@@ -120,6 +120,7 @@ GET /api/miniapp/channel/{ch_id}/invite_link
 GET /api/miniapp/channel_factory/recent
 GET /api/miniapp/channel_rankings
 GET /api/miniapp/channels
+GET /api/miniapp/channels/removed
 GET /api/miniapp/chatlist_folders
 GET /api/miniapp/chatwarmup/accounts
 GET /api/miniapp/chatwarmup/sessions
@@ -411,6 +412,7 @@ HEAD /api/miniapp/channel/{ch_id}/invite_link
 HEAD /api/miniapp/channel_factory/recent
 HEAD /api/miniapp/channel_rankings
 HEAD /api/miniapp/channels
+HEAD /api/miniapp/channels/removed
 HEAD /api/miniapp/chatlist_folders
 HEAD /api/miniapp/chatwarmup/accounts
 HEAD /api/miniapp/chatwarmup/sessions
@@ -729,6 +731,7 @@ POST /api/miniapp/channel/{ch_id}/edit
 POST /api/miniapp/channel/{ch_id}/pin
 POST /api/miniapp/channel/{ch_id}/post
 POST /api/miniapp/channel/{ch_id}/promote
+POST /api/miniapp/channel/{ch_id}/restore
 POST /api/miniapp/channel_factory/submit
 POST /api/miniapp/channel_rankings/add
 POST /api/miniapp/channel_rankings/check

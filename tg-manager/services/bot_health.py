@@ -103,6 +103,27 @@ def describe(row: dict, now: datetime | None = None) -> dict:
     поправится, нужен человек; именно по нему считается счётчик на экране.
     """
     now = now or datetime.now(timezone.utc)
+    streak = int(row.get("fail_streak") or 0)
+    if row.get("deleted_at"):
+        return {"state": "deleted", "kind": "", "label": "🗑 Удалён",
+                "hint": "Бот удалён из системы: его нет в списках и в работе."
+                        " Подписчики и история сохранены — добавьте тот же"
+                        " токен заново, чтобы вернуть бота.",
+                "attention": False}
+    if (row.get("is_active") is False
+            and (row.get("last_error") or "").lower() == UNAUTHORIZED
+            and streak >= FAIL_STREAK_TO_ALERT):
+        # Telegram раз за разом не принимает токен: бота удалили в @BotFather
+        # или перевыпустили токен. Опрос снял такого бота из работы сам, и
+        # «⏸ Убран из работы» здесь было бы неправдой о причине.
+        return {"state": "dead", "kind": UNAUTHORIZED,
+                "label": "🔴 Бот удалён в Telegram или токен отозван",
+                "hint": "Telegram не принимает токен этого бота — его удалили"
+                        " или перевыпустили токен в @BotFather. Бот выведен из"
+                        " работы автоматически. Вставьте новый токен, чтобы"
+                        " вернуть его с подписчиками и воронками, или удалите"
+                        " бота из системы.",
+                "attention": True}
     if row.get("is_active") is False:
         # Сюда бот попадает двумя путями: владелец убрал его из работы, либо
         # опрос отключил после мёртвого токена. Снаружи это одно и то же
@@ -115,7 +136,6 @@ def describe(row: dict, now: datetime | None = None) -> dict:
                         " кнопкой «Вернуть в работу» или повторным добавлением"
                         " токена.",
                 "attention": False}
-    streak = int(row.get("fail_streak") or 0)
     if streak <= 0:
         return {"state": "ok", "kind": "", "label": "🟢 Работает", "hint": "",
                 "attention": False}

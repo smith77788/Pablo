@@ -752,16 +752,15 @@ def setup_routes(app: web.Application, pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
+        # Удаление, а не пауза: бот пропадает из списков и из работы. Пауза —
+        # это PUT …/toggle. Раньше этот маршрут тоже только снимал is_active, и
+        # «удалённый» бот оставался в списке с кнопкой «Вернуть в работу».
         try:
-            row = await pool.fetchrow(
-                "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
-            )
-            if not row:
+            from database import db as _db
+
+            if not await _db.delete_bot(pool, bot_id, uid):
                 return _err("Бот не найден", 404)
-            await pool.execute(
-                "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1 AND added_by=$2", bot_id, uid
-            )
-            return _json_resp({"ok": True})
+            return _json_resp({"ok": True, "deleted": True})
         except Exception:
             log.exception("bot_remove uid=%d bot=%d", uid, bot_id)
             return _err(_INTERNAL_ERROR, 500)
@@ -1159,11 +1158,25 @@ def setup_routes(app: web.Application, pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
+        # Явное состояние {"active": true|false} — чтобы «поставить на паузу»
+        # не превращалось в «включить», если экран показывал устаревшее
+        # состояние. Без тела — прежнее переключение. Удалённого бота пауза не
+        # трогает: вернуть его можно только повторным добавлением токена.
+        want = None
+        if request.can_read_body:
+            try:
+                body = await request.json()
+            except Exception:
+                body = None
+            if isinstance(body, dict) and isinstance(body.get("active"), bool):
+                want = body["active"]
         try:
             row = await pool.fetchrow(
-                """UPDATE managed_bots SET is_active = NOT is_active
-                   WHERE bot_id=$1 AND added_by=$2 RETURNING bot_id, is_active""",
-                bot_id, uid)
+                """UPDATE managed_bots
+                      SET is_active = COALESCE($3::boolean, NOT is_active)
+                    WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL
+                RETURNING bot_id, is_active""",
+                bot_id, uid, want)
             if not row:
                 return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})

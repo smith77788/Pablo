@@ -4561,8 +4561,18 @@ async def get_channels_full_info(
     _acc: dict | None = None,
     pause: float = 1.2,
     limit: int = 200,
+    *,
+    errors: dict | None = None,
+    known_hashes: dict | None = None,
 ) -> dict[int, dict]:
     """Карточки НЕСКОЛЬКИХ каналов за одно подключение: {id: {...}}.
+
+    `errors` (если передан) заполняется {id: имя класса ошибки Telegram} по
+    каналам, которые прочитать не удалось, — по нему проверка живости отличает
+    «канал удалён / доступ потерян» от временного сбоя. `known_hashes` —
+    сохранённые access_hash ЭТОЙ ЖЕ сессии ({id: hash}): удалённого канала в
+    диалогах уже нет, и без хеша Telegram не сказал бы о нём ничего
+    определённого.
 
     Зачем отдельно от get_full_channel_info: та открывает и закрывает клиент на
     КАЖДЫЙ канал. При 167 каналах это 167 подключений сессии подряд — само по
@@ -4625,6 +4635,11 @@ async def get_channels_full_info(
             key = _normalize_channel_id(cid)
             try:
                 ah = hashes.get(key, 0)
+                if not ah and known_hashes:
+                    try:
+                        ah = int(known_hashes.get(int(cid)) or 0)
+                    except (TypeError, ValueError):
+                        ah = 0
                 if ah:
                     peer = InputPeerChannel(channel_id=key, access_hash=ah)
                 else:
@@ -4660,6 +4675,8 @@ async def get_channels_full_info(
                         "на %d/%d каналов", _fw, idx, len(ids),
                     )
                     break
+                if errors is not None:
+                    errors[int(cid)] = etype
                 log.debug("get_channels_full_info: канал %s пропущен: %s", cid, e)
             if idx < len(ids) - 1:
                 await asyncio.sleep(pause + random.uniform(0, 0.8))

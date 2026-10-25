@@ -505,7 +505,13 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(_INTERNAL_ERROR, 500)
 
     async def channel_remove(request: web.Request) -> web.Response:
-        """Убрать канал из управления (запись managed_channels)."""
+        """Удалить канал/чат из системы: из списков, импорта и работы.
+
+        Раньше это был голый DELETE строки, и следующий «Импорт каналов»
+        возвращал канал обратно — удалить его насовсем было нельзя. Теперь
+        удаление запоминается (removed_channels), импорт его уважает, а вернуть
+        канал можно из раздела удалённых.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -514,9 +520,9 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор канала", 400)
         try:
-            res = await pool.execute(
-                "DELETE FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
-            if str(res).endswith(" 0"):
+            from database.db import remove_managed_channel
+
+            if not await remove_managed_channel(pool, uid, ch_id):
                 return _err("Канал не найден", 404)
             # Канал — владеемый ресурс, и убрать его может не только хозяин:
             # доступ даётся и через workspace, и через экосистему. Без записи
@@ -530,12 +536,50 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("channel_remove uid=%d ch=%d", uid, ch_id)
             return _err(_INTERNAL_ERROR, 500)
 
-    async def channels_bulk_delete(request: web.Request) -> web.Response:
-        """Убрать из управления несколько каналов разом (паритет с channel_remove).
+    async def channels_removed(request: web.Request) -> web.Response:
+        """Удалённые владельцем и пропавшие в Telegram каналы/чаты."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from database.db import list_removed_channels
 
-        DELETE строк managed_channels по owner-скоупу. Это Infragram-side: сам
-        канал в Telegram не трогаем, лишь перестаём им управлять. Идемпотентно:
-        повтор по уже убранным = 0, а не ошибка.
+            rows = await list_removed_channels(pool, uid)
+        except Exception:
+            log.exception("channels_removed uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"channels": rows, "total": len(rows)})
+
+    async def channel_restore(request: web.Request) -> web.Response:
+        """Вернуть удалённый канал/чат в систему."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор канала", 400)
+        try:
+            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+            from database.db import record_manual_action, restore_removed_channel
+
+            _lim = await get_channel_limit(pool, uid)
+            if await get_effective_channel_count(pool, uid) >= _lim:
+                return _err(f"Достигнут лимит каналов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
+            if not await restore_removed_channel(pool, uid, ch_id):
+                return _err("Канал не найден среди удалённых", 404)
+            await record_manual_action(pool, uid, "channel_restore", target=str(ch_id))
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("channel_restore uid=%d ch=%d", uid, ch_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def channels_bulk_delete(request: web.Request) -> web.Response:
+        """Удалить из системы несколько каналов разом (паритет с channel_remove).
+
+        Каждый канал идёт через remove_managed_channel: голый DELETE строк
+        вернул бы каналы следующим импортом с аккаунтов. Сам канал в Telegram
+        не трогаем. Идемпотентно: повтор по уже удалённым = 0, а не ошибка.
         """
         uid = _get_uid(request)
         if not uid:
@@ -552,11 +596,12 @@ def setup_routes(app: web.Application, pool) -> None:
         except (TypeError, ValueError):
             return _err("Неверный идентификатор канала", 400)
         try:
-            res = await pool.execute(
-                "DELETE FROM managed_channels WHERE channel_id = ANY($1::bigint[]) "
-                "AND owner_id=$2", ch_ids, uid)
-            deleted = int(str(res).rsplit(" ", 1)[-1]) if str(res).startswith("DELETE") else 0
-            from database.db import record_manual_action
+            from database.db import record_manual_action, remove_managed_channel
+
+            deleted = 0
+            for ch_id in dict.fromkeys(ch_ids):
+                if await remove_managed_channel(pool, uid, ch_id):
+                    deleted += 1
 
             await record_manual_action(
                 pool, uid, "channels_bulk_delete",
@@ -871,3 +916,5 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/channels/mass", channels_mass)
     app.router.add_post("/api/miniapp/channels/bulk_delete", channels_bulk_delete)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
+    app.router.add_get("/api/miniapp/channels/removed", channels_removed)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/restore", channel_restore)

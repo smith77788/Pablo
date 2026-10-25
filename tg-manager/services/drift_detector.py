@@ -30,6 +30,15 @@ _BATCH_SIZE = 40  # каналов за одну сессию аккаунта (
 # каналу на подключение; здесь константа остаётся её настройкой.
 _PAUSE_BETWEEN = 3.0
 
+# Проверка живости. Ответы Telegram, которые значат «канала для этого аккаунта
+# больше нет»: канал удалён, либо аккаунт забанен/исключён (Telegram отвечает
+# на оба случая одним CHANNEL_PRIVATE). Сеть, флуд и «не нашли сущность» сюда
+# не входят — они ничего не доказывают.
+_GONE_ERRORS = frozenset({"ChannelPrivateError", "ChannelInvalidError"})
+# Сколько кругов подряд канал обязан ответить «недоступен», прежде чем его
+# уберут из работы. Одна ошибка — ещё не приговор.
+_GONE_CONFIRM_CHECKS = 2
+
 
 async def run(pool: asyncpg.Pool, bot) -> None:
     while True:
@@ -190,6 +199,78 @@ async def _stamp_checked(pool: asyncpg.Pool, ids: list) -> None:
         log.debug("drift_detector: отметка осмотра не записана: %s", e)
 
 
+async def _reset_gone(pool: asyncpg.Pool, ids: list) -> None:
+    """Канал ответил — счётчик «недоступен подряд» обнуляется."""
+    if not ids:
+        return
+    try:
+        await pool.execute(
+            "UPDATE managed_channels SET gone_streak=0 "
+            "WHERE id = ANY($1::int[]) AND gone_streak > 0",
+            list(ids),
+        )
+    except Exception as e:
+        log.debug("drift_detector: счётчик недоступности не сброшен: %s", e)
+
+
+async def _note_gone(pool: asyncpg.Pool, bot, owner_id: int, candidates: list) -> int:
+    """Канал ответил «недоступен». Подтверждённый — убрать из работы.
+
+    Убирается так же, как при удалении владельцем (строка managed_channels
+    уходит, причина остаётся в removed_channels), только с reason='gone': такой
+    канал вернёт любой импорт, в котором он снова найдётся в диалогах.
+    Возвращает число убранных.
+    """
+    removed = 0
+    for ch, etype in candidates:
+        try:
+            streak = await pool.fetchval(
+                "UPDATE managed_channels SET gone_streak = gone_streak + 1 "
+                "WHERE id=$1 RETURNING gone_streak",
+                ch["id"],
+            )
+        except Exception as e:
+            log.debug("drift_detector: счётчик недоступности не записан: %s", e)
+            continue
+        if int(streak or 0) < _GONE_CONFIRM_CHECKS:
+            continue
+        detail = ("Канал удалён в Telegram или аккаунт потерял к нему доступ"
+                  f" (бан или исключение). Ответ Telegram: {etype}.")
+        try:
+            ok = await db.remove_managed_channel(
+                pool, owner_id, int(ch["channel_id"]),
+                reason=db.REMOVED_GONE, detail=detail)
+        except Exception as e:
+            log.warning("drift_detector: недоступный канал %s не убран: %s",
+                        ch["channel_id"], e)
+            continue
+        if not ok:
+            continue
+        removed += 1
+        name = ch["title"] or (f"@{ch['username']}" if ch["username"] else f"#{ch['channel_id']}")
+        log.info("drift_detector: канал %s владельца %s недоступен (%s) — убран из работы",
+                 ch["channel_id"], owner_id, etype)
+        try:
+            await db.notify_if_enabled(
+                pool, bot, owner_id, "restriction",
+                f"🗑 <b>Канал недоступен и убран из работы</b>\n\n"
+                f"<b>{_html_escape(name)}</b> — удалён в Telegram или аккаунт "
+                f"потерял к нему доступ (бан или исключение). Рассылки, публикации "
+                f"и администратор канала его больше не берут.\n\n"
+                f"Если это ошибка — верните канал в мини-аппе: «Каналы» → "
+                f"«🗑 Удалённые и недоступные».",
+                dedup_key=f"channel_gone:{owner_id}:{ch['channel_id']}",
+            )
+        except Exception:
+            log.debug("drift_detector: уведомление о канале %s не ушло", ch["channel_id"])
+    return removed
+
+
+def _html_escape(text) -> str:
+    return (str(text or "").replace("&", "&amp;")
+            .replace("<", "&lt;").replace(">", "&gt;"))
+
+
 async def _check_all(pool: asyncpg.Pool, bot) -> bool:
     """Один круг обновления карточек. True — очередь не разобрана до конца.
 
@@ -262,6 +343,10 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
                 "обновляем аккаунтом %s", acc_id, len(channels), owner_id, acc["id"],
             )
         acc_dict = dict(acc)
+        # Живость канала проверяем только «родной» сессией: у запасного
+        # аккаунта доступа к приватному каналу может не быть изначально, и его
+        # отказ ничего не говорит о самом канале.
+        _native = int(acc_dict["id"]) == int(acc_id)
 
         if len(channels) > _BATCH_SIZE:
             backlog = True
@@ -287,6 +372,8 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
         # до _BATCH_SIZE лишних обращений к базе за группу, причём в цикле,
         # который и без того держит захваченную сессию аккаунта.
         _seen: list = []
+        _alive: list = []
+        _gone: list = []
         try:
             # Карточки всей пачки — за ОДНО подключение и с одним обходом
             # диалогов. Раньше здесь был get_full_channel_info на каждый канал:
@@ -296,6 +383,7 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
             # почти гарантированный провал: возвращался None, ставилась отметка
             # осмотра, и карточка не менялась НИКОГДА.
             _batch = channels[:_BATCH_SIZE]
+            _errs: dict = {}
             try:
                 _infos = await account_manager.get_channels_full_info(
                     acc_dict["session_str"],
@@ -303,6 +391,10 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
                     _acc=acc_dict,
                     pause=_PAUSE_BETWEEN,
                     limit=_BATCH_SIZE,
+                    errors=_errs,
+                    known_hashes=({int(c["channel_id"]): int(c["access_hash"] or 0)
+                                   for c in _batch if c["access_hash"]}
+                                  if _native else None),
                 )
             except Exception as e:
                 log.warning("drift_detector: карточки пачки не прочитаны: %s", e)
@@ -315,7 +407,11 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
                 _seen.append(ch["id"])
 
                 if not info:
+                    _etype = _errs.get(int(ch["channel_id"]))
+                    if _native and _etype in _GONE_ERRORS:
+                        _gone.append((ch, _etype))
                     continue
+                _alive.append(ch["id"])
 
                 new_title = (info.get("title") or "").strip()
                 new_username = (info.get("username") or "").strip()
@@ -452,6 +548,9 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
             # строки иначе остались бы без отметки и забрали бы выборку
             # следующего круга себе.
             await _stamp_checked(pool, _seen)
+            await _reset_gone(pool, _alive)
+            if _gone:
+                await _note_gone(pool, bot, owner_id, _gone)
             # Освобождаем ту же сессию, что захватывали выше (при мёртвом
             # «родном» аккаунте это запасной — acc_id указывал бы на чужую).
             await op_worker.release_accounts([_use_acc_id])

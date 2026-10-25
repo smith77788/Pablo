@@ -925,7 +925,7 @@ async def replace_bot_token(
               SET token=$3,
                   username=COALESCE(NULLIF($4,''), username),
                   first_name=COALESCE(NULLIF($5,''), first_name),
-                  is_active=TRUE,
+                  is_active=TRUE, deleted_at=NULL,
                   fail_streak=0, last_error=NULL, dead_notified_at=NULL
             WHERE bot_id=$1 AND added_by=$2
         RETURNING bot_id""",
@@ -975,7 +975,7 @@ async def add_bot(
                       SET token=$3,
                           username=COALESCE(NULLIF($4,''), username),
                           first_name=COALESCE(NULLIF($5,''), first_name),
-                          is_active=TRUE,
+                          is_active=TRUE, deleted_at=NULL,
                           fail_streak=0, last_error=NULL, dead_notified_at=NULL
                     WHERE bot_id=$1 AND added_by=$2""",
                 bot_id, added_by, _enc_tok(token), username or "", first_name or "")
@@ -1056,7 +1056,7 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
                   JOIN workspace_members wm ON wm.workspace_id=w.id
                   WHERE wm.user_id=$1
               ))
-           AND m.is_active=TRUE
+           AND m.is_active=TRUE AND m.deleted_at IS NULL
            ORDER BY m.added_at DESC""",
         added_by,
     )
@@ -1068,7 +1068,7 @@ async def get_bot(
 ) -> dict | None:
     row = await pool.fetchrow(
         """SELECT * FROM managed_bots
-           WHERE bot_id=$1 AND is_active=TRUE
+           WHERE bot_id=$1 AND is_active=TRUE AND deleted_at IS NULL
               AND (added_by=$2
                    OR bot_id IN (
                        SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
@@ -1091,7 +1091,14 @@ async def get_bot(
 
 
 async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
-    """Убрать бота у владельца. Строка остаётся, аудитория не теряется.
+    """Удалить бота из системы. Строка остаётся, аудитория не теряется.
+
+    Удаление и пауза — РАЗНЫЕ состояния. Раньше оба писали только is_active,
+    и удалённый бот оставался в списке мини-аппа как «убранный из работы», а
+    кнопка «Вернуть в работу» поднимала его обратно. Теперь удаление ставит ещё
+    и deleted_at: бот исчезает из всех списков (_BOTS_VISIBLE_SQL, get_bots,
+    get_bot), переключатель паузы его не трогает, а работа его не берёт, потому
+    что is_active снимается тем же запросом.
 
     Раньше это был DELETE, а на managed_bots(bot_id) висит десяток таблиц с
     ON DELETE CASCADE: bot_users, funnels, auto_replies, broadcasts, статистика.
@@ -1109,7 +1116,8 @@ async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
     должна достаться новому хозяину.
     """
     result = await pool.execute(
-        "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1 AND added_by=$2",
+        "UPDATE managed_bots SET is_active=FALSE, deleted_at=now() "
+        "WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
         bot_id,
         added_by,
     )
@@ -4158,6 +4166,10 @@ async def upsert_managed_channels(
             ids.append(int(ch["id"]))
         except (KeyError, TypeError, ValueError):
             continue
+    # Фильтр — до транзакции: его сбой внутри неё оборвал бы весь импорт.
+    # ids собраны раньше намеренно: удалённый владельцем канал строки и так не
+    # имеет, а список «что оставить» должен быть полным.
+    channels = await skip_removed_channels(pool, owner_id, channels)
     rows = _managed_channel_rows(owner_id, acc_id, channels)
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -4186,11 +4198,181 @@ async def add_managed_channels(
     """
     if not channels:
         return 0
+    channels = await skip_removed_channels(pool, owner_id, channels)
+    if not channels:
+        return 0
     await pool.executemany(
         _MANAGED_CHANNEL_UPSERT_SQL,
         _managed_channel_rows(owner_id, acc_id, channels),
     )
     return len(channels)
+
+
+# ── Удалённые и пропавшие каналы/чаты (removed_channels, v257) ──────────────
+#
+# managed_channels — кэш того, что видят аккаунты владельца, и импорт диалогов
+# пересобирает его снова и снова. Поэтому удалить канал строкой DELETE было
+# мало: следующий «Импорт каналов» возвращал его обратно, и канал снова брался
+# в работу. Удаление пишет запись в removed_channels, и импорт её уважает.
+#
+# Почему строка managed_channels при этом удаляется, а не помечается флагом:
+# к ней обращаются почти две сотни запросов — списки, рассылки, публикации,
+# администратор каналов, аналитика. Флаг пришлось бы добавить в каждый, и
+# любой забытый снова брал бы удалённый канал в работу. Нет строки — нет и
+# канала ни в одной выборке.
+
+REMOVED_BY_OWNER = "owner"
+REMOVED_GONE = "gone"
+
+
+async def skip_removed_channels(conn, owner_id: int, channels: list[dict]) -> list[dict]:
+    """Убрать из импорта каналы, которые владелец удалил.
+
+    Заодно снимает отметку «пропал в Telegram» с тех, что снова нашлись в
+    диалогах: раз аккаунт их видит, канал жив и доступен.
+
+    Сбой (нет таблицы на базе без миграции, заглушка пула) импорт не ломает:
+    лучше вернуть удалённый канал, чем потерять импорт целиком.
+    """
+    ids: list[int] = []
+    for ch in channels:
+        try:
+            ids.append(int(ch["id"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not ids:
+        return channels
+    try:
+        rows = await conn.fetch(
+            """WITH back AS (
+                   DELETE FROM removed_channels
+                    WHERE owner_id=$1 AND reason='gone'
+                      AND channel_id = ANY($2::bigint[])
+               )
+               SELECT channel_id FROM removed_channels
+                WHERE owner_id=$1 AND reason='owner'
+                  AND channel_id = ANY($2::bigint[])""",
+            owner_id, ids,
+        )
+    except Exception as e:
+        log.debug("removed_channels: фильтр импорта недоступен: %s", e)
+        return channels
+    blocked = {int(r["channel_id"]) for r in rows or []}
+    if not blocked:
+        return channels
+    out = []
+    for ch in channels:
+        try:
+            if int(ch["id"]) in blocked:
+                continue
+        except (KeyError, TypeError, ValueError):
+            pass
+        out.append(ch)
+    return out
+
+
+async def remove_managed_channel(
+    pool: asyncpg.Pool, owner_id: int, channel_id: int,
+    *, reason: str = REMOVED_BY_OWNER, detail: str = "",
+) -> bool:
+    """Убрать канал/чат из системы: из списков, импорта и работы.
+
+    Одна транзакция: строка managed_channels уходит, запись о причине
+    появляется, администратор канала (va_channel_admin) выключается — иначе он
+    продолжал бы публиковать в канал, которого в системе уже нет.
+    True — канал был и убран.
+    """
+    if reason not in (REMOVED_BY_OWNER, REMOVED_GONE):
+        raise ValueError(f"неизвестная причина удаления канала: {reason!r}")
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """DELETE FROM managed_channels
+                    WHERE owner_id=$1 AND channel_id=$2
+                RETURNING acc_id, title, username, type, access_hash""",
+                owner_id, channel_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                """INSERT INTO removed_channels
+                       (owner_id, channel_id, reason, detail, acc_id, title,
+                        username, type, access_hash)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 0))
+                   ON CONFLICT (owner_id, channel_id) DO UPDATE
+                   SET reason=EXCLUDED.reason, detail=EXCLUDED.detail,
+                       acc_id=EXCLUDED.acc_id, title=EXCLUDED.title,
+                       username=EXCLUDED.username, type=EXCLUDED.type,
+                       access_hash=EXCLUDED.access_hash, removed_at=now()""",
+                owner_id, channel_id, reason, (detail or "")[:300],
+                row["acc_id"], row["title"], row["username"], row["type"],
+                row["access_hash"],
+            )
+            await conn.execute(
+                "UPDATE va_channel_admin SET enabled=FALSE "
+                "WHERE owner_id=$1 AND channel_id=$2 AND enabled",
+                owner_id, channel_id,
+            )
+    return True
+
+
+async def list_removed_channels(pool: asyncpg.Pool, owner_id: int, limit: int = 500) -> list[dict]:
+    """Удалённые владельцем и пропавшие в Telegram каналы — для экрана."""
+    rows = await pool.fetch(
+        """SELECT channel_id, reason, detail, title, username, type, removed_at
+             FROM removed_channels
+            WHERE owner_id=$1
+            ORDER BY removed_at DESC
+            LIMIT $2""",
+        owner_id, int(limit),
+    )
+    return [dict(r) for r in rows or []]
+
+
+async def forget_removed_channels(pool: asyncpg.Pool, owner_id: int, channel_ids: list) -> None:
+    """Снять отметку удаления: владелец снова явно добавил канал.
+
+    Без этого канал, добавленный руками после удаления, висел бы сразу в двух
+    местах — в списке и среди удалённых. Сбой не критичен и не пробрасывается.
+    """
+    ids = []
+    for c in channel_ids or []:
+        try:
+            ids.append(int(c))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return
+    try:
+        await pool.execute(
+            "DELETE FROM removed_channels WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+            owner_id, ids,
+        )
+    except Exception as e:
+        log.debug("removed_channels: отметка не снята owner=%s: %s", owner_id, e)
+
+
+async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id: int) -> bool:
+    """Вернуть удалённый канал в систему той же строкой, что была до удаления."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """DELETE FROM removed_channels
+                    WHERE owner_id=$1 AND channel_id=$2 AND acc_id IS NOT NULL
+                RETURNING acc_id, title, username, type, access_hash""",
+                owner_id, channel_id,
+            )
+            if not row:
+                return False
+            await conn.execute(
+                """INSERT INTO managed_channels
+                       (owner_id, acc_id, channel_id, title, username, access_hash, type)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)
+                   ON CONFLICT (owner_id, channel_id) DO NOTHING""",
+                owner_id, row["acc_id"], channel_id, row["title"],
+                row["username"], int(row["access_hash"] or 0), row["type"],
+            )
+    return True
 
 
 async def finalize_stale_parser_runs(pool: asyncpg.Pool, older_than_minutes: int = 60) -> int:

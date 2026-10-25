@@ -223,15 +223,22 @@ async def _record_bot_error(pool: asyncpg.Pool, bot_id: int,
     Запись состояния — вспомогательная: её сбой не должен ломать опрос.
     """
     try:
-        from services.bot_health import classify_error
+        from services.bot_health import FAIL_STREAK_TO_ALERT, UNAUTHORIZED, classify_error
 
         kind = classify_error(description, error_code)
+        # Серия 401 подряд — бот удалён в @BotFather или токен перевыпущен; сам
+        # он не оживёт. Такой бот снимается из работы (is_active=FALSE): иначе
+        # его продолжали брать рассылки, воронки и сеть ботов, и каждая попытка
+        # заканчивалась той же ошибкой. Владелец получает уведомление
+        # (notify_broken_bots), а новый токен возвращает бота (replace_bot_token).
         await pool.execute(
             """UPDATE managed_bots
                   SET last_error=$2, last_error_at=now(),
-                      fail_streak = fail_streak + 1
+                      fail_streak = fail_streak + 1,
+                      is_active = CASE WHEN $2 = $3 AND fail_streak + 1 >= $4
+                                       THEN FALSE ELSE is_active END
                 WHERE bot_id=$1""",
-            bot_id, kind)
+            bot_id, kind, UNAUTHORIZED, FAIL_STREAK_TO_ALERT)
     except Exception:
         log.debug("auto_responder: состояние бота %s не записано", bot_id)
 
@@ -267,7 +274,11 @@ async def notify_broken_bots(pool: asyncpg.Pool, bot) -> int:
             """SELECT bot_id, added_by, username, first_name,
                       last_error, fail_streak
                  FROM managed_bots
-                WHERE is_active AND fail_streak > 0
+                WHERE deleted_at IS NULL
+                  -- бот с мёртвым токеном снят из работы автоматически, и
+                  -- сказать об этом владельцу нужно именно тогда
+                  AND (is_active OR last_error = 'unauthorized')
+                  AND fail_streak > 0
                   AND dead_notified_at IS NULL
                 LIMIT 50""")
     except Exception as e:
