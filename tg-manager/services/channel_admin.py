@@ -2329,10 +2329,22 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
         raise ChannelAdminError("После чистки текст поста оказался пустым")
 
     acc_ids = await va_control.eligible_accounts(pool, owner_id, channel_id)
+    # Пост ведёт в основной канал владельца — ставим в него свою ссылку-
+    # приглашение, чтобы считать вступления с этого поста (services/va_links).
+    # Любой сбой здесь не мешает публикации: уходит исходный текст.
+    link_id = None
+    if acc_ids:
+        try:
+            from services import va_links
+            text, link_id = await va_links.prepare(pool, owner_id, channel_id, text, pillar)
+        except Exception:
+            log.warning("publish: ссылка поста для учёта переходов не создана", exc_info=True)
+
     if not acc_ids:
         raise ChannelAdminError("Нет доступного аккаунта для публикации: проверьте активность, ограничения и карантин")
     ch = await channel_row(pool, owner_id, channel_id) or {}
     if not ch:
+        await _drop_link(pool, link_id)
         raise ChannelAdminError("Канал не найден среди ваших каналов")
     try:
         photo = (await va_media.get_photo(pool, owner_id, channel_id, media_id) if media_id
@@ -2340,6 +2352,7 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
         if photo and not va_media.caption_fits(text):
             raise va_media.MediaError("Текст с изображением слишком длинный: нужен более короткий черновик")
     except va_media.MediaError as exc:
+        await _drop_link(pool, link_id)
         raise ChannelAdminError(str(exc)) from exc
     media_params = ({"media_file_id": photo["file_id"], "media_type": "photo", "require_media": True}
                     if photo else {})
@@ -2379,12 +2392,33 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
             label=f"🧠 Администратор: {(ch.get('title') or channel_id)}"[:120],
         )
     except operation_bus.PlanRequiredError as e:
+        await _drop_link(pool, link_id)
         raise ChannelAdminError(
             f"Публикация в каналы доступна на тарифе «{e.required_plan}» и выше — "
             "продлите подписку, и администратор продолжит сам") from e
+    except BaseException:
+        await _drop_link(pool, link_id)
+        raise
     if not op_id:
+        await _drop_link(pool, link_id)
         raise ChannelAdminError("Не удалось поставить публикацию в очередь")
+    if link_id:
+        try:
+            from services import va_links
+            await va_links.attach_op(pool, link_id, int(op_id))
+        except Exception:
+            log.warning("publish: ссылка поста не связана с публикацией", exc_info=True)
     return int(op_id)
+
+
+async def _drop_link(pool, link_id: Optional[int]) -> None:
+    if not link_id:
+        return
+    try:
+        from services import va_links
+        await va_links.drop(pool, link_id)
+    except Exception:
+        log.debug("publish: запись ссылки не удалена", exc_info=True)
 
 
 async def save_draft(pool, owner_id: int, channel_id: int, d: Draft) -> int:
@@ -2896,6 +2930,17 @@ async def channel_report(pool, owner_id: int, channel_id: int) -> dict:
         "AND day > CURRENT_DATE - 8 ORDER BY day", int(owner_id), int(channel_id))
     stats = await pillar_stats(pool, owner_id, channel_id)
     best = max(stats.items(), key=lambda kv: kv[1]["score"])[0] if stats else None
+    try:
+        from services import va_links
+        links = await va_links.summary(pool, owner_id, channel_id)
+    except Exception:
+        log.debug("channel_report: переходы не посчитаны", exc_info=True)
+        links = {"links": 0, "joins": 0, "requests": 0, "by_pillar": {}}
+    # Задача витрины — вступления в основной канал. Есть они — лучшая рубрика
+    # та, что приводит людей, а не та, что больше читают.
+    by_pillar = links.get("by_pillar") or {}
+    if any(v > 0 for v in by_pillar.values()):
+        best = max(by_pillar.items(), key=lambda kv: kv[1])[0]
     members = [int(r["members_count"]) for r in growth or []]
     return {
         "posts_7d": int((agg or {}).get("posts_7d") or 0) if agg else 0,
@@ -2904,8 +2949,12 @@ async def channel_report(pool, owner_id: int, channel_id: int) -> dict:
         "members": members[-1] if members else None,
         "members_delta_7d": (members[-1] - members[0]) if len(members) >= 2 else None,
         "best_pillar": best,
+        "links_7d": int(links.get("links") or 0),
+        "joins_7d": int(links.get("joins") or 0),
+        "requests_7d": int(links.get("requests") or 0),
         "freq_suggestion": await frequency_suggestion(pool, owner_id, channel_id),
-        "pillars": [{"name": p, "posts": s["posts"], "avg_views": s["views"]}
+        "pillars": [{"name": p, "posts": s["posts"], "avg_views": s["views"],
+                     "joins": int(by_pillar.get(p, 0))}
                     for p, s in sorted(stats.items(), key=lambda kv: -kv[1]["score"])],
     }
 
@@ -3110,6 +3159,10 @@ def format_daily_report(items: list[tuple[str, dict]]) -> str:
             if r.get("members_delta_7d") is not None:
                 d = r["members_delta_7d"]
                 s += f" ({'+' if d >= 0 else ''}{d} за неделю)"
+        if r.get("links_7d"):
+            s += f"\n• привёл в основной канал: {r.get('joins_7d') or 0}"
+            if r.get("requests_7d"):
+                s += f" (ещё заявок на вступление: {r['requests_7d']})"
         if r.get("best_pillar"):
             s += f"\n• лучше всего заходит: {html.escape(r['best_pillar'])}"
         fs = r.get("freq_suggestion")

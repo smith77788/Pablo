@@ -543,10 +543,16 @@ function _vaReportHtml(r, s) {
     'Подписчиков: <b>' + (r.members !== null && r.members !== undefined ? _vaNum(r.members) : (s.members_count ? _vaNum(s.members_count) : '—')) + '</b>' + delta + '<br>' +
     'Постов за неделю: <b>' + _vaNum(r.posts_7d) + '</b>' + (r.avg_views_7d ? ', в среднем <b>' + _vaNum(r.avg_views_7d) + '</b> ' + plural(r.avg_views_7d, 'просмотр', 'просмотра', 'просмотров') : '') + '<br>' +
     'Всего постов в памяти: ' + _vaNum(r.posts_total);
+  if (r.links_7d) {
+    h += '<br>Привёл в основной канал за неделю: <b>' + _vaNum(r.joins_7d || 0) + '</b>' +
+      (r.requests_7d ? ' и ' + _vaNum(r.requests_7d) + ' ' + plural(r.requests_7d, 'заявку', 'заявки', 'заявок') : '') +
+      ' <span style="color:var(--hint)">(по ссылкам в ' + _vaNum(r.links_7d) + ' ' + plural(r.links_7d, 'посте', 'постах', 'постах') + ')</span>';
+  }
   if ((r.pillars || []).length) {
     h += '<br><br>Что заходит аудитории:<br>' + r.pillars.map(function (p) {
       return '• ' + esc(p.name) + ' — <span style="white-space:nowrap">' + _vaNum(p.avg_views) + ' просм. в среднем, ' +
-        p.posts + ' ' + plural(p.posts, 'пост', 'поста', 'постов') + '</span>';
+        p.posts + ' ' + plural(p.posts, 'пост', 'поста', 'постов') +
+        (p.joins ? ', привела ' + _vaNum(p.joins) + ' в основной канал' : '') + '</span>';
     }).join('<br>');
   } else {
     h += '<br><span style="color:var(--hint)">Отклик по рубрикам появится, когда наберутся просмотры первых постов.</span>';
@@ -852,7 +858,8 @@ function _vaChannelHtml(d) {
       return _vaOpt(r[0], (s.business || {}).network_role || 'discovery', r[1]);
     }).join('') + '</select><div class="field-note">Действует при включённой общей стратегии. Она задаёт единый ресурс для перехода; голос канала сохраняется.</div></div>' +
     '<div class="field"><label>О проекте своими словами</label><textarea id="vaProject" rows="3" maxlength="2000">' + esc(s.project_info) + '</textarea></div>' +
-    '<div class="field"><label>Куда вести клиентов</label><input id="vaContact" maxlength="200" value="' + esc(s.lead_contact) + '" placeholder="@manager, сайт или номер"></div>' +
+    '<div class="field"><label>Куда вести клиентов</label><input id="vaContact" maxlength="200" value="' + esc(s.lead_contact) + '" placeholder="@manager, сайт или номер">' +
+      '<div style="font-size:12px;color:var(--hint);margin-top:4px">Укажите @основной канал, заведённый в Infragram, и в каждом посте будет своя ссылка-приглашение: администратор посчитает, сколько людей пришло с какого поста.</div></div>' +
     _vaBusinessHtml(s.business || {}) +
     '<details class="acc-actions" style="margin:0 0 12px"><summary style="padding:12px;cursor:pointer">Расписание и самостоятельность</summary>' +
     '<div style="display:flex;gap:10px">' +

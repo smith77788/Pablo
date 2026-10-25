@@ -4452,6 +4452,109 @@ async def read_channel_snapshot(
             log_exc_swallow(log, "Сбой в read_channel_snapshot")
 
 
+async def _admin_channel_peer(client, channel_id: int | str, access_hash: int, username: str):
+    """Пир канала тем же порядком, что read_channel_snapshot: hash → @username → id."""
+    if access_hash:
+        try:
+            return await _resolve_channel_peer(
+                client, _normalize_channel_id(channel_id), int(access_hash))
+        except Exception as e:
+            log.debug("_admin_channel_peer: по access_hash не вышло: %s", e)
+    uname = (username or "").strip().lstrip("@")
+    if uname:
+        try:
+            return await asyncio.wait_for(client.get_entity(f"@{uname}"), timeout=10.0)
+        except Exception as e:
+            log.debug("_admin_channel_peer: @%s не разрезолвлен: %s", uname, e)
+    return await _resolve_channel_peer(client, channel_id, 0)
+
+
+async def export_tracked_invite(
+    session_string: str,
+    channel_id: int | str,
+    *,
+    title: str,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
+) -> str | None:
+    """Создать в канале ОТДЕЛЬНУЮ ссылку-приглашение с названием и вернуть её.
+
+    Аккаунт должен быть админом канала с правом приглашать. Telegram сам ведёт
+    счётчик вступивших по каждой такой ссылке (usage) — так виртуальный
+    администратор видит, сколько людей пост витрины привёл в основной канал.
+    None — создать не удалось (нет прав, флуд, канал не читается)."""
+    from telethon.tl.functions.messages import ExportChatInviteRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        peer = await _admin_channel_peer(client, channel_id, access_hash, username)
+        res = await asyncio.wait_for(
+            client(ExportChatInviteRequest(peer=peer, title=(title or "")[:32])),
+            timeout=_OP_TIMEOUT)
+        link = getattr(res, "link", None)
+        return str(link) if link else None
+    except Exception as e:
+        log.warning("export_tracked_invite(%s) не удалось: %s", channel_id, str(e)[:160])
+        return None
+    finally:
+        try:
+            await safe_disconnect(client)
+        except Exception:
+            log_exc_swallow(log, "Сбой в export_tracked_invite")
+
+
+async def read_invite_usage(
+    session_string: str,
+    channel_id: int | str,
+    links: list[str],
+    *,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
+    pause: float = 0.7,
+) -> dict[str, dict]:
+    """Счётчики своих ссылок-приглашений за ОДНО подключение.
+
+    Возвращает {link: {"joins": usage, "requests": requested}}. Ссылки, которые
+    прочитать не удалось (отозвана, удалена), в ответ не попадают — прежний
+    счёт в базе остаётся как был."""
+    from telethon.tl.functions.messages import GetExportedChatInviteRequest
+
+    out: dict[str, dict] = {}
+    if not links:
+        return out
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        peer = await _admin_channel_peer(client, channel_id, access_hash, username)
+        for i, link in enumerate(links):
+            if i:
+                await asyncio.sleep(pause)
+            try:
+                res = await asyncio.wait_for(
+                    client(GetExportedChatInviteRequest(peer=peer, link=link)),
+                    timeout=_OP_TIMEOUT)
+            except Exception as e:
+                log.debug("read_invite_usage: %s не прочитана: %s", link, e)
+                continue
+            inv = getattr(res, "invite", None)
+            if inv is None:
+                continue
+            out[link] = {"joins": int(getattr(inv, "usage", 0) or 0),
+                         "requests": int(getattr(inv, "requested", 0) or 0)}
+        return out
+    except Exception as e:
+        log.debug("read_invite_usage(%s) error: %s", channel_id, e)
+        return out
+    finally:
+        try:
+            await safe_disconnect(client)
+        except Exception:
+            log_exc_swallow(log, "Сбой в read_invite_usage")
+
+
 async def get_channels_full_info(
     session_string: str,
     channel_ids: list,
