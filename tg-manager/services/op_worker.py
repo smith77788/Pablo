@@ -4699,6 +4699,7 @@ def _build_dispatch() -> dict:
         # ── Массовые операции по каналам и ботам ──────────────────────────────
         "mass_publish": _exec_mass_publish,
         "bulk_bot_edit": _exec_bulk_bot_edit,
+        "bulk_bot_profile": _exec_bulk_bot_profile,
         "bulk_join": _exec_bulk_join,
         "bulk_leave": _exec_bulk_leave,
         "find_contact": _exec_find_contact,
@@ -6128,6 +6129,149 @@ async def _exec_bulk_bot_edit(
         "ok": ok_count,
         "failed": fail_count,
         "summary": f"Обновлено: {ok_count} ботов, ошибок: {fail_count}",
+    }
+
+
+async def _exec_bulk_bot_profile(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массово изменить ПРОФИЛЬ выбранных (или всех) ботов за один проход:
+    имя, описание, короткое описание (через Bot API) и приветствие на /start
+    (локальное правило auto_replies).
+
+    params: {bot_ids?: [bot_id...], name?, description?, short_description?,
+    greeting?}. Пустое/отсутствующее поле — НЕ трогаем. Пустой/отсутствующий
+    bot_ids — все активные боты владельца.
+
+    Идемпотентно: setMy*-методы и замена приветствия приводят к тому же
+    состоянию при повторе. Уже успешно обработанных ботов пропускаем по
+    operation_log (completed_targets), чтобы повтор операции не бил по тем же
+    ботам новым запросом и не ловил лишний FloodWait.
+
+    Разные поля бота требуют разных прав/состояний, поэтому успех считается
+    по-ботно: бот засчитан «ok» только если ВСЕ запрошенные поля применились;
+    иначе — 'error' с русской причиной (отозванный токен, флуд и т.п.), и повтор
+    по нему попробует снова (уже применённые поля перезапишутся тем же значением).
+    """
+    from services import bot_api, bot_health
+    from database.db import fetch_bots as _fetch_bots_op
+
+    name = (params.get("name") or "").strip()
+    description = (params.get("description") or "").strip()
+    short_description = (params.get("short_description") or "").strip()
+    greeting = (params.get("greeting") or "").strip()
+
+    # Поля для Bot API: (метод, имя-параметра, значение). Приветствие — отдельно,
+    # это не вызов Telegram, а локальное правило.
+    api_fields: list[tuple[str, str, str]] = []
+    if name:
+        api_fields.append(("setMyName", "name", name))
+    if description:
+        api_fields.append(("setMyDescription", "description", description))
+    if short_description:
+        api_fields.append(("setMyShortDescription", "short_description", short_description))
+    if not api_fields and not greeting:
+        return {"status": "failed",
+                "summary": "⚠️ Не задано ни одно поле профиля (имя/описание/приветствие)"}
+
+    # Цели: выбранные боты (bot_id — публичный id, как в UI) либо все активные.
+    raw_ids = params.get("bot_ids") or []
+    bot_ids: list[int] = []
+    for x in raw_ids:
+        try:
+            bot_ids.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    if bot_ids:
+        bots_rows = await _fetch_bots_op(
+            pool,
+            "SELECT id, bot_id, token FROM managed_bots "
+            "WHERE added_by=$1 AND is_active=TRUE AND bot_id = ANY($2::bigint[]) ORDER BY id",
+            owner_id, bot_ids,
+        )
+    else:
+        bots_rows = await _fetch_bots_op(
+            pool,
+            "SELECT id, bot_id, token FROM managed_bots "
+            "WHERE added_by=$1 AND is_active=TRUE ORDER BY id",
+            owner_id,
+        )
+    if not bots_rows:
+        return {"status": "failed", "summary": "⚠️ Нет подходящих ботов для изменения"}
+
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        len(bots_rows), op_id,
+    )
+    # Что уже сделано прошлым прогоном — не трогаем повторно.
+    already = await completed_targets(pool, op_id)
+
+    ok_count = 0
+    fail_count = 0
+    async with aiohttp.ClientSession() as sess:
+        for b in bots_rows:
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled", "ok": ok_count, "failed": fail_count,
+                    "summary": f"Отменено. Обновлено: {ok_count}, ошибок: {fail_count}",
+                }
+            target = str(b["id"])
+            if target in already:
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
+
+            reasons: list[str] = []
+            for method, pkey, val in api_fields:
+                try:
+                    data = await bot_api._call(sess, b["token"], method, **{pkey: val})
+                except Exception as e:  # noqa: BLE001 — любая ошибка = провал поля, не всей операции
+                    reasons.append(bot_health._LABEL[bot_health.OTHER])
+                    log.warning("bulk_bot_profile: bot=%s %s error=%s", b.get("bot_id"), method, e)
+                    continue
+                if not data.get("ok"):
+                    _kind = bot_health.classify_error(
+                        data.get("description", ""), data.get("error_code"))
+                    reasons.append(bot_health._LABEL.get(_kind, bot_health._LABEL[bot_health.OTHER]))
+
+            if greeting:
+                try:
+                    async with pool.acquire() as conn:
+                        async with conn.transaction():
+                            await conn.execute(
+                                "DELETE FROM auto_replies WHERE bot_id=$1 AND trigger_type='start'",
+                                b["bot_id"])
+                            await conn.execute(
+                                "INSERT INTO auto_replies(bot_id, trigger_type, response_text, is_active) "
+                                "VALUES($1,'start',$2,TRUE)", b["bot_id"], greeting)
+                except Exception as e:  # noqa: BLE001
+                    reasons.append("приветствие не сохранено")
+                    log.warning("bulk_bot_profile: bot=%s greeting error=%s", b.get("bot_id"), e)
+
+            if not reasons:
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, ok_count + fail_count, target)
+            else:
+                fail_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, ok_count + fail_count, target, "; ".join(reasons)[:300])
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            # Небольшая пауза бережёт от флуд-лимита Bot API; виток цикла сам
+            # перечитывает отмену, поэтому обычного sleep здесь достаточно.
+            await asyncio.sleep(1)
+
+    _changed = ", ".join(
+        lbl for lbl, on in (("имя", bool(name)), ("описание", bool(description)),
+                            ("короткое описание", bool(short_description)),
+                            ("приветствие", bool(greeting))) if on)
+    return {
+        "status": "done", "ok": ok_count, "failed": fail_count,
+        "summary": f"Профиль ботов обновлён ({_changed}): {ok_count}, ошибок: {fail_count}",
     }
 
 

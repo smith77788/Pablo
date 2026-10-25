@@ -1453,9 +1453,68 @@ def setup_routes(app: web.Application, pool) -> None:
                            "dead": len(dead_ids), "unknown": unknown,
                            "alive": alive, "deleted_ids": dead_ids})
 
+    async def bots_bulk_profile(request: web.Request) -> web.Response:
+        """Массово изменить профиль выбранных (или ВСЕХ) ботов владельца:
+        имя, описание, короткое описание (Bot API) и приветствие на /start.
+
+        Пустое поле — не трогаем. Пустой/отсутствующий bot_ids — все активные
+        боты. Ставит операцию bulk_bot_profile (по-ботный журнал, прогресс,
+        идемпотентность — в исполнителе)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Некорректный запрос", 400)
+
+        def _field(key: str, cap: int) -> str:
+            v = body.get(key)
+            return "" if v is None else str(v).strip()[:cap]
+
+        name = _field("name", 64)
+        description = _field("description", 512)
+        short_description = _field("short_description", 120)
+        greeting = _field("greeting", 4096)
+        if not (name or description or short_description or greeting):
+            return _err("Укажите хотя бы одно поле: имя, описание или приветствие", 400)
+
+        raw = body.get("bot_ids")
+        bot_ids = _parse_bot_ids(raw) if raw else None  # None/пусто = все боты
+        if raw and bot_ids is None:
+            return _err("Неверный список ботов", 400)
+
+        if bot_ids:
+            cnt = await _safe_count(
+                pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
+                "AND is_active AND bot_id = ANY($2::bigint[])", uid, bot_ids)
+        else:
+            cnt = await _safe_count(
+                pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active", uid)
+        if not cnt:
+            return _err("Нет подходящих ботов", 400)
+
+        params = {"name": name, "description": description,
+                  "short_description": short_description, "greeting": greeting}
+        if bot_ids:
+            params["bot_ids"] = bot_ids
+        try:
+            op_id = await _obus.submit(
+                pool, uid, "bulk_bot_profile", params,
+                total_items=int(cnt), label=f"Профиль ботов: {cnt} шт.")
+        except _obus.PlanRequiredError as e:
+            return _err(f"Доступно на тарифе «{e.required_plan}» и выше", 403)
+        except Exception:
+            log.exception("bots_bulk_profile uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not op_id:
+            return _err("Не удалось поставить операцию", 500)
+        return _json_resp({"ok": True, "op_id": op_id, "count": int(cnt)})
+
     app.router.add_get("/api/miniapp/bots", bots)
     app.router.add_post("/api/miniapp/bots/check_all", bots_check_all)
     app.router.add_post("/api/miniapp/bots/bulk_delete", bots_bulk_delete)
+    app.router.add_post("/api/miniapp/bots/bulk_profile", bots_bulk_profile)
     app.router.add_post("/api/miniapp/bots/cleanup_dead", bots_cleanup_dead)
     app.router.add_post("/api/miniapp/bot/add", bot_add)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)

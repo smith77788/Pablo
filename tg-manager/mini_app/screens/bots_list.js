@@ -404,6 +404,45 @@ async function submitBotBroadcast() {
   finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
 }
 
+// ── Массовое изменение профиля (имя/описание/приветствие) ──────────────────
+function openBotProfileEdit() {
+  if (!BOT_SEL.size) { toast('❗ Выберите хотя бы одного бота'); return; }
+  ['bpName','bpDesc','bpShort','bpGreet'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  document.getElementById('bpErr').textContent='';
+  document.getElementById('bpHint').textContent = `Изменения применятся к ${BOT_SEL.size} ${plural(BOT_SEL.size,'выбранному боту','выбранным ботам','выбранным ботам')}.`;
+  showModal('mo-bot-profile');
+}
+
+async function submitBotProfileEdit() {
+  const errEl=document.getElementById('bpErr'); errEl.textContent='';
+  const name=document.getElementById('bpName').value.trim();
+  const description=document.getElementById('bpDesc').value.trim();
+  const short_description=document.getElementById('bpShort').value.trim();
+  const greeting=document.getElementById('bpGreet').value.trim();
+  if(!name && !description && !short_description && !greeting){
+    errEl.textContent='Заполните хотя бы одно поле'; return;
+  }
+  const parts=[];
+  if(name) parts.push('имя');
+  if(description) parts.push('описание');
+  if(short_description) parts.push('короткое описание');
+  if(greeting) parts.push('приветствие');
+  const n=BOT_SEL.size;
+  if(!await askConfirm(`Изменить ${parts.join(', ')} у ${n} ${plural(n,'бота','ботов','ботов')}?`)) return;
+  const btn=document.getElementById('bpBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const _p={bot_ids:[...BOT_SEL]};
+    if(name) _p.name=name;
+    if(description) _p.description=description;
+    if(short_description) _p.short_description=short_description;
+    if(greeting) _p.greeting=greeting;
+    const r=await api('/api/miniapp/bots/bulk_profile',{method:'POST',body:JSON.stringify(_p)});
+    toast(`✏️ Изменение профиля запущено: ${r.count||n} ${plural(r.count||n,'бот','бота','ботов')}`);
+    closeModal('mo-bot-profile'); toggleBotSelMode();
+  } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
+  finally { btn.disabled=false; btn.textContent='Применить к выбранным'; }
+}
+
 async function submitQuickBot() {
   const token=document.getElementById('quickBotToken').value.trim();
   const errEl=document.getElementById('quickBotErr'); errEl.textContent='';

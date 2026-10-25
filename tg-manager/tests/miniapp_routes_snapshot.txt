@@ -709,6 +709,7 @@ POST /api/miniapp/bot_factory/create
 POST /api/miniapp/bot_factory/create_new
 POST /api/miniapp/bots/bulk_delete
 POST /api/miniapp/bots/bulk_edit
+POST /api/miniapp/bots/bulk_profile
 POST /api/miniapp/bots/check_all
 POST /api/miniapp/bots/cleanup_dead
 POST /api/miniapp/bots/connect_discovered

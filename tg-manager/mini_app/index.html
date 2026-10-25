@@ -1268,6 +1268,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="sel-bar-acts">
         <button class="mini-btn" onclick="openBotBroadcast()">📢 Рассылка выбранным</button>
+        <button class="mini-btn" onclick="openBotProfileEdit()">✏️ Изменить профиль</button>
         <button class="mini-btn" onclick="bulkDeleteBots()">🗑 Удалить выбранных</button>
       </div>
     </div>
@@ -1284,6 +1285,22 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <textarea id="bbButtons" rows="2" placeholder="Кнопки: Текст | https://ссылка (по одной на строку)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
     <div id="bbErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" id="bbBtn" onclick="submitBotBroadcast()" style="width:100%;margin-top:8px">Запустить рассылку</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: ПРОФИЛЬ ВЫБРАННЫХ БОТОВ ══════════════════════ -->
+<div class="mbg" id="mo-bot-profile" onclick="if(event.target===this)closeModal('mo-bot-profile')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-bot-profile')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">✏️ Профиль выбранным ботам</div>
+    <div id="bpHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
+    <div class="field-note" style="margin:0 0 8px">Пустое поле не меняется. Заполните только то, что нужно изменить у всех выбранных ботов сразу.</div>
+    <div class="field"><label>Имя бота</label><input id="bpName" maxlength="64" placeholder="До 64 символов"></div>
+    <div class="field"><label>Описание (текст перед запуском)</label><textarea id="bpDesc" rows="3" maxlength="512" placeholder="До 512 символов"></textarea></div>
+    <div class="field"><label>Короткое описание (в профиле бота)</label><textarea id="bpShort" rows="2" maxlength="120" placeholder="До 120 символов"></textarea></div>
+    <div class="field"><label>Приветствие (ответ на /start)</label><textarea id="bpGreet" rows="3" maxlength="4096" placeholder="Сообщение, которое бот пришлёт на /start"></textarea></div>
+    <div id="bpErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" id="bpBtn" onclick="submitBotProfileEdit()" style="width:100%;margin-top:8px">Применить к выбранным</button>
   </div>
 </div>
 
