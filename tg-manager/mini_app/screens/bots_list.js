@@ -422,22 +422,38 @@ async function submitBotProfileEdit() {
   if(!name && !description && !short_description && !greeting){
     errEl.textContent='Заполните хотя бы одно поле'; return;
   }
-  const parts=[];
-  if(name) parts.push('имя');
-  if(description) parts.push('описание');
-  if(short_description) parts.push('короткое описание');
-  if(greeting) parts.push('приветствие');
-  const n=BOT_SEL.size;
-  if(!await askConfirm(`Изменить ${parts.join(', ')} у ${n} ${plural(n,'бота','ботов','ботов')}?`)) return;
-  const btn=document.getElementById('bpBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  const _p={bot_ids:[...BOT_SEL]};
+  if(name) _p.name=name;
+  if(description) _p.description=description;
+  if(short_description) _p.short_description=short_description;
+  if(greeting) _p.greeting=greeting;
+  const btn=document.getElementById('bpBtn'); btn.disabled=true;
+  // 1) Предпросмотр «было → станет» ДО применения.
+  let pv;
+  btn.textContent='Готовлю предпросмотр…';
+  try { pv=await api('/api/miniapp/bots/profile_preview',{method:'POST',body:JSON.stringify(_p)}); }
+  catch(e){ errEl.textContent=errRu(e,'Не удалось получить предпросмотр'); btn.disabled=false; btn.textContent='Применить к выбранным'; return; }
+  btn.disabled=false; btn.textContent='Применить к выбранным';
+  const _fl=(s,m)=>{ s=String(s==null?'':s).replace(/\n/g,' '); return s.length>m?s.slice(0,m)+'…':(s||'—'); };
+  const _lab={name:'имя',description:'описание',short_description:'короткое описание',greeting:'приветствие'};
+  const _keys=Object.keys(pv.after||{});
+  let txt=`Изменить у ${pv.total} ${plural(pv.total,'бота','ботов','ботов')}.\n\nСтанет:\n`;
+  _keys.forEach(k=>{ txt+=`• ${_lab[k]}: «${_fl(pv.after[k],60)}»\n`; });
+  if(pv.targets && pv.targets.length){
+    txt+=`\nПримеры (было → станет):\n`;
+    pv.targets.forEach(t=>{
+      const ch=_keys.map(k=>`${_lab[k]}: «${_fl((t.before||{})[k],28)}» → «${_fl(pv.after[k],28)}»`).join('; ');
+      txt+=`• ${_fl(t.title,22)}: ${ch}\n`;
+    });
+    if(pv.total>pv.shown) txt+=`…и ещё ${pv.total-pv.shown} ${plural(pv.total-pv.shown,'бот','бота','ботов')} (изменятся так же).\n`;
+  }
+  txt+=`\nПрименить? Это можно будет откатить («↩️ Откатить профиль» в итоге операции).`;
+  if(!await askConfirm(txt)) return;
+  // 2) Применение.
+  btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const _p={bot_ids:[...BOT_SEL]};
-    if(name) _p.name=name;
-    if(description) _p.description=description;
-    if(short_description) _p.short_description=short_description;
-    if(greeting) _p.greeting=greeting;
     const r=await api('/api/miniapp/bots/bulk_profile',{method:'POST',body:JSON.stringify(_p)});
-    toast(`✏️ Изменение профиля запущено: ${r.count||n} ${plural(r.count||n,'бот','бота','ботов')}`);
+    toast(`✏️ Изменение профиля запущено: ${r.count||pv.total} ${plural(r.count||pv.total,'бот','бота','ботов')}`);
     closeModal('mo-bot-profile'); toggleBotSelMode();
   } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='Применить к выбранным'; }

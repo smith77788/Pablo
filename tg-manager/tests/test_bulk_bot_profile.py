@@ -267,3 +267,20 @@ async def test_rollback_without_snapshot_fails(monkeypatch):
     res = await op_worker._exec_bulk_bot_profile_rollback(
         pool, None, 50, 99, {"source_op_id": 42})
     assert res["status"] == "failed"
+
+
+# ── Безопасность: предпросмотр «было → станет» до применения ───────────────────
+
+def test_preview_route_registered_and_reads_current():
+    src = open(os.path.join(ROOT, "services", "mini_app_bots.py"), encoding="utf-8").read()
+    assert '"/api/miniapp/bots/profile_preview"' in src
+    assert "bots_profile_preview" in src
+    # предпросмотр читает ТЕКУЩИЕ значения (это и есть «было»)
+    assert "get_my_name" in src and "get_my_description" in src
+
+
+def test_ui_previews_before_applying():
+    src = open(os.path.join(ROOT, "mini_app", "screens", "bots_list.js"), encoding="utf-8").read()
+    i_prev = src.index("profile_preview")
+    i_apply = src.index("'/api/miniapp/bots/bulk_profile'")
+    assert i_prev < i_apply, "применение идёт раньше предпросмотра — предпросмотра нет"

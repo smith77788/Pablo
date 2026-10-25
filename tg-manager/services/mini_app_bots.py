@@ -1511,6 +1511,85 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось поставить операцию", 500)
         return _json_resp({"ok": True, "op_id": op_id, "count": int(cnt)})
 
+    async def bots_profile_preview(request: web.Request) -> web.Response:
+        """Предпросмотр массового изменения профиля: «было → станет» по образцу
+        выбранных ботов, ДО применения. Текущие значения читаются из Telegram у
+        НЕБОЛЬШОГО образца (чтобы не ждать сотни запросов и не ловить флуд) —
+        остальные показываем числом. Полную подстраховку даёт откат."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Некорректный запрос", 400)
+
+        def _field(key: str, cap: int) -> str:
+            v = body.get(key)
+            return "" if v is None else str(v).strip()[:cap]
+
+        after = {"name": _field("name", 64), "description": _field("description", 512),
+                 "short_description": _field("short_description", 120),
+                 "greeting": _field("greeting", 4096)}
+        after = {k: v for k, v in after.items() if v}
+        if not after:
+            return _err("Укажите хотя бы одно поле", 400)
+
+        raw = body.get("bot_ids")
+        bot_ids = _parse_bot_ids(raw) if raw else None
+        if raw and bot_ids is None:
+            return _err("Неверный список ботов", 400)
+        if bot_ids:
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
+                "AND is_active AND bot_id = ANY($2::bigint[])", uid, bot_ids)
+            rows = await _safe_fetch(
+                pool, "SELECT bot_id, token, first_name, username FROM managed_bots "
+                "WHERE added_by=$1 AND is_active AND bot_id = ANY($2::bigint[]) ORDER BY bot_id LIMIT 8",
+                uid, bot_ids)
+        else:
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active", uid)
+            rows = await _safe_fetch(
+                pool, "SELECT bot_id, token, first_name, username FROM managed_bots "
+                "WHERE added_by=$1 AND is_active ORDER BY bot_id LIMIT 8", uid)
+        if not total:
+            return _err("Нет подходящих ботов", 400)
+        import asyncio
+        from services.token_vault import decrypt_token
+        from services import bot_api
+        import aiohttp as _aio
+
+        async def _before_of(sess, r) -> dict:
+            tok = decrypt_token(r["token"])
+            out: dict = {}
+            try:
+                if "name" in after:
+                    out["name"] = await bot_api.get_my_name(sess, tok)
+                if "description" in after:
+                    out["description"] = await bot_api.get_my_description(sess, tok)
+                if "short_description" in after:
+                    out["short_description"] = await bot_api.get_my_short_description(sess, tok)
+            except Exception:
+                pass
+            if "greeting" in after:
+                out["greeting"] = await _safe_fetchrow(
+                    pool, "SELECT response_text FROM auto_replies WHERE bot_id=$1 "
+                    "AND trigger_type='start' ORDER BY id LIMIT 1", r["bot_id"])
+                out["greeting"] = (out["greeting"] or {}).get("response_text", "") if out["greeting"] else ""
+            return {"bot_id": r["bot_id"],
+                    "title": r["first_name"] or (("@" + r["username"]) if r["username"] else str(r["bot_id"])),
+                    "before": out}
+
+        targets = []
+        try:
+            async with _aio.ClientSession() as sess:
+                targets = await asyncio.gather(*[_before_of(sess, r) for r in (rows or [])])
+        except Exception:
+            log.exception("bots_profile_preview uid=%d", uid)
+        return _json_resp({"total": int(total), "shown": len(targets),
+                           "after": after, "targets": list(targets)})
+
     async def bots_bulk_profile_rollback(request: web.Request) -> web.Response:
         """Откатить массовое изменение профиля ботов (вернуть как было).
 
@@ -1552,6 +1631,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/bots/check_all", bots_check_all)
     app.router.add_post("/api/miniapp/bots/bulk_delete", bots_bulk_delete)
     app.router.add_post("/api/miniapp/bots/bulk_profile", bots_bulk_profile)
+    app.router.add_post("/api/miniapp/bots/profile_preview", bots_profile_preview)
     app.router.add_post("/api/miniapp/bots/bulk_profile_rollback", bots_bulk_profile_rollback)
     app.router.add_post("/api/miniapp/bots/cleanup_dead", bots_cleanup_dead)
     app.router.add_post("/api/miniapp/bot/add", bot_add)

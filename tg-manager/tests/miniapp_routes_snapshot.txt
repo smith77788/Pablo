@@ -715,6 +715,7 @@ POST /api/miniapp/bots/check_all
 POST /api/miniapp/bots/cleanup_dead
 POST /api/miniapp/bots/connect_discovered
 POST /api/miniapp/bots/enable_b2b
+POST /api/miniapp/bots/profile_preview
 POST /api/miniapp/bots/scan_fleet
 POST /api/miniapp/broadcast
 POST /api/miniapp/broadcast/ab_test
