@@ -335,16 +335,77 @@ async def _groq_complete_detailed(system: str, user: str,
             return None, ""
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url, timeout=timeout)
-        resp = await client.chat.completions.create(
-            model=GROQ_WARMUP_MODEL,
-            messages=[{"role": "system", "content": system},
-                      {"role": "user", "content": user}],
-            max_tokens=300, temperature=0.9)   # живее и короче — как в чате
+        msgs = [{"role": "system", "content": system},
+                {"role": "user", "content": user}]
+        try:
+            resp = await client.chat.completions.create(
+                model=GROQ_WARMUP_MODEL, messages=msgs,
+                max_tokens=300, temperature=0.9)   # живее и короче — как в чате
+        except Exception as e:
+            # ЗАФИКСИРОВАННАЯ МОДЕЛЬ — ТОЧКА ОТКАЗА БЕЗ ЕДИНОЙ ПРАВКИ КОДА.
+            # Провайдеры выводят модели из обращения по своему расписанию. В
+            # этот день разогрев, работавший годами, просто замолкает: запрос
+            # отвергнут, реплики нет, ход тихо пропущен — и ни в коде, ни в
+            # настройках ничего не менялось, поэтому искать причину негде.
+            # Поэтому отказ ИМЕННО ПО МОДЕЛИ лечится на месте: спрашиваем у
+            # провайдера его живой список и берём ближайшую подходящую.
+            if not _is_model_error(e):
+                raise
+            alt = await _groq_alive_model(client)
+            if not alt:
+                return None, f"модель {GROQ_WARMUP_MODEL} недоступна: {e}"
+            log.warning(
+                "chat_warmup: модель %s отвергнута провайдером (%s) — беру %s",
+                GROQ_WARMUP_MODEL, str(e)[:120], alt)
+            resp = await client.chat.completions.create(
+                model=alt, messages=msgs, max_tokens=300, temperature=0.9)
         txt = (resp.choices[0].message.content or "").strip()
         return (txt or None), ("" if txt else "пустой ответ модели")
     except Exception as e:
         log.debug("chat_warmup._groq_complete failed: %s", e)
         return None, str(e)[:160]
+
+
+#: Признаки того, что провайдер отверг именно МОДЕЛЬ, а не запрос целиком.
+#: Узко намеренно: на сетевой сбой, неверный ключ или исчерпанную квоту искать
+#: замену модели бессмысленно, а повторный запрос только удвоит нагрузку.
+_MODEL_ERROR_MARKS = (
+    "decommission", "model_not_found", "does not exist", "no longer available",
+    "unknown model", "invalid model",
+)
+
+
+def _is_model_error(exc: Exception) -> bool:
+    """Отказ по модели (её сняли с обслуживания), а не по ключу или сети."""
+    low = str(exc).lower()
+    return "model" in low and any(m in low for m in _MODEL_ERROR_MARKS)
+
+
+async def _groq_alive_model(client) -> str:
+    """Живая модель провайдера взамен снятой. Пустая строка — если не нашлась.
+
+    Порядок предпочтения повторяет замысел зафиксированной модели: сначала
+    крупная llama (диалог живее), затем любая llama, затем что угодно. Список
+    спрашивается у самого провайдера, поэтому следующее снятие модели переживём
+    без правки кода.
+    """
+    try:
+        listing = await client.models.list()
+        ids = [str(getattr(m, "id", "") or "") for m in (listing.data or [])]
+        ids = [i for i in ids if i and "whisper" not in i and "tts" not in i
+               and "guard" not in i]
+        if not ids:
+            return ""
+        for want in (lambda i: "llama" in i and "70b" in i,
+                     lambda i: "llama" in i,
+                     lambda i: True):
+            hit = sorted(i for i in ids if want(i))
+            if hit:
+                return hit[0]
+        return ""
+    except Exception as exc:
+        log.debug("chat_warmup: список моделей провайдера недоступен: %s", exc)
+        return ""
 
 
 # ── CRUD сессий ──────────────────────────────────────────────────────────────
