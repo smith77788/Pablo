@@ -33,14 +33,27 @@ from services import mini_app_api                          # noqa: E402
 
 
 class _Pool:
-    """Пул для ручек, которым хватает «свои живые аккаунты»."""
+    """Пул для ручек, которым хватает «свои живые аккаунты».
+
+    Строка аккаунта отдаётся ПОЛНОЙ: разогрев теперь выбирает участников по
+    готовности (свободен / занят арендой / на паузе / негоден), а не срезает
+    список по id, и читает для этого те же поля, что и ход.
+    """
 
     def __init__(self, accounts: int = 0):
         self.accounts = accounts
 
     async def fetch(self, query, *args):
         if "FROM tg_accounts" in query:
-            return [{"id": i} for i in range(1, self.accounts + 1)]
+            rows = [{"id": i} for i in range(1, self.accounts + 1)]
+            if "op_lease_until" not in query:
+                return rows
+            for r in rows:
+                r.update({"label": f"acc{r['id']}", "is_active": True,
+                          "has_session": True, "acc_status": "active",
+                          "cooldown_until": None, "leased": False,
+                          "trust_score": 50})
+            return rows
         return []
 
     async def fetchrow(self, query, *args):
@@ -191,6 +204,11 @@ def test_chat_warmup_names_the_accounts_left_out(monkeypatch):
     assert data["accounts"] == 30, data
     assert data["requested"] == 50, "сколько аккаунтов выбрали — не сказано"
     assert data["omitted"] == 20, "двадцать аккаунтов не вошли, и об этом молчок"
+    # И ПОЧЕМУ не вошли: «не поместился в потолок» и «забанен» — разные новости
+    # и разные действия владельца, одно число их не различает.
+    assert sum(d["count"] for d in data.get("omitted_detail") or []) == 20, data
+    assert any("потолок" in d["reason"]
+               for d in data.get("omitted_detail") or []), data
 
 
 def test_chat_warmup_is_silent_when_nothing_was_dropped(monkeypatch):

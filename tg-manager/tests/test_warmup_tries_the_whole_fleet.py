@@ -161,10 +161,23 @@ def test_the_turn_reports_how_many_it_tried():
 
 
 def test_the_screen_names_a_barred_account():
+    """Выведенный из разогрева не должен выглядеть на экране свободным.
+
+    Шов переехал: признак читает общее для хода и экрана чтение готовности
+    (`fleet_availability`), а подпись даёт `busy_reason_ru`. Поэтому стережём
+    всю цепочку, а не текст одной функции; само ПОВЕДЕНИЕ экрана (barred
+    аккаунт приходит с причиной и не считается готовым) проверяется в
+    test_warmup_picks_the_free_accounts — это строже прежнего грепа, который
+    прошёл бы и на функции, упоминающей строку, но не выводящей её.
+    """
     import inspect
 
-    src = inspect.getsource(cw.diagnose)
-    assert "_write_forbidden_ids" in src and "не даёт ему писать" in src, (
-        "живая диагностика не показывает выведенных из разогрева — на экране "
-        "они выглядят здоровыми и свободными"
+    assert "fleet_availability" in inspect.getsource(cw.diagnose), (
+        "экран судит о флоте сам и про запрет письма снова не знает"
+    )
+    assert "_write_forbidden_ids" in inspect.getsource(cw.fleet_availability), (
+        "общее чтение готовности не спрашивает про запрет письма"
+    )
+    assert "не даёт ему писать" in inspect.getsource(cw.busy_reason_ru), (
+        "причина больше не называется владельцу"
     )

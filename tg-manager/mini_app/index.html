@@ -2678,7 +2678,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <span class="link-tap" onclick="cwToggleAllAccs()" role="button" tabindex="0" style="font-size:11px;color:var(--accent)">выбрать все / сбросить</span>
     </div>
     <div id="cwAccs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;padding-left:16px;padding-right:16px"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div style="font-size:11px;color:var(--hint);margin:0 0 10px">Ничего не выбрано = весь живой флот (до 30 аккаунтов).</div>
+    <div id="cwAccsHint" style="font-size:11px;color:var(--hint);margin:0 0 4px"></div>
+    <div style="font-size:11px;color:var(--hint);margin:0 0 10px">Ничего не выбрано = весь живой флот; в один чат беру не больше 30 и начинаю со свободных.</div>
     <button class="btn btn-p" onclick="cwStart()" style="width:100%;padding:11px;font-size:14px">▶ Запустить разогрев</button>
     <div class="sec" style="margin-top:14px">Активные разогревы</div>
     <div class="lst" id="cwList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -9148,7 +9149,15 @@ async function cwLoadAccounts(){
   try{
     const r=await api('/api/miniapp/chatwarmup/accounts'); CW_ACC_ALL=r.accounts||[];
     if(!CW_ACC_ALL.length){el.innerHTML='<span style="font-size:12px;color:var(--hint)">Нет живых аккаунтов</span>';return;}
-    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" style="font-size:11px;padding:5px 10px;min-height:32px;display:inline-flex;align-items:center;border-radius:14px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;border:1px solid transparent">${esc(a.label)}</span>`).join('');
+    // Занятость видна ДО запуска: флот больше потолка почти всегда частично
+    // занят другими делами, и отмечать такие аккаунты вслепую означало сессию,
+    // которая молчит. Занятый отмечать можно — он освободится, — но знать об
+    // этом владелец должен заранее.
+    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" title="${a.busy?esc(a.reason):'свободен'}" style="font-size:11px;padding:5px 10px;min-height:32px;display:inline-flex;align-items:center;border-radius:14px;background:rgba(255,255,255,.06);color:${a.busy?'var(--hint)':'#fff'};cursor:pointer;border:1px solid transparent">${a.busy?'⏳ ':''}${esc(a.label)}</span>`).join('');
+    const hint=document.getElementById('cwAccsHint');
+    if(hint) hint.textContent=(r.free!=null&&r.cap)
+      ? `Свободны сейчас: ${r.free} из ${CW_ACC_ALL.length} · в один чат беру не больше ${r.cap}, свободных в первую очередь`
+      : '';
   }catch(e){el.innerHTML=errHtml(errRu(e),'cwLoadAccounts()');}
 }
 function _cwChipStyle(el,on){el.style.background=on?'var(--accent-soft-2)':'rgba(255,255,255,.06)';el.style.borderColor=on?'var(--accent)':'transparent';}
@@ -9188,9 +9197,12 @@ async function cwStart(){
   try{
     const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
       body:JSON.stringify({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT})});
-    // Потолок флота на чат (30) раньше срабатывал молча.
+    // Потолок флота на чат (30) раньше срабатывал молча, а потом называл
+    // только число. Теперь видно и причину: «не поместился в потолок» и
+    // «нет строки сессии» — это разные новости и разные действия.
+    const od=(r.omitted_detail||[]).map(d=>`${d.reason} — ${d.count}`).join('; ');
     toast(`💬 Разогрев запущен: ${r.accounts||0} акк.`
-      + (r.omitted>0?` · не вошли: ${r.omitted}`:''));
+      + (r.omitted>0?` · не вошли ${r.omitted}${od?`: ${od}`:''}`:''));
     document.getElementById('cwChat').value='';
     cwLoad();
   }catch(e){toast('⚠️ '+errRu(e,'Ошибка'));}

@@ -195,10 +195,19 @@ def test_the_live_diagnosis_names_each_blocked_account(pool):
         s = await _fresh(pool)
         a1, a2 = s["account_ids"]
         # Один аккаунт на паузе Telegram, второй занят операцией.
+        #
+        # «Занят» — это ЖИВАЯ АРЕНДА, а не флаг `in_operation`. Раньше тест
+        # ставил один флаг, и экран соглашался, — но ровно такую строку арбитр
+        # захвата (op_worker._db_claim) аккаунтом СВОБОДНЫМ и считает: аренды
+        # нет, значит ход этот аккаунт возьмёт. Проверка стала строже: экран
+        # сверяется с тем же признаком, по которому решает сам ход, а не с
+        # флагом, который остаётся висеть после упавшей операции.
         await pool.execute(
             "UPDATE tg_accounts SET cooldown_until = now() + interval '40 minutes' "
             "WHERE id=$1", a1)
-        await pool.execute("UPDATE tg_accounts SET in_operation=TRUE WHERE id=$1", a2)
+        await pool.execute(
+            "UPDATE tg_accounts SET in_operation=TRUE, op_lease_owner='w-test', "
+            "op_lease_until = now() + interval '5 minutes' WHERE id=$1", a2)
 
         d = await cw.diagnose(pool, OWNER, s)
         reasons = {a["label"]: a["reason"] for a in d["accounts"]}
@@ -213,6 +222,18 @@ def test_the_live_diagnosis_names_each_blocked_account(pool):
         assert d2["ready"] == 1
         assert not any("Ни один аккаунт" in g for g in d2["global"])
 
+        # А ЗАЛИПШИЙ ФЛАГ без аренды держать аккаунт не имеет права: иначе
+        # экран показывает занятым того, кого ход в ту же секунду берёт, —
+        # владелец видит «весь флот занят» при живом свободном флоте.
+        await pool.execute(
+            "UPDATE tg_accounts SET op_lease_until=NULL, op_lease_owner=NULL "
+            "WHERE id=$1", a2)
+        d3 = await cw.diagnose(pool, OWNER, s)
+        assert d3["ready"] == 2, (
+            "аккаунт с залипшим in_operation и истёкшей арендой читается как "
+            "занятый — это и есть «все аккаунты заняты без операций»"
+        )
+
     _run(_t())
 
 
@@ -225,7 +246,15 @@ def test_a_dead_account_is_named_by_its_status(pool):
                            s["account_ids"][0])
         d = await cw.diagnose(pool, OWNER, s)
         reasons = {a["label"]: a["reason"] for a in d["accounts"]}
-        assert "spamblock" in reasons["lora_m"], reasons
+        # Подпись статуса — из общего словаря продукта: в базе код английский, а
+        # владелец английского не понимает. Раньше тест ждал в тексте сам код
+        # («spamblock»), то есть стерёг утечку английского на экран.
+        assert "спам-блок" in reasons["lora_m"], reasons
+        assert "spamblock" not in reasons["lora_m"], reasons
+
+    # Без этой строки тело теста не исполнялось вовсе: корутина создавалась и
+    # выбрасывалась, а тест «проходил» всегда.
+    _run(_t())
 
 
 def test_the_diagnosis_is_scoped_to_its_owner(pool):

@@ -563,11 +563,247 @@ async def _write_forbidden_ids(pool, sid: int) -> set[int]:
         return set()
 
 
-def _speaker_order(own_ids: list[int], last_speaker) -> list[int]:
-    """Порядок, в котором пробовать аккаунты: не тот же, что говорил последним.
+# ── Кто из флота может говорить ПРЯМО СЕЙЧАС ─────────────────────────────────
+#
+# ЧТО ЛОМАЛОСЬ. Сессия разогрева берёт не больше потолка флота на чат, а флот у
+# владельца бывает в полтора-два раза больше и почти всегда занят другими
+# делами. Участники выбирались ПЕРВЫМИ ПО id, а ход — случайным перебором шести
+# кандидатов, и ни там, ни там не спрашивалось, свободен ли аккаунт. Итог
+# воспроизводим: из 51 аккаунта в сессию попадали 30 с самыми малыми id, среди
+# них — держащие операции, и разогрев молчал при живом свободном флоте.
+#
+# Занятость бывает РАЗНОЙ ДЛИТЕЛЬНОСТИ, и это главное при выборе: аренда под
+# операцию снимается через минуты, пауза Telegram держится часами, карантин —
+# сутками, а негодность (нет строки сессии, мёртвый статус) сама не проходит
+# вовсе. Поэтому занятость здесь — не флаг, а ВЕС: по нему строится и очередь
+# хода, и отбор участников под потолок. Мимолётная занятость участника из
+# сессии не исключает — через полчаса он заговорит; негодность исключает.
+
+FREE = ""
+BUSY_LEASED = "leased"
+BUSY_COOLDOWN = "cooldown"
+BUSY_QUARANTINE = "quarantine"
+BUSY_NO_WRITE = "no_write"
+BUSY_UNFIT = "unfit"
+
+#: Чем больше вес, тем дольше аккаунт останется непригодным.
+_BUSY_WEIGHT = {FREE: 0, BUSY_LEASED: 1, BUSY_COOLDOWN: 2,
+                BUSY_QUARANTINE: 3, BUSY_NO_WRITE: 4, BUSY_UNFIT: 5}
+
+
+def busy_weight(code) -> int:
+    """Вес кода занятости; неизвестный код считаем ХУДШИМ, а не лучшим."""
+    return _BUSY_WEIGHT.get(str(code or ""), max(_BUSY_WEIGHT.values()))
+
+
+#: Поля, по которым судят о готовности аккаунта. Один набор на всех читателей.
+_AVAIL_COLS = (
+    "a.id, "
+    "COALESCE(a.username, a.first_name, a.phone, '#' || a.id::text) AS label, "
+    "COALESCE(a.is_active, FALSE) AS is_active, "
+    "a.session_str IS NOT NULL AS has_session, "
+    "COALESCE(a.acc_status, 'active') AS acc_status, "
+    "a.cooldown_until, "
+    # Занятость под операцию — АРЕНДА, а не флаг `in_operation`. Флаг остаётся
+    # висеть после упавшей операции (его чистит отдельный реконсилер), и по
+    # нему свободный аккаунт читается как занятый: экран говорил «занят
+    # операцией» про аккаунт, который ход в ту же секунду успешно захватывал.
+    # Арбитр захвата (op_worker._db_claim) судит по аренде — судим так же.
+    "(a.op_lease_until IS NOT NULL AND a.op_lease_until > now()) AS leased, "
+    "COALESCE(a.trust_score, 0) AS trust_score"
+)
+
+
+def busy_class(row, *, now=None, barred: bool = False,
+               quarantined: bool = False) -> str:
+    """Что мешает аккаунту сделать ход — одним кодом; FREE, если ничего.
+
+    Порядок проверок — ровно тот, по которому отказывается говорить сам ход, и
+    функция ОДНА на обоих читателей (очередь хода и экран «почему молчит»): два
+    списка условий однажды разъехались бы, а от них зависит, увидит ли владелец
+    правду о своём флоте.
+    """
+    if row is None:
+        return BUSY_UNFIT
+    if barred:
+        return BUSY_NO_WRITE
+    if not row["is_active"] or not row["has_session"]:
+        return BUSY_UNFIT
+    if _acc_status.is_dead(row["acc_status"]):
+        return BUSY_UNFIT
+    cd = row["cooldown_until"]
+    if cd is not None and now is not None and cd > now:
+        return BUSY_COOLDOWN
+    if quarantined:
+        return BUSY_QUARANTINE
+    if row["leased"]:
+        return BUSY_LEASED
+    return FREE
+
+
+def busy_reason_ru(code, row=None, *, now=None) -> str:
+    """Та же причина по-русски и ДЕЙСТВЕННО: что владельцу с этим делать.
+
+    Негодность разбита на три разных совета не ради красоты: выключенный
+    аккаунт включается кнопкой, аккаунт без сессии перезаливается, а забаненный
+    не лечится никак. Один общий текст «негоден» заставляет владельца перебирать
+    флот руками.
+    """
+    code = str(code or "")
+    if code == FREE:
+        return ""
+    if code == BUSY_NO_WRITE:
+        return f"чат не даёт ему писать (ещё {_NO_WRITE_HOURS} ч)"
+    if code == BUSY_UNFIT:
+        if row is None:
+            return "аккаунт удалён или сменил владельца"
+        if not row["is_active"]:
+            return "выключен владельцем"
+        if not row["has_session"]:
+            return "нет строки сессии — перезалейте аккаунт"
+        # Код статуса в базе английский, а владелец английского не понимает:
+        # подпись берём из общего словаря статусов.
+        return (f"{_acc_status.ru_label(row['acc_status'])} — "
+                f"для действий не годится")
+    if code == BUSY_COOLDOWN:
+        left = 0
+        try:
+            if row is not None and row["cooldown_until"] and now is not None:
+                left = int((row["cooldown_until"] - now).total_seconds() // 60)
+        except Exception:
+            left = 0
+        return f"пауза Telegram ещё {max(1, left)} мин"
+    if code == BUSY_QUARANTINE:
+        return "в карантине по здоровью"
+    if code == BUSY_LEASED:
+        return "занят операцией прямо сейчас"
+    return code
+
+
+async def fleet_availability(pool, account_ids, *, owner_id=None,
+                             session_id: int = 0) -> dict[int, dict]:
+    """Готовность каждого аккаунта из списка — ОДНИМ запросом к базе.
+
+    Отдаёт {id: {"code", "reason", "weight", "label", "row"}}.
+
+    Fail-open и намеренно: это только ПОРЯДОК и ОТБОР, настоящие гейты стоят на
+    самом ходе и на операциях. Любая ошибка чтения → пустой словарь, то есть
+    поведение как до этой функции (никого не считаем занятым), а не остановка
+    разогрева из-за недоступности пульса.
+    """
+    try:
+        ids = sorted({int(a) for a in (account_ids or []) if a})
+    except (TypeError, ValueError):
+        return {}
+    if not pool or not ids:
+        return {}
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    try:
+        sql = ("SELECT " + _AVAIL_COLS
+               + " FROM tg_accounts a WHERE a.id = ANY($1::bigint[])")
+        args: list = [ids]
+        if owner_id:
+            sql += " AND a.owner_id=$2"
+            args.append(int(owner_id))
+        rows = await pool.fetch(sql, *args)
+    except Exception as exc:
+        log.warning("chat_warmup: готовность флота не прочитана (%s) — "
+                    "порядок хода остаётся случайным", exc)
+        return {}
+    barred: set[int] = set()
+    if session_id:
+        barred = await _write_forbidden_ids(pool, int(session_id))
+    quarantined: set[int] = set()
+    try:
+        from services.infra_memory import quarantined_accounts
+
+        quarantined = await quarantined_accounts(pool, ids)
+    except Exception as exc:
+        log.debug("chat_warmup: пульс здоровья недоступен, считаем чистыми: %s", exc)
+
+    # Разбор — тоже под fail-open, и это не перестраховка: `busy_class`
+    # договорился с _AVAIL_COLS о наборе полей, и выборка с другим набором
+    # (урезанная миграция, подменённый пул) уронила бы ВЕСЬ ход, а не только
+    # порядок кандидатов. Граница fail-open должна охватывать всё чтение.
+    try:
+        seen = {int(r["id"]): r for r in (rows or [])}
+        out: dict[int, dict] = {}
+        for acc_id in ids:
+            row = seen.get(acc_id)
+            code = busy_class(row, now=now, barred=acc_id in barred,
+                              quarantined=acc_id in quarantined)
+            out[acc_id] = {
+                "code": code,
+                "reason": busy_reason_ru(code, row, now=now),
+                "weight": busy_weight(code),
+                "label": (row["label"] if row is not None else f"#{acc_id}"),
+                "trust": float(row["trust_score"]) if row is not None else 0.0,
+                "row": row,
+            }
+    except Exception as exc:
+        log.warning("chat_warmup: выборка готовности другого вида (%s) — "
+                    "порядок хода остаётся случайным", exc)
+        return {}
+    return out
+
+
+async def pick_fleet(pool, account_ids, cap: int, *,
+                     owner_id=None) -> tuple[list[int], list[dict]]:
+    """Кого взять в сессию, когда выбрано больше, чем помещается под потолок.
+
+    Возвращает (выбранные, причины невключения по группам). Негодные не
+    попадают в сессию вовсе — место в ней конечно, а заговорить они не могут;
+    остальные выстраиваются по длительности занятости, а при равной — по
+    доверию к аккаунту (раньше порядок задавал id, то есть дата заливки).
+
+    Fail-open: нет данных о готовности → прежнее поведение (первые `cap`).
+    """
+    try:
+        ids = [int(a) for a in (account_ids or []) if a]
+    except (TypeError, ValueError):
+        return [], []
+    cap = max(1, int(cap or 1))
+    avail = await fleet_availability(pool, ids, owner_id=owner_id)
+    if not avail:
+        return ids[:cap], []
+
+    fit = [i for i in ids if avail.get(i, {}).get("code") != BUSY_UNFIT]
+    ranked = sorted(fit, key=lambda i: (avail[i]["weight"], -avail[i]["trust"], i))
+    chosen = ranked[:cap]
+    left_out = [i for i in ids if i not in set(chosen)]
+
+    groups: dict[str, int] = {}
+    for acc_id in left_out:
+        info = avail.get(acc_id) or {}
+        if info.get("code") == BUSY_UNFIT:
+            why = info.get("reason") or "негоден для действий"
+        else:
+            # Не вошёл не из-за себя, а из-за потолка: причина у него другая, и
+            # называть её «негоден» было бы прямой ложью.
+            why = f"не поместился в потолок {cap}"
+        groups[why] = groups.get(why, 0) + 1
+    detail = [{"reason": k, "count": v}
+              for k, v in sorted(groups.items(), key=lambda kv: -kv[1])]
+    return chosen, detail
+
+
+def _speaker_order(own_ids: list[int], last_speaker,
+                   busy: dict[int, dict] | None = None) -> list[int]:
+    """Порядок, в котором пробовать аккаунты: сначала свободные.
 
     Тот же замысел, что у _pick_speaker, но ход получает ОЧЕРЕДЬ, а не один
     шанс: занятый операцией или негодный аккаунт больше не гасит ход целиком.
+
+    `busy` — готовность каждого (см. `fleet_availability`). Без неё одного
+    перемешивания мало: очередь перебирается не целиком, а на длину бюджета
+    попыток, и во флоте из тридцати аккаунтов, где двадцать держат операции,
+    шесть случайных кандидатов с большой вероятностью окажутся занятыми ВСЕ —
+    ход промолчит при живых свободных аккаунтах. Сортировка устойчивая, поэтому
+    внутри каждой группы остаётся та же случайность.
+
+    Говоривший последним уходит в хвост СВОЕЙ группы, а не очереди: лучше
+    второй ход подряд, чем тишина, если свободен только он.
     """
     ids = [int(a) for a in own_ids]
     if len(ids) <= 1:
@@ -575,7 +811,10 @@ def _speaker_order(own_ids: list[int], last_speaker) -> list[int]:
     rest = [i for i in ids if i != last_speaker]
     random.shuffle(rest)
     tail = [i for i in ids if i == last_speaker]
-    return rest + tail
+    order = rest + tail
+    if not busy:
+        return order
+    return sorted(order, key=lambda i: busy_weight((busy.get(i) or {}).get("code")))
 
 
 async def diagnose(pool, owner_id: int, session: dict) -> dict:
@@ -598,58 +837,35 @@ async def diagnose(pool, owner_id: int, session: dict) -> dict:
             out["global"].append("В сессии не выбрано ни одного аккаунта флота")
             return out
 
-        rows = await pool.fetch(
-            "SELECT a.id, "
-            "       COALESCE(a.username, a.first_name, a.phone, '#' || a.id::text) AS label, "
-            "       a.is_active, a.session_str IS NOT NULL AS has_session, "
-            "       COALESCE(a.acc_status, 'active') AS acc_status, "
-            "       a.cooldown_until, a.in_operation "
-            "  FROM tg_accounts a WHERE a.id = ANY($1::bigint[]) AND a.owner_id=$2",
-            ids, int(owner_id))
-        seen = {int(r["id"]): r for r in rows}
-        barred = await _write_forbidden_ids(pool, int(session.get("id") or 0))
-
-        import datetime as _dt
-        now = _dt.datetime.now(_dt.timezone.utc)
-        for acc_id in ids:
-            r = seen.get(acc_id)
-            if r is None:
-                out["accounts"].append({"label": f"#{acc_id}", "ok": False,
-                                        "reason": "аккаунт удалён или сменил владельца"})
-                continue
-            label = r["label"]
-            reason = ""
-            if acc_id in barred:
-                # Самая обидная причина: аккаунт жив и свободен, а сказать ему
-                # в этом чате не дают — и без отметки он выбирался бы снова.
-                reason = f"чат не даёт ему писать (ещё {_NO_WRITE_HOURS} ч)"
-            elif not r["is_active"]:
-                reason = "выключен владельцем"
-            elif not r["has_session"]:
-                reason = "нет строки сессии — перезалейте аккаунт"
-            elif _acc_status.is_dead(r["acc_status"]):
-                reason = f"статус «{r['acc_status']}» — для действий не годится"
-            elif r["cooldown_until"] and r["cooldown_until"] > now:
-                _left = int((r["cooldown_until"] - now).total_seconds() // 60)
-                reason = f"пауза Telegram ещё {max(1, _left)} мин"
-            elif r["in_operation"]:
-                reason = "занят операцией прямо сейчас"
-            else:
-                try:
-                    from services.infra_memory import is_account_quarantined
-
-                    if await is_account_quarantined(pool, acc_id):
-                        reason = "в карантине по здоровью"
-                except Exception:
-                    pass  # пульс недоступен — считаем аккаунт годным (fail-open)
-            out["accounts"].append({"label": label, "ok": not reason,
-                                    "reason": reason})
-            if not reason:
-                out["ready"] += 1
-
-        if not out["ready"]:
+        # Те же гейты, что у хода, и ОДНИМ запросом: поштучная проверка давала
+        # round-trip на аккаунт при каждой отрисовке экрана, а карантин — ещё
+        # по одному сверху. На флоте в полсотни аккаунтов это сотня запросов
+        # подряд ради одной картинки.
+        avail = await fleet_availability(
+            pool, ids, owner_id=int(owner_id),
+            session_id=int(session.get("id") or 0))
+        if not avail:
+            # Fail-open у готовности означает «никого не держим», и для ХОДА это
+            # правильно. Но экран диагностики в этом случае обязан сказать, что
+            # не знает, а не отрисовать весь флот готовым: «все готовы, а флот
+            # молчит» — это ровно тот ответ, из-за которого экран и появился.
             out["global"].append(
-                "Ни один аккаунт сессии сейчас не может сделать ход")
+                "Не удалось прочитать готовность аккаунтов — обновите экран")
+        else:
+            for acc_id in ids:
+                info = avail.get(acc_id) or {}
+                reason = info.get("reason") or ""
+                out["accounts"].append({
+                    "label": info.get("label") or f"#{acc_id}",
+                    "ok": not reason,
+                    "reason": reason,
+                })
+                if not reason:
+                    out["ready"] += 1
+
+            if not out["ready"]:
+                out["global"].append(
+                    "Ни один аккаунт сессии сейчас не может сделать ход")
         try:
             from services import ai_claude
             from services.ai_providers import configured_providers
@@ -842,18 +1058,41 @@ async def _process_session(pool, session: dict) -> None:
     if not account_ids:
         await _skip(pool, session, "В сессии не выбрано ни одного аккаунта флота")
         return
-    # Аккаунты, которым этот чат недавно отказал в письме, в очередь не берём:
-    # иначе они выбираются снова и снова и съедают ходы, в которых мог бы
-    # говорить кто-то другой.
-    _barred = await _write_forbidden_ids(pool, sid)
-    _queue = [i for i in _speaker_order(account_ids, session.get("last_speaker"))
-              if i not in _barred]
+    # ГОТОВНОСТЬ ФЛОТА — ОДНИМ ЗАПРОСОМ, ДО ВЫБОРА ГОВОРЯЩЕГО. Бюджет попыток
+    # короткий (_MAX_SPEAKER_TRIES), а флот у владельца бывает в полсотни
+    # аккаунтов, почти все из которых заняты операциями. Случайные шесть
+    # кандидатов из такого флота с большой вероятностью все окажутся занятыми,
+    # и ход промолчит при живых свободных аккаунтах. Поэтому очередь строится
+    # по длительности занятости: свободные — первыми.
+    #
+    # Безнадёжные в очередь не берём вовсе: аккаунту, которому этот чат не даёт
+    # писать, и аккаунту без годной сессии попытка ничего не даст, а место в
+    # бюджете она съест — ровно то, из-за чего ход молчал.
+    _avail = await fleet_availability(pool, account_ids, owner_id=owner_id,
+                                      session_id=sid)
+    if _avail:
+        _hopeless = {i for i, v in _avail.items()
+                     if v.get("code") in (BUSY_UNFIT, BUSY_NO_WRITE)}
+    else:
+        # Готовность не прочиталась (fail-open) — остаётся прежнее поведение:
+        # случайный порядок и единственный безнадёжный класс, который виден
+        # отдельным запросом.
+        _hopeless = await _write_forbidden_ids(pool, sid)
+    _queue = [i for i in _speaker_order(account_ids, session.get("last_speaker"),
+                                        _avail)
+              if i not in _hopeless]
     if not _queue:
+        # Причина у каждого своя, и действия у владельца разные: «перезалейте
+        # сессию» против «дайте права в чате» против «подождите паузу».
+        _groups: dict[str, int] = {}
+        for _acc in account_ids:
+            _r = (_avail.get(_acc) or {}).get("reason") or "негоден для действий"
+            _groups[_r] = _groups.get(_r, 0) + 1
+        _list = ", ".join(f"{k} — {v}"
+                          for k, v in sorted(_groups.items(), key=lambda kv: -kv[1]))
         await _skip(pool, session,
-                    f"Всем {len(account_ids)} аккаунтам сессии этот чат не даёт "
-                    f"писать — проверьте права в чате или смените аккаунты"
-                    if _barred else
-                    "Некому говорить: подходящий аккаунт не выбрался")
+                    f"Ни один из {len(account_ids)} аккаунтов сессии говорить "
+                    f"не может ({_list})")
         return
 
     # ПЕРЕБОР, А НЕ ОДИН ШАНС. Раньше ход брал РОВНО ОДИН аккаунт, и если тот

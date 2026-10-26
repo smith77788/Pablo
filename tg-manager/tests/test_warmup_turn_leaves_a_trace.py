@@ -364,9 +364,31 @@ def test_the_screen_answers_before_the_first_turn():
 
 
 def test_the_diagnosis_checks_the_same_gates_as_a_turn():
-    """Диагностика обязана проверять ровно то, обо что спотыкается ход."""
+    """Диагностика обязана проверять ровно то, обо что спотыкается ход.
+
+    Шов переехал, и проверка вместе с ним. Раньше списки условий у хода и у
+    экрана были РАЗНЫЕ, и тест стерёг, чтобы в тексте diagnose упоминались те
+    же имена — то есть сравнивал две копии. Теперь копии одна: и ход, и экран
+    спрашивают `fleet_availability`, а она — `busy_class`. Проверка стала
+    строже, а не слабее: совпадение имён в двух списках ещё допускало, что
+    условия разъедутся по сути (так и случилось с `in_operation`, который экран
+    читал как занятость, а ход — нет), а общая дверь этого не допускает.
+    Поведение каждого гейта проверяется в test_warmup_picks_the_free_accounts.
+    """
     src = _read("services", "chat_warmup.py")
     body = src[src.index("async def diagnose("):src.index("async def _defer(")]
-    for gate in ("is_active", "session_str", "is_dead", "cooldown_until",
-                 "in_operation", "is_account_quarantined", "configured_providers"):
-        assert gate in body, f"диагностика не смотрит на {gate}, а ход — смотрит"
+    assert "fleet_availability" in body, (
+        "экран снова судит о флоте сам, а не через общую с ходом дверь"
+    )
+    turn = src[src.index("async def _process_session("):src.index("async def run(")]
+    assert "fleet_availability" in turn, (
+        "ход перестал пользоваться общим чтением готовности — списки условий "
+        "снова разъедутся"
+    )
+    door = src[src.index("def busy_class("):src.index("async def fleet_availability(")]
+    for gate in ("is_active", "has_session", "is_dead", "cooldown_until",
+                 "quarantined", "leased"):
+        assert gate in door, f"общая дверь не смотрит на {gate}"
+    assert "configured_providers" in body, (
+        "экран не говорит про ключи ИИ — а без них флот вступает и молчит"
+    )

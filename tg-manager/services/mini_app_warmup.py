@@ -502,11 +502,30 @@ def setup_routes(app: web.Application, pool) -> None:
         acc_ids = await _alive_accounts(uid, ids or None)
         if not acc_ids:
             return _err("Выберите хотя бы один живой аккаунт для разогрева", 400)
-        # Потолок флота на один чат был молчаливым: отметив 50 аккаунтов,
-        # владелец получал разогрев тридцатью и ни слова об остальных.
-        requested_accs = len(acc_ids)
-        acc_ids = acc_ids[:_CW_FLEET_CAP]
         from services import chat_warmup
+        # ПОТОЛОК РЕЗАЛ СПИСОК ПО id, то есть по дате заливки аккаунта. У
+        # владельца флот больше потолка и почти всегда частично занят другими
+        # делами: в сессию попадали тридцать самых старых аккаунтов, среди них
+        # держащие операции и вовсе негодные (`_alive_accounts` спрашивает
+        # только про выключатель и строку сессии — ни про статус, ни про
+        # паузу). Снаружи это и есть «разогрев берёт максимум 30, и в них могут
+        # быть занятые»: место в сессии конечно, а тратилось оно на тех, кто
+        # говорить не мог.
+        #
+        # Теперь участников выбирает `chat_warmup.pick_fleet`: негодные не
+        # занимают места вовсе, остальные — по длительности занятости (аренда
+        # под операцию проходит за минуты, карантин — за сутки), при равной — по
+        # доверию к аккаунту. И состав больше не молчаливый: кто не вошёл и
+        # почему, возвращается владельцу.
+        requested_accs = len(acc_ids)
+        acc_ids, omitted_detail = await chat_warmup.pick_fleet(
+            pool, acc_ids, _CW_FLEET_CAP, owner_id=uid)
+        if not acc_ids:
+            _why = "; ".join(f"{d['reason']} — {d['count']}"
+                             for d in omitted_detail) or "нет годных аккаунтов"
+            return _err(
+                "Ни один из выбранных аккаунтов не годится для разогрева "
+                f"({_why}). Выберите другие или почините эти", 400)
         mode = chat_warmup.valid_mode(body.get("mode"))
         topics = validate_string(body.get("topics"), max_len=500) or ""
         intensity = (body.get("intensity") or "normal")
@@ -517,7 +536,8 @@ def setup_routes(app: web.Application, pool) -> None:
                                                  mode=mode, topics=topics, intensity=intensity)
             return _json_resp({"ok": True, "session": s, "accounts": len(acc_ids),
                                "requested": requested_accs,
-                               "omitted": requested_accs - len(acc_ids)})
+                               "omitted": requested_accs - len(acc_ids),
+                               "omitted_detail": omitted_detail})
         except Exception:
             log.exception("chatwarmup_create uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -641,7 +661,14 @@ def setup_routes(app: web.Application, pool) -> None:
         })
 
     async def chatwarmup_accounts(request: web.Request) -> web.Response:
-        """Живой флот владельца для выбора под разогрев чата (id + подпись)."""
+        """Живой флот владельца для выбора под разогрев чата.
+
+        Подпись и ЗАНЯТОСТЬ каждого. Список был просто перечнем галочек, и
+        владелец с флотом больше потолка отмечал тридцать аккаунтов, не зная,
+        что половина из них держит операции: сессия создавалась, а разогрев
+        молчал. Состав теперь выбирается по готовности (см. chatwarmup_create),
+        но и видеть её человек должен ДО того, как нажал «запустить».
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -650,10 +677,25 @@ def setup_routes(app: web.Application, pool) -> None:
             "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
             "AND " + _acc_status.sql_not_dead() + " "
             "ORDER BY trust_score DESC NULLS LAST, added_at LIMIT 200", uid)
-        accs = [{"id": r["id"],
-                 "label": (r["username"] or r["first_name"] or r["phone"] or f"#{r['id']}")}
-                for r in (rows or [])]
-        return _json_resp({"ok": True, "accounts": accs})
+        rows = rows or []
+        from services import chat_warmup
+        avail = await chat_warmup.fleet_availability(
+            pool, [int(r["id"]) for r in rows], owner_id=uid)
+        accs = []
+        for r in rows:
+            info = avail.get(int(r["id"])) or {}
+            accs.append({
+                "id": r["id"],
+                "label": (r["username"] or r["first_name"] or r["phone"]
+                          or f"#{r['id']}"),
+                # Пустая причина = свободен. Без данных о готовности
+                # (fail-open) причин нет ни у кого — список выглядит как раньше.
+                "busy": bool(info.get("reason")),
+                "reason": info.get("reason") or "",
+            })
+        return _json_resp({"ok": True, "accounts": accs,
+                           "free": sum(1 for a in accs if not a["busy"]),
+                           "cap": _CW_FLEET_CAP})
 
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)

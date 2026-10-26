@@ -123,6 +123,7 @@ GET /api/miniapp/channels
 GET /api/miniapp/channels/removed
 GET /api/miniapp/chatlist_folders
 GET /api/miniapp/chatwarmup/accounts
+GET /api/miniapp/chatwarmup/session/{sid}
 GET /api/miniapp/chatwarmup/sessions
 GET /api/miniapp/check_owned_restrictions/targets
 GET /api/miniapp/circuit_breaker
@@ -415,6 +416,7 @@ HEAD /api/miniapp/channels
 HEAD /api/miniapp/channels/removed
 HEAD /api/miniapp/chatlist_folders
 HEAD /api/miniapp/chatwarmup/accounts
+HEAD /api/miniapp/chatwarmup/session/{sid}
 HEAD /api/miniapp/chatwarmup/sessions
 HEAD /api/miniapp/check_owned_restrictions/targets
 HEAD /api/miniapp/circuit_breaker
