@@ -251,3 +251,48 @@ def test_the_diagnosis_never_breaks_the_screen():
 
     out = _run(cw.diagnose(_Boom(), 1, {"account_ids": [1, 2]}))
     assert isinstance(out, dict) and "accounts" in out
+
+
+def test_a_barred_account_really_leaves_the_queue(pool):
+    """Запрет письма отмечается и читается обратно по настоящей базе."""
+    from services import chat_warmup as cw
+
+    async def _t():
+        s = await _fresh(pool)
+        a1, a2 = s["account_ids"]
+        await cw._note_write_forbidden(
+            pool, s, a1, RuntimeError("You can't write in this chat"))
+
+        barred = await cw._write_forbidden_ids(pool, int(s["id"]))
+        assert barred == {a1}, barred
+
+        # Очередь кандидатов этого аккаунта больше не содержит.
+        queue = [i for i in cw._speaker_order(s["account_ids"], None)
+                 if i not in barred]
+        assert queue == [a2]
+
+        # И на экране он назван своей причиной, а не «свободен».
+        d = await cw.diagnose(pool, OWNER, s)
+        reasons = {a["label"]: a["reason"] for a in d["accounts"]}
+        assert "не даёт ему писать" in reasons["lora_m"], reasons
+        assert d["ready"] == 1
+
+    _run(_t())
+
+
+def test_the_bar_is_scoped_to_its_session(pool):
+    """Запрет в одном чате не выводит аккаунт из разогрева другого чата."""
+    from services import chat_warmup as cw
+
+    async def _t():
+        s = await _fresh(pool)
+        other = await cw.create_session(pool, OWNER, "t.me/other_chat",
+                                        s["account_ids"], mode="mixed")
+        await cw._note_write_forbidden(
+            pool, s, s["account_ids"][0], RuntimeError("You can't write in this chat"))
+
+        assert await cw._write_forbidden_ids(pool, int(other["id"])) == set(), (
+            "аккаунт выведен из разогрева чата, который ему ничего не запрещал"
+        )
+
+    _run(_t())

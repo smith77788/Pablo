@@ -472,7 +472,9 @@ _LOG_TEXT_MAX = 500
 
 def _excerpt(sender, text) -> str:
     """«Кому отвечали» одной строкой: имя и начало сообщения."""
-    name = str(sender or "участник").strip()
+    # .strip() ДО подстановки: имя из одних пробелов давало в журнале
+    # «: текст» — как будто отвечали в пустоту.
+    name = str(sender or "").strip() or "участник"
     body = " ".join(str(text or "").split())[:90]
     return f"{name}: {body}" if body else name
 
@@ -514,6 +516,68 @@ async def _log(pool, session: dict, status: str, reason: str = "", *,
         log.debug("chat_warmup: журнал хода не записан: %s", exc)
 
 
+#: Сколько аккаунтов пробовать за один ход, прежде чем сдаться.
+#: Ход выбирал РОВНО ОДИН аккаунт и, если тот занят операцией или не годится,
+#: пропускал ход целиком — при флоте в тридцать аккаунтов это значит, что
+#: разогрев молчит из-за одного занятого. Перебор ограничен: ход должен
+#: оставаться коротким, а не перебирать весь флот под одной арендой.
+_MAX_SPEAKER_TRIES = 6
+
+#: Сколько держать отметку «этому аккаунту чат не даёт писать». Ограничение
+#: бывает временным (новичок в группе, медленный режим), поэтому через срок
+#: аккаунт пробуется снова и, если запрет остался, отмечается заново.
+_NO_WRITE_HOURS = 6
+
+#: Журнальный kind для такого отказа — по нему же он и вычитывается.
+_NO_WRITE_KIND = "no_write"
+
+
+def _is_write_forbidden(exc: Exception) -> bool:
+    """Чат не даёт ЭТОМУ аккаунту писать (а не разовый сбой сети).
+
+    Отдельный класс, потому что лечится он иначе: повторять бесполезно —
+    аккаунт нужно вывести из этой сессии, иначе он будет выбираться снова и
+    снова и съедать ходы, в которых мог бы говорить кто-то другой.
+    """
+    if type(exc).__name__ in (
+            "ChatWriteForbiddenError", "ChatAdminRequiredError",
+            "UserBannedInChannelError", "ChannelPrivateError"):
+        return True
+    low = str(exc).lower()
+    return ("can't write in this chat" in low
+            or "chat_write_forbidden" in low
+            or "banned_in_channel" in low)
+
+
+async def _write_forbidden_ids(pool, sid: int) -> set[int]:
+    """Аккаунты, которым этот чат недавно отказал в письме. Никогда не бросает."""
+    try:
+        rows = await pool.fetch(
+            "SELECT DISTINCT account_id FROM chat_warmup_log "
+            " WHERE session_id=$1 AND kind=$2 AND account_id IS NOT NULL "
+            "   AND created_at > now() - make_interval(hours => $3)",
+            int(sid), _NO_WRITE_KIND, _NO_WRITE_HOURS)
+        return {int(r["account_id"]) for r in rows}
+    except Exception as exc:
+        log.debug("chat_warmup: список запрещённых к письму недоступен: %s", exc)
+        return set()
+
+
+def _speaker_order(own_ids: list[int], last_speaker) -> list[int]:
+    """Порядок, в котором пробовать аккаунты: не тот же, что говорил последним.
+
+    Тот же замысел, что у _pick_speaker, но ход получает ОЧЕРЕДЬ, а не один
+    шанс: занятый операцией или негодный аккаунт больше не гасит ход целиком.
+    """
+    ids = [int(a) for a in own_ids]
+    if len(ids) <= 1:
+        return ids
+    rest = [i for i in ids if i != last_speaker]
+    random.shuffle(rest)
+    tail = [i for i in ids if i == last_speaker]
+    return rest + tail
+
+
 async def diagnose(pool, owner_id: int, session: dict) -> dict:
     """Почему сессия молчит ПРЯМО СЕЙЧАС — по тем же гейтам, что и ход.
 
@@ -543,6 +607,7 @@ async def diagnose(pool, owner_id: int, session: dict) -> dict:
             "  FROM tg_accounts a WHERE a.id = ANY($1::bigint[]) AND a.owner_id=$2",
             ids, int(owner_id))
         seen = {int(r["id"]): r for r in rows}
+        barred = await _write_forbidden_ids(pool, int(session.get("id") or 0))
 
         import datetime as _dt
         now = _dt.datetime.now(_dt.timezone.utc)
@@ -554,7 +619,11 @@ async def diagnose(pool, owner_id: int, session: dict) -> dict:
                 continue
             label = r["label"]
             reason = ""
-            if not r["is_active"]:
+            if acc_id in barred:
+                # Самая обидная причина: аккаунт жив и свободен, а сказать ему
+                # в этом чате не дают — и без отметки он выбирался бы снова.
+                reason = f"чат не даёт ему писать (ещё {_NO_WRITE_HOURS} ч)"
+            elif not r["is_active"]:
                 reason = "выключен владельцем"
             elif not r["has_session"]:
                 reason = "нет строки сессии — перезалейте аккаунт"
@@ -617,6 +686,21 @@ async def _defer(pool, sid: int) -> None:
             " WHERE id=$1", int(sid))
     except Exception as exc:
         log.debug("chat_warmup: отложить сессию %s не удалось: %s", sid, exc)
+
+
+async def _note_write_forbidden(pool, session: dict, account_id, exc) -> None:
+    """Отметить, что чат не даёт ЭТОМУ аккаунту писать, и вывести его из очереди.
+
+    Повторять бесполезно: пока запрет держится, аккаунт будет выбираться снова и
+    снова и съедать ходы, в которых мог бы говорить кто-то другой. Отметка
+    живёт _NO_WRITE_HOURS — ограничение бывает временным (новичок в группе,
+    медленный режим), поэтому потом аккаунт пробуется ещё раз.
+    """
+    await _log(
+        pool, session, "error",
+        f"Чат не даёт этому аккаунту писать — выведен из разогрева "
+        f"на {_NO_WRITE_HOURS} ч ({str(exc)[:120]})",
+        account_id=account_id, kind=_NO_WRITE_KIND)
 
 
 async def _skip(pool, session: dict, reason: str, *, status: str = "skipped",
@@ -758,58 +842,92 @@ async def _process_session(pool, session: dict) -> None:
     if not account_ids:
         await _skip(pool, session, "В сессии не выбрано ни одного аккаунта флота")
         return
-    speaker = _pick_speaker(account_ids, session.get("last_speaker"))
-    if speaker is None:
+    # Аккаунты, которым этот чат недавно отказал в письме, в очередь не берём:
+    # иначе они выбираются снова и снова и съедают ходы, в которых мог бы
+    # говорить кто-то другой.
+    _barred = await _write_forbidden_ids(pool, sid)
+    _queue = [i for i in _speaker_order(account_ids, session.get("last_speaker"))
+              if i not in _barred]
+    if not _queue:
         await _skip(pool, session,
+                    f"Всем {len(account_ids)} аккаунтам сессии этот чат не даёт "
+                    f"писать — проверьте права в чате или смените аккаунты"
+                    if _barred else
                     "Некому говорить: подходящий аккаунт не выбрался")
         return
 
-    acc = await pool.fetchrow(
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version, "
-        "a.lang_code, a.system_lang_code, a.proxy_id, p.geo_country "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.id=$1 AND a.is_active AND a.session_str IS NOT NULL "
-        "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
-        # Аккаунт на паузе Telegram трогать нельзя: прогрев — такое же живое
-        # действие, как операция, и ход под действующим ограничением приближает
-        # спамблок вместо того, чтобы его отдалить.
-        "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
-        speaker)
-    if not acc:
-        await _skip(pool, session,
-                    "Аккаунт недоступен: выключен, без сессии, мёртв или на паузе Telegram",
-                    account_id=speaker)
-        return
-    # Единый пульс здоровья флота, fail-open: недавнее серьёзное ограничение —
-    # аккаунт отдыхает, а не прогревается.
-    try:
-        from services.infra_memory import is_account_quarantined
+    # ПЕРЕБОР, А НЕ ОДИН ШАНС. Раньше ход брал РОВНО ОДИН аккаунт, и если тот
+    # оказывался занят операцией, в карантине или негодным — пропускал ход
+    # целиком. При флоте в тридцать аккаунтов это значит, что разогрев молчит
+    # из-за одного занятого, а следующая попытка будет только через интервал
+    # интенсивности. Теперь кандидаты пробуются по очереди до первого годного.
+    speaker = None
+    acc = None
+    op_worker_mod = None
+    _tempo_checked = False
+    _why: list[str] = []
+    for _cand in _queue[:_MAX_SPEAKER_TRIES]:
+        _row = await pool.fetchrow(
+            "SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version, "
+            "a.lang_code, a.system_lang_code, a.proxy_id, p.geo_country "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.id=$1 AND a.is_active AND a.session_str IS NOT NULL "
+            "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
+            # Аккаунт на паузе Telegram трогать нельзя: прогрев — такое же живое
+            # действие, как операция, и ход под действующим ограничением приближает
+            # спамблок вместо того, чтобы его отдалить.
+            "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
+            _cand)
+        if not _row:
+            _why.append("негоден")
+            continue
+        # Единый пульс здоровья флота, fail-open: недавнее серьёзное ограничение —
+        # аккаунт отдыхает, а не прогревается.
+        try:
+            from services.infra_memory import is_account_quarantined
 
-        if await is_account_quarantined(pool, int(speaker)):
-            await _skip(pool, session,
-                        "Аккаунт в карантине по здоровью — ход пропущен",
-                        account_id=speaker)
-            return
-    except Exception:
-        log.debug("chat_warmup: пульс здоровья недоступен, продолжаем (fail-open)")
-    if not await _warmup_allowed(pool, owner_id, acc.get("geo_country"), __import__("datetime").datetime.now(__import__("datetime").timezone.utc)):
-        await _skip(pool, session,
-                    "Темп снижен: губернатор флота или ночь в регионе аккаунта",
-                    account_id=speaker)
-        return
+            if await is_account_quarantined(pool, int(_cand)):
+                _why.append("в карантине")
+                continue
+        except Exception:
+            log.debug("chat_warmup: пульс здоровья недоступен, продолжаем (fail-open)")
 
-    # Атомарный захват — одна сессия не коннектится диалогом И операцией/прогревом.
-    try:
-        from services import op_worker
-        leased = await op_worker.try_claim_account(int(speaker))
-    except Exception:
-        op_worker = None  # type: ignore
-        leased = True
-    if not leased:
+        # Темп — решение не про аккаунт, а про момент: спросили один раз и, если
+        # сейчас говорить не время, перебирать флот дальше незачем.
+        if not _tempo_checked:
+            _tempo_checked = True
+            if not await _warmup_allowed(
+                    pool, owner_id, _row.get("geo_country"),
+                    __import__("datetime").datetime.now(__import__("datetime").timezone.utc)):
+                await _skip(pool, session,
+                            "Темп снижен: губернатор флота или ночь в регионе аккаунта",
+                            account_id=_cand)
+                return
+
+        # Атомарный захват — одна сессия не коннектится диалогом И операцией/прогревом.
+        try:
+            from services import op_worker as _ow
+            _leased = await _ow.try_claim_account(int(_cand))
+            op_worker_mod = _ow
+        except Exception:
+            op_worker_mod = None
+            _leased = True
+        if not _leased:
+            _why.append("занят операцией")
+            continue
+        speaker, acc = int(_cand), _row
+        break
+
+    if speaker is None:
+        _tried = min(len(_queue), _MAX_SPEAKER_TRIES)
+        _counts: dict[str, int] = {}
+        for w in _why:
+            _counts[w] = _counts.get(w, 0) + 1
+        _detail = ", ".join(f"{k}: {v}" for k, v in sorted(_counts.items())) or "нет кандидатов"
         await _skip(pool, session,
-                    "Аккаунт занят другой операцией — ход пропущен",
-                    account_id=speaker)
+                    f"Ни один из {_tried} аккаунтов не может сделать ход ({_detail})")
         return
+    op_worker = op_worker_mod
 
     # Пост-захватный путь под одним try с release в finally. Раньше _fleet_tg_ids
     # (запрос в БД) и _make_client стояли ВНЕ try — их сбой (ошибка БД, битая
@@ -861,9 +979,12 @@ async def _process_session(pool, session: dict) -> None:
                                              plan.get("reply_to_text")))
             except Exception as e:
                 log.debug("chat_warmup s=%d: реакция не удалась: %s", sid, e)
-                await _log(pool, session, "error",
-                           f"Реакция не поставлена: {e}", account_id=speaker,
-                           kind="reaction")
+                if _is_write_forbidden(e):
+                    await _note_write_forbidden(pool, session, speaker, e)
+                else:
+                    await _log(pool, session, "error",
+                               f"Реакция не поставлена: {e}", account_id=speaker,
+                               kind="reaction")
         else:
             target = None
             if plan["kind"] == "reply" and plan.get("reply_to_id"):
@@ -917,11 +1038,15 @@ async def _process_session(pool, session: dict) -> None:
         log.debug("chat_warmup s=%d acc=%s ход не удался: %s", sid, speaker, e)
         # Пауза Telegram — не рядовой сбой, и владельцу её надо назвать своими
         # словами: это не поломка разогрева, а требование платформы переждать.
-        await _log(
-            pool, session, "error",
-            (f"Telegram попросил паузу: {max(1, _flood_s // 60)} мин"
-             if _flood_s > 0 else f"Ход не удался: {e}"),
-            account_id=speaker)
+        if _flood_s > 0:
+            await _log(pool, session, "error",
+                       f"Telegram попросил паузу: {max(1, _flood_s // 60)} мин",
+                       account_id=speaker)
+        elif _is_write_forbidden(e):
+            await _note_write_forbidden(pool, session, speaker, e)
+        else:
+            await _log(pool, session, "error", f"Ход не удался: {e}",
+                       account_id=speaker)
     finally:
         if client is not None:
             try:
