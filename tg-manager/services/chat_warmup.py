@@ -272,6 +272,21 @@ async def generate_reply(persona_desc: str, recent: list[dict], target: dict | N
         return None
 
 
+def _no_text_reason() -> str:
+    """Почему реплики нет: совсем нечем писать или модель не ответила сейчас."""
+    try:
+        from services import ai_claude
+        from services.ai_providers import configured_providers
+
+        if ai_claude.enabled() or configured_providers():
+            return ("Модель не вернула текст — ход пропущен "
+                    "(обычно временно: перегрузка или таймаут провайдера)")
+    except Exception:
+        return "Текст не сгенерирован: генератор ответов недоступен"
+    return ("Не задан ни один ключ ИИ — флот вступил в чат, но писать ему нечем. "
+            "Задайте ключ (Claude или Groq) в админ-меню «Ключи ИИ»")
+
+
 async def _groq_complete(system: str, user: str, timeout: float = 45.0) -> str | None:
     """Прямой вызов Groq на ФИКСИРОВАННОЙ модели GROQ_WARMUP_MODEL. None — если
     Groq не настроен или запрос не удался (тогда вызывающий идёт дальше по каскаду)."""
@@ -341,6 +356,94 @@ async def _touch(pool, sid: int, speaker: int, last_seen_msg: int, sent: bool) -
 
 
 # ── Фоновый исполнитель: один осмысленный ход диалога ────────────────────────
+
+# ── Журнал ходов: что флот написал и почему промолчал ────────────────────────
+#
+# У разогрева были только счётчики сессии, поэтому владелец видел строку
+# «активен · смешанный · отправлено 0» и не мог узнать ровным счётом ничего.
+# А промолчать ход может по десятку причин — аккаунт на кулдауне, в карантине,
+# занят операцией, флот не смог войти в чат, ночное окно, генератор ответов
+# недоступен, текст отклонён проверкой контента, Telegram попросил паузу — и ни
+# одна из них нигде не оставалась. Для массовой операции по живым аккаунтам это
+# прямое нарушение гейта продукта: per-target лог обязателен.
+
+#: Сколько символов реплики хранить в журнале: экран показывает начало, а не всё.
+_LOG_TEXT_MAX = 500
+
+
+def _excerpt(sender, text) -> str:
+    """«Кому отвечали» одной строкой: имя и начало сообщения."""
+    name = str(sender or "участник").strip()
+    body = " ".join(str(text or "").split())[:90]
+    return f"{name}: {body}" if body else name
+
+
+async def _log(pool, session: dict, status: str, reason: str = "", *,
+               account_id: int | None = None, kind: str = "turn",
+               text: str = "", reply_to: str = "") -> None:
+    """Записать ход в журнал. Никогда не бросает: журнал не имеет права сорвать ход.
+
+    Подряд идущие пропуски с одной причиной не плодят строки — у последней
+    растёт `repeats` и обновляется `created_at`. Сессия, которая сутки не может
+    войти в чат, иначе написала бы тысячи одинаковых строк, а владельцу нужно
+    одно: что мешает прямо сейчас и давно ли.
+    """
+    try:
+        sid = int(session["id"])
+        owner_id = int(session["owner_id"])
+        reason = (reason or "")[:300]
+        if status != "ok":
+            prev = await pool.fetchrow(
+                "SELECT id, status, COALESCE(reason,'') AS reason FROM chat_warmup_log "
+                " WHERE session_id=$1 ORDER BY id DESC LIMIT 1", sid)
+            if prev and prev["status"] == status and prev["reason"] == reason:
+                await pool.execute(
+                    "UPDATE chat_warmup_log SET repeats = repeats + 1, created_at = NOW() "
+                    " WHERE id=$1", int(prev["id"]))
+                return
+        await pool.execute(
+            """INSERT INTO chat_warmup_log
+                   (session_id, owner_id, account_id, kind, status, reason, text, reply_to)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+            sid, owner_id,
+            int(account_id) if account_id else None,
+            kind, status, reason or None,
+            (text or "")[:_LOG_TEXT_MAX] or None,
+            (reply_to or "")[:200] or None,
+        )
+    except Exception as exc:
+        log.debug("chat_warmup: журнал хода не записан: %s", exc)
+
+
+async def _defer(pool, sid: int) -> None:
+    """Отложить сессию до следующего интервала, не трогая счётчики.
+
+    ЧТО ЛОМАЛОСЬ. `last_run_at` обновлялся ТОЛЬКО в конце хода, дошедшего до
+    самого низа (`_touch`). Любой ранний выход — аккаунт на кулдауне, карантин,
+    занят операцией, не вошли в чат, нет новых сообщений — оставлял отметку
+    нетронутой, а `_due` без неё считает сессию созревшей ВСЕГДА. Цикл ходит раз
+    в 20 секунд, значит сессия, которая не может сделать ход, повторяла попытку
+    каждые 20 секунд круглые сутки: открывала сессию Telegram, вступала в чат,
+    читала историю — и снова упиралась в ту же причину. Это не только пустая
+    нагрузка, это прямой риск бана: такой частоты у живого участника не бывает.
+
+    Теперь пропуск стоит столько же, сколько ход: следующая попытка — по
+    интенсивности сессии (1.5–5 минут на обычной), как и задумано.
+    """
+    try:
+        await pool.execute(
+            "UPDATE chat_warmup_sessions SET last_run_at=NOW(), updated_at=NOW() "
+            " WHERE id=$1", int(sid))
+    except Exception as exc:
+        log.debug("chat_warmup: отложить сессию %s не удалось: %s", sid, exc)
+
+
+async def _skip(pool, session: dict, reason: str, *, status: str = "skipped",
+                **kw) -> None:
+    """Пропустить ход: назвать причину в журнале и отложить до следующего раза."""
+    await _log(pool, session, status, reason, **kw)
+    await _defer(pool, int(session["id"]))
+
 
 async def _warmup_allowed(pool, owner_id: int, geo_country, now) -> bool:
     """Разрешить реплику сейчас? Уважает губернатор (реже под давлением) и
@@ -472,9 +575,12 @@ async def _process_session(pool, session: dict) -> None:
     account_ids = [int(a) for a in (session.get("account_ids") or [])]
     mode = valid_mode(session.get("mode"))
     if not account_ids:
+        await _skip(pool, session, "В сессии не выбрано ни одного аккаунта флота")
         return
     speaker = _pick_speaker(account_ids, session.get("last_speaker"))
     if speaker is None:
+        await _skip(pool, session,
+                    "Некому говорить: подходящий аккаунт не выбрался")
         return
 
     acc = await pool.fetchrow(
@@ -489,6 +595,9 @@ async def _process_session(pool, session: dict) -> None:
         "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
         speaker)
     if not acc:
+        await _skip(pool, session,
+                    "Аккаунт недоступен: выключен, без сессии, мёртв или на паузе Telegram",
+                    account_id=speaker)
         return
     # Единый пульс здоровья флота, fail-open: недавнее серьёзное ограничение —
     # аккаунт отдыхает, а не прогревается.
@@ -496,10 +605,16 @@ async def _process_session(pool, session: dict) -> None:
         from services.infra_memory import is_account_quarantined
 
         if await is_account_quarantined(pool, int(speaker)):
+            await _skip(pool, session,
+                        "Аккаунт в карантине по здоровью — ход пропущен",
+                        account_id=speaker)
             return
     except Exception:
         log.debug("chat_warmup: пульс здоровья недоступен, продолжаем (fail-open)")
     if not await _warmup_allowed(pool, owner_id, acc.get("geo_country"), __import__("datetime").datetime.now(__import__("datetime").timezone.utc)):
+        await _skip(pool, session,
+                    "Темп снижен: губернатор флота или ночь в регионе аккаунта",
+                    account_id=speaker)
         return
 
     # Атомарный захват — одна сессия не коннектится диалогом И операцией/прогревом.
@@ -510,6 +625,9 @@ async def _process_session(pool, session: dict) -> None:
         op_worker = None  # type: ignore
         leased = True
     if not leased:
+        await _skip(pool, session,
+                    "Аккаунт занят другой операцией — ход пропущен",
+                    account_id=speaker)
         return
 
     # Пост-захватный путь под одним try с release в finally. Раньше _fleet_tg_ids
@@ -527,6 +645,12 @@ async def _process_session(pool, session: dict) -> None:
         await account_manager._connect_and_track(client, acc_d, "chat_warmup")
         entity = await _resolve_and_join(client, session["chat_ref"])
         if entity is None:
+            # Самая частая и самая непонятная снаружи причина: флот физически не
+            # в чате, поэтому «активен · отправлено 0» держится вечно.
+            await _skip(pool, session,
+                        "Не удалось войти в чат: проверьте ссылку и доступ "
+                        "(закрытый чат, бан аккаунта, неверный адрес)",
+                        status="error", account_id=speaker)
             return
         raw = await asyncio.wait_for(client.get_messages(entity, limit=CONTEXT_WINDOW), timeout=_TG_TIMEOUT)
         recent = [_msg_to_dict(m, own_tg) for m in reversed(list(raw))]  # старые → новые
@@ -535,19 +659,30 @@ async def _process_session(pool, session: dict) -> None:
         if recent:
             max_seen = max([max_seen] + [m["id"] for m in recent if not m["is_fleet"]])
         if not plan:
-            return  # engage без новых внешних сообщений — тихо ждём
+            await _skip(pool, session,
+                        "Новых сообщений в чате нет — ждём участников",
+                        account_id=speaker)
+            return
 
         if should_react(plan["kind"], bool(plan.get("reply_to_id"))):
             # Иногда живой человек просто ставит реакцию, а не пишет — лёгкий след.
             try:
                 from telethon.tl.functions.messages import SendReactionRequest
                 from telethon.tl.types import ReactionEmoji
+                _reaction = pick_reaction()
                 await asyncio.wait_for(client(SendReactionRequest(
                     peer=entity, msg_id=int(plan["reply_to_id"]),
-                    reaction=[ReactionEmoji(emoticon=pick_reaction())])), timeout=_TG_TIMEOUT)
+                    reaction=[ReactionEmoji(emoticon=_reaction)])), timeout=_TG_TIMEOUT)
                 sent = True
+                await _log(pool, session, "ok", kind="reaction", text=_reaction,
+                           account_id=speaker,
+                           reply_to=_excerpt(plan.get("reply_to_sender"),
+                                             plan.get("reply_to_text")))
             except Exception as e:
                 log.debug("chat_warmup s=%d: реакция не удалась: %s", sid, e)
+                await _log(pool, session, "error",
+                           f"Реакция не поставлена: {e}", account_id=speaker,
+                           kind="reaction")
         else:
             target = None
             if plan["kind"] == "reply" and plan.get("reply_to_id"):
@@ -559,22 +694,38 @@ async def _process_session(pool, session: dict) -> None:
                 from services import content_safety
                 if content_safety.scan_text(reply).blocked:
                     log.info("chat_warmup s=%d: реплика отклонена content_safety", sid)
+                    await _log(pool, session, "skipped",
+                               "Ответ отклонён проверкой контента — ход пропущен",
+                               account_id=speaker, kind=plan["kind"])
                 else:
                     import asyncio as _a
                     await _a.sleep(random.uniform(2.0, 6.0))  # имитация набора
                     reply_to = plan["reply_to_id"] if plan["kind"] == "reply" else None
                     await asyncio.wait_for(client.send_message(entity, reply, reply_to=reply_to), timeout=_TG_TIMEOUT)
                     sent = True
-            # reply пусто (LLM недоступен) → тихо пропускаем ход (без мусора)
+                    await _log(pool, session, "ok", kind=plan["kind"], text=reply,
+                               account_id=speaker,
+                               reply_to=_excerpt(plan.get("reply_to_sender"),
+                                                 plan.get("reply_to_text")))
+            else:
+                # reply пусто — мусора в чат не шлём, но молчать об этом нельзя:
+                # снаружи это выглядит как мёртвый разогрев, и ровно так оно и
+                # выглядело. Две причины разные, и действия у владельца разные:
+                # ключа ИИ нет вовсе (писать нечем — задать ключ) против того,
+                # что модель не ответила на этот запрос (само пройдёт).
+                await _log(pool, session, "skipped", _no_text_reason(),
+                           account_id=speaker, kind=plan["kind"])
     except Exception as e:
         # Пауза Telegram — не рядовой сбой хода: о ней обязан узнать весь
         # продукт, иначе следующая подсистема возьмёт этот аккаунт как
         # спокойный и уведёт под то же ограничение.
+        _flood_s = 0
         try:
             from services import flood_engine as _fe
 
             _secs = _fe.flood_seconds(e) or 0
             if _secs > 0:
+                _flood_s = int(_secs)
                 await _fe.record_flood(pool, int(speaker), _secs, "chat_warmup")
                 log.warning(
                     "chat_warmup s=%d acc=%s: Telegram просит паузу %d с",
@@ -583,6 +734,13 @@ async def _process_session(pool, session: dict) -> None:
             log.warning("chat_warmup: пауза не записана в пульс здоровья",
                         exc_info=True)
         log.debug("chat_warmup s=%d acc=%s ход не удался: %s", sid, speaker, e)
+        # Пауза Telegram — не рядовой сбой, и владельцу её надо назвать своими
+        # словами: это не поломка разогрева, а требование платформы переждать.
+        await _log(
+            pool, session, "error",
+            (f"Telegram попросил паузу: {max(1, _flood_s // 60)} мин"
+             if _flood_s > 0 else f"Ход не удался: {e}"),
+            account_id=speaker)
     finally:
         if client is not None:
             try:

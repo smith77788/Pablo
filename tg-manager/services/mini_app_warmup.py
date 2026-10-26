@@ -540,6 +540,101 @@ def setup_routes(app: web.Application, pool) -> None:
         ok = await chat_warmup.set_status(pool, uid, sid, status)
         return _json_resp({"ok": ok}) if ok else _err("Сессия не найдена или неверный статус", 404)
 
+    async def chatwarmup_detail(request: web.Request) -> web.Response:
+        """Ход одной сессии разогрева: сводка, вклад каждого аккаунта и журнал.
+
+        До этого у разогрева снаружи был ровно один показатель — «отправлено N».
+        Строку в списке нельзя было даже открыть, поэтому вопрос «почему флот
+        молчит» не имел ответа в принципе: причин у молчаливого хода десяток
+        (аккаунт на кулдауне, в карантине, занят операцией, флот не вошёл в чат,
+        ночное окно, генератор ответов недоступен, пауза Telegram), и ни одна
+        никуда не попадала. Теперь каждый ход пишется в chat_warmup_log, а этот
+        экран его показывает.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sid = int(request.match_info["sid"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        from services import chat_warmup
+
+        sess = await chat_warmup.get_session(pool, uid, sid)
+        if not sess:
+            return _err("Сессия не найдена", 404)
+
+        # Вклад каждого аккаунта: сколько написал и сколько ходов не состоялось.
+        # Подпись берём из флота — владелец узнаёт аккаунт по имени, не по id.
+        by_acc = await _safe_fetch(pool,
+            """SELECT l.account_id,
+                      COALESCE(a.username, a.first_name, a.phone, '#' || l.account_id::text) AS label,
+                      COUNT(*) FILTER (WHERE l.status='ok') AS sent,
+                      SUM(CASE WHEN l.status<>'ok' THEN l.repeats ELSE 0 END) AS missed,
+                      MAX(l.created_at) AS last_at
+                 FROM chat_warmup_log l
+                 LEFT JOIN tg_accounts a ON a.id = l.account_id
+                WHERE l.session_id=$1 AND l.owner_id=$2 AND l.account_id IS NOT NULL
+                GROUP BY l.account_id, a.username, a.first_name, a.phone
+                ORDER BY sent DESC, missed DESC""", sid, uid) or []
+
+        rows = await _safe_fetch(pool,
+            """SELECT l.id, l.account_id, l.kind, l.status, l.reason, l.text,
+                      l.reply_to, l.repeats, l.created_at,
+                      COALESCE(a.username, a.first_name, a.phone, '#' || l.account_id::text) AS label
+                 FROM chat_warmup_log l
+                 LEFT JOIN tg_accounts a ON a.id = l.account_id
+                WHERE l.session_id=$1 AND l.owner_id=$2
+                ORDER BY l.created_at DESC, l.id DESC LIMIT 60""", sid, uid) or []
+
+        def _iso(v):
+            try:
+                return v.isoformat()
+            except Exception:
+                return None
+
+        # Подсказка на случай пустого журнала: сразу после обновления записей
+        # ещё нет, а вопрос «почему флот молчит» уже есть. Самая частая причина
+        # отвечается без единого хода — писать нечем, ключа ИИ нет.
+        hint = ""
+        if not any(r["status"] == "ok" for r in rows):
+            try:
+                from services import ai_claude
+                from services.ai_providers import configured_providers
+
+                if not (ai_claude.enabled() or configured_providers()):
+                    hint = ("Не задан ни один ключ ИИ: флот вступает в чат, но "
+                            "писать ему нечем. Задайте ключ (Claude или Groq) в "
+                            "админ-меню «Ключи ИИ».")
+            except Exception:
+                log.debug("chatwarmup_detail: статус ИИ недоступен", exc_info=True)
+
+        return _json_resp({
+            "ok": True,
+            "hint": hint,
+            "session": {
+                **{k: v for k, v in dict(sess).items()
+                   if k in ("id", "chat_ref", "mode", "topics", "intensity",
+                            "status", "messages_sent")},
+                "accounts": len(sess.get("account_ids") or []),
+                "last_run_at": _iso(sess.get("last_run_at")),
+                "created_at": _iso(sess.get("created_at")),
+            },
+            "by_account": [
+                {"account_id": r["account_id"], "label": r["label"],
+                 "sent": int(r["sent"] or 0), "missed": int(r["missed"] or 0),
+                 "last_at": _iso(r["last_at"])}
+                for r in by_acc
+            ],
+            "log": [
+                {"id": r["id"], "account_id": r["account_id"], "label": r["label"],
+                 "kind": r["kind"], "status": r["status"], "reason": r["reason"],
+                 "text": r["text"], "reply_to": r["reply_to"],
+                 "repeats": int(r["repeats"] or 1), "at": _iso(r["created_at"])}
+                for r in rows
+            ],
+        })
+
     async def chatwarmup_accounts(request: web.Request) -> web.Response:
         """Живой флот владельца для выбора под разогрев чата (id + подпись)."""
         uid = _get_uid(request)
@@ -566,4 +661,5 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/chatwarmup/sessions", chatwarmup_sessions)
     app.router.add_post("/api/miniapp/chatwarmup/session", chatwarmup_create)
     app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
+    app.router.add_get("/api/miniapp/chatwarmup/session/{sid}", chatwarmup_detail)
     app.router.add_get("/api/miniapp/chatwarmup/accounts", chatwarmup_accounts)

@@ -2685,6 +2685,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- Ход одной сессии разогрева: кто из флота что написал и почему молчит. -->
+<div class="screen" id="s-cwdetail">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">💬 Ход разогрева</div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" style="margin-left:auto" onclick="cwDetailLoad()">🔄</div></div>
+  <div class="sub-sb"><div id="cwDetailBody" style="padding:0 16px"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+</div>
+
 <!-- ══════════════════════ SWARM ══════════════════════ -->
 <div class="screen" id="s-swarm">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🐝 Рой</div></div>
@@ -9163,8 +9171,10 @@ async function cwLoad(){
       const ctrl=st==='stopped'?'':(st==='active'
         ?`<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'paused')" aria-label="Приостановить">⏸</button>`
         :`<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'active')" aria-label="Возобновить">▶</button>`);
-      return `<div class="li"><div class="li-body"><div class="li-name">${esc(x.chat_ref)}</div>
-        <div class="li-sub">${badge} · ${esc(modeLbl)} · отправлено ${x.messages_sent||0}</div></div>
+      // Тап по строке открывает ход разогрева. Раньше строка не открывалась
+      // вовсе, и «отправлено 0» было всем, что владелец мог о ней узнать.
+      return `<div class="li"><div class="li-body link-tap" role="button" tabindex="0" onclick="cwOpenDetail(${x.id})"><div class="li-name">${esc(x.chat_ref)}</div>
+        <div class="li-sub">${badge} · ${esc(modeLbl)} · отправлено ${x.messages_sent||0} · нажмите, чтобы открыть ход</div></div>
         <div style="display:flex;gap:5px">${ctrl}<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'stopped')" aria-label="Остановить">⏹</button></div></div>`;
     }).join('');
   }catch(e){el.innerHTML=errHtml(errRu(e),'cwLoad()');}
@@ -9182,6 +9192,54 @@ async function cwStart(){
     document.getElementById('cwChat').value='';
     cwLoad();
   }catch(e){toast('⚠️ '+errRu(e,'Ошибка'));}
+}
+let CW_DETAIL_ID = 0;
+function cwOpenDetail(id){ CW_DETAIL_ID=id; push('s-cwdetail'); cwDetailLoad(); }
+const CW_KIND_LBL = {reply:'ответ', seed:'своя реплика', reaction:'реакция', turn:'ход'};
+async function cwDetailLoad(){
+  const el=document.getElementById('cwDetailBody'); if(!el||!CW_DETAIL_ID) return;
+  el.innerHTML='<div class="spin-wrap"><div class="spin"></div></div>';
+  try{
+    const r=await api(`/api/miniapp/chatwarmup/session/${CW_DETAIL_ID}`);
+    const s=r.session||{}, accs=r.by_account||[], lg=r.log||[];
+    const badge=s.status==='active'?'🟢 активен':(s.status==='paused'?'⏸ пауза':'⏹ остановлен');
+    const modeLbl=({mixed:'смешанный',engage:'вовлечение',seed:'оживление'})[s.mode]||s.mode||'';
+    let html_hint='';
+    // Что мешает прямо сейчас: самая свежая запись не про отправку.
+    const stall=lg.find(x=>x.status!=='ok');
+    if(r.hint){
+      html_hint=`<div style="font-size:12px;line-height:1.5;padding:10px 12px;margin-bottom:10px;border-radius:var(--radius);background:rgba(255,255,255,.06);border-left:3px solid var(--orange)">⚠️ ${esc(r.hint)}</div>`;
+    }
+    let html=`<div class="sec">${esc(s.chat_ref||'')}</div>
+      <div style="font-size:12px;color:var(--hint);line-height:1.6;margin-bottom:10px">
+        ${badge} · ${esc(modeLbl)} · аккаунтов ${s.accounts||0}<br>
+        Отправлено сообщений: <b>${s.messages_sent||0}</b>${s.last_run_at?` · последний ход ${ago(s.last_run_at)}`:''}
+      </div>` + html_hint;
+    if(stall && (!lg.length || lg[0].id===stall.id)){
+      html+=`<div style="font-size:12px;line-height:1.5;padding:10px 12px;margin-bottom:10px;border-radius:var(--radius);background:rgba(255,255,255,.06)">
+        <b>Сейчас мешает:</b> ${esc(stall.reason||'причина не указана')}
+        ${stall.repeats>1?` <span style="color:var(--hint)">(подряд ${stall.repeats})</span>`:''}</div>`;
+    }
+    html+='<div class="sec">Кто что написал</div>';
+    html+= accs.length
+      ? '<div class="lst">'+accs.map(a=>`<div class="li"><div class="li-body"><div class="li-name">${esc(a.label||('#'+a.account_id))}</div>
+          <div class="li-sub">написал ${a.sent} · пропусков ${a.missed}${a.last_at?` · ${ago(a.last_at)}`:''}</div></div></div>`).join('')+'</div>'
+      : '<div style="font-size:12px;color:var(--hint);margin-bottom:10px">Ходов ещё не было.</div>';
+    html+='<div class="sec">Журнал ходов</div>';
+    html+= lg.length
+      ? '<div class="lst">'+lg.map(x=>{
+          const ic=x.status==='ok'?'✅':(x.status==='error'?'⚠️':'⏭');
+          const head=`${ic} ${esc(x.label||'флот')} · ${esc(CW_KIND_LBL[x.kind]||x.kind||'')}`;
+          const body=x.status==='ok'
+            ? esc(x.text||'')+(x.reply_to?`<br><span style="color:var(--hint)">в ответ — ${esc(x.reply_to)}</span>`:'')
+            : esc(x.reason||'')+(x.repeats>1?` <span style="color:var(--hint)">(подряд ${x.repeats})</span>`:'');
+          return `<div class="li"><div class="li-body"><div class="li-name" style="font-size:12px">${head}</div>
+            <div class="li-sub" style="white-space:normal">${body}</div>
+            <div class="li-sub" style="color:var(--hint)">${x.at?ago(x.at):''}</div></div></div>`;
+        }).join('')+'</div>'
+      : '<div style="font-size:12px;color:var(--hint)">Пока пусто. Записи появятся после первого хода флота.</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML=errHtml(errRu(e),'cwDetailLoad()');}
 }
 async function cwStatus(id,st){
   try{
