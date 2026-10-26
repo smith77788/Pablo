@@ -64,7 +64,10 @@ def _includes_in_scope(scope: ast.AST) -> list[tuple[str, int]]:
 def test_no_router_included_twice():
     offenders: list[str] = []
     for py in sorted(ROOT.rglob("*.py")):
-        if "/tests/" in str(py) or "/.venv/" in str(py):
+        # Path.parts работает и с ``/`` в Linux CI, и с ``\`` на Windows.
+        # Строковый поиск по Unix-слешам заставлял guard проверять собственный
+        # тест и aiogram из .venv как код продукта.
+        if {"tests", ".venv"}.intersection(py.parts):
             continue
         try:
             tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))

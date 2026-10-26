@@ -6317,6 +6317,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         channel_ids = body.get("channel_ids")  # optional list; None = all channels
         if not text:
             return _err("Нужен текст")
+        from services import postbot as _postbot
+        if _postbot.has_explicit_intent(text) and not _postbot.parse_reference(text):
+            return _err("Неверный формат: укажите @PostBot и один код публикации", 400)
         if check_sql_suspicious(text):
             return _err("Недопустимые символы в тексте")
         if delay not in (5, 30, 60, -1):

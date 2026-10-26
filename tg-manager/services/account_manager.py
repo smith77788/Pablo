@@ -6756,7 +6756,13 @@ async def pin_last_channel_post(
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
-        cid = abs(int(channel_id)) if isinstance(channel_id, (int, str)) else 0
+        # Публичный @username — валидная ссылка на канал, но не число. Раньше
+        # int("@channel") выполнялся до следующей проверки и делал заявленную
+        # Strategy 2a недостижимой.
+        _numeric_channel_id = isinstance(channel_id, int) or (
+            isinstance(channel_id, str) and channel_id.lstrip("-").isdigit()
+        )
+        cid = abs(int(channel_id)) if _numeric_channel_id else 0
         if access_hash and cid > 0:
             peer = InputPeerChannel(channel_id=cid, access_hash=access_hash)
         elif isinstance(channel_id, str) and not channel_id.lstrip("-").isdigit():
@@ -6823,6 +6829,22 @@ async def post_to_channel(
     """
     if not session_string:
         return {"error": "session_str отсутствует — сессия недоступна"}
+    from services import postbot
+
+    postbot_reference = postbot.parse_reference(text)
+    if postbot.has_explicit_intent(text) and not postbot_reference:
+        return {
+            "error": "Неверный формат. Укажите @PostBot и один код публикации",
+            "validation_error": True,
+        }
+    if postbot_reference and (media_bytes or media_file_id):
+        return {
+            "error": (
+                "Публикация PostBot уже содержит собственные вложения. "
+                "Удалите отдельно добавленное медиа"
+            ),
+            "validation_error": True,
+        }
     from telethon.tl.types import InputPeerChannel
     from telethon.errors import (
         FloodWaitError,
@@ -6837,8 +6859,12 @@ async def post_to_channel(
     try:
         await _connect_and_track(client, _acc, "post")
 
-        # Strategy 1: access_hash → direct InputPeerChannel (no API call)
-        cid = abs(int(channel_id)) if isinstance(channel_id, (int, str)) else 0
+        # Strategy 1: access_hash → direct InputPeerChannel (no API call).
+        # Публичный @username нельзя преобразовывать в int до Strategy 2a.
+        _numeric_channel_id = isinstance(channel_id, int) or (
+            isinstance(channel_id, str) and channel_id.lstrip("-").isdigit()
+        )
+        cid = abs(int(channel_id)) if _numeric_channel_id else 0
         if access_hash and cid > 0:
             peer = InputPeerChannel(channel_id=cid, access_hash=access_hash)
         elif isinstance(channel_id, str) and not channel_id.lstrip("-").isdigit():
@@ -6895,7 +6921,14 @@ async def post_to_channel(
             if peer is None:
                 return {"error": "Канал не найден в диалогах аккаунта"}
 
-        if media_bytes and media_type:
+        if postbot_reference:
+            msg = await postbot.publish(
+                client,
+                peer,
+                postbot_reference,
+                timeout=_OP_TIMEOUT,
+            )
+        elif media_bytes and media_type:
             # Send media via raw bytes (Bot API file_ids don't work in MTProto/Telethon).
             import io as _io
             file_obj = _io.BytesIO(media_bytes)
@@ -6911,7 +6944,15 @@ async def post_to_channel(
             )
         # Return resolved access_hash so caller can persist it to DB (avoids repeated dialog scans)
         resolved_hash = getattr(peer, "access_hash", 0) if hasattr(peer, "access_hash") else 0
-        return {"msg_id": msg.id, "resolved_access_hash": resolved_hash or 0}
+        response = {
+            "msg_id": getattr(msg, "id", None),
+            "resolved_access_hash": resolved_hash or 0,
+        }
+        if postbot_reference:
+            response["source"] = "postbot"
+        return response
+    except postbot.PostBotPublishError as e:
+        return {"error": str(e), "postbot_error": True}
     except FloodWaitError as e:
         return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}
     except UserBannedInChannelError as e:

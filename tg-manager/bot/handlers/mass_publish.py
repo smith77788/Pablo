@@ -256,6 +256,7 @@ async def _ask_post_text(event, edit: bool = True) -> None:
     text = (
         "📝 <b>Текст поста</b>\n\n"
         "Введите текст публикации или отправьте медиа (фото/видео/документ) с подписью.\n"
+        "Готовый пост из PostBot: <code>@PostBot код</code>.\n"
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;code&gt;</code>"
     )
     markup = kb.as_markup()
@@ -296,6 +297,23 @@ async def fsm_mpub_text(message: Message, state: FSMContext) -> None:
 
     if not text and not media_file_id:
         await message.answer("⚠️ Введите текст поста или отправьте медиа с подписью:")
+        return
+
+    from services import postbot
+    postbot_reference = postbot.parse_reference(text)
+    if postbot.has_explicit_intent(text) and not postbot_reference:
+        await message.answer(
+            "⚠️ Неверный формат: укажите @PostBot и один код публикации",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    if postbot_reference and media_file_id:
+        await message.answer(
+            "⚠️ PostBot-публикация уже содержит свои вложения. "
+            "Отправьте только строку <code>@PostBot код</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
 
     text = replace_placeholders(text, auto_fillable_placeholders())

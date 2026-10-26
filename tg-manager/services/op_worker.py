@@ -6544,10 +6544,16 @@ async def _exec_mass_publish(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Опубликовать сообщение во все управляемые каналы/группы владельца."""
-    from services import account_manager
+    from services import account_manager, postbot
 
     target = params.get("target", "channels")
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
+    postbot_reference = postbot.parse_reference(mp_text)
+    if postbot.has_explicit_intent(mp_text) and not postbot_reference:
+        return {
+            "status": "failed",
+            "summary": "⚠️ Неверный формат: укажите @PostBot и один код публикации",
+        }
 
     # Content safety backstop: запрещённый контент (CSAM / терроризм) не публикуется.
     try:
@@ -6586,7 +6592,11 @@ async def _exec_mass_publish(
         # правилам этого канала; во все каналы — по общим правилам владельца.
         _one = [int(i) for i in (params.get("channel_ids") or [])]
         _ck = str(_one[0]) if len(_one) == 1 else None
-        _blocked, _reasons = await _er.autonomous_block(pool, owner_id, mp_text, channel_key=_ck)
+        _blocked, _reasons = False, []
+        if not postbot_reference:
+            _blocked, _reasons = await _er.autonomous_block(
+                pool, owner_id, mp_text, channel_key=_ck
+            )
         if _blocked:
             log.info(
                 "_exec_mass_publish op=%d ЗАБЛОКИРОВАНО редактором: %s",
@@ -6610,6 +6620,16 @@ async def _exec_mass_publish(
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None
+    if postbot_reference and (
+        media_file_id or params.get("media_ref_from") or params.get("media_prompt")
+    ):
+        return {
+            "status": "failed",
+            "summary": (
+                "⚠️ PostBot-публикация уже содержит свои вложения. "
+                "Удалите отдельно добавленное медиа"
+            ),
+        }
     # media_bytes: downloaded once before the loop, re-uploaded per channel via Telethon.
     # Bot API file_ids cannot be used directly by Telethon (different protocol),
     # so we download the file bytes first using the main bot token.
@@ -6684,7 +6704,7 @@ async def _exec_mass_publish(
     # Brand injection: free-tier users get @MEXAHI3MBOT appended to every channel post
     try:
         from services import brand_injection as _bi
-        if await _bi.is_user_free_tier(pool, owner_id):
+        if not postbot_reference and await _bi.is_user_free_tier(pool, owner_id):
             mp_text = _bi.add_promo(mp_text, html=True)
     except Exception as e:
         log_exc_swallow(log, f"mass_publish brand_injection failed for op {op_id}: {e}")
@@ -6698,7 +6718,9 @@ async def _exec_mass_publish(
     # безопасного минимума (джиттер — ниже в цикле), а форму ссылки варьируем на
     # каждый канал (ниже, _ch_text). Без ссылки всё работает как раньше (no-op).
     from services import link_vary as _link_vary
-    _has_channel_link = _link_vary.contains_channel_link(mp_text)
+    _has_channel_link = (
+        False if postbot_reference else _link_vary.contains_channel_link(mp_text)
+    )
     if _has_channel_link:
         delay = max(delay, _LINK_SAFE_MIN_DELAY_S)
 
@@ -6982,7 +7004,8 @@ async def _exec_mass_publish(
             if not dialog["access_hash"] and dialog.get("username")
             else dialog["id"]
         )
-        _ch_text = _expand_spintax(mp_text)  # свой вариант текста на этот канал
+        # Код PostBot атомарен: любая подстановка сделает его недействительным.
+        _ch_text = mp_text if postbot_reference else _expand_spintax(mp_text)
         if _has_channel_link:
             # Форму ссылки варьируем на канал: один и тот же URL во всех постах —
             # самый явный паттерн накрутки. Адрес не меняется, ведёт туда же.
