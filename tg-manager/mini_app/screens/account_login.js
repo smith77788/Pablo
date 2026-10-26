@@ -40,7 +40,7 @@ function accSetLoginMethod(m){
   }
   const qb=document.getElementById('accQrBox'); if(qb) qb.innerHTML='<button class="btn btn-p" id="accQrStartBtn" onclick="accQrStart()" style="width:100%">🔲 Показать QR-код</button>';
   const qh=document.getElementById('accQrHint'); if(qh) qh.style.display='none';
-  _accLoginPhone=''; _accLoginHash='';
+  _accLoginPhone=''; _accLoginHash=''; _accShowPull(null);
 }
 
 async function accPhoneStart(){
@@ -53,6 +53,9 @@ async function accPhoneStart(){
     const r=await api('/api/miniapp/account/add/phone/start',{method:'POST',body:JSON.stringify({phone,proxy_id:_accProxy().id})});
     _accLoginPhone=phone; _accLoginHash=r.phone_code_hash;
     document.getElementById('accPhoneStep-code').style.display='block';
+    // Код Telegram отдаёт в приложение. Если живая сессия этого номера есть у
+    // нас, ждать доставки владельцу не нужно — код читается из служебного чата.
+    _accShowPull(r.code_from_account||null);
     toast(r.hint||'Код отправлен');
   }catch(e){ _accErr(String(e&&e.message||e)); }
   finally{ b.disabled=false; b.textContent='📨 Отправить код'; }
@@ -109,6 +112,34 @@ async function accPhoneResend(){
     _accErr(String(e&&e.message||e));
     return {error:true};
   }finally{ if(b){ b.disabled=false; b.textContent=prev||'🔁 Запросить ещё раз'; } }
+}
+
+// Кнопка «Взять код из моей сессии»: видна только когда её есть откуда взять.
+// Кнопка, которая всегда отвечает «неоткуда», — тот же тупик, только с тапом.
+function _accShowPull(accId){
+  _accCodeAccId = accId || null;
+  const b=document.getElementById('accPhonePullBtn');
+  const n=document.getElementById('accPhonePullNote');
+  const vis = _accCodeAccId ? 'block' : 'none';
+  if(b) b.style.display=vis;
+  if(n) n.style.display=vis;
+}
+
+async function accPhonePullCode(){
+  if(!_accCodeAccId){ return; }
+  _accErr('');
+  const b=document.getElementById('accPhonePullBtn'); const prev=b?b.textContent:'';
+  if(b){ b.disabled=true; b.textContent='⏳ Читаю служебный чат…'; }
+  try{
+    const r=await api('/api/miniapp/account/'+_accCodeAccId+'/login_code',{method:'POST'});
+    const code=(r&&r.code)||'';
+    if(!code){ _accErr('Код в служебном чате не нашёлся — подождите и попробуйте ещё раз'); return; }
+    const inp=document.getElementById('accPhoneCode');
+    if(inp) inp.value=code;
+    _accResendNote('Код взят из служебного чата этого аккаунта. Нажмите «Подтвердить код».');
+    toast('📩 Код получен: '+code);
+  }catch(e){ _accErr(String(e&&e.message||e)); }
+  finally{ if(b){ b.disabled=false; b.textContent=prev||'📩 Взять код из моей сессии'; } }
 }
 
 function accPhoneAutoStop(){

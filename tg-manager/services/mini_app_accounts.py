@@ -27,6 +27,7 @@ tdata).
 from __future__ import annotations
 
 import asyncio
+import re
 
 from aiohttp import web
 
@@ -1764,7 +1765,20 @@ def setup_routes(app: web.Application, pool) -> None:
             from services import account_manager as am
             phone_code_hash, hint = await asyncio.wait_for(
                 am.start_login(phone, proxy_url=proxy_url, owner_id=uid), timeout=40)
-            return _json_resp({"ok": True, "phone_code_hash": phone_code_hash, "hint": hint})
+            # Telegram отдаёт код В ПРИЛОЖЕНИЕ — в любую живую сессию номера, а
+            # не владельцу в SMS. Если такая сессия есть у нас, код можно
+            # прочитать прямо из служебного чата 777000 и не ждать доставки
+            # вовсе. Номер в tg_accounts хранится как отдал Telegram (часто без
+            # «+»), поэтому сверяем по одним цифрам.
+            digits = re.sub(r"\D", "", phone)
+            code_acc = await _safe_fetchval(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+                "AND session_str IS NOT NULL AND session_str <> '' "
+                "AND regexp_replace(COALESCE(phone,''), '[^0-9]', '', 'g') = $2 "
+                "LIMIT 1", uid, digits) if digits else None
+            return _json_resp({"ok": True, "phone_code_hash": phone_code_hash,
+                               "hint": hint,
+                               "code_from_account": int(code_acc) if code_acc else None})
         except asyncio.TimeoutError:
             return _err("Telegram не ответил за 40с — проверьте номер/прокси", 400)
         except ValueError as ve:

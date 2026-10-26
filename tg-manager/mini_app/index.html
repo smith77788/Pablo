@@ -6834,6 +6834,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <button class="btn btn-s" id="accPhoneResendBtn" onclick="accPhoneResend()" style="flex:1 1 50%;font-size:13px;padding:10px 6px">🔁 Запросить ещё раз</button>
           <button class="btn btn-s" id="accPhoneAutoBtn" onclick="accPhoneAutoToggle()" style="flex:1 1 50%;font-size:13px;padding:10px 6px">♾️ Повторять, пока не придёт</button>
         </div>
+        <button class="btn btn-s" id="accPhonePullBtn" onclick="accPhonePullCode()" style="display:none;width:100%;margin-top:6px;font-size:13px;padding:10px 6px">📩 Взять код из моей сессии</button>
+        <div class="field-note" id="accPhonePullNote" style="display:none">Этот номер уже подключён в Infragram, и его сессия жива. Telegram отдаёт код входа В ПРИЛОЖЕНИЕ — значит, он лежит в служебном чате этого аккаунта, и мы прочитаем его оттуда, не дожидаясь SMS.</div>
         <div class="field-note" id="accPhoneResendNote">Код не пришёл? Запросите ещё раз или включите автоповтор. Учтите: у Telegram на один номер конечное число способов доставки — приложение, SMS, звонок. Когда они кончатся, код перестанет приходить на несколько часов, и вход придётся начинать заново с другого номера. Введите код сразу, как получите.</div>
         <!-- Регулировка темпа автоповтора — только для админа (владельца). -->
         <div id="accPhoneResendAdmin" style="display:none;margin-top:8px;padding:8px;border:1px dashed var(--border-strong);border-radius:var(--radius)">
@@ -14359,6 +14361,8 @@ function closeAccImportModal() {
 
 // ── Способы входа в аккаунт (строка / номер / QR) ────────────────────────────
 let _accLoginPhone='', _accLoginHash='', _accQrTimer=null;
+// Аккаунт с живой сессией на этом же номере: из него можно прочитать код входа.
+let _accCodeAccId=null;
 let _accAutoTimer=null, _accAutoRunning=false;  // автоповтор запроса кода
 function _accErr(msg){ const e=document.getElementById('accImportErr'); if(!msg){e.style.display='none';return;} e.textContent=msg; e.style.display='block'; }
 function _accProxy(){ const sel=document.getElementById('accImportProxy'); const opt=sel.options[sel.selectedIndex]; return { id: sel.value||null, url:(opt&&opt.dataset&&opt.dataset.url)||null }; }
