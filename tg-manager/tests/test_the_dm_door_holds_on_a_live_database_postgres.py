@@ -96,7 +96,7 @@ async def _excluded(pool, cid) -> bool:
     return bool(await pool.fetchval(
         "SELECT EXISTS(SELECT 1 FROM dm_campaign_log "
         " WHERE campaign_id=$1 AND tg_user_id=$2 "
-        "   AND status IN ('sent','blocked','skip'))", cid, TARGET))
+        "   AND status IN ('sent','blocked','skip','unconfirmed'))", cid, TARGET))
 
 
 def test_the_second_premark_does_not_create_a_second_row(pool, campaign):
