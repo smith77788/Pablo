@@ -1738,6 +1738,20 @@ def setup_routes(app: web.Application, pool) -> None:
                 log.warning("proxy bind failed acc=%s: %s", acc_id, e)
         return acc_id
 
+    def _login_err(exc, fallback: str) -> str:
+        """Отказ Telegram → действие, по-русски.
+
+        Общий текст («Не удалось повторно отправить код») — тупик: владелец не
+        узнаёт из него ни что ждать, ни что начать заново, а автоповтор на
+        фронте останавливается молча. Настоящую причину знает только лог,
+        куда владелец не заглядывает.
+        """
+        try:
+            from services import account_manager as am
+            return am.login_error_ru(exc) or fallback
+        except Exception:
+            return fallback
+
     async def account_add_phone_start(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -1755,9 +1769,9 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Telegram не ответил за 40с — проверьте номер/прокси", 400)
         except ValueError as ve:
             return _err(str(ve), 400)
-        except Exception:
+        except Exception as exc:
             log.exception("account_add_phone_start uid=%s", uid)
-            return _err("Не удалось отправить код", 400)
+            return _err(_login_err(exc, "Не удалось отправить код"), 400)
 
     async def account_add_phone_code(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -1851,9 +1865,9 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Telegram не ответил за 40с", 400)
         except ValueError as ve:
             return _err(str(ve), 400)
-        except Exception:
+        except Exception as exc:
             log.exception("account_add_phone_resend uid=%s", uid)
-            return _err("Не удалось повторно отправить код", 400)
+            return _err(_login_err(exc, "Не удалось повторно отправить код"), 400)
 
     async def account_add_qr_start(request: web.Request) -> web.Response:
         uid = _get_uid(request)

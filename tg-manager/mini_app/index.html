@@ -6826,12 +6826,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <button class="btn btn-s" id="accPhoneResendBtn" onclick="accPhoneResend()" style="flex:1 1 50%;font-size:13px;padding:10px 6px">🔁 Запросить ещё раз</button>
           <button class="btn btn-s" id="accPhoneAutoBtn" onclick="accPhoneAutoToggle()" style="flex:1 1 50%;font-size:13px;padding:10px 6px">♾️ Повторять, пока не придёт</button>
         </div>
-        <div class="field-note" id="accPhoneResendNote">Код не пришёл? Запросите ещё раз или включите автоповтор — он будет запрашивать код сам, пока тот не придёт или Telegram не попросит паузу. Введите код сразу, как получите.</div>
+        <div class="field-note" id="accPhoneResendNote">Код не пришёл? Запросите ещё раз или включите автоповтор. Учтите: у Telegram на один номер конечное число способов доставки — приложение, SMS, звонок. Когда они кончатся, код перестанет приходить на несколько часов, и вход придётся начинать заново с другого номера. Введите код сразу, как получите.</div>
         <!-- Регулировка темпа автоповтора — только для админа (владельца). -->
         <div id="accPhoneResendAdmin" style="display:none;margin-top:8px;padding:8px;border:1px dashed var(--border-strong);border-radius:var(--radius)">
           <label style="display:block;font-weight:600;font-size:12px;margin-bottom:4px">⚙️ Запросов в минуту (автоповтор) · только для админа</label>
           <input type="number" min="1" step="1" id="accPhoneRpm" placeholder="например 4" oninput="_accSaveRpm()" style="width:100%;padding:8px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
-          <div style="color:var(--hint);font-size:11px;margin-top:3px">Сколько укажете — столько система и пытается исполнять: верхнего потолка нет (хоть 500000). Реально темп ограничит только FloodWait от Telegram — поймали, автоповтор сам остановится. Пусто — осторожный режим: по рекомендации Telegram, но не чаще раза в 15 с.</div>
+          <div style="color:var(--hint);font-size:11px;margin-top:3px">Сколько укажете — столько система и пытается исполнять: верхнего потолка нет. Но частый запрос код БЫСТРЕЕ не делает: Telegram остановит либо паузой (FloodWait), либо тем, что кончатся способы доставки на этот номер — и тогда кодов не будет несколько часов. Автоповтор в обоих случаях сам остановится и скажет, что именно ответил Telegram. Пусто — осторожный режим: по рекомендации Telegram, но не чаще раза в 15 с.</div>
         </div>
       </div>
       <div class="field" id="accPhoneStep-2fa" style="display:none">

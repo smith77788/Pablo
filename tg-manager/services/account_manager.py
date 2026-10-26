@@ -1970,6 +1970,93 @@ async def start_login(
     return result.phone_code_hash, delivery_hint
 
 
+# ─── Отказы Telegram при входе по номеру, человеческим языком ───
+#
+# Telegram отказывает своими кодами (SEND_CODE_UNAVAILABLE, AUTH_RESTART,
+# PHONE_CODE_EXPIRED…), а владелец видел один общий текст «Не удалось
+# повторно отправить код». Из него не следует ничего: ждать, начать заново
+# или номер уже не годится — и автоповтор останавливался молча.
+#
+# Сопоставляем по ИМЕНИ класса и по коду ошибки, а не через import: telethon
+# свои классы добавляет и переименовывает, а код в ответе остаётся прежним.
+# Неизвестный отказ показываем ВМЕСТЕ с кодом — тупика не должно быть и там.
+LOGIN_ERROR_RU = {
+    "SENDCODEUNAVAILABLE": (
+        "Telegram больше не шлёт код на этот номер: все способы доставки "
+        "(приложение, SMS, звонок) уже использованы. Подождите несколько "
+        "часов и начните вход заново."),
+    "AUTHRESTART": (
+        "Telegram просит начать вход заново — нажмите «Отправить код»."),
+    "PHONECODEEXPIRED": (
+        "Код устарел. Начните вход заново кнопкой «Отправить код»."),
+    "PHONECODEHASHEMPTY": (
+        "Сессия входа потерялась. Начните заново кнопкой «Отправить код»."),
+    "PHONECODEINVALID": "Неверный код — проверьте и введите снова.",
+    "PHONENUMBERINVALID": (
+        "Telegram не принимает этот номер. Проверьте код страны и цифры."),
+    "PHONENUMBERBANNED": (
+        "Номер заблокирован в Telegram — войти им не получится."),
+    "PHONENUMBERFLOOD": (
+        "С этого номера код запрашивали слишком часто. Telegram закрыл "
+        "выдачу кодов на несколько часов — возьмите другой номер или "
+        "подождите."),
+    "PHONENUMBERUNOCCUPIED": (
+        "На этом номере нет аккаунта Telegram — его сначала нужно "
+        "зарегистрировать."),
+    "APIIDINVALID": (
+        "Telegram не принял ключи приложения (TG_API_ID / TG_API_HASH) — "
+        "проверьте их в настройках сервера."),
+    "APIIDPUBLISHEDFLOOD": (
+        "Telegram ограничил эти ключи приложения. Нужны свои TG_API_ID и "
+        "TG_API_HASH."),
+}
+
+
+def _login_error_keys(exc) -> list[str]:
+    """Ключи для словаря: из имени класса и из кода ошибки Telegram.
+
+    Имя класса (`SendCodeUnavailableError`) первично: `message` у telethon —
+    это уже ЧЕЛОВЕЧЕСКИЙ текст, причём английский, и подставлять его владельцу
+    нельзя. Код ошибки оставляем вторым ключом на случай родового RPCError.
+    """
+    out = []
+    for raw in (type(exc).__name__, str(getattr(exc, "message", "") or "")):
+        key = re.sub(r"[^A-Z]", "", raw.upper()).replace("ERROR", "")
+        if key:
+            out.append(key)
+    return out
+
+
+def _login_error_code(exc) -> str:
+    """Короткий код отказа для показа: 'SendCodeUnavailableError'."""
+    name = type(exc).__name__
+    if name in ("RPCError", "BadRequestError", "Exception"):
+        raw = str(getattr(exc, "message", "") or "")
+        token = re.search(r"[A-Z][A-Z_0-9]{4,}", raw)
+        if token:
+            return token.group(0)
+    return name
+
+
+def login_error_ru(exc) -> str:
+    """Что случилось при входе и что делать — по-русски, владельцу как есть.
+
+    Пустую строку не возвращаем никогда: общий текст без кода ошибки — это
+    тупик, из которого владелец не может выйти сам. Английскую формулировку
+    telethon наружу тоже не пускаем: владелец её не читает.
+    """
+    for key in _login_error_keys(exc):
+        known = LOGIN_ERROR_RU.get(key)
+        if known:
+            return known
+    secs = int(getattr(exc, "seconds", 0) or 0)
+    if secs:
+        return (f"⏳ Telegram просит подождать {secs} сек перед новым "
+                f"запросом кода.")
+    return (f"Telegram отказал: {_login_error_code(exc)}. Попробуйте позже "
+            f"или начните вход заново кнопкой «Отправить код».")
+
+
 async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str, int]:
     """Resend code via next available method (usually SMS if app was first).
 
