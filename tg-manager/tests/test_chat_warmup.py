@@ -150,13 +150,25 @@ def test_groq_path_preferred_over_spintax(monkeypatch):
         raise RuntimeError("claude down")
     monkeypatch.setattr(ai_claude, "complete", _claude_fail)  # …но падает
     async def _groq_ok(system, user, timeout=45.0):
-        return "  норм тема, го  "
-    monkeypatch.setattr(cwm, "_groq_complete", _groq_ok)
+        return "  норм тема, го  ", ""
+    # Шов переехал на _groq_complete_detailed: каскаду теперь нужен не только
+    # текст, но и ТЕКСТ ОШИБКИ провайдера — иначе «ключ неверный», «квота
+    # кончилась» и «модель перегружена» выглядят для владельца одинаково
+    # («реплики нет»), и разогрев молчит без объяснений. Поведение под
+    # проверкой то же; ниже дополнительно закреплено, что старое имя осталось
+    # рабочей обёрткой и с пути не исчезло.
+    monkeypatch.setattr(cwm, "_groq_complete_detailed", _groq_ok)
     async def _spintax_boom(system, user):
         raise AssertionError("spintax не должен вызываться, когда ответил Groq")
     monkeypatch.setattr(spintax_ai, "complete", _spintax_boom)
     out = asyncio.run(cwm.generate_reply("персона", [], None, "темы", "seed"))
     assert out == "норм тема, го"
+    # Старое имя — по-прежнему рабочая обёртка с прежним контрактом (str|None).
+    assert asyncio.run(cwm._groq_complete("s", "u")).strip() == "норм тема, го"
+    # И подробная версия отдаёт причину, когда текста нет.
+    assert isinstance(
+        asyncio.run(cwm.generate_reply_detailed("персона", [], None, "темы", "seed")),
+        tuple)
     main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     assert "chat_warmup.run" in main   # цикл зарегистрирован
 

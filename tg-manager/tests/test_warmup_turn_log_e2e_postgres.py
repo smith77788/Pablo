@@ -185,3 +185,69 @@ def test_a_turn_without_an_account_is_allowed(pool):
         assert "не выбрано" in row["reason"]
 
     _run(_t())
+
+
+def test_the_live_diagnosis_names_each_blocked_account(pool):
+    """Почему молчит СЕЙЧАС — по живым данным, теми же гейтами, что и ход."""
+    from services import chat_warmup as cw
+
+    async def _t():
+        s = await _fresh(pool)
+        a1, a2 = s["account_ids"]
+        # Один аккаунт на паузе Telegram, второй занят операцией.
+        await pool.execute(
+            "UPDATE tg_accounts SET cooldown_until = now() + interval '40 minutes' "
+            "WHERE id=$1", a1)
+        await pool.execute("UPDATE tg_accounts SET in_operation=TRUE WHERE id=$1", a2)
+
+        d = await cw.diagnose(pool, OWNER, s)
+        reasons = {a["label"]: a["reason"] for a in d["accounts"]}
+        assert d["ready"] == 0
+        assert "пауза Telegram" in reasons["lora_m"], reasons
+        assert "занят операцией" in reasons["alik_v"], reasons
+        assert any("Ни один аккаунт" in g for g in d["global"])
+
+        # Снимаем паузу у одного — он снова готов, и это видно.
+        await pool.execute("UPDATE tg_accounts SET cooldown_until=NULL WHERE id=$1", a1)
+        d2 = await cw.diagnose(pool, OWNER, s)
+        assert d2["ready"] == 1
+        assert not any("Ни один аккаунт" in g for g in d2["global"])
+
+    _run(_t())
+
+
+def test_a_dead_account_is_named_by_its_status(pool):
+    from services import chat_warmup as cw
+
+    async def _t():
+        s = await _fresh(pool)
+        await pool.execute("UPDATE tg_accounts SET acc_status='spamblock' WHERE id=$1",
+                           s["account_ids"][0])
+        d = await cw.diagnose(pool, OWNER, s)
+        reasons = {a["label"]: a["reason"] for a in d["accounts"]}
+        assert "spamblock" in reasons["lora_m"], reasons
+
+
+def test_the_diagnosis_is_scoped_to_its_owner(pool):
+    from services import chat_warmup as cw
+
+    async def _t():
+        s = await _fresh(pool)
+        d = await cw.diagnose(pool, OWNER + 1, s)
+        # Чужому владельцу аккаунты сессии не принадлежат — их просто нет.
+        assert all(not a["ok"] for a in d["accounts"])
+        assert all("удалён или сменил владельца" in a["reason"] for a in d["accounts"])
+
+    _run(_t())
+
+
+def test_the_diagnosis_never_breaks_the_screen():
+    """Сломанная диагностика не имеет права уронить экран хода."""
+    from services import chat_warmup as cw
+
+    class _Boom:
+        async def fetch(self, *a, **k):
+            raise RuntimeError("БД недоступна")
+
+    out = _run(cw.diagnose(_Boom(), 1, {"account_ids": [1, 2]}))
+    assert isinstance(out, dict) and "accounts" in out

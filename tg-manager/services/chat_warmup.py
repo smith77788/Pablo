@@ -243,33 +243,64 @@ async def generate_reply(persona_desc: str, recent: list[dict], target: dict | N
     llama-3.3-70b-versatile (сильнее дефолтной — живее диалог), затем прочие
     OpenAI-совместимые провайдеры (OpenRouter/Gemini) через spintax_ai. Так
     разогрев работает даже без ключа Anthropic — достаточно бесплатного Groq."""
+    text, _ = await generate_reply_detailed(persona_desc, recent, target, topics, mode)
+    return text
+
+
+async def generate_reply_detailed(persona_desc: str, recent: list[dict],
+                                  target: dict | None, topics: str,
+                                  mode: str) -> tuple[str | None, str]:
+    """То же самое, но вместе с ПРИЧИНОЙ, если реплики нет.
+
+    Зачем отдельная функция. Каскад провайдеров глотал ошибки каждого: ключ
+    неверный, квота кончилась, провайдер не отвечает — снаружи всё это
+    выглядело одинаково («реплики нет»), и разогрев молчал без объяснений. А
+    действия у владельца разные: неверный ключ надо менять, перегрузку —
+    переждать. Возвращаем (текст|None, причина по-русски); причина пустая,
+    когда текст есть.
+
+    Контракт `generate_reply` не меняется: она тонкая обёртка над этой.
+    """
+    errors: list[str] = []
     try:
         from services import ai_claude, spintax_ai
         from services.ai_providers import configured_providers
-        # Нет ни Claude, ни настроенных провайдеров → тихо пропускаем ход.
+        # Нет ни Claude, ни настроенных провайдеров → писать нечем.
         if not (ai_claude.enabled() or configured_providers()):
-            return None
+            return None, _no_text_reason()
         system, user = build_dialogue_prompt(persona_desc, recent, target, topics, mode)
         raw = None
         # 1) Claude Opus — предпочтительный путь.
         if ai_claude.enabled():
             try:
                 raw = await ai_claude.complete(system, user, timeout=60.0)
-            except Exception:
+            except Exception as e:
                 raw = None
+                errors.append(f"Claude: {e}")
         # 2) Groq на зафиксированной llama-3.3-70b.
         if not (raw and raw.strip()):
-            raw = await _groq_complete(system, user)
+            raw, _err = await _groq_complete_detailed(system, user)
+            if _err:
+                errors.append(f"Groq: {_err}")
         # 3) Остальные провайдеры (OpenRouter/Gemini) — общий каскад spintax_ai.
         if not (raw and raw.strip()):
             try:
                 raw = await spintax_ai.complete(system, user)
-            except Exception:
+            except Exception as e:
                 raw = None
-        return sanitize_reply(raw or "") or None
+                errors.append(f"Остальные провайдеры: {e}")
+        clean = sanitize_reply(raw or "") or None
+        if clean:
+            return clean, ""
+        if errors:
+            return None, "Провайдеры ответили ошибкой — " + "; ".join(errors)[:200]
+        if raw and raw.strip():
+            # Текст был, но очистка его забраковала: самораскрытие ИИ или мусор.
+            return None, "Ответ модели не прошёл очистку — ход пропущен"
+        return None, _no_text_reason()
     except Exception as e:
         log.debug("chat_warmup.generate_reply failed: %s", e)
-        return None
+        return None, f"Генерация сорвалась: {e}"
 
 
 def _no_text_reason() -> str:
@@ -290,11 +321,18 @@ def _no_text_reason() -> str:
 async def _groq_complete(system: str, user: str, timeout: float = 45.0) -> str | None:
     """Прямой вызов Groq на ФИКСИРОВАННОЙ модели GROQ_WARMUP_MODEL. None — если
     Groq не настроен или запрос не удался (тогда вызывающий идёт дальше по каскаду)."""
+    text, _ = await _groq_complete_detailed(system, user, timeout)
+    return text
+
+
+async def _groq_complete_detailed(system: str, user: str,
+                                  timeout: float = 45.0) -> tuple[str | None, str]:
+    """То же, но вместе с текстом ошибки — её имя владелец и увидит в журнале."""
     try:
         from services.ai_providers import configured_providers
         prov = next((p for p in configured_providers() if getattr(p, "name", "") == "groq"), None)
         if not prov:
-            return None
+            return None, ""
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url, timeout=timeout)
         resp = await client.chat.completions.create(
@@ -303,10 +341,10 @@ async def _groq_complete(system: str, user: str, timeout: float = 45.0) -> str |
                       {"role": "user", "content": user}],
             max_tokens=300, temperature=0.9)   # живее и короче — как в чате
         txt = (resp.choices[0].message.content or "").strip()
-        return txt or None
+        return (txt or None), ("" if txt else "пустой ответ модели")
     except Exception as e:
         log.debug("chat_warmup._groq_complete failed: %s", e)
-        return None
+        return None, str(e)[:160]
 
 
 # ── CRUD сессий ──────────────────────────────────────────────────────────────
@@ -413,6 +451,88 @@ async def _log(pool, session: dict, status: str, reason: str = "", *,
         )
     except Exception as exc:
         log.debug("chat_warmup: журнал хода не записан: %s", exc)
+
+
+async def diagnose(pool, owner_id: int, session: dict) -> dict:
+    """Почему сессия молчит ПРЯМО СЕЙЧАС — по тем же гейтам, что и ход.
+
+    Журнал отвечает на тот же вопрос, но только после того, как ход случился.
+    Владельцу, у которого разогрев «активен, а флот молчит», ответ нужен в ту
+    секунду, когда он открыл экран, — и все данные для него уже лежат в базе:
+    статус аккаунта, пауза Telegram, карантин по здоровью, захват под операцию,
+    наличие ключа ИИ. Проверяем ровно те условия, по которым ход отказывается
+    говорить, и в том же порядке.
+
+    Возвращает {"ready": N, "accounts": [{label, ok, reason}], "global": [причины]}.
+    Никогда не бросает: диагностика не имеет права сломать экран.
+    """
+    out: dict = {"ready": 0, "accounts": [], "global": []}
+    try:
+        ids = [int(a) for a in (session.get("account_ids") or [])]
+        if not ids:
+            out["global"].append("В сессии не выбрано ни одного аккаунта флота")
+            return out
+
+        rows = await pool.fetch(
+            "SELECT a.id, "
+            "       COALESCE(a.username, a.first_name, a.phone, '#' || a.id::text) AS label, "
+            "       a.is_active, a.session_str IS NOT NULL AS has_session, "
+            "       COALESCE(a.acc_status, 'active') AS acc_status, "
+            "       a.cooldown_until, a.in_operation "
+            "  FROM tg_accounts a WHERE a.id = ANY($1::bigint[]) AND a.owner_id=$2",
+            ids, int(owner_id))
+        seen = {int(r["id"]): r for r in rows}
+
+        import datetime as _dt
+        now = _dt.datetime.now(_dt.timezone.utc)
+        for acc_id in ids:
+            r = seen.get(acc_id)
+            if r is None:
+                out["accounts"].append({"label": f"#{acc_id}", "ok": False,
+                                        "reason": "аккаунт удалён или сменил владельца"})
+                continue
+            label = r["label"]
+            reason = ""
+            if not r["is_active"]:
+                reason = "выключен владельцем"
+            elif not r["has_session"]:
+                reason = "нет строки сессии — перезалейте аккаунт"
+            elif _acc_status.is_dead(r["acc_status"]):
+                reason = f"статус «{r['acc_status']}» — для действий не годится"
+            elif r["cooldown_until"] and r["cooldown_until"] > now:
+                _left = int((r["cooldown_until"] - now).total_seconds() // 60)
+                reason = f"пауза Telegram ещё {max(1, _left)} мин"
+            elif r["in_operation"]:
+                reason = "занят операцией прямо сейчас"
+            else:
+                try:
+                    from services.infra_memory import is_account_quarantined
+
+                    if await is_account_quarantined(pool, acc_id):
+                        reason = "в карантине по здоровью"
+                except Exception:
+                    pass  # пульс недоступен — считаем аккаунт годным (fail-open)
+            out["accounts"].append({"label": label, "ok": not reason,
+                                    "reason": reason})
+            if not reason:
+                out["ready"] += 1
+
+        if not out["ready"]:
+            out["global"].append(
+                "Ни один аккаунт сессии сейчас не может сделать ход")
+        try:
+            from services import ai_claude
+            from services.ai_providers import configured_providers
+
+            if not (ai_claude.enabled() or configured_providers()):
+                out["global"].append(
+                    "Не задан ни один ключ ИИ: разогрев пишет только тексты, "
+                    "которые сочиняет модель")
+        except Exception:
+            log.debug("chat_warmup.diagnose: статус ИИ недоступен", exc_info=True)
+    except Exception as exc:
+        log.debug("chat_warmup.diagnose: %s", exc)
+    return out
 
 
 async def _defer(pool, sid: int) -> None:
@@ -688,8 +808,8 @@ async def _process_session(pool, session: dict) -> None:
             if plan["kind"] == "reply" and plan.get("reply_to_id"):
                 target = {"text": plan["reply_to_text"], "sender_name": plan["reply_to_sender"]}
             persona_desc = await _persona_desc(pool, speaker)
-            reply = await generate_reply(persona_desc, recent, target,
-                                         session.get("topics") or "", mode)
+            reply, _why = await generate_reply_detailed(
+                persona_desc, recent, target, session.get("topics") or "", mode)
             if reply:
                 from services import content_safety
                 if content_safety.scan_text(reply).blocked:
@@ -713,7 +833,7 @@ async def _process_session(pool, session: dict) -> None:
                 # выглядело. Две причины разные, и действия у владельца разные:
                 # ключа ИИ нет вовсе (писать нечем — задать ключ) против того,
                 # что модель не ответила на этот запрос (само пройдёт).
-                await _log(pool, session, "skipped", _no_text_reason(),
+                await _log(pool, session, "skipped", _why or _no_text_reason(),
                            account_id=speaker, kind=plan["kind"])
     except Exception as e:
         # Пауза Telegram — не рядовой сбой хода: о ней обязан узнать весь

@@ -9222,6 +9222,17 @@ async function cwDetailLoad(){
         <b>Сейчас мешает:</b> ${esc(stall.reason||'причина не указана')}
         ${stall.repeats>1?` <span style="color:var(--hint)">(подряд ${stall.repeats})</span>`:''}</div>`;
     }
+    // Почему молчит прямо сейчас — по живым данным, а не по журналу.
+    const dg=r.diagnose||{};
+    const notReady=(dg.accounts||[]).filter(a=>!a.ok);
+    if((dg.global||[]).length||notReady.length){
+      html+='<div class="sec">Почему молчит сейчас</div>';
+      html+='<div style="font-size:12px;line-height:1.6;padding:10px 12px;margin-bottom:10px;border-radius:var(--radius);background:rgba(255,255,255,.06)">';
+      (dg.global||[]).forEach(g=>{ html+=`⚠️ ${esc(g)}<br>`; });
+      html+=`Готовы к ходу: <b>${dg.ready||0}</b> из ${(dg.accounts||[]).length}`;
+      if(notReady.length) html+='<br>'+notReady.slice(0,12).map(a=>`• ${esc(a.label)} — ${esc(a.reason)}`).join('<br>');
+      html+='</div>';
+    }
     html+='<div class="sec">Кто что написал</div>';
     html+= accs.length
       ? '<div class="lst">'+accs.map(a=>`<div class="li"><div class="li-body"><div class="li-name">${esc(a.label||('#'+a.account_id))}</div>

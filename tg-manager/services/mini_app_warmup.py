@@ -609,9 +609,14 @@ def setup_routes(app: web.Application, pool) -> None:
             except Exception:
                 log.debug("chatwarmup_detail: статус ИИ недоступен", exc_info=True)
 
+        # Живая проверка тех же гейтов, что отказывают ходу: ответ нужен в ту
+        # секунду, когда владелец открыл экран, а не после следующего хода.
+        diag = await chat_warmup.diagnose(pool, uid, sess)
+
         return _json_resp({
             "ok": True,
             "hint": hint,
+            "diagnose": diag,
             "session": {
                 **{k: v for k, v in dict(sess).items()
                    if k in ("id", "chat_ref", "mode", "topics", "intensity",

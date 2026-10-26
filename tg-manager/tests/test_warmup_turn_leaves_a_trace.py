@@ -339,3 +339,26 @@ def test_an_empty_journal_still_answers_the_question():
     detail = html[html.index("async function cwDetailLoad()"):html.index("async function cwStatus(")]
     assert "r.hint" in detail, "подсказка не выводится на экране"
     assert "esc(r.hint)" in detail
+
+
+def test_the_screen_answers_before_the_first_turn():
+    """Экран обязан называть причину сразу, а не после следующего хода."""
+    api = _read("services", "mini_app_warmup.py")
+    body = api[api.index("async def chatwarmup_detail"):api.index("async def chatwarmup_accounts")]
+    assert "chat_warmup.diagnose" in body and '"diagnose"' in body
+
+    html = _read("mini_app", "index.html")
+    detail = html[html.index("async function cwDetailLoad()"):html.index("async function cwStatus(")]
+    assert "Почему молчит сейчас" in detail
+    assert "r.diagnose" in detail
+    assert "dg.ready" in detail, "не видно, сколько аккаунтов вообще готовы к ходу"
+    assert "esc(a.reason)" in detail, "причина выводится без экранирования"
+
+
+def test_the_diagnosis_checks_the_same_gates_as_a_turn():
+    """Диагностика обязана проверять ровно то, обо что спотыкается ход."""
+    src = _read("services", "chat_warmup.py")
+    body = src[src.index("async def diagnose("):src.index("async def _defer(")]
+    for gate in ("is_active", "session_str", "is_dead", "cooldown_until",
+                 "in_operation", "is_account_quarantined", "configured_providers"):
+        assert gate in body, f"диагностика не смотрит на {gate}, а ход — смотрит"
