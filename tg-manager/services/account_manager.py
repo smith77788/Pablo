@@ -3279,12 +3279,18 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
 
 
 async def send_message_via_account(
-    session_string: str, chat_id: int, text: str, _acc: dict | None = None
+    session_string: str, chat_id: int, text: str, _acc: dict | None = None,
+    *, strict: bool = False,
 ) -> bool:
     """Отправляет сообщение через личный аккаунт. Возвращает True при успехе.
 
     Raises FloodWaitError, AuthKeyUnregisteredError, SessionRevokedError so callers
     can apply cooldowns or mark the account dead.  All other errors return False.
+
+    strict=True — пробрасывать ВСЕ ошибки, включая таймаут. Нужен тем, кто
+    ведёт учёт доставки: False без причины неотличим от PeerFlood, закрытой
+    лички и обрыва сети, а вызывающий, не проверивший результат, засчитывал
+    его как отправку.
     """
     from telethon.errors import (
         FloodWaitError,
@@ -3304,6 +3310,8 @@ async def send_message_via_account(
         log.warning(
             "send_message_via_account: timeout acc=%s", (_acc or {}).get("id", "?")
         )
+        if strict:
+            raise
         return False
     except FloodWaitError:
         # Re-raise so the caller can apply a proper cooldown
@@ -3319,6 +3327,8 @@ async def send_message_via_account(
     except Exception as e:
         if is_dead_session_error(str(e)):
             raise AuthKeyUnregisteredError(request=None) from e
+        if strict:
+            raise
         log.exception("send_message error: %s", e)
         return False
     finally:
@@ -3335,6 +3345,7 @@ async def send_media_via_account(
     media_bytes: bytes | None = None,
     media_filename: str | None = None,
     uniquify: bool = False,
+    strict: bool = False,
 ) -> bool:
     """Отправляет медиа (фото/видео/док) с подписью через личный аккаунт.
 
@@ -3346,7 +3357,7 @@ async def send_media_via_account(
         делается пиксельно/байт-различной (анти-детект, см. media_uniquifier).
 
     Обработка ошибок как в send_message_via_account (флуд/dead-session
-    пробрасываются).
+    пробрасываются, strict=True пробрасывает всё).
     """
     from telethon.errors import (
         FloodWaitError,
@@ -3379,6 +3390,8 @@ async def send_media_via_account(
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "send_media")
         log.warning("send_media_via_account: timeout acc=%s", (_acc or {}).get("id", "?"))
+        if strict:
+            raise
         return False
     except FloodWaitError:
         raise
@@ -3392,6 +3405,8 @@ async def send_media_via_account(
     except Exception as e:
         if is_dead_session_error(str(e)):
             raise AuthKeyUnregisteredError(request=None) from e
+        if strict:
+            raise
         log.exception("send_media error: %s", e)
         return False
     finally:

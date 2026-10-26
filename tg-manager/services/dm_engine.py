@@ -346,9 +346,14 @@ _PEER_FLOOD_ERRORS = {"PeerFloodError"}
 
 
 def _classify_error(exc: Exception) -> str:
-    """Возвращает 'flood' | 'peer_flood' | 'blocked' | 'skip' | 'auth' | 'retry'."""
+    """Возвращает 'flood' | 'peer_flood' | 'blocked' | 'skip' | 'auth' |
+    'unconfirmed' | 'retry'."""
     name = type(exc).__name__
     exc_str = str(exc)
+    if isinstance(exc, asyncio.TimeoutError):
+        # Запрос ушёл, ответа нет: Telegram мог сообщение и принять. Не
+        # «отправлено» (подтверждения нет) и не «повторить» (возможен дубль).
+        return "unconfirmed"
     if name in _FLOOD_ERRORS or "FLOOD_WAIT" in exc_str.upper():
         return "flood"
     if name in _PEER_FLOOD_ERRORS or "PEER_FLOOD" in exc_str:
@@ -455,7 +460,15 @@ async def send_dm(
        разрешить его через contacts.GetContacts или по кэшу сессии.
        Если аккаунт ранее видел этого пользователя — работает. Иначе — retry error.
 
-    Возвращает {'status': 'sent'|'flood'|'blocked'|'skip'|'auth'|'retry', 'wait': int, 'error': str}
+    Возвращает {'status': 'sent'|'flood'|'peer_flood'|'blocked'|'skip'|'auth'|
+    'unconfirmed'|'retry', 'wait': int, 'error': str}
+
+    'sent' — только когда Telegram ПРИНЯЛ сообщение. Отправка идёт со
+    strict=True: без него account_manager глотал PeerFlood, закрытую личку,
+    неразрешённый username и таймаут, возвращая False, а этот False здесь не
+    проверялся — каждая такая попытка писалась в журнал и в отчёт кампании как
+    доставленная. Аккаунт под спам-блоком «отправлял» дальше, и его не
+    убирало из ротации: PeerFlood до классификатора просто не доходил.
     """
     from services import account_manager
 
@@ -465,19 +478,28 @@ async def send_dm(
     target: str | int = username.lstrip("@") if username else user_id
 
     async def _deliver(dest):
+        ok = await _deliver_once(dest)
+        if ok is False:
+            # Страховка: strict-отправка ошибки пробрасывает, но False без
+            # причины всё равно не доставка.
+            raise RuntimeError("отправка не подтверждена аккаунтом")
+
+    async def _deliver_once(dest):
         if media_bytes is not None:
             # Массовая рассылка: медиа скачано один раз, уникализируем под каждого
             # получателя (анти-детект). URL валидируется на уровне API (SSRF-гард).
-            await account_manager.send_media_via_account(
+            return await account_manager.send_media_via_account(
                 session_str, dest, caption=text, _acc=_acc,
                 media_bytes=media_bytes, media_filename=media_filename,
-                uniquify=uniquify_media,
+                uniquify=uniquify_media, strict=True,
             )
         elif media_url:
             # Медиа с подписью (caption). URL валидируется на уровне API (SSRF-гард).
-            await account_manager.send_media_via_account(session_str, dest, media_url, text, _acc=_acc)
+            return await account_manager.send_media_via_account(
+                session_str, dest, media_url, text, _acc=_acc, strict=True)
         else:
-            await account_manager.send_message(session_str, dest, text, _acc=_acc)
+            return await account_manager.send_message(
+                session_str, dest, text, _acc=_acc, strict=True)
 
     try:
         await _deliver(target)
@@ -668,14 +690,14 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
     # отсеял) и страхует источники, где подзапрос неприменим (import_list).
     _EXCLUDE_SENT = (
         "NOT IN (SELECT tg_user_id FROM dm_campaign_log "
-        "WHERE campaign_id=$%d AND status IN ('sent','blocked','skip'))"
+        "WHERE campaign_id=$%d AND status IN ('sent','blocked','skip','unconfirmed'))"
     )
 
     # Исключить уже успешно отправленных, заблокированных и пропущенных (не retry)
     sent_ids = {
         r["tg_user_id"]
         for r in await pool.fetch(
-            "SELECT tg_user_id FROM dm_campaign_log WHERE campaign_id=$1 AND status IN ('sent','blocked','skip')",
+            "SELECT tg_user_id FROM dm_campaign_log WHERE campaign_id=$1 AND status IN ('sent','blocked','skip','unconfirmed')",
             campaign_id,
         )
     }
@@ -1086,7 +1108,7 @@ async def run_campaign(
     # (цели из dm_campaign_log исключены), чинится именно прогресс.
     already_done = int(await pool.fetchval(
         "SELECT count(DISTINCT tg_user_id) FROM dm_campaign_log "
-        "WHERE campaign_id=$1 AND status IN ('sent','blocked','skip')",
+        "WHERE campaign_id=$1 AND status IN ('sent','blocked','skip','unconfirmed')",
         campaign_id,
     ) or 0)
     total = already_done + len(targets)
@@ -1518,6 +1540,22 @@ async def run_campaign(
                     log_exc_swallow(log, "run_campaign: update operation")
             await _guarded_sleep(op_id, random.uniform(_delay_min, _delay_max), pool=pool)
             continue
+        elif status == "unconfirmed":
+            # Таймаут: Telegram мог принять сообщение, а мог и нет. В отчёт
+            # как доставленное не идёт, но и повторно этому человеку не пишем —
+            # повторная ЛС от незнакомца хуже недоставленной.
+            failed += 1
+            await _settle_dm_target(pool, campaign_id, acc["id"], user_id,
+                                    "unconfirmed",
+                                    "доставка не подтверждена (таймаут): "
+                                    + (result.get("error") or "")[:150])
+            await pool.execute(
+                "UPDATE dm_campaigns SET fail_count=fail_count+1 WHERE id=$1",
+                campaign_id,
+            )
+            infra_memory.record_account_op(
+                acc["id"], "dm_campaign", False, "timeout"
+            )
         else:
             # retry — логируем как ошибку
             # Сообщение не доставлено: предзапись снимаем, иначе цель выпала

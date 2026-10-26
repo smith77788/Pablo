@@ -27,7 +27,7 @@ def test_progress_counts_already_done_from_the_log():
     src = _run_campaign_src()
     # already_done берётся из dm_campaign_log по уже обработанным статусам.
     assert "already_done" in src, "кумулятив прошлых прогонов не вычисляется"
-    assert "dm_campaign_log" in src and "status IN ('sent','blocked','skip')" in src, (
+    assert "dm_campaign_log" in src and "status IN ('sent','blocked','skip','unconfirmed')" in src, (
         "already_done должен считать уже обработанные цели из журнала рассылки")
 
 
