@@ -6594,9 +6594,7 @@ async def _exec_mass_publish(
         _ck = str(_one[0]) if len(_one) == 1 else None
         _blocked, _reasons = False, []
         if not postbot_reference:
-            _blocked, _reasons = await _er.autonomous_block(
-                pool, owner_id, mp_text, channel_key=_ck
-            )
+            _blocked, _reasons = await _er.autonomous_block(pool, owner_id, mp_text, channel_key=_ck)
         if _blocked:
             log.info(
                 "_exec_mass_publish op=%d ЗАБЛОКИРОВАНО редактором: %s",
@@ -7005,7 +7003,10 @@ async def _exec_mass_publish(
             else dialog["id"]
         )
         # Код PostBot атомарен: любая подстановка сделает его недействительным.
-        _ch_text = mp_text if postbot_reference else _expand_spintax(mp_text)
+        if postbot_reference:
+            _ch_text = mp_text
+        else:
+            _ch_text = _expand_spintax(mp_text)
         if _has_channel_link:
             # Форму ссылки варьируем на канал: один и тот же URL во всех постах —
             # самый явный паттерн накрутки. Адрес не меняется, ведёт туда же.

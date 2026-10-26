@@ -206,7 +206,9 @@ def test_mass_publish_keeps_postbot_reference_atomic():
     assert "postbot_reference = postbot.parse_reference(mp_text)" in body
     assert "not postbot_reference and await _bi.is_user_free_tier" in body
     assert "False if postbot_reference else _link_vary.contains_channel_link" in body
-    assert "mp_text if postbot_reference else _expand_spintax(mp_text)" in body
+    assert "if postbot_reference:" in body
+    assert "_ch_text = mp_text" in body
+    assert "_ch_text = _expand_spintax(mp_text)" in body
 
 
 def test_all_publish_inputs_expose_and_validate_postbot_format():
