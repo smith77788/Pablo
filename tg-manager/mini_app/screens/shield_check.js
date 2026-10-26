@@ -34,8 +34,57 @@ async function openShieldCheck() {
     body.innerHTML = errHtml('Не удалось посчитать сущности: ' + ((e && e.message) || ''), 'openShieldCheck()');
     return;
   }
-  body.innerHTML = _shRender(t);
+  // Гео-бан — отдельная проверка (нужны аккаунты в разных странах). Считаем её
+  // цели мягко: не смогли — просто не показываем блок, основной экран важнее.
+  let g = null;
+  try { g = await api('/api/miniapp/check_bot_geoban/targets'); } catch (e) { g = null; }
+  body.innerHTML = _shRender(t) + _shGeoRender(g);
   loadShieldOps();
+}
+
+// Блок проверки гео-бана ботов: ограничен ли бот в ОДНИХ странах и доступен в
+// ДРУГИХ. Виден только при аккаунтах минимум в 2 странах — честно про это пишем.
+function _shGeoRender(g) {
+  if (!g) return '';
+  const bots = Number(g.bots) || 0;
+  const geos = Number(g.geos) || 0;
+  if (bots === 0) return '';
+  let note, btn;
+  if (geos < 2) {
+    note = 'Для проверки гео-бана нужны аккаунты с прокси минимум в <b>2 разных странах</b> — ' +
+           'сейчас различимо: <b>' + geos + '</b>. Подключите аккаунт с прокси ещё одной страны.';
+    btn = '<button class="btn btn-s" disabled style="width:100%">🌍 Нужны аккаунты в 2+ странах</button>';
+  } else {
+    note = 'Проверит каждого публичного бота с аккаунтов <b>' + geos + '</b> разных стран и покажет, ' +
+           'где он ограничен, а где доступен. Ничего не меняет.';
+    btn = '<button class="btn btn-p" id="shGeoBtn" onclick="runBotGeoban()" style="width:100%">' +
+          '🌍 Проверить гео-бан ' + bots + ' ' + _shBotPlural(bots) + '</button>';
+  }
+  return '' +
+    '<div class="sec">🌍 Гео-бан ботов</div>' +
+    '<div class="lst" style="padding:14px">' +
+      '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin-bottom:12px">' + note + '</div>' +
+      btn +
+    '</div>';
+}
+
+async function runBotGeoban() {
+  const btn = document.getElementById('shGeoBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь…'; }
+  try {
+    const d = await api('/api/miniapp/check_bot_geoban', { method: 'POST', body: JSON.stringify({}) });
+    tg.HapticFeedback?.notificationOccurred('success');
+    if (d && d.op_id && typeof openOpDetail === 'function') {
+      openOpDetail(d.op_id);
+    } else {
+      toast('🌍 Проверка гео-бана запущена');
+      loadShieldOps();
+    }
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    toast((e && e.message) || 'Не удалось запустить проверку гео-бана');
+    if (btn) { btn.disabled = false; btn.textContent = '🌍 Проверить гео-бан'; }
+  }
 }
 
 function _shRender(t) {
@@ -74,6 +123,13 @@ function _shPlural(n) {
   if (m10 === 1 && m100 !== 11) return 'сущность';
   if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'сущности';
   return 'сущностей';
+}
+
+function _shBotPlural(n) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'бота';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'бота';
+  return 'ботов';
 }
 
 async function runShieldCheck() {

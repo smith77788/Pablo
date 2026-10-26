@@ -393,6 +393,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🛡",
     },
+    "check_bot_geoban": {
+        "description": "Проверка ботов на гео-бан (ограничение по странам)",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🌍",
+    },
     "scan_owned_resources": {
         "description": "Сканирование собственных каналов/групп",
         "min_plan": "starter",

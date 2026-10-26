@@ -4739,6 +4739,7 @@ def _build_dispatch() -> dict:
         "bulk_update_profile": _exec_bulk_update_profile,
         "check_accounts_health": _exec_check_accounts_health,
         "check_owned_restrictions": _exec_check_owned_restrictions,
+        "check_bot_geoban": _exec_check_bot_geoban,
         "scan_owned_resources": _exec_scan_owned_resources,
         "scan_owned_bots": _exec_scan_owned_bots,
         "connect_discovered_bots": _exec_connect_discovered_bots,
@@ -14594,6 +14595,199 @@ async def _exec_check_owned_restrictions(
         "visibility_unmeasured": vis_unmeasured,
         "summary": summary,
     }
+
+
+async def _exec_check_bot_geoban(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Проверка НАШИХ ботов на ГЕО-БАН: ограничен в одних странах, чист в других.
+
+    Read-only. Telegram отдаёт флаг `restricted`/`restriction_reason` сущности
+    ОТНОСИТЕЛЬНО страны смотрящего аккаунта (его прокси/IP). Поэтому один бот из
+    РФ может быть ограничен, а из DE — доступен: это и есть гео-бан. Отличить его
+    от ОБЩЕГО бана можно только пробой с аккаунтов РАЗНЫХ стран — проверяем бота
+    с одного здорового аккаунта на каждую различимую страну (geo_country прокси),
+    затем `entity_restriction_check.classify_geoban` сводит пробы в вердикт.
+    Находки гео-бана пишем в restriction_events (общий пульс), темп — бережный и
+    отменяемый (cancellable_pause).
+    """
+    from services import account_manager
+    from services import entity_restriction_check as _erc
+    from services import shadowban_monitor as _sbm
+
+    _GEO_MAX = 6  # потолок различимых стран на бота: n_ботов × стран резолвов к Telegram
+
+    only_bots = [int(x) for x in (params.get("bot_ids") or [])]
+    _bot_where = "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''"
+    _bot_args: list = [owner_id]
+    if only_bots:
+        _bot_where += " AND bot_id = ANY($2::bigint[])"
+        _bot_args.append(only_bots)
+    bot_rows = await _safe_fetch(
+        pool, f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
+        *_bot_args)
+    bots = [{"bot_id": int(r["bot_id"]),
+             "username": (r.get("username") or "").strip().lstrip("@") or None,
+             "title": r.get("first_name")}
+            for r in (bot_rows or []) if (r.get("username") or "").strip()]
+    if not bots:
+        return {"status": "failed",
+                "summary": "⚠️ Нет публичных ботов (с @username) для проверки гео-бана."}
+
+    acc_rows = await _safe_fetch(
+        pool,
+        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+                  a.device_model, a.system_version, a.app_version,
+                  a.lang_code, a.system_lang_code,
+                  a.proxy_id, p.proxy_url, p.geo_country
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+           WHERE a.owner_id=$1 AND a.is_active=TRUE""",
+        owner_id)
+    observers = [dict(r) for r in (acc_rows or []) if (r.get("session_str") or "").strip()]
+    if not observers:
+        return {"status": "failed",
+                "summary": "⚠️ Нет активного аккаунта для проверки."}
+
+    observers = await _claim_available_accounts(op_id, observers, owner_id)
+    if not observers:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+    try:
+        _quar = await _infra_mem.quarantined_accounts(pool, [a["id"] for a in observers])
+    except Exception:
+        _quar = set()
+    healthy = [a for a in observers if int(a["id"]) not in _quar]
+    if not healthy:
+        return {"status": "requeue",
+                "summary": "⏳ Свободные аккаунты сейчас в карантине — попробуйте позже"}
+
+    # Одна страна = один наблюдатель (первый здоровый с известным geo). Без geo
+    # прокси страну не знаем — такие аккаунты для гео-пробы бесполезны.
+    geo_acc: dict = {}
+    for a in healthy:
+        geo = (str(a.get("geo_country") or "")).strip().upper()
+        if not geo or geo in geo_acc:
+            continue
+        geo_acc[geo] = a
+        if len(geo_acc) >= _GEO_MAX:
+            break
+    distinct_geos = len(geo_acc)
+
+    n = len(bots)
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2", n, op_id)
+
+    # Меньше двух стран — гео-бан от общего не отличить. Не гоняем пробы впустую:
+    # честно говорим, что нужно, и это НЕ ошибка операции.
+    if distinct_geos < 2:
+        have = (", ".join(sorted(geo_acc)) or "ни одной")
+        return {
+            "status": "done", "checked": 0, "counts": {}, "findings": [],
+            "summary": ("Проверка гео-бана требует аккаунтов с прокси минимум в "
+                        f"2 разных странах — сейчас различима {distinct_geos} "
+                        f"(страны: {have}).\n\nПодключите аккаунты с прокси ещё "
+                        "хотя бы одной страны и повторите: тогда видно, где бот "
+                        "ограничен, а где доступен."),
+        }
+
+    _clients: dict = {}
+    _dead: set = set()
+
+    async def _client_for(acc: dict):
+        aid = int(acc["id"])
+        if aid in _clients:
+            return _clients[aid]
+        if aid in _dead:
+            return None
+        try:
+            c = await account_manager.connect_client(
+                acc.get("session_str") or "", device=acc, action_type="op",
+                retry_auth_dup=True)
+            _clients[aid] = c
+            return c
+        except Exception as e:
+            log.warning("check_bot_geoban op=%d: наблюдатель acc=%s не подключился: %s",
+                        op_id, aid, e)
+            _dead.add(aid)
+            return None
+
+    counts: dict = {}
+    findings: list = []
+    try:
+        for idx, b in enumerate(bots):
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled",
+                        "summary": f"Отменено. Проверено: {idx}/{n}\n"
+                                   + _erc.build_geoban_summary(counts, n, checked=idx)}
+            per_geo: list = []
+            for geo, acc in geo_acc.items():
+                client = await _client_for(acc)
+                if client is None:
+                    continue
+                try:
+                    r = await _erc.resolve_flags(
+                        client, kind="bot", entity_id=b["bot_id"],
+                        username=b["username"], do_bot_ping=False)
+                    sig = r.get("signals") or {}
+                    per_geo.append({
+                        "geo": geo,
+                        "probe_error": sig.get("probe_error"),
+                        "restricted": sig.get("restricted"),
+                        "restriction_reasons": sig.get("restriction_reasons"),
+                        "resolved": sig.get("resolved"),
+                        "has_username": sig.get("has_username", True),
+                    })
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    per_geo.append({"geo": geo, "probe_error": str(e)[:160],
+                                    "has_username": True})
+                # Разносим резолвы к Telegram, пауза отменяемая и объявлена сторожу.
+                await cancellable_pause(pool, op_id, random.uniform(1.5, 3.0), "geoban geo probe")
+
+            verdict = _erc.classify_geoban(per_geo)
+            status = verdict["status"]
+            counts[status] = counts.get(status, 0) + 1
+            _title = b.get("title") or (f"@{b['username']}" if b.get("username") else str(b["bot_id"]))
+            await _journal_write(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,$4,$5)",
+                op_id, idx + 1, f"Бот «{_title}»"[:64],
+                "error" if status == _erc.GEO_BANNED else "ok",
+                f"{verdict['label']} — {verdict['reason_ru']}"[:200])
+
+            if status == _erc.GEO_BANNED:
+                findings.append({"bot_id": b["bot_id"], "title": _title,
+                                 "blocked_geos": verdict["blocked_geos"],
+                                 "clean_geos": verdict["clean_geos"]})
+                try:
+                    await _sbm._record_event(
+                        pool, owner_id, "bot_geoban", "critical",
+                        {"bot_id": b["bot_id"], "username": b.get("username"),
+                         "title": _title, "blocked_geos": verdict["blocked_geos"],
+                         "clean_geos": verdict["clean_geos"],
+                         "reason": verdict["reason_ru"]},
+                        bot_id=b["bot_id"])
+                except Exception as e:
+                    log.debug("check_bot_geoban: record_event failed: %s", e)
+
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx + 1 < n:
+                await cancellable_pause(pool, op_id, random.uniform(2.0, 4.0), "geoban next bot")
+    finally:
+        for c in _clients.values():
+            try:
+                await c.disconnect()
+            except Exception:
+                pass
+
+    summary = _erc.build_geoban_summary(counts, n)
+    summary += f"\n\nℹ️ Проверено стран: {distinct_geos} ({', '.join(sorted(geo_acc))})."
+    return {"status": "done", "checked": n, "counts": counts,
+            "findings": findings[:50], "summary": summary}
 
 
 async def _exec_connect_discovered_bots(

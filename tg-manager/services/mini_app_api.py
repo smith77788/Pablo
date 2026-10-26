@@ -6459,6 +6459,58 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("check_owned_restrictions uid=%d", uid)
             return _err("Не удалось поставить проверку в очередь", 500)
 
+    async def check_bot_geoban_targets(request: web.Request) -> web.Response:
+        """Сколько ПУБЛИЧНЫХ ботов (с @username) можно проверить на гео-бан, и в
+        скольких различимых странах есть аккаунты (гео-бан виден только при ≥2)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        bots = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots "
+            "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''", uid)
+        geos = await _safe_count(pool,
+            """SELECT COUNT(DISTINCT UPPER(p.geo_country))
+                 FROM tg_accounts a
+                 JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+                WHERE a.owner_id=$1 AND a.is_active=TRUE
+                  AND p.geo_country IS NOT NULL AND p.geo_country <> ''""", uid)
+        return _json_resp({"ok": True, "bots": int(bots or 0),
+                           "geos": int(geos or 0)})
+
+    async def check_bot_geoban(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        params: dict = {"owner_id": uid}
+        bot_ids = body.get("bot_ids")
+        if bot_ids:
+            try:
+                params["bot_ids"] = [int(x) for x in bot_ids
+                                     if str(x).lstrip("-").isdigit()]
+            except (TypeError, ValueError):
+                return _err("Неверные идентификаторы ботов", 400)
+        if params.get("bot_ids") is not None:
+            total = len(params["bot_ids"])
+        else:
+            total = int(await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots "
+                "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''", uid) or 0)
+        if total == 0:
+            return _err("Нет публичных ботов (с @username) для проверки гео-бана")
+        try:
+            from services.operation_bus import submit
+            op_id = await submit(pool, uid, "check_bot_geoban", params, total_items=total)
+            return _json_resp({"ok": True, "op_id": op_id, "total": total})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("check_bot_geoban uid=%d", uid)
+            return _err("Не удалось поставить проверку в очередь", 500)
+
     # ── Редактор канала (Virtual Channel Administrator) ────────────────────
     # Правила редактора задавались только в коде (save_profile), а подсказка
     # перед публикацией жила лишь в боте: в Mini App — главном интерфейсе —
@@ -7918,6 +7970,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/mass_publish", mass_publish)
     app.router.add_get("/api/miniapp/check_owned_restrictions/targets", check_owned_restrictions_targets)
     app.router.add_post("/api/miniapp/check_owned_restrictions", check_owned_restrictions)
+    app.router.add_get("/api/miniapp/check_bot_geoban/targets", check_bot_geoban_targets)
+    app.router.add_post("/api/miniapp/check_bot_geoban", check_bot_geoban)
     app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)
     app.router.add_put("/api/miniapp/editorial/policy", editorial_policy_save)
     app.router.add_post("/api/miniapp/editorial/review", editorial_review_draft)

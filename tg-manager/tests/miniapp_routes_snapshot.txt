@@ -125,6 +125,7 @@ GET /api/miniapp/chatlist_folders
 GET /api/miniapp/chatwarmup/accounts
 GET /api/miniapp/chatwarmup/session/{sid}
 GET /api/miniapp/chatwarmup/sessions
+GET /api/miniapp/check_bot_geoban/targets
 GET /api/miniapp/check_owned_restrictions/targets
 GET /api/miniapp/circuit_breaker
 GET /api/miniapp/cleaner/accounts
@@ -418,6 +419,7 @@ HEAD /api/miniapp/chatlist_folders
 HEAD /api/miniapp/chatwarmup/accounts
 HEAD /api/miniapp/chatwarmup/session/{sid}
 HEAD /api/miniapp/chatwarmup/sessions
+HEAD /api/miniapp/check_bot_geoban/targets
 HEAD /api/miniapp/check_owned_restrictions/targets
 HEAD /api/miniapp/circuit_breaker
 HEAD /api/miniapp/cleaner/accounts
@@ -753,6 +755,7 @@ POST /api/miniapp/channels/reclassify
 POST /api/miniapp/chatlist_folders
 POST /api/miniapp/chatwarmup/session
 POST /api/miniapp/chatwarmup/session/{sid}/status
+POST /api/miniapp/check_bot_geoban
 POST /api/miniapp/check_owned_restrictions
 POST /api/miniapp/cleaner/submit
 POST /api/miniapp/clone_adapt/submit

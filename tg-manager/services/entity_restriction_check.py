@@ -471,3 +471,116 @@ async def probe_entity(
     out = classify(kind, signals)
     out["meta"] = meta
     return out
+
+
+# ── Гео-бан: сущность ограничена в ОДНИХ странах и чиста в ДРУГИХ ──────────────
+# Telegram отдаёт `restricted`/`restriction_reason` ОТНОСИТЕЛЬНО страны смотрящего
+# аккаунта (его IP/прокси). Один и тот же бот из РФ может быть ограничен, а из DE
+# — чист: это и есть гео-бан. Отличить гео-бан от ОБЩЕГО (везде) можно только
+# пробой с аккаунтов РАЗНЫХ стран — отсюда проверка по нескольким гео.
+GEO_CLEAN = "geo_clean"                # доступен во всех проверенных странах
+GEO_BANNED = "geo_banned"              # заблокирован в ЧАСТИ стран, но не во всех
+GEO_GLOBAL = "geo_global"              # заблокирован во ВСЕХ проверенных (не гео-, а общий бан)
+GEO_INCONCLUSIVE = "geo_inconclusive"  # проверено < 2 стран — гео от общего не отличить
+
+_GEO_LABELS = {
+    GEO_CLEAN: "✅ Гео-бана нет",
+    GEO_BANNED: "🌍 Гео-бан",
+    GEO_GLOBAL: "🚫 Общий бан (во всех странах)",
+    GEO_INCONCLUSIVE: "❓ Нужны аккаунты в разных странах",
+}
+
+
+def geo_status_label(status: str) -> str:
+    """Русская подпись гео-статуса с эмодзи."""
+    return _GEO_LABELS.get(status, status)
+
+
+def _geo_blocked(v: dict):
+    """Заблокирована ли сущность С ТОЧКИ ЗРЕНИЯ одной страны.
+
+    True  — заблокирована (официальное ограничение ИЛИ публичная не резолвится);
+    False — чисто (резолвится и без ограничения);
+    None  — проверить не удалось (сбой нашей стороны) → страну не учитываем.
+    """
+    if v.get("probe_error"):
+        return None
+    if v.get("restricted") or (v.get("restriction_reasons") or []):
+        return True
+    resolved = v.get("resolved")
+    if resolved is False and v.get("has_username"):
+        return True
+    if resolved is True:
+        return False
+    return None
+
+
+def classify_geoban(per_geo: list) -> dict:
+    """Свести пробы по странам в вердикт гео-бана. ЧИСТАЯ функция (без сети/БД).
+
+    per_geo: список проб [{geo, probe_error, restricted, restriction_reasons,
+    resolved, has_username}] — по одной или несколько на страну (ISO-2). Внутри
+    страны «заблокирован хотя бы в одной пробе» => страна заблокирована.
+
+    Отличить гео-бан от общего можно только при ДВУХ и более странах с валидным
+    сигналом: одна чистая страна не доказывает отсутствия бана в непроверенных,
+    одна заблокированная не доказывает, что это именно ГЕО-бан. Поэтому при < 2
+    пригодных странах — честный GEO_INCONCLUSIVE.
+    """
+    by_geo: dict = {}
+    for v in per_geo or []:
+        geo = (str(v.get("geo") or "")).strip().upper() or "??"
+        b = _geo_blocked(v)
+        prev = by_geo.get(geo, "_unset")
+        if b is True:
+            by_geo[geo] = True                     # заблокирован — финально для страны
+        elif b is False and prev in ("_unset", None):
+            by_geo[geo] = False
+        elif prev == "_unset":
+            by_geo[geo] = None                     # только сбой проверки
+    blocked = sorted(g for g, b in by_geo.items() if b is True)
+    clean = sorted(g for g, b in by_geo.items() if b is False)
+    failed = sorted(g for g, b in by_geo.items() if b is None)
+    usable = len(blocked) + len(clean)
+
+    if usable < 2:
+        status = GEO_INCONCLUSIVE
+    elif blocked and clean:
+        status = GEO_BANNED
+    elif blocked:                                   # usable>=2 и все пригодные заблокированы
+        status = GEO_GLOBAL
+    else:
+        status = GEO_CLEAN
+
+    if status == GEO_BANNED:
+        reason_ru = "Заблокирован в: " + ", ".join(blocked) + "; доступен в: " + ", ".join(clean)
+    elif status == GEO_GLOBAL:
+        reason_ru = "Заблокирован во всех проверенных странах: " + ", ".join(blocked)
+    elif status == GEO_CLEAN:
+        reason_ru = "Доступен во всех проверенных странах: " + ", ".join(clean)
+    else:
+        reason_ru = ("Проверено менее двух стран — гео-бан от общего не отличить. "
+                     "Нужны аккаунты с прокси в разных странах.")
+    return {
+        "status": status,
+        "label": geo_status_label(status),
+        "blocked_geos": blocked,
+        "clean_geos": clean,
+        "failed_geos": failed,
+        "reason_ru": reason_ru,
+    }
+
+
+def build_geoban_summary(counts: dict, total: int, *, checked=None) -> str:
+    """Короткая сводка гео-проверки для итога операции (по-русски)."""
+    done = total if checked is None else checked
+    parts = [f"Проверено ботов: {done}/{total}"]
+    order = (GEO_BANNED, GEO_GLOBAL, GEO_INCONCLUSIVE, GEO_CLEAN)
+    for st in order:
+        c = int(counts.get(st, 0) or 0)
+        if c:
+            parts.append(f"{geo_status_label(st)}: {c}")
+    banned = int(counts.get(GEO_BANNED, 0) or 0)
+    if banned:
+        parts.append("⚠️ Боты в гео-бане недоступны части пользователей по странам.")
+    return "\n".join(parts)
