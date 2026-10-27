@@ -64,10 +64,15 @@ def test_backfill_migration_consistent_with_map():
 
 
 def test_detection_writes_iso2():
-    src = _read("bot/handlers/proxy_manager.py")
-    # ip-api запрашивает countryCode и нормализует к ISO2
+    # Детектор гео прокси вынесен в единый сервис services/proxy_geo.py
+    # (его зовут и бот, и мини-апп при добавлении прокси). Там же — запрос
+    # countryCode у ip-api и нормализация к ISO2.
+    src = _read("services/proxy_geo.py")
     assert "countryCode" in src
     assert "to_iso2(" in src
+    # Бот больше не содержит копию логики, а делегирует в сервис.
+    bot_src = _read("bot/handlers/proxy_manager.py")
+    assert "from services.proxy_geo import detect_proxy_geo" in bot_src
 
 
 def test_match_sites_expect_iso2_unchanged():
