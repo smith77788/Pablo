@@ -197,12 +197,32 @@ def _pch(cid, acc_id):
     return _ch(cid, None, title="Приват", type_="channel", acc_id=acc_id)
 
 
-def test_private_channel_without_managing_account_is_check_failed():
-    # Приватный канал управляется acc=5, а свободен только acc=1. Открыть его
-    # некем — честный check_failed, а не ложная «недоступность». probe даже не
-    # зовётся (нет клиента с доступом).
+def test_private_channel_falls_back_to_another_connected_account():
+    # Жалоба владельца: приватный канал записан за acc=5 (тот занят/в карантине/
+    # переподключён под новым id), а свободен ДРУГОЙ его аккаунт acc=1, который
+    # СОСТОИТ в канале. Раньше проверка отказывалась (probe не звался) и писала
+    # «нет управляющего аккаунта с доступом» — хотя доступ у владельца есть.
+    # Теперь пробуем acc=1, он резолвит канал по участию и даёт честный вердикт.
     pool = _FakePool(channels=[_pch(101, acc_id=5)], bots=[], accounts=[_acc(1)])
-    probe = AsyncMock()
+    probe = AsyncMock(side_effect=[_verdict(erc.STATUS_CLEAN)])
+    with patch.object(op_worker, "_claim_available_accounts",
+                      AsyncMock(side_effect=lambda op_id, accs, owner: accs)), \
+         patch.object(op_worker, "_is_cancelled", AsyncMock(return_value=False)), \
+         patch("services.infra_memory.is_account_quarantined", AsyncMock(return_value=False)), \
+         patch("services.account_manager.connect_client", AsyncMock(return_value=_FakeClient())), \
+         patch("services.entity_restriction_check.probe_entity", probe), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        res = _run(op_worker._exec_check_owned_restrictions(pool, None, 7, 99, {}))
+    assert res["counts"].get(erc.STATUS_CLEAN) == 1      # проверено, а не «нет доступа»
+    assert probe.await_count == 1                        # фолбэк-аккаунт реально пробовали
+
+
+def test_private_check_failed_only_after_trying_every_account():
+    # Единственный свободный acc=1 НЕ состоит в приватном канале → probe честно
+    # возвращает check_failed («нечем проверить»). Это по-прежнему check_failed —
+    # но теперь ПОСЛЕ реальной попытки, а не вместо неё.
+    pool = _FakePool(channels=[_pch(101, acc_id=5)], bots=[], accounts=[_acc(1)])
+    probe = AsyncMock(side_effect=[_verdict(erc.STATUS_CHECK_FAILED)])
     with patch.object(op_worker, "_claim_available_accounts",
                       AsyncMock(side_effect=lambda op_id, accs, owner: accs)), \
          patch.object(op_worker, "_is_cancelled", AsyncMock(return_value=False)), \
@@ -212,7 +232,28 @@ def test_private_channel_without_managing_account_is_check_failed():
          patch("asyncio.sleep", new=AsyncMock()):
         res = _run(op_worker._exec_check_owned_restrictions(pool, None, 7, 99, {}))
     assert res["counts"].get(erc.STATUS_CHECK_FAILED) == 1
-    assert probe.await_count == 0
+    assert probe.await_count == 1
+
+
+def test_private_retries_next_account_when_first_is_not_member():
+    # Управляющий acc=1 на самом деле НЕ участник (probe → check_failed), а acc=2
+    # участник (probe → clean). Прогон не сдаётся на первом «нечем проверить», а
+    # пробует следующего — итоговый вердикт clean, probe вызван дважды.
+    pool = _FakePool(channels=[_pch(101, acc_id=1)], bots=[],
+                     accounts=[_acc(1), _acc(2)])
+    probe = AsyncMock(side_effect=[_verdict(erc.STATUS_CHECK_FAILED),
+                                   _verdict(erc.STATUS_CLEAN)])
+    with patch.object(op_worker, "_claim_available_accounts",
+                      AsyncMock(side_effect=lambda op_id, accs, owner: accs)), \
+         patch.object(op_worker, "_is_cancelled", AsyncMock(return_value=False)), \
+         patch("services.infra_memory.is_account_quarantined", AsyncMock(return_value=False)), \
+         patch("services.account_manager.connect_client", AsyncMock(return_value=_FakeClient())), \
+         patch("services.entity_restriction_check.probe_entity", probe), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        res = _run(op_worker._exec_check_owned_restrictions(pool, None, 7, 99, {}))
+    assert res["counts"].get(erc.STATUS_CLEAN) == 1
+    assert res["counts"].get(erc.STATUS_CHECK_FAILED) is None
+    assert probe.await_count == 2
 
 
 def test_single_account_marks_visibility_unmeasured_and_disables_search():

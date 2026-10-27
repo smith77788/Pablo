@@ -14291,6 +14291,29 @@ async def _exec_check_accounts_health(
     }
 
 
+def _restriction_access_candidates(ent, obs_by_id, observers, dead):
+    """Аккаунты-кандидаты на резолв сущности: пары (аккаунт, access_hash для НЕГО).
+
+    Вынесено на модульный уровень, чтобы проверять регрессом (баг «приватная не
+    проверяется, хотя управляющий аккаунт подключён»). Правила — в докстринге
+    замыкания `_access_candidates` внутри `_exec_check_owned_restrictions`.
+    Коротко: управляющий (preferred_acc) первым со своим записанным access_hash;
+    остальные живые — следом с access_hash=0 (резолв по участию). Приватную
+    не-участник не откроет и даст «нечем проверить», а не ложный негатив, поэтому
+    перебор безопасен и для приватной.
+    """
+    pref = ent.get("preferred_acc")
+    out: list[tuple[dict, int]] = []
+    if pref and pref in obs_by_id and pref not in dead:
+        out.append((obs_by_id[pref], int(ent.get("access_hash") or 0)))
+    for a in observers:
+        aid = int(a["id"])
+        if aid in dead or (pref and aid == pref):
+            continue
+        out.append((a, 0))
+    return out
+
+
 async def _exec_check_owned_restrictions(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -14457,19 +14480,21 @@ async def _exec_check_owned_restrictions(
             log.debug("check_owned_restrictions op=%d: get_dialogs acc=%s не удался: %s",
                       op_id, aid, e)
 
-    def _pick_access(ent: dict):
-        # Аккаунт С ДОСТУПОМ для резолва+флагов. Приватную сущность (нет
-        # @username) откроет ТОЛЬКО её управляющий аккаунт (участник) — чужой
-        # даст ложную «недоступность», поэтому для приватной берём строго его.
-        # Публичную резолвит любой; управляющего пробуем первым.
-        pref = ent.get("preferred_acc")
-        order: list[dict] = []
-        if pref and pref in _obs_by_id and pref not in _dead:
-            order.append(_obs_by_id[pref])
-        if not ent.get("is_private"):
-            order.extend(a for a in observers if int(a["id"]) not in _dead
-                         and (not pref or int(a["id"]) != pref))
-        return order
+    def _access_candidates(ent: dict):
+        # Кандидаты на РЕЗОЛВ+флаги: пары (аккаунт, access_hash для НЕГО).
+        # Приватную сущность (нет @username) открывает только аккаунт-участник.
+        # Раньше пробовали лишь записанный управляющий (managed_channels.acc_id),
+        # и если он занят другой операцией, в карантине или устарел (владелец
+        # переподключил аккаунт под новым id, либо участник — ДРУГОЙ его аккаунт),
+        # приватная падала в «нет управляющего аккаунта», хотя доступ у владельца
+        # есть. Добрать остальных безопасно: не-участник приватную не резолвит и
+        # даёт «нечем проверить» (probe_error), а НЕ ложное «ограничена/недоступна»
+        # (entity_restriction_check.resolve_flags: приватная без @username на
+        # ошибке доступа → probe_error, не resolved=False) — поэтому перебор только
+        # помогает. access_hash у каждого аккаунта свой: записанный валиден лишь для
+        # управляющего, остальным даём 0 — они резолвят по участию (скан диалогов).
+        # Чистая логика вынесена в _restriction_access_candidates (под регрессом).
+        return _restriction_access_candidates(ent, _obs_by_id, observers, _dead)
 
     def _pick_search(ent: dict):
         # ВНЕШНИЙ аккаунт для проверки видимости: НЕ управляющий этой сущностью
@@ -14499,35 +14524,34 @@ async def _exec_check_owned_restrictions(
                                + _erc.build_summary(counts, n, checked=idx),
                 }
 
-            access_client = None
-            _access_acc_id = None
-            for cand in _pick_access(ent):
-                access_client = await _client_for(cand)
-                if access_client is not None:
-                    _access_acc_id = int(cand["id"])
-                    break
+            # Внешний аккаунт для видимости — только публичным сущностям и один на
+            # сущность (от того, каким аккаунтом резолвим доступ, не зависит).
+            search_client = None
+            if ent.get("username"):
+                _s = _pick_search(ent)
+                if _s is not None:
+                    search_client = await _client_for(_s)
+                if search_client is None:
+                    vis_unmeasured += 1
 
-            if access_client is None:
-                _why = ("нет управляющего аккаунта с доступом к приватной сущности"
-                        if ent.get("is_private") else "нет доступного аккаунта-наблюдателя")
-                verdict = _erc.classify(ent["kind"], {"probe_error": _why})
-            else:
-                # Приватную сущность без access_hash резолвит только скан диалогов
-                # управляющего — наполняем кэш его сессии один раз (не на каждую).
-                if ent.get("is_private") and not ent.get("access_hash"):
-                    await _ensure_dialogs(_access_acc_id, access_client)
-                # Внешний аккаунт для видимости — только публичным сущностям.
-                search_client = None
-                if ent.get("username"):
-                    _s = _pick_search(ent)
-                    if _s is not None:
-                        search_client = await _client_for(_s)
-                    if search_client is None:
-                        vis_unmeasured += 1
+            # Перебор аккаунтов доступа. Для приватной «нечем проверить» у одного
+            # аккаунта не финал: это может быть просто не-участник — пробуем
+            # следующего, прежде чем сдаться. Публичную резолвит первый же живой.
+            _is_private = bool(ent.get("is_private"))
+            verdict = None
+            for cand, chash in _access_candidates(ent):
+                client = await _client_for(cand)
+                if client is None:
+                    continue
+                # Приватную без валидного хэша резолвит только скан диалогов
+                # аккаунта (его участие); хэш есть лишь у управляющего — остальным
+                # (chash=0) диалоги обязательны. Скан кэшируется один раз на аккаунт.
+                if _is_private and not chash:
+                    await _ensure_dialogs(int(cand["id"]), client)
                 try:
-                    verdict = await _erc.probe_entity(
-                        access_client, kind=ent["kind"], entity_id=ent["id"],
-                        username=ent.get("username"), access_hash=ent.get("access_hash"),
+                    v = await _erc.probe_entity(
+                        client, kind=ent["kind"], entity_id=ent["id"],
+                        username=ent.get("username"), access_hash=chash,
                         search_client=search_client,
                         do_search=bool(search_client))
                 except asyncio.CancelledError:
@@ -14535,7 +14559,17 @@ async def _exec_check_owned_restrictions(
                 except Exception as e:
                     log.warning("check_owned_restrictions op=%d ent=%s: проба упала: %s",
                                 op_id, ent["id"], e)
-                    verdict = _erc.classify(ent["kind"], {"probe_error": str(e)[:160]})
+                    v = _erc.classify(ent["kind"], {"probe_error": str(e)[:160]})
+                verdict = v
+                if _is_private and v["status"] == _erc.STATUS_CHECK_FAILED:
+                    continue   # не-участник — пробуем следующего
+                break
+
+            if verdict is None:
+                # Ни один аккаунт не подключился (все заняты/в карантине/мертвы).
+                verdict = _erc.classify(ent["kind"], {
+                    "probe_error": "нет доступного аккаунта для проверки "
+                                   "(все заняты другими операциями или не подключились)"})
 
             status = verdict["status"]
             counts[status] = counts.get(status, 0) + 1
