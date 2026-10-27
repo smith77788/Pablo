@@ -7834,6 +7834,11 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
       try { runPulseAction({kind: _screen, param: _param}); }
       catch(err) { toast('⚠️ Не удалось открыть раздел из ссылки: ' + errRu(err, 'ошибка')); }
     }, 100);
+    // Хэша нет — часть клиентов Telegram стирает наш #<kind> из web_app-ссылки
+    // нуджа и заменяет его своими tgWebApp-параметрами. Тогда раздел «Открыть»
+    // пропадает, и приложение открывается на главной. Раздел продублирован в
+    // состоянии организма — спросим его (спасательный путь, не основной).
+    else setTimeout(recoverNudgeOpen, 100);
   } catch(e) {
     const errorHtml = errHtml(errRu(e), 'location.reload()');
     document.getElementById('kpiScroll').innerHTML = errorHtml;
@@ -9465,6 +9470,17 @@ function runPulseAction(a) {
   // раздел — это поломка ссылки, и сказать надо именно это.
   toast('⚠️ Не знаю раздела «' + String(k || '—').substring(0, 24) + '» — ссылка ведёт в никуда');
   return false;
+}
+// Спасательный путь «Открыть»: когда Telegram стёр #<kind> из ссылки нуджа,
+// раздела в хэше нет, и приложение осталось бы на главной. Организм продублировал
+// цель последнего нуджа в своём состоянии — забираем её (разово, сервер сразу
+// чистит ключ; окно 30 мин, чтобы запуск приложения спустя час не прыгал в
+// старый нудж). Тихо: это запасной маршрут, обычный запуск не должен ничего ловить.
+async function recoverNudgeOpen() {
+  try {
+    const a = await api('/api/miniapp/organism/pending_open', {method:'POST', body:'{}'});
+    if (a && a.kind) runPulseAction({kind: a.kind, param: (a.param != null ? a.param : null)});
+  } catch(_) { /* запасной путь: молчим, чтобы не пугать на обычном старте */ }
 }
 // Горячие контакты → сразу к сегмент-офферу (переговоры + тег интереса).
 function openContactsHot() {

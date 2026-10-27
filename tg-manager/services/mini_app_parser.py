@@ -177,6 +177,42 @@ def setup_routes(app: web.Application, pool) -> None:
             await spine.state_set(pool, uid, "dismissed", cur[-100:])
         return _json_resp({"ok": True})
 
+    async def organism_pending_open(request: web.Request) -> web.Response:
+        """Куда вёл последний нудж — спасательный путь для «Открыть».
+
+        Кнопка «Открыть» в нудже кладёт раздел в #<kind> web_app-ссылки, но
+        часть клиентов Telegram заменяет хэш своими tgWebApp-параметрами, и
+        раздел теряется — «Открыть» молча приводит на главную. Тогда мини-апп
+        на старте, не найдя раздела в хэше, спрашивает цель здесь. Отдаём её
+        РАЗОВО (сразу чистим ключ, даже если протух) — иначе следующее обычное
+        открытие приложения прыгнуло бы в тот же старый нудж — и только в узком
+        окне (30 мин): позже это уже не «я нажал Открыть», а просто запуск.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            import time as _time
+            from services.organism import spine
+            got = await spine.state_get(pool, uid, "nudge_open", None)
+            if not isinstance(got, dict) or not got.get("kind"):
+                return _json_resp({})
+            # Разовый расход: чистим до проверки свежести.
+            await spine.state_set(pool, uid, "nudge_open", None)
+            try:
+                at = float(got.get("at") or 0)
+            except (TypeError, ValueError):
+                at = 0.0
+            if at <= 0 or (_time.time() - at) > 1800:
+                return _json_resp({})
+            out = {"kind": str(got.get("kind"))}
+            if got.get("param") not in (None, ""):
+                out["param"] = str(got.get("param"))
+            return _json_resp(out)
+        except Exception:
+            log.exception("organism_pending_open uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def mesh_task_create(request: web.Request) -> web.Response:
         """Запустить цепочку между ботами.
 
@@ -617,6 +653,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/organism/pulse", organism_pulse)
     app.router.add_get("/api/miniapp/organism/digest", organism_digest)
     app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
+    app.router.add_post("/api/miniapp/organism/pending_open", organism_pending_open)
     app.router.add_get("/api/miniapp/parser/runs", parser_runs)
     app.router.add_get("/api/miniapp/parser/audience", parsed_audience)
     app.router.add_get("/api/miniapp/parser/audience/export", parsed_audience_export)

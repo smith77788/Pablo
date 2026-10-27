@@ -245,4 +245,19 @@ async def _tick_owner(pool, bot, owner_id: int, *, notifier=None, now: float | N
         log.debug("organism.runner: notify failed owner=%s", owner_id)
         return False
     await spine.state_set(pool, owner_id, "last_nudge", {"id": top["id"], "at": now})
+    # Куда ведёт «Открыть» — дублируем в состояние. Кнопка кладёт раздел в
+    # #<kind> web_app-ссылки, но ЧАСТЬ клиентов Telegram стирает наш хэш и
+    # заменяет его своими tgWebApp-параметрами: раздел теряется, и «Открыть»
+    # молча приводит владельца на главную (ровно эта жалоба). Мини-апп на
+    # старте, не найдя раздела в хэше, забирает цель отсюда — расход разовый и
+    # в узком окне (чтобы обычное открытие приложения спустя час не прыгало в
+    # старый нудж). Формат совпадает с _open_button: kind + необязательный param.
+    _act = top.get("action") or {}
+    _kind = _act.get("kind")
+    if _kind:
+        _open = {"kind": str(_kind), "at": now}
+        _param = _act.get("op_id")
+        if _param not in (None, ""):
+            _open["param"] = str(_param)
+        await spine.state_set(pool, owner_id, "nudge_open", _open)
     return True
