@@ -111,42 +111,11 @@ async def _check_proxy_alive(proxy_url: str) -> dict:
 
 
 async def _detect_proxy_geo(proxy_url: str) -> dict:
-    """Attempt to detect geo country/city via ip-api.com through the proxy.
-
-    Works for both auth and no-auth proxy URLs:
-      socks5://user:pass@1.2.3.4:1080
-      socks5://1.2.3.4:1080
-    Uses the proxy's external IP (from ip-api.com) rather than extracting from URL,
-    so the geo reflects actual egress location even for hostname-based proxies.
+    """Гео прокси по его exit-IP. Тонкая обёртка над services.proxy_geo —
+    один источник правды и для бота, и для мини-аппа (авто-гео при добавлении).
     """
-    try:
-        import aiohttp
-
-        socks_module = importlib.import_module("aiohttp_socks")
-        ProxyConnector = cast(Any, getattr(socks_module, "ProxyConnector"))
-
-        connector = ProxyConnector.from_url(proxy_url)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            # ip-api.com without an IP argument returns geo for the caller's IP,
-            # which — routed through the proxy — is the proxy's egress IP.
-            async with session.get(
-                "http://ip-api.com/json/?fields=country,countryCode,city,query",
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    # Пишем ISO2-код (матч-сайты сравнивают geo_country с ISO2:
-                    # UPPER(geo_country)=UPPER('UA')). Раньше писалось полное имя
-                    # («Ukraine») → гео-подбор прокси/аккаунтов не срабатывал.
-                    from services.geo_normalize import to_iso2
-
-                    return {
-                        "geo_country": to_iso2(data.get("countryCode") or data.get("country")),
-                        "geo_city": data.get("city"),
-                    }
-    except Exception:
-        log_exc_swallow(log, "Не удалось определить геолокацию прокси")
-    return {}
+    from services.proxy_geo import detect_proxy_geo
+    return await detect_proxy_geo(proxy_url, timeout=10.0)
 
 
 # ── Menu ───────────────────────────────────────────────────────────────────────

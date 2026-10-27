@@ -205,7 +205,24 @@ def setup_routes(app: web.Application, pool) -> None:
                     """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type)
                        VALUES($1,$2,$3,$4) RETURNING id""",
                     uid, label, _enc, proxy_type)
-            return _json_resp({"ok": True, "id": row["id"]})
+            # Авто-определение страны прокси по его exit-IP. Без него geo_country
+            # оставался пустым, и гео-подбор аккаунтов/прокси и проверка гео-бана
+            # ботов не видели страну (её ставила только ручная кнопка в боте).
+            # Best-effort: сбой/таймаут не роняет добавление (без прокси ничего не
+            # работает) — страну тогда можно определить позже.
+            geo_country = None
+            try:
+                from services.proxy_geo import detect_proxy_geo
+                _geo = await detect_proxy_geo(proxy_url, timeout=8.0)
+                geo_country = _geo.get("geo_country") or None
+                if geo_country:
+                    await pool.execute(
+                        "UPDATE user_proxies SET geo_country=$1, geo_city=$2 "
+                        "WHERE id=$3 AND owner_id=$4",
+                        geo_country, _geo.get("geo_city"), row["id"], uid)
+            except Exception:
+                log.debug("add_proxy: авто-гео не удалось (не критично)")
+            return _json_resp({"ok": True, "id": row["id"], "geo_country": geo_country})
         except Exception as e:
             log.exception("add_proxy uid=%d", uid)
             return _err(f"Не удалось добавить прокси: {str(e)[:120]}", 400)

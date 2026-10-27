@@ -25,7 +25,14 @@ function _shScreen() {
 async function openShieldCheck() {
   _shScreen();
   push('s-shieldcheck');
+  await _shLoadBody();
+}
+
+// Перезагрузка тела БЕЗ push — чтобы кнопка «🔄 Обновить» (после добавления
+// прокси) обновляла счётчик различимых стран, не плодя экраны в истории.
+async function _shLoadBody() {
   const body = document.getElementById('s-shieldcheck-body');
+  if (!body) return;
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   let t = { channels: 0, bots: 0, total: 0 };
   try {
@@ -52,20 +59,40 @@ function _shGeoRender(g) {
   let note, btn;
   if (geos < 2) {
     note = 'Для проверки гео-бана нужны аккаунты с прокси минимум в <b>2 разных странах</b> — ' +
-           'сейчас различимо: <b>' + geos + '</b>. Подключите аккаунт с прокси ещё одной страны.';
-    btn = '<button class="btn btn-s" disabled style="width:100%">🌍 Нужны аккаунты в 2+ странах</button>';
+           'сейчас различимо: <b>' + geos + '</b>. Добавьте прокси ещё одной страны прямо здесь — ' +
+           'страна определится автоматически.';
+    btn = '<button class="btn btn-s" disabled style="width:100%;margin-bottom:8px">🌍 Нужны аккаунты в 2+ странах</button>';
   } else {
     note = 'Проверит каждого публичного бота с аккаунтов <b>' + geos + '</b> разных стран и покажет, ' +
            'где он ограничен, а где доступен. Ничего не меняет.';
-    btn = '<button class="btn btn-p" id="shGeoBtn" onclick="runBotGeoban()" style="width:100%">' +
+    btn = '<button class="btn btn-p" id="shGeoBtn" onclick="runBotGeoban()" style="width:100%;margin-bottom:8px">' +
           '🌍 Проверить гео-бан ' + bots + ' ' + _shBotPlural(bots) + '</button>';
   }
+  // Добавить прокси прямо отсюда (страна определится авто) + обновить счётчик.
+  const tools =
+    '<div style="display:flex;gap:8px">' +
+      '<button class="btn btn-s" onclick="shAddProxy()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">➕ Добавить прокси</button>' +
+      '<button class="btn btn-s" onclick="_shLoadBody()" style="flex:0 0 auto;font-size:13px;padding:10px 12px" title="Обновить счётчик стран">🔄</button>' +
+    '</div>';
   return '' +
     '<div class="sec">🌍 Гео-бан ботов</div>' +
     '<div class="lst" style="padding:14px">' +
       '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin-bottom:12px">' + note + '</div>' +
       btn +
+      tools +
     '</div>';
+}
+
+// Добавить прокси, не уходя с экрана: открываем общую модалку. Страну новый
+// прокси получает авто (services.proxy_geo при POST /proxy). После закрытия
+// модалки владелец жмёт «🔄», чтобы увидеть обновлённый счётчик стран.
+function shAddProxy() {
+  if (typeof openProxyModal === 'function') {
+    openProxyModal();
+    toast('После добавления нажмите 🔄, чтобы обновить счётчик стран');
+  } else {
+    toast('Откройте раздел «Прокси», чтобы добавить прокси');
+  }
 }
 
 async function runBotGeoban() {
