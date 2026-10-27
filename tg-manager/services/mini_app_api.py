@@ -30,6 +30,7 @@ from services.contacts_hub import segments as _segments
 from services import mini_app_bots
 from services import mini_app_invite
 from services import mini_app_channels
+from services import mini_app_monitor
 from services import mini_app_operations
 from services import mini_app_dashboard
 from services import mini_app_dm
@@ -7995,6 +7996,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_presence.setup_routes(app, pool)
     mini_app_cloud.setup_routes(app, pool)
     mini_app_va.setup_routes(app, pool)
+    mini_app_monitor.setup_routes(app, pool)
     # Analytics
     # Subscription
     app.router.add_get("/api/miniapp/subscription", subscription)

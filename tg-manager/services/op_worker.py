@@ -37,6 +37,11 @@ log = logging.getLogger(__name__)
 _RECURRING_OK_OPS = frozenset({
     "quick_post", "mass_publish", "bulk_post_chans", "bulk_post_to_channel",
     "network_broadcast", "run_broadcast", "group_announce", "pin_last_post",
+    # Авто-мониторинг флота (services/mini_app_monitor): периодические read-only
+    # ПРОВЕРКИ. Безопасно зацикливать — наружу ничего не уходит, аккаунты не
+    # меняются; находки идут в пульс (restriction_events). Темп задаёт владелец
+    # (repeat_interval_min), предохранитель/тариф/счётчик неудач — на месте.
+    "check_accounts_health", "check_owned_restrictions", "check_bot_geoban",
 })
 
 # Сколько неудачных кругов подряд расписание переживает, прежде чем остановиться

@@ -208,6 +208,7 @@ GET /api/miniapp/mass_publish/targets
 GET /api/miniapp/mass_targets
 GET /api/miniapp/mesh/task/{task_id}
 GET /api/miniapp/mesh/tasks
+GET /api/miniapp/monitor/status
 GET /api/miniapp/mp/admin/providers
 GET /api/miniapp/mp/catalog
 GET /api/miniapp/mp/mine
@@ -502,6 +503,7 @@ HEAD /api/miniapp/mass_publish/targets
 HEAD /api/miniapp/mass_targets
 HEAD /api/miniapp/mesh/task/{task_id}
 HEAD /api/miniapp/mesh/tasks
+HEAD /api/miniapp/monitor/status
 HEAD /api/miniapp/mp/admin/providers
 HEAD /api/miniapp/mp/catalog
 HEAD /api/miniapp/mp/mine
@@ -832,6 +834,7 @@ POST /api/miniapp/mass_publish
 POST /api/miniapp/mass_report
 POST /api/miniapp/mesh/task
 POST /api/miniapp/mesh/task/{task_id}/drop
+POST /api/miniapp/monitor/toggle
 POST /api/miniapp/mp/admin/provider/{pid}/status
 POST /api/miniapp/mp/provider/{pid}/apikey
 POST /api/miniapp/mp/provider/{pid}/apikey/{kid}/revoke

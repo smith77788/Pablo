@@ -45,8 +45,77 @@ async function _shLoadBody() {
   // цели мягко: не смогли — просто не показываем блок, основной экран важнее.
   let g = null;
   try { g = await api('/api/miniapp/check_bot_geoban/targets'); } catch (e) { g = null; }
-  body.innerHTML = _shRender(t) + _shGeoRender(g);
+  // Авто-мониторинг: периодические фоновые проверки. Тоже мягко.
+  let mon = null;
+  try { mon = await api('/api/miniapp/monitor/status'); } catch (e) { mon = null; }
+  body.innerHTML = _shRender(t) + _shGeoRender(g) + _shMonRender(mon);
   loadShieldOps();
+}
+
+// Авто-мониторинг флота: периодические фоновые проверки (здоровье, ограничения,
+// гео-бан). Включил — и флот проверяется сам на заданном интервале, находки
+// идут в пульс. Переиспользует рекуррентные операции op_worker.
+function _shMonFmtInterval(min) {
+  const m = Number(min) || 0;
+  if (m % (60 * 24) === 0 && m >= 60 * 24) { const d = m / (60 * 24); return 'каждые ' + d + ' ' + _shDayPlural(d); }
+  if (m % 60 === 0) { const h = m / 60; return 'каждые ' + h + ' ' + _shHourPlural(h); }
+  return 'каждые ' + m + ' мин';
+}
+function _shHourPlural(n) { const a = n % 10, b = n % 100; if (a === 1 && b !== 11) return 'час'; if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return 'часа'; return 'часов'; }
+function _shDayPlural(n) { const a = n % 10, b = n % 100; if (a === 1 && b !== 11) return 'день'; if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return 'дня'; return 'дней'; }
+
+function _shMonRender(mon) {
+  if (!mon || !mon.monitors) return '';
+  const m = mon.monitors;
+  const kinds = ['health', 'restrictions', 'geoban'];
+  let rows = '';
+  kinds.forEach(function (k) {
+    const it = m[k]; if (!it) return;
+    const on = !!it.enabled;
+    const sub = on ? ('✅ Вкл · ' + _shMonFmtInterval(it.interval_min)) : 'Выкл';
+    const btn = on
+      ? '<button class="btn btn-s" onclick="shMonToggle(\'' + k + '\',false)" style="flex:0 0 auto;font-size:12px;padding:8px 12px">Выключить</button>'
+      : '<button class="btn btn-p" onclick="shMonToggle(\'' + k + '\',true)" style="flex:0 0 auto;font-size:12px;padding:8px 12px">Включить</button>';
+    rows +=
+      '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--sep)">' +
+        '<div style="flex:1 1 auto;min-width:0">' +
+          '<div style="font-size:14px;font-weight:600">' + esc(it.label || k) + '</div>' +
+          '<div style="font-size:12px;color:' + (on ? 'var(--green)' : 'var(--hint)') + '">' + sub + '</div>' +
+        '</div>' + btn +
+      '</div>';
+  });
+  return '' +
+    '<div class="sec">🔁 Авто-мониторинг флота</div>' +
+    '<div class="lst" style="padding:14px">' +
+      '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin-bottom:6px">' +
+        'Проверяйте флот автоматически на заданном интервале — находки идут в пульс. Ничего не меняет.' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
+        '<span style="font-size:13px;color:var(--hint)">Интервал:</span>' +
+        '<select id="shMonInterval" class="sel" style="flex:1 1 auto;padding:8px;font-size:13px">' +
+          '<option value="720" selected>каждые 12 часов</option>' +
+          '<option value="1440">каждые сутки</option>' +
+          '<option value="4320">каждые 3 дня</option>' +
+          '<option value="10080">каждую неделю</option>' +
+        '</select>' +
+      '</div>' +
+      rows +
+    '</div>';
+}
+
+async function shMonToggle(kind, enabled) {
+  let interval = 720;
+  const sel = document.getElementById('shMonInterval');
+  if (sel && enabled) { const v = parseInt(sel.value, 10); if (Number.isFinite(v)) interval = v; }
+  try {
+    await api('/api/miniapp/monitor/toggle', { method: 'POST', body: JSON.stringify({ kind: kind, enabled: enabled, interval_min: interval }) });
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast(enabled ? '🔁 Авто-мониторинг включён' : '⏹ Авто-мониторинг выключен');
+    _shLoadBody();
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    toast((e && e.message) || 'Не удалось изменить мониторинг');
+  }
 }
 
 // Блок проверки гео-бана ботов: ограничен ли бот в ОДНИХ странах и доступен в
