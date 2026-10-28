@@ -334,6 +334,7 @@ GET /api/miniapp/vault/recent
 GET /api/miniapp/vault/search
 GET /api/miniapp/vault/settings
 GET /api/miniapp/vault/status
+GET /api/miniapp/vlayer/analytics
 GET /api/miniapp/vlayer/entity/{entity_type}/{entity_id}
 GET /api/miniapp/vlayer/overview
 GET /api/miniapp/warmup
@@ -629,6 +630,7 @@ HEAD /api/miniapp/vault/recent
 HEAD /api/miniapp/vault/search
 HEAD /api/miniapp/vault/settings
 HEAD /api/miniapp/vault/status
+HEAD /api/miniapp/vlayer/analytics
 HEAD /api/miniapp/vlayer/entity/{entity_type}/{entity_id}
 HEAD /api/miniapp/vlayer/overview
 HEAD /api/miniapp/warmup

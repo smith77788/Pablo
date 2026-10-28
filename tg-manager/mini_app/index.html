@@ -22140,7 +22140,12 @@ async function openVLayer() {
   push('s-vlayer');
   txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/vlayer/overview');
+    // Тренды тянем параллельно и мягко (catch→null): аналитика не должна рушить
+    // основную сводку, если по ней что-то пойдёт не так.
+    const [d, an] = await Promise.all([
+      api('/api/miniapp/vlayer/overview'),
+      api('/api/miniapp/vlayer/analytics').catch(() => null),
+    ]);
     const funnel = d.funnel || [];
     const events = d.events || [];
     const hot = d.hot || [];
@@ -22236,6 +22241,9 @@ async function openVLayer() {
       </div>`;
     }).join('');
     }
+    // Тренды и конверсия — КАК движется аудитория (шаг 3). Сразу после воронки:
+    // она отвечает «где сейчас», а это — «куда и как быстро».
+    html += _vlAnalyticsHtml(an);
     // «Горячие» — кого дожимать первыми.
     if (hot.length) {
       html += '<div class="sec">🔥 Дожать в первую очередь</div>';
@@ -22279,6 +22287,43 @@ function _vlWho(x) {
               conversation:'Диалог', network:'Сеть' }[x && x.entity_type] || 'Сущность';
   const id = String((x && x.entity_id) || '');
   return t + ' ' + (id.length > 10 ? id.slice(0, 8) + '…' : id);
+}
+
+// Тренды слоя (шаг 3): моментум 7 дней, конверсия воронки, лучшие источники.
+// Пусто/ошибка аналитики → пустая строка, основная сводка не страдает.
+function _vlAnalyticsHtml(an) {
+  if (!an) return '';
+  let h = '';
+  const m = an.momentum;
+  if (m && (m.hot_now || m.hot_prev || m.lost_now || m.lost_prev)) {
+    const V = { heating: ['🔥','Аудитория разогревается','var(--red)'],
+                cooling: ['🧊','Аудитория остывает','var(--hint)'],
+                mixed:   ['➖','Без явного тренда','var(--orange)'] }[m.verdict] || ['➖','',''];
+    const arrow = x => x === 'up' ? '↑' : x === 'down' ? '↓' : '→';
+    h += '<div class="sec">📈 Тренды · 7 дней против прошлых</div>';
+    h += `<div class="card" style="border-left:3px solid ${V[2]};margin-bottom:8px">
+      <div style="font-weight:600;font-size:14px">${V[0]} ${esc(V[1])}</div>
+      <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.5">
+        Дошли до «готов купить»: <b>${num(m.hot_now)}</b> ${arrow(m.hot_dir)} (было ${num(m.hot_prev)})<br>
+        Ушли в потерю: <b>${num(m.lost_now)}</b> ${arrow(m.lost_dir)} (было ${num(m.lost_prev)})
+      </div></div>`;
+  }
+  const conv = (an.conversion || []).filter(c => c.reached > 0);
+  if (conv.length) {
+    h += '<div class="sec">Конверсия воронки · дошли до ступени</div><div class="lst">';
+    h += conv.map(c => `<div class="row"><div class="row-body">
+      <div class="row-name">${esc(c.label)} · ${num(c.reached)}</div>
+      ${c.conv_pct != null ? `<div class="row-val">конверсия с прошлой ступени: ${c.conv_pct}%</div>` : ''}
+    </div></div>`).join('') + '</div>';
+  }
+  const src = an.by_source || [];
+  if (src.length) {
+    h += '<div class="sec">Лучшие источники · довели до квалификации+</div><div class="lst">';
+    h += src.map(s => `<div class="row"><div class="row-body">
+      <div class="row-name">${esc(s.label)}</div>
+      <div class="row-val">${num(s.count)} чел.</div></div></div>`).join('') + '</div>';
+  }
+  return h;
 }
 
 // Таймер распада состояния: главный смысл слоя — состояние тает без активности.

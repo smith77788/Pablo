@@ -5469,6 +5469,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("По этой сущности слой ещё ничего не знает", 404)
         return _json_resp({"ok": True, **data})
 
+    async def vlayer_analytics(request: web.Request) -> web.Response:
+        """Тренды слоя: конверсия воронки, моментум 7д и лучшие источники.
+
+        Не «где аудитория сейчас» (это overview), а КАК она движется: сколько
+        интереса доходит до «готов купить», греемся мы или остываем за неделю,
+        какой бот/источник довёл больше людей до верхних ступеней. Read-only.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        try:
+            return _json_resp({"ok": True, **await _vl.analytics(pool, uid)})
+        except Exception:
+            log.exception("vlayer_analytics uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     # ── «Нотариус»: заверение рекламных размещений ────────────────────────
 
 
@@ -8063,6 +8080,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/vlayer/overview", vlayer_overview)
     app.router.add_get("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}",
                        vlayer_entity)
+    app.router.add_get("/api/miniapp/vlayer/analytics", vlayer_analytics)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
     app.router.add_post("/api/miniapp/rehab/{acc_id}/{action}", rehab_action)
     # A/B Experiments

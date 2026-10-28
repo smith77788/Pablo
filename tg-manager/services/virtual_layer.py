@@ -1225,3 +1225,138 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
         log.debug("virtual_layer.overview bots failed owner=%s", owner_id)
     return out
 
+
+# ── Аналитика и тренды (read-only) ─────────────────────────────────────────────
+# Шаг 3 усиления модуля: не «где аудитория сейчас», а КАК она движется. Считаем
+# из истории переходов (virtual_state_history) и текущих состояний — без снимков,
+# которых продукт не хранит. Чистые помощники отделены от БД и проверяются тестом.
+
+# Ступени восходящей воронки для конверсии (new/lost — не ступени подъёма).
+CONVERSION_RUNGS = (("curious", 1), ("interested", 2), ("qualified", 3),
+                    ("ready", 4), ("purchased", 5))
+
+
+def conversion_from_maxranks(rows) -> list[dict]:
+    """rows: [{maxr, c}] — макс. достигнутый ранг на сущность → сколько сущностей.
+
+    Отдаёт воронку «дошли ХОТЯ БЫ до ступени» + конверсию от предыдущей ступени.
+    «Дошли до ready» включает тех, кто ушёл дальше в purchased, поэтому считаем по
+    МАКСИМУМУ ранга на сущность — суммировать «вошедших в каждую ступень» нельзя,
+    это задвоит одного человека.
+    """
+    by: dict[int, int] = {}
+    for r in rows:
+        try:
+            by[int(r["maxr"])] = int(r["c"])
+        except (TypeError, ValueError, KeyError):
+            continue
+    out: list[dict] = []
+    prev = None
+    for value, rk in CONVERSION_RUNGS:
+        reached = sum(c for m, c in by.items() if m >= rk)
+        conv = round(reached / prev * 100) if (prev and prev > 0) else None
+        out.append({"value": value, "label": VALUE_LABEL.get(value, value),
+                    "reached": reached, "conv_pct": conv})
+        prev = reached
+    return out
+
+
+def momentum_delta(row) -> dict:
+    """row: {hot_now, hot_prev, lost_now, lost_prev} (7 дней против прошлых 7).
+
+    Греемся или остываем: новых «готов купить» стало больше при не выросших
+    потерях — heating; меньше при не упавших потерях — cooling; иначе mixed.
+    """
+    def _i(k):
+        try:
+            return int((row or {}).get(k) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    hn, hp, ln, lp = _i("hot_now"), _i("hot_prev"), _i("lost_now"), _i("lost_prev")
+
+    def _dir(now, prev):
+        return "up" if now > prev else "down" if now < prev else "flat"
+
+    if hn > hp and ln <= lp:
+        verdict = "heating"
+    elif hn < hp and ln >= lp:
+        verdict = "cooling"
+    else:
+        verdict = "mixed"
+    return {"hot_now": hn, "hot_prev": hp, "hot_dir": _dir(hn, hp),
+            "lost_now": ln, "lost_prev": lp, "lost_dir": _dir(ln, lp),
+            "verdict": verdict}
+
+
+def _source_label(source, bot_name=None) -> str:
+    """Источник сигнала человеку: bot_<id> → имя бота/«Бот N», иначе как есть."""
+    s = str(source or "")
+    m = _BOT_SOURCE.match(s)
+    if m:
+        if bot_name:
+            bn = str(bot_name)
+            return bn if bn.startswith("@") else "@" + bn
+        return "Бот " + m.group(1)
+    return s or "—"
+
+
+async def analytics(pool, owner_id: int, *, entity_type: str = USER,
+                    state_key: str = "funnel") -> dict:
+    """Тренды слоя для экрана: конверсия воронки, моментум 7д, лучшие источники.
+
+    Read-only, fail-open по каждому блоку (пустой блок вместо падения экрана).
+    """
+    out = {"conversion": [], "momentum": None, "by_source": []}
+    try:
+        rows = await pool.fetch(
+            "WITH e AS (SELECT entity_id, MAX(CASE to_value "
+            "WHEN 'curious' THEN 1 WHEN 'interested' THEN 2 WHEN 'qualified' THEN 3 "
+            "WHEN 'ready' THEN 4 WHEN 'purchased' THEN 5 ELSE 0 END) AS maxr "
+            "FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
+            "AND state_key=$3 GROUP BY entity_id) "
+            "SELECT maxr, COUNT(*) AS c FROM e GROUP BY maxr",
+            owner_id, entity_type, state_key)
+        out["conversion"] = conversion_from_maxranks([dict(r) for r in rows])
+    except Exception:
+        log.debug("virtual_layer.analytics conversion failed owner=%s", owner_id)
+    try:
+        row = await pool.fetchrow(
+            "SELECT "
+            "COUNT(DISTINCT entity_id) FILTER (WHERE to_value IN ('ready','purchased') "
+            "  AND created_at >= now()-interval '7 days') AS hot_now, "
+            "COUNT(DISTINCT entity_id) FILTER (WHERE to_value IN ('ready','purchased') "
+            "  AND created_at >= now()-interval '14 days' "
+            "  AND created_at < now()-interval '7 days') AS hot_prev, "
+            "COUNT(DISTINCT entity_id) FILTER (WHERE to_value='lost' "
+            "  AND created_at >= now()-interval '7 days') AS lost_now, "
+            "COUNT(DISTINCT entity_id) FILTER (WHERE to_value='lost' "
+            "  AND created_at >= now()-interval '14 days' "
+            "  AND created_at < now()-interval '7 days') AS lost_prev "
+            "FROM virtual_state_history "
+            "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3",
+            owner_id, entity_type, state_key)
+        if row:
+            out["momentum"] = momentum_delta(dict(row))
+    except Exception:
+        log.debug("virtual_layer.analytics momentum failed owner=%s", owner_id)
+    try:
+        src_rows = await pool.fetch(
+            "SELECT vs.source AS source, COUNT(*) AS c, "
+            "COALESCE(mb.username, mb.first_name) AS bot_name "
+            "FROM virtual_states vs "
+            "LEFT JOIN managed_bots mb ON ('bot_' || mb.bot_id::text) = vs.source "
+            "WHERE vs.owner_id=$1 AND vs.entity_type=$2 AND vs.state_key=$3 "
+            "AND vs.value IN ('qualified','ready','purchased') "
+            "AND (vs.expires_at IS NULL OR vs.expires_at > now()) "
+            "AND vs.source IS NOT NULL "
+            "GROUP BY vs.source, bot_name ORDER BY c DESC LIMIT 10",
+            owner_id, entity_type, state_key)
+        out["by_source"] = [
+            {"source": r["source"], "count": int(r["c"]),
+             "label": _source_label(r["source"], r["bot_name"])}
+            for r in src_rows]
+    except Exception:
+        log.debug("virtual_layer.analytics by_source failed owner=%s", owner_id)
+    return out
+
