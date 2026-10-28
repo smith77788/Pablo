@@ -1127,7 +1127,7 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
     Лента виртуальных событий берётся отдельно из spine (это его память),
     поэтому здесь только состояния. Fail-open: пустая сводка вместо падения.
     """
-    out = {"funnel": [], "ladder": [], "hot": [], "total": 0,
+    out = {"funnel": [], "ladder": [], "hot": [], "cooling": [], "total": 0,
            "audience": None, "bots": []}
     try:
         # Просроченность спрашиваем вместе со значением: распределение
@@ -1196,6 +1196,32 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
                 h["name"] = name
     except Exception:
         log.debug("virtual_layer.overview hot failed owner=%s", owner_id)
+    # «Вот-вот остынут»: живые состояния interested+ со сроком в ближайшие сутки.
+    # Срочность, которой не было: распад снимет их на ближайшем проходе, и дожать
+    # надо ДО него, а не после — тогда это уже реактивация потерянного. Соседний
+    # к «дожать первыми» список, но отсортированный по близости распада.
+    try:
+        cool_rows = await pool.fetch(
+            "SELECT entity_type, entity_id, value, confidence, expires_at "
+            "FROM virtual_states WHERE owner_id=$1 AND state_key=$2 "
+            "AND value = ANY($3::text[]) "
+            "AND expires_at IS NOT NULL AND expires_at > now() "
+            "AND expires_at <= now() + interval '24 hours' "
+            "ORDER BY expires_at ASC LIMIT 30",
+            owner_id, state_key, ["interested", "qualified", "ready"])
+        out["cooling"] = [
+            {"entity_type": r["entity_type"], "entity_id": r["entity_id"],
+             "value": r["value"], "label": VALUE_LABEL.get(r["value"], r["value"]),
+             "confidence": round(float(r["confidence"] or 0), 2),
+             "expires_at": r["expires_at"]}
+            for r in cool_rows]
+        names = await resolve_names(pool, owner_id, out["cooling"])
+        for c in out["cooling"]:
+            name = names.get(str(c["entity_id"]))
+            if name:
+                c["name"] = name
+    except Exception:
+        log.debug("virtual_layer.overview cooling failed owner=%s", owner_id)
     # Температура аудитории (каскад): hot|warm|None.
     try:
         aud = await get_state(pool, owner_id, NETWORK, "audience", state_key)

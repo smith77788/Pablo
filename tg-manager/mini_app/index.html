@@ -22173,6 +22173,22 @@ async function openVLayer() {
         что делать.
       </div>
     </details>`;
+    // «Вот-вот остынут» — срочное, поэтому вверху: эти люди распадутся вниз в
+    // ближайшие сутки, дожать надо ДО распада. Каждый открывается в карточку.
+    const cooling = d.cooling || [];
+    if (cooling.length) {
+      html += '<div class="sec">⏳ Вот-вот остынут · дожать сейчас</div>';
+      html += '<div style="padding:0 16px 6px;font-size:12px;color:var(--hint)">Распадутся на ступень вниз в ближайшие сутки, если не подтвердить интерес.</div>';
+      html += '<div class="lst">' + cooling.slice(0, 30).map(c => {
+        const who = c.name || _vlWho(c);
+        const left = _vlDecayText({expires_at: c.expires_at});
+        return `<div class="row" onclick="openVLayerEntity('${esc(String(c.entity_type||'user'))}','${esc(String(c.entity_id))}')" style="cursor:pointer">
+          <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">⏳</div>
+          <div class="row-body"><div class="row-name">${esc(who)}</div>
+            <div class="row-val">${esc(c.label)}${left ? ' · ' + esc(left) : ''} · история →</div></div>
+        </div>`;
+      }).join('') + '</div>';
+    }
     // Воронка: полоски по рунгам.
     const max = Math.max(...funnel.map(f => f.count), 1);
     if (d.audience) {

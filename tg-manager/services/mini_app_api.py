@@ -5426,8 +5426,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     e["name"] = name
         except Exception:
             log.debug("vlayer_overview events failed uid=%s", uid)
+        cooling = ov.get("cooling") or []
+        for c in cooling:
+            if c.get("expires_at") is not None:
+                try:
+                    c["expires_at"] = c["expires_at"].isoformat()
+                except (AttributeError, ValueError):
+                    c["expires_at"] = None
         return _json_resp({"ok": True, "funnel": ov["funnel"], "hot": ov["hot"],
-                           "ladder": ov.get("ladder") or [],
+                           "ladder": ov.get("ladder") or [], "cooling": cooling,
                            "total": ov["total"], "audience": ov.get("audience"),
                            "bots": ov.get("bots") or [], "events": events})
 
