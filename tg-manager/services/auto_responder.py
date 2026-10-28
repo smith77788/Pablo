@@ -52,7 +52,55 @@ _DEAD_TOKEN_MAX_COOLDOWN = 3600.0  # cap at 1h between retries
 # в цикл — впишите его и сюда, иначе Telegram не доставит его этому опросу.
 _MANAGED_BOT_ALLOWED_UPDATES = [
     "message", "callback_query", "my_chat_member", "message_reaction",
+    # Больше входных сигналов для «Модели поведения»: голос в опросе и
+    # вступление/выход участника (чаты/каналы, где бот админ). Платёж ловим из
+    # поля message.successful_payment — отдельного типа ему не нужно. Намеренно
+    # НЕ берём pre_checkout_query: его пришлось бы отвечать за 10 сек, иначе
+    # оплата срывается — а это не наша зона здесь.
+    "poll_answer", "chat_member",
 ]
+
+
+def poll_vote_signal(pa: dict):
+    """Из poll_answer — кто ПРОГОЛОСОВАЛ (вовлечённость). Отзыв голоса (пустой
+    option_ids) не считаем; анонимный голос (от чата, без user) пропускаем.
+    Возвращает (tg_user_id, who) или (None, None). Чистая — под регресс."""
+    if not isinstance(pa, dict):
+        return None, None
+    if not (pa.get("option_ids") or []):
+        return None, None
+    user = pa.get("user") or {}
+    uid = user.get("id")
+    return (uid, user) if uid else (None, None)
+
+
+_CM_IN = {"member", "administrator", "creator", "restricted"}
+_CM_OUT = {"left", "kicked"}
+
+
+def chat_member_signal(cm: dict):
+    """Из chat_member (участник чата/канала, где бот админ): вступил или вышел.
+
+    Вступил/вернулся → «opened» (слабый — вовлечённость); вышел/удалён →
+    «unsubscribed» (негатив). Ботов и анонимов пропускаем. Возвращает
+    (tg_user_id, signal, who) или (None, None, None). Чистая — под регресс.
+    """
+    if not isinstance(cm, dict):
+        return None, None, None
+    old = ((cm.get("old_chat_member") or {}).get("status") or "")
+    newm = cm.get("new_chat_member") or {}
+    new = (newm.get("status") or "")
+    if not new or new == old:
+        return None, None, None
+    user = newm.get("user") or {}
+    uid = user.get("id")
+    if not uid or user.get("is_bot"):
+        return None, None, None
+    if new in _CM_IN and old not in _CM_IN:
+        return uid, "opened", user
+    if new in _CM_OUT and old in _CM_IN:
+        return uid, "unsubscribed", user
+    return None, None, None
 
 
 def reaction_signal(mr: dict):
@@ -693,6 +741,24 @@ async def _process_bot(
                     await _vl_signal(_ruid, "reacted", 0.5, _rwho)
                 continue
 
+            # Голос в опросе бота — осознанная вовлечённость.
+            pa = upd.get("poll_answer")
+            if pa:
+                _puid, _pwho = poll_vote_signal(pa)
+                if _puid:
+                    await _vl_signal(_puid, "reacted", 0.5, _pwho)
+                continue
+
+            # Участник вступил/вышел из чата/канала, где бот админ: вступление —
+            # вовлечённость, выход — отписка (негатив двигает в «потерян»).
+            cm = upd.get("chat_member")
+            if cm:
+                _cuid, _csig, _cwho = chat_member_signal(cm)
+                if _cuid:
+                    await _vl_signal(_cuid, _csig,
+                                     0.5 if _csig == "opened" else 0.9, _cwho)
+                continue
+
             # Человек заблокировал бота или вернулся. Telegram шлёт это сам,
             # в наборе обновлений по умолчанию, — а продукт выбрасывал апдейт
             # не глядя. Из-за этого bot_users.is_blocked не выставлялся НИ
@@ -730,6 +796,12 @@ async def _process_bot(
             if not _is_dm_update(upd):
                 continue
             chat_id = msg.get("chat", {}).get("id")
+            # Оплата через Telegram Payments — сильнейший сигнал: человек КУПИЛ.
+            # Это поле message, приходит и без текста, поэтому ловим ДО проверки
+            # текста ниже (иначе платёж без подписи выпал бы молча).
+            if msg.get("successful_payment"):
+                _pf = msg.get("from") or {}
+                await _vl_signal(_pf.get("id"), "paid", 0.98, _pf)
             text = msg.get("text", "")
             if not chat_id or not text:
                 continue
@@ -772,6 +844,14 @@ async def _process_bot(
             # обновит уверенность и отодвинет распад.
             await _vl_signal(chat_id, "opened" if is_start else "replied",
                              0.5 if is_start else 0.6, from_user)
+            # Встроенное намерение из текста — и в ЛС бота, не только в Хранилище:
+            # «сколько стоит»/«как оплатить» в переписке с ботом двигают выше
+            # общего «ответил» (тот же разборщик, что у Хранилища/аккаунтов).
+            if not is_start:
+                from services.intent_sensor import builtin_intent_signal
+                _bi = builtin_intent_signal(text)
+                if _bi:
+                    await _vl_signal(chat_id, _bi, 0.7, from_user)
 
             # Track user activity — returns True for first-ever message (new user)
             is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)

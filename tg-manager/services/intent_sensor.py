@@ -319,6 +319,41 @@ def _match(text: str, rules: list[dict]) -> list[dict]:
     return [r for r in rules if _phrase_matches(r.get("phrase", ""), low)]
 
 
+# Встроенное распознавание НАМЕРЕНИЯ из текста — работает у ВСЕХ владельцев без
+# ручных правил (их правила `vault_intent_rules` остаются сверху). Раньше из
+# текста слой получал только общий «ответил»; теперь частые намерения двигают по
+# воронке сами. Сильнейшее побеждает: оплата > цена > вопрос.
+_PAY_PAT = _re.compile(
+    r"как\s+оплат|куда\s+(плат|перев)|как\s+(купить|заказать|оформить)"
+    r"|оформит[ьъ]?\s+заказ|реквизит|номер\s+карт|скинь(те)?\s+сч[её]т"
+    r"|готов\s+(оплат|купить|заказать)", _re.I)
+_PRICE_PAT = _re.compile(
+    r"сколько\s+стоит|ско[лl]ько\s+это|как(ая|ие|ой)\s+цен|\bцен[аыу]\b"
+    r"|по\s*ч[её]м|сто[ия]мост|\bпрайс\b|\bprice\b", _re.I)
+_QUESTION_PAT = _re.compile(
+    r"\?|^\s*(как|что|когда|где|куда|почему|зачем|сколько|можно\s+ли|есть\s+ли"
+    r"|а\s+если)\b", _re.I)
+
+
+def builtin_intent_signal(text: str):
+    """Намерение из текста без ручных правил. Возвращает имя сигнала или None.
+
+    Сильнейшее намерение побеждает: «как оплатить» (asked_how_to_pay, → готов
+    купить) сильнее «сколько стоит» (asked_price, → интерес), а оно — сильнее
+    вопроса (asked_question, → присматривается).
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+    if _PAY_PAT.search(t):
+        return "asked_how_to_pay"
+    if _PRICE_PAT.search(t):
+        return "asked_price"
+    if _QUESTION_PAT.search(t):
+        return "asked_question"
+    return None
+
+
 async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
                         text: str, notifier=None) -> dict:
     """Обработать одно ВХОДЯЩЕЕ сообщение. Возвращает {matched, stage, tags,
@@ -339,11 +374,21 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
         # всегда (контакт заводился ниже и только при совпадении правила), то
         # есть самое важное подтверждение — «человек ответил» — слой не видел,
         # а у владельца без настроенных правил не видел вообще ничего.
+        _who = {"username": peer.get("peer_username"),
+                "first_name": peer.get("peer_name")}
         await virtual_layer.signal_for_telegram_user(
             pool, owner_id, peer.get("peer_user_id"), "replied",
-            confidence=0.6, source="vault",
-            identity={"username": peer.get("peer_username"),
-                      "first_name": peer.get("peer_name")})
+            confidence=0.6, source="vault", identity=_who)
+        # Встроенное намерение из текста (цена/оплата/вопрос) — сверх общего
+        # «ответил», без ручных правил. Контакт уже заведён сигналом «ответил»,
+        # так что это просто поднимает его выше по воронке, где текст об этом
+        # прямо говорит. Работает и для Хранилища, и для аккаунт-стороны
+        # (audience_listener зовёт тот же scan_incoming).
+        _intent = builtin_intent_signal(text)
+        if _intent:
+            await virtual_layer.signal_for_telegram_user(
+                pool, owner_id, peer.get("peer_user_id"), _intent,
+                confidence=0.7, source="vault", identity=_who)
     except Exception:
         log.debug("intent_sensor: virtual_layer replied failed owner=%s", owner_id)
 
