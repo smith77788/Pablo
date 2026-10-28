@@ -1396,11 +1396,25 @@ async def segment(pool, owner_id: int, value: str, *, entity_type: str = USER,
     рунг (effective_value), поэтому ступень V собирают и сырое V (не просрочено), и
     строки на рунг выше, которые просрочены и потому распались до V. Fail-open.
     """
-    out = {"value": value, "label": VALUE_LABEL.get(value, value), "people": []}
+    out = {"value": value, "label": VALUE_LABEL.get(value, value),
+           "people": [], "total": 0}
     candidates = [value]
     rk = rank(value)
     if 0 <= rk < len(LADDER) - 1:
         candidates.append(LADDER[rk + 1])   # на рунг выше — просроченное даст V
+    # Настоящий размер ступени — чтобы экран честно сказал «показано X из Y», а не
+    # выдал потолок за весь список (принцип проекта: число за потолком обязано быть
+    # названо). Считаем тем же эффективным значением, что и воронка.
+    try:
+        cnt = await pool.fetch(
+            "SELECT value, (expires_at IS NOT NULL AND expires_at <= now()) AS expired, "
+            "COUNT(*) AS c FROM virtual_states WHERE owner_id=$1 AND entity_type=$2 "
+            "AND state_key=$3 AND value = ANY($4::text[]) GROUP BY value, expired",
+            owner_id, entity_type, state_key, candidates)
+        out["total"] = sum(int(r["c"]) for r in cnt
+                           if effective_value(r["value"], bool(r["expired"])) == value)
+    except Exception:
+        log.debug("virtual_layer.segment total failed owner=%s", owner_id)
     try:
         rows = await pool.fetch(
             "SELECT entity_id, value, confidence, expires_at, "

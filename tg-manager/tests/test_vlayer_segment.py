@@ -16,12 +16,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class _Pool:
-    def __init__(self, state_rows, names):
+    def __init__(self, state_rows, names=None):
         self._state = state_rows
-        self._names = names        # eid -> name
+        self._names = names or {}   # eid -> name
 
     async def fetch(self, q, *a):
-        if "FROM virtual_states" in q:
+        if "GROUP BY value, expired" in q:          # агрегат для total
+            agg = {}
+            for r in self._state:
+                k = (r["value"], r["expired"])
+                agg[k] = agg.get(k, 0) + 1
+            return [{"value": v, "expired": e, "c": c} for (v, e), c in agg.items()]
+        if "FROM virtual_states" in q:              # сам список
             return self._state
         if "unified_contacts" in q:
             return [{"eid": k, "name": v} for k, v in self._names.items()]
@@ -56,6 +62,14 @@ def test_segment_collects_raw_and_decayed_rows():
     names = {p["entity_id"]: p.get("name") for p in d["people"]}
     assert names["a"] == "Аня" and names["b"] == "Борис"
     assert all(p["ttl_hours"] == 96 for p in d["people"])   # TTL «interested» = 96ч
+    assert d["total"] == 2                                    # настоящий размер ступени
+
+
+def test_segment_total_is_honest_when_truncated():
+    # потолок не должен выдаваться за весь список: total считает всех, people — срез
+    rows = [_row(f"u{i}", "interested", False) for i in range(5)]
+    d = _run(V.segment(_Pool(rows), 7, "interested", limit=2))
+    assert len(d["people"]) == 2 and d["total"] == 5
 
 
 def test_segment_terminal_value_has_no_rung_above():
@@ -90,3 +104,5 @@ def test_screen_rungs_open_the_segment():
     assert "/api/miniapp/vlayer/segment/" in html
     # из списка человек открывается в свою карточку
     assert "кто это →" in html
+    # честный потолок: «показано X из Y», а не потолок как весь список
+    assert "показано ${num(people.length)} из ${num(total)}" in html

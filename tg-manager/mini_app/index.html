@@ -22372,7 +22372,11 @@ async function openVLayerSegment(value) {
     const people = d.people || [];
     let html = `<div class="row" onclick="openVLayer()" style="cursor:pointer">
       <div class="row-body"><div class="row-name">← К сводке модели</div></div></div>`;
-    html += `<div class="sec">${esc(d.label || value)} · ${num(people.length)} чел.</div>`;
+    const total = (d.total != null) ? d.total : people.length;
+    const shown = (total > people.length)
+      ? `показано ${num(people.length)} из ${num(total)}`
+      : `${num(total)} чел.`;
+    html += `<div class="sec">${esc(d.label || value)} · ${shown}</div>`;
     if (!people.length) {
       html += empty('🤷','Пусто','На этой ступени сейчас никого нет');
     } else {
