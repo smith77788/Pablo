@@ -48,7 +48,12 @@ class _FakeClient:
 
 async def _run(effects, refs):
     client = _FakeClient(effects)
+    # mark_online — фоновый онлайн-статус в connect_client (действие только из
+    # онлайна). К исходам инвайта он отношения не имеет, но идёт через тот же
+    # client(req) и съедал бы эффект. Этот тест про флуд инвайта — присутствие
+    # выключаем, чтобы эффекты описывали ровно приглашения.
     with patch("services.account_manager._make_client", return_value=client), \
+         patch("services.account_manager.mark_online", AsyncMock(return_value=True)), \
          patch.object(inv, "_resolve_group_entity", AsyncMock(return_value=object())), \
          patch.object(inv.asyncio, "sleep", AsyncMock()):
         # bulk=False закрепляет ПРЕДМЕТ этих проверок — поштучный путь, где у
