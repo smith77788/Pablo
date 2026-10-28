@@ -42,6 +42,39 @@ _dead_token_cooldown: dict[int, tuple[int, float]] = {}
 _DEAD_TOKEN_BASE_COOLDOWN = 60.0  # seconds
 _DEAD_TOKEN_MAX_COOLDOWN = 3600.0  # cap at 1h between retries
 
+# Типы обновлений, которые ОПРОС дочерних ботов берёт у Telegram. Явный список
+# ЗАМЕНЯЕТ набор по умолчанию, поэтому здесь перечислено ВСЁ, что обрабатывает
+# цикл ниже (message / callback_query / my_chat_member), плюс message_reaction —
+# эмодзи-реакции Telegram по умолчанию НЕ присылает, а это частая лёгкая
+# вовлечённость для «Модели поведения». Бизнес-апдейты (Echo Vault) сюда НЕ
+# входят намеренно: их доставляет главный бот (main.py dp), не этот опрос, —
+# поэтому сужение набора «Хранилище» не задевает. Добавите обработку нового типа
+# в цикл — впишите его и сюда, иначе Telegram не доставит его этому опросу.
+_MANAGED_BOT_ALLOWED_UPDATES = [
+    "message", "callback_query", "my_chat_member", "message_reaction",
+]
+
+
+def reaction_signal(mr: dict):
+    """Из апдейта message_reaction — кто ДОБАВИЛ/сменил реакцию (вовлечённость).
+
+    Сигналим на добавление или смену (new_reaction непуст и отличается от old):
+    снятие реакции интересом не считаем. Анонимную реакцию (от чата, без user)
+    пропускаем — некого двигать по воронке. Возвращает (tg_user_id, who) или
+    (None, None). Чистая функция — проверяется регрессом без Telegram.
+    """
+    if not isinstance(mr, dict):
+        return None, None
+    new = mr.get("new_reaction") or []
+    old = mr.get("old_reaction") or []
+    if not new or new == old:
+        return None, None
+    user = mr.get("user") or {}
+    uid = user.get("id")
+    if not uid:
+        return None, None
+    return uid, user
+
 # Троттлинг уведомлений «новый подписчик» ПО БОТУ (анти-накрутка). Раньше каждый
 # новый юзер слал владельцу отдельный DM через main-bot; при накрутке ботами
 # поток из тысяч фейков насыщал main-bot (FloodWait) — и Infragram переставал
@@ -204,7 +237,8 @@ async def _init_offset(
     pool: asyncpg.Pool, http: aiohttp.ClientSession, bot_id: int, token: str
 ) -> int:
     """On first run: skip all pending updates, store current max_id as start point."""
-    data = await bot_api._call(http, token, "getUpdates", offset=-1, limit=1, timeout=0)
+    data = await bot_api._call(http, token, "getUpdates", offset=-1, limit=1, timeout=0,
+                               allowed_updates=_MANAGED_BOT_ALLOWED_UPDATES)
     updates = data.get("result", []) if data.get("ok") else []
     if updates:
         max_id = updates[-1]["update_id"]
@@ -517,7 +551,8 @@ async def _process_bot(
             await _init_offset(pool, http, bot_id, token)
             return
         data = await bot_api._call(
-            http, token, "getUpdates", offset=offset + 1, limit=100, timeout=0
+            http, token, "getUpdates", offset=offset + 1, limit=100, timeout=0,
+            allowed_updates=_MANAGED_BOT_ALLOWED_UPDATES,
         )
         if not data.get("ok"):
             # Раньше ошибка getUpdates молча проглатывалась (updates=[]), из-за
@@ -645,6 +680,17 @@ async def _process_bot(
                 _cb_from = cbq.get("from") or {}
                 await _vl_signal(_cb_from.get("id"), "clicked_offer", 0.7,
                                  _cb_from)
+                continue
+
+            # Эмодзи-реакция на сообщение бота — лёгкая, но частая вовлечённость,
+            # которую слой раньше не видел (Telegram не шлёт message_reaction без
+            # запроса в allowed_updates — добавлен выше). Сигналим «reacted»
+            # (ступень «присматривается») только на добавление/смену реакции.
+            mr = upd.get("message_reaction")
+            if mr:
+                _ruid, _rwho = reaction_signal(mr)
+                if _ruid:
+                    await _vl_signal(_ruid, "reacted", 0.5, _rwho)
                 continue
 
             # Человек заблокировал бота или вернулся. Telegram шлёт это сам,
