@@ -5469,6 +5469,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("По этой сущности слой ещё ничего не знает", 404)
         return _json_resp({"ok": True, **data})
 
+    async def vlayer_segment(request: web.Request) -> web.Response:
+        """Список людей на одной ступени воронки — чтобы число на экране
+        открывалось списком тех самых людей, а не оставалось числом."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        value = (request.match_info.get("value") or "").strip()
+        if value not in (_vl.LADDER + [_vl.LOST]):
+            return _err("Неизвестная ступень", 400)
+        try:
+            data = await _vl.segment(pool, uid, value)
+        except Exception:
+            log.exception("vlayer_segment uid=%s value=%s", uid, value)
+            return _err(_INTERNAL_ERROR, 500)
+        for p in data.get("people", []):
+            if p.get("expires_at") is not None:
+                try:
+                    p["expires_at"] = p["expires_at"].isoformat()
+                except (AttributeError, ValueError):
+                    p["expires_at"] = None
+        return _json_resp({"ok": True, **data})
+
     async def vlayer_analytics(request: web.Request) -> web.Response:
         """Тренды слоя: конверсия воронки, моментум 7д и лучшие источники.
 
@@ -8081,6 +8104,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}",
                        vlayer_entity)
     app.router.add_get("/api/miniapp/vlayer/analytics", vlayer_analytics)
+    app.router.add_get("/api/miniapp/vlayer/segment/{value}", vlayer_segment)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
     app.router.add_post("/api/miniapp/rehab/{acc_id}/{action}", rehab_action)
     # A/B Experiments

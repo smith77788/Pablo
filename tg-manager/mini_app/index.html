@@ -22232,9 +22232,15 @@ async function openVLayer() {
       const hint = f.meaning
         ? `<div style="font-size:11px;color:var(--hint);margin-top:4px;line-height:1.4">${esc(f.meaning)}${f.count && f.action ? ' <b>→</b> ' + esc(f.action) : ''}</div>`
         : '';
-      return `<div style="padding:7px 16px;${dim}">
+      // Заполненная ступень кликабельна → список тех самых людей (принцип
+      // проекта: число обязано открываться срезом, а не оставаться числом).
+      const tap = f.count
+        ? ` onclick="openVLayerSegment('${esc(f.value)}')" style="cursor:pointer;padding:7px 16px;${dim}"`
+        : ` style="padding:7px 16px;${dim}"`;
+      const more = f.count ? ' <span style="color:var(--hint);font-weight:400">· кто это →</span>' : '';
+      return `<div${tap}>
         <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
-          <span>${esc(f.label)}</span><span style="font-weight:600">${num(f.count)}</span></div>
+          <span>${esc(f.label)}</span><span style="font-weight:600">${num(f.count)}${more}</span></div>
         <div style="height:6px;background:var(--sep);border-radius:3px;overflow:hidden">
           <div style="height:100%;width:${w}%;background:var(--accent,#7c3aed);border-radius:3px"></div></div>
         ${hint}
@@ -22339,6 +22345,33 @@ function _vlDecayText(cur) {
   return h < 48
     ? `Протухнет через ~${h} ч без новой активности`
     : `Протухнет через ~${Math.round(h / 24)} дн. без новой активности`;
+}
+
+// Список людей на одной ступени воронки: число на экране обязано открываться
+// срезом тех самых людей (принцип проекта), а не оставаться числом.
+async function openVLayerSegment(value) {
+  txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/vlayer/segment/' + encodeURIComponent(value));
+    const people = d.people || [];
+    let html = `<div class="row" onclick="openVLayer()" style="cursor:pointer">
+      <div class="row-body"><div class="row-name">← К сводке модели</div></div></div>`;
+    html += `<div class="sec">${esc(d.label || value)} · ${num(people.length)} чел.</div>`;
+    if (!people.length) {
+      html += empty('🤷','Пусто','На этой ступени сейчас никого нет');
+    } else {
+      html += '<div class="lst">' + people.map(p => {
+        const who = p.name || _vlWho({entity_type: p.entity_type, entity_id: p.entity_id});
+        const decay = _vlDecayText(p);
+        return `<div class="row" onclick="openVLayerEntity('${esc(String(p.entity_type||'user'))}','${esc(String(p.entity_id))}')" style="cursor:pointer">
+          <div class="row-body"><div class="row-name">${esc(who)}</div>
+            <div class="row-val">уверенность ${Math.round((p.confidence||0)*100)}%${decay ? ' · ' + esc(decay) : ''} · история →</div></div>
+        </div>`;
+      }).join('') + '</div>';
+    }
+    html += '<div style="height:16px"></div>';
+    txt('vlayerBody', html);
+  } catch(e) { txt('vlayerBody', errHtml(errRu(e), "openVLayerSegment('" + value + "')")); }
 }
 
 // История переходов одной сущности: текущее значение не отвечает на вопрос

@@ -337,6 +337,7 @@ GET /api/miniapp/vault/status
 GET /api/miniapp/vlayer/analytics
 GET /api/miniapp/vlayer/entity/{entity_type}/{entity_id}
 GET /api/miniapp/vlayer/overview
+GET /api/miniapp/vlayer/segment/{value}
 GET /api/miniapp/warmup
 GET /api/miniapp/warmup/{plan_id}/log
 GET /api/miniapp/workflow/{wf_id}/status
@@ -633,6 +634,7 @@ HEAD /api/miniapp/vault/status
 HEAD /api/miniapp/vlayer/analytics
 HEAD /api/miniapp/vlayer/entity/{entity_type}/{entity_id}
 HEAD /api/miniapp/vlayer/overview
+HEAD /api/miniapp/vlayer/segment/{value}
 HEAD /api/miniapp/warmup
 HEAD /api/miniapp/warmup/{plan_id}/log
 HEAD /api/miniapp/workflow/{wf_id}/status

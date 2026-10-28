@@ -1360,3 +1360,53 @@ async def analytics(pool, owner_id: int, *, entity_type: str = USER,
         log.debug("virtual_layer.analytics by_source failed owner=%s", owner_id)
     return out
 
+
+async def segment(pool, owner_id: int, value: str, *, entity_type: str = USER,
+                  state_key: str = "funnel", limit: int = 100) -> dict:
+    """Список людей, стоящих на ОДНОЙ ступени воронки (её ЭФФЕКТИВНОЕ значение).
+
+    Принцип проекта: число на экране обязано открываться списком тех самых людей.
+    «Эффективное» — то же, что видит воронка: просроченная строка опускается на
+    рунг (effective_value), поэтому ступень V собирают и сырое V (не просрочено), и
+    строки на рунг выше, которые просрочены и потому распались до V. Fail-open.
+    """
+    out = {"value": value, "label": VALUE_LABEL.get(value, value), "people": []}
+    candidates = [value]
+    rk = rank(value)
+    if 0 <= rk < len(LADDER) - 1:
+        candidates.append(LADDER[rk + 1])   # на рунг выше — просроченное даст V
+    try:
+        rows = await pool.fetch(
+            "SELECT entity_id, value, confidence, expires_at, "
+            "(expires_at IS NOT NULL AND expires_at <= now()) AS expired "
+            "FROM virtual_states WHERE owner_id=$1 AND entity_type=$2 "
+            "AND state_key=$3 AND value = ANY($4::text[]) "
+            "ORDER BY confidence DESC, updated_at DESC LIMIT $5",
+            owner_id, entity_type, state_key, candidates, int(limit) * 3)
+    except Exception:
+        log.debug("virtual_layer.segment failed owner=%s", owner_id)
+        return out
+    people: list[dict] = []
+    for r in rows:
+        if effective_value(r["value"], bool(r["expired"])) != value:
+            continue
+        _ttl = ttl_for(value)
+        people.append({
+            "entity_type": entity_type, "entity_id": r["entity_id"],
+            "confidence": round(float(r["confidence"] or 0), 2),
+            "expires_at": r["expires_at"], "expired": bool(r["expired"]),
+            "ttl_hours": int(_ttl.total_seconds() // 3600) if _ttl else None,
+        })
+        if len(people) >= limit:
+            break
+    try:
+        names = await resolve_names(pool, owner_id, people)
+        for p in people:
+            nm = names.get(str(p["entity_id"]))
+            if nm:
+                p["name"] = nm
+    except Exception:
+        log.debug("virtual_layer.segment names failed owner=%s", owner_id)
+    out["people"] = people
+    return out
+
