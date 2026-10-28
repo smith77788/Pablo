@@ -5427,6 +5427,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.debug("vlayer_overview events failed uid=%s", uid)
         return _json_resp({"ok": True, "funnel": ov["funnel"], "hot": ov["hot"],
+                           "ladder": ov.get("ladder") or [],
                            "total": ov["total"], "audience": ov.get("audience"),
                            "bots": ov.get("bots") or [], "events": events})
 
@@ -5456,6 +5457,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         data["transitions"] = [
             {**t, "at": t["at"].isoformat() if t.get("at") else None}
             for t in data["transitions"]]
+        # current.expires_at — datetime (распад-таймер карточки): сериализуем в ISO,
+        # иначе _json_resp упал бы на нём и экран остался без состояния.
+        _cur = data.get("current")
+        if isinstance(_cur, dict) and _cur.get("expires_at") is not None:
+            try:
+                _cur["expires_at"] = _cur["expires_at"].isoformat()
+            except (AttributeError, ValueError):
+                _cur["expires_at"] = None
         if not data["transitions"] and not data["current"]:
             return _err("По этой сущности слой ещё ничего не знает", 404)
         return _json_resp({"ok": True, **data})

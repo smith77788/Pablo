@@ -134,6 +134,78 @@ _TTL_HOURS = {
 }
 DEFAULT_TTL_HOURS = 96
 
+# Русские подписи сигналов — для ответа на вопрос «ПОЧЕМУ человек здесь». История
+# переходов хранит reason вида "signal:asked_price" / "reaffirm" / "decay", и без
+# перевода владелец читал машинные коды. Один источник правды с SIGNAL_TARGET.
+SIGNAL_LABEL = {
+    "opened": "открыл сообщение/бота",
+    "reacted": "поставил реакцию",
+    "asked_question": "задал вопрос",
+    "replied": "ответил в переписке",
+    "asked_price": "спросил цену",
+    "clicked_offer": "кликнул по офферу",
+    "left_contact": "оставил контакт",
+    "added_to_cart": "добавил в корзину",
+    "asked_how_to_pay": "спросил, как оплатить",
+    "paid": "оплатил",
+    "unsubscribed": "отписался",
+    "blocked": "заблокировал",
+    "refused": "отказался",
+    "reported": "пожаловался",
+}
+
+
+def reason_label(reason: str | None) -> str:
+    """Причина перехода по-русски. reason из истории: "signal:<x>", "reaffirm",
+    "decay", "cascade:<temp>" или имя сигнала как есть. Неизвестное отдаём как есть,
+    чтобы причина не потерялась (тот же принцип, что у restriction-причин)."""
+    r = str(reason or "").strip()
+    if not r:
+        return ""
+    if r.startswith("signal:"):
+        s = r.split(":", 1)[1]
+        return SIGNAL_LABEL.get(s, s)
+    if r == "reaffirm":
+        return "подтвердил интерес ещё раз"
+    if r == "decay":
+        return "распад по времени — давно тишина"
+    if r.startswith("cascade:"):
+        return "пересчёт температуры по аудитории"
+    return SIGNAL_LABEL.get(r, r)
+
+# Что КАЖДОЕ состояние значит и что с ним ДЕЛАТЬ — простым языком. Это и есть
+# ответ на «никто не понимает, как читать экран»: не код состояния, а смысл и
+# следующий шаг. Один источник правды для легенды сводки и карточки человека.
+STATE_GUIDE = {
+    "new":        {"meaning": "Только появился — поведения ещё не видно.",
+                   "action": "Ничего не нужно: дайте сигналу накопиться."},
+    "curious":    {"meaning": "Присматривается: открыл, отреагировал, но в разговор не вошёл.",
+                   "action": "Дайте лёгкий повод ответить — вопрос или полезный пост, без оффера в лоб."},
+    "interested": {"meaning": "Интерес: ответил, втянулся в переписку.",
+                   "action": "Ведите диалог к ценности и мягко подводите к предложению."},
+    "qualified":  {"meaning": "Квалифицирован: кликнул оффер или оставил контакт — тёплый лид.",
+                   "action": "Самое время для персонального предложения."},
+    "ready":      {"meaning": "Готов купить: спрашивал цену/как оплатить, в корзине.",
+                   "action": "Дожимайте сейчас — пришлите оффер и ссылку на оплату, пока момент не ушёл."},
+    "purchased":  {"meaning": "Купил — сделка закрыта.",
+                   "action": "Апселл, допродажа, просьба о рекомендации."},
+    LOST:         {"meaning": "Потерян: отписался, отказался или интерес распался сам.",
+                   "action": "Реактивация дешевле нового трафика — другой заход или пауза, не тот же оффер."},
+    # Температуры каскада (бот/аудитория).
+    HOT:  {"meaning": "Горячо: готовых и квалифицированных набралось достаточно.",
+           "action": "Момент для рассылки/оффера по этой аудитории."},
+    WARM: {"meaning": "Тёпло: интерес есть, но до массового дожима не дотягивает.",
+           "action": "Продолжайте греть — контент и точечные касания."},
+    COLD: {"meaning": "Остыло: прежний интерес распался по времени.",
+           "action": "Сначала разогрев — оффер сейчас уйдёт в пустоту."},
+}
+
+
+def state_guide(value: str | None) -> dict:
+    """{meaning, action} для значения состояния. Неизвестное → пустые строки
+    (экран просто не покажет подпись, а не упадёт)."""
+    return STATE_GUIDE.get(str(value or ""), {"meaning": "", "action": ""})
+
 
 def _now(now: datetime | None = None) -> datetime:
     return now or datetime.now(timezone.utc)
@@ -948,6 +1020,7 @@ async def entity_history(pool, owner_id: int, entity_type: str, entity_id,
          "to": r["to_value"],
          "to_label": VALUE_LABEL.get(r["to_value"], r["to_value"]),
          "reason": r["reason"],
+         "reason_label": reason_label(r["reason"]),
          "confidence": round(float(r["confidence"] or 0), 2),
          "at": r["created_at"]}
         for r in chrono]
@@ -960,13 +1033,21 @@ async def entity_history(pool, owner_id: int, entity_type: str, entity_id,
     try:
         cur = await get_state(pool, owner_id, entity_type, eid, state_key)
         if cur:
+            _val = cur.get("value")
+            _exp = _aware(cur.get("expires_at"))
+            _ttl = ttl_for(_val) if _val else None
             out["current"] = {
-                "value": cur.get("value"),
-                "label": VALUE_LABEL.get(cur.get("value"),
-                                         TEMPERATURE_LABEL.get(cur.get("value"),
-                                                               cur.get("value"))),
+                "value": _val,
+                "label": VALUE_LABEL.get(_val,
+                                         TEMPERATURE_LABEL.get(_val, _val)),
                 "confidence": round(float(cur.get("confidence") or 0), 2),
                 "source": cur.get("source"),
+                # Распад — ядро смысла слоя: показываем, когда состояние «протухнет»
+                # без новой активности, и что оно значит + что делать.
+                "expires_at": _exp,
+                "expired": bool(_exp and _exp <= _now()),
+                "ttl_hours": int(_ttl.total_seconds() // 3600) if _ttl else None,
+                "guide": state_guide(_val),
             }
     except Exception:
         log.debug("virtual_layer.entity_history state failed owner=%s", owner_id)
@@ -1046,7 +1127,8 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
     Лента виртуальных событий берётся отдельно из spine (это его память),
     поэтому здесь только состояния. Fail-open: пустая сводка вместо падения.
     """
-    out = {"funnel": [], "hot": [], "total": 0, "audience": None, "bots": []}
+    out = {"funnel": [], "ladder": [], "hot": [], "total": 0,
+           "audience": None, "bots": []}
     try:
         # Просроченность спрашиваем вместе со значением: распределение
         # воронки считалось по СЫРОМУ value, и на том же экране получалось
@@ -1072,8 +1154,18 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
         dist[value] = dist.get(value, 0) + int(r["c"])
     order = LADDER + [LOST]
     out["funnel"] = [
-        {"value": v, "label": VALUE_LABEL.get(v, v), "count": dist.get(v, 0)}
+        {"value": v, "label": VALUE_LABEL.get(v, v), "count": dist.get(v, 0),
+         **state_guide(v)}
         for v in order if dist.get(v, 0) > 0
+    ]
+    # Полная лестница (включая нули) — чтобы экран показывал ВЕСЬ путь аудитории
+    # как единую дорожку, а не две случайные полоски: владелец не понимал, что
+    # «Присматривается» и «Интерес» — ступени одной воронки. У каждой ступени —
+    # смысл и следующий шаг (STATE_GUIDE), один источник правды с карточкой.
+    out["ladder"] = [
+        {"value": v, "label": VALUE_LABEL.get(v, v), "count": dist.get(v, 0),
+         "terminal": v in _TERMINAL, **state_guide(v)}
+        for v in order
     ]
     out["total"] = sum(dist.values())
     # «Горячие» сущности верхних рунгов — кого дожимать в первую очередь.

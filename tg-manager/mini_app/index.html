@@ -22153,6 +22153,21 @@ async function openVLayer() {
         + 'двигают аудиторию по воронке. Загляните позже.');
       txt('vlayerBody', html); return;
     }
+    // «Как читать» — экран не объяснял сам себя, и владельцу/пользователям было
+    // непонятно, что значат цифры. Коротко: что делает слой, откуда данные, что
+    // состояния тают. Нативный <details> — сворачивается без JS.
+    html += `<details class="card" style="margin-bottom:8px">
+      <summary style="cursor:pointer;font-weight:600;font-size:14px">ℹ️ Как читать этот экран</summary>
+      <div style="font-size:12px;color:var(--hint);margin-top:6px;line-height:1.5">
+        Слой смотрит на поведение людей — сенсор намерений по переписке, действия ботов,
+        стадии CRM — и ставит каждого на ступень воронки с «уверенностью», которая
+        <b>тает со временем</b>, если человек замолкает. Поэтому «Интерес», о котором сутки
+        тишина, сам съезжает вниз: обычный тег так не умеет. Ступени снизу вверх:
+        Присматривается → Интерес → Квалифицирован → Готов купить → Купил; в сторону —
+        Остыл/Потерян. Нажмите на любого человека, чтобы увидеть, <b>почему</b> он здесь и
+        что делать.
+      </div>
+    </details>`;
     // Воронка: полоски по рунгам.
     const max = Math.max(...funnel.map(f => f.count), 1);
     if (d.audience) {
@@ -22168,9 +22183,16 @@ async function openVLayer() {
                h:'Готовых почти не осталось: прежний интерес распался по времени. Оффер сейчас уйдёт в пустоту — сначала разогрев.'},
       };
       const t = T[d.audience] || T.warm;
+      // Прямое действие из состояния — чтобы экран не только показывал, но и
+      // ВЁЛ к шагу: горячую/тёплую аудиторию — в рассылку/оффер, остывшую — в
+      // разогрев (переход в уже существующие экраны, без новой массовой логики).
+      const actBtn = d.audience === 'cold'
+        ? `<button class="btn btn-s" style="margin-top:8px" onclick="openChatWarmup()">🔥 Разогреть аудиторию</button>`
+        : `<button class="btn btn-p" style="margin-top:8px" onclick="openCampaignPlanner()">📣 Запустить рассылку/оффер</button>`;
       html += `<div class="card" style="border-left:3px solid ${t.c};margin-bottom:8px">
         <div style="font-weight:600;font-size:14px">${t.e} ${t.l}</div>
         <div style="font-size:12px;color:var(--hint);margin-top:2px">${t.h}</div>
+        ${actBtn}
       </div>`;
     }
     // Температура по каждому боту: где именно греется аудитория.
@@ -22190,23 +22212,37 @@ async function openVLayer() {
       }).join('');
       html += '</div>';
     }
-    // Заголовок только вместе с содержимым: без этой проверки на экране
-    // оставалась надпись «Воронка аудитории», под которой ничего нет.
-    if (funnel.length) {
-    html += '<div class="sec">Воронка аудитории</div>';
-    html += funnel.map(f => {
-      const w = Math.max(4, Math.round(f.count / max * 100));
-      return `<div style="padding:6px 16px">
+    // Весь путь аудитории одной дорожкой: раньше показывали только непустые
+    // ступени, и владелец не видел, что «Присматривается» и «Интерес» — части
+    // одной воронки. Берём полную лестницу (d.ladder, нули приглушены), у каждой
+    // ступени — смысл, а у заполненных — «что делать» (один источник правды на
+    // сервере, STATE_GUIDE).
+    const ladder = (d.ladder && d.ladder.length) ? d.ladder : funnel;
+    if (ladder.length) {
+    const lmax = Math.max(...ladder.map(f => f.count), 1);
+    html += '<div class="sec">Воронка аудитории · весь путь</div>';
+    html += ladder.map(f => {
+      const w = Math.max(f.count ? 4 : 0, Math.round(f.count / lmax * 100));
+      const dim = f.count ? '' : 'opacity:.45;';
+      const hint = f.meaning
+        ? `<div style="font-size:11px;color:var(--hint);margin-top:4px;line-height:1.4">${esc(f.meaning)}${f.count && f.action ? ' <b>→</b> ' + esc(f.action) : ''}</div>`
+        : '';
+      return `<div style="padding:7px 16px;${dim}">
         <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
           <span>${esc(f.label)}</span><span style="font-weight:600">${num(f.count)}</span></div>
         <div style="height:6px;background:var(--sep);border-radius:3px;overflow:hidden">
           <div style="height:100%;width:${w}%;background:var(--accent,#7c3aed);border-radius:3px"></div></div>
+        ${hint}
       </div>`;
     }).join('');
     }
     // «Горячие» — кого дожимать первыми.
     if (hot.length) {
-      html += '<div class="sec">🔥 Дожать в первую очередь</div><div class="lst">';
+      html += '<div class="sec">🔥 Дожать в первую очередь</div>';
+      // Прямое действие по горячему сегменту: раньше список был только для
+      // чтения — каждого можно было открыть, но «написать всем готовым» неоткуда.
+      html += `<div style="padding:0 16px 8px"><button class="btn btn-p" style="width:100%" onclick="openContactsHot()">✍️ Написать оффер готовым</button></div>`;
+      html += '<div class="lst">';
       html += hot.slice(0, 20).map(h => `<div class="row" onclick="openVLayerEntity('${esc(String(h.entity_type||'user'))}','${esc(String(h.entity_id))}')" style="cursor:pointer">
         <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">🔥</div>
         <div class="row-body"><div class="row-name">${esc(h.name || _vlWho(h))}</div>
@@ -22245,6 +22281,21 @@ function _vlWho(x) {
   return t + ' ' + (id.length > 10 ? id.slice(0, 8) + '…' : id);
 }
 
+// Таймер распада состояния: главный смысл слоя — состояние тает без активности.
+// Показываем человеку, когда оно «протухнет», чтобы было видно срочность.
+function _vlDecayText(cur) {
+  if (!cur) return '';
+  if (cur.expired) return 'Уже остыло (давно тишина) — скоро съедет вниз';
+  if (!cur.expires_at) return cur.ttl_hours == null ? 'Состояние бессрочное' : '';
+  const ms = new Date(cur.expires_at).getTime() - Date.now();
+  if (isNaN(ms)) return '';
+  if (ms <= 0) return 'Уже остыло — скоро съедет вниз';
+  const h = Math.round(ms / 3600000);
+  return h < 48
+    ? `Протухнет через ~${h} ч без новой активности`
+    : `Протухнет через ~${Math.round(h / 24)} дн. без новой активности`;
+}
+
 // История переходов одной сущности: текущее значение не отвечает на вопрос
 // «как он сюда пришёл», а третий заход по кругу и первый подъём дожимают
 // по-разному.
@@ -22257,11 +22308,16 @@ async function openVLayerEntity(entityType, entityId) {
     const cur = d.current || {};
     let html = `<div class="row" onclick="openVLayer()" style="cursor:pointer">
       <div class="row-body"><div class="row-name">← К сводке модели</div></div></div>`;
+    const g = cur.guide || {};
+    const decay = _vlDecayText(cur);
     html += `<div class="card" style="margin:8px 0">
       <div style="font-weight:600;font-size:15px">${esc(String(who))}</div>
       <div style="font-size:13px;color:var(--hint);margin-top:3px">
         ${cur.label ? esc(cur.label) : 'Состояние не записано'}${cur.confidence != null ? ' · уверенность ' + Math.round(cur.confidence * 100) + '%' : ''}</div>
-      <div style="font-size:13px;margin-top:6px">${esc(d.pattern_label || '')}</div>
+      ${g.meaning ? `<div style="font-size:12px;margin-top:6px;line-height:1.4">${esc(g.meaning)}</div>` : ''}
+      ${decay ? `<div style="font-size:12px;color:var(--hint);margin-top:4px">⏳ ${esc(decay)}</div>` : ''}
+      ${d.pattern_label ? `<div style="font-size:13px;margin-top:6px">${esc(d.pattern_label)}</div>` : ''}
+      ${g.action ? `<div style="font-size:12px;margin-top:6px;color:var(--accent,#7c3aed)"><b>Что делать:</b> ${esc(g.action)}</div>` : ''}
     </div>`;
     // История отвечает «как пришёл», но действовать по ней было нечем:
     // человек виден, а открыть его карточку и написать неоткуда.
@@ -22277,7 +22333,7 @@ async function openVLayerEntity(entityType, entityId) {
       html += '<div class="lst">' + tr.slice().reverse().map(t => `<div class="row">
         <div class="row-body">
           <div class="row-name">${t.from_label ? esc(t.from_label) + ' → ' : ''}${esc(t.to_label || '')}</div>
-          <div class="row-val">${t.at ? new Date(t.at).toLocaleString('ru-RU') : ''}${t.reason ? ' · ' + esc(t.reason) : ''}</div>
+          <div class="row-val">${t.at ? new Date(t.at).toLocaleString('ru-RU') : ''}${(t.reason_label || t.reason) ? ' · ' + esc(t.reason_label || t.reason) : ''}</div>
         </div></div>`).join('') + '</div>';
     }
     html += '<div style="height:16px"></div>';

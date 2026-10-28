@@ -67,8 +67,14 @@ def test_overview_hot_lists_top_rungs():
 
 def test_overview_empty_is_safe():
     ov = asyncio.run(V.overview(_Pool([], []), 7))
-    assert ov == {"funnel": [], "hot": [], "total": 0, "audience": None,
-                  "bots": []}
+    assert ov["funnel"] == [] and ov["hot"] == [] and ov["total"] == 0
+    assert ov["audience"] is None and ov["bots"] == []
+    # Лестница показывается ВСЕГДА (весь путь аудитории), даже когда людей нет:
+    # все ступени с нулём — экран должен объяснять воронку, а не прятать её.
+    assert [r["value"] for r in ov["ladder"]] == V.LADDER + [V.LOST]
+    assert all(r["count"] == 0 for r in ov["ladder"])
+    # У каждой ступени — смысл и следующий шаг (STATE_GUIDE), один источник правды.
+    assert all(r["meaning"] and r["action"] for r in ov["ladder"])
 
 
 def test_overview_survives_a_broken_pool():
