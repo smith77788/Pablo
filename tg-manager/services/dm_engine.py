@@ -1619,6 +1619,20 @@ async def run_campaign(
                             f"dm_engine: progress notification failed campaign={campaign.get('id')} owner={owner_id}",
                         )
 
+        # «Живое поведение» между сообщениями: аккаунт иногда делает обычные
+        # человеческие действия (онлайн, открыть диалоги, что-то прочитать), а не
+        # только шлёт ЛС. Аккаунт, у которого в API только send_message, —
+        # машина по СОСТАВУ вызовов, сколько ни разноси паузы. Тот же механизм,
+        # что у инвайта (invite_behavior.humanize): read-only, best-effort,
+        # никогда не роняет кампанию. Между сообщениями сессия свободна (send_dm
+        # подключается и отключается сам) — временный клиент humanize не
+        # конфликтует с мьютексом сессии.
+        try:
+            from services import invite_behavior
+            await invite_behavior.humanize(acc)
+        except Exception:
+            log_exc_swallow(log, "dm_engine: humanize failed")
+
         # Humanized delay (per target-type range), растянутая по давлению флота.
         # DM-кампании были единственным массовым расходником ВНЕ губернатора:
         # инвайт, разовая рассылка и ещё два десятка операций уважают общее

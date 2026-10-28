@@ -1763,6 +1763,30 @@ def _direct_fallback_ok(transport: str | None, policy: str) -> bool:
     return transport in ("relay", "ipv6") and policy != "strict"
 
 
+async def mark_online(client, *, timeout: float = 10.0) -> bool:
+    """Best-effort: отметить аккаунт ОНЛАЙН (UpdateStatus offline=False).
+
+    Реальный пользователь онлайн, когда его клиент что-то делает. Действие с
+    аккаунта, который Telegram видит ОФФЛАЙН, — заметный анти-спам-триггер:
+    живые люди не рассылают, не инвайтят и не постят «из оффлайна». Поэтому
+    боевые подключения (операции) помечают аккаунт онлайн ПЕРЕД работой.
+
+    offline НЕ выставляем обратно: аккаунт сам «уплывёт» в оффлайн по таймауту
+    Telegram, как закрывший приложение человек — это естественнее принудительного
+    оффлайна сразу после действия (который сам по себе аномалия). Никогда не
+    бросает и не роняет операцию — присутствие это улучшение, а не обязательство.
+    """
+    try:
+        from telethon.tl.functions.account import UpdateStatusRequest
+        await asyncio.wait_for(client(UpdateStatusRequest(offline=False)), timeout=timeout)
+        return True
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.debug("mark_online failed")
+        return False
+
+
 async def connect_client(session_string: str = "", device: dict | None = None,
                          action_type: str = "op", low_risk: bool = False,
                          retry_auth_dup: bool = True):
@@ -1818,6 +1842,13 @@ async def connect_client(session_string: str = "", device: dict | None = None,
             await _connect_and_track(client, device, action_type)
             _note_session_holder(_skey, client)
             _bind_session_release(client, _skey)
+            # Боевое (захватывающее аккаунт) подключение = аккаунт сейчас будет
+            # действовать, значит обязан быть ОНЛАЙН: действие из оффлайна —
+            # анти-спам-триггер. Пассивные пробы (retry_auth_dup=False:
+            # readiness/membership) аккаунт не захватывают — присутствие не
+            # трогаем. Best-effort: не задерживает и не роняет операцию.
+            if retry_auth_dup:
+                await mark_online(client)
             return client
         except AuthKeyDuplicatedError as e:
             last_dup = e
@@ -1867,6 +1898,9 @@ async def connect_client(session_string: str = "", device: dict | None = None,
             await _connect_and_track(client, device, action_type)
             _note_session_holder(_skey, client)
             _bind_session_release(client, _skey)
+            # Онлайн на прямом фолбэке — так же, как на основном пути (см. выше).
+            if retry_auth_dup:
+                await mark_online(client)
             return client
       # Теоретически недостижимо (цикл либо возвращает, либо пробрасывает).
       if last_dup:
@@ -3382,6 +3416,8 @@ async def send_media_via_account(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        # Онлайн перед отправкой медиа — как в send_dm (действие из оффлайна = триггер).
+        await mark_online(client)
         await asyncio.wait_for(
             client.send_file(chat_id, file=send_target, caption=caption or None),
             timeout=max(_OP_TIMEOUT, 60),
@@ -3496,6 +3532,10 @@ async def send_dm(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        # Онлайн ПЕРЕД отправкой: рассылка из оффлайна — анти-спам-триггер (живой
+        # человек онлайн, когда пишет). Best-effort, send_dm строит клиент сам
+        # (минуя connect_client), поэтому присутствие ставим здесь.
+        await mark_online(client)
         target = username.lstrip("@") if isinstance(username, str) else username
         # Try to resolve numeric IDs
         if isinstance(target, str) and target.isdigit():
