@@ -1,0 +1,125 @@
+"""Действия по контакту из карточки: написать в ЛС / пригласить в чат.
+
+Пользователь на карточке контакта выбирает один/несколько своих аккаунтов и с
+них пишет контакту или приглашает его в канал/чат. Реюзаем боевые движки
+(bulk_dm_adhoc / mass_invite), а не наивный цикл — темп и защита от бана те же.
+
+mini_app_api не импортируется в песочнице — проверяем на уровне исходников.
+"""
+from __future__ import annotations
+
+import os
+
+
+# Весь API-слой мини-аппа: ручки контактов вынесены из 25-тысячестрочного
+# mini_app_api.py в services/mini_app_uch.py, и проверка не должна зависеть
+# от того, в каком файле лежит обработчик.
+def _api_src() -> str:
+
+    return api_source()
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from tests.miniapp_source import api_function, api_source, js_function
+
+
+def _read(rel: str) -> str:
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+def test_backend_endpoints_and_routes():
+    api = _api_src()
+    assert "async def uch_contact_message" in api
+    assert "async def uch_contact_invite" in api
+    # маршруты зарегистрированы
+    assert '/message", uch_contact_message)' in api
+    assert '/invite", uch_contact_invite)' in api
+
+
+def test_message_reuses_dm_engine_and_invite_reuses_invite_engine():
+    msg = api_function("uch_contact_message")
+    # ЛС идёт через безопасный DM-движок, а не прямой send
+    assert '"bulk_dm_adhoc"' in msg
+    assert '"usernames": [ref]' in msg
+    inv = api_function("uch_contact_invite")
+    assert '"mass_invite"' in inv
+    assert '"source": "import_list"' in inv
+    # способ инвайта на выбор (паритет с массовым)
+    assert '"invite_method"' in inv
+
+
+def test_target_resolver_prefers_username_then_id():
+    api = _api_src()
+    assert "def _uch_msg_ref" in api
+    assert "def _uch_invite_target" in api
+    ref = api_function("_uch_msg_ref")
+    # username → id; телефон в ЛС НЕ используем (ненадёжно)
+    assert '"username"' in ref and "telegram_user_id" in ref
+    inv = api_function("_uch_invite_target")
+    # Сам разбор переехал в services/contacts_hub/invite_target.py — хендлер
+    # обязан звать его, а не держать вторую копию порядка адресов.
+    assert "invite_target(c)" in inv, (
+        "хендлер инвайта больше не делегирует общему разбору адреса")
+    # Порядок проверяем на самой функции: она чистая, база не нужна.
+    from services.contacts_hub.invite_target import invite_target
+    assert invite_target({"username": "ivan", "phones": ["+70000000000"],
+                          "telegram_user_id": 7}) == ("user", "@ivan")
+    # для инвайта телефон допустим и стоит ВПЕРЕДИ голого id
+    assert invite_target({"username": "", "phones": ["70000000000"],
+                          "telegram_user_id": 7}) == ("phone", "+70000000000")
+    assert invite_target({"username": "", "phones": [],
+                          "telegram_user_id": 7}) == ("user", "7")
+    assert invite_target({"username": "", "phones": [],
+                          "telegram_user_id": None}) == (None, None)
+
+
+def test_frontend_has_buttons_modals_and_submit():
+    ui = _read("mini_app/index.html")
+    # кнопки на карточке
+    assert "openContactWrite()" in ui
+    assert "openContactInvite()" in ui
+    # модалки
+    assert 'id="mo-contact-write"' in ui
+    assert 'id="mo-contact-invite"' in ui
+    # выбор аккаунтов (мультивыбор) + submit дергает новые эндпоинты
+    assert "_renderContactAccPicker" in ui
+    assert "ca-acc-cb" in ui
+    assert "/message'" in ui and "/invite'" in ui
+    # выбор способа инвайта
+    assert 'id="cciMethod"' in ui
+
+
+def test_frontend_picker_defaults_to_source_accounts():
+    ui = _read("mini_app/index.html")
+    # по умолчанию отмечаем аккаунты, где контакт найден (sources)
+    assert "window._cdSources" in ui
+    fn = js_function("openContactWrite")
+    assert "_cdSources" in fn and "account_id" in fn
+
+
+def test_backend_media_endpoint_and_op_branch():
+    api = _api_src()
+    assert "async def uch_contact_media" in api
+    assert '/media", uch_contact_media)' in api
+    med = api_function("uch_contact_media")
+    # multipart-приём + кладём media_path в тот же DM-движок
+    assert "await request.multipart()" in med
+    assert '"media_path"' in med
+    # исполнитель умеет медиа-ветку
+    ow = _read("services/op_worker.py")
+    dm = ow[ow.index("async def _exec_bulk_dm_adhoc"):]
+    dm = dm[:dm.index("async def _exec_pin_last_post")]
+    assert "media_path" in dm
+    assert "send_media_via_account" in dm
+    assert "media_bytes" in dm
+
+
+def test_frontend_media_and_history():
+    ui = _read("mini_app/index.html")
+    # медиа-инпут + multipart-отправка
+    assert 'id="ccwFile"' in ui
+    assert "FormData()" in ui and "/media'" in ui
+    # история переписки из хранилища по telegram_user_id
+    assert "function openContactHistory" in ui
+    assert "openVaultChat(c.telegram_user_id)" in ui

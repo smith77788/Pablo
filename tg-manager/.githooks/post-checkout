@@ -1,0 +1,11 @@
+#!/bin/sh
+if [ "$INFRAGRAM_GUARD_SYNCING" = "1" ]; then
+    exit 0
+fi
+PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+"$PROJECT_DIR/.githooks/run-workspace-guard.sh" --worktree "$PWD" --post-checkout
+STATUS=$?
+if [ "$STATUS" -ne 0 ]; then
+    echo "WORKSPACE GUARD: checkout создан, но запись и commit заблокированы до bootstrap." >&2
+fi
+exit 0

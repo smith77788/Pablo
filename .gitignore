@@ -8,3 +8,7 @@ data/
 *.db
 *.sqlite
 .DS_Store
+.claude/
+!tg-manager/.claude/
+!tg-manager/.claude/settings.json
+platform/apps/web/tsconfig.tsbuildinfo

@@ -1,0 +1,102 @@
+"""Autopost v2 — рекуррентные посты в свои каналы (P0 Operator Top-1 Roadmap).
+
+Recurring раньше был только у managed-бот рассылок (scheduled_broadcasts).
+Теперь operation_queue-постинг: repeat_interval_min>0 → op_worker переочередит
+следующий запуск. Только постинг-op'ы (allowlist), аккаунт-действия — нет.
+"""
+from __future__ import annotations
+
+import inspect
+
+from services import op_worker
+from services import mini_app_api
+from tests.miniapp_source import api_source
+
+
+def test_allowlist_has_posting_ops_only():
+    ok = op_worker._RECURRING_OK_OPS
+    assert "quick_post" in ok and "mass_publish" in ok and "run_broadcast" in ok
+    # аккаунт-действия НЕ должны рекуррентно зацикливаться
+    for danger in ("leave_all_chats", "delete_private_dialogs", "mass_invite",
+                   "profile_setter", "delete_contacts", "read_all_dialogs"):
+        assert danger not in ok, f"{danger} не должен быть в _RECURRING_OK_OPS"
+
+
+def test_op_worker_reschedules_on_done():
+    src = inspect.getsource(op_worker)
+    # Переочередь гейтится результативностью + allowlist + repeat_interval_min.
+    # Раньше гейт был `_final_status == "done"`, и один сбойный канал в серии
+    # НАВСЕГДА обрывал автопостинг: итерация закрывалась не «done», следующая
+    # не ставилась, и владелец узнавал об этом только по тишине в канале.
+    # Результативность прогона теперь ЕДЕТ В ПОМОЩНИКА параметром: он решает,
+    # продлевать ли расписание после неудачного круга (см.
+    # tests/test_recurring_schedule_survives_a_bad_round.py).
+    assert "productive=op_status.is_productive(_final_status)" in src
+    assert "op_type not in _RECURRING_OK_OPS" in src
+    assert "repeat_interval_min" in src
+    # Реально ставит новый op со сдвигом времени — ЧЕРЕЗ ШИНУ.
+    # Раньше здесь стоял прямой INSERT с `make_interval(mins => $6)`, и это
+    # означало, что расписание сильнее защиты: круг заводился даже тогда, когда
+    # предохранитель Ban Weather приостановил этот тип операций, а автопостинг
+    # на платном плане продолжал крутиться после отмены подписки. Проверяем
+    # смысл (следующий круг ставится со сдвигом на repeat_interval_min), а не
+    # конкретный SQL: механизм теперь общий для всего продукта.
+    seg = src[src.index("async def _reschedule_recurring"):][:8000]
+    assert "submit(" in seg, "переочередь идёт мимо operation_bus"
+    assert "timedelta(minutes=_rmin)" in seg, "следующий круг ставится без сдвига времени"
+    # repeat_count декрементится (ограничение числа повторов)
+    assert "repeat_count" in src
+
+
+def test_endpoints_accept_repeat_interval():
+    """Ручка обязана ПРОЧИТАТЬ повтор и положить его в params операции.
+
+    Счёт вхождений по всему слою мини-аппа («встречается ли слово хотя бы
+    дважды») зеленел бы и тогда, когда одна из ручек повтор читает, а в
+    params не кладёт, и расписание никогда не продлевалось бы. Поэтому
+    границы функции берутся точно.
+    """
+    from tests.miniapp_source import py_function
+
+    for module, fn in (("services/mini_app_api.py", "mass_publish"),
+                       ("services/mini_app_broadcast.py", "create_broadcast")):
+        body = py_function(module, fn)
+        assert 'body.get("repeat_interval_min")' in body, (
+            f"{fn} не читает repeat_interval_min — повтор с экрана уходит в никуда")
+        assert '["repeat_interval_min"] = _rmin' in body, (
+            f"{fn} читает повтор, но не кладёт его в params операции: "
+            "воркеру нечего переочереживать")
+
+
+def test_ui_has_repeat_control():
+    """Повтор должен быть НАЖИМАЕМ, а не только поддержан воркером.
+
+    22.10.2026: экран «Быстрый пост» удалили как дубль единой публикации, и
+    вместе с ним уехало единственное поле повтора — `id="qpRepeat"`. Воркер,
+    ручка и этот файл остались, а завести рекуррентную публикацию в свои
+    каналы стало нельзя. Контрол добавлен на экран единой публикации
+    (`id="mpRepeat"`), откуда публикация и уходит; удаление в тот день
+    откатили и повторили, поэтому проверка привязана к экрану, который
+    остался, — см. tests/test_publish_module_unified.py о том, почему он один.
+    """
+    from pathlib import Path
+    html = (Path(op_worker.__file__).resolve().parents[1] / "mini_app" / "index.html").read_text(encoding="utf-8")
+    assert 'id="mpRepeat"' in html, "поле повтора снова некуда нажать"
+    assert ("payload.repeat_interval_min = _repMin" in html
+            or "payload.repeat_interval_min=repMin" in html), (
+        "поле есть, а в бэк повтор не уходит")
+    # Рекуррентная публикация не должна выглядеть разовой: подтверждение и тост
+    # обязаны назвать повтор словами.
+    assert "_repNote" in html, "подтверждение не называет повтор"
+    assert "_repToast" in html, "тост не говорит, что публикация рекуррентная"
+
+
+def test_partial_iteration_keeps_schedule_alive():
+    """Частично выполненная итерация обязана продлевать расписание."""
+    from services import op_status
+    assert op_status.is_productive(op_status.PARTIAL), (
+        "иначе один сбойный канал в серии навсегда обрывает автопостинг"
+    )
+    assert not op_status.is_productive(op_status.FAILED), (
+        "полностью провалившаяся итерация расписание продлевать не должна"
+    )
