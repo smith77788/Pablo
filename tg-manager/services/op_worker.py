@@ -3736,6 +3736,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "id рассылки не закрепился за операцией — рассылка не запущена и "
         "снята; без этого отказа повтор операции отправил бы сообщение всей "
         "аудитории второй раз",
+    "infragram_network_broadcast_mark_write_failures_total":
+        "отметка о запуске рассылки по боту (сетевая рассылка) — не записалась "
+        "в базу: рассылка по этому боту не запущена, иначе повторный прогон "
+        "операции отправил бы сообщение всей его аудитории второй раз",
     "infragram_broadcast_subset_write_failures_total":
         "список получателей рассылки не сохранился — рассылка не запущена и "
         "снята; без этого отказа докатка после перезапуска отправила бы её "
@@ -11731,7 +11735,7 @@ async def _restart_broadcasts(pool: asyncpg.Pool, wanted: set) -> None:
 async def _nb_launch(
     pool: asyncpg.Pool, op_id: int, owner_id: int, bot_id: int, token: str,
     text: str, ids: list, buttons, *, subset: bool, order: int,
-    params: dict, launched_bc_ids: list, already: set,
+    params: dict, launched_bc_ids: list, already: set, deferred: list,
 ) -> bool:
     """Завести и запустить рассылку одного бота сетевой рассылки.
 
@@ -11763,22 +11767,72 @@ async def _nb_launch(
         target_user_ids=(list(ids) if subset else None), buttons=buttons,
     )
     if not bc_id:
+        log.error(
+            "network_broadcast op=%d: строка рассылки по боту %s не создалась — "
+            "бот пропущен, его аудитория сообщения не получит",
+            op_id, bot_id,
+        )
+        deferred.append(bot_id)
         return False
+
+    # ОТМЕТКА ДО ЗАПУСКА. `broadcaster.start` необратим: залп уходит в задачу, и
+    # дальше сообщения идут живым людям. Отметка — единственное, чем повторный
+    # прогон операции отличается от первого, а повтор здесь норма, не редкость:
+    # рабочая ветка едет в прод на каждом пуше, рестарт возвращает операцию в
+    # очередь и обнуляет done_items, и исполнитель идёт по списку ботов с
+    # начала. Без отметки повтор заводит по этому боту ВТОРУЮ рассылку с новым
+    # id, а журнал доставок первой ей не указ — он ведётся по её собственному
+    # id. То есть вся аудитория бота получает сообщение второй раз.
+    #
+    # Дверь стояла и раньше, но была открыта с двух сторон: запись шла ПОСЛЕ
+    # запуска (падение процесса в зазоре = лишняя рассылка), а её результат
+    # выбрасывался на пол (`_safe_execute` не бросает исключений, он отдаёт
+    # 'ERROR' — и его никто не смотрел; блип базы = та же лишняя рассылка).
+    #
+    # Потерять запуск перестановка не может: строка рассылки уже создана и
+    # стоит в 'pending', а ровно эти статусы поднимает `resume_interrupted` на
+    # следующем старте процесса (db.get_interrupted_broadcasts). Поэтому
+    # «отметили, но не успели запустить» догоняется само, а «запустили, но не
+    # отметили» не лечится ничем. Отправить дважды хуже, чем не отправить — то
+    # же правило, что у инвайта и кампании ЛС, см. CLAUDE.md.
+    _bots = [int(x) for x in (params.get("launched_bot_ids") or [])] + [bot_id]
+    _bcs = [int(x) for x in (params.get("launched_bc_ids") or [])] + [int(bc_id)]
+    _mark_ok = False
+    for _attempt in (1, 2):
+        if await _safe_execute(
+            pool,
+            "UPDATE operation_queue SET params = COALESCE(params, '{}'::jsonb) "
+            "|| $1::jsonb WHERE id=$2",
+            json.dumps({"launched_bot_ids": _bots, "launched_bc_ids": _bcs}),
+            op_id, log_ctx=f"[nb_mark op={op_id} bot={bot_id}]",
+        ) != "ERROR":
+            _mark_ok = True
+            break
+    if not _mark_ok:
+        log.error(
+            "network_broadcast op=%d: бот %s НЕ закреплён за операцией — "
+            "рассылка по нему не запускается и снимается. Отправлять, не "
+            "запомнив, нельзя: повтор прогона завёл бы вторую рассылку на ту "
+            "же аудиторию.", op_id, bot_id,
+        )
+        _reliability_metric("infragram_network_broadcast_mark_write_failures_total")
+        # Снимаем незапущенную строку: иначе её поднимет `resume_interrupted` на
+        # следующем старте процесса и рассылка уедет мимо операции.
+        await broadcaster.abandon_unstarted(pool, int(bc_id))
+        deferred.append(bot_id)
+        return False
+
+    params["launched_bot_ids"] = _bots
+    params["launched_bc_ids"] = _bcs
     broadcaster.start(
         pool, None, bc_id, token, bot_id, text, None, ids, buttons,
         start_delay=order * _NB_BOT_START_DELAY_S,
     )
     launched_bc_ids.append(int(bc_id))
     already.add(bot_id)
-    _bots = [int(x) for x in (params.get("launched_bot_ids") or [])] + [bot_id]
-    _bcs = [int(x) for x in (params.get("launched_bc_ids") or [])] + [int(bc_id)]
-    params["launched_bot_ids"] = _bots
-    params["launched_bc_ids"] = _bcs
     await _safe_execute(
         pool,
-        "UPDATE operation_queue SET done_items=done_items+1, "
-        "params = COALESCE(params, '{}'::jsonb) || $1::jsonb WHERE id=$2",
-        json.dumps({"launched_bot_ids": _bots, "launched_bc_ids": _bcs}),
+        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
         op_id, log_ctx=f"[nb_launch op={op_id}]",
     )
     return True
@@ -11823,6 +11877,11 @@ async def _exec_network_broadcast(
 
     total_started = 0
     total_users = 0
+    # Боты, по которым рассылка НЕ пошла (не создалась строка, не записалась
+    # отметка о запуске). Без этого счёта отказ был невидим: `_nb_launch`
+    # возвращал False, ветка делала `continue`, и операция на сегменте с живой
+    # аудиторией закрывалась словами «нет пользователей в выбранном сегменте».
+    deferred: list[int] = []
     # Что УЖЕ заведено предыдущим прогоном этой же операции. Операция может быть
     # повторена (упал воркер на середине списка ботов, таймаут, ручной повтор), а
     # раньше повтор заводил по каждому боту НОВУЮ рассылку с новым id: журнал
@@ -11871,6 +11930,7 @@ async def _exec_network_broadcast(
                 pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
                 _bc_buttons, subset=False, order=total_started,
                 params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+                deferred=deferred,
             ):
                 continue
             total_started += 1
@@ -11897,6 +11957,7 @@ async def _exec_network_broadcast(
                 pool, op_id, owner_id, bid, token_map[bid], text, ids,
                 _bc_buttons, subset=True, order=total_started,
                 params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+                deferred=deferred,
             ):
                 continue
             total_started += 1
@@ -11922,6 +11983,7 @@ async def _exec_network_broadcast(
                 pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
                 _bc_buttons, subset=True, order=total_started,
                 params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+                deferred=deferred,
             ):
                 continue
             total_started += 1
@@ -11954,12 +12016,26 @@ async def _exec_network_broadcast(
                 pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
                 _bc_buttons, subset=True, order=total_started,
                 params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+                deferred=deferred,
             ):
                 continue
             total_started += 1
             total_users += len(ids)
 
     if total_started == 0:
+        if deferred:
+            # Не «нет пользователей», а отказ защиты: аудитория была.
+            return {
+                "status": "failed",
+                "ok": 0,
+                "summary": (
+                    f"⚠️ Рассылка не запущена: ни один бот не закреплён за "
+                    f"операцией (пропущено {len(deferred)} из {len(bots)}). "
+                    f"База не приняла отметку о запуске, а без неё повтор "
+                    f"отправил бы сообщение той же аудитории второй раз. "
+                    f"Попробуйте запустить ещё раз."
+                ),
+            }
         return {
             "status": "done",
             "ok": 0,
@@ -11997,6 +12073,18 @@ async def _exec_network_broadcast(
         f"Сегмент: {label}\n"
         f"Ботов: {total_started}, получателей: {total_users:,}"
     ).strip()
+    if deferred:
+        # Работа была, но не доведена — это 'partial', а не «готово». Молчать
+        # нельзя: аудитория пропущенных ботов сообщения не получила, и владелец
+        # узнаёт об этом только отсюда.
+        res["deferred_bots"] = len(deferred)
+        if res.get("status") == "done":
+            res["status"] = "partial"
+        res["summary"] = (
+            f"{res['summary']}\n"
+            f"⚠️ Пропущено ботов: {len(deferred)} — их не удалось закрепить за "
+            f"операцией, сообщение их аудитории не отправлено."
+        )
     return res
 
 
