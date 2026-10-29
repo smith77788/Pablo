@@ -620,12 +620,19 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор операции", 400)
         try:
+            # Подзапрос собирается ОТДЕЛЬНО, а основной запрос остаётся
+            # одним литералом: храповик скоупа по владельцу читает SQL-литералы
+            # функции и ищет в них колонку владения. Склейка через `+` разбивает
+            # литерал, `owner_id` уезжает в кусок без SELECT, и ручка читается
+            # как не скоупленная — хотя скоуп на месте. Первая версия этой
+            # правки так и покраснела.
+            _err_cnt = ("(SELECT COUNT(*) FROM operation_log ol "
+                        " WHERE ol.op_id=operation_queue.id AND ol.status='error'"
+                        + _obus.REAL_TARGET_SQL + ") AS err_cnt")
             row = await pool.fetchrow(
-                "SELECT op_type, params, label, status, total_items, done_items, "
-                "(SELECT COUNT(*) FROM operation_log ol "
-                " WHERE ol.op_id=operation_queue.id AND ol.status='error'"
-                + _obus.REAL_TARGET_SQL + ") AS err_cnt "
-                "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+                f"SELECT op_type, params, label, status, total_items, done_items, "
+                f"{_err_cnt} "
+                f"FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
                 return _err("Не найдено", 404)
@@ -757,12 +764,15 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Unauthorized", 401)
         from services import operation_retry as _oretry
 
+        # Подзапрос отдельной строкой — см. комментарий в retry_operation:
+        # склейка через `+` прячет owner_id от храповика скоупа.
+        _err_cnt = ("(SELECT COUNT(*) FROM operation_log ol "
+                    " WHERE ol.op_id=oq.id AND ol.status='error'"
+                    + _obus.REAL_TARGET_SQL + ") AS err_cnt")
         rows = await _safe_fetch(pool,
-            """SELECT oq.id, oq.op_type, oq.label, oq.status,
+            f"""SELECT oq.id, oq.op_type, oq.label, oq.status,
                       oq.done_items, oq.total_items,
-                      (SELECT COUNT(*) FROM operation_log ol
-                        WHERE ol.op_id=oq.id AND ol.status='error'"""
-                        + _obus.REAL_TARGET_SQL + """) AS err_cnt
+                      {_err_cnt}
                  FROM operation_queue oq
                 WHERE oq.owner_id=$1
                   AND oq.status IN ('failed','cancelled','done')
