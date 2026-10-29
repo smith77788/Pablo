@@ -3,7 +3,7 @@
 POST /webhook/payment активирует подписку по user_id из тела запроса. Проверка
 подписи стояла под условием «если задан WEBHOOK_SECRET», а переменная нигде в
 деплое не задаётся — значит любой, кто знает адрес, мог выдать себе платный
-тариф одним запросом. То же у /webhook/cryptopay без CRYPTOPAY_TOKEN.
+тариф одним запросом.
 
 Правильное поведение для денежного эндпоинта — отказ, а не пропуск: нет
 секрета, нет и приёма. Живой путь оплаты у продукта другой (проверка платежа
@@ -70,13 +70,18 @@ def test_webhook_is_closed_when_no_secret_is_configured(monkeypatch):
     assert "_webhook_closed(" in body, "нет секрета — должен быть явный отказ"
 
 
-def test_cryptopay_is_closed_without_its_token(monkeypatch):
+def test_dead_cryptopay_door_is_gone(monkeypatch):
+    """Вход CryptoPay снят: счетов CryptoPay продукт не выставляет.
+
+    Он ждал токен в заголовке, а CryptoPay подписывает тело HMAC, то есть
+    настоящее уведомление не принял бы никогда, — оставалась только денежная
+    дверь, через которую при утечке токена выдаётся подписка.
+    """
     pw = _module(monkeypatch)
-    body = _func_src(pw, "cryptopay_webhook")
-    assert "_webhook_closed(" in body, (
-        "без CRYPTOPAY_TOKEN хук обязан отказывать, а не принимать любой запрос")
-    assert "compare_digest" in body, (
-        "токен надо сравнивать за постоянное время, а не оператором !=")
+    src = open(pw.__file__, encoding="utf-8").read()
+    assert 'add_post("/webhook/cryptopay"' not in src, (
+        "мёртвый вход CryptoPay вернулся: счетов CryptoPay в коде нет")
+    assert "def cryptopay_webhook" not in src
 
 
 def test_closed_response_names_the_missing_variable(monkeypatch):

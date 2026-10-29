@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import html
 import logging
-import os
 import random
 import string
 import asyncio
@@ -111,7 +110,12 @@ END $$;
 
 
 def _tron_wallet() -> str:
-    return os.getenv("TRON_WALLET", "")
+    # Тот же источник, что у подписки и автопроверки: кошелёк из настроек
+    # оплаты (БД) с запасным env. Раньше здесь читался только env, и после
+    # смены кошелька в «⚙️ Настройка оплаты» Strike показывал старый адрес.
+    from bot.handlers.subscription import _tron_wallet as _w
+
+    return _w()
 
 
 def _gen_ref() -> str:
@@ -347,7 +351,25 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
     await safe_answer(callback)
 
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Проверить оплату", callback_data=StrikeCb(action="check_pay"))
+    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
+    kb.adjust(1)
+
     wallet = _tron_wallet()
+    if not wallet:
+        # Счёт без кошелька оплатить нельзя — не заводим его вовсе.
+        await callback.message.edit_text(
+            f"⚔️ <b>Массовые жалобы — ${_PRICE_USD} USDT</b>\n\n"
+            "⚠️ Автоматическая оплата не настроена.\n\n"
+            "Свяжитесь с администратором для активации.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    from services import usdt_invoice
+
     ref = _gen_ref()
     try:
         for _ in range(5):
@@ -358,23 +380,30 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 break
             ref = _gen_ref()
 
-        await pool.execute(
-            """INSERT INTO payments
-                   (user_id, plan, period_months, currency, amount_crypto, amount_usd,
-                    wallet_address, reference)
-               VALUES ($1, 'strike', 0, 'USDT_TRC20', $2, $3, $4, $5)
-               ON CONFLICT (reference) DO NOTHING""",
-            callback.from_user.id,
-            float(_PRICE_USD),
-            float(_PRICE_USD),
-            wallet or "NOT_CONFIGURED",
-            ref,
+        # Своя сумма до цента у каждого открытого счёта: перевод TRC-20 без
+        # комментария узнаётся только по ней. Ровные 250 USDT у всех
+        # покупателей подтверждали чужой счёт.
+        amount = await usdt_invoice.create_payment(
+            pool,
+            user_id=callback.from_user.id,
+            plan="strike",
+            period_months=0,
+            base_usdt=float(_PRICE_USD),
+            amount_usd=float(_PRICE_USD),
+            wallet=wallet,
+            reference=ref,
         )
         log.info(
             "strike buy: payment record created user=%s ref=%s",
             callback.from_user.id,
             ref,
         )
+    except usdt_invoice.NoFreeAmountError as exc:
+        await callback.message.edit_text(
+            f"⏳ <b>Счёт не создан.</b>\n\n{exc}", parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
     except Exception as exc:
         mark_handled_error(f"strike_buy: DB insert failed: {exc}")
         log_exc_swallow(log, "cb_strike_buy: DB insert failed")
@@ -383,27 +412,13 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Проверить оплату", callback_data=StrikeCb(action="check_pay"))
-    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
-    kb.adjust(1)
-
-    if not wallet:
-        await callback.message.edit_text(
-            "⚔️ <b>Массовые жалобы — $250 USDT</b>\n\n"
-            "⚠️ Автоматическая оплата не настроена.\n\n"
-            "Свяжитесь с администратором для активации.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
-        return
-
     await callback.message.edit_text(
         f"⚔️ <b>Модуль «Массовые жалобы» — оплата</b>\n\n"
-        f"Сумма: <b>{_PRICE_USD} USDT</b>\n"
+        f"Сумма: <b>{amount:.2f} USDT</b>\n"
         f"Сеть: <b>TRC-20 (TRON)</b>\n\n"
         f"Кошелёк:\n<code>{wallet}</code>\n\n"
-        f"Переведите ровно <b>{_PRICE_USD} USDT</b> и нажмите «Проверить оплату».\n"
+        f"Переведите ровно <b>{amount:.2f} USDT</b> — до цента: по этой сумме "
+        f"мы узнаём ваш перевод. Затем нажмите «Проверить оплату».\n"
         f"⚠️ Другие сети не принимаются.\n\n"
         f"⏱ Подтверждение: 5–30 минут\n"
         f"<i>ID платежа: {ref}</i>",

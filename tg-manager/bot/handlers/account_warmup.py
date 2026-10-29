@@ -22,7 +22,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import db
-from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb
+from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb, SubCb
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import WarmupSessionFSM, ResourceActivityFSM
 from bot.utils.event_status import mark_handled_error
@@ -43,6 +43,37 @@ def _back_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
     return kb
+
+
+async def _show_gate_refusal(message, exc: PermissionError) -> None:
+    """Отказ гейта прогрева (нет подписки / Ban Weather) — причина и путь к оплате.
+
+    Раньше отказ шёл общей веткой «❌ Ошибка создания плана» с текстом
+    исключения, а массовое создание и вовсе писало его только в лог.
+    """
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💎 Оформить подписку", callback_data=SubCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
+    kb.adjust(1)
+    try:
+        await message.edit_text(
+            f"🔒 <b>Прогрев не запущен</b>\n\n{html.escape(str(exc) or 'Требуется подписка')}",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        log_exc_swallow(log, "warmup: отказ гейта не показан")
+
+
+async def _warmup_gate_refusal(pool: asyncpg.Pool, owner_id: int) -> PermissionError | None:
+    """Гейт тарифа прогрева заранее — до того, как что-то писать или спрашивать."""
+    from services import operation_bus
+
+    try:
+        await operation_bus.enforce_gates(pool, owner_id, "account_warmup")
+    except PermissionError as exc:
+        return exc
+    return None
 
 
 # ── Меню разогрева ────────────────────────────────────────────────────────
@@ -249,6 +280,11 @@ async def cb_warmup_create_all_plans(
     plan_type = callback_data.action.replace("pall_", "")
     user_id = callback.from_user.id
 
+    refusal = await _warmup_gate_refusal(pool, user_id)
+    if refusal:
+        await _show_gate_refusal(callback.message, refusal)
+        return
+
     # Only accounts with a valid session can be warmed
     try:
         accounts = await pool.fetch(
@@ -324,6 +360,9 @@ async def cb_warmup_start(
 
     try:
         plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, "standard")
+    except PermissionError as exc:
+        await _show_gate_refusal(callback.message, exc)
+        return
     except Exception as exc:
         log.warning('handler error in cb_warmup_start: %s', exc)
         await callback.message.edit_text(
@@ -396,7 +435,8 @@ async def _upsert_niche_profile(
         """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
            VALUES($1,$2,$3,$4,now())
            ON CONFLICT (account_id) DO UPDATE
-           SET niche=$3, profile_type=$4, updated_at=now()""",
+           SET niche=$3, profile_type=$4, updated_at=now()
+           WHERE account_niche_profiles.owner_id = EXCLUDED.owner_id""",
         account_id, owner_id, niche, profile_type,
     )
 
@@ -453,10 +493,25 @@ async def cb_warmup_pick_profile(
     plan_idx = callback_data.page
     plan_type = _WARMUP_PLAN_ORDER[plan_idx] if 0 <= plan_idx < len(_WARMUP_PLAN_ORDER) else "standard"
 
+    # acc_id пришёл из callback и подделывается: владельца и тариф проверяем
+    # ДО любой записи. Раньше профиль и план писались на чужой аккаунт, а
+    # владелец проверялся уже после.
+    refusal = await _warmup_gate_refusal(pool, callback.from_user.id)
+    if refusal:
+        await _show_gate_refusal(callback.message, refusal)
+        return
+    if await db.get_account_label(pool, acc_id, callback.from_user.id) is None:
+        await callback.message.edit_text(
+            "❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
+        return
+
     try:
         # Профиль пишем ДО плана — движок при первом тике уже читает правильные веса.
         await _upsert_niche_profile(pool, callback.from_user.id, acc_id, profile_type)
         plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, plan_type)
+    except PermissionError as _e:
+        await _show_gate_refusal(callback.message, _e)
+        return
     except Exception as _e:
         log.warning('handler error in cb_warmup_pick_profile: %s', _e)
         await callback.message.edit_text(
@@ -1289,6 +1344,11 @@ async def cb_wu_sess_start(
     target_type: str = data.get("target_type", "infra")
     plan_type: str = data.get("plan_type", "standard")
     cfg = _SESSION_PLAN_CONFIG[plan_type]
+
+    refusal = await _warmup_gate_refusal(pool, callback.from_user.id)
+    if refusal:
+        await _show_gate_refusal(callback.message, refusal)
+        return
 
     try:
         session_id = await pool.fetchval(

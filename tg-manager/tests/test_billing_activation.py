@@ -59,11 +59,17 @@ async def test_activation_normalizes_alias_plan():
 
 
 @pytest.mark.asyncio
-async def test_months_coerced_to_at_least_one():
-    ex = FakeExecutor(EXP)
-    await billing.activate_subscription(ex, user_id=7, plan="paid", months=0)
-    _, upsert_args = ex.fetchval_calls[0]
-    assert upsert_args[2] == "1"
+async def test_less_than_a_month_is_refused_not_rounded_up():
+    """Срок 0 — подделанная кнопка (цена 0), а не «округлим до месяца».
+
+    Раньше здесь закреплялось обратное: max(1, months) выдавал месяц за счёт
+    на ноль (D1 в OPEN_DEFECTS.md).
+    """
+    for bad in (0, -1, None):
+        ex = FakeExecutor(EXP)
+        with pytest.raises(ValueError):
+            await billing.activate_subscription(ex, user_id=7, plan="paid", months=bad)
+        assert ex.fetchval_calls == [] and ex.execute_calls == []
 
 
 @pytest.mark.asyncio

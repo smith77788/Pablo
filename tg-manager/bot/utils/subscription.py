@@ -85,6 +85,21 @@ CHANNEL_LIMITS: dict[str, int] = tariffs.resource_limits("channels")
 
 PLAN_PRICES = {plan: tariffs.price_str(plan) for plan in tariffs.PLANS if plan != "free"}
 PLAN_EMOJIS = {"free": "🆓", "paid": "💎"}
+# Имя тарифа для человека. Код хранит английские ключи ('paid', 'strike'), а в
+# сообщениях бота они выводились как есть: «Оплата PAID», «Подписка STRIKE».
+_PLAN_NAMES_RU = {
+    "free": "Бесплатный",
+    "paid": "Подписка",
+    "strike": "Массовые жалобы",
+    "host_server": "Host-Server",
+}
+
+
+def plan_name_ru(plan: str | None) -> str:
+    key = (plan or "").strip().lower()
+    if key in _PLAN_NAMES_RU:
+        return _PLAN_NAMES_RU[key]
+    return _PLAN_NAMES_RU.get(tariffs.coerce_plan(key), "Подписка")
 PLAN_FEATURES = {
     "paid": "∞ ботов и каналов, CRM, воронки, аккаунты, AI-ассистент, рассылки, аналитика, все функции",
 }

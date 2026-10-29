@@ -169,28 +169,43 @@ def gen_reference() -> str:
 async def create_purchase(pool: asyncpg.Pool, user_id: int) -> dict:
     """Создать запись оплаты за модуль (плата разовая, plan='host_server').
 
-    Возвращает {reference, wallet, price_usd}. Активация — в payment_checker при
-    подтверждении транзакции (как у strike). period_months=0 → это не подписка.
+    Возвращает {reference, wallet, price_usd, amount_usdt}. Активация — в
+    payment_checker при подтверждении транзакции (как у strike).
+    period_months=0 → это не подписка.
+
+    `amount_usdt` — сумма к переводу: цена плюс центы, закреплённые только за
+    этим счётом. Перевод TRC-20 без комментария узнаётся лишь по сумме, и
+    ровная цена у всех покупателей подтверждала чужой счёт. Без настроенного
+    кошелька счёт не заводится (wallet='NOT_CONFIGURED').
     """
     if await has_access(pool, user_id):
         return {"already": True}
     price = await get_price(pool)
-    wallet = os.getenv("TRON_WALLET", "") or "NOT_CONFIGURED"
+    from bot.handlers.subscription import _tron_wallet
+    from services import usdt_invoice
+
+    wallet = _tron_wallet()
+    if not wallet:
+        return {"already": False, "wallet": "NOT_CONFIGURED", "price_usd": price,
+                "reference": None, "amount_usdt": None}
     ref = gen_reference()
     for _ in range(5):
         exists = await pool.fetchrow("SELECT id FROM payments WHERE reference=$1", ref)
         if not exists:
             break
         ref = gen_reference()
-    await pool.execute(
-        """INSERT INTO payments
-               (user_id, plan, period_months, currency, amount_crypto, amount_usd,
-                wallet_address, reference)
-           VALUES ($1, 'host_server', 0, 'USDT_TRC20', $2, $3, $4, $5)
-           ON CONFLICT (reference) DO NOTHING""",
-        user_id, float(price), float(price), wallet, ref,
+    amount = await usdt_invoice.create_payment(
+        pool,
+        user_id=user_id,
+        plan="host_server",
+        period_months=0,
+        base_usdt=float(price),
+        amount_usd=float(price),
+        wallet=wallet,
+        reference=ref,
     )
-    return {"already": False, "reference": ref, "wallet": wallet, "price_usd": price}
+    return {"already": False, "reference": ref, "wallet": wallet,
+            "price_usd": price, "amount_usdt": amount}
 
 
 # ── маркетплейс: предложения (сдать) ─────────────────────────────────────────

@@ -28296,8 +28296,10 @@ function rebuildPlanPrices() {
   ];
   _PLAN_PRICES = periods.map(p=>{
     const d = Number(disc[String(p.months)]||0);
-    const total = Math.round(base * p.months * (1 - d/100));
-    return {...p, price:'$'+total, save: d?d+'%':null};
+    // До цента, как считает бот: Math.round показывал $78 там, где счёт
+    // выставлялся на $78.30.
+    const total = Math.round(base * p.months * (1 - d/100) * 100) / 100;
+    return {...p, price:'$'+(Number.isInteger(total) ? total : total.toFixed(2)), save: d?d+'%':null};
   });
 }
 rebuildPlanPrices();
@@ -28380,11 +28382,11 @@ async function openBilling() {
         <div class="row">
           <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
           <div class="row-body">
-            <div class="row-name">${esc(p.plan||'—')} · ${p.period_months||1} мес.</div>
+            <div class="row-name">${esc(({paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',strike:'Массовые жалобы',host_server:'Host-Server'})[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+p.period_months+' мес.':''}</div>
             <div class="row-val">${p.currency||'—'} · $${p.amount_usd||0}</div>
             <div class="row-val" style="color:var(--hint)">${ago(p.created_at)}</div>
           </div>
-          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${p.status==='confirmed'?'✓ Оплачен':'—'}</span></div>
+          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${({confirmed:'✓ Оплачен',pending:'⏳ Ждёт оплаты',confirming:'⏳ Подтверждается',expired:'Истёк',failed:'Ошибка'})[p.status]||'—'}</span></div>
         </div>
       `).join(''));
     }
@@ -28393,8 +28395,10 @@ async function openBilling() {
   }
 }
 function initPayment(planKey, label, price) {
-  if (tg && tg.openTelegramLink) {
-    const botUsername = window._botUsername || 'infragram_bot';
+  // Имя бота — только из конфигурации сервера. Раньше при неизвестном имени
+  // открывался @infragram_bot — чужой бот, которому человек понёс бы деньги.
+  const botUsername = (window._botUsername || '').replace(/^@/, '');
+  if (tg && tg.openTelegramLink && botUsername) {
     tg.openTelegramLink(`https://t.me/${botUsername}?start=pay_${planKey}`);
   } else {
     toast(`❗ Для оплаты перейдите в бот и выберите тариф «${label}» (${price})`);
