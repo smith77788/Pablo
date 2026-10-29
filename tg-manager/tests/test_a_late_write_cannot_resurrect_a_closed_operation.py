@@ -31,9 +31,21 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "services", "op_worker.py")
-_SETS_NON_TERMINAL = re.compile(
-    r"UPDATE operation_queue SET\s+status\s*=\s*'(pending|paused|scheduled|running)'",
-    re.I)
+# `status` не обязан стоять ПЕРВОЙ колонкой в SET: запрос
+# «SET started_at=NULL, status='pending'» прежняя версия не находила вовсе, то
+# есть самый опасный вид записи (без условия на статус) мог проехать мимо
+# переписи из-за порядка колонок. Поэтому ищем присваивание статуса где угодно
+# в SET-части, а не сразу за словом SET.
+_UPDATES_THE_QUEUE = re.compile(r"UPDATE\s+operation_queue\b", re.I)
+_SETS_NON_TERMINAL_COL = re.compile(
+    r"status\s*=\s*'(pending|paused|scheduled|running)'", re.I)
+
+
+def _sets_non_terminal(sql: str) -> bool:
+    if not _UPDATES_THE_QUEUE.search(sql):
+        return False
+    set_part = re.split(r"\bWHERE\b", sql, flags=re.I)[0]
+    return bool(_SETS_NON_TERMINAL_COL.search(set_part))
 
 
 def _src() -> str:
@@ -68,7 +80,7 @@ def fate_writes(src: str) -> list[tuple[int, str, bool]]:
         if not isinstance(n, ast.Call):
             continue
         sql = _sql_with_markers(n)
-        if not _SETS_NON_TERMINAL.search(sql):
+        if not _sets_non_terminal(sql):
             continue
         where = sql.split("WHERE", 1)[1] if "WHERE" in sql.upper() else ""
         guarded = ("__STATUS_GUARD__" in sql
@@ -155,3 +167,81 @@ def test_the_claim_query_cannot_start_an_operation_twice():
     assert claim.upper().count("STATUS = 'PENDING'") >= 2, (
         "статус не перепроверяется под замком — отбор полагается на чтение до "
         "блокировки")
+
+
+# ── Та же проверка по ВСЕМУ дереву, а не по одному файлу ────────────────────
+#
+# Выше читается `services/op_worker.py`, и имя файла обещает свойство целиком.
+# Но операцию возвращают в очередь и другие модули: `services/error_recovery.py`
+# и `services/recovery_engine.py` поднимают зависшую своим UPDATE. Сейчас оба
+# условие на статус ставят — но ничто их на этом не держало, а цена ошибки
+# здесь максимальная: владелец нажал «Отмена», а движок восстановления вернул
+# операцию в 'pending' и флот сделал то, что человек запретил.
+#
+# Тот же урок, что и у переписи отмены: проверка, читающая один файл при имени
+# про свойство, — это выбор «кого судить» по списку путей.
+
+_TREE_SKIP_DIRS = {"tests", "__pycache__", ".git", "node_modules", "venv",
+                   ".venv", "migrations"}
+
+
+def _py_files():
+    for base, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in _TREE_SKIP_DIRS]
+        for f in files:
+            if f.endswith(".py"):
+                yield os.path.join(base, f)
+
+
+def _fate_writes_everywhere():
+    out = []
+    for path in _py_files():
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        if "operation_queue" not in src:
+            continue
+        try:
+            found = fate_writes(src)
+        except SyntaxError:
+            continue
+        rel = os.path.relpath(path, ROOT)
+        for lineno, sql, guarded in found:
+            out.append((rel, lineno, sql, guarded))
+    return out
+
+
+def test_the_tree_census_reaches_the_other_modules():
+    """Самопроверка: перепись обязана видеть модули ВНЕ op_worker."""
+    seen = {rel for rel, _, _, _ in _fate_writes_everywhere()}
+    for rel in (os.path.join("services", "error_recovery.py"),
+                os.path.join("services", "recovery_engine.py")):
+        assert rel in seen, (
+            f"перепись не видит {rel}, хотя он возвращает операцию в очередь — "
+            "отбор снова сузился до одного файла")
+
+
+def test_no_module_resurrects_an_operation_without_looking_at_its_status():
+    naked = [(rel, ln, sql) for rel, ln, sql, g in _fate_writes_everywhere()
+             if not g]
+    assert not naked, (
+        f"запись возвращает операцию в очередь, не глядя на её статус: {naked}. "
+        "Владелец успеет нажать «Отмена» между решением и записью, и такая "
+        "запись поднимет отменённую операцию — флот сделает то, что человек "
+        "запретил")
+
+
+_SICK_COLUMN_ORDER = '''
+async def f(pool, op_id):
+    await pool.execute(
+        "UPDATE operation_queue SET started_at=NULL, status='pending' WHERE id=$1",
+        op_id)
+'''
+
+
+def test_the_census_bites_when_status_is_not_the_first_column():
+    """Порядок колонок в SET не должен прятать запись от переписи."""
+    found = fate_writes(_SICK_COLUMN_ORDER)
+    assert found, (
+        "запись со статусом НЕ первой колонкой не найдена — порядок колонок "
+        "прячет от переписи самый опасный вид записи")
+    assert not found[0][2], "...и она должна считаться записью без условия"
