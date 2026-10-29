@@ -21601,63 +21601,109 @@ async def _exec_account_warmup(
 async def _exec_parse_audience(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Парсинг аудитории канала/группы.
-    params: {source_ref, parse_type, limit}
+    """Парсинг аудитории канала/группы — единственный исполнитель разбора.
+
+    params: {source_ref, parse_type, limit, days_back}
+
+    Сюда ведут и мини-апп, и бот: у разбора одна дверь с тарифом, отменой,
+    историей операции и передачей базы в инвайт/рассылку. Итог честный:
+    пустой источник — «выполнено, 0», обрыв без результата — провал с
+    причиной, обрыв с частью базы — частичный итог с причиной.
     """
+    import html as _html
+
     from services import parser as _parser
 
     source_ref = (params.get("source_ref") or "").strip()
     parse_type = params.get("parse_type", "members")
-    limit = int(params.get("limit") or 500)
+    try:
+        limit = int(params.get("limit") or 500)
+    except (TypeError, ValueError):
+        limit = 500
     try:
         days_back = max(1, min(365, int(params.get("days_back") or 30)))
     except (TypeError, ValueError):
         days_back = 30
 
     if not source_ref:
-        return {"status": "failed", "summary": "⚠️ source_ref не указан"}
+        return {"status": "failed", "summary": "⚠️ Не указан источник для разбора"}
 
     if limit < 1 or limit > 50000:
         limit = 500
 
+    src = _html.escape(source_ref)
+    kind = _parser.PARSE_TYPE_LABELS.get(parse_type, _parser.PARSE_TYPE_LABELS["members"])
+
+    async def _progress(current: int, total: int) -> None:
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+            int(current), op_id, log_ctx=f"[parse_progress op={op_id}]")
+
+    async def _stop() -> bool:
+        return await _is_cancelled(pool, op_id)
+
+    kw = {"limit": limit, "progress_cb": _progress, "should_stop": _stop}
     try:
         if parse_type == "active":
             result = await _parser.parse_active_users(
-                pool, owner_id, source_ref, days_back=days_back, limit=limit
-            )
+                pool, owner_id, source_ref, days_back=days_back, **kw)
         elif parse_type == "comments":
             result = await _parser.parse_commenters(
-                pool, owner_id, source_ref, days_back=days_back, limit=limit
-            )
+                pool, owner_id, source_ref, days_back=days_back, **kw)
         else:
-            result = await _parser.parse_members(pool, owner_id, source_ref, limit=limit)
-
-        total_found = result.get("total_found", 0)
-        total_saved = result.get("total_saved", 0)
-        status = result.get("status", "done")
-
-        if status == "error":
-            return {
-                "status": "failed",
-                "summary": f"⚠️ Парсинг {source_ref} не удался: {result.get('error', 'неизвестная ошибка')}",
-            }
-
-        await pool.execute(
-            "UPDATE operation_queue SET total_items=$1, done_items=$2 WHERE id=$3",
-            total_found, total_saved, op_id,
-        )
-        return {
-            "status": "done",
-            "total_found": total_found,
-            "total_saved": total_saved,
-            "summary": f"👥 Парсинг {source_ref}: найдено {total_found}, сохранено {total_saved}",
-            # Связка модулей: база уходит в инвайт/рассылку без повторного
-            # выбора из списка (services/op_chain).
-            "handoff": {"parse_run_id": result.get("run_id")},
-        }
+            result = await _parser.parse_members(pool, owner_id, source_ref, **kw)
     except Exception as exc:
         log.exception("_exec_parse_audience op=%d source=%s", op_id, source_ref)
-        return {"status": "failed", "summary": f"⚠️ Ошибка парсинга: {exc}"}
+        return {"status": "failed",
+                "summary": f"⚠️ Разбор {src} не удался: "
+                           f"{_html.escape(_parser.explain_parse_error(exc))}"}
+
+    total_found = int(result.get("total_found", 0) or 0)
+    total_saved = int(result.get("total_saved", 0) or 0)
+    status = result.get("status", "done")
+    note = result.get("note") or ""
+    note_line = f"\n{_html.escape(note)}" if note else ""
+
+    if status == "error":
+        return {
+            "status": "failed",
+            "summary": f"⚠️ Разбор {src} не удался: "
+                       f"{_html.escape(result.get('error') or 'причина неизвестна')}",
+            "reason": result.get("error") or "",
+        }
+
+    # Цель операции — то, что источник реально отдал, а не потолок из формы:
+    # 300 человек в группе при лимите 500 — это полный, а не частичный разбор.
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1, done_items=$1 WHERE id=$2",
+        total_found, op_id, log_ctx=f"[parse_done op={op_id}]")
+    found_line = (f"найдено {total_found}, из них новых {total_saved}"
+                  if total_found else "найдено 0")
+    out = {
+        "total_found": total_found,
+        "total_saved": total_saved,
+        # База этого запуска — все найденные (повторно найденные тоже
+        # переходят в неё), поэтому передаём её целиком.
+        "handoff": {"parse_run_id": result.get("run_id")},
+    }
+    if status == "cancelled":
+        out.update(status="cancelled",
+                   summary=f"🚫 Разбор {kind} {src} остановлен: {found_line}.{note_line}")
+        return out
+    if result.get("partial"):
+        # ok>0 при status=failed → classify_final даёт «частично»: работа была,
+        # но не доведена, и причина уходит владельцу.
+        out.update(status="failed", ok=total_found, reason=note,
+                   summary=f"⚠️ Разбор {kind} {src} оборван: {found_line}.{note_line}")
+        return out
+    if total_found == 0:
+        out.update(status="done", ok=0,
+                   summary=f"∅ Разбор {kind} {src}: источник открыт, но людей в "
+                           f"нём не нашлось.{note_line}")
+        return out
+    out.update(status="done", ok=total_found,
+               summary=f"👥 Разбор {kind} {src}: {found_line}.{note_line}")
+    return out
 
 
 async def _exec_reg_check(

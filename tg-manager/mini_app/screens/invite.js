@@ -412,10 +412,12 @@ async function loadInviteParseRuns() {
   if (!sel) return;
   try {
     const d = await api('/api/miniapp/parser/runs');
-    const runs = (d.runs||[]).filter(r=>(r.total_saved||0) > 0);
+    // База запуска — все найденные им люди (повторно найденные переходят в
+    // неё же), а не только новые: перепарсенный источник с 0 новых — не пустая база.
+    const runs = (d.runs||[]).filter(r=>r.status==='done' && (r.total_found||0) > 0);
     const cur = INV_PARSE_RUN ? String(INV_PARSE_RUN) : '';
     sel.innerHTML = '<option value="">— вся аудитория парсера —</option>' +
-      runs.map(r=>`<option value="${r.id}"${String(r.id)===cur?' selected':''}>${esc(r.source||('запуск #'+r.id))} (${num(r.total_saved)})</option>`).join('');
+      runs.map(r=>`<option value="${r.id}"${String(r.id)===cur?' selected':''}>${esc(r.source||('запуск #'+r.id))} (${num(r.total_found)})</option>`).join('');
   } catch(e) {
     // Одинокий пункт «вся аудитория» неотличим от «запусков парсера нет».
     sel.innerHTML = '<option value="">— вся аудитория парсера —</option>'

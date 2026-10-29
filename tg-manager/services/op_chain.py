@@ -117,8 +117,10 @@ def steps_for(op_type: str, status: str, params: dict | None = None,
             run_id = int(ho.get("parse_run_id") or 0)
         except (TypeError, ValueError):
             run_id = 0
+        # База запуска — все найденные (повторно найденные переходят в неё),
+        # а не только новые: перепарсенный источник с 0 новых — не пустая база.
         try:
-            saved = int(res.get("total_saved") or 0)
+            saved = int(res.get("total_found") or res.get("total_saved") or 0)
         except (TypeError, ValueError):
             saved = 0
         if run_id > 0 and saved > 0:

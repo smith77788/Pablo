@@ -122,7 +122,7 @@ def _no_flood_record(monkeypatch):
 def test_collector_stops_on_a_long_flood(_no_flood_record):
     client = _FloodingClient(messages=50, seconds=600)
 
-    found, saved, flood_wait = asyncio.run(
+    found, saved, flood_wait, _reason = asyncio.run(
         parser._collect_and_save_senders(
             None, 7, 1, client, object(),
             source_type="group", source_id=1, source_title="t",
@@ -167,7 +167,7 @@ def test_collector_waits_out_a_short_flood(monkeypatch, _no_flood_record):
 
     client = _FloodingClient(messages=3, seconds=30)
 
-    found, saved, flood_wait = asyncio.run(
+    found, saved, flood_wait, _reason = asyncio.run(
         parser._collect_and_save_senders(
             None, 7, 1, client, object(),
             source_type="group", source_id=1, source_title="t",
@@ -207,16 +207,18 @@ def test_no_naive_wait_token_parsing():
 
 
 def test_every_parse_reports_a_truncated_run():
-    """Все три функции разбора отдают наверх flood_wait и признак неполноты."""
+    """Все три разбора идут через одну дверь, и она отдаёт наверх flood_wait и
+    признак неполноты (раньше это было скопировано в каждую функцию)."""
     src = _src()
-    assert src.count('"flood_wait": flood_wait') == 3, (
-        "не все функции разбора сообщают о прерванном флудом сборе"
-    )
-    assert src.count('"partial": bool(flood_wait)') == 3
+    assert src.count("return await _run_parse(") == 3
+    assert '"flood_wait": st.flood_wait' in src
+    assert '"partial": st.partial' in src
 
 
 def test_flood_is_written_into_the_run_error():
-    src = _src()
-    assert src.count("_flood_note") >= 6, (
-        "обрыв по флуду не записывается в отчёт о разборе"
-    )
+    st = parser._ParseState("@x")
+    st.total_found = 40
+    st.flood_wait = 600
+    assert st.final_status == "done"
+    assert st.partial
+    assert "600" in st.run_note and "не вся аудитория" in st.run_note

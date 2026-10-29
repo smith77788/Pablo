@@ -466,7 +466,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 "total_found": r["total_found"] or 0,
                 "total_saved": r["total_saved"] or 0,
                 "started_at": r["started_at"].isoformat() if r["started_at"] else None,
-                "error": (r["error"] or "")[:200],
+                "error": (r["error"] or "")[:300],
             }
             for r in rows
         ]})
@@ -573,9 +573,11 @@ def setup_routes(app: web.Application, pool) -> None:
             body, ctype, fname = _parser.audience_to_txt(users), "text/plain", "parsed_audience.txt"
         else:
             body, ctype, fname = _parser.audience_to_json(users), "application/json", "parsed_audience.json"
+        # Без Access-Control-Allow-Origin: в выгрузке телефоны и имена, а
+        # звёздочка разрешала любому чужому сайту прочитать её ответом на
+        # запрос с токеном. Мини-апп берёт файл со своего же адреса.
         return web.Response(text=body, content_type=ctype, charset="utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{fname}"',
-                     "Access-Control-Allow-Origin": "*"})
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
     async def submit_parse_job(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -604,7 +606,8 @@ def setup_routes(app: web.Application, pool) -> None:
         except (TypeError, ValueError):
             days_back = 30
         _win = f", {days_back}д" if parse_type in ("active", "comments") else ""
-        label = f"Парсинг {parse_type} из @{source_ref} (до {limit}{_win})"
+        _kind = _parser.PARSE_TYPE_LABELS.get(parse_type, parse_type)
+        label = f"Разбор {_kind} из @{source_ref} (до {limit}{_win})"
         try:
             op_id = await _obus.submit(
                 pool, uid, "parse_audience",
