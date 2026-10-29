@@ -189,3 +189,48 @@ def test_the_invite_outcome_marker_is_still_written():
     body = _fn("_exec_mass_invite")
     assert "'link_sent' if" in body or '"link_sent" if' in body
     assert "joined" in body
+
+
+# ── Журнал пишется только из воркера, и это проверяется, а не предполагается ──
+#
+# Перепись выше читает РОВНО `services/op_worker.py`. Сегодня это верно: ни
+# одного `INSERT INTO operation_log` вне воркера нет. Но верно это по случаю, а
+# не по построению: отметку о взятой цели мог бы начать писать `dm_engine`,
+# `smart_invite` или любой другой движок, и громкости от него никто бы не
+# потребовал — проверка его просто не читает. Цена именно у этой потери самая
+# конкретная: пропавшая отметка «сделано» значит, что повтор ПОВТОРИТ реальное
+# действие в Telegram — второй инвайт, второй пост.
+
+_TREE_SKIP_DIRS = {"tests", "__pycache__", ".git", "node_modules", "venv",
+                   ".venv", "migrations"}
+
+
+def _modules_writing_the_journal() -> set[str]:
+    out = set()
+    for base, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in _TREE_SKIP_DIRS]
+        for f in files:
+            if not f.endswith(".py"):
+                continue
+            path = os.path.join(base, f)
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+            if re.search(r"INSERT\s+INTO\s+operation_log", src, re.I):
+                out.add(os.path.relpath(path, ROOT))
+    return out
+
+
+def test_the_journal_is_written_from_one_module_only():
+    """Иначе перепись громкости выше сторожит лишь часть журнала."""
+    writers = _modules_writing_the_journal()
+    expected = {os.path.join("services", "op_worker.py")}
+    extra = writers - expected
+    assert not extra, (
+        f"журнал целей пишется ещё и здесь: {sorted(extra)}. Перепись "
+        "громкости читает только воркер, поэтому эти записи никто не "
+        "проверяет на громкость — а пропавшая отметка «сделано» значит, что "
+        "повтор повторит реальное действие в Telegram. Либо пишите журнал "
+        "через воркер, либо расширьте перепись на эти модули")
+    assert writers == expected, (
+        "воркер перестал писать журнал целей — перепись громкости выше "
+        "сторожит пустоту")
