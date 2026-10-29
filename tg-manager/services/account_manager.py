@@ -2802,7 +2802,10 @@ async def start_qr_login(user_id: int) -> bytes:
     # то есть приходит ещё и CancelledError. Поэтому ловим BaseException.
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        qr = await client.qr_login()
+        # Потолок: `qr_login()` только СОЗДАЁТ ссылку, ждать сканирования будет
+        # `qr.wait()` у вызывающего. Без потолка мёртвый сокет оставлял бы
+        # владельца перед экраном без QR и без ошибки.
+        qr = await asyncio.wait_for(client.qr_login(), timeout=_OP_TIMEOUT)
         img = qrcode.make(qr.url)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
@@ -2904,7 +2907,7 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        me = await client.get_me()
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         return {
             "tg_user_id": me.id,
             "phone": me.phone or "",
@@ -3879,7 +3882,8 @@ async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dic
     last_text = ""
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
-        if not await client.is_user_authorized():
+        if not await asyncio.wait_for(
+                client.is_user_authorized(), timeout=_OP_TIMEOUT):
             return {"ok": False, "status": "no_session", "reply": "", "steps": 0}
 
         spam_bot = await asyncio.wait_for(client.get_entity("@SpamBot"), timeout=10.0)
@@ -9744,7 +9748,7 @@ async def validate_session_import(session_str: str, proxy_url: str | None = None
         device = {"proxy_url": proxy_url or "", "proxy_id": None, "cf_relay_url": ""}
         client = _make_client(session_str, device)
         await asyncio.wait_for(client.connect(), timeout=15)
-        me = await client.get_me()
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         return {"valid": True, "phone": me.phone or "", "user_id": me.id}
     except Exception as e:
         return {"valid": False, "error": str(e)[:200]}
