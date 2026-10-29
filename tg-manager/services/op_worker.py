@@ -3736,6 +3736,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "id рассылки не закрепился за операцией — рассылка не запущена и "
         "снята; без этого отказа повтор операции отправил бы сообщение всей "
         "аудитории второй раз",
+    "infragram_gp_asset_mark_write_failures_total":
+        "id созданного канала или бота (Global Presence) — не записался в "
+        "цель: цель закрыта на месте, иначе разбор брошенных целей счёл бы "
+        "её незапущенной и аккаунт создал бы второй такой же ресурс",
     "infragram_network_broadcast_mark_write_failures_total":
         "отметка о запуске рассылки по боту (сетевая рассылка) — не записалась "
         "в базу: рассылка по этому боту не запущена, иначе повторный прогон "
@@ -8381,6 +8385,68 @@ async def _exec_bulk_leave(
     }
 
 
+_GP_ASSET_LABEL = {"channel": "Канал", "bot": "Бот"}
+
+
+async def _mark_gp_asset(pool, target_id: int, asset_id: int, kind: str) -> bool:
+    """Отметить в цели Global Presence id СОЗДАННОГО канала или бота.
+
+    Это не отчётность, а дверь. Расклинивание брошенных целей
+    (`_revive_abandoned_gp_targets`) разбирает их ровно по `result_asset_id` и
+    само объясняет ставку: пусто — «работа не начиналась», цель возвращается в
+    очередь и повтор создаёт канал ЗАНОВО; заполнено — «ресурс уже создан»,
+    цель закрывается. То есть потерянная отметка стоит ВТОРОГО канала, а для
+    бота дороже: лимит BotFather считается на аккаунт, и дубль выжигает
+    дефицитный слот.
+
+    Писалось это одним `_safe_execute`, результат которого никто не смотрел, —
+    а он не бросает исключений, он возвращает 'ERROR'. Один блип базы между
+    созданием канала и отметкой открывал дверь настежь.
+
+    Отметить ДО действия, как это делают инвайт и кампания ЛС, здесь нельзя:
+    id появляется только вместе с ресурсом. Поэтому дверь держится иначе —
+    запись повторяется, а при полной неудаче цель закрывается на месте с
+    честным error_message. Закрытая цель расклиниванию не попадается, и
+    второго канала не будет; сам ресурс не теряется — его подбирает
+    сканирование собственных ресурсов, ровно как написано в расклинивании про
+    оборвавшийся прогон.
+
+    Возвращает True, если отметка легла.
+    """
+    _label = _GP_ASSET_LABEL.get(kind, "Ресурс")
+    for _attempt in (1, 2, 3):
+        if await _safe_execute(
+            pool,
+            "UPDATE global_presence_targets SET result_asset_id=$1 WHERE id=$2",
+            int(asset_id), int(target_id),
+            log_ctx=f"[gp_mark_created {kind} target={target_id}]",
+        ) != "ERROR":
+            return True
+        if _attempt < 3:
+            await asyncio.sleep(0.5 * _attempt)
+    log.error(
+        "gp_%s: %s создан (id %s), но отметка в цели %s НЕ записалась — "
+        "закрываем цель на месте, иначе расклинивание сочтёт её незапущенной и "
+        "аккаунт создаст второй такой же",
+        kind, _label.lower(), asset_id, target_id,
+    )
+    _reliability_metric("infragram_gp_asset_mark_write_failures_total", kind=kind)
+    # Закрытие ограничено статусом 'running': исход, который цель уже успела
+    # получить, затирать нельзя.
+    await _safe_execute(
+        pool,
+        "UPDATE global_presence_targets SET status='done', "
+        "       error_message=COALESCE(error_message, $1) "
+        " WHERE id=$2 AND status='running'",
+        f"{_label} создан, но его id не удалось записать — оформление (имя, "
+        f"аватар, запись в каталог) могло не примениться. Ресурс есть: его "
+        f"подберёт сканирование собственных ресурсов.",
+        int(target_id),
+        log_ctx=f"[gp_mark_lost {kind} target={target_id}]",
+    )
+    return False
+
+
 async def _revive_abandoned_gp_targets(pool: asyncpg.Pool, plan_id: int, what: str) -> None:
     """Расклинить цели плана Global Presence, брошенные прошлым прогоном.
 
@@ -8761,12 +8827,7 @@ async def _exec_global_presence_channel(
             # этой отметке расклинивание отличает «канал уже создан» от «работа
             # не начиналась» и не создаёт второй канал.
             if channel_id:
-                await _safe_execute(
-                    pool,
-                    "UPDATE global_presence_targets SET result_asset_id=$1 WHERE id=$2",
-                    channel_id, target["id"],
-                    log_ctx=f"[gp_mark_created target={target['id']}]",
-                )
+                await _mark_gp_asset(pool, target["id"], channel_id, "channel")
 
             username_error = None
             planned_username = target.get("planned_username")
@@ -9796,12 +9857,8 @@ async def _exec_global_presence_bot(
             # По этой отметке расклинивание отличает созданное от неначатого.
             if token and ":" in token:
                 try:
-                    await _safe_execute(
-                        pool,
-                        "UPDATE global_presence_targets SET result_asset_id=$1 WHERE id=$2",
-                        int(token.split(":")[0]), target["id"],
-                        log_ctx=f"[gp_bot_mark_created target={target['id']}]",
-                    )
+                    await _mark_gp_asset(
+                        pool, target["id"], int(token.split(":")[0]), "bot")
                 except (TypeError, ValueError):
                     log.debug("gp_bot: токен без числового id, отметка пропущена")
 
