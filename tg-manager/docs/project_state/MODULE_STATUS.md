@@ -1,94 +1,95 @@
-> **Файл от июня 2026, содержимое не обновлялось.** Держим как исторический
-> ориентир: часть пунктов давно закрыта, часть потеряла смысл. Живое состояние —
-> в `TASK_QUEUE.md`, `CURRENT_STATE.md` и `docs/project_state/CURRENT_MISSION.md`.
+# Карта готовности модулей
 
-# Module Status Registry
+**Обновлено:** 2026-10-29 · ветка `claude/telegram-bot-services-xfAh6` @ `0585e4b`
+Июньская версия реестра — в истории git; она описывала защиту вызовов пула, а
+не готовность модулей, и больше не используется.
 
-Statuses: PLANNED | IN_PROGRESS | PARTIAL | WORKING | VERIFIED | REGRESSION
+## Как читать
 
-Last updated: 2026-06-06
+Модуль проверяется по цепочке из `CURRENT_MISSION.md`:
 
----
+**пользователь → интерфейс → настройки → валидация → бэкенд → база → исполнение
+→ результат → ошибка → восстановление → аудит → обратная связь**
 
-## Core Infrastructure
+Статусы модуля:
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| activity_log middleware | WORKING | warning/error split done; needs schema_v84 in prod |
-| mark_handled_error | WORKING | 11 handlers covered |
-| Pool call protection | IN_PROGRESS | channel_ops, account_warmup, mass_ops, dm_campaigns done |
-| op_worker (main loop) | PARTIAL | executes ops, but some exec functions need verification |
-| operation_bus | PARTIAL | submit works, result reporting needs check |
-| activity_logger (queue) | WORKING | batch inserts, fire-and-forget |
+- **ЗАКРЫТ** — пройден целиком, существенных улучшений не находится.
+- **ЧАСТИЧНО** — основной путь работает, но в цепочке есть подтверждённый обрыв.
+- **СЛОМАН** — обрыв делает модуль непригодным к релизу (деньги, безопасность,
+  неверный результат).
+- **НЕ ПРОЙДЕН** — в этот проход по цепочке не разбирался; статус неизвестен,
+  записи из CLAUDE.md и коммитов — не доказательство.
 
-## Operations
+Звенья: ✅ проверено, работает · ⚠️ есть дефект · ❌ обрыв · · не проверялось.
+Номера дефектов — в `OPEN_DEFECTS.md`.
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| STRIKE | PARTIAL | access control works; staggered_strike needs safety hardening |
-| Mass Publish | PARTIAL | inline bg task works; op_worker path needs verification |
-| Bulk Join | PARTIAL | via op_worker _exec_bulk_join |
-| Bulk Leave | PARTIAL | via op_worker _exec_bulk_leave |
-| Bulk Bot Edit | PARTIAL | via op_worker _exec_bulk_bot_edit |
-| Global Presence (channel) | PARTIAL | via op_worker |
-| Global Presence (bot) | PARTIAL | via op_worker |
-| Bulk Create Channels | PARTIAL | via op_worker |
-| DM Campaigns | PARTIAL | launch works; dm_engine.run_campaign needs check |
-| Quick Post | PARTIAL | wizard complete; channel posting needs check |
-| BotFather Create | PARTIAL | automated dialog, stability unknown |
+## Модули, пройденные в этот проход
 
-## Account Management
+| Модуль | Статус | Обрыв на звене | Инт. | Настр. | Валид. | Бэкенд | База | Испол. | Результ. | Ошибка | Восст. | Аудит | Обр. связь | Дефекты |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Оплата / тарифы | **СЛОМАН** | валидация, исполнение, гейт тарифа | ⚠️ | ✅ | ❌ | ⚠️ | ✅ | ❌ | ⚠️ | ⚠️ | ✅ | ✅ | ❌ | D1, D2, D3, D12, D18, D24 |
+| Аккаунты: прогрев | **ЧАСТИЧНО** | бэкенд (6 путей создания плана) | ⚠️ | ✅ | ❌ | ❌ | ⚠️ | ⚠️ | ✅ | ⚠️ | ✅ | ⚠️ | ✅ | D3, D4, D5, D9, D28 |
+| Аккаунты: импорт | **ЧАСТИЧНО** | бэкенд/база (3 независимые записи) | ✅ | ✅ | ⚠️ | ❌ | ❌ | ✅ | ⚠️ | ⚠️ | ✅ | · | ✅ | D6, D13, D25 |
+| Аккаунты: восстановление | **ЧАСТИЧНО** | исполнение (ручная апелляция мимо реабилитации) | ✅ | ✅ | ✅ | ⚠️ | ✅ | ⚠️ | ✅ | ⚠️ | ✅ | ⚠️ | ✅ | D14 |
+| Парсер аудитории | **ЧАСТИЧНО** | результат и ошибка (нечестный статус) | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | D7, D10, D11, D20, D26 |
+| Онбординг | **ЧАСТИЧНО** | результат (ложное «активирован») | ⚠️ | — | — | ✅ | ✅ | — | ❌ | ✅ | — | — | ⚠️ | D8, D15, D21 |
+| Рассылки / DM-кампании | **ЧАСТИЧНО** | бэкенд (два маршрута создания) | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | · | · | · | · | · | · | D16 |
+| Публикации в каналы | **ЧАСТИЧНО** | интерфейс (три пути одной публикации) | ⚠️ | ⚠️ | ✅ | ⚠️ | ✅ | ✅ | ✅ | ✅ | · | ✅ | ✅ | D17, D22, D23 |
+| Инвайт | **ЗАКРЫТ** (2026-09-04) | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| Account Warmup | IN_PROGRESS | pool calls protected; warmup logic correctness unknown |
-| Account Health | PLANNED | trust_score updates, deactivation on fatal |
-| Account Selection | PARTIAL | resource_selector exists |
-| Proxy Management | PARTIAL | add/delete/detect works; failover unknown |
-| Session Safety | PARTIAL | deactivates on AUTH_KEY error |
+Пояснения по строкам:
 
-## UI / Handlers
+- **Оплата.** Путь «мини-апп → диплинк `pay_*` → бот → крипто-счёт →
+  `payment_checker` → `billing.activate_subscription`» собран, подтверждение и
+  выдача идут одной транзакцией. Но срок подписки из кнопки не проверяется
+  (D1), USDT сопоставляется только по сумме (D2), тариф прогрева обходится
+  тремя путями (D3), а о скором окончании подписки никто не предупреждает
+  (D18). Дверь CryptoPay/Stars есть, но счетов этих типов никто не создаёт (D12).
+- **Прогрев.** Полный путь — экран прогрева мини-аппа (`warmup_create_plan`):
+  проверка пригодности, профиль поведения, сброс старой жалобы, операция через
+  шину. Ещё пять путей (карточка аккаунта, массовый в мини-аппе, три в боте)
+  делают по-своему и пропускают кто проверку бана, кто тариф, кто владельца.
+  Движок, уведомление о самоостановке и пауза из БД — в порядке.
+- **Импорт.** Вход по телефону, QR, `.session` и tdata идёт через
+  `db.add_tg_account` (дедуп по `tg_user_id`, снятие залипших блокировок,
+  авто-раскладка по прокси в мини-аппе). Вкладка «строка сессии» того же окна и
+  авторегистрация пишут аккаунт своими запросами без этих гарантий.
+- **Восстановление.** Цикл `account_rehab` (апелляция → перепроверка →
+  тихий прогрев, итог владельцу) работает; ручная апелляция из карточки о нём
+  не знает.
+- **Парсер.** Ошибка Telegram внутри разбора превращается в «найдено 0» без
+  причины, а сбой подключения оставляет запуск «в работе» навсегда. Бот парсит
+  в обход шины.
+- **Онбординг.** Чеклист мини-аппа гаснет сразу после первого аккаунта,
+  потому что подключение само ставит операцию синхронизации контактов.
+- **Рассылки и публикации** пройдены до бэкенда; исполнители (`dm_engine`,
+  `_exec_mass_publish`, `_exec_bulk_post_chans`) прочитаны выборочно —
+  пред-отметка цели, стоп из БД и честный счётчик на месте.
+- **Инвайт** в этот проход заново не разбирался. После закрытия в него
+  вносились правки (онлайн-статус перед действием, 28.10) — при следующем
+  проходе стоит убедиться, что статус «закрыт» ещё верен.
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| botmother_menu | IN_PROGRESS | pool protection pending |
-| admin.py | IN_PROGRESS | 34 unprotected pool calls |
-| channel_ops | WORKING | pool calls fully protected |
-| dm_campaigns | WORKING | pool calls fully protected |
-| mass_ops | WORKING | pool calls fully protected |
-| account_warmup | WORKING | pool calls fully protected |
-| strike | WORKING | pool calls protected |
-| proxy_manager | WORKING | pool calls protected |
-| quick_post | WORKING | pool calls protected |
-| global_presence | WORKING | pool calls protected |
-| mass_publish | WORKING | pool calls protected |
+## Сквозные требования к релизу
 
-## Reports & Analytics
+| Требование | Статус | Что есть | Чего нет |
+|---|---|---|---|
+| Онбординг | ЧАСТИЧНО | Чеклист из трёх шагов в мини-аппе | Честного «первого результата» (D8); бесплатного пути до результата (D15); онбординга в боте (D21) |
+| Надёжность | ЧАСТИЧНО | Аренда исполнителя `executor_lease`: второй воркер не берёт операции | Общего пейсинга между процессами (второй исполнитель бесполезен); baseline схемы: файлов уже **271**, снимок не снят; CI 18–24 мин из лимита 45, каждый пуш гоняется дважды (push + pull_request) |
+| Наблюдаемость | ЧАСТИЧНО | Оповещение админа о сбое защитных записей; уведомления владельцу о самоостановке прогрева и итогах реабилитации | Детектор всплесков ошибок, падения фоновых сервисов и отказы платёжных API пишутся только в лог (D27) |
+| Безопасность | ЧАСТИЧНО | Скоуп по владельцу в запросах мини-аппа, шифрование секретов, `_err` чистит секреты | Подделка callback в оплате (D1) и прогреве (D5); токен мини-аппа в URL и логах (D19) |
+| Критерий «готов к релизу» | НЕТ | `RELEASE_GATES.md`: три грепа и смоук | Настоящего чек-листа |
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| Activity Log UI | PARTIAL | query works; data sparse before fixes |
-| Operation Reports | PARTIAL | op_reports handler works |
-| Health Dashboard | PLANNED | health_dashboard.py has unprotected calls |
-| Infra Analytics | PLANNED | infra_analytics.py has unprotected calls |
+## Модули, не пройденные в этот проход
 
-## Factories & Creation
+Статус неизвестен. Перечислены по убыванию риска для релиза.
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| Channel Factory | PLANNED | channel_factory.py — 12 unprotected calls |
-| Group Factory | PLANNED | group_factory.py — 8 unprotected calls |
-| Bot Factory | PLANNED | bot_factory.py — 2 unprotected calls |
-
-## Other
-
-| Module | Status | Notes |
-|--------|--------|-------|
-| Private Channels | PLANNED | reading/management correctness unknown |
-| Username Naming | PLANNED | no dedicated engine found |
-| CRM | PARTIAL | crm.py — 1 unprotected call |
-| Funnels | PLANNED | funnels.py — 8 unprotected calls |
-| Ecosystems | PLANNED | ecosystems.py — 18 unprotected calls |
-| Presence Pack | PLANNED | presence_pack.py — 18 unprotected calls |
-| SEO | PLANNED | seo.py — 23 unprotected calls |
-| Subscription | PARTIAL | subscription.py — 6 unprotected calls |
+| Модуль | Что известно без прохода |
+|---|---|
+| Прокси (добавление, проверка, отказоустойчивость) | `proxy_watchdog`, авто-раскладка при импорте в мини-аппе; в боте раскладки нет (D13) |
+| Боты: подключение по токену, рассылка бота, автоответчик | Рассылка бота читает список доставленных строго (CLAUDE.md) |
+| Фабрики каналов, групп, ботов | Диалог с BotFather хрупкий (дефект с июня, не перепроверен) |
+| Контакты / CRM | Много исправлений скоупа и слияния (CLAUDE.md), по цепочке целиком не проходился |
+| STRIKE | — |
+| Операции: шина, исполнитель, отчёты | Реестр на 81 тип, гейт тарифа и Ban Weather в `submit` |
+| Виртуальный слой, Bot Mesh | Транспорт bot→bot не обкатан на живых ботах (TASK_QUEUE) |
+| `services/wb_chat` | В `main.py` не подключён |

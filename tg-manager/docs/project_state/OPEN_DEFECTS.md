@@ -1,47 +1,192 @@
-> **Файл от июня 2026, содержимое не обновлялось.** Держим как исторический
-> ориентир: часть пунктов давно закрыта, часть потеряла смысл. Живое состояние —
-> в `TASK_QUEUE.md`, `CURRENT_STATE.md` и `docs/project_state/CURRENT_MISSION.md`.
+# Открытые дефекты
 
-# Open Defects
+**Обновлено:** 2026-10-29 · ветка `claude/telegram-bot-services-xfAh6` @ `0585e4b`
+Июньский список — в истории git. Всё ниже подтверждено чтением кода в этот
+проход; где дефект выведен, но не воспроизведён, это сказано прямо.
+Карта модулей — `MODULE_STATUS.md`.
 
-Last updated: 2026-06-14
+Приоритет для релиза:
 
-## OPEN (1 item)
+- **P0** — блокирует релиз: деньги, безопасность, неверный результат на
+  главном пути.
+- **P1** — надо закрыть до релиза: дубли путей, нечестные статусы, обрывы
+  восстановления.
+- **P2** — полировка, можно после релиза.
 
-- [HIGH] Channel/Group/Bot Creation — BotFather dialog brittle; hard to fix without live interactive session
+## P0
 
-## FIXED (2026-06-14 session, continued)
-- dm_engine progress: operation_queue.done_items never updated → run_campaign() accepts op_id, syncs per iteration
-- _exec_check_accounts_health: exception → status "active" (fake success) → now "unknown"
-- _exec_bulk_bot_edit: no bots → returned done 0/0 (fake success) → now returns failed
-- net_broadcast.py: 4 pool calls without try (crash on DB error) → wrapped
-- admin_users.py cb_grant_strike: 2 pool calls without try → wrapped
-- accounts.py cb_scan_connect: pool.fetchval without try → wrapped
-- channel_ops.py: 2 pool calls without try → wrapped
+**D1. Подписка почти бесплатно через подделанную кнопку.**
+`bot/handlers/subscription.py::cb_pay` берёт `months` из callback без
+проверки. При `months=0` цена `_calc` равна нулю: для TON ожидается 0 нанотон
+(подтвердит любая транзакция с комментарием-референсом), для USDT сумма равна
+одному сдвигу 0,01–0,49. `billing.activate_subscription` делает
+`max(1, months)` и выдаёт месяц. Подделка callback-данных доступна любому
+клиенту через `GetBotCallbackAnswerRequest`. Не воспроизводилось на живом боте.
 
-## FIXED (2026-06-14 session)
-- scan_owned_assets: ChannelPrivateError from iter_dialogs iterator kills entire scan, partial results lost
-  → Fixed: manual __anext__ loop catches ChannelPrivateError per-dialog, scan continues
-- cb_scan_all_resources (accounts.py): inline blocking loop ~8s/account → operation_bus.submit("scan_owned_resources")
-- cb_chanf_import_all_accs (channel_factory.py): inline blocking import → operation_bus.submit("channel_import_all")
-- cb_check_all_accounts (accounts.py): inline blocking health check → operation_bus.submit("check_accounts_health")
-- cb_promote_all (channel_ops.py): inline blocking promote ~2s/account → operation_bus.submit("promote_all_admins")
-- fsm_join_invite_combined bulk path (channel_ops.py): inline blocking → operation_bus.submit("bulk_join")
-- fsm_botfather_username (channel_ops.py): asyncio.create_task bypass → operation_bus.submit("bot_factory")
-- Dead _bg functions: 12 functions (1187 lines) removed from channel_ops.py and group_factory.py
+**D2. USDT (TRC-20) подтверждает чужой платёж.**
+`services/payment_checker.py::_check_trc20` сопоставляет перевод с платежом
+только по сумме с допуском ±0,02, а сдвиг-«отпечаток» у референса шагает по
+0,01 (49 корзин). Два одновременных платежа одного тарифа с соседними центами
+неразличимы: перевод одного человека подтверждает подписку другому. Время
+перевода с `created_at` платежа не сверяется, поэтому старый непривязанный
+перевод из последних 50 тоже может подтвердить новый платёж.
 
-## FIXED (2026-06-13 session)
-- reg_checker: "requires account" shown for channels → Bot API fallback, instant result
-- entity_analyzer: radar stats missing from return dict → added get_entity_radar_stats()
-- accounts.py: double callback.answer() in cb_pools_bulk_assign
-- follow_toggle: always returned to page 0 → page param preserved
-- account_manager: ConnectionTcpFull → ConnectionTcpObfuscated (protocol obfuscation)
-- IP masking: CF relay (tg-relay.agentsmith77778888.workers.dev) via CF_RELAY_URL
+**D3. Тариф прогрева обходится, и прогрев не останавливается по окончании подписки.**
+`min_plan` у `account_warmup` проверяет только `operation_bus.submit`. Но
+`run_warmup_loop` берёт все планы `status='active'` без проверки тарифа и Ban
+Weather. Планы без операции заводят: массовый прогрев мини-аппа
+(`_warmup_bulk_core`) и все три пути бота (`create_warmup_plan`). Итог: прогрев
+доступен без подписки и продолжается после её окончания.
 
-## FIXED (2026-06-06, session 3 — 66+ items)
-- Pool calls: 66 unprotected pool calls wrapped across all handlers
-- account_warmup: parallel 4→2, FloodWait all action types
-- STRIKE: ban/PeerFlood detection, warmup overlap guard
-- Mass ops: account double-use lock
-- Factory username: check_username_available() before set
-- activity_log: batch insert failure → WARNING + re-enqueue
+**D4. Шесть путей создания плана прогрева, и они расходятся.**
+Полный путь — `mini_app_warmup.warmup_create_plan`. Карточка аккаунта
+(`/api/miniapp/account/{id}/warmup/start`, её зовёт `startWarmup` в
+`index.html`) не проверяет пригодность (`warmup_status.can_resume`): план
+заводится на забаненном аккаунте и стоит на «дне 0» вечно. Она не пишет профиль
+поведения, не снимает старую жалобу `pause_reason`, а план ставит ДО
+`submit`, так что отказ по тарифу оставляет «активный» план без операции. Бот
+(`cb_warmup_start`) запускает `run_daily_warmup` через `asyncio.create_task`
+мимо шины.
+
+**D5. Бот пишет план и профиль прогрева на чужой аккаунт.**
+`cb_warmup_start` и `cb_warmup_pick_profile` зовут `create_warmup_plan` и
+`_upsert_niche_profile` с `account_id` из callback, а владельца проверяют уже
+после записи. `ON CONFLICT (account_id)` перезапишет план чужого аккаунта
+(сброс на день 0) и его профиль. Нужен подделанный callback.
+
+**D6. Три независимые записи аккаунта в базу.**
+`db.add_tg_account` (телефон, QR, `.session`, tdata в мини-аппе и боте) делает
+дедуп по `tg_user_id`, подставляет `id:<uid>` вместо пустого номера и снимает
+залипшие блокировки. Вкладка «строка сессии» того же окна
+(`session_importer.import_sessions`) пишет своим INSERT. Она выбрасывает
+`user_id`, имя и username, которые вернул `get_me` (`tg_user_id` остаётся NULL).
+Дедуп у неё только по отпечатку сессии, поэтому тот же аккаунт с другой
+сессией становится вторым аккаунтом. Пустой номер пишется как `''`, и вторая
+такая сессия падает на уникальном `(owner_id, phone)` с текстом «ошибка БД».
+Авторегистрация (`auto_registrar._save_account`) не снимает
+`in_operation`/`cooldown_until`/обнулённое доверие.
+
+**D7. Парсер выдаёт обрыв за результат.**
+`services/parser.py::parse_members`: любая ошибка Telegram, кроме флуда,
+внутри цикла (`CHAT_ADMIN_REQUIRED` у вещательного канала, сеть) — это
+`break`, после которого запуск получает `empty` или `done` без причины.
+Владелец видит «найдено 0» или неполный список как полный. Обрыв по флуду
+честно помечен, остальные — нет.
+
+**D8. Онбординг считает пользователя активированным, когда он ничего не запускал.**
+`onboarding_status` считает «первое действие» как `COUNT(*)` из
+`operation_queue`. Подключение аккаунта само ставит `contacts_push`
+(`device_sync.schedule_for_new_account`), так что чеклист гаснет сразу после
+первого шага. Кроме того, «поставил операцию» не равно «получил результат»:
+статус и итог операции не учитываются.
+
+## P1
+
+**D9. «Создать планы для всех» в боте сбрасывает идущие планы.**
+`account_warmup.py` (создание всех): выборка только по `is_active`, без
+`acc_status` и без исключения уже активных планов. `create_warmup_plan` на
+конфликте ставит `current_day=0`, то есть каждый греющийся аккаунт начинает
+заново, а аккаунты со спамблоком возвращаются под нагрузку. Мини-апп этот
+случай исключает.
+
+**D10. Запуск парсера навсегда остаётся «в работе».**
+Исключение вне внутреннего `try` (тайм-аут `connect` 15 с) проходит через
+`finally`, но запуск не закрывает. Так же оставляет запуск бот, когда
+`wait_for(300 с)` снимает корутину.
+
+**D11. Бот парсит в обход шины операций.**
+`audience_parser._start_parse` зовёт `parse_members`/`parse_active_users`/
+`parse_commenters` напрямую. Нет тарифа (`min_plan=starter`), отмены, истории
+операции и передачи базы в инвайт; `days_back` игнорируется.
+
+**D12. Мёртвая дверь оплаты CryptoPay и Stars.**
+`/webhook/cryptopay` и `payment_recovery` ждут счета CryptoPay и Stars, но
+`createInvoice`/`send_invoice` нет нигде в коде. Либо подключать, либо убирать.
+
+**D13. Аккаунт, добавленный в боте, сидит на IP сервера.**
+Пути бота (QR, телефон, файл) не раскладывают аккаунт по прокси владельца, в
+отличие от `_persist_login` мини-аппа. Ошибки входа отдаются сырым
+`str(exc)`.
+
+**D14. Ручная апелляция спамблока не знает о реабилитации.**
+`account_spamblock_appeal` (карточка аккаунта) идёт к @SpamBot сам, не двигая
+`account_rehab_state`: счётчик `_MAX_APPEALS=2` не растёт, и автоматика
+апеллирует снова. Ошибка отдаётся с сырым текстом исключения.
+
+**D15. Бесплатного пути до первого результата нет.**
+CTA третьего шага онбординга — инвайт (`min_plan=starter`). Бесплатный
+пользователь получает пейволл до первого результата. Это решение продукта, а не
+баг кода: нужен выбор, какой результат доступен бесплатно.
+
+**D16. Два маршрута создания DM-кампании.**
+`POST /api/miniapp/dm_campaigns` (`mini_app_api.dm_campaign_create`: сегменты,
+когорты, свой список целей; его зовёт экран) и `POST /api/miniapp/dm_campaign`
+(`mini_app_dm.create_dm_campaign`: только `all_bots`/`bot_users`, своя
+валидация). Второй экраном не вызывается, но жив и ждёт, когда его выберут.
+
+**D17. Публикация в каналы — три типа операций.**
+`mass_publish` (единая публикация), `bulk_post_chans` («Пост во все каналы
+аккаунта» в массовых действиях, `/channels/bulk_post`: без медиа и отложки) и
+`bulk_post_to_channel` (карточка канала). `test_publish_module_unified`
+сторожит только `quick_post`.
+
+**D18. Нет напоминания об окончании подписки.**
+`scheduler.expire_stale_subscriptions` молча гасит истёкшие подписки; заранее
+владельцу ничего не пишется.
+
+**D19. Токен мини-аппа ходит в URL.**
+`_get_uid` принимает `?token=` (SSE, выгрузки, `downloadFile`).
+`SECURITY.md` это запрещает, а `AppRunner` по умолчанию пишет access-лог со
+строкой запроса, то есть токен (живёт 2 ч) попадает в логи платформы. Уровень
+логгера `aiohttp.access` в проде не проверялся.
+
+**D27. Владелец узнаёт о поломке из лога, а не из сообщения.**
+`error_monitor` при всплеске ошибок только пишет `log.warning`;
+`service_supervisor` молча перезапускает упавший фоновый сервис; отказы TON и
+TRON API в `payment_checker` (401, 429, тайм-аут) — тоже только лог. Админу
+уходит лишь сбой защитных записей (`op_worker`).
+
+**D28. Мелкие расхождения путей прогрева.**
+Пауза из карточки аккаунта не ставит `pause_reason='user'` (ручка по
+`plan_id` ставит). Перезапуск в боте сбрасывает `current_day` и ставит
+`acc_status='warming'`, в мини-аппе — нет. Бот показывает сырой `str(exc)` и
+английское «Active Tasks».
+
+## P2
+
+**D20. Парсер участников упирается в потолок Telegram.**
+`ChannelParticipantsSearch("")` отдаёт не больше ~10 тыс. на группу, у
+вещательного канала список видит только админ. Нет перебора по буквам и нет
+объяснения на экране.
+
+**D21. Бот не ведёт новичка к аккаунтам.**
+`/start` без ботов рассказывает про «бота по токену» и пути через `/menu`;
+чеклиста нет, на мини-апп не ведёт.
+
+**D22. Мёртвые и дублирующие ручки публикаций.**
+`/api/miniapp/schedule_post` не зовёт ни один экран. `/broadcast/schedule` и
+`/broadcasts/schedule` — два адреса одного обработчика.
+
+**D23. Два мастера публикации в боте** (`/post` quick_post и mass_publish) в
+одну операцию.
+
+**D24. Мелочи оплаты.** `initPayment` при неизвестном имени бота открывает
+`infragram_bot` (может быть чужой бот). Бот пишет «Оплата PAID» — английское
+имя тарифа.
+
+**D25. Пустой список аккаунтов** советует «загрузить файл сессии в боте», хотя
+загрузка есть в самом мини-аппе.
+
+**D26. Английский в UI парсера и сырой текст.** Подпись операции «Парсинг
+members из @…», итог операции содержит сырой `{exc}`. Выгрузка аудитории (с
+телефонами) отдаётся с `Access-Control-Allow-Origin: *`.
+
+## Не дефект, но мешает релизу
+
+- Baseline схемы не снят, а файлов уже 271 (в `CURRENT_STATE.md` написано 194).
+- Пейсинг не вынесен в общий слой: второй исполнитель не опасен, но бесполезен.
+- CI занимает 18–24 мин из лимита 45, и каждый пуш гоняется дважды (push и
+  pull_request).
+- `RELEASE_GATES.md` — три грепа и смоук; чек-листа релиза нет.
+- Диалог с BotFather в фабриках хрупкий (с июня, в этот проход не
+  перепроверялся).
