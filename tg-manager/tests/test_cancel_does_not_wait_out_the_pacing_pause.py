@@ -22,12 +22,28 @@
 паузой сразу идёт реальное действие, пауза остаётся целой: укоротить её
 значит сделать действие раньше, чем позволяет анти-бан-темп, а это дороже
 простоя.
+
+ВТОРАЯ ПЕРЕПИСЬ — ПО ИМЕНИ. Перепись по длине судит только то, что видно из
+исходника, и честно молчит об остальном: `flood_wait`, `wait_time`,
+`_cool_left`, `_invite_pause(acc_id)` приходят из Telegram и из движка флуда, и
+статически у них нет нижней границы. Это ровно самые ДОЛГИЕ паузы в слое, то
+есть дыра была в том месте, где она дороже всего. Вторая перепись берёт их по
+имени длительности (флуд, остывание, ожидание) и требует того же: либо дверь,
+ждущая отмену, либо запись в `_UNKNOWN_LENGTH_WHOLE` с причиной.
+
+ОБ ИЗМЕРИТЕЛЕ ВТОРОЙ ПЕРЕПИСИ. Первая её версия искала подстроку в тексте
+выражения и считала находкой КАЖДЫЙ `await _governed_delay(...)`: в слове
+`await` сидит `wait`. Выходило 28 находок вместо 13 — измеритель был сломан
+ровно так, как об этом предупреждает CLAUDE.md. Поэтому имена берутся по дереву
+(`ast.Name`/`ast.Attribute`), а не поиском по строке, и на это стоят две
+собственные проверки: на заведомо здоровом и на заведомо больном примере.
 """
 from __future__ import annotations
 
 import ast
 import asyncio
 import os
+import re
 
 import pytest
 
@@ -50,6 +66,143 @@ _MUST_STAY_WHOLE = {
     ("_exec_global_presence_channel", "_post_delay"),
     ("_exec_bulk_create_channels", "_pub_delay"),
 }
+
+
+# Длительность «минутного класса»: пауза Telegram, остывание, накопленное
+# ожидание. Короткий пейсинг между целями называется иначе (delay, jitter) и
+# под перепись по имени не попадает: обрывать его незачем, отмену спросят на
+# следующем витке.
+_MINUTE_CLASS = re.compile(r"flood|cool|wait|pause|retry_after", re.I)
+
+# Паузы НЕИЗВЕСТНОЙ длины, которые обязаны остаться целыми, с причиной каждой.
+# Правило то же, что и у переписи по длине: ранний выход допустим только там,
+# где следом проверяют отмену.
+_UNKNOWN_LENGTH_WHOLE = {
+    # Пауза Telegram, а сразу за ней — повтор того же действия (`continue` в
+    # цикле попыток, который об отмене не спрашивает). Выйти раньше значит
+    # опубликовать В ОКНО паузы: Telegram вернёт новый FloodWait и продлит
+    # штраф аккаунту — см. комментарий у отбора отдохнувших аккаунтов.
+    ("_exec_mass_publish", "flood_wait + random.uniform(2, 8)"),
+    # Пауза Telegram, а сразу за ней создание канала.
+    ("_exec_global_presence_channel", "wait_time"),
+    ("_exec_bulk_create_channels", "wait_time"),
+    # Пауза Telegram, а сразу за ней выдача username тому же каналу.
+    ("_exec_global_presence_channel", "flood_wait"),
+    # Пауза Telegram, а сразу за ней повторное создание бота у BotFather.
+    ("_exec_bot_factory", "wait_secs + 15"),
+    # Остывание аккаунта, а сразу за ней пост в канал.
+    ("_exec_bulk_post_chans", "_cool_left + random.uniform(2, 8)"),
+    # Темп инвайта (включает хвост остывания аккаунта). Стоит в конце батча
+    # аккаунта, но ЭТОТ цикл об отмене не спрашивает вовсе — то есть ранний
+    # выход привёл бы к инвайтам после «Стоп», а не к остановке. Инвайт —
+    # самая баноопасная операция продукта, и его цикл отмены разбирается
+    # отдельно, не заодно с переписью пауз.
+    ("_exec_mass_invite", "_invite_pause(acc_id)"),
+}
+
+
+def _identifiers(node: ast.AST) -> set[str]:
+    """Имена, упомянутые в выражении — ПО ДЕРЕВУ, не поиском по тексту.
+
+    Ключевое слово `await` именем не является и сюда не попадает: см. раздел
+    «ОБ ИЗМЕРИТЕЛЕ ВТОРОЙ ПЕРЕПИСИ» в докстринге модуля.
+    """
+    names: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name):
+            names.add(sub.id)
+        elif isinstance(sub, ast.Attribute):
+            names.add(sub.attr)
+    return names
+
+
+def _bare_minute_sleeps(src: str) -> list[tuple[str, str, int]]:
+    """Голые `asyncio.sleep` минутного класса в функциях операции."""
+    tree = ast.parse(src)
+    funcs = [n for n in ast.walk(tree)
+             if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))]
+    found: list[tuple[str, str, int]] = []
+    for fn in funcs:
+        args = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
+        if not {"pool", "op_id"} <= args:
+            continue
+        # Вложенная функция — чужое тело: её сны принадлежат ей, а не этой.
+        inner = {id(x) for g in funcs if g is not fn for x in ast.walk(g)}
+        for node in ast.walk(fn):
+            if id(node) in inner:
+                continue
+            if not (isinstance(node, ast.Call)
+                    and ast.unparse(node.func).endswith("asyncio.sleep")
+                    and node.args):
+                continue
+            arg = node.args[0]
+            if isinstance(arg, ast.Constant):
+                continue  # константа — техпауза, её длительность видна глазом
+            if not any(_MINUTE_CLASS.search(name) for name in _identifiers(arg)):
+                continue
+            found.append((fn.name, ast.unparse(arg), node.lineno))
+    return found
+
+
+def test_the_name_census_sees_a_real_offender():
+    """Измеритель на заведомо БОЛЬНОМ примере: голый сон флуд-паузы виден."""
+    sick = ("import asyncio\n"
+            "async def _exec_x(pool, op_id):\n"
+            "    flood_wait = 600\n"
+            "    await asyncio.sleep(flood_wait + 8)\n")
+    assert _bare_minute_sleeps(sick), (
+        "перепись не видит голый сон флуд-паузы — мерить ею нечего")
+
+
+def test_the_name_census_does_not_count_the_await_keyword():
+    """Измеритель на заведомо ЗДОРОВОМ примере: `await` — не `wait`."""
+    healthy = ("import asyncio\n"
+               "async def _exec_x(pool, op_id):\n"
+               "    await asyncio.sleep(await _governed_delay(pool, 1, 2.0))\n")
+    assert _bare_minute_sleeps(healthy) == [], (
+        "короткий пейсинг через _governed_delay принят за флуд-паузу: в слове "
+        "`await` сидит `wait`, и перепись обязана брать имена по дереву")
+
+
+def test_the_name_census_does_not_count_the_cancel_aware_doors():
+    """Измеритель не считает находкой сами двери."""
+    cured = ("import asyncio\n"
+             "async def _exec_x(pool, op_id):\n"
+             "    flood_wait = 600\n"
+             "    await bounded_flood_sleep(flood_wait, 'x', pool=pool, op_id=op_id)\n"
+             "    await cancellable_pause(pool, op_id, flood_wait, 'x')\n")
+    assert _bare_minute_sleeps(cured) == [], "вызов через дверь принят за голый сон"
+
+
+def test_every_pause_of_unknown_length_hears_the_cancel():
+    """Перепись по имени: ни одной минутной паузы мимо двери, ждущей отмену."""
+    with open(SRC, encoding="utf-8") as fh:
+        found = _bare_minute_sleeps(fh.read())
+    # Пауза, уже признанную целой переписью по длине, второй записи не требует:
+    # причина у неё одна (gp_channel «pause» стоит вплотную перед выдачей
+    # username), и дублировать её — значит заводить две правды об одном месте.
+    excused = _UNKNOWN_LENGTH_WHOLE | _MUST_STAY_WHOLE
+    deaf = [f for f in found if (f[0], f[1]) not in excused]
+    assert not deaf, (
+        "эти паузы неизвестной длины глухи к отмене — «Стоп» владельца не "
+        "доходит до исполнителя всё это время:\n"
+        + "\n".join(f"  {fn} стр.{line}: {expr}" for fn, expr, line in deaf)
+        + "\nПаузу Telegram ждут через `bounded_flood_sleep(..., pool=pool, "
+        "op_id=op_id)`, свой пейсинг — через `cancellable_pause(pool, op_id, "
+        "...)`. Если сразу за паузой идёт реальное действие — оставьте её "
+        "целой и внесите в _UNKNOWN_LENGTH_WHOLE с причиной.")
+
+
+def test_the_unknown_length_whole_pauses_are_still_there():
+    """Самопроверка списка: мёртвая запись маскирует новую находку."""
+    with open(SRC, encoding="utf-8") as fh:
+        keys = {(fn, expr) for fn, expr, _ in _bare_minute_sleeps(fh.read())}
+    stale = sorted(_UNKNOWN_LENGTH_WHOLE - keys)
+    assert not (_UNKNOWN_LENGTH_WHOLE & _MUST_STAY_WHOLE), (
+        "одна и та же пауза записана в оба реестра — причина должна быть одна")
+    assert not stale, (
+        f"этих пауз в коде больше нет: {stale} — уберите их из "
+        "_UNKNOWN_LENGTH_WHOLE")
 
 
 def _lower_bound(node: ast.AST, known: dict[str, float]) -> float | None:

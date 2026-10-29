@@ -6964,7 +6964,8 @@ async def _exec_mass_publish(
                     "ok": ok_count,
                     "failed": fail_count,
                 }
-            await asyncio.sleep(_cool_left + random.uniform(2, 8))
+            await bounded_flood_sleep(
+                _cool_left + random.uniform(2, 8), "mass_publish_cooldown", pool=pool, op_id=op_id)
         else:
             candidate_accounts = _ready_accounts
         acc = candidate_accounts[0] if candidate_accounts else None
@@ -9088,7 +9089,8 @@ async def _exec_global_presence_channel(
                         i + 1,
                         tod_factor,
                     )
-                    await asyncio.sleep(await _governed_delay(pool, owner_id, cooldown))
+                    await cancellable_pause(
+                        pool, op_id, await _governed_delay(pool, owner_id, cooldown), "gp_channel_cooldown")
                 else:
                     # Короткая пауза между операциями
                     delay = random.uniform(45, 90) * chaos * tod_factor * jitter
@@ -10575,7 +10577,8 @@ async def _exec_bulk_create_channels(
                         cooldown,
                         i + 1,
                     )
-                    await asyncio.sleep(await _governed_delay(pool, owner_id, cooldown))
+                    await cancellable_pause(
+                        pool, op_id, await _governed_delay(pool, owner_id, cooldown), "bulk_channels_cooldown")
                 else:
                     delay = random.uniform(15, 30) * chaos * tod_factor
                     await asyncio.sleep(await _governed_delay(pool, owner_id, delay))
@@ -10836,7 +10839,7 @@ async def _exec_bot_factory_multi(
                 chaos = session_simulator.chaos_factor()
                 tod = session_simulator.time_of_day_factor()
                 pause = (random.uniform(120, 240) if global_i % 3 == 2 else random.uniform(45, 90)) * chaos * tod
-                await asyncio.sleep(pause)
+                await cancellable_pause(pool, op_id, pause, "bot_factory_multi")
     finally:
         await release_accounts(claimed_ids)
 
@@ -11102,7 +11105,7 @@ async def _exec_bot_factory(
                     pause = random.uniform(120, 240) * chaos * tod
                 else:
                     pause = random.uniform(45, 90) * chaos * tod
-                await asyncio.sleep(pause)
+                await cancellable_pause(pool, op_id, pause, "bot_factory")
 
         return {
             "status": "done",
@@ -12999,7 +13002,7 @@ async def _exec_bulk_dm_adhoc(
             wait = await _governed_delay(pool, owner_id, delay) + min(flood_wait_total, 30.0)
             flood_wait_total = max(0.0, flood_wait_total - delay)
             if i < total - 1:
-                await asyncio.sleep(wait)
+                await cancellable_pause(pool, op_id, wait, "bulk_dm_adhoc")
 
         # Медиа-файл больше не нужен — удаляем (диск контейнера эфемерный, но не
         # копим мусор при многих отправках).
