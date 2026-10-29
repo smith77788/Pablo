@@ -26440,7 +26440,18 @@ async function submitMultigeoSet() {
   errEl.textContent='';
   try {
     const r = await api(`/api/miniapp/bot/${botId}/multigeo`,{method:'POST',body:JSON.stringify(body)});
-    if (!r.ok) { errEl.textContent='Ошибки: '+r.errors?.join(', '); return; }
+    if (!r.ok) {
+      // Сервер перечисляет НЕ сохранённые поля своими ключами (name,
+      // description, short_description) — владельцу они ничего не говорят, а
+      // по-английски он не читает. Переводим в названия полей формы.
+      const FLD = {name:'название', description:'описание',
+                   short_description:'короткое описание'};
+      const bad = (r.errors||[]).map(f=>FLD[f]||f);
+      errEl.textContent = bad.length
+        ? 'Телеграм не принял: ' + bad.join(', ')
+        : 'Телеграм не принял профиль';
+      return;
+    }
     toast('✅ Профиль обновлён');
     closeModal('mo-multigeo');
     loadMultigeo();
