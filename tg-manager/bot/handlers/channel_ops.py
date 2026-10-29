@@ -517,6 +517,12 @@ async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
                    COUNT(*) FILTER (WHERE status='pending')  AS pending,
                    COUNT(*) FILTER (WHERE status='done'
                        AND finished_at > NOW() - INTERVAL '24h') AS done_24h,
+                   -- 'partial' — «работа была, но не доведена»: отдельный
+                   -- терминальный исход (см. services/op_status). Без своего
+                   -- числа такая операция не попадала НИ в «завершено», НИ в
+                   -- «ошибок», то есть честный статус до владельца не доходил.
+                   COUNT(*) FILTER (WHERE status='partial'
+                       AND finished_at > NOW() - INTERVAL '24h') AS partial_24h,
                    COUNT(*) FILTER (WHERE status='failed')   AS failed
                FROM operation_queue WHERE owner_id=$1""",
             uid,
@@ -528,11 +534,16 @@ async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
     running = int(stats["running"] or 0) if stats else 0
     pending = int(stats["pending"] or 0) if stats else 0
     done_24h = int(stats["done_24h"] or 0) if stats else 0
+    partial_24h = int(stats["partial_24h"] or 0) if stats else 0
     failed = int(stats["failed"] or 0) if stats else 0
 
     status_line = (
         f"🔄 Активных: <b>{running}</b>  ⏳ Ожидают: <b>{pending}</b>\n"
         f"✅ Завершено (24ч): <b>{done_24h}</b>  ❌ Ошибок: <b>{failed}</b>"
+        # Строка только при ненулевом числе: на чистом экране лишнего нуля не
+        # нужно, а когда недоведённые есть — владелец обязан их увидеть.
+        + (f"\n⚠️ Частично (24ч): <b>{partial_24h}</b> — работа была, но не доведена"
+           if partial_24h else "")
     )
 
     kb = InlineKeyboardBuilder()
