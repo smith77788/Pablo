@@ -6,12 +6,16 @@ Webhook Server — HTTP endpoint для входящих webhook-уведомл�
 
 Поддерживает:
 - TON/TRON через внешние сервисы (например, tonapi.io webhooks)
-- Cryptobot / CryptoPay webhooks
-- Telegram Stars (через inline_query callback)
 - Кастомный JSON-хук: POST /webhook/payment с {user_id, amount, currency, tx_hash}
 - Railway deploy webhook: POST /webhook/deploy — уведомления о деплоях
 
-Денежные хуки (payment, cryptopay) проверяют подпись ВСЕГДА. Не задан секрет —
+Входа CryptoPay (/webhook/cryptopay) больше нет: счетов CryptoPay продукт не
+выставляет (createInvoice нигде не вызывался), а проверка в нём ждала токен
+в заголовке, хотя CryptoPay подписывает тело HMAC — настоящее уведомление он не
+принял бы никогда. Мёртвая денежная дверь — только поверхность атаки. История
+старых оплат CryptoPay/Stars по-прежнему читается services/payment_recovery.
+
+Денежный хук (payment) проверяет подпись ВСЕГДА. Не задан секрет —
 хук закрыт и отвечает 503: раздать платный тариф без проверки хуже, чем не
 принять платёж (живой путь оплаты — services/payment_checker.py, проверка
 транзакции в блокчейне).
@@ -151,7 +155,7 @@ async def _activate_subscription(
         await bot.send_message(
             user_id,
             f"✅ <b>Оплата подтверждена!</b>\n\n"
-            f"Подписка <b>{plan.upper()}</b> активирована на {months} мес.\n"
+            f"Подписка активирована на {months} мес.\n"
             f"Действует до: <b>{expires.strftime('%d.%m.%Y')}</b>\n\n"
             f"Ref: <code>{tx_ref}</code>",
             parse_mode="HTML",
@@ -247,66 +251,6 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
             )
         except Exception:
             log.exception("payment_webhook: _activate_subscription failed user=%d", user_id)
-            return web.Response(status=500, text="Internal error")
-        return web.Response(status=200, text="OK")
-
-    async def cryptopay_webhook(request: web.Request) -> web.Response:
-        """Специфический обработчик для CryptoPay/CryptoBotAPI."""
-        # Rate limit webhook requests per IP
-        if not await check_rate_limit(request, max_requests=60, window=60):
-            return rate_limit_response(request)
-
-        api_token = os.getenv("CRYPTOPAY_TOKEN", "")
-        if not api_token:
-            return _webhook_closed("CRYPTOPAY_TOKEN")
-        sig = request.headers.get("Crypto-Pay-Api-Token", "")
-        # compare_digest, а не !=: обычное сравнение строк выходит на первом
-        # несовпавшем символе и по времени ответа подсказывает токен посимвольно.
-        if not hmac.compare_digest(sig, api_token):
-            return web.Response(status=403, text="Forbidden")
-
-        body = await request.read()
-
-        try:
-            data = json.loads(body)
-        except json.JSONDecodeError:
-            return web.Response(status=400, text="Invalid JSON")
-
-        update_type = data.get("update_type", "")
-        if update_type != "invoice_paid":
-            return web.Response(status=200, text="OK")
-
-        invoice = data.get("payload", {})
-        payload = invoice.get("payload", "")  # user_id:plan:months
-        status = invoice.get("status", "")
-        if status != "paid":
-            return web.Response(status=200, text="OK")
-
-        try:
-            parts = payload.split(":")
-            user_id = int(parts[0])
-            plan = parts[1] if len(parts) > 1 else ""
-            months = int(parts[2]) if len(parts) > 2 else 1
-        except (ValueError, IndexError):
-            log.warning("cryptopay_webhook: bad payload %s", payload)
-            return web.Response(status=200, text="OK")
-
-        amount = float(invoice.get("paid_usd_amount", 0))
-        currency = invoice.get("asset", "USDT")
-        tx_ref = str(invoice.get("invoice_id", "cp"))
-
-        # Normalize legacy plan names and accept current canonical name
-        _plan_alias = {"starter": "paid", "pro": "paid", "enterprise": "paid"}
-        plan = _plan_alias.get(plan, plan)
-        if plan not in ("paid",):
-            return web.Response(status=200, text="OK")
-
-        try:
-            await _activate_subscription(
-                pool, bot, user_id, plan, int(months or 1), tx_ref, currency, amount
-            )
-        except Exception:
-            log.exception("cryptopay_webhook: _activate_subscription failed user=%d", user_id)
             return web.Response(status=500, text="Internal error")
         return web.Response(status=200, text="OK")
 
@@ -408,7 +352,6 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app.router.add_get("/", root_redirect)        # root → /miniapp/ redirect
     app.router.add_get("/webhook/deploy", deploy_health)
     app.router.add_post("/webhook/payment", payment_webhook)
-    app.router.add_post("/webhook/cryptopay", cryptopay_webhook)
     app.router.add_post("/webhook/deploy", deploy_webhook)
 
     from services import email_oauth, rest_api, mini_app_api, managed_bot_webhooks

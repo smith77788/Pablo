@@ -1621,6 +1621,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
         # Cancel any active warmup first
         try:
+            # Гейт тарифа ДО записи плана: раньше план ставился первым, а отказ
+            # submit() по тарифу оставлял «активный» план без операции, который
+            # фоновый цикл грел без подписки.
+            await _obus.enforce_gates(pool, uid, "account_warmup")
             await pool.execute(
                 "UPDATE account_warmup_plans SET status='paused' WHERE account_id=$1 AND owner_id=$2 AND status='active'",
                 acc_id, uid)

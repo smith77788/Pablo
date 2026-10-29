@@ -23,6 +23,7 @@ from bot.states import HostOfferingFSM, HostPriceFSM
 from bot.utils.op_helpers import safe_answer
 from bot.utils.subscription import is_platform_admin
 from services import host_server as hs
+from services import usdt_invoice
 from services.logger import log_exc_swallow
 
 router = Router(name="host_server")
@@ -105,6 +106,9 @@ async def cb_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     uid = callback.from_user.id
     try:
         res = await hs.create_purchase(pool, uid)
+    except usdt_invoice.NoFreeAmountError as exc:
+        await callback.message.edit_text(f"⏳ Счёт не создан.\n\n{exc}")
+        return
     except Exception:
         log_exc_swallow(log, "host cb_buy")
         await callback.message.edit_text("❌ Ошибка создания платежа. Попробуйте позже.")
@@ -128,10 +132,11 @@ async def cb_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
     await callback.message.edit_text(
         f"🖥️ <b>Host-Server — оплата</b>\n\n"
-        f"Сумма: <b>{price} USDT</b>\n"
+        f"Сумма: <b>{res['amount_usdt']:.2f} USDT</b>\n"
         f"Сеть: <b>TRC-20 (TRON)</b>\n\n"
         f"Кошелёк:\n<code>{html.escape(wallet)}</code>\n\n"
-        f"Переведите ровно <b>{price} USDT</b> и нажмите «Проверить оплату».\n"
+        f"Переведите ровно <b>{res['amount_usdt']:.2f} USDT</b> — до цента: по "
+        f"этой сумме мы узнаём ваш перевод. Затем нажмите «Проверить оплату».\n"
         f"⚠️ Другие сети не принимаются.\n\n"
         f"⏱ Подтверждение: 5–30 минут\n"
         f"<i>ID платежа: {res['reference']}</i>",

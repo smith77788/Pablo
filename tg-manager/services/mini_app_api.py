@@ -1867,8 +1867,14 @@ async def _warmup_bulk_core(
     niche: str = "general",
 ) -> dict:
     """Массовый прогрев: планы для ВСЕХ подходящих аккаунтов (активные, с сессией,
-    без активного плана). Фоновый run_warmup_loop подхватит новые active-планы."""
+    без активного плана). Фоновый run_warmup_loop подхватит новые active-планы.
+
+    Бросает PermissionError (нет подписки / Ban Weather): операции здесь нет,
+    поэтому гейт тарифа submit() сам не сработает — спрашиваем его явно.
+    """
     from services.account_warmer import WARMUP_PROFILES, WARMUP_NICHES
+
+    await _obus.enforce_gates(pool, uid, "account_warmup")
 
     plan_type = (plan_type or "standard").strip()
     if plan_type not in ("gentle", "standard", "aggressive"):
@@ -8348,6 +8354,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if result.get("error"):
                 return _err(result["error"], 400)
             return _json_resp(result)
+        except PermissionError as exc:
+            # Нет подписки или предохранитель Ban Weather — честный отказ с
+            # причиной, а не «не удалось».
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("next_actions_apply id=%s uid=%s", action_id, uid)
             return _err("Не удалось применить действие", 500)

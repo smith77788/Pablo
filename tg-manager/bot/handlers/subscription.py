@@ -114,18 +114,38 @@ def _gen_ref() -> str:
     return "PAY-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 
-def _usdt_reference_offset(reference: str) -> float:
-    """Small deterministic cents suffix so TRC-20 payments can be matched by amount."""
-    checksum = sum(ord(ch) for ch in reference)
-    cents = checksum % 49 + 1
-    return round(cents / 100, 2)
+# Сроки и валюты, которые реально продаются. Кнопки бота — не граница доверия:
+# callback-данные подделываются любым клиентом (GetBotCallbackAnswerRequest).
+# Раньше `months` из кнопки шёл в цену как есть: при months=0 цена была нулевой,
+# а billing.activate_subscription делал max(1, months) и выдавал месяц, то есть
+# подписка покупалась за сдвиг в несколько центов. Период проверяется здесь, на
+# сервере, по тому же словарю скидок, из которого строятся кнопки.
+ALLOWED_PERIODS: tuple[int, ...] = tuple(sorted(PERIOD_DISCOUNTS))
+ALLOWED_CURRENCIES: tuple[str, ...] = ("TON", "USDT_TRC20")
+
+
+def valid_period(months) -> int | None:
+    """Срок подписки из недоверенного ввода → число месяцев или None."""
+    try:
+        m = int(months)
+    except (TypeError, ValueError):
+        return None
+    return m if m in ALLOWED_PERIODS else None
 
 
 def _calc(plan: str, months: int, currency: str, promo: int = 0) -> tuple[float, float]:
-    """Returns (usd_total, crypto_amount)."""
+    """Returns (usd_total, crypto_amount).
+
+    Бросает ValueError на сроке вне ALLOWED_PERIODS и на нулевой цене: счёт на
+    ноль подтверждается любой транзакцией с референсом.
+    """
+    if valid_period(months) is None:
+        raise ValueError(f"недопустимый срок подписки: {months!r}")
     base = PLAN_PRICES_USD.get(plan, 0)
     disc = promo if (promo and months > 1) else PERIOD_DISCOUNTS.get(months, 0)
     usd = round(base * months * (1 - disc / 100), 2)
+    if usd <= 0:
+        raise ValueError(f"нулевая цена: plan={plan!r} months={months!r}")
     if currency == "TON":
         return usd, round(usd / _get_ton_rate(), 2)
     return usd, usd  # USDT 1:1
@@ -437,7 +457,8 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb, pool: as
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     promo, promo_until = await _get_promo(pool)
     kb = InlineKeyboardBuilder()
-    for months, std_disc in [(1, 0), (3, 10), (6, 15), (12, 20)]:
+    for months in ALLOWED_PERIODS:
+        std_disc = PERIOD_DISCOUNTS.get(months, 0)
         if promo and months > 1:
             total = round(base * months * (1 - promo / 100), 2)
             std_total = round(base * months * (1 - std_disc / 100), 2)
@@ -457,19 +478,31 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb, pool: as
     kb.adjust(1)
     if promo:
         header = (
-            f"💳 {em} <b>{plan.upper()}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
+            f"💳 {em} <b>{sub_utils.plan_name_ru(plan)}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
             f"🔥 <b>АКЦИЯ −{promo}%</b> на 3, 6, 12 мес. — до {promo_until}\n"
             f"<i>Чем дольше — тем выгоднее (1 мес — без акции)</i>"
         )
     else:
         header = (
-            f"💳 {em} <b>{plan.upper()}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
+            f"💳 {em} <b>{sub_utils.plan_name_ru(plan)}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
             f"📅 Выберите период (чем дольше — тем дешевле):"
         )
     await callback.message.edit_text(
         header,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
+    )
+
+
+async def _reject_bad_period(callback: CallbackQuery) -> None:
+    """Срок не из списка — кнопка подделана или устарела. Счёт не создаём."""
+    log.warning(
+        "subscription: отклонён недопустимый срок user=%s data=%r",
+        callback.from_user.id, callback.data,
+    )
+    await callback.answer(
+        "Такого срока подписки нет. Откройте /subscription и выберите срок заново.",
+        show_alert=True,
     )
 
 
@@ -480,7 +513,10 @@ async def cb_choose_period(
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
-    months = callback_data.months
+    months = valid_period(callback_data.months)
+    if months is None:
+        await _reject_bad_period(callback)
+        return
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     ton = _ton_wallet()
     tron = _tron_wallet()
@@ -554,8 +590,14 @@ async def cb_pay(
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
-    months = callback_data.months
+    months = valid_period(callback_data.months)
+    if months is None:
+        await _reject_bad_period(callback)
+        return
     currency = callback_data.currency or ""
+    if currency not in ALLOWED_CURRENCIES:
+        await callback.answer("Этот способ оплаты не поддерживается.", show_alert=True)
+        return
     wallet = _ton_wallet() if currency == "TON" else _tron_wallet()
     if not wallet:
         await callback.answer(
@@ -565,7 +607,17 @@ async def cb_pay(
     await safe_answer(callback)
 
     promo, _ = await _get_promo(pool)
-    usd, crypto = _calc(plan, months, currency, promo)
+    try:
+        usd, crypto = _calc(plan, months, currency, promo)
+    except ValueError:
+        log.error("cb_pay: нулевая или неверная цена plan=%s months=%s promo=%s",
+                  plan, months, promo)
+        await callback.message.edit_text(
+            "❌ <b>Не удалось рассчитать цену.</b>\n\nОбратитесь в поддержку.",
+            parse_mode="HTML",
+            reply_markup=terminal_kb(),
+        )
+        return
 
     ref = _gen_ref()
     for _ in range(5):
@@ -579,24 +631,44 @@ async def cb_pay(
         if not existing:
             break
         ref = _gen_ref()
-    if currency == "USDT_TRC20":
-        crypto = round(crypto + _usdt_reference_offset(ref), 2)
+
+    from services import usdt_invoice
 
     try:
-        await pool.execute(
-            """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto, amount_usd,
-                                      wallet_address, reference, expires_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + INTERVAL '24 hours')
-               ON CONFLICT (reference) DO NOTHING""",
-            callback.from_user.id,
-            plan,
-            months,
-            currency,
-            crypto,
-            usd,
-            wallet,
-            ref,
+        if currency == "USDT_TRC20":
+            # Сумма уникальна среди открытых счетов: перевод TRC-20 без
+            # комментария привязывается к счёту только ею.
+            crypto = await usdt_invoice.create_payment(
+                pool,
+                user_id=callback.from_user.id,
+                plan=plan,
+                period_months=months,
+                base_usdt=crypto,
+                amount_usd=usd,
+                wallet=wallet,
+                reference=ref,
+            )
+        else:
+            await pool.execute(
+                """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto, amount_usd,
+                                          wallet_address, reference, expires_at)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + INTERVAL '24 hours')""",
+                callback.from_user.id,
+                plan,
+                months,
+                currency,
+                crypto,
+                usd,
+                wallet,
+                ref,
+            )
+    except usdt_invoice.NoFreeAmountError as exc:
+        await callback.message.edit_text(
+            f"⏳ <b>Счёт не создан.</b>\n\n{exc}",
+            parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
+        return
     except Exception:
         log_exc_swallow(log, "cb_pay: failed to insert payment record")
         await callback.message.edit_text(
@@ -616,7 +688,9 @@ async def cb_pay(
     else:
         crypto_str = f"{crypto:.2f} USDT"
         note = (
-            f"Переведите ровно <b>{crypto:.2f} USDT</b>.\n"
+            f"Переведите ровно <b>{crypto:.2f} USDT</b> — до цента.\n"
+            "По этой сумме мы узнаём ваш перевод: она закреплена только за этим "
+            "счётом. Другая сумма автоматически не подтвердится.\n"
             "Сеть: <b>TRC-20 (TRON)</b>. Другие сети не принимаются."
         )
 
@@ -626,7 +700,7 @@ async def cb_pay(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        f"💳 <b>Оплата {plan.upper()} на {months} мес.</b>\n\n"
+        f"💳 <b>Оплата: {sub_utils.plan_name_ru(plan).lower()} на {months} мес.</b>\n\n"
         f"Сумма: <b>{crypto_str}</b> (≈ ${usd})\n"
         f"Кошелёк: <code>{wallet}</code>\n\n"
         f"{note}\n\n"
@@ -678,8 +752,9 @@ async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.message.edit_text(
         f"💳 <b>Статус платежа</b>\n\n"
         f"Статус: {status}\n"
-        f"План: <b>{row['plan'].upper()}</b> на {row['period_months']} мес.\n"
-        f"Сумма: {row['amount_crypto']} {row['currency']}\n"
+        f"План: <b>{sub_utils.plan_name_ru(row['plan'])}</b> на {row['period_months']} мес.\n"
+        f"Сумма: <b>{float(row['amount_crypto']):.2f} "
+        f"{'TON' if row['currency'] == 'TON' else 'USDT (TRC-20)'}</b>\n"
         f"Референс: <code>{row['reference']}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -691,11 +766,14 @@ async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(SubCb.filter(F.action == "request_sub"))
 async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
+    months = valid_period(callback_data.months)
+    if months is None:
+        await _reject_bad_period(callback)
+        return
     await safe_answer(callback)
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
-    months = callback_data.months
     usd, _ = _calc(plan, months, "TON")
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     uid = callback.from_user.id
@@ -724,7 +802,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
             "⚠️ <b>Оплата пока не настроена</b>\n\n"
             "Администратор ещё не указал канал для заявок на подписку. "
             "Попробуйте позже или напишите владельцу сервиса напрямую.\n\n"
-            f"Вы выбрали: <b>{em} {plan.upper()}</b> × {months} мес. — <b>${usd}</b>",
+            f"Вы выбрали: <b>{em} {sub_utils.plan_name_ru(plan)}</b> × {months} мес. — <b>${usd}</b>",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -732,7 +810,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     notify = (
         f"💳 <b>Запрос на подписку</b>\n\n"
         f"Пользователь: {user_label} (<code>{uid}</code>)\n"
-        f"План: <b>{em} {plan.upper()}</b> × {months} мес.\n"
+        f"План: <b>{em} {sub_utils.plan_name_ru(plan)}</b> × {months} мес.\n"
         f"Сумма: <b>${usd}</b>\n\n"
         f"Чтобы активировать после получения оплаты:\n"
         f"<b>/admin</b> → 💰 Выдать подписку →\n"
@@ -751,7 +829,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     await callback.message.edit_text(
         f"✅ <b>Запрос отправлен!</b>\n\n"
         f"Администратор получил уведомление о вашем запросе:\n"
-        f"<b>{em} {plan.upper()}</b> × {months} мес. — <b>${usd}</b>\n\n"
+        f"<b>{em} {sub_utils.plan_name_ru(plan)}</b> × {months} мес. — <b>${usd}</b>\n\n"
         f"Подписка будет активирована после подтверждения оплаты.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -768,11 +846,14 @@ async def cb_admin_grant(
     if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
+    months = valid_period(callback_data.months)
+    if months is None:
+        await _reject_bad_period(callback)
+        return
     await safe_answer(callback)
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
-    months = max(1, callback_data.months)
     from datetime import datetime, timedelta, timezone
 
     try:
@@ -827,7 +908,7 @@ async def cb_admin_grant(
     kb.button(text="✅ Готово", callback_data=SubCb(action="menu"))
     await callback.message.edit_text(
         f"✅ <b>Подписка активирована!</b>\n\n"
-        f"План: <b>{plan.upper()}</b>\n"
+        f"План: <b>{sub_utils.plan_name_ru(plan)}</b>\n"
         f"Срок: {months} мес. (до {expires.strftime('%d.%m.%Y')})",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

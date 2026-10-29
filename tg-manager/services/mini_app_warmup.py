@@ -344,6 +344,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 niche=body.get("niche") or "general",
             )
             return _json_resp(result)
+        except PermissionError as exc:
+            # Нет подписки или предохранитель Ban Weather.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("warmup_bulk_start uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)

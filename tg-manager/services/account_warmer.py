@@ -662,18 +662,34 @@ async def create_warmup_plan(
     Также выставляет acc_status='warming' чтобы ресурс-селектор и UI
     могли отличить прогреваемые аккаунты от обычных активных.
     """
+    # Тариф и Ban Weather — тот же гейт, что у submit('account_warmup').
+    # Сюда приходят все пути, заводящие план мимо шины (три пути бота), и без
+    # этой проверки план без подписки заводился одной кнопкой.
+    # Бросает PermissionError с текстом для человека.
+    from services import operation_bus
+
+    await operation_bus.enforce_gates(pool, owner_id, "account_warmup")
+
     # Note: "aggressive" capped at 12/day (was 20) — 20 actions/day on a fresh
     # low-trust account is the #1 ban trigger. target_days lengthened accordingly.
     daily_map = {"gentle": 5, "standard": 10, "aggressive": 12}
     days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
 
+    # План пишется только на СВОЙ аккаунт: account_id в боте приходит из
+    # callback-данных, которые подделываются. Раньше владельца проверяли уже
+    # после записи, и ON CONFLICT (account_id) сбрасывал на день 0 план чужого
+    # аккаунта. Источник строки — tg_accounts владельца, а конфликт обновляет
+    # только план того же владельца.
     row = await pool.fetchrow(
         """INSERT INTO account_warmup_plans(
                owner_id, account_id, plan_type, daily_actions, target_days
-           ) VALUES ($1, $2, $3, $4, $5)
+           )
+           SELECT $1, a.id, $3, $4, $5 FROM tg_accounts a
+            WHERE a.id = $2 AND a.owner_id = $1
            ON CONFLICT (account_id) DO UPDATE
                SET status='active', current_day=0, started_at=NOW(),
                    plan_type=$3, daily_actions=$4, target_days=$5
+             WHERE account_warmup_plans.owner_id = EXCLUDED.owner_id
            RETURNING id""",
         owner_id,
         account_id,
@@ -681,6 +697,8 @@ async def create_warmup_plan(
         daily_map.get(plan_type, 5),
         days_map.get(plan_type, 14),
     )
+    if not row:
+        raise PermissionError("Аккаунт не найден")
     plan_id = row["id"]
 
     # Mark the account as warming so resource_selector excludes it from
@@ -1745,6 +1763,25 @@ async def _pause_plan(pool: asyncpg.Pool, plan_id: int, reason: str,
         log.warning("warmup: пауза плана %s (%s) не записана: %s", plan_id, reason, e)
 
 
+async def _warmup_gate(pool: asyncpg.Pool, owner_id: int) -> str | None:
+    """Причина не греть аккаунты владельца сейчас, или None.
+
+    Тот же гейт, что у submit('account_warmup'), но перед КАЖДЫМ днём прогрева:
+    план исполняет фоновый цикл, а не операция, поэтому без этой проверки
+    прогрев продолжался после окончания подписки. План не трогаем — только
+    пропускаем день: продлил подписку, и прогрев идёт дальше сам.
+    """
+    from services import operation_bus
+
+    try:
+        await operation_bus.enforce_gates(pool, owner_id, "account_warmup")
+    except operation_bus.PlanRequiredError:
+        return "no_subscription"
+    except operation_bus.ImmunityBlockedError:
+        return "ban_weather"
+    return None
+
+
 async def run_daily_warmup(
     pool: asyncpg.Pool,
     plan: dict,
@@ -1804,6 +1841,18 @@ async def _run_daily_warmup_impl(
 ) -> dict:
     """Внутренняя реализация run_daily_warmup — вызывается только через guard."""
     from services import account_manager
+
+    _gate = await _warmup_gate(pool, owner_id)
+    if _gate:
+        log.info("warmup: plan %d пропущен — %s (owner=%s)", plan_id, _gate, owner_id)
+        await _note_skip(pool, plan_id, _gate)
+        return {
+            "actions_done": 0,
+            "actions_ok": 0,
+            "actions_fail": 0,
+            "completed": False,
+            "warmup_level": "light",
+        }
 
     # Получаем сессию аккаунта
     acc_row = await db.get_account_for_telethon(pool, account_id)
@@ -2443,6 +2492,15 @@ async def _run_warmup_session_impl(
     from services import account_manager
 
     owner_id = session["owner_id"]
+    _gate = await _warmup_gate(pool, owner_id)
+    if _gate:
+        log.info("warmup_session %d пропущена — %s (owner=%s)", session_id, _gate, owner_id)
+        return {
+            "actions_done": 0,
+            "actions_ok": 0,
+            "actions_fail": 0,
+            "completed": False,
+        }
     account_ids: list = session.get("account_ids") or []
     target_refs: list = session.get("target_refs") or []
     plan_type: str = session.get("plan_type", "standard")  # noqa: F841 — kept for log context

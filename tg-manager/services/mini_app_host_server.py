@@ -46,12 +46,16 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        from services import usdt_invoice
         try:
             from services import host_server as hs
             res = await hs.create_purchase(pool, uid)
             if res.get("already"):
                 return _json_resp({"ok": True, "already": True})
             return _json_resp({"ok": True, **res})
+        except usdt_invoice.NoFreeAmountError as exc:
+            # Все суммы вокруг цены заняты открытыми счетами.
+            return _err(str(exc), 409)
         except Exception:
             log.exception("host_server_buy uid=%s", uid)
             return _err("Не удалось оформить покупку", 500)
