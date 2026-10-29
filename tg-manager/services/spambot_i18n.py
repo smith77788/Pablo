@@ -80,6 +80,38 @@ LIMIT_PATTERNS: tuple[str, ...] = (
     "kısıtla", "sınırla", "kullanılamaz",
 )
 
+# ── Бан/терминация аккаунта (НЕ снимаемый спамблок) ──────────────────────────
+# На ЗАБАНЕННЫЙ аккаунт @SpamBot отвечает про НАРУШЕНИЕ условий и блокировку —
+# это терминальный бан, а не спамблок, который снимается апелляцией. Раньше такой
+# ответ («Your account was blocked for violations of the Telegram Terms of
+# Service») не матчил ни OK, ни LIMIT и уходил в None → аккаунт оставался «active»
+# и его продолжали брать в работу. Фразы высокоточные (многословные), чтобы не
+# поймать доброкачественный ответ; @SpamBot часто отвечает на бан по-английски
+# даже для не-EN аккаунтов, поэтому EN-набор обязателен.
+BAN_PATTERNS: tuple[str, ...] = (
+    # en
+    "blocked for violations", "was blocked for", "account was blocked",
+    "account has been blocked", "has been blocked for", "permanently banned",
+    "banned for violating", "your account was banned",
+    # ru
+    "заблокирован за нарушения", "был заблокирован", "ваш аккаунт заблокирован",
+    "аккаунт был заблокирован", "аккаунт заблокирован за",
+    # uk / be
+    "заблоковано за порушення", "ваш акаунт заблоковано", "заблакаван за парушэнн",
+    # de
+    "gesperrt wegen", "konto wurde gesperrt", "wurde dauerhaft gesperrt",
+    # fr
+    "bloqué pour violation", "compte a été bloqué",
+    # it
+    "bloccato per violazioni", "account è stato bloccato",
+    # es
+    "bloqueada por infracciones", "cuenta ha sido bloqueada",
+    # pl
+    "zablokowane za naruszenie", "konto zostało zablokowane",
+    # tr
+    "ihlalleri nedeniyle engellendi", "hesabınız engellendi",
+)
+
 # ── Временный спамблок (назван срок снятия) ──────────────────────────────────
 TEMP_PATTERNS: tuple[str, ...] = (
     # en (существовавшие)
@@ -130,16 +162,19 @@ PERM_PATTERNS: tuple[str, ...] = (
 
 
 def classify_reply(reply_text: Optional[str]) -> Optional[str]:
-    """'active' | 'spamblock' | None (не распознано).
+    """'active' | 'banned' | 'spamblock' | None (не распознано).
 
     OK проверяется ПЕРВЫМ — иначе «нет ограничений» на любом языке поймается
-    LIMIT-паттерном по корню слова.
+    LIMIT-паттерном по корню слова. BAN — РАНЬШЕ limit: бан (нарушение условий,
+    блокировка) терминален и не должен понижаться до снимаемого спамблока.
     """
     if not reply_text:
         return None
     low = reply_text.lower()
     if any(p in low for p in OK_PATTERNS):
         return "active"
+    if any(p in low for p in BAN_PATTERNS):
+        return "banned"
     if any(p in low for p in LIMIT_PATTERNS):
         return "spamblock"
     return None

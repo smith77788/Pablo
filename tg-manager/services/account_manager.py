@@ -3702,7 +3702,7 @@ _VERIFIED_RESTRICTION_STATUSES = frozenset({"spamblock", "banned", "deactivated"
 
 
 def classify_spambot_reply(reply_text: str) -> str | None:
-    """'active' | 'spamblock' | None (не распознано).
+    """'active' | 'banned' | 'spamblock' | None (не распознано).
 
     @SpamBot отвечает на языке аккаунта (lang_code). Классификация вынесена в
     services/spambot_i18n.py и покрывает все 10 локалей, которые раздаёт
@@ -4054,6 +4054,19 @@ async def check_account_status_full(
                     return {
                         "status": "active",
                         "reason": "Аккаунт активен, ограничений нет",
+                        "display_name": display_name,
+                        "profile": profile,
+                    }
+                if spambot_status == "banned":
+                    # Терминальный бан (нарушение условий), а не снимаемый
+                    # спамблок. Раньше этот ответ не распознавался и уходил в
+                    # 'unknown' — acc_status не менялся, и забаненный аккаунт
+                    # продолжали брать в работу. 'banned' ∈ LOST_STATUSES →
+                    # выводит из ротации и персистится.
+                    return {
+                        "status": "banned",
+                        "reason": f"@SpamBot: аккаунт заблокирован за нарушение "
+                                  f"условий Telegram — {reply_text[:120]}",
                         "display_name": display_name,
                         "profile": profile,
                     }
