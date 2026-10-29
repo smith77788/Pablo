@@ -15196,7 +15196,18 @@ async def _exec_enable_bot_to_bot(
     summary = " · ".join(parts)
     if err_lines:
         summary += "\n" + "\n".join(err_lines[:15])
-    return {"status": "done", "enabled": enabled_n, "already": already_n,
+    # Исход честный, а не всегда «done». Ошибки уходили только в текст сводки, и
+    # операция, не включившая НИ ОДНОГО бота, числилась выполненной: ни на одном
+    # экране владельца это не было видно числом. Боты без аккаунта-владельца —
+    # тоже недоведённая работа: их режим включается только вручную.
+    _left = bool(err_lines) or bool(no_owner)
+    if not _left:
+        status = "done"
+    elif enabled_n or already_n:
+        status = "partial"
+    else:
+        status = "failed"
+    return {"status": status, "enabled": enabled_n, "already": already_n,
             "summary": summary}
 
 
