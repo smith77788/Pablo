@@ -3701,11 +3701,13 @@ _SPAMBOT_LIMIT_PATTERNS = (
     "ваш аккаунт ограничен",
     "недоступны",           # «некоторые функции будут недоступны до …»
 )
-_VERIFIED_RESTRICTION_STATUSES = frozenset({"spamblock", "banned", "deactivated"})
+_VERIFIED_RESTRICTION_STATUSES = frozenset(
+    {"spamblock", "banned", "deactivated", "frozen"}
+)
 
 
 def classify_spambot_reply(reply_text: str) -> str | None:
-    """'active' | 'banned' | 'spamblock' | None (не распознано).
+    """'active' | 'frozen' | 'banned' | 'spamblock' | None (не распознано).
 
     @SpamBot отвечает на языке аккаунта (lang_code). Классификация вынесена в
     services/spambot_i18n.py и покрывает все 10 локалей, которые раздаёт
@@ -4058,6 +4060,21 @@ async def check_account_status_full(
                     return {
                         "status": "active",
                         "reason": "Аккаунт активен, ограничений нет",
+                        "display_name": display_name,
+                        "profile": profile,
+                    }
+                if spambot_status == "frozen":
+                    # Заморозка (read-only) — средняя ступень между спамблоком и
+                    # баном. Раньше этот ответ @SpamBot не распознавался и уходил
+                    # в 'unknown' — acc_status не менялся, и замороженный аккаунт
+                    # продолжали брать в работу. 'frozen' ∈ DEAD_STATUSES →
+                    # выводит из ротации, при этом ∈ RESTRICTED_STATUSES (не
+                    # LOST): снимается апелляцией, а не потерян навсегда.
+                    return {
+                        "status": "frozen",
+                        "reason": f"@SpamBot: аккаунт заморожен (read-only) за "
+                                  f"нарушение условий Telegram, снимается "
+                                  f"апелляцией — {reply_text[:120]}",
                         "display_name": display_name,
                         "profile": profile,
                     }
