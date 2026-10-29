@@ -12,7 +12,14 @@ from __future__ import annotations
 import logging
 
 import asyncpg
+from services.account_manager import timeboxed
 from services.logger import log_exc_swallow
+
+# Потолок на ОДИН запрос к Telegram: мёртвый прокси отдаёт half-open сокет, и
+# запрос не возвращается никогда. Клиент сюда приходит чужой (зовёт
+# broadcaster), поэтому обёртка ставится на входе функции — потолок будет и у
+# запросов, добавленных позже.
+_TG_TIMEOUT = 45
 
 log = logging.getLogger(__name__)
 
@@ -146,6 +153,7 @@ async def add_botmother_as_channel_admin(
     access_hash: int = 0,
 ) -> bool:
     """Добавить @MEXAHI3MBOT как admin в канале/группе. Не выбрасывает исключений."""
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.channels import EditAdminRequest, InviteToChannelRequest
         from telethon.tl.types import ChatAdminRights, InputChannel
@@ -197,6 +205,7 @@ async def post_welcome_and_pin(
     Создаёт постоянный рекламный billboard при первом создании канала.
     Клиент Telethon должен быть уже подключён.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.messages import UpdatePinnedMessageRequest
         from telethon.tl.types import InputChannel

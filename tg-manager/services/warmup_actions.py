@@ -51,7 +51,22 @@ import logging
 import random
 import re
 
+from services.account_manager import timeboxed
 from services.logger import log_exc_swallow
+
+# Потолок на ОДИН запрос. Мёртвый прокси чаще отдаёт не отказ, а half-open
+# сокет: TCP установлен, ответа нет и не будет, и запрос не возвращается
+# НИКОГДА. Примитив прогрева работает на арендованном аккаунте: повисший
+# запрос держал бы аренду вечно (renew_leases продлевает её, а реконсилер
+# живую память намеренно не чистит), и аккаунт выпадал бы из всего до
+# перезапуска процесса. Клиент сюда приходит чужой — обёртка ставится на входе
+# каждого примитива одной строкой, поэтому потолок есть и у запросов,
+# добавленных позже.
+_TG_TIMEOUT = 45
+# Фотографию мы действительно СКАЧИВАЕМ, и через медленный прокси это законно
+# дольше одиночного запроса — потолок свой, как у переноса медиа в
+# services/content_cloner_engine.py.
+_MEDIA_TIMEOUT = 180
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +121,7 @@ async def deep_scroll(client, target: str = "", found: list | None = None) -> bo
     Аккаунт, который ежедневно видит ровно последние десять постов и ни одного
     старого, ведёт себя как программа опроса, а не как читатель.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         entity = await client.get_entity(target)
         seen = 0
@@ -136,6 +152,7 @@ async def view_posts(client, target: str = "", found: list | None = None) -> boo
     учитывается по-настоящему — это и есть обычное поведение читателя, и оно
     ничего не пишет.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.messages import GetMessagesViewsRequest
 
@@ -161,6 +178,7 @@ async def read_comments(client, target: str = "", found: list | None = None) -> 
     комментарии не рискованно вовсе, а на стороне Telegram это заход в связанную
     группу — ровно то, что делает обычный подписчик.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         entity = await client.get_entity(target)
         msgs = await client.get_messages(entity, limit=20)
@@ -193,6 +211,7 @@ async def open_media(client, target: str = "", found: list | None = None) -> boo
     парсера. Ограничиваемся фотографиями: видео и документы весят столько, что
     флот из сотни аккаунтов выжрал бы трафик прокси без всякой пользы.
     """
+    client = timeboxed(client, _MEDIA_TIMEOUT)
     try:
         entity = await client.get_entity(target)
         msgs = await client.get_messages(entity, limit=25)
@@ -218,6 +237,7 @@ async def open_link(client, target: str = "", found: list | None = None) -> bool
     Заодно самый естественный источник новых каналов: в постах постоянно висят
     t.me/<канал>, и человек по ним ходит.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.messages import GetWebPageRequest
 
@@ -243,6 +263,7 @@ async def open_link(client, target: str = "", found: list | None = None) -> bool
 
 async def search_in_channel(client, target: str = "", found: list | None = None) -> bool:
     """Ищет по словам внутри канала — обычный поиск в открытом чате."""
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from services.account_warmer import _WARMUP_SEARCH_QUERIES
 
@@ -271,6 +292,7 @@ async def explore_similar(client, target: str = "", found: list | None = None) -
     вдвойне: даёт аккаунту каналы, которых нет в общем для всего флота списке,
     то есть разводит графы интересов аккаунтов друг от друга.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.channels import GetChannelRecommendationsRequest
 
@@ -299,6 +321,7 @@ async def read_saved(client, target: str = "", found: list | None = None) -> boo
     туда не заходит. Папка, куда только кладут и никогда не открывают, — это
     след скрипта.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         msgs = await client.get_messages("me", limit=random.randint(5, 20))
         for _m in list(msgs or [])[: random.randint(2, 6)]:
@@ -313,6 +336,7 @@ async def read_saved(client, target: str = "", found: list | None = None) -> boo
 
 async def check_stickers(client, target: str = "", found: list | None = None) -> bool:
     """Открывает панель стикеров: свои наборы и «популярные»."""
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.messages import (
             GetAllStickersRequest,
@@ -335,6 +359,7 @@ async def top_peers(client, target: str = "", found: list | None = None) -> bool
     """Запрашивает «частые контакты» — то, что клиент делает сам при открытии
     поиска. Аккаунт, у которого этот запрос не звучал ни разу, отличается от
     аккаунта живого клиента на уровне трафика."""
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.contacts import GetTopPeersRequest
 
@@ -358,6 +383,7 @@ async def top_peers(client, target: str = "", found: list | None = None) -> bool
 
 async def open_folders(client, target: str = "", found: list | None = None) -> bool:
     """Открывает папки и закреплённые чаты — навигация обычного пользователя."""
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.messages import (
             GetDialogFiltersRequest,
@@ -378,6 +404,7 @@ async def open_folders(client, target: str = "", found: list | None = None) -> b
 async def settings_peek(client, target: str = "", found: list | None = None) -> bool:
     """Заглядывает в настройки приватности — редкое, но совершенно рядовое
     действие живого пользователя. Ничего не меняет: только читает."""
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.account import GetPrivacyRequest
         from telethon.tl.types import InputPrivacyKeyStatusTimestamp
@@ -398,6 +425,7 @@ async def channel_stories(client, target: str = "", found: list | None = None) -
     аккаунте без контактов почти всегда пуст. Здесь — истории канала, который
     аккаунт и так читает.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         from telethon.tl.functions.stories import (
             GetPeerStoriesRequest,
