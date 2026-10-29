@@ -16020,6 +16020,23 @@ async def _exec_community_add_channel(
             "summary": f"🖥 Ноды: создано каналов {created}"}
 
 
+async def _node_members_already(pool, node_id: int) -> list[int]:
+    """Кто в ноде УЖЕ состоит. Дверь идемпотентности оживления ноды.
+
+    Вынесено в своё имя не ради красоты: реестр дверей
+    (`tests/test_every_mutating_executor_is_idempotent.py`) узнаёт двери по
+    тексту, и ключ по имени таблицы `community_node_members` совпадал бы и с
+    `_exec_community_set_staff`, который эту таблицу только ЧИТАЕТ, чтобы знать
+    кого промоутить. Там это не дверь, и реестр начал бы прятать настоящую
+    находку. Имя функции такой двусмысленности не создаёт.
+    """
+    rows = await _safe_fetch(
+        pool,
+        "SELECT account_id FROM community_node_members WHERE node_id=$1",
+        int(node_id), log_ctx=f"[node_members node={node_id}]")
+    return sorted({int(r["account_id"]) for r in (rows or [])})
+
+
 async def _exec_community_liven(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -16040,12 +16057,31 @@ async def _exec_community_liven(
         count = max(1, min(int(params.get("count") or 5), 50))
     except (TypeError, ValueError):
         count = 5
+    # ДВЕРЬ ИДЕМПОТЕНТНОСТИ: кто в ноде уже состоит. Повтор прогона здесь норма
+    # (деплой на каждом пуше возвращает операцию в очередь и гонит её с начала),
+    # а вступление необратимо и лимитируемо. Без этой двери повтор делал до
+    # пятидесяти настоящих joinChannel по чату, где флот уже сидит, и — хуже —
+    # выбор аккаунтов шёл заново и мог взять ДРУГИЕ: владелец просил пять, а
+    # после одного воскрешения в ноде оказывалось десять.
+    #
+    # Поэтому задача читается как «довести ноду ДО count», а не «вступить count
+    # раз»: свои исключаются из выбора, а остаток считается от фактического
+    # числа участников.
+    _in_node = await _node_members_already(pool, node_id)
+    _need = max(0, count - len(_in_node))
+    if _need <= 0:
+        return {"status": "done", "joined": 0,
+                "summary": (f"🏛 Оживление ноды: в ней уже {len(_in_node)} "
+                            f"аккаунтов флота из запрошенных {count} — "
+                            f"вступать некому")}
     # Одна дверь к аккаунту (шаг №1 аудита): выбор через флуд-осознанный слой
     # вместо сырого random() — не берём аккаунт в кулдауне/мёртвый по статусу и
     # получаем полный транспорт (owner_id + cf_relay_url). min_trust=0.0 —
     # порог доверия здесь не вводим, меняем только «какой аккаунт безопасно взять».
     from services import resource_selector as _rsel
-    accs = await _rsel.select_accounts(pool, owner_id, count, min_trust_score=0.0)
+    accs = await _rsel.select_accounts(
+        pool, owner_id, _need, min_trust_score=0.0,
+        exclude_ids=_in_node or None)
     chat_id = int(node["tg_chat_id"])
     # Пригласительная ссылка через бота (он админ ноды) — так вступают и в
     # приватную только что созданную супергруппу (по id без access_hash нельзя).
@@ -16092,10 +16128,14 @@ async def _exec_community_liven(
     # Просили N аккаунтов, а свободных нашлось меньше — операция закончится с
     # полосой ниже ста процентов, и владелец должен прочитать почему, а не
     # гадать, оборвалась она или нет.
-    _short = len(accs or []) < count
+    # Нехватка считается от ОСТАТКА, а не от исходного count: часть ноды уже
+    # набрана прошлым прогоном, и «нашлось 2 из 5» на доборе двоих было бы
+    # неправдой.
+    _short = len(accs or []) < _need
     return {"status": "done", "joined": joined,
             "summary": (f"🏛 Оживление ноды: вступило {joined} аккаунтов флота"
-                        + (f" · свободных аккаунтов нашлось {len(accs or [])} из {count}"
+                        + (f" (в ноде было {len(_in_node)})" if _in_node else "")
+                        + (f" · свободных аккаунтов нашлось {len(accs or [])} из {_need}"
                            if _short else "")
                         + (f" · пропущено занятых: {busy}" if busy else ""))}
 
