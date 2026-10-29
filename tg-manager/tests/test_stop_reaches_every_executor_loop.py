@@ -83,21 +83,108 @@ def _target_loops(node):
             and not _is_retry_loop(n)]
 
 
+def _door_in_a_loop(node) -> bool:
+    """Дверь отмены стоит ВНУТРИ цикла по целям."""
+    return any(any(d in ast.unparse(lp) for d in CANCEL_DOORS)
+               for lp in _target_loops(node))
+
+
+def _door_handed_to_the_engine(node) -> bool:
+    """Дверь передана наружу замыканием — цикл по целям живёт в движке.
+
+    Так устроен поиск контакта: исполнитель объявляет `async def _cancelled()`
+    с `_is_cancelled` внутри и отдаёт его в `contact_finder.hunt`, который и
+    идёт по кандидатам. Это не слабее двери в цикле: отмену спрашивают на
+    КАЖДОЙ итерации, просто итерации чужие.
+    """
+    closures = {f.name for f in ast.walk(node)
+                if isinstance(f, (ast.AsyncFunctionDef, ast.FunctionDef))
+                and f is not node
+                and any(d in ast.unparse(f) for d in CANCEL_DOORS)}
+    if not closures:
+        return False
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
+            continue
+        passed = [ast.unparse(a) for a in call.args]
+        passed += [ast.unparse(k.value) for k in call.keywords]
+        if any(p in closures for p in passed):
+            return True
+    return False
+
+
 def test_no_executor_loop_ignores_the_stop_button():
-    """Храповик: цикл по целям обязан спрашивать дверь отмены."""
+    """Храповик: цикл по целям обязан спрашивать дверь отмены.
+
+    Проверка была слабее, чем читалась: дверь искали в ТЕКСТЕ исполнителя, а не
+    в его цикле. Исполнитель, спросивший отмену один раз ПЕРЕД циклом на триста
+    целей, храповик проходил — а «Остановить» у него не работает до конца
+    списка, то есть ровно то, от чего храповик и ставился. Теперь дверь обязана
+    стоять внутри цикла (или быть отдана замыканием тому, кто по целям идёт).
+    """
     deaf = []
     seen = 0
     for name, seg, node in _executors():
         seen += 1
         if name in DELEGATED:
             continue
-        has_loop = bool(_target_loops(node))
-        if has_loop and not any(d in seg for d in CANCEL_DOORS):
-            deaf.append(name)
+        if not _target_loops(node):
+            continue
+        if _door_in_a_loop(node) or _door_handed_to_the_engine(node):
+            continue
+        deaf.append(name)
     assert seen > 50, f"пробник не нашёл исполнителей ({seen}) — он сломан"
     assert not deaf, (
-        "эти исполнители идут по списку целей, не спрашивая про отмену: "
-        f"«Остановить» для них не работает до конца списка — {deaf}")
+        "эти исполнители идут по списку целей, не спрашивая про отмену внутри "
+        f"цикла: «Остановить» для них не работает до конца списка — {deaf}. "
+        "Поставьте проверку в голову цикла, передайте замыкание тому, кто идёт "
+        "по целям, или внесите исполнителя в DELEGATED с объяснением")
+
+
+_DOOR_BEFORE_THE_LOOP = (
+    "async def _exec_x(pool, op_id):\n"
+    "    if await _is_cancelled(pool, op_id):\n"
+    "        return {}\n"
+    "    for t in targets:\n"
+    "        await send(t)\n")
+_DOOR_INSIDE_THE_LOOP = (
+    "async def _exec_x(pool, op_id):\n"
+    "    for t in targets:\n"
+    "        if await _is_cancelled(pool, op_id):\n"
+    "            break\n"
+    "        await send(t)\n")
+_DOOR_HANDED_OVER = (
+    "async def _exec_x(pool, op_id):\n"
+    "    async def _cancelled():\n"
+    "        return await _is_cancelled(pool, op_id)\n"
+    "    for q in (1, 2):\n"
+    "        pass\n"
+    "    return await engine.hunt(targets, cancelled=_cancelled)\n")
+
+
+def _one(src):
+    return ast.parse(src).body[0]
+
+
+def test_a_door_before_the_loop_is_not_enough():
+    """Главная самопроверка усиления: раньше этот пример проходил."""
+    node = _one(_DOOR_BEFORE_THE_LOOP)
+    assert any(d in ast.unparse(node) for d in CANCEL_DOORS), "пример устарел"
+    assert not _door_in_a_loop(node), (
+        "проверка перед циклом принята за дверь в цикле — усиление не работает")
+    assert not _door_handed_to_the_engine(node)
+
+
+def test_a_door_inside_the_loop_passes():
+    assert _door_in_a_loop(_one(_DOOR_INSIDE_THE_LOOP))
+
+
+def test_a_door_handed_to_the_engine_passes():
+    node = _one(_DOOR_HANDED_OVER)
+    assert not _door_in_a_loop(node), "пример устарел: дверь оказалась в цикле"
+    assert _door_handed_to_the_engine(node), (
+        "замыкание с дверью, отданное движку, не признано — перепись потребует "
+        "правок у исполнителя, который отмену как раз спрашивает")
 
 
 def test_the_deaf_executor_detector_bites():
