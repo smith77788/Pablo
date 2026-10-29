@@ -413,7 +413,7 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "🛡",
     },
     "check_bot_geoban": {
-        "description": "Проверка ботов на гео-бан (ограничение по странам)",
+        "description": "Гео-доступность каналов, чатов и ботов по странам",
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🌍",
