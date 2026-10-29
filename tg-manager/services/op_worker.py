@@ -3736,6 +3736,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "id рассылки не закрепился за операцией — рассылка не запущена и "
         "снята; без этого отказа повтор операции отправил бы сообщение всей "
         "аудитории второй раз",
+    "infragram_network_node_mark_write_failures_total":
+        "отметка созданного узла связки — не записалась: объект создан, но план "
+        "о нём не знает, и следующий прогон развёртывания создал бы второй "
+        "такой же канал",
     "infragram_gp_asset_mark_write_failures_total":
         "id созданного канала или бота (Global Presence) — не записался в "
         "цель: цель закрыта на месте, иначе разбор брошенных целей счёл бы "
@@ -15718,6 +15722,68 @@ async def _exec_reclassify_channels(
         await release_accounts(claimed_ids)
 
 
+async def _record_network_node(
+    pool, *, node_id: int, ref_id: int, title: str = "",
+    owner_id: int | None = None, acc_id: int | None = None,
+    username=None, access_hash: int = 0, asset_type: str = "channel",
+) -> bool:
+    """Записать СОЗДАННЫЙ узел связки: каталог и отметку узла одной транзакцией.
+
+    Отметка `ref_id` — дверь: развёртывание пропускает узел, у которого она уже
+    стоит. Повтор прогона здесь норма, а не редкость (рабочая ветка едет в прод
+    на каждом пуше, рестарт возвращает операцию в очередь и гонит её по узлам с
+    начала), поэтому потерянная отметка стоит ВТОРОГО канала с тем же
+    названием.
+
+    Писалась отметка через `network_builder.update_node_status`, который
+    исключений не бросает: он возвращает `{'ok': False}` и пишет
+    предупреждение в лог. Результат никто не смотрел, а сама запись шла вторым
+    запросом после записи в каталог — то есть два окна, и оба открытые.
+
+    Отметить ДО создания нельзя: `ref_id` появляется только вместе с каналом.
+    Поэтому окно сжимается до одной атомарной записи — ровно так уже устроен
+    Global Presence в этом же файле, — и запись повторяется.
+
+    `owner_id`/`acc_id` не заданы — каталог не трогаем: нода-сообщество
+    регистрируется своим путём (`nodes_engine`), и в `managed_channels` её
+    место не здесь.
+
+    Возвращает True, если запись легла.
+    """
+    for _attempt in (1, 2, 3):
+        try:
+            async with pool.acquire() as _conn:
+                async with _conn.transaction():
+                    if owner_id is not None and acc_id is not None:
+                        await _conn.execute(
+                            "INSERT INTO managed_channels(owner_id, acc_id, "
+                            "channel_id, title, username, access_hash, type) "
+                            "VALUES($1,$2,$3,$4,$5,$6,$7) "
+                            "ON CONFLICT(owner_id, channel_id) DO UPDATE "
+                            "SET title=$4, access_hash=$6, type=$7",
+                            int(owner_id), int(acc_id), int(ref_id), title,
+                            username, int(access_hash or 0), asset_type,
+                        )
+                    await _conn.execute(
+                        "UPDATE network_nodes SET status='created', ref_id=$1 "
+                        "WHERE id=$2",
+                        int(ref_id), int(node_id),
+                    )
+            return True
+        except Exception as e:
+            if _attempt < 3:
+                await asyncio.sleep(0.5 * _attempt)
+                continue
+            log.error(
+                "deploy_network: объект «%s» (id %s) создан, но узел %s его НЕ "
+                "запомнил (%s) — следующий прогон счёл бы узел незапущенным и "
+                "создал второй такой же",
+                title or "узел", ref_id, node_id, e,
+            )
+    _reliability_metric("infragram_network_node_mark_write_failures_total")
+    return False
+
+
 async def _exec_deploy_network(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -15775,6 +15841,10 @@ async def _exec_deploy_network(
         node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
         node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
         created = wired = 0
+        # Узлы, чей объект создан, но отметка не записалась. Без этого счёта
+        # отказ был невидим: прогон закрывался «готово», а следующий создавал
+        # второй такой же канал.
+        unmarked = 0
         manual: list[str] = []
         # Счётчик шагов общий на оба цикла: план (plan_deployment) считает шагом
         # каждый недостающий узел и каждое ребро, и total_items операции равен
@@ -15805,15 +15875,19 @@ async def _exec_deploy_network(
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
                     continue
-                await _safe_execute(
-                    pool,
-                    "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type) "
-                    "VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(owner_id, channel_id) DO UPDATE "
-                    "SET title=$4, access_hash=$6, type=$7",
-                    owner_id, acc["id"], ch_id, label, res.get("username") or None,
-                    int(res.get("access_hash") or 0),
-                    res.get("type") or ("group" if ntype in ("group", "chat") else "channel"))
-                await _nb.update_node_status(pool, n["id"], "created", ref_id=ch_id)
+                if not await _record_network_node(
+                        pool, node_id=n["id"], ref_id=int(ch_id), title=label,
+                        owner_id=owner_id, acc_id=int(acc["id"]),
+                        username=res.get("username") or None,
+                        access_hash=int(res.get("access_hash") or 0),
+                        asset_type=(res.get("type")
+                                    or ("group" if ntype in ("group", "chat")
+                                        else "channel"))):
+                    manual.append(
+                        f"{label}: создан (id {ch_id}), но узел плана его не "
+                        f"запомнил — свяжите вручную")
+                    unmarked += 1
+                    continue
                 node_ref[n["id"]] = ch_id
                 created += 1
                 await _governed_sleep(pool, owner_id, random.uniform(30, 60))
@@ -15837,7 +15911,13 @@ async def _exec_deploy_network(
                     await _ne.add_node_member(pool, int(cnode["id"]), int(acc["id"]), "admin")
                 except Exception:
                     pass
-                await _nb.update_node_status(pool, n["id"], "created", ref_id=int(ch_id))
+                if not await _record_network_node(
+                        pool, node_id=n["id"], ref_id=int(ch_id), title=label):
+                    manual.append(
+                        f"{label}: нода создана (id {ch_id}), но узел плана её "
+                        f"не запомнил — свяжите вручную")
+                    unmarked += 1
+                    continue
                 node_ref[n["id"]] = int(ch_id)
                 created += 1
                 await _governed_sleep(pool, owner_id, random.uniform(30, 60))
@@ -15902,9 +15982,16 @@ async def _exec_deploy_network(
             pass
         await _mark_progress(pool, op_id, _done_n)
         parts = [f"🔗 Связка развёрнута: создано {created}, связано {wired}"]
+        if unmarked:
+            # Работа была, но не доведена: объекты созданы, а план их не знает.
+            # Закрывать это как «готово» нельзя — повтор создаст их заново.
+            parts.append(
+                f"⚠️ Не запомнено узлов: {unmarked} — объекты созданы и есть в "
+                f"каталоге, но план о них не знает")
         if manual:
             parts.append("Вручную: " + "; ".join(manual[:5]))
-        return {"status": "done", "created": created, "wired": wired,
+        return {"status": "partial" if unmarked else "done",
+                "created": created, "wired": wired, "unmarked": unmarked,
                 "manual": manual, "summary": " · ".join(parts)}
     finally:
         await release_accounts([_claimed_acc])
