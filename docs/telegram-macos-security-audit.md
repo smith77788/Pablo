@@ -172,6 +172,8 @@ The subsequent `savePanel(file:named:for:)` uses an `NSSavePanel`, which require
 | 1 | `web_app_share_to_story` IP leak + SSRF | MEDIUM-HIGH | CONFIRMED | `WebpageModalController.swift:2116` |
 | 2 | `web_app_open_tg_link` missing click gate | LOW-MEDIUM | CONFIRMED | `WebpageModalController.swift:1917` |
 | 3 | File download `fileName` path traversal | N/A | MITIGATED | `WebpageModalController.swift:2685` |
+| 4 | JS-Bridge Hijacking (`sameOrigin == false`) | CRITICAL | CONFIRMED | `WebpageModalController.swift:1271,1621,1695,2892` |
+| 5 | Biometric Auth bypass (`accessGranted` missing) | HIGH | CONFIRMED | `WebpageModalController.swift:2015,2055` |
 
 ---
 
@@ -324,7 +326,159 @@ if let requestData, requestData.sameOrigin {
 
 ---
 
+## Finding 5 — HIGH
+
+### `web_app_biometry_update_token` / `web_app_biometry_request_auth`: Обход проверки `accessGranted`
+
+**Файл:** `packages/WebAppUI/Sources/WebAppUI/WebpageModalController.swift:2015–2104`  
+**CVSS estimate:** 7.1 (AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:L/A:N)
+
+#### Описание
+
+Telegram Bot Platform предоставляет API биометрической аутентификации для Mini Apps. Правильный flow требует явного согласия пользователя:
+
+1. `web_app_biometry_request_access` — показывает диалог "Разрешить боту X использовать биометрию?" → устанавливает `biometryState.accessGranted = true`
+2. `web_app_biometry_update_token` — сохраняет токен в Keychain (ДОЛЖНО требовать `accessGranted`)
+3. `web_app_biometry_request_auth` — читает токен из Keychain через TouchID (ДОЛЖНО требовать `accessGranted`)
+
+Однако ни `web_app_biometry_update_token`, ни `web_app_biometry_request_auth` **не проверяют `biometryState.accessGranted`**:
+
+```swift
+// Строка 2015 — web_app_biometry_update_token
+case "web_app_biometry_update_token":
+    guard let botPeer = requestData?.bot, var biometryState = self.biometryState else {
+        return
+    }
+    // НЕТ ПРОВЕРКИ: biometryState.accessGranted НЕ проверяется!
+    if let json = json, let token = json["token"] as? String {
+        let secQuery: NSMutableDictionary = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrAccessControl: sacObject!,
+            kSecAttrService: "TelegramMiniApp",
+            kSecAttrAccount: "bot_id_\(botPeer.id.toInt64())"
+        ]
+        // SecItemAdd вызывается БЕЗ проверки accessGranted
+        let resultCode = SecItemAdd(secQuery as CFDictionary, nil)
+
+// Строка 2055 — web_app_biometry_request_auth
+case "web_app_biometry_request_auth":
+    guard let botPeer = requestData?.bot, var biometryState = self.biometryState else {
+        return
+    }
+    // НЕТ ПРОВЕРКИ: biometryState.accessGranted НЕ проверяется!
+    DispatchQueue.global().async {
+        var itemCopy: CFTypeRef?
+        let resultCode = SecItemCopyMatching(secQuery, &itemCopy)
+        // SecItemCopyMatching запускает системный TouchID/пароль диалог
+```
+
+Для сравнения — `web_app_biometry_request_access` корректно проверяет флаг:
+```swift
+// Строка 2000 — ПРАВИЛЬНЫЙ guard
+if biometryState.accessGranted {
+    self.sendBiometricInfo(biometryState: biometryState)
+    return
+}
+// затем показывает диалог пользователю
+```
+
+#### Сценарий атаки (standalone)
+
+Новый злоумышленный бот, которому пользователь ни разу не давал биометрическое разрешение:
+
+```
+[Мини-апп злоумышленника] открывается
+        │
+        ▼
+JS вызывает:
+    TelegramWebviewProxy.postEvent("web_app_biometry_update_token",
+        JSON.stringify({token: "attacker_bait"}))
+        │
+        ▼  
+[Swift] SecItemAdd() — записывает токен в Keychain БЕЗ разрешения
+        │             biometryState.accessGranted всё ещё FALSE
+        ▼
+JS вызывает:
+    TelegramWebviewProxy.postEvent("web_app_biometry_request_auth", null)
+        │
+        ▼
+[macOS] Показывает системный диалог:
+        "Введите Touch ID для разблокировки Keychain"
+        — пользователь видит generic системный prompt,
+          не понимает кто и зачем запрашивает
+        │
+        ▼
+[Пользователь] аутентифицируется через TouchID
+        │
+        ▼
+[Мини-апп] получает "attacker_bait" обратно
+        → доказывает: пользователь за компьютером, Touch ID сработал
+```
+
+**Результат**: Бот может скрытно проверить доступность биометрии и "обучить" пользователя на routine биометрические подтверждения без его явного согласия через Telegram UI.
+
+#### Усиленный сценарий (в связке с Finding 4)
+
+После захвата JS-bridge через `sameOrigin == false` navigation bypass:
+
+```
+[attacker.com загружен в WebView] — захват bridge из Finding 4
+        │
+        ▼
+attacker.com JS знает bot_id легитимного бота (из requestData)
+Легитимный бот ранее хранил чувствительный сессионный токен
+        │
+        ▼
+TelegramWebviewProxy.postEvent("web_app_biometry_request_auth", null)
+        │
+        ▼
+[macOS] TouchID диалог — UI показывает "Разблокировать для [Бот X]"
+        │
+        ▼
+[Пользователь] думает что это Бот X запрашивает, аутентифицируется
+        │
+        ▼
+[Swift] SecItemCopyMatching() читает Keychain-токен ЛЕГИТИМНОГО бота
+sendEvent("biometry_auth_requested", {status: "authorized", token: "SENSITIVE_SESSION_TOKEN"})
+        │
+        ▼
+[attacker.com] получает чувствительный токен легитимного бота!
+```
+
+Уязвимость позволяет: при активации Finding 4 (для бота с `sameOrigin == false`) похитить сессионный токен легитимного бота из Keychain через обман пользователя при биометрической аутентификации.
+
+#### Почему это HIGH, а не MEDIUM
+
+1. **Нет защиты на уровне Telegram**: пользователь никогда явно не разрешал боту доступ к биометрии через Telegram UI — но TouchID диалог всё равно появляется.
+2. **Системный диалог вводит в заблуждение**: macOS показывает generic "Touch ID required" — пользователь не может определить, кто именно инициировал запрос.
+3. **Amplification через Finding 4**: в связке с bridge hijacking позволяет похитить Keychain-токены легитимных ботов после успешной биометрической аутентификации.
+4. **Нет user interaction required для записи**: `web_app_biometry_update_token` пишет в Keychain полностью автоматически, без какого-либо пользовательского взаимодействия.
+
+#### Рекомендуемое исправление
+
+```swift
+// В ОБОИХ обработчиках добавить guard accessGranted:
+case "web_app_biometry_update_token":
+    guard let botPeer = requestData?.bot, var biometryState = self.biometryState else { return }
+    guard biometryState.accessGranted else {  // ← ДОБАВИТЬ
+        sendEvent(name: "biometry_token_updated", data: "{status: \"failed\"}")
+        return
+    }
+    // ... остальной код
+
+case "web_app_biometry_request_auth":
+    guard let botPeer = requestData?.bot, var biometryState = self.biometryState else { return }
+    guard biometryState.accessGranted else {  // ← ДОБАВИТЬ
+        let eventData: JSON = ["status": "failed"]
+        sendEvent(name: "biometry_auth_requested", data: eventData.string)
+        return
+    }
+    // ... остальной код
+```
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**
-- **Sparkle update integrity** — update XML is delivered over authenticated MTProto; DSA signature verified via `SUPublicDSAKeyFile`. Attack surface requires MITM of authenticated MTProto session.
+- **Sparkle update integrity** — `InternalUpdaterDownloader` subclasses `SPUDownloaderSession` and delivers the binary via MTProto, then calls `urlSession(_:downloadTask:didFinishDownloadingTo:)`. Sparkle's EdDSA signature verification (via `SUPublicEdDSAKey` hardcoded in `Info.plist`) runs AFTER the download regardless of delivery path. **Not vulnerable**: a compromised MTProto channel cannot push unsigned updates because the public key is compiled into the app bundle.
