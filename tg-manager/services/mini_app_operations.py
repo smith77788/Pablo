@@ -64,8 +64,13 @@ def setup_routes(app: web.Application, pool) -> None:
         _q = (request.query.get("q") or "").strip()[:64]
         # err_cnt — число упавших под-элементов (каналов) для показа кнопки
         # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
+        # Служебные строки журнала (выдача админки, промоут-трюк, фолбэк
+        # ссылкой) — не цели, и провалом операции они не являются: иначе кнопка
+        # «повторить неудавшиеся» зажигалась бы там, где не упало ни одной
+        # цели. Правда про них одна — operation_bus.REAL_TARGET_SQL.
         _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
-                    "WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt")
+                    "WHERE ol.op_id=oq.id AND ol.status='error'"
+                    + _obus.REAL_TARGET_SQL + ") AS err_cnt")
         # Страница и честные счётчики. Раньше запрос был жёстко LIMIT 30 без
         # offset и без общего числа: истории дальше тридцати операций просто не
         # существовало, а плитки на экране («Всего», «Готово», «Ошибки»)
@@ -618,7 +623,8 @@ def setup_routes(app: web.Application, pool) -> None:
             row = await pool.fetchrow(
                 "SELECT op_type, params, label, status, total_items, done_items, "
                 "(SELECT COUNT(*) FROM operation_log ol "
-                " WHERE ol.op_id=operation_queue.id AND ol.status='error') AS err_cnt "
+                " WHERE ol.op_id=operation_queue.id AND ol.status='error'"
+                + _obus.REAL_TARGET_SQL + ") AS err_cnt "
                 "FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
@@ -755,7 +761,8 @@ def setup_routes(app: web.Application, pool) -> None:
             """SELECT oq.id, oq.op_type, oq.label, oq.status,
                       oq.done_items, oq.total_items,
                       (SELECT COUNT(*) FROM operation_log ol
-                        WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt
+                        WHERE ol.op_id=oq.id AND ol.status='error'"""
+                        + _obus.REAL_TARGET_SQL + """) AS err_cnt
                  FROM operation_queue oq
                 WHERE oq.owner_id=$1
                   AND oq.status IN ('failed','cancelled','done')

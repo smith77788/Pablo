@@ -20147,8 +20147,17 @@ async def _exec_mass_invite(
                 else:
                     _tgt, _msg = "—", _raw
                 await _journal_write(
-                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'fail',$4)", op_id, step, _tgt[:120], _msg[:200])
+                    pool,
+                    # Слово статуса — 'error', как у всех провалов цели. Было
+                    # 'fail', которого не знает ни один читатель журнала:
+                    # счётчик ошибок операции (`status='error'`) показывал
+                    # владельцу ноль при любом числе непрошедших целей, а в
+                    # покрытие журнала эти строки не шли вовсе. Служебные
+                    # строки инвайта из счётчиков исключаются по ИМЕНИ цели
+                    # (operation_bus.REAL_TARGET_SQL), а не по слову статуса,
+                    # поэтому честное 'error' здесь ничего не раздувает.
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)", op_id, step, _tgt[:120], _msg[:200])
 
             # Успешно добавленные цели — тоже в лог (для полного CSV-отчёта: КОГО
             # добавили, а не только кого нет). Успех = попробованные минус явные
@@ -20476,7 +20485,11 @@ async def _exec_mass_invite(
                 await _journal_write(
                     pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,0,'promote_trick',$2,$3)", op_id,
-                    "ok" if _trick_ok else "fail",
+                    # Слово статуса — из словаря читателей журнала ('fail' не
+                    # знает никто). Счётчики провалов служебные строки не
+                    # считают по ИМЕНИ цели (operation_bus.REAL_TARGET_SQL), а
+                    # не по слову статуса, поэтому 'error' здесь безопасен.
+                    "ok" if _trick_ok else "error",
                     f"добавлено промоут-трюком: {_trick_ok}/{max(_trick_tried, _trick_ok)}")
             except Exception as _te:
                 log.warning("mass_invite op=%d: промоут-трюк сбой: %s", op_id, _te)
@@ -20511,7 +20524,7 @@ async def _exec_mass_invite(
                     op_id, len(_admins_left))
         await _journal_write(
             pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-            "VALUES($1,0,'promote_trick',$2,$3)", op_id, "fail",
+            "VALUES($1,0,'promote_trick',$2,$3)", op_id, "error",
             "права админа не сняты: " + ", ".join(str(x) for x in _admins_left[:50]))
 
     # ── Финальный фолбэк: кого не взял НИ ОДИН способ — ссылка в ЛС ───────────
@@ -20622,7 +20635,7 @@ async def _exec_mass_invite(
             await _journal_write(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'link_fallback',$2,$3)", op_id,
-                "ok" if _link_fallback_ok else "fail",
+                "ok" if _link_fallback_ok else "error",
                 f"ссылка в ЛС недостижимым целям: доставлено {_link_fallback_ok}/"
                 f"{max(_lf_tried, _link_fallback_ok)}"
                 + (f", не успели отправить: {_link_fallback_left}" if _link_fallback_left else ""))
