@@ -1616,7 +1616,8 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             plan_id = await _aw.create_warmup_plan(pool, uid, acc_id, plan_type)
             plan = await pool.fetchrow(
-                "SELECT target_days FROM account_warmup_plans WHERE id=$1", plan_id)
+                "SELECT target_days FROM account_warmup_plans WHERE id=$1 AND owner_id=$2",
+                plan_id, uid)
             # Операция — след в истории; план уже записан, исполнитель его
             # не пересоздаёт.
             label = f"Прогрев аккаунта #{acc_id} ({plan_type})"

@@ -257,8 +257,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 custom_channels=custom_channels,
                 daily_actions=daily_actions, target_days=target_days)
             plan = await pool.fetchrow(
-                "SELECT daily_actions, target_days FROM account_warmup_plans WHERE id=$1",
-                plan_id)
+                "SELECT daily_actions, target_days FROM account_warmup_plans "
+                "WHERE id=$1 AND owner_id=$2", plan_id, uid)
             # Операция — след в истории и в «Операциях». План уже записан,
             # поэтому исполнитель операции его не пересоздаёт.
             label = f"Прогрев аккаунта ({plan_type}, {profile_type})"
