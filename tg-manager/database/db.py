@@ -5329,15 +5329,49 @@ async def link_plan_to_operation(pool: asyncpg.Pool, plan_id: int, op_id: int) -
 async def cancel_global_presence_plan(
     pool: asyncpg.Pool, plan_id: int, owner_id: int
 ) -> bool:
-    """Cancel a plan and its linked operation. Returns True if the plan was found and owned."""
+    """Cancel a plan and its linked operation. Returns True if the plan was found and owned.
+
+    Связанную операцию гасит ШИНА (`operation_bus.cancel`), а не свой UPDATE.
+    Своя отмена ставила статус и `finished_at` аккуратно, но не писала
+    `result` и не объявляла исход — операция оставалась терминальной и ПУСТОЙ:
+    владелец видит «Отменено» без единой цифры, хотя часть целей отработана, и
+    именно по этой цифре решает, продолжать ли и с какого места. Отмены при
+    этом не было ни на графике исходов, ни в подписанном аудит-трейле, ни в
+    памяти организма — ровно те дефекты, из-за которых дверь и появилась.
+
+    `allow` расширен до всех НЕтерминальных состояний: по умолчанию дверь
+    отменяет из ('pending','running'), а здесь нужно и 'paused', и
+    'scheduled', и 'waiting_approval' — иначе приостановленная операция
+    переживёт отмену своего плана.
+
+    Порядок: сначала операция, потом план. Если дверь не сработает, план
+    останется живым и состояние не разъедется наполовину; обратный порядок
+    чинится сам (`sync_plan_status_from_op` подтягивает статус плана от
+    операции), а прямой — нет.
+    """
+    plan = await pool.fetchrow(
+        "SELECT op_id FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+        plan_id,
+        owner_id,
+    )
+    if not plan:
+        return False
+    if plan["op_id"]:
+        from services import op_status as _ost
+        from services import operation_bus as _obus
+
+        await _obus.cancel(
+            pool, int(plan["op_id"]), owner_id,
+            allow=tuple(sorted(_ost.IN_FLIGHT)),
+        )
     async with pool.acquire() as conn:
         async with conn.transaction():
-            plan = await conn.fetchrow(
+            still = await conn.fetchrow(
                 "SELECT op_id FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
                 plan_id,
                 owner_id,
             )
-            if not plan:
+            if not still:
                 return False
             await conn.execute(
                 "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
@@ -5347,15 +5381,6 @@ async def cancel_global_presence_plan(
                 "UPDATE global_presence_targets SET status='cancelled' WHERE plan_id=$1 AND status='pending'",
                 plan_id,
             )
-            if plan["op_id"]:
-                await conn.execute(
-                    # 'partial' — тоже завершённое состояние (services/op_status):
-                    # отмена плана не должна задним числом переписывать исход
-                    # операции, которая УЖЕ отработала часть целей.
-                    "UPDATE operation_queue SET status='cancelled', finished_at=now() "
-                    "WHERE id=$1 AND status NOT IN ('done','partial','failed','cancelled')",
-                    plan["op_id"],
-                )
     return True
 
 
