@@ -188,6 +188,44 @@ async def _journal_write(
     return "ERROR"
 
 
+async def _journal_writemany(
+    pool: asyncpg.Pool, query: str, rows, log_ctx: str = "", where: str = "",
+) -> str:
+    """То же, что `_journal_write`, но для ПАЧКИ отметок: `executemany`.
+
+    Зачем отдельный писатель, а не цикл по `_journal_write`: пачку пишут там,
+    где целей в батче десятки (успешные цели инвайта), и построчная запись
+    стоила бы десятков круговых обходов базы на каждом батче. Терять при этом
+    нечего: executemany у asyncpg атомарен — либо легли все строки, либо ни
+    одна, а значение здесь ровно то же, что у одиночной отметки.
+
+    Гасить исключение вокруг этого вызова не нужно и вредно: писатель их не
+    бросает, и `except` вокруг него — мёртвый код, который прячет от читателя
+    тот факт, что потеря уже обработана внутри.
+    """
+    last: Exception | None = None
+    _rows = list(rows or [])
+    if not _rows:
+        return "SKIP"
+    for attempt in (1, 2):
+        try:
+            return await pool.executemany(query, _rows) or "INSERT"
+        except Exception as e:
+            last = e
+            if attempt == 1:
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    report_error(last, extra={"context": f"op_worker_journal_writemany{log_ctx}",
+                              "query": query[:100]})
+    log.error(
+        "op_worker: пачка отметок в журнале целей не записалась%s (%d строк, %s) "
+        "— повторный прогон может сделать эти цели второй раз",
+        log_ctx, len(_rows), last,
+    )
+    _reliability_metric("infragram_journal_write_failures_total",
+                        where=where or "journal_batch")
+    return "ERROR"
+
+
 async def _retrying_execute(
     pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
     metric: str = "infragram_requeue_write_failures_total",
@@ -6121,11 +6159,13 @@ async def _exec_bulk_bot_edit(
                 data_resp = await resp.json()
                 if data_resp.get("ok"):
                     ok_count += 1
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                         op_id,
                         ok_count + fail_count,
                         str(b["id"]),
+                        log_ctx=f" op={op_id}", where="bulk_bot_edit",
                     )
                 else:
                     fail_count += 1
@@ -20177,26 +20217,32 @@ async def _exec_mass_invite(
                 _ok_seen.update(_succ)
                 _succ = _succ[:max(0, _OK_LOG_CAP - _ok_logged)]
                 if _succ:
-                    try:
-                        # МАРКЕР ИСХОДА. Ретеншен инвайта (экран мини-аппа и
-                        # подсказка организма) считает вступивших запросом
-                        # `status='ok' AND message='joined'` — а маркер не писал
-                        # НИКТО. Обе функции показывали «нет данных» с самого
-                        # своего появления: приток всегда выходил нулём.
-                        #
-                        # Маркер не декоративный: голого 'ok' для этого мало.
-                        # У метода «ссылка в ЛС» успех означает доставленную
-                        # ссылку, а не вступление (человек ещё может не войти),
-                        # и складывать их в один счётчик значило бы завышать
-                        # ретеншен. Поэтому исход называется явно.
-                        _outcome = "link_sent" if _invite_method == "link" else "joined"
-                        await pool.executemany(
-                            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                            "VALUES($1,$2,$3,'ok',$4)",
-                            [(op_id, step, s[:120], _outcome) for s in _succ])
-                        _ok_logged += len(_succ)
-                    except Exception:
-                        log_exc_swallow(log, "invite: ok per-target log")
+                    # МАРКЕР ИСХОДА. Ретеншен инвайта (экран мини-аппа и
+                    # подсказка организма) считает вступивших запросом
+                    # `status='ok' AND message='joined'` — а маркер не писал
+                    # НИКТО. Обе функции показывали «нет данных» с самого
+                    # своего появления: приток всегда выходил нулём.
+                    #
+                    # Маркер не декоративный: голого 'ok' для этого мало.
+                    # У метода «ссылка в ЛС» успех означает доставленную
+                    # ссылку, а не вступление (человек ещё может не войти),
+                    # и складывать их в один счётчик значило бы завышать
+                    # ретеншен. Поэтому исход называется явно.
+                    _outcome = "link_sent" if _invite_method == "link" else "joined"
+                    # Громкий писатель: пропавшая отметка «ok» значит, что
+                    # людей пригласили, а повтор прогона пригласит их СНОВА —
+                    # в самой баноопасной операции продукта. Прежний
+                    # `pool.executemany` в гасителе исключений терял её без
+                    # следа; эта же отметка кормит экран ретеншена
+                    # (`status='ok' AND message='joined'`), так что её потеря
+                    # обнуляла и приток.
+                    await _journal_writemany(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'ok',$4)",
+                        [(op_id, step, s[:120], _outcome) for s in _succ],
+                        log_ctx=f" op={op_id}", where="mass_invite_ok")
+                    _ok_logged += len(_succ)
 
             # Группа закрыта/нет прав — это не про аккаунт, это про цель. Раньше
             # об неё по очереди разбивался весь флот; теперь останавливаемся сразу.
@@ -20997,21 +21043,27 @@ async def _exec_bulk_set_profile(
                 # «Проверка» — фиксируем сам вердикт в лог, чтобы был виден результат
                 if op == "check_restriction":
                     verdict = pse.format_restriction_verdict(res)
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                         "VALUES($1,$2,$3,'ok',$4)",
                         op_id, idx, f"acc#{acc['id']}", verdict[:200],
+                        log_ctx=f" op={op_id}", where="bulk_set_profile",
                     )
                 else:
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                         op_id, idx, f"acc#{acc['id']}",
+                        log_ctx=f" op={op_id}", where="bulk_set_profile",
                     )
             else:
                 fail_count += 1
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    log_ctx=f" op={op_id}", where="bulk_set_profile",
                 )
         except Exception as exc:
             log.warning("bulk_set_profile op=%d acc=%s: %s", op_id, acc.get("id"), exc)
@@ -21475,25 +21527,33 @@ async def _exec_compliance_scan(
                 acc["session_str"], dict(acc), ref, limit=per_limit, low_risk=True)
             if not dossier.get("ok"):
                 err_count += 1
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, (dossier.get("error") or "")[:200])
+                    "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref,
+                    (dossier.get("error") or "")[:200],
+                    log_ctx=f" op={op_id}", where="compliance_scan")
             elif dossier.get("verdict") == "prohibited":
                 flagged += 1
                 cats = ", ".join(dossier.get("categories") or [])
                 first_hit = (dossier.get("hits") or [{}])[0]
                 evidence = f"{first_hit.get('category_label','')}: «{first_hit.get('excerpt','')}»"
                 flagged_lines.append(f"🚫 {dossier.get('resource', ref)} — {cats}")
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'flagged',$4)", op_id, idx, dossier.get("resource", ref),
-                    (f"[{cats}] {evidence}")[:200])
+                    "VALUES($1,$2,$3,'flagged',$4)", op_id, idx,
+                    dossier.get("resource", ref), (f"[{cats}] {evidence}")[:200],
+                    log_ctx=f" op={op_id}", where="compliance_scan")
             else:
                 clean_count += 1
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'ok',$4)", op_id, idx, dossier.get("resource", ref),
-                    f"чисто ({dossier.get('scanned',0)} текстов)")
+                    "VALUES($1,$2,$3,'ok',$4)", op_id, idx,
+                    dossier.get("resource", ref),
+                    f"чисто ({dossier.get('scanned',0)} текстов)",
+                    log_ctx=f" op={op_id}", where="compliance_scan")
         except Exception as exc:
             err_count += 1
             log.warning("compliance_scan op=%d ref=%s: %s", op_id, ref, exc)
