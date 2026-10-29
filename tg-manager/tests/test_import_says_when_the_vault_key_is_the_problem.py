@@ -32,13 +32,16 @@ class _Pool:
         return 1
 
     async def fetchrow(self, q, *a):
+        if "INSERT INTO tg_accounts" in q:
+            # Запись аккаунта (db.upsert_tg_account) — новый аккаунт.
+            self.inserted.append(a)
+            return {"id": len(self.inserted), "created": True, "proxy_id": None}
         return None
 
     async def fetch(self, q, *a):
         return []
 
     async def execute(self, q, *a):
-        self.inserted.append(a)
         return "INSERT 0 1"
 
 
@@ -97,8 +100,10 @@ def test_the_same_cause_is_reported_once_not_five_hundred_times(_five_good_sessi
 def test_a_real_database_failure_is_still_a_database_failure(
         _five_good_sessions, _working_vault):
     class _BrokenPool(_Pool):
-        async def execute(self, q, *a):
-            raise RuntimeError("соединение с базой потеряно")
+        async def fetchrow(self, q, *a):
+            if "INSERT INTO tg_accounts" in q:
+                raise RuntimeError("соединение с базой потеряно")
+            return None
 
     res = _import(_five_good_sessions, _BrokenPool())
 

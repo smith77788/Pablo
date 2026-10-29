@@ -3655,24 +3655,84 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
     return d
 
 
-async def add_tg_account(
+class AccountIdentityMissing(ValueError):
+    """Telegram не вернул ни номера, ни id аккаунта — записать нечего.
+
+    Без обоих ключей строка легла бы с phone='' и на уникальном
+    (owner_id, phone) перезаписала бы ДРУГОЙ аккаунт с пустым номером.
+    """
+
+
+def normalize_account_phone(phone, tg_user_id) -> str:
+    """Ключ аккаунта в (owner_id, phone): номер или `id:<tg_user_id>`.
+
+    У tdata, `.session` и строк сессии Telegram часто отдаёт пустой номер.
+    Пустая строка в ключе — это один «аккаунт» на всех таких: вторая сессия
+    падала на уникальном индексе с «ошибкой БД» или, хуже, обновляла чужую
+    строку. Поэтому пустой номер заменяется на `id:<uid>`, а без uid — отказ.
+    """
+    p = str(phone or "").strip()
+    if p:
+        return p
+    try:
+        uid = int(tg_user_id) if tg_user_id is not None else 0
+    except (TypeError, ValueError):
+        uid = 0
+    if uid > 0:
+        return f"id:{uid}"
+    raise AccountIdentityMissing(
+        "Telegram не вернул ни номер, ни id аккаунта — сессию не записать")
+
+
+async def upsert_tg_account(
     pool: asyncpg.Pool,
     owner_id: int,
     phone: str,
     session_str: str,
-    tg_user_id: int,
-    first_name: str,
-    username: str,
+    tg_user_id: int | None,
+    first_name: str | None = "",
+    username: str | None = "",
     device_model: str | None = None,
     system_version: str | None = None,
     app_version: str | None = None,
     lang_code: str | None = None,
     system_lang_code: str | None = None,
-) -> int:
+    *,
+    api_id: int | None = None,
+    proxy_id: int | None = None,
+    override_proxy: bool = False,
+    auto_proxy: bool = False,
+) -> tuple[int, bool, int | None]:
+    """Единственная запись аккаунта в базу. → (id, создан_ли, proxy_id).
+
+    Через неё идут все входы: телефон, QR, `.session`, tdata (мини-апп и бот),
+    строка сессии и авторегистрация. Раньше у строки сессии и авторегистрации
+    были свои INSERT без этих гарантий: строка сессии теряла tg_user_id, имя и
+    username, плодила второй аккаунт той же личности с другой сессией и падала
+    «ошибкой БД» на пустом номере; авторегистрация не снимала залипшие
+    блокировки.
+
+    Гарантии:
+      • ключ — номер или `id:<uid>` (`normalize_account_phone`);
+      • анти-дубль по ЛИЧНОСТИ: уже есть аккаунт этого владельца с тем же
+        tg_user_id (или, если uid нет, с той же сессией) — обновляется он, а не
+        создаётся второй;
+      • переимпорт = новая рабочая сессия: снимаются блокировки прошлой;
+      • api_id и прокси аккаунта при переимпорте НЕ меняются — смена
+        приложения или IP у живого аккаунта сама по себе признак угона;
+        переданные значения ставятся только новому аккаунту или там, где
+        их не было. Исключение — прокси, который человек выбрал сам
+        (`override_proxy=True`);
+      • `auto_proxy=True` и прокси не задан — аккаунт без прокси садится на
+        наименее загруженный живой прокси владельца. Иначе каждый добавленный
+        по одному аккаунт (а в боте — любой) оставался на общем IP сервера, и
+        флот собирался в одну когорту по самому сильному признаку связи.
+    """
     # Шифруем сессию at-rest (session_str — эквивалент пароля к аккаунту).
     # session_fp — детерминированный fingerprint для дедупа (шифр недетерминирован).
     from services.token_vault import encrypt_token, session_fingerprint
 
+    phone = normalize_account_phone(phone, tg_user_id)
     _enc_session = encrypt_token(session_str)
     _fp = session_fingerprint(session_str)
 
@@ -3686,32 +3746,48 @@ async def add_tg_account(
     # личности. Поэтому, если аккаунт с этим tg_user_id у владельца уже есть,
     # приводим phone к его телефону — и ON CONFLICT ниже ОБНОВИТ существующую
     # строку (освежит сессию), а не наплодит дубль. tg_user_id неизменен для
-    # аккаунта, так что это надёжный ключ тождества.
+    # аккаунта, так что это надёжный ключ тождества. Без uid тот же приём
+    # работает по отпечатку сессии.
     try:
         _uid_val = int(tg_user_id) if tg_user_id is not None else 0
     except (TypeError, ValueError):
         _uid_val = 0
+    _existing_phone = None
     if _uid_val > 0:
         _existing_phone = await pool.fetchval(
             "SELECT phone FROM tg_accounts WHERE owner_id=$1 AND tg_user_id=$2 "
             "ORDER BY id LIMIT 1",
             owner_id, _uid_val)
-        if _existing_phone is not None and _existing_phone != phone:
-            phone = _existing_phone
+    if _existing_phone is None:
+        _existing_phone = await pool.fetchval(
+            "SELECT phone FROM tg_accounts WHERE owner_id=$1 AND session_fp=$2 "
+            "ORDER BY id LIMIT 1",
+            owner_id, _fp)
+    if _existing_phone is not None and _existing_phone != phone:
+        phone = _existing_phone
+
+    if auto_proxy and not proxy_id:
+        proxy_id = await _least_loaded_proxy(pool, owner_id)
 
     row = await pool.fetchrow(
         """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
                first_name, username, device_model, system_version, app_version,
-               lang_code, system_lang_code, session_fp)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+               lang_code, system_lang_code, session_fp, api_id, proxy_id)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
            ON CONFLICT (owner_id, phone) DO UPDATE
-           SET session_str=$3, tg_user_id=$4, first_name=$5, username=$6,
+           SET session_str=$3,
+               tg_user_id=COALESCE($4, tg_accounts.tg_user_id),
+               first_name=COALESCE(NULLIF($5, ''), tg_accounts.first_name),
+               username=COALESCE(NULLIF($6, ''), tg_accounts.username),
                device_model=COALESCE($7, tg_accounts.device_model),
                system_version=COALESCE($8, tg_accounts.system_version),
                app_version=COALESCE($9, tg_accounts.app_version),
                lang_code=COALESCE($10, tg_accounts.lang_code),
                system_lang_code=COALESCE($11, tg_accounts.system_lang_code),
                session_fp=$12,
+               api_id=COALESCE(tg_accounts.api_id, $13),
+               proxy_id=CASE WHEN $15 THEN COALESCE($14, tg_accounts.proxy_id)
+                             ELSE COALESCE(tg_accounts.proxy_id, $14) END,
                acc_status='active',
                status_reason=NULL,
                status_checked_at=now(),
@@ -3729,21 +3805,30 @@ async def add_tg_account(
                trust_score=GREATEST(COALESCE(tg_accounts.trust_score, 1.0), 1.0),
                flood_count_7d=0,
                last_used=now()
-           RETURNING id""",
+           RETURNING id, (xmax = 0) AS created, proxy_id""",
         owner_id,
         phone,
         _enc_session,
-        tg_user_id,
-        first_name,
-        username,
+        _uid_val or None,
+        first_name or "",
+        username or "",
         device_model,
         system_version,
         app_version,
         lang_code,
         system_lang_code,
         _fp,
+        api_id,
+        proxy_id,
+        bool(override_proxy),
     )
     acc_id = row["id"]
+    # След в журнале действий: подключение и переподключение аккаунта раньше
+    # не оставляли ничего — на вопрос «откуда этот аккаунт и когда ему сменили
+    # сессию» ответа в системе не было. Не бросает.
+    await record_manual_action(
+        pool, owner_id, "account_add" if row["created"] else "account_reimport",
+        target=f"account:{acc_id}")
     # Регистрируем связь телефон→владелец для анти-абуз системы
     await record_phone_link(pool, phone, owner_id)
     # CF-релей НЕ раздаём автоматически: транспорт — прокси (задаёт пользователь)
@@ -3755,6 +3840,55 @@ async def add_tg_account(
     # постановки ему не мешает.
     from services.contacts_hub.device_sync import schedule_for_new_account
     await schedule_for_new_account(pool, owner_id, acc_id)
+    return acc_id, bool(row["created"]), row["proxy_id"]
+
+
+async def _least_loaded_proxy(pool: asyncpg.Pool, owner_id: int) -> int | None:
+    """Наименее загруженный живой прокси владельца (None — прокси нет)."""
+    try:
+        from services.proxy_balancer import plan_distribution
+
+        prows = await pool.fetch(
+            """SELECT p.id,
+                      (SELECT COUNT(*) FROM tg_accounts a
+                        WHERE a.proxy_id = p.id) AS used
+                 FROM user_proxies p
+                WHERE p.owner_id=$1 AND p.is_active
+                  AND COALESCE(p.is_alive, TRUE)""", owner_id)
+        plan = plan_distribution(
+            [(int(r["id"]), int(r["used"] or 0)) for r in prows], 1)
+        return plan[0] if plan else None
+    except Exception as e:
+        log.debug("auto proxy pick failed owner=%s: %s", owner_id, e)
+        return None
+
+
+async def add_tg_account(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    phone: str,
+    session_str: str,
+    tg_user_id: int,
+    first_name: str,
+    username: str,
+    device_model: str | None = None,
+    system_version: str | None = None,
+    app_version: str | None = None,
+    lang_code: str | None = None,
+    system_lang_code: str | None = None,
+) -> int:
+    """Записать аккаунт (вход по телефону, QR, `.session`, tdata). → id.
+
+    Обёртка над `upsert_tg_account` с прежней сигнатурой. Аккаунт без прокси
+    садится на наименее загруженный живой прокси владельца — так же, как при
+    импорте пачкой; раньше это делал только мини-апп, и аккаунт, добавленный
+    в боте, сидел на IP сервера.
+    """
+    acc_id, _created, _proxy = await upsert_tg_account(
+        pool, owner_id, phone, session_str, tg_user_id, first_name, username,
+        device_model, system_version, app_version, lang_code, system_lang_code,
+        auto_proxy=True,
+    )
     return acc_id
 
 

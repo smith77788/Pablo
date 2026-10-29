@@ -1867,83 +1867,19 @@ async def _warmup_bulk_core(
     niche: str = "general",
 ) -> dict:
     """Массовый прогрев: планы для ВСЕХ подходящих аккаунтов (активные, с сессией,
-    без активного плана). Фоновый run_warmup_loop подхватит новые active-планы.
+    не мёртвые, без активного плана). Фоновый run_warmup_loop подхватит новые
+    active-планы.
 
-    Бросает PermissionError (нет подписки / Ban Weather): операции здесь нет,
-    поэтому гейт тарифа submit() сам не сработает — спрашиваем его явно.
+    Отбор и запись — общая функция `account_warmer.create_warmup_plans_bulk`:
+    её же зовёт кнопка «Создать планы для всех» в боте. Своя копия отбора в
+    боте не исключала идущие планы и обнуляла им день.
+
+    Бросает PermissionError (нет подписки / Ban Weather) до любой записи.
     """
-    from services.account_warmer import WARMUP_PROFILES, WARMUP_NICHES
+    from services.account_warmer import create_warmup_plans_bulk
 
-    await _obus.enforce_gates(pool, uid, "account_warmup")
-
-    plan_type = (plan_type or "standard").strip()
-    if plan_type not in ("gentle", "standard", "aggressive"):
-        plan_type = "standard"
-    profile_type = (profile_type or "mixed").strip().lower()
-    if profile_type not in WARMUP_PROFILES:
-        profile_type = "mixed"
-    niche = (niche or "general").strip().lower()
-    if niche not in WARMUP_NICHES:
-        niche = "general"
-    days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
-    actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
-    target_days = days_map[plan_type]
-    daily_actions = actions_map[plan_type]
-
-    # spamblock здесь так же смертелен, как бан: движок прогрева СПЕЦИАЛЬНО
-    # останавливает план на флагнутом аккаунте, чтобы не добивать его. Раньше
-    # «прогреть все подходящие» обходило это с чёрного хода — ON CONFLICT ниже
-    # возвращал такой план в active, и аккаунт снова шёл под нагрузку.
-    # Снятием спам-блока занимается реабилитация, а не прогрев.
-    rows = await _safe_fetch(pool,
-        """SELECT a.id FROM tg_accounts a
-           WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
-             AND """ + _acc_status.sql_not_dead("a.acc_status") + """
-             AND NOT EXISTS (
-                 SELECT 1 FROM account_warmup_plans wp
-                 WHERE wp.account_id=a.id AND wp.status='active')
-           LIMIT 500""", uid)
-    acc_ids = [int(r["id"]) for r in (rows or [])]
-    if not acc_ids:
-        return {"ok": True, "started": 0,
-                "note": "Нет подходящих аккаунтов (все уже греются или недоступны)"}
-    await pool.execute(
-        """CREATE TABLE IF NOT EXISTS account_niche_profiles (
-               account_id BIGINT PRIMARY KEY, owner_id BIGINT NOT NULL,
-               niche TEXT NOT NULL DEFAULT 'general', profile_type TEXT NOT NULL DEFAULT 'reader',
-               custom_channels TEXT[] DEFAULT '{}', flood_wait_count INT NOT NULL DEFAULT 0,
-               last_flood_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW())"""
-    )
-    # Два запроса на ВЕСЬ пакет вместо двух на каждый аккаунт: при лимите в 500
-    # аккаунтов это было до 1000 последовательных round-trip к Postgres внутри
-    # одного HTTP-запроса — секунды ожидания и столько же захватов соединения из
-    # пула. unnest разворачивает массив id прямо в SELECT-источник INSERT.
-    # Транзакция нужна, чтобы пакет не оставался наполовину заведённым: профиль
-    # ниши без плана прогрева — мусор, который потом никто не подберёт.
-    # Дубликатов в acc_ids нет (id — первичный ключ), поэтому ON CONFLICT
-    # безопасен: одна строка не затрагивается дважды.
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
-                   SELECT acc_id, $2, $3, $4, now() FROM unnest($1::bigint[]) AS acc_id
-                   ON CONFLICT (account_id) DO UPDATE SET niche=$3, profile_type=$4, updated_at=now()""",
-                acc_ids, uid, niche, profile_type)
-            done = await conn.fetch(
-                """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
-                   SELECT $1, acc_id, $3, $4, $5 FROM unnest($2::bigint[]) AS acc_id
-                   ON CONFLICT (account_id) DO UPDATE
-                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active',
-                       started_at=now(),
-                       -- Старую жалобу снимаем вместе с перезапуском: иначе экран
-                       -- показывал бы «аккаунт был забанен» на плане, который уже идёт.
-                       pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
-                       pause_notified_at=NULL, last_skip_reason=NULL, last_skip_at=NULL
-                   RETURNING account_id""",
-                uid, acc_ids, plan_type, target_days, daily_actions)
-    started = len(done or [])
-    return {"ok": True, "started": started, "plan_type": plan_type,
-            "profile_type": profile_type, "niche": niche}
+    return await create_warmup_plans_bulk(
+        pool, uid, plan_type=plan_type, profile_type=profile_type, niche=niche)
 
 
 async def _check_all_proxies_core(pool: asyncpg.Pool, uid: int) -> dict:

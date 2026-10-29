@@ -29,10 +29,13 @@ class _Pool:
         return 1          # прокси принадлежит владельцу
 
     async def fetchrow(self, q, *a):
+        if "INSERT INTO tg_accounts" in q:
+            # Запись аккаунта (db.upsert_tg_account): новый аккаунт.
+            self.inserted.append(a)
+            return {"id": len(self.inserted), "created": True, "proxy_id": a[13]}
         return None       # дубликатов нет
 
     async def execute(self, q, *a):
-        self.inserted.append(a)
         return "INSERT 0 1"
 
 

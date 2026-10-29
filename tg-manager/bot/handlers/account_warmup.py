@@ -240,15 +240,14 @@ async def cb_warmup_select_all_plan(
 ) -> None:
     await safe_answer(callback)
 
+    # Считаем тех, кому план реально заведётся (тот же отбор, что у записи),
+    # а не все включённые: иначе экран обещал «всех 40», а заводилось 25.
+    from services.account_warmer import count_warmup_candidates
+
     try:
-        count = await pool.fetchval(
-            """SELECT COUNT(*) FROM tg_accounts
-               WHERE owner_id=$1 AND is_active=TRUE
-                 AND session_str IS NOT NULL AND session_str != ''""",
-            callback.from_user.id,
-        )
+        count = await count_warmup_candidates(pool, callback.from_user.id)
     except Exception:
-        log_exc_swallow(log, "count accounts with sessions")
+        log_exc_swallow(log, "count warmup candidates")
         count = 0
 
     kb = InlineKeyboardBuilder()
@@ -275,7 +274,7 @@ async def cb_warmup_create_all_plans(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Создаю планы...")
-    from services.account_warmer import create_warmup_plan
+    from services.account_warmer import create_warmup_plans_bulk
 
     plan_type = callback_data.action.replace("pall_", "")
     user_id = callback.from_user.id
@@ -285,58 +284,45 @@ async def cb_warmup_create_all_plans(
         await _show_gate_refusal(callback.message, refusal)
         return
 
-    # Only accounts with a valid session can be warmed
+    # Та же функция, что «Прогреть все» в мини-аппе: только живые аккаунты с
+    # сессией и БЕЗ идущего плана. Раньше здесь брались все включённые, и
+    # create_warmup_plan по одному обнулял день каждому, кто уже грелся, а
+    # спам-блокнутых возвращал под нагрузку.
     try:
-        accounts = await pool.fetch(
-            """SELECT id FROM tg_accounts
-               WHERE owner_id=$1 AND is_active=TRUE
-                 AND session_str IS NOT NULL AND session_str != ''
-               ORDER BY added_at DESC""",
-            user_id,
-        )
+        res = await create_warmup_plans_bulk(pool, user_id, plan_type=plan_type)
+    except PermissionError as exc:
+        await _show_gate_refusal(callback.message, exc)
+        return
     except Exception:
-        log_exc_swallow(log, "fetch accounts for create_all_plans")
-        accounts = []
-
-    if not accounts:
+        log.exception("warmup create_all owner=%s", user_id)
         await callback.message.edit_text(
-            "⚠️ <b>Нет аккаунтов с активной сессией</b>\n\n"
-            "Для разогрева нужны аккаунты со статусом «active» и рабочей сессией.\n"
-            "Аккаунты с истёкшей сессией пропускаются.",
+            "❌ <b>Планы не созданы</b>\n\nНе удалось записать планы — попробуйте ещё раз.",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
 
-    total = len(accounts)
-    msg = await callback.message.edit_text(
-        f"⏳ Создаю планы разогрева для {total} аккаунтов...",
+    started = int(res.get("started") or 0)
+    if not started:
+        await callback.message.edit_text(
+            "⚠️ <b>Новых планов нет</b>\n\n"
+            "Все живые аккаунты с сессией уже греются, а выключенные, "
+            "забаненные и аккаунты в спам-блоке прогрев не берёт — "
+            "спам-блок снимает реабилитация.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"✅ <b>Планы разогрева созданы!</b>\n\n"
+        f"Аккаунтов: <b>{started}</b>\n"
+        f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n\n"
+        "Уже идущие планы не тронуты. Разогрев запускается автоматически "
+        "раз в сутки.",
         parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
     )
-
-    async def _create_bg():
-        created = 0
-        for acc in accounts:
-            try:
-                await create_warmup_plan(pool, user_id, acc["id"], plan_type)
-                created += 1
-            except Exception as exc:
-                log.warning("warmup create_all: acc=%d error=%s", acc["id"], exc)
-        try:
-            await msg.edit_text(
-                f"✅ <b>Планы разогрева созданы!</b>\n\n"
-                f"Аккаунтов: <b>{created}/{total}</b>\n"
-                f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n\n"
-                "Разогрев запускается автоматически раз в сутки.\n"
-                "Или используйте «▶️ Запустить сейчас» для немедленного старта.",
-                parse_mode="HTML",
-                reply_markup=_back_kb().as_markup(),
-            )
-        except Exception:
-            log_exc_swallow(log, "warmup create_all: не удалось обновить сообщение")
-
-    from services.bg_tasks import spawn  # strong-ссылка (класс #14)
-    spawn(_create_bg())
 
 
 @router.callback_query(WarmupCb.filter(F.action == "start"))
@@ -355,46 +341,53 @@ async def cb_warmup_start(
         await cb_warmup_create_list(callback, pool)
         return
 
-    from services.account_warmer import create_warmup_plan, run_daily_warmup, get_active_plans
-    from services import task_registry
+    from services import operation_bus
+    from services.account_warmer import WarmupNotAllowed, create_warmup_plan
+
+    user_id = callback.from_user.id
+    # acc_id из callback подделывается: подпись — со скоупом по владельцу.
+    label = await db.get_account_label(pool, acc_id, user_id)
+    if label is None:
+        await callback.message.edit_text(
+            "❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
+        return
 
     try:
-        plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, "standard")
+        plan_id = await create_warmup_plan(pool, user_id, acc_id, "standard")
+        # След — операция в шине, как из мини-аппа; сам день прогрева
+        # исполняет фоновый цикл (с учётом локальной ночи аккаунта). Раньше
+        # здесь был asyncio.create_task(run_daily_warmup) мимо шины — второй
+        # исполнитель дня рядом с фоновым циклом, без истории и отмены.
+        await operation_bus.submit(
+            pool, user_id, "account_warmup",
+            {"account_id": acc_id, "plan_type": "standard"},
+            total_items=1, label=f"Прогрев аккаунта {label} (standard)")
+    except WarmupNotAllowed as exc:
+        await callback.message.edit_text(
+            f"⚠️ <b>Прогрев не запущен</b>\n\n{html.escape(str(exc))}",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     except PermissionError as exc:
         await _show_gate_refusal(callback.message, exc)
         return
-    except Exception as exc:
-        log.warning('handler error in cb_warmup_start: %s', exc)
+    except Exception:
+        log.exception("cb_warmup_start acc=%s owner=%s", acc_id, user_id)
         await callback.message.edit_text(
-            f"❌ <b>Ошибка создания плана:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            "❌ <b>План не создан</b>\n\nНе удалось записать план — попробуйте ещё раз.",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
 
-    plans = await get_active_plans(pool, callback.from_user.id)
-    plan = next((p for p in plans if p["id"] == plan_id), None)
-
-    label = await db.get_account_label(pool, acc_id, callback.from_user.id)
-    if label is None:
-        await callback.answer("Аккаунт не найден.", show_alert=True)
-        return
-
-    run_status = ""
-    if plan:
-        task = asyncio.create_task(run_daily_warmup(pool, plan))
-        task_registry.register(
-            callback.from_user.id, "warmup", f"Разогрев: {label}", task
-        )
-        run_status = "\n▶️ Первый цикл запущен в фоне."
-
     await callback.message.edit_text(
-        f"✅ <b>План разогрева создан и запущен!</b>\n\n"
+        f"✅ <b>План разогрева создан!</b>\n\n"
         f"Аккаунт: <b>{html.escape(label)}</b>\n"
-        f"Режим: <b>🌿 Standard (14 дней, 10 действий/день)</b>\n"
-        f"ID плана: <code>{plan_id}</code>"
-        f"{run_status}\n\n"
-        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
+        f"Режим: <b>🌿 Standard (14 дней, до 10 действий/день)</b>\n"
+        f"ID плана: <code>{plan_id}</code>\n\n"
+        "Первый сеанс начнётся в течение часа — не в локальную ночь аккаунта. "
+        "Ход прогрева — в «📋 Активные планы».",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
@@ -410,35 +403,6 @@ _WARMUP_PROFILE_LABELS = {
     "lurker": "🕶 Наблюдатель",
     "mixed": "🎭 Смешанный",
 }
-
-
-async def _upsert_niche_profile(
-    pool: asyncpg.Pool, owner_id: int, account_id: int,
-    profile_type: str, niche: str = "general",
-) -> None:
-    """Сохранить поведенческий профиль прогрева — движок account_warmer читает
-    profile_type/niche именно отсюда. Зеркалит запись из mini-app (idempotent
-    upsert по account_id). Таблица self-heal'ится на случай лага миграции."""
-    await pool.execute(
-        """CREATE TABLE IF NOT EXISTS account_niche_profiles (
-               account_id      BIGINT PRIMARY KEY,
-               owner_id        BIGINT NOT NULL,
-               niche           TEXT NOT NULL DEFAULT 'general',
-               profile_type    TEXT NOT NULL DEFAULT 'reader',
-               custom_channels TEXT[] DEFAULT '{}',
-               flood_wait_count INT NOT NULL DEFAULT 0,
-               last_flood_at   TIMESTAMPTZ,
-               updated_at      TIMESTAMPTZ DEFAULT NOW()
-           )"""
-    )
-    await pool.execute(
-        """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
-           VALUES($1,$2,$3,$4,now())
-           ON CONFLICT (account_id) DO UPDATE
-           SET niche=$3, profile_type=$4, updated_at=now()
-           WHERE account_niche_profiles.owner_id = EXCLUDED.owner_id""",
-        account_id, owner_id, niche, profile_type,
-    )
 
 
 @router.callback_query(
@@ -486,7 +450,7 @@ async def cb_warmup_pick_profile(
 ) -> None:
     """Финал: создать план прогрева + сохранить поведенческий профиль."""
     await safe_answer(callback)
-    from services.account_warmer import create_warmup_plan
+    from services.account_warmer import WarmupNotAllowed, create_warmup_plan
 
     profile_type = callback_data.action.replace("prof_", "")
     acc_id = callback_data.account_id
@@ -506,25 +470,30 @@ async def cb_warmup_pick_profile(
         return
 
     try:
-        # Профиль пишем ДО плана — движок при первом тике уже читает правильные веса.
-        await _upsert_niche_profile(pool, callback.from_user.id, acc_id, profile_type)
-        plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, plan_type)
+        # Профиль и план — одной транзакцией в общей функции: движок при первом
+        # тике уже читает правильные веса, а отказ не оставляет профиль без плана.
+        plan_id = await create_warmup_plan(
+            pool, callback.from_user.id, acc_id, plan_type, profile_type=profile_type)
+    except WarmupNotAllowed as _e:
+        await callback.message.edit_text(
+            f"⚠️ <b>Прогрев не запущен</b>\n\n{html.escape(str(_e))}",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     except PermissionError as _e:
         await _show_gate_refusal(callback.message, _e)
         return
-    except Exception as _e:
-        log.warning('handler error in cb_warmup_pick_profile: %s', _e)
+    except Exception:
+        log.exception("cb_warmup_pick_profile acc=%s", acc_id)
         await callback.message.edit_text(
-            f"❌ <b>Ошибка создания плана:</b> {html.escape(str(_e)[:200])}",
+            "❌ <b>План не создан</b>\n\nНе удалось записать план — попробуйте ещё раз.",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
 
-    label = await db.get_account_label(pool, acc_id, callback.from_user.id)
-    if label is None:
-        await callback.answer("Аккаунт не найден.", show_alert=True)
-        return
+    label = await db.get_account_label(pool, acc_id, callback.from_user.id) or f"id{acc_id}"
 
     await callback.message.edit_text(
         f"✅ <b>План разогрева создан!</b>\n\n"
@@ -665,7 +634,7 @@ async def cb_warmup_delete_plan(
     except Exception as exc:
         log.warning('handler error in cb_warmup_delete_plan: %s', exc)
         mark_handled_error(f"warmup_delete_plan: {exc}")
-        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        await callback.answer("❌ Не получилось — попробуйте ещё раз", show_alert=True)
         return
     await callback.message.edit_text(
         "🗑 <b>План разогрева отменён</b>",
@@ -717,7 +686,7 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         "Процесс займёт время (20-90с между действиями).\n\n"
         "♻️ <b>Авто-возобновление:</b> при перезапуске бота разогрев "
         "продолжится автоматически в течение 1 часа.\n\n"
-        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
+        "Следите за прогрессом в <b>⚡ Активные задачи</b>.",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
@@ -768,7 +737,7 @@ async def cb_warmup_run_one(
         f"🌡 <b>Разогрев запущен: {html.escape(label)}</b>\n\n"
         f"Действий: <b>{daily}</b>\n"
         "Работает в фоне. Лог обновится после завершения.\n\n"
-        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
+        "Следите за прогрессом в <b>⚡ Активные задачи</b>.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1368,7 +1337,7 @@ async def cb_wu_sess_start(
         log.warning('handler error in cb_wu_sess_start: %s', exc)
         mark_handled_error(f"wu_sess_start insert: {exc}")
         await callback.message.edit_text(
-            f"❌ <b>Ошибка создания сессии:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            "❌ <b>Сессия не создана</b>\n\nНе удалось записать — попробуйте ещё раз.",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -1610,7 +1579,7 @@ async def cb_wu_sess_run(
 
     await callback.message.edit_text(
         f"▶️ <b>Сессия #{sess_id} запущена в фоне</b>\n\n"
-        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
+        "Следите за прогрессом в <b>⚡ Активные задачи</b>.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1630,7 +1599,7 @@ async def cb_wu_sess_pause(
     except Exception as exc:
         log.warning('handler error in cb_wu_sess_pause: %s', exc)
         mark_handled_error(f"wu_sess_pause: {exc}")
-        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        await callback.answer("❌ Не получилось — попробуйте ещё раз", show_alert=True)
         return
     await callback.answer("⏸ Сессия поставлена на паузу", show_alert=True)
 
@@ -1649,7 +1618,7 @@ async def cb_wu_sess_resume(
     except Exception as exc:
         log.warning('handler error in cb_wu_sess_resume: %s', exc)
         mark_handled_error(f"wu_sess_resume: {exc}")
-        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        await callback.answer("❌ Не получилось — попробуйте ещё раз", show_alert=True)
         return
     await callback.answer("▶️ Сессия возобновлена", show_alert=True)
 
@@ -1670,7 +1639,7 @@ async def cb_wu_sess_delete(
         log.warning('handler error in cb_wu_sess_delete: %s', exc)
         mark_handled_error(f"wu_sess_delete: {exc}")
         await callback.message.edit_text(
-            f"❌ <b>Ошибка удаления:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            "❌ <b>Не удалено</b>\n\nНе получилось — попробуйте ещё раз.",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -1988,7 +1957,7 @@ async def cb_ract_start(
         log.warning('handler error in cb_ract_start: %s', exc)
         mark_handled_error(f"ract_start insert: {exc}")
         await callback.message.edit_text(
-            f"❌ <b>Ошибка создания сессии:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            "❌ <b>Сессия не создана</b>\n\nНе удалось записать — попробуйте ещё раз.",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -2223,7 +2192,7 @@ async def cb_ract_run(
 
     await callback.message.edit_text(
         f"▶️ <b>Сессия #{sess_id} запущена в фоне</b>\n\n"
-        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
+        "Следите за прогрессом в <b>⚡ Активные задачи</b>.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -2242,7 +2211,7 @@ async def cb_ract_pause(
     except Exception as exc:
         log.warning('handler error in cb_ract_pause: %s', exc)
         mark_handled_error(f"ract_pause: {exc}")
-        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        await callback.answer("❌ Не получилось — попробуйте ещё раз", show_alert=True)
         return
     await callback.answer("⏸ Сессия поставлена на паузу", show_alert=True)
 
@@ -2260,7 +2229,7 @@ async def cb_ract_resume(
     except Exception as exc:
         log.warning('handler error in cb_ract_resume: %s', exc)
         mark_handled_error(f"ract_resume: {exc}")
-        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        await callback.answer("❌ Не получилось — попробуйте ещё раз", show_alert=True)
         return
     await callback.answer("▶️ Сессия возобновлена", show_alert=True)
 
@@ -2280,7 +2249,7 @@ async def cb_ract_delete(
         log.warning('handler error in cb_ract_delete: %s', exc)
         mark_handled_error(f"ract_delete: {exc}")
         await callback.message.edit_text(
-            f"❌ <b>Ошибка удаления:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            "❌ <b>Не удалено</b>\n\nНе получилось — попробуйте ещё раз.",
             parse_mode="HTML",
             reply_markup=_ract_back_kb().as_markup(),
         )

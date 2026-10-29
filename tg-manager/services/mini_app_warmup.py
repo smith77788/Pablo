@@ -228,93 +228,54 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(f"niche должен быть одним из: {', '.join(WARMUP_NICHES)}", 400)
         custom_channels = normalize_warmup_channels(body.get("custom_channels"))
 
+        daily_actions = target_days = None
+        # Опциональные переопределения (продвинутый режим); клампит общая
+        # функция создания плана.
+        if body.get("daily_actions") is not None:
+            try:
+                daily_actions = int(body["daily_actions"])
+            except (TypeError, ValueError):
+                return _err("daily_actions должен быть числом 3..20", 400)
+        if body.get("target_days") is not None:
+            try:
+                target_days = int(body["target_days"])
+            except (TypeError, ValueError):
+                return _err("target_days должен быть числом 5..45", 400)
+
+        # Владелец, сессия, пригодность аккаунта (can_resume: не выключен, не
+        # забанен, не в спам-блоке), тариф, профиль поведения и сам план —
+        # всё в одной функции, общей для всех шести путей создания плана.
+        # Пригодность раньше проверялась здесь, а карточка аккаунта и бот
+        # заводили план на забаненном аккаунте; ответ 409 на такой аккаунт
+        # теперь даёт `WarmupNotAllowed.status`.
+        from services import account_warmer as _aw
+
         try:
-            acc = await pool.fetchrow(
-                "SELECT id, session_str, acc_status, is_active "
-                "FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
-            )
-        except Exception:
-            log.exception("warmup_create_plan fetchrow uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not acc:
-            return _err("Аккаунт не найден", 404)
-        if not acc["session_str"]:
-            return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
-        # Пригодность аккаунта проверялась ТОЛЬКО в браузере (список в модалке
-        # фильтровался по status==='active'). Любой прямой запрос — или
-        # устаревший список на экране — заводил план на забаненном аккаунте:
-        # план создавался, показывал «День 0/21» и не двигался никогда.
-        from services import warmup_status as _ws
-
-        _ok, _why = _ws.can_resume(None, acc["acc_status"], acc["is_active"])
-        if not _ok:
-            return _err(_why, 409)
-        try:
-            days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
-            actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
-            target_days = days_map.get(plan_type, 14)
-            daily_actions = actions_map.get(plan_type, 10)
-            # Опциональные переопределения (продвинутый режим). Клампим по
-            # безопасности: >20 действий/день на свежем аккаунте — топ-триггер
-            # бана, поэтому жёсткий потолок независимо от ввода пользователя.
-            if body.get("daily_actions") is not None:
-                try:
-                    daily_actions = max(3, min(20, int(body["daily_actions"])))
-                except (TypeError, ValueError):
-                    return _err("daily_actions должен быть числом 3..20", 400)
-            if body.get("target_days") is not None:
-                try:
-                    target_days = max(5, min(45, int(body["target_days"])))
-                except (TypeError, ValueError):
-                    return _err("target_days должен быть числом 5..45", 400)
-
-            # Сохраняем поведенческий профиль — движок прогрева читает именно
-            # отсюда (profile_type → веса действий, niche/custom_channels → на
-            # каких каналах греть).
-            await pool.execute(
-                """CREATE TABLE IF NOT EXISTS account_niche_profiles (
-                       account_id      BIGINT PRIMARY KEY,
-                       owner_id        BIGINT NOT NULL,
-                       niche           TEXT NOT NULL DEFAULT 'general',
-                       profile_type    TEXT NOT NULL DEFAULT 'reader',
-                       custom_channels TEXT[] DEFAULT '{}',
-                       flood_wait_count INT NOT NULL DEFAULT 0,
-                       last_flood_at   TIMESTAMPTZ,
-                       updated_at      TIMESTAMPTZ DEFAULT NOW()
-                   )"""
-            )
-            await pool.execute(
-                """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, custom_channels, updated_at)
-                   VALUES($1,$2,$3,$4,$5,now())
-                   ON CONFLICT (account_id) DO UPDATE
-                   SET niche=$3, profile_type=$4, custom_channels=$5, updated_at=now()""",
-                account_id, uid, niche, profile_type, custom_channels,
-            )
-
+            plan_id = await _aw.create_warmup_plan(
+                pool, uid, account_id, plan_type,
+                profile_type=profile_type, niche=niche,
+                custom_channels=custom_channels,
+                daily_actions=daily_actions, target_days=target_days)
+            plan = await pool.fetchrow(
+                "SELECT daily_actions, target_days FROM account_warmup_plans WHERE id=$1",
+                plan_id)
+            # Операция — след в истории и в «Операциях». План уже записан,
+            # поэтому исполнитель операции его не пересоздаёт.
             label = f"Прогрев аккаунта ({plan_type}, {profile_type})"
             op_id = await _obus.submit(
                 pool, uid, "account_warmup", {
                     "account_id": account_id, "plan_type": plan_type,
                     "profile_type": profile_type, "niche": niche,
                 }, total_items=1, label=label)
-            await pool.execute(
-                """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
-                   VALUES($1,$2,$3,$4,$5)
-                   ON CONFLICT (account_id) DO UPDATE
-                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active',
-                       started_at=now(),
-                       -- Перезапуск снимает старую жалобу: иначе новый план
-                       -- показывал бы причину, по которой встал предыдущий.
-                       pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
-                       pause_notified_at=NULL, last_skip_reason=NULL, last_skip_at=NULL""",
-                uid, account_id, plan_type, target_days, daily_actions,
-            )
             return _json_resp({
-                "ok": True, "op_id": op_id, "label": label,
+                "ok": True, "op_id": op_id, "plan_id": plan_id, "label": label,
                 "profile_type": profile_type, "niche": niche,
                 "custom_channels": len(custom_channels),
-                "daily_actions": daily_actions, "target_days": target_days,
+                "daily_actions": plan["daily_actions"] if plan else daily_actions,
+                "target_days": plan["target_days"] if plan else target_days,
             })
+        except _aw.WarmupNotAllowed as exc:
+            return _err(str(exc), exc.status)
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с

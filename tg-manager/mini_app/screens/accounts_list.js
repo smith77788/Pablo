@@ -149,7 +149,7 @@ function renderAccounts(list) {
   if (!list.length) {
     const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
     if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
-    else el.innerHTML=empty('📱','Нет аккаунтов','Импортируйте сессии прямо здесь или загрузите файл сессии в боте',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
+    else el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт прямо здесь: по номеру, QR-коду, файлу .session, архиву tdata или строке сессии',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
     return;
   }
   el.innerHTML = list.map(a=>{

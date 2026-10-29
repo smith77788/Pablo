@@ -482,10 +482,14 @@ async def test_plan_is_not_written_on_someone_elses_account(monkeypatch):
     pool = _WarmPool()
     with pytest.raises(PermissionError):
         await aw.create_warmup_plan(pool, 900, 5, "standard")
-    sql = next(q for q, _ in pool.queries if "INSERT INTO account_warmup_plans" in q)
-    assert "a.owner_id = $1" in sql
-    assert "account_warmup_plans.owner_id = EXCLUDED.owner_id" in sql
-    assert not any("UPDATE tg_accounts" in q for q, _ in pool.queries)
+    # Чужой аккаунт отсекается чтением со скоупом ДО любой записи.
+    assert not any(q.lstrip().upper().startswith(("INSERT", "UPDATE"))
+                   for q, _ in pool.queries)
+    # И сама запись остаётся под владельцем — на случай гонки между чтением
+    # и записью.
+    src = _func_src("services/account_warmer.py", "create_warmup_plan")
+    assert "a.owner_id = $1" in src
+    assert "account_warmup_plans.owner_id = EXCLUDED.owner_id" in aw._PLAN_UPSERT_TAIL
 
 
 async def test_bulk_warmup_refuses_without_subscription(no_subscription):
@@ -498,8 +502,12 @@ async def test_bulk_warmup_refuses_without_subscription(no_subscription):
 
 
 def test_account_card_checks_tariff_before_writing_the_plan():
+    # Карточка пишет план только через общую дверь, а в ней гейт — до записи.
     src = _func_src("services/mini_app_accounts.py", "start_warmup")
-    assert src.index("enforce_gates(") < src.index("INSERT INTO account_warmup_plans")
+    assert "create_warmup_plan(" in src
+    assert "INSERT INTO account_warmup_plans" not in src
+    core = _func_src("services/account_warmer.py", "create_warmup_plan")
+    assert core.index("enforce_gates(") < core.index("INSERT INTO account_warmup_plans")
 
 
 def test_bot_paths_check_tariff_before_writing():
@@ -508,7 +516,7 @@ def test_bot_paths_check_tariff_before_writing():
         src = _func_src(h, fn)
         assert "_warmup_gate_refusal(" in src, fn
     pick = _func_src(h, "cb_warmup_pick_profile")
-    assert pick.index("get_account_label(") < pick.index("_upsert_niche_profile(")
+    assert pick.index("get_account_label(") < pick.index("create_warmup_plan(")
 
 
 def test_no_subscription_skip_is_shown_honestly():

@@ -524,6 +524,112 @@ async def notify_terminal(pool, bot) -> int:
     return sent
 
 
+_MANUAL_APPEAL_TIMEOUT_S = 60
+
+
+async def run_manual_appeal(pool, owner_id: int, acc_id: int, acc: dict) -> dict:
+    """Ручная аппеляция спам-блока — одна дверь для мини-аппа и бота.
+
+    Диалог с @SpamBot под тайм-аутом, учёт в реабилитации
+    (`record_manual_appeal`) и след в журнале действий человека. Возвращает
+    ответ `appeal_spamblock`; при тайм-ауте или сбое — status 'timeout' /
+    'error' без сырого текста исключения (он уходит в лог).
+    """
+    from services import account_manager
+    from database.db import record_manual_action
+
+    try:
+        res = await asyncio.wait_for(
+            account_manager.appeal_spamblock(acc.get("session_str"), dict(acc)),
+            timeout=_MANUAL_APPEAL_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        res = {"ok": False, "status": "timeout", "reply": "", "steps": 0}
+    except Exception:
+        log.exception("rehab: ручная аппеляция acc=%s", acc_id)
+        res = {"ok": False, "status": "error", "reply": "", "steps": 0}
+    st = res.get("status") or "error"
+    await record_manual_appeal(pool, owner_id, acc_id, st)
+    await record_manual_action(
+        pool, owner_id, "spamblock_appeal", target=f"account:{acc_id}",
+        result="success" if st in ("free", "appeal_sent") else st)
+    return res
+
+
+async def record_manual_appeal(pool, owner_id: int, acc_id: int, status: str) -> None:
+    """Учесть аппеляцию, которую человек отправил сам (кнопка в карточке).
+
+    Раньше ручная аппеляция шла к @SpamBot мимо реабилитации: счётчик
+    `appeal_count` не рос (лимит `_MAX_APPEALS` не работал), фаза оставалась
+    `appeal`, и через минуты автоматика писала @SpamBot снова — две
+    одинаковые аппеляции подряд, ровно тот всплеск, который реабилитация
+    старается не создавать. А ответ «блок снят» записывался статусом 'ok',
+    которого нет в словаре статусов: аккаунт не возвращался в строй.
+
+    Теперь:
+      • `free` — аккаунт под спам-блоком возвращается в 'active' (с причиной
+        и источником в журнале статусов), реабилитация закрывается `freed`;
+      • `appeal_sent` / `still_blocked` — аккаунт помечается спам-блоком, если
+        ещё не помечен, аппеляция засчитывается, фаза `appeal` сменяется тихим
+        прогревом, а следующий шаг автоматики не раньше обычного разноса.
+    Fail-soft: учёт не должен ронять ответ человеку.
+    """
+    from services import account_status
+
+    try:
+        cur = await pool.fetchval(
+            "SELECT acc_status FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id, owner_id)
+        cur = (cur or "active").lower()
+        if status == "free":
+            if cur in account_status.RESTRICTED_STATUSES:
+                await account_status.set_status(
+                    pool, acc_id, "active",
+                    reason="Спам-блок снят (ручная аппеляция)", source="manual_appeal")
+            await pool.execute(
+                """UPDATE account_rehab_state
+                      SET phase='freed', note='снят по ручной аппеляции',
+                          appeal_count = appeal_count + 1,
+                          last_action_at = now(),
+                          freed_at = COALESCE(freed_at, now()),
+                          updated_at = now()
+                    WHERE acc_id=$1 AND owner_id=$2
+                      AND phase IN ('appeal','warming','recheck','off','stuck')""",
+                acc_id, owner_id)
+            return
+        if status not in ("appeal_sent", "still_blocked"):
+            return
+        if cur != "spamblock" and cur not in account_status.LOST_STATUSES:
+            # @SpamBot подтвердил ограничение — статус должен говорить правду,
+            # иначе операции продолжат брать флагнутый аккаунт.
+            await account_status.set_status(
+                pool, acc_id, "spamblock",
+                reason="Спам-блок подтверждён @SpamBot (ручная аппеляция)",
+                source="manual_appeal")
+        note = ("ручная аппеляция отправлена" if status == "appeal_sent"
+                else "ручная проверка: блок держится")
+        await pool.execute(
+            """INSERT INTO account_rehab_state(
+                   acc_id, owner_id, phase, appeal_count, note,
+                   last_action_at, next_action_at)
+               SELECT a.id, a.owner_id, 'warming', 1, $3, now(),
+                      now() + make_interval(secs => $4)
+                 FROM tg_accounts a
+                WHERE a.id=$1 AND a.owner_id=$2
+               ON CONFLICT (acc_id) DO UPDATE
+                  SET appeal_count = account_rehab_state.appeal_count + 1,
+                      phase = CASE WHEN account_rehab_state.phase = 'appeal'
+                                   THEN 'warming' ELSE account_rehab_state.phase END,
+                      note = EXCLUDED.note,
+                      last_action_at = now(),
+                      next_action_at = GREATEST(account_rehab_state.next_action_at,
+                                                EXCLUDED.next_action_at),
+                      updated_at = now()
+                WHERE account_rehab_state.owner_id = EXCLUDED.owner_id""",
+            acc_id, owner_id, note, _jitter(_WARM_GAP_SEC))
+    except Exception as e:
+        log.warning("rehab: ручная аппеляция acc=%s не учтена: %s", acc_id, e)
+
+
 async def force_now(pool, owner_id: int, acc_id: int) -> bool:
     """Сделать следующий шаг восстановления немедленно.
 

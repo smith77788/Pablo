@@ -13486,7 +13486,7 @@ async function startWarmup(accId, planType) {
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🔥 Прогрев запущен · '+d.target_days+' дней');
     openAccount(accId);
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,160)); }
 }
 
 async function pauseWarmup(accId) {
@@ -14545,6 +14545,9 @@ async function submitAccImport() {
     // Честный итог: сколько реально добавлено/провалено + причины (см. правило
     // «рапорт об успехе без эффекта»).
     let html=`<div style="color:${imp?'var(--green)':'var(--hint)'}">✅ Импортировано: <b>${imp}</b></div>`;
+    // Тот же аккаунт с новой сессией — не новый аккаунт и не ошибка: сессия
+    // обновлена у уже подключённого, дубль не создан.
+    if (r.updated) html+=`<div style="color:var(--hint)">🔄 Обновлена сессия у подключённых: <b>${r.updated}</b></div>`;
     if (fail) html+=`<div style="color:var(--red)">✕ Не удалось: <b>${fail}</b></div>`;
     // Изоляция по IP — итог, который раньше нигде не показывался: партия
     // садилась за один выход, и человек узнавал об этом только из отдельного

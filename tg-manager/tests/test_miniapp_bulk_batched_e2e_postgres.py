@@ -155,19 +155,25 @@ def test_warmup_bulk_is_batched_and_starts_all(pool):
     assert res["started"] == 7, res
 
     # Число запросов не зависит от числа аккаунтов: выборка + CREATE TABLE IF
-    # NOT EXISTS + два пакетных INSERT. Раньше было бы 2 запроса на аккаунт.
+    # NOT EXISTS + два пакетных INSERT + одна пометка acc_status='warming'
+    # пакетом (её ставит и одиночное создание плана; раньше пакетный путь её
+    # пропускал). Раньше было бы 2 запроса на аккаунт.
     # Два чтения тарифа (subscriptions, platform_users) — гейт подписки, один
     # раз на вызов, тоже не от числа аккаунтов.
     gate = [q for q in queries
             if "FROM subscriptions" in q or "FROM platform_users" in q]
     assert len(gate) <= 2, gate
-    assert len(queries) - len(gate) <= 5, queries
+    assert len(queries) - len(gate) <= 6, queries
 
     rows = _run(pool.fetch(
         "SELECT account_id, status, plan_type FROM account_warmup_plans WHERE owner_id=$1",
         OWNER))
     assert sorted(r["account_id"] for r in rows) == sorted(ids)
     assert all(r["status"] == "active" and r["plan_type"] == "standard" for r in rows)
+    warming = _run(pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND acc_status='warming'",
+        OWNER))
+    assert warming == 7, "аккаунт с заведённым планом помечается как прогреваемый"
 
     # Чужие аккаунты не задеты.
     foreign = _run(pool.fetch(

@@ -59,10 +59,11 @@ def test_import_assigns_selected_proxy():
     assert "user_proxies WHERE id=$1 AND owner_id=$2" in src, (
         "proxy_id должен сверяться на принадлежность владельцу (не закреплять чужой)"
     )
-    # proxy_id реально попадает в INSERT аккаунта
-    assert re.search(r"INSERT INTO tg_accounts.*proxy_id", src, re.DOTALL), (
-        "proxy_id должен писаться в tg_accounts при импорте"
-    )
+    # proxy_id реально попадает в запись аккаунта (общая дверь upsert_tg_account)
+    assert "proxy_id=_acc_proxy" in src, "proxy_id должен писаться в tg_accounts при импорте"
+    from database import db as _db
+    assert re.search(r"INSERT INTO tg_accounts.*proxy_id",
+                     inspect.getsource(_db.upsert_tg_account), re.DOTALL)
     # фронт передаёт proxy_id
     html = _index()
     m = re.search(r"async function submitAccImport\(\)\s*\{(.*?)\n\}", html, re.DOTALL)

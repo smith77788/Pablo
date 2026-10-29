@@ -647,90 +647,315 @@ async def warmup_channel_pool(
     return list(dict.fromkeys(mixed))[:size]
 
 
+# ── Создание плана прогрева: одна дверь на все пути ────────────────────────
+#
+# Раньше план заводили шесть путей (экран прогрева, карточка аккаунта,
+# массовый прогрев в мини-аппе, три кнопки бота), и каждый писал его своим
+# запросом. Расходились они во всём, что важно: карточка аккаунта заводила план
+# на забаненном аккаунте (он стоял на «дне 0» вечно), бот обнулял день идущего
+# прогрева, профиль поведения писал только экран прогрева. Теперь все пути
+# зовут `create_warmup_plan` или `create_warmup_plans_bulk`, и правила живут
+# здесь: тариф → владелец → аккаунт жив → запись плана и профиля одной
+# транзакцией.
+
+WARMUP_PLAN_TYPES = ("gentle", "standard", "aggressive")
+_PLAN_DAILY = {"gentle": 5, "standard": 10, "aggressive": 12}
+_PLAN_DAYS = {"gentle": 21, "standard": 14, "aggressive": 10}
+
+
+class WarmupNotAllowed(PermissionError):
+    """Прогрев на этом аккаунте заводить нельзя. Текст — для человека.
+
+    `status` — HTTP-код для мини-аппа: 404 (не найден / чужой), 400 (нет
+    сессии), 409 (аккаунт выключен, забанен или ограничен). Наследник
+    PermissionError, чтобы старые обработчики отказа гейта ловили и его.
+    """
+
+    def __init__(self, message: str, status: int = 409):
+        super().__init__(message)
+        self.status = status
+
+
+def plan_defaults(plan_type: str) -> tuple[int, int]:
+    """(daily_actions, target_days) режима. Одна таблица на все пути."""
+    return _PLAN_DAILY.get(plan_type, 10), _PLAN_DAYS.get(plan_type, 14)
+
+
+_NICHE_PROFILES_DDL = """CREATE TABLE IF NOT EXISTS account_niche_profiles (
+       account_id      BIGINT PRIMARY KEY,
+       owner_id        BIGINT NOT NULL,
+       niche           TEXT NOT NULL DEFAULT 'general',
+       profile_type    TEXT NOT NULL DEFAULT 'reader',
+       custom_channels TEXT[] DEFAULT '{}',
+       flood_wait_count INT NOT NULL DEFAULT 0,
+       last_flood_at   TIMESTAMPTZ,
+       updated_at      TIMESTAMPTZ DEFAULT NOW()
+   )"""
+
+# Конфликт по аккаунту — это перезапуск плана. Идущий или приостановленный
+# план продолжается с того же дня: раньше бот ставил current_day=0, мини-апп —
+# нет, и одна и та же кнопка в двух местах то обнуляла неделю прогрева, то
+# нет. Завершённый или отменённый план начинается заново. Старая жалоба
+# (причина паузы, пропуска) снимается всегда: иначе новый план показывал бы
+# причину, по которой встал предыдущий. Обновляется только план того же
+# владельца (D5).
+_PLAN_UPSERT_TAIL = """
+   ON CONFLICT (account_id) DO UPDATE
+       SET status='active',
+           current_day = CASE WHEN account_warmup_plans.status IN ('active','paused')
+                              THEN account_warmup_plans.current_day ELSE 0 END,
+           started_at = CASE WHEN account_warmup_plans.status IN ('active','paused')
+                             THEN account_warmup_plans.started_at ELSE NOW() END,
+           completed_at = NULL,
+           plan_type=EXCLUDED.plan_type, daily_actions=EXCLUDED.daily_actions,
+           target_days=EXCLUDED.target_days,
+           pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
+           pause_notified_at=NULL, last_skip_reason=NULL, last_skip_at=NULL
+     WHERE account_warmup_plans.owner_id = EXCLUDED.owner_id"""
+
+
 async def create_warmup_plan(
     pool: asyncpg.Pool,
     owner_id: int,
     account_id: int,
     plan_type: str = "standard",  # standard / gentle / aggressive
+    *,
+    profile_type: str | None = None,
+    niche: str | None = None,
+    custom_channels: list[str] | None = None,
+    daily_actions: int | None = None,
+    target_days: int | None = None,
 ) -> int:
-    """Создаёт план разогрева для аккаунта. Возвращает plan_id.
+    """Создаёт (или перезапускает) план прогрева аккаунта. Возвращает plan_id.
 
-    daily_actions здесь — это ПОТОЛОК (target) на финальных днях. Реальное число
+    Единственный путь записи плана на один аккаунт. Порядок проверок важен:
+    всё, что может отказать, идёт ДО записи.
+
+      1. тариф и Ban Weather — тот же гейт, что у submit('account_warmup')
+         (бросает PermissionError с текстом для человека);
+      2. аккаунт этого владельца (account_id в боте приходит из callback и
+         подделывается) — иначе WarmupNotAllowed(404);
+      3. у аккаунта есть сессия и он жив: не выключен, не забанен, не в
+         спам-блоке — иначе WarmupNotAllowed(400/409). Раньше это проверял
+         только экран прогрева, а карточка аккаунта и бот заводили план на
+         забаненном аккаунте, и он стоял на «дне 0» вечно.
+
+    profile_type/niche/custom_channels — профиль поведения (движок читает его
+    из account_niche_profiles); None — профиль не трогать. daily_actions и
+    target_days — продвинутые переопределения, клампятся по безопасности.
+
+    daily_actions — это ПОТОЛОК (target) на финальных днях. Реальное число
     действий в день рассчитывается через _actions_for_day_count() с рампой
     low→medium→high, поэтому свежий аккаунт никогда не получает максимум сразу.
 
-    Также выставляет acc_status='warming' чтобы ресурс-селектор и UI
-    могли отличить прогреваемые аккаунты от обычных активных.
+    Выставляет acc_status='warming', чтобы ресурс-селектор и UI отличали
+    прогреваемые аккаунты от обычных активных.
     """
-    # Тариф и Ban Weather — тот же гейт, что у submit('account_warmup').
-    # Сюда приходят все пути, заводящие план мимо шины (три пути бота), и без
-    # этой проверки план без подписки заводился одной кнопкой.
-    # Бросает PermissionError с текстом для человека.
     from services import operation_bus
+    from services import warmup_status as _ws
+
+    if plan_type not in WARMUP_PLAN_TYPES:
+        raise WarmupNotAllowed(
+            "Режим прогрева должен быть gentle, standard или aggressive", 400)
+    if profile_type is not None and profile_type not in WARMUP_PROFILES:
+        raise WarmupNotAllowed(
+            f"Профиль должен быть одним из: {', '.join(WARMUP_PROFILES)}", 400)
+    if niche is not None and niche not in WARMUP_NICHES:
+        raise WarmupNotAllowed(
+            f"Ниша должна быть одной из: {', '.join(WARMUP_NICHES)}", 400)
 
     await operation_bus.enforce_gates(pool, owner_id, "account_warmup")
 
-    # Note: "aggressive" capped at 12/day (was 20) — 20 actions/day on a fresh
-    # low-trust account is the #1 ban trigger. target_days lengthened accordingly.
-    daily_map = {"gentle": 5, "standard": 10, "aggressive": 12}
-    days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
-
-    # План пишется только на СВОЙ аккаунт: account_id в боте приходит из
-    # callback-данных, которые подделываются. Раньше владельца проверяли уже
-    # после записи, и ON CONFLICT (account_id) сбрасывал на день 0 план чужого
-    # аккаунта. Источник строки — tg_accounts владельца, а конфликт обновляет
-    # только план того же владельца.
-    row = await pool.fetchrow(
-        """INSERT INTO account_warmup_plans(
-               owner_id, account_id, plan_type, daily_actions, target_days
-           )
-           SELECT $1, a.id, $3, $4, $5 FROM tg_accounts a
-            WHERE a.id = $2 AND a.owner_id = $1
-           ON CONFLICT (account_id) DO UPDATE
-               SET status='active', current_day=0, started_at=NOW(),
-                   plan_type=$3, daily_actions=$4, target_days=$5
-             WHERE account_warmup_plans.owner_id = EXCLUDED.owner_id
-           RETURNING id""",
-        owner_id,
-        account_id,
-        plan_type,
-        daily_map.get(plan_type, 5),
-        days_map.get(plan_type, 14),
+    acc = await pool.fetchrow(
+        "SELECT id, session_str, acc_status, is_active FROM tg_accounts "
+        "WHERE id=$1 AND owner_id=$2",
+        account_id, owner_id,
     )
-    if not row:
-        raise PermissionError("Аккаунт не найден")
+    if not acc:
+        raise WarmupNotAllowed("Аккаунт не найден", 404)
+    if not acc["session_str"]:
+        raise WarmupNotAllowed(
+            "У аккаунта нет сессии — сначала переимпортируйте его", 400)
+    ok, why = _ws.can_resume(None, acc["acc_status"], acc["is_active"])
+    if not ok:
+        raise WarmupNotAllowed(why, 409)
+
+    daily, days = plan_defaults(plan_type)
+    if daily_actions is not None:
+        # >20 действий/день на свежем аккаунте — топ-триггер бана: жёсткий
+        # потолок независимо от ввода.
+        daily = max(3, min(20, int(daily_actions)))
+    if target_days is not None:
+        days = max(5, min(45, int(target_days)))
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if profile_type is not None or niche is not None:
+                await conn.execute(_NICHE_PROFILES_DDL)
+                await conn.execute(
+                    """INSERT INTO account_niche_profiles(
+                           account_id, owner_id, niche, profile_type,
+                           custom_channels, updated_at)
+                       VALUES($1,$2,$3,$4,COALESCE($5::text[], '{}'),now())
+                       ON CONFLICT (account_id) DO UPDATE
+                       SET niche=$3, profile_type=$4,
+                           custom_channels=COALESCE($5::text[],
+                                                    account_niche_profiles.custom_channels),
+                           updated_at=now()
+                       WHERE account_niche_profiles.owner_id = EXCLUDED.owner_id""",
+                    account_id, owner_id, niche or "general",
+                    profile_type or "mixed", custom_channels,
+                )
+            # Источник строки — живой аккаунт этого владельца: проверка выше и
+            # запись не разъезжаются, даже если статус сменился между ними.
+            row = await conn.fetchrow(
+                """INSERT INTO account_warmup_plans(
+                       owner_id, account_id, plan_type, daily_actions, target_days
+                   )
+                   SELECT $1, a.id, $3, $4, $5 FROM tg_accounts a
+                    WHERE a.id = $2 AND a.owner_id = $1
+                      AND a.is_active = TRUE AND a.session_str IS NOT NULL
+                      AND """ + _acc_status.sql_not_dead("a.acc_status") + _PLAN_UPSERT_TAIL + """
+                   RETURNING id""",
+                owner_id, account_id, plan_type, daily, days,
+            )
+            if not row:
+                # Транзакция откатит и профиль: профиль без плана — мусор.
+                raise WarmupNotAllowed("Аккаунт недоступен для прогрева", 409)
     plan_id = row["id"]
 
-    # Mark the account as warming so resource_selector excludes it from
-    # heavy ops and UI shows the correct warming badge.
+    await _mark_warming(pool, owner_id, [account_id])
+    log.info("warmup: plan %d for acc=%d (%s)", plan_id, account_id, plan_type)
+    return plan_id
+
+
+async def _mark_warming(pool: asyncpg.Pool, owner_id: int, account_ids: list[int],
+                        *, stage_events: bool = True) -> None:
+    """acc_status → 'warming', стадия CRM и кэш здоровья для заведённых планов.
+
+    stage_events=False — для пакета: стадия CRM пишется запросом на аккаунт,
+    а пакетный путь держит число запросов постоянным.
+    """
+    if not account_ids:
+        return
     try:
         await pool.execute(
             """UPDATE tg_accounts
                SET acc_status = 'warming'
-               WHERE id = $1
+               WHERE id = ANY($1::bigint[]) AND owner_id = $2
                  AND is_active = TRUE
                  AND COALESCE(acc_status, 'active') = 'active'""",
-            account_id,
+            list(account_ids), owner_id,
         )
     except Exception as _e:
-        log.warning("warmup: could not set acc_status=warming for acc=%d: %s", account_id, _e)
+        log.warning("warmup: could not set acc_status=warming owner=%s: %s", owner_id, _e)
 
-    # CRM-воронка: старт прогрева → авто-стадия «Прогрев» (только «сырой» аккаунт).
-    try:
-        await db.apply_account_stage_event(pool, account_id, "warmup_start")
-    except Exception:
-        log_exc_swallow(log, "warmup: stage(warmup_start) failed")
+    from services import account_health as _ah
 
-    # Update in-memory health cache warmup_state immediately
-    try:
-        from services import account_health as _ah
-        health = _ah.get_health(account_id)
-        health.warmup_state = _ah.WarmupState.WARMING
-    except Exception:
-        log_exc_swallow(log, "warmup: set warmup_state=warming failed")
+    for acc_id in account_ids:
+        try:
+            _ah.get_health(acc_id).warmup_state = _ah.WarmupState.WARMING
+        except Exception:
+            log_exc_swallow(log, "warmup: set warmup_state=warming failed")
+        if not stage_events:
+            continue
+        # CRM-воронка: старт прогрева → авто-стадия «Прогрев» (только «сырой» аккаунт).
+        try:
+            await db.apply_account_stage_event(pool, acc_id, "warmup_start")
+        except Exception:
+            log_exc_swallow(log, "warmup: stage(warmup_start) failed")
 
-    log.info("warmup: created plan %d for acc=%d (acc_status → warming)", plan_id, account_id)
-    return plan_id
+
+_BULK_CANDIDATES_WHERE = (
+    """a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
+       AND """ + _acc_status.sql_not_dead("a.acc_status") + """
+       AND NOT EXISTS (
+           SELECT 1 FROM account_warmup_plans wp
+           WHERE wp.account_id=a.id AND wp.status='active')"""
+)
+
+
+async def count_warmup_candidates(pool: asyncpg.Pool, owner_id: int) -> int:
+    """Скольким аккаунтам «прогреть все» реально заведёт план."""
+    n = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts a WHERE " + _BULK_CANDIDATES_WHERE,
+        owner_id)
+    return int(n or 0)
+
+
+async def create_warmup_plans_bulk(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    plan_type: str = "standard",
+    profile_type: str = "mixed",
+    niche: str = "general",
+    limit: int = 500,
+) -> dict:
+    """Планы для ВСЕХ подходящих аккаунтов владельца разом.
+
+    Подходящий — включён, с сессией, не мёртвый и не в спам-блоке
+    (`sql_not_dead`) и ЕЩЁ БЕЗ активного плана. Последнее — главное: кнопка
+    «Создать планы для всех» в боте брала все включённые аккаунты и через
+    ON CONFLICT обнуляла день каждому, кто уже грелся, а спам-блокнутых
+    возвращала под нагрузку. Снятием спам-блока занимается реабилитация, а не
+    прогрев.
+
+    Запросов — константа на пакет, а не по два на аккаунт. Бросает
+    PermissionError (нет подписки / Ban Weather) до любой записи.
+    """
+    from services import operation_bus
+
+    await operation_bus.enforce_gates(pool, owner_id, "account_warmup")
+
+    plan_type = (plan_type or "standard").strip()
+    if plan_type not in WARMUP_PLAN_TYPES:
+        plan_type = "standard"
+    profile_type = (profile_type or "mixed").strip().lower()
+    if profile_type not in WARMUP_PROFILES:
+        profile_type = "mixed"
+    niche = (niche or "general").strip().lower()
+    if niche not in WARMUP_NICHES:
+        niche = "general"
+    daily, days = plan_defaults(plan_type)
+
+    rows = await pool.fetch(
+        "SELECT a.id FROM tg_accounts a WHERE " + _BULK_CANDIDATES_WHERE
+        + " ORDER BY a.id LIMIT $2",
+        owner_id, int(limit),
+    )
+    acc_ids = [int(r["id"]) for r in (rows or [])]
+    if not acc_ids:
+        return {"ok": True, "started": 0,
+                "note": "Нет подходящих аккаунтов (все уже греются или недоступны)"}
+    # Транзакция — чтобы пакет не остался наполовину заведённым: профиль ниши
+    # без плана прогрева — мусор, который потом никто не подберёт. unnest
+    # разворачивает массив id прямо в источник INSERT. Источник плана ещё раз
+    # сверяется с tg_accounts владельца и с тем, что активного плана нет:
+    # параллельный запуск не обнулит план, заведённый между выборкой и записью.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(_NICHE_PROFILES_DDL)
+            await conn.execute(
+                """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
+                   SELECT acc_id, $2, $3, $4, now() FROM unnest($1::bigint[]) AS acc_id
+                   ON CONFLICT (account_id) DO UPDATE SET niche=$3, profile_type=$4, updated_at=now()
+                   WHERE account_niche_profiles.owner_id = EXCLUDED.owner_id""",
+                acc_ids, owner_id, niche, profile_type)
+            done = await conn.fetch(
+                """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, daily_actions, target_days)
+                   SELECT $1, a.id, $3, $4, $5
+                     FROM tg_accounts a
+                    WHERE a.id = ANY($2::bigint[]) AND a.owner_id = $1
+                      AND NOT EXISTS (
+                          SELECT 1 FROM account_warmup_plans wp
+                           WHERE wp.account_id=a.id AND wp.status='active')"""
+                + _PLAN_UPSERT_TAIL + """
+                   RETURNING account_id""",
+                owner_id, acc_ids, plan_type, daily, days)
+    started_ids = [int(r["account_id"]) for r in (done or [])]
+    await _mark_warming(pool, owner_id, started_ids, stage_events=False)
+    return {"ok": True, "started": len(started_ids), "plan_type": plan_type,
+            "profile_type": profile_type, "niche": niche}
 
 
 async def get_active_plans(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
