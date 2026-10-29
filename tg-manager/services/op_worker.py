@@ -3120,12 +3120,30 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
         {"status": status, "ok": ok_n, "failed": failed_n,
          "reason": _POISON_ERROR.format(n=_MAX_REVIVES), "summary": summary},
         op_type, 0.0)
-    await _safe_execute(
+    # Тот же случай, что у `_finish_cancelled_op`: строка УЖЕ терминальна
+    # ('failed' поставил путь бюджета живучести), и эта запись дописывает ей
+    # точный статус и цифры. Поэтому `_op_closed_by_us` здесь не подходит — он
+    # охраняет переход В терминальный статус, а не обогащение закрытой строки.
+    # Но цена потери та же, что разбирают докстринги `_finish_cancelled_op` и
+    # `_watchdog_cancelled_orphans`: операция остаётся терминальной и ПУСТОЙ
+    # (`result IS NULL`), владелец видит исход без единой цифры, и починить это
+    # нечем — сторож сирот отмены трогает только 'cancelled'. Значит дверь с
+    # повтором и счётчиком незаписанного финала.
+    await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status=$2, result=$3::jsonb, "
         "acct_wait_since=NULL WHERE id=$1 AND status='failed'",
         op_id, status, json.dumps(result, ensure_ascii=False),
-        log_ctx=f"[poisoned_finish op={op_id}]")
+        log_ctx=f"[poisoned_finish op={op_id}]",
+        where="poisoned_finish",
+        metric="infragram_op_close_write_failures_total",
+        lost="итог остановленной по живучести операции не сохранён",
+    )
+    # Сообщение владельцу остаётся даже при потерянной записи, и это НЕ та же
+    # ошибка, что у флуд-отсрочки. Там событие не состоялось, здесь состоялось:
+    # операция действительно остановлена и действительно 'failed'. Цифры в
+    # тексте взяты из журнала целей, а не из потерянной записи. Промолчать
+    # значило бы оставить остановленную операцию без объяснения — хуже.
     log.error(
         "op_worker: op=%d op_type=%s → %s по бюджету живучести (%s, ok=%d failed=%d)",
         op_id, op_type, status, source, ok_n, failed_n)

@@ -302,3 +302,106 @@ def test_a_lost_fleet_requeue_is_retried_and_counted(_quiet):
         pool, 42, defer_s=60, bot=None, owner_id=1))
     assert pool.attempts == 2, "потерянный возврат по занятому флоту не повторён"
     assert "infragram_requeue_write_failures_total" in _names(_quiet)
+
+
+# ── Тот же вопрос обо ВСЕХ записях статуса операции ─────────────────────────
+#
+# Возврат в очередь — лишь половина класса. Любая запись, меняющая статус
+# операции, теряется одинаково: строка остаётся в прежнем состоянии, а код
+# дальше рапортует о том, чего в базе нет. Поэтому ратчет на весь класс, а не
+# на найденные экземпляры.
+
+# Двери, у которых есть повтор и счётчик потерь.
+RETRYING_DOORS = ("_retrying_execute", "_op_closed_by_us")
+
+# Записи, где потерю дешево подбирает СЛЕДУЮЩИЙ круг, — им повтор не нужен.
+# Каждая здесь с причиной, и причина одна и та же: механизм самовосстановим.
+SELF_REPAIRING = {
+    "_reset_stale_running":
+        "ревизия при старте: потерянную строку поднимет сторож зависших",
+    "_watchdog_stale":
+        "сам сторож зависших: его страхует его же следующий круг",
+    "_process_pending":
+        "захват строки поллером: не захватил — операция осталась 'pending' "
+        "и уйдёт в работу на следующем круге",
+    "shutdown":
+        "возврат при остановке процесса: не записали — поднимет "
+        "`_reset_stale_running` при старте",
+}
+
+
+def _status_writes():
+    """Все записи, меняющие СТАТУС операции в `operation_queue`."""
+    tree, _ = _tree_and_lines()
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        door = ast.unparse(node.func).split(".")[-1]
+        if door not in ("_safe_execute", "_retrying_execute", "execute",
+                        "_op_closed_by_us"):
+            continue
+        sql = " ".join(ast.unparse(a) for a in node.args[:3])
+        if not re.search(r"UPDATE\s+operation_queue", sql):
+            continue
+        if not re.search(r"SET[^\"\']*status\s*=", sql, re.S):
+            continue
+        out.append((_enclosing_fn(tree, node.lineno), door, node.lineno))
+    return out
+
+
+def test_the_status_census_sees_both_kinds():
+    """Самопроверка: в выборке есть и самовосстановимые, и решения о судьбе."""
+    found = {fn for fn, _, _ in _status_writes()}
+    assert "_run_op_task" in found, (
+        "перепись не видит запись финала — отбор сломан, а не код чист")
+    for name in SELF_REPAIRING:
+        assert name in found, (
+            f"`{name}` больше не находится — список исключений устарел, "
+            "и ратчет молча ослаб")
+
+
+def test_every_status_write_is_retried_or_self_repairing():
+    bad = [(fn, door, ln) for fn, door, ln in _status_writes()
+           if door not in RETRYING_DOORS and fn not in SELF_REPAIRING]
+    assert not bad, (
+        "запись статуса операции идёт дверью без повтора и счётчика: "
+        f"{bad}. Потерянная запись оставляет строку в прежнем состоянии, "
+        "а код дальше докладывает о том, чего в базе нет. Если механизм "
+        "самовосстановим — впиши его в SELF_REPAIRING с причиной")
+
+
+def test_a_lost_poisoned_finish_is_retried_and_counted(_quiet, monkeypatch):
+    """Итог операции, остановленной по живучести, — тоже финал.
+
+    Строка уже 'failed', и эта запись дописывает ей цифры. Потеряли — операция
+    осталась терминальной и ПУСТОЙ (`result IS NULL`): владелец видит исход без
+    единой цифры, а сторож сирот отмены трогает только 'cancelled'.
+    """
+    from services import op_worker
+
+    pool = _FailingPool()
+    announced = {}
+
+    async def _counters(*a, **kw):
+        return 3, 2
+
+    async def _announce(*a, **kw):
+        announced["yes"] = True
+
+    monkeypatch.setattr(op_worker, "_journal_counters", _counters)
+    monkeypatch.setattr(op_worker, "_announce_op_outcome", _announce)
+
+    # Строку функция берёт из RETURNING того же UPDATE, что погасил операцию.
+    row = {"id": 42, "owner_id": 1, "op_type": "mass_invite", "params": {},
+           "done_items": 3, "total_items": 10}
+    asyncio.run(op_worker._finish_poisoned_op(
+        pool, row, source="watchdog", bot=None))
+
+    assert pool.attempts == 2, (
+        f"потерянный итог не повторён (попыток: {pool.attempts})")
+    assert "infragram_op_close_write_failures_total" in _names(_quiet), (
+        "незаписанный итог не попал на счётчик — потеря невидима")
+    assert announced.get("yes"), (
+        "сообщение владельцу пропало: операция действительно остановлена, "
+        "и промолчать значит оставить её без объяснения")
