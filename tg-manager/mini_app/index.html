@@ -25095,11 +25095,23 @@ function pmCoverageHelp(level) {
   toast(t);
 }
 
-async function openGlobalPresence() {
-  push('s-globalpresence');
-  txt('gpList','<div class="spin-wrap"><div class="spin"></div></div>');
+// Планы отдавались голым массивом из двадцати: плитка писала «20 планов»
+// (длину страницы), а двадцать первый не открывался никак. Теперь страницы по
+// смещению и честный итог с сервера.
+let GP_ROWS = [], GP_OFFSET = 0;
+async function openGlobalPresence(more) {
+  if (more) { GP_OFFSET = GP_ROWS.length; }
+  else {
+    GP_ROWS = []; GP_OFFSET = 0;
+    push('s-globalpresence');
+    txt('gpList','<div class="spin-wrap"><div class="spin"></div></div>');
+  }
   try {
-    const rows = await api('/api/miniapp/global_presence');
+    const d = await api('/api/miniapp/global_presence?limit=20&offset='+GP_OFFSET);
+    const _page = listOf(d,'plans');
+    GP_ROWS = GP_OFFSET ? GP_ROWS.concat(_page) : _page;
+    const rows = GP_ROWS;
+    const gpTotal = totalOf(d, rows);
     if (!rows.length) { txt('gpList', empty('🌍','Планов нет','Нажмите + Создать в шапке экрана')); return; }
     txt('gpList', rows.map(r => {
       const done=r.done_targets||0, total=r.total_targets||0;
@@ -25116,10 +25128,15 @@ async function openGlobalPresence() {
           <div class="row-right chev">›</div>
         </div>
       `;
-    }).join(''));
+    }).join('') + moreBtn(rows.length, gpTotal, 'openGlobalPresence(1)'));
+    // «N активных» считается по загруженным строкам, поэтому называется только
+    // когда загружены ВСЕ планы: иначе число описывало бы страницу, а не план.
     const active = rows.filter(r=>r.status==='running').length;
-    document.getElementById('m-gp-val').textContent = active?`${active} активных`:rows.length+' планов';
-  } catch(e) { txt('gpList', empty('⚠️','Ошибка',errRu(e))); }
+    const el = document.getElementById('m-gp-val');
+    if (el) el.textContent = (active && rows.length >= gpTotal)
+      ? `${num(active)} активных`
+      : num(gpTotal)+' '+plural(gpTotal,'план','плана','планов');
+  } catch(e) { txt('gpList', errHtml(errRu(e),'openGlobalPresence()')); }
 }
 
 // Отметка «выбрать все» в этом списке накрывает ровно то, что в нём показано,
@@ -25296,16 +25313,31 @@ async function submitGpCreate() {
     openGlobalPresence();
   } catch(e) { errEl.textContent = errRu(e,'Ошибка'); }
 }
-async function openGpDetail(planId, planName) {
-  push('s-gpdetail');
-  document.getElementById('gpdetail-name').textContent = planName||'План';
-  txt('gpdetail-body','<div class="spin-wrap"><div class="spin"></div></div>');
+let _GPD_ARGS = null, GPD_ROWS = [], GPD_OFFSET = 0;
+async function openGpDetailMore() {
+  if (!_GPD_ARGS) return;
+  GPD_OFFSET = GPD_ROWS.length;
+  await openGpDetail(_GPD_ARGS[0], _GPD_ARGS[1], true);
+}
+async function openGpDetail(planId, planName, more) {
+  _GPD_ARGS = [planId, planName];
+  if (!more) {
+    GPD_ROWS = []; GPD_OFFSET = 0;
+    push('s-gpdetail');
+    document.getElementById('gpdetail-name').textContent = planName||'План';
+    txt('gpdetail-body','<div class="spin-wrap"><div class="spin"></div></div>');
+  }
   try {
-    const d = await api(`/api/miniapp/global_presence/${planId}`);
+    const d = await api(`/api/miniapp/global_presence/${planId}?limit=100&offset=${GPD_OFFSET}`);
     const p = d.plan;
     const selection = typeof p.geo_selection === 'string' ? JSON.parse(p.geo_selection||'{}') : (p.geo_selection||{});
     const va = selection.virtual_admin;
-    const targets = d.targets||[];
+    const _tPage = listOf(d,'targets');
+    GPD_ROWS = GPD_OFFSET ? GPD_ROWS.concat(_tPage) : _tPage;
+    const targets = GPD_ROWS;
+    // Итог целей считает сервер. Раньше подпись брала число из спека (сколько
+    // целей ПЛАНИРОВАЛОСЬ), и после сотни дойти до остальных было нечем.
+    const targetsTotal = (d.targets_total!=null) ? d.targets_total : targets.length;
     const dr = d.dressing||{};
     const vaCoverage = d.virtual_admin_coverage||{};
     const stCls = {done:'b-gr',failed:'b-rd',running:'b-or',pending:'b-gy',skipped:'b-gy'};
@@ -25336,7 +25368,7 @@ async function openGpDetail(planId, planName) {
       <div class="hint" style="padding:6px 16px 0">Значения считаются для каждого объекта отдельно — по его городу и тематике.</div>
       ` : ''}
       ${va?.enabled && vaCoverage.eligible > vaCoverage.installed ? `<div style="padding:8px 16px"><button class="btn" onclick="gpRetryVa(${p.id})">Повторить подключение администратора</button></div>` : ''}
-      <div class="sec" style="margin-top:8px">Цели (показаны ${targets.length} из ${selection.count||targets.length})</div>
+      <div class="sec" style="margin-top:8px">Цели (показаны ${num(targets.length)} из ${num(targetsTotal)})</div>
       <div class="lst" style="margin:0 16px">
     `;
     if (!targets.length) {
@@ -25356,6 +25388,7 @@ async function openGpDetail(planId, planName) {
       });
     }
     html += '</div>';
+    html += moreBtn(targets.length, targetsTotal, 'openGpDetailMore()');
     if (p.status === 'pending' || p.status === 'failed') {
       html += `<div style="padding:12px 16px"><button class="btn btn-p" onclick="launchGpPlan(${p.id})" style="width:100%">🚀 Запустить план</button></div>`;
     }
