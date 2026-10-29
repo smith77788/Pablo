@@ -40,6 +40,7 @@ from services import mini_app_presence
 from services import mini_app_cloud
 from services import mini_app_mp
 from services import mini_app_networks
+from services import mini_app_links
 from services import mini_app_sales
 from services import mini_app_va
 from services import mini_app_warmup
@@ -1525,6 +1526,43 @@ def _str_list(value) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(x).strip() for x in value if str(x).strip()]
     return []
+
+
+from urllib.parse import urlparse as _urlparse  # noqa: E402
+
+
+# ── Сокращатель ссылок: адрес короткой ссылки и свои хосты ────────────────
+#
+# Модульные и чистые (зависят только от request), поэтому остались здесь, а
+# ручки `/api/miniapp/links/*` уехали в `services/mini_app_links.py`: их
+# зовёт и публичный редирект `/{code}`, который остался в монолите.
+def _short_base(request: web.Request) -> str:
+    """Базовый адрес короткой ссылки: env SHORT_LINK_BASE (напр.
+    https://infragram.app) либо домен текущего запроса (учитывая прокси
+    Railway через X-Forwarded-*)."""
+    base = (os.getenv("SHORT_LINK_BASE") or "").strip().rstrip("/")
+    if base:
+        return base
+    _proto = (request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip()
+              or request.scheme or "https")
+    _host = (request.headers.get("X-Forwarded-Host", "").split(",")[0].strip()
+             or request.headers.get("Host", "") or request.host or "")
+    return f"{_proto}://{_host}" if _host else ""
+
+
+def _self_hosts(request: web.Request) -> set[str]:
+    """Наши собственные хосты — чтобы не дать завернуть ссылку на наш же
+    редирект (бесконечная петля)."""
+    hosts: set[str] = set()
+    for h in (os.getenv("SHORT_LINK_BASE"),
+              request.headers.get("X-Forwarded-Host"),
+              request.headers.get("Host"), request.host):
+        if not h:
+            continue
+        _n = _urlparse(h if "://" in h else "http://" + h).hostname
+        if _n:
+            hosts.add(_n.lower())
+    return hosts
 
 
 def _list_offset(request: web.Request, maximum: int = 10_000_000) -> int:
@@ -7878,36 +7916,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _sse_streams.pop(uid, None)
         return response
 
-    # ── Сокращатель ссылок («bit.ly для себя») ─────────────────────────────────
+    # ── Сокращатель ссылок: публичный редирект ─────────────────────────────────
+    #
+    # Ручки `/api/miniapp/links/*` уехали в `services/mini_app_links.py`. Здесь
+    # остался редирект: он не часть API мини-аппа, а публичный вход по короткому
+    # коду, и живёт на корне (`/{code}`) вместе с остальными корневыми путями.
     from services import link_shortener as _lnk
-    from urllib.parse import urlparse as _urlparse
-
-    def _short_base(request: web.Request) -> str:
-        """Базовый адрес короткой ссылки: env SHORT_LINK_BASE (напр.
-        https://infragram.app) либо домен текущего запроса (учитывая прокси
-        Railway через X-Forwarded-*)."""
-        base = (os.getenv("SHORT_LINK_BASE") or "").strip().rstrip("/")
-        if base:
-            return base
-        _proto = (request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip()
-                  or request.scheme or "https")
-        _host = (request.headers.get("X-Forwarded-Host", "").split(",")[0].strip()
-                 or request.headers.get("Host", "") or request.host or "")
-        return f"{_proto}://{_host}" if _host else ""
-
-    def _self_hosts(request: web.Request) -> set[str]:
-        """Наши собственные хосты — чтобы не дать завернуть ссылку на наш же
-        редирект (бесконечная петля)."""
-        hosts: set[str] = set()
-        for h in (os.getenv("SHORT_LINK_BASE"),
-                  request.headers.get("X-Forwarded-Host"),
-                  request.headers.get("Host"), request.host):
-            if not h:
-                continue
-            _n = _urlparse(h if "://" in h else "http://" + h).hostname
-            if _n:
-                hosts.add(_n.lower())
-        return hosts
 
     async def short_link_redirect(request: web.Request) -> web.Response:
         """Публичный редирект: короткая ссылка → 302 на цель + учёт клика."""
@@ -7918,98 +7932,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                 content_type="text/plain", charset="utf-8")
         raise web.HTTPFound(target)
 
-    async def links_create(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        target = validate_string(body.get("target_url") or body.get("url"), max_len=2048)
-        title = validate_string(body.get("title"), max_len=200, required=False)
-        code = validate_string(body.get("code"), max_len=40, required=False)
-        tags = validate_string(body.get("tags"), max_len=400, required=False)
-        expires_at = validate_string(body.get("expires_at"), max_len=40, required=False)
-        _utm_in = body.get("utm") if isinstance(body.get("utm"), dict) else {}
-        utm = {k: validate_string(_utm_in.get(k), max_len=100, required=False) or ""
-               for k in ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content")}
-        res = await _lnk.create(pool, uid, target or "", title,
-                                self_hosts=_self_hosts(request),
-                                custom_code=(code or None), utm=utm,
-                                tags=(tags or None), expires_at=(expires_at or None))
-        if not res.get("ok"):
-            return _err(res.get("error") or "Не удалось создать ссылку")
-        res["short_url"] = f"{_short_base(request)}/{res['code']}"
-        if body.get("qr"):
-            res["qr"] = _lnk.make_qr_data_uri(res["short_url"])
-        return _json_resp(res)
-
-    async def links_qr(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        code = validate_string(body.get("code"), max_len=40)
-        link = await _lnk.get_one(pool, uid, code or "")
-        if not link:
-            return _err("Ссылка не найдена", 404)
-        short_url = f"{_short_base(request)}/{code}"
-        qr = _lnk.make_qr_data_uri(short_url)
-        if not qr:
-            return _err("QR временно недоступен")
-        return _json_resp({"ok": True, "qr": qr, "short_url": short_url})
-
-    async def links_list(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        lim = _list_limit(request, 100, 500)
-        off = _list_offset(request)
-        items = await _lnk.list_for_owner(pool, uid, limit=lim, offset=off)
-        total = await _lnk.count_for_owner(pool, uid)
-        base = _short_base(request)
-        for it in items:
-            it["short_url"] = f"{base}/{it['code']}"
-        return _json_resp({"links": items, "base": base, "total": total,
-                           "page": {"limit": lim, "offset": off,
-                                    "has_more": off + len(items) < total}})
-
-    async def links_toggle(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        code = validate_string(body.get("code"), max_len=40)
-        ok = await _lnk.set_disabled(pool, uid, code or "", bool(body.get("disabled")))
-        return _json_resp({"ok": ok}) if ok else _err("Ссылка не найдена", 404)
-
-    async def links_delete(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        code = validate_string(body.get("code"), max_len=40)
-        ok = await _lnk.delete(pool, uid, code or "")
-        return _json_resp({"ok": ok}) if ok else _err("Ссылка не найдена", 404)
-
     # ── Route registration ────────────────────────────────────────────────────
 
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
-    app.router.add_post("/api/miniapp/links/create", links_create)
-    app.router.add_get("/api/miniapp/links", links_list)
-    app.router.add_post("/api/miniapp/links/toggle", links_toggle)
-    app.router.add_post("/api/miniapp/links/delete", links_delete)
-    app.router.add_post("/api/miniapp/links/qr", links_qr)
     app.router.add_get("/s/{code}", short_link_redirect)
     app.router.add_post("/api/miniapp/auth", auth)
     app.router.add_post("/api/miniapp/pair", pair_device)
@@ -8091,6 +8016,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_dm.setup_routes(app, pool)
     mini_app_warmup.setup_routes(app, pool)
     mini_app_accounts.setup_routes(app, pool)
+    mini_app_links.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
     mini_app_mp.setup_routes(app, pool)
