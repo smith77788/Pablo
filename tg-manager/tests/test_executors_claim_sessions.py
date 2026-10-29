@@ -106,19 +106,80 @@ def test_claims_are_bound_to_the_operation_for_cleanup():
             continue
         if "_claim_available_accounts" in body or "_claim_single_account" in body:
             continue
-        # остался голый try_claim_account — тогда обязано быть и освобождение
+        # остался голый try_claim_account — тогда обязано быть и освобождение,
+        # причём в `finally`: проверка «release есть где-то в теле» читалась как
+        # сильная, но пропускала освобождение ТОЛЬКО на счастливом пути, а
+        # повисший запрос или исключение посреди цикла как раз и уводят
+        # исполнителя мимо него. Аккаунт после такого «занят» навсегда:
+        # renew_leases продлевает аренду, а реконсилер живую память намеренно
+        # не чистит.
         if "try_claim_account" in body:
-            assert "release_accounts" in body, (
-                f"{name} захватывает голым try_claim_account без release — "
-                f"аккаунт останется «занят» навсегда"
+            assert _releases_in_finally(body), (
+                f"{name} захватывает голым try_claim_account и освобождает его "
+                f"не в finally — исключение посреди прогона оставит аккаунт "
+                f"«занятым» до перезапуска процесса"
             )
 
 
+def _releases_in_finally(body: str) -> bool:
+    """В теле есть `finally`, освобождающий аккаунты."""
+    for node in ast.walk(ast.parse(body)):
+        if isinstance(node, ast.Try) and node.finalbody:
+            if any("release_accounts" in ast.unparse(x) for x in node.finalbody):
+                return True
+    return False
+
+
+_RELEASE_ON_THE_HAPPY_PATH = (
+    "async def _exec_x(pool, op_id):\n"
+    "    if not await try_claim_account(1):\n"
+    "        return {}\n"
+    "    await work()\n"
+    "    await release_accounts([1])\n"
+    "    return {}\n")
+_RELEASE_IN_FINALLY = (
+    "async def _exec_x(pool, op_id):\n"
+    "    if not await try_claim_account(1):\n"
+    "        return {}\n"
+    "    try:\n"
+    "        await work()\n"
+    "    finally:\n"
+    "        await release_accounts([1])\n"
+    "    return {}\n")
+
+
+def test_a_release_on_the_happy_path_is_not_enough():
+    """Главная самопроверка усиления: раньше этот пример проходил."""
+    assert "release_accounts" in _RELEASE_ON_THE_HAPPY_PATH, "пример устарел"
+    assert not _releases_in_finally(_RELEASE_ON_THE_HAPPY_PATH), (
+        "освобождение на счастливом пути принято за надёжное — усиление не "
+        "работает")
+
+
+def test_a_release_in_finally_passes():
+    assert _releases_in_finally(_RELEASE_IN_FINALLY)
+
+
 def test_central_release_still_runs_for_every_operation():
+    """Централизованное освобождение обязано стоять именно в `finally`.
+
+    Проверка была на наличие строки в модуле. Строка может жить и на счастливом
+    пути, а смысл правила — освобождать флот и после падения исполнителя.
+    """
     assert "await release_operation_accounts(op_id)" in _SRC, (
         "исчезло централизованное освобождение в finally _run_op_task — "
         "захваченные аккаунты потекут"
     )
+    in_finally = False
+    for node in ast.walk(ast.parse(_SRC)):
+        if isinstance(node, ast.Try) and node.finalbody:
+            if any("release_operation_accounts" in ast.unparse(x)
+                   for x in node.finalbody):
+                in_finally = True
+                break
+    assert in_finally, (
+        "централизованное освобождение больше не в finally: падение исполнителя "
+        "оставит весь захваченный флот «занятым» до перезапуска процесса")
 
 
 # ── Проверка самого измерителя ─────────────────────────────────────────────
