@@ -149,3 +149,94 @@ def test_no_alert_path_narrows_the_admin_list():
     assert bare == [], (
         "кто-то снова резолвит получателей через _admin_ids(): этот список "
         f"не включает вошедших в админку по секрету — строки {bare}")
+
+
+# --- Тот же класс по всему коду, а не в одном файле -------------------------
+#
+# Храповик выше сторожит слой операций. Но резолвить получателей самому можно
+# откуда угодно, и так оно и было: `services/payment_checker.py` брал админов
+# тем же старым `_admin_ids()`, то есть алерт о платежах при незаполненном
+# `ADMIN_IDS` не уходил никому. Правило ниже считает класс по всему коду.
+#
+# Законных мест для `_admin_ids()` ровно два, и они разные по смыслу:
+#   * дом самого помощника (`bot/utils/subscription.py`) — он на нём и стоит;
+#   * проверка ПРАВ (`_is_admin`): там узкий список безопасен, потому что
+#     ошибка в эту сторону отказывает в доступе, а не раздаёт его. Такие
+#     проверки и так смотрят сессии админки отдельной ветвью.
+# Всё остальное — это оповещение, и получателей ему брать из общего места.
+_ADMIN_IDS_HOME = ("bot/utils/subscription.py",)
+
+
+def _enclosing_function(tree, lineno: int) -> str:
+    best, best_line = "", -1
+    for node in ast.walk(tree):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.lineno <= lineno <= (node.end_lineno or node.lineno)
+                and node.lineno > best_line):
+            best, best_line = node.name, node.lineno
+    return best
+
+
+def _bare_admin_id_calls() -> list[str]:
+    """Вызовы `_admin_ids()` по ДЕРЕВУ, а не по тексту строки.
+
+    Поиск подстроки считал находкой строку `def _admin_ids() -> set[int]:` —
+    то есть само объявление помощника. Тот же урок, что и в соседнем треде, где
+    подстрочный поиск пауз дал двадцать восемь находок вместо тринадцати,
+    потому что в слове `await` сидит `wait`: имена берутся по дереву.
+
+    И уже по дереву правило ошиблось второй раз — на однофамильце: у охраны
+    чата свой `_admin_ids(bot, chat_id)`, это админы телеграм-чата. Поэтому
+    считаются только вызовы БЕЗ аргументов.
+    """
+    import pathlib
+
+    root = pathlib.Path(ROOT)
+    out = []
+    for path in (sorted((root / "services").rglob("*.py"))
+                 + sorted((root / "bot").rglob("*.py"))):
+        rel = str(path.relative_to(root)).replace("\\", "/")
+        if rel in _ADMIN_IDS_HOME:
+            continue
+        src = path.read_text(encoding="utf-8", errors="replace")
+        if "_admin_ids" not in src:
+            continue
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            # БЕЗ АРГУМЕНТОВ: в `bot/handlers/chat_guard.py` живёт свой
+            # `_admin_ids(bot, chat_id)` — админы ТЕЛЕГРАМ-ЧАТА, которых не
+            # модерируют. С платформенными получателями он не имеет общего
+            # ничего, кроме имени, и правило, судившее по имени, выдало на нём
+            # ложную находку. Платформенный помощник аргументов не берёт.
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "_admin_ids"
+                    and not node.args and not node.keywords):
+                continue
+            fn = _enclosing_function(tree, node.lineno)
+            if fn.startswith("_is_admin") or fn.startswith("is_"):
+                continue
+            out.append(f"{rel}:{node.lineno} в {fn or '<модуль>'}")
+    return out
+
+
+def test_the_rule_knows_where_admin_ids_may_still_be_read():
+    """Проба: законные места существуют, иначе правило ниже бессмысленно."""
+    import pathlib
+
+    home = pathlib.Path(ROOT) / _ADMIN_IDS_HOME[0]
+    assert "_admin_ids()" in home.read_text(encoding="utf-8"), (
+        "общий помощник больше не стоит на _admin_ids — правило устарело")
+    tree = ast.parse("def _is_admin(u):\n    return u in _admin_ids()\n")
+    assert _enclosing_function(tree, 2) == "_is_admin"
+
+
+def test_only_rights_checks_resolve_admins_themselves():
+    bad = _bare_admin_id_calls()
+    assert not bad, (
+        "получателей оповещения резолвят своим списком: он не включает "
+        "вошедших в админку по секрету, и при незаполненном ADMIN_IDS "
+        "сообщить будет некому. Нужен platform_alert_recipients(pool):\n  "
+        + "\n  ".join(bad))

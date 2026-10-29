@@ -223,15 +223,22 @@ async def _alert_admins(pool, bot, key: str, text: str) -> None:
     if bot is None:
         return
     try:
-        from bot.utils.subscription import _admin_ids
+        from bot.utils.subscription import platform_alert_recipients
         from database import db as _db
 
-        admin_ids = _admin_ids()
+        # Получатели берутся ОДНИМ способом со всеми платформенными алертами:
+        # `ADMIN_IDS` плюс живые сессии админки. Прежний `_admin_ids()` знал
+        # только переменную окружения, и при незаполненной (обычная установка)
+        # алерт о платежах не уходил никому, хотя мини-апп этих людей админами
+        # считает.
+        admin_ids = await platform_alert_recipients(pool)
     except Exception:
         log_exc_swallow(log, "payment_checker: список админов недоступен")
         return
     if not admin_ids:
-        log.critical("payment_checker: сообщить некому (ADMIN_IDS пуст): %s", key)
+        log.critical(
+            "payment_checker: сообщить некому (ни ADMIN_IDS, ни живых сессий "
+            "админки): %s", key)
         return
     for aid in admin_ids:
         try:
