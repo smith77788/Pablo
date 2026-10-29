@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -66,9 +67,6 @@ _ALLOWED: dict[str, str] = {
         "внешний API провайдеров по ключу, не экран владельца",
     "geo_va_link.retry_missing":
         "действие (добить непроставленное), а не список",
-    "mini_app_api._collect_valid_proxies":
-        "размер ПАЧКИ: ответ отдаёт overflow, экран шлёт вставку по частям "
-        "(tests/test_the_pasted_proxies_do_not_vanish.py)",
     "contact_invite_link.invite_history_for_contact":
         "история приглашений ОДНОМУ контакту: пятидесяти там не бывает",
     "account_warmer.normalize_warmup_channels":
@@ -147,6 +145,44 @@ def _capped_functions() -> dict[tuple[str, str], tuple[str, int, int | None]]:
     return out
 
 
+# Ключ, которым ответ признаёт обрезку. Тот же набор, что у соседнего правила
+# `test_a_capped_list_says_it_is_capped.py`, плюс `overflow` (сколько строк
+# осталось за потолком вставки) и заголовок экспорта.
+_HONEST = re.compile(r"""["'](?:[a-z_]*total|truncated|has_more|overflow)["']\s*:""")
+_HONEST_HEADER = re.compile(r"X-[A-Za-z-]*Truncated")
+
+
+def _says_it_is_capped(body: str) -> bool:
+    return bool(_HONEST.search(body) or _HONEST_HEADER.search(body))
+
+
+def _innermost(tree: ast.Module) -> dict[int, ast.AST]:
+    """id(узла вызова) → ближайшая объемлющая функция.
+
+    Ближайшая, а не любая: `setup_routes` объемлет все обработчики файла, и его
+    тело содержит честные ключи ЧУЖИХ ручек — по нему судить значит оправдывать
+    молчащую ручку итогом соседней.
+    """
+    out: dict[int, ast.AST] = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Call):
+                prev = out.get(id(n))
+                if prev is None or _depth(fn, n) < _depth(prev, n):
+                    out[id(n)] = fn
+    return out
+
+
+def _depth(fn: ast.AST, call: ast.AST) -> int:
+    """Насколько глубоко вызов лежит внутри функции (меньше — ближе)."""
+    for d, node in enumerate(ast.walk(fn)):
+        if node is call:
+            return d
+    return 10 ** 6
+
+
 def _findings(files=None) -> list[str]:
     caps = _capped_functions()
     bad: list[str] = []
@@ -176,6 +212,7 @@ def _findings(files=None) -> list[str]:
                         funcsrc[a.asname or a.name] = stem
         own = {f.name for f in ast.walk(tree)
                if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        inner = _innermost(tree)
         for n in ast.walk(tree):
             if not isinstance(n, ast.Call):
                 continue
@@ -203,7 +240,15 @@ def _findings(files=None) -> list[str]:
                 continue
             if f"{key[0]}.{key[1]}" in _ALLOWED:
                 continue
-            bad.append(f"{path.name}:{n.lineno} → {key[0]}.{key[1]}"
+            # Ручка, которая САМА говорит об обрезке, порока не содержит: порок
+            # — молчаливый потолок, а не потолок. Это свойство, поэтому его
+            # проверяем, а не выносим в список исключений от руки.
+            _fn = inner.get(id(n))
+            if (_fn is not None and getattr(_fn, "name", "") != "setup_routes"
+                    and _says_it_is_capped(ast.unparse(_fn))):
+                continue
+            _where = getattr(_fn, "name", "?")
+            bad.append(f"{path.name}:{n.lineno} {_where} → {key[0]}.{key[1]}"
                        f"({argname}={default}) · {ast.unparse(n)[:70]}")
     return bad
 
@@ -273,6 +318,52 @@ def test_a_named_constant_ceiling_is_seen_too(tmp_path):
     finally:
         mod.ROOT = old
     assert len(bad) == 1 and "limit=500" in bad[0], bad
+
+
+def _probe(tmp_path, engine: str, handler: str):
+    (tmp_path / "services").mkdir(exist_ok=True)
+    (tmp_path / "services" / "probe_engine.py").write_text(engine, encoding="utf-8")
+    f = tmp_path / "services" / "mini_app_probe.py"
+    f.write_text(handler, encoding="utf-8")
+    import tests.test_a_ceiling_hides_in_a_callees_signature as mod
+    old = mod.ROOT
+    mod.ROOT = tmp_path
+    try:
+        return mod._findings([f])
+    finally:
+        mod.ROOT = old
+
+
+_PROBE_ENGINE = ("async def list_things(pool, owner_id, limit: int = 100):\n"
+                 "    return []\n")
+
+
+def test_a_handler_that_admits_the_cap_is_not_a_finding(tmp_path):
+    """Порок — МОЛЧАЛИВЫЙ потолок. Ручка, которая сама отдаёт итог, чиста."""
+    handler = ('from services import probe_engine as _pe\n\n\n'
+               'async def things(request):\n'
+               '    rows = await _pe.list_things(pool, uid)\n'
+               '    return _json_resp({"things": rows, "total": 260})\n')
+    assert _probe(tmp_path, _PROBE_ENGINE, handler) == []
+
+
+def test_a_neighbours_honesty_does_not_excuse_a_silent_handler(tmp_path):
+    """Честный ключ соседней ручки — не оправдание.
+
+    `setup_routes` объемлет все обработчики файла, и по его телу молчащая ручка
+    выглядела бы честной за счёт итога соседа. Берётся БЛИЖАЙШАЯ объемлющая
+    функция, а `setup_routes` не берётся вовсе.
+    """
+    handler = ('from services import probe_engine as _pe\n\n\n'
+               'def setup_routes(app, pool):\n'
+               '    async def honest(request):\n'
+               '        return _json_resp({"items": [], "total": 7})\n\n'
+               '    async def silent(request):\n'
+               '        rows = await _pe.list_things(pool, uid)\n'
+               '        return _json_resp({"items": rows})\n\n'
+               '    app.router.add_get("/api/miniapp/probe", silent)\n')
+    bad = _probe(tmp_path, _PROBE_ENGINE, handler)
+    assert len(bad) == 1 and "silent" in bad[0], bad
 
 
 def test_a_homonym_in_the_same_file_is_not_a_foreign_call(tmp_path):
