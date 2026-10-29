@@ -734,7 +734,7 @@ def setup_routes(app: web.Application, pool) -> None:
         elif op == "privacy":
             pk = (body.get("privacy_key") or "phone").strip()
             if pk not in ("phone", "invite", "lastseen"):
-                return _err("Настройка приватности: phone, invite или lastseen", 400)
+                return _err("Настройка приватности: телефон, приглашения в группы или «был в сети»", 400)
             params["privacy_key"] = pk
             params["privacy_allow"] = bool(body.get("privacy_allow", False))
             label = f"Приватность: {pk}"
@@ -1817,7 +1817,7 @@ def setup_routes(app: web.Application, pool) -> None:
             code = (body.get("code") or "").strip()
             pch = (body.get("phone_code_hash") or "").strip()
             if not phone or not code or not pch:
-                return _err("Нужны phone, code и phone_code_hash", 400)
+                return _err("Не хватает данных входа: запросите код заново", 400)
             from services import account_manager as am
             res = await asyncio.wait_for(am.confirm_code(phone, code, pch), timeout=40)
             if res == "need_2fa":
@@ -1842,7 +1842,7 @@ def setup_routes(app: web.Application, pool) -> None:
             phone = (body.get("phone") or "").strip()
             password = body.get("password") or ""
             if not phone or not password:
-                return _err("Нужны phone и password", 400)
+                return _err("Нужны номер телефона и пароль двухфакторной защиты", 400)
             from services import account_manager as am
             await asyncio.wait_for(am.confirm_2fa(phone, password), timeout=40)
             session_str, info = await am.get_client_info_and_session(phone)
@@ -1880,7 +1880,7 @@ def setup_routes(app: web.Application, pool) -> None:
             phone = normalize_phone(body.get("phone") or "") or (body.get("phone") or "").strip()
             pch = (body.get("phone_code_hash") or "").strip()
             if not phone or not pch:
-                return _err("Нужны phone и phone_code_hash", 400)
+                return _err("Не хватает данных входа: запросите код заново", 400)
             from services import account_manager as am
             from telethon.errors import FloodWaitError
             try:

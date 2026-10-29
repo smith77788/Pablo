@@ -594,7 +594,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not source_ref:
-            return _err("source_ref обязателен", 400)
+            return _err("Укажите источник: @username, ссылку или идентификатор", 400)
         if parse_type not in ("members", "active", "comments"):
             parse_type = "members"
         if limit < 1 or limit > 10000:

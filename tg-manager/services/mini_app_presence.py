@@ -223,7 +223,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
         if not data.get("account_id"):
-            return _err("account_id обязателен", 400)
+            return _err("Выберите аккаунт", 400)
         # Нечисловой id раньше доходил до `int()` внутри try и выпадал
         # пятисоткой: «внутренняя ошибка сервера» вместо «неверный аккаунт».
         account_id = validate_integer(data.get("account_id"), min_val=1)
@@ -453,7 +453,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 channel_ids = body.get("channel_ids", cur)
                 group_ids = body.get("group_ids", grp)
                 if not isinstance(channel_ids, list) or not isinstance(group_ids, list):
-                    return _err("channel_ids и group_ids должны быть списками", 400)
+                    return _err("Каналы и группы должны передаваться списками", 400)
                 _res = await db.update_presence_pack_channels(
                     pool, pack_id, uid,
                     [int(x) for x in channel_ids],

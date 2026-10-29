@@ -326,7 +326,7 @@ def setup_routes(app: web.Application, pool) -> None:
         value = (body.get("value") or "").strip()
         worker_op = channel_edit_worker_op(op)
         if not worker_op or not value:
-            return _err("Укажите op (title|about|username) и значение", 400)
+            return _err("Укажите, что менять (название, описание или @username), и новое значение", 400)
         if op == "title" and len(value) > 128:
             return _err("Название канала — до 128 символов", 400)
         ch = await _safe_fetchrow(pool,
@@ -633,7 +633,7 @@ def setup_routes(app: web.Application, pool) -> None:
             try:
                 acc_ids = [int(x) for x in raw_ids][:200]
             except (TypeError, ValueError):
-                return _err("account_ids должен быть списком чисел", 400)
+                return _err("Список аккаунтов должен быть списком чисел", 400)
             acc_ids = [a for a in acc_ids if a > 0]
             if not acc_ids:
                 return _err("Выберите хотя бы один аккаунт", 400)

@@ -230,7 +230,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             chan_id = int(body.get("chan_id"))
         except (TypeError, ValueError):
-            return _err("chan_id обязателен", 400)
+            return _err("Выберите канал", 400)
         fields = body.get("fields") or None
 
         # Единая реализация применения (та же, что в bulk-исполнителе) — без дублей.
@@ -285,7 +285,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             bot_id = int(body.get("bot_id"))
         except (TypeError, ValueError):
-            return _err("bot_id обязателен", 400)
+            return _err("Выберите бота", 400)
         fields = body.get("fields") or None
         from services import bot_reoptimizer
         try:
@@ -503,7 +503,7 @@ def setup_routes(app: web.Application, pool) -> None:
         experiment_type = data.get("experiment_type", "start_message")
         variants = data.get("variants", [])
         if not bot_id or not name:
-            return _err("bot_id и name обязательны", 400)
+            return _err("Выберите бота и укажите название", 400)
         if experiment_type not in ("start_message", "auto_reply", "funnel"):
             experiment_type = "start_message"
         if not variants or len(variants) < 2:

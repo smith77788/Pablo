@@ -47,7 +47,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             tg_chat_id = int(str(data.get("tg_chat_id") or "").strip())
         except (ValueError, TypeError):
-            return _err("tg_chat_id должен быть числом (например -1001234567890)", 400)
+            return _err("Идентификатор чата должен быть числом (например -1001234567890)", 400)
         if not title:
             return _err("Укажите название сообщества", 400)
         from services import nodes_engine

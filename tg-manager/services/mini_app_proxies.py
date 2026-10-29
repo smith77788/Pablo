@@ -178,7 +178,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # Единая валидация (паритет с import_proxies): длина, loopback, схема.
         _reason = _reject_proxy_reason(proxy_url)
         if _reason == "too_long":
-            return _err("proxy_url слишком длинный (>500 символов)")
+            return _err("Строка прокси слишком длинная: максимум 500 символов")
         if _reason == "internal":
             return _err("Внутренние/loopback-адреса недопустимы")
         if _reason == "scheme":

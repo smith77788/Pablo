@@ -1687,7 +1687,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             d = await request.json()
             if not d.get('confirm'):
-                return _err("нужно подтверждение (confirm)", 400)
+                return _err("Нужно подтверждение удаления", 400)
             if not any([d.get('country'), d.get('tag'), d.get('account_id')]):
                 return _err("пустой фильтр — нечего удалять", 400)
             from services.contacts_hub.bulk_ops_engine import delete_by_filter

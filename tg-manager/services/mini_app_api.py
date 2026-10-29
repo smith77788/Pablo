@@ -2714,7 +2714,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if op not in ("name", "avatar", "2fa"):
-            return _err("Операция: name, avatar или 2fa", 400)
+            return _err("Операция: имя, аватар или двухфакторная защита", 400)
         if acc_count < 0:
             return _err("Число аккаунтов не может быть отрицательным", 400)
         try:
@@ -2818,7 +2818,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not op or not account_id:
             return _err("Неверное тело запроса", 400)
         if op not in ("leave_all_chats", "delete_contacts"):
-            return _err("Операция: leave_all_chats или delete_contacts", 400)
+            return _err("Операция: выйти из всех чатов или удалить контакты", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
@@ -3546,7 +3546,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # через BotFather — отдельная операция op_type="bot_factory" (в боте).
         ecosystem_id = data.get("ecosystem_id")
         if not token:
-            return _err("token обязателен", 400)
+            return _err("Укажите токен бота", 400)
         if not name_template:
             return _err("имя бота обязательно", 400)
         if not validate_bot_token(token):
@@ -3658,7 +3658,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 acc_ids = [int(x) for x in raw_ids][:200]
             except (TypeError, ValueError):
-                return _err("account_ids должен быть списком чисел", 400)
+                return _err("Список аккаунтов должен быть списком чисел", 400)
             acc_ids = [a for a in acc_ids if a > 0]
             if not acc_ids:
                 return _err("Выберите хотя бы один аккаунт", 400)
@@ -4798,13 +4798,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         node_type = str(data.get("node_type", "workspace")).strip()
         name = str(data.get("name", "")).strip()
         if not tg_chat_id_raw or not name:
-            return _err("tg_chat_id и name обязательны", 400)
+            return _err("Укажите идентификатор чата и название", 400)
         if node_type not in ("proxies", "accounts", "tasks", "alerts", "workspace"):
             node_type = "workspace"
         try:
             tg_chat_id = int(str(tg_chat_id_raw).replace("-100", "-100").strip())
         except (ValueError, TypeError):
-            return _err("tg_chat_id должен быть числом (например -1001234567890)", 400)
+            return _err("Идентификатор чата должен быть числом (например -1001234567890)", 400)
         try:
             nid = await pool.fetchval(
                 """INSERT INTO bm_telegram_nodes (owner_id, tg_chat_id, node_type, name)
@@ -5355,7 +5355,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 if _pad > 0:
                     _params["per_account_daily"] = max(1, min(200, _pad))
             except (TypeError, ValueError):
-                return _err("per_account_daily должен быть числом", 400)
+                return _err("Дневной лимит на аккаунт должен быть числом", 400)
         params_json = _json.dumps(_params)
         try:
             try:
@@ -5842,7 +5842,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not channel:
-            return _err("channel обязателен", 400)
+            return _err("Укажите канал", 400)
         label = f"Разведка рекламы @{channel}"
         try:
             op_id = await _obus.submit(
@@ -7104,7 +7104,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось разобрать запрос")
         action = (body.get("action") or "both").strip()
         if action not in ("about", "avatar", "both"):
-            return _err("Действие: about, avatar или both", 400)
+            return _err("Действие: описания, аватары или и то и другое", 400)
         about_template = (body.get("about_template") or "").strip()
 
         try:

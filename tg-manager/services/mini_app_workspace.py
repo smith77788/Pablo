@@ -254,7 +254,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not name:
-            return _err("name обязателен", 400)
+            return _err("Укажите название рабочего пространства", 400)
         try:
             ws_id = await pool.fetchval(
                 "INSERT INTO workspaces(owner_id, name, description) VALUES($1,$2,$3) RETURNING id",

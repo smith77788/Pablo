@@ -230,7 +230,7 @@ def setup_routes(app: web.Application, pool) -> None:
             d = await request.json()
             target = int(d.get('owner_id') or 0)
             if not target:
-                return _err("нужен owner_id", 400)
+                return _err("Укажите владельца", 400)
             lim = d.get('limit_bytes')
             q = await tg_cloud.set_paid(pool, target, bool(d.get('paid', True)),
                                         limit_bytes=(int(lim) if lim else None))

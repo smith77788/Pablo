@@ -47,7 +47,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if target_type not in ("bot_users", "all_bots", "crm", "parsed_audience"):
             return _err("Неверный тип цели")
         if target_type == "bot_users" and not target_id:
-            return _err("Для цели bot_users нужен идентификатор цели")
+            return _err("Для рассылки подписчикам бота нужно выбрать бота")
         total_targets = 0
         if target_type == "bot_users" and target_id:
             try:
@@ -212,7 +212,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 try:
                     _p["per_account_daily"] = max(1, min(200, int(raw)))
                 except (TypeError, ValueError):
-                    return _err("per_account_daily должен быть числом", 400)
+                    return _err("Дневной лимит на аккаунт должен быть числом", 400)
             _params_touched = True
 
         if "quiet_hours" in body:

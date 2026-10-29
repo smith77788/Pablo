@@ -197,7 +197,7 @@ def setup_routes(app: web.Application, pool) -> None:
         from services import workflow_engine as _wf
         raw = body.get("steps")
         if not isinstance(raw, list) or not raw:
-            return _err("steps обязателен и должен быть непустым списком", 400)
+            return _err("Добавьте хотя бы один шаг", 400)
         try:
             steps = _wf.validate_steps(raw)
         except ValueError as e:

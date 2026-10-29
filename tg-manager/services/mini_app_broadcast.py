@@ -390,7 +390,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not title:
-            return _err("title обязателен", 400)
+            return _err("Укажите название сделки", 400)
         valid_stages = ("lead", "contact", "proposal", "negotiation", "won", "lost")
         if stage not in valid_stages:
             stage = "lead"

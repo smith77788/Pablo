@@ -712,7 +712,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось разобрать запрос", 400)
         token = validate_string(data.get("token"), max_len=200)
         if not token:
-            return _err("token обязателен", 400)
+            return _err("Укажите токен бота", 400)
         if not validate_bot_token(token):
             return _err("Неверный формат токена. Пример: 1234567890:AAHxxxxxxxx...", 400)
         try:
@@ -1009,7 +1009,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный запрос", 400)
         valid_roles = ("entry", "conversion", "retention", "general")
         if role not in valid_roles:
-            return _err("Роль бота: entry, conversion, retention или general", 400)
+            return _err("Роль бота: вход, конверсия, удержание или общая", 400)
         try:
             res = await pool.execute(
                 "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4",
@@ -1226,7 +1226,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not name:
             return _err("Нужно название")
         if trigger_type not in ("start", "keyword"):
-            return _err("Тип триггера: start или keyword")
+            return _err("Тип триггера: команда /start или ключевое слово")
         if trigger_type == "keyword" and not keyword:
             return _err("Для триггера по ключевому слову нужно само слово")
         if not first_message:
