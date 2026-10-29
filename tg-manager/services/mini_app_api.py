@@ -3858,29 +3858,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
     async def onboarding_status(request: web.Request) -> web.Response:
-        """Чеклист активации новичка: 2–3 шага до первого результата, скрывается
-        сам, когда пользователь активирован. Read-only, fail-open (пустой при сбое —
-        лучше без чеклиста, чем блокировать домашний экран)."""
+        """Чеклист новичка: от подключения аккаунта до ПЕРВОГО РЕЗУЛЬТАТА
+        (services/onboarding.py). Скрывается, когда результат получен. Read-only,
+        кроме разовых записей: выдача пробного периода и фиксация активации.
+        Fail-open: при сбое — без чеклиста, но не блок домашнего экрана."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
             from services import onboarding
-            accounts = await _safe_fetchval(
-                pool,
-                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 "
-                "AND session_str IS NOT NULL AND session_str <> ''", uid) or 0
-            with_proxy = await _safe_fetchval(
-                pool,
-                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 "
-                "AND proxy_id IS NOT NULL", uid) or 0
-            proxies = await _safe_fetchval(
-                pool, "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1", uid) or 0
-            ops_total = await _safe_fetchval(
-                pool, "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", uid) or 0
-            return _json_resp(onboarding.build_checklist(
-                accounts=accounts, accounts_with_proxy=with_proxy,
-                proxies=proxies, ops_total=ops_total))
+            return _json_resp(await onboarding.load_checklist(pool, uid))
         except Exception:
             log.exception("onboarding_status uid=%s", uid)
             # fail-open: активированным считаем, чтобы не мешать (чеклист скрыт)

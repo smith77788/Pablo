@@ -134,6 +134,16 @@ async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> No
         )
         return
     if not allowed:
+        # Новичок с живым аккаунтом ещё не брал пробный период — выдаём его
+        # здесь, в момент первого платного действия (services/trial.py), а не
+        # показываем пейволл раньше, чем он увидел результат.
+        try:
+            from services import trial
+            if await trial.maybe_grant(pool, owner_id):
+                allowed = await require_plan(pool, owner_id, min_plan)
+        except Exception:
+            log.warning("operation_bus: trial grant errored owner=%s", owner_id, exc_info=True)
+    if not allowed:
         raise PlanRequiredError(op_type, coerce_plan(min_plan))
 
 
