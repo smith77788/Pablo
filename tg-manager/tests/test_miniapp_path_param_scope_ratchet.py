@@ -86,18 +86,55 @@ _GATE_PROOF = {
 }
 
 
+def _str_parts(node: ast.AST) -> list[str]:
+    """Постоянные куски строкового выражения, в порядке текста.
+
+    Склейка через `+` — ОДИН запрос, а не два. `retry_operation` собирает его
+    из трёх частей (`"SELECT …'error'" + _obus.REAL_TARGET_SQL + ") AS … WHERE
+    id=$1 AND owner_id=$2"`), и измеритель, считавший каждый литерал отдельно,
+    видел первую часть без `owner_id` и объявлял ручку неотскоупленной. Скоуп
+    при этом был на месте — то есть находка была ложной, а цена ложной находки
+    в храповике безопасности выше обычной: следующий разбор заносит ручку в
+    исключения, и дыра появляется там, где её не было.
+    """
+    if isinstance(node, ast.Constant):
+        return [node.value] if isinstance(node.value, str) else []
+    if isinstance(node, ast.JoinedStr):
+        out: list[str] = []
+        for v in node.values:
+            out += _str_parts(v)
+        return out
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _str_parts(node.left) + _str_parts(node.right)
+    if isinstance(node, ast.FormattedValue):
+        return []
+    return []
+
+
 def _sql_literals(fn: ast.AST) -> list[str]:
     """Все SQL-строки функции — в любых кавычках, включая f-строки (у f-строк
-    берём только постоянные куски: имена таблиц и условий живут там)."""
+    берём только постоянные куски: имена таблиц и условий живут там) и склейки
+    через `+` (такая склейка — один запрос, см. `_str_parts`)."""
     out: list[str] = []
+    consumed: set[int] = set()
+    # Сначала склейки: их куски не должны попасть в выдачу поодиночке.
     for n in ast.walk(fn):
+        if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add):
+            if id(n) in consumed:
+                continue
+            for inner in ast.walk(n):
+                consumed.add(id(inner))
+            joined = " ".join(_str_parts(n))
+            if joined and _SQL_VERB.search(joined):
+                out.append(joined)
+    for n in ast.walk(fn):
+        if id(n) in consumed:
+            continue
         if isinstance(n, ast.Constant) and isinstance(n.value, str):
             if _SQL_VERB.search(n.value):
                 out.append(n.value)
         elif isinstance(n, ast.JoinedStr):
-            parts = [v.value for v in n.values
-                     if isinstance(v, ast.Constant) and isinstance(v.value, str)]
-            joined = " ".join(parts)
+            joined = " ".join(_str_parts(n))
             if _SQL_VERB.search(joined):
                 out.append(joined)
     return out
@@ -234,6 +271,38 @@ def _any_gate_source(name: str) -> str:
     return ""
 
 
+def _judgeable(fn) -> bool:
+    return bool(_reads_path_param(fn) and _calls_db(fn))
+
+
+def test_no_handler_escapes_judgment_by_the_shape_of_its_sql():
+    """Выборка храповика названа способом записи — и это его слепое место.
+
+    Он берёт ручку, только если нашёл в ней SQL-литерал с глаголом. Ручка, у
+    которой запрос собран иначе (вся строка в переменной, скоуп в куске без
+    глагола), под суд не попадает вовсе — то есть настоящая дыра рядом была бы
+    невидима. Сосед на это и указал, когда склейка через `+` спрятала от
+    храповика верный скоуп в `retry_operation`.
+
+    Склейку я научил читать как один запрос (`_str_parts`), а это — замер
+    остатка: ручек, которые ходят в БД с id из пути и всё равно не дают ни
+    одного SQL с глаголом, сейчас ноль. Появится — значит появилось и место,
+    которое храповик не судит, и это надо разбирать руками, а не молчать.
+    """
+    escaped = []
+    for src in _SOURCES:
+        tree = ast.parse(src)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            if _judgeable(fn) and not _sql_literals(fn):
+                escaped.append(fn.name)
+    assert not escaped, (
+        "эти ручки берут id из пути и ходят в БД, но храповик их не судит — у "
+        "них нет SQL-литерала с глаголом. Разберите каждую руками: скоуп может "
+        "отсутствовать, и правило этого не покажет: " + ", ".join(sorted(escaped)))
+
+
 def test_every_path_param_handler_is_owner_scoped():
     leaks = set()
     for src in _SOURCES:
@@ -290,8 +359,51 @@ async def ok3(request):
 '''
 
 
+# Запрос, собранный из кусков через `+`: так пишет `retry_operation`, когда
+# вставляет в середину условие из `operation_bus.REAL_TARGET_SQL`.
+_SCOPED_CONCAT = '''
+async def ok4(request):
+    uid = _get_uid(request)
+    op_id = int(request.match_info["op_id"])
+    return await pool.fetchrow(
+        "SELECT op_type, (SELECT COUNT(*) FROM operation_log ol "
+        " WHERE ol.op_id=operation_queue.id AND ol.status='error'"
+        + _obus.REAL_TARGET_SQL + ") AS err_cnt "
+        "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+        op_id, uid)
+'''
+
+_LEAKY_CONCAT = '''
+async def leaky2(request):
+    uid = _get_uid(request)
+    op_id = int(request.match_info["op_id"])
+    return await pool.fetchrow(
+        "SELECT op_type, (SELECT COUNT(*) FROM operation_log ol "
+        " WHERE ol.op_id=operation_queue.id AND ol.status='error'"
+        + _obus.REAL_TARGET_SQL + ") AS err_cnt "
+        "FROM operation_queue WHERE id=$1",
+        op_id)
+'''
+
+
 def test_probe_catches_a_real_leak():
     assert _unscoped(_LEAKY) == ["leaky"]
+
+
+def test_a_query_glued_from_parts_is_one_query():
+    """Склейка через `+` — один запрос, и скоуп в его хвосте считается.
+
+    Измеритель, считавший каждый литерал отдельно, видел первую часть без
+    `owner_id` и объявлял `retry_operation` неотскоупленным. Цена ложной
+    находки в храповике безопасности выше обычной: следующий разбор заносит
+    ручку в исключения, и дыра появляется там, где её не было.
+    """
+    assert _unscoped(_SCOPED_CONCAT) == []
+
+
+def test_a_query_glued_from_parts_still_shows_a_real_leak():
+    """И обратное: склейка не стала способом спрятать отсутствие скоупа."""
+    assert _unscoped(_LEAKY_CONCAT) == ["leaky2"]
 
 
 def test_probe_does_not_slander_scoped_handlers():
