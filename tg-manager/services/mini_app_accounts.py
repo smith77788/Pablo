@@ -324,9 +324,9 @@ def setup_routes(app: web.Application, pool) -> None:
             except Exception:
                 log.debug("account_detail rehab acc=%s", acc_id)
         recent_ops = await _safe_fetch(pool,
-            """SELECT op_type, status, done_items, total_items, created_at
+            """SELECT op_type, label, status, done_items, total_items, created_at
                FROM operation_queue WHERE owner_id=$1
-               ORDER BY created_at DESC LIMIT 8""", uid)
+               ORDER BY created_at DESC, id DESC LIMIT 8""", uid)
         # Риск-пульс аккаунта — объясняет «активен, но операции его пропускают»
         # (тот же единый сигнал, что и в списке; owner-scoped, fail-soft).
         health = None

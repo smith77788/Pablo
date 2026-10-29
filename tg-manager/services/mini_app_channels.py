@@ -258,9 +258,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 "SELECT id, phone, first_name, username FROM tg_accounts WHERE id=$1",
                 ch["acc_id"])
         recent_ops = await _safe_fetch(pool,
-            """SELECT op_type, status, done_items, total_items, created_at
+            """SELECT op_type, label, status, done_items, total_items, created_at
                FROM operation_queue WHERE owner_id=$1
-               ORDER BY created_at DESC LIMIT 8""", uid)
+               ORDER BY created_at DESC, id DESC LIMIT 8""", uid)
         # ── Статистика роста участников (снимок за день + дельты) ─────────────
         mc = int(ch.get("member_count") or 0)
         if mc > 0:
