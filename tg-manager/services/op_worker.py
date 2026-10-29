@@ -3639,10 +3639,10 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
                 len(rows), [(int(r["id"]), r["status"]) for r in rows])
 
     try:
-        from bot.utils.subscription import _admin_ids
-        admin_ids = _admin_ids()
+        from bot.utils.subscription import platform_alert_recipients
+        admin_ids = await platform_alert_recipients(pool)
     except Exception:
-        log.debug('admin_ids fallback: returning empty set')
+        log.debug('platform_alert_recipients fallback: returning empty set')
         admin_ids = set()
     if not admin_ids:
         # Список админов пуст — алерт НЕ помечаем объявленным: иначе он
@@ -3848,11 +3848,11 @@ async def _watchdog_protective_failures(
               [(n, int(d)) for n, _w, d, _t in grown])
 
     try:
-        from bot.utils.subscription import _admin_ids
+        from bot.utils.subscription import platform_alert_recipients
 
-        admin_ids = _admin_ids()
+        admin_ids = await platform_alert_recipients(pool)
     except Exception:
-        log.debug("admin_ids fallback: returning empty set")
+        log.debug("platform_alert_recipients fallback: returning empty set")
         admin_ids = set()
     if not admin_ids:
         # Никому не ушло — база отсчёта не двигается, сообщение вернётся. Но
