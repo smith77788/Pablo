@@ -760,8 +760,16 @@ def setup_routes(app: web.Application, pool) -> None:
                 WHERE oq.owner_id=$1
                   AND oq.status IN ('failed','cancelled','done')
                   AND oq.created_at > now() - INTERVAL '7 days'
-                ORDER BY oq.created_at DESC
-                LIMIT 100""", uid)
+                  -- Уже перезапущенные из выборки исключаются, иначе каждое
+                  -- нажатие брало ОДНИ И ТЕ ЖЕ двадцать пять новейших: дедуп
+                  -- превращал их в ничто, остальные недоведённые не брались
+                  -- никогда, и «нажмите ещё раз» было бы неправдой.
+                  AND NOT EXISTS (
+                        SELECT 1 FROM operation_queue r
+                         WHERE r.owner_id=$1
+                           AND r.params->>'retry_of_op' = oq.id::text)
+                ORDER BY oq.created_at DESC, oq.id DESC
+                LIMIT 300""", uid)
         candidates = _oretry.pick_retryable([dict(r) for r in (rows or [])])
         if not candidates:
             return _json_resp({"ok": True, "retried": 0,
@@ -822,13 +830,20 @@ def setup_routes(app: web.Application, pool) -> None:
         # молчаливое ничегонеделание. Частичный успех остаётся успехом.
         if not retried and skipped:
             return _err("Повтор отклонён тарифом: " + (skipped[0]["why"] or "требуется подписка"), 403)
+        # Кнопка называется «перезапустить все», а за нажатие ставится не
+        # больше двадцати пяти: иначе одно нажатие заваливает очередь. Молчать
+        # об остатке нельзя — владелец читает «Перезапущено 25» как «всё», и
+        # недоведённые операции так и остаются недоведёнными.
+        left = max(0, len(candidates) - len(chosen))
         return _json_resp({
             "ok": True, "retried": len(retried), "skipped": len(skipped),
-            "candidates": len(candidates), "items": retried[:25],
+            "candidates": len(candidates), "left": left, "items": retried[:25],
             "note": (f"Перезапущено {len(retried)}"
                      + (f", пропущено {len(skipped)}" if skipped else "")
                      + (f". Разовым запуском, без копирования расписания: "
-                        f"{dropped_schedules}" if dropped_schedules else "")),
+                        f"{dropped_schedules}" if dropped_schedules else "")
+                     + (f". Осталось недоведённых: {left} — нажмите ещё раз"
+                        if left else "")),
         })
 
     async def operation_export(request: web.Request) -> web.Response:
@@ -837,16 +852,28 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Unauthorized", 401)
         fmt = request.query.get("format", "csv")
         try:
+            # Потолок — предохранитель от выгрузки на миллион строк, а не
+            # продуктовое ограничение. Было 500: владелец скачивал
+            # operations.csv, считая, что это история, а получал последние
+            # полтораста часов работы. Выгрузку несут из приложения наружу — в
+            # отчёт, в таблицу, в переписку, — и обрезанная выгрузка хуже
+            # отказа: по ней принимают решения, не зная, что её обрезали.
+            cap = 50_000
             rows = await pool.fetch(
                 # Колонки err_cnt нет — экспорт падал всегда. Число неудачных
                 # попыток в этой схеме — retry_count.
                 """SELECT id, op_type, label, status, total_items, done_items,
                           COALESCE(retry_count, 0) AS err_cnt, created_at, finished_at
-                   FROM operation_queue WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 500""",
-                uid,
+                   FROM operation_queue WHERE owner_id=$1
+                   ORDER BY created_at DESC, id DESC LIMIT $2""",
+                uid, cap,
             )
             if fmt == "json":
-                return _json_resp({"operations": [dict(r) for r in rows]})
+                total = await _safe_count(pool,
+                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", uid)
+                return _json_resp({"operations": [dict(r) for r in rows],
+                                   "total": total,
+                                   "truncated": len(rows) >= cap})
             header = ["ID", "Тип", "Метка", "Статус", "Всего", "Сделано", "Ошибок", "Создано", "Завершено"]
             data = [[
                 r["id"], r["op_type"], r["label"] or "", r["status"],
