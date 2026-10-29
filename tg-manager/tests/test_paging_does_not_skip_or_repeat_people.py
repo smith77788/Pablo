@@ -109,6 +109,24 @@ _OFFSET = re.compile(r"\bOFFSET\s*(?:\$\d+|\$\{|\{)")
 _ORDER = re.compile(r"\bORDER BY\s+(.*?)(?=\s+LIMIT\b|\s+OFFSET\b|$)",
                     re.S | re.I)
 
+
+def _own_order(lit: str) -> str:
+    """Сортировка, которая управляет листанием, — ПОСЛЕДНЯЯ в литерале.
+
+    В одном литерале ORDER BY бывает несколько: подзапрос в списке колонок
+    («последняя позиция слова» — `(SELECT sr.position … ORDER BY sr.checked_at
+    DESC LIMIT 1)`) несёт свою, и в тексте она стоит ПЕРВОЙ. Пока у внешнего
+    запроса не было сдвига, мерка такие литералы не смотрела вовсе; с
+    появлением сдвига она начала судить сортировку подзапроса — и выдала
+    находку на запросе, у которого порядок полон. Листанием управляет та
+    сортировка, что стоит перед хвостом LIMIT/OFFSET, то есть последняя.
+
+    На раскрытие констант это не влияет: ORDER BY вложенного куска живёт в
+    ДРУГОМ литерале и сюда не попадает (см. `_expanded`).
+    """
+    found = _ORDER.findall(_normalise(lit))
+    return " ".join(found[-1].split()).strip().strip("\"'") if found else ""
+
 # Склейка f-строк в ИСХОДНИКЕ: запрос собран как
 # `f"... ORDER BY created_at DESC " f"LIMIT ${n} OFFSET ${m}"`, и в тексте
 # между сортировкой и LIMIT стоит `" f"`. Без этой нормализации регексп не
@@ -363,9 +381,8 @@ def _paging_queries() -> list[tuple[str, int, str | None, str]]:
                    else ast.get_source_segment(src, node) or "")
             if not _OFFSET.search(lit):
                 continue
-            m = _ORDER.search(_normalise(lit))
-            out.append((p.name, node.lineno,
-                        " ".join(m.group(1).split()) if m else None, lit))
+            order = _own_order(lit)
+            out.append((p.name, node.lineno, order or None, lit))
     return out
 
 
@@ -401,6 +418,26 @@ def test_the_detector_knows_a_total_order_from_a_partial_one():
         "member_count DESC NULLS LAST, channel_id",
         "SELECT DISTINCT channel_id, title FROM managed_channels "
         "ORDER BY member_count DESC NULLS LAST, channel_id")
+
+
+def test_the_detector_reads_the_order_that_pages():
+    """Проба: в литерале с подзапросом судить надо ВНЕШНЮЮ сортировку.
+
+    Обратный контроль (прогонялся): вернуть мерке первую сортировку литерала
+    -> красный test_every_paged_query_has_a_tiebreaker на запросе списка слов,
+    у которого порядок полон, а первой в тексте стоит `ORDER BY sr.checked_at
+    DESC LIMIT 1` из подзапроса «последняя позиция».
+    """
+    lit = ("SELECT tk.id, "
+           "(SELECT sr.position FROM search_rankings sr "
+           " WHERE sr.keyword_id=tk.id ORDER BY sr.checked_at DESC LIMIT 1) AS p "
+           "FROM tracked_keywords tk WHERE tk.owner_id=$1 "
+           "ORDER BY tk.created_at DESC, tk.id DESC LIMIT $2 OFFSET $3")
+    assert _own_order(lit) == "tk.created_at DESC, tk.id DESC"
+    # Полноту судим вместе с литералом: `tk.id` уникален по СХЕМЕ таблицы,
+    # которую запрос называет, а не по списку псевдонимов.
+    assert order_is_total(_own_order(lit), lit)
+    assert _own_order("SELECT 1") == ""
 
 
 def test_the_detector_sees_the_paging_queries():
@@ -488,9 +525,8 @@ def _all_paging_queries() -> list[tuple[str, int, str, str]]:
                    else ast.get_source_segment(src, node) or "")
             if not _OFFSET.search(lit) or "SELECT" not in lit.upper():
                 continue
-            m = _ORDER.search(_normalise(lit))
             out.append((str(path.relative_to(root)), node.lineno,
-                        " ".join(m.group(1).split()) if m else "", lit))
+                        _own_order(lit), lit))
     return out
 
 
@@ -589,9 +625,7 @@ def _split_paged_in(src: str) -> list[tuple[int, str]]:
                else ast.get_source_segment(src, arg) or "")
         if not isinstance(lit, str) or "SELECT" not in lit.upper():
             continue
-        m = _ORDER.search(_normalise(lit))
-        order = (" ".join(m.group(1).split()).strip().strip('"\'') if m else "")
-        out.append((arg.lineno, order, lit))
+        out.append((arg.lineno, _own_order(lit), lit))
     return [(ln, o) for ln, o, _l in out]
 
 
@@ -626,10 +660,8 @@ def _split_paging_queries() -> list[tuple[str, int, str, str]]:
                    else ast.get_source_segment(src, arg) or "")
             if not isinstance(lit, str) or "SELECT" not in lit.upper():
                 continue
-            m = _ORDER.search(_normalise(lit))
-            order = (" ".join(m.group(1).split()).strip().strip("\"'")
-                     if m else "")
-            out.append((str(path.relative_to(root)), arg.lineno, order, lit))
+            out.append((str(path.relative_to(root)), arg.lineno,
+                        _own_order(lit), lit))
     return tuple(out)
 
 

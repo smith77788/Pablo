@@ -2935,7 +2935,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
                WHERE mb.added_by = $1 AND bu.user_id > 0
-               ORDER BY bu.first_seen DESC NULLS LAST, bu.user_id DESC
+               ORDER BY bu.first_seen DESC NULLS LAST, bu.user_id DESC,
+                        bu.bot_id DESC
                LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request))
         total = await _safe_count(pool,
             """SELECT COUNT(*) FROM bot_users bu

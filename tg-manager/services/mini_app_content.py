@@ -790,7 +790,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 "       bu.first_name, bu.last_name, bu.username "
                 "FROM bot_user_facts f "
                 "LEFT JOIN bot_users bu ON bu.bot_id = f.bot_id AND bu.user_id = f.user_id "
-                "WHERE f.bot_id=$1 ORDER BY f.updated_at DESC, f.user_id, f.fact_key "
+                "WHERE f.bot_id=$1 "
+                "ORDER BY f.updated_at DESC, f.user_id, f.fact_key, f.id "
                 "LIMIT $2 OFFSET $3",
                 bot_id, _list_limit(request, 100, 2000), _list_offset(request),
             )
