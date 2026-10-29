@@ -393,3 +393,122 @@ def test_a_live_operation_keeps_the_whole_pacing_pause(ow):
     slept = asyncio.run(ow._pause_watching_for_cancel(
         _Pool("running"), 42, 0.05, "проверка"))
     assert slept == pytest.approx(0.05, abs=1e-6)
+
+
+# ── ТРЕТЬЯ ПЕРЕПИСЬ: пауза, собранная из многих коротких снов ─────────────────
+#
+# Две переписи выше спрашивают про ОДИН сон: длинный по значению или длинный по
+# имени. Но минуты набираются и иначе: `for _ in range(30): await
+# asyncio.sleep(5)` — каждый сон короткий, ни одна из двух переписей его не
+# выберет, а операция глуха к отмене две с половиной минуты. Это второй СПОСОБ
+# сделать то же самое, и выборка, названная через «длинный сон», его не видит
+# (см. CLAUDE.md «У переписи два вопроса»).
+#
+# На сегодня таких циклов в слое НЕТ ни одного — и это проверенный ноль, а не
+# молчание сломанного измерителя: ниже стоят самопроверки на заведомо больном,
+# заведомо здоровом и заведомо коротком примере. Храповик держит ноль.
+_LOOP_TOTAL_S = 60.0
+_CANCEL_AWARE = ("_is_cancelled", "stop_requested", "cancellable_pause",
+                 "is_cancelled", "_pause_watching_for_cancel",
+                 "bounded_flood_sleep")
+
+
+def _countable(node: ast.AST) -> float | None:
+    """Длина, если её видно по тексту. Непосчитанное — не находка."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if isinstance(node, ast.Call) and ast.unparse(node.func) in (
+            "random.uniform", "random.randint"):
+        vals = [_countable(a) for a in node.args]
+        if vals and all(v is not None for v in vals):
+            return max(vals)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        a, b = _countable(node.left), _countable(node.right)
+        if a is not None and b is not None:
+            return a * b
+    return None
+
+
+def _sleepy_loops(src: str) -> list[tuple[int, float]]:
+    """Циклы с СЧИТАЕМЫМ числом итераций, спящие суммарно долго без отмены.
+
+    Число итераций берём только из литерального `range(...)`: `while True`
+    фонового демона — не находка, его сон законен и прерывается отменой задачи.
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    out: list[tuple[int, float]] = []
+    for loop in ast.walk(tree):
+        if not isinstance(loop, (ast.For, ast.AsyncFor, ast.While)):
+            continue
+        whole = ast.unparse(loop)
+        if "sleep" not in whole or any(k in whole for k in _CANCEL_AWARE):
+            continue
+        iters = None
+        if isinstance(loop, (ast.For, ast.AsyncFor)) and isinstance(loop.iter, ast.Call) \
+                and ast.unparse(loop.iter.func) == "range":
+            vals = [_countable(a) for a in loop.iter.args]
+            if len(vals) == 1 and vals[0] is not None:
+                iters = vals[0]
+            elif len(vals) == 2 and all(v is not None for v in vals):
+                iters = vals[1] - vals[0]
+        if iters is None:
+            continue
+        total = 0.0
+        for n in ast.walk(loop):
+            if isinstance(n, ast.Call) and ast.unparse(n.func).endswith("sleep") \
+                    and n.args:
+                total += _countable(n.args[0]) or 0.0
+        if total * iters >= _LOOP_TOTAL_S:
+            out.append((loop.lineno, total * iters))
+    return out
+
+
+_SICK_LOOP = '''
+async def f():
+    for _ in range(30):
+        await asyncio.sleep(5.0)
+'''
+_LOOP_WITH_A_CANCEL_CHECK = '''
+async def f(pool, op_id):
+    for _ in range(30):
+        if await _is_cancelled(pool, op_id):
+            break
+        await asyncio.sleep(5.0)
+'''
+_SHORT_LOOP = '''
+async def f():
+    for _ in range(3):
+        await asyncio.sleep(2.0)
+'''
+
+
+def test_the_loop_census_bites():
+    """Измеритель, молчащий на заведомо больном примере, бесполезен."""
+    assert _sleepy_loops(_SICK_LOOP), (
+        "тридцать снов по пять секунд — две с половиной минуты глухоты, "
+        "а перепись их не видит")
+
+
+def test_the_loop_census_spares_a_loop_that_checks_the_cancel():
+    assert not _sleepy_loops(_LOOP_WITH_A_CANCEL_CHECK)
+
+
+def test_the_loop_census_spares_a_short_loop():
+    assert not _sleepy_loops(_SHORT_LOOP)
+
+
+def test_no_loop_waits_out_the_cancel_in_small_steps():
+    import glob
+    offenders = {}
+    for path in sorted(glob.glob(os.path.join(ROOT, "services", "*.py"))):
+        with open(path, encoding="utf-8") as f:
+            found = _sleepy_loops(f.read())
+        if found:
+            offenders[os.path.basename(path)] = found
+    assert not offenders, (
+        "цикл копит минуты короткими снами и ни разу не смотрит на отмену: "
+        f"{offenders}. Остановка операции владельцем будет ждать его до конца. "
+        "Поставьте проверку отмены в голову цикла или cancellable_pause")
