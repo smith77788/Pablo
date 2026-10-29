@@ -6067,7 +6067,13 @@ async def _exec_bulk_bot_edit(
     }
     method = field_to_method.get(field)
     if not method:
-        return {"status": "skipped", "reason": f"Unknown field: {field}"}
+        # Отказ ДО работы, и он обязан называться словом из op_status: «skipped»
+        # для classify_final — незнакомое слово, которое оно молча игнорирует и
+        # при пустых счётчиках выдаёт done, то есть владелец видел отказ как
+        # выполненную операцию. Предохранитель этот отказ не считает сбоем сам:
+        # признак конфигурационного отказа — пустые ok/failed.
+        return {"status": "failed",
+                "summary": f"⚠️ Неизвестное поле для правки ботов: {field}"}
 
     # Parse commands for field=commands: "/cmd - description" format
     commands_payload: list | None = None
@@ -9704,7 +9710,9 @@ async def _exec_global_presence_bot(
                 "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
                 plan_id,
             )
-            return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id}
+            return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id,
+                    "summary": "✅ План присутствия уже выполнен — "
+                               "новых ботов создавать не нужно"}
 
         await _safe_execute(
                 pool,
