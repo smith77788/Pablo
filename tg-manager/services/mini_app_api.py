@@ -7762,12 +7762,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         _seen_order: deque[int] = deque()
 
         async def fetch_completed_ops() -> list:
+            # `partial` — терминальный исход недоведённой работы (op_status.py), и
+            # именно он требует от владельца решения. В этом потоке его не было:
+            # операция, закрытая «частично», не давала ни плашки итога, ни
+            # быстрых действий, ни перечитывания списка — она просто исчезала из
+            # прогресса, а итог доходил только в чат бота. Плашка на неполном
+            # исходе уже верна: `ok = status === 'done'`, то есть ⚠️ и «Повторить».
             try:
                 rows = await pool.fetch(
                     """SELECT id, op_type, COALESCE(label, op_type) AS label,
                               total_items, done_items, status, error_msg,
                               COALESCE(result->>'summary', result->>'reason') AS summary
-                       FROM operation_queue WHERE owner_id=$1 AND status IN ('done','failed')
+                       FROM operation_queue WHERE owner_id=$1
+                         AND status IN ('done','partial','failed')
                          AND finished_at > now() - make_interval(mins => 30)
                        ORDER BY finished_at DESC LIMIT 20""",
                     uid)
