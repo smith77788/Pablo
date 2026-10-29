@@ -13718,6 +13718,11 @@ async function saveTpl() {
 // молчать: публикация необратима.
 // ── Короткие ссылки («bit.ly для себя») ────────────────────────────────────
 let LNK_BASE = '';
+// Страница ссылок доклеивается смещением: было сто без всякой подписи, и
+// ссылка за сотой не открывалась ничем — ни выключить, ни удалить, ни QR.
+let LNK_ROWS = [], LNK_OFFSET = 0, LNK_TOTAL = 0;
+
+async function lnkLoadMore() { LNK_OFFSET = LNK_ROWS.length; await lnkLoad(true); }
 
 function openLinks() {
   push('s-links');
@@ -13797,19 +13802,29 @@ function lnkRenderResult(r) {
   box.innerHTML=html; box.style.display='block';
 }
 
-async function lnkLoad() {
+async function lnkLoad(keep) {
   const list=document.getElementById('lnkList'); if(!list) return;
+  if(!keep){ LNK_ROWS=[]; LNK_OFFSET=0; }
   try {
-    const r=await api('/api/miniapp/links');
+    const r=await api('/api/miniapp/links?limit=100&offset='+LNK_OFFSET);
     LNK_BASE=r.base||LNK_BASE;
     const bl=document.getElementById('lnkBase'); if(bl) bl.textContent=_lnkBaseLabel(LNK_BASE);
-    lnkRenderList(r.links||[]);
+    const _page=listOf(r,'links');
+    LNK_ROWS = LNK_OFFSET ? LNK_ROWS.concat(_page) : _page;
+    LNK_TOTAL = totalOf(r, LNK_ROWS);
+    lnkRenderList(LNK_ROWS);
   } catch(e){ list.innerHTML='<div style="padding:14px;opacity:.6;font-size:13px">Не удалось загрузить: '+_lnkEsc(errRu(e,'ошибка'))+'</div>'; }
 }
 
 function lnkRenderList(items) {
   const list=document.getElementById('lnkList');
-  const cnt=document.getElementById('lnkCount'); if(cnt) cnt.textContent=items.length?('· '+items.length):'';
+  // Число рядом с заголовком — сколько ссылок ВСЕГО, а не сколько влезло на
+  // страницу: длина страницы, выданная за итог, прятала остальные.
+  const cnt=document.getElementById('lnkCount');
+  if(cnt) cnt.textContent = items.length
+    ? ('· ' + (LNK_TOTAL > items.length
+        ? num(items.length) + ' из ' + num(LNK_TOTAL) : num(LNK_TOTAL || items.length)))
+    : '';
   if(!items.length){ list.innerHTML='<div style="padding:14px;opacity:.6;font-size:13px">Пока ссылок нет — создайте первую выше.</div>'; return; }
   let html='';
   for(const it of items){
@@ -13834,6 +13849,7 @@ function lnkRenderList(items) {
     html+='<button class="btn btn-s" onclick="lnkDelete(\''+c+'\')" title="Удалить">🗑</button>';
     html+='</div></div>';
   }
+  html += moreBtn(items.length, LNK_TOTAL, 'lnkLoadMore()');
   list.innerHTML=html;
 }
 

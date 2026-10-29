@@ -7940,11 +7940,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        items = await _lnk.list_for_owner(pool, uid)
+        lim = _list_limit(request, 100, 500)
+        off = _list_offset(request)
+        items = await _lnk.list_for_owner(pool, uid, limit=lim, offset=off)
+        total = await _lnk.count_for_owner(pool, uid)
         base = _short_base(request)
         for it in items:
             it["short_url"] = f"{base}/{it['code']}"
-        return _json_resp({"links": items, "base": base})
+        return _json_resp({"links": items, "base": base, "total": total,
+                           "page": {"limit": lim, "offset": off,
+                                    "has_more": off + len(items) < total}})
 
     async def links_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
