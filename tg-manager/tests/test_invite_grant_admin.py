@@ -7,6 +7,7 @@ promote_all_admins через operation_bus (прогресс/отмена/ге�
 from __future__ import annotations
 
 import inspect
+import pathlib
 import re
 from pathlib import Path
 
@@ -35,11 +36,30 @@ def test_grant_admin_route_registered():
     assert 'app.router.add_post("/api/miniapp/invite/grant_admin", invite_grant_admin)' in _src()
 
 
+def _grant_path() -> str:
+    """Обработчик плюс то, что несёт выборку кандидатов.
+
+    Выборка кандидатов в промоутеры была скопирована в двух обработчиках и
+    сведена в `_promoter_candidates` с общим условием `_PROMOTER_WHERE`. Тест,
+    привязанный к тексту ВНУТРИ обработчика, покраснел на переносе, хотя скоуп
+    владельца никуда не девался, — проверяется путь целиком.
+    """
+    from tests.miniapp_source import py_function
+
+    body = py_function("services/mini_app_invite.py", "invite_grant_admin")
+    assert "_promoter_candidates(" in body, (
+        "обработчик больше не берёт кандидатов общим помощником: проверьте, "
+        "откуда теперь приходит выборка, и перепривяжите проверку к ней")
+    helper = py_function("services/mini_app_invite.py", "_promoter_candidates")
+    whole = (pathlib.Path(__file__).resolve().parents[1]
+             / "services" / "mini_app_invite.py").read_text(encoding="utf-8")
+    m = re.search(r"_PROMOTER_WHERE = \((.*?)\)\n", whole, re.DOTALL)
+    assert m, "общее условие выборки кандидатов не найдено"
+    return body + "\n" + helper + "\n" + m.group(1)
+
+
 def test_grant_admin_submits_operation_via_bus():
-    src = _src()
-    m = re.search(r"async def invite_grant_admin\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
-    assert m, "invite_grant_admin handler not found"
-    body = m.group(1)
+    body = _grant_path()
     assert "if not uid" in body and "401" in body
     assert "owner_id=$1" in body, "скоуп по владельцу (не чужие аккаунты)"
     # Права аккаунтов проверяются общим параллельным сканом (_scan_admin_status),
