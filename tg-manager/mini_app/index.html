@@ -6318,7 +6318,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="filterDeals('lead',this)" id="dealFilterLead">Лид</button>
       <button class="btn btn-s" onclick="filterDeals('contact',this)" id="dealFilterContact">Контакт</button>
       <button class="btn btn-s" onclick="filterDeals('proposal',this)" id="dealFilterProposal">Предложение</button>
+      <button class="btn btn-s" onclick="filterDeals('negotiation',this)" id="dealFilterNegotiation">Переговоры</button>
       <button class="btn btn-s" onclick="filterDeals('won',this)" id="dealFilterWon">Выиграно</button>
+      <button class="btn btn-s" onclick="filterDeals('lost',this)" id="dealFilterLost">Проиграно</button>
     </div>
     <div class="lst" id="dealList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -24072,18 +24074,31 @@ async function submitParser() {
 }
 
 // ── CRM Deals ──────────────────────────────────────────
-let DEALS_DATA = [], DEALS_FILTER = null;
+let DEALS_DATA = [], DEALS_FILTER = null, DEALS_OFFSET = 0;
 const STAGE_LABELS = {lead:'🎯 Лид',contact:'📞 Контакт',proposal:'📄 Предложение',negotiation:'🤝 Переговоры',won:'✅ Выиграно',lost:'❌ Проиграно'};
 async function openCRMDeals() {
   DEALS_FILTER = null;
   push('s-crmdeals');
   loadDeals();
 }
-async function loadDeals() {
-  txt('dealList','<div class="spin-wrap"><div class="spin"></div></div>');
+// Пятьдесят сделок были потолком, а не страницей: сделка пятьдесят первая не
+// открывалась никак, шапка писала «50 сделок» при сотне, а чипы над списком
+// считают всю воронку и показывали настоящее число над обрезанным списком.
+// Теперь потолок растёт по нажатию, а число в шапке — серверное.
+async function loadDeals(more) {
+  // Страница доклеивается к показанному, а не растит потолок: потолок рано или
+  // поздно упирается в серверный предел, и тогда кнопка обещает продолжение,
+  // которого не будет. Со смещением «Показать ещё» исчезает ровно там, где
+  // список закончился, на любом числе сделок.
+  if (!more) { DEALS_OFFSET = 0; DEALS_DATA = [];
+    txt('dealList','<div class="spin-wrap"><div class="spin"></div></div>'); }
   try {
-    const d = await api('/api/miniapp/crm/deals'+(DEALS_FILTER?'?stage='+DEALS_FILTER:''));
-    DEALS_DATA = d.deals||[];
+    const d = await api('/api/miniapp/crm/deals?limit=50&offset='+DEALS_OFFSET
+                        +(DEALS_FILTER?'&stage='+DEALS_FILTER:''));
+    const dealsPage = listOf(d,'deals');
+    DEALS_DATA = more ? DEALS_DATA.concat(dealsPage) : dealsPage;
+    DEALS_OFFSET = DEALS_DATA.length;
+    const dealsTotal = totalOf(d, DEALS_DATA);
     // Summary bar
     const sum = d.summary||{};
     const stages = ['lead','contact','proposal','negotiation','won','lost'];
@@ -24091,7 +24106,7 @@ async function loadDeals() {
       const c = sum[s]?.count||0;
       return c>0?`<div class="kpi-card" style="min-width:70px;text-align:center"><div style="font-size:16px;font-weight:700">${c}</div><div style="font-size:10px;color:var(--hint)">${STAGE_LABELS[s].split(' ')[1]||s}</div></div>`:''
     }).join(''));
-    txt('m-deal-cnt', DEALS_DATA.length+' сделок');
+    txt('m-deal-cnt', dealsTotal+' сделок');
     if (!DEALS_DATA.length) {
       // Под выбранным этапом сделок нет — это НЕ «сделок нет вообще». Предлагать
       // здесь «создайте первую» значит врать человеку, у которого их сорок на
@@ -24109,8 +24124,8 @@ async function loadDeals() {
       return `<div class="row">
         <div class="row-ico" style="background:var(--bg-green-16)">💼</div>
         <div class="row-body">
-          <div class="row-name">${esc(d2.title)}</div>
-          <div class="row-val">${STAGE_LABELS[d2.stage]||d2.stage}${d2.contact?' · '+esc(d2.contact):''}${d2.value?` · $${d2.value.toFixed(0)}`:''}</div>
+          <div class="row-name">${esc(d2.title||'Сделка без названия')}</div>
+          <div class="row-val">${esc(STAGE_LABELS[d2.stage]||d2.stage||'этап не указан')}${d2.contact?' · '+esc(d2.contact):''}${d2.value?` · $${d2.value.toFixed(0)}`:''}</div>
           <div class="row-val" style="color:var(--hint)">${ago(d2.updated_at)}</div>
         </div>
         <div class="row-right" style="display:flex;gap:5px;flex-direction:column">
@@ -24118,8 +24133,8 @@ async function loadDeals() {
           <button class="btn btn-d" style="padding:4px 8px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id}, this)" aria-label="Удалить">✕</button>
         </div>
       </div>`;
-    }).join(''));
-  } catch(e) { txt('dealList', empty('⚠️','Ошибка',errRu(e))); }
+    }).join('') + moreBtn(DEALS_DATA.length, dealsTotal, 'loadDeals(1)'));
+  } catch(e) { txt('dealList', errHtml(errRu(e),'loadDeals()')); }
 }
 function filterDeals(stage, btn) {
   DEALS_FILTER = stage;
