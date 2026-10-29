@@ -1023,11 +1023,18 @@ def _reject_proxy_reason(purl: str) -> str | None:
     return None
 
 
-def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
+PROXY_IMPORT_BATCH = 500   # сколько прокси сервер берёт за один запрос
+
+
+def _collect_valid_proxies(
+        raw: str, limit: int = PROXY_IMPORT_BATCH) -> tuple[list[str], int, int]:
     """Разобрать вставленный список прокси для массового импорта.
 
     Возвращает (уникальные валидные URL в порядке появления, число пропущенных
-    невалидных). Правила (паритет с add_proxy + защита): пустые строки не
+    невалидных, число непустых строк ЗА потолком). Третье число раньше не
+    считалось вовсе: вставка на 800 прокси добавляла первые 500, экран говорил
+    «Добавлено: 500» и очищал поле — остальные 300 пропадали без следа, и узнать
+    о них владельцу было негде. Правила (паритет с add_proxy + защита): пустые строки не
     считаются; длиннее 500 символов, loopback/внутренние адреса и неподдержанные
     схемы — пропускаются (skipped); дубли в пределах вставки схлопываются по
     детерминированному proxy_fingerprint (тот же ключ, что у одиночного добавления
@@ -1039,7 +1046,9 @@ def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
     skipped = 0
     seen: set[str] = set()
     out: list[str] = []
-    for line in _re.split(r"[\n,;]+", raw or ""):
+    overflow = 0
+    _parts = _re.split(r"[\n,;]+", raw or "")
+    for _i, line in enumerate(_parts):
         purl = line.strip()
         if not purl:
             continue
@@ -1052,8 +1061,9 @@ def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
         seen.add(fp)
         out.append(purl)
         if len(out) >= limit:
+            overflow = sum(1 for _r in _parts[_i + 1:] if _r.strip())
             break
-    return out, skipped
+    return out, skipped, overflow
 
 
 # Единый источник фильтров parsed_audiences (парсер-вью + инвайт + DM) —
@@ -5550,8 +5560,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.warning("rehab_overview uid=%d", uid, exc_info=True)
             counts = {"in_progress": 0, "freed": 0, "stuck": 0, "gone": 0, "by_phase": {}}
-        return _json_resp({"ok": True, **counts,
-                           "accounts": await _rh.list_for_owner(pool, uid)})
+        lim = _list_limit(request, 100, 500)
+        off = _list_offset(request)
+        accounts = await _rh.list_for_owner(pool, uid, limit=lim, offset=off)
+        # Итог берём из той же сводки, что и плитки сверху — лишнего запроса не
+        # нужно: `by_phase` считает ВСЕ строки реабилитации. Если сводка не
+        # получилась, итог не меньше того, что уже на экране.
+        total = max(sum(int(v) for v in (counts.get("by_phase") or {}).values()),
+                    off + len(accounts))
+        return _json_resp({"ok": True, **counts, "accounts": accounts,
+                           "total": total,
+                           "page": {"limit": lim, "offset": off,
+                                    "has_more": off + len(accounts) < total}})
 
     async def rehab_action(request: web.Request) -> web.Response:
         """Ручное управление восстановлением одного аккаунта.

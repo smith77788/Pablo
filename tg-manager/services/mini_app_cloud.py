@@ -26,8 +26,8 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты Telegram-облака на приложении мини-аппа."""
     from services.mini_app_api import (
         _BAD_BODY, _INTERNAL_ERROR, _cloud_safe_name, _content_disposition, _err,
-        _get_uid, _is_admin, _json_resp, log, read_upload, read_upload_text,
-        bad_body_response,
+        _get_uid, _is_admin, _json_resp, _list_limit, _list_offset, log,
+        read_upload, read_upload_text, bad_body_response,
     )
 
     async def _read_upload(part, max_bytes: int) -> bytes:
@@ -68,7 +68,10 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             from services import tg_cloud
-            files = await tg_cloud.list_files(pool, uid)
+            lim = _list_limit(request, 200, 500)
+            off = _list_offset(request)
+            files = await tg_cloud.list_files(pool, uid, limit=lim, offset=off)
+            total = await tg_cloud.count_files(pool, uid)
             for f in files:
                 try:
                     dur = await tg_cloud.file_durability(pool, int(f['id']))
@@ -76,7 +79,10 @@ def setup_routes(app: web.Application, pool) -> None:
                     f['target_replicas'] = dur['target']
                 except Exception:
                     f['min_replicas'] = None
-            return _json_resp({'files': files, 'target_replicas': tg_cloud.REPLICAS})
+            return _json_resp({'files': files, 'total': total,
+                               'target_replicas': tg_cloud.REPLICAS,
+                               'page': {'limit': lim, 'offset': off,
+                                        'has_more': off + len(files) < total}})
         except Exception:
             log.exception("cloud_list")
             return _err(_INTERNAL_ERROR, 500)

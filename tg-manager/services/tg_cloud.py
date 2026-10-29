@@ -208,12 +208,27 @@ class AccessDenied(Exception):
 
 
 # ── Манифест ──────────────────────────────────────────────────────────────────
-async def list_files(pool, owner_id: int, *, limit: int = 200) -> list[dict]:
+async def list_files(pool, owner_id: int, *, limit: int = 200,
+                     offset: int = 0) -> list[dict]:
+    """Страница файлов владельца. `id DESC` уникален, ничьих тут нет.
+
+    Потолок стоял только тут, в значении по умолчанию, и экран брал ровно то,
+    что пришло: двести первый файл нельзя было ни скачать, ни удалить, ни
+    починить ему копии — а щит «⚠️ кусок недоступен» показывается в строке, то
+    есть про недоступный кусок владелец бы и не узнал.
+    """
     rows = await pool.fetch(
         "SELECT id, name, size_bytes, chunk_count, sha256, status, created_at "
-        "FROM tg_cloud_files WHERE owner_id=$1 ORDER BY id DESC LIMIT $2",
-        owner_id, max(1, min(1000, limit)))
+        "FROM tg_cloud_files WHERE owner_id=$1 ORDER BY id DESC "
+        "LIMIT $2 OFFSET $3",
+        owner_id, max(1, min(1000, limit)), max(0, int(offset or 0)))
     return [dict(r) for r in rows]
+
+
+async def count_files(pool, owner_id: int) -> int:
+    """Сколько файлов всего — чтобы экран не выдавал длину страницы за их число."""
+    return int(await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_cloud_files WHERE owner_id=$1", owner_id) or 0)
 
 
 async def get_file(pool, owner_id: int, file_id: int) -> dict | None:

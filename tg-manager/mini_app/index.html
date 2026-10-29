@@ -14859,16 +14859,48 @@ async function checkProxyIsolation() {
     box.innerHTML = h;
   } catch(e) { box.innerHTML = '<div class="err-msg-txt">⚠️ '+esc(errRu(e,'Ошибка'))+'</div>'; }
 }
+// Сервер берёт за один запрос не больше PROXY_IMPORT_BATCH строк (500), и
+// потолок стоял в значении по умолчанию его разборщика, а не в тексте ручки.
+// Вставка на 800 прокси добавляла первые 500, экран говорил «Добавлено: 500»
+// и очищал поле — остальные 300 пропадали совсем. Теперь отправляем пачками
+// поменьше серверной, называем общий итог, а неотправленное оставляем в поле.
+const PROXY_IMPORT_CHUNK = 400;
 async function submitProxyImport() {
-  const raw = document.getElementById('proxyImport').value.trim();
+  const el = document.getElementById('proxyImport');
+  const raw = (el.value || '').trim();
   if (!raw) { toast('❗ Вставьте список прокси'); return; }
+  const lines = raw.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+  const chunks = [];
+  for (let i = 0; i < lines.length; i += PROXY_IMPORT_CHUNK)
+    chunks.push(lines.slice(i, i + PROXY_IMPORT_CHUNK));
+  let added = 0, skipped = 0, dup = 0, done = 0, lost = 0;
   try {
-    const r = await api('/api/miniapp/proxies/import', {method:'POST', body:JSON.stringify({proxies:raw})});
-    toast(`✅ Добавлено: ${r.added}${r.skipped?' · пропущено: '+r.skipped:''}`);
-    document.getElementById('proxyImport').value='';
-    toggleProxyImport();
-    loadProxies();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
+    for (let i = 0; i < chunks.length; i++) {
+      if (chunks.length > 1) toast(`⏳ Пачка ${i + 1} из ${chunks.length} · прокси: ${num(lines.length)}`);
+      const r = await api('/api/miniapp/proxies/import',
+        {method:'POST', body:JSON.stringify({proxies: chunks[i].join('\n')})});
+      added += r.added || 0; skipped += r.skipped || 0; dup += r.duplicates || 0;
+      done = i + 1;
+      // Сервер снизил пачку ниже нашей — остаток этой пачки не ушёл, и дальше
+      // идти нельзя: иначе снова потеряем строки молча.
+      if (r.overflow > 0) { lost = r.overflow; break; }
+    }
+  } catch(e) {
+    toast('⚠️ '+errRu(e,'Ошибка').substring(0,60));
+  }
+  // Что не ушло — остаётся в поле: иначе повторить было бы нечем.
+  const sent = done * PROXY_IMPORT_CHUNK - lost;
+  const left = lines.slice(Math.max(0, sent));
+  el.value = left.join('\n');
+  if (added || skipped || dup) {
+    let msg = `✅ Добавлено: ${num(added)}`;
+    if (dup) msg += ` · уже были: ${num(dup)}`;
+    if (skipped) msg += ` · не прокси: ${num(skipped)}`;
+    if (left.length) msg += ` · осталось в поле: ${num(left.length)}`;
+    toast(msg);
+  }
+  if (!left.length) toggleProxyImport();
+  loadProxies();
 }
 
 // Выпадашки назначения прокси показывали серверный срез как весь парк: прокси
@@ -19477,12 +19509,25 @@ function _cloudIcon(name) {
 }
 let _CLOUD_FILES = {};   // id → запись файла (имя берём отсюда, без экранирования в onclick)
 
-async function cloudRefreshList() {
+// Файлы приходили одной страницей по двести, и потолок стоял в значении по
+// умолчанию движка. Двести первый файл нельзя было ни скачать, ни удалить, ни
+// починить ему копии — а щит «⚠️ кусок недоступен» живёт в строке, то есть про
+// недоступный кусок владелец бы и не узнал.
+let CLD_ROWS = [], CLD_OFFSET = 0, CLD_TOTAL = 0;
+async function cloudLoadMore() {
+  CLD_OFFSET = CLD_ROWS.length;
+  await cloudRefreshList(true);
+}
+async function cloudRefreshList(keep) {
   const box = document.getElementById('cloudFiles');
   if (!box) return;
+  if (!keep) { CLD_ROWS = []; CLD_OFFSET = 0; CLD_TOTAL = 0; }
   try {
-    const d = await api('/api/miniapp/cloud/files');
-    const files = d.files || [];
+    const d = await api('/api/miniapp/cloud/files?limit=200&offset=' + CLD_OFFSET);
+    const _page = listOf(d, 'files');
+    CLD_ROWS = CLD_OFFSET ? CLD_ROWS.concat(_page) : _page;
+    CLD_TOTAL = totalOf(d, CLD_ROWS);
+    const files = CLD_ROWS;
     _CLOUD_FILES = {};
     files.forEach(f => { _CLOUD_FILES[f.id] = f; });
     if (!files.length) { box.innerHTML = empty('☁️','Пока пусто','Загрузите первый файл кнопкой выше'); return; }
@@ -19510,7 +19555,8 @@ async function cloudRefreshList() {
         <button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudSave(${f.id})" title="Сохранить">⬇️</button>
         <button class="btn btn-s" style="padding:6px 10px;font-size:12px;color:var(--red)" onclick="cloudDelete(${f.id})" title="Удалить">🗑</button>
       </div>`;
-    }).join('');
+    }).join('')
+      + moreBtn(files.length, CLD_TOTAL, 'cloudLoadMore()');   // «Показать ещё · N из M»
   } catch (e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Ошибка'))}</div>`; }
 }
 
@@ -22833,12 +22879,25 @@ const REHAB_COLOR = {appeal:'var(--blue,#3b82f6)', warming:'var(--green)',
                      recheck:'var(--blue,#3b82f6)', freed:'var(--green)',
                      stuck:'var(--orange,#f59e0b)', gone:'var(--hint)',
                      off:'var(--hint)'};
-async function openRehab() {
-  push('s-rehab');
-  txt('rehabStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('rehabList','');
+// Список реабилитации приходил одной страницей по сто, и потолок стоял в
+// значении по умолчанию движка (`list_for_owner(pool, owner_id, limit=100)`).
+// Кнопки ⏩/⏹/🔁 живут в строке: при волне блокировок аккаунт за сотым нельзя
+// было ни поторопить, ни остановить, а плитка сверху при этом честно писала
+// «Восстанавливаются: 143» над списком из ста.
+let RHB_ROWS = [], RHB_OFFSET = 0, RHB_TOTAL = 0;
+async function rehabLoadMore() {
+  RHB_OFFSET = RHB_ROWS.length;
+  await openRehab(true);
+}
+async function openRehab(keep) {
+  if (!keep) {
+    push('s-rehab');
+    txt('rehabStats','<div class="spin-wrap"><div class="spin"></div></div>');
+    txt('rehabList','');
+    RHB_ROWS = []; RHB_OFFSET = 0; RHB_TOTAL = 0;
+  }
   try {
-    const d = await api('/api/miniapp/rehab');
+    const d = await api('/api/miniapp/rehab?limit=100&offset=' + RHB_OFFSET);
     // «Возвращены» и «Нужен разбор» — это срезы списка аккаунтов, а не просто
     // цифры. «Восстанавливаются» никуда не ведёт нарочно: их список прямо ниже.
     txt('rehabStats',`
@@ -22847,7 +22906,10 @@ async function openRehab() {
       <div class="kpi-card tap-card" onclick="healthGoAccounts('spamblock','')" role="button" tabindex="0"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(d.stuck||0)}</div><div class="kpi-lbl">Нужен разбор ›</div></div>
     `);
     txt('m-rehab-val', (d.in_progress||0) ? `${d.in_progress} в работе${(d.stuck||0)?' · '+d.stuck+' ⚠️':''}` : ((d.stuck||0)?`${d.stuck} ждут разбора`:'нет ограниченных'));
-    const accs = d.accounts||[];
+    const _page = listOf(d, 'accounts');
+    RHB_ROWS = RHB_OFFSET ? RHB_ROWS.concat(_page) : _page;
+    RHB_TOTAL = totalOf(d, RHB_ROWS);
+    const accs = RHB_ROWS;
     if (!accs.length) { txt('rehabList', empty('🩹','Восстанавливать некого',
       'Ни один аккаунт не под спам-блоком — это хорошая новость',
       {label:'📱 К аккаунтам', fn:"healthGoAccounts('all','')"})); return; }
@@ -22871,7 +22933,7 @@ async function openRehab() {
           ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')" aria-label="Повторить шаг">🔁</button>`:''}
         </div>
       </div>`;
-    }).join(''));
+    }).join('') + moreBtn(accs.length, RHB_TOTAL, 'rehabLoadMore()'));
   } catch(e) {
     txt('rehabStats','');
     txt('rehabList', errHtml(errRu(e), 'openRehab()'));
@@ -25564,8 +25626,22 @@ async function submitDmAdhoc() {
     })});
     toast(`✉️ Рассылка запущена · ${r.recipients} получателей × ${r.accounts} акк. · ~${humanDur(r.eta_seconds||0)} · #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Рассылка в ЛС');
-    document.getElementById('daUsers').value = '';
-    openMassOps();
+    // Подтверждение честно предупреждало «за раз уйдёт только первая 1000 из
+    // 1500» — и поле очищалось, то есть пятьсот оставшихся адресатов исчезали
+    // вместе с текстом, а «следующего раза» взяться было неоткуда. Сервер
+    // присылает их число в `truncated`: оставляем неотправленных в поле.
+    const _sentN = r.recipients || willSend;
+    const _keep = uniq.slice(_sentN);
+    if (r.truncated > 0 && _keep.length) {
+      const _keepSet = new Set(_keep);
+      document.getElementById('daUsers').value = usernames
+        .filter(u => _keepSet.has(u.replace(/^@/,'').toLowerCase()))
+        .join('\n');
+      toast(`📋 Осталось в поле: ${num(_keep.length)} ${plural(_keep.length,'получатель','получателя','получателей')} — отправьте следующей партией`);
+    } else {
+      document.getElementById('daUsers').value = '';
+      openMassOps();
+    }
   } catch(e) { errEl.textContent = errRu(e,'Ошибка'); }
 }
 

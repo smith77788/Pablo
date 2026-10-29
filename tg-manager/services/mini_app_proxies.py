@@ -38,10 +38,11 @@ def setup_routes(app: web.Application, pool) -> None:
     # Общие помощники живут в mini_app_api, а он импортирует этот модуль —
     # импорт сверху дал бы цикл. К моменту вызова mini_app_api уже загружен.
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _apply_proxy_moves, _check_all_proxies_core,
-        _collect_valid_proxies, _csv_resp, _err, _get_uid, _json_resp,
-        _proxy_display_host, _reject_proxy_reason, _safe_count, _safe_fetch,
-        _safe_fetchrow, _safe_fetchval, log, parse_proxy_type,
+        PROXY_IMPORT_BATCH, _INTERNAL_ERROR, _apply_proxy_moves,
+        _check_all_proxies_core, _collect_valid_proxies, _csv_resp, _err,
+        _get_uid, _json_resp, _proxy_display_host, _reject_proxy_reason,
+        _safe_count, _safe_fetch, _safe_fetchrow, _safe_fetchval, log,
+        parse_proxy_type,
     )
     from services.security import validate_integer, validate_string
 
@@ -487,13 +488,14 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось разобрать запрос", 400)
         from services.token_vault import encrypt_token, proxy_fingerprint
         raw = validate_string(body.get("proxies"), max_len=50000) or ""
+        cut_chars = max(0, len(str(body.get("proxies") or "")) - len(raw))
 
         # Валидация/нормализация — в чистой _collect_valid_proxies (тестируется),
         # затем ОДИН bulk-INSERT вместо N round-trip'ов (до 500 строк → до 500
         # запросов). Паритет с add_proxy: шифруем at-rest (encrypt_token) и дедуп
         # по детерминированному proxy_fp — иначе bulk-импорт клал креды прокси в
         # БД ПЛЕЙНТЕКСТОМ и не отсекал дубли, добавленные одиночно.
-        purls, skipped = _collect_valid_proxies(raw)
+        purls, skipped, overflow = _collect_valid_proxies(raw)
         encs = [encrypt_token(p) for p in purls]
         ptypes = [parse_proxy_type(p) for p in purls]
         fps = [proxy_fingerprint(p) for p in purls]
@@ -523,8 +525,13 @@ def setup_routes(app: web.Application, pool) -> None:
                 added = len(rows)
 
         duplicates = len(encs) - added   # прошли валидацию, но уже были в пуле
+        # `overflow` — строки за потолком пачки, `cut_chars` — хвост, который
+        # отрезал validate_string. Раньше ни то, ни другое не называлось, а
+        # экран ещё и очищал поле: вставленное за потолком пропадало совсем.
         return _json_resp({"ok": True, "added": added, "skipped": skipped,
-                           "duplicates": duplicates})
+                           "duplicates": duplicates, "overflow": overflow,
+                           "cut_chars": cut_chars,
+                           "batch": PROXY_IMPORT_BATCH})
 
     async def proxy_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
