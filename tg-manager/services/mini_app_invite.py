@@ -555,6 +555,56 @@ def setup_routes(app: web.Application, pool) -> None:
             uid, int(cid or 0), uname)
         return [int(r["acc_id"]) for r in rows or [] if r.get("acc_id")]
 
+    # Поиск промоутера: кандидаты на живую проверку и честный размер флота.
+    #
+    # Проверка прав дорогая — коннект к Telegram на каждый аккаунт, — поэтому за
+    # один запрос проверяется горсть аккаунтов, иначе шлюз рвёт ответ по
+    # таймауту. Но горсть — это НЕ весь флот, а экран выносил приговор всему
+    # флоту: «ни один из ваших аккаунтов не админ этого чата». Проверялись при
+    # этом восемь аккаунтов с наименьшими id, и владельцу двух сотен аккаунтов
+    # предлагалось сделать админом тот аккаунт, который админом уже был.
+    #
+    # Поэтому кандидата можно назвать прямо (отмеченные в списке аккаунты идут
+    # первыми), а размер флота возвращается отдельным числом: ответ говорит
+    # «проверено 8 из 212» вместо приговора всем.
+    _PROMOTER_SCAN_LIMIT = 8
+    _PROMOTER_WHERE = (
+        "a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
+        "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
+        "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL)")
+
+    async def _promoter_candidates(uid: int, group: str, chosen=None,
+                                   limit: int = _PROMOTER_SCAN_LIMIT):
+        """(строки для живой проверки, сколько аккаунтов всего пригодно).
+
+        Порядок: отмеченные владельцем, затем привязанные к каналу в «Моих
+        каналах» (создатель канала и есть промоутер), затем по id.
+        """
+        picked = [int(x) for x in (chosen or [])]
+        own = await _own_channel_acc_ids(uid, group)
+        # SELECT ... FROM tg_accounts держим ОДНИМ литералом: храповик единой
+        # двери к аккаунту (tests/test_account_selection_single_door.py) видит
+        # только статический SQL, и стоило вынести FROM в переменную — известная
+        # «дверь» пропала из его реестра, то есть выбор аккаунтов перестал
+        # сторожиться вообще. Общим остаётся условие, а не вся строка.
+        rows = await _safe_fetch(
+            pool,
+            "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
+            "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
+            "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p "
+            "ON p.id=a.proxy_id AND p.is_active=TRUE WHERE " + _PROMOTER_WHERE + " "
+            "ORDER BY (a.id = ANY($2::bigint[])) DESC, "
+            "(a.id = ANY($3::bigint[])) DESC, a.id "
+            f"LIMIT {int(limit)}",
+            uid, picked, own) or []
+        fleet = await _safe_count(
+            pool,
+            "SELECT COUNT(*) FROM tg_accounts a LEFT JOIN user_proxies p "
+            "ON p.id=a.proxy_id AND p.is_active=TRUE WHERE " + _PROMOTER_WHERE, uid)
+        return rows, int(fleet or 0)
+
+
     async def invite_rights_check(request: web.Request) -> web.Response:
         """Живая проверка прав ДО запуска: есть ли среди аккаунтов админ ЦЕЛЕВОГО
         чата, способный раздать право приглашать остальным.
@@ -573,23 +623,13 @@ def setup_routes(app: web.Application, pool) -> None:
         if not group:
             return _err("Укажите группу/канал", 400)
         try:
-            rows = await _safe_fetch(pool,
-                "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
-                "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
-                "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
-                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
-                "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
-                "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
-                # Сначала аккаунты, к которым канал привязан в «Моих каналах»:
-                # создатель канала — и есть промоутер. Раньше брались первые
-                # восемь по id, и если владельца среди них не было, а остальные
-                # ещё не вступили, экран говорил «ни один аккаунт не админ».
-                "ORDER BY (a.id = ANY($2::bigint[])) DESC, a.id LIMIT 8",
-                uid, await _own_channel_acc_ids(uid, group)) or []
+            _ids = request.query.get("account_ids") or ""
+            chosen = [int(x) for x in _ids.split(",") if x.strip().isdigit()]
+            rows, fleet = await _promoter_candidates(uid, group, chosen)
             if not rows:
                 return _json_resp({"has_promoter": False, "has_inviter": False,
-                                   "checked": 0, "usable": 0, "promoter_label": None})
+                                   "checked": 0, "usable": 0, "scanned": 0,
+                                   "fleet": fleet, "promoter_label": None})
             has_promoter = has_inviter = False
             promoter_label = None
             checked = 0
@@ -610,6 +650,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 "promoter_label": promoter_label,
                 "checked": checked,
                 "usable": len(rows),
+                # Сколько проверено живьём и сколько аккаунтов всего пригодно:
+                # без второго числа экран выносил приговор всему флоту по горсти.
+                "scanned": len(rows),
+                "fleet": fleet,
             })
         except Exception:
             log.exception("invite_rights_check uid=%d", uid)
@@ -714,17 +758,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not group:
             return _err("Укажите группу/канал", 400)
         try:
-            rows = await _safe_fetch(pool,
-                "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
-                "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
-                "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
-                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
-                "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
-                "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
-                # Владелец канала из «Моих каналов» — первым (см. rights_check).
-                "ORDER BY (a.id = ANY($2::bigint[])) DESC, a.id LIMIT 8",
-                uid, await _own_channel_acc_ids(uid, group)) or []
+            chosen = [int(x) for x in (body.get("account_ids") or [])
+                      if str(x).isdigit()]
+            rows, fleet = await _promoter_candidates(uid, group, chosen)
             if not rows:
                 return _err("Нет доступных аккаунтов", 404)
             promoter = None
@@ -735,11 +771,25 @@ def setup_routes(app: web.Application, pool) -> None:
                     channel_id = int(st["channel_id"])
                     break
             if promoter is None:
+                # Отказ называет, сколько аккаунтов проверено и сколько их всего:
+                # «ни один аккаунт не админ» было неправдой, когда проверялись
+                # восемь из двух сотен, и отправляло владельца делать админом
+                # аккаунт, который админом уже был.
+                _scanned = len(rows)
+                _part = fleet > _scanned
+                msg = (f"Проверено аккаунтов: {_scanned}"
+                       + (f" из {fleet}" if _part else "")
+                       + ". Среди них нет админа этого чата с правом «Назначать "
+                         "администраторов». ")
+                msg += ("Проверены не все: отметьте в списке аккаунт, который админ "
+                        "этого чата, и повторите."
+                        if _part else
+                        "Сделайте один свой аккаунт таким админом в Telegram — "
+                        "тогда я раздам право приглашать остальным.")
                 return _json_resp({
                     "ok": False, "no_promoter": True,
-                    "message": ("Ни один аккаунт не админ этого чата с правом «Назначать "
-                                "администраторов». Сделайте один свой аккаунт таким админом "
-                                "в Telegram — тогда я раздам право приглашать остальным."),
+                    "scanned": _scanned, "fleet": fleet,
+                    "message": msg,
                 })
             op_id = await _obus.submit(
                 pool, uid, "promote_all_admins",
