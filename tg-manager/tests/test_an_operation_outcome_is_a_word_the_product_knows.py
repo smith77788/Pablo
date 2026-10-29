@@ -168,6 +168,26 @@ def _status_words_of_return(fn: ast.AST, node: ast.Return) -> set[str]:
     return words
 
 
+def _partial_by_assignment(fn: ast.AST) -> list[int]:
+    """Строки, где исход правится НА МЕСТЕ: `res["status"] = "partial"`.
+
+    Третья моя правка этой ветки теряла «частично» именно так, и перепись её не
+    видела: она смотрела только на словарь в `return`. Исход, собранный
+    присваиванием в уже готовый результат, — тот же исход.
+    """
+    out = []
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Assign) or not isinstance(n.value, ast.Constant):
+            continue
+        if n.value.value != "partial":
+            continue
+        for t in n.targets:
+            if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant) \
+                    and t.slice.value == "status":
+                out.append(n.lineno)
+    return out
+
+
 def partial_without_counters(src: str) -> list[tuple[str, int]]:
     tree = ast.parse(src)
     out = []
@@ -189,6 +209,23 @@ def partial_without_counters(src: str) -> list[tuple[str, int]]:
             keys = {k.value for k in n.value.keys if isinstance(k, ast.Constant)}
             if not ("ok" in keys and "failed" in keys):
                 out.append((fn.name, n.lineno))
+    # Исход, правленный на месте: счётчик обязан быть поправлен рядом, иначе
+    # classify_final всё равно скажет «выполнено».
+    for fn in tree.body:
+        if not isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        if not fn.name.startswith("_exec_"):
+            continue
+        fixes_the_counter = any(
+            isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Subscript)
+                    and isinstance(t.slice, ast.Constant)
+                    and t.slice.value == "failed" for t in n.targets)
+            for n in ast.walk(fn))
+        if fixes_the_counter:
+            continue
+        for line in _partial_by_assignment(fn):
+            out.append((fn.name, line))
     return sorted(out)
 
 
@@ -230,3 +267,15 @@ def test_the_counter_census_accepts_counters():
                "    return {'status': 'partial', 'ok': 3, 'failed': 1, "
                "'summary': 'часть'}\n")
     assert not partial_without_counters(healthy)
+
+
+def test_the_census_sees_a_status_fixed_in_place():
+    """Исход правят и присваиванием — перепись обязана это видеть."""
+    sick = ("async def _exec_x(pool, op_id):\n"
+            "    res = await inner()\n"
+            "    if left:\n"
+            "        res['status'] = 'partial'\n"
+            "    return res\n")
+    assert partial_without_counters(sick), (
+        "исход, правленный на месте, перепись пропускает — ровно так и "
+        "потерялась третья правка")

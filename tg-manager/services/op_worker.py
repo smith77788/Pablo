@@ -12192,6 +12192,14 @@ async def _exec_network_broadcast(
         res["deferred_bots"] = len(deferred)
         if res.get("status") == "done":
             res["status"] = "partial"
+        # Слово «partial» само до очереди НЕ доходит: исход считает
+        # op_status.classify_final, и считает по счётчикам — при ok>0 и
+        # failed=0 он скажет «выполнено». Пропущенный бот — это непройденная
+        # единица работы, и он обязан попасть в failed. Единица здесь бот, а не
+        # получатель (их считает total_items), поэтому число в сводке даётся
+        # отдельной строкой — счётчик нужен исходу, а владельцу нужна правда о
+        # ботах.
+        res["failed"] = int(res.get("failed") or 0) + len(deferred)
         res["summary"] = (
             f"{res['summary']}\n"
             f"⚠️ Пропущено ботов: {len(deferred)} — их не удалось закрепить за "
