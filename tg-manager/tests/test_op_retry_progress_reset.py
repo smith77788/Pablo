@@ -63,7 +63,10 @@ def test_circuit_release_actually_issues_reset(monkeypatch):
             captured["sql"] = sql
         return "UPDATE 1"
 
-    monkeypatch.setattr(op_worker, "_safe_execute", _fake_execute)
+    # Возврат в очередь — решение о судьбе операции, и он ходит дверью с
+    # повтором (та же причина, что у `_maybe_requeue` ниже): потерянный
+    # возврат оставляет операцию в 'running' и держит слот владельца час.
+    monkeypatch.setattr(op_worker, "_retrying_execute", _fake_execute)
     _run(op_worker._release_op_for_circuit(None, 42, 1800))
     assert "done_items=0" in captured.get("sql", ""), captured
 

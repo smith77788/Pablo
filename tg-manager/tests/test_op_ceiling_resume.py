@@ -81,7 +81,7 @@ async def test_resume_requeues_pending_and_does_not_fail(monkeypatch):
     """_resume_op_over_ceiling возвращает в очередь (pending), не помечает ошибкой."""
     executed = {}
 
-    async def fake_execute(pool, sql, *args, log_ctx=""):
+    async def fake_execute(pool, sql, *args, log_ctx="", **k):
         executed["sql"] = sql
         executed["args"] = args
         return "UPDATE 1"
@@ -96,7 +96,8 @@ async def test_resume_requeues_pending_and_does_not_fail(monkeypatch):
     def fake_metric(name, value=1.0, **labels):
         metric["name"] = name
 
-    monkeypatch.setattr(op_worker, "_safe_execute", fake_execute)
+    # Продолжение после потолка — решение о судьбе операции: дверь с повтором.
+    monkeypatch.setattr(op_worker, "_retrying_execute", fake_execute)
     monkeypatch.setattr(op_worker, "_notify_owner_about_op", fake_notify)
     monkeypatch.setattr(op_worker, "_reliability_metric", fake_metric)
 

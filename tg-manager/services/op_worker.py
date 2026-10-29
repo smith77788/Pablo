@@ -809,7 +809,7 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
     'pending' с scheduled_for = now()+cooldown+буфер: повтор ровно после cooldown,
     без busy-loop (кандидаты уважают scheduled_for) и без фантомного слота."""
     defer = max(int(cooldown_s), 0) + 5
-    await _safe_execute(
+    await _retrying_execute(
         pool,
         # done_items=0: как retry/watchdog-requeue — при повторном прогоне после
         # cooldown исполнитель считает прогресс заново, иначе done копится поверх
@@ -825,6 +825,8 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
         op_id,
         float(defer),
         log_ctx=f"[circuit_release op={op_id}]",
+        where="circuit_release",
+        lost="операция осталась в 'running' и держит слот владельца до сторожа зависших",
     )
 
 
@@ -942,7 +944,7 @@ async def _requeue_op_no_accounts(
                 pool, op_id, owner_id,
                 waited_min=int(waited.total_seconds() // 60), bot=bot)
             return
-    await _safe_execute(
+    await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         # COALESCE: отметку ставит ПЕРВОЕ откладывание и дальше её не сдвигает,
@@ -951,7 +953,10 @@ async def _requeue_op_no_accounts(
         "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(defer_s),
-        log_ctx=f"[requeue_no_acc op={op_id}]")
+        log_ctx=f"[requeue_no_acc op={op_id}]",
+        where="requeue_no_accounts",
+        lost="возврат в очередь по занятому флоту потерян — операция осталась в 'running'",
+    )
 
 
 # Сколько секунд флуд-паузы ещё имеет смысл переждать ПРЯМО В ПРОГОНЕ.
@@ -1633,7 +1638,7 @@ async def _defer_op_for_flood(
     прошлого прогона — класс «done > total».
     """
     delay = max(1, int(wait_s))
-    await _safe_execute(
+    _res = await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         # Часы ожидания флота снимаем: пауза назначена Telegram, а не дефицитом
@@ -1645,7 +1650,18 @@ async def _defer_op_for_flood(
         "last_error=$3, scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(delay), (reason or "")[:300],
-        log_ctx=f"[defer_flood op={op_id}]")
+        log_ctx=f"[defer_flood op={op_id}]",
+        where="defer_flood",
+        lost="отсрочка флуд-паузы потеряна — операция осталась в 'running'",
+    )
+    if str(_res or "").strip() == "ERROR":
+        # Запись не прошла и со второго раза: операция осталась 'running' и
+        # держит слот до сторожа зависших. Отсрочки НЕ случилось — значит ни
+        # счётчика отсрочек (он считает факты, иначе по графику не судить о
+        # системе), ни успокаивающего сообщения владельцу о том, что операция
+        # продолжится сама в назначенный срок. Потеря уже громкая: дверь
+        # решений написала log.error и подняла счётчик потерь.
+        return
     log.warning(
         "op_worker: op=%d отложена на %dс из-за длинной флуд-паузы — слот и аккаунты освобождены",
         op_id, delay,
@@ -1682,7 +1698,7 @@ async def _resume_op_over_ceiling(
     НЕ помечается ошибкой — для владельца это «продолжается», а не «упала».
     """
     delay = _OP_CEILING_RESUME_DELAY_S
-    await _safe_execute(
+    _res = await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         "acct_wait_since=NULL, last_error=$3, "
@@ -1690,7 +1706,16 @@ async def _resume_op_over_ceiling(
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(delay),
         "Длинная операция продолжается со следующего прогона (потолок времени)",
-        log_ctx=f"[ceiling_resume op={op_id}]")
+        log_ctx=f"[ceiling_resume op={op_id}]",
+        where="ceiling_resume",
+        lost="продолжение после потолка прогона потеряно — операция осталась в 'running'",
+    )
+    if str(_res or "").strip() == "ERROR":
+        # Та же причина, что в `_defer_op_for_flood`: продолжения не случилось,
+        # операция осталась 'running'. Считать его состоявшимся и обещать
+        # владельцу «продолжится с того же места» значило бы рассказать о
+        # работе, которой не будет до сторожа зависших.
+        return
     log.info(
         "op_worker: op=%d достигла потолка прогона на здоровом прогрессе "
         "(%d/%d) — возвращена в очередь, продолжит с того же места",
@@ -2493,6 +2518,7 @@ async def _maybe_requeue(
         op_id,
         float(backoff),
         log_ctx=f"[maybe_requeue_update op={op_id}]",
+        where="maybe_requeue",
     )
     if str(res or "").strip() == "ERROR":
         # Запись не прошла даже с повтором — в очередь операция НЕ вернулась.
@@ -2802,7 +2828,7 @@ async def _release_op_for_owner_limit(pool: "asyncpg.Pool", op_id: int) -> None:
     текстом «все аккаунты 20 мин были заняты». Возврат по месту в семафоре —
     новая попытка, а не продолжение ожидания.
     """
-    await _safe_execute(
+    await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         "acct_wait_since=NULL, "
@@ -2811,6 +2837,8 @@ async def _release_op_for_owner_limit(pool: "asyncpg.Pool", op_id: int) -> None:
         op_id,
         float(_OWNER_SEM_DEFER_S),
         log_ctx=f"[owner_sem_release op={op_id}]",
+        where="owner_sem_release",
+        lost="возврат по занятому семафору владельца потерян — фантомный слот на час",
     )
 _owner_sem_lock = asyncio.Lock()
 
