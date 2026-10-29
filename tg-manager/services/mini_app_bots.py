@@ -29,8 +29,8 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import operation_bus as _obus
     from services.mini_app_api import (
         _BOTS_VISIBLE_SQL, _INTERNAL_ERROR, _cached_user, _err, _get_uid,
-        _json_resp, _safe_count, _safe_fetch, _safe_fetchrow, _str_list, _text,
-        _user_can_use_bot, log, schedule_repeat_minutes,
+        _json_resp, _list_limit, _safe_count, _safe_fetch, _safe_fetchrow,
+        _str_list, _text, _user_can_use_bot, log, schedule_repeat_minutes,
     )
     from services.security import (
         escape_html, resolve_url_is_public, validate_bot_token,
@@ -318,10 +318,29 @@ def setup_routes(app: web.Application, pool) -> None:
             bot_id, uid)
         if not own:
             return _err("Бот не найден", 404)
+        # Тридцать ссылок были потолком без признака обрезки: ссылку после
+        # тридцатой нельзя было ни скопировать, ни удалить. А плитки сверху
+        # считались по ЭТОЙ тридцатке и назывались «Ссылок» и «Кликов», то
+        # есть обещали всё: у бота с сорока ссылками обе цифры были неправдой.
+        # Теперь это страница, а итоги считает запрос по всем ссылкам.
+        limit = _list_limit(request, 30, 200)
+        try:
+            offset = max(validate_integer(request.rel_url.query.get("offset", "0"),
+                                          min_val=0, max_val=1000000) or 0, 0)
+        except (ValueError, TypeError):
+            offset = 0
         links = await _safe_fetch(pool,
             """SELECT id, name, start_param, click_count, unique_users, created_at
-               FROM bot_deep_links WHERE bot_id=$1 ORDER BY click_count DESC LIMIT 30""", bot_id)
-        total_clicks = sum(l["click_count"] or 0 for l in links)
+               FROM bot_deep_links WHERE bot_id=$1
+               ORDER BY click_count DESC, id DESC LIMIT $2 OFFSET $3""",
+            bot_id, limit, offset)
+        # Клики и число ссылок — по ВСЕМ ссылкам бота, а не по показанной
+        # странице: иначе плитка «Кликов» падает при пролистывании вниз.
+        totals = await _safe_fetchrow(pool,
+            """SELECT COUNT(*) AS n, COALESCE(SUM(click_count), 0) AS clicks
+               FROM bot_deep_links WHERE bot_id=$1""", bot_id)
+        links_total = int((totals or {}).get("n") or 0)
+        total_clicks = int((totals or {}).get("clicks") or 0)
         referrals = await _safe_count(pool,
             "SELECT COUNT(*) FROM referrals WHERE bot_id=$1", bot_id)
         for ln in links:
@@ -329,6 +348,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 ln["created_at"] = ln["created_at"].isoformat()
         return _json_resp({"links": links, "total_clicks": total_clicks,
                            "referrals": referrals,
+                           "total": links_total,
+                           "page": {"offset": offset, "limit": limit,
+                                    "has_more": offset + len(links) < links_total},
                            "bot_username": own["username"] or ""})
 
     async def create_deeplink(request: web.Request) -> web.Response:

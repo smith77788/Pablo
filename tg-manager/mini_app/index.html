@@ -15660,7 +15660,7 @@ async function openDeeplinks(botId) {
   push('s-deeplinks');
   loadDeeplinks();
 }
-let _DL_ROWS = [];
+let _DL_ROWS = [], _DL_OFFSET = 0;
 let _DL_BOT_UNAME = '';
 // Ссылка — то, ради чего экран и существует: её отдают людям. Экран показывал
 // «?start=promo» и кнопку удаления, а самой ссылки не было нигде.
@@ -15683,24 +15683,33 @@ function dlShare(i) {
   try { if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); return; } } catch(_) {}
   copyToClipboard(u, '🔗 Ссылка скопирована');
 }
-async function loadDeeplinks() {
-  txt('dlList', '<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('dlStats', '');
+async function loadDeeplinks(more) {
+  // Плитки называют ВСЕ ссылки бота, а не показанную страницу: раньше у бота с
+  // сорока ссылками было написано «Ссылок 30», а клики складывались по этим же
+  // тридцати. Страница доклеивается по смещению, поэтому «Показать ещё»
+  // исчезает ровно там, где ссылки закончились.
+  if (!more) { _DL_OFFSET = 0; _DL_ROWS = [];
+    txt('dlList', '<div class="spin-wrap"><div class="spin"></div></div>');
+    txt('dlStats', ''); }
   try {
-    const d = await api('/api/miniapp/bot/'+DL_BOT_ID+'/deeplinks');
-    const links = d.links||[];
+    const d = await api('/api/miniapp/bot/'+DL_BOT_ID+'/deeplinks?limit=30&offset='+_DL_OFFSET);
+    const page = listOf(d,'links');
+    const links = more ? _DL_ROWS.concat(page) : page;
+    const linksTotal = totalOf(d, links);
     _DL_ROWS = links;
+    _DL_OFFSET = links.length;
     _DL_BOT_UNAME = (d.bot_username||'').replace(/^@/,'');
     txt('dlStats', `
-      <div class="kpi-card"><div class="kpi-val">${links.length}</div><div class="kpi-lbl">Ссылок</div></div>
+      <div class="kpi-card"><div class="kpi-val">${num(linksTotal)}</div><div class="kpi-lbl">Ссылок</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(d.total_clicks)}</div><div class="kpi-lbl">Кликов</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(d.referrals)}</div><div class="kpi-lbl">Рефералов</div></div>
     `);
     if (!links.length) { txt('dlList', empty('🔗','Ссылок пока нет','Ссылка приводит человека в бота с меткой: видно, откуда он пришёл и сколько таких',{label:'➕ Создать ссылку',fn:'openDlModal()'})); return; }
-    if (!_DL_BOT_UNAME) {
-      txt('dlList', `<div style="font-size:12px;color:var(--orange);padding:0 16px 8px;line-height:1.4">⚠️ У бота не записано имя, поэтому ссылку собрать не из чего. Откройте карточку бота и обновите данные.</div>`);
-    }
-    txt('dlList', (document.getElementById('dlList').innerHTML||'') + links.map((l,i)=>`
+    // Предупреждение собирается в ту же строку, что и список. Раньше оно
+    // писалось в dlList, а список доклеивался к его innerHTML — с «Показать
+    // ещё» так дописалась бы ВТОРАЯ копия уже показанных ссылок.
+    const dlHead = _DL_BOT_UNAME ? '' : `<div style="font-size:12px;color:var(--orange);padding:0 16px 8px;line-height:1.4">⚠️ У бота не записано имя, поэтому ссылку собрать не из чего. Откройте карточку бота и обновите данные.</div>`;
+    txt('dlList', dlHead + links.map((l,i)=>`
       <div class="li tap" onclick="dlCopy(${i})" role="button" tabindex="0">
         <div class="row-ico" style="background:var(--bg-violet-16)">🔗</div>
         <div class="row-body">
@@ -15713,8 +15722,8 @@ async function loadDeeplinks() {
           <button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${Number(l.id)}, this)" aria-label="Удалить">✕</button>
         </div>
       </div>
-    `).join(''));
-  } catch(e) { txt('dlList', empty('⚠️','Ошибка загрузки',errRu(e))); }
+    `).join('') + moreBtn(links.length, linksTotal, 'loadDeeplinks(1)'));
+  } catch(e) { txt('dlList', errHtml(errRu(e),'loadDeeplinks()')); }
 }
 function openDlModal() {
   document.getElementById('dlName').value='';
