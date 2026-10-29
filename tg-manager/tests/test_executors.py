@@ -60,7 +60,7 @@ async def test_parse_audience_requires_source():
     from services.op_worker import _exec_parse_audience
     res = await _exec_parse_audience(FakePool(), _Bot(), 1, 42, {})
     assert res["status"] == "failed"
-    assert "source_ref" in res["summary"]
+    assert "источник" in res["summary"]
 
 
 @pytest.mark.asyncio
