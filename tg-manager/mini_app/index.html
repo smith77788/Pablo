@@ -11004,7 +11004,9 @@ async function openAccountChannels(accId) {
         <div class="li-body"><div class="li-name">${name}</div>
           <div class="li-sub">${type} · ${num(c.member_count||0)} участников</div></div>
         <div class="li-right"><span class="chev">›</span></div></div>`;
-    }).join(''));
+    // Потолок выборки — 500; сервер присылает честное total, и если каналов больше,
+    // об этом надо сказать: иначе список молча обрывается и выглядит полным.
+    }).join('') + anCap(list.length, d.total, 'канал', 'канала', 'каналов'));
   } catch(e) { txt('acchanList', errHtml(errRu(e),'openAccountChannels('+accId+')')); }
 }
 

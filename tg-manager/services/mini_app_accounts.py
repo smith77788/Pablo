@@ -1282,8 +1282,16 @@ def setup_routes(app: web.Application, pool) -> None:
             "SELECT channel_id AS id, channel_id, username, title, type, "
             "COALESCE(members_count, 0) AS member_count "
             "FROM managed_channels WHERE owner_id=$1 AND acc_id=$2 "
-            "ORDER BY member_count DESC NULLS LAST LIMIT 500", uid, acc_id)
-        return _json_resp({"channels": rows, "total": len(rows or [])})
+            "ORDER BY member_count DESC NULLS LAST, channel_id LIMIT 500", uid, acc_id)
+        # Итог считает запрос: `len(rows)` при потолке 500 называет длину
+        # страницы, а не число каналов, и у аккаунта с большим числом каналов
+        # шапка писала бы ровно «500» — цифра правдоподобная и неверная.
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
+            uid, acc_id)
+        return _json_resp({"channels": rows, "total": total,
+                           "page": {"limit": 500, "shown": len(rows or []),
+                                    "has_more": len(rows or []) < total}})
 
     async def account_bots(request: web.Request) -> web.Response:
         """Боты, СОЗДАННЫЕ через этот аккаунт (managed_bots.acc_id).
@@ -1301,8 +1309,15 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор аккаунта", 400)
         rows = await _safe_fetch(pool,
             "SELECT bot_id, username, first_name, is_active FROM managed_bots "
-            "WHERE added_by=$1 AND acc_id=$2 ORDER BY added_at DESC LIMIT 500", uid, acc_id)
-        return _json_resp({"bots": rows, "total": len(rows or [])})
+            "WHERE added_by=$1 AND acc_id=$2 ORDER BY added_at DESC, bot_id LIMIT 500",
+            uid, acc_id)
+        # См. выше: при потолке в 500 длина страницы — не итог.
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND acc_id=$2",
+            uid, acc_id)
+        return _json_resp({"bots": rows, "total": total,
+                           "page": {"limit": 500, "shown": len(rows or []),
+                                    "has_more": len(rows or []) < total}})
 
     async def account_spamblock_appeal(request: web.Request) -> web.Response:
         """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
