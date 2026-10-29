@@ -22,7 +22,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import operation_bus as _obus
     from services.mini_app_api import (
         _INTERNAL_ERROR, _dna_to_dict, _err, _get_uid, _json_resp, _list_limit,
-        _safe_count, _safe_fetch, _safe_fetchrow, _spintax_pack, log,
+        _list_offset, _safe_count, _safe_fetch, _safe_fetchrow, _spintax_pack, log,
     )
     from services.security import validate_integer, validate_string
 
@@ -52,9 +52,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 FROM clone_adapt_history h
                 LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
                 LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
-                WHERE h.owner_id=$1 ORDER BY h.created_at DESC LIMIT $2
+                WHERE h.owner_id=$1 ORDER BY h.created_at DESC, h.id DESC
+                LIMIT $2 OFFSET $3
                 """,
-                uid, _list_limit(request, 30, 1000),
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM clone_adapt_history WHERE owner_id=$1", uid)
@@ -395,8 +396,9 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, topic, campaign_type, spread_hours, posts_total, posts_published, status, created_at "
-                "FROM narrative_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
-                uid, _list_limit(request, 30, 1000),
+                "FROM narrative_campaigns WHERE owner_id=$1 "
+                "ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM narrative_campaigns WHERE owner_id=$1", uid)
@@ -788,8 +790,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 "       bu.first_name, bu.last_name, bu.username "
                 "FROM bot_user_facts f "
                 "LEFT JOIN bot_users bu ON bu.bot_id = f.bot_id AND bu.user_id = f.user_id "
-                "WHERE f.bot_id=$1 ORDER BY f.updated_at DESC LIMIT $2",
-                bot_id, _list_limit(request, 100, 2000),
+                "WHERE f.bot_id=$1 ORDER BY f.updated_at DESC, f.user_id, f.fact_key "
+                "LIMIT $2 OFFSET $3",
+                bot_id, _list_limit(request, 100, 2000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM bot_user_facts WHERE bot_id=$1", bot_id)

@@ -2935,8 +2935,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
                WHERE mb.added_by = $1 AND bu.user_id > 0
-               ORDER BY bu.first_seen DESC NULLS LAST
-               LIMIT $2""", uid, lim)
+               ORDER BY bu.first_seen DESC NULLS LAST, bu.user_id DESC
+               LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request))
         total = await _safe_count(pool,
             """SELECT COUNT(*) FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
@@ -5115,8 +5115,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """SELECT entity_id, entity_type, entity_name, username,
                           reg_date, method, checked_at
                    FROM reg_check_cache WHERE checked_by=$1
-                   ORDER BY checked_at DESC LIMIT $2""",
-                uid, _list_limit(request, 30, 1000),
+                   ORDER BY checked_at DESC, entity_id DESC, entity_type
+                   LIMIT $2 OFFSET $3""",
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM reg_check_cache WHERE checked_by=$1", uid)
@@ -5887,8 +5888,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             msgs = await pool.fetch(
                 "SELECT id, direction, text, created_at FROM relay_messages "
-                "WHERE session_id=$1 ORDER BY created_at ASC LIMIT $2",
-                session_id, _list_limit(request, 100, 2000),
+                "WHERE session_id=$1 ORDER BY created_at ASC, id "
+                "LIMIT $2 OFFSET $3",
+                session_id, _list_limit(request, 100, 2000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM relay_messages WHERE session_id=$1", session_id)
@@ -6093,7 +6095,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         rows = await _safe_fetch(pool,
             """SELECT id, username, label, channel_id, last_members, last_checked, created_at
                FROM competitors WHERE owner_id=$1
-               ORDER BY created_at DESC LIMIT $2""", uid, _list_limit(request, 50, 1000))
+               ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3""",
+            uid, _list_limit(request, 50, 1000), _list_offset(request))
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM competitors WHERE owner_id=$1", uid)
         return _json_resp({"competitors": rows, "total": total})
@@ -6236,7 +6239,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                FROM tracked_keywords tk
                JOIN managed_bots mb ON mb.bot_id=tk.bot_id
                WHERE tk.owner_id=$1
-               ORDER BY tk.created_at DESC LIMIT $2""", uid, _list_limit(request, 50, 1000))
+               ORDER BY tk.created_at DESC, tk.id DESC LIMIT $2 OFFSET $3""",
+            uid, _list_limit(request, 50, 1000), _list_offset(request))
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM tracked_keywords tk JOIN managed_bots mb "
             "ON mb.bot_id=tk.bot_id WHERE tk.owner_id=$1", uid)
@@ -6906,8 +6910,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if asset_type:
                 rows = await pool.fetch(
                     "SELECT id, asset_type, name, created_at FROM asset_templates "
-                    "WHERE owner_id=$1 AND asset_type=$2 ORDER BY created_at DESC LIMIT $3",
-                    uid, asset_type, lim,
+                    "WHERE owner_id=$1 AND asset_type=$2 "
+                    "ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4",
+                    uid, asset_type, lim, _list_offset(request),
                 )
                 total = await _safe_count(pool,
                     "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1 AND asset_type=$2",
@@ -6915,8 +6920,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             else:
                 rows = await pool.fetch(
                     "SELECT id, asset_type, name, created_at FROM asset_templates "
-                    "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
-                    uid, lim,
+                    "WHERE owner_id=$1 ORDER BY created_at DESC, id DESC "
+                    "LIMIT $2 OFFSET $3",
+                    uid, lim, _list_offset(request),
                 )
                 total = await _safe_count(pool,
                     "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1", uid)
@@ -7033,8 +7039,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, name, description, target_url, target_label, bot_id "
-                "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC LIMIT $2",
-                uid, _list_limit(request, 30, 1000),
+                "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM presence_packs WHERE owner_id=$1", uid)
@@ -7221,8 +7228,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, title, username, type, added_at FROM managed_channels "
-                "WHERE owner_id=$1 ORDER BY added_at DESC LIMIT $2",
-                uid, _list_limit(request, 20, 1000),
+                "WHERE owner_id=$1 ORDER BY added_at DESC, id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, _list_limit(request, 20, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)

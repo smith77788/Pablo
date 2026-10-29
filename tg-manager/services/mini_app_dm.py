@@ -20,7 +20,7 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты кампаний личных сообщений на приложении мини-аппа."""
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json, _json_resp, _list_limit,
-        _obus, _safe_count, _safe_fetch, _safe_fetchrow, log,
+        _list_offset, _obus, _safe_count, _safe_fetch, _safe_fetchrow, log,
     )
     from services.security import (
         check_sql_suspicious, is_safe_public_url, validate_string,
@@ -369,6 +369,12 @@ def setup_routes(app: web.Application, pool) -> None:
         status = validate_string(request.query.get("status"), 32, required=False) or None
         reason = validate_string(request.query.get("reason"), 200, required=False) or None
         limit = _list_limit(request, 100, 500)
+        # Смещение, а не растущий потолок: экран доклеивал страницы, удваивая
+        # limit, и на пятистах — собственном пределе ручки — упирался в стену.
+        # Кнопка «Показать ещё» при этом оставалась (total был больше) и
+        # обещала записи, которые уже никак не достать, а «Скопировать номера»
+        # отдавала пятьсот из тысячи, не сказав об этом.
+        offset = _list_offset(request)
 
         # Фильтры подставляются как параметры, а не склейкой условий: так в
         # обоих запросах (счётчик и список) одинаковое число аргументов и
@@ -403,8 +409,8 @@ def setup_routes(app: web.Application, pool) -> None:
                                  WHERE owner_id=$2 AND tg_user_id=l.tg_user_id
                                  LIMIT 1) p ON TRUE
                  WHERE l.campaign_id=$1 AND {_f % (3, 3, 4, 4, 5)}
-              ORDER BY l.sent_at DESC
-                 LIMIT {limit}""",
+              ORDER BY l.sent_at DESC, l.id DESC
+                 LIMIT {limit} OFFSET {offset}""",
             campaign_id, uid, status, reason, failed_only,
         )
         for r in rows:
@@ -415,6 +421,8 @@ def setup_routes(app: web.Application, pool) -> None:
             "items": rows,
             "total": total,
             "shown": len(rows),
+            "page": {"limit": limit, "offset": offset,
+                     "has_more": offset + len(rows) < total},
         })
 
     async def dm_campaign_pause(request: web.Request) -> web.Response:

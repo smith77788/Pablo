@@ -13165,12 +13165,18 @@ function openCompetitors() {
   loadCompetitors();
 }
 
-let COMP_LIMIT = 50;
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел (1000), и
+// на нём растущий limit превращался в стену — кнопка «Показать ещё» оставалась
+// (итог честный и больше показанного), а нажатие уже ничего не добавляло.
+// Имена с CMPT_: COMP_* в этом файле занято экраном «Соответствие».
+let CMPT_ROWS = [], CMPT_OFFSET = 0;
 async function loadCompetitors(more) {
-  COMP_LIMIT = more ? COMP_LIMIT + 200 : 50;
+  CMPT_OFFSET = more ? CMPT_ROWS.length : 0;
   try {
-    const d = await api('/api/miniapp/competitors?limit='+COMP_LIMIT);
-    const items = listOf(d,'competitors');
+    const d = await api('/api/miniapp/competitors?limit=50&offset='+CMPT_OFFSET);
+    const page = listOf(d,'competitors');
+    CMPT_ROWS = CMPT_OFFSET ? CMPT_ROWS.concat(page) : page;
+    const items = CMPT_ROWS;
     const total = totalOf(d, items);
     // Плитка называет ВСЁ число, а не длину показанной страницы.
     txt('m-comp-cnt', total ? total+' конкурентов' : 'Нет');
@@ -13407,12 +13413,15 @@ function openKeywordsScreen() {
   loadKeywords();
 }
 
-let KW_LIMIT = 50;
+// Страницы по смещению — см. комментарий у loadCompetitors.
+let KWT_ROWS = [], KWT_OFFSET = 0;
 async function loadKeywords(more) {
-  KW_LIMIT = more ? KW_LIMIT + 200 : 50;
+  KWT_OFFSET = more ? KWT_ROWS.length : 0;
   try {
-    const d = await api('/api/miniapp/keywords?limit='+KW_LIMIT);
-    const items = listOf(d,'keywords');
+    const d = await api('/api/miniapp/keywords?limit=50&offset='+KWT_OFFSET);
+    const page = listOf(d,'keywords');
+    KWT_ROWS = KWT_OFFSET ? KWT_ROWS.concat(page) : page;
+    const items = KWT_ROWS;
     const total = totalOf(d, items);
     if (!items.length) { txt('kwTrackList', empty('🔍','Нет отслеживаемых слов','Нажмите + Добавить')); return; }
     txt('kwTrackList', items.map(k=>{
@@ -16310,18 +16319,23 @@ function nuSwitch(which) {
   if (!onBots) loadPlatformUsers();
 }
 
-let NU_LIMIT = 100;
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
+// нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
+// остаётся и перестаёт работать.
+let NU_ROWS = [], NU_OFFSET = 0;
 // «Показать ещё» на ленте подписчиков: экран уже открыт, поэтому повторно
 // push() делать нельзя — иначе в стеке появится второй такой же экран.
-async function openNewUsersMore() { NU_LIMIT += 400; await openNewUsers(true); }
+async function openNewUsersMore() { NU_OFFSET = NU_ROWS.length; await openNewUsers(true); }
 async function openNewUsers(keep) {
-  if (!keep) { NU_LIMIT = 100; push('s-newusers'); }
+  if (!keep) { NU_ROWS = []; NU_OFFSET = 0; push('s-newusers'); }
   if (!keep) nuSwitch('bots');
   if (!keep) txt('newUsersList','<div class="spin-wrap"><div class="spin"></div></div>');
   // Подписчики ботов
   try {
-    const d = await api('/api/miniapp/new_users?limit='+NU_LIMIT);
-    const us = listOf(d,'users');
+    const d = await api('/api/miniapp/new_users?limit=100&offset='+NU_OFFSET);
+    const _page = listOf(d,'users');
+    NU_ROWS = NU_OFFSET ? NU_ROWS.concat(_page) : _page;
+    const us = NU_ROWS;
     const nuTotal = totalOf(d, us);
     if (!us.length) { txt('newUsersList', empty('🆕','Пока нет подписчиков','Появятся, как только кто-то напишет вашим ботам')); }
     else txt('newUsersList', us.map(u=>{
@@ -20292,14 +20306,19 @@ async function submitAiMemory() {
   finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
 }
 const MEM_KIND = {note:'📝',instruction:'📋',fact:'💡',rule:'⚙️'};
-let AIMEM_LIMIT = 50;
-async function openAiMemoryMore() { AIMEM_LIMIT += 200; await openAiMemory(true); }
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
+// нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
+// остаётся и перестаёт работать.
+let AIMEM_ROWS = [], AIMEM_OFFSET = 0;
+async function openAiMemoryMore() { AIMEM_OFFSET = AIMEM_ROWS.length; await openAiMemory(true); }
 async function openAiMemory(keep) {
-  if (!keep) { AIMEM_LIMIT = 50; push('s-aimemory'); }
+  if (!keep) { AIMEM_ROWS = []; AIMEM_OFFSET = 0; push('s-aimemory'); }
   if (!keep) txt('aiMemoryList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/ai_memory?limit='+AIMEM_LIMIT);
-    const mems = listOf(d,'memories');
+    const d = await api('/api/miniapp/ai_memory?limit=50&offset='+AIMEM_OFFSET);
+    const _page = listOf(d,'memories');
+    AIMEM_ROWS = AIMEM_OFFSET ? AIMEM_ROWS.concat(_page) : _page;
+    const mems = AIMEM_ROWS;
     const memTotal = totalOf(d, mems);
     // Плитка называет ВСЁ число записей, а не длину показанной страницы.
     txt('m-aimem-val',`${num(memTotal)} записей`);
@@ -21632,14 +21651,19 @@ async function submitRegCheck() {
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='🔍 Проверить'; }
 }
-let REGCHK_LIMIT = 30;
-async function openRegCheckMore() { REGCHK_LIMIT += 200; await openRegCheck(true); }
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
+// нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
+// остаётся и перестаёт работать.
+let REGCHK_ROWS = [], REGCHK_OFFSET = 0;
+async function openRegCheckMore() { REGCHK_OFFSET = REGCHK_ROWS.length; await openRegCheck(true); }
 async function openRegCheck(keep) {
-  if (!keep) { REGCHK_LIMIT = 30; push('s-regcheck'); }
+  if (!keep) { REGCHK_ROWS = []; REGCHK_OFFSET = 0; push('s-regcheck'); }
   if (!keep) txt('regCheckList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/reg_check/history?limit='+REGCHK_LIMIT);
-    const checks = listOf(d,'checks');
+    const d = await api('/api/miniapp/reg_check/history?limit=30&offset='+REGCHK_OFFSET);
+    const _page = listOf(d,'checks');
+    REGCHK_ROWS = REGCHK_OFFSET ? REGCHK_ROWS.concat(_page) : _page;
+    const checks = REGCHK_ROWS;
     const rcTotal = totalOf(d, checks);
     if (!checks.length) { txt('regCheckList', empty('📅','История пуста','Нажмите Проверить')); return; }
     txt('regCheckList', checks.map(c=>`
@@ -21786,7 +21810,9 @@ let _DMR_RECENT = [];      // последние отправки на экра�
 let _DMR_STATUSES = [];    // строки сводки «Исходы»
 let _DMR_ERRS = [];        // строки сводки «Частые причины недоставки»
 let _DMR_LOG = [];         // получатели на подэкране списка
-let _DMRL_Q = null;        // фильтр открытого списка: {status, reason, title, limit}
+let _DMRL_Q = null;        // фильтр открытого списка: {status, reason, failed, title}
+let _DMRL_OFFSET = 0;      // сколько записей журнала уже доклеено
+let _DMRL_TOTAL = 0;       // сколько их всего по этому фильтру — по серверу
 function dmrRow(src, i) {
   const r = (src === 'rep' ? _DMR_RECENT : _DMR_LOG)[i];
   if (!r) return '';
@@ -21893,17 +21919,29 @@ async function openDmLog(q) {
   if (_DMR_ID == null) return;
   _DMRL_Q = {status:(q&&q.status)||'', reason:(q&&q.reason)||'',
              failed:!!(q&&q.failed),
-             title:(q&&q.title)||'Получатели', limit:Number(q&&q.limit)||100};
+             title:(q&&q.title)||'Получатели'};
+  _DMRL_OFFSET = 0; _DMRL_TOTAL = 0; _DMR_LOG = [];
   push('s-dmrlog');
   txt('dmrl-title', _DMRL_Q.title);
   txt('dmrlBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadDmLogPage();
+}
+// Страница журнала по СМЕЩЕНИЮ. Раньше «Показать ещё» удваивало limit, и на
+// пятистах — предел самой ручки — список упирался в стену: кнопка оставалась
+// (всего больше показанного), но нажатие уже ничего не добавляло, а «номера»
+// копировались те же пятьсот. Для списка, который открывают, чтобы вычистить
+// мёртвые контакты, недостижимая запись — это запись, которую не вычистить.
+async function loadDmLogPage() {
+  if (!_DMRL_Q) return;
   try {
-    const p = new URLSearchParams({limit:String(_DMRL_Q.limit)});
+    const p = new URLSearchParams({limit:'100', offset:String(_DMRL_OFFSET)});
     if (_DMRL_Q.status) p.set('status', _DMRL_Q.status);
     if (_DMRL_Q.reason) p.set('reason', _DMRL_Q.reason);
     if (_DMRL_Q.failed) p.set('failed', '1');
     const d = await api('/api/miniapp/dm_campaign/'+_DMR_ID+'/log?'+p.toString());
-    _DMR_LOG = d.items||[];
+    const page = listOf(d, 'items');
+    _DMR_LOG = _DMRL_OFFSET ? _DMR_LOG.concat(page) : page;
+    _DMRL_TOTAL = totalOf(d, _DMR_LOG);
     if (!_DMR_LOG.length) {
       txt('dmrlBody', empty('📭','Таких получателей нет',
         'По этому фильтру в журнале кампании пока нет ни одной записи'));
@@ -21911,17 +21949,19 @@ async function openDmLog(q) {
     }
     txt('dmrlBody',
       `<div class="lst">` + _DMR_LOG.map((r,i)=>dmrRow('log',i)).join('') + `</div>`
-      + moreBtn(_DMR_LOG.length, d.total||0, 'openDmLogMore()')
+      + moreBtn(_DMR_LOG.length, _DMRL_TOTAL, 'openDmLogMore()')
       // Список нужен не для чтения, а для работы: выгрузить в другой канал,
-      // вычистить из базы, передать коллеге. Без копирования это тупик.
-      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="dmrCopyIds('log')">📋 Скопировать номера (${num(_DMR_LOG.length)})</button>`);
+      // вычистить из базы, передать коллеге. Без копирования это тупик. Кнопка
+      // называет ровно то, что скопирует: «500 из 1 200» — не «1 200».
+      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="dmrCopyIds('log')">📋 Скопировать номера (${_DMRL_TOTAL > _DMR_LOG.length ? num(_DMR_LOG.length)+' из '+num(_DMRL_TOTAL) : num(_DMR_LOG.length)})</button>`);
   } catch(e) {
-    txt('dmrlBody', errHtml(errRu(e),'openDmLogMore()'));
+    txt('dmrlBody', errHtml(errRu(e),'loadDmLogPage()'));
   }
 }
 function openDmLogMore() {
   if (!_DMRL_Q) return;
-  openDmLog(Object.assign({}, _DMRL_Q, {limit: Math.min(_DMRL_Q.limit*2, 500)}));
+  _DMRL_OFFSET = _DMR_LOG.length;
+  loadDmLogPage();
 }
 
 // Правка неидущей кампании: раньше опечатка в тексте означала удалить её и
@@ -22538,7 +22578,8 @@ async function meshStopTask() {
     openBotMeshTask(_MESH_TASK_ID, true);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
-let MESH_LIMIT = 30;
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let MESH_ROWS = [], MESH_OFFSET = 0;
 
 
 // Повтор без аргумента невозможен — id задачи держим рядом, как у других
@@ -22547,14 +22588,18 @@ let _MESH_TASK_ID = null;
 
 
 
-let NOTARY_LIMIT = 100;
-async function openNotaryMore() { NOTARY_LIMIT += 400; await openNotary(true); }
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
+// нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
+// остаётся и перестаёт работать.
+let NOTARY_OFFSET = 0;
+async function openNotaryMore() { NOTARY_OFFSET = (NOTARY_WATCHES||[]).length; await openNotary(true); }
 async function openNotary(keep) {
-  if (!keep) { NOTARY_LIMIT = 100; push('s-notary'); }
+  if (!keep) { NOTARY_WATCHES = []; NOTARY_OFFSET = 0; push('s-notary'); }
   if (!keep) txt('notaryList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/notary?limit='+NOTARY_LIMIT);
-    NOTARY_WATCHES = listOf(d,'watches');
+    const d = await api('/api/miniapp/notary?limit=100&offset='+NOTARY_OFFSET);
+    const _page = listOf(d,'watches');
+    NOTARY_WATCHES = NOTARY_OFFSET ? (NOTARY_WATCHES||[]).concat(_page) : _page;
     const notaryTotal = totalOf(d, NOTARY_WATCHES);
     const el = document.getElementById('m-notary-val');
     // Плитка называет ВСЁ число наблюдений, а не длину показанной страницы.
@@ -22675,14 +22720,17 @@ async function notaryCancel(id) {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
 }
 
-let FOLDERS_LIMIT = 100;
-async function openFoldersMore() { FOLDERS_LIMIT += 400; await openFolders(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let FOLDERS_ROWS = [], FOLDERS_OFFSET = 0;
+async function openFoldersMore() { FOLDERS_OFFSET = FOLDERS_ROWS.length; await openFolders(true); }
 async function openFolders(keep) {
-  if (!keep) { FOLDERS_LIMIT = 100; push('s-folders'); }
+  if (!keep) { FOLDERS_ROWS = []; FOLDERS_OFFSET = 0; push('s-folders'); }
   if (!keep) txt('foldersList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/chatlist_folders?limit='+FOLDERS_LIMIT);
-    const fs = listOf(d,'folders');
+    const d = await api('/api/miniapp/chatlist_folders?limit=100&offset='+FOLDERS_OFFSET);
+    const _page = listOf(d,'folders');
+    FOLDERS_ROWS = FOLDERS_OFFSET ? FOLDERS_ROWS.concat(_page) : _page;
+    const fs = FOLDERS_ROWS;
     const foldersTotal = totalOf(d, fs);
     if (!fs.length) { txt('foldersList', empty('📁','Пока нет папок','Соберите подборку своих каналов и раздайте одну ссылку')); return; }
     txt('foldersList', fs.map(f=>{
@@ -23545,10 +23593,11 @@ async function toggleRelay(botId, enable) {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
 // id переписки держим рядом: строку в onclick без кавычек не унести.
-let _RELAY_ARGS = null, RELAY_LIMIT = 100;
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let _RELAY_ARGS = null, RELAY_ROWS = [], RELAY_OFFSET = 0;
 async function openRelaySessionMore() {
   if (!_RELAY_ARGS) return;
-  RELAY_LIMIT += 400;
+  RELAY_OFFSET = RELAY_ROWS.length;
   await openRelaySession(_RELAY_ARGS[0], _RELAY_ARGS[1], true);
 }
 function retryRelaySession() {
@@ -23556,11 +23605,13 @@ function retryRelaySession() {
 }
 async function openRelaySession(sessionId, name, keep) {
   _RELAY_ARGS = [sessionId, name];
-  if (!keep) { RELAY_LIMIT = 100; txt('relaymsgs-title', '💬 '+name); push('s-relaymsgs'); }
+  if (!keep) { RELAY_ROWS = []; RELAY_OFFSET = 0; txt('relaymsgs-title', '💬 '+name); push('s-relaymsgs'); }
   if (!keep) txt('relayMsgBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/relay/session/'+sessionId+'/messages?limit='+RELAY_LIMIT);
-    const msgs = listOf(d,'messages');
+    const d = await api('/api/miniapp/relay/session/'+sessionId+'/messages?limit=100&offset='+RELAY_OFFSET);
+    const _page = listOf(d,'messages');
+    RELAY_ROWS = RELAY_OFFSET ? RELAY_ROWS.concat(_page) : _page;
+    const msgs = RELAY_ROWS;
     const relTotal = totalOf(d, msgs);
     if (!msgs.length) { txt('relayMsgBody', empty('💬','Нет сообщений','')); return; }
     document.getElementById('relayMsgBody').innerHTML = msgs.map(m=>{
@@ -23903,16 +23954,20 @@ function showParserTab(tab) {
   document.getElementById('parserTabAudience').className = tab==='audience'?'btn btn-p':'btn btn-s';
   if (tab==='audience') loadParsedAudience('');
 }
-let PRUNS_LIMIT = 30;
-async function loadParserRunsMore() { PRUNS_LIMIT += 200; await loadParserRuns(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let PRUNS_OFFSET = 0;
+async function loadParserRunsMore() { PRUNS_OFFSET = (PARSER_RUNS||[]).length; await loadParserRuns(true); }
 async function loadParserRuns(keep) {
-  if (!keep) PRUNS_LIMIT = 30;
+  if (!keep) { PARSER_RUNS = []; PRUNS_OFFSET = 0; }
   if (!keep) txt('parserRunList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/parser/runs?limit='+PRUNS_LIMIT);
-    const runs = listOf(d,'runs');
+    const d = await api('/api/miniapp/parser/runs?limit=30&offset='+PRUNS_OFFSET);
+    const _page = listOf(d,'runs');
+    // PARSER_RUNS — он же хранилище для «→ в рассылку», поэтому страница
+    // доклеивается в него, а не в отдельный массив.
+    PARSER_RUNS = PRUNS_OFFSET ? (PARSER_RUNS||[]).concat(_page) : _page;
+    const runs = PARSER_RUNS;
     const prTotal = totalOf(d, runs);
-    PARSER_RUNS = runs;   // для «→ в рассылку» без проблем с экранированием
     if (!runs.length) { txt('parserRunList', empty('⏱','Нет запусков','Запустите первый парсинг')); return; }
     const stIco = {pending:'⏳',running:'⚙️',done:'✅',empty:'∅',failed:'❌',cancelled:'🚫'};
     txt('parserRunList', runs.map(r=>`
@@ -24626,16 +24681,19 @@ function filterAssetTpl(type, btn) {
   if (btn) btn.classList.add('btn-p');
   loadAssetTpl(type);
 }
-let AT_LIMIT = 50, AT_TYPE = null;
-async function loadAssetTplMore() { AT_LIMIT += 200; await loadAssetTpl(AT_TYPE, true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let AT_ROWS = [], AT_OFFSET = 0, AT_TYPE = null;
+async function loadAssetTplMore() { AT_OFFSET = AT_ROWS.length; await loadAssetTpl(AT_TYPE, true); }
 async function loadAssetTpl(type, keep) {
   AT_TYPE = type || null;
-  if (!keep) { AT_LIMIT = 50; txt('atList','<div class="spin-wrap"><div class="spin"></div></div>'); }
+  if (!keep) { AT_ROWS = []; AT_OFFSET = 0; txt('atList','<div class="spin-wrap"><div class="spin"></div></div>'); }
   try {
-    const url = '/api/miniapp/asset_templates?limit='+AT_LIMIT
+    const url = '/api/miniapp/asset_templates?limit=50&offset='+AT_OFFSET
               + (type?`&type=${encodeURIComponent(type)}`:'');
     const d = await api(url);
-    const rows = listOf(d,'items');
+    const _page = listOf(d,'items');
+    AT_ROWS = AT_OFFSET ? AT_ROWS.concat(_page) : _page;
+    const rows = AT_ROWS;
     const atTotal = totalOf(d, rows);
     if (!rows.length) { txt('atList', empty('📐','Шаблонов нет','Нажмите + Создать')); return; }
     const typeIco={bot:'🤖',channel:'📢',group:'👥',post:'📝'};
@@ -24832,14 +24890,17 @@ async function openSwarm() {
 }
 
 // ── Presence Packs ──────────────────────────────────────
-let PP_LIMIT = 30;
-async function openPresencePacksMore() { PP_LIMIT += 200; await openPresencePacks(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let PP_ROWS = [], PP_OFFSET = 0;
+async function openPresencePacksMore() { PP_OFFSET = PP_ROWS.length; await openPresencePacks(true); }
 async function openPresencePacks(keep) {
-  if (!keep) { PP_LIMIT = 30; push('s-presencepacks'); }
+  if (!keep) { PP_ROWS = []; PP_OFFSET = 0; push('s-presencepacks'); }
   if (!keep) txt('ppList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/presence_packs?limit='+PP_LIMIT);
-    const rows = listOf(d,'items');
+    const d = await api('/api/miniapp/presence_packs?limit=30&offset='+PP_OFFSET);
+    const _page = listOf(d,'items');
+    PP_ROWS = PP_OFFSET ? PP_ROWS.concat(_page) : _page;
+    const rows = PP_ROWS;
     const ppTotal = totalOf(d, rows);
     if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать')); return; }
     txt('ppList', rows.map(r=>`
@@ -25916,14 +25977,17 @@ async function openChannelFactory(asGroup) {
 function cfAccAll(on) {
   document.querySelectorAll('#cfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on; });
 }
-let CFR_LIMIT = 20;
-async function loadCfRecentMore() { CFR_LIMIT += 200; await loadCfRecent(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let CFR_ROWS = [], CFR_OFFSET = 0;
+async function loadCfRecentMore() { CFR_OFFSET = CFR_ROWS.length; await loadCfRecent(true); }
 async function loadCfRecent(keep) {
-  if (!keep) CFR_LIMIT = 20;
+  if (!keep) { CFR_ROWS = []; CFR_OFFSET = 0; }
   if (!keep) txt('cfRecent','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/channel_factory/recent?limit='+CFR_LIMIT);
-    const rows = listOf(d,'items');
+    const d = await api('/api/miniapp/channel_factory/recent?limit=20&offset='+CFR_OFFSET);
+    const _page = listOf(d,'items');
+    CFR_ROWS = CFR_OFFSET ? CFR_ROWS.concat(_page) : _page;
+    const rows = CFR_ROWS;
     const cfTotal = totalOf(d, rows);
     if (!rows.length) { txt('cfRecent', empty('📢','Нет каналов','')); return; }
     txt('cfRecent', rows.map(r=>`
@@ -26546,14 +26610,17 @@ async function submitCloner() {
 }
 
 // ── Clone Adapt ─────────────────────────────────────────
-let CA_LIMIT = 30;
-async function openCloneAdaptMore() { CA_LIMIT += 200; await openCloneAdapt(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let CA_ROWS = [], CA_OFFSET = 0;
+async function openCloneAdaptMore() { CA_OFFSET = CA_ROWS.length; await openCloneAdapt(true); }
 async function openCloneAdapt(keep) {
-  if (!keep) { CA_LIMIT = 30; push('s-cloneadapt'); }
+  if (!keep) { CA_ROWS = []; CA_OFFSET = 0; push('s-cloneadapt'); }
   if (!keep) txt('caHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/clone_adapt/history?limit='+CA_LIMIT);
-    const rows = listOf(d,'items');
+    const d = await api('/api/miniapp/clone_adapt/history?limit=30&offset='+CA_OFFSET);
+    const _page = listOf(d,'items');
+    CA_ROWS = CA_OFFSET ? CA_ROWS.concat(_page) : _page;
+    const rows = CA_ROWS;
     const caTotal = totalOf(d, rows);
     if (!rows.length) { txt('caHistory', empty('🔄','Нет истории','')); return; }
     txt('caHistory', rows.map(r => {
@@ -26886,14 +26953,17 @@ async function submitMeshCreate() {
 }
 
 // ── Narrative Engine ────────────────────────────────────
-let NARR_LIMIT = 30;
-async function openNarrativeMore() { NARR_LIMIT += 200; await openNarrative(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let NARR_ROWS = [], NARR_OFFSET = 0;
+async function openNarrativeMore() { NARR_OFFSET = NARR_ROWS.length; await openNarrative(true); }
 async function openNarrative(keep) {
-  if (!keep) { NARR_LIMIT = 30; push('s-narrative'); }
+  if (!keep) { NARR_ROWS = []; NARR_OFFSET = 0; push('s-narrative'); }
   if (!keep) txt('narrativeList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/narrative?limit='+NARR_LIMIT);
-    const rows = listOf(d,'items');
+    const d = await api('/api/miniapp/narrative?limit=30&offset='+NARR_OFFSET);
+    const _page = listOf(d,'items');
+    NARR_ROWS = NARR_OFFSET ? NARR_ROWS.concat(_page) : _page;
+    const rows = NARR_ROWS;
     const narrTotal = totalOf(d, rows);
     if (!rows.length) { txt('narrativeList', empty('📖','Кампаний нет','Нажмите + Создать')); return; }
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
@@ -27260,10 +27330,11 @@ async function openSemanticMemory() {
     `).join(''));
   } catch(e) { txt('semList', errHtml(errRu(e), 'openSemanticMemory()')); }
 }
-let _SEMF_ARGS = null, SEMF_LIMIT = 100;
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let _SEMF_ARGS = null, SEMF_ROWS = [], SEMF_OFFSET = 0;
 async function openSemFactsMore() {
   if (!_SEMF_ARGS) return;
-  SEMF_LIMIT += 400;
+  SEMF_OFFSET = SEMF_ROWS.length;
   await openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
 }
 function retrySemFacts() {
@@ -27272,14 +27343,16 @@ function retrySemFacts() {
 async function openSemFacts(botId, botName, keep) {
   _SEMF_ARGS = [botId, botName];
   if (!keep) {
-    SEMF_LIMIT = 100;
+    SEMF_ROWS = []; SEMF_OFFSET = 0;
     push('s-semfacts');
     document.getElementById('semfacts-name').textContent = botName + ' — факты';
     txt('semfactsList', '<div class="spin-wrap"><div class="spin"></div></div>');
   }
   try {
-    const d = await api(`/api/miniapp/semantic_memory/${botId}?limit=${SEMF_LIMIT}`);
-    const rows = listOf(d,'items');
+    const d = await api(`/api/miniapp/semantic_memory/${botId}?limit=100&offset=${SEMF_OFFSET}`);
+    const _page = listOf(d,'items');
+    SEMF_ROWS = SEMF_OFFSET ? SEMF_ROWS.concat(_page) : _page;
+    const rows = SEMF_ROWS;
     const semTotal = totalOf(d, rows);
     if (!rows.length) { txt('semfactsList', empty('🧬','Бот ещё ничего не запомнил',
       'Факты о собеседнике извлекаются из переписки: имя, город, интересы, что человек хотел купить. Они появятся, когда с ботом начнут разговаривать.')); return; }
@@ -27327,6 +27400,10 @@ async function forgetSemUser(userId, factCount, el) {
   try {
     const r = await api(`/api/miniapp/semantic_memory/${botId}/user/${userId}`, {method:'DELETE'});
     toast(`🗑 Забыто: ${num(r.facts||0)} ${plural(r.facts||0,'факт','факта','фактов')}`);
+    // Перерисовка НА МЕСТЕ после удаления: список читается с начала, иначе при
+    // нажатом «Показать ещё» страница по старому смещению доклеилась бы к уже
+    // показанным строкам — и забытый собеседник остался бы на экране.
+    SEMF_ROWS = []; SEMF_OFFSET = 0;
     openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
