@@ -595,9 +595,12 @@ async def list_for_owner(pool, owner_id: int, limit: int = 100,
                  FROM account_rehab_state r
                  JOIN tg_accounts a ON a.id = r.acc_id
                 WHERE r.owner_id=$1
+                -- `updated_at` у двух строк совпадает запросто (один проход
+                -- автоматики правит их вместе), а со сдвигом страницы без
+                -- уникального хвоста теряют и повторяют аккаунты.
                 ORDER BY (r.phase = 'stuck') DESC,
                          (r.phase IN ('appeal','warming','recheck')) DESC,
-                         r.updated_at DESC
+                         r.updated_at DESC, r.acc_id
                 LIMIT $2 OFFSET $3""",
             owner_id, max(1, min(500, int(limit))), max(0, int(offset or 0)))
     except Exception as e:
