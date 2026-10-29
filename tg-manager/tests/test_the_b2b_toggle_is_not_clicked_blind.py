@@ -224,6 +224,16 @@ async def test_a_partly_enabled_operation_is_partial(monkeypatch):
     res = await W._exec_enable_bot_to_bot(_Pool(), None, 1, 2, {})
     assert res["status"] == "partial", (
         "часть ботов осталась непройденной, а исход говорит «выполнено»")
+    # И это слово обязано ДОЙТИ до очереди. Решает op_status.classify_final, и
+    # решает по счётчикам: «partial» с пустыми ok/failed он превращает в
+    # «done». Первая версия этой правки именно так и терялась — слово было
+    # честным, а счётчиков в возврате не было.
+    from services import op_status
+    assert op_status.classify_final(
+        res["status"], ok=res.get("ok", 0), failed=res.get("failed", 0),
+    ) == op_status.PARTIAL, (
+        f"исход не дошёл до очереди: {res.get('ok')=} {res.get('failed')=} — "
+        "classify_final превратит это в «выполнено»")
 
 
 async def _ok(v):

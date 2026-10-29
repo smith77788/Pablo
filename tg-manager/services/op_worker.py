@@ -15197,8 +15197,9 @@ async def _exec_enable_bot_to_bot(
     uname_to_bot = {(b.get("username") or "").lstrip("@"): b["bot_id"] for b in bots}
     enabled_n = already_n = 0
     err_lines: list[str] = []
+    _planned = sum(len(v) for v in by_acc.values())
     await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
-                        sum(len(v) for v in by_acc.values()), op_id)
+                        _planned, op_id)
 
     for acc_id, unames in by_acc.items():
         if await _is_cancelled(pool, op_id):
@@ -15255,8 +15256,14 @@ async def _exec_enable_bot_to_bot(
         status = "partial"
     else:
         status = "failed"
+    # Счётчики факта обязательны, а не декоративны: исход решает
+    # op_status.classify_final, и решает ПО СЧЁТЧИКАМ — слово исполнителя для
+    # него намерение. «partial» с пустыми ok/failed превращается в «done», то
+    # есть честный частичный исход терялся бы молча.
+    _ok_n = enabled_n + already_n
+    _failed_n = max(0, _planned - _ok_n) + len(no_owner)
     return {"status": status, "enabled": enabled_n, "already": already_n,
-            "summary": summary}
+            "ok": _ok_n, "failed": _failed_n, "summary": summary}
 
 
 async def _db_get_account_for_telethon(pool, acc_id: int, owner_id: int):
@@ -16049,8 +16056,13 @@ async def _exec_deploy_network(
                 f"каталоге, но план о них не знает")
         if manual:
             parts.append("Вручную: " + "; ".join(manual[:5]))
+        # ok/failed — не украшение: classify_final судит по счётчикам, и
+        # «partial» с пустыми счётчиками он превращает в «done». Незапомненный
+        # узел — именно непройденная работа: объект создан, а план о нём не
+        # знает, и повтор создаст его заново.
         return {"status": "partial" if unmarked else "done",
                 "created": created, "wired": wired, "unmarked": unmarked,
+                "ok": created + wired, "failed": unmarked,
                 "manual": manual, "summary": " · ".join(parts)}
     finally:
         await release_accounts([_claimed_acc])

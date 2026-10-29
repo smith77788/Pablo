@@ -133,3 +133,100 @@ def test_the_worker_reads_the_summary_and_not_the_reason():
     assert 'result.get("reason") or result.get("summary")' in src, (
         "воркер перестал читать reason в текст ошибки — проверьте, читается ли "
         "он вообще, иначе причина отказа теряется на ЛЮБОМ исходе")
+
+
+# ── «Частично» без счётчиков теряется по дороге ──────────────────────────────
+#
+# Исход решает не слово исполнителя, а `op_status.classify_final`, и решает по
+# СЧЁТЧИКАМ: `status` — это намерение, а ok/failed — факт (так и задумано, см.
+# докстринг). Из этого следует неочевидное: возврат, заявивший `partial` без
+# ok/failed, превращается в `done` — `classify_final('partial', ok=0,
+# failed=0)` возвращает DONE. Слово теряется молча, и недоведённая работа
+# снова закрывается зелёным.
+#
+# Я наступил на это дважды в один день, в своих же правках: связка сетей и
+# включение bot-to-bot оба честно говорили «partial» и оба получали «done».
+
+def _status_words_of_return(fn: ast.AST, node: ast.Return) -> set[str]:
+    """Слова, которыми этот возврат может назвать исход (включая переменную)."""
+    words: set[str] = set()
+    for k, v in zip(node.value.keys, node.value.values):
+        if not (isinstance(k, ast.Constant) and k.value == "status"):
+            continue
+        if isinstance(v, ast.Name):
+            for n in ast.walk(fn):
+                tgts = (n.targets if isinstance(n, ast.Assign)
+                        else [n.target] if isinstance(n, ast.AnnAssign) else [])
+                if any(isinstance(t, ast.Name) and t.id == v.id for t in tgts):
+                    for sub in ast.walk(n.value) if n.value is not None else []:
+                        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                            words.add(sub.value)
+        else:
+            for sub in ast.walk(v):
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                    words.add(sub.value)
+    return words
+
+
+def partial_without_counters(src: str) -> list[tuple[str, int]]:
+    tree = ast.parse(src)
+    out = []
+    for fn in tree.body:
+        if not isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        if not fn.name.startswith("_exec_"):
+            continue
+        nested = {id(x) for g in ast.walk(fn)
+                  if isinstance(g, (ast.FunctionDef, ast.AsyncFunctionDef)) and g is not fn
+                  for x in ast.walk(g)}
+        for n in ast.walk(fn):
+            if id(n) in nested or not isinstance(n, ast.Return):
+                continue
+            if not isinstance(n.value, ast.Dict):
+                continue
+            if "partial" not in _status_words_of_return(fn, n):
+                continue
+            keys = {k.value for k in n.value.keys if isinstance(k, ast.Constant)}
+            if not ("ok" in keys and "failed" in keys):
+                out.append((fn.name, n.lineno))
+    return sorted(out)
+
+
+def test_a_partial_outcome_carries_its_counters():
+    silent = partial_without_counters(_src())
+    assert not silent, (
+        f"исход «partial» заявлен без счётчиков ok/failed: {silent}. "
+        "classify_final судит по счётчикам, а не по слову: при пустых "
+        "счётчиках «partial» превращается в «done», и недоведённая работа "
+        "снова закрывается зелёным")
+
+
+def test_the_mechanism_is_really_this_way():
+    """Не догадка: вот как именно теряется слово."""
+    from services import op_status
+
+    assert op_status.classify_final("partial", ok=0, failed=0) == op_status.DONE
+    assert op_status.classify_final("partial", ok=1, failed=1) == op_status.PARTIAL
+
+
+def test_the_counter_census_bites():
+    sick = ("async def _exec_x(pool, op_id):\n"
+            "    return {'status': 'partial', 'summary': 'часть'}\n")
+    assert partial_without_counters(sick), "перепись не видит partial без счётчиков"
+
+
+def test_the_counter_census_sees_a_variable_status():
+    """Слово бывает в переменной — на этом сбилась первая прикидка."""
+    sick = ("async def _exec_x(pool, op_id):\n"
+            "    status = 'partial' if left else 'done'\n"
+            "    return {'status': status, 'summary': 'часть'}\n")
+    assert partial_without_counters(sick), (
+        "перепись смотрит только на литерал в самом возврате — исход, "
+        "собранный в переменной, она пропустит")
+
+
+def test_the_counter_census_accepts_counters():
+    healthy = ("async def _exec_x(pool, op_id):\n"
+               "    return {'status': 'partial', 'ok': 3, 'failed': 1, "
+               "'summary': 'часть'}\n")
+    assert not partial_without_counters(healthy)
