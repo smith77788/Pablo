@@ -30,6 +30,7 @@ from typing import Any, Optional
 import asyncpg  # noqa: F401 — используется в аннотациях "asyncpg.Pool"
 from config import TG_API_ID, TG_API_HASH, TG_PROXY, CF_RELAY_URL
 from services.logger import log_exc_swallow
+from services import bot_usernames as _bot_usernames
 
 log = logging.getLogger(__name__)
 
@@ -9114,7 +9115,9 @@ def parse_mybots_usernames(button_labels) -> list[str]:
         # BotFather иногда пишет «@name — описание»: берём первый токен.
         s = s.split()[0].strip()
         uname = s.lstrip("@")
-        if len(uname) < 5 or not uname.lower().endswith("bot"):
+        # Основной «…bot» или дополнительный «…app/ai/agent/game» (Telegram,
+        # октябрь 2026): кнопка с любым из них — это бот, не навигация.
+        if not _bot_usernames.is_bot_username(uname):
             continue
         if not all(c.isalnum() or c == "_" for c in uname):
             continue

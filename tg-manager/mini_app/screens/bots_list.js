@@ -221,7 +221,9 @@ async function openBotByUsername(uname) {
       BOT_OFFSET = BOTS.length;
       BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
     }
-    const b = (BOTS||[]).find(x => String(x.username||'').toLowerCase() === String(uname).toLowerCase());
+    const lu = String(uname).toLowerCase();
+    const b = (BOTS||[]).find(x => String(x.username||'').toLowerCase() === lu
+                                || String(x.extra_username||'').toLowerCase() === lu);
     if (!b) { toast('⚠️ Бот ещё не появился в списке — обновите раздел «Боты»'); return; }
     openBot(b.bot_id);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
@@ -249,7 +251,9 @@ function renderBots() {
     // Показываем ИМЯ бота (first_name) как основную подпись, @username — второй
     // строкой (раньше выводился только @username, имя не было видно вовсе).
     const name = b.first_name || (b.username?'@'+b.username:'Бот #'+b.bot_id);
-    const handle = (b.first_name && b.username) ? '@'+b.username : '';
+    // Второй username на app/ai/agent/game (Telegram, 2026) — рядом с основным.
+    const handle = [(b.first_name && b.username) ? '@'+b.username : '',
+                    b.extra_username ? '@'+b.extra_username : ''].filter(Boolean).join(' · ');
     const initials = (b.first_name||b.username||'Бот').replace('@','').slice(0,2).toUpperCase();
     const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
     const active = b.is_active;

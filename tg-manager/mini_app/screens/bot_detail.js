@@ -18,6 +18,7 @@ async function openBot(botId) {
   push('s-botdetail');
   try {
     const d = await api('/api/miniapp/bot/'+botId);
+    if (CUR_BOT && CUR_BOT.id==botId) CUR_BOT.d = d;
     txt('bd-body', buildBotDetail(d));
     modernizeIcons(document.getElementById('s-botdetail'));
   } catch(e) {
@@ -101,6 +102,7 @@ function buildBotDetail(d) {
       {ico:'🔗',lbl:'Вебхук',        fn:`openBotWebhook(${bid},'${bn}')`},
       {ico:'🌍',lbl:'Мультигео',      fn:`openMultigeo()`},
       {ico:'📝',lbl:'Заметка',        fn:`openBotNote(${bid})`},
+      {ico:'🏷',lbl:'Доп. username',  fn:`openBotExtraUsername(${bid})`},
     ]},
   ];
 
@@ -131,6 +133,7 @@ function buildBotDetail(d) {
       <div class="bot-phdr-ava" style="background:${grad}">${initials}</div>
       <div class="bot-phdr-body">
         <div class="bot-phdr-name">${esc(bname)}</div>
+        ${b.extra_username?`<div class="bot-phdr-sub" title="${b.extra_username_verified?'Проверено: ведёт на этого бота':'Ещё не подтверждено'}">также @${esc(b.extra_username)}${b.extra_username_verified?' ✓':' · не проверен'}</div>`:''}
         <div class="bot-phdr-sub">${num(d.active_subscribers)} активных · ${num(d.total_subscribers)} всего</div>
         ${(bh.state&&bh.state!=='ok')?`<span class="badge b-gy" style="background:var(--bg2);color:${bh.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'}">${esc(bh.label)}</span>`
           : (b.is_active?'<span class="badge b-gr">🟢 Активен</span>':'<span class="badge b-gy">Выключен</span>')}
@@ -350,6 +353,62 @@ function updateCmpTargetBot() {
       return `<option value="${b.bot_id}">${esc(name)} (${num(b.subscriber_count||0)} подп.)</option>`;
     }).join('') : '<option value="">Нет ботов — добавьте бота</option>';
   }
+}
+
+// Дополнительный @username (…app/ai/agent/game). Ставится у @BotFather — у
+// Bot API метода нет, — здесь только привязка с проверкой на сервере.
+const BOT_EXTRA_SUFFIXES = ['app','ai','agent','game'];
+let BEU_BOT_ID = 0;
+function _beuBase(v) {
+  let u = (v||'').trim().replace(/^@/,'').replace(/^(https?:\/\/)?(t|telegram)\.me\//i,'');
+  const low = u.toLowerCase();
+  for (const suf of ['agent','game','app','bot','ai']) {
+    if (low.endsWith(suf) && low.length > suf.length) return u.slice(0, -suf.length);
+  }
+  return u;
+}
+function _beuChips() {
+  const base = _beuBase(document.getElementById('beuInput').value) || (CUR_BOT && CUR_BOT.name || '').replace('@','').replace(/_?bot$/i,'');
+  document.getElementById('beuChips').innerHTML = BOT_EXTRA_SUFFIXES.map(s=>
+    `<button class="btn" style="padding:5px 10px;font-size:12px" onclick="document.getElementById('beuInput').value='${esc(base)}'+'${s}';_beuChips()">…${s}</button>`).join('');
+}
+function openBotExtraUsername(botId) {
+  BEU_BOT_ID = botId;
+  const b = (CUR_BOT && CUR_BOT.d && CUR_BOT.d.bot) || {};
+  const inp = document.getElementById('beuInput');
+  inp.value = b.extra_username || '';
+  inp.oninput = _beuChips;
+  document.getElementById('beuErr').textContent = '';
+  document.getElementById('beuClear').style.display = b.extra_username ? '' : 'none';
+  _beuChips();
+  showModal('mo-bot-extra-un');
+}
+async function saveBotExtraUsername(clear) {
+  const inp = document.getElementById('beuInput');
+  const err = document.getElementById('beuErr');
+  const btn = document.getElementById(clear ? 'beuClear' : 'beuBtn');
+  const username = clear ? '' : inp.value.trim().replace(/^@/,'');
+  err.textContent = '';
+  if (!clear) {
+    const low = username.toLowerCase();
+    if (!/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(username)) { err.textContent = 'Латиница, цифры и «_», 5–32 символа, начинается с буквы'; return; }
+    if (low.endsWith('bot')) { err.textContent = 'Это основной формат «…bot». Дополнительный оканчивается на app, ai, agent или game'; return; }
+    if (!['app','ai','agent','game','gay'].some(s=>low.endsWith(s))) { err.textContent = 'Должен оканчиваться на app, ai, agent или game'; return; }
+  }
+  btn.disabled = true;
+  try {
+    const r = await api('/api/miniapp/bot/'+BEU_BOT_ID+'/extra_username', {method:'PUT', body:JSON.stringify({username})});
+    const d = CUR_BOT && CUR_BOT.id==BEU_BOT_ID && CUR_BOT.d;
+    if (d) {
+      d.bot.extra_username = r.extra_username; d.bot.extra_username_verified = r.verified;
+      txt('bd-body', buildBotDetail(d));
+      modernizeIcons(document.getElementById('s-botdetail'));
+    }
+    closeModal('mo-bot-extra-un');
+    toast(!r.extra_username ? '🗑 Дополнительный username отвязан'
+      : (r.verified ? '✅ @'+r.extra_username+' привязан и проверен' : '⚠️ @'+r.extra_username+' сохранён, но не проверен: '+(r.hint||'повторим позже')));
+  } catch(e) { err.textContent = errRu(e, 'Не удалось сохранить'); }
+  finally { btn.disabled = false; }
 }
 
 async function openBotNote(botId) {

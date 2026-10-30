@@ -4592,6 +4592,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- Дополнительный @username бота (суффиксы app/ai/agent/game, Telegram 2026) -->
+<div class="mbg" id="mo-bot-extra-un" onclick="if(event.target===this)closeModal('mo-bot-extra-un')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-bot-extra-un')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">🏷 Дополнительный username</div>
+    <div class="field-note" style="margin:0 0 10px;line-height:1.45">Кроме основного «…bot» боту можно дать второй username на <b>app</b>, <b>ai</b>, <b>agent</b> или <b>game</b>. Задаётся у @BotFather (нужен Telegram Premium, один на бота, до двух на аккаунт), потом привяжите его здесь: мы проверим, что он ведёт на этого бота.</div>
+    <div class="field"><label>Username</label><input id="beuInput" maxlength="33" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="например, myshopapp"></div>
+    <div id="beuChips" style="display:flex;gap:6px;flex-wrap:wrap;margin:-2px 0 8px"></div>
+    <div id="beuErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" id="beuBtn" onclick="saveBotExtraUsername()" style="width:100%;margin-top:8px">Привязать</button>
+    <button class="btn" id="beuClear" onclick="saveBotExtraUsername(true)" style="width:100%;margin-top:8px;display:none">Отвязать</button>
+    <a class="btn" href="https://t.me/BotFather" target="_blank" rel="noopener" style="display:block;text-align:center;width:100%;margin-top:8px;box-sizing:border-box">Открыть @BotFather</a>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: BOT COMMANDS ══════════════════════ -->
 <div class="screen" id="s-botcommands">
   <div class="hdr">

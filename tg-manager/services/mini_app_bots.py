@@ -68,7 +68,9 @@ def setup_routes(app: web.Application, pool) -> None:
         # прошла, список ботов не должен исчезнуть целиком: _safe_fetch вернул
         # бы пустоту, неотличимую от «ботов нет». Поэтому — запасной запрос
         # без них (см. ту же защиту в обзоре прогрева).
-        _BOT_HEALTH_COLS = "mb.last_error, mb.fail_streak, mb.last_ok_at,"
+        # extra_username (schema_v261) — сюда же: без миграции запасной запрос
+        # просто не покажет второй username, а список останется.
+        _BOT_HEALTH_COLS = "mb.last_error, mb.fail_streak, mb.last_ok_at, mb.extra_username,"
         _BOTS_SQL = """SELECT DISTINCT mb.bot_id, mb.username, mb.first_name, mb.is_active,
                       {health}
                       COUNT(DISTINCT bu.user_id) FILTER (WHERE bu.is_active=true) AS subscriber_count,
@@ -81,7 +83,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             rows = await pool.fetch(
                 _BOTS_SQL.format(health=_BOT_HEALTH_COLS, visible=_BOTS_VISIBLE_SQL,
-                                 group=",\n mb.last_error, mb.fail_streak, mb.last_ok_at"),
+                                 group=",\n mb.last_error, mb.fail_streak, mb.last_ok_at, mb.extra_username"),
                 uid, limit, offset)
         except Exception:
             log.warning("bots uid=%d: нет колонок здоровья, показываем список без них", uid)
@@ -484,6 +486,32 @@ def setup_routes(app: web.Application, pool) -> None:
         if res == "UPDATE 0":
             return _err("Не найдено", 404)
         return _json_resp({"ok": True})
+
+    async def set_bot_extra_username(request: web.Request) -> web.Response:
+        """Привязать/снять дополнительный @username (…app/ai/agent/game)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор бота", 400)
+        try:
+            body = await request.json()
+            raw = body.get("username") if isinstance(body, dict) else None
+            if raw is not None and not isinstance(raw, str):
+                raise ValueError("username")
+        except Exception:
+            return _err("Неверное тело запроса", 400)
+        from services import managed_bots as _mb
+        try:
+            res = await _mb.set_extra_username(pool, uid, bot_id, (raw or "")[:64])
+        except Exception:
+            log.exception("set_bot_extra_username uid=%d bot=%d", uid, bot_id)
+            return _err(_INTERNAL_ERROR, 500)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Ошибка", res.get("status") or 400)
+        return _json_resp(res)
 
     async def bot_commands(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -1676,6 +1704,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/bot/{bot_id}/stats", bot_stats)
     app.router.add_get("/api/miniapp/bot/{bot_id}/note", bot_note)
     app.router.add_put("/api/miniapp/bot/{bot_id}/note", save_bot_note)
+    app.router.add_put("/api/miniapp/bot/{bot_id}/extra_username", set_bot_extra_username)
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
     app.router.add_post("/api/miniapp/bot/{bot_id}/profile", bot_profile)
