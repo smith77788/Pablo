@@ -990,7 +990,7 @@ async function spOrders(pid, keep) {
       const phone = (contact && contact.phone) ? ' · 📞 ' + esc(contact.phone) : '';
       const total = ((o.total_cents || 0) / 100).toFixed(2) + ' ' + (o.currency || 'USD');
       const who = o.customer_username ? '@' + esc(o.customer_username)
-                : esc(o.customer_name || ('chat ' + o.customer_chat_id));
+                : esc(o.customer_name || (o.customer_chat_id ? 'chat ' + o.customer_chat_id : 'Покупатель без имени'));
       const itemsLine = (Array.isArray(items) && items.length)
         ? '<div class="row-val">🛒 ' + esc(items.map(it =>
             (it.name || '') + (it.qty > 1 ? ' ×' + it.qty : '')).join(', ')) + '</div>'

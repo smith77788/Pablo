@@ -304,12 +304,33 @@ if (sweepMode) {
       const el = document.querySelector('.screen.show');
       return el ? el.id : null;
     });
-    const r = await page.evaluate(async ({ name, a }) => {
-      if (typeof window[name] !== 'function') return { missing: true };
-      try { await window[name](...a); }
-      catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
-      return {};
-    }, { name: fn, a: args });
+    // Пробный вызов пробует подставленный id, а БЕЗ аргументов — только если
+    // с ним экран не открылся. Порядок именно такой, и он важен в обе стороны.
+    // Единственный параметр открывашки — не всегда id: у целого семейства
+    // (openNarrative, openNewUsers, openPresencePacks и ещё с десяток) он
+    // зовётся `keep` и значит «догрузить страницу, экран не открывать» —
+    // подставленная туда единица экран не откроет, и спасает вызов без
+    // аргументов. Но обратный порядок ломает семейство, где id ОБЯЗАТЕЛЕН:
+    // `openOpDetail()` без него тоже «открывает» экран — с заголовком
+    // «Операция #undefined» и телом «не найдена». Экран засчитан, а показали
+    // мы пустышку. Поэтому сначала id, и только потом — без него.
+    const attempts = probe ? [args, []] : [[]];
+    let r = {};
+    for (const a of attempts) {
+      r = await page.evaluate(async ({ name, a }) => {
+        if (typeof window[name] !== 'function') return { missing: true };
+        try { await window[name](...a); }
+        catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
+        return {};
+      }, { name: fn, a });
+      await page.waitForTimeout(120);
+      const now = await page.evaluate(() => {
+        const el = document.querySelector('.screen.show');
+        return el ? el.id : null;
+      });
+      if (now && now !== beforeId) break;      // экран открылся — хватит
+      await page.evaluate(() => { try { while (typeof STACK !== 'undefined' && STACK.length) back(); } catch (_) {} });
+    }
     await page.waitForTimeout(220);
     // MINIAPP_SHOT_DIR — снимок каждого экрана обхода. Отчёт говорит, ЧТО
     // обрезано, а посмотреть, как это выглядит, иначе нечем: экраны обхода не
@@ -432,8 +453,9 @@ if (sweepMode) {
       + ` — ${mute.slice(0, 12).join(' ')}` + (mute.length > 12 ? ' …' : ''));
   }
   if (missed.length) {
-    console.log(`не показано экранов: ${missed.length} — ${missed.slice(0, 12).join(' ')}`
-      + (missed.length > 12 ? ' …' : ''));
+    // Список печатается ЦЕЛИКОМ: именно он и говорит, куда смотреть дальше.
+    // Обрезанный на двенадцати, он превращался в украшение отчёта.
+    console.log(`не показано экранов: ${missed.length} — ${missed.join(' ')}`);
   }
   console.log(`с находками: ${report.length}`);
   report.forEach(r => console.log('  ' + r));
