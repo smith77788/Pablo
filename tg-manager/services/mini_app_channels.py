@@ -29,6 +29,8 @@ def setup_routes(app: web.Application, pool) -> None:
         _CHANNEL_IS_GROUP_SQL, _CHANNELS_ONE_ROW_SQL, _INTERNAL_ERROR,
         _cached_user, _channel_filter_sql, _err, _get_uid, _json_resp,
         _safe_count, _safe_fetch, _safe_fetchrow, channel_edit_worker_op, log,
+        _CHANNEL_IRREVERSIBLE_OPS, CHANNEL_CONFIRM_WORD, channel_clear_limit,
+        channel_manage_confirmed, channel_manage_worker_op, managed_channel_role,
     )
     from services.security import (
         check_sql_suspicious, validate_integer, validate_string,
@@ -248,7 +250,7 @@ def setup_routes(app: web.Application, pool) -> None:
         ch = await _safe_fetchrow(pool,
             """SELECT channel_id, username, title, type,
                       COALESCE(members_count, 0) AS member_count,
-                      acc_id, added_at
+                      acc_id, added_at, is_admin, is_creator
                FROM managed_channels WHERE channel_id=$1 AND owner_id=$2""", ch_id, uid)
         if not ch:
             return _err("Канал не найден", 404)
@@ -304,7 +306,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.debug("channel_detail: posts_published failed ch=%d", ch_id)
         return _json_resp({
-            "channel": ch,
+            "channel": {**dict(ch), "role": managed_channel_role(ch)},
             "linked_account": acc,
             "recent_ops": recent_ops,
             "member_growth": member_growth,
@@ -386,9 +388,105 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def _submit_channel_manage(uid: int, op: str, chans: list, body: dict) -> web.Response:
+        """Общий путь одиночного и массового удаления/очистки/выхода."""
+        worker_op = channel_manage_worker_op(op)
+        if not worker_op:
+            return _err("Неизвестная операция", 400)
+        if not channel_manage_confirmed(op, body):
+            return _err(f"Подтвердите действие: введите слово «{CHANNEL_CONFIRM_WORD}»", 400)
+        params = {
+            "op": worker_op,
+            "channel_acc_pairs": [{
+                "channel_id": int(c["channel_id"]), "acc_id": int(c["acc_id"]),
+                "title": c.get("title") or "",
+                "access_hash": int(c.get("access_hash") or 0),
+                "username": c.get("username") or "",
+                "type": c.get("type") or "",
+            } for c in chans],
+        }
+        if op in _CHANNEL_IRREVERSIBLE_OPS:
+            params["confirmed"] = True
+        if op == "clear":
+            limit = channel_clear_limit(body)
+            if limit < 0:
+                return _err("Число постов — целое от 1 до 100000 (или «все»)", 400)
+            params["clear_limit"] = limit
+        n = len(chans)
+        label = {"delete": "💥 Удаление в Telegram", "clear": "🧹 Очистка постов",
+                 "leave": "🚪 Выход из каналов"}[op]
+        op_id = await _obus.submit(
+            pool, uid, "bulk_chan_exec", params, total_items=n, label=f"{label}: {n}")
+        return _json_resp({"ok": True, "op_id": op_id, "count": n})
+
+    async def channel_manage(request: web.Request) -> web.Response:
+        """Удалить канал в Telegram / очистить посты / выйти из канала.
+        body: {op: delete|clear|leave, confirm?: "УДАЛИТЬ", clear_limit?: int}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, title, acc_id, access_hash, username, type "
+            "FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
+        if not ch:
+            return _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return _err("У канала нет привязанного аккаунта", 400)
+        try:
+            return await _submit_channel_manage(uid, body.get("op"), [ch], body)
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("channel_manage uid=%d ch=%d", uid, ch_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def channel_autoposts(request: web.Request) -> web.Response:
+        """Действующий автопостинг владельца: цепочки публикаций с повтором,
+        которые ещё ждут следующего круга. ?channel_id= — только этого канала."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        ch_raw = request.query.get("channel_id") or ""
+        ch_filter = ""
+        args: list = [uid]
+        if ch_raw:
+            if not ch_raw.lstrip("-").isdigit():
+                return _err("Неверный идентификатор канала", 400)
+            ch_filter = (" AND (params->'channel_ids' @> jsonb_build_array($2::bigint)"
+                         " OR params->>'channel_ref' = $2::text)")
+            args.append(int(ch_raw))
+        rows = await _safe_fetch(pool,
+            "SELECT id, op_type, status, label, scheduled_for, created_at, "
+            "       params->>'text' AS text, params->>'text_to_post' AS text_to_post, "
+            "       (params->>'repeat_interval_min')::int AS repeat_interval_min, "
+            "       params->>'repeat_count' AS repeat_count, "
+            "       COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(params->'channel_ids')='array' "
+            "                THEN params->'channel_ids' END), 1) AS channels "
+            "FROM operation_queue WHERE owner_id=$1 "
+            "  AND status IN ('pending','scheduled','running','paused') "
+            "  AND op_type IN ('quick_post','mass_publish','bulk_post_to_channel','bulk_post_chans') "
+            "  AND COALESCE((params->>'repeat_interval_min')::int, 0) > 0" + ch_filter +
+            " ORDER BY scheduled_for NULLS FIRST, id LIMIT 50", *args)
+        out = []
+        for r in rows or []:
+            d = dict(r)
+            d["text"] = (d.pop("text") or d.pop("text_to_post", None) or "")[:200]
+            d.pop("text_to_post", None)
+            for k in ("scheduled_for", "created_at"):
+                if hasattr(d.get(k), "isoformat"):
+                    d[k] = d[k].isoformat()
+            out.append(d)
+        return _json_resp({"ok": True, "autoposts": out})
+
     async def channels_mass(request: web.Request) -> web.Response:
         """Массовое действие над выбранными каналами.
-        body: {op: post|about|username|promote, channel_ids: [..], value?/text?}"""
+        body: {op: post|title|about|username|promote|delete|clear|leave,
+               channel_ids: [..], value?/text?/confirm?/clear_limit?}"""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -401,7 +499,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not ids_in:
             return _err("Выберите каналы", 400)
         chans = await _safe_fetch(pool,
-            "SELECT channel_id, title, acc_id, access_hash, username FROM managed_channels "
+            "SELECT channel_id, title, acc_id, access_hash, username, type FROM managed_channels "
             "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, ids_in)
         chans = [c for c in (chans or []) if c.get("acc_id")]
         if not chans:
@@ -451,6 +549,8 @@ def setup_routes(app: web.Application, pool) -> None:
                     total_items=n, label=f"Публикация в каналы: {n}")
                 return _json_resp(
                     {"ok": True, "op_id": op_id, "op_ids": [op_id], "count": n})
+            if channel_manage_worker_op(op):
+                return await _submit_channel_manage(uid, op, chans, body)
             if op == "promote":
                 op_ids = []
                 for c in chans:
@@ -916,5 +1016,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/channels/mass", channels_mass)
     app.router.add_post("/api/miniapp/channels/bulk_delete", channels_bulk_delete)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/manage", channel_manage)
+    app.router.add_get("/api/miniapp/channels/autoposts", channel_autoposts)
     app.router.add_get("/api/miniapp/channels/removed", channels_removed)
     app.router.add_post("/api/miniapp/channel/{ch_id}/restore", channel_restore)

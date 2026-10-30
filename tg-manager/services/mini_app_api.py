@@ -957,6 +957,54 @@ def channel_edit_worker_op(op) -> str | None:
     return _CHANNEL_EDIT_OPS.get(op)
 
 
+# Действия, после которых канала (или поста, или участия аккаунта) больше нет:
+# UI-op → op воркера bulk_chan_exec. Отдельно от _CHANNEL_EDIT_OPS намеренно:
+# правки метаданных обратимы и идут без подтверждения, эти — нет.
+_CHANNEL_MANAGE_OPS = {"delete": "chan_delete", "clear": "chan_clear", "leave": "chan_leave"}
+# Удаление канала и очистку постов не вернуть — для них владелец набирает слово.
+_CHANNEL_IRREVERSIBLE_OPS = frozenset({"delete", "clear"})
+CHANNEL_CONFIRM_WORD = "УДАЛИТЬ"
+
+
+def managed_channel_role(ch) -> str:
+    """Роль аккаунта в канале — как в списке каналов (owner/admin/member/unknown).
+    По ней карточка предлагает «Удалить в Telegram» создателю и «Покинуть» чужому."""
+    if ch.get("is_creator"):
+        return "owner"
+    if ch.get("is_admin"):
+        return "admin"
+    return "member" if ch.get("is_admin") is False else "unknown"
+
+
+def channel_manage_worker_op(op) -> str | None:
+    """UI-op ('delete'|'clear'|'leave') → воркер-op, либо None если не поддержан."""
+    return _CHANNEL_MANAGE_OPS.get(op)
+
+
+def channel_manage_confirmed(op, body) -> bool:
+    """Подтвердил ли владелец действие. Необратимое требует набранного слова
+    «УДАЛИТЬ» в body.confirm — случайный тап или старый клиент его не пришлёт."""
+    if op not in _CHANNEL_IRREVERSIBLE_OPS:
+        return True
+    raw = str((body or {}).get("confirm") or "").strip()
+    return raw.upper() == CHANNEL_CONFIRM_WORD
+
+
+def channel_clear_limit(body) -> int:
+    """Сколько последних постов удалить: 0 — все, -1 — значение нечитаемо.
+
+    Нечитаемое число нельзя молча превращать в 0: 0 означает «все посты»,
+    и опечатка в поле стёрла бы канал целиком вместо десятка постов."""
+    raw = (body or {}).get("clear_limit")
+    if raw in (None, "", 0, "0"):
+        return 0
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return -1
+    return n if 0 < n <= 100000 else -1
+
+
 def _proxy_display_host(raw: str) -> str:
     """Чистый выходной host прокси для показа в транспорте аккаунта.
 
@@ -6267,6 +6315,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         params = {"text": text, "delay": delay, "owner_id": uid}
         if channel_ids:
             params["channel_ids"] = channel_ids
+            # Явно выбранные группы не должны отсекаться фильтром «только
+            # каналы» исполнителя: автопостинг из карточки шлёт target=all.
+            if body.get("target") in ("all", "channels", "groups"):
+                params["target"] = body["target"]
         # Рекуррентная публикация (0 = разовая). Умел её только «Быстрый пост»,
         # слитый в этот экран; при слиянии повтор потерялся, хотя воркер его
         # поддерживает — после успешного прогона сам ставит следующий запуск.
