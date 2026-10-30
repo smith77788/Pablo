@@ -22,6 +22,27 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
+def _dedup_status_sql() -> str:
+    """Статусы, внутри которых повторный сабмит считается ТЕМ ЖЕ сабмитом.
+
+    Берётся из единственного источника статусов (`services/op_status.py`), а не
+    переписывается здесь руками. Здесь лежал ровно такой рукописный список — и
+    это та же мина, на которой уже подрывались копии в `bot/handlers`: они не
+    знали про 'partial', 'paused' и 'waiting_approval', появившиеся позже.
+    Цена промаха именно в ЭТОМ месте выше всех: не знает дедуп про новый
+    «в полёте» статус — двойной тап даёт ДВЕ операции, то есть двойной расход
+    аккаунтов и удвоенный риск бана на самой баноопасной операции продукта.
+
+    Почему `done` входит, а `partial`, `failed` и `cancelled` — нет: окно
+    закрывает гонку «первый запрос уже успел завершиться УСПЕШНО», и повторный
+    тап в эти секунды значит «я не увидел ответа», а не «сделай ещё раз».
+    Операция, которая не доехала, повторного запуска владельцу не запрещает.
+    """
+    from services import op_status as _ost
+
+    return "('" + "','".join(sorted(_ost.IN_FLIGHT | {_ost.DONE})) + "')"
+
+
 # Окно идемпотентности постановки операции (сек). См. submit(dedup_window_sec).
 # 20с покрывает и двойной тап (<1с), и retry клиента после таймаута, но слишком
 # коротко, чтобы подавить намеренный повторный запуск позже.
@@ -829,18 +850,16 @@ async def submit(
         async with conn.transaction():
             if dedup_window_sec and dedup_window_sec > 0:
                 dedup_identity = sensitive_params_fp or params_json
+                _dedup_statuses = _dedup_status_sql()
                 await conn.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     f"opbus|{owner_id}|{op_type}|{dedup_identity}|{sched}",
                 )
                 if sensitive_params_fp:
                     existing = await conn.fetchval(
-                        """SELECT id FROM operation_queue
+                        f"""SELECT id FROM operation_queue
                            WHERE owner_id = $1 AND op_type = $2
-                             AND status IN (
-                                 'pending', 'running', 'paused', 'scheduled',
-                                 'waiting_approval', 'done'
-                             )
+                             AND status IN {_dedup_statuses}
                              AND params->>'_sealed_params_fp' = $3
                              AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
                              AND created_at > NOW() - make_interval(secs => $5)
@@ -850,12 +869,9 @@ async def submit(
                     )
                 else:
                     existing = await conn.fetchval(
-                        """SELECT id FROM operation_queue
+                        f"""SELECT id FROM operation_queue
                            WHERE owner_id = $1 AND op_type = $2
-                             AND status IN (
-                                 'pending', 'running', 'paused', 'scheduled',
-                                 'waiting_approval', 'done'
-                             )
+                             AND status IN {_dedup_statuses}
                              AND params = $3::jsonb
                              AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
                              AND created_at > NOW() - make_interval(secs => $5)
