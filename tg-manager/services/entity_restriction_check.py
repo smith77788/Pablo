@@ -528,12 +528,18 @@ def classify_geoban(per_geo: list) -> dict:
     пригодных странах — честный GEO_INCONCLUSIVE.
     """
     by_geo: dict = {}
+    reason_by_geo: dict = {}
     for v in per_geo or []:
         geo = (str(v.get("geo") or "")).strip().upper() or "??"
         b = _geo_blocked(v)
         prev = by_geo.get(geo, "_unset")
         if b is True:
             by_geo[geo] = True                     # заблокирован — финально для страны
+            if geo not in reason_by_geo:
+                reason_by_geo[geo] = (
+                    _reasons_to_ru(v.get("restriction_reasons") or [])
+                    or ("помечен Telegram как ограниченный" if v.get("restricted")
+                        else "не открывается по ссылке"))
         elif b is False and prev in ("_unset", None):
             by_geo[geo] = False
         elif prev == "_unset":
@@ -567,6 +573,11 @@ def classify_geoban(per_geo: list) -> dict:
         "blocked_geos": blocked,
         "clean_geos": clean,
         "failed_geos": failed,
+        # Пострановая карта для отчёта: страна → blocked | clean | failed,
+        # и причина блокировки там, где она есть.
+        "per_geo": {g: ("blocked" if b is True else "clean" if b is False else "failed")
+                    for g, b in sorted(by_geo.items())},
+        "blocked_reasons": {g: reason_by_geo[g] for g in blocked if g in reason_by_geo},
         "reason_ru": reason_ru,
     }
 
@@ -574,7 +585,7 @@ def classify_geoban(per_geo: list) -> dict:
 def build_geoban_summary(counts: dict, total: int, *, checked=None) -> str:
     """Короткая сводка гео-проверки для итога операции (по-русски)."""
     done = total if checked is None else checked
-    parts = [f"Проверено ботов: {done}/{total}"]
+    parts = [f"Проверено ресурсов: {done}/{total}"]
     order = (GEO_BANNED, GEO_GLOBAL, GEO_INCONCLUSIVE, GEO_CLEAN)
     for st in order:
         c = int(counts.get(st, 0) or 0)
@@ -582,5 +593,51 @@ def build_geoban_summary(counts: dict, total: int, *, checked=None) -> str:
             parts.append(f"{geo_status_label(st)}: {c}")
     banned = int(counts.get(GEO_BANNED, 0) or 0)
     if banned:
-        parts.append("⚠️ Боты в гео-бане недоступны части пользователей по странам.")
+        parts.append("⚠️ Ресурсы в гео-бане недоступны части пользователей по странам.")
     return "\n".join(parts)
+
+
+_KIND_ICONS = {"channel": "📢", "group": "👥", "bot": "🤖"}
+_KIND_RU = {"channel": "Канал", "group": "Чат", "bot": "Бот"}
+_CELL_ICONS = {"blocked": "⛔️", "clean": "✅", "failed": "❓"}
+
+
+def resource_label(kind: str, title: Optional[str], username: Optional[str]) -> str:
+    """«Канал «Новости» (@news)» — подпись ресурса в отчёте и логе операции."""
+    kind_ru = _KIND_RU.get(kind, "Ресурс")
+    uname = (username or "").strip().lstrip("@")
+    name = (title or "").strip()
+    if name and uname:
+        return f"{kind_ru} «{name}» (@{uname})"
+    if uname:
+        return f"{kind_ru} @{uname}"
+    return f"{kind_ru} «{name}»" if name else kind_ru
+
+
+def build_geo_report(rows: list, geos: list) -> str:
+    """Отчёт гео-доступности: по строке на ресурс, по ячейке на страну.
+
+    rows: [{kind, title, username, verdict}] — verdict из classify_geoban.
+    geos: страны, с которых проверяли (порядок столбцов). Сначала ресурсы с
+    проблемами (гео-бан, общий бан), потом остальные — владелец открывает отчёт
+    ради проблем, и они не должны тонуть в списке чистых. Причину блокировки
+    по стране добавляем строкой ниже: текст Telegram объясняет больше, чем код.
+    """
+    if not rows:
+        return ""
+    geos = [str(g).upper() for g in geos]
+    rank = {GEO_BANNED: 0, GEO_GLOBAL: 1, GEO_INCONCLUSIVE: 2, GEO_CLEAN: 3}
+    ordered = sorted(rows, key=lambda r: rank.get((r.get("verdict") or {}).get("status"), 9))
+    lines = ["📊 Доступность по странам (" + ", ".join(geos) + "):",
+             "✅ доступен · ⛔️ заблокирован · ❓ не удалось проверить"]
+    for r in ordered:
+        v = r.get("verdict") or {}
+        per_geo = v.get("per_geo") or {}
+        cells = " · ".join(f"{g} {_CELL_ICONS.get(per_geo.get(g, 'failed'), '❓')}"
+                           for g in geos)
+        icon = _KIND_ICONS.get(r.get("kind"), "•")
+        lines.append(f"{icon} {resource_label(r.get('kind'), r.get('title'), r.get('username'))}"
+                     f": {cells}")
+        for g, why in (v.get("blocked_reasons") or {}).items():
+            lines.append(f"    {g}: {why}")
+    return "\n".join(lines)

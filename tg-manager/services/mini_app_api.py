@@ -6371,14 +6371,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось поставить проверку в очередь", 500)
 
     async def check_bot_geoban_targets(request: web.Request) -> web.Response:
-        """Сколько ПУБЛИЧНЫХ ботов (с @username) можно проверить на гео-бан, и в
-        скольких различимых странах есть аккаунты (гео-бан виден только при ≥2)."""
+        """Сколько ПУБЛИЧНЫХ ресурсов (каналов, чатов, ботов с @username) можно
+        проверить на гео-доступность, и в скольких различимых странах есть
+        аккаунты (гео-бан виден только при ≥2)."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         bots = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots "
             "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''", uid)
+        channels = await _safe_count(pool,
+            "SELECT COUNT(DISTINCT channel_id) FROM managed_channels "
+            "WHERE owner_id=$1 AND username IS NOT NULL AND username <> ''", uid)
         geos = await _safe_count(pool,
             """SELECT COUNT(DISTINCT UPPER(p.geo_country))
                  FROM tg_accounts a
@@ -6386,6 +6390,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 WHERE a.owner_id=$1 AND a.is_active=TRUE
                   AND p.geo_country IS NOT NULL AND p.geo_country <> ''""", uid)
         return _json_resp({"ok": True, "bots": int(bots or 0),
+                           "channels": int(channels or 0),
+                           "total": int(bots or 0) + int(channels or 0),
                            "geos": int(geos or 0)})
 
     async def check_bot_geoban(request: web.Request) -> web.Response:
@@ -6404,14 +6410,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                      if str(x).lstrip("-").isdigit()]
             except (TypeError, ValueError):
                 return _err("Неверные идентификаторы ботов", 400)
-        if params.get("bot_ids") is not None:
-            total = len(params["bot_ids"])
+        channel_ids = body.get("channel_ids")
+        if channel_ids:
+            try:
+                params["channel_ids"] = [int(x) for x in channel_ids
+                                         if str(x).lstrip("-").isdigit()]
+            except (TypeError, ValueError):
+                return _err("Неверные идентификаторы каналов", 400)
+        if params.get("bot_ids") is not None or params.get("channel_ids") is not None:
+            total = len(params.get("bot_ids") or []) + len(params.get("channel_ids") or [])
         else:
-            total = int(await _safe_count(pool,
+            bots = await _safe_count(pool,
                 "SELECT COUNT(*) FROM managed_bots "
-                "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''", uid) or 0)
+                "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''", uid)
+            channels = await _safe_count(pool,
+                "SELECT COUNT(DISTINCT channel_id) FROM managed_channels "
+                "WHERE owner_id=$1 AND username IS NOT NULL AND username <> ''", uid)
+            total = int(bots or 0) + int(channels or 0)
         if total == 0:
-            return _err("Нет публичных ботов (с @username) для проверки гео-бана")
+            return _err("Нет публичных каналов, чатов или ботов (с @username) "
+                        "для проверки гео-доступности")
         try:
             from services.operation_bus import submit
             op_id = await submit(pool, uid, "check_bot_geoban", params, total_items=total)
