@@ -63,7 +63,14 @@ async def _cleanup(pool, plan_id, op_id):
     await pool.execute("DELETE FROM global_presence_targets WHERE plan_id=$1", plan_id)
     await pool.execute("DELETE FROM global_presence_plans WHERE id=$1", plan_id)
     await pool.execute("DELETE FROM operation_log WHERE op_id=$1", op_id)
-    await pool.execute("DELETE FROM operation_queue WHERE id=$1", op_id)
+    # По владельцу, а не только по этому op_id: часть проверок заводит вторую
+    # операцию (чужой план), и она оставалась в очереди в статусе 'pending'
+    # навсегда. Вредит это не мусором: `operation_bus.queue_frozen` спрашивает
+    # очередь ЦЕЛИКОМ («вся работа встала, поллер молчит») и чужие ждущие строки
+    # считает настоящей аварией — то есть на свежей базе прогона соседний файл
+    # краснеет, если окажется после этого по порядку.
+    await pool.execute("DELETE FROM operation_queue WHERE owner_id = ANY($1::bigint[])",
+                       [OWNER, OWNER + 1])
 
 
 async def test_the_operation_gets_a_verdict_with_figures():

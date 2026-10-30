@@ -33,6 +33,12 @@ async def _load_schema(conn) -> None:
             pass
 
 
+async def _clean(pool):
+    """Убрать за собой ВСЁ, что создаёт этот тест, включая очередь операций."""
+    for table in ("broadcast_campaigns", "dm_campaigns", "operation_queue"):
+        await pool.execute(f"DELETE FROM {table} WHERE owner_id=$1", OWNER)
+
+
 def _jsonb(v):
     return json.loads(v) if isinstance(v, str) else v
 
@@ -61,8 +67,7 @@ def test_launch_fans_out_and_groups(monkeypatch):
         await conn.close()
         pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
         try:
-            await pool.execute("DELETE FROM broadcast_campaigns WHERE owner_id=$1", OWNER)
-            await pool.execute("DELETE FROM dm_campaigns WHERE owner_id=$1", OWNER)
+            await _clean(pool)
 
             spec = {
                 "name": "Промо",
@@ -121,10 +126,18 @@ def test_launch_fans_out_and_groups(monkeypatch):
             # Чужой владелец кампанию не видит.
             assert await ch.campaign_status(pool, OWNER + 1, cid) is None
 
-            await pool.execute("DELETE FROM broadcast_campaigns WHERE owner_id=$1", OWNER)
-            await pool.execute("DELETE FROM dm_campaigns WHERE owner_id=$1", OWNER)
         finally:
-            await pool.close()
+            # Уборка в finally и ОБЯЗАТЕЛЬНО вместе с очередью: запуск кампании
+            # раскладывается в пять операций, и `_fake_submit` пишет их в
+            # operation_queue по-настоящему. Раньше убирались только кампании, а
+            # пять 'pending' оставались в базе навсегда — и валили любой тест,
+            # который спрашивает очередь ЦЕЛИКОМ, без скоупа по владельцу
+            # (`operation_bus.queue_frozen`: «работа стоит, поллер молчит»).
+            # Своего владельца чужой тест не чистит и не должен.
+            try:
+                await _clean(pool)
+            finally:
+                await pool.close()
 
     asyncio.run(go())
 
@@ -142,7 +155,7 @@ def test_invalid_spec_rejected_before_group_created(monkeypatch):
         await conn.close()
         pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
         try:
-            await pool.execute("DELETE FROM broadcast_campaigns WHERE owner_id=$1", OWNER)
+            await _clean(pool)
             before = await pool.fetchval(
                 "SELECT COUNT(*) FROM broadcast_campaigns WHERE owner_id=$1", OWNER)
             with pytest.raises(ch.CampaignSpecError):
