@@ -176,7 +176,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    Слоты с nowrap это правило не трогает — там работает многоточие. */
 .screen{overflow-wrap:break-word}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-.sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 16px)}
+.sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 16px + var(--sel-gap, 0px))}
 .sub-sb{padding-bottom:28px}
 /* Содержимое не должно начинаться вплотную к шапке: замер по всем экранам
    показал разброс от 0 до 40px. Восемь пикселей сверху телу экрана и
@@ -8842,6 +8842,28 @@ function _syncBackButton() {
   } catch(_) {}
 }
 
+// Полоса действий над выделением (`.sel-bar`) прибита к низу окна и лежит
+// ПОВЕРХ списка — места в потоке она не занимает. Пока ей это место не
+// выделяли, последние строки списка оставались под ней навсегда: прокрутка
+// уже в упоре, достать их нечем. Нашёл обход экранов, когда научился нажимать
+// «Все» и мерить закрытое в упоре: на вкладке «Аккаунты» закрыто 4 элемента,
+// на вкладке «Боты» — 6.
+//
+// Высоту берём у самой полосы, а не числом: она зависит от того, сколько
+// кнопок действий и в сколько рядов они легли, и на 320 это не то же, что на
+// 390. Отступ в 12 пикселей — зазор между полосой и последней строкой.
+function syncSelBarGap(wrapId) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  const scr = wrap.closest('.screen');
+  const box = scr && scr.querySelector('.sb');
+  if (!box) return;
+  const bar = wrap.querySelector('.sel-bar');
+  const open = !!bar && wrap.style.display !== 'none';
+  box.style.setProperty('--sel-gap',
+    open ? (bar.getBoundingClientRect().height + 12) + 'px' : '0px');
+}
+
 function push(sid) {
   closeAllModals();
   // Экраны — синглтоны по id, и один и тот же id дважды подряд в стеке не
@@ -10890,6 +10912,7 @@ function toggleAccSelMode() {
   const btn = document.getElementById('accSelToggle');
   if (btn) btn.textContent = ACC_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
   document.getElementById('accSelBar').style.display = ACC_SEL_MODE ? '' : 'none';
+  syncSelBarGap('accSelBar');
   renderAccounts(_accFiltered());
   updateAccSelBar();
 }
@@ -11662,6 +11685,7 @@ function toggleChSelMode() {
   const btn = document.getElementById('chSelToggle');
   if (btn) btn.textContent = CH_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать каналы';
   document.getElementById('chSelBar').style.display = CH_SEL_MODE ? '' : 'none';
+  syncSelBarGap('chSelBar');
   renderChannels(CUR_CHANNELS);
   updateChSelBar();
 }

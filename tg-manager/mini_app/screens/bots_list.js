@@ -308,6 +308,7 @@ function toggleBotSelMode() {
   const btn = document.getElementById('botSelToggle');
   if (btn) btn.textContent = BOT_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
   document.getElementById('botSelBar').style.display = BOT_SEL_MODE ? '' : 'none';
+  syncSelBarGap('botSelBar');
   renderBots();
   updateBotSelBar();
 }
