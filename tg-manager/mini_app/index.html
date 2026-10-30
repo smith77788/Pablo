@@ -9007,8 +9007,8 @@ async function loadOnboarding() {
         <div style="font-size:14px;font-weight:700">🎉 Первый результат</div>
         <span class="icon-tap" role="button" tabindex="0" aria-label="Закрыть" style="color:var(--hint)" onclick="onboardDismiss()">✕</span>
       </div>
-      <div style="font-size:13px;margin-top:4px">${esc(fr.title)}${fr.ok ? ' — <b>' + esc(String(fr.ok)) + '</b>' : ''}</div>
-      <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">Дальше подсказки — в «Пульсе» ниже.${d.trial ? ' Пробный период: осталось ' + esc(String(d.trial.days_left)) + ' дн.' : ''}</div>
+      <div style="font-size:13px;margin-top:4px">${esc(fr.title)}${fr.ok ? ' — <b>' + esc(fr.ok) + '</b>' : ''}</div>
+      <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">Дальше подсказки — в «Пульсе» ниже.${d.trial ? ' Пробный период: осталось ' + esc(d.trial.days_left) + ' дн.' : ''}</div>
       ${fr.op_id ? `<button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="openMassOps(${Number(fr.op_id)})">Посмотреть итог →</button>` : ''}
     </div>`;
     el._dismissKey = _onboardDismissKey(d);
@@ -11375,7 +11375,7 @@ function buildAccDetail(d) {
     <div class="profile-hdr">
       <div class="profile-ava ${avatarCls}">${initials}</div>
       <div class="profile-name">${esc(name)}</div>
-      ${a.username?`<div class="profile-sub" style="cursor:pointer;color:var(--accent)" onclick="openTgUser('${esc(String(a.username))}')" role="button" tabindex="0">@${esc(a.username)} ↗</div>`:''}
+      ${a.username?`<div class="profile-sub" style="cursor:pointer;color:var(--accent)" onclick="openTgUser('${esc(a.username)}')" role="button" tabindex="0">@${esc(a.username)} ↗</div>`:''}
       <div class="profile-badges">${statusBadge}</div>
     </div>
     ${healthBanner}
@@ -14563,7 +14563,7 @@ function _accDone(r){
            (found && found !== r.added ? (' из ' + found) : '') + '</div>';
     if (r.errors && r.errors.length) {
       html += '<div style="color:var(--hint);font-size:12px;margin-top:6px;line-height:1.4">Не добавлены:<br>' +
-              r.errors.map(e=>'• '+esc(String(e))).join('<br>') + '</div>';
+              r.errors.map(e=>'• '+esc(e)).join('<br>') + '</div>';
     }
     toastMsg = '✅ Добавлено: ' + r.added;
   } else {
@@ -14680,7 +14680,7 @@ async function submitAccImport() {
         : `<div style="margin-top:6px;opacity:.85">🔌 Все аккаунты без прокси — выходят с общего IP сервера</div>`;
     }
     if (r.isolation_note) html+=`<div style="margin-top:6px;padding:8px 10px;background:var(--bg2);border-left:3px solid var(--orange,#f59e0b);border-radius:6px;font-size:12px;line-height:1.4">${esc(r.isolation_note)}</div>`;
-    if (errs.length) html+=`<div style="margin-top:6px;opacity:.8">${errs.map(e=>'• '+esc(String(e))).join('<br>')}</div>`;
+    if (errs.length) html+=`<div style="margin-top:6px;opacity:.8">${errs.map(e=>'• '+esc(e)).join('<br>')}</div>`;
     res.innerHTML=html; res.style.display='block';
     if (imp) {
       tg.HapticFeedback?.notificationOccurred('success');
@@ -17727,7 +17727,7 @@ async function openContactDetail(id) {
       ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Имя в Telegram</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
       ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
-      ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(String(c.registered_estimate))}</div></div></div>`:''}
+      ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(c.registered_estimate)}</div></div></div>`:''}
       ${lastSeenLabel(c.last_seen_type, c.last_seen_at)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type, c.last_seen_at))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
       ${c.is_verified?`<div class="row"><div class="row-body"><div class="row-name">Верификация</div><div class="row-val">✅ Подтверждён</div></div></div>`:''}
       ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
@@ -18423,7 +18423,7 @@ async function openContactRelationships(id) {
     rels.forEach(r=>{
       // Вторая сторона пары: таблица хранит a/b, «другой» — тот, кто не этот контакт.
       const other = (String(r.contact_a_id)===String(id)) ? r.contact_b_id : r.contact_a_id;
-      const open = other ? ` onclick="openContactDetail('${esc(String(other))}')" role="button" tabindex="0"` : '';
+      const open = other ? ` onclick="openContactDetail('${esc(other)}')" role="button" tabindex="0"` : '';
       html += `<div class="li${other?' tap':''}"${open}><div class="li-body"><div class="li-name">${esc(r.related_contact_name||'Без имени')}${r.related_is_premium?' 💎':''}</div><div class="li-sub wrap">${esc(uchRelRu(r.relationship_type))} · уверенность ${Math.round((r.strength||0)*100)}%${uchRelHint(r.relationship_type)?' · '+esc(uchRelHint(r.relationship_type)):''}</div></div>${other?'<span class="chev">›</span>':''}</div>`;
     });
     html += `<div class="sec" style="margin-top:12px">Весь граф</div>
@@ -19810,11 +19810,11 @@ async function openUchGraph() {
     }
     const top = types.length ? types[0].relationship_type : '';
     let html = `<div style="padding:12px 16px">
-      <div class="kpi-card${top?' tap-card':''}" style="margin-bottom:12px"${top?` onclick="openUchGraphType('${esc(String(top))}')" role="button" tabindex="0"`:''}><div class="kpi-val">${num(total)}</div><div class="kpi-lbl">${plural(total,'Связь','Связи','Связей')} между контактами${top?' · нажмите, чтобы увидеть пары':''}</div></div>`;
+      <div class="kpi-card${top?' tap-card':''}" style="margin-bottom:12px"${top?` onclick="openUchGraphType('${esc(top)}')" role="button" tabindex="0"`:''}><div class="kpi-val">${num(total)}</div><div class="kpi-lbl">${plural(total,'Связь','Связи','Связей')} между контактами${top?' · нажмите, чтобы увидеть пары':''}</div></div>`;
     if (types.length) {
       html += '<div class="sec">По типам — нажмите, чтобы увидеть пары</div>';
       types.forEach(t=>{
-        html += `<div class="li tap" onclick="openUchGraphType('${esc(String(t.relationship_type))}')" role="button" tabindex="0"><div class="li-body"><div class="li-name">${esc(uchRelRu(t.relationship_type))}</div><div class="li-sub wrap">${num(t.cnt)} ${plural(t.cnt,'связь','связи','связей')}${uchRelHint(t.relationship_type)?' · '+esc(uchRelHint(t.relationship_type)):''}</div></div><span class="chev">›</span></div>`;
+        html += `<div class="li tap" onclick="openUchGraphType('${esc(t.relationship_type)}')" role="button" tabindex="0"><div class="li-body"><div class="li-name">${esc(uchRelRu(t.relationship_type))}</div><div class="li-sub wrap">${num(t.cnt)} ${plural(t.cnt,'связь','связи','связей')}${uchRelHint(t.relationship_type)?' · '+esc(uchRelHint(t.relationship_type)):''}</div></div><span class="chev">›</span></div>`;
       });
     }
     if (d.strongest&&d.strongest.length) {
@@ -20170,7 +20170,7 @@ async function openContactStats() {
       html += `<div class="sec" style="margin-top:8px">📡 По аккаунтам</div><div class="lst" style="margin:0 16px">`;
       accs.forEach(a=>{
         const nm = a.account_name || ('Аккаунт #'+a.account_id);
-        html += `<div class="row" onclick="csGoAccountContacts(${Number(a.account_id)},'${esc(String(nm)).replace(/'/g,"\\'")}')" role="button" tabindex="0">
+        html += `<div class="row" onclick="csGoAccountContacts(${Number(a.account_id)},'${esc(nm).replace(/'/g,"\\'")}')" role="button" tabindex="0">
           <div class="row-body"><div class="row-name">${esc(nm)}</div><div class="row-val">${num(a.contact_count)} ${plural(a.contact_count,'контакт','контакта','контактов')}</div></div>
           <div class="row-right"><span class="chev">›</span></div></div>`;
       });
@@ -20546,7 +20546,7 @@ async function openCommunity() {
     CUR_CNODES = nodes;
     txt('communityList', nodes.map(n=>`<div class="row tap" onclick="openCommunityNode(${n.id})">
       <div class="row-ico" style="background:var(--bg-purple-16)">🏛</div>
-      <div class="row-body"><div class="row-name">${esc(n.title||('Нода #'+n.id))}</div><div class="row-val">${num(n.channels||0)} каналов · chat ${n.tg_chat_id}</div></div>
+      <div class="row-body"><div class="row-name">${esc(n.title||('Нода #'+n.id))}</div><div class="row-val">${num(n.channels||0)} каналов · chat ${n.tg_chat_id??'—'}</div></div>
       <span class="chev">›</span>
     </div>`).join(''));
   } catch(e) { txt('communityList', errHtml(errRu(e))); }
@@ -20689,7 +20689,7 @@ async function openNodes() {
       <div class="row">
         <div class="row-ico tap" style="background:var(--bg-green-16)" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">${n.is_active?'🟢':'⚫'}</div>
         <div class="row-body tap" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">
-          <div class="row-name">${esc(n.name||'Node')} ${NODE_TYPE[n.node_type]||n.node_type}</div>
+          <div class="row-name">${esc(n.name||'Node')} ${NODE_TYPE[n.node_type]||n.node_type||'—'}</div>
           <div class="row-val">${n.open_threads||0} открытых топиков · ${n.total_threads||0} всего</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
@@ -21388,7 +21388,7 @@ async function openStars() {
         <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
         <div class="row-body" onclick="openStarsExp(${e.id})" role="button" tabindex="0" style="cursor:pointer">
           <div class="row-name">${esc(e.name)}${winner}</div>
-          <div class="row-val">${STARS_STATUS[e.status]||e.status} · цена ⭐${e.price_a} покупают ${crA} · цена ⭐${e.price_b} покупают ${crB}</div>
+          <div class="row-val">${STARS_STATUS[e.status]||e.status||'—'} · цена ⭐${e.price_a??'—'} покупают ${crA} · цена ⭐${e.price_b??'—'} покупают ${crB}</div>
         </div>
         <div class="row-right">
           <button class="btn ${isActive?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="toggleStarsExp(${e.id})">${isActive?'⏸':'▶️'}</button>
@@ -21551,7 +21551,7 @@ async function openGhost() {
       <div class="row">
         <div class="row-ico" style="background:var(--bg-violet-16)">${p.enabled?'🟢':'⚫'}</div>
         <div class="row-body" onclick="openGhostDetail(${p.id})" role="button" tabindex="0" style="cursor:pointer">
-          <div class="row-name">${esc(p.first_name||p.phone)} ${GHOST_PERSONA[p.personality]||p.personality}</div>
+          <div class="row-name">${esc(p.first_name||p.phone)} ${GHOST_PERSONA[p.personality]||p.personality||'—'}</div>
           <div class="row-val">${p.daily_cap} действий в день · ${p.active_hours_start}:00–${p.active_hours_end}:00 · нажмите, чтобы посмотреть, что он делал</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px">
@@ -21612,7 +21612,7 @@ async function openGhostDetail(id) {
         const bad = l.result!=='ok';
         return `<div class="li"><div class="li-body">
           <div class="li-name">${bad?'⚠️ ':'✅ '}${esc(l.action_ru||l.action_type||'')}</div>
-          <div class="li-sub wrap">${esc(l.result_ru||l.result||'')}${l.target?' · '+esc(String(l.target)):''}${l.error_msg?' · '+esc(String(l.error_msg).slice(0,120)):''} · ${ago(l.executed_at)}</div>
+          <div class="li-sub wrap">${esc(l.result_ru||l.result||'')}${l.target?' · '+esc(l.target):''}${l.error_msg?' · '+esc(String(l.error_msg).slice(0,120)):''} · ${ago(l.executed_at)}</div>
         </div></div>`;
       }).join('') + '</div>';
       // Журнал приезжает последними тридцатью. Без этой строки владелец,
@@ -21925,7 +21925,7 @@ async function openDmCampaigns() {
         <div class="row-ico" style="background:var(--bg-blue-16)">✉️</div>
         <div class="row-body tap" onclick="openDmReport(${c.id})" title="Показать отчёт: кому дошло и почему нет">
           <div class="row-name">${esc(c.name)}</div>
-          <div class="row-val">${DM_STATUS[c.status]||c.status} · 🎯 ${esc(DM_TARGET[c.target_type]||c.target_type||'—')} · ${snt}/${tot} отправлено${failTxt}${etaTxt}</div>
+          <div class="row-val">${DM_STATUS[c.status]||c.status||'—'} · 🎯 ${esc(DM_TARGET[c.target_type]||c.target_type||'—')} · ${snt}/${tot} отправлено${failTxt}${etaTxt}</div>
           ${bar}
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
@@ -21996,7 +21996,7 @@ function dmErrRu(raw) {
 function dmrWho(r) {
   if (r.name) return esc(r.name) + (r.username ? ' · @' + esc(r.username) : '');
   if (r.username) return '@' + esc(r.username);
-  return 'Пользователь ' + esc(String(r.tg_user_id));
+  return 'Пользователь ' + esc(r.tg_user_id);
 }
 // Ни имя, ни причина, ни статус в onclick не попадают: это внешний текст из
 // Telegram, и в атрибуте он — исполняемый код. Через onclick едет только
@@ -22357,7 +22357,7 @@ async function openWarmup() {
       <div class="row" style="border-left:3px solid ${col}">
         <div class="row-ico" style="background:var(--bg-green-16)">🌱</div>
         <div class="row-body" onclick="openWarmupLog(${p.id})" style="cursor:pointer">
-          <div class="row-name">${esc(p.first_name||p.phone)} ${WARMUP_PLAN[p.plan_type]||p.plan_type}</div>
+          <div class="row-name">${esc(p.first_name||p.phone)} ${WARMUP_PLAN[p.plan_type]||p.plan_type||'—'}</div>
           <div class="row-val">${esc(h.label)} · День ${p.current_day||0}/${p.target_days||0}</div>
           ${h.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(h.hint)}</div>`:''}
         </div>
@@ -22431,7 +22431,7 @@ async function openVLayer() {
       html += '<div class="lst">' + cooling.slice(0, 30).map(c => {
         const who = c.name || _vlWho(c);
         const left = _vlDecayText({expires_at: c.expires_at});
-        return `<div class="row" onclick="openVLayerEntity('${esc(String(c.entity_type||'user'))}','${esc(String(c.entity_id))}')" style="cursor:pointer">
+        return `<div class="row" onclick="openVLayerEntity('${esc(String(c.entity_type||'user'))}','${esc(c.entity_id)}')" style="cursor:pointer">
           <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">⏳</div>
           <div class="row-body"><div class="row-name">${esc(who)}</div>
             <div class="row-val">${esc(c.label)}${left ? ' · ' + esc(left) : ''} · история →</div></div>
@@ -22474,7 +22474,7 @@ async function openVLayer() {
                 : b.value === 'cold' ? 'var(--hint)' : 'var(--orange)';
         const ico = b.value === 'hot' ? '🔥' : b.value === 'cold' ? '🧊' : '🌤';
         const nm = b.name && b.name[0] === '@' ? b.name : '@' + b.name;
-        return `<div class="row" onclick="openVLayerEntity('bot','${esc(String(b.bot_id))}')" style="cursor:pointer">
+        return `<div class="row" onclick="openVLayerEntity('bot','${esc(b.bot_id)}')" style="cursor:pointer">
           <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">${ico}</div>
           <div class="row-body"><div class="row-name">${esc(nm)}</div>
             <div class="row-val" style="color:${c}">${esc(b.label)} · уверенность ${Math.round((b.confidence||0)*100)}%</div></div>
@@ -22522,7 +22522,7 @@ async function openVLayer() {
       // чтения — каждого можно было открыть, но «написать всем готовым» неоткуда.
       html += `<div style="padding:0 16px 8px"><button class="btn btn-p" style="width:100%" onclick="openContactsHot()">✍️ Написать оффер готовым</button></div>`;
       html += '<div class="lst">';
-      html += hot.slice(0, 20).map(h => `<div class="row" onclick="openVLayerEntity('${esc(String(h.entity_type||'user'))}','${esc(String(h.entity_id))}')" style="cursor:pointer">
+      html += hot.slice(0, 20).map(h => `<div class="row" onclick="openVLayerEntity('${esc(String(h.entity_type||'user'))}','${esc(h.entity_id)}')" style="cursor:pointer">
         <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">🔥</div>
         <div class="row-body"><div class="row-name">${esc(h.name || _vlWho(h))}</div>
           <div class="row-val">${esc(h.label)} · уверенность ${Math.round((h.confidence||0)*100)}% · история →</div></div>
@@ -22538,7 +22538,7 @@ async function openVLayer() {
     } else {
       html += '<div class="lst">' + events.map(e => {
         const open = e.entity_id
-          ? ` onclick="openVLayerEntity('${esc(String(e.entity_type||'user'))}','${esc(String(e.entity_id))}')" style="cursor:pointer"`
+          ? ` onclick="openVLayerEntity('${esc(String(e.entity_type||'user'))}','${esc(e.entity_id)}')" style="cursor:pointer"`
           : '';
         const who = e.entity_id ? (e.name || _vlWho(e)) : '';
         return `<div class="row"${open}>
@@ -22632,7 +22632,7 @@ async function openVLayerSegment(value) {
       html += '<div class="lst">' + people.map(p => {
         const who = p.name || _vlWho({entity_type: p.entity_type, entity_id: p.entity_id});
         const decay = _vlDecayText(p);
-        return `<div class="row" onclick="openVLayerEntity('${esc(String(p.entity_type||'user'))}','${esc(String(p.entity_id))}')" style="cursor:pointer">
+        return `<div class="row" onclick="openVLayerEntity('${esc(String(p.entity_type||'user'))}','${esc(p.entity_id)}')" style="cursor:pointer">
           <div class="row-body"><div class="row-name">${esc(who)}</div>
             <div class="row-val">уверенность ${Math.round((p.confidence||0)*100)}%${decay ? ' · ' + esc(decay) : ''} · история →</div></div>
         </div>`;
@@ -22658,7 +22658,7 @@ async function openVLayerEntity(entityType, entityId) {
     const g = cur.guide || {};
     const decay = _vlDecayText(cur);
     html += `<div class="card" style="margin:8px 0">
-      <div style="font-weight:600;font-size:15px">${esc(String(who))}</div>
+      <div style="font-weight:600;font-size:15px">${esc(who)}</div>
       <div style="font-size:13px;color:var(--hint);margin-top:3px">
         ${cur.label ? esc(cur.label) : 'Состояние не записано'}${cur.confidence != null ? ' · уверенность ' + Math.round(cur.confidence * 100) + '%' : ''}</div>
       ${g.meaning ? `<div style="font-size:12px;margin-top:6px;line-height:1.4">${esc(g.meaning)}</div>` : ''}
@@ -22670,7 +22670,7 @@ async function openVLayerEntity(entityType, entityId) {
     // человек виден, а открыть его карточку и написать неоткуда.
     if (entityType === 'user') {
       html += `<button class="btn btn-p" style="width:100%;margin-bottom:10px"
-        onclick="openContactDetail('${esc(String(entityId))}')">👤 Открыть карточку контакта</button>`;
+        onclick="openContactDetail('${esc(entityId)}')">👤 Открыть карточку контакта</button>`;
     }
     const tr = d.transitions || [];
     html += '<div class="sec">История переходов</div>';
@@ -23229,7 +23229,7 @@ async function openExperiments() {
         <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
         <div class="row-body">
           <div class="row-name">${esc(e.name)}</div>
-          <div class="row-val">${EXP_STATUS[e.status]||e.status} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type} · ${e.variant_count||0} вариантов</div>
+          <div class="row-val">${EXP_STATUS[e.status]||e.status||'—'} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type||'—'} · ${e.variant_count||0} вариантов</div>
         </div>
         <div class="row-right chev">›</div>
       </div>
@@ -23269,7 +23269,7 @@ async function openExpDetail(id, name) {
           <div class="li-body">
             <div class="li-name">${esc(v.name)}${mark}</div>
             <div class="li-sub wrap">${esc((v.content||'(текст пуст)').slice(0,110))}${(v.content||'').length>110?'…':''}</div>
-            <div class="li-sub wrap" style="margin-top:2px">Показов ${num(v.impressions||0)} · конверсия ${cr} · доля показа ${v.weight}%${need>0?' · до оценки не хватает '+num(need):''}</div>
+            <div class="li-sub wrap" style="margin-top:2px">Показов ${num(v.impressions||0)} · конверсия ${cr} · доля показа ${v.weight??0}%${need>0?' · до оценки не хватает '+num(need):''}</div>
           </div><span class="chev">›</span>
         </div>`;
     }).join('');
@@ -23668,7 +23668,7 @@ async function openAdIntel() {
       txt('adIntelChannels', chs.map(c=>{
         const nm = c.title || (c.username ? '@'+c.username : 'Канал');
         return `
-      <div class="row${c.username?' tap':''}" ${c.username?`role="button" tabindex="0" onclick="openTgUser('${esc(String(c.username))}')"`:''}>
+      <div class="row${c.username?' tap':''}" ${c.username?`role="button" tabindex="0" onclick="openTgUser('${esc(c.username)}')"`:''}>
         <div class="row-ico" style="background:var(--bg-yellow-16)">📺</div>
         <div class="row-body">
           <div class="row-name">${esc(nm)}</div>
@@ -23686,7 +23686,7 @@ async function openAdIntel() {
         chs.length ? null : {label:'➕ Добавить канал', fn:'openAdIntelModal()'}));
     } else {
       txt('adIntelAdv', advs.map(a=>`
-      <div class="row${a.username?' tap':''}" ${a.username?`role="button" tabindex="0" onclick="openTgUser('${esc(String(a.username))}')"`:''}>
+      <div class="row${a.username?' tap':''}" ${a.username?`role="button" tabindex="0" onclick="openTgUser('${esc(a.username)}')"`:''}>
         <div class="row-ico" style="background:var(--bg-violet-16)">🏢</div>
         <div class="row-body">
           <div class="row-name">${a.username?'@'+esc(a.username):'Рекламодатель'}</div>
@@ -23732,7 +23732,7 @@ async function openNetwork() {
           <div class="row-ico" style="background:var(--bg-blue-16)">🤖</div>
           <div class="row-body">
             <div class="row-name">@${esc(b.name)} ${b.is_active?'🟢':'🔴'}</div>
-            <div class="row-val">${ROLE_LABELS[b.role]||b.role}${b.swarm?' · ⚡ в рою ×'+Number(b.weight||1).toFixed(1).replace('.',','):''}</div>
+            <div class="row-val">${ROLE_LABELS[b.role]||b.role||'—'}${b.swarm?' · ⚡ в рою ×'+Number(b.weight||1).toFixed(1).replace('.',','):''}</div>
           </div>
           <div class="row-right" style="display:flex;gap:5px;align-items:center">
             <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();openNetRoleModal(${b.bot_id},'${esc(b.name)}','${b.role||'general'}')">✏️ Роль</button>
@@ -24663,7 +24663,7 @@ function renderPromoTab(tab) {
       <div class="row-ico" style="background:var(--bg-green-16)">🔑</div>
       <div class="row-body">
         <div class="row-name">${esc(o.keyword)}</div>
-        <div class="row-val">${ORDER_STATUS[o.status]||o.status} · Топ-${o.target_position}${o.current_subs?` · ${num(o.current_subs)}/${num(o.target_subs)} подп.`:''}</div>
+        <div class="row-val">${ORDER_STATUS[o.status]||o.status||'—'} · Топ-${o.target_position??'—'}${o.current_subs?` · ${num(o.current_subs)}/${num(o.target_subs)} подп.`:''}</div>
         <div class="row-val" style="color:var(--hint)">${ago(o.created_at)}</div>
       </div>
       <div class="row-right" style="display:flex;gap:6px">
@@ -25337,7 +25337,7 @@ async function openGlobalPresence(more) {
         <div class="row tap" onclick="openGpDetail(${r.id},'${esc(r.name_pattern)}')">
           <div class="row-body">
             <div class="row-name">${esc(r.name_pattern)}</div>
-            <div class="row-val">${GP_TYPES[r.asset_type]||r.asset_type} · <span class="badge ${cls}">${lbl}</span></div>
+            <div class="row-val">${GP_TYPES[r.asset_type]||r.asset_type||'—'} · <span class="badge ${cls}">${lbl}</span></div>
             <div class="row-val">Целей: ${done}/${total} (${pct}%) · Ошибок: ${r.failed_targets||0}</div>
             <div class="row-val" style="color:var(--hint)">${ago(r.created_at)}</div>
           </div>
@@ -25566,7 +25566,7 @@ async function openGpDetail(planId, planName, more) {
       : null;
     let html = `
       <div class="lst" style="margin:12px 16px 0">
-        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${GP_TYPES[p.asset_type]||p.asset_type}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${GP_TYPES[p.asset_type]||p.asset_type||'—'}</div></div></div>
         ${rolesLine?`<div class="row"><div class="row-body"><div class="row-name">Тематики</div><div class="row-val">${esc(rolesLine)}</div></div></div>`:''}
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val">${stb(p.status)[1]}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Паттерн</div><div class="row-val">${esc(p.name_pattern)}</div></div></div>
@@ -26097,7 +26097,7 @@ async function openEcosystems() {
         <div class="row-ico" style="background:var(--bg-green-16)">${[...(ECO_TYPES[r.ecosystem_type]||'🌐')][0]}</div>
         <div class="row-body">
           <div class="row-name">${esc(r.name)}</div>
-          <div class="row-val">${ECO_TYPES[r.ecosystem_type]||r.ecosystem_type} · ${RISK_LABEL[r.risk_level]||r.risk_level}</div>
+          <div class="row-val">${ECO_TYPES[r.ecosystem_type]||r.ecosystem_type||'—'} · ${RISK_LABEL[r.risk_level]||r.risk_level||'—'}</div>
           <div class="row-val">Участников: ${r.member_count||0} · Здоровье: ${((r.health_score||1)*100).toFixed(0)}%</div>
           ${r.region?`<div class="row-val" style="color:var(--hint)">📍 ${esc(r.region)}</div>`:''}
         </div>
@@ -26169,9 +26169,9 @@ async function openEcoDetail(ecoId, ecoName) {
     const health = Math.round((e.health_score==null?1:e.health_score)*100);
     let html = `
       <div class="lst" style="margin:12px 16px 0">
-        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${ECO_TYPES[e.ecosystem_type]||e.ecosystem_type}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${ECO_TYPES[e.ecosystem_type]||e.ecosystem_type||'—'}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val">${stb(e.status)[1]}</div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Риск</div><div class="row-val">${RISK_LABEL[e.risk_level]||e.risk_level}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Риск</div><div class="row-val">${RISK_LABEL[e.risk_level]||e.risk_level||'—'}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Здоровье</div>
           <div class="row-val" style="color:${health>=80?'var(--green)':(health>=50?'var(--orange,#f59e0b)':'var(--red)')}">${health}%</div></div></div>
         ${e.description?`<div class="row"><div class="row-body"><div class="row-name">Описание</div><div class="row-val">${esc(e.description)}</div></div></div>`:''}
@@ -27641,7 +27641,7 @@ async function openSemFacts(botId, botName, keep) {
         <div class="row-ico" style="background:var(--bg-purple-16)">👤</div>
         <div class="li-body">
           <div class="li-name">${who ? esc(who) : 'Собеседник без имени'}${f0.name && f0.username ? ' · @'+esc(f0.username) : ''}</div>
-          ${facts.map(f=>`<div class="li-sub wrap"><span style="color:var(--hint)">${esc(semFactRu(f.fact_key))}:</span> ${esc(String(f.fact_value))}</div>`).join('')}
+          ${facts.map(f=>`<div class="li-sub wrap"><span style="color:var(--hint)">${esc(semFactRu(f.fact_key))}:</span> ${esc(f.fact_value)}</div>`).join('')}
         </div>
         <button class="btn btn-s" style="padding:5px 10px;min-width:0;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="forgetSemUser(${Number(uid2)},${facts.length},this)">Забыть</button>
       </div>`;
@@ -27949,7 +27949,7 @@ async function loadFunnelPeople(limit) {
     }
     txt('fpplBody', note + '<div class="lst">' + rows.map(r=>{
       const who = r.name ? esc(r.name)+(r.username?' · @'+esc(r.username):'')
-                : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(String(r.user_id)));
+                : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(r.user_id));
       const parts = [];
       if (r.status) parts.push(esc(_FPPL_STATUS[r.status]||r.status));
       parts.push('шаг ' + num(r.step||0));
@@ -28000,7 +28000,7 @@ async function openFunnelSteps(fid, fname) {
     if (!runs.total) {
       html += `<div class="hint" style="padding:0 16px 8px">Пока никто: люди попадают в воронку сами, когда подходят под сегмент «${esc(AF_SEG_RU[f.target_segment]||f.target_segment||'')}».</div>`;
     } else {
-      const _fp = (q, t) => `openFunnelPeople('auto',${fid},'${esc(String(t))}','${q}')`;
+      const _fp = (q, t) => `openFunnelPeople('auto',${fid},'${esc(t)}','${q}')`;
       html += `<div style="display:flex;gap:8px;padding:0 16px 8px;flex-wrap:wrap">
         <div class="kpi-chip" style="cursor:pointer" role="button" tabindex="0" onclick="${_fp('status=active','Идут по воронке')}"><div class="kpi-chip-val">${num(st.active||0)}</div><div class="kpi-chip-lbl">идут ›</div></div>
         <div class="kpi-chip" style="cursor:pointer" role="button" tabindex="0" onclick="${_fp('status=completed','Дошли до конца')}"><div class="kpi-chip-val">${num(st.completed||0)}</div><div class="kpi-chip-lbl">дошли до конца ›</div></div>
@@ -28255,7 +28255,14 @@ function errRu(e, fallback) {
   return fallback || 'Что-то пошло не так, попробуйте ещё раз';
 }
 function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  // `String(s||'')` съедал НОЛЬ и false: `esc(0)` давал пустоту, и число 0 в
+  // строке просто пропадало. Именно из-за этого по коду расползлось полсотни
+  // обёрток `esc(x)` — а такая обёртка превращает отсутствующее
+  // значение в слово «undefined» ЕЩЁ ДО того, как esc успеет его обезвредить,
+  // и владелец видит «undefined → undefined» вместо названия канала.
+  // Пусто — только для null и undefined; ноль есть ноль.
+  const t = (s === null || s === undefined) ? '' : String(s);
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 // Копирование в буфер обмена — единственная честная дверь.
 //
@@ -29161,7 +29168,7 @@ async function loadCrosspost() {
     if (!links.length) { el.innerHTML = '<div style="font-size:12px;color:var(--hint)">Правил нет. Добавьте ребро «кросспостинг» в связку и разверните её.</div>'; return; }
     el.innerHTML = links.map(l=>`<div class="row">
       <div class="row-ico" style="background:${l.enabled?'var(--bg-green-16)':'rgba(113,113,122,.16)'}">🔁</div>
-      <div class="row-body"><div class="row-name" style="font-size:13px">${esc(String(l.source_title))} → ${esc(String(l.target_title))}</div>
+      <div class="row-body"><div class="row-name" style="font-size:13px">${esc(l.source_title)} → ${esc(l.target_title)}</div>
       <div class="row-val">переслано ${num(l.forwarded_total||0)}${l.last_run_at?' · '+ago(l.last_run_at):' · ещё не запускалось'}</div></div>
     </div>`).join('');
   } catch(e) {
@@ -29821,7 +29828,7 @@ async function loadAudSegment(limit) {
     txt('audsegBody', note +
       `<div class="lst">` + _AUDSEG_ROWS.map(r=>{
         const who = r.name ? esc(r.name)+(r.username?' · @'+esc(r.username):'')
-                  : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(String(r.user_id)));
+                  : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(r.user_id));
         return `<div class="li tap" onclick="copyToClipboard('${Number(r.user_id)}','📋 Номер скопирован')" role="button" tabindex="0">
           <div class="row-body"><div class="row-name">${who}</div>
             <div class="li-sub wrap">${num(r.msgs||0)} ${plural(r.msgs||0,'сообщение','сообщения','сообщений')}${

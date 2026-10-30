@@ -125,6 +125,11 @@ await page.addInitScript((mode) => {
     const url = String(u || '');
     const o = { ok:true, token:'stub-token', total: 1234567, count: 1234567, stats: {}, page: { limit: 25, offset: 0, has_more: true } };
     for (const k of ARRAY_KEYS) o[k] = ROWS;
+    // `warnings` у бэкенда — список СТРОК (services/mini_app_fleet.py), а не
+    // записей, и экран печатает их через esc(). Общий список записей давал там
+    // «[object Object]» — находку, которой в приложении нет.
+    o.warnings = [LONG + '. Проверьте нагрузку на аккаунты.',
+                  'Часть прокси не отвечает — операции будут падать.'];
     // Форма берётся по адресу, а не одна на всех. Список операций читает
     // `i.action` как СТРОКУ, а чеклист активации — `s.action.kind` без всякой
     // проверки: одной плоской строкой обе формы не удовлетворить, и заглушка

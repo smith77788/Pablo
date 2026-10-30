@@ -55,14 +55,35 @@ def test_relationship_labels_are_shared_and_russian():
     assert "Похожий username" not in HTML, "английское слово в подписи типа связи"
 
 
+#: Значение внутри атрибута (`onclick="…phType(\'${…}\')"`) — это АРГУМЕНТ, а не
+#: текст на экране: сырой ключ там и должен стоять, иначе переход не состоится.
+#: Прежняя проверка искала подстроку во всём теле и этой разницы не видела;
+#: зелёной она была лишь потому, что вокруг значения стояла обёртка
+#: `esc(String(...))`, не совпадавшая с искомым текстом буквально. То есть
+#: держала её случайность, а не свойство. Атрибуты вырезаем до поиска.
+_ATTR = re.compile(r'[\w-]+="[^"]*"')
+
+
+def _shown(src: str) -> str:
+    return _ATTR.sub("", src)
+
+
 def test_graph_screen_does_not_print_raw_type_key():
-    body = _fn("openUchGraph")
+    body = _shown(_fn("openUchGraph"))
     assert "esc(t.relationship_type)" not in body, \
         "экран печатает сырой ключ типа вместо подписи"
     assert "uchRelRu(t.relationship_type)" in body
-    pair = _fn("_uchPairRow")
+    pair = _shown(_fn("_uchPairRow"))
     assert "esc(r.relationship_type)" not in pair
     assert "uchRelRu(r.relationship_type)" in pair
+
+
+def test_the_raw_key_check_still_sees_a_key_on_screen():
+    """Мерка на заведомо больном образце: иначе вырезание атрибутов ослепит её."""
+    shown = _shown('<div class="li-name">${esc(t.relationship_type)}</div>')
+    assert "esc(t.relationship_type)" in shown, "мерка ослепла на видимом тексте"
+    hidden = _shown("""<div onclick="phType('${esc(t.relationship_type)}')">x</div>""")
+    assert "esc(t.relationship_type)" not in hidden, "аргумент принят за текст"
 
 
 def test_contact_relationships_uses_the_shared_labels():
