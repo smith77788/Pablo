@@ -63,6 +63,21 @@ def test_resolve_rejects_http_and_internal():
     assert asyncio.run(resolve_url_is_public("https://169.254.169.254/latest")) is False
 
 
+def _dns_works() -> bool:
+    """Есть ли в окружении DNS. Без него проверка ниже красная не по делу:
+    гард отказывает НЕРАЗРЕШЁННОМУ имени, и это правильное поведение. В
+    контейнере агента DNS бывает закрыт, и такое красное стоит каждому
+    следующему прогону отдельного разбора."""
+    import socket
+
+    try:
+        socket.getaddrinfo("example.com", 443)
+        return True
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not _dns_works(), reason="в окружении нет DNS")
 def test_resolve_allows_public_host():
     # Реальный публичный хост должен резолвиться и проходить.
     assert asyncio.run(resolve_url_is_public("https://example.com/a.jpg")) is True

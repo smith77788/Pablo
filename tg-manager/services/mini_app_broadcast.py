@@ -36,8 +36,8 @@ from services import operation_bus as _obus
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты рассылок, CRM и кампаний."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _safe_count, _safe_fetch,
-        _safe_fetchrow, _text, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
+        _safe_fetch, _safe_fetchrow, _text, log,
     )
     from services.security import (
         check_sql_suspicious, escape_html, validate_integer, validate_string,
@@ -315,22 +315,40 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         stage = request.rel_url.query.get("stage")
+        # Пятьдесят сделок были не страницей, а молчаливым потолком: ни
+        # смещения, ни признака обрезки. Сделка пятьдесят первая не
+        # открывалась НИКАК — срез по этапу обрывался на тех же пятидесяти, —
+        # а чипы над списком считают всю воронку и писали «Переговоры 70» над
+        # пятьюдесятью строками. Теперь это страница: смещение, честный итог
+        # по тому же условию и признак продолжения.
+        limit = _list_limit(request, 50, 200)
         try:
-            if stage:
-                rows = await pool.fetch(
-                    "SELECT id, title, contact, stage, value, notes, created_at, updated_at "
-                    "FROM crm_deals WHERE owner_id=$1 AND stage=$2 ORDER BY updated_at DESC LIMIT 50",
-                    uid, stage,
-                )
-            else:
-                rows = await pool.fetch(
-                    "SELECT id, title, contact, stage, value, notes, created_at, updated_at "
-                    "FROM crm_deals WHERE owner_id=$1 ORDER BY updated_at DESC LIMIT 50",
-                    uid,
-                )
+            offset = max(validate_integer(request.rel_url.query.get("offset", "0"),
+                                          min_val=0, max_val=1000000) or 0, 0)
+        except (ValueError, TypeError):
+            offset = 0
+        cond = ["owner_id=$1"]
+        args: list = [uid]
+        if stage:
+            args.append(stage)
+            cond.append(f"stage=${len(args)}")
+        where = " AND ".join(cond)
+        try:
+            # Добор по id обязателен: у сделок одного дня `updated_at`
+            # совпадает, и без него страницы теряли бы и повторяли строки.
+            rows = await pool.fetch(
+                "SELECT id, title, contact, stage, value, notes, created_at, updated_at "
+                f"FROM crm_deals WHERE {where} "
+                f"ORDER BY updated_at DESC, id DESC LIMIT {limit} OFFSET ${len(args) + 1}",
+                *args, offset,
+            )
         except Exception:
             log.exception("crm_deals uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+        # Итог считается ПО ТОМУ ЖЕ условию, что и страница: иначе шапка
+        # описывала бы один набор, а список — другой.
+        total = await _safe_count(
+            pool, f"SELECT COUNT(*) FROM crm_deals WHERE {where}", *args)
         # Also get pipeline summary
         try:
             summary_rows = await pool.fetch(
@@ -353,6 +371,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 for r in rows
             ],
             "summary": summary,
+            "total": total,
+            "page": {"offset": offset, "limit": limit,
+                     "has_more": offset + len(rows) < total},
         })
 
     async def create_crm_deal(request: web.Request) -> web.Response:
@@ -369,7 +390,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not title:
-            return _err("title обязателен", 400)
+            return _err("Укажите название сделки", 400)
         valid_stages = ("lead", "contact", "proposal", "negotiation", "won", "lost")
         if stage not in valid_stages:
             stage = "lead"

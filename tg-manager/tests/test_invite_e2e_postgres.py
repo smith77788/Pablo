@@ -341,7 +341,10 @@ def test_closed_group_stops_the_fleet(stand):
         # Per-target лог инвайта реально пишется (моё новое: «кто и почему не добавлен»).
         # На живом драйвере это ещё и проверка связывания INSERT в operation_log.
         fails = _run(stand.pool.fetch(
-            "SELECT target, message FROM operation_log WHERE op_id=$1 AND status='fail'",
+            # 'error', а не 'fail': провал цели пишется словом, которое читают
+            # счётчики ошибок операции. Пока здесь стояло 'fail', владелец
+            # видел «Ошибок: 0» при любом числе непрошедших целей.
+            "SELECT target, message FROM operation_log WHERE op_id=$1 AND status='error'",
             stand.last_op_id))
         assert fails, "нет per-target записей об отказе — «Ошибок: N» снова без деталей"
         assert any("ChannelPrivate" in (f["message"] or "") for f in fails), \

@@ -25,7 +25,6 @@ import asyncio
 import json
 import os
 import pathlib
-import re
 
 import pytest
 
@@ -175,44 +174,17 @@ def test_the_door_always_sets_the_finish_time():
     )
 
 
-# ── Храповик: мимо двери отмену не пишут ────────────────────────────────────
-
-def test_no_surface_cancels_an_operation_by_hand():
-    offenders = []
-    for rel in SURFACES:
-        src = _read(rel)
-        for m in re.finditer(r"UPDATE operation_queue", src):
-            seg = src[m.start():m.start() + 400]
-            nxt = seg.find("UPDATE operation_queue", 1)
-            if nxt > 0:
-                seg = seg[:nxt]
-            if re.search(r"status\s*=\s*'cancelled'", seg.split("WHERE")[0]):
-                line = src[:m.start()].count("\n") + 1
-                offenders.append(f"  {rel}:{line}")
-    assert not offenders, (
-        "отмена операции пишется мимо operation_bus.cancel — поверхности снова "
-        "разойдутся в том, какие состояния отменяются, ставится ли время "
-        "завершения и объявляется ли исход:\n" + "\n".join(offenders)
-    )
-
-
-def test_the_detector_sees_the_surfaces_at_all():
-    """Детектор, который ничего не находит, зелёный всегда.
-
-    Слой мини-аппа проверяется как слой: отмена живёт в одном его модуле, и
-    требовать дверь от каждого из трёх десятков — значит требовать её от
-    модуля про подарки. Но если дверь исчезнет из слоя ЦЕЛИКОМ, список
-    поверхностей устарел и храповик ниже сторожит пустоту.
-    """
-    layer = "\n".join(_read(rel) for rel in _MINI_APP_LAYER)
-    assert "operation_bus" in layer and "cancel(" in layer, (
-        "слой мини-аппа больше не отменяет операции — список поверхностей "
-        "устарел"
-    )
-    for rel in SURFACES:
-        if rel in _MINI_APP_LAYER:
-            continue
-        src = _read(rel)
-        assert "operation_bus" in src and "cancel(" in src, (
-            f"{rel} больше не отменяет операции — список поверхностей устарел"
-        )
+# ── Храповик переписи живёт в отдельном файле ───────────────────────────────
+#
+# Здесь он был — и выбирал, кого судить, по РУКОПИСНОМУ списку поверхностей
+# (слой мини-аппа плюс три хендлера). Два настоящих обхода жили ровно вне
+# списка: `database/db.py` (отмена плана глобального присутствия) и
+# `bot/handlers/dm_campaigns.py` (кнопка «Пауза» в кампаниях рассылки). Оба
+# читались как покрытые, потому что тест с именем «мимо двери отмену не пишут»
+# зелёный. Докстринг этого же теста спорил с поимённым списком — но только для
+# слоя мини-аппа, а для остальных поверхностей делал именно то, от чего
+# предостерегал.
+#
+# Перепись перенесена в `test_an_operation_is_cancelled_only_through_the_bus`:
+# она обходит всё дерево и читает SQL как строковую константу, поэтому видит и
+# многострочный запрос, и файл, которого в списке никогда не было.

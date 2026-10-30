@@ -77,9 +77,9 @@ def setup_routes(app: web.Application, pool) -> None:
             try:
                 kw_id = int(data.get('keyword_id') or data.get('id') or 0)
             except (TypeError, ValueError):
-                return _err('Некорректный keyword_id', 400)
+                return _err('Неверный идентификатор ключевого слова', 400)
             if not kw_id:
-                return _err('Укажите keyword_id', 400)
+                return _err('Укажите ключевое слово', 400)
             result = await untrack_keyword(pool, uid, kw_id)
             if not result.get('ok'):
                 return _err('Ключевое слово не найдено', 404)
@@ -100,9 +100,9 @@ def setup_routes(app: web.Application, pool) -> None:
             try:
                 kw_id = int(data.get('keyword_id') or 0)
             except (TypeError, ValueError):
-                return _err('Некорректный keyword_id', 400)
+                return _err('Неверный идентификатор ключевого слова', 400)
             if not kw_id:
-                return _err('Укажите keyword_id', 400)
+                return _err('Укажите ключевое слово', 400)
             pos = data.get('position')
             result = await record_position(pool, uid, kw_id,
                                            int(pos) if pos is not None else None)

@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 
 log = logging.getLogger(__name__)
 
@@ -38,10 +39,23 @@ _B2B_KEYS = ("bot-to-bot", "bot to bot", "b2b", "бот-бот", "бот к бо
              "botmode", "bot-bot")
 # Кандидаты входа в настройки бота, где живёт переключатель.
 _SETTINGS_KEYS = ("bot settings", "настройки бота", "settings")
-# Признаки, что режим УЖЕ включён (кнопка предлагает выключить / стоит галочка).
-_ON_MARKERS = ("turn off", "disable", "выключить", "отключить", "✅", "enabled", "on")
-# Признаки, что режим выключен (кнопка предлагает включить).
-_OFF_MARKERS = ("turn on", "enable", "включить", "off", "disabled")
+# Признаки состояния. Порядок проверки важнее самого набора, поэтому наборы
+# разделены по виду признака, а не по смыслу: в «disabled» сидит «disable», а в
+# «enabled» — «enable», и обратный порядок прочитал бы состояние НАОБОРОТ.
+#
+# Состояние словом («Bot-to-Bot Mode: enabled») — читается первым.
+_STATE_ON = ("enabled",)
+_STATE_OFF = ("disabled",)
+# Состояние предложением действия: кнопка предлагает выключить — значит сейчас
+# включено, и наоборот.
+_ACTION_TURNS_OFF = ("turn off", "disable", "выключить", "отключить")
+_ACTION_TURNS_ON = ("turn on", "enable", "включить")
+# Полные наборы — производные: раньше это были два отдельных списка, которых
+# разборщик не читал вовсе (у него были свои, более узкие, прямо в теле), и
+# подпись «Bot-to-Bot Mode: enabled» уходила в unknown. Держит
+# tests/test_the_b2b_toggle_is_not_clicked_blind.py.
+_ON_MARKERS = _STATE_ON + _ACTION_TURNS_OFF + ("✅", "on")
+_OFF_MARKERS = _STATE_OFF + _ACTION_TURNS_ON + ("off",)
 
 
 def _labels(msg) -> list[str]:
@@ -77,12 +91,24 @@ def find_b2b_toggle(labels: list[str]) -> dict:
     if btn is None:
         return {"button": None, "state": "unknown"}
     low = btn.strip().lower()
-    # Подпись «Turn off …» означает, что СЕЙЧАС включено, и наоборот.
-    if any(m in low for m in ("turn off", "disable", "выключить", "отключить")):
+    # Сначала состояние словом: «disabled» содержит «disable», и проверка
+    # действий раньше состояния прочитала бы такую подпись наоборот.
+    if any(m in low for m in _STATE_ON):
         return {"button": btn, "state": "on"}
-    if any(m in low for m in ("turn on", "enable", "включить")):
+    if any(m in low for m in _STATE_OFF):
+        return {"button": btn, "state": "off"}
+    # Подпись «Turn off …» означает, что СЕЙЧАС включено, и наоборот.
+    if any(m in low for m in _ACTION_TURNS_OFF):
+        return {"button": btn, "state": "on"}
+    if any(m in low for m in _ACTION_TURNS_ON):
         return {"button": btn, "state": "off"}
     if "✅" in btn:
+        return {"button": btn, "state": "on"}
+    # Отдельное слово: «turn off» выше уже разобран, поэтому оставшийся «off» —
+    # это состояние. По границе слова, иначе «on» нашлось бы в любом тексте.
+    if re.search(r"\boff\b", low):
+        return {"button": btn, "state": "off"}
+    if re.search(r"\bon\b", low):
         return {"button": btn, "state": "on"}
     return {"button": btn, "state": "unknown"}
 
@@ -168,6 +194,16 @@ async def enable_b2b_via_botfather(session_string: str, usernames: list,
                     continue
                 if toggle["state"] == "on":
                     already.append(uname)
+                    continue
+                if toggle["state"] != "off":
+                    # Это ТУМБЛЕР: нажатие по уже включённому режиму его
+                    # ВЫКЛЮЧАЕТ. Пока состояние не прочитано, нажимать нельзя —
+                    # иначе операция делает обратное тому, о чём просили, и
+                    # записывает бота в enabled, откуда исполнитель ставит
+                    # managed_bots.b2b_enabled=TRUE и прячет это навсегда.
+                    errors[uname] = (
+                        f"состояние пункта bot-to-bot не читается "
+                        f"(«{toggle['button']}») — проверьте вручную")
                     continue
                 try:
                     await msg.click(text=toggle["button"])

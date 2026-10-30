@@ -667,9 +667,15 @@ async def cb_mpub_retry_failed(
     # него второй раз: мусор у подписчиков и сожжённый лимит аккаунта. Ровно это
     # правило уже действует в operation_bus.collect_failed_targets; здесь оно
     # отсутствовало, и ручной повтор дублировал публикации.
+    # Служебные строки журнала отбрасывались ниже — разбором target в число.
+    # Фильтр в самом запросе надёжнее: правило про них одно и живёт в
+    # operation_bus, а не в двух местах по разным признакам.
+    from services.operation_bus import REAL_TARGET_SQL
+
     log_rows = await pool.fetch(
         "SELECT target, status FROM operation_log "
-        " WHERE op_id=$1 AND target IS NOT NULL AND status IN ('ok','error')",
+        " WHERE op_id=$1 AND target IS NOT NULL AND status IN ('ok','error')"
+        + REAL_TARGET_SQL,
         src_op_id,
     )
 
@@ -797,13 +803,19 @@ async def cb_mpub_dry_run(
 @router.callback_query(MassPubCb.filter(F.action == "history"))
 async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
+    # Служебные строки журнала (выдача админки, промоут-трюк, фолбэк ссылкой) —
+    # не цели: иначе в истории у операции без единой упавшей цели стояло бы
+    # «ошибок: 1». Правда про них одна — operation_bus.REAL_TARGET_SQL.
+    from services.operation_bus import REAL_TARGET_SQL
+
     rows: list[asyncpg.Record] = []
     try:
         rows = await pool.fetch(
             "SELECT oq.id, oq.status, oq.total_items, oq.done_items, oq.created_at, "
             "       oq.finished_at, oq.error_msg, "
             "       (SELECT COUNT(*) FROM operation_log ol "
-            "        WHERE ol.op_id = oq.id AND ol.status='error') AS err_cnt "
+            "        WHERE ol.op_id = oq.id AND ol.status='error'"
+            + REAL_TARGET_SQL + ") AS err_cnt "
             "FROM operation_queue oq "
             "WHERE oq.owner_id=$1 AND oq.op_type='mass_publish' "
             "ORDER BY oq.created_at DESC LIMIT 10",

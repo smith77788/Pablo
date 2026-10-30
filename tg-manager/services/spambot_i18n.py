@@ -80,6 +80,77 @@ LIMIT_PATTERNS: tuple[str, ...] = (
     "kısıtla", "sınırla", "kullanılamaz",
 )
 
+# ── Бан/терминация аккаунта (НЕ снимаемый спамблок) ──────────────────────────
+# На ЗАБАНЕННЫЙ аккаунт @SpamBot отвечает про НАРУШЕНИЕ условий и блокировку —
+# это терминальный бан, а не спамблок, который снимается апелляцией. Раньше такой
+# ответ («Your account was blocked for violations of the Telegram Terms of
+# Service») не матчил ни OK, ни LIMIT и уходил в None → аккаунт оставался «active»
+# и его продолжали брать в работу. Фразы высокоточные (многословные), чтобы не
+# поймать доброкачественный ответ; @SpamBot часто отвечает на бан по-английски
+# даже для не-EN аккаунтов, поэтому EN-набор обязателен.
+BAN_PATTERNS: tuple[str, ...] = (
+    # en
+    "blocked for violations", "was blocked for", "account was blocked",
+    "account has been blocked", "has been blocked for", "permanently banned",
+    "banned for violating", "your account was banned",
+    # ru
+    "заблокирован за нарушения", "был заблокирован", "ваш аккаунт заблокирован",
+    "аккаунт был заблокирован", "аккаунт заблокирован за",
+    # uk / be
+    "заблоковано за порушення", "ваш акаунт заблоковано", "заблакаван за парушэнн",
+    # de
+    "gesperrt wegen", "konto wurde gesperrt", "wurde dauerhaft gesperrt",
+    # fr
+    "bloqué pour violation", "compte a été bloqué",
+    # it
+    "bloccato per violazioni", "account è stato bloccato",
+    # es
+    "bloqueada por infracciones", "cuenta ha sido bloqueada",
+    # pl
+    "zablokowane za naruszenie", "konto zostało zablokowane",
+    # tr
+    "ihlalleri nedeniyle engellendi", "hesabınız engellendi",
+)
+
+# ── Заморозка аккаунта (read-only, снимается ТОЛЬКО апелляцией) ──────────────
+# Заморозка — средняя ступень между спамблоком и баном (введена Telegram в 2025).
+# Аккаунт переводится в режим «только чтение» и будет УДАЛЁН после названной
+# даты, если не подать апелляцию через @SpamBot. На заморозку @SpamBot отвечает
+# НЕ стандартным «Hello, I am Telegram…», а текстом про заморозку: «Your account
+# has been frozen for a serious violation… read-only mode… appeal via @SpamBot…
+# will be permanently deactivated and deleted». Этот ответ раньше не матчил ни
+# OK, ни BAN, ни LIMIT и уходил в None → аккаунт оставался «active» и его
+# продолжали брать в работу (вторая половина жалобы владельца: «заморожены»).
+# Различитель — именно «frozen»/«заморожен»/«read-only»/«только чтение»: в бане
+# стоит «blocked/banned», в спамблоке — «limited/restricted», и они не
+# пересекаются с этими корнями. Слово «violation/нарушение» одно на все три
+# ступени, поэтому в паттерны НЕ берём (та же ловушка, что у бана с ToS).
+# @SpamBot часто отвечает на заморозку по-английски даже для не-EN аккаунтов —
+# EN-набор обязателен; корни других локалей — на случай локализованного ответа.
+FROZEN_PATTERNS: tuple[str, ...] = (
+    # en
+    "has been frozen", "account was frozen", "account is frozen",
+    "account has been frozen", "been frozen for", "now in read-only mode",
+    "read-only mode", "read only mode", "frozen for a serious",
+    # ru
+    "заморожен", "заморожена", "заморожено", "заморозк", "замороз",
+    "только чтение", "режим чтения",
+    # uk / be
+    "заморожено", "заморожен", "замарожан",
+    # de
+    "eingefroren", "wurde eingefroren", "nur-lese",
+    # fr
+    "a été gelé", "compte gelé", "gelé pour", "lecture seule",
+    # it
+    "congelato", "congelata", "sola lettura",
+    # es
+    "congelada", "congelado", "solo lectura", "sólo lectura",
+    # pl
+    "zamrożone", "zamrożony", "zamrożon", "tylko do odczytu",
+    # tr
+    "donduruldu", "dondurul", "salt okunur",
+)
+
 # ── Временный спамблок (назван срок снятия) ──────────────────────────────────
 TEMP_PATTERNS: tuple[str, ...] = (
     # en (существовавшие)
@@ -130,16 +201,25 @@ PERM_PATTERNS: tuple[str, ...] = (
 
 
 def classify_reply(reply_text: Optional[str]) -> Optional[str]:
-    """'active' | 'spamblock' | None (не распознано).
+    """'active' | 'frozen' | 'banned' | 'spamblock' | None (не распознано).
 
     OK проверяется ПЕРВЫМ — иначе «нет ограничений» на любом языке поймается
-    LIMIT-паттерном по корню слова.
+    LIMIT-паттерном по корню слова. Дальше FROZEN и BAN — РАНЬШЕ limit: оба
+    терминальны для работы (заморозка снимается только апелляцией, бан —
+    нарушение условий/блокировка) и не должны понижаться до снимаемого
+    спамблока. Наборы FROZEN/BAN/LIMIT не пересекаются по корням
+    (frozen/read-only · blocked/banned · limited/restricted), поэтому порядок
+    между ними задаёт лишь приоритет смысла, не разрешает коллизию.
     """
     if not reply_text:
         return None
     low = reply_text.lower()
     if any(p in low for p in OK_PATTERNS):
         return "active"
+    if any(p in low for p in FROZEN_PATTERNS):
+        return "frozen"
+    if any(p in low for p in BAN_PATTERNS):
+        return "banned"
     if any(p in low for p in LIMIT_PATTERNS):
         return "spamblock"
     return None

@@ -188,6 +188,44 @@ async def _journal_write(
     return "ERROR"
 
 
+async def _journal_writemany(
+    pool: asyncpg.Pool, query: str, rows, log_ctx: str = "", where: str = "",
+) -> str:
+    """То же, что `_journal_write`, но для ПАЧКИ отметок: `executemany`.
+
+    Зачем отдельный писатель, а не цикл по `_journal_write`: пачку пишут там,
+    где целей в батче десятки (успешные цели инвайта), и построчная запись
+    стоила бы десятков круговых обходов базы на каждом батче. Терять при этом
+    нечего: executemany у asyncpg атомарен — либо легли все строки, либо ни
+    одна, а значение здесь ровно то же, что у одиночной отметки.
+
+    Гасить исключение вокруг этого вызова не нужно и вредно: писатель их не
+    бросает, и `except` вокруг него — мёртвый код, который прячет от читателя
+    тот факт, что потеря уже обработана внутри.
+    """
+    last: Exception | None = None
+    _rows = list(rows or [])
+    if not _rows:
+        return "SKIP"
+    for attempt in (1, 2):
+        try:
+            return await pool.executemany(query, _rows) or "INSERT"
+        except Exception as e:
+            last = e
+            if attempt == 1:
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    report_error(last, extra={"context": f"op_worker_journal_writemany{log_ctx}",
+                              "query": query[:100]})
+    log.error(
+        "op_worker: пачка отметок в журнале целей не записалась%s (%d строк, %s) "
+        "— повторный прогон может сделать эти цели второй раз",
+        log_ctx, len(_rows), last,
+    )
+    _reliability_metric("infragram_journal_write_failures_total",
+                        where=where or "journal_batch")
+    return "ERROR"
+
+
 async def _retrying_execute(
     pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
     metric: str = "infragram_requeue_write_failures_total",
@@ -771,7 +809,7 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
     'pending' с scheduled_for = now()+cooldown+буфер: повтор ровно после cooldown,
     без busy-loop (кандидаты уважают scheduled_for) и без фантомного слота."""
     defer = max(int(cooldown_s), 0) + 5
-    await _safe_execute(
+    await _retrying_execute(
         pool,
         # done_items=0: как retry/watchdog-requeue — при повторном прогоне после
         # cooldown исполнитель считает прогресс заново, иначе done копится поверх
@@ -787,6 +825,8 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
         op_id,
         float(defer),
         log_ctx=f"[circuit_release op={op_id}]",
+        where="circuit_release",
+        lost="операция осталась в 'running' и держит слот владельца до сторожа зависших",
     )
 
 
@@ -904,7 +944,7 @@ async def _requeue_op_no_accounts(
                 pool, op_id, owner_id,
                 waited_min=int(waited.total_seconds() // 60), bot=bot)
             return
-    await _safe_execute(
+    await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         # COALESCE: отметку ставит ПЕРВОЕ откладывание и дальше её не сдвигает,
@@ -913,7 +953,10 @@ async def _requeue_op_no_accounts(
         "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(defer_s),
-        log_ctx=f"[requeue_no_acc op={op_id}]")
+        log_ctx=f"[requeue_no_acc op={op_id}]",
+        where="requeue_no_accounts",
+        lost="возврат в очередь по занятому флоту потерян — операция осталась в 'running'",
+    )
 
 
 # Сколько секунд флуд-паузы ещё имеет смысл переждать ПРЯМО В ПРОГОНЕ.
@@ -1595,7 +1638,7 @@ async def _defer_op_for_flood(
     прошлого прогона — класс «done > total».
     """
     delay = max(1, int(wait_s))
-    await _safe_execute(
+    _res = await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         # Часы ожидания флота снимаем: пауза назначена Telegram, а не дефицитом
@@ -1607,7 +1650,18 @@ async def _defer_op_for_flood(
         "last_error=$3, scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(delay), (reason or "")[:300],
-        log_ctx=f"[defer_flood op={op_id}]")
+        log_ctx=f"[defer_flood op={op_id}]",
+        where="defer_flood",
+        lost="отсрочка флуд-паузы потеряна — операция осталась в 'running'",
+    )
+    if str(_res or "").strip() == "ERROR":
+        # Запись не прошла и со второго раза: операция осталась 'running' и
+        # держит слот до сторожа зависших. Отсрочки НЕ случилось — значит ни
+        # счётчика отсрочек (он считает факты, иначе по графику не судить о
+        # системе), ни успокаивающего сообщения владельцу о том, что операция
+        # продолжится сама в назначенный срок. Потеря уже громкая: дверь
+        # решений написала log.error и подняла счётчик потерь.
+        return
     log.warning(
         "op_worker: op=%d отложена на %dс из-за длинной флуд-паузы — слот и аккаунты освобождены",
         op_id, delay,
@@ -1644,7 +1698,7 @@ async def _resume_op_over_ceiling(
     НЕ помечается ошибкой — для владельца это «продолжается», а не «упала».
     """
     delay = _OP_CEILING_RESUME_DELAY_S
-    await _safe_execute(
+    _res = await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         "acct_wait_since=NULL, last_error=$3, "
@@ -1652,7 +1706,16 @@ async def _resume_op_over_ceiling(
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(delay),
         "Длинная операция продолжается со следующего прогона (потолок времени)",
-        log_ctx=f"[ceiling_resume op={op_id}]")
+        log_ctx=f"[ceiling_resume op={op_id}]",
+        where="ceiling_resume",
+        lost="продолжение после потолка прогона потеряно — операция осталась в 'running'",
+    )
+    if str(_res or "").strip() == "ERROR":
+        # Та же причина, что в `_defer_op_for_flood`: продолжения не случилось,
+        # операция осталась 'running'. Считать его состоявшимся и обещать
+        # владельцу «продолжится с того же места» значило бы рассказать о
+        # работе, которой не будет до сторожа зависших.
+        return
     log.info(
         "op_worker: op=%d достигла потолка прогона на здоровом прогрессе "
         "(%d/%d) — возвращена в очередь, продолжит с того же места",
@@ -2455,6 +2518,7 @@ async def _maybe_requeue(
         op_id,
         float(backoff),
         log_ctx=f"[maybe_requeue_update op={op_id}]",
+        where="maybe_requeue",
     )
     if str(res or "").strip() == "ERROR":
         # Запись не прошла даже с повтором — в очередь операция НЕ вернулась.
@@ -2764,7 +2828,7 @@ async def _release_op_for_owner_limit(pool: "asyncpg.Pool", op_id: int) -> None:
     текстом «все аккаунты 20 мин были заняты». Возврат по месту в семафоре —
     новая попытка, а не продолжение ожидания.
     """
-    await _safe_execute(
+    await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         "acct_wait_since=NULL, "
@@ -2773,6 +2837,8 @@ async def _release_op_for_owner_limit(pool: "asyncpg.Pool", op_id: int) -> None:
         op_id,
         float(_OWNER_SEM_DEFER_S),
         log_ctx=f"[owner_sem_release op={op_id}]",
+        where="owner_sem_release",
+        lost="возврат по занятому семафору владельца потерян — фантомный слот на час",
     )
 _owner_sem_lock = asyncio.Lock()
 
@@ -3054,12 +3120,30 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
         {"status": status, "ok": ok_n, "failed": failed_n,
          "reason": _POISON_ERROR.format(n=_MAX_REVIVES), "summary": summary},
         op_type, 0.0)
-    await _safe_execute(
+    # Тот же случай, что у `_finish_cancelled_op`: строка УЖЕ терминальна
+    # ('failed' поставил путь бюджета живучести), и эта запись дописывает ей
+    # точный статус и цифры. Поэтому `_op_closed_by_us` здесь не подходит — он
+    # охраняет переход В терминальный статус, а не обогащение закрытой строки.
+    # Но цена потери та же, что разбирают докстринги `_finish_cancelled_op` и
+    # `_watchdog_cancelled_orphans`: операция остаётся терминальной и ПУСТОЙ
+    # (`result IS NULL`), владелец видит исход без единой цифры, и починить это
+    # нечем — сторож сирот отмены трогает только 'cancelled'. Значит дверь с
+    # повтором и счётчиком незаписанного финала.
+    await _retrying_execute(
         pool,
         "UPDATE operation_queue SET status=$2, result=$3::jsonb, "
         "acct_wait_since=NULL WHERE id=$1 AND status='failed'",
         op_id, status, json.dumps(result, ensure_ascii=False),
-        log_ctx=f"[poisoned_finish op={op_id}]")
+        log_ctx=f"[poisoned_finish op={op_id}]",
+        where="poisoned_finish",
+        metric="infragram_op_close_write_failures_total",
+        lost="итог остановленной по живучести операции не сохранён",
+    )
+    # Сообщение владельцу остаётся даже при потерянной записи, и это НЕ та же
+    # ошибка, что у флуд-отсрочки. Там событие не состоялось, здесь состоялось:
+    # операция действительно остановлена и действительно 'failed'. Цифры в
+    # тексте взяты из журнала целей, а не из потерянной записи. Промолчать
+    # значило бы оставить остановленную операцию без объяснения — хуже.
     log.error(
         "op_worker: op=%d op_type=%s → %s по бюджету живучести (%s, ok=%d failed=%d)",
         op_id, op_type, status, source, ok_n, failed_n)
@@ -3639,10 +3723,10 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
                 len(rows), [(int(r["id"]), r["status"]) for r in rows])
 
     try:
-        from bot.utils.subscription import _admin_ids
-        admin_ids = _admin_ids()
+        from bot.utils.subscription import platform_alert_recipients
+        admin_ids = await platform_alert_recipients(pool)
     except Exception:
-        log.debug('admin_ids fallback: returning empty set')
+        log.debug('platform_alert_recipients fallback: returning empty set')
         admin_ids = set()
     if not admin_ids:
         # Список админов пуст — алерт НЕ помечаем объявленным: иначе он
@@ -3736,6 +3820,18 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "id рассылки не закрепился за операцией — рассылка не запущена и "
         "снята; без этого отказа повтор операции отправил бы сообщение всей "
         "аудитории второй раз",
+    "infragram_network_node_mark_write_failures_total":
+        "отметка созданного узла связки — не записалась: объект создан, но план "
+        "о нём не знает, и следующий прогон развёртывания создал бы второй "
+        "такой же канал",
+    "infragram_gp_asset_mark_write_failures_total":
+        "id созданного канала или бота (Global Presence) — не записался в "
+        "цель: цель закрыта на месте, иначе разбор брошенных целей счёл бы "
+        "её незапущенной и аккаунт создал бы второй такой же ресурс",
+    "infragram_network_broadcast_mark_write_failures_total":
+        "отметка о запуске рассылки по боту (сетевая рассылка) — не записалась "
+        "в базу: рассылка по этому боту не запущена, иначе повторный прогон "
+        "операции отправил бы сообщение всей его аудитории второй раз",
     "infragram_broadcast_subset_write_failures_total":
         "список получателей рассылки не сохранился — рассылка не запущена и "
         "снята; без этого отказа докатка после перезапуска отправила бы её "
@@ -3840,11 +3936,11 @@ async def _watchdog_protective_failures(
               [(n, int(d)) for n, _w, d, _t in grown])
 
     try:
-        from bot.utils.subscription import _admin_ids
+        from bot.utils.subscription import platform_alert_recipients
 
-        admin_ids = _admin_ids()
+        admin_ids = await platform_alert_recipients(pool)
     except Exception:
-        log.debug("admin_ids fallback: returning empty set")
+        log.debug("platform_alert_recipients fallback: returning empty set")
         admin_ids = set()
     if not admin_ids:
         # Никому не ушло — база отсчёта не двигается, сообщение вернётся. Но
@@ -6055,7 +6151,13 @@ async def _exec_bulk_bot_edit(
     }
     method = field_to_method.get(field)
     if not method:
-        return {"status": "skipped", "reason": f"Unknown field: {field}"}
+        # Отказ ДО работы, и он обязан называться словом из op_status: «skipped»
+        # для classify_final — незнакомое слово, которое оно молча игнорирует и
+        # при пустых счётчиках выдаёт done, то есть владелец видел отказ как
+        # выполненную операцию. Предохранитель этот отказ не считает сбоем сам:
+        # признак конфигурационного отказа — пустые ok/failed.
+        return {"status": "failed",
+                "summary": f"⚠️ Неизвестное поле для правки ботов: {field}"}
 
     # Parse commands for field=commands: "/cmd - description" format
     commands_payload: list | None = None
@@ -6103,11 +6205,13 @@ async def _exec_bulk_bot_edit(
                 data_resp = await resp.json()
                 if data_resp.get("ok"):
                     ok_count += 1
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                         op_id,
                         ok_count + fail_count,
                         str(b["id"]),
+                        log_ctx=f" op={op_id}", where="bulk_bot_edit",
                     )
                 else:
                     fail_count += 1
@@ -6960,7 +7064,8 @@ async def _exec_mass_publish(
                     "ok": ok_count,
                     "failed": fail_count,
                 }
-            await asyncio.sleep(_cool_left + random.uniform(2, 8))
+            await bounded_flood_sleep(
+                _cool_left + random.uniform(2, 8), "mass_publish_cooldown", pool=pool, op_id=op_id)
         else:
             candidate_accounts = _ready_accounts
         acc = candidate_accounts[0] if candidate_accounts else None
@@ -8376,6 +8481,68 @@ async def _exec_bulk_leave(
     }
 
 
+_GP_ASSET_LABEL = {"channel": "Канал", "bot": "Бот"}
+
+
+async def _mark_gp_asset(pool, target_id: int, asset_id: int, kind: str) -> bool:
+    """Отметить в цели Global Presence id СОЗДАННОГО канала или бота.
+
+    Это не отчётность, а дверь. Расклинивание брошенных целей
+    (`_revive_abandoned_gp_targets`) разбирает их ровно по `result_asset_id` и
+    само объясняет ставку: пусто — «работа не начиналась», цель возвращается в
+    очередь и повтор создаёт канал ЗАНОВО; заполнено — «ресурс уже создан»,
+    цель закрывается. То есть потерянная отметка стоит ВТОРОГО канала, а для
+    бота дороже: лимит BotFather считается на аккаунт, и дубль выжигает
+    дефицитный слот.
+
+    Писалось это одним `_safe_execute`, результат которого никто не смотрел, —
+    а он не бросает исключений, он возвращает 'ERROR'. Один блип базы между
+    созданием канала и отметкой открывал дверь настежь.
+
+    Отметить ДО действия, как это делают инвайт и кампания ЛС, здесь нельзя:
+    id появляется только вместе с ресурсом. Поэтому дверь держится иначе —
+    запись повторяется, а при полной неудаче цель закрывается на месте с
+    честным error_message. Закрытая цель расклиниванию не попадается, и
+    второго канала не будет; сам ресурс не теряется — его подбирает
+    сканирование собственных ресурсов, ровно как написано в расклинивании про
+    оборвавшийся прогон.
+
+    Возвращает True, если отметка легла.
+    """
+    _label = _GP_ASSET_LABEL.get(kind, "Ресурс")
+    for _attempt in (1, 2, 3):
+        if await _safe_execute(
+            pool,
+            "UPDATE global_presence_targets SET result_asset_id=$1 WHERE id=$2",
+            int(asset_id), int(target_id),
+            log_ctx=f"[gp_mark_created {kind} target={target_id}]",
+        ) != "ERROR":
+            return True
+        if _attempt < 3:
+            await asyncio.sleep(0.5 * _attempt)
+    log.error(
+        "gp_%s: %s создан (id %s), но отметка в цели %s НЕ записалась — "
+        "закрываем цель на месте, иначе расклинивание сочтёт её незапущенной и "
+        "аккаунт создаст второй такой же",
+        kind, _label.lower(), asset_id, target_id,
+    )
+    _reliability_metric("infragram_gp_asset_mark_write_failures_total", kind=kind)
+    # Закрытие ограничено статусом 'running': исход, который цель уже успела
+    # получить, затирать нельзя.
+    await _safe_execute(
+        pool,
+        "UPDATE global_presence_targets SET status='done', "
+        "       error_message=COALESCE(error_message, $1) "
+        " WHERE id=$2 AND status='running'",
+        f"{_label} создан, но его id не удалось записать — оформление (имя, "
+        f"аватар, запись в каталог) могло не примениться. Ресурс есть: его "
+        f"подберёт сканирование собственных ресурсов.",
+        int(target_id),
+        log_ctx=f"[gp_mark_lost {kind} target={target_id}]",
+    )
+    return False
+
+
 async def _revive_abandoned_gp_targets(pool: asyncpg.Pool, plan_id: int, what: str) -> None:
     """Расклинить цели плана Global Presence, брошенные прошлым прогоном.
 
@@ -8756,12 +8923,7 @@ async def _exec_global_presence_channel(
             # этой отметке расклинивание отличает «канал уже создан» от «работа
             # не начиналась» и не создаёт второй канал.
             if channel_id:
-                await _safe_execute(
-                    pool,
-                    "UPDATE global_presence_targets SET result_asset_id=$1 WHERE id=$2",
-                    channel_id, target["id"],
-                    log_ctx=f"[gp_mark_created target={target['id']}]",
-                )
+                await _mark_gp_asset(pool, target["id"], channel_id, "channel")
 
             username_error = None
             planned_username = target.get("planned_username")
@@ -9084,7 +9246,8 @@ async def _exec_global_presence_channel(
                         i + 1,
                         tod_factor,
                     )
-                    await asyncio.sleep(await _governed_delay(pool, owner_id, cooldown))
+                    await cancellable_pause(
+                        pool, op_id, await _governed_delay(pool, owner_id, cooldown), "gp_channel_cooldown")
                 else:
                     # Короткая пауза между операциями
                     delay = random.uniform(45, 90) * chaos * tod_factor * jitter
@@ -9633,7 +9796,9 @@ async def _exec_global_presence_bot(
                 "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
                 plan_id,
             )
-            return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id}
+            return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id,
+                    "summary": "✅ План присутствия уже выполнен — "
+                               "новых ботов создавать не нужно"}
 
         await _safe_execute(
                 pool,
@@ -9790,12 +9955,8 @@ async def _exec_global_presence_bot(
             # По этой отметке расклинивание отличает созданное от неначатого.
             if token and ":" in token:
                 try:
-                    await _safe_execute(
-                        pool,
-                        "UPDATE global_presence_targets SET result_asset_id=$1 WHERE id=$2",
-                        int(token.split(":")[0]), target["id"],
-                        log_ctx=f"[gp_bot_mark_created target={target['id']}]",
-                    )
+                    await _mark_gp_asset(
+                        pool, target["id"], int(token.split(":")[0]), "bot")
                 except (TypeError, ValueError):
                     log.debug("gp_bot: токен без числового id, отметка пропущена")
 
@@ -10571,7 +10732,8 @@ async def _exec_bulk_create_channels(
                         cooldown,
                         i + 1,
                     )
-                    await asyncio.sleep(await _governed_delay(pool, owner_id, cooldown))
+                    await cancellable_pause(
+                        pool, op_id, await _governed_delay(pool, owner_id, cooldown), "bulk_channels_cooldown")
                 else:
                     delay = random.uniform(15, 30) * chaos * tod_factor
                     await asyncio.sleep(await _governed_delay(pool, owner_id, delay))
@@ -10832,7 +10994,7 @@ async def _exec_bot_factory_multi(
                 chaos = session_simulator.chaos_factor()
                 tod = session_simulator.time_of_day_factor()
                 pause = (random.uniform(120, 240) if global_i % 3 == 2 else random.uniform(45, 90)) * chaos * tod
-                await asyncio.sleep(pause)
+                await cancellable_pause(pool, op_id, pause, "bot_factory_multi")
     finally:
         await release_accounts(claimed_ids)
 
@@ -11098,7 +11260,7 @@ async def _exec_bot_factory(
                     pause = random.uniform(120, 240) * chaos * tod
                 else:
                     pause = random.uniform(45, 90) * chaos * tod
-                await asyncio.sleep(pause)
+                await cancellable_pause(pool, op_id, pause, "bot_factory")
 
         return {
             "status": "done",
@@ -11731,7 +11893,7 @@ async def _restart_broadcasts(pool: asyncpg.Pool, wanted: set) -> None:
 async def _nb_launch(
     pool: asyncpg.Pool, op_id: int, owner_id: int, bot_id: int, token: str,
     text: str, ids: list, buttons, *, subset: bool, order: int,
-    params: dict, launched_bc_ids: list, already: set,
+    params: dict, launched_bc_ids: list, already: set, deferred: list,
 ) -> bool:
     """Завести и запустить рассылку одного бота сетевой рассылки.
 
@@ -11763,22 +11925,72 @@ async def _nb_launch(
         target_user_ids=(list(ids) if subset else None), buttons=buttons,
     )
     if not bc_id:
+        log.error(
+            "network_broadcast op=%d: строка рассылки по боту %s не создалась — "
+            "бот пропущен, его аудитория сообщения не получит",
+            op_id, bot_id,
+        )
+        deferred.append(bot_id)
         return False
+
+    # ОТМЕТКА ДО ЗАПУСКА. `broadcaster.start` необратим: залп уходит в задачу, и
+    # дальше сообщения идут живым людям. Отметка — единственное, чем повторный
+    # прогон операции отличается от первого, а повтор здесь норма, не редкость:
+    # рабочая ветка едет в прод на каждом пуше, рестарт возвращает операцию в
+    # очередь и обнуляет done_items, и исполнитель идёт по списку ботов с
+    # начала. Без отметки повтор заводит по этому боту ВТОРУЮ рассылку с новым
+    # id, а журнал доставок первой ей не указ — он ведётся по её собственному
+    # id. То есть вся аудитория бота получает сообщение второй раз.
+    #
+    # Дверь стояла и раньше, но была открыта с двух сторон: запись шла ПОСЛЕ
+    # запуска (падение процесса в зазоре = лишняя рассылка), а её результат
+    # выбрасывался на пол (`_safe_execute` не бросает исключений, он отдаёт
+    # 'ERROR' — и его никто не смотрел; блип базы = та же лишняя рассылка).
+    #
+    # Потерять запуск перестановка не может: строка рассылки уже создана и
+    # стоит в 'pending', а ровно эти статусы поднимает `resume_interrupted` на
+    # следующем старте процесса (db.get_interrupted_broadcasts). Поэтому
+    # «отметили, но не успели запустить» догоняется само, а «запустили, но не
+    # отметили» не лечится ничем. Отправить дважды хуже, чем не отправить — то
+    # же правило, что у инвайта и кампании ЛС, см. CLAUDE.md.
+    _bots = [int(x) for x in (params.get("launched_bot_ids") or [])] + [bot_id]
+    _bcs = [int(x) for x in (params.get("launched_bc_ids") or [])] + [int(bc_id)]
+    _mark_ok = False
+    for _attempt in (1, 2):
+        if await _safe_execute(
+            pool,
+            "UPDATE operation_queue SET params = COALESCE(params, '{}'::jsonb) "
+            "|| $1::jsonb WHERE id=$2",
+            json.dumps({"launched_bot_ids": _bots, "launched_bc_ids": _bcs}),
+            op_id, log_ctx=f"[nb_mark op={op_id} bot={bot_id}]",
+        ) != "ERROR":
+            _mark_ok = True
+            break
+    if not _mark_ok:
+        log.error(
+            "network_broadcast op=%d: бот %s НЕ закреплён за операцией — "
+            "рассылка по нему не запускается и снимается. Отправлять, не "
+            "запомнив, нельзя: повтор прогона завёл бы вторую рассылку на ту "
+            "же аудиторию.", op_id, bot_id,
+        )
+        _reliability_metric("infragram_network_broadcast_mark_write_failures_total")
+        # Снимаем незапущенную строку: иначе её поднимет `resume_interrupted` на
+        # следующем старте процесса и рассылка уедет мимо операции.
+        await broadcaster.abandon_unstarted(pool, int(bc_id))
+        deferred.append(bot_id)
+        return False
+
+    params["launched_bot_ids"] = _bots
+    params["launched_bc_ids"] = _bcs
     broadcaster.start(
         pool, None, bc_id, token, bot_id, text, None, ids, buttons,
         start_delay=order * _NB_BOT_START_DELAY_S,
     )
     launched_bc_ids.append(int(bc_id))
     already.add(bot_id)
-    _bots = [int(x) for x in (params.get("launched_bot_ids") or [])] + [bot_id]
-    _bcs = [int(x) for x in (params.get("launched_bc_ids") or [])] + [int(bc_id)]
-    params["launched_bot_ids"] = _bots
-    params["launched_bc_ids"] = _bcs
     await _safe_execute(
         pool,
-        "UPDATE operation_queue SET done_items=done_items+1, "
-        "params = COALESCE(params, '{}'::jsonb) || $1::jsonb WHERE id=$2",
-        json.dumps({"launched_bot_ids": _bots, "launched_bc_ids": _bcs}),
+        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
         op_id, log_ctx=f"[nb_launch op={op_id}]",
     )
     return True
@@ -11823,6 +12035,11 @@ async def _exec_network_broadcast(
 
     total_started = 0
     total_users = 0
+    # Боты, по которым рассылка НЕ пошла (не создалась строка, не записалась
+    # отметка о запуске). Без этого счёта отказ был невидим: `_nb_launch`
+    # возвращал False, ветка делала `continue`, и операция на сегменте с живой
+    # аудиторией закрывалась словами «нет пользователей в выбранном сегменте».
+    deferred: list[int] = []
     # Что УЖЕ заведено предыдущим прогоном этой же операции. Операция может быть
     # повторена (упал воркер на середине списка ботов, таймаут, ручной повтор), а
     # раньше повтор заводил по каждому боту НОВУЮ рассылку с новым id: журнал
@@ -11871,6 +12088,7 @@ async def _exec_network_broadcast(
                 pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
                 _bc_buttons, subset=False, order=total_started,
                 params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+                deferred=deferred,
             ):
                 continue
             total_started += 1
@@ -11897,6 +12115,7 @@ async def _exec_network_broadcast(
                 pool, op_id, owner_id, bid, token_map[bid], text, ids,
                 _bc_buttons, subset=True, order=total_started,
                 params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+                deferred=deferred,
             ):
                 continue
             total_started += 1
@@ -11922,6 +12141,7 @@ async def _exec_network_broadcast(
                 pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
                 _bc_buttons, subset=True, order=total_started,
                 params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+                deferred=deferred,
             ):
                 continue
             total_started += 1
@@ -11954,12 +12174,26 @@ async def _exec_network_broadcast(
                 pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
                 _bc_buttons, subset=True, order=total_started,
                 params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+                deferred=deferred,
             ):
                 continue
             total_started += 1
             total_users += len(ids)
 
     if total_started == 0:
+        if deferred:
+            # Не «нет пользователей», а отказ защиты: аудитория была.
+            return {
+                "status": "failed",
+                "ok": 0,
+                "summary": (
+                    f"⚠️ Рассылка не запущена: ни один бот не закреплён за "
+                    f"операцией (пропущено {len(deferred)} из {len(bots)}). "
+                    f"База не приняла отметку о запуске, а без неё повтор "
+                    f"отправил бы сообщение той же аудитории второй раз. "
+                    f"Попробуйте запустить ещё раз."
+                ),
+            }
         return {
             "status": "done",
             "ok": 0,
@@ -11997,6 +12231,26 @@ async def _exec_network_broadcast(
         f"Сегмент: {label}\n"
         f"Ботов: {total_started}, получателей: {total_users:,}"
     ).strip()
+    if deferred:
+        # Работа была, но не доведена — это 'partial', а не «готово». Молчать
+        # нельзя: аудитория пропущенных ботов сообщения не получила, и владелец
+        # узнаёт об этом только отсюда.
+        res["deferred_bots"] = len(deferred)
+        if res.get("status") == "done":
+            res["status"] = "partial"
+        # Слово «partial» само до очереди НЕ доходит: исход считает
+        # op_status.classify_final, и считает по счётчикам — при ok>0 и
+        # failed=0 он скажет «выполнено». Пропущенный бот — это непройденная
+        # единица работы, и он обязан попасть в failed. Единица здесь бот, а не
+        # получатель (их считает total_items), поэтому число в сводке даётся
+        # отдельной строкой — счётчик нужен исходу, а владельцу нужна правда о
+        # ботах.
+        res["failed"] = int(res.get("failed") or 0) + len(deferred)
+        res["summary"] = (
+            f"{res['summary']}\n"
+            f"⚠️ Пропущено ботов: {len(deferred)} — их не удалось закрепить за "
+            f"операцией, сообщение их аудитории не отправлено."
+        )
     return res
 
 
@@ -12911,7 +13165,7 @@ async def _exec_bulk_dm_adhoc(
             wait = await _governed_delay(pool, owner_id, delay) + min(flood_wait_total, 30.0)
             flood_wait_total = max(0.0, flood_wait_total - delay)
             if i < total - 1:
-                await asyncio.sleep(wait)
+                await cancellable_pause(pool, op_id, wait, "bulk_dm_adhoc")
 
         # Медиа-файл больше не нужен — удаляем (диск контейнера эфемерный, но не
         # копим мусор при многих отправках).
@@ -14997,8 +15251,9 @@ async def _exec_enable_bot_to_bot(
     uname_to_bot = {(b.get("username") or "").lstrip("@"): b["bot_id"] for b in bots}
     enabled_n = already_n = 0
     err_lines: list[str] = []
+    _planned = sum(len(v) for v in by_acc.values())
     await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
-                        sum(len(v) for v in by_acc.values()), op_id)
+                        _planned, op_id)
 
     for acc_id, unames in by_acc.items():
         if await _is_cancelled(pool, op_id):
@@ -15044,8 +15299,25 @@ async def _exec_enable_bot_to_bot(
     summary = " · ".join(parts)
     if err_lines:
         summary += "\n" + "\n".join(err_lines[:15])
-    return {"status": "done", "enabled": enabled_n, "already": already_n,
-            "summary": summary}
+    # Исход честный, а не всегда «done». Ошибки уходили только в текст сводки, и
+    # операция, не включившая НИ ОДНОГО бота, числилась выполненной: ни на одном
+    # экране владельца это не было видно числом. Боты без аккаунта-владельца —
+    # тоже недоведённая работа: их режим включается только вручную.
+    _left = bool(err_lines) or bool(no_owner)
+    if not _left:
+        status = "done"
+    elif enabled_n or already_n:
+        status = "partial"
+    else:
+        status = "failed"
+    # Счётчики факта обязательны, а не декоративны: исход решает
+    # op_status.classify_final, и решает ПО СЧЁТЧИКАМ — слово исполнителя для
+    # него намерение. «partial» с пустыми ok/failed превращается в «done», то
+    # есть честный частичный исход терялся бы молча.
+    _ok_n = enabled_n + already_n
+    _failed_n = max(0, _planned - _ok_n) + len(no_owner)
+    return {"status": status, "enabled": enabled_n, "already": already_n,
+            "ok": _ok_n, "failed": _failed_n, "summary": summary}
 
 
 async def _db_get_account_for_telethon(pool, acc_id: int, owner_id: int):
@@ -15570,6 +15842,68 @@ async def _exec_reclassify_channels(
         await release_accounts(claimed_ids)
 
 
+async def _record_network_node(
+    pool, *, node_id: int, ref_id: int, title: str = "",
+    owner_id: int | None = None, acc_id: int | None = None,
+    username=None, access_hash: int = 0, asset_type: str = "channel",
+) -> bool:
+    """Записать СОЗДАННЫЙ узел связки: каталог и отметку узла одной транзакцией.
+
+    Отметка `ref_id` — дверь: развёртывание пропускает узел, у которого она уже
+    стоит. Повтор прогона здесь норма, а не редкость (рабочая ветка едет в прод
+    на каждом пуше, рестарт возвращает операцию в очередь и гонит её по узлам с
+    начала), поэтому потерянная отметка стоит ВТОРОГО канала с тем же
+    названием.
+
+    Писалась отметка через `network_builder.update_node_status`, который
+    исключений не бросает: он возвращает `{'ok': False}` и пишет
+    предупреждение в лог. Результат никто не смотрел, а сама запись шла вторым
+    запросом после записи в каталог — то есть два окна, и оба открытые.
+
+    Отметить ДО создания нельзя: `ref_id` появляется только вместе с каналом.
+    Поэтому окно сжимается до одной атомарной записи — ровно так уже устроен
+    Global Presence в этом же файле, — и запись повторяется.
+
+    `owner_id`/`acc_id` не заданы — каталог не трогаем: нода-сообщество
+    регистрируется своим путём (`nodes_engine`), и в `managed_channels` её
+    место не здесь.
+
+    Возвращает True, если запись легла.
+    """
+    for _attempt in (1, 2, 3):
+        try:
+            async with pool.acquire() as _conn:
+                async with _conn.transaction():
+                    if owner_id is not None and acc_id is not None:
+                        await _conn.execute(
+                            "INSERT INTO managed_channels(owner_id, acc_id, "
+                            "channel_id, title, username, access_hash, type) "
+                            "VALUES($1,$2,$3,$4,$5,$6,$7) "
+                            "ON CONFLICT(owner_id, channel_id) DO UPDATE "
+                            "SET title=$4, access_hash=$6, type=$7",
+                            int(owner_id), int(acc_id), int(ref_id), title,
+                            username, int(access_hash or 0), asset_type,
+                        )
+                    await _conn.execute(
+                        "UPDATE network_nodes SET status='created', ref_id=$1 "
+                        "WHERE id=$2",
+                        int(ref_id), int(node_id),
+                    )
+            return True
+        except Exception as e:
+            if _attempt < 3:
+                await asyncio.sleep(0.5 * _attempt)
+                continue
+            log.error(
+                "deploy_network: объект «%s» (id %s) создан, но узел %s его НЕ "
+                "запомнил (%s) — следующий прогон счёл бы узел незапущенным и "
+                "создал второй такой же",
+                title or "узел", ref_id, node_id, e,
+            )
+    _reliability_metric("infragram_network_node_mark_write_failures_total")
+    return False
+
+
 async def _exec_deploy_network(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -15627,6 +15961,10 @@ async def _exec_deploy_network(
         node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
         node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
         created = wired = 0
+        # Узлы, чей объект создан, но отметка не записалась. Без этого счёта
+        # отказ был невидим: прогон закрывался «готово», а следующий создавал
+        # второй такой же канал.
+        unmarked = 0
         manual: list[str] = []
         # Счётчик шагов общий на оба цикла: план (plan_deployment) считает шагом
         # каждый недостающий узел и каждое ребро, и total_items операции равен
@@ -15657,15 +15995,19 @@ async def _exec_deploy_network(
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
                     continue
-                await _safe_execute(
-                    pool,
-                    "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type) "
-                    "VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(owner_id, channel_id) DO UPDATE "
-                    "SET title=$4, access_hash=$6, type=$7",
-                    owner_id, acc["id"], ch_id, label, res.get("username") or None,
-                    int(res.get("access_hash") or 0),
-                    res.get("type") or ("group" if ntype in ("group", "chat") else "channel"))
-                await _nb.update_node_status(pool, n["id"], "created", ref_id=ch_id)
+                if not await _record_network_node(
+                        pool, node_id=n["id"], ref_id=int(ch_id), title=label,
+                        owner_id=owner_id, acc_id=int(acc["id"]),
+                        username=res.get("username") or None,
+                        access_hash=int(res.get("access_hash") or 0),
+                        asset_type=(res.get("type")
+                                    or ("group" if ntype in ("group", "chat")
+                                        else "channel"))):
+                    manual.append(
+                        f"{label}: создан (id {ch_id}), но узел плана его не "
+                        f"запомнил — свяжите вручную")
+                    unmarked += 1
+                    continue
                 node_ref[n["id"]] = ch_id
                 created += 1
                 await _governed_sleep(pool, owner_id, random.uniform(30, 60))
@@ -15689,7 +16031,13 @@ async def _exec_deploy_network(
                     await _ne.add_node_member(pool, int(cnode["id"]), int(acc["id"]), "admin")
                 except Exception:
                     pass
-                await _nb.update_node_status(pool, n["id"], "created", ref_id=int(ch_id))
+                if not await _record_network_node(
+                        pool, node_id=n["id"], ref_id=int(ch_id), title=label):
+                    manual.append(
+                        f"{label}: нода создана (id {ch_id}), но узел плана её "
+                        f"не запомнил — свяжите вручную")
+                    unmarked += 1
+                    continue
                 node_ref[n["id"]] = int(ch_id)
                 created += 1
                 await _governed_sleep(pool, owner_id, random.uniform(30, 60))
@@ -15754,9 +16102,21 @@ async def _exec_deploy_network(
             pass
         await _mark_progress(pool, op_id, _done_n)
         parts = [f"🔗 Связка развёрнута: создано {created}, связано {wired}"]
+        if unmarked:
+            # Работа была, но не доведена: объекты созданы, а план их не знает.
+            # Закрывать это как «готово» нельзя — повтор создаст их заново.
+            parts.append(
+                f"⚠️ Не запомнено узлов: {unmarked} — объекты созданы и есть в "
+                f"каталоге, но план о них не знает")
         if manual:
             parts.append("Вручную: " + "; ".join(manual[:5]))
-        return {"status": "done", "created": created, "wired": wired,
+        # ok/failed — не украшение: classify_final судит по счётчикам, и
+        # «partial» с пустыми счётчиками он превращает в «done». Незапомненный
+        # узел — именно непройденная работа: объект создан, а план о нём не
+        # знает, и повтор создаст его заново.
+        return {"status": "partial" if unmarked else "done",
+                "created": created, "wired": wired, "unmarked": unmarked,
+                "ok": created + wired, "failed": unmarked,
                 "manual": manual, "summary": " · ".join(parts)}
     finally:
         await release_accounts([_claimed_acc])
@@ -15785,6 +16145,23 @@ async def _exec_community_add_channel(
             "summary": f"🖥 Ноды: создано каналов {created}"}
 
 
+async def _node_members_already(pool, node_id: int) -> list[int]:
+    """Кто в ноде УЖЕ состоит. Дверь идемпотентности оживления ноды.
+
+    Вынесено в своё имя не ради красоты: реестр дверей
+    (`tests/test_every_mutating_executor_is_idempotent.py`) узнаёт двери по
+    тексту, и ключ по имени таблицы `community_node_members` совпадал бы и с
+    `_exec_community_set_staff`, который эту таблицу только ЧИТАЕТ, чтобы знать
+    кого промоутить. Там это не дверь, и реестр начал бы прятать настоящую
+    находку. Имя функции такой двусмысленности не создаёт.
+    """
+    rows = await _safe_fetch(
+        pool,
+        "SELECT account_id FROM community_node_members WHERE node_id=$1",
+        int(node_id), log_ctx=f"[node_members node={node_id}]")
+    return sorted({int(r["account_id"]) for r in (rows or [])})
+
+
 async def _exec_community_liven(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -15805,12 +16182,31 @@ async def _exec_community_liven(
         count = max(1, min(int(params.get("count") or 5), 50))
     except (TypeError, ValueError):
         count = 5
+    # ДВЕРЬ ИДЕМПОТЕНТНОСТИ: кто в ноде уже состоит. Повтор прогона здесь норма
+    # (деплой на каждом пуше возвращает операцию в очередь и гонит её с начала),
+    # а вступление необратимо и лимитируемо. Без этой двери повтор делал до
+    # пятидесяти настоящих joinChannel по чату, где флот уже сидит, и — хуже —
+    # выбор аккаунтов шёл заново и мог взять ДРУГИЕ: владелец просил пять, а
+    # после одного воскрешения в ноде оказывалось десять.
+    #
+    # Поэтому задача читается как «довести ноду ДО count», а не «вступить count
+    # раз»: свои исключаются из выбора, а остаток считается от фактического
+    # числа участников.
+    _in_node = await _node_members_already(pool, node_id)
+    _need = max(0, count - len(_in_node))
+    if _need <= 0:
+        return {"status": "done", "joined": 0,
+                "summary": (f"🏛 Оживление ноды: в ней уже {len(_in_node)} "
+                            f"аккаунтов флота из запрошенных {count} — "
+                            f"вступать некому")}
     # Одна дверь к аккаунту (шаг №1 аудита): выбор через флуд-осознанный слой
     # вместо сырого random() — не берём аккаунт в кулдауне/мёртвый по статусу и
     # получаем полный транспорт (owner_id + cf_relay_url). min_trust=0.0 —
     # порог доверия здесь не вводим, меняем только «какой аккаунт безопасно взять».
     from services import resource_selector as _rsel
-    accs = await _rsel.select_accounts(pool, owner_id, count, min_trust_score=0.0)
+    accs = await _rsel.select_accounts(
+        pool, owner_id, _need, min_trust_score=0.0,
+        exclude_ids=_in_node or None)
     chat_id = int(node["tg_chat_id"])
     # Пригласительная ссылка через бота (он админ ноды) — так вступают и в
     # приватную только что созданную супергруппу (по id без access_hash нельзя).
@@ -15857,10 +16253,14 @@ async def _exec_community_liven(
     # Просили N аккаунтов, а свободных нашлось меньше — операция закончится с
     # полосой ниже ста процентов, и владелец должен прочитать почему, а не
     # гадать, оборвалась она или нет.
-    _short = len(accs or []) < count
+    # Нехватка считается от ОСТАТКА, а не от исходного count: часть ноды уже
+    # набрана прошлым прогоном, и «нашлось 2 из 5» на доборе двоих было бы
+    # неправдой.
+    _short = len(accs or []) < _need
     return {"status": "done", "joined": joined,
             "summary": (f"🏛 Оживление ноды: вступило {joined} аккаунтов флота"
-                        + (f" · свободных аккаунтов нашлось {len(accs or [])} из {count}"
+                        + (f" (в ноде было {len(_in_node)})" if _in_node else "")
+                        + (f" · свободных аккаунтов нашлось {len(accs or [])} из {_need}"
                            if _short else "")
                         + (f" · пропущено занятых: {busy}" if busy else ""))}
 
@@ -19853,8 +20253,17 @@ async def _exec_mass_invite(
                 else:
                     _tgt, _msg = "—", _raw
                 await _journal_write(
-                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'fail',$4)", op_id, step, _tgt[:120], _msg[:200])
+                    pool,
+                    # Слово статуса — 'error', как у всех провалов цели. Было
+                    # 'fail', которого не знает ни один читатель журнала:
+                    # счётчик ошибок операции (`status='error'`) показывал
+                    # владельцу ноль при любом числе непрошедших целей, а в
+                    # покрытие журнала эти строки не шли вовсе. Служебные
+                    # строки инвайта из счётчиков исключаются по ИМЕНИ цели
+                    # (operation_bus.REAL_TARGET_SQL), а не по слову статуса,
+                    # поэтому честное 'error' здесь ничего не раздувает.
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)", op_id, step, _tgt[:120], _msg[:200])
 
             # Успешно добавленные цели — тоже в лог (для полного CSV-отчёта: КОГО
             # добавили, а не только кого нет). Успех = попробованные минус явные
@@ -19874,26 +20283,32 @@ async def _exec_mass_invite(
                 _ok_seen.update(_succ)
                 _succ = _succ[:max(0, _OK_LOG_CAP - _ok_logged)]
                 if _succ:
-                    try:
-                        # МАРКЕР ИСХОДА. Ретеншен инвайта (экран мини-аппа и
-                        # подсказка организма) считает вступивших запросом
-                        # `status='ok' AND message='joined'` — а маркер не писал
-                        # НИКТО. Обе функции показывали «нет данных» с самого
-                        # своего появления: приток всегда выходил нулём.
-                        #
-                        # Маркер не декоративный: голого 'ok' для этого мало.
-                        # У метода «ссылка в ЛС» успех означает доставленную
-                        # ссылку, а не вступление (человек ещё может не войти),
-                        # и складывать их в один счётчик значило бы завышать
-                        # ретеншен. Поэтому исход называется явно.
-                        _outcome = "link_sent" if _invite_method == "link" else "joined"
-                        await pool.executemany(
-                            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                            "VALUES($1,$2,$3,'ok',$4)",
-                            [(op_id, step, s[:120], _outcome) for s in _succ])
-                        _ok_logged += len(_succ)
-                    except Exception:
-                        log_exc_swallow(log, "invite: ok per-target log")
+                    # МАРКЕР ИСХОДА. Ретеншен инвайта (экран мини-аппа и
+                    # подсказка организма) считает вступивших запросом
+                    # `status='ok' AND message='joined'` — а маркер не писал
+                    # НИКТО. Обе функции показывали «нет данных» с самого
+                    # своего появления: приток всегда выходил нулём.
+                    #
+                    # Маркер не декоративный: голого 'ok' для этого мало.
+                    # У метода «ссылка в ЛС» успех означает доставленную
+                    # ссылку, а не вступление (человек ещё может не войти),
+                    # и складывать их в один счётчик значило бы завышать
+                    # ретеншен. Поэтому исход называется явно.
+                    _outcome = "link_sent" if _invite_method == "link" else "joined"
+                    # Громкий писатель: пропавшая отметка «ok» значит, что
+                    # людей пригласили, а повтор прогона пригласит их СНОВА —
+                    # в самой баноопасной операции продукта. Прежний
+                    # `pool.executemany` в гасителе исключений терял её без
+                    # следа; эта же отметка кормит экран ретеншена
+                    # (`status='ok' AND message='joined'`), так что её потеря
+                    # обнуляла и приток.
+                    await _journal_writemany(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'ok',$4)",
+                        [(op_id, step, s[:120], _outcome) for s in _succ],
+                        log_ctx=f" op={op_id}", where="mass_invite_ok")
+                    _ok_logged += len(_succ)
 
             # Группа закрыта/нет прав — это не про аккаунт, это про цель. Раньше
             # об неё по очереди разбивался весь флот; теперь останавливаемся сразу.
@@ -20043,7 +20458,14 @@ async def _exec_mass_invite(
                 retired.add(acc_id)
                 await _release_admin_seat(acc_id)
             await _humanize(acc)
-            await asyncio.sleep(_invite_pause(acc_id))
+            # Пауза темпа — через дверь, ждущую отмену. Ранний выход из неё не даёт
+            # ни одного лишнего инвайта: батчи этого чанка уже разосланы (фаза B
+            # в `_iter_round` бьёт их параллельно), а следующий чанк `_iter_round`
+            # не наберёт — он сверяет отмену между чанками. Без двери «Стоп» ждал
+            # суммы этих пауз по всему чанку, то есть минуты на самой
+            # баноопасной операции продукта — ровно тогда, когда владелец жмёт
+            # «Стоп» потому, что увидел ограничения.
+            await cancellable_pause(pool, op_id, _invite_pause(acc_id), "mass_invite")
 
         # Лимит приглашённых на канал достигнут — следующий канал резерва.
         # Резерва нет — канал полон по решению оператора, останавливаемся:
@@ -20175,7 +20597,11 @@ async def _exec_mass_invite(
                 await _journal_write(
                     pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,0,'promote_trick',$2,$3)", op_id,
-                    "ok" if _trick_ok else "fail",
+                    # Слово статуса — из словаря читателей журнала ('fail' не
+                    # знает никто). Счётчики провалов служебные строки не
+                    # считают по ИМЕНИ цели (operation_bus.REAL_TARGET_SQL), а
+                    # не по слову статуса, поэтому 'error' здесь безопасен.
+                    "ok" if _trick_ok else "error",
                     f"добавлено промоут-трюком: {_trick_ok}/{max(_trick_tried, _trick_ok)}")
             except Exception as _te:
                 log.warning("mass_invite op=%d: промоут-трюк сбой: %s", op_id, _te)
@@ -20210,7 +20636,7 @@ async def _exec_mass_invite(
                     op_id, len(_admins_left))
         await _journal_write(
             pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-            "VALUES($1,0,'promote_trick',$2,$3)", op_id, "fail",
+            "VALUES($1,0,'promote_trick',$2,$3)", op_id, "error",
             "права админа не сняты: " + ", ".join(str(x) for x in _admins_left[:50]))
 
     # ── Финальный фолбэк: кого не взял НИ ОДИН способ — ссылка в ЛС ───────────
@@ -20321,7 +20747,7 @@ async def _exec_mass_invite(
             await _journal_write(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'link_fallback',$2,$3)", op_id,
-                "ok" if _link_fallback_ok else "fail",
+                "ok" if _link_fallback_ok else "error",
                 f"ссылка в ЛС недостижимым целям: доставлено {_link_fallback_ok}/"
                 f"{max(_lf_tried, _link_fallback_ok)}"
                 + (f", не успели отправить: {_link_fallback_left}" if _link_fallback_left else ""))
@@ -20683,21 +21109,27 @@ async def _exec_bulk_set_profile(
                 # «Проверка» — фиксируем сам вердикт в лог, чтобы был виден результат
                 if op == "check_restriction":
                     verdict = pse.format_restriction_verdict(res)
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                         "VALUES($1,$2,$3,'ok',$4)",
                         op_id, idx, f"acc#{acc['id']}", verdict[:200],
+                        log_ctx=f" op={op_id}", where="bulk_set_profile",
                     )
                 else:
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                         op_id, idx, f"acc#{acc['id']}",
+                        log_ctx=f" op={op_id}", where="bulk_set_profile",
                     )
             else:
                 fail_count += 1
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    log_ctx=f" op={op_id}", where="bulk_set_profile",
                 )
         except Exception as exc:
             log.warning("bulk_set_profile op=%d acc=%s: %s", op_id, acc.get("id"), exc)
@@ -21161,25 +21593,33 @@ async def _exec_compliance_scan(
                 acc["session_str"], dict(acc), ref, limit=per_limit, low_risk=True)
             if not dossier.get("ok"):
                 err_count += 1
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, (dossier.get("error") or "")[:200])
+                    "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref,
+                    (dossier.get("error") or "")[:200],
+                    log_ctx=f" op={op_id}", where="compliance_scan")
             elif dossier.get("verdict") == "prohibited":
                 flagged += 1
                 cats = ", ".join(dossier.get("categories") or [])
                 first_hit = (dossier.get("hits") or [{}])[0]
                 evidence = f"{first_hit.get('category_label','')}: «{first_hit.get('excerpt','')}»"
                 flagged_lines.append(f"🚫 {dossier.get('resource', ref)} — {cats}")
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'flagged',$4)", op_id, idx, dossier.get("resource", ref),
-                    (f"[{cats}] {evidence}")[:200])
+                    "VALUES($1,$2,$3,'flagged',$4)", op_id, idx,
+                    dossier.get("resource", ref), (f"[{cats}] {evidence}")[:200],
+                    log_ctx=f" op={op_id}", where="compliance_scan")
             else:
                 clean_count += 1
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'ok',$4)", op_id, idx, dossier.get("resource", ref),
-                    f"чисто ({dossier.get('scanned',0)} текстов)")
+                    "VALUES($1,$2,$3,'ok',$4)", op_id, idx,
+                    dossier.get("resource", ref),
+                    f"чисто ({dossier.get('scanned',0)} текстов)",
+                    log_ctx=f" op={op_id}", where="compliance_scan")
         except Exception as exc:
             err_count += 1
             log.warning("compliance_scan op=%d ref=%s: %s", op_id, ref, exc)

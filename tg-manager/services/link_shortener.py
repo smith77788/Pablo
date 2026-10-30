@@ -288,14 +288,33 @@ async def resolve(pool, code: str) -> str | None:
     return row["target_url"] if row else None
 
 
-async def list_for_owner(pool, owner_id: int, limit: int = 100) -> list[dict]:
+async def count_for_owner(pool, owner_id: int) -> int:
+    """Сколько ссылок у владельца всего — без потолка выборки.
+
+    Экран показывал длину страницы как число ссылок, а страница упиралась в сто.
+    Ссылка за сотой не открывалась ничем: ни выключить, ни удалить, ни QR, ни
+    посмотреть переходы.
+    """
+    try:
+        return int(await pool.fetchval(
+            "SELECT COUNT(*) FROM short_links WHERE owner_id=$1", int(owner_id)) or 0)
+    except Exception as e:
+        log_exc_swallow(log, f"link_shortener: count: {e}")
+        return 0
+
+
+async def list_for_owner(pool, owner_id: int, limit: int = 100,
+                         offset: int = 0) -> list[dict]:
     import datetime as _dt
     try:
         rows = await pool.fetch(
             "SELECT code, target_url, title, clicks, disabled, created_at, "
             "last_click_at, expires_at, tags "
-            "FROM short_links WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
-            int(owner_id), int(max(1, min(limit, 500))))
+            # `code` в хвосте порядка: `created_at` не уникален, и без разрыва
+            # ничьих страницы теряли бы и повторяли ссылки.
+            "FROM short_links WHERE owner_id=$1 "
+            "ORDER BY created_at DESC, code LIMIT $2 OFFSET $3",
+            int(owner_id), int(max(1, min(limit, 500))), int(max(0, offset)))
     except Exception as e:
         log_exc_swallow(log, f"link_shortener: list: {e}")
         return []

@@ -23,7 +23,8 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты экранов присутствия на приложении мини-аппа."""
     from services.mini_app_api import (
         _INTERNAL_ERROR, _ecosystem_is_mine, _err, _get_uid, _json_resp,
-        _jlist, _list_limit, _safe_count, _safe_fetch, _safe_fetchrow, log,
+        _jlist, _list_limit, _list_offset, _safe_count, _safe_fetch,
+        _safe_fetchrow, log,
     )
     from services.security import validate_integer
 
@@ -222,7 +223,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
         if not data.get("account_id"):
-            return _err("account_id обязателен", 400)
+            return _err("Выберите аккаунт", 400)
         # Нечисловой id раньше доходил до `int()` внутри try и выпадал
         # пятисоткой: «внутренняя ошибка сервера» вместо «неверный аккаунт».
         account_id = validate_integer(data.get("account_id"), min_val=1)
@@ -452,7 +453,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 channel_ids = body.get("channel_ids", cur)
                 group_ids = body.get("group_ids", grp)
                 if not isinstance(channel_ids, list) or not isinstance(group_ids, list):
-                    return _err("channel_ids и group_ids должны быть списками", 400)
+                    return _err("Каналы и группы должны передаваться списками", 400)
                 _res = await db.update_presence_pack_channels(
                     pool, pack_id, uid,
                     [int(x) for x in channel_ids],
@@ -542,6 +543,8 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        lim = _list_limit(request, 20, 200)
+        off = _list_offset(request)
         try:
             rows = await pool.fetch(
                 """
@@ -555,11 +558,22 @@ def setup_routes(app: web.Application, pool) -> None:
                 WHERE gpp.owner_id=$1
                 GROUP BY gpp.id, gpp.asset_type, gpp.name_pattern,
                          gpp.status, gpp.created_at, gpp.updated_at
-                ORDER BY gpp.created_at DESC LIMIT 20
+                ORDER BY gpp.created_at DESC, gpp.id DESC
+                LIMIT $2 OFFSET $3
                 """,
-                uid,
+                uid, lim, off,
             )
-            return _json_resp([dict(r) for r in rows])
+            # Было — голый массив из двадцати планов: экран писал «20 планов»
+            # (длина страницы), остальные не открывались никак, и кнопки
+            # «показать ещё» быть не могло — итога в ответе не было вовсе.
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM global_presence_plans WHERE owner_id=$1",
+                uid)
+            return _json_resp({
+                "plans": [dict(r) for r in rows], "total": total,
+                "page": {"limit": lim, "offset": off,
+                         "has_more": off + len(rows) < total},
+            })
         except Exception:
             log.exception("global_presence_plans uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -572,6 +586,8 @@ def setup_routes(app: web.Application, pool) -> None:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор плана", 400)
+        t_lim = _list_limit(request, 100, 500)
+        t_off = _list_offset(request)
         try:
             plan = await pool.fetchrow(
                 "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
@@ -585,9 +601,16 @@ def setup_routes(app: web.Application, pool) -> None:
                 # заменён вариантом — ссылка обязана вести на реальный объект.
                 "       COALESCE(final_username, planned_username) AS username, "
                 "       final_username, avatar_applied "
-                "FROM global_presence_targets WHERE plan_id=$1 ORDER BY status, country, city LIMIT 100",
-                plan_id,
+                "FROM global_presence_targets WHERE plan_id=$1 "
+                "ORDER BY status, country, city, id LIMIT $2 OFFSET $3",
+                plan_id, t_lim, t_off,
             )
+            # Экран подписывал список «показаны N из M», но M брал из спека
+            # (сколько целей ПЛАНИРОВАЛОСЬ), а дойти до целей за сотней было
+            # нечем. Итог считает запрос, страница ходит по смещению.
+            targets_total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM global_presence_targets WHERE plan_id=$1",
+                plan_id)
             # Сводка оформления: «создано» и «оформлено» — разные числа, и
             # объект без аватара/username хуже ранжируется.
             dressing = await pool.fetchrow(
@@ -616,6 +639,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 {
                     "plan": dict(plan),
                     "targets": [dict(t) for t in targets],
+                    "targets_total": targets_total,
+                    "targets_page": {"limit": t_lim, "offset": t_off,
+                                     "has_more": t_off + len(targets) < targets_total},
                     "dressing": dict(dressing) if dressing else {},
                     "virtual_admin_coverage": dict(admin_coverage) if admin_coverage else None,
                 }

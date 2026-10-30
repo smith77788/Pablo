@@ -121,11 +121,29 @@ def test_empty_reason_filter_matches_the_label_shown():
     assert "'без описания'" in rep, "подпись в сводке изменилась — фильтр разойдётся"
 
 
+def _journal_screen() -> str:
+    """Функции, которые рисуют журнал, — по ЭЛЕМЕНТУ, а не по имени функции.
+
+    Проверка была привязана к имени `openDmLog`, и когда рисование переехало в
+    отдельный загрузчик страницы (журнал стал листаться смещением), она
+    покраснела на живом экране, где и кнопка копирования, и «показать ещё» на
+    месте. Экран здесь определяется тем, во что он пишет — `dmrlBody`.
+    """
+    out = []
+    for m in re.finditer(r"(?:async\s+)?function\s+(\w+)\s*\(", HTML):
+        body = _fn(m.group(1))
+        if "'dmrlBody'" in body or '"dmrlBody"' in body:
+            out.append(body)
+    assert out, "экран журнала получателей не найден: никто не пишет в dmrlBody"
+    return "\n".join(out)
+
+
 def test_recipient_list_can_be_taken_out_of_the_screen():
     """Список мёртвых контактов нужен в работе, а не для чтения."""
-    assert "dmrCopyIds(" in _fn("openDmLog")
+    screen = _journal_screen()
+    assert "dmrCopyIds(" in screen
     assert "copyToClipboard" in _fn("dmrCopyIds")
-    assert "moreBtn(" in _fn("openDmLog"), "список молча обрывается на сотне"
+    assert "moreBtn(" in screen, "список молча обрывается на сотне"
 
 
 def test_report_says_how_much_is_left():

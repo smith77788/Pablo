@@ -209,7 +209,9 @@ async function openAccountBots(accId) {
         <div class="row-ico" style="background:var(--bg-green-16)">🤖</div>
         <div class="li-body"><div class="li-name">${name}</div><div class="li-sub">${sub}</div></div>
         <div class="li-right"><span class="chev">›</span></div></div>`;
-    }).join(''));
+    // Потолок выборки — 500; если ботов больше, список обрывается молча —
+    // сервер присылает честный total, и строка ниже сообщает об остатке.
+    }).join('') + anCap(list.length, d.total, 'бот', 'бота', 'ботов'));
   } catch(e) { txt('accbotList', errHtml(errRu(e),'openAccountBots('+accId+')')); }
 }
 

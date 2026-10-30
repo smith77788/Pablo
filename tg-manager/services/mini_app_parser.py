@@ -343,7 +343,8 @@ def setup_routes(app: web.Application, pool) -> None:
             """SELECT task_id, origin_bot, route, step, depth, trace, status,
                       drop_reason, deadline_at, created_at, updated_at
                  FROM bot_mesh_tasks WHERE owner_id=$1
-                ORDER BY created_at DESC LIMIT $2""", uid, lim)
+                ORDER BY created_at DESC, task_id DESC
+                LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request))
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_mesh_tasks WHERE owner_id=$1", uid)
         names = await _mesh_bot_names(uid)
@@ -442,8 +443,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 """SELECT id, source_type, source_ref, parse_type, status,
                           total_found, total_saved, started_at, finished_at, error
                    FROM parser_runs WHERE owner_id=$1
-                    ORDER BY started_at DESC LIMIT $2""",
-                uid, _list_limit(request, 30, 1000),
+                    ORDER BY started_at DESC, id DESC LIMIT $2 OFFSET $3""",
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM parser_runs WHERE owner_id=$1", uid)
@@ -593,7 +594,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not source_ref:
-            return _err("source_ref обязателен", 400)
+            return _err("Укажите источник: @username, ссылку или идентификатор", 400)
         if parse_type not in ("members", "active", "comments"):
             parse_type = "members"
         if limit < 1 or limit > 10000:

@@ -35,7 +35,15 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from services.account_manager import timeboxed
 from services.logger import log_exc_swallow
+
+# Потолок на ОДИН запрос к Telegram. Мёртвый прокси отдаёт half-open сокет:
+# запрос не возвращается никогда, а висит он на пути МАССОВОГО ИНВАЙТА —
+# самой баноопасной операции продукта, которая держит слот и арендованный флот.
+# Клиент сюда приходит чужой, поэтому обёртка ставится на входе: потолок будет
+# и у запросов, добавленных здесь позже.
+_TG_TIMEOUT = 45
 
 log = logging.getLogger(__name__)
 
@@ -275,6 +283,7 @@ async def assess_and_store_liveness(pool, owner_id: int, chat_key: str,
     поэтому оценку делаем ДО массового инвайта. Сбой не критичен: без оценки
     governor просто не режет темп по живости.
     """
+    client = timeboxed(client, _TG_TIMEOUT)
     try:
         participants = 0
         try:
