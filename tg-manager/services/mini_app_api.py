@@ -40,6 +40,8 @@ from services import mini_app_presence
 from services import mini_app_cloud
 from services import mini_app_mp
 from services import mini_app_networks
+from services import mini_app_fleet
+from services import mini_app_rankings
 from services import mini_app_links
 from services import mini_app_sales
 from services import mini_app_va
@@ -2512,74 +2514,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Замер позиций каналов/чатов в поиске ─────────────────────────────────
 
-    async def channel_rankings_list(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import channel_ranking
-        rows = await channel_ranking.list_positions(pool, uid)
-        out = [{
-            "id": r["id"], "channel_id": str(r["channel_id"]),
-            "keyword": r["keyword"], "title": r.get("title") or "",
-            "username": r.get("username") or "",
-            "position": r.get("pos"), "prev_position": r.get("prev_pos"),
-            "checked_at": str(r["checked_at"]) if r.get("checked_at") else None,
-        } for r in rows]
-        return _json_resp({"keywords": out})
 
-    async def channel_rankings_add(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        try:
-            channel_id = int(data.get("channel_id"))
-        except (TypeError, ValueError):
-            return _err("Неверный канал")
-        keyword = validate_string(data.get("keyword"), max_len=64) or ""
-        if not keyword:
-            return _err("Введите ключевое слово")
-        # Канал должен принадлежать владельцу.
-        owns = await _safe_fetchval(
-            pool, "SELECT 1 FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-            uid, channel_id)
-        if not owns:
-            return _err("Канал не найден среди ваших", 404)
-        from services import channel_ranking
-        ok = await channel_ranking.add_keyword(pool, uid, channel_id, keyword)
-        return _json_resp({"ok": bool(ok)})
 
-    async def channel_rankings_remove(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-            kid = int(data.get("id"))
-        except (TypeError, ValueError, Exception):
-            return _err("Неверный идентификатор")
-        from services import channel_ranking
-        ok = await channel_ranking.remove_keyword(pool, uid, kid)
-        return _json_resp({"ok": bool(ok)})
 
-    async def channel_rankings_check(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "check_channel_rankings", {},
-                label="Замер позиций каналов в поиске")
-            return _json_resp({"ok": True, "op_id": op_id})
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channel_rankings_check uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
     # ── Dashboard ────────────────────────────────────────────────────────────
 
@@ -4005,93 +3942,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
 
-    async def fleet_diagnose(request: web.Request) -> web.Response:
-        """Диагностика «почему флот не исполняет»: воронка отбора аккаунтов +
-        конфиг + залипшие операции + последние реальные ошибки."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import fleet_doctor
-            return _json_resp(await fleet_doctor.diagnose(pool, uid))
-        except Exception:
-            log.exception("fleet_diagnose uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def fleet_diagnose_blocked(request: web.Request) -> web.Response:
-        """Какие именно аккаунты отсеялись на шаге воронки — и чем они больны.
-
-        Вердикт «Ни у одного аккаунта нет сессии» называет болезнь, но не
-        больных: выяснить, какие это аккаунты, экран не позволял, и чинить
-        приходилось наугад по всему флоту.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import fleet_doctor
-        step = validate_string(request.query.get("step"), 32, required=False) or ""
-        if step not in fleet_doctor.FUNNEL_STEPS:
-            return _err("Неизвестный шаг воронки", 400)
-        limit = _list_limit(request, 100, 300)
-        rows = await _safe_fetch(
-            pool,
-            "SELECT id, phone, first_name, username, is_active, "
-            "(session_str IS NOT NULL AND session_str <> '') AS has_session, "
-            "COALESCE(acc_status,'active') AS acc_status, "
-            "(cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS cd_active, "
-            "trust_score "
-            "FROM tg_accounts WHERE owner_id=$1 ORDER BY id",
-            uid,
-        )
-        blocked = fleet_doctor.step_blockers([dict(r) for r in rows], step)
-        items = [{
-            "id": b.get("id"),
-            "label": (b.get("first_name") or (("@" + b["username"]) if b.get("username") else None)
-                      or b.get("phone") or f"Аккаунт {b.get('id')}"),
-            "reason": b.get("reason", ""),
-        } for b in blocked[:limit]]
-        return _json_resp({"step": step, "items": items, "total": len(blocked)})
-
-    async def fleet_sweep(request: web.Request) -> web.Response:
-        """Единое обслуживание флота «сделать всё разом»: параллельно по ботам,
-        аккаунтам и каналам — проверить живость и (по желанию) удалить мёртвое.
-
-        body: {delete: bool, preview: bool}. delete=false — только проверка;
-        delete=true,preview=true — посчитать, что удалится (без удаления);
-        delete=true,preview=false — удалить мёртвое. Удаляется только то, что
-        ТОЧНО мёртвое (бот с отозванным токеном, аккаунт с терминальным
-        статусом); «не ответившие» не трогаются.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        want_delete = bool(body.get("delete"))
-        preview = bool(body.get("preview"))
-        try:
-            from services import fleet_maintenance
-            return _json_resp(await fleet_maintenance.sweep_fleet(
-                pool, uid, delete=want_delete, preview=preview))
-        except Exception:
-            log.exception("fleet_sweep uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
 
 
-    async def fleet_governor_status(request: web.Request) -> web.Response:
-        """Состояние глобального губернатора темпа: уровень, множитель, причина."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import fleet_governor
-            return _json_resp(await fleet_governor.status(pool, uid))
-        except Exception:
-            log.exception("fleet_governor_status uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
+
+
 
 
 
@@ -7942,10 +7797,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/devices", devices_list)
     app.router.add_post("/api/miniapp/devices/revoke", devices_revoke)
     app.router.add_post("/api/miniapp/factory/name_preview", factory_name_preview)
-    app.router.add_get("/api/miniapp/channel_rankings", channel_rankings_list)
-    app.router.add_post("/api/miniapp/channel_rankings/add", channel_rankings_add)
-    app.router.add_post("/api/miniapp/channel_rankings/remove", channel_rankings_remove)
-    app.router.add_post("/api/miniapp/channel_rankings/check", channel_rankings_check)
     # Bots
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)
     app.router.add_post("/api/miniapp/bot_factory/create_new", bot_factory_create_new)
@@ -7953,11 +7804,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_get("/api/miniapp/mass_targets", mass_targets)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
-    app.router.add_get("/api/miniapp/fleet/governor", fleet_governor_status)
     app.router.add_get("/api/miniapp/onboarding", onboarding_status)
-    app.router.add_get("/api/miniapp/fleet/diagnose", fleet_diagnose)
-    app.router.add_get("/api/miniapp/fleet/diagnose/blocked", fleet_diagnose_blocked)
-    app.router.add_post("/api/miniapp/fleet/sweep", fleet_sweep)
     app.router.add_post("/api/miniapp/dm/preview", dm_preview)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
     app.router.add_post("/api/miniapp/mass_report", mass_report_submit)
@@ -8017,6 +7864,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_warmup.setup_routes(app, pool)
     mini_app_accounts.setup_routes(app, pool)
     mini_app_links.setup_routes(app, pool)
+    mini_app_fleet.setup_routes(app, pool)
+    mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
     mini_app_mp.setup_routes(app, pool)
@@ -8866,30 +8715,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def _segment_pressure_ok(uid: int, op_name: str) -> tuple[bool, str]:
         return await _segments.pressure_ok(pool, uid, op_name)
 
-    async def fleet_warnings(request: web.Request) -> web.Response:
-        """Мягкие предупреждения перед массовой операцией.
-
-        Оба предупреждения давно существуют, но показывались ТОЛЬКО в боте:
-        основной интерфейс — мини-апп — запускал массовые операции вслепую.
-        Fail-open: предупреждения не должны мешать работать.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        warnings = []
-        try:
-            from services import infra_orchestrator as _io
-            for fn in (_io.get_pressure_warning, _io.get_readiness_warning,
-                       _io.get_dead_proxy_warning):
-                try:
-                    w = await fn(pool, uid)
-                except Exception:
-                    w = None
-                if w:
-                    warnings.append(w)
-        except Exception:
-            log.debug("fleet_warnings uid=%s", uid, exc_info=True)
-        return _json_resp({"warnings": warnings})
 
 
 
@@ -9154,7 +8979,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # обычная функция, и ссылка на ещё не созданную локальную функцию даёт
     # UnboundLocalError. Раньше эта строка стояла на 600 строк выше — сервер
     # не собирался вообще, мини-апп отвечал «Application failed to respond».
-    app.router.add_get("/api/miniapp/fleet/warnings", fleet_warnings)
     app.router.add_get("/api/miniapp/ab/results", ab_results)
     app.router.add_post("/api/miniapp/ab/followup", ab_followup)
 
