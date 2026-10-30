@@ -356,6 +356,13 @@ async function selfCheck() {
 // поверх неё полосу, как это делает `.sel-bar`, — мерка обязана её найти.
 // Иначе «закрытого текста нет» ниже не значит ничего.
 async function coveredSelfCheck() {
+  // Сначала в упор, как и всякий замер этой меркой. Иначе фон самопроверки
+  // считается на непрокрученном экране и показывает находки, которых нет:
+  // в режиме пустых данных он печатал «своих находок на экране: 3», тогда как
+  // весь обход на тех же данных не нашёл ни одной. Число, которое ничего не
+  // значит, стоит рядом с числами, которые значат, — и выглядит так же.
+  await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
+  await page.waitForTimeout(80);
   return page.evaluate((src) => {
     const covered = new Function('return (' + src + ')()');
     const scr = document.querySelector('.screen.show');
