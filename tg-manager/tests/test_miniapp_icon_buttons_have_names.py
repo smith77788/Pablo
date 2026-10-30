@@ -78,15 +78,48 @@ _ACRONYMS = {"CSV", "JSON", "API", "SMS", "IP", "URL", "ID", "QR", "SEO", "DM",
              "HTML", "PDF", "XLSX", "TXT", "SOCKS", "HTTP", "HTTPS", "TON"}
 
 
+def _english_words(label):
+    """Латинские куски подписи, которые придётся ЧИТАТЬ по-английски.
+
+    Имя продукта — не английское слово. «Написать в Telegram» — русская подпись
+    с именем платформы, и ровно так приложение называет её в 181 другом месте
+    разметки: «Имя в Telegram», «Введите код из Telegram». Первая редакция
+    правила этого не различала и выдала ложную находку на первой же верной
+    подписи, какую встретила. Ложная находка дороже пропуска: следующий разбор
+    закрывает её перечнем самих подписей-исключений, и дырка остаётся навсегда.
+
+    Признак, который можно измерить, а не перечислить: имя пишут с большой
+    буквы (Telegram, BotFather, Premium), английское же слово в подписи — это
+    глагол или существительное строчными (open, settings, delete). Имя с
+    большой буквы одно подпись не удержит: второе правило в самой проверке
+    требует кириллицу, иначе читать подпись владельцу нечем.
+    """
+    return [w for w in re.findall(r"[A-Za-z]{2,}", label)
+            if w.upper() not in _ACRONYMS and not re.fullmatch(r"[A-Z][a-z]+", w)]
+
+
 def test_names_are_russian():
     """Владелец не читает по-английски (CLAUDE.md)."""
+    seen = 0
     latin = []
     for _, attrs, _t in _icon_only():
         al = re.search(r'aria-label="([^"]*)"', attrs)
         if not al:
             continue
-        words = [w for w in re.findall(r"[A-Za-z]{2,}", al.group(1))
-                 if w.upper() not in _ACRONYMS]
-        if words:
-            latin.append(al.group(1))
-    assert not latin, f"английские подписи: {sorted(set(latin))[:5]}"
+        seen += 1
+        name = al.group(1)
+        if _english_words(name) or not re.search(r"[А-Яа-яЁё]", name):
+            latin.append(name)
+    assert seen > 200, f"подписей на проверке всего {seen} — сломан разбор, а не разметка"
+    assert not latin, f"подписи не по-русски (проверено {seen}): {sorted(set(latin))[:5]}"
+
+
+def test_the_russian_check_still_fails_on_english():
+    """Правило смягчено ради имён продуктов — вот что оно всё ещё не пропускает."""
+    assert _english_words("Write to chat"), "английская фраза прошла"
+    assert _english_words("Открыть settings"), "английское слово строчными прошло"
+    assert not _english_words("Написать в Telegram"), "имя платформы принято за слово"
+    assert not _english_words("Экспорт CSV"), "обозначение формата принято за слово"
+    # Подпись из одних имён с большой буквы правило слов не ловит — её закрывает
+    # требование кириллицы в самой проверке.
+    assert not re.search(r"[А-Яа-яЁё]", "Open Telegram")
