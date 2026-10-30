@@ -6181,6 +6181,34 @@ async def delete_presence_pack(pool: asyncpg.Pool, pack_id: int, owner_id: int) 
     )
 
 
+async def _cancel_op_that_lost_its_gate(
+    pool: asyncpg.Pool, op_id: int, owner_id: int
+) -> None:
+    """Отменить операцию, которой не удалось поставить гейт подтверждения.
+
+    Отмена идёт дверью шины (`operation_bus.cancel`): она же допишет итог и
+    объявит исход, иначе владелец увидел бы «Отменено» без единой цифры.
+    `allow` расширен до всех нетерминальных состояний: ноль строк на гейте
+    значит, что поллер мог успеть перевести операцию в 'running', — именно её и
+    надо успеть отменить.
+
+    Своих исключений наружу не пускает: вызывающий всё равно поднимает ошибку,
+    и потерять её, упав здесь, значило бы промолчать о главном.
+    """
+    try:
+        from services import op_status as _ost
+        from services import operation_bus as _obus
+
+        await _obus.cancel(pool, op_id, owner_id,
+                           allow=tuple(sorted(_ost.IN_FLIGHT)))
+    except Exception as cancel_exc:
+        log.error(
+            "enqueue_op_with_approval: гейт не встал и ОТМЕНИТЬ операцию %s "
+            "тоже не удалось (%s) — она может уйти в работу без подтверждения",
+            op_id, cancel_exc,
+        )
+
+
 async def enqueue_op_with_approval(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -6211,12 +6239,35 @@ async def enqueue_op_with_approval(
         total_items=total_items,
     ))
     if total_items > threshold:
-        await pool.execute(
-            "UPDATE operation_queue "
-            "   SET requires_approval=TRUE, status='waiting_approval' "
-            " WHERE id=$1 AND status='pending'",
-            op_id,
-        )
+        # ГЕЙТ ПАДАЕТ ЗАКРЫТЫМ. Между двумя шагами операция уже в очереди и уже
+        # 'pending', то есть готова к исполнению. Если второй шаг не доехал —
+        # блип к БД или ноль строк потому, что поллер успел её подхватить, —
+        # крупная операция уходит в работу БЕЗ решения владельца. Из двух
+        # направлений отказа это опасное, поэтому не сумев поставить гейт, мы
+        # операцию отменяем и поднимаем ошибку: отказ владелец переживёт, а
+        # несогласованную рассылку по реальным аккаунтам — нет.
+        _gate: str | None = None
+        _why: Exception | None = None
+        try:
+            _gate = await pool.execute(
+                "UPDATE operation_queue "
+                "   SET requires_approval=TRUE, status='waiting_approval' "
+                " WHERE id=$1 AND status='pending'",
+                op_id,
+            )
+        except Exception as gate_exc:
+            _why = gate_exc
+        # Ноль строк значит, что строка уже не 'pending': её либо подхватил
+        # поллер, либо закрыл кто-то другой. Первое — ровно тот случай, от
+        # которого гейт и защищает, поэтому ноль строк тоже отказ, а не успех.
+        _stood = _why is None and str(_gate or "").strip().rsplit(" ", 1)[-1] != "0"
+        if not _stood:
+            await _cancel_op_that_lost_its_gate(pool, op_id, owner_id)
+            raise RuntimeError(
+                f"Операция #{op_id} не поставлена на подтверждение"
+                + (f" ({_why})" if _why else " (строка уже не ожидает запуска)")
+                + " и отменена, чтобы не уйти в работу без подтверждения"
+            ) from _why
     return op_id
 
 

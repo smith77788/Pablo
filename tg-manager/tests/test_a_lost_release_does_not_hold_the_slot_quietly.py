@@ -327,48 +327,143 @@ SELF_REPAIRING = {
     "shutdown":
         "возврат при остановке процесса: не записали — поднимет "
         "`_reset_stale_running` при старте",
+    "recover":
+        "error_recovery: сброс зависшей 'running' → 'pending'; условие на "
+        "'running' не даёт поднять закрытую, а потерю подберёт сторож зависших",
+    "_queue_recovery":
+        "recovery_engine: та же форма, что и выше, и та же страховка",
+}
+
+# Записи, которым повтор не нужен потому, что отказ ПАДАЕТ ЗАКРЫТЫМ: потерянная
+# запись не оставляет операцию в опасном состоянии, потому что путь её
+# отменяет. Записка здесь проверяемая — см. тест ниже, он требует и отмену, и
+# исключение, иначе исключение превратилось бы в «мы подумали, что безопасно».
+FAILS_CLOSED_ON_LOSS = {
+    "enqueue_op_with_approval":
+        "гейт подтверждения: не встал — операция отменяется через дверь шины "
+        "и наружу идёт ошибка, поэтому без подтверждения она не исполнится",
+}
+
+# Записи, где потеря НЕ тихая: владелец видит отказ сразу и нажимает снова.
+# Причина другая, чем у самовосстановимых, поэтому и набор другой — иначе
+# «исключение» перестаёт что-либо объяснять.
+REPORTED_TO_THE_OWNER = {
+    "pause_operations":
+        "мини-апп возвращает число приостановленных, а сбой — 500: владелец "
+        "видит, что пауза не применилась",
+    "resume_operations":
+        "то же для возобновления",
+    "cb_approval_confirm":
+        "экран апрува на исключении показывает «Ошибка подтверждения "
+        "операции» и не рапортует об успехе",
 }
 
 
+def _sets_a_status(sql: str) -> bool:
+    """Присваивание статуса именно в SET-части, а не где угодно в запросе.
+
+    Прежняя версия искала `status=` после слова SET и перебегала через WHERE:
+    запрос `SET result=$2 WHERE id=$1 AND status='cancelled'` считался записью
+    статуса, хотя статус он только ПРОВЕРЯЕТ (`_close_cancelled_pending` в
+    шине). Третья форма сломанного измерителя из CLAUDE.md, в моём же
+    храповике: площадь поиска шире смысла. Поэтому WHERE отрезаем.
+    """
+    if not re.search(r"UPDATE\s+operation_queue", sql):
+        return False
+    set_part = re.split(r"\bWHERE\b", sql, flags=re.I)[0]
+    return bool(re.search(r"status\s*=", set_part))
+
+
+_TREE_SKIP_DIRS = {"tests", "__pycache__", ".git", "node_modules", "venv",
+                   ".venv", "migrations"}
+
+
 def _status_writes():
-    """Все записи, меняющие СТАТУС операции в `operation_queue`."""
-    tree, _ = _tree_and_lines()
+    """Все записи, меняющие СТАТУС операции в `operation_queue`, по ВСЕМУ дереву.
+
+    Раньше читался ровно `services/op_worker.py`. Операцию переводят по
+    состояниям и другие модули — движки восстановления, слой мини-аппа,
+    постановка с подтверждением, экран апрува, — и ровно там, вне поля зрения
+    переписи, нашлись две настоящие находки.
+    """
     out = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        door = ast.unparse(node.func).split(".")[-1]
-        if door not in ("_safe_execute", "_retrying_execute", "execute",
-                        "_op_closed_by_us"):
-            continue
-        sql = " ".join(ast.unparse(a) for a in node.args[:3])
-        if not re.search(r"UPDATE\s+operation_queue", sql):
-            continue
-        if not re.search(r"SET[^\"\']*status\s*=", sql, re.S):
-            continue
-        out.append((_enclosing_fn(tree, node.lineno), door, node.lineno))
+    for base, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in _TREE_SKIP_DIRS]
+        for f in sorted(files):
+            if not f.endswith(".py"):
+                continue
+            path = os.path.join(base, f)
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+            if "operation_queue" not in src:
+                continue
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue
+            rel = os.path.relpath(path, ROOT)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                door = ast.unparse(node.func).split(".")[-1]
+                if door not in ("_safe_execute", "_retrying_execute", "execute",
+                                "_op_closed_by_us"):
+                    continue
+                sql = " ".join(ast.unparse(a) for a in node.args[:3])
+                if not _sets_a_status(sql):
+                    continue
+                out.append((rel, _enclosing_fn(tree, node.lineno), door,
+                            node.lineno))
     return out
 
 
 def test_the_status_census_sees_both_kinds():
     """Самопроверка: в выборке есть и самовосстановимые, и решения о судьбе."""
-    found = {fn for fn, _, _ in _status_writes()}
+    found = {fn for _, fn, _, _ in _status_writes()}
     assert "_run_op_task" in found, (
         "перепись не видит запись финала — отбор сломан, а не код чист")
-    for name in SELF_REPAIRING:
+    for name in {**SELF_REPAIRING, **REPORTED_TO_THE_OWNER,
+                 **FAILS_CLOSED_ON_LOSS}:
         assert name in found, (
             f"`{name}` больше не находится — список исключений устарел, "
             "и ратчет молча ослаб")
 
 
-def test_every_status_write_is_retried_or_self_repairing():
-    bad = [(fn, door, ln) for fn, door, ln in _status_writes()
-           if door not in RETRYING_DOORS and fn not in SELF_REPAIRING]
+def test_the_census_reaches_beyond_the_worker():
+    """Самопроверка площади: перепись обязана видеть модули вне воркера."""
+    files = {rel for rel, _, _, _ in _status_writes()}
+    for rel in (os.path.join("services", "recovery_engine.py"),
+                os.path.join("services", "mini_app_operations.py"),
+                os.path.join("database", "db.py")):
+        assert rel in files, (
+            f"перепись не видит {rel}, хотя он переводит операцию по "
+            "состояниям — отбор снова сузился до одного файла")
+
+
+def test_the_census_does_not_count_a_status_only_checked():
+    """`SET result=... WHERE status='cancelled'` статус не пишет."""
+    assert not _sets_a_status(
+        "UPDATE operation_queue SET result=$2::jsonb, acct_wait_since=NULL "
+        "WHERE id=$1 AND status='cancelled'"), (
+        "перепись считает записью статуса запрос, который его только "
+        "проверяет — площадь поиска перебежала через WHERE")
+    assert _sets_a_status(
+        "UPDATE operation_queue SET status='paused' WHERE id=$1"), (
+        "перепись перестала видеть саму запись статуса")
+
+
+def test_every_status_write_is_retried_or_excused():
+    bad = [(rel, fn, door, ln) for rel, fn, door, ln in _status_writes()
+           if door not in RETRYING_DOORS
+           and fn not in SELF_REPAIRING
+           and fn not in REPORTED_TO_THE_OWNER
+           and fn not in FAILS_CLOSED_ON_LOSS]
     assert not bad, (
         "запись статуса операции идёт дверью без повтора и счётчика: "
         f"{bad}. Потерянная запись оставляет строку в прежнем состоянии, "
-        "а код дальше докладывает о том, чего в базе нет. Если механизм "
-        "самовосстановим — впиши его в SELF_REPAIRING с причиной")
+        "а код дальше докладывает о том, чего в базе нет. Если потерю "
+        "подбирает следующий круг — впиши в SELF_REPAIRING; если владелец "
+        "видит отказ сразу — в REPORTED_TO_THE_OWNER; обе с причиной")
 
 
 def test_a_lost_poisoned_finish_is_retried_and_counted(_quiet, monkeypatch):
@@ -405,3 +500,32 @@ def test_a_lost_poisoned_finish_is_retried_and_counted(_quiet, monkeypatch):
     assert announced.get("yes"), (
         "сообщение владельцу пропало: операция действительно остановлена, "
         "и промолчать значит оставить её без объяснения")
+
+
+def test_the_fail_closed_excuse_is_checkable():
+    """Исключение «падает закрытым» обязано быть видно в коде, а не в словаре.
+
+    Записка «это безопасно» без проверки — обещание, которое живёт до первой
+    правки. Поэтому у каждого такого пути требуем две вещи: отмену операции и
+    исключение наружу. Без отмены операция осталась бы 'pending' и ушла в
+    работу; без исключения вызывающий решил бы, что всё получилось.
+    """
+    with open(os.path.join(ROOT, "database", "db.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    node = next(n for n in ast.walk(ast.parse(src))
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and n.name == "enqueue_op_with_approval")
+    body = "\n".join(src.splitlines()[node.lineno - 1:node.end_lineno])
+    assert "_cancel_op_that_lost_its_gate" in body, (
+        "гейт подтверждения больше не отменяет операцию при неудаче — "
+        "крупная операция уйдёт в работу без подтверждения владельца")
+    assert re.search(r"\braise\b", body), (
+        "гейт не поднимает ошибку: вызывающий решит, что операция ждёт "
+        "подтверждения, хотя она отменена")
+    helper = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  and n.name == "_cancel_op_that_lost_its_gate")
+    htext = "\n".join(src.splitlines()[helper.lineno - 1:helper.end_lineno])
+    assert "operation_bus" in htext and "IN_FLIGHT" in htext, (
+        "отмена идёт не дверью шины или без расширенного allow: ноль строк на "
+        "гейте значит, что поллер мог успеть взять операцию в 'running'")
