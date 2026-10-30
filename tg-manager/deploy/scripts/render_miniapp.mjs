@@ -261,14 +261,26 @@ const COVERED = () => {
   return { n: out.length, worst: out.slice(0, 3), ran: true };
 };
 
-// Довести прокручиваемый ящик экрана до упора: мерка закрытого текста имеет
+// Довести прокручиваемые ящики экрана до упора: мерка закрытого текста имеет
 // смысл только там.
+//
+// Ящик ищем по факту (`scrollHeight > clientHeight`), а не по классу. Первая
+// редакция брала `.sb` внутри экрана — на вкладках прокручивается не он, и
+// присваивание `scrollTop` чужому элементу молча ничего не делает. Мерка тогда
+// снималась НЕ в упоре, и обычные строки в начале списка, честно уходящие под
+// нижнюю панель, выглядели находкой: два экрана «с находками» были ложью, и
+// снимок состояния показал это сразу — список стоял в самом верху.
+//
+// Поэтому ящик не только крутится, но и отчитывается, дошёл ли до конца.
 const SCROLL_END = () => {
   const scr = document.querySelector('.screen.show');
-  if (!scr) return false;
-  const box = scr.querySelector('.sb') || scr;
-  box.scrollTop = box.scrollHeight;
-  return true;
+  if (!scr) return { ran: false, atEnd: false, boxes: 0 };
+  const cands = [scr, document.scrollingElement, ...scr.querySelectorAll('*')]
+    .filter(el => el && el.scrollHeight - el.clientHeight > 4);
+  for (const el of cands) el.scrollTop = el.scrollHeight;
+  const atEnd = cands.every(
+    el => el.scrollTop + el.clientHeight >= el.scrollHeight - 4);
+  return { ran: true, atEnd, boxes: cands.length };
 };
 
 // Сколько осмысленного текста показал экран, не считая его шапки и нижней
@@ -356,6 +368,7 @@ async function coveredSelfCheck() {
 }
 
 let selScreens = 0;                // на скольких экранах удалось выделить строки
+const scrollStuck = [];            // где прокрутка не дошла до упора
 
 // Полоса действий над выделением (`.sel-bar`) лежит поверх списка и
 // показывается, только когда что-то выделено. Пока обход ничего не выделял,
@@ -368,21 +381,47 @@ let selScreens = 0;                // на скольких экранах уд�
 // выделения в разметке три, а сработала одна — две другие живут на вкладках
 // «Аккаунты» и «Боты», куда проход по открывашкам не заходит.
 async function coveredWithSelection() {
-  const clicked = await page.evaluate(() => {
+  // Нажатия «Все» мало: полоса показывается не от выделения, а от РЕЖИМА
+  // выбора, который включает отдельная кнопка. Пока проход жал только «Все»,
+  // знаменатель говорил «выделили на двух экранах», а полоса не появлялась ни
+  // разу — то есть мерить было нечего, а выглядело как мерили.
+  const shown = await page.evaluate(() => {
     const scr = document.querySelector('.screen.show');
     if (!scr) return false;
-    const link = [...scr.querySelectorAll('.sel-bar-link')]
+    const vis = (el) => !!el && el.getBoundingClientRect().height > 4;
+    if (!scr.querySelector('.sel-bar')) return false;
+    if (!vis(scr.querySelector('.sel-bar'))) {
+      const on = [...scr.querySelectorAll('button, span, div')].find(e => {
+        const t = (e.textContent || '').trim();
+        return t.length < 20 && /Выбрать$/.test(t) && e.getAttribute('onclick');
+      });
+      if (on) on.click();
+    }
+    const all = [...scr.querySelectorAll('.sel-bar-link')]
       .find(e => (e.textContent || '').trim() === 'Все');
-    if (!link) return false;
-    link.click();
-    return true;
+    if (all) all.click();
+    return vis(scr.querySelector('.sel-bar'));
   });
-  if (!clicked) return null;
+  // Считаем экраны, где полоса ДЕЙСТВИТЕЛЬНО показалась, а не где нашлась
+  // ссылка: знаменатель, считающий нажатия, не знает, что из них вышло.
+  if (!shown) return null;
   selScreens++;
   await page.waitForTimeout(140);
-  await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
+  const se = await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
   await page.waitForTimeout(80);
-  const sv = await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString());
+  const sv = se.atEnd
+    ? await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString())
+    : { n: 0, worst: [] };
+  if (!se.atEnd) scrollStuck.push('выделение');
+  if (process.env.MINIAPP_SHOT_DIR) {
+    // Снимок именно этого состояния: находку «закрыто при выделении» иначе
+    // нечем посмотреть — обычные снимки обхода сняты до нажатия «Все».
+    const id = await page.evaluate(() => {
+      const el = document.querySelector('.screen.show');
+      return el ? el.id : 'none';
+    });
+    await page.screenshot({ path: path.join(process.env.MINIAPP_SHOT_DIR, `sel_${id}.png`) });
+  }
   return sv.n ? `ЗАКРЫТО ПРИ ВЫДЕЛЕНИИ ${sv.n}: ` + sv.worst.join(' ; ') : null;
 }
 
@@ -523,9 +562,14 @@ if (sweepMode) {
     const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
     // В упоре прокрутки — и только там — имеет смысл спрашивать, не закрыт ли
     // хвост списка полосой, прибитой к низу окна.
-    await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
+    const se = await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
     await page.waitForTimeout(80);
-    const cv = await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString());
+    // Не дошли до упора — мерка закрытого текста не имеет смысла, и молчать об
+    // этом нельзя: «находок нет» и «мерить было негде» выглядят одинаково.
+    const cv = se.atEnd
+      ? await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString())
+      : { n: 0, worst: [], stuck: true };
+    if (cv.stuck) scrollStuck.push(fn);
     const shownId = await page.evaluate(() => {
       const el = document.querySelector('.screen.show');
       return el ? el.id : null;
@@ -667,6 +711,11 @@ if (sweepMode) {
   // Знаменатель прохода с выделением. Ноль значит, что полоса действий не
   // показалась ни разу, и «закрытого при выделении нет» не значит ничего.
   console.log(`экранов, где удалось выделить строки: ${selScreens}`);
+  if (scrollStuck.length) {
+    console.log(`прокрутка не дошла до конца: ${scrollStuck.length}`
+      + ` — ${scrollStuck.slice(0, 10).join(' ')}`
+      + ' (закрытый текст там НЕ мерился)');
+  }
   console.log(`с находками: ${report.length}`);
   report.forEach(r => console.log('  ' + r));
   if (hints.length) {
