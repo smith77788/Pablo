@@ -9800,10 +9800,81 @@ async def _exec_bulk_update_profile(
         await release_accounts(claimed_ids)
 
 
+# op воркера bulk_chan_exec → подпись в итоге. Единый список допустимых op.
+_CHAN_EXEC_OPS = {
+    "chan_uname": "🔤 Username",
+    "chan_about": "📄 Описание",
+    "chan_title": "📛 Название",
+    "chan_delete": "💥 Удаление каналов в Telegram",
+    "chan_clear": "🧹 Очистка постов",
+    "chan_leave": "🚪 Выход из каналов",
+}
+# Необратимые: исполняются только с params.confirmed=True.
+_CHAN_DESTRUCTIVE_OPS = frozenset({"chan_delete", "chan_clear"})
+
+
+async def _forget_managed_channel(pool: asyncpg.Pool, owner_id: int, ch_id: int) -> None:
+    """Стереть следы канала в Infragram после его удаления или выхода из него.
+
+    Запись канала, его администратор, история постов и ждущие публикации,
+    нацеленные только на этот канал. Иначе автопостинг продолжал бы бить в
+    несуществующий канал, а администратор — будить владельца ошибками.
+    Каждая чистка отдельная и best-effort: нет таблицы — не мешает остальным.
+    """
+    key = str(int(ch_id))
+    for q, args in (
+        ("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", (owner_id, ch_id)),
+        ("DELETE FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2", (owner_id, ch_id)),
+        ("DELETE FROM va_channel_brain WHERE owner_id=$1 AND channel_key=$2", (owner_id, key)),
+        ("DELETE FROM va_channel_posts WHERE owner_id=$1 AND channel_key=$2", (owner_id, key)),
+        ("UPDATE operation_queue SET status='cancelled' "
+         "WHERE owner_id=$1 AND status IN ('pending','paused') "
+         "AND (params->>'channel_ref' = $2 "
+         "     OR params->'channel_ids' = jsonb_build_array($2::bigint))", (owner_id, key)),
+    ):
+        await _safe_execute(pool, q, *args, log_ctx=f"[forget_channel ch={ch_id}]")
+
+
+async def _chan_destructive_step(
+    pool: asyncpg.Pool, owner_id: int, op: str, acc: dict, ch_id: int,
+    chan_title: str, access_hash: int, username: str, chat_type: str,
+    clear_limit: int,
+) -> tuple[bool, str]:
+    """Один канал для chan_delete / chan_clear / chan_leave → (успех, строка итога)."""
+    import html as _html
+    from services import account_manager
+
+    kw = {"_acc": acc, "access_hash": access_hash, "username": username}
+    if op == "chan_clear":
+        r = await account_manager.clear_channel_posts(
+            acc["session_str"], ch_id, limit=clear_limit, **kw)
+        n = int(r.get("deleted") or 0)
+        if r.get("ok"):
+            return True, f"✅ {chan_title}: удалено постов — {n}"
+        return False, (f"❌ {chan_title}: {_html.escape(str(r.get('error') or 'ошибка'))}"
+                       + (f" (успели удалить {n})" if n else ""))
+
+    call = (account_manager.destroy_channel if op == "chan_delete"
+            else account_manager.leave_managed_channel)
+    extra = {"chat_type": chat_type} if op == "chan_delete" else {}
+    r = await call(acc["session_str"], ch_id, **kw, **extra)
+    flood = int(r.get("flood") or 0)
+    if not r.get("ok") and 0 < flood <= 60:
+        await asyncio.sleep(flood + 1)
+        r = await call(acc["session_str"], ch_id, **kw, **extra)
+    if not r.get("ok"):
+        return False, f"❌ {chan_title}: {_html.escape(str(r.get('error') or 'ошибка'))}"
+    await _forget_managed_channel(pool, owner_id, ch_id)
+    if op == "chan_delete":
+        return True, f"✅ {chan_title}: удалён в Telegram"
+    return True, f"✅ {chan_title}: аккаунт вышел, канал убран из Infragram"
+
+
 async def _exec_bulk_chan_exec(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Bulk set username or about for channels across multiple accounts."""
+    """Массовые действия с каналами: название/описание/username, а также
+    удаление канала в Telegram, очистка постов и выход (см. _CHAN_EXEC_OPS)."""
     import html as _html
     from services import account_manager
 
@@ -9821,8 +9892,14 @@ async def _exec_bulk_chan_exec(
         except Exception as e:
             log_exc_swallow(log, f"bulk_chan_exec brand_injection failed: {e}")
 
-    if not channel_acc_pairs or op not in ("chan_uname", "chan_about", "chan_title"):
+    if not channel_acc_pairs or op not in _CHAN_EXEC_OPS:
         return {"status": "failed", "reason": "Не указаны channel_acc_pairs или неверный op"}
+    # Удаление канала и очистка постов необратимы. Флаг ставит только эндпойнт,
+    # получивший от владельца явное подтверждение, — операция, собранная иначе
+    # (старый клиент, ручная вставка, повтор чужих params), ничего не удаляет.
+    if op in _CHAN_DESTRUCTIVE_OPS and params.get("confirmed") is not True:
+        return {"status": "failed",
+                "reason": "Необратимое действие без подтверждения владельца — отменено"}
 
     # Collect unique acc_ids and fetch sessions from DB (never pass session_str in params)
     acc_ids = list({int(p["acc_id"]) for p in channel_acc_pairs})
@@ -9948,6 +10025,13 @@ async def _exec_bulk_chan_exec(
                     else:
                         err_list.append(f"❌ {chan_title}: ошибка смены названия")
 
+                elif op in ("chan_delete", "chan_clear", "chan_leave"):
+                    ok, line = await _chan_destructive_step(
+                        pool, owner_id, op, acc, int(ch_id), chan_title,
+                        _pair_hash, _pair_uname, str(pair.get("type") or ""),
+                        int(params.get("clear_limit") or 0))
+                    (ok_list if ok else err_list).append(line)
+
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -9962,7 +10046,7 @@ async def _exec_bulk_chan_exec(
     finally:
         await release_accounts(claimed_ids)
 
-    op_label = {"chan_uname": "🔤 Username", "chan_about": "📄 Описание", "chan_title": "📛 Название"}.get(op, op)
+    op_label = _CHAN_EXEC_OPS.get(op, op)
     summary_lines = [
         f"{op_label} — завершено: ✅ {len(ok_list)} ❌ {len(err_list)} из {total}"
         + (f" · пропущено (аккаунт занят): {_busy}" if _busy else "")

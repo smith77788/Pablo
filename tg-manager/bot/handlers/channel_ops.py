@@ -2398,13 +2398,26 @@ async def cb_do_delete(
     await callback.answer("⏳ Удаляю...")
     from services import account_manager
 
-    ok = await account_manager.delete_channel(
-        acc["session_str"], callback_data.channel_id, _acc=acc
+    # destroy_channel резолвит по access_hash/@username (голый id на свежей
+    # сессии не находится) и называет причину отказа, а не «проверьте права».
+    ch = await pool.fetchrow(
+        "SELECT access_hash, username, type FROM managed_channels "
+        "WHERE owner_id=$1 AND channel_id=$2",
+        callback.from_user.id, callback_data.channel_id,
     )
+    res = await account_manager.destroy_channel(
+        acc["session_str"], callback_data.channel_id, _acc=acc,
+        access_hash=int((ch or {}).get("access_hash") or 0),
+        username=(ch or {}).get("username") or "",
+        chat_type=(ch or {}).get("type") or "",
+    )
+    if res.get("ok"):
+        from services.op_worker import _forget_managed_channel
+        await _forget_managed_channel(pool, callback.from_user.id, callback_data.channel_id)
     await callback.message.edit_text(
-        "✅ <b>Канал удалён.</b>"
-        if ok
-        else "❌ <b>Ошибка удаления.</b> Проверьте права.",
+        "✅ <b>Канал удалён в Telegram</b> и убран из Infragram."
+        if res.get("ok")
+        else f"❌ <b>Не удалось удалить:</b> {html.escape(str(res.get('error') or 'ошибка'))}",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )

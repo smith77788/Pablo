@@ -4980,6 +4980,219 @@ async def delete_channel(
             log_exc_swallow(log, "Сбой в delete_channel")
 
 
+# ── Полное управление каналом: удалить в Telegram, очистить посты, покинуть ──
+#
+# Прежний delete_channel выше резолвил канал по «голому» id (на свежей сессии
+# это «Invalid channel object») и возвращал голый bool: владелец видел только
+# «ошибка удаления», не понимая, что дело в правах создателя. Функции ниже
+# резолвят тем же путём, что правка названия (_resolve_channel_peer:
+# access_hash → @username → PeerChannel → диалоги), и возвращают причину
+# по-русски — её показывает итог операции.
+
+# Сколько секунд флуд-паузы ждём прямо внутри операции. Дольше — честно
+# останавливаемся и говорим, сколько удалось сделать, а не висим часами.
+_CHANNEL_FLOOD_WAIT_MAX_S = 60
+_CLEAR_BATCH = 100  # потолок Telegram на channels.deleteMessages
+
+
+def channel_action_error_ru(exc: BaseException) -> str:
+    """Причина отказа Telegram по действию с каналом — по-русски, для итога."""
+    name = type(exc).__name__
+    if isinstance(exc, asyncio.TimeoutError):
+        return "Telegram не ответил вовремя (проверьте прокси аккаунта)"
+    if name in ("ChatAdminRequiredError", "RightForbiddenError",
+                "ChatWriteForbiddenError", "UserNotParticipantError"):
+        return "у аккаунта нет прав: удалить канал может только его создатель"
+    if name == "MessageDeleteForbiddenError":
+        return "у аккаунта нет права удалять сообщения в этом канале"
+    if name == "ChannelTooLargeError":
+        return ("Telegram не даёт удалить такой большой канал "
+                "(ограничение на каналы больше 1000 подписчиков)")
+    if name in ("ChannelPrivateError", "ChannelInvalidError", "PeerIdInvalidError",
+                "ChatIdInvalidError", "ValueError"):
+        return "аккаунт не видит канал: он уже удалён или аккаунт потерял доступ"
+    if name == "FloodWaitError":
+        return f"флуд-лимит Telegram, подождите {getattr(exc, 'seconds', 0)} сек."
+    return (str(exc) or name)[:120]
+
+
+async def _resolve_managed_channel(client, channel_id: int, access_hash: int, username: str):
+    ref = f"@{username.lstrip('@')}" if username else int(channel_id)
+    return await _resolve_channel_peer(client, ref, int(access_hash or 0))
+
+
+async def destroy_channel(
+    session_string: str,
+    channel_id: int,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
+    chat_type: str = "",
+) -> dict:
+    """Удалить канал/группу В САМОМ Telegram — безвозвратно, для всех участников.
+
+    Telegram разрешает это только создателю. Базовую группу (не супергруппу)
+    удаляет messages.deleteChat, всё остальное — channels.deleteChannel.
+    → {"ok": True} | {"ok": False, "error": str, "flood": сек?}
+    """
+    if not session_string:
+        return {"ok": False, "error": "у аккаунта нет сессии"}
+    from telethon.tl.functions.channels import DeleteChannelRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        if (chat_type or "").lower() == "chat":
+            from telethon.tl.functions.messages import DeleteChatRequest
+            await asyncio.wait_for(
+                client(DeleteChatRequest(chat_id=abs(int(channel_id)))), timeout=_OP_TIMEOUT)
+            return {"ok": True}
+        entity = await _resolve_managed_channel(client, channel_id, access_hash, username)
+        await asyncio.wait_for(client(DeleteChannelRequest(channel=entity)), timeout=_OP_TIMEOUT)
+        return {"ok": True}
+    except Exception as e:
+        out = {"ok": False, "error": channel_action_error_ru(e)}
+        if type(e).__name__ == "FloodWaitError":
+            out["flood"] = int(getattr(e, "seconds", 0) or 0)
+        else:
+            log.warning("destroy_channel ch=%s: %s", channel_id, e)
+        return out
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в destroy_channel")
+
+
+async def _delete_ids(client, peer, ids: list[int]) -> int:
+    """Удалить пачку сообщений; вернуть, сколько реально удалено.
+
+    Пачка целиком может упасть из-за одного неудаляемого сообщения — тогда
+    добираем поштучно, чтобы одно сообщение не оставляло в канале сотню других.
+    FloodWait пробрасываем: им распоряжается вызывающий.
+    """
+    def _count(res, fallback: int) -> int:
+        if isinstance(res, (list, tuple)):
+            n = sum(int(getattr(r, "pts_count", 0) or 0) for r in res)
+            return n if n else fallback
+        return fallback
+
+    try:
+        res = await asyncio.wait_for(
+            client.delete_messages(peer, ids, revoke=True), timeout=_OP_TIMEOUT)
+        return _count(res, len(ids))
+    except Exception as e:
+        if type(e).__name__ == "FloodWaitError" or len(ids) == 1:
+            raise
+    done = 0
+    for mid in ids:
+        try:
+            res = await asyncio.wait_for(
+                client.delete_messages(peer, [mid], revoke=True), timeout=_OP_TIMEOUT)
+            done += _count(res, 1)
+        except Exception as e:
+            if type(e).__name__ == "FloodWaitError":
+                raise
+            log.debug("clear_channel_posts: сообщение %s не удалено: %s", mid, e)
+    return done
+
+
+async def clear_channel_posts(
+    session_string: str,
+    channel_id: int,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
+    limit: int = 0,
+) -> dict:
+    """Удалить посты канала для всех: все (limit=0) или последние `limit` штук.
+
+    Идём от новых к старым и удаляем пачками по 100 по ходу обхода, поэтому
+    прерванная очистка оставляет канал частично очищенным, а повтор просто
+    дочищает остаток — двойного эффекта у удаления нет.
+    → {"ok": bool, "deleted": int, "error"?: str}
+    """
+    if not session_string:
+        return {"ok": False, "deleted": 0, "error": "у аккаунта нет сессии"}
+    client = _make_client(session_string, _acc)
+    deleted = 0
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        peer = await _resolve_managed_channel(client, channel_id, access_hash, username)
+        it = client.iter_messages(peer, limit=(int(limit) if limit and int(limit) > 0 else None))
+        batch: list[int] = []
+
+        async def _flush() -> None:
+            nonlocal deleted, batch
+            if not batch:
+                return
+            ids, batch = batch, []
+            try:
+                deleted += await _delete_ids(client, peer, ids)
+            except Exception as e:
+                secs = int(getattr(e, "seconds", 0) or 0)
+                if type(e).__name__ != "FloodWaitError" or secs > _CHANNEL_FLOOD_WAIT_MAX_S:
+                    raise
+                await asyncio.sleep(secs + 1)
+                deleted += await _delete_ids(client, peer, ids)
+
+        while True:
+            try:
+                msg = await asyncio.wait_for(it.__anext__(), timeout=_OP_TIMEOUT)
+            except StopAsyncIteration:
+                break
+            mid = getattr(msg, "id", None)
+            if not mid:
+                continue
+            batch.append(int(mid))
+            if len(batch) >= _CLEAR_BATCH:
+                await _flush()
+        await _flush()
+        return {"ok": True, "deleted": deleted}
+    except Exception as e:
+        log.warning("clear_channel_posts ch=%s: удалено %d, затем %s", channel_id, deleted, e)
+        return {"ok": False, "deleted": deleted, "error": channel_action_error_ru(e)}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в clear_channel_posts")
+
+
+async def leave_managed_channel(
+    session_string: str,
+    channel_id: int,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
+) -> dict:
+    """Аккаунт выходит из канала/группы (канал при этом продолжает жить).
+
+    В отличие от leave_channel резолвит по access_hash/@username — на свежей
+    сессии «голый» id не находится.
+    """
+    if not session_string:
+        return {"ok": False, "error": "у аккаунта нет сессии"}
+    from telethon.tl.functions.channels import LeaveChannelRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await _resolve_managed_channel(client, channel_id, access_hash, username)
+        await asyncio.wait_for(client(LeaveChannelRequest(channel=entity)), timeout=_OP_TIMEOUT)
+        return {"ok": True}
+    except Exception as e:
+        if type(e).__name__ == "UserNotParticipantError":
+            return {"ok": True}  # уже не участник — цель достигнута
+        log.warning("leave_managed_channel ch=%s: %s", channel_id, e)
+        return {"ok": False, "error": channel_action_error_ru(e)}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в leave_managed_channel")
+
+
 async def get_channel_members(
     session_string: str,
     channel_id: int,
