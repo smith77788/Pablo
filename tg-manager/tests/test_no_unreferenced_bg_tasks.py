@@ -58,7 +58,6 @@ _SPAWNED_JOBS = [
     ("bot/handlers/admin.py", "_gate_notify_all_task"),
     ("bot/handlers/auto_registrar.py", "_do_batch_register"),
     ("bot/handlers/auto_registrar.py", "_wait_and_confirm"),
-    ("bot/handlers/account_warmup.py", "_create_bg"),
     ("bot/handlers/gift_transfer.py", "_scan_bg"),
     ("bot/handlers/reg_checker.py", "_enrich_metadata"),
     ("bot/handlers/ai_assistant.py", "_do_action"),

@@ -352,10 +352,15 @@ def test_action_journal_endpoint_exists_and_is_owner_scoped():
 
 def test_creating_a_plan_checks_the_account_on_the_server():
     """Пригодность аккаунта проверялась только в браузере: прямой запрос (или
-    устаревший список на экране) заводил план на забаненном аккаунте."""
-    src = _func_src(_API_SRC, "warmup_create_plan")
-    assert "can_resume" in src and "409" in src
-    assert "acc_status" in src
+    устаревший список на экране) заводил план на забаненном аккаунте.
+
+    Проверка живёт в общей двери `account_warmer.create_warmup_plan`, через
+    которую идут все пути создания плана; экран отдаёт её отказ кодом 409.
+    """
+    src = _func_src(_WARMER_SRC, "create_warmup_plan")
+    assert "can_resume" in src and "acc_status" in src and "409" in src
+    route = _func_src(_API_SRC, "warmup_create_plan")
+    assert "create_warmup_plan(" in route and "exc.status" in route
 
 
 def test_bulk_warmup_does_not_revive_plans_the_engine_stopped():
@@ -368,14 +373,17 @@ def test_bulk_warmup_does_not_revive_plans_the_engine_stopped():
     краснел бы на усилении защиты, поэтому проверяем смысл.
     """
     from services import account_status
+    from services import account_warmer as aw
 
-    src = _func_src(_API_SRC, "_warmup_bulk_core")
-    assert "sql_not_dead" in src, (
+    assert "sql_not_dead" in _func_src(_WARMER_SRC, "create_warmup_plans_bulk") \
+        or "sql_not_dead" in _WARMER_SRC.split("_BULK_CANDIDATES_WHERE = (", 1)[1][:400], (
         "выборка аккаунтов для прогрева перестала брать общее условие — "
         "спам-блокнутый аккаунт снова попадёт под нагрузку")
     assert "spamblock" in account_status.DEAD_STATUSES
+    # Мини-апп зовёт ту же функцию, а не свою копию отбора.
+    assert "create_warmup_plans_bulk(" in _func_src(_API_SRC, "_warmup_bulk_core")
     # И снимает старую жалобу, чтобы перезапущенный план не показывал её.
-    assert "pause_reason=NULL" in src
+    assert "pause_reason=NULL" in aw._PLAN_UPSERT_TAIL
 
 
 def test_warmup_op_does_not_report_success_for_a_stopped_plan():
@@ -385,12 +393,17 @@ def test_warmup_op_does_not_report_success_for_a_stopped_plan():
         (_ROOT / "services" / "op_worker.py").read_text(encoding="utf-8"),
         "_exec_account_warmup")
     assert 'existing["status"]' in src
-    assert "status='active'" in src  # неактивный план поднимается, а не выдумывается
+    # Неактивный план поднимается общей дверью (с проверкой аккаунта), а не
+    # своим UPDATE и не выдумывается.
+    assert "create_warmup_plan(" in src
+    assert "UPDATE account_warmup_plans" not in src
 
 
 def test_restarting_a_plan_clears_the_previous_complaint():
-    src = _func_src(_API_SRC, "warmup_create_plan")
-    assert "last_skip_reason=NULL" in src
+    from services import account_warmer as aw
+
+    assert "last_skip_reason=NULL" in aw._PLAN_UPSERT_TAIL
+    assert "_PLAN_UPSERT_TAIL" in _func_src(_WARMER_SRC, "create_warmup_plan")
 
 
 def test_ui_shows_the_real_state_and_opens_the_journal():

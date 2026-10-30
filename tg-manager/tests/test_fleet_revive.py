@@ -16,7 +16,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def test_reimport_clears_operational_blockers():
     src = open(os.path.join(ROOT, "database", "db.py"), encoding="utf-8").read()
-    i = src.index("async def add_tg_account")
+    # Все входы пишут аккаунт через upsert_tg_account (add_tg_account — обёртка).
+    i = src.index("async def upsert_tg_account")
     j = src.find("\nasync def ", i + 1)  # тело до конца функции, а не фикс-окно
     body = src[i:j if j > 0 else None]
     # ON CONFLICT-ветка переимпорта снимает ВСЕ блокировки прошлой сессии

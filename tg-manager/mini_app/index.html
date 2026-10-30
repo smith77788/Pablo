@@ -8947,44 +8947,91 @@ async function loadHome() {
   renderFrequent();
 }
 
-// 🚀 Онбординг: чеклист активации новичка. Скрывается сам после активации, чтобы
-// не мозолить глаза ветеранам. Действия шагов — дип-линки в существующие потоки.
+// 🚀 Онбординг: путь новичка от аккаунта до ПЕРВОГО РЕЗУЛЬТАТА
+// (services/onboarding.py). Чеклист прячется, только когда результат получен, —
+// раньше он гас от системной операции, которую ставит само подключение аккаунта.
+// Действия шагов — дип-линки в существующие потоки.
 const _ONBOARD_ACT = {
   import_accounts: 'openAccImportModal',
   proxy:           'openProxies',
+  billing:         'openBilling',
+  first_action:    'onboardFirstAction',
+  operation:       'openMassOps',
   invite:          'openMassInvite',
 };
 // Это первый экран нового владельца: кнопка, которая молча ничего не делает,
 // читается как «приложение сломано». Раньше и неизвестный шаг, и отсутствующая
 // функция давали ровно тишину.
-function onboardStep(kind) {
+function onboardStep(kind, param) {
   const fname = _ONBOARD_ACT[kind];
   const f = fname && window[fname];
   if (typeof f !== 'function') {
     toast('⚠️ Шаг «' + String(kind || '—').substring(0, 24) + '» не открывается — сообщите нам');
     return false;
   }
-  f();
+  (param !== undefined && param !== null && param !== '') ? f(param) : f();
   return true;
 }
+// Первое действие: короткий выбор вместо одного инвайта — инвайту нужна
+// собранная аудитория и своя группа, у новичка их нет.
+const _ONBOARD_FIRST = [
+  {value:'openWarmup',     label:'🔥 Прогреть аккаунт',    sub:'Безопасный старт: аккаунт ведёт себя как живой, первый день — сегодня'},
+  {value:'openParser',     label:'🎯 Собрать аудиторию',   sub:'Участники группы или канала конкурента — база для инвайта и рассылки'},
+  {value:'openMassInvite', label:'📨 Пригласить в группу', sub:'Если аудитория уже собрана'},
+];
+async function onboardFirstAction() {
+  const fname = await askChoice('С чего начать?', _ONBOARD_FIRST);
+  if (!fname) return;
+  const f = window[fname];
+  if (typeof f !== 'function') { toast('⚠️ Раздел не открывается — сообщите нам'); return; }
+  f();
+}
+function _onboardDismissKey(d) { return 'infra_onboard_done_' + String(d.activated_at || ''); }
 async function loadOnboarding() {
   const el = document.getElementById('onboardCard');
   if (!el) return;
   let d;
   try { d = await api('/api/miniapp/onboarding'); }
   catch(_) { el.style.display='none'; return; }   // fail-open: нет чеклиста ≠ блок экрана
-  if (!d || d.activated || !(d.steps||[]).length) { el.style.display='none'; el.innerHTML=''; return; }
+  if (!d || !(d.steps||[]).length) { el.style.display='none'; el.innerHTML=''; return; }
+  if (d.activated) {
+    // Обратная связь: первый результат показываем один раз и сутки, дальше
+    // карточка уходит насовсем (активация липкая на сервере).
+    let seen = false;
+    try { seen = !!localStorage.getItem(_onboardDismissKey(d)); } catch(_) {}
+    const fresh = d.activated_at && (Date.now() - Date.parse(d.activated_at)) < 86400e3;
+    if (seen || !fresh || !d.first_result) { el.style.display='none'; el.innerHTML=''; return; }
+    const fr = d.first_result;
+    el.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;box-shadow:var(--shadow)">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:14px;font-weight:700">🎉 Первый результат</div>
+        <span class="icon-tap" role="button" tabindex="0" aria-label="Закрыть" style="color:var(--hint)" onclick="onboardDismiss()">✕</span>
+      </div>
+      <div style="font-size:13px;margin-top:4px">${esc(fr.title)}${fr.ok ? ' — <b>' + esc(String(fr.ok)) + '</b>' : ''}</div>
+      <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">Дальше подсказки — в «Пульсе» ниже.${d.trial ? ' Пробный период: осталось ' + esc(String(d.trial.days_left)) + ' дн.' : ''}</div>
+      ${fr.op_id ? `<button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="openMassOps(${Number(fr.op_id)})">Посмотреть итог →</button>` : ''}
+    </div>`;
+    el._dismissKey = _onboardDismissKey(d);
+    el.style.display='block';
+    return;
+  }
   const rows = (d.steps||[]).map(s => {
     const mark = s.done ? '<span style="color:var(--green)">✓</span>'
       : (s.id===d.next_step ? '<span style="color:var(--accent)">◆</span>' : '<span style="color:var(--hint)">○</span>');
     const opt = s.optional ? ' <span style="font-size:11px;color:var(--hint)">(необязательно)</span>' : '';
-    const cta = s.done ? '' :
-      `<button class="btn btn-p" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="onboardStep('${s.action.kind}')">${esc(s.cta||'Открыть')} →</button>`;
+    const act = s.action || null;
+    const prm = act && act.param != null ? Number(act.param) : NaN;
+    const prmArg = Number.isInteger(prm) ? ',' + prm : '';
+    // У закрытого шага кнопки нет, кроме «Оформить» на идущем триале.
+    const showCta = act && s.cta && (!s.done || s.id === 'plan');
+    const cta = !showCta ? '' :
+      `<button class="btn ${s.done?'btn-s':'btn-p'}" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="onboardStep('${esc(act.kind)}'${prmArg})">${esc(s.cta||'Открыть')} →</button>`;
+    const showHint = !s.done || s.id === 'plan';
     return `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--sep)">
       <div style="font-size:15px;line-height:1.4;width:16px;text-align:center;flex:0 0 auto">${mark}</div>
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600;${s.done?'opacity:.6':''}">${esc(s.title)}${opt}</div>
-        ${s.done?'':`<div style="font-size:12px;color:var(--hint);line-height:1.4;margin-top:2px">${esc(s.hint)}</div>`}
+        <div style="font-size:13px;font-weight:600;${s.done && s.id!=='plan'?'opacity:.6':''}">${esc(s.title)}${opt}</div>
+        ${showHint && s.hint ? `<div style="font-size:12px;color:var(--hint);line-height:1.4;margin-top:2px">${esc(s.hint)}</div>` : ''}
       </div>
       ${cta}
     </div>`;
@@ -8994,10 +9041,15 @@ async function loadOnboarding() {
       <div style="font-size:14px;font-weight:700">🚀 Быстрый старт</div>
       <div style="font-size:12px;color:var(--hint);font-variant-numeric:tabular-nums">${d.done}/${d.total}</div>
     </div>
-    <div style="font-size:12px;color:var(--hint);margin-top:2px">Пара шагов до первого результата — дальше система сама подскажет, что делать.</div>
+    <div style="font-size:12px;color:var(--hint);margin-top:2px">Несколько шагов до первого результата — карточка уйдёт, когда он будет.</div>
     ${rows}
   </div>`;
   el.style.display='block';
+}
+function onboardDismiss() {
+  const el = document.getElementById('onboardCard');
+  try { if (el && el._dismissKey) localStorage.setItem(el._dismissKey, '1'); } catch(_) {}
+  if (el) { el.style.display='none'; el.innerHTML=''; }
 }
 
 // 🫀 Пульс организма — единый живой контекст + цепочки следующих действий.
@@ -9497,6 +9549,9 @@ function runPulseAction(a) {
   if (k==='va_channel' && _n) return openVaChannel(_n);
   if (k==='va') return openVaAdmin();
   if (k==='channels') return openChannels();
+  // Онбординг из бота (/start новичка): к чеклисту и к подключению аккаунта.
+  if (k==='onboarding') { goTab('home'); setTimeout(()=>{ const c=document.getElementById('onboardCard'); if (c) c.scrollIntoView({behavior:'smooth', block:'start'}); }, 300); return; }
+  if (k==='accounts_add') return openAccImportModal();
   // «Открываю…» было обещанием, за которым ничего не следовало: человек нажимал
   // «Открыть», читал, что раздел открывается, и оставался на месте. Неизвестный
   // раздел — это поломка ссылки, и сказать надо именно это.
@@ -13529,7 +13584,7 @@ async function startWarmup(accId, planType) {
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🔥 Прогрев запущен · '+d.target_days+' дней');
     openAccount(accId);
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,160)); }
 }
 
 async function pauseWarmup(accId) {
@@ -14604,6 +14659,9 @@ async function submitAccImport() {
     // Честный итог: сколько реально добавлено/провалено + причины (см. правило
     // «рапорт об успехе без эффекта»).
     let html=`<div style="color:${imp?'var(--green)':'var(--hint)'}">✅ Импортировано: <b>${imp}</b></div>`;
+    // Тот же аккаунт с новой сессией — не новый аккаунт и не ошибка: сессия
+    // обновлена у уже подключённого, дубль не создан.
+    if (r.updated) html+=`<div style="color:var(--hint)">🔄 Обновлена сессия у подключённых: <b>${r.updated}</b></div>`;
     if (fail) html+=`<div style="color:var(--red)">✕ Не удалось: <b>${fail}</b></div>`;
     // Изоляция по IP — итог, который раньше нигде не показывался: партия
     // садилась за один выход, и человек узнавал об этом только из отдельного

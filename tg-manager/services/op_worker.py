@@ -22017,29 +22017,24 @@ async def _exec_account_warmup(
                     "plan_id": existing["id"],
                     "summary": f"🌡️ Прогрев активен для {name} (план: {plan_type})",
                 }
-            await pool.execute(
-                """UPDATE account_warmup_plans
-                      SET status='active', started_at=now(),
-                          pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
-                          pause_notified_at=NULL,
-                          last_skip_reason=NULL, last_skip_at=NULL
-                    WHERE id=$1""",
-                existing["id"])
-            return {
-                "status": "done",
-                "plan_id": existing["id"],
-                "summary": f"🌡️ Прогрев возобновлён для {name} (план: {plan_type})",
-            }
-        # Plan not yet created (op triggered from bot handler or legacy path) — create it.
+        # Плана нет или он не идёт (отменён, завершён, остановлен движком) —
+        # заводим через общую дверь. Раньше неактивный план поднимался здесь
+        # своим UPDATE без проверки аккаунта, и операция «возобновляла»
+        # прогрев на забаненном аккаунте.
         plan_id = await account_warmer.create_warmup_plan(pool, owner_id, account_id, plan_type)
+        verb = "возобновлён" if existing else "запущен"
         return {
             "status": "done",
             "plan_id": plan_id,
-            "summary": f"🌡️ Прогрев запущен для {name} (план: {plan_type}, план_id={plan_id})",
+            "summary": f"🌡️ Прогрев {verb} для {name} (план: {plan_type})",
         }
-    except Exception as exc:
+    except PermissionError as exc:
+        # Отказ по делу (аккаунт мёртв, нет подписки, Ban Weather) — причина
+        # человеку, а не «ошибка запуска» с внутренним текстом.
+        return {"status": "failed", "summary": f"⚠️ Прогрев не запущен: {exc}"}
+    except Exception:
         log.exception("_exec_account_warmup op=%d acc=%d", op_id, account_id)
-        return {"status": "failed", "summary": f"⚠️ Ошибка запуска прогрева: {exc}"}
+        return {"status": "failed", "summary": "⚠️ Не удалось запустить прогрев — попробуйте ещё раз"}
 
 
 async def _exec_parse_audience(

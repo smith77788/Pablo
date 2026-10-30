@@ -92,46 +92,25 @@ async def _save_account(
     сохраняется, чтобы все последующие сессии аккаунта шли через тот же
     IP/гео, что и при регистрации.
     """
-    from services.token_vault import encrypt_token, session_fingerprint
-
-    acc_id = await pool.fetchval(
-        """INSERT INTO tg_accounts
-           (owner_id, phone, session_str, tg_user_id, first_name, username,
-            device_model, system_version, app_version, lang_code, system_lang_code,
-            proxy_id, session_fp, is_active, trust_score, acc_status, added_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE,1.0,'active',NOW())
-           ON CONFLICT (owner_id, phone) DO UPDATE
-             SET session_str=$3, tg_user_id=$4, first_name=$5, username=$6,
-                 device_model=$7, system_version=$8, app_version=$9,
-                 lang_code=$10, system_lang_code=$11, proxy_id=$12,
-                 session_fp=$13,
-                 is_active=TRUE, acc_status='active', status_reason=NULL,
-                 status_checked_at=now(), last_used=now()
-           RETURNING id""",
-        owner_id,
-        phone,
-        encrypt_token(session_str),
-        info.get("tg_user_id"),
-        info.get("first_name", ""),
-        info.get("username", ""),
-        info.get("device_model", "Samsung SM-S911B"),
-        info.get("system_version", "Android 14"),
-        info.get("app_version", "11.5.3"),
-        info.get("lang_code", "ru"),
-        info.get("system_lang_code", "ru-RU"),
-        proxy_id,
-        session_fingerprint(session_str),
+    # Запись — общей дверью всех входов (`db.upsert_tg_account`): анти-дубль по
+    # tg_user_id, пустой номер → `id:<uid>`, снятие залипших блокировок
+    # (in_operation, cooldown_until, обнулённое доверие), связь телефон→владелец
+    # и синхронизация контактов. Своя INSERT здесь блокировки не снимала:
+    # перерегистрированный аккаунт молча выпадал из операций.
+    acc_id, _created, _proxy = await db.upsert_tg_account(
+        pool, owner_id,
+        phone=phone,
+        session_str=session_str,
+        tg_user_id=info.get("tg_user_id"),
+        first_name=info.get("first_name", ""),
+        username=info.get("username", ""),
+        device_model=info.get("device_model", "Samsung SM-S911B"),
+        system_version=info.get("system_version", "Android 14"),
+        app_version=info.get("app_version", "11.5.3"),
+        lang_code=info.get("lang_code", "ru"),
+        system_lang_code=info.get("system_lang_code", "ru-RU"),
+        proxy_id=proxy_id,
     )
-    # Регистрируем связь телефон→владелец для анти-абуз системы
-    try:
-        await db.record_phone_link(pool, phone, owner_id)
-    except Exception:
-        log_exc_swallow(log, "_save_account: record_phone_link failed")
-    # Синхронизация контактов «как с устройства» — как у любого подключения
-    # (database.db.add_tg_account).
-    if acc_id:
-        from services.contacts_hub.device_sync import schedule_for_new_account
-        await schedule_for_new_account(pool, owner_id, int(acc_id))
     return acc_id
 
 

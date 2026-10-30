@@ -28,35 +28,69 @@ def test_bot_offers_profile_choice_and_writes_table():
     h = _read("bot/handlers/account_warmup.py")
     for prof in ("prof_reader", "prof_commenter", "prof_reactor", "prof_lurker", "prof_mixed"):
         assert prof in h, f"нет профиля {prof}"
-    assert "async def _upsert_niche_profile(" in h
-    assert "INSERT INTO account_niche_profiles" in h
-    # профиль пишется ДО создания плана (движок при первом тике видит веса)
-    i_prof = h.index("_upsert_niche_profile(pool, callback.from_user.id, acc_id, profile_type)")
-    i_plan = h.index("create_warmup_plan(pool, callback.from_user.id, acc_id, plan_type)")
-    assert i_prof < i_plan
+    # Профиль пишет общая дверь создания плана — в той же транзакции, что и
+    # план (движок при первом тике видит веса, отказ не оставляет профиль
+    # без плана). Своя запись профиля в боте снята.
+    assert "profile_type=profile_type" in h
+    assert "async def _upsert_niche_profile(" not in h
+    aw = _read("services/account_warmer.py")
+    assert "INSERT INTO account_niche_profiles" in aw
+
+
+class _Ctx:
+    def __init__(self, v):
+        self.v = v
+
+    async def __aenter__(self):
+        return self.v
+
+    async def __aexit__(self, *exc):
+        return False
 
 
 @pytest.mark.asyncio
-async def test_upsert_niche_profile_writes_profile_type():
-    import bot.handlers.account_warmup as wu
+async def test_create_plan_writes_profile_before_plan(monkeypatch):
+    from services import account_warmer as aw
+    from services import operation_bus
 
+    async def _gates(*a, **kw):
+        return None
+
+    monkeypatch.setattr(operation_bus, "enforce_gates", _gates)
     calls = []
 
-    class _Pool:
+    class _Conn:
         async def execute(self, q, *args):
             calls.append((q, args))
             return "INSERT 1"
 
-    await wu._upsert_niche_profile(_Pool(), owner_id=42, account_id=7,
-                                   profile_type="commenter")
-    # был CREATE TABLE IF NOT EXISTS и INSERT ... ON CONFLICT
-    joined = " ".join(q for q, _ in calls)
-    assert "CREATE TABLE IF NOT EXISTS account_niche_profiles" in joined
-    assert "ON CONFLICT (account_id) DO UPDATE" in joined
-    # profile_type реально в аргументах INSERT
-    insert_args = [a for q, a in calls if "INSERT INTO account_niche_profiles" in q][0]
-    assert "commenter" in insert_args
-    assert 7 in insert_args and 42 in insert_args
+        async def fetchrow(self, q, *args):
+            calls.append((q, args))
+            return {"id": 11}
+
+        def transaction(self):
+            return _Ctx(None)
+
+    class _Pool:
+        async def fetchrow(self, q, *args):
+            return {"id": 7, "session_str": "s", "acc_status": "active",
+                    "is_active": True}
+
+        async def execute(self, q, *args):
+            return "UPDATE 1"
+
+        def acquire(self):
+            return _Ctx(_Conn())
+
+    plan_id = await aw.create_warmup_plan(_Pool(), 42, 7, "gentle",
+                                          profile_type="commenter")
+    assert plan_id == 11
+    qs = [q for q, _ in calls]
+    i_prof = next(i for i, q in enumerate(qs) if "INSERT INTO account_niche_profiles" in q)
+    i_plan = next(i for i, q in enumerate(qs) if "INSERT INTO account_warmup_plans" in q)
+    assert i_prof < i_plan
+    prof_args = calls[i_prof][1]
+    assert "commenter" in prof_args and 7 in prof_args and 42 in prof_args
 
 
 def test_plan_index_encoding_roundtrip():

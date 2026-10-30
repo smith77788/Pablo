@@ -41,11 +41,13 @@ class _DispatchPool:
             return {"id": 4242}
         if "FROM tg_accounts WHERE session_fp" in q:
             return None  # не дубль — продолжаем импорт
+        if "INSERT INTO tg_accounts" in q:
+            # Запись аккаунта (db.upsert_tg_account): $14 — proxy_id.
+            self.inserted_account_args = a
+            return {"id": 1, "created": True, "proxy_id": a[13]}
         return None
 
     async def execute(self, q, *a):
-        if "INSERT INTO tg_accounts" in q:
-            self.inserted_account_args = a
         return "INSERT 0 1"
 
 
@@ -91,9 +93,9 @@ async def test_import_binds_new_proxy_to_account():
             proxy_url="socks5://u:p@9.9.9.9:1080", proxy_id=None)
     assert res["imported"] == 1
     assert pool.proxy_insert_seen, "новый прокси не был создан"
-    # последний аргумент INSERT tg_accounts — proxy_id закреплённого прокси
+    # $14 INSERT tg_accounts — proxy_id закреплённого прокси
     assert pool.inserted_account_args is not None
-    assert pool.inserted_account_args[-1] == 4242, "новый proxy_id не закреплён за аккаунтом"
+    assert pool.inserted_account_args[13] == 4242, "новый proxy_id не закреплён за аккаунтом"
 
 
 @pytest.mark.asyncio
@@ -105,4 +107,4 @@ async def test_import_no_proxy_stays_direct():
             pool, owner_id=5, raw_data=_LINE, proxy_url=None, proxy_id=None)
     assert res["imported"] == 1
     assert not pool.proxy_insert_seen
-    assert pool.inserted_account_args[-1] is None
+    assert pool.inserted_account_args[13] is None

@@ -154,8 +154,14 @@ def test_single_account_logins_also_get_a_proxy():
     """Файл сессии, tdata, вход по номеру и QR идут через один путь: там тоже
     нельзя молча оставлять аккаунт на общем IP сервера."""
     src = _func_src(_API, "_persist_login")
-    assert "plan_distribution" in src
-    assert "is_alive" in src
+    assert "auto_proxy=True" in src
+    # Раскладка живёт в общей записи аккаунта — её же зовут пути бота.
+    import inspect
+
+    from database import db
+    pick = inspect.getsource(db._least_loaded_proxy)
+    assert "plan_distribution" in pick and "is_alive" in pick
+    assert "auto_proxy=True" in inspect.getsource(db.add_tg_account)
 
 
 def test_explicit_choice_is_still_honoured():

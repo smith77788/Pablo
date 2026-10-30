@@ -1336,29 +1336,29 @@ def setup_routes(app: web.Application, pool) -> None:
             "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
         if not acc or not acc.get("session_str"):
             return _err("Аккаунт недоступен", 400)
-        try:
-            from services import account_manager
-            res = await asyncio.wait_for(
-                account_manager.appeal_spamblock(acc["session_str"], dict(acc)), timeout=60)
-        except asyncio.TimeoutError:
+        # Аппеляция — шаг реабилитации, а не действие мимо неё: счётчик
+        # аппеляций, фаза и статус аккаунта (снят → 'active', подтверждён →
+        # 'spamblock') ведутся там же, где у автоматики. Раньше ручная
+        # аппеляция их не трогала, и автоматика через минуты писала @SpamBot
+        # повторно; а снятый блок записывался несуществующим статусом 'ok'.
+        from services import account_rehab
+
+        res = await account_rehab.run_manual_appeal(pool, uid, acc_id, dict(acc))
+        if res.get("status") == "timeout":
             return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
-        except Exception as exc:
-            log.exception("account_spamblock_appeal uid=%d acc=%d", uid, acc_id)
-            return _err(f"Ошибка: {str(exc)[:140]}", 400)
-        # Синхронизируем acc_status в БД, если бот подтвердил «free».
-        if res.get("status") == "free":
-            try:
-                await pool.execute(
-                    "UPDATE tg_accounts SET acc_status='ok' WHERE id=$1 AND owner_id=$2", acc_id, uid)
-            except Exception:
-                pass
+        if res.get("status") == "error" and not res.get("reply"):
+            # Сырой текст исключения уходил на экран — теперь он в логе.
+            return _err("Не удалось связаться с @SpamBot — проверьте прокси и сессию "
+                        "аккаунта и повторите", 400)
         labels = {"free": "✅ Спамблок снят — аккаунт активен",
                   "appeal_sent": "📨 Аппеляция отправлена — ждите решения",
                   "still_blocked": "🔴 Спамблок активен, кнопки аппеляции нет",
                   "error": "⚠️ Ошибка обращения к @SpamBot",
                   "no_session": "⚠️ Сессия недоступна"}
         if not res.get("ok") and res.get("status") not in ("still_blocked", "appeal_sent", "free"):
-            return _err(labels.get(res.get("status"), "Не выполнено") + (f": {res.get('reply')}" if res.get("reply") else ""), 400)
+            # Ответ @SpamBot в текст ошибки не подмешиваем: это внешний текст
+            # (данные, не сообщение продукта), он и так есть в поле reply успеха.
+            return _err(labels.get(res.get("status"), "Не выполнено"), 400)
         return _json_resp({"ok": True, "status": res.get("status"),
                            "label": labels.get(res.get("status"), res.get("status")),
                            "reply": res.get("reply"), "steps": res.get("steps", 0)})
@@ -1618,45 +1618,32 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
-        if not owns:
-            return _err("Аккаунт не найден", 404)
         plan_type = body.get("plan_type", "standard")
         if plan_type not in ("standard", "gentle", "aggressive"):
             plan_type = "standard"
-        # Values must match account_warmer.create_warmup_plan() — aggressive capped at 12/day
-        target_days    = {"gentle": 21, "standard": 14, "aggressive": 10}[plan_type]
-        daily_actions  = {"gentle":  5, "standard": 10, "aggressive": 12}[plan_type]
-        # Require session_str so the worker doesn't fail immediately
-        has_session = await _safe_count(pool,
-            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
-            acc_id, uid)
-        if not has_session:
-            return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
-        # Cancel any active warmup first
+        # Та же дверь, что у экрана прогрева: владелец, сессия, пригодность
+        # аккаунта, тариф и запись плана. Раньше карточка писала план своим
+        # запросом без проверки пригодности — план заводился на забаненном
+        # аккаунте и стоял на «дне 0» вечно, а старая жалоба (причина паузы)
+        # оставалась висеть на новом плане.
+        from services import account_warmer as _aw
+
         try:
-            # Гейт тарифа ДО записи плана: раньше план ставился первым, а отказ
-            # submit() по тарифу оставлял «активный» план без операции, который
-            # фоновый цикл грел без подписки.
-            await _obus.enforce_gates(pool, uid, "account_warmup")
-            await pool.execute(
-                "UPDATE account_warmup_plans SET status='paused' WHERE account_id=$1 AND owner_id=$2 AND status='active'",
-                acc_id, uid)
-            row = await pool.fetchrow(
-                """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
-                   VALUES($1,$2,$3,$4,$5)
-                   ON CONFLICT (account_id) DO UPDATE
-                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=NOW()
-                   RETURNING id""",
-                uid, acc_id, plan_type, target_days, daily_actions)
-            # Also create op_queue entry so op_worker executes warmup logic
+            plan_id = await _aw.create_warmup_plan(pool, uid, acc_id, plan_type)
+            plan = await pool.fetchrow(
+                "SELECT target_days FROM account_warmup_plans WHERE id=$1 AND owner_id=$2",
+                plan_id, uid)
+            # Операция — след в истории; план уже записан, исполнитель его
+            # не пересоздаёт.
             label = f"Прогрев аккаунта #{acc_id} ({plan_type})"
             op_id = await _obus.submit(
                 pool, uid, "account_warmup",
                 {"account_id": acc_id, "plan_type": plan_type},
                 total_items=1, label=label)
-            return _json_resp({"ok": True, "id": row["id"], "op_id": op_id, "target_days": target_days})
+            return _json_resp({"ok": True, "id": plan_id, "op_id": op_id,
+                               "target_days": plan["target_days"] if plan else None})
+        except _aw.WarmupNotAllowed as exc:
+            return _err(str(exc), exc.status)
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
@@ -1664,7 +1651,6 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("start_warmup acc=%d uid=%d", acc_id, uid)
-            log.exception("warmup_start")
             return _err("Не удалось запустить прогрев", 500)
 
     async def pause_warmup(request: web.Request) -> web.Response:
@@ -1676,8 +1662,14 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор аккаунта", 400)
         try:
+            # Пауза человека — с причиной 'user', как у паузы с экрана прогрева:
+            # без неё она выглядела паузой движка (бан, спам-блок), и экран
+            # прятал «Возобновить», а уведомление о самоостановке уходило
+            # владельцу о его же собственном нажатии.
             row = await pool.fetchrow(
-                """UPDATE account_warmup_plans SET status='paused'
+                """UPDATE account_warmup_plans
+                      SET status='paused', pause_reason='user', pause_detail=NULL,
+                          paused_at=NOW(), pause_notified_at=NOW()
                    WHERE account_id=$1 AND owner_id=$2 AND status='active'
                    RETURNING id""", acc_id, uid)
             if not row:
@@ -1715,8 +1707,12 @@ def setup_routes(app: web.Application, pool) -> None:
     async def _persist_login(_uid: int, session_str: str, info: dict, pid: int | None) -> int:
         """Сохранить залогиненный аккаунт (шифрование+дедуп) + закрепить прокси."""
         from database import db as _db
-        acc_id = await _db.add_tg_account(
-            pool, owner_id=_uid,
+        # Прокси — в той же записи: выбранный человеком ставится и уже
+        # подключённому аккаунту, а без выбора — наименее загруженный живой
+        # прокси владельца, но только аккаунту без прокси (у живого аккаунта
+        # IP при повторном входе не меняется).
+        acc_id, _created, _proxy = await _db.upsert_tg_account(
+            pool, _uid,
             phone=info.get("phone") or "",
             session_str=session_str,
             tg_user_id=info.get("tg_user_id"),
@@ -1727,35 +1723,8 @@ def setup_routes(app: web.Application, pool) -> None:
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
+            proxy_id=pid, override_proxy=bool(pid), auto_proxy=True,
         )
-        # Прокси не выбран — берём наименее загруженный ЖИВОЙ прокси владельца.
-        # Иначе каждый добавленный по одному аккаунт молча оставался на общем IP
-        # сервера, и флот собирался в одну когорту по самому сильному признаку
-        # связи. Стандарт продукта (proxy_selector.audit_proxy_isolation) —
-        # один аккаунт на один IP.
-        if not pid and acc_id:
-            try:
-                from services.proxy_balancer import plan_distribution
-
-                prows = await pool.fetch(
-                    """SELECT p.id,
-                              (SELECT COUNT(*) FROM tg_accounts a
-                                WHERE a.proxy_id = p.id) AS used
-                         FROM user_proxies p
-                        WHERE p.owner_id=$1 AND p.is_active
-                          AND COALESCE(p.is_alive, TRUE)""", _uid)
-                plan = plan_distribution(
-                    [(int(r["id"]), int(r["used"] or 0)) for r in prows], 1)
-                pid = plan[0] if plan else None
-            except Exception as e:
-                log.debug("auto proxy pick failed acc=%s: %s", acc_id, e)
-        if pid and acc_id:
-            try:
-                await pool.execute(
-                    "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
-                    pid, acc_id, _uid)
-            except Exception as e:
-                log.warning("proxy bind failed acc=%s: %s", acc_id, e)
         return acc_id
 
     def _login_err(exc, fallback: str) -> str:

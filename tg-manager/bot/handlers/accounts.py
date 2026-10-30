@@ -170,10 +170,46 @@ def _api_missing_text() -> str:
     )
 
 
+def _login_ru(exc) -> str:
+    """Отказ Telegram при входе → что делать, по-русски (как в мини-аппе).
+
+    Раньше бот показывал сырой `str(exc)` — английскую строку Telethon,
+    которую владелец не читает.
+    """
+    try:
+        from services.account_manager import login_error_ru
+
+        return login_error_ru(exc) or "Telegram отклонил вход — попробуйте ещё раз"
+    except Exception:
+        return "Telegram отклонил вход — попробуйте ещё раз"
+
+
+def _save_err_ru(exc) -> str:
+    """Сбой записи аккаунта → причина для человека; техника — в лог."""
+    if isinstance(exc, db.AccountIdentityMissing):
+        return str(exc)
+    log.warning("запись аккаунта не удалась: %s", exc, exc_info=exc)
+    return "не удалось записать в базу — попробуйте ещё раз"
+
+
 async def _get_account_limit(pool: asyncpg.Pool, user_id: int) -> tuple[str, int]:
     """Return (plan, limit) for this user."""
     plan = await get_plan(pool, user_id)
-    return plan, ACC_LIMITS.get(plan, 0)
+    limit = ACC_LIMITS.get(plan, 0)
+    if limit == 0:
+        # Бесплатный тариф аккаунтов не даёт, но пробный период выдаётся ПОСЛЕ
+        # первого аккаунта (services/trial.py). Без этого исключения новичок в
+        # боте упирался в замок раньше, чем мог получить триал.
+        try:
+            from services import trial
+            if await trial.maybe_grant(pool, user_id):
+                plan = await get_plan(pool, user_id)
+                limit = ACC_LIMITS.get(plan, 0)
+            elif await trial.is_eligible(pool, user_id, need_account=False):
+                limit = 1
+        except Exception:
+            log_exc_swallow(log, "Не удалось проверить право на пробный период")
+    return plan, limit
 
 
 def _acc_menu_markup(acc_id: int, is_active: bool = True):
@@ -801,7 +837,7 @@ async def cb_qr_login(
         png = await start_qr_login(user_id)
     except Exception as exc:
         await callback.message.answer(
-            f"❌ Не удалось запустить QR-вход: <code>{escape(str(exc)[:200])}</code>",
+            f"❌ Не удалось запустить QR-вход: {escape(_login_ru(exc))}",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -901,7 +937,7 @@ async def _qr_wait_task(
         try:
             await bot.send_message(
                 chat_id,
-                f"❌ Ошибка QR-входа: <code>{escape(str(exc)[:200])}</code>",
+                f"❌ Ошибка QR-входа: {escape(_login_ru(exc))}",
                 parse_mode="HTML",
             )
         except Exception:
@@ -928,7 +964,7 @@ async def _qr_wait_task(
         try:
             await bot.send_message(
                 chat_id,
-                f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+                f"❌ Не удалось сохранить аккаунт: {escape(_save_err_ru(exc))}",
                 parse_mode="HTML",
             )
         except Exception:
@@ -1002,7 +1038,7 @@ async def handle_qr_2fa(
         return
     except Exception as exc:
         await message.answer(
-            f"❌ Ошибка: <code>{escape(str(exc)[:200])}</code>",
+            f"❌ {escape(_login_ru(exc))}",
             parse_mode="HTML",
         )
         await state.clear()
@@ -1029,7 +1065,7 @@ async def handle_qr_2fa(
         )
     except Exception as exc:
         await message.answer(
-            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+            f"❌ Не удалось сохранить аккаунт: {escape(_save_err_ru(exc))}",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -1162,7 +1198,7 @@ async def _finalize_login(
         session_str, info = await get_client_info_and_session(phone)
     except Exception as exc:
         await message.answer(
-            f"❌ Не удалось получить сессию: <code>{escape(str(exc)[:200])}</code>",
+            f"❌ Не удалось получить сессию: {escape(_login_ru(exc))}",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -1198,7 +1234,7 @@ async def _finalize_login(
         )
     except Exception as exc:
         await message.answer(
-            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+            f"❌ Не удалось сохранить аккаунт: {escape(_save_err_ru(exc))}",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -1444,13 +1480,18 @@ async def cb_acc_spamblock_appeal(
         "🆘 <b>Апелляция спамблока</b>\n\nВедётся диалог со @SpamBot…",
         parse_mode="HTML",
     )
-    from services import account_manager
+    # Та же дверь, что у мини-аппа: тайм-аут, учёт в реабилитации (счётчик
+    # аппеляций, фаза, статус аккаунта) и след в журнале действий.
+    from services import account_rehab
 
-    try:
-        res = await account_manager.appeal_spamblock(acc["session_str"], dict(acc))
-    except Exception as exc:
+    res = await account_rehab.run_manual_appeal(
+        pool, callback.from_user.id, callback_data.acc_id, dict(acc))
+    if res.get("status") in ("timeout", "error") and not res.get("reply"):
         await callback.message.edit_text(
-            f"❌ Ошибка апелляции: <code>{escape(str(exc)[:200])}</code>",
+            "❌ <b>Апелляция не отправлена</b>\n\n"
+            + ("Аккаунт не ответил за 60 секунд." if res.get("status") == "timeout"
+               else "Не удалось связаться с @SpamBot.")
+            + " Проверьте прокси и сессию аккаунта и повторите.",
             parse_mode="HTML",
             reply_markup=_back_to_acc_markup(callback_data.acc_id),
         )
@@ -3900,7 +3941,10 @@ async def _finalize_import(
     accounts = await db.get_tg_accounts(pool, message.from_user.id)
 
     tg_user_id = info.get("tg_user_id") or 0
-    phone = info.get("phone") or f"id:{tg_user_id or 'unknown'}"
+    # Пустой номер → `id:<uid>` делает общая запись аккаунта; без uid она
+    # отказывает. Раньше здесь подставлялось `id:unknown` — один ключ на все
+    # такие сессии, и вторая перезаписывала первую.
+    phone = info.get("phone") or (f"id:{tg_user_id}" if tg_user_id else "")
 
     # ── Duplicate check by tg_user_id ─────────────────────────────────────────
     # The DB unique constraint is (owner_id, phone). When the same Telegram account
@@ -3919,25 +3963,24 @@ async def _finalize_import(
             existing_by_uid = None
 
     if existing_by_uid:
-        # Account already exists — update the session string instead of inserting.
+        # Аккаунт уже есть — обновляем сессию той же общей записью, что и все
+        # входы. Свой UPDATE здесь не снимал залипшие блокировки прошлой
+        # сессии (in_operation, cooldown_until, обнулённое доверие): аккаунт
+        # «переподключили», а операции его так и не брали.
         try:
-            from services.token_vault import encrypt_token, session_fingerprint
-
-            await pool.execute(
-                """UPDATE tg_accounts
-                   SET session_str=$1, session_fp=$5, first_name=$2, username=$3,
-                       acc_status='active', status_reason=NULL,
-                       status_checked_at=now(), is_active=true, last_used=now()
-                   WHERE id=$4""",
-                encrypt_token(session_str),
-                info.get("first_name", ""),
-                info.get("username", ""),
-                existing_by_uid["id"],
-                session_fingerprint(session_str),
+            await db.add_tg_account(
+                pool,
+                owner_id=message.from_user.id,
+                phone=existing_by_uid["phone"] or phone,
+                session_str=session_str,
+                tg_user_id=tg_user_id,
+                first_name=info.get("first_name", ""),
+                username=info.get("username", ""),
             )
-        except Exception as exc:
+        except Exception:
+            log.exception("_finalize_import: обновление сессии acc=%s", existing_by_uid["id"])
             await message.answer(
-                f"❌ Ошибка обновления сессии в БД: <code>{escape(str(exc)[:200])}</code>",
+                "❌ Сессия не обновлена — не удалось записать в базу. Попробуйте ещё раз.",
                 parse_mode="HTML",
                 reply_markup=terminal_kb(),
             )
@@ -4002,9 +4045,13 @@ async def _finalize_import(
             lang_code=device.get("lang_code"),
             system_lang_code=device.get("system_lang_code"),
         )
-    except Exception as exc:
+    except db.AccountIdentityMissing as exc:
+        await message.answer(f"❌ {escape(str(exc))}", reply_markup=terminal_kb())
+        return
+    except Exception:
+        log.exception("_finalize_import: запись аккаунта owner=%s", message.from_user.id)
         await message.answer(
-            f"❌ Ошибка сохранения в БД: <code>{escape(str(exc)[:200])}</code>",
+            "❌ Аккаунт не сохранён — не удалось записать в базу. Попробуйте ещё раз.",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -4205,20 +4252,17 @@ async def _do_batch_import(
                     existing_uid_row = None
 
             if existing_uid_row:
-                acc_id = existing_uid_row["id"]
-                from services.token_vault import encrypt_token, session_fingerprint
-
-                await pool.execute(
-                    """UPDATE tg_accounts
-                       SET session_str=$1, session_fp=$5, first_name=$2, username=$3,
-                           acc_status='active', status_reason=NULL,
-                           status_checked_at=now(), is_active=true, last_used=now()
-                       WHERE id=$4""",
-                    encrypt_token(validated_str),
-                    info.get("first_name", ""),
-                    info.get("username", ""),
-                    acc_id,
-                    session_fingerprint(validated_str),
+                # Обновление — той же общей записью аккаунта (она находит
+                # аккаунт по tg_user_id и снимает залипшие блокировки прошлой
+                # сессии), а не своим UPDATE, который их оставлял.
+                acc_id = await db.add_tg_account(
+                    pool,
+                    owner_id=user_id,
+                    phone=phone,
+                    session_str=validated_str,
+                    tg_user_id=tg_uid,
+                    first_name=info.get("first_name", ""),
+                    username=info.get("username", ""),
                 )
                 name = (
                     info.get("first_name")
@@ -4276,8 +4320,11 @@ async def _do_batch_import(
                         "Ошибка привязки кластера при батч-импорте аккаунта",
                         account_id=acc_id,
                     )
+        except db.AccountIdentityMissing as e:
+            err_list.append(f"❌ Сессия #{i + 1}: {escape(str(e))}")
         except Exception as e:
-            err_list.append(f"❌ Сессия #{i + 1}: {escape(str(e)[:60])}")
+            log.warning("batch import: сессия #%d: %s", i + 1, e)
+            err_list.append(f"❌ Сессия #{i + 1}: {escape(_login_ru(e))}")
 
         if (i + 1) % 3 == 0 or i + 1 == total:
             try:

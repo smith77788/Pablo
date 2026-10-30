@@ -40,9 +40,13 @@ def test_importer_assigns_device_fields_on_insert():
     # использует генератор отпечатка с локалью по стране номера
     assert "generate_device_fingerprint" in src
     assert "country_code_from_phone" in src
-    # все device-колонки реально попадают в INSERT tg_accounts
-    ins = src[src.index("INSERT INTO tg_accounts"):]
+    # все device-поля уходят в общую запись аккаунта, а она пишет их в INSERT
+    with open(os.path.join(ROOT, "database/db.py"), encoding="utf-8") as f:
+        dbsrc = f.read()
+    up = dbsrc[dbsrc.index("async def upsert_tg_account("):]
+    ins = up[up.index("INSERT INTO tg_accounts"):]
     ins = ins[:ins.index(")", ins.index("VALUES"))]
     for col in ("device_model", "system_version", "app_version",
                 "lang_code", "system_lang_code"):
-        assert col in ins, f"колонка {col} не попала в INSERT импорта"
+        assert f'{col}=dev["{col}"]' in src, f"поле {col} не передано в запись импорта"
+        assert col in ins, f"колонка {col} не попала в INSERT аккаунта"

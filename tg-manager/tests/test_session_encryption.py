@@ -124,9 +124,11 @@ def test_importer_dedups_by_fingerprint_not_ciphertext():
 def test_add_tg_account_encrypts_before_store():
     from database import db
 
-    src = inspect.getsource(db.add_tg_account)
-    assert "encrypt_token(session_str)" in src, "add_tg_account должен шифровать session_str"
-    assert "session_fp" in src, "add_tg_account должен писать session_fp для дедупа"
+    # add_tg_account — обёртка над общей записью аккаунта; шифрует она.
+    assert "upsert_tg_account(" in inspect.getsource(db.add_tg_account)
+    src = inspect.getsource(db.upsert_tg_account)
+    assert "encrypt_token(session_str)" in src, "upsert_tg_account должен шифровать session_str"
+    assert "session_fp" in src, "upsert_tg_account должен писать session_fp для дедупа"
 
 
 def test_all_session_write_paths_encrypt():
@@ -142,7 +144,13 @@ def test_all_session_write_paths_encrypt():
     ):
         with open(os.path.join(root, rel), encoding="utf-8") as f:
             src = f.read()
-        # у каждого файла, пишущего session_str, должен быть encrypt_token
-        if "session_str=$" in src or "session_str, " in src:
+        # у каждого файла, пишущего session_str, должен быть encrypt_token —
+        # или запись идёт через общую db.upsert_tg_account, которая шифрует сама
+        # (её проверяет тест выше).
+        import re
+
+        writes = (re.search(r"session_str\s*=\s*\$\d", src)
+                  or re.search(r"INSERT\s+INTO\s+tg_accounts[^;]*?session_str", src, re.S))
+        if writes:
             assert "encrypt_token(" in src, f"{rel}: пишет session_str без encrypt_token"
             assert "session_fp" in src, f"{rel}: пишет session_str без session_fp"

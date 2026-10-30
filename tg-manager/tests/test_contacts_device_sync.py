@@ -120,16 +120,19 @@ def test_hub_contacts_skip_excluded_and_dedup():
 
 
 @pytest.mark.parametrize("path,needle", [
+    ("database/db.py", "async def upsert_tg_account("),
     ("database/db.py", "async def add_tg_account("),
     ("services/session_importer.py", "async def import_sessions("),
     ("bot/handlers/auto_registrar.py", "async def _save_account("),
 ])
 def test_every_connect_path_schedules_sync(path, needle):
+    """Синхронизацию ставит общая запись аккаунта; каждый вход идёт через неё."""
     src = (ROOT / path).read_text(encoding="utf-8")
     i = src.index(needle)
     j = src.find("\nasync def ", i + 1)
     body = src[i:j if j > 0 else None]
-    assert "schedule_for_new_account(" in body, f"{path}: подключение без синхронизации"
+    assert ("schedule_for_new_account(" in body
+            or "upsert_tg_account(" in body), f"{path}: подключение без синхронизации"
 
 
 def test_schedule_goes_through_operation_bus(monkeypatch):

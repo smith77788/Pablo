@@ -214,6 +214,7 @@ async def import_sessions(
     if not lines:
         return {"imported": 0, "failed": 0, "errors": ["Пустые данные"]}
     imported = 0
+    updated = 0
     failed = 0
     errors = []
     # Каждая строка валидируется реальным подключением к Telegram (до 15с) —
@@ -330,9 +331,11 @@ async def import_sessions(
         # приходил владельцу как «ошибка БД» — на КАЖДОЙ строке. При импорте
         # пачкой это пятьсот одинаковых сообщений, все не про то: человек идёт
         # чинить базу, а дело в ключе шифрования. Причина тут общая для всех
-        # строк, поэтому говорим её один раз и останавливаемся.
+        # строк, поэтому говорим её один раз и останавливаемся. Само
+        # шифрование при записи делает upsert_tg_account; здесь — только
+        # проверка ключа до записи.
         try:
-            _enc_session = encrypt_token(session_str)
+            encrypt_token(session_str)
         except Exception as e:
             _rest = len(parsed) - _pos - 1
             failed += 1 + _rest
@@ -343,36 +346,50 @@ async def import_sessions(
                 + (f", ещё {_rest} строк не обработано." if _rest else ".")
             )
             break
+        # Запись — общей дверью всех входов (`db.upsert_tg_account`). Своя
+        # INSERT здесь выбрасывала user_id, имя и username, которые только что
+        # вернул get_me: tg_user_id оставался NULL, и тот же аккаунт с другой
+        # сессией становился вторым аккаунтом. Пустой номер писался как '', и
+        # вторая такая сессия падала на уникальном (owner_id, phone) с
+        # «ошибкой БД».
+        from database import db as _db
+
         try:
-            await pool.execute(
-                """INSERT INTO tg_accounts
-                       (owner_id, session_str, session_fp, phone, is_active, acc_status,
-                        device_model, system_version, app_version, lang_code, system_lang_code,
-                        api_id, proxy_id)
-                   VALUES ($1, $2, $3, $4, TRUE, 'active',
-                        $5, $6, $7, $8, $9, $10, $11)""",
-                owner_id, _enc_session, _fp, phone,
-                dev["device_model"], dev["system_version"], dev["app_version"],
-                dev["lang_code"], dev["system_lang_code"],
-                _assign_api_id(_fp), _acc_proxy,
+            _acc_id, _created, _final_proxy = await _db.upsert_tg_account(
+                pool, owner_id,
+                phone=phone,
+                session_str=session_str,
+                tg_user_id=result.get("user_id"),
+                first_name=result.get("first_name") or "",
+                username=result.get("username") or "",
+                device_model=dev["device_model"],
+                system_version=dev["system_version"],
+                app_version=dev["app_version"],
+                lang_code=dev["lang_code"],
+                system_lang_code=dev["system_lang_code"],
+                api_id=_assign_api_id(_fp),
+                proxy_id=_acc_proxy,
             )
-            imported += 1
-            _plan_pos += 1
-            _assigned.append(_acc_proxy)
-            try:
-                _new_id = await pool.fetchval(
-                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND session_fp=$2 "
-                    "ORDER BY id DESC LIMIT 1", owner_id, _fp)
-            except Exception:
-                _new_id = None   # аккаунт уже сохранён — не считаем его ошибкой
-            if _new_id:
-                # Синхронизация контактов «как с устройства» — как у любого
-                # другого подключения (database.db.add_tg_account).
-                from services.contacts_hub.device_sync import schedule_for_new_account
-                await schedule_for_new_account(pool, owner_id, int(_new_id))
-        except Exception as e:
+        except _db.AccountIdentityMissing as e:
             failed += 1
-            errors.append(f"Строка {i+1}: ошибка БД — {str(e)[:100]}")
+            errors.append(f"Строка {i+1}: {e}")
+            continue
+        except Exception:
+            log.exception("import_sessions: запись аккаунта owner=%s", owner_id)
+            failed += 1
+            errors.append(f"Строка {i+1}: ошибка БД — аккаунт не сохранён, попробуйте ещё раз")
+            continue
+        if _created:
+            imported += 1
+            # Место в раскладке прокси занимает только новый аккаунт: у
+            # переимпортированного прокси остаётся прежний.
+            _plan_pos += 1
+            _assigned.append(_final_proxy)
+        else:
+            updated += 1
+            errors.append(
+                f"Строка {i+1}: аккаунт уже был у вас (id={_acc_id}) — "
+                "сессия обновлена, дубль не создан")
     # CF-релей НЕ раздаём импортированным аккаунтам автоматически: без прокси —
     # прямой host-IP. Прокси задаёт пользователь (proxy_id при импорте), CF/IPv6 —
     # только по явному выбору. Авто-CF делала релей «основой» и запирала аккаунты.
@@ -386,5 +403,6 @@ async def import_sessions(
     # откроет когда-нибудь потом (или никогда). Объяснять общий IP после
     # массового бана когорты уже поздно.
     _iso = isolation_summary(_assigned, _prior_loads)
-    return {"imported": imported, "failed": failed, "errors": errors[:20],
+    return {"imported": imported, "updated": updated, "failed": failed,
+            "errors": errors[:20],
             "isolation": _iso, "isolation_note": isolation_note(_iso)}

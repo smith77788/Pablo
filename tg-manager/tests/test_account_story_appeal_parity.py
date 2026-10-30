@@ -40,7 +40,10 @@ def test_story_fsm_two_steps_media_then_caption():
 
 def test_handlers_call_real_backends():
     h = _read("bot/handlers/accounts.py")
-    assert "account_manager.appeal_spamblock(acc[\"session_str\"], dict(acc))" in h
+    # Аппеляция — через общую дверь реабилитации (её же зовёт мини-апп),
+    # а она — через настоящий бэкенд @SpamBot.
+    assert "account_rehab.run_manual_appeal(" in h
+    assert "account_manager.appeal_spamblock(" in _read("services/account_rehab.py")
     assert "story_manager.post_story(" in h
 
 
