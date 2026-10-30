@@ -248,10 +248,17 @@ async def test_shutdown_stops_the_poller_from_taking_new_work():
 
 
 def test_main_calls_shutdown_before_closing_the_pool():
-    """Уборка по закрытому пулу — это отсутствие уборки."""
+    """Уборка по закрытому пулу — это отсутствие уборки.
+
+    Проверяем ВЫЗОВ и его место, а не точный текст аргументов: раньше здесь
+    стояло дословное `op_worker.shutdown(pool)`, и появление именованного
+    аргумента (`bot=` для последнего слива защитных тревог) красило тест,
+    ничего не сломав. Смысл теста — порядок относительно `pool.close()`.
+    """
     with open(os.path.join(ROOT, "main.py"), encoding="utf-8") as f:
         src = f.read()
-    assert "op_worker.shutdown(pool)" in src, "main не сворачивает воркер операций"
-    assert src.index("op_worker.shutdown(pool)") < src.index("await pool.close()"), (
+    call = "op_worker.shutdown(pool"
+    assert call in src, "main не сворачивает воркер операций"
+    assert src.index(call) < src.index("await pool.close()"), (
         "shutdown вызывается после закрытия пула — уборка не выполнится"
     )

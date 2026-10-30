@@ -3967,6 +3967,11 @@ _PROTECTIVE_FAILURE_COUNTERS = {
 # рестарт, как и окно алертов о застрявших операциях).
 _PROTECTIVE_ALERT_REPEAT_S = 3 * 3600
 
+# Сколько даём последнему сливу защитных тревог на остановке. Коротко
+# намеренно: уборка уже сделана, а платформа убивает контейнер по своему
+# таймауту, и зависший слив забрал бы остаток уборки (закрытие пула и сессии).
+_SHUTDOWN_ALERT_FLUSH_S = 5.0
+
 
 def _counter_total(counters: dict, name: str) -> float:
     """Сумма счётчика по всем меткам: в срезе имена идут как name{label="..."}."""
@@ -4340,7 +4345,9 @@ async def _stand_down_after_lease_loss(
     return {"stopped": stopped, "released": released}
 
 
-async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:
+async def shutdown(
+    pool: asyncpg.Pool, grace_s: float = 10.0, bot: Bot | None = None,
+) -> dict:
     """Свернуть воркер по SIGTERM, не оставив после себя сирот.
 
     ПОЧЕМУ ЭТО НУЖНО. Railway шлёт SIGTERM на каждом деплое, и до сих пор
@@ -4442,6 +4449,28 @@ async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:
         "op_worker shutdown: %d операций возвращено в очередь, %d аккаунтов освобождено",
         requeued, len(held),
     )
+
+    # ПОСЛЕДНИЙ СЛИВ ЗАЩИТНЫХ ТРЕВОГ. Счётчики защиты живут в памяти процесса,
+    # а сторож, доносящий их владельцу словами, ходит раз в ~5 минут. Значит
+    # сбой защитной записи, случившийся в последние минуты перед остановкой,
+    # не доезжал до владельца НИКОГДА: процесс умирал вместе со счётчиками.
+    # А сбои эти как раз к остановке и тяготеют — рестарт платформы давит на
+    # базу, и `_reset_stale_running` на старте пишет в неё первым делом.
+    #
+    # Спама не будет: окно анти-повтора у этих тревог лежит в БД
+    # (`notify_dedup_ok`, 3 часа) и рестарт переживает, поэтому база отсчёта
+    # здесь пустая — «доложи всё, о чём ещё не докладывали».
+    #
+    # Стоит ПОСЛЕ возврата операций и снятия аренд и ограничено по времени:
+    # уборка важнее тревоги, а платформа убьёт контейнер по своему таймауту.
+    if bot is not None:
+        try:
+            await asyncio.wait_for(
+                _watchdog_protective_failures(pool, bot, {}),
+                timeout=_SHUTDOWN_ALERT_FLUSH_S)
+        except Exception as e:
+            log_exc_swallow(log, f"op_worker shutdown: слив защитных тревог: {e}")
+
     return {"requeued": requeued, "released": len(held)}
 
 
