@@ -29,10 +29,13 @@ def test_start_filter_includes_commenters():
     assert "start_comments" in src and '"comments"' in src
 
 
-def test_start_parse_dispatches_commenters():
-    path = os.path.join(os.path.dirname(__file__), "..", "bot", "handlers", "audience_parser.py")
-    with open(path) as f:
+def test_bus_executor_dispatches_commenters():
+    """Бот больше не зовёт разбор сам — он ставит операцию в шину, а
+    комментаторов разбирает исполнитель `parse_audience`."""
+    path = os.path.join(os.path.dirname(__file__), "..", "services", "op_worker.py")
+    with open(path, encoding="utf-8") as f:
         src = f.read()
-    assert "parse_commenters" in src
-    # диспетч по типу — comments должен вызывать именно parse_commenters
-    assert 'parse_type == "comments"' in src
+    body = src[src.index("async def _exec_parse_audience("):]
+    body = body[:body.index("async def _exec_reg_check(")]
+    assert 'parse_type == "comments"' in body
+    assert "parse_commenters" in body

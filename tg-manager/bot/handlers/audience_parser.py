@@ -8,7 +8,12 @@ Flows:
 - Экспорт в CSV / текстовый список
 - Удаление аудитории
 
-Subscription: STARTER минимум для парсинга.
+Тариф разбора один на весь продукт — `min_plan` операции `parse_audience`
+в реестре шины (`_PARSE_PLAN`). Бот раньше требовал PRO, мини-апп — STARTER.
+Гео-парсинг идёт не через шину и остаётся на PRO.
+
+Сам разбор бот не ведёт: он ставит операцию `parse_audience` в шину, как и
+мини-апп. Итог (с причиной обрыва) приходит владельцу сообщением шины.
 """
 
 from __future__ import annotations
@@ -42,9 +47,17 @@ router = Router()
 _PAGE_SIZE = 10
 
 
+def _parse_plan() -> str:
+    """Тариф разбора — из реестра шины, а не своей константой."""
+    from services.operation_bus import OP_REGISTRY
+
+    return OP_REGISTRY["parse_audience"].get("min_plan") or "starter"
+
+
 class ParserFSM(StatesGroup):
     waiting_source = State()
     waiting_limit = State()
+    waiting_days = State()  # окно активности для «активных» и «комментаторов»
     geo_coords = State()   # широта,долгота для гео-парсинга
     geo_radius = State()   # радиус в метрах
     ops_select = State()   # выбор баз для операций (merge/exclude/dedup)
@@ -90,12 +103,13 @@ def _menu_kb() -> InlineKeyboardBuilder:
 async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
 
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    _plan = _parse_plan()
+    if not await require_plan(pool, callback.from_user.id, _plan):
         await callback.message.edit_text(
-            locked_text("Парсер аудитории", "pro"),
+            locked_text("Парсер аудитории", _plan),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "pro", back_callback=BmCb(action="monitoring")
+                _plan, back_callback=BmCb(action="monitoring")
             ),
         )
         return
@@ -124,7 +138,7 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"Запусков парсера: <b>{runs}</b>\n\n"
         "Извлекайте аудиторию из каналов и групп для дальнейшей работы.\n"
         "• <b>Участники</b> — все подписчики канала/группы\n"
-        "• <b>Активные</b> — кто писал в группе за последние 30 дней\n"
+        "• <b>Активные</b> — кто писал в группе за выбранный срок\n"
         "• <b>Комментаторы</b> — авторы комментариев в обсуждениях канала",
         parse_mode="HTML",
         reply_markup=_menu_kb().as_markup(),
@@ -141,8 +155,9 @@ async def cb_parser_start(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer("🔒 Требуется PRO", show_alert=True)
+    _plan = _parse_plan()
+    if not await require_plan(pool, callback.from_user.id, _plan):
+        await callback.answer(f"🔒 Требуется тариф {_plan.upper()}", show_alert=True)
         return
     await safe_answer(callback)
 
@@ -227,8 +242,11 @@ async def cb_parser_limit_quick(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await safe_answer(callback)
-    limit = int(callback.data.split(":")[-1])
-    await _start_parse(callback.message, state, pool, callback.from_user.id, limit)
+    try:
+        limit = max(10, min(int(callback.data.split(":")[-1]), 10000))
+    except ValueError:
+        return
+    await _after_limit(callback.message, state, pool, callback.from_user.id, limit)
 
 
 @router.message(ParserFSM.waiting_limit)
@@ -246,32 +264,71 @@ async def fsm_parser_limit(
             "⚠️ Введите число (от 10 до 10000):", reply_markup=kb.as_markup()
         )
         return
-    await _start_parse(message, state, pool, message.from_user.id, limit)
+    await _after_limit(message, state, pool, message.from_user.id, limit)
 
 
-_PARSE_TIMEOUT = 300  # 5 минут максимум на операцию
+_DAYS_CHOICES = (7, 30, 90)
 
 
-def _friendly_parse_error(e: Exception) -> str:
-    msg = str(e).lower()
-    if "connector is closed" in msg or "clientconnectionerror" in msg:
-        return "Соединение с Telegram прервалось. Попробуйте ещё раз."
-    if "flood" in msg or "floodwaiterror" in msg:
-        return "Telegram ограничил запросы (FloodWait). Подождите несколько минут."
-    if "usernotparticipant" in msg or "channelprivateerror" in msg:
-        return "Нет доступа к каналу/группе. Аккаунт должен быть подписчиком."
-    if "usernaminvalid" in msg or "not found" in msg or "no user" in msg:
-        return "Канал/группа не найдены. Проверьте username."
-    if "timeout" in msg or "timed out" in msg:
-        return "Время ожидания истекло (>5 мин). Попробуйте с меньшим лимитом."
-    return str(e)[:200]
+async def _after_limit(
+    msg_target, state: FSMContext, pool: asyncpg.Pool, owner_id: int, limit: int
+) -> None:
+    """Для «активных» и «комментаторов» спросить окно, остальным — сразу в шину.
+
+    Раньше бот окно не спрашивал вовсе: активные считались за 30 дней,
+    комментаторы — за 90, и выбрать срок можно было только в мини-аппе.
+    """
+    data = await state.get_data()
+    if data.get("parse_type") not in ("active", "comments"):
+        await _start_parse(msg_target, state, pool, owner_id, limit, days_back=30)
+        return
+    await state.update_data(parse_limit=limit)
+    await state.set_state(ParserFSM.waiting_days)
+    kb = InlineKeyboardBuilder()
+    for d in _DAYS_CHOICES:
+        kb.button(text=f"{d} дн.", callback_data=f"prs:days:{d}")
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+    kb.adjust(len(_DAYS_CHOICES), 1)
+    await msg_target.answer(
+        "🗓 <b>За какой срок собирать?</b>\n\n"
+        "Возьмём тех, кто писал за последние N дней.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("prs:days:"))
+async def cb_parser_days(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await safe_answer(callback)
+    try:
+        days = int(callback.data.split(":")[-1])
+    except ValueError:
+        return
+    if days not in _DAYS_CHOICES:
+        return
+    data = await state.get_data()
+    limit = int(data.get("parse_limit") or 500)
+    await _start_parse(callback.message, state, pool, callback.from_user.id,
+                       limit, days_back=days)
 
 
 async def _start_parse(
-    msg_target, state: FSMContext, pool: asyncpg.Pool, owner_id: int, limit: int
+    msg_target, state: FSMContext, pool: asyncpg.Pool, owner_id: int, limit: int,
+    days_back: int = 30,
 ) -> None:
-    from services.parser import parse_members, parse_active_users, parse_commenters
-    from services import infra_orchestrator
+    """Поставить разбор в шину операций — ту же дверь, что у мини-аппа.
+
+    Раньше бот звал parse_members/parse_active_users/parse_commenters сам, под
+    `wait_for(300 с)`: мимо тарифа шины, без отмены, без истории операции и без
+    передачи базы в инвайт, а снятая по тайм-ауту корутина оставляла запуск
+    «в работе» навсегда. Теперь разбор ведёт исполнитель `parse_audience`, а
+    итог с причиной обрыва приходит владельцу сообщением шины.
+    """
+    from services import infra_orchestrator, operation_bus
+    from services.operation_bus import ImmunityBlockedError, PlanRequiredError
+    from services.parser import PARSE_TYPE_LABELS
 
     data = await state.get_data()
     source = data.get("parse_source", "")
@@ -287,92 +344,53 @@ async def _start_parse(
         await msg_target.answer(f"⚠️ {reason}", parse_mode="HTML")
         return
 
-    type_label = {"members": "участников", "active": "активных", "comments": "комментаторов"}.get(parse_type, "участников")
-    progress_msg = await msg_target.answer(
-        f"⏳ <b>Парсинг {type_label}</b>\n\n"
-        f"Источник: <code>{html.escape(source)}</code>\n"
-        f"Лимит: <b>{limit:,}</b>\n\n"
-        "🔌 Подключаюсь к Telegram...",
-        parse_mode="HTML",
-    )
-
-    last_update = {"n": 0}
-
-    async def progress_cb(current: int, total: int) -> None:
-        if current - last_update["n"] >= 50:
-            last_update["n"] = current
-            pct = min(100, round(current / max(total, 1) * 100))
-            bar = "▓" * (pct // 10) + "░" * (10 - pct // 10)
-            try:
-                await progress_msg.edit_text(
-                    f"⏳ <b>Парсинг {type_label}</b>\n\n"
-                    f"Источник: <code>{html.escape(source)}</code>\n\n"
-                    f"[{bar}] {pct}%\n"
-                    f"Собрано: <b>{current:,}</b> / {total:,}",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "Не удалось обновить сообщение прогресса парсинга")
-
+    kind = PARSE_TYPE_LABELS.get(parse_type, PARSE_TYPE_LABELS["members"])
+    windowed = parse_type in ("active", "comments")
+    win = f", {days_back}д" if windowed else ""
+    params = {"source_ref": source, "parse_type": parse_type, "limit": limit}
+    if windowed:
+        params["days_back"] = days_back
     try:
-        if parse_type == "members":
-            coro = parse_members(
-                pool, owner_id, source, limit=limit, progress_cb=progress_cb
-            )
-        elif parse_type == "comments":
-            coro = parse_commenters(
-                pool, owner_id, source, limit=limit, progress_cb=progress_cb
-            )
-        else:
-            coro = parse_active_users(
-                pool, owner_id, source, limit=limit, progress_cb=progress_cb
-            )
-        result = await asyncio.wait_for(coro, timeout=_PARSE_TIMEOUT)
-    except asyncio.TimeoutError:
-        await progress_msg.edit_text(
-            "⏱ <b>Время ожидания истекло</b>\n\n"
-            "Парсинг занял больше 5 минут. Попробуйте уменьшить лимит "
-            "или выбрать другой источник.",
+        op_id = await operation_bus.submit(
+            pool, owner_id, "parse_audience", params, total_items=limit,
+            label=f"Разбор {kind} из {source} (до {limit}{win})",
+        )
+    except PlanRequiredError as exc:
+        await msg_target.answer(
+            locked_text("Парсер аудитории", exc.required_plan),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                exc.required_plan, back_callback=ParserCb(action="menu")),
+        )
+        return
+    except ImmunityBlockedError as exc:
+        await msg_target.answer(
+            f"🌩 <b>Разбор временно приостановлен</b>\n\n{html.escape(str(exc))}",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
-    except Exception as e:
-        friendly = _friendly_parse_error(e)
-        await progress_msg.edit_text(
-            f"❌ <b>Ошибка парсинга</b>\n\n{html.escape(friendly)}",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        log.warning("parse error for user=%s source=%s: %s", owner_id, source, e)
-        return
-
-    if result and result.get("status") == "error":
-        await progress_msg.edit_text(
-            f"❌ <b>Ошибка парсинга</b>\n\n{html.escape(result.get('error', 'неизвестная ошибка')[:200])}",
-            parse_mode="HTML",
+    except Exception:
+        log.exception("parse_audience submit owner=%s source=%s", owner_id, source)
+        await msg_target.answer(
+            "⚠️ Не удалось поставить разбор в очередь. Повторите через минуту.",
             reply_markup=_back_kb().as_markup(),
         )
         return
 
     kb = InlineKeyboardBuilder()
-    kb.button(
-        text="📊 Просмотреть аудиторию",
-        callback_data=ParserCb(action="audience", run_id=result.get("run_id", 0)),
-    )
-    kb.button(
-        text="📥 Экспорт CSV",
-        callback_data=ParserCb(action="export", run_id=result.get("run_id", 0)),
-    )
+    kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+    kb.button(text="📋 История запусков", callback_data=ParserCb(action="runs"))
     kb.button(text="◀️ В меню парсера", callback_data=ParserCb(action="menu"))
     kb.adjust(1)
-
-    await progress_msg.edit_text(
-        f"✅ <b>Парсинг завершён!</b>\n\n"
+    await msg_target.answer(
+        f"⏳ <b>Разбор {kind} поставлен в очередь</b>\n\n"
         f"Источник: <code>{html.escape(source)}</code>\n"
-        f"Тип: {type_label}\n"
-        f"Найдено: <b>{result.get('total_found', 0):,}</b>\n"
-        f"Сохранено (новых): <b>{result.get('total_saved', 0):,}</b>",
+        f"Лимит: <b>{limit:,}</b>"
+        + (f"\nСрок: <b>{days_back} дн.</b>" if windowed else "")
+        + f"\nОперация: <code>#{op_id}</code>\n\n"
+        "Итог придёт сообщением: сколько найдено, а если разбор оборвался — "
+        "почему.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -384,7 +402,7 @@ async def _start_parse(
 @router.callback_query(ParserCb.filter(F.action == "runs"))
 async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
-    from services.parser import get_run_history
+    from services.parser import PARSE_TYPE_LABELS, get_run_history
 
     runs = await get_run_history(pool, callback.from_user.id, limit=15)
 
@@ -403,14 +421,21 @@ async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "done": "✅",
             "failed": "❌",
             "running": "⏳",
+            "pending": "⏳",
             "empty": "⚪",
+            "cancelled": "🚫",
         }.get(r["status"], "❓")
         started = r["started_at"].strftime("%d.%m %H:%M") if r["started_at"] else "—"
+        kind = PARSE_TYPE_LABELS.get(r["parse_type"], r["parse_type"])
         lines.append(
             f"{status_icon} <code>{html.escape(r['source_ref'])}</code> "
-            f"[{r['parse_type']}] — {r['total_found']:,} найдено\n"
+            f"[{html.escape(kind)}] — {r['total_found']:,} найдено\n"
             f"   <i>{started}</i>"
         )
+        # Причина обрыва — рядом с запуском: «0 найдено» без неё не отличить
+        # от пустого источника.
+        if r.get("error"):
+            lines.append(f"   ⚠️ {html.escape(str(r['error'])[:200])}")
         if r["status"] == "done" and r["total_found"] > 0:
             kb.button(
                 text=f"📥 {r['source_ref'][:20]} ({r['total_found']:,})",
@@ -842,7 +867,14 @@ async def cb_parser_confirm_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
 # ── Гео-парсинг (Nearby People) ───────────────────────────────────────────────
 
 @router.callback_query(ParserCb.filter(F.action == "start_geo"))
-async def cb_parser_geo_start(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_parser_geo_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    # Гео-парсинг идёт не через шину и своего тарифа в реестре не имеет —
+    # прежний PRO держим здесь, раз меню парсера теперь открыто по тарифу шины.
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer("🔒 Гео-парсинг доступен на тарифе PRO", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(ParserFSM.geo_coords)
     kb = InlineKeyboardBuilder()

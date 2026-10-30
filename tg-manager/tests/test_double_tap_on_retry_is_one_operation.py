@@ -76,8 +76,23 @@ def test_no_caller_disables_the_window():
     )
 
 
+def _dedup_statuses_live() -> set[str]:
+    """Статусы, по которым дедуп ищет «уже поставленную» операцию.
+
+    Набор больше не набран в SQL руками — он выводится из модели состояний
+    (`operation_bus._dedup_status_sql`), поэтому проверка смотрит туда же.
+    Читать текст `submit` здесь уже нельзя: в запросе осталась подстановка, и
+    перепись по литералам вернула бы пустой набор — то есть «статусов нет»
+    вместо «статусы такие». Ровно так эта проверка и упала, когда дверь
+    переехала.
+    """
+    from services import operation_bus
+
+    return set(re.findall(r"'([a-z_]+)'", operation_bus._dedup_status_sql()))
+
+
 def _dedup_statuses(src: str) -> set[str]:
-    """Статусы, по которым дедуп ищет «уже поставленную» операцию."""
+    """Статусы из ТЕКСТА запроса — остаётся для самопроверки детектора ниже."""
     out: set[str] = set()
     for block in re.findall(r"AND status IN \(([^)]*)\)", src):
         out |= set(re.findall(r"'([a-z_]+)'", block))
@@ -99,7 +114,7 @@ def test_the_window_never_swallows_a_retry_of_a_failed_operation():
     from services import operation_bus
 
     src = inspect.getsource(operation_bus.submit)
-    statuses = _dedup_statuses(src)
+    statuses = _dedup_statuses_live()
     assert statuses, "окно дедупа перестало ограничиваться статусами"
     assert "pending" in statuses and "running" in statuses, (
         "дедуп перестал видеть операции в полёте — двойной тап снова поставит две")
