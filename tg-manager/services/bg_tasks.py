@@ -63,6 +63,26 @@ async def drain(timeout: float = 5.0) -> dict:
 
     Возвращает {"done": N, "cancelled": M} — для лога и тестов.
     """
+    # Отчёт остановки описывает записи ЭТОГО цикла — и ничьи больше. Набор
+    # strong-ссылок модульный и живёт дольше любого event loop, а задача из
+    # цикла, который больше не крутится, не завершится никогда: её
+    # done-callback не снимет её из набора, и она остаётся там навсегда.
+    # Попав в чужую остановку, такая сирота отменялась и уходила в счётчик
+    # потерянных записей как настоящая потеря — то есть счётчик врал.
+    # У рабочего процесса цикл один (`asyncio.run(main())`), так что потерь
+    # это не стоило; стоило оно верности отчёта и прогона, где циклов много.
+    try:
+        _loop = asyncio.get_running_loop()
+    except RuntimeError:          # drain вне цикла — ждать нечем
+        _loop = None
+    orphans = [t for t in _bg_tasks
+               if not t.done() and t.get_loop() is not _loop]
+    for t in orphans:
+        _bg_tasks.discard(t)      # сиротами набор иначе растёт без предела
+    if orphans:
+        log.warning(
+            "bg_tasks: %d задач из другого цикла выброшены из набора, "
+            "в отчёт остановки они не идут", len(orphans))
     pending = [t for t in _bg_tasks if not t.done()]
     if not pending:
         return {"done": 0, "cancelled": 0}
