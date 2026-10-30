@@ -11744,6 +11744,13 @@ async function openChannel(chId) {
 }
 
 function buildChDetail(d) {
+  // Ответ без самого канала — состояние, которое этот код сам же и допускал
+  // (`d.channel||{}`), но рисовал из пустоты: выходило «Канал #undefined» и
+  // ещё десяток пустых полей. Машинное слово в тексте для человека читается
+  // как поломка, причём непонятно чья. Лучше сказать прямо.
+  if (!d || !d.channel) {
+    return empty('📡','Канал не открылся','Сервер не вернул данные канала. Обновите список и попробуйте снова');
+  }
   const c = d.channel||{};
   const acc = d.linked_account;
   const ops = d.recent_ops||[];
@@ -21567,6 +21574,14 @@ async function openGhostDetail(id) {
   txt('ghdBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api(`/api/miniapp/ghost/${id}`);
+    // Без профиля экран рисовался из пустоты и писал «Окно активности
+    // undefined:00–undefined:00». Состояние этот код сам допускал
+    // (`d.profile||{}`) — значит и сказать о нём надо словами.
+    if (!d.profile) {
+      txt('ghdBody', empty('👻','Призрак не открылся',
+        'Сервер не вернул профиль. Обновите список и попробуйте снова'));
+      return;
+    }
     const p = d.profile||{};
     txt('ghdTitle','👻 '+(p.first_name||p.phone||'Призрак'));
     const cap = p.daily_cap||0, done = d.today_actions||0;
@@ -23238,7 +23253,7 @@ async function openExpDetail(id, name) {
     // Экран был витриной: три числа и список вариантов, из действий — только
     // «Удалить». Запуск, пауза и выбор победителя жили только в боте.
     let h = `<div style="display:flex;gap:10px;padding:8px 0 12px;flex-wrap:wrap">
-        <div class="kpi-card"><div class="kpi-val" style="font-size:15px">${EXP_STATUS[d.status]||d.status}</div><div class="kpi-lbl">Статус</div></div>
+        <div class="kpi-card"><div class="kpi-val" style="font-size:15px">${EXP_STATUS[d.status]||d.status||'—'}</div><div class="kpi-lbl">Статус</div></div>
         <div class="kpi-card"><div class="kpi-val">${num(total_impr)}</div><div class="kpi-lbl">Показов</div></div>
         <div class="kpi-card"><div class="kpi-val">${num(total_conv)}</div><div class="kpi-lbl">Конверсий</div></div>
       </div>`;
@@ -26988,6 +27003,13 @@ async function loadMeshDetail(meshId, status) {
   try {
     const d = await api(`/api/miniapp/content_mesh/${meshId}`
       + (st ? '?status=' + encodeURIComponent(st) : ''));
+    // То же, что у канала и призрака: без самой сетки экран писал «задержка
+    // undefined минут». Состояние допускалось кодом — значит оно возможно.
+    if (!d.mesh) {
+      txt('mdBody', empty('🕸','Сетка не открылась',
+        'Сервер не вернул данные сетки. Обновите список и попробуйте снова'));
+      return;
+    }
     const m = d.mesh||{};
     const q = d.queue||{};
     const targets = d.targets||[];
