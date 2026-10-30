@@ -76,11 +76,24 @@ def test_the_approval_gate_has_no_caller_yet():
         "см. докстринг файла")
 
 
+def _function_source(rel: str, name: str) -> str:
+    """Текст функции по ГРАНИЦАМ из ast, а не по окну фиксированной длины.
+
+    Отрицательная проверка («слова здесь нет») внутри окна от `index()` плюс
+    N символов выключается молча: код сдвинулся, окно промахнулось, «искомого
+    нет» стало правдой. Поэтому границы берём у разбора, а не на глаз, и
+    отсутствие самой функции — тоже провал, а не тихое «нет слова».
+    """
+    src = (ROOT / rel).read_text(encoding="utf-8")
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name:
+            return "\n".join(src.splitlines()[n.lineno - 1:n.end_lineno])
+    raise AssertionError(f"{name} не найдена в {rel} — проверку надо перечитать")
+
+
 def test_the_eyes_are_really_absent():
     """Не догадка: вот чего именно нет."""
-    alerts = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
-    i = alerts.index("async def _watchdog_alerts")
-    body = alerts[i:i + 4000]
+    body = _function_source("services/op_worker.py", "_watchdog_alerts")
     assert "waiting_approval" not in body, (
         "сторож алертов научился видеть ожидающие подтверждения — значит "
         "половина долга закрыта, перечитайте докстринг этого файла")
