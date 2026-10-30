@@ -3848,6 +3848,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
     "infragram_dm_settle_write_failures_total":
         "исход ЛС не записался — на экранах кампании отправка, которой не "
         "было (или наоборот), и счёт по статусам врёт",
+    "infragram_queue_frozen_check_failures_total":
+        "детектор «очередь не разбирается» ослеп: если исполнитель операций "
+        "встанет, никто об этом не скажет — на экране остановка выглядит "
+        "обычным «ожидает»",
     "infragram_journal_write_failures_total":
         "строка успеха в журнале — повтор операции сделает действие второй раз",
     "infragram_account_cooldown_write_failures_total":

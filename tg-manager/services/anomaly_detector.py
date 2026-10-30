@@ -167,7 +167,17 @@ async def _detect_queue_frozen(pool: asyncpg.Pool) -> list[Anomaly]:
                 )
             )
     except Exception as e:
-        log.debug("_detect_queue_frozen: %s", e)
+        # Та же причина, что и у самого детектора в operation_bus: молчание
+        # здесь означает «аномалии нет», а не «проверить не вышло». Этот except
+        # ловит ещё и сборку самой аномалии, то есть случай «увидели остановку,
+        # но не смогли о ней сказать».
+        log.warning("_detect_queue_frozen: %s", e)
+        try:
+            from services import metrics as _m
+
+            _m.inc("infragram_queue_frozen_check_failures_total", {})
+        except Exception:
+            pass
     return anomalies
 
 
