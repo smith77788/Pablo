@@ -902,6 +902,10 @@ async def create_warmup_plans_bulk(
 
     Запросов — константа на пакет, а не по два на аккаунт. Бросает
     PermissionError (нет подписки / Ban Weather) до любой записи.
+
+    За раз заводится не больше `limit` планов. Если подходящих больше, в ответе
+    `left` — сколько осталось без плана: экран говорит, что нажать ещё раз, а не
+    молча обрезает пакет.
     """
     from services import operation_bus
 
@@ -954,8 +958,11 @@ async def create_warmup_plans_bulk(
                 owner_id, acc_ids, plan_type, daily, days)
     started_ids = [int(r["account_id"]) for r in (done or [])]
     await _mark_warming(pool, owner_id, started_ids, stage_events=False)
-    return {"ok": True, "started": len(started_ids), "plan_type": plan_type,
-            "profile_type": profile_type, "niche": niche}
+    # Пакет упёрся в потолок — значит, могли остаться аккаунты без плана.
+    left = (await count_warmup_candidates(pool, owner_id)
+            if len(acc_ids) >= int(limit) else 0)
+    return {"ok": True, "started": len(started_ids), "left": left,
+            "plan_type": plan_type, "profile_type": profile_type, "niche": niche}
 
 
 async def get_active_plans(pool: asyncpg.Pool, owner_id: int) -> list[dict]:

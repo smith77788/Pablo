@@ -22182,7 +22182,7 @@ async function bulkWarmup() {
   toast('🔥 Запускаю массовый прогрев…');
   try {
     const r = await api('/api/miniapp/warmup/bulk_start', {method:'POST', body:JSON.stringify({plan_type:'standard', profile_type:'mixed', niche:'general'})});
-    toast(r.started>0 ? `✅ Прогрев запущен для ${r.started} аккаунтов` : (r.note||'Нет подходящих аккаунтов'));
+    toast(r.started>0 ? `✅ Прогрев запущен для ${r.started} аккаунтов` + (r.left>0 ? ` · ещё ${r.left} без плана — нажмите снова` : '') : (r.note||'Нет подходящих аккаунтов'));
     openWarmup();
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
 }

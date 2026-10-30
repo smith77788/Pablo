@@ -251,6 +251,19 @@ def test_bulk_keeps_running_plans_and_skips_spamblock(pool):
     assert _run(aw.count_warmup_candidates(pool, OWNER)) == 0
 
 
+def test_bulk_over_the_ceiling_says_how_many_are_left(pool):
+    """Пакет упёрся в потолок — ответ говорит, сколько осталось без плана,
+    а повторное нажатие заводит остаток."""
+    from services import account_warmer as aw
+
+    for _ in range(3):
+        _acc(pool)
+    res = _run(aw.create_warmup_plans_bulk(pool, OWNER, limit=2))
+    assert res["started"] == 2 and res["left"] == 1, res
+    res = _run(aw.create_warmup_plans_bulk(pool, OWNER, limit=2))
+    assert res["started"] == 1 and res["left"] == 0, res
+
+
 def test_bot_create_all_goes_through_the_shared_bulk():
     import inspect
 

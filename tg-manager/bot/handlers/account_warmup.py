@@ -303,6 +303,7 @@ async def cb_warmup_create_all_plans(
         return
 
     started = int(res.get("started") or 0)
+    left = int(res.get("left") or 0)
     if not started:
         await callback.message.edit_text(
             "⚠️ <b>Новых планов нет</b>\n\n"
@@ -319,7 +320,10 @@ async def cb_warmup_create_all_plans(
         f"Аккаунтов: <b>{started}</b>\n"
         f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n\n"
         "Уже идущие планы не тронуты. Разогрев запускается автоматически "
-        "раз в сутки.",
+        "раз в сутки."
+        + (f"\n\nЕщё <b>{left}</b> аккаунтов без плана — за раз заводится "
+           "не больше 500, нажмите «Создать планы для всех» ещё раз."
+           if left else ""),
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
