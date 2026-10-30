@@ -19927,7 +19927,7 @@ function remRow(r, i, late) {
     ? (late ? ('просрочено ' + ago(r.next_reminder_at))
             : new Date(r.next_reminder_at).toLocaleString('ru-RU'))
     : 'без даты';
-  const uname = r.username ? `<span class="row-right icon-tap" onclick="event.stopPropagation();remWrite(${i})" role="button" tabindex="0" title="Написать в Telegram">✉️</span>` : '';
+  const uname = r.username ? `<span class="row-right icon-tap" onclick="event.stopPropagation();remWrite(${i})" role="button" tabindex="0" title="Написать в Telegram" aria-label="Написать в Telegram">✉️</span>` : '';
   return `<div class="li" style="margin:0 16px 8px;display:block">
     <div class="li tap" style="padding:0" onclick="remOpen(${i})" role="button" tabindex="0">
       <div class="li-body">
