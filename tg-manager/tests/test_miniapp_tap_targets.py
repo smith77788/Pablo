@@ -31,8 +31,21 @@ MIN_ICON = 36
 MIN_GAP = 8
 
 
+#: Комментарий, объясняющий правило, обычно это правило и цитирует. Такая
+#: цитата — не действующий CSS, но текстовому поиску она неотличима от него, и
+#: первым совпадением оказывалась она: `.li-right{flex-shrink:0}` из
+#: объяснения вместо настоящего `.li-right{...;gap:8px}` сорока строками ниже,
+#: и проверка падала на живой, исправной вёрстке. Поэтому комментарии
+#: вырезаются до поиска.
+_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+
+
+def _css(html: str) -> str:
+    return _COMMENT.sub("", html)
+
+
 def _css_value(html: str, selector: str, prop: str) -> int:
-    m = re.search(re.escape(selector) + r"\{([^}]*)\}", html)
+    m = re.search(re.escape(selector) + r"\{([^}]*)\}", _css(html))
     assert m, f"нет правила {selector}"
     v = re.search(prop + r":\s*(\d+)px", m.group(1))
     assert v, f"в {selector} нет {prop}"
@@ -86,3 +99,9 @@ def test_the_proxy_row_shows_its_state_instead_of_an_ellipsis():
     assert len(subs) == 2, f"ожидались две строки прокси, найдено {len(subs)}"
     for s in subs:
         assert "wrap" in s, "строка прокси всё ещё прячет состояние за многоточием"
+
+
+def test_a_rule_quoted_in_a_comment_is_not_the_rule():
+    """Мерка на заведомо больном образце: объяснение выше настоящего правила."""
+    probe = "/* так было: .li-right{flex-shrink:0} */\n.li-right{gap:8px}"
+    assert _css_value(probe, ".li-right", "gap") == 8

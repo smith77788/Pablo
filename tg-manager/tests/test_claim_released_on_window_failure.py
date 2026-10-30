@@ -89,8 +89,10 @@ def test_parser_releases_account_when_make_client_fails(monkeypatch):
         return None
     monkeypatch.setattr(parser, "_update_run", _upd, raising=False)
 
-    with pytest.raises(RuntimeError):
-        asyncio.run(parser.parse_members(None, 1, "@src"))
+    # Сбой после создания запуска не уходит наверх исключением: запуск
+    # закрывается провалом с причиной (иначе он висел «в работе» навсегда).
+    res = asyncio.run(parser.parse_members(None, 1, "@src"))
+    assert res["status"] == "error" and res["run_id"] == 123
 
     assert not ow.is_account_in_use(7772), (
         "аккаунт обязан освободиться при сбое _make_client в окне захвата")

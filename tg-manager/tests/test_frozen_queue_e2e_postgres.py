@@ -63,6 +63,9 @@ def pool():
     except Exception as exc:
         pytest.skip(f"Postgres по INFRAGRAM_TEST_DSN недоступен: {str(exc)[:120]}")
     yield p
+    # Убрать за собой и на выходе: иначе ждущие строки этого файла остаются в
+    # базе и ломают следующий файл, который спросит очередь целиком.
+    _run(_clean(p))
     _run(p.close())
 
 
@@ -72,6 +75,36 @@ async def _clean(p):
     await p.execute("DELETE FROM operation_queue WHERE owner_id = ANY($1::bigint[])",
                     [OWNER, OWNER2])
     await p.execute("DELETE FROM platform_settings WHERE key=$1", obus.POLLER_MARK_KEY)
+
+
+async def _assert_quiet(p, why: str = "") -> None:
+    """Детектор обязан молчать — а если не молчит, сказать ПОЧЕМУ.
+
+    `queue_frozen` спрашивает очередь ЦЕЛИКОМ, без скоупа по владельцу: «вся
+    работа встала» — вопрос системный, и это правильно. Зато любая строка,
+    оставленная чужим тестом, роняет здесь «пустая очередь → None», и выглядит
+    это как сломанный детектор; разбор уходит в сторону. Чужого владельца
+    чистить нельзя — порядок тестов не наш, — поэтому называем виновного в
+    тексте провала. Так нашёлся тест запуска кампании: он убирал кампании, а
+    пять 'pending' оставлял в очереди навсегда.
+    """
+    from services import operation_bus as obus
+
+    verdict = await obus.queue_frozen(p)
+    if verdict is None:
+        return
+    foreign = await p.fetch(
+        "SELECT owner_id, count(*) AS n FROM operation_queue "
+        "WHERE owner_id <> ALL($1::bigint[]) GROUP BY 1 ORDER BY 2 DESC",
+        [OWNER, OWNER2])
+    note = ""
+    if foreign:
+        note = (" В очереди лежат ЧУЖИЕ строки (владелец → сколько): "
+                + ", ".join(f"{r['owner_id']} → {r['n']}" for r in foreign)
+                + " — похоже, чей-то тест не убрал за собой operation_queue, "
+                  "а детектор смотрит очередь целиком.")
+    raise AssertionError(
+        (why or "детектор обязан молчать") + f", а он вернул {verdict}." + note)
 
 
 async def _enqueue(p, owner: int, *, age_min: int = 0, scheduled_in_min=None,
@@ -97,7 +130,7 @@ def test_the_query_runs_at_all(pool):
         await _clean(pool)
         # Пустая очередь — верный ответ None, но получен он ДОЛЖЕН быть от
         # Postgres, а не от except-ветки fail-open.
-        assert await obus.queue_frozen(pool) is None
+        await _assert_quiet(pool)
 
         await _enqueue(pool, OWNER, age_min=30)
         verdict = await obus.queue_frozen(pool)
@@ -121,9 +154,8 @@ def test_a_real_mark_silences_the_detector(pool):
         await _enqueue(pool, OWNER, age_min=30)
         await obus.mark_poller_alive(pool, "host:1:abc")
 
-        assert await obus.queue_frozen(pool) is None, (
-            "поллер отметился только что, а детектор всё равно объявил остановку"
-        )
+        await _assert_quiet(
+            pool, "поллер отметился только что, а детектор всё равно объявил остановку")
         # Та же отметка, сдвинутая в прошлое часами БД.
         await pool.execute(
             "UPDATE platform_settings SET updated_at = now() - interval '20 minutes' "
@@ -161,19 +193,17 @@ def test_legitimate_waiting_is_not_a_stall(pool):
         # Создана час назад, но срок ещё не наступил: флуд-пауза, «продолжим
         # завтра», повтор после cooldown — всё это законное ожидание.
         await _enqueue(pool, OWNER, age_min=60, scheduled_in_min=120)
-        assert await obus.queue_frozen(pool) is None
+        await _assert_quiet(pool)
 
         await _clean(pool)
         await _enqueue(pool, OWNER, age_min=60, approval=True)
-        assert await obus.queue_frozen(pool) is None, (
-            "операция ждёт подтверждения владельца, а детектор счёл это аварией"
-        )
+        await _assert_quiet(
+            pool, "операция ждёт подтверждения владельца, а детектор счёл это аварией")
 
         await _clean(pool)
         await _enqueue(pool, OWNER, age_min=60, status="paused")
-        assert await obus.queue_frozen(pool) is None, (
-            "приостановленная владельцем очередь — не остановка исполнителя"
-        )
+        await _assert_quiet(
+            pool, "приостановленная владельцем очередь — не остановка исполнителя")
 
     _run(_t())
 
@@ -220,7 +250,7 @@ def test_the_threshold_is_the_one_from_the_module(pool):
         await _clean(pool)
         # Ровно под порогом молчания — ещё не авария.
         await _enqueue(pool, OWNER, age_min=max(1, obus.POLLER_SILENCE_S // 60 - 2))
-        assert await obus.queue_frozen(pool) is None
+        await _assert_quiet(pool)
         await _enqueue(pool, OWNER, age_min=obus.POLLER_SILENCE_S // 60 + 2)
         assert await obus.queue_frozen(pool) is not None
 

@@ -57,12 +57,28 @@ const CHROME = process.env.CHROME_BIN || [
 ].find(p => { try { fs.accessSync(p); return true; } catch { return false; } });
 
 const browser = await chromium.launch(CHROME ? { executablePath: CHROME } : {});
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: sweepMode ? 1 : 2 });
+// Ширина окна — главный множитель обрезки, и 390 (iPhone 14) её почти не
+// вызывает. Узкие телефоны в ходу: 320 — iPhone SE первого поколения и
+// недорогие Android. MINIAPP_WIDTH позволяет прогнать обход по обеим.
+const VW = Number(process.env.MINIAPP_WIDTH) || 390;
+const ctx = await browser.newContext({ viewport: { width: VW, height: 844 }, deviceScaleFactor: sweepMode ? 1 : 2 });
 const page = await ctx.newPage();
 await page.addInitScript((fat) => {
-  window.Telegram = { WebApp: { ready(){}, expand(){}, initData:'', initDataUnsafe:{ user:{ id:1, first_name:'Test' } }, colorScheme:'dark', themeParams:{}, MainButton:{show(){},hide(){},setText(){},onClick(){}}, BackButton:{show(){},hide(){},onClick(){}}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}}, onEvent(){}, offEvent(){}, openTelegramLink(){}, showAlert(){}, showConfirm(){}, close(){}, setHeaderColor(){}, setBackgroundColor(){} } };
+  // Заглушку надо ДЕРЖАТЬ, а не просто поставить. Рядом с index.html лежит
+  // настоящий telegram-web-app.js, он грузится и делает `window.Telegram = {...}`,
+  // затем `window.Telegram.WebApp = ...` — то есть затирает заглушку, и
+  // initData становится пустой. Приложение уходит в ветку связывания
+  // устройства, поверх всего встаёт оверлей ввода кода, boot() до конца не
+  // доходит: любой снимок — это фотография окна входа, а не приложения.
+  // Поэтому и `Telegram`, и `Telegram.WebApp` отдаются через getter с
+  // глотающим setter: присваивание SDK молча проходит и ничего не меняет
+  // (бросать нельзя — упадёт сам SDK, а с ним и загрузка страницы).
+  const WA = { ready(){}, expand(){}, initData:'stub-init-data', initDataUnsafe:{ user:{ id:1, first_name:'Test' } }, colorScheme:'dark', themeParams:{}, MainButton:{show(){},hide(){},setText(){},onClick(){}}, BackButton:{show(){},hide(){},onClick(){}}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}}, onEvent(){}, offEvent(){}, openTelegramLink(){}, showAlert(){}, showConfirm(){}, close(){}, setHeaderColor(){}, setBackgroundColor(){} };
+  const TGSTUB = {};
+  Object.defineProperty(TGSTUB, 'WebApp', { get: () => WA, set: () => {}, configurable: true });
+  Object.defineProperty(window, 'Telegram', { get: () => TGSTUB, set: () => {}, configurable: true });
   const ok = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  const EMPTY = { ok:true, accounts:[], bots:[], channels:[], keywords:[], alerts:[], suggestions:[], bot_suggestions:[], rows:[], items:[], stats:{}, total:0, count:0, presets:[], recent:[], history:[], top_channels:[], recent_activity:[], by_stage:[] };
+  const EMPTY = { ok:true, token:'stub-token', accounts:[], bots:[], channels:[], keywords:[], alerts:[], suggestions:[], bot_suggestions:[], rows:[], items:[], stats:{}, total:0, count:0, presets:[], recent:[], history:[], top_channels:[], recent_activity:[], by_stage:[] };
   if (!fat) { window.fetch = async () => ok(EMPTY); return; }
   // «Толстые» данные: длинные строки — главная причина обрезки по ширине.
   // Пустой ответ проверяет только пустые состояния экранов.
@@ -80,6 +96,7 @@ await page.addInitScript((fat) => {
     count: 1234567, total: 1234567, value: 1234567, price: 1234567,
     position: 7, prev_position: 12, pos: 7, prev_pos: 12, trust_score: 88,
     is_active: true, enabled: true, has_session: true, ok: true,
+    action: 'Проверка аккаунтов и очистка мёртвых разом',
   });
   const ROWS = Array.from({ length: 25 }, (_, i) => row(i + 1));
   const ARRAY_KEYS = ['accounts','bots','channels','keywords','alerts','suggestions',
@@ -90,9 +107,22 @@ await page.addInitScript((fat) => {
     'members','devices','plans','rules','tags','meshes','targets','variants',
     'steps','funnels','subscribers','logs','events','reminders','duplicates',
     'conflicts','networks','instances','ecosystems','gifts','stars','strikes'];
-  window.fetch = async () => {
-    const o = { ok:true, total: 1234567, count: 1234567, stats: {}, page: { limit: 25, offset: 0, has_more: true } };
+  window.fetch = async (u) => {
+    const url = String(u || '');
+    const o = { ok:true, token:'stub-token', total: 1234567, count: 1234567, stats: {}, page: { limit: 25, offset: 0, has_more: true } };
     for (const k of ARRAY_KEYS) o[k] = ROWS;
+    // Форма берётся по адресу, а не одна на всех. Список операций читает
+    // `i.action` как СТРОКУ, а чеклист активации — `s.action.kind` без всякой
+    // проверки: одной плоской строкой обе формы не удовлетворить, и заглушка
+    // неизбежно ломала одно из двух. Сломанное место уходило в отчёт ошибкой
+    // JS, которой в приложении нет (бэкенд отдаёт обе формы правильно, см.
+    // services/onboarding.py), а выдуманная находка в следующий раз
+    // закрывается списком исключений — и дыра оказывается там, где её не было.
+    if (url.indexOf('/onboarding') >= 0) {
+      o.activated = false; o.next_step = 1; o.done = 3; o.total = ROWS.length;
+      o.steps = ROWS.map((r, i) => ({ ...r, done: i < 3, optional: i % 4 === 0,
+        hint: LONG, cta: 'Подключить аккаунты', action: { kind: 'import_accounts' } }));
+    }
     return ok(o);
   };
 }, sweepMode);
@@ -105,7 +135,17 @@ await page.waitForTimeout(1200);
 
 // Мерка обрезки — одним текстом и для отчёта, и для самопроверки.
 const CLIPPED = () => {
-  const scr = document.querySelector('.screen.show');
+  // Окно лежит ПОВЕРХ экрана и мерится вместо него: пока корнем был только
+  // `.screen.show`, семьдесят одно модальное окно не мерилось вовсе — ни
+  // одной находки оттуда прийти не могло.
+  //
+  // Корень — именно `.modal`, а не подложка `.mbg`. Подложка это flex-строка
+  // во весь экран, и всё, что в неё положить, она ужимает по своей ширине:
+  // самопроверка показала это прямо — заведомо широкий элемент, подставленный
+  // в подложку, мерка не находила. Внутри `.modal` он находится.
+  const _mb = document.querySelector('.mbg.show');
+  const scr = _mb ? (_mb.querySelector('.modal') || _mb)
+                  : document.querySelector('.screen.show');
   const W = window.innerWidth;
   const out = [];
   if (!scr) return { n: 0, worst: [] };
@@ -131,7 +171,9 @@ const CLIPPED = () => {
 async function selfCheck() {
   return page.evaluate((src) => {
     const clipped = new Function('return (' + src + ')()');
-    const scr = document.querySelector('.screen.show');
+    const _mb = document.querySelector('.mbg.show');
+    const scr = _mb ? (_mb.querySelector('.modal') || _mb)
+                    : document.querySelector('.screen.show');
     if (!scr) return { ran: false };
     const bad = document.createElement('div');
     bad.style.cssText = 'width:900px;height:20px';
@@ -146,7 +188,12 @@ async function selfCheck() {
 }
 
 if (sweepMode) {
-  const fns = fs.readFileSync(sweepList, 'utf8').split('\n').map(s => s.trim()).filter(Boolean);
+  // Строка списка — либо `имя`, либо `имя|аргумент`. Второй вид — ПРОБНЫЙ
+  // вызов: функция требует id сущности, заглушка отдаёт одни и те же данные на
+  // любой URL, поэтому экран детали рисуется при любом id. Падение такого
+  // вызова — не находка, а непокрытый экран: он виден в строке охвата.
+  const fns = fs.readFileSync(sweepList, 'utf8').split('\n').map(s => s.trim()).filter(Boolean)
+    .map(line => { const [name, arg] = line.split('|'); return { name, arg, probe: arg !== undefined }; });
   const sc = await selfCheck();
   console.log(`самопроверка мерки: заведомо обрезанный элемент найден=${sc.caught}`
     + ` | прежняя мерка (scrollWidth) его видит=${sc.old}`);
@@ -155,25 +202,119 @@ if (sweepMode) {
     process.exitCode = 2;
   }
   const report = [];
-  for (const fn of fns) {
+  const seen = new Set();          // какие экраны обход ДЕЙСТВИТЕЛЬНО показал
+  let probesShown = 0, probesTotal = 0;
+  for (const { name: fn, arg, probe } of fns) {
     live = [];
-    const r = await page.evaluate(async (name) => {
+    if (probe) probesTotal++;
+    const r = await page.evaluate(async ({ name, a }) => {
       if (typeof window[name] !== 'function') return { missing: true };
-      try { await window[name](); } catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
+      try { a === undefined ? await window[name]() : await window[name](a); }
+      catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
       return {};
-    }, fn);
+    }, { name: fn, a: arg });
     await page.waitForTimeout(220);
+    // MINIAPP_SHOT_DIR — снимок каждого экрана обхода. Отчёт говорит, ЧТО
+    // обрезано, а посмотреть, как это выглядит, иначе нечем: экраны обхода не
+    // вкладки, и одиночный режим их не открывает.
+    if (process.env.MINIAPP_SHOT_DIR) {
+      await page.screenshot({ path: path.join(process.env.MINIAPP_SHOT_DIR, `miniapp_${fn}.png`) });
+    }
     const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
+    const shownId = await page.evaluate(() => {
+      const el = document.querySelector('.screen.show');
+      return el ? el.id : null;
+    });
+    if (shownId) { seen.add(shownId); if (probe) probesShown++; }
     const problems = [];
-    if (r.missing) problems.push('НЕТ ФУНКЦИИ');
-    if (r.threw) problems.push('THREW: ' + r.threw);
-    if (live.length) problems.push(...live.slice(0, 2));
+    // У пробного вызова падение значит «подставленный id не подошёл», а не
+    // поломку: в находки оно не идёт, иначе отчёт утонет в шуме и перестанет
+    // что-либо значить. Обрезка считается у обоих одинаково — она мерится по
+    // тому, что ДЕЙСТВИТЕЛЬНО нарисовано.
+    if (!probe) {
+      if (r.missing) problems.push('НЕТ ФУНКЦИИ');
+      if (r.threw) problems.push('THREW: ' + r.threw);
+      if (live.length) problems.push(...live.slice(0, 2));
+    }
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
     if (problems.length) report.push(fn + ' | ' + problems.join(' | '));
     await page.evaluate(() => { try { while (typeof STACK !== 'undefined' && STACK.length) back(); } catch(_) {} });
     await page.waitForTimeout(60);
   }
-  console.log(`экранов проверено: ${fns.length}`);
+  // ── Вкладки ────────────────────────────────────────────────────────────
+  // Пять вкладок открываются не функцией-открывашкой, а навигацией, поэтому в
+  // список они не попадают и до этого не мерились вовсе.
+  for (const t of ['home', 'accounts', 'bots', 'broadcasts', 'more']) {
+    live = [];
+    await page.evaluate((x) => {
+      try { while (typeof STACK !== 'undefined' && STACK.length) back(); } catch (_) {}
+      if (typeof navGo === 'function') navGo(x, null);
+      else if (typeof goTab === 'function') goTab(x);
+    }, t);
+    await page.waitForTimeout(400);
+    const shownId = await page.evaluate(() => {
+      const el = document.querySelector('.screen.show');
+      return el ? el.id : null;
+    });
+    if (shownId) seen.add(shownId);
+    if (process.env.MINIAPP_SHOT_DIR) {
+      await page.screenshot({ path: path.join(process.env.MINIAPP_SHOT_DIR, `tab_${t}.png`) });
+    }
+    const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
+    const problems = [];
+    if (live.length) problems.push(...live.slice(0, 2));
+    if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
+    if (problems.length) report.push('вкладка ' + t + ' | ' + problems.join(' | '));
+  }
+
+  // ── Окна ───────────────────────────────────────────────────────────────
+  // Окно открывается добавлением класса `show` его подложке — JS для этого не
+  // нужен, и содержимое окон в разметке статично. Поэтому мерится каждое, а
+  // не те, до которых удалось бы доковырять открывающей функцией.
+  const modalIds = await page.evaluate(() =>
+    [...document.querySelectorAll('.mbg')].map(e => e.id).filter(Boolean));
+  // Самопроверка отдельно для окон: у них свой корень, и «в окнах обрезки
+  // нет» без неё значило бы ровно столько же, сколько прежнее «h-overflow:
+  // OK» — то есть ничего.
+  if (modalIds.length) {
+    await page.evaluate((i) => document.getElementById(i).classList.add('show'), modalIds[0]);
+    await page.waitForTimeout(120);
+    const scm = await selfCheck();
+    await page.evaluate((i) => document.getElementById(i).classList.remove('show'), modalIds[0]);
+    console.log(`самопроверка мерки в окне (${modalIds[0]}): `
+      + `заведомо обрезанный элемент найден=${scm.caught}`);
+    if (!scm.caught) {
+      console.log('МЕРКА СЛЕПА В ОКНАХ — «обрезки нет» по окнам ничего не означает');
+      process.exitCode = 2;
+    }
+  }
+  for (const id of modalIds) {
+    live = [];
+    await page.evaluate((i) => document.getElementById(i).classList.add('show'), id);
+    await page.waitForTimeout(120);
+    if (process.env.MINIAPP_SHOT_DIR) {
+      await page.screenshot({ path: path.join(process.env.MINIAPP_SHOT_DIR, `modal_${id}.png`) });
+    }
+    const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
+    if (m.n) report.push('окно ' + id + ' | ' + `ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
+    await page.evaluate((i) => document.getElementById(i).classList.remove('show'), id);
+  }
+
+  // ── Отчёт ──────────────────────────────────────────────────────────────
+  // Знаменатель называется вслух. «Находок нет» без него не значит ничего:
+  // обход открывает только экраны с функцией БЕЗ аргументов, а экранов в
+  // разметке больше. Пока это не печаталось, треть приложения молчала.
+  const total = await page.evaluate(() =>
+    [...document.querySelectorAll('.screen')].map(e => e.id).filter(Boolean));
+  const missed = total.filter(i => !seen.has(i));
+  console.log(`экранов проверено: ${seen.size} из ${total.length} в разметке `
+    + `(ширина окна ${VW}); окон проверено: ${modalIds.length}`);
+  console.log(`из них пробными вызовами с подставленным id: ${probesShown} `
+    + `из ${probesTotal} попыток`);
+  if (missed.length) {
+    console.log(`не показано экранов: ${missed.length} — ${missed.slice(0, 12).join(' ')}`
+      + (missed.length > 12 ? ' …' : ''));
+  }
   console.log(`с находками: ${report.length}`);
   report.forEach(r => console.log('  ' + r));
   if (report.length) process.exitCode = 1;
