@@ -28,6 +28,10 @@ import logging
 import pytest
 
 COUNTER = "infragram_queue_frozen_check_failures_total"
+ANOMALY_COUNTER = (
+    'infragram_anomaly_check_failures_total'
+    '{detector="detect_queue_frozen"}'
+)
 
 
 class _BlindPool:
@@ -74,17 +78,51 @@ async def test_the_detector_counts_its_own_blindness(caplog):
 
 
 @pytest.mark.asyncio
-async def test_the_anomaly_side_counts_it_too(caplog):
-    """Второй глаз: сборка аномалии тоже может упасть, и тоже молча."""
-    from services import anomaly_detector, metrics
+async def test_the_anomaly_side_counts_it_too(caplog, monkeypatch):
+    """Второй глаз: падение может случиться ПОСЛЕ опроса очереди.
 
+    Тонкость, на которой первая версия этой проверки оказалась пустой: при
+    падающем пуле `queue_frozen` гасит ошибку сама и отдаёт None, поэтому
+    внешний `except` в разборе аномалий не срабатывает вовсе — счётчик рос у
+    шины, а проверка считала, что проверяет разбор. Чтобы спросить именно
+    внешнюю дверь, ронять надо то, что разбор зовёт: сборка аномалии и чтение
+    вердикта живут уже за пределами чужого fail-open.
+    """
+    from services import anomaly_detector, metrics, operation_bus
+
+    async def _raises(pool):
+        raise RuntimeError("вердикт прочитан, а дальше сломалось")
+
+    monkeypatch.setattr(operation_bus, "queue_frozen", _raises)
     metrics.reset()
     with caplog.at_level(logging.WARNING, logger="services.anomaly_detector"):
         out = await anomaly_detector._detect_queue_frozen(_BlindPool())
 
     assert out == [], "разбор аномалий не должен падать из-за своей слепоты"
-    assert _count() == 1, "слепота разбора аномалий не попала на график"
+    # Со стороны разбора аномалий счётчик общий, с меткой ослепшего детектора:
+    # глаз здесь не один, и владельцу важно, какой именно перестал видеть.
+    assert _count(ANOMALY_COUNTER) == 1, (
+        f"слепота разбора аномалий не попала на график: "
+        f"{metrics.snapshot()['counters']}")
     assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_every_anomaly_eye_counts_its_blindness(monkeypatch):
+    """Глаз не один: чинить один детектор и оставить пять слепыми — полдела."""
+    from services import anomaly_detector as ad
+    from services import metrics
+
+    eyes = ("_detect_error_spike", "_detect_success_drop", "_detect_queue_surge",
+            "_detect_flood_wave", "_detect_trust_collapse", "_detect_latency_spike")
+    for name in eyes:
+        metrics.reset()
+        out = await getattr(ad, name)(_BlindPool(), 4242)
+        assert out == [], f"{name}: разбор упал вместо пустого ответа"
+        got = metrics.snapshot()["counters"]
+        key = f'infragram_anomaly_check_failures_total{{detector="{name.lstrip("_")}"}}'
+        assert got.get(key) == 1, (
+            f"{name} ослеп молча: ожидали {key}, получили {got}")
 
 
 def test_the_counter_is_an_owner_alarm():

@@ -117,6 +117,31 @@ async def _detect_owner(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly]:
 # ─── Очередь не разбирается ───────────────────────────────────────────────────
 
 
+def _blind(detector: str, exc: BaseException, owner_id: int | None = None) -> None:
+    """Проверка не смогла ПОСМОТРЕТЬ — это не то же, что «аномалии нет».
+
+    Каждый детектор ниже возвращает пустой список и на «всё здорово», и на свой
+    собственный сбой, а `log.debug` в рабочих логах не виден. Снаружи ослепший
+    глаз неотличим от здорового продукта — ровно тот класс, из-за которого
+    защиту называют молча отключённой: сломалось не то, за чем смотрят, а то,
+    чем смотрят, и сломалось беззвучно.
+
+    Поэтому предупреждение в лог и счётчик с меткой детектора: по метке видно,
+    КАКОЙ глаз ослеп, а сам счётчик входит в набор тревог владельцу
+    (`op_worker._PROTECTIVE_FAILURE_COUNTERS`) — единственный путь, которым это
+    до него доходит. Ничего не бросает: разбор аномалий не должен падать из-за
+    своей слепоты.
+    """
+    log.warning("anomaly_detector: проверка %s%s не удалась: %s", detector,
+                f" (owner={owner_id})" if owner_id is not None else "", exc)
+    try:
+        from services import metrics as _m
+
+        _m.inc("infragram_anomaly_check_failures_total", {"detector": detector})
+    except Exception:
+        pass
+
+
 async def _detect_queue_frozen(pool: asyncpg.Pool) -> list[Anomaly]:
     """Исполнитель операций молчит, а готовая к запуску работа ждёт.
 
@@ -171,13 +196,7 @@ async def _detect_queue_frozen(pool: asyncpg.Pool) -> list[Anomaly]:
         # здесь означает «аномалии нет», а не «проверить не вышло». Этот except
         # ловит ещё и сборку самой аномалии, то есть случай «увидели остановку,
         # но не смогли о ней сказать».
-        log.warning("_detect_queue_frozen: %s", e)
-        try:
-            from services import metrics as _m
-
-            _m.inc("infragram_queue_frozen_check_failures_total", {})
-        except Exception:
-            pass
+        _blind("detect_queue_frozen", e)
     return anomalies
 
 
@@ -236,7 +255,7 @@ async def _detect_error_spike(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly
                 )
             )
     except Exception as e:
-        log.debug("_detect_error_spike owner=%d: %s", owner_id, e)
+        _blind("detect_error_spike", e, owner_id)
     return anomalies
 
 
@@ -294,7 +313,7 @@ async def _detect_success_drop(pool: asyncpg.Pool, owner_id: int) -> list[Anomal
                     )
                 )
     except Exception as e:
-        log.debug("_detect_success_drop owner=%d: %s", owner_id, e)
+        _blind("detect_success_drop", e, owner_id)
     return anomalies
 
 
@@ -344,7 +363,7 @@ async def _detect_queue_surge(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly
                 )
             )
     except Exception as e:
-        log.debug("_detect_queue_surge owner=%d: %s", owner_id, e)
+        _blind("detect_queue_surge", e, owner_id)
     return anomalies
 
 
@@ -396,7 +415,7 @@ async def _detect_flood_wave(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly]
                 )
             )
     except Exception as e:
-        log.debug("_detect_flood_wave owner=%d: %s", owner_id, e)
+        _blind("detect_flood_wave", e, owner_id)
     return anomalies
 
 
@@ -452,7 +471,7 @@ async def _detect_trust_collapse(pool: asyncpg.Pool, owner_id: int) -> list[Anom
                 )
             )
     except Exception as e:
-        log.debug("_detect_trust_collapse owner=%d: %s", owner_id, e)
+        _blind("detect_trust_collapse", e, owner_id)
     return anomalies
 
 
@@ -517,7 +536,7 @@ async def _detect_latency_spike(pool: asyncpg.Pool, owner_id: int) -> list[Anoma
                 )
             )
     except Exception as e:
-        log.debug("_detect_latency_spike owner=%d: %s", owner_id, e)
+        _blind("detect_latency_spike", e, owner_id)
     return anomalies
 
 
