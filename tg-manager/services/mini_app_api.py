@@ -703,6 +703,54 @@ def channel_edit_worker_op(op) -> str | None:
     return _CHANNEL_EDIT_OPS.get(op)
 
 
+# Действия, после которых канала (или поста, или участия аккаунта) больше нет:
+# UI-op → op воркера bulk_chan_exec. Отдельно от _CHANNEL_EDIT_OPS намеренно:
+# правки метаданных обратимы и идут без подтверждения, эти — нет.
+_CHANNEL_MANAGE_OPS = {"delete": "chan_delete", "clear": "chan_clear", "leave": "chan_leave"}
+# Удаление канала и очистку постов не вернуть — для них владелец набирает слово.
+_CHANNEL_IRREVERSIBLE_OPS = frozenset({"delete", "clear"})
+CHANNEL_CONFIRM_WORD = "УДАЛИТЬ"
+
+
+def managed_channel_role(ch) -> str:
+    """Роль аккаунта в канале — как в списке каналов (owner/admin/member/unknown).
+    По ней карточка предлагает «Удалить в Telegram» создателю и «Покинуть» чужому."""
+    if ch.get("is_creator"):
+        return "owner"
+    if ch.get("is_admin"):
+        return "admin"
+    return "member" if ch.get("is_admin") is False else "unknown"
+
+
+def channel_manage_worker_op(op) -> str | None:
+    """UI-op ('delete'|'clear'|'leave') → воркер-op, либо None если не поддержан."""
+    return _CHANNEL_MANAGE_OPS.get(op)
+
+
+def channel_manage_confirmed(op, body) -> bool:
+    """Подтвердил ли владелец действие. Необратимое требует набранного слова
+    «УДАЛИТЬ» в body.confirm — случайный тап или старый клиент его не пришлёт."""
+    if op not in _CHANNEL_IRREVERSIBLE_OPS:
+        return True
+    raw = str((body or {}).get("confirm") or "").strip()
+    return raw.upper() == CHANNEL_CONFIRM_WORD
+
+
+def channel_clear_limit(body) -> int:
+    """Сколько последних постов удалить: 0 — все, -1 — значение нечитаемо.
+
+    Нечитаемое число нельзя молча превращать в 0: 0 означает «все посты»,
+    и опечатка в поле стёрла бы канал целиком вместо десятка постов."""
+    raw = (body or {}).get("clear_limit")
+    if raw in (None, "", 0, "0"):
+        return 0
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return -1
+    return n if 0 < n <= 100000 else -1
+
+
 def _proxy_display_host(raw: str) -> str:
     """Чистый выходной host прокси для показа в транспорте аккаунта.
 
@@ -3397,9 +3445,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неверный идентификатор канала", 400)
         ch = await _safe_fetchrow(pool,
             """SELECT channel_id, username, title, type,
-                      COALESCE(members_count, 0) AS member_count,
-                      acc_id, added_at
-               FROM managed_channels WHERE channel_id=$1 AND owner_id=$2""", ch_id, uid)
+                      COALESCE(members_count, 0) AS member_count, acc_id, added_at, is_admin,
+                      is_creator FROM managed_channels WHERE channel_id=$1 AND owner_id=$2""", ch_id, uid)
         if not ch:
             return _err("Канал не найден", 404)
         acc = None
@@ -3454,7 +3501,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.debug("channel_detail: posts_published failed ch=%d", ch_id)
         return _json_resp({
-            "channel": ch,
+            "channel": {**dict(ch), "role": managed_channel_role(ch)},
             "linked_account": acc,
             "recent_ops": recent_ops,
             "member_growth": member_growth,
@@ -5471,9 +5518,105 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
             return _err(str(exc), 500)
 
+    async def _submit_channel_manage(uid: int, op: str, chans: list, body: dict) -> web.Response:
+        """Общий путь одиночного и массового удаления/очистки/выхода."""
+        worker_op = channel_manage_worker_op(op)
+        if not worker_op:
+            return _err("Неизвестная операция", 400)
+        if not channel_manage_confirmed(op, body):
+            return _err(f"Подтвердите действие: введите слово «{CHANNEL_CONFIRM_WORD}»", 400)
+        params = {
+            "op": worker_op,
+            "channel_acc_pairs": [{
+                "channel_id": int(c["channel_id"]), "acc_id": int(c["acc_id"]),
+                "title": c.get("title") or "",
+                "access_hash": int(c.get("access_hash") or 0),
+                "username": c.get("username") or "",
+                "type": c.get("type") or "",
+            } for c in chans],
+        }
+        if op in _CHANNEL_IRREVERSIBLE_OPS:
+            params["confirmed"] = True
+        if op == "clear":
+            limit = channel_clear_limit(body)
+            if limit < 0:
+                return _err("Число постов — целое от 1 до 100000 (или «все»)", 400)
+            params["clear_limit"] = limit
+        n = len(chans)
+        label = {"delete": "💥 Удаление в Telegram", "clear": "🧹 Очистка постов",
+                 "leave": "🚪 Выход из каналов"}[op]
+        op_id = await _obus.submit(
+            pool, uid, "bulk_chan_exec", params, total_items=n, label=f"{label}: {n}")
+        return _json_resp({"ok": True, "op_id": op_id, "count": n})
+
+    async def channel_manage(request: web.Request) -> web.Response:
+        """Удалить канал в Telegram / очистить посты / выйти из канала.
+        body: {op: delete|clear|leave, confirm?: "УДАЛИТЬ", clear_limit?: int}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, title, acc_id, access_hash, username, type "
+            "FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
+        if not ch:
+            return _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return _err("У канала нет привязанного аккаунта", 400)
+        try:
+            return await _submit_channel_manage(uid, body.get("op"), [ch], body)
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("channel_manage uid=%d ch=%d", uid, ch_id)
+            return _err(str(exc), 500)
+
+    async def channel_autoposts(request: web.Request) -> web.Response:
+        """Действующий автопостинг владельца: цепочки публикаций с повтором,
+        которые ещё ждут следующего круга. ?channel_id= — только этого канала."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        ch_raw = request.query.get("channel_id") or ""
+        ch_filter = ""
+        args: list = [uid]
+        if ch_raw:
+            if not ch_raw.lstrip("-").isdigit():
+                return _err("Неверный идентификатор канала", 400)
+            ch_filter = (" AND (params->'channel_ids' @> jsonb_build_array($2::bigint)"
+                         " OR params->>'channel_ref' = $2::text)")
+            args.append(int(ch_raw))
+        rows = await _safe_fetch(pool,
+            "SELECT id, op_type, status, label, scheduled_for, created_at, "
+            "       params->>'text' AS text, params->>'text_to_post' AS text_to_post, "
+            "       (params->>'repeat_interval_min')::int AS repeat_interval_min, "
+            "       params->>'repeat_count' AS repeat_count, "
+            "       COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(params->'channel_ids')='array' "
+            "                THEN params->'channel_ids' END), 1) AS channels "
+            "FROM operation_queue WHERE owner_id=$1 "
+            "  AND status IN ('pending','running','paused') "
+            "  AND op_type IN ('quick_post','mass_publish','bulk_post_to_channel','bulk_post_chans') "
+            "  AND COALESCE((params->>'repeat_interval_min')::int, 0) > 0" + ch_filter +
+            " ORDER BY scheduled_for NULLS FIRST, id LIMIT 50", *args)
+        out = []
+        for r in rows or []:
+            d = dict(r)
+            d["text"] = (d.pop("text") or d.pop("text_to_post", None) or "")[:200]
+            d.pop("text_to_post", None)
+            for k in ("scheduled_for", "created_at"):
+                if hasattr(d.get(k), "isoformat"):
+                    d[k] = d[k].isoformat()
+            out.append(d)
+        return _json_resp({"ok": True, "autoposts": out})
+
     async def channels_mass(request: web.Request) -> web.Response:
         """Массовое действие над выбранными каналами.
-        body: {op: post|about|username|promote, channel_ids: [..], value?/text?}"""
+        body: {op: post|title|about|username|promote|delete|clear|leave|unlink,
+               channel_ids: [..], value?/text?/confirm?/clear_limit?}"""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -5485,8 +5628,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         ids_in = [int(x) for x in (body.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
         if not ids_in:
             return _err("Выберите каналы", 400)
+        if op == "unlink":
+            # Убрать из Infragram без действий в Telegram — аккаунт не нужен.
+            try:
+                n_del = await pool.fetchval(
+                    "WITH d AS (DELETE FROM managed_channels WHERE owner_id=$1 "
+                    "AND channel_id = ANY($2::bigint[]) RETURNING 1) SELECT COUNT(*) FROM d",
+                    uid, ids_in)
+            except Exception as exc:
+                log.exception("channels_mass unlink uid=%d", uid)
+                return _err(str(exc), 500)
+            return _json_resp({"ok": True, "count": int(n_del or 0)})
         chans = await _safe_fetch(pool,
-            "SELECT channel_id, title, acc_id, access_hash, username FROM managed_channels "
+            "SELECT channel_id, title, acc_id, access_hash, username, type FROM managed_channels "
             "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, ids_in)
         chans = [c for c in (chans or []) if c.get("acc_id")]
         if not chans:
@@ -5527,6 +5681,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     }, total_items=1)
                     op_ids.append(int(oid))
                 return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+            if channel_manage_worker_op(op):
+                return await _submit_channel_manage(uid, op, chans, body)
             if op == "promote":
                 op_ids = []
                 for c in chans:
@@ -7004,6 +7160,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             label = f"Быстрый пост · каналов: {len(channel_ids)}"
             _pd = {"text": text, "channel_ids": channel_ids}
+            # Выбранные вручную группы не должны отсекаться фильтром «только
+            # каналы» исполнителя: автопостинг из карточки шлёт target=all.
+            if body.get("target") in ("all", "channels", "groups"):
+                _pd["target"] = body["target"]
             if _rmin > 0:
                 _pd["repeat_interval_min"] = _rmin
                 _rc = body.get("repeat_count")
@@ -19503,6 +19663,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
     app.router.add_post("/api/miniapp/channels/mass", channels_mass)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/manage", channel_manage)
+    app.router.add_get("/api/miniapp/channels/autoposts", channel_autoposts)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)

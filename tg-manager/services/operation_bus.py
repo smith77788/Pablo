@@ -324,7 +324,7 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "✏️",
     },
     "bulk_chan_exec": {
-        "description": "Bulk username/about для каналов",
+        "description": "Массовые действия с каналами",
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "✏️",

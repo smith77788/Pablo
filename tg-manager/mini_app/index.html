@@ -1608,6 +1608,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="mini-btn" onclick="openChMass('about')">✏️ Описание</button>
         <button class="mini-btn" onclick="openChMass('username')">🔗 Юзернейм</button>
         <button class="mini-btn" onclick="runChMass('promote')">👑 Админы</button>
+        <button class="mini-btn" onclick="openChAutopost([...CH_SEL])">🔁 Автопостинг</button>
+        <button class="mini-btn" onclick="openChDestructive('clear',[...CH_SEL])">🧹 Очистить посты</button>
+        <button class="mini-btn" style="color:var(--red)" onclick="openChDestructive('delete',[...CH_SEL])">💥 Удалить в Telegram</button>
+        <button class="mini-btn" onclick="runChLeave([...CH_SEL])">🚪 Покинуть</button>
+        <button class="mini-btn" onclick="runChUnlink([...CH_SEL])">🔌 Отвязать</button>
       </div>
     </div>
   </div>
@@ -9843,11 +9848,14 @@ async function toggleFunnel(id, el) {
 
 // ── Accounts ───────────────────────────────────────────
 async function removeChannel(chId, _el) {
-  if (!await confirmDelete('Убрать из управления канал', _el, 'Сам канал в Telegram не удаляется.')) return;
+  if (!await confirmDelete('Отвязать от Infragram канал', _el, 'Сам канал в Telegram останется. Чтобы удалить его совсем — кнопка «💥 Удалить в Telegram».')) return;
   try {
     await api(`/api/miniapp/channel/${chId}`, {method:'DELETE'});
-    toast('🗑 Канал убран из управления');
+    toast('🔌 Канал отвязан от Infragram');
+    CUR_CHANNELS = CUR_CHANNELS.filter(x => String(x.channel_id) !== String(chId));
+    if (typeof CH_TOTAL === 'number' && CH_TOTAL > 0) { CH_TOTAL--; txt('ch-cnt', CH_TOTAL+' каналов'); }
     back(); loadAccounts();
+    if (document.getElementById('chList')) renderChannels();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 // ── Профиль аккаунта (модалка) ───────────────────────────
@@ -11435,6 +11443,7 @@ async function openChannel(chId) {
   try {
     const d = await api('/api/miniapp/channel/'+chId);
     txt('chd-body', buildChDetail(d));
+    loadChAutoposts(chId, 'chdAutoposts');  // screens/channel_manage.js
   } catch(e) {
     txt('chd-body', errHtml(e.message));
   }
@@ -11478,8 +11487,14 @@ function buildChDetail(d) {
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👑 Админы</button>
       <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👥 Инвайтинг</button>
       <button class="btn btn-s" onclick="openParserForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📊 Собрать аудиторию</button>
-      <button class="btn btn-d" onclick="removeChannel(${c.channel_id}, this)" style="flex:1 1 auto;min-width:88px">🗑 Убрать</button>
+      <button class="btn btn-s" onclick="openChAutopost([${c.channel_id}])" style="flex:1 1 auto;min-width:88px">🔁 Автопостинг</button>
+      <button class="btn btn-s" onclick="openChDestructive('clear',[${c.channel_id}])" style="flex:1 1 auto;min-width:88px">🧹 Очистить посты</button>
+      ${c.role==='member'
+        ? `<button class="btn btn-d" onclick="runChLeave([${c.channel_id}])" style="flex:1 1 auto;min-width:88px">🚪 Покинуть</button>`
+        : `<button class="btn btn-d" onclick="openChDestructive('delete',[${c.channel_id}])" style="flex:1 1 auto;min-width:88px">💥 Удалить в Telegram</button>`}
+      <button class="btn btn-s" onclick="removeChannel(${c.channel_id}, this)" style="flex:1 1 auto;min-width:88px">🔌 Отвязать от Infragram</button>
     </div>
+    <div id="chdAutoposts"></div>
 
     <div class="sec">Информация</div>
     <div class="lst">
@@ -26769,6 +26784,7 @@ function renderAudSegChart(segments) {
 <script src="screens/flood_guard.js"></script>
 <script src="screens/editorial.js"></script>
 <script src="screens/va_admin.js"></script>
+<script src="screens/channel_manage.js"></script>
 <script src="screens/shield_check.js"></script>
 </body>
 </html>
