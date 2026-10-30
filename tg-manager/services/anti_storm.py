@@ -179,6 +179,8 @@ async def check_and_arm(pool, owner_id: int, *, bot=None) -> dict:
     # Был ли шторм уже активен ДО этого события — чтобы не слать владельцу
     # «волна банов» на каждый бан в течение уже объявленного шторма.
     storm_was_active = False
+    armed = False
+    read_ok = True
     try:
         # Не понижаем уже армированный шторм до watch и не сбрасываем срок назад:
         # берём более сильный уровень и более поздний until.
@@ -192,11 +194,42 @@ async def check_and_arm(pool, owner_id: int, *, bot=None) -> dict:
                 state["until"] = prev["until"]
                 state["mult"] = max(state["mult"], float(prev.get("mult") or 1.0))
                 state["level"] = prev.get("level", state["level"])
-        await spine.state_set(pool, owner_id, _STATE_KEY, state)
-        await spine.emit(pool, owner_id, "anti_storm_" + decision["level"],
-                         {"hit": hit, "fleet": fleet, "mult": decision["mult"]})
     except Exception:
-        log.debug("anti_storm: arm failed owner=%s", owner_id, exc_info=True)
+        # Прежнее состояние не прочитано. Раньше этот сбой отменял армирование
+        # ЦЕЛИКОМ — волна банов шла, а флот оставался в полном темпе из-за
+        # неудачного чтения. Писать вслепую тоже нельзя: своим `watch` можно
+        # затереть уже объявленный шторм, то есть ОСЛАБИТЬ защиту. Поэтому
+        # правило: на непрочитанном состоянии армируем только самый сильный
+        # уровень (шторм), который ничего слабее собой не заменит.
+        read_ok = False
+        log.warning("anti_storm: прежнее состояние не прочитано owner=%s — "
+                    "армируем только шторм", owner_id, exc_info=True)
+
+    if read_ok or decision["level"] == STORM:
+        try:
+            await spine.state_set(pool, owner_id, _STATE_KEY, state)
+            armed = True
+        except Exception:
+            # ЭТО и есть защита: без записи никакого замедления нет, флот
+            # продолжает работать в полном темпе ровно в те минуты, когда
+            # Telegram чистит аккаунты. `log.debug` такую потерю прятал, а
+            # владельцу при этом уходило «флот переведён в глубокий сон» —
+            # обещание, которого никто не выполнил.
+            log.error("anti_storm: защита не включилась owner=%s — состояние не "
+                      "записано", owner_id, exc_info=True)
+            try:
+                from services import metrics as _m
+
+                _m.inc("infragram_anti_storm_arm_write_failures_total", {})
+            except Exception:
+                pass
+
+    if armed:
+        try:
+            await spine.emit(pool, owner_id, "anti_storm_" + decision["level"],
+                             {"hit": hit, "fleet": fleet, "mult": decision["mult"]})
+        except Exception:
+            log.warning("anti_storm: событие шины не ушло owner=%s", owner_id)
     # Сбросить кэш губернатора, чтобы клэмп применился сейчас, а не через TTL.
     try:
         from services import fleet_governor
@@ -204,14 +237,29 @@ async def check_and_arm(pool, owner_id: int, *, bot=None) -> dict:
     except Exception:
         pass
     if bot is not None and decision["level"] == STORM and not storm_was_active:
-        try:
-            await bot.send_message(
-                owner_id,
+        # Текст зависит от того, ВКЛЮЧИЛАСЬ ли защита. Обещание «переведён в
+        # глубокий сон» при незаписанном состоянии — ложь в самую опасную
+        # минуту: владелец прочитает, что всё под контролем, и не остановит
+        # работу сам.
+        if armed:
+            _text = (
                 "🌩 <b>Anti-Storm: волна банов</b>\n"
                 f"За {WINDOW_MIN} мин критические ограничения получили {hit} "
                 f"аккаунтов. Флот переведён в глубокий сон (темп ×{int(DEEP_SLEEP_MULT)}) "
-                f"на {HOLD_MIN} мин — переждём чистку, чтобы не жечь остальные.",
-                parse_mode="HTML")
+                f"на {HOLD_MIN} мин — переждём чистку, чтобы не жечь остальные."
+            )
+        else:
+            _text = (
+                "🌩 <b>Anti-Storm: волна банов, защита НЕ включилась</b>\n"
+                f"За {WINDOW_MIN} мин критические ограничения получили {hit} "
+                "аккаунтов, но автоматическое замедление не записалось — флот "
+                "продолжает работать в полном темпе.\n"
+                "Остановите массовые операции вручную, иначе чистка заберёт и "
+                "остальные аккаунты."
+            )
+        try:
+            await bot.send_message(owner_id, _text, parse_mode="HTML")
         except Exception:
-            log.debug("anti_storm: notify failed owner=%s", owner_id)
+            log.warning("anti_storm: не удалось предупредить владельца owner=%s",
+                        owner_id)
     return decision
