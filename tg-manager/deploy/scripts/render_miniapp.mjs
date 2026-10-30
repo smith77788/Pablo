@@ -198,6 +198,79 @@ const CLIPPED = () => {
   return { n: out.length, worst: out.slice(0, 3) };
 };
 
+// Текст, который закрыт собой же приложением и до которого нельзя доскроллить.
+//
+// Обрезку мерили только по горизонтали. По вертикали у приложения есть полосы,
+// прибитые к низу окна (`#tabbar`, `.sel-bar` над ним), и список под ними
+// прокручивается ДО СВОЕГО конца, а не до низа окна: если контейнеру не дали
+// запаса снизу, последние строки остаются под полосой навсегда. Прокрутка их
+// не достанет — она уже в упоре.
+//
+// Признак берём не из геометрии полос, а из попадания точки: что лежит в
+// середине элемента по `elementFromPoint`. Это ровно тот ответ, который
+// получает палец владельца, и он сам разбирается и с z-index, и с
+// `pointer-events:none` (тост закрывает вид, но не перехватывает касание, и
+// находкой быть не должен).
+//
+// Мерить имеет смысл только в упоре: до прокрутки под полосой лежит половина
+// списка, и это нормально. Поэтому контейнер сначала доводят до конца.
+const COVERED = () => {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return { n: 0, worst: [], ran: false };
+  const W = window.innerWidth, H = window.innerHeight;
+  // Накрывающая полоса — только прибитая к НИЗУ. Первая редакция мерки этого
+  // не требовала и выдала находки на 106 экранах: при прокрутке в упор строки
+  // списка уезжают под липкую шапку, и это не беда, а то, ради чего шапку
+  // делали липкой, — прокрутил вверх, и строка на месте. Беда ровно одна: то,
+  // что не достаётся прокруткой НИ В КАКОМ положении, то есть закрытое снизу
+  // в упоре. Поэтому накрывающий элемент обязан быть fixed или sticky и
+  // лежать нижней половиной окна.
+  //
+  // Чего мерка не мерит и не обещает: наложения без прикрепления (z-index
+  // внутри самого экрана) — они прокруткой меняются, и разбор им нужен свой.
+  const pinnedBottom = (node) => {
+    for (let a = node; a && a !== document.body; a = a.parentElement) {
+      const st = getComputedStyle(a);
+      if (st.position === 'fixed' || st.position === 'sticky') {
+        return a.getBoundingClientRect().bottom > H / 2;
+      }
+    }
+    return false;
+  };
+  const out = [];
+  for (const el of scr.querySelectorAll('*')) {
+    if (el.children.length) continue;                 // только листья
+    const txt = (el.textContent || '').trim();
+    if (!txt) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 6) continue;
+    // Вне окна — не находка: это просто непрокрученная часть списка.
+    if (r.bottom <= 0 || r.top >= H || r.right <= 0 || r.left >= W) continue;
+    const st = getComputedStyle(el);
+    if (st.visibility === 'hidden' || st.display === 'none' || st.opacity === '0') continue;
+    const x = Math.min(Math.max(r.left + r.width / 2, 1), W - 2);
+    const y = Math.min(Math.max(r.top + r.height / 2, 1), H - 2);
+    const top = document.elementFromPoint(x, y);
+    if (!top || top === el || el.contains(top) || top.contains(el)) continue;
+    if (!pinnedBottom(top)) continue;
+    out.push(el.tagName.toLowerCase() + '.' + String(el.className || '').split(' ')[0]
+             + ' под ' + top.tagName.toLowerCase() + '.'
+             + String(top.className || '').split(' ')[0]
+             + ' «' + txt.slice(0, 28) + '»');
+  }
+  return { n: out.length, worst: out.slice(0, 3), ran: true };
+};
+
+// Довести прокручиваемый ящик экрана до упора: мерка закрытого текста имеет
+// смысл только там.
+const SCROLL_END = () => {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return false;
+  const box = scr.querySelector('.sb') || scr;
+  box.scrollTop = box.scrollHeight;
+  return true;
+};
+
 // Сколько осмысленного текста показал экран, не считая его шапки и нижней
 // навигации. Ноль означает ровно то, что видит владелец: пустоту без единого
 // слова — ни «пусто», ни «ошибка», ни кнопки.
@@ -249,6 +322,37 @@ async function selfCheck() {
     const old = document.documentElement.scrollWidth > window.innerWidth;
     return { ran: true, caught, clean, old };
   }, CLIPPED.toString());
+}
+
+// Самопроверка мерки закрытого текста. Кладём на экран строку и прибиваем
+// поверх неё полосу, как это делает `.sel-bar`, — мерка обязана её найти.
+// Иначе «закрытого текста нет» ниже не значит ничего.
+async function coveredSelfCheck() {
+  return page.evaluate((src) => {
+    const covered = new Function('return (' + src + ')()');
+    const scr = document.querySelector('.screen.show');
+    if (!scr) return { ran: false };
+    // Сравниваем с собственным фоном, а не с нулём: на экране могут быть и
+    // настоящие находки, и тогда «после снятия полосы ноль» — требование не к
+    // мерке, а к приложению, и самопроверка падала бы на чужой беде.
+    const base = covered().n;
+    const line = document.createElement('div');
+    // Выше настоящих полос: на `bottom:30px` подопытную строку накрывает сам
+    // `#tabbar`, и самопроверка засчитывала это себе — «после снятия полосы»
+    // находка оставалась, хотя снимать надо было не ту полосу.
+    line.style.cssText = 'position:fixed;left:20px;bottom:200px;width:180px;height:24px';
+    line.textContent = 'заведомо закрытая строка';
+    scr.appendChild(line);
+    const bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:180px;height:60px;'
+      + 'background:#123;z-index:999';
+    document.body.appendChild(bar);
+    const caught = covered().n > base;
+    bar.remove();
+    const afterBar = covered().n - base;
+    line.remove();
+    return { ran: true, caught, afterBar };
+  }, COVERED.toString());
 }
 
 // Четыре экрана обход не показывал — и не потому, что они сломаны. Их
@@ -321,11 +425,19 @@ if (sweepMode) {
       process.exitCode = 2;
     }
   }
+  const cs = await coveredSelfCheck();
+  console.log(`самопроверка мерки закрытого текста: заведомо закрытая строка`
+    + ` найдена=${cs.caught} | без полосы находок=${cs.afterBar}`);
+  if (!cs.caught || cs.afterBar !== 0) {
+    console.log('МЕРКА ЗАКРЫТОГО ТЕКСТА СЛЕПА — «закрытого нет» ничего не означает');
+    process.exitCode = 2;
+  }
   const report = [];
   const seen = new Set();          // какие экраны обход ДЕЙСТВИТЕЛЬНО показал
   const mute = [];                 // открывашки, не открывшие ничего
   const hints = [];                // машинный текст: подсказка, не находка
   const seedDead = [];             // затравка есть, а экран всё равно не открылся
+  let selScreens = 0;              // на скольких экранах удалось выделить строки
   let probesShown = 0, probesTotal = 0;
   for (const { name: fn, args, want, probe } of fns) {
     live = [];
@@ -379,6 +491,11 @@ if (sweepMode) {
       await page.screenshot({ path: path.join(process.env.MINIAPP_SHOT_DIR, `miniapp_${fn}.png`) });
     }
     const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
+    // В упоре прокрутки — и только там — имеет смысл спрашивать, не закрыт ли
+    // хвост списка полосой, прибитой к низу окна.
+    await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
+    await page.waitForTimeout(80);
+    const cv = await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString());
     const shownId = await page.evaluate(() => {
       const el = document.querySelector('.screen.show');
       return el ? el.id : null;
@@ -404,6 +521,30 @@ if (sweepMode) {
       if (live.length) problems.push(...live.slice(0, 2));
     }
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
+    if (cv.n) problems.push(`ЗАКРЫТО ${cv.n}: ` + cv.worst.join(' ; '));
+    // Полоса действий над выделением (`.sel-bar`) лежит поверх списка и
+    // показывается, только когда что-то выделено. Пока обход ничего не
+    // выделял, самый вероятный случай закрытого текста мерке был не виден.
+    // Нажимаем ту же ссылку «Все», что и владелец: показать полосу руками
+    // через `display` значило бы померить состояние, в котором приложение не
+    // бывает.
+    const selClicked = await page.evaluate(() => {
+      const scr = document.querySelector('.screen.show');
+      if (!scr) return false;
+      const link = [...scr.querySelectorAll('.sel-bar-link')]
+        .find(e => (e.textContent || '').trim() === 'Все');
+      if (!link) return false;
+      link.click();
+      return true;
+    });
+    if (selClicked) {
+      selScreens++;
+      await page.waitForTimeout(140);
+      await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
+      await page.waitForTimeout(80);
+      const sv = await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString());
+      if (sv.n) problems.push(`ЗАКРЫТО ПРИ ВЫДЕЛЕНИИ ${sv.n}: ` + sv.worst.join(' ; '));
+    }
     const gb = await page.evaluate((src) => new Function('return (' + src + ')()')(), GIBBERISH.toString());
     // В находки это НЕ идёт — см. заголовок раздела при печати. Заглушка
     // отдаёт одну форму на 1019 маршрутов, и поле, которое на одном экране
@@ -512,6 +653,9 @@ if (sweepMode) {
       + ' — экран не открылся, состояние ставится не тем, чем нужно');
     process.exitCode = 2;
   }
+  // Знаменатель прохода с выделением. Ноль значит, что полоса действий не
+  // показалась ни разу, и «закрытого при выделении нет» не значит ничего.
+  console.log(`экранов, где удалось выделить строки: ${selScreens}`);
   console.log(`с находками: ${report.length}`);
   report.forEach(r => console.log('  ' + r));
   if (hints.length) {

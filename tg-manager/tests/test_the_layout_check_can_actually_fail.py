@@ -276,3 +276,53 @@ def test_the_unshown_screens_are_listed_in_full():
     assert "missed.join(' ')" in src, (
         "список непоказанных экранов снова обрезан — а он и есть то, что "
         "говорит, куда смотреть дальше")
+def test_the_covered_measure_blames_only_bars_pinned_to_the_bottom():
+    """Уехать под липкую шапку — не беда, а то, ради чего шапку делали липкой.
+
+    Первая редакция мерки закрытого текста этого не различала и выдала находки
+    на 106 экранах: при прокрутке в упор строки списка честно уходят под шапку,
+    и прокрутка вверх их возвращает. Беда ровно одна — то, что не достаётся
+    прокруткой ни в каком положении, то есть закрытое снизу в упоре.
+    """
+    src = _src()
+    assert "const COVERED" in src, "мерка закрытого текста пропала"
+    assert "pinnedBottom" in src and re.search(r"bottom > H / 2", src), (
+        "мерка снова винит любой накрывающий элемент, в том числе шапку")
+    assert "elementFromPoint" in src, (
+        "ответ о закрытости берётся не попаданием точки — значит, не тем, что "
+        "получает палец владельца")
+
+
+def test_the_covered_measure_is_taken_at_the_end_of_the_scroll():
+    """До упора под полосой лежит половина списка, и это нормально."""
+    src = _src()
+    i_scroll = src.find("SCROLL_END.toString()")
+    i_cv = src.find("COVERED.toString()", i_scroll)
+    assert i_scroll > 0 and i_cv > i_scroll, (
+        "мерка закрытого текста снимается не в упоре прокрутки")
+
+
+def test_the_covered_measure_proves_it_can_see():
+    src = _src()
+    assert "coveredSelfCheck" in src, "самопроверка мерки закрытого текста пропала"
+    assert "МЕРКА ЗАКРЫТОГО ТЕКСТА СЛЕПА" in src, (
+        "ослепшая мерка больше не говорит об этом вслух")
+    assert re.search(r"cs\.caught[\s\S]{0,300}?exitCode = 2", src), (
+        "ослепшая мерка не красит прогон")
+    assert "const base = covered().n" in src, (
+        "самопроверка снова сравнивается с нулём, а не со своим фоном: "
+        "настоящая находка на экране роняла бы её на чужой беде")
+
+
+def test_the_selection_bar_is_opened_the_way_the_owner_opens_it():
+    """Полоса действий показывается только на выделении — и показывать её
+    руками через `display` значит померить состояние, в котором приложение не
+    бывает."""
+    src = _src()
+    assert "sel-bar-link" in src and "link.click()" in src, (
+        "проход с выделением больше не нажимает ту же ссылку, что владелец")
+    assert not re.search(r"sel-?[Bb]ar[^\n]{0,80}style\.display", src), (
+        "полосу действий снова показывают подменой стиля")
+    assert "экранов, где удалось выделить строки" in src, (
+        "у прохода с выделением пропал знаменатель — «закрытого при выделении "
+        "нет» без него ничего не значит")
