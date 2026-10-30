@@ -18374,6 +18374,14 @@ async function openContactIdentity(id) {
   try {
     const d = await api('/api/miniapp/uch/contacts/'+id+'/identity');
     const ids = d.identities||[];
+    // Без идентификаторов граф рисовать не из чего, и экран оставался пустым
+    // целиком — ни одного знака. Пустота без объяснения читается как поломка
+    // приложения, а не как «связей пока нет».
+    if (!ids.length) {
+      txt('cdBody', empty('🔑','Связей не найдено',
+        'У контакта нет ни телефона, ни ника, ни почты — связывать нечего'));
+      return;
+    }
     let html = '<div style="padding:12px 16px">';
     if (d.last_active) html += `<div style="padding:8px 12px;background:rgba(96,165,250,.1);border-radius:8px;margin-bottom:8px;font-size:13px">🕐 ${esc(d.last_active)}</div>`;
     const grouped = {};
@@ -28748,6 +28756,14 @@ async function openAdminUsers() {
   try {
     const d = await api('/api/miniapp/admin/users');
     const users = d.users || [];
+    // Пустой список рисовал пустой div: экран оставался заголовком над
+    // чернотой — ни слова о том, что это, пусто или сломалось. Замерено
+    // обходом на пустых ответах: ни одного знака на всём экране.
+    if (!users.length) {
+      txt('adm-users-body', empty('👥','Пользователей нет',
+        'Здесь появятся все, кто открыл мини-апп хотя бы раз'));
+      return;
+    }
     let html = '<div style="display:flex;flex-direction:column;gap:8px">';
     for (const u of users) {
       html += `<div class="mgmt-tile" style="cursor:pointer" onclick="openAdminUserDetail(${u.user_id})">

@@ -125,7 +125,13 @@ await page.addInitScript((fat) => {
     }
     return ok(o);
   };
-}, sweepMode);
+}, sweepMode && !process.env.MINIAPP_EMPTY);
+
+// MINIAPP_EMPTY — обход на ПУСТЫХ ответах. Толстые данные проверяют вёрстку, а
+// пустые — другое свойство: сказал ли экран хоть слово, когда показывать
+// нечего. Экран, нарисовавший один заголовок и ничего больше, читается как
+// поломка приложения; в этом и состоит находка.
+const emptyMode = !!process.env.MINIAPP_EMPTY;
 
 let live = [];
 page.on('pageerror', e => live.push('PAGEERROR: ' + String(e.message).slice(0, 160)));
@@ -168,6 +174,22 @@ const CLIPPED = () => {
   return { n: out.length, worst: out.slice(0, 3) };
 };
 
+// Сколько осмысленного текста показал экран, не считая его шапки и нижней
+// навигации. Ноль означает ровно то, что видит владелец: пустоту без единого
+// слова — ни «пусто», ни «ошибка», ни кнопки.
+const MUTE = () => {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return { len: 0, id: null, none: true };
+  let n = 0;
+  for (const el of scr.children) {
+    if (el.classList && (el.classList.contains('hdr') || el.classList.contains('nav'))) continue;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') continue;
+    n += (el.innerText || el.textContent || '').trim().length;
+  }
+  return { len: n, id: scr.id };
+};
+
 async function selfCheck() {
   return page.evaluate((src) => {
     const clipped = new Function('return (' + src + ')()');
@@ -200,6 +222,29 @@ if (sweepMode) {
   if (!sc.caught) {
     console.log('МЕРКА СЛЕПА — «обрезки нет» ниже ничего не означает');
     process.exitCode = 2;
+  }
+  if (emptyMode) {
+    // Мерка немоты тоже обязана показать, что видит. Прячем у показанного
+    // экрана всё, кроме шапки, и она должна насчитать ноль знаков.
+    const ms = await page.evaluate((src) => {
+      const mute = new Function('return (' + src + ')()');
+      const scr = document.querySelector('.screen.show');
+      if (!scr) return { ran: false };
+      const hid = [];
+      for (const el of scr.children) {
+        if (el.classList && el.classList.contains('hdr')) continue;
+        hid.push([el, el.style.display]); el.style.display = 'none';
+      }
+      const silent = mute().len === 0;
+      hid.forEach(([el, d]) => { el.style.display = d; });
+      return { ran: true, silent, back: mute().len };
+    }, MUTE.toString());
+    console.log(`самопроверка мерки немоты: заведомо немой экран найден=${ms.silent}`
+      + ` | текст вернулся=${ms.back > 0}`);
+    if (!ms.silent || !(ms.back > 0)) {
+      console.log('МЕРКА НЕМОТЫ СЛЕПА — «немых экранов нет» ничего не означает');
+      process.exitCode = 2;
+    }
   }
   const report = [];
   const seen = new Set();          // какие экраны обход ДЕЙСТВИТЕЛЬНО показал
@@ -237,6 +282,17 @@ if (sweepMode) {
       if (live.length) problems.push(...live.slice(0, 2));
     }
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
+    if (emptyMode) {
+      const mu = await page.evaluate((src) => new Function('return (' + src + ')()')(), MUTE.toString());
+      // Порог — НОЛЬ, и это намеренно. Пробовали сорок знаков: под них попали
+      // `empty('✅','Дубликатов нет','Все контакты уникальны')` (39 знаков),
+      // `empty('⚙️','Операция не найдена')` (22) и экран-форма, у которой текст
+      // живёт в placeholder'ах (12). Все три работают правильно — то есть три
+      // находки из пяти были ложными. Ложная находка в такой мерке дороже
+      // пропущенной: в следующий раз её закроют списком исключений, и дыра
+      // окажется там, где её не было. Ни одного знака — признак без толкований.
+      if (mu.id && mu.len === 0) problems.push(`НЕМОЙ ЭКРАН ${mu.id}: ни одного знака`);
+    }
     if (problems.length) report.push(fn + ' | ' + problems.join(' | '));
     await page.evaluate(() => { try { while (typeof STACK !== 'undefined' && STACK.length) back(); } catch(_) {} });
     await page.waitForTimeout(60);
