@@ -215,7 +215,7 @@ if (sweepMode) {
   // любой URL, поэтому экран детали рисуется при любом id. Падение такого
   // вызова — не находка, а непокрытый экран: он виден в строке охвата.
   const fns = fs.readFileSync(sweepList, 'utf8').split('\n').map(s => s.trim()).filter(Boolean)
-    .map(line => { const [name, arg] = line.split('|'); return { name, arg, probe: arg !== undefined }; });
+    .map(line => { const [name, ...args] = line.split('|'); return { name, args, probe: args.length > 0 }; });
   const sc = await selfCheck();
   console.log(`самопроверка мерки: заведомо обрезанный элемент найден=${sc.caught}`
     + ` | прежняя мерка (scrollWidth) его видит=${sc.old}`);
@@ -250,7 +250,7 @@ if (sweepMode) {
   const seen = new Set();          // какие экраны обход ДЕЙСТВИТЕЛЬНО показал
   const mute = [];                 // открывашки, не открывшие ничего
   let probesShown = 0, probesTotal = 0;
-  for (const { name: fn, arg, probe } of fns) {
+  for (const { name: fn, args, probe } of fns) {
     live = [];
     if (probe) probesTotal++;
     // Какой экран показан ДО вызова. Без этого «показалось 57 из 57» было
@@ -263,10 +263,10 @@ if (sweepMode) {
     });
     const r = await page.evaluate(async ({ name, a }) => {
       if (typeof window[name] !== 'function') return { missing: true };
-      try { a === undefined ? await window[name]() : await window[name](a); }
+      try { await window[name](...a); }
       catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
       return {};
-    }, { name: fn, a: arg });
+    }, { name: fn, a: args });
     await page.waitForTimeout(220);
     // MINIAPP_SHOT_DIR — снимок каждого экрана обхода. Отчёт говорит, ЧТО
     // обрезано, а посмотреть, как это выглядит, иначе нечем: экраны обхода не
