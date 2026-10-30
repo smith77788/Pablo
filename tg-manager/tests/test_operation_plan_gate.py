@@ -56,6 +56,18 @@ class FakePool:
         return {"id": 777}
 
 
+@pytest.fixture(autouse=True)
+def _no_trial(monkeypatch):
+    """Гейт тарифа перед отказом пробует выдать пробный период (services/trial):
+    у FakePool нет таблиц, а здесь проверяется сам отказ. Триал — в
+    tests/test_onboarding_e2e_postgres.py на живой базе."""
+    from services import trial
+
+    async def _none(pool, owner_id):
+        return None
+    monkeypatch.setattr(trial, "maybe_grant", _none)
+
+
 @pytest.fixture
 def paid_op():
     # берём реальную платную операцию из реестра

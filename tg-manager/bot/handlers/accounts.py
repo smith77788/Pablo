@@ -195,7 +195,21 @@ def _save_err_ru(exc) -> str:
 async def _get_account_limit(pool: asyncpg.Pool, user_id: int) -> tuple[str, int]:
     """Return (plan, limit) for this user."""
     plan = await get_plan(pool, user_id)
-    return plan, ACC_LIMITS.get(plan, 0)
+    limit = ACC_LIMITS.get(plan, 0)
+    if limit == 0:
+        # Бесплатный тариф аккаунтов не даёт, но пробный период выдаётся ПОСЛЕ
+        # первого аккаунта (services/trial.py). Без этого исключения новичок в
+        # боте упирался в замок раньше, чем мог получить триал.
+        try:
+            from services import trial
+            if await trial.maybe_grant(pool, user_id):
+                plan = await get_plan(pool, user_id)
+                limit = ACC_LIMITS.get(plan, 0)
+            elif await trial.is_eligible(pool, user_id, need_account=False):
+                limit = 1
+        except Exception:
+            log_exc_swallow(log, "Не удалось проверить право на пробный период")
+    return plan, limit
 
 
 def _acc_menu_markup(acc_id: int, is_active: bool = True):

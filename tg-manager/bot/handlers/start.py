@@ -123,6 +123,56 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
     )
 
 
+_ONBOARD_MARK = {True: "✅", False: "▫️"}
+
+
+async def _onboarding_message(pool: asyncpg.Pool, uid: int):
+    """Чеклист онбординга для /start: (текст, клавиатура) или None, если
+    пользователь уже получил первый результат или чеклист недоступен."""
+    try:
+        from services import onboarding
+
+        d = await onboarding.load_checklist(pool, uid)
+    except Exception:
+        log_exc_swallow(log, "Не удалось собрать чеклист онбординга для /start")
+        return None
+    if not d or d.get("activated") or not d.get("steps"):
+        return None
+    from html import escape
+    from aiogram.types import WebAppInfo
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.handlers.botmother_menu import _valid_mini_app_url
+    from config import MINI_APP_URL
+
+    lines = []
+    for st in d["steps"]:
+        mark = "👉" if st["id"] == d.get("next_step") else _ONBOARD_MARK[bool(st["done"])]
+        opt = " <i>(необязательно)</i>" if st.get("optional") else ""
+        lines.append(f"{mark} {escape(st['title'])}{opt}")
+    nxt = next((st for st in d["steps"] if st["id"] == d.get("next_step")), None)
+    hint = f"\n\n<i>{escape(nxt['hint'])}</i>" if nxt and nxt.get("hint") else ""
+    text = (
+        "👋 <b>Добро пожаловать в Infragram!</b>\n\n"
+        "Система управления Telegram-аккаунтами, каналами и ботами.\n\n"
+        f"🚀 <b>Быстрый старт</b> · {d['done']}/{d['total']}\n"
+        + "\n".join(lines) + hint +
+        "\n\n<i>Удобнее всего — в приложении: там каждый шаг в один тап.</i>"
+    )
+    kb = InlineKeyboardBuilder()
+    url = _valid_mini_app_url(MINI_APP_URL)
+    if url:
+        kb.button(text="🚀 Открыть быстрый старт", web_app=WebAppInfo(url=f"{url}#onboarding"))
+    acc_step = next((st for st in d["steps"] if st["id"] == "accounts"), None)
+    if acc_step and not acc_step["done"]:
+        kb.button(text="📱 Подключить аккаунт здесь", callback_data=AccCb(action="add"))
+    plan_step = next((st for st in d["steps"] if st["id"] == "plan"), None)
+    if plan_step and not plan_step["done"] and plan_step.get("action"):
+        kb.button(text="💳 Подписка", callback_data=SubCb(action="menu"))
+    kb.button(text="🏠 Все разделы", callback_data=BmCb(action="main"))
+    kb.adjust(1)
+    return text, kb.as_markup()
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     uid = message.from_user.id
@@ -239,6 +289,14 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     bot_count = len(bots)
 
     if not bot_count:
+        # Новичок: ведём по тому же чеклисту, что и мини-апп, — от аккаунта до
+        # первого результата. Раньше здесь были только «пути через /menu» про
+        # бота по токену, без чеклиста и без двери в мини-апп (D21).
+        onboard = await _onboarding_message(pool, uid)
+        if onboard:
+            text, kb = onboard
+            await message.answer(text, parse_mode="HTML", reply_markup=kb)
+            return
         await message.answer(
             "👋 <b>Добро пожаловать в Infragram!</b>\n\n"
             "Это система управления Telegram-активами:\n"

@@ -63,7 +63,8 @@ const browser = await chromium.launch(CHROME ? { executablePath: CHROME } : {});
 const VW = Number(process.env.MINIAPP_WIDTH) || 390;
 const ctx = await browser.newContext({ viewport: { width: VW, height: 844 }, deviceScaleFactor: sweepMode ? 1 : 2 });
 const page = await ctx.newPage();
-await page.addInitScript((fat) => {
+await page.addInitScript((mode) => {
+  const fat = mode === 'fat';
   // Заглушку надо ДЕРЖАТЬ, а не просто поставить. Рядом с index.html лежит
   // настоящий telegram-web-app.js, он грузится и делает `window.Telegram = {...}`,
   // затем `window.Telegram.WebApp = ...` — то есть затирает заглушку, и
@@ -79,6 +80,19 @@ await page.addInitScript((fat) => {
   Object.defineProperty(window, 'Telegram', { get: () => TGSTUB, set: () => {}, configurable: true });
   const ok = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'Content-Type': 'application/json' } });
   const EMPTY = { ok:true, token:'stub-token', accounts:[], bots:[], channels:[], keywords:[], alerts:[], suggestions:[], bot_suggestions:[], rows:[], items:[], stats:{}, total:0, count:0, presets:[], recent:[], history:[], top_channels:[], recent_activity:[], by_stage:[] };
+  if (mode === 'fail') {
+    // Третий режим: бэкенд отвечает пятисоткой на всё, кроме входа. Вход
+    // оставлен рабочим намеренно — иначе поверх всего встанет окно входа, и
+    // проверяться будет оно одно, а не поведение экранов при сбое.
+    const boom = () => new Response(JSON.stringify({ error: 'Внутренняя ошибка' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } });
+    window.fetch = async (u) => {
+      const url = String(u || '');
+      if (url.indexOf('/auth') >= 0 || url.indexOf('/config') >= 0) return ok(EMPTY);
+      return boom();
+    };
+    return;
+  }
   if (!fat) { window.fetch = async () => ok(EMPTY); return; }
   // «Толстые» данные: длинные строки — главная причина обрезки по ширине.
   // Пустой ответ проверяет только пустые состояния экранов.
@@ -125,7 +139,18 @@ await page.addInitScript((fat) => {
     }
     return ok(o);
   };
-}, sweepMode);
+}, !sweepMode ? 'empty'
+   : process.env.MINIAPP_FAIL ? 'fail'
+   : process.env.MINIAPP_EMPTY ? 'empty' : 'fat');
+
+// MINIAPP_EMPTY — обход на ПУСТЫХ ответах. Толстые данные проверяют вёрстку, а
+// пустые — другое свойство: сказал ли экран хоть слово, когда показывать
+// нечего. Экран, нарисовавший один заголовок и ничего больше, читается как
+// поломка приложения; в этом и состоит находка.
+// Мерка немоты нужна обоим режимам без данных: и когда показывать нечего, и
+// когда бэкенд отвечает ошибкой. Экран, промолчавший в ответ на сбой, —
+// отдельная беда: человек видит пустоту и не знает, сломалось или просто пусто.
+const emptyMode = !!(process.env.MINIAPP_EMPTY || process.env.MINIAPP_FAIL);
 
 let live = [];
 page.on('pageerror', e => live.push('PAGEERROR: ' + String(e.message).slice(0, 160)));
@@ -168,6 +193,40 @@ const CLIPPED = () => {
   return { n: out.length, worst: out.slice(0, 3) };
 };
 
+// Сколько осмысленного текста показал экран, не считая его шапки и нижней
+// навигации. Ноль означает ровно то, что видит владелец: пустоту без единого
+// слова — ни «пусто», ни «ошибка», ни кнопки.
+const MUTE = () => {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return { len: 0, id: null, none: true };
+  let n = 0;
+  for (const el of scr.children) {
+    if (el.classList && (el.classList.contains('hdr') || el.classList.contains('nav'))) continue;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') continue;
+    n += (el.innerText || el.textContent || '').trim().length;
+  }
+  return { len: n, id: scr.id };
+};
+
+// Следы машинного происхождения, вылезшие в текст для человека. Список —
+// литералы, а не догадка о «латинице»: каждое попадание наверняка беда, а
+// ложных находок такой список не даёт. Пропустить он может, и пусть: ложная
+// находка здесь дороже пропущенной — её закроют списком исключений.
+const GIBBERISH = () => {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return { hits: [] };
+  const bad = ['undefined', 'NaN', '[object Object]', 'TypeError', 'ReferenceError',
+               'Failed to fetch', 'Internal Server Error'];
+  const t = (scr.innerText || '').replace(/\s+/g, ' ');
+  const hits = [];
+  for (const b of bad) {
+    const i = t.indexOf(b);
+    if (i >= 0) hits.push(b + ' « ' + t.slice(Math.max(0, i - 24), i + b.length + 16).trim() + ' »');
+  }
+  return { hits, id: scr.id };
+};
+
 async function selfCheck() {
   return page.evaluate((src) => {
     const clipped = new Function('return (' + src + ')()');
@@ -193,7 +252,7 @@ if (sweepMode) {
   // любой URL, поэтому экран детали рисуется при любом id. Падение такого
   // вызова — не находка, а непокрытый экран: он виден в строке охвата.
   const fns = fs.readFileSync(sweepList, 'utf8').split('\n').map(s => s.trim()).filter(Boolean)
-    .map(line => { const [name, arg] = line.split('|'); return { name, arg, probe: arg !== undefined }; });
+    .map(line => { const [name, ...args] = line.split('|'); return { name, args, probe: args.length > 0 }; });
   const sc = await selfCheck();
   console.log(`самопроверка мерки: заведомо обрезанный элемент найден=${sc.caught}`
     + ` | прежняя мерка (scrollWidth) его видит=${sc.old}`);
@@ -201,18 +260,51 @@ if (sweepMode) {
     console.log('МЕРКА СЛЕПА — «обрезки нет» ниже ничего не означает');
     process.exitCode = 2;
   }
+  if (emptyMode) {
+    // Мерка немоты тоже обязана показать, что видит. Прячем у показанного
+    // экрана всё, кроме шапки, и она должна насчитать ноль знаков.
+    const ms = await page.evaluate((src) => {
+      const mute = new Function('return (' + src + ')()');
+      const scr = document.querySelector('.screen.show');
+      if (!scr) return { ran: false };
+      const hid = [];
+      for (const el of scr.children) {
+        if (el.classList && el.classList.contains('hdr')) continue;
+        hid.push([el, el.style.display]); el.style.display = 'none';
+      }
+      const silent = mute().len === 0;
+      hid.forEach(([el, d]) => { el.style.display = d; });
+      return { ran: true, silent, back: mute().len };
+    }, MUTE.toString());
+    console.log(`самопроверка мерки немоты: заведомо немой экран найден=${ms.silent}`
+      + ` | текст вернулся=${ms.back > 0}`);
+    if (!ms.silent || !(ms.back > 0)) {
+      console.log('МЕРКА НЕМОТЫ СЛЕПА — «немых экранов нет» ничего не означает');
+      process.exitCode = 2;
+    }
+  }
   const report = [];
   const seen = new Set();          // какие экраны обход ДЕЙСТВИТЕЛЬНО показал
+  const mute = [];                 // открывашки, не открывшие ничего
+  const hints = [];                // машинный текст: подсказка, не находка
   let probesShown = 0, probesTotal = 0;
-  for (const { name: fn, arg, probe } of fns) {
+  for (const { name: fn, args, probe } of fns) {
     live = [];
     if (probe) probesTotal++;
+    // Какой экран показан ДО вызова. Без этого «показалось 57 из 57» было
+    // неправдой: упавшая открывашка оставляет на виду прежний экран, и в
+    // зачёт шёл он. Числитель, который считает чужую работу своей, не лучше
+    // отсутствующего знаменателя.
+    const beforeId = await page.evaluate(() => {
+      const el = document.querySelector('.screen.show');
+      return el ? el.id : null;
+    });
     const r = await page.evaluate(async ({ name, a }) => {
       if (typeof window[name] !== 'function') return { missing: true };
-      try { a === undefined ? await window[name]() : await window[name](a); }
+      try { await window[name](...a); }
       catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
       return {};
-    }, { name: fn, a: arg });
+    }, { name: fn, a: args });
     await page.waitForTimeout(220);
     // MINIAPP_SHOT_DIR — снимок каждого экрана обхода. Отчёт говорит, ЧТО
     // обрезано, а посмотреть, как это выглядит, иначе нечем: экраны обхода не
@@ -225,7 +317,9 @@ if (sweepMode) {
       const el = document.querySelector('.screen.show');
       return el ? el.id : null;
     });
-    if (shownId) { seen.add(shownId); if (probe) probesShown++; }
+    const opened = shownId && shownId !== beforeId;
+    if (opened) { seen.add(shownId); if (probe) probesShown++; }
+    else if (!probe) mute.push(fn);   // позвали без аргументов, экран не сменился
     const problems = [];
     // У пробного вызова падение значит «подставленный id не подошёл», а не
     // поломку: в находки оно не идёт, иначе отчёт утонет в шуме и перестанет
@@ -237,6 +331,23 @@ if (sweepMode) {
       if (live.length) problems.push(...live.slice(0, 2));
     }
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
+    const gb = await page.evaluate((src) => new Function('return (' + src + ')()')(), GIBBERISH.toString());
+    // В находки это НЕ идёт — см. заголовок раздела при печати. Заглушка
+    // отдаёт одну форму на 1019 маршрутов, и поле, которое на одном экране
+    // число, на другом список; отличить тут беду приложения от беды заглушки
+    // нельзя. Это подсказка «посмотри сюда», а не приговор.
+    if (gb.hits && gb.hits.length) hints.push(fn + ' | ' + gb.hits.slice(0, 2).join(' | '));
+    if (emptyMode) {
+      const mu = await page.evaluate((src) => new Function('return (' + src + ')()')(), MUTE.toString());
+      // Порог — НОЛЬ, и это намеренно. Пробовали сорок знаков: под них попали
+      // `empty('✅','Дубликатов нет','Все контакты уникальны')` (39 знаков),
+      // `empty('⚙️','Операция не найдена')` (22) и экран-форма, у которой текст
+      // живёт в placeholder'ах (12). Все три работают правильно — то есть три
+      // находки из пяти были ложными. Ложная находка в такой мерке дороже
+      // пропущенной: в следующий раз её закроют списком исключений, и дыра
+      // окажется там, где её не было. Ни одного знака — признак без толкований.
+      if (mu.id && mu.len === 0) problems.push(`НЕМОЙ ЭКРАН ${mu.id}: ни одного знака`);
+    }
     if (problems.length) report.push(fn + ' | ' + problems.join(' | '));
     await page.evaluate(() => { try { while (typeof STACK !== 'undefined' && STACK.length) back(); } catch(_) {} });
     await page.waitForTimeout(60);
@@ -311,12 +422,22 @@ if (sweepMode) {
     + `(ширина окна ${VW}); окон проверено: ${modalIds.length}`);
   console.log(`из них пробными вызовами с подставленным id: ${probesShown} `
     + `из ${probesTotal} попыток`);
+  if (mute.length) {
+    console.log(`открывашек без аргументов, НЕ открывших свой экран: ${mute.length}`
+      + ` — ${mute.slice(0, 12).join(' ')}` + (mute.length > 12 ? ' …' : ''));
+  }
   if (missed.length) {
     console.log(`не показано экранов: ${missed.length} — ${missed.slice(0, 12).join(' ')}`
       + (missed.length > 12 ? ' …' : ''));
   }
   console.log(`с находками: ${report.length}`);
   report.forEach(r => console.log('  ' + r));
+  if (hints.length) {
+    console.log(`\nмашинный текст на экране (ПОДСКАЗКА, не находка — заглушка`
+      + ` отдаёт одну форму ответа на все маршруты и сама порождает часть`
+      + ` этих мест; проверять каждое вручную): ${hints.length}`);
+    hints.forEach(h => console.log('  ' + h));
+  }
   if (report.length) process.exitCode = 1;
 } else {
   if (tab !== 'home') {

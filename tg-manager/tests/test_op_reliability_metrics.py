@@ -63,6 +63,111 @@ def _emitted_counters() -> set[str]:
     return set(re.findall(r'_reliability_metric\(\s*"([a-z0-9_]+)"', src))
 
 
+# ── Счётчики, которые пишутся ВНЕ трёх выбранных файлов ─────────────────────
+#
+# Разбор выше читает три файла из `_EMITTERS`. Это тот самый слепой отбор, на
+# котором уже горели другие переписи: счётчик, написанный в четвёртом файле, не
+# проверяется ни на описание, ни на попадание в набор тревог владельцу — и
+# молчит об этом. Нашлось на живом примере: детектор «очередь не разбирается»
+# (`operation_bus.queue_frozen`) пишет свой счётчик ослепшей защиты прямым
+# `metrics.inc`, и ни один из трёх файлов его не видит.
+#
+# Поэтому ниже — разбор по всему рабочему дереву, и он намеренно проверяет
+# только ОДНО направление: всё написанное обязано быть описано. Обратное
+# («всё описанное где-то пишется») проверять нельзя: имена счётчиков уходят в
+# общие двери через переменные (`_retrying_execute(..., metric="...")`), и
+# перепись по литералам объявила бы живые счётчики мёртвыми.
+
+_RUNTIME_DIRS = ("bot", "services", "database", "codex_bridge")
+_EMIT_FORMS = (
+    r'\b(?:_m|metrics|_metrics)\.inc\(\s*"(infragram_[a-z0-9_]+)"',
+    r'_reliability_metric\(\s*"(infragram_[a-z0-9_]+)"',
+    r'metric\s*=\s*"(infragram_[a-z0-9_]+)"',
+)
+
+
+def _counters_everywhere() -> set[str]:
+    out: set[str] = set()
+    for d in _RUNTIME_DIRS:
+        base = os.path.join(ROOT, d)
+        for dirpath, _dirs, files in os.walk(base):
+            if "__pycache__" in dirpath:
+                continue
+            for f in files:
+                if not f.endswith(".py"):
+                    continue
+                with open(os.path.join(dirpath, f), encoding="utf-8",
+                          errors="ignore") as fh:
+                    src = fh.read()
+                for form in _EMIT_FORMS:
+                    out |= set(re.findall(form, src))
+    return out
+
+
+def _alarm_list() -> dict[str, str]:
+    """`op_worker._PROTECTIVE_FAILURE_COUNTERS` без импорта модуля.
+
+    Импортировать `op_worker` здесь нельзя — он тянет конфиг с обязательными
+    переменными среды, и проверка стала бы зависеть от окружения. Поэтому
+    читаем сам литерал разбором: границы берёт ast, а не окно по символам.
+    """
+    tree = ast.parse(_read("services/op_worker.py"))
+    for node in tree.body:
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target] if isinstance(node, ast.AnnAssign) else [])
+        if not any(isinstance(t, ast.Name)
+                   and t.id == "_PROTECTIVE_FAILURE_COUNTERS" for t in targets):
+            continue
+        assert isinstance(node.value, ast.Dict)
+        out = {}
+        for k, v in zip(node.value.keys, node.value.values):
+            if isinstance(k, ast.Constant):
+                out[k.value] = ast.literal_eval(v) if isinstance(
+                    v, (ast.Constant, ast.BinOp)) else ""
+        return out
+    raise AssertionError("набор тревог владельцу не найден в op_worker")
+
+
+def test_the_tree_wide_census_sees_counters_outside_the_three_files():
+    """Самопроверка: разбор обязан находить то, чего не видят `_EMITTERS`."""
+    everywhere = _counters_everywhere()
+    assert len(everywhere) > len(_emitted_counters()), (
+        "разбор по дереву не нашёл больше, чем разбор по трём файлам — "
+        "значит он сломан или отбор файлов перестал быть узким")
+    assert "infragram_queue_frozen_check_failures_total" in everywhere, (
+        "счётчик ослепшего детектора остановки написан вне трёх файлов и "
+        "разбором не найден")
+
+
+def test_every_counter_anywhere_is_documented():
+    """Описание нужно КАЖДОМУ счётчику, а не тем, что в выбранных файлах."""
+    from services.metrics import _HELP
+
+    undocumented = sorted(n for n in _counters_everywhere() if n not in _HELP)
+    assert not undocumented, (
+        f"счётчики без описания в реестре метрик: {undocumented}. "
+        "На графике это строка, смысл которой знает только тот, кто полез в "
+        "исходник")
+
+
+def test_every_failure_counter_reaches_the_owner():
+    """`*_failures_total` — это «защита перестала работать», и владелец узнаёт.
+
+    Счётчики живут в памяти процесса, логи владелец не читает; единственный
+    способ, которым до него доходит «защита молча отключилась», — сторож,
+    который перебирает `_PROTECTIVE_FAILURE_COUNTERS`. Счётчик, не попавший в
+    этот набор, растёт в тишине.
+    """
+    alarm = _alarm_list()
+    orphans = sorted(n for n in _counters_everywhere()
+                     if n.endswith("_failures_total") and n not in alarm)
+    assert not orphans, (
+        f"счётчики сбоя защиты вне набора тревог владельцу: {orphans}")
+    for name, text in alarm.items():
+        assert re.search(r"[а-яА-Я]", text or ""), (
+            f"{name}: текст тревоги читает владелец, он должен быть на русском")
+
+
 def test_every_counter_is_documented_in_the_registry():
     """Метрика без описания — строка, которую некому прочитать на графике."""
     from services.metrics import _HELP
