@@ -10815,6 +10815,7 @@ async def _exec_bot_factory_multi(
                 "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
+    _claimed_total = len(active_accounts)
     total = len(active_accounts) * bot_count
     await _safe_execute(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
@@ -10822,6 +10823,13 @@ async def _exec_bot_factory_multi(
     created_count = 0
     failed_count = 0
     created_tokens: list[str] = []
+    # Потолок «ботов на аккаунт» = bot_count (владелец задаёт ровно его). Раньше
+    # bot_count шёл ТОЛЬКО в total как множитель, а при создании не применялся:
+    # исполнитель лил всех ботов на первый живой аккаунт (владелец задал 2 —
+    # на один аккаунт создалось 5). Считаем созданных на каждый аккаунт и в
+    # выбор берём тех, кто ещё под потолком, — это и потолок, и равномерность.
+    from collections import defaultdict as _defaultdict
+    made_by_acc: dict[int, int] = _defaultdict(int)
 
     # SEO-массив для ботов: имя из ключей (перестановка), @username вращением
     # ключей с суффиксом bot. Иначе — прежняя нумерация unique_bot_username.
@@ -10880,47 +10888,69 @@ async def _exec_bot_factory_multi(
                 continue
 
             await session_simulator.typing_delay(display_name)
+            # Выбор аккаунта на шаг: РАВНОМЕРНО и с ПОТОЛКОМ bot_count. На каждый
+            # шаг берём аккаунт с НАИМЕНЬШИМ числом уже созданных (при равенстве —
+            # по порядку списка), что даёт честный round-robin; достигший потолка
+            # в выбор не попадает. Аккаунт, выбывший по бану/флуду, убираем из
+            # ротации ЭТОЙ операции — в т.ч. при суточном лимите BotFather, который
+            # за время операции не снимется (раньше флудящий аккаунт оставался
+            # первым в ротации, и каждый следующий бот снова бил по нему).
             result = None
+            candidate = None
             tried: set[int] = set()
-            for candidate in active_accounts:
-                if candidate["id"] in tried:
-                    continue
-                tried.add(candidate["id"])
+            while True:
+                elig = [a for a in active_accounts
+                        if made_by_acc[int(a["id"])] < bot_count
+                        and int(a["id"]) not in tried]
+                if not elig:
+                    break
+                elig.sort(key=lambda a: made_by_acc[int(a["id"])])
+                cand = elig[0]
+                tried.add(int(cand["id"]))
                 result = await account_manager.create_bot_via_botfather(
-                    candidate["session_str"],
+                    cand["session_str"],
                     bot_display_name=display_name,
                     bot_username=username,
-                    _acc=candidate,
+                    _acc=cand,
                 )
                 if result.get("banned") or account_manager.is_dead_session_error(result.get("error")):
                     await pool.execute(
-                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", candidate["id"]
+                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", cand["id"]
                     )
-                    active_accounts = [a for a in active_accounts if a["id"] != candidate["id"]]
+                    active_accounts = [a for a in active_accounts if a["id"] != cand["id"]]
                     continue
                 if result.get("peer_flood") or result.get("flood_wait"):
-                    # Аккаунт пропускаем, но пауза остаётся на НЁМ: без записи
-                    # следующая операция возьмёт его первым как свободного.
-                    # PeerFlood у BotFather — тот же сигнал флага аккаунта,
-                    # что и при инвайте, поэтому и срок берём оттуда.
+                    # Помечаем флуд на аккаунте (срок берём как при инвайте) и
+                    # УБИРАЕМ его из ротации операции: суточный лимит BotFather за
+                    # время операции не снимется, а держать его первым — зависание.
                     if result.get("peer_flood"):
                         try:
                             from services.flood_engine import record_peer_flood
                             await record_peer_flood(
-                                pool, int(candidate["id"]), "create_bot", op_id)
+                                pool, int(cand["id"]), "create_bot", op_id)
                         except Exception:
                             log_exc_swallow(
                                 log, "bot_factory: запись PeerFlood не сработала")
                     else:
                         await _note_flood_penalty(
-                            pool, int(candidate["id"]),
+                            pool, int(cand["id"]),
                             result.get("flood_wait") or 0, "create_bot", op_id)
+                    active_accounts = [a for a in active_accounts if a["id"] != cand["id"]]
                     continue
+                # Успех или обычная ошибка (не вина аккаунта) — аккаунт выбран.
+                candidate = cand
                 break
-            if result is None:
-                result = {"error": "нет доступных аккаунтов"}
+
+            if candidate is None:
+                # Ни одного аккаунта под потолком не осталось (все достигли
+                # bot_count или выбыли по бану/флуду) — разместить ботов больше
+                # негде. Честно останавливаемся: оставшиеся шаги не наши.
+                break
 
             if result.get("token"):
+                # Бот создан — слот BotFather этого аккаунта потрачен, засчитываем
+                # в потолок ДАЖЕ если getMe ниже не ответит (бот уже существует).
+                made_by_acc[int(candidate["id"])] += 1
                 token = result["token"]
                 actual_uname = result.get("username", username)
                 created_tokens.append(token)
@@ -11006,13 +11036,24 @@ async def _exec_bot_factory_multi(
     finally:
         await release_accounts(claimed_ids)
 
+    _lost = _claimed_total - len(active_accounts)
+    if created_count >= total:
+        _status = "done"
+    elif created_count > 0:
+        _status = "partial"
+    else:
+        _status = "failed"
+    _summary = f"Создано ботов: {created_count} из {total}, ошибок: {failed_count}"
+    if _lost:
+        _summary += f", аккаунтов выбыло (бан/флуд): {_lost}"
+    if _busy:
+        _summary += f", пропущено занятых аккаунтов: {_busy}"
     return {
-        "status": "done",
+        "status": _status,
         "ok": created_count,
         "failed": failed_count,
         "created_tokens": created_tokens[:10],
-        "summary": (f"Создано ботов: {created_count}, ошибок: {failed_count}"
-                    + (f", пропущено занятых аккаунтов: {_busy}" if _busy else "")),
+        "summary": _summary,
     }
 
 

@@ -9339,6 +9339,14 @@ _BF_RATE_LIMIT = (
 _BF_USERNAME_TAKEN = ("already", "taken", "занят", "sorry", "exists")
 
 
+# Длинный лимит BotFather («…try again in N seconds») бывает СУТОЧНЫМ (десятки
+# тысяч секунд: владелец видел 85623с ≈ 24ч). Пережидать его ВНУТРИ
+# create_bot_via_botfather нельзя — это вешает всю операцию фабрики на одном
+# аккаунте. Короткий флуд (до этого порога) пережидаем на месте, длинный —
+# возвращаем вызывающему как flood_wait, чтобы он переключился на другой аккаунт.
+_BF_MAX_INLINE_WAIT = 90
+
+
 async def create_bot_via_botfather(
     session_string: str,
     bot_display_name: str,
@@ -9407,6 +9415,11 @@ async def create_bot_via_botfather(
                 resp = await _bf_send(text)
                 wait = _parse_flood_wait(resp)
                 if wait is None:
+                    return resp
+                # Длинный лимит НЕ пережидаем здесь: вернём текст, вызывающий
+                # увидит flood_wait и уйдёт на другой аккаунт (иначе вся операция
+                # зависала на одном аккаунте на часы — жалоба про 85623с ≈ 24ч).
+                if wait > _BF_MAX_INLINE_WAIT:
                     return resp
                 jitter = random.randint(10, 30)
                 total_wait = wait + jitter
