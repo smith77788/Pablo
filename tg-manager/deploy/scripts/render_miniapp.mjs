@@ -275,12 +275,28 @@ const COVERED = () => {
 const SCROLL_END = () => {
   const scr = document.querySelector('.screen.show');
   if (!scr) return { ran: false, atEnd: false, boxes: 0 };
+  // Ящик — тот, который МОЖНО прокрутить: переполнение само по себе ещё не
+  // прокрутка. На экране массовой публикации `div.field` переполнен на семь
+  // пикселей при `overflow:visible`, прокрутить его нельзя, и отчёт честно, но
+  // бесполезно сообщал «прокрутка не дошла до конца» на ровном месте.
+  const scrolls = (el) => {
+    const oy = getComputedStyle(el).overflowY;
+    return oy === 'auto' || oy === 'scroll' || oy === 'overlay';
+  };
   const cands = [scr, document.scrollingElement, ...scr.querySelectorAll('*')]
-    .filter(el => el && el.scrollHeight - el.clientHeight > 4);
+    .filter(el => el && el.scrollHeight - el.clientHeight > 4
+                  && (el === document.scrollingElement || scrolls(el)));
   for (const el of cands) el.scrollTop = el.scrollHeight;
-  const atEnd = cands.every(
-    el => el.scrollTop + el.clientHeight >= el.scrollHeight - 4);
-  return { ran: true, atEnd, boxes: cands.length };
+  const stuck = cands.filter(
+    el => el.scrollTop + el.clientHeight < el.scrollHeight - 4);
+  // Какой именно ящик не доехал — часть ответа, а не подробность: без имени
+  // строка «прокрутка не дошла» не говорит, чинить мерку или приложение.
+  return {
+    ran: true, atEnd: stuck.length === 0, boxes: cands.length,
+    stuck: stuck.slice(0, 2).map(el => el.tagName.toLowerCase() + '.'
+      + String(el.className || '').split(' ')[0]
+      + ' ' + Math.round(el.scrollTop) + '/' + Math.round(el.scrollHeight - el.clientHeight)),
+  };
 };
 
 // Сколько осмысленного текста показал экран, не считая его шапки и нижней
@@ -391,10 +407,13 @@ async function coveredWithSelection() {
     const vis = (el) => !!el && el.getBoundingClientRect().height > 4;
     if (!scr.querySelector('.sel-bar')) return false;
     if (!vis(scr.querySelector('.sel-bar'))) {
-      const on = [...scr.querySelectorAll('button, span, div')].find(e => {
-        const t = (e.textContent || '').trim();
-        return t.length < 20 && /Выбрать$/.test(t) && e.getAttribute('onclick');
-      });
+      // По ИМЕНИ обработчика, а не по тексту кнопки. Текст искали как
+      // «…Выбрать» в конце — и знаменатель показал «2» при трёх полосах:
+      // у каналов кнопка называется «☑️ Выбрать каналы». Подбирать условие
+      // под надписи значит ждать следующей надписи; режим выбора включает
+      // функция, и имя у неё одно на все три экрана.
+      const on = [...scr.querySelectorAll('[onclick]')].find(
+        e => /toggle\w*SelMode\(/.test(e.getAttribute('onclick') || ''));
       if (on) on.click();
     }
     const all = [...scr.querySelectorAll('.sel-bar-link')]
@@ -569,7 +588,7 @@ if (sweepMode) {
     const cv = se.atEnd
       ? await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString())
       : { n: 0, worst: [], stuck: true };
-    if (cv.stuck) scrollStuck.push(fn);
+    if (cv.stuck) scrollStuck.push(fn + ' [' + (se.stuck || []).join(' ; ') + ']');
     const shownId = await page.evaluate(() => {
       const el = document.querySelector('.screen.show');
       return el ? el.id : null;

@@ -25,27 +25,46 @@ from tests.miniapp_source import miniapp_html, miniapp_source
 _WRAPS = ("accSelBar", "chSelBar", "botSelBar")
 
 
+def _helper() -> str:
+    fn = re.search(r"function syncSelBarGap\([\s\S]{0,1400}?\n\}", miniapp_html())
+    assert fn, "помощник, выделяющий полосе место, пропал"
+    return fn.group(0)
+
+
 def _all_sources() -> str:
     return miniapp_source()
 
 
-def test_the_scroll_box_reserves_room_for_the_bar():
-    css = re.search(r"\.sb\{padding-bottom:[^}]*\}", miniapp_html())
-    assert css, "у прокручиваемого ящика пропал запас снизу"
-    assert "--sel-gap" in css.group(0), (
-        "запас снизу снова рассчитан только на нижнюю навигацию — полоса "
-        f"действий опять закроет хвост списка: {css.group(0)}")
+def test_the_room_goes_to_the_box_that_actually_scrolls():
+    """Первая правка давала запас `.sb` — и на экране каналов не помогла.
+
+    Там прокручивается не `.sb`, запас уходил туда, где его никто не крутит, и
+    обход нашёл восемь закрытых элементов ровно на экране, про который уже было
+    написано «исправлено». Ящик ищется по факту: `scrollHeight > clientHeight`.
+    """
+    fn = _helper()
+    assert "scrollHeight - el.clientHeight" in fn, (
+        "ящик для запаса снова выбирается по классу, а не по факту прокрутки")
 
 
 def test_the_gap_is_measured_not_guessed():
     """Высота полосы зависит от числа кнопок и от ширины экрана."""
-    src = miniapp_html()
-    fn = re.search(r"function syncSelBarGap\([\s\S]{0,900}?\n\}", src)
-    assert fn, "помощник, выделяющий полосе место, пропал"
-    assert "getBoundingClientRect" in fn.group(0), (
+    fn = _helper()
+    assert "getBoundingClientRect" in fn, (
         "высота полосы снова взята числом, а не померена: на 320 кнопки лягут "
         "в другое число рядов, и запас разойдётся с полосой")
-    assert "setProperty('--sel-gap'" in fn.group(0)
+    assert "paddingBottom" in fn and "getComputedStyle" in fn, (
+        "запас больше не складывается с собственным отступом ящика")
+
+
+def test_the_gap_does_not_pile_up_on_itself():
+    """Базовый отступ читается, только когда свой запас уже снят."""
+    fn = _helper()
+    i_clear = fn.find("box.style.paddingBottom = ''")
+    i_read = fn.find("getComputedStyle(box)")
+    assert 0 <= i_clear < i_read, (
+        "базовый отступ читается вместе со своим запасом — он сложится сам с "
+        "собой на каждом переключении режима выбора")
 
 
 def test_every_selection_bar_asks_for_its_room():
@@ -59,8 +78,8 @@ def test_every_selection_bar_asks_for_its_room():
 
 def test_the_room_is_taken_back_when_the_bar_closes():
     """Иначе внизу списка навсегда останется пустая полоса в сотню пикселей."""
-    fn = re.search(r"function syncSelBarGap\([\s\S]{0,900}?\n\}", miniapp_html())
-    assert fn and "'0px'" in fn.group(0), (
+    fn = _helper()
+    assert re.search(r"box\.style\.paddingBottom = '';\s*\n\s*if \(!open\) return;", fn), (
         "закрытая полоса больше не возвращает списку место")
 
 

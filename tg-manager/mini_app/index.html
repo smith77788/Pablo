@@ -176,7 +176,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    Слоты с nowrap это правило не трогает — там работает многоточие. */
 .screen{overflow-wrap:break-word}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-.sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 16px + var(--sel-gap, 0px))}
+.sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 16px)}
 .sub-sb{padding-bottom:28px}
 /* Содержимое не должно начинаться вплотную к шапке: замер по всем экранам
    показал разброс от 0 до 40px. Восемь пикселей сверху телу экрана и
@@ -8856,12 +8856,33 @@ function syncSelBarGap(wrapId) {
   const wrap = document.getElementById(wrapId);
   if (!wrap) return;
   const scr = wrap.closest('.screen');
-  const box = scr && scr.querySelector('.sb');
-  if (!box) return;
+  if (!scr) return;
   const bar = wrap.querySelector('.sel-bar');
   const open = !!bar && wrap.style.display !== 'none';
-  box.style.setProperty('--sel-gap',
-    open ? (bar.getBoundingClientRect().height + 12) + 'px' : '0px');
+  // Ящик ищем ПО ФАКТУ, а не по классу `.sb`. Первая правка ставила запас
+  // именно ему — и на вкладках помогла, а на экране каналов нет: там
+  // прокручивается не он, запас уходил туда, где его никто не крутит, и обход
+  // нашёл восемь закрытых элементов ровно там, где «уже исправлено».
+  // Переполнение само по себе ещё не прокрутка: на экране массовой публикации
+  // `div.field` переполнен на семь пикселей при `overflow:visible`. Нужен тот
+  // ящик, который МОЖНО прокрутить.
+  const scrolls = (el) => {
+    const oy = getComputedStyle(el).overflowY;
+    return oy === 'auto' || oy === 'scroll' || oy === 'overlay';
+  };
+  const box = [scr, ...scr.querySelectorAll('*')]
+    .find(el => el.scrollHeight - el.clientHeight > 4 && scrolls(el))
+    || scr.querySelector('.sb') || scr;
+  // Свой запас сначала снимаем: иначе базовый отступ прочитается вместе с ним
+  // и сложится сам с собой на каждом переключении.
+  box.style.paddingBottom = '';
+  if (!open) return;
+  const base = getComputedStyle(box).paddingBottom || '0px';
+  // Высоту берём у самой полосы, а не числом: она зависит от того, сколько
+  // кнопок действий и в сколько рядов они легли, и на 320 это не то же, что
+  // на 390. Двенадцать пикселей — зазор между полосой и последней строкой.
+  const h = Math.round(bar.getBoundingClientRect().height) + 12;
+  box.style.paddingBottom = `calc(${base} + ${h}px)`;
 }
 
 function push(sid) {
