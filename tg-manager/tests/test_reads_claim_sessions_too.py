@@ -260,5 +260,8 @@ def test_parser_does_not_loop_forever(monkeypatch, arbiter):
 
 def test_every_parse_entry_point_releases_the_lease():
     src = inspect.getsource(parser_mod)
-    assert src.count("await _release_account(_leased)") == 3
-    assert src.count("await _claim_best_account(pool, owner_id)") == 3
+    # Все три разбора идут через одну дверь `_run_parse`: захват и
+    # освобождение аренды там ровно по одному разу.
+    assert src.count("await _release_account(_leased)") == 1
+    assert src.count("await _claim_best_account(pool, owner_id)") == 1
+    assert src.count("return await _run_parse(") == 3

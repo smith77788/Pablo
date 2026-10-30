@@ -1416,9 +1416,10 @@ def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Respons
         text=buf.getvalue(),
         content_type="text/csv",
         charset="utf-8",
+        # Выгрузку CORS не открываем: в ней телефоны и имена, а скачивает её
+        # сам мини-апп со своего адреса (переходом, не чужим fetch).
         headers={
             "Content-Disposition": f'attachment; filename="{safe_name}"',
-            "Access-Control-Allow-Origin": "*",
         },
     )
 
