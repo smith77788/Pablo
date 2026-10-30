@@ -137,6 +137,22 @@ await page.addInitScript((mode) => {
     // JS, которой в приложении нет (бэкенд отдаёт обе формы правильно, см.
     // services/onboarding.py), а выдуманная находка в следующий раз
     // закрывается списком исключений — и дыра оказывается там, где её не было.
+    // Одно и то же имя поля на разных адресах значит разное. `proxies` на
+    // `/transport` — ЧИСЛО прокси (services/mini_app_api.py: transport_get),
+    // а на экране прокси — список записей; `accounts`, `channels`, `bots` на
+    // `/topology` — счётчики (services/mini_app_parser.py:
+    // topology_overview), а в списках — записи. Заглушка, раздающая одну
+    // форму по имени поля, печатала на этих двух экранах
+    // «[object Object],[object Object]» — подсказку о беде, которой в
+    // приложении нет. Подсказка, которую нельзя закрыть, со временем
+    // перестаёт читаться вся целиком, и настоящая уходит вместе с ней.
+    if (url.indexOf('/transport') >= 0) {
+      o.proxies = 12; o.accounts_with_proxy = 34;
+    }
+    if (url.indexOf('/topology') >= 0 && url.indexOf('/topology/') < 0) {
+      o.accounts = 25; o.channels = 14; o.bots = 7;
+      o.channel_links = 31; o.bot_users_total = 1234567;
+    }
     if (url.indexOf('/onboarding') >= 0) {
       o.activated = false; o.next_step = 1; o.done = 3; o.total = ROWS.length;
       o.steps = ROWS.map((r, i) => ({ ...r, done: i < 3, optional: i % 4 === 0,
@@ -333,6 +349,26 @@ const GIBBERISH = () => {
   return { hits, id: scr.id };
 };
 
+// Самопроверка мерки машинного текста. Подсказок стало ноль — и ровно с этой
+// минуты «подсказок нет» перестало что-либо означать: мерка могла ослепнуть
+// тем же способом, каким ослепла мерка в окнах (корень не тот, текст не
+// читается). Кладём на экран заведомо машинное слово и требуем его найти.
+async function gibberishSelfCheck() {
+  return page.evaluate((src) => {
+    const gib = new Function('return (' + src + ')()');
+    const scr = document.querySelector('.screen.show');
+    if (!scr) return { ran: false };
+    const base = gib().hits.length;
+    const bad = document.createElement('div');
+    bad.textContent = 'заведомо undefined в тексте';
+    scr.appendChild(bad);
+    const caught = gib().hits.length > base;
+    bad.remove();
+    const restored = gib().hits.length === base;
+    return { ran: true, caught, restored, base };
+  }, GIBBERISH.toString());
+}
+
 async function selfCheck() {
   return page.evaluate((src) => {
     const clipped = new Function('return (' + src + ')()');
@@ -521,6 +557,13 @@ if (sweepMode) {
       console.log('МЕРКА НЕМОТЫ СЛЕПА — «немых экранов нет» ничего не означает');
       process.exitCode = 2;
     }
+  }
+  const gs = await gibberishSelfCheck();
+  console.log(`самопроверка мерки машинного текста: заведомо машинное слово`
+    + ` найдено=${gs.caught} | после снятия подсказок столько же=${gs.restored}`);
+  if (!gs.caught || !gs.restored) {
+    console.log('МЕРКА МАШИННОГО ТЕКСТА СЛЕПА — «подсказок нет» ничего не означает');
+    process.exitCode = 2;
   }
   const cs = await coveredSelfCheck();
   console.log(`самопроверка мерки закрытого текста: заведомо закрытая строка`
