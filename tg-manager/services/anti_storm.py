@@ -25,10 +25,28 @@ Anti-Storm — быстрый событийный предохранитель 
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
+
+
+def _note_write_cancelled(where: str, ctx: str, lost: str) -> None:
+    """Отмена съела защитную запись. Разбор и счётчик — у общей двери.
+
+    Писатели защиты ловят `except Exception`, а `asyncio.CancelledError` с
+    Python 3.8 не `Exception`: отмена проходила сквозь них без следа, и слепы
+    они оказывались ровно к нашим собственным остановкам (деплой, передача
+    очереди другому процессу). Отмену вызывающий обязан пробросить сразу
+    после этого вызова.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.note_write_cancelled(__name__, where, ctx, lost)
+    except Exception:
+        pass
 
 # Окно наблюдения за волной (минуты): сколько назад смотрим на критические баны.
 WINDOW_MIN = 30
@@ -209,6 +227,12 @@ async def check_and_arm(pool, owner_id: int, *, bot=None) -> dict:
         try:
             await spine.state_set(pool, owner_id, _STATE_KEY, state)
             armed = True
+        except asyncio.CancelledError:
+            _note_write_cancelled(
+                "anti_storm_arm", f"[owner={owner_id}]",
+                "защита от волны банов не включилась — флот остался в полном "
+                "темпе")
+            raise
         except Exception:
             # ЭТО и есть защита: без записи никакого замедления нет, флот
             # продолжает работать в полном темпе ровно в те минуты, когда

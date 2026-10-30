@@ -18,6 +18,23 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
+
+def _note_write_cancelled(where: str, ctx: str, lost: str) -> None:
+    """Отмена съела защитную запись. Разбор и счётчик — у общей двери.
+
+    Писатели защиты ловят `except Exception`, а `asyncio.CancelledError` с
+    Python 3.8 не `Exception`: отмена проходила сквозь них без следа, и слепы
+    они оказывались ровно к нашим собственным остановкам (деплой, передача
+    очереди другому процессу). Отмену вызывающий обязан пробросить сразу
+    после этого вызова.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.note_write_cancelled(__name__, where, ctx, lost)
+    except Exception:
+        pass
+
 # Консервативный человекоподобный дефолт. Можно переопределить platform_setting
 # 'account_daily_action_budget'. 0 или отрицательное = без лимита.
 DEFAULT_DAILY_BUDGET = 50
@@ -219,6 +236,12 @@ async def record_actions(
                 int(n),
             )
             return
+        except asyncio.CancelledError:
+            _note_write_cancelled(
+                "budget", f"[acc={account_id} action={action}]",
+                "суточный лимит недосчитает эти действия, и следующая "
+                "операция может взять аккаунт сверх него")
+            raise
         except Exception:
             if _attempt == 1:
                 log.warning(

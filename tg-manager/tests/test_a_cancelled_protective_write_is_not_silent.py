@@ -144,3 +144,110 @@ def test_the_counter_is_documented(ow):
     """Описание графика обязано быть: безымянный счётчик никто не прочтёт."""
     from services import metrics as _m
     assert CANCELLED in _m._HELP, "счётчик не описан в services/metrics.py::_HELP"
+
+
+# ── Храповик: слепота не должна вернуться ────────────────────────────────────
+
+import ast  # noqa: E402  (рядом с переписью, чтобы читалось как одна тема)
+import os  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_TREE = ("services", "bot", "database", "codex_bridge", "main.py")
+
+# Считаем потерю ЗАПИСИ. Счётчики чтения (`*_read_failures_total`) сюда
+# намеренно не входят: отменённое чтение ничего не теряет — работа ещё не
+# начиналась, и прогон просто откладывается целиком.
+_LOSS_SUFFIXES = ("_write_failures_total", "_unmark_failures_total")
+
+
+def _py_files():
+    out = []
+    for rel in _TREE:
+        path = os.path.join(ROOT, rel)
+        if os.path.isfile(path):
+            out.append(path)
+            continue
+        for base, _dirs, names in os.walk(path):
+            for n in sorted(names):
+                if n.endswith(".py"):
+                    out.append(os.path.join(base, n))
+    return out
+
+
+def _loss_counters(handler) -> list[str]:
+    return sorted({
+        n.value for n in ast.walk(handler)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        and n.value.startswith("infragram_")
+        and n.value.endswith(_LOSS_SUFFIXES)
+    })
+
+
+def _blind_writers(tree, label: str) -> list[str]:
+    """try-блоки, которые СЧИТАЮТ потерю записи и не ловят отмену."""
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        caught = []
+        for h in node.handlers:
+            if h.type is None:
+                caught.append("<bare>")
+                continue
+            items = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
+            caught += [ast.unparse(i) for i in items]
+        if any("CancelledError" in c or c in ("BaseException", "<bare>")
+               for c in caught):
+            continue
+        for h in node.handlers:
+            names = _loss_counters(h)
+            if names:
+                found.append(f"{label}:{h.lineno} {','.join(names)}")
+                break
+    return found
+
+
+def test_the_census_sees_a_deliberately_blind_writer():
+    """Самопроверка мерки ПРЕЖДЕ, чем верить её пустому списку."""
+    sample = (
+        "async def w(pool):\n"
+        "    for a in (1, 2):\n"
+        "        try:\n"
+        "            return await pool.execute('x')\n"
+        "        except Exception:\n"
+        "            inc('infragram_demo_write_failures_total')\n"
+    )
+    assert _blind_writers(ast.parse(sample), "sample"), (
+        "перепись не видит заведомо слепого писателя — верить её пустому "
+        "списку нельзя"
+    )
+    healthy = sample.replace(
+        "        except Exception:",
+        "        except asyncio.CancelledError:\n            raise\n"
+        "        except Exception:")
+    assert not _blind_writers(ast.parse(healthy), "sample"), (
+        "перепись считает слепым писателя, который отмену ловит — мерка сломана"
+    )
+
+
+def test_no_protective_writer_is_blind_to_cancellation():
+    """Потеря ЗАПИСИ, которую мы считаем, обязана считаться и на пути отмены.
+
+    `except Exception` не ловит `CancelledError` с Python 3.8, то есть writer
+    без своего `except asyncio.CancelledError` слеп ровно к нашим собственным
+    остановкам: SIGTERM на деплое (а деплой у нас на каждый пуш) и передача
+    очереди другому процессу. Исключений в этом списке нет намеренно: на
+    момент постановки храповика их было ноль, и каждое новое — это настоящая
+    невидимая потеря, а не издержка мерки.
+    """
+    blind = []
+    for path in _py_files():
+        try:
+            tree = ast.parse(open(path, encoding="utf-8").read())
+        except SyntaxError:
+            continue
+        blind += _blind_writers(tree, os.path.relpath(path, ROOT))
+    assert not blind, (
+        "писатели защиты считают потерю записи, но слепы к отмене "
+        f"({len(blind)}): {blind}"
+    )

@@ -45,6 +45,23 @@ from bot.utils.template_validator import replace_placeholders
 
 logger = logging.getLogger(__name__)
 
+
+def _note_write_cancelled(where: str, ctx: str, lost: str) -> None:
+    """Отмена съела защитную запись. Разбор и счётчик — у общей двери.
+
+    Писатели защиты ловят `except Exception`, а `asyncio.CancelledError` с
+    Python 3.8 не `Exception`: отмена проходила сквозь них без следа, и слепы
+    они оказывались ровно к нашим собственным остановкам (деплой, передача
+    очереди другому процессу). Отмену вызывающий обязан пробросить сразу
+    после этого вызова.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.note_write_cancelled(__name__, where, ctx, lost)
+    except Exception:
+        pass
+
 # broadcast_id → asyncio.Task, for optional cancellation
 _running: dict[int, asyncio.Task] = {}
 
@@ -352,6 +369,12 @@ async def run(
                 "VALUES ($1, $2) ON CONFLICT DO NOTHING",
                 [(broadcast_id, uid) for uid in batch],
             )
+        except asyncio.CancelledError:
+            _note_write_cancelled(
+                "broadcast_journal", f"[broadcast={broadcast_id}]",
+                f"журнал доставок потерял {len(batch)} получателей — докатка "
+                "может написать им второй раз")
+            raise
         except Exception as _e:
             # Громко и в метрику: потерянная строка журнала означает, что
             # докатка напишет этим людям второй раз. Тихий warning сюда и

@@ -27,6 +27,23 @@ from services import op_status
 
 log = logging.getLogger(__name__)
 
+
+def _note_write_cancelled(where: str, ctx: str, lost: str) -> None:
+    """Отмена съела защитную запись. Разбор и счётчик — у общей двери.
+
+    Писатели защиты ловят `except Exception`, а `asyncio.CancelledError` с
+    Python 3.8 не `Exception`: отмена проходила сквозь них без следа, и слепы
+    они оказывались ровно к нашим собственным остановкам (деплой, передача
+    очереди другому процессу). Отмену вызывающий обязан пробросить сразу
+    после этого вызова.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.note_write_cancelled(__name__, where, ctx, lost)
+    except Exception:
+        pass
+
 _MAX_MEDIA_BYTES = 20 * 1024 * 1024  # потолок скачивания медиа кампании
 
 _CT_EXT = {
@@ -936,6 +953,12 @@ async def _premark_dm_target(pool, campaign_id: int, acc_id, user_id: int) -> bo
                 campaign_id, acc_id, user_id,
             )
             return True
+        except asyncio.CancelledError:
+            _note_write_cancelled(
+                "dm_dedup", f"[campaign={campaign_id} target={user_id}]",
+                "предзапись цели потеряна; сообщение не ушло, но следующий "
+                "прогон увидит цель неотправленной")
+            raise
         except Exception as e:
             if _attempt == 1:
                 await asyncio.sleep(0.5)
@@ -964,6 +987,12 @@ async def _unmark_dm_target(pool, campaign_id: int, user_id: int) -> None:
             " WHERE campaign_id=$1 AND tg_user_id=$2 AND status='sent'",
             campaign_id, user_id,
         )
+    except asyncio.CancelledError:
+        _note_write_cancelled(
+            "dm_unmark", f"[campaign={campaign_id} target={user_id}]",
+            "метка с неотправленной цели не снята — этот человек выпал из "
+            "кампании")
+        raise
     except Exception as e:
         log.error(
             "dm dedup: метка с неотправленной цели НЕ снялась campaign=%s "
@@ -996,6 +1025,12 @@ async def _settle_dm_target(pool, campaign_id: int, acc_id, user_id: int,
                 "VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
                 campaign_id, acc_id, user_id, status, (error_msg or "")[:200],
             )
+    except asyncio.CancelledError:
+        _note_write_cancelled(
+            "dm_settle", f"[campaign={campaign_id} target={user_id}]",
+            "исход цели не записан — экраны кампании покажут отправку, "
+            "которой не было")
+        raise
     except Exception as e:
         log.error("dm dedup: исход цели не записался campaign=%s target=%s "
                   "status=%s (%s)", campaign_id, user_id, status, str(e)[:120])

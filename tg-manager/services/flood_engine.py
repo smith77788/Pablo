@@ -36,6 +36,22 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
+
+def _note_write_cancelled(where: str, ctx: str, lost: str) -> None:
+    """Отмена съела защитную запись. Разбор и счётчик — у общей двери.
+
+    Писатели защиты ловят `except Exception`, а `asyncio.CancelledError` с
+    Python 3.8 не `Exception`: отмена проходила сквозь них без следа, и слепы
+    они оказывались ровно к нашим собственным остановкам (деплой, передача
+    очереди). Отмену вызывающий обязан пробросить сразу после этого вызова.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.note_write_cancelled(__name__, where, ctx, lost)
+    except Exception:
+        pass
+
 # In-memory per-account flood state (supplements DB for hot-path queries)
 _flood_state: dict[int, "_AccountFloodState"] = {}
 _ACTION_BASELINES: dict[str, float] = {
@@ -899,6 +915,12 @@ async def apply_cooldown(
                 (int(owner_id) if owner_id is not None else None),
             )
             return True
+        except asyncio.CancelledError:
+            _note_write_cancelled(
+                "account_cooldown", f"[acc={account_id}]",
+                "пауза аккаунта потеряна, он останется доступным следующей "
+                "операции сразу после флуда")
+            raise
         except Exception as exc:
             if _attempt == 1:
                 log.warning(
@@ -969,6 +991,12 @@ async def apply_post_action_cooldown(
                 f"rest after {action_type}",
             )
             return True
+        except asyncio.CancelledError:
+            _note_write_cancelled(
+                "account_rest", f"[acc={account_id}]",
+                "отдых аккаунта потерян, после рестарта он выглядит отдохнувшим "
+                "и может уйти во второй тяжёлый прогон сразу")
+            raise
         except Exception as exc:
             if _attempt == 1:
                 log.warning(

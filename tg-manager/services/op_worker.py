@@ -170,13 +170,15 @@ def _note_protective_write_cancelled(
     настоящий сбой защиты. Поэтому WARNING и свой счётчик: потеря видна, а
     тревога не обесценена.
     """
-    log.warning(
-        "op_worker: защитная запись не состоялась — задачу отменили%s (%s). "
-        "Это остановка процесса, а не отказ базы, но потеря настоящая",
-        log_ctx, lost,
-    )
-    _reliability_metric("infragram_protective_write_cancelled_total",
-                        where=where or "unknown")
+    # Дверь одна (`metrics.note_write_cancelled`): иначе у каждого писателя
+    # завёлся бы свой текст и свой счётчик, и общая картина «сколько защиты
+    # съели наши рестарты» не собиралась бы нигде.
+    try:
+        from services import metrics as _m
+
+        _m.note_write_cancelled(__name__, where or "unknown", log_ctx, lost)
+    except Exception:
+        pass
 
 
 async def _journal_write(
@@ -17757,6 +17759,12 @@ async def _journal_done(pool, op_id: int, step_num: int, target,
                 message,
             )
             return True
+        except asyncio.CancelledError:
+            _note_protective_write_cancelled(
+                "journal_success", f"[op={op_id}]",
+                "строка успеха потеряна, следующая попытка сделает эту цель "
+                "второй раз")
+            raise
         except Exception as exc:
             if _attempt == 1:
                 log.warning(
@@ -17792,6 +17800,12 @@ async def _record_invited_targets(pool, owner_id: int, group_key: str, op_id: in
         try:
             await _invite_log_insert(pool, owner_id, group_key, op_id, uniq)
             return True
+        except asyncio.CancelledError:
+            _note_protective_write_cancelled(
+                "invite_dedup", f"[op={op_id}]",
+                "предзапись инвайта потеряна, следующий прогон может "
+                "пригласить тех же людей второй раз")
+            raise
         except Exception:
             if _attempt == 1:
                 log.warning(
@@ -17856,6 +17870,12 @@ async def _premark_invite_targets(pool, owner_id: int, group_key: str, op_id: in
         try:
             await _invite_log_insert(pool, owner_id, group_key, op_id, _keys)
             return True
+        except asyncio.CancelledError:
+            _note_protective_write_cancelled(
+                "invite_dedup_batch", f"[op={op_id}]",
+                "предзапись пачки инвайта потеряна, следующий прогон может "
+                "позвать тех же людей второй раз")
+            raise
         except Exception:
             if _attempt == 1:
                 await asyncio.sleep(0.5)
@@ -17904,6 +17924,12 @@ async def _unmark_untried_invites(pool, owner_id: int, group_key: str, op_id: in
                 "AND target = ANY($3::text[]) AND op_id = $4",
                 owner_id, group_key, _drop, op_id)
             return True
+        except asyncio.CancelledError:
+            _note_protective_write_cancelled(
+                "invite_unmark", f"[op={op_id}]",
+                "снятие предзаписи потеряно, цели числятся приглашёнными и "
+                "больше не позовутся")
+            raise
         except Exception:
             if _attempt == 1:
                 await asyncio.sleep(0.5)
