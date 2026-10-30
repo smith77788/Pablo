@@ -1928,8 +1928,11 @@ async def _warmup_bulk_core(
     """
     from services.account_warmer import create_warmup_plans_bulk
 
+    # Потолок пакета — явно здесь: 500 аккаунтов за один запуск, остальные
+    # возьмёт следующий (уже греющиеся пакет пропускает).
     return await create_warmup_plans_bulk(
-        pool, uid, plan_type=plan_type, profile_type=profile_type, niche=niche)
+        pool, uid, plan_type=plan_type, profile_type=profile_type, niche=niche,
+        limit=500)
 
 
 async def _check_all_proxies_core(pool: asyncpg.Pool, uid: int) -> dict:

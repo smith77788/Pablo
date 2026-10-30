@@ -140,7 +140,9 @@ def test_endpoint_and_route_wired():
     assert '"/api/miniapp/onboarding"' in src
     assert "onboarding.load_checklist" in src
     # P0 D8: эндпоинт больше не считает «активацией» любую строку очереди.
-    assert 'COUNT(*) FROM operation_queue WHERE owner_id=$1", uid' not in src
+    i = src.index("async def onboarding_status")
+    body = src[i:src.index("\n    async def ", i + 10)]
+    assert "operation_queue" not in body
 
 
 def _html():
