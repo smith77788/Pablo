@@ -57,7 +57,7 @@ async function accPhoneStart(){
     // нас, ждать доставки владельцу не нужно — код читается из служебного чата.
     _accShowPull(r.code_from_account||null);
     toast(r.hint||'Код отправлен');
-  }catch(e){ _accErr(String(e&&e.message||e)); }
+  }catch(e){ _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); }
   finally{ b.disabled=false; b.textContent='📨 Отправить код'; }
 }
 
@@ -70,7 +70,7 @@ async function accPhoneCode(){
     accPhoneAutoStop();  // код принят — автоповтор больше не нужен
     if(r.needs_2fa){ document.getElementById('accPhoneStep-2fa').style.display='block'; toast('❗ Требуется пароль 2FA'); }
     else _accDone(r);
-  }catch(e){ _accErr(String(e&&e.message||e)); }
+  }catch(e){ _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); }
   finally{ b.disabled=false; b.textContent='✅ Подтвердить код'; }
 }
 
@@ -81,7 +81,7 @@ async function accPhone2fa(){
   try{
     const r=await api('/api/miniapp/account/add/phone/2fa',{method:'POST',body:JSON.stringify({phone:_accLoginPhone,password,proxy_id:_accProxy().id})});
     _accDone(r);
-  }catch(e){ _accErr(String(e&&e.message||e)); }
+  }catch(e){ _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); }
   finally{ b.disabled=false; b.textContent='🔓 Подтвердить 2FA'; }
 }
 
@@ -109,7 +109,7 @@ async function accPhoneResend(){
     toast((r&&r.hint)?r.hint:'Код запрошен повторно');
     return {ok:true, timeout:((r&&r.timeout)||0)};
   }catch(e){
-    _accErr(String(e&&e.message||e));
+    _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз'));
     return {error:true};
   }finally{ if(b){ b.disabled=false; b.textContent=prev||'🔁 Запросить ещё раз'; } }
 }
@@ -138,7 +138,7 @@ async function accPhonePullCode(){
     if(inp) inp.value=code;
     _accResendNote('Код взят из служебного чата этого аккаунта. Нажмите «Подтвердить код».');
     toast('📩 Код получен: '+code);
-  }catch(e){ _accErr(String(e&&e.message||e)); }
+  }catch(e){ _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); }
   finally{ if(b){ b.disabled=false; b.textContent=prev||'📩 Взять код из моей сессии'; } }
 }
 
@@ -184,7 +184,7 @@ async function accQrStart(){
     document.getElementById('accQrHint').style.display='block';
     accStopQrPoll();
     _accQrTimer=setInterval(accQrPoll, 3000);
-  }catch(e){ _accErr(String(e&&e.message||e)); box.innerHTML='<button class="btn btn-p" onclick="accQrStart()" style="width:100%">↺ Повторить</button>'; }
+  }catch(e){ _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); box.innerHTML='<button class="btn btn-p" onclick="accQrStart()" style="width:100%">↺ Повторить</button>'; }
 }
 
 async function accQrPoll(){
@@ -193,7 +193,7 @@ async function accQrPoll(){
     if(r.status==='done'){ _accDone(r); }
     else if(r.status==='need_2fa'){ accStopQrPoll(); document.getElementById('accQrStep-2fa').style.display='block'; toast('❗ Требуется пароль 2FA'); }
     // pending → ждём следующий тик
-  }catch(e){ accStopQrPoll(); _accErr(String(e&&e.message||e)); }
+  }catch(e){ accStopQrPoll(); _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); }
 }
 
 async function accQr2fa(){
@@ -203,7 +203,7 @@ async function accQr2fa(){
   try{
     const r=await api('/api/miniapp/account/add/qr/2fa',{method:'POST',body:JSON.stringify({password,proxy_id:_accProxy().id})});
     _accDone(r);
-  }catch(e){ _accErr(String(e&&e.message||e)); }
+  }catch(e){ _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); }
   finally{ b.disabled=false; b.textContent='🔓 Подтвердить 2FA'; }
 }
 
@@ -212,7 +212,7 @@ async function accFileUpload(){
   if(!f){ _accErr('Выберите файл .session'); return; }
   const b=document.getElementById('accFileBtn'); b.disabled=true; b.textContent='⏳ Импортирую…';
   try{ _accDone(await _accUpload('/api/miniapp/account/add/session_file', f)); }
-  catch(e){ _accErr(String(e&&e.message||e)); }
+  catch(e){ _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); }
   finally{ b.disabled=false; b.textContent='📂 Загрузить и импортировать'; }
 }
 
@@ -222,6 +222,6 @@ async function accTdataUpload(){
   if(f.size>50*1024*1024){ _accErr('Архив больше 50 МБ'); return; }
   const b=document.getElementById('accTdataBtn'); b.disabled=true; b.textContent='⏳ Конвертирую…';
   try{ _accDone(await _accUpload('/api/miniapp/account/add/tdata', f)); }
-  catch(e){ _accErr(String(e&&e.message||e)); }
+  catch(e){ _accErr(errRu(e, 'Не удалось выполнить вход — попробуйте ещё раз')); }
   finally{ b.disabled=false; b.textContent='📦 Загрузить и конвертировать'; }
 }

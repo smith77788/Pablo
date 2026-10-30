@@ -828,12 +828,82 @@ def body_came_broken_from_the_client(exc: BaseException) -> bool:
     return False
 
 
+# ── Текст ошибки владельцу — по-русски ───────────────────────────────────────
+# Владелец не читает по-английски, а `_err` чаще всего получает str(исключения):
+# Telethon отвечает «Chat admin privileges are required», asyncpg — «cannot
+# perform operation», aiohttp — «Cannot connect to host». Фронт это НЕ спасает:
+# его `errRu` пропускает сообщение, в котором есть хоть одна кириллическая
+# буква, а восемь мест в API строят текст как f"Ошибка: {str(exc)}" — русский
+# префикс проводит английское тело прямо на экран.
+#
+# Признак английской фразы — служебные слова, а не перечень «плохих» слов:
+# никакой новый технический токен (имя канала, хост прокси, код ошибки) не
+# заставит сюда дописывать исключения. Второе правило — для текста, где
+# кириллицы нет вовсе: строчное латинское слово, не часть идентификатора,
+# ссылки или @имени.
+_OWNER_EN_WORDS = (
+    "the|and|with|without|for|you|your|are|not|this|that|have|has|had|was|were"
+    "|from|must|cannot|could|should|would|will|please|required|require|requires"
+    "|invalid|allowed|failed|failure|unable|already|does|doesn|isn|aren|wasn"
+    "|too|than|while|when|which|there|their|been|being|such|only|every|each"
+    "|wait|seconds|minutes|retry|again|expired|unknown|missing|exists|exist"
+    "|denied|refused|closed|timeout|timed|connect|connection|privileges|peer"
+)
+_OWNER_EN = re.compile(r"(?<![A-Za-z])(?:" + _OWNER_EN_WORDS + r")(?![A-Za-z])", re.I)
+_OWNER_RU = re.compile(r"[\u0410-\u044f\u0401\u0451]")
+_OWNER_BARE_EN = re.compile(r"(?<![A-Za-z0-9_@/:.\-])[a-z]{3,}(?![A-Za-z0-9_@/:.\-])")
+# Русская «голова» сообщения: всё до первой латинской буквы, если там есть
+# кириллица. Из «Не удалось добавить прокси: Cannot connect» остаётся то, что
+# владельцу и нужно знать, — ЧТО не получилось.
+_OWNER_RU_HEAD = re.compile(r"[^A-Za-z]*[\u0410-\u044f\u0401\u0451][^A-Za-z]*")
+_OWNER_EN_TAIL = " — подробности в журнале"
+
+
+_OWNER_LATIN_WORD = re.compile(r"[A-Za-z]{2,}")
+
+
+def _looks_english(msg: str) -> bool:
+    """Увидит ли владелец в этом тексте английскую фразу.
+
+    Одного служебного слова мало: им бывает имя поля («Некорректное значение:
+    from») или английское название канала в кавычках. Фраза — это либо два
+    служебных слова, либо одно плюс латинские слова вокруг.
+    """
+    if not msg:
+        return False
+    marks = len(set(m.group(0).lower() for m in _OWNER_EN.finditer(msg)))
+    if marks >= 2 or (marks and len(_OWNER_LATIN_WORD.findall(msg)) >= 3):
+        return True
+    if _OWNER_RU.search(msg):
+        return False
+    return bool(_OWNER_BARE_EN.search(msg))
+
+
+def _owner_ru(msg: str, quiet: bool = False) -> str:
+    """Английское тело заменяем русской фразой, оригинал — в журнал.
+
+    `quiet` — для журналов операций: там оригинал уже лежит в базе и в
+    серверном логе, а строк в ответе десятки, и предупреждение на каждую
+    только забивает лог.
+    """
+    if not _looks_english(msg):
+        return msg
+    head = _OWNER_RU_HEAD.match(msg)
+    lead = head.group(0).strip(" :,.;!?()[]«»—–-") if head else ""
+    if not quiet:
+        log.warning("англоязычный текст ошибки владельцу: %r", msg)
+    return (lead + _OWNER_EN_TAIL) if lead else ("Операция не выполнена" + _OWNER_EN_TAIL)
+
+
 def _err(msg: str, status: int = 400) -> web.Response:
     # Единственная дверь наружу для текста ошибки, а текст этот чаще всего —
     # str(исключения). Ошибки asyncpg несут строку подключения, ошибки Telethon
     # — токен, ошибки прокси — логин с паролем. Чистим здесь, чтобы утечка не
     # зависела от того, вспомнил ли автор конкретного из 500 мест про секреты.
     msg = redact_secrets(msg) if msg else msg
+    # Русский — до сборки тела: ниже по паролю «подписк» ищется пейволл, а
+    # русская голова сообщения о подписке английской фразой не бывает.
+    msg = _owner_ru(msg) if msg else msg
     body = {"error": msg}
     # Единый маркер пейволла: ЛЮБОЙ 403 «требуется подписка» помечаем, чтобы фронт
     # показал экран апгрейда (ценность + 1 тап к оформлению) вместо сухого тоста —
@@ -9161,8 +9231,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     msg = "IPv6-подсеть не работает на этом сервере"
                     if probe.get("hint"):
                         msg += ": " + probe["hint"]
-                    return _json_resp({"ok": False, "error": msg, "probe": probe},
-                                      status=400)
+                    # Мимо `_err` (нужно отдать `probe`), поэтому русский текст
+                    # обеспечиваем тем же `_owner_ru` — дверь одна по правилу,
+                    # а не по вызову.
+                    return _json_resp({"ok": False, "error": _owner_ru(msg),
+                                       "probe": probe}, status=400)
             norm = await db.set_ipv6_subnet(pool, uid, subnet)
             return _json_resp({"ok": True, "ipv6_subnet": norm, "probe": probe})
         except ValueError as ve:

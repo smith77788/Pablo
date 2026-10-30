@@ -116,7 +116,12 @@ def test_api_error_response_scrubs_secrets():
     resp = _err(f"asyncpg: postgres://app:s3cr3t@db:5432/infragram unreachable", 500)
     body = _json.loads(resp.text)
     assert "s3cr3t" not in body["error"]
-    assert "postgres://app:***@" in body["error"]
+    # Вид замаскированного остатка проверяется у самой `redact_secrets` ниже:
+    # этот английский текст `_err` владельцу уже не показывает (он не читает
+    # по-английски) и заменяет русской фразой. Чистка идёт ДО замены, поэтому
+    # в журнал и в ответ секрет не попадает ни по одному пути.
+    assert "postgres://app:***@" in redact_secrets(
+        "asyncpg: postgres://app:s3cr3t@db:5432/infragram unreachable")
 
     resp2 = _err(f"Telethon отверг сессию {SESSION}", 500)
     assert SESSION not in _json.loads(resp2.text)["error"]

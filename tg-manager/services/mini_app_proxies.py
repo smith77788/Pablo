@@ -40,7 +40,8 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.mini_app_api import (
         PROXY_IMPORT_BATCH, _INTERNAL_ERROR, _apply_proxy_moves,
         _check_all_proxies_core, _collect_valid_proxies, _csv_resp, _err,
-        _get_uid, _json_resp, _proxy_display_host, _reject_proxy_reason,
+        _get_uid, _json_resp, _owner_ru, _proxy_display_host,
+        _reject_proxy_reason,
         _safe_count, _safe_fetch, _safe_fetchrow, _safe_fetchval, log,
         parse_proxy_type,
     )
@@ -362,7 +363,8 @@ def setup_routes(app: web.Application, pool) -> None:
             # результат уже выполненной проверки прокси.
             log.warning("check_proxy persist failed proxy=%s", proxy_id, exc_info=True)
         return _json_resp({"ok": True, "alive": bool(res.get("ok")),
-                           "latency_ms": res.get("latency_ms"), "error": res.get("error")})
+                           "latency_ms": res.get("latency_ms"),
+                           "error": _owner_ru(res.get("error") or "")})
 
     async def proxy_toggle_backup(request: web.Request) -> web.Response:
         """Пометить/снять прокси как резервный (is_backup) для failover."""

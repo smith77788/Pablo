@@ -25,6 +25,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import operation_bus as _obus
     from services.mini_app_api import (
         _INTERNAL_ERROR, _PREFLIGHT_CONCURRENCY, _err, _get_uid, _json_resp,
+        _owner_ru,
         _safe_count, _safe_fetch, _safe_fetchrow, _scan_admin_status, log,
         read_upload, read_upload_text, UploadTooLarge,
     )
@@ -792,7 +793,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _json_resp({
                     "ok": False, "no_promoter": True,
                     "scanned": _scanned, "fleet": fleet,
-                    "message": msg,
+                    "message": _owner_ru(msg),
                 })
             op_id = await _obus.submit(
                 pool, uid, "promote_all_admins",

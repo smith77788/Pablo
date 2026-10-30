@@ -24,7 +24,7 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты виртуального администратора канала."""
     from services.mini_app_api import (
-        _err, _get_uid, _is_admin, _json_resp, log, va_post_link,
+        _err, _get_uid, _is_admin, _json_resp, _owner_ru, log, va_post_link,
     )
 
     def _va_cid(request: web.Request) -> int | None:
@@ -259,7 +259,8 @@ def setup_routes(app: web.Application, pool) -> None:
             "draft": "Пост написан — редактор нашёл замечания, он ждёт вашего решения ниже",
             "error": "Не получилось написать пост — причина в журнале, администратор повторит сам",
         }.get(res, "Готово")
-        return _json_resp({"ok": res != "error", "result": res, "message": msg})
+        return _json_resp({"ok": res != "error", "result": res,
+                           "message": _owner_ru(msg)})
 
     async def _va_draft(request: web.Request, action: str) -> web.Response:
         uid = _get_uid(request)

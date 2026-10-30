@@ -27,7 +27,7 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты прогрева на приложении мини-аппа."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _obus, _safe_fetch,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _obus, _owner_ru, _safe_fetch,
         _safe_fetchrow, _warmup_bulk_core, alive_accounts, log,
     )
     from services import account_status as _acc_status
@@ -190,7 +190,8 @@ def setup_routes(app: web.Application, pool) -> None:
                      "fail": int(agg["fail"] or 0) if agg else 0},
             "actions": [
                 {"action": r["action_type"], "target": r["target"],
-                 "success": bool(r["success"]), "error": r["error"],
+                 "success": bool(r["success"]),
+                 "error": _owner_ru(r["error"] or "", quiet=True),
                  "at": r["performed_at"].isoformat() if r["performed_at"] else None}
                 for r in rows
             ],

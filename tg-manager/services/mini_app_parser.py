@@ -36,7 +36,7 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты парсинга, сетки, топологии и пульса."""
     from services.mini_app_api import (
         _INTERNAL_ERROR, _csv_resp, _err, _get_uid, _json_resp, _list_limit,
-        _list_offset, _safe_count, _safe_fetch, _safe_fetchrow, log,
+        _list_offset, _owner_ru, _safe_count, _safe_fetch, _safe_fetchrow, log,
     )
     from services.security import validate_integer
 
@@ -467,7 +467,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 "total_found": r["total_found"] or 0,
                 "total_saved": r["total_saved"] or 0,
                 "started_at": r["started_at"].isoformat() if r["started_at"] else None,
-                "error": (r["error"] or "")[:300],
+                "error": _owner_ru((r["error"] or "")[:300], quiet=True),
             }
             for r in rows
         ]})
