@@ -117,12 +117,15 @@ async def _resolve_username_id(pool: asyncpg.Pool, owner_id: int,
     {"status": "found", "user_id", "is_bot"} | {"status": "not_found"} |
     {"status": "unverified", "reason": "no_account"|"flood_wait"|"error"}
     """
+    # Выбор аккаунтов — только через resource_selector: он знает про cooldown,
+    # доверие и флуды. Сырой `ORDER BY id LIMIT 2` брал первые два активных
+    # аккаунта подряд, в том числе сидящий в кулдауне после флуда, и резолв
+    # имени уходил именно им — то есть ровно тем, кому сейчас нельзя.
     try:
-        accs = await pool.fetch(
-            "SELECT id, session_str, device_model, system_version, app_version, phone "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-            "AND session_str IS NOT NULL AND session_str<>'' "
-            "ORDER BY id LIMIT $2", owner_id, _RESOLVE_ACCOUNTS_MAX)
+        from services import resource_selector as _rsel
+        accs = await _rsel.select_accounts(
+            pool, owner_id, _RESOLVE_ACCOUNTS_MAX, action_type="resolve")
+        accs = [a for a in accs if (a.get("session_str") or "").strip()]
     except Exception:
         log.exception("extra_username: выборка аккаунтов owner=%s", owner_id)
         return {"status": "unverified", "reason": "error"}

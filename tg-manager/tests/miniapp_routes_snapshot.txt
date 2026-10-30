@@ -997,6 +997,7 @@ PUT /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/toggle
 PUT /api/miniapp/auto_reply/{reply_id}/toggle
 PUT /api/miniapp/bot/{bot_id}/commands
+PUT /api/miniapp/bot/{bot_id}/extra_username
 PUT /api/miniapp/bot/{bot_id}/note
 PUT /api/miniapp/bot/{bot_id}/relay/toggle
 PUT /api/miniapp/bot/{bot_id}/role
