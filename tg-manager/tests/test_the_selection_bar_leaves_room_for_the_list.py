@@ -25,10 +25,31 @@ from tests.miniapp_source import miniapp_html, miniapp_source
 _WRAPS = ("accSelBar", "chSelBar", "botSelBar")
 
 
+def _block(src: str, head: str) -> str:
+    """Тело функции по скобкам, а не по длине.
+
+    Первая редакция брала его регуляркой с потолком в 1400 знаков: функция
+    подросла на один комментарий, и проверки начали падать на здоровом коде —
+    то есть мерить длину комментария вместо того, что в функции написано.
+    """
+    i = src.index(head)
+    j = src.index("{", i)
+    depth = 0
+    for k in range(j, len(src)):
+        if src[k] == "{":
+            depth += 1
+        elif src[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[i:k + 1]
+    raise AssertionError(f"не закрыта скобка у {head!r}")
+
+
 def _helper() -> str:
-    fn = re.search(r"function syncSelBarGap\([\s\S]{0,1400}?\n\}", miniapp_html())
-    assert fn, "помощник, выделяющий полосе место, пропал"
-    return fn.group(0)
+    src = miniapp_html()
+    assert "function syncSelBarGap(" in src, (
+        "помощник, выделяющий полосе место, пропал")
+    return _block(src, "function syncSelBarGap(")
 
 
 def _all_sources() -> str:

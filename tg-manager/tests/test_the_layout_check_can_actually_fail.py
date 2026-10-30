@@ -345,11 +345,14 @@ def test_the_scroll_box_is_found_by_fact_not_by_class():
     шли в находки. Две находки из двух оказались ложными.
     """
     src = _src()
-    fn = re.search(r"const SCROLL_END[\s\S]{0,1200}?\n\};", src)
-    assert fn, "доводка прокрутки до упора пропала"
-    assert "scrollHeight - el.clientHeight" in fn.group(0), (
+    assert "const SCROLL_END" in src, "доводка прокрутки до упора пропала"
+    fn = src[src.index("const SCROLL_END"):src.index("\n};", src.index("const SCROLL_END"))]
+    assert "scrollHeight - el.clientHeight" in fn, (
         "ящик для прокрутки снова ищется по классу, а не по факту")
-    assert "atEnd" in fn.group(0) and "se.atEnd" in src, (
+    assert "overflowY" in fn, (
+        "переполнение снова принимают за прокрутку: div.field на массовой "
+        "публикации переполнен на семь пикселей при overflow:visible")
+    assert "atEnd" in fn and "se.atEnd" in src, (
         "прокрутка больше не отчитывается, дошла ли она до конца")
     assert "прокрутка не дошла до конца" in src, (
         "«находок нет» и «мерить было негде» снова выглядят одинаково")
