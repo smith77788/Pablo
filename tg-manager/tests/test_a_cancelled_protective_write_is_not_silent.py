@@ -306,12 +306,13 @@ def test_the_alarm_counter_reaches_the_owner(ow):
 
 def test_shutdown_tells_the_metrics_it_is_planned():
     """Без этой проводки весь раздел не работает: флаг никто не поставит."""
-    import ast
     import inspect
+    import textwrap
+
     from services import op_worker as _ow
 
     src = inspect.getsource(_ow.shutdown)
-    tree = ast.parse(__import__("textwrap").dedent(src))
+    tree = ast.parse(textwrap.dedent(src))
     calls = [ast.unparse(n.func) for n in ast.walk(tree)
              if isinstance(n, ast.Call)]
     assert any("set_shutting_down" in c for c in calls), (
