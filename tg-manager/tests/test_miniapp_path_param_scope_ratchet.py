@@ -1,4 +1,4 @@
-"""Храповик: хендлер, берущий id из ПУТИ, обязан скоупить запрос по владельцу.
+"""Храповик: хендлер, берущий значение ИЗВНЕ, обязан скоупить запрос по владельцу.
 
 Самый дорогой класс бага мультиарендного продукта. `/api/miniapp/account/{id}`
 без `owner_id` — это не «неточность выборки», а выдача чужого аккаунта любому
@@ -18,6 +18,23 @@
 uid, nid)`) — SQL в них нет, скоуп обеспечивает сервис. Расширять сюда нельзя
 без отдельного разбора: измеритель, дающий десятки находок в зрелом коде, почти
 всегда сломан (CLAUDE.md), а этот на момент написания даёт ровно ноль.
+
+**Две половины одного класса.** Внешний id приходит в ручку двумя путями, и
+долгое время заморожен был только первый. `request.match_info` — путь
+(`/api/miniapp/account/{id}`), и его держит `test_every_path_param_handler_is_owner_scoped`
+ниже. Тело запроса — ровно такой же внешний ввод: `data.get("channel_id")`
+подставляется клиентом так же свободно, как сегмент пути, и `WHERE
+channel_id=$1` без владельца отдаёт чужой канал точно так же. Половина про
+тело не проверялась вовсе; измерено — 75 ручек берут значение из тела и ходят в
+базу, и все 75 скоуп имеют. Ноль дыр, и именно поэтому это стоит закрепить:
+класс самый дорогой в мультиарендном продукте, а дыра в нём не падает, не
+краснеет и выглядит работающей ручкой.
+
+Свойство взято ШИРЕ, чем «ключ с `id` в имени»: проверяются ручки, читающие из
+тела любое значение. Узкий отбор по именам ключей пропустил бы `WHERE
+phone=$1` или `WHERE username=$1` — тот же чужой доступ под другим именем.
+Третий раз в этом файле: отбор, названный механизмом, видит одну реализацию
+свойства и молчит про остальные.
 
 Проверка идёт по границам функций из AST, а не по окну фиксированной длины:
 сдвинулся код — защита не должна выключаться молча.
@@ -480,3 +497,123 @@ def test_every_recognised_gate_exists_and_is_fail_closed():
         assert not unguarded, (
             f"{gate} вызывается вне try в: {sorted(unguarded)} — при сбое базы "
             f"ответ не превратится в отказ")
+
+
+# ── Вторая половина класса: значение из ТЕЛА запроса ───────────────────────
+
+# Любое значение, прочитанное из разобранного тела. Намеренно не только ключи с
+# `id` в имени: `WHERE phone=$1` без владельца — тот же чужой доступ.
+_BODY_VALUE = re.compile(r"""(?:data|body|payload)\.get\(\s*['"]([a-z0-9_]+)['"]""",
+                         re.I)
+
+_PROBE_STEAL_BY_ID = """
+async def steal_a_channel(request):
+    data = await request.json()
+    cid = int(data.get("channel_id"))
+    row = await pool.fetchrow(
+        "SELECT title FROM managed_channels WHERE channel_id=$1", cid)
+    return _json_resp({"title": row["title"]})
+"""
+
+_PROBE_SCOPED_BY_ID = """
+async def read_my_channel(request):
+    data = await request.json()
+    cid = int(data.get("channel_id"))
+    row = await pool.fetchrow(
+        "SELECT title FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+        cid, uid)
+    return _json_resp({"title": row["title"]})
+"""
+
+_PROBE_VIA_GATE = """
+async def bot_setting_via_gate(request):
+    data = await request.json()
+    bot_id = int(data.get("bot_id"))
+    if not await _user_can_use_bot(pool, uid, bot_id):
+        return _err("Бот не найден", 404)
+    await pool.execute("UPDATE managed_bots SET greeting=$1 WHERE bot_id=$2",
+                       data.get("greeting"), bot_id)
+    return _json_resp({"ok": True})
+"""
+
+# Ключ без «id» в имени: узкий отбор по именам ключей пропустил бы ровно это,
+# а отдаётся здесь самое ценное, что есть у аккаунта.
+_PROBE_STEAL_BY_PHONE = """
+async def steal_by_phone(request):
+    data = await request.json()
+    phone = validate_string(data.get("phone"), max_len=32)
+    row = await pool.fetchrow(
+        "SELECT session_str FROM tg_accounts WHERE phone=$1", phone)
+    return _json_resp({"session": row["session_str"]})
+"""
+
+
+def _body_scope_findings(extra: str | None = None) -> tuple[list[str], int]:
+    """(неотскоупленные ручки, сколько всего отобрано) по телу запроса."""
+    bad: list[str] = []
+    total = 0
+    for src in _SOURCES + ((extra,) if extra else ()):
+        tree = ast.parse(src)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            seg = ast.get_source_segment(src, fn) or ""
+            # id из пути — забота первой половины, не этой.
+            if "request.match_info" in seg or not _BODY_VALUE.search(seg):
+                continue
+            if not _DB_CALL.search(seg):
+                continue
+            sqls = _sql_literals(fn)
+            if not sqls:
+                continue
+            total += 1
+            if any(_OWNER.search(q) for q in sqls):
+                continue
+            if any(g in seg for g in _ACCESS_GATES):
+                continue
+            bad.append(fn.name)
+    return sorted(bad), total
+
+
+def test_every_body_param_handler_is_owner_scoped():
+    bad, _total = _body_scope_findings()
+    assert bad == [], (
+        "значение из тела запроса подставляется клиентом так же свободно, как "
+        "сегмент пути: запрос без колонки владения отдаёт чужие данные любому "
+        "авторизованному — " + ", ".join(bad))
+
+
+def test_the_body_half_still_selects_its_handlers():
+    """Обмелевший отбор — вечно зелёное правило ни о чём."""
+    _bad, total = _body_scope_findings()
+    assert total >= 70, (
+        f"отбор по телу запроса обмелел до {total} ручек — скорее всего сломан "
+        "он, а не API")
+
+
+def test_an_unscoped_body_id_is_caught():
+    bad, _t = _body_scope_findings(_PROBE_STEAL_BY_ID)
+    assert "steal_a_channel" in bad, (
+        "правило не видит чужой доступ по значению из тела — оно пустое")
+
+
+def test_a_scoped_body_id_is_spared():
+    bad, _t = _body_scope_findings(_PROBE_SCOPED_BY_ID)
+    assert "read_my_channel" not in bad, (
+        "отскоупленная ручка объявлена дырой: ложная находка в храповике "
+        "безопасности дороже обычной — следующий разбор заносит ручку в "
+        "исключения, и дыра появляется там, где её не было")
+
+
+def test_a_fail_closed_gate_counts_as_scope():
+    """Скоуп, живущий внутри признанной проверки, повторять в SQL не требуется."""
+    bad, _t = _body_scope_findings(_PROBE_VIA_GATE)
+    assert "bot_setting_via_gate" not in bad
+
+
+def test_a_key_without_id_in_its_name_is_still_checked():
+    """Узкий отбор по именам ключей пропустил бы ровно этот случай."""
+    bad, _t = _body_scope_findings(_PROBE_STEAL_BY_PHONE)
+    assert "steal_by_phone" in bad, (
+        "чужой доступ по ключу без «id» в имени не замечен — отбор назван "
+        "механизмом, а не свойством")
