@@ -16,14 +16,16 @@ function meshBotLabel(b) {
   return b.username ? '@'+b.username : (b.first_name || ('бот #'+b.bot_id));
 }
 
-async function openBotMeshMore() { MESH_LIMIT += 200; await openBotMesh(true); }
+async function openBotMeshMore() { MESH_OFFSET = MESH_ROWS.length; await openBotMesh(true); }
 
 async function openBotMesh(keep) {
-  if (!keep) { MESH_LIMIT = 30; push('s-botmesh'); }
+  if (!keep) { MESH_ROWS = []; MESH_OFFSET = 0; push('s-botmesh'); }
   if (!keep) txt('botmeshList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/mesh/tasks?limit='+MESH_LIMIT);
-    const tasks = listOf(d,'tasks');
+    const d = await api('/api/miniapp/mesh/tasks?limit=30&offset='+MESH_OFFSET);
+    const _page = listOf(d,'tasks');
+    MESH_ROWS = MESH_OFFSET ? MESH_ROWS.concat(_page) : _page;
+    const tasks = MESH_ROWS;
     const total = totalOf(d, tasks);
     const cntLbl = total ? num(total)+' '+plural(total,'задача','задачи','задач') : '';
     txt('botmeshCount', cntLbl);

@@ -324,9 +324,9 @@ def setup_routes(app: web.Application, pool) -> None:
             except Exception:
                 log.debug("account_detail rehab acc=%s", acc_id)
         recent_ops = await _safe_fetch(pool,
-            """SELECT op_type, status, done_items, total_items, created_at
+            """SELECT op_type, label, status, done_items, total_items, created_at
                FROM operation_queue WHERE owner_id=$1
-               ORDER BY created_at DESC LIMIT 8""", uid)
+               ORDER BY created_at DESC, id DESC LIMIT 8""", uid)
         # Риск-пульс аккаунта — объясняет «активен, но операции его пропускают»
         # (тот же единый сигнал, что и в списке; owner-scoped, fail-soft).
         health = None
@@ -734,7 +734,7 @@ def setup_routes(app: web.Application, pool) -> None:
         elif op == "privacy":
             pk = (body.get("privacy_key") or "phone").strip()
             if pk not in ("phone", "invite", "lastseen"):
-                return _err("Настройка приватности: phone, invite или lastseen", 400)
+                return _err("Настройка приватности: телефон, приглашения в группы или «был в сети»", 400)
             params["privacy_key"] = pk
             params["privacy_allow"] = bool(body.get("privacy_allow", False))
             label = f"Приватность: {pk}"
@@ -1282,8 +1282,16 @@ def setup_routes(app: web.Application, pool) -> None:
             "SELECT channel_id AS id, channel_id, username, title, type, "
             "COALESCE(members_count, 0) AS member_count "
             "FROM managed_channels WHERE owner_id=$1 AND acc_id=$2 "
-            "ORDER BY member_count DESC NULLS LAST LIMIT 500", uid, acc_id)
-        return _json_resp({"channels": rows, "total": len(rows or [])})
+            "ORDER BY member_count DESC NULLS LAST, channel_id LIMIT 500", uid, acc_id)
+        # Итог считает запрос: `len(rows)` при потолке 500 называет длину
+        # страницы, а не число каналов, и у аккаунта с большим числом каналов
+        # шапка писала бы ровно «500» — цифра правдоподобная и неверная.
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
+            uid, acc_id)
+        return _json_resp({"channels": rows, "total": total,
+                           "page": {"limit": 500, "shown": len(rows or []),
+                                    "has_more": len(rows or []) < total}})
 
     async def account_bots(request: web.Request) -> web.Response:
         """Боты, СОЗДАННЫЕ через этот аккаунт (managed_bots.acc_id).
@@ -1301,8 +1309,15 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор аккаунта", 400)
         rows = await _safe_fetch(pool,
             "SELECT bot_id, username, first_name, is_active FROM managed_bots "
-            "WHERE added_by=$1 AND acc_id=$2 ORDER BY added_at DESC LIMIT 500", uid, acc_id)
-        return _json_resp({"bots": rows, "total": len(rows or [])})
+            "WHERE added_by=$1 AND acc_id=$2 ORDER BY added_at DESC, bot_id LIMIT 500",
+            uid, acc_id)
+        # См. выше: при потолке в 500 длина страницы — не итог.
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND acc_id=$2",
+            uid, acc_id)
+        return _json_resp({"bots": rows, "total": total,
+                           "page": {"limit": 500, "shown": len(rows or []),
+                                    "has_more": len(rows or []) < total}})
 
     async def account_spamblock_appeal(request: web.Request) -> web.Response:
         """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
@@ -1621,6 +1636,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
         # Cancel any active warmup first
         try:
+            # Гейт тарифа ДО записи плана: раньше план ставился первым, а отказ
+            # submit() по тарифу оставлял «активный» план без операции, который
+            # фоновый цикл грел без подписки.
+            await _obus.enforce_gates(pool, uid, "account_warmup")
             await pool.execute(
                 "UPDATE account_warmup_plans SET status='paused' WHERE account_id=$1 AND owner_id=$2 AND status='active'",
                 acc_id, uid)
@@ -1798,7 +1817,7 @@ def setup_routes(app: web.Application, pool) -> None:
             code = (body.get("code") or "").strip()
             pch = (body.get("phone_code_hash") or "").strip()
             if not phone or not code or not pch:
-                return _err("Нужны phone, code и phone_code_hash", 400)
+                return _err("Не хватает данных входа: запросите код заново", 400)
             from services import account_manager as am
             res = await asyncio.wait_for(am.confirm_code(phone, code, pch), timeout=40)
             if res == "need_2fa":
@@ -1823,7 +1842,7 @@ def setup_routes(app: web.Application, pool) -> None:
             phone = (body.get("phone") or "").strip()
             password = body.get("password") or ""
             if not phone or not password:
-                return _err("Нужны phone и password", 400)
+                return _err("Нужны номер телефона и пароль двухфакторной защиты", 400)
             from services import account_manager as am
             await asyncio.wait_for(am.confirm_2fa(phone, password), timeout=40)
             session_str, info = await am.get_client_info_and_session(phone)
@@ -1861,7 +1880,7 @@ def setup_routes(app: web.Application, pool) -> None:
             phone = normalize_phone(body.get("phone") or "") or (body.get("phone") or "").strip()
             pch = (body.get("phone_code_hash") or "").strip()
             if not phone or not pch:
-                return _err("Нужны phone и phone_code_hash", 400)
+                return _err("Не хватает данных входа: запросите код заново", 400)
             from services import account_manager as am
             from telethon.errors import FloodWaitError
             try:

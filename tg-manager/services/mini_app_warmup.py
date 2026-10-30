@@ -206,9 +206,9 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось разобрать запрос", 400)
         plan_type = body.get("plan_type", "standard")
         if plan_type not in ("gentle", "standard", "aggressive"):
-            return _err("plan_type должен быть gentle/standard/aggressive", 400)
+            return _err("Режим прогрева: мягкий, обычный или интенсивный", 400)
         if not body.get("account_id"):
-            return _err("account_id обязателен", 400)
+            return _err("Выберите аккаунт", 400)
         # Нечисловой id уезжал параметром в запрос и давал DataError → 500.
         account_id = validate_integer(body.get("account_id"), min_val=1)
         if not account_id:
@@ -261,12 +261,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 try:
                     daily_actions = max(3, min(20, int(body["daily_actions"])))
                 except (TypeError, ValueError):
-                    return _err("daily_actions должен быть числом 3..20", 400)
+                    return _err("Действий в день: число от 3 до 20", 400)
             if body.get("target_days") is not None:
                 try:
                     target_days = max(5, min(45, int(body["target_days"])))
                 except (TypeError, ValueError):
-                    return _err("target_days должен быть числом 5..45", 400)
+                    return _err("Длительность прогрева: число дней от 5 до 45", 400)
 
             # Сохраняем поведенческий профиль — движок прогрева читает именно
             # отсюда (profile_type → веса действий, niche/custom_channels → на
@@ -344,6 +344,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 niche=body.get("niche") or "general",
             )
             return _json_resp(result)
+        except PermissionError as exc:
+            # Нет подписки или предохранитель Ban Weather.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("warmup_bulk_start uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)

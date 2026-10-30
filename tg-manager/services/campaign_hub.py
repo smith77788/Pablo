@@ -32,6 +32,16 @@ KIND_BOTS = "bots"
 KIND_DM = "dm"
 ALL_KINDS = (KIND_CHANNELS, KIND_CHATS, KIND_BOTS, KIND_DM)
 
+# Названия видов для владельца: причины отказа по ветке уезжают в тост
+# мини-аппа («Не ушло: …»), а ключи вида `dm` и `channel_post` ему ничего не
+# говорят — и по-английски он не читает (CLAUDE.md, первая строка).
+KIND_LABEL = {
+    KIND_CHANNELS: "каналы",
+    KIND_CHATS: "чаты",
+    KIND_BOTS: "боты",
+    KIND_DM: "личные сообщения",
+}
+
 # Тип операции-исполнителя для каждого вида (ключи op_worker.dispatch_table()).
 KIND_OP_TYPE = {
     KIND_CHANNELS: "mass_publish",
@@ -223,6 +233,11 @@ _PLANNERS = {
 }
 
 
+def _kind_ru(kind: str) -> str:
+    """Название вида для владельца; незнакомый вид возвращаем как есть."""
+    return KIND_LABEL.get(kind, kind)
+
+
 def enabled_kinds(spec: dict) -> list[str]:
     """Виды ресурсов, включённые в спеке (в стабильном порядке)."""
     targets = spec.get("targets") or {}
@@ -327,12 +342,17 @@ async def launch_campaign(pool, owner_id: int, spec: dict) -> dict:
             children.append({"kind": kind, "op_id": int(op_id), "op_type": op["op_type"]})
         except PermissionError as exc:
             # Тариф (PlanRequiredError) или предохранитель Ban Weather — не сбой.
-            errors.append(f"{kind}: {str(exc) or 'требуется подписка'}")
+            errors.append(f"{_kind_ru(kind)}: {str(exc) or 'требуется подписка'}")
         except CampaignSpecError as exc:
-            errors.append(f"{kind}: {exc}")
-        except Exception as exc:
+            errors.append(f"{_kind_ru(kind)}: {exc}")
+        except Exception:
+            # Текст встроенного исключения владельцу не показываем: он
+            # по-английски, без имени поля и без того, что делать. Причина
+            # известна ЗДЕСЬ — ветка не поставилась, — её и пишем, а подробности
+            # уходят в журнал выше.
             log.exception("launch_campaign owner=%s kind=%s", owner_id, kind)
-            errors.append(f"{kind}: {str(exc)[:140]}")
+            errors.append(f"{_kind_ru(kind)}: не удалось поставить операцию, "
+                          "причина записана в журнал сервера")
 
     status = "running" if children else "failed"
     if children and errors:

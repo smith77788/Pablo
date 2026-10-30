@@ -85,6 +85,21 @@ CHANNEL_LIMITS: dict[str, int] = tariffs.resource_limits("channels")
 
 PLAN_PRICES = {plan: tariffs.price_str(plan) for plan in tariffs.PLANS if plan != "free"}
 PLAN_EMOJIS = {"free": "🆓", "paid": "💎"}
+# Имя тарифа для человека. Код хранит английские ключи ('paid', 'strike'), а в
+# сообщениях бота они выводились как есть: «Оплата PAID», «Подписка STRIKE».
+_PLAN_NAMES_RU = {
+    "free": "Бесплатный",
+    "paid": "Подписка",
+    "strike": "Массовые жалобы",
+    "host_server": "Host-Server",
+}
+
+
+def plan_name_ru(plan: str | None) -> str:
+    key = (plan or "").strip().lower()
+    if key in _PLAN_NAMES_RU:
+        return _PLAN_NAMES_RU[key]
+    return _PLAN_NAMES_RU.get(tariffs.coerce_plan(key), "Подписка")
 PLAN_FEATURES = {
     "paid": "∞ ботов и каналов, CRM, воронки, аккаунты, AI-ассистент, рассылки, аналитика, все функции",
 }
@@ -168,6 +183,35 @@ def feature_required_plan(feature_key: str) -> str:
 def _admin_ids() -> set[int]:
     raw = os.getenv("ADMIN_IDS", "")
     return {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+
+
+async def platform_alert_recipients(pool) -> set[int]:
+    """Кому уходят платформенные алерты. ОДНО место для всех оповещений.
+
+    Раньше каждое оповещение резолвило получателей само, через `_admin_ids()`,
+    то есть через одну переменную окружения. А продукт знает платформенного
+    админа шире: `is_platform_admin` принимает и того, кто вошёл в админку по
+    `ADMIN_SECRET`, и такие сессии лежат в `platform_admin_sessions` со
+    сроком — они переживают перезапуск. Мини-апп этих людей админами считает, а
+    оповещения — нет.
+
+    Цена расхождения высокая именно здесь. Весь слой защитных отказов устроен
+    так: операция отказывается делать необратимое действие и говорит об этом
+    счётчиком, который сторож превращает в сообщение админу. Получатель —
+    последнее звено, и при незаполненном `ADMIN_IDS` (обычная установка)
+    молчали ВСЕ отказы разом.
+
+    Пустой ответ по-прежнему возможен и по-прежнему значит «сообщить некому»:
+    вызывающий обязан это заметить и посчитать, а не двигать базу отсчёта.
+    """
+    ids = set(_admin_ids())
+    try:
+        from bot.handlers.admin import live_session_admins
+
+        ids |= await live_session_admins(pool)
+    except Exception:
+        log_exc_swallow(log, "platform_alert_recipients: сессии админки не прочитались")
+    return ids
 
 
 def is_platform_admin(user_id: int) -> bool:

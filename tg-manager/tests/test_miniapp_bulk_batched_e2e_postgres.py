@@ -71,6 +71,19 @@ def pool():
         _LOOP.close()
 
 
+@pytest.fixture(autouse=True)
+def _paid_owner(pool):
+    """Массовый прогрев доступен по подписке (гейт тарифа, D3) — у владельца
+    теста она настоящая, в базе, как у живого покупателя."""
+    _run(pool.execute(
+        "INSERT INTO subscriptions(user_id, plan, expires_at, is_active) "
+        "VALUES($1,'paid', now() + INTERVAL '30 days', true) "
+        "ON CONFLICT (user_id) DO UPDATE SET is_active=true, "
+        "expires_at=now() + INTERVAL '30 days'", OWNER))
+    from bot.utils.subscription import invalidate_plan_cache
+    invalidate_plan_cache(OWNER)
+
+
 class _Recorder:
     """Пишет выполненные запросы, всё остальное проксирует в настоящий пул/соединение."""
 
@@ -143,7 +156,12 @@ def test_warmup_bulk_is_batched_and_starts_all(pool):
 
     # Число запросов не зависит от числа аккаунтов: выборка + CREATE TABLE IF
     # NOT EXISTS + два пакетных INSERT. Раньше было бы 2 запроса на аккаунт.
-    assert len(queries) <= 5, queries
+    # Два чтения тарифа (subscriptions, platform_users) — гейт подписки, один
+    # раз на вызов, тоже не от числа аккаунтов.
+    gate = [q for q in queries
+            if "FROM subscriptions" in q or "FROM platform_users" in q]
+    assert len(gate) <= 2, gate
+    assert len(queries) - len(gate) <= 5, queries
 
     rows = _run(pool.fetch(
         "SELECT account_id, status, plan_type FROM account_warmup_plans WHERE owner_id=$1",

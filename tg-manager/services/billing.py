@@ -71,7 +71,12 @@ async def activate_subscription(executor, user_id: int, plan: str, months: int) 
         )
         return None
 
-    months = max(1, int(months or 1))
+    # Срок меньше месяца — это не «округлим до месяца», а подделанный счёт:
+    # months=0 давал нулевую цену, и max(1, months) здесь выдавал за неё месяц.
+    # Бросаем, чтобы транзакция подтверждения откатилась целиком.
+    months = int(months or 0)
+    if months < 1:
+        raise ValueError(f"срок подписки меньше месяца: {months}")
 
     expires = await executor.fetchval(_SUBSCRIPTION_UPSERT, user_id, normalized, str(months))
     if expires is None:

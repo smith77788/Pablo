@@ -8,6 +8,7 @@ has_promoter/has_inviter; мини-апп показывает баннер по
 from __future__ import annotations
 
 import inspect
+import pathlib
 import re
 from pathlib import Path
 
@@ -27,11 +28,33 @@ def test_route_registered():
     assert 'app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)' in _src()
 
 
+def _rights_path(name: str) -> str:
+    """Тело обработчика плюс помощник, который несёт выборку кандидатов.
+
+    Выборка была скопирована в двух обработчиках и сведена в
+    `_promoter_candidates`. Тест, привязанный к тексту ВНУТРИ обработчика,
+    краснел на этом переносе, хотя поведение не поменялось, — поэтому
+    проверяется путь целиком: обработчик и помощник, которого он зовёт.
+    """
+    from tests.miniapp_source import py_function
+
+    body = py_function("services/mini_app_invite.py", name)
+    assert "_promoter_candidates(" in body, (
+        f"{name} больше не берёт кандидатов общим помощником: проверьте, "
+        "откуда теперь приходит выборка, и перепривяжите проверку к ней")
+    helper = py_function("services/mini_app_invite.py", "_promoter_candidates")
+    # Скоуп владельца вынесен в общее условие рядом с помощником — он тоже
+    # часть пути, и без него проверка «скоупится по владельцу» ищет текст там,
+    # где его больше нет.
+    whole = (pathlib.Path(__file__).resolve().parents[1]
+             / "services" / "mini_app_invite.py").read_text(encoding="utf-8")
+    m = re.search(r"_PROMOTER_WHERE = \((.*?)\)\n", whole, re.DOTALL)
+    assert m, "общее условие выборки кандидатов не найдено"
+    return body + "\n" + helper + "\n" + m.group(1)
+
+
 def test_handler_checks_admin_status_and_scopes_owner():
-    src = _src()
-    m = re.search(r"async def invite_rights_check\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
-    assert m, "invite_rights_check handler not found"
-    body = m.group(1)
+    body = _rights_path("invite_rights_check")
     assert "if not uid" in body and "401" in body, "нужна авторизация"
     assert "channel_admin_status" in body, "должен проверять права аккаунта в чате живьём"
     assert "owner_id=$1" in body, "должен скоупиться по владельцу (не чужие аккаунты)"
@@ -61,12 +84,10 @@ def test_own_channel_account_is_checked_first():
     аккаунта». Проверялись первые восемь аккаунтов по id; владельца канала среди
     них могло не быть, остальные ещё не вступили — и экран говорил «ни один не
     админ». Теперь первыми идут аккаунты, к которым канал привязан."""
-    src = _src()
     for name in ("invite_rights_check", "invite_grant_admin"):
-        m = re.search(rf"async def {name}\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
-        assert m, name
-        assert "_own_channel_acc_ids(uid, group)" in m.group(1), name
-        assert "ORDER BY a.id LIMIT 8" not in m.group(1), name
+        body = _rights_path(name)
+        assert "_own_channel_acc_ids(uid, group)" in body, name
+        assert "ORDER BY a.id LIMIT 8" not in body, name
 
 
 def test_unchecked_is_not_reported_as_no_admin():

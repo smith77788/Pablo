@@ -103,6 +103,74 @@ def test_the_shutdown_drains_before_it_closes_the_pool():
         "воркер обязан свернуться первым: его уборка сама пишет в базу")
 
 
+def _orphan(bg_tasks) -> "object":
+    """Оставить в наборе задачу из цикла, который больше не крутится.
+
+    Именно так её оставляют три живых e2e-теста приглашений: `new_event_loop()
+    .run_until_complete(...)`, и цикл дальше просто брошен. `asyncio.run` так
+    не умеет — он на выходе отменяет оставшиеся задачи, и сироты не выходит;
+    поэтому воспроизводить беду надо сырым циклом, иначе проверка зелёная и
+    без фикса.
+    """
+    async def _never():
+        await asyncio.sleep(3600)
+
+    async def _go():
+        return bg_tasks.spawn(_never(), name="сирота")
+
+    loop = asyncio.new_event_loop()
+    return loop, loop.run_until_complete(_go())
+
+
+def _bury(loop, task) -> None:
+    """Прибрать сироту после проверки: иначе сборщик печатает «Task was
+    destroyed but it is pending!» на весь прогон — тот самый шум, от которого
+    эта остановка и избавляет."""
+    task.cancel()
+    try:
+        loop.run_until_complete(asyncio.sleep(0))
+    except Exception:
+        pass
+    loop.close()
+
+
+def test_a_write_from_an_abandoned_loop_is_not_counted_as_lost():
+    """Отчёт остановки — про записи этого цикла; чужие в счётчик потерь не идут."""
+    from services import bg_tasks
+
+    loop, task = _orphan(bg_tasks)
+    assert task in bg_tasks._bg_tasks, "сироту не удалось создать — проверка пуста"
+
+    before = _total(_DROPPED)
+    assert asyncio.run(bg_tasks.drain(0.01)) == {"done": 0, "cancelled": 0}, (
+        "задача из брошенного цикла попала в отчёт остановки")
+    assert _total(_DROPPED) == before, (
+        "сирота посчитана потерянной записью — счётчик врёт")
+    assert task not in bg_tasks._bg_tasks, (
+        "сирота осталась в наборе strong-ссылок: набор растёт без предела")
+    _bury(loop, task)
+
+
+def test_an_orphan_does_not_stop_the_shutdown_from_waiting_for_its_own():
+    """Отбор по циклу не должен заодно перестать ждать СВОИ записи."""
+    from services import bg_tasks
+
+    loop, task = _orphan(bg_tasks)
+    landed: list[str] = []
+
+    async def _write():
+        await asyncio.sleep(0.05)
+        landed.append("журнал")
+
+    async def _go():
+        bg_tasks.spawn(_write(), name="журнал")
+        return await bg_tasks.drain(2.0)
+
+    assert asyncio.run(_go()) == {"done": 1, "cancelled": 0}
+    assert landed == ["журнал"], "своя запись потерялась из-за чужой"
+    _bury(loop, task)
+
+
 def test_the_counter_is_described_for_the_owner():
     from services.metrics import _HELP
 

@@ -24,7 +24,8 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import bot_sales_persona as _bsp
     from services import provider_marketplace as _mp
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, int_field, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        int_field, log,
     )
 
     async def _sp_owned(uid, pid):
@@ -404,8 +405,15 @@ def setup_routes(app: web.Application, pool) -> None:
             bid = int(q["bot_id"]) if q.get("bot_id") else None
         except ValueError:
             bid = None
-        return _json_resp({"orders": await _bsp.list_orders(
-            pool, uid, bot_id=bid, status=q.get("status") or None)})
+        _st = q.get("status") or None
+        lim = _list_limit(request, 100, 500)
+        off = _list_offset(request)
+        orders = await _bsp.list_orders(pool, uid, bot_id=bid, status=_st,
+                                        limit=lim, offset=off)
+        total = await _bsp.count_orders(pool, uid, bot_id=bid, status=_st)
+        return _json_resp({"orders": orders, "total": total,
+                           "page": {"limit": lim, "offset": off,
+                                    "has_more": off + len(orders) < total}})
 
     async def sp_order_update(request):
         uid = _get_uid(request)

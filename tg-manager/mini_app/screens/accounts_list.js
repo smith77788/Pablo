@@ -228,15 +228,26 @@ function accSelWholeFilter() {
 
 // Один тап: удалить ВСЕ невоскрешаемые аккаунты (бан/деактивация/отозванная сессия).
 async function purgeDeadAccounts() {
-  let cnt = 0;
+  let cnt = null;
   try {
     const st = await api('/api/miniapp/accounts?filter=dead&limit=1');
-    cnt = (st.stats && st.stats.dead!=null) ? st.stats.dead : (st.filtered_total||0);
+    // Итог под фильтром лежит в st.page, а не в корне ответа: запасной путь
+    // читал st.filtered_total, то есть всегда undefined. И сам запасной путь
+    // нужен: stats приходит пустым, когда сводный запрос не сложился, —
+    // тогда «0» означает «не знаю», а не «мёртвых нет».
+    const _ft = (st.page && st.page.filtered_total != null) ? st.page.filtered_total : null;
+    cnt = (st.stats && st.stats.dead != null) ? st.stats.dead : _ft;
   } catch(e) {
     // Не удалось СПРОСИТЬ — значит мы не знаем ответа. Раньше здесь оставался
     // cnt=0, и приложение утверждало «Мёртвых аккаунтов нет 👍»: упавший запрос
     // выдавался за проверенный факт, и владелец переставал чистить парк.
     toast('⚠️ Не удалось проверить: ' + errRu(e,'ошибка связи'));
+    return;
+  }
+  if (cnt == null) {
+    // Ни сводки, ни итога под фильтром — ответ есть, а числа в нём нет.
+    // Сказать «мёртвых нет» значило бы выдать незнание за проверенный факт.
+    toast('⚠️ Не удалось узнать, сколько мёртвых аккаунтов — попробуйте ещё раз');
     return;
   }
   if (!cnt) { toast('✅ Мёртвых аккаунтов нет 👍'); return; }

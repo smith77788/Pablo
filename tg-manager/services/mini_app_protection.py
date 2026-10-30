@@ -35,7 +35,8 @@ from services import operation_bus as _obus
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты жалоб, фиксации нарушений и флуд-меток."""
     from services.mini_app_api import (
-        _BAD_BODY, _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
+        _BAD_BODY, _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit,
+        _list_offset, _safe_count,
         _safe_fetch, _safe_fetchrow, log,
         bad_body_response,
     )
@@ -79,7 +80,8 @@ def setup_routes(app: web.Application, pool) -> None:
                       first_seen_at, last_seen_at, absent_since,
                       views_first, views_last, checks_done, cert_sig, created_at
                  FROM notary_watches WHERE owner_id=$1
-                ORDER BY created_at DESC LIMIT $2""", uid, lim)
+                ORDER BY created_at DESC, id DESC
+                LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request))
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM notary_watches WHERE owner_id=$1", uid)
         from services import notary as _nt

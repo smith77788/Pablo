@@ -49,6 +49,15 @@ def test_warmup_releases_account_when_prep_fails_postgres(monkeypatch):
                 "INSERT INTO tg_accounts(owner_id,phone,session_str,is_active,acc_status,"
                 "added_at) VALUES($1,$2,'sess',TRUE,'active', now() - interval '10 days') "
                 "RETURNING id", OWNER, "+79000009001"))
+            # Прогрев — по подписке (гейт тарифа перед каждым днём, D3):
+            # у владельца стенда она настоящая, в базе.
+            await pool.execute(
+                "INSERT INTO subscriptions(user_id, plan, expires_at, is_active) "
+                "VALUES($1,'paid', now() + INTERVAL '30 days', true) "
+                "ON CONFLICT (user_id) DO UPDATE SET is_active=true, "
+                "expires_at=now() + INTERVAL '30 days'", OWNER)
+            from bot.utils.subscription import invalidate_plan_cache
+            invalidate_plan_cache(OWNER)
             plan_id = int(await pool.fetchval(
                 "INSERT INTO account_warmup_plans(account_id,owner_id,current_day,target_days,"
                 "daily_actions,status,last_action_at) VALUES($1,$2,0,14,5,'active', NULL) "

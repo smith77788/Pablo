@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 import asyncpg
 from bot.keyboards import main_menu
-from bot.utils.subscription import get_plan, PLAN_EMOJIS, is_platform_admin
+from bot.utils.subscription import get_plan, PLAN_EMOJIS, is_platform_admin, plan_name_ru
 from database import db
 from bot.callbacks import (
     BotCb,
@@ -187,14 +187,30 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     # pay_<plan> → redirect to subscription screen
     if start_param.startswith("pay_"):
         from aiogram.utils.keyboard import InlineKeyboardBuilder
-        plan_key = start_param[4:]  # e.g. "paid_1m"
+        from bot.handlers.subscription import valid_period
+        plan_key = start_param[4:]  # e.g. "paid_3m"
+        # Срок, выбранный в мини-аппе, ведёт сразу к выбору способа оплаты этого
+        # срока. Раньше диплинк показывал «Тариф: PAID_3M» и отправлял в общее
+        # меню, где срок выбирался заново.
+        months = None
+        if plan_key.endswith("m"):
+            months = valid_period(plan_key.rsplit("_", 1)[-1][:-1])
         kb_pay = InlineKeyboardBuilder()
-        kb_pay.button(text="💳 Перейти к оплате", callback_data=SubCb(action="menu"))
+        if months:
+            kb_pay.button(
+                text="💳 Выбрать способ оплаты",
+                callback_data=SubCb(action="choose_period", plan="paid", months=months),
+            )
+            what = f"Подписка на {months} мес."
+        else:
+            kb_pay.button(text="💳 Перейти к оплате", callback_data=SubCb(action="menu"))
+            what = "Подписка"
         kb_pay.button(text="◀️ Главное меню", callback_data="bm:main")
+        kb_pay.adjust(1)
         await message.answer(
             f"💳 <b>Оформление подписки</b>\n\n"
-            f"Тариф: <b>{plan_key.upper()}</b>\n\n"
-            f"Нажмите кнопку ниже чтобы выбрать способ оплаты:",
+            f"Тариф: <b>{what}</b>\n\n"
+            f"Нажмите кнопку ниже, чтобы выбрать способ оплаты:",
             parse_mode="HTML",
             reply_markup=kb_pay.as_markup(),
         )
@@ -300,7 +316,7 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     text = (
         f"❓ <b>Справка Infragram OS</b>\n\n"
-        f"Ваш план: <b>{emoji} {plan.upper()}</b>\n\n"
+        f"Ваш план: <b>{emoji} {plan_name_ru(plan)}</b>\n\n"
         f"<b>📋 Команды:</b>\n"
         f"/start — главное меню\n"
         f"/subscription — подписка и оплата\n"
@@ -340,7 +356,7 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
 
     text = (
         f"❓ <b>Справка Infragram OS</b>\n\n"
-        f"Ваш план: <b>{emoji} {plan.upper()}</b>\n\n"
+        f"Ваш план: <b>{emoji} {plan_name_ru(plan)}</b>\n\n"
         f"<b>📋 Команды:</b>\n"
         f"/start — главное меню\n"
         f"/subscription — подписка и оплата\n"
@@ -403,6 +419,12 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
                    COUNT(*) FILTER (WHERE status='pending')  AS pending,
                    COUNT(*) FILTER (WHERE status='done'
                        AND finished_at > NOW() - INTERVAL '24h') AS done_24h,
+                   -- 'partial' — «работа была, но не доведена»: отдельный
+                   -- терминальный исход (см. services/op_status). Без своего
+                   -- числа такая операция не попадала НИ в «завершено», НИ в
+                   -- «ошибок».
+                   COUNT(*) FILTER (WHERE status='partial'
+                       AND finished_at > NOW() - INTERVAL '24h') AS partial_24h,
                    COUNT(*) FILTER (WHERE status='failed'
                        AND created_at > NOW() - INTERVAL '24h')  AS failed_24h,
                    COUNT(*) AS total
@@ -437,6 +459,7 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
     running = int(op_stats["running"] or 0) if op_stats else 0
     pending = int(op_stats["pending"] or 0) if op_stats else 0
     done_24h = int(op_stats["done_24h"] or 0) if op_stats else 0
+    partial_24h = int(op_stats["partial_24h"] or 0) if op_stats else 0
     failed_24h = int(op_stats["failed_24h"] or 0) if op_stats else 0
     total_ops = int(op_stats["total"] or 0) if op_stats else 0
 
@@ -461,7 +484,10 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
         f"⚙️ <b>Операции:</b>\n"
         f"   🔄 Активных: <b>{running}</b>  ⏳ Ожидают: <b>{pending}</b>\n"
         f"   ✅ Завершено (24ч): <b>{done_24h}</b>  ❌ Ошибок (24ч): <b>{failed_24h}</b>\n"
-        f"   Всего в очереди: <b>{total_ops}</b>\n\n"
+        # Строка только при ненулевом числе — см. тот же приём в /ops.
+        + (f"   ⚠️ Частично (24ч): <b>{partial_24h}</b> — работа была, но не доведена\n"
+           if partial_24h else "")
+        + f"   Всего в очереди: <b>{total_ops}</b>\n\n"
         f"🛡 <b>Здоровье:</b>\n"
         f"   ⚡ Flood-событий (24ч): <b>{floods_24h}</b>\n"
         f"   📋 Ошибок операций (24ч): <b>{errors_24h}</b>\n"

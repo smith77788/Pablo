@@ -140,7 +140,11 @@ def test_full_audience_keeps_target_null(_stubs):
 def test_launched_bots_are_pinned_into_params(_stubs):
     pool = _FakePool()
     _exec(pool, {"text": "привет", "segment": "all_each"})
-    pinned = pool.wrote("SET done_items=done_items+1, params")
+    # Ищем запись params, а НЕ её сращивание со счётчиком прогресса в один
+    # UPDATE: отметка о запуске переехала ВПЕРЁД, до broadcaster.start, и
+    # счётчик прогресса остался после него (см. _nb_launch). Проверять форму
+    # запроса было ложной точностью — важно, что отметка записана.
+    pinned = pool.wrote("params = COALESCE(params")
     assert pinned, (
         "запущенные боты не записаны в params — повтор операции отправит их "
         "аудиториям сообщение второй раз"

@@ -34,7 +34,10 @@ class FakePool:
             self.access.add(args[0])
             return "INSERT 0 1"
         if q.startswith("INSERT INTO payments"):
-            self.payments.append({"reference": args[-1], "plan": "host_server"})
+            # usdt_invoice.create_payment: (user, plan, months, amount, usd,
+            # wallet, reference, ttl_hours)
+            self.payments.append({"reference": args[6], "plan": args[1],
+                                  "amount": args[3], "wallet": args[5]})
             return "INSERT 0 1"
         if "UPDATE host_offerings SET is_active" in q:
             oid, owner, active = args
@@ -119,6 +122,22 @@ class FakePool:
     async def fetchval(self, query, *args):
         return None
 
+    # usdt_invoice.create_payment выделяет сумму в транзакции на соединении.
+    def acquire(self):
+        pool = self
+
+        class _Ctx:
+            async def __aenter__(self):
+                return pool
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _Ctx()
+
+    def transaction(self):
+        return self.acquire()
+
 
 @pytest.fixture()
 def pool(monkeypatch):
@@ -141,6 +160,8 @@ def pool(monkeypatch):
     async def _plan(_pool, uid):
         return "free"
     monkeypatch.setattr(sub, "get_plan", _plan, raising=False)
+    import bot.handlers.subscription as subh
+    monkeypatch.setattr(subh, "_tron_wallet", lambda: "TWALLET123456")
     return p
 
 
@@ -178,6 +199,11 @@ async def test_purchase_then_grant_gives_access(pool):
     res = await hs.create_purchase(pool, uid)
     assert res["already"] is False and res["reference"].startswith("HST-")
     assert pool.payments and pool.payments[0]["plan"] == "host_server"
+    # Сумма к переводу — цена плюс центы, закреплённые за этим счётом.
+    price = res["price_usd"]
+    assert price + 0.01 <= res["amount_usdt"] <= price + 0.99
+    assert pool.payments[0]["amount"] == res["amount_usdt"]
+    assert pool.payments[0]["wallet"] == "TWALLET123456"
     # активация как в payment_checker
     await hs.grant_access(pool, uid, res["reference"])
     assert await hs.has_access(pool, uid) is True

@@ -89,6 +89,28 @@ async def grant_session_admin(pool, uid: int) -> None:
         log.warning("grant_session_admin: не записал сессию uid=%s: %s", uid, exc)
 
 
+async def live_session_admins(pool) -> set[int]:
+    """Живые сессии админки прямо из БД — для тех, кому надо ТОЧНО сейчас.
+
+    Отличается от `refresh_session_admins` тем, что ничего не меняет в кэше и
+    возвращает множество. Нужна оповещениям: они живут в процессе воркера, где
+    кэш сессий может быть пустым (фоновое обновление — это процесс бота), а
+    получателя алерта угадывать нельзя. Один SELECT на такт сторожа.
+
+    Fail-open на кэш: недоступная база не должна сужать список получателей
+    сильнее, чем он есть.
+    """
+    if pool is None:
+        return set(_session_admins)
+    try:
+        rows = await pool.fetch(
+            "SELECT user_id FROM platform_admin_sessions WHERE expires_at > now()")
+    except Exception as exc:
+        log.debug("live_session_admins: %s", exc)
+        return set(_session_admins)
+    return {int(r["user_id"]) for r in rows}
+
+
 async def refresh_session_admins(pool) -> int:
     """Подтянуть живые сессии из БД в кэш процесса. Возвращает их число.
 

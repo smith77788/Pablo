@@ -1308,7 +1308,14 @@ def setup_routes(app: web.Application, pool) -> None:
             # BadStage — подвид ValueError: «Неизвестная стадия сделки» уходит
             # владельцу как есть, по-русски.
             return _err(str(ve), 400)
-        except Exception:
+        except Exception as exc:
+            # Сломанное тело — вина клиента, а не наша: пятисотка с
+            # трассировкой на обрезанном запросе топит настоящие пятисотки.
+            # Так отвечают остальные 211 чтений тела в слое; эта ручка была
+            # единственной достижимой с экрана, которая помощника не звала.
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_crm_upsert uid=%s", uid)
             return _err("Не удалось сохранить CRM", 500)
 
@@ -1687,7 +1694,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             d = await request.json()
             if not d.get('confirm'):
-                return _err("нужно подтверждение (confirm)", 400)
+                return _err("Нужно подтверждение удаления", 400)
             if not any([d.get('country'), d.get('tag'), d.get('account_id')]):
                 return _err("пустой фильтр — нечего удалять", 400)
             from services.contacts_hub.bulk_ops_engine import delete_by_filter

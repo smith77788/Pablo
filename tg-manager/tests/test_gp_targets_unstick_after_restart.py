@@ -70,8 +70,11 @@ def test_created_resource_is_recorded_before_the_slow_finishing_steps():
     """Отметка после паузы бесполезна: смерть процесса случится именно в паузе."""
     from services import op_worker
 
+    # Сам UPDATE переехал в дверь `_mark_gp_asset` (она повторяет запись и при
+    # полной неудаче закрывает цель). Проверяем ПОРЯДОК вызова двери, а не
+    # наличие SQL в теле исполнителя: смысл проверки в том, где стоит отметка.
     src = inspect.getsource(op_worker._exec_global_presence_channel)
-    mark = src.index("SET result_asset_id=$1")
+    mark = src.index("_mark_gp_asset(")
     pause = src.index("waiting %.0fs before assigning username")
     assert mark < pause, (
         "созданный канал отмечается уже после паузы 90-180с — обрыв в этом "
@@ -83,8 +86,8 @@ def test_created_bot_is_recorded_before_the_catalog_write():
     from services import op_worker
 
     src = inspect.getsource(op_worker._exec_global_presence_bot)
-    assert "SET result_asset_id=$1" in src, "созданный бот не отмечается вовсе"
-    assert src.index("SET result_asset_id=$1") < src.index("_db.add_bot("), (
+    assert "_mark_gp_asset(" in src, "созданный бот не отмечается вовсе"
+    assert src.index("_mark_gp_asset(") < src.index("_db.add_bot("), (
         "бот отмечается после записи в каталог — обрыв между ними снова "
         "приведёт к созданию ВТОРОГО бота через BotFather"
     )

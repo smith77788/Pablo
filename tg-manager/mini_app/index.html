@@ -6318,7 +6318,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="filterDeals('lead',this)" id="dealFilterLead">Лид</button>
       <button class="btn btn-s" onclick="filterDeals('contact',this)" id="dealFilterContact">Контакт</button>
       <button class="btn btn-s" onclick="filterDeals('proposal',this)" id="dealFilterProposal">Предложение</button>
+      <button class="btn btn-s" onclick="filterDeals('negotiation',this)" id="dealFilterNegotiation">Переговоры</button>
       <button class="btn btn-s" onclick="filterDeals('won',this)" id="dealFilterWon">Выиграно</button>
+      <button class="btn btn-s" onclick="filterDeals('lost',this)" id="dealFilterLost">Проиграно</button>
     </div>
     <div class="lst" id="dealList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -11002,7 +11004,9 @@ async function openAccountChannels(accId) {
         <div class="li-body"><div class="li-name">${name}</div>
           <div class="li-sub">${type} · ${num(c.member_count||0)} участников</div></div>
         <div class="li-right"><span class="chev">›</span></div></div>`;
-    }).join(''));
+    // Потолок выборки — 500; сервер присылает честное total, и если каналов больше,
+    // об этом надо сказать: иначе список молча обрывается и выглядит полным.
+    }).join('') + anCap(list.length, d.total, 'канал', 'канала', 'каналов'));
   } catch(e) { txt('acchanList', errHtml(errRu(e),'openAccountChannels('+accId+')')); }
 }
 
@@ -13161,12 +13165,18 @@ function openCompetitors() {
   loadCompetitors();
 }
 
-let COMP_LIMIT = 50;
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел (1000), и
+// на нём растущий limit превращался в стену — кнопка «Показать ещё» оставалась
+// (итог честный и больше показанного), а нажатие уже ничего не добавляло.
+// Имена с CMPT_: COMP_* в этом файле занято экраном «Соответствие».
+let CMPT_ROWS = [], CMPT_OFFSET = 0;
 async function loadCompetitors(more) {
-  COMP_LIMIT = more ? COMP_LIMIT + 200 : 50;
+  CMPT_OFFSET = more ? CMPT_ROWS.length : 0;
   try {
-    const d = await api('/api/miniapp/competitors?limit='+COMP_LIMIT);
-    const items = listOf(d,'competitors');
+    const d = await api('/api/miniapp/competitors?limit=50&offset='+CMPT_OFFSET);
+    const page = listOf(d,'competitors');
+    CMPT_ROWS = CMPT_OFFSET ? CMPT_ROWS.concat(page) : page;
+    const items = CMPT_ROWS;
     const total = totalOf(d, items);
     // Плитка называет ВСЁ число, а не длину показанной страницы.
     txt('m-comp-cnt', total ? total+' конкурентов' : 'Нет');
@@ -13403,12 +13413,15 @@ function openKeywordsScreen() {
   loadKeywords();
 }
 
-let KW_LIMIT = 50;
+// Страницы по смещению — см. комментарий у loadCompetitors.
+let KWT_ROWS = [], KWT_OFFSET = 0;
 async function loadKeywords(more) {
-  KW_LIMIT = more ? KW_LIMIT + 200 : 50;
+  KWT_OFFSET = more ? KWT_ROWS.length : 0;
   try {
-    const d = await api('/api/miniapp/keywords?limit='+KW_LIMIT);
-    const items = listOf(d,'keywords');
+    const d = await api('/api/miniapp/keywords?limit=50&offset='+KWT_OFFSET);
+    const page = listOf(d,'keywords');
+    KWT_ROWS = KWT_OFFSET ? KWT_ROWS.concat(page) : page;
+    const items = KWT_ROWS;
     const total = totalOf(d, items);
     if (!items.length) { txt('kwTrackList', empty('🔍','Нет отслеживаемых слов','Нажмите + Добавить')); return; }
     txt('kwTrackList', items.map(k=>{
@@ -13705,6 +13718,11 @@ async function saveTpl() {
 // молчать: публикация необратима.
 // ── Короткие ссылки («bit.ly для себя») ────────────────────────────────────
 let LNK_BASE = '';
+// Страница ссылок доклеивается смещением: было сто без всякой подписи, и
+// ссылка за сотой не открывалась ничем — ни выключить, ни удалить, ни QR.
+let LNK_ROWS = [], LNK_OFFSET = 0, LNK_TOTAL = 0;
+
+async function lnkLoadMore() { LNK_OFFSET = LNK_ROWS.length; await lnkLoad(true); }
 
 function openLinks() {
   push('s-links');
@@ -13784,19 +13802,29 @@ function lnkRenderResult(r) {
   box.innerHTML=html; box.style.display='block';
 }
 
-async function lnkLoad() {
+async function lnkLoad(keep) {
   const list=document.getElementById('lnkList'); if(!list) return;
+  if(!keep){ LNK_ROWS=[]; LNK_OFFSET=0; }
   try {
-    const r=await api('/api/miniapp/links');
+    const r=await api('/api/miniapp/links?limit=100&offset='+LNK_OFFSET);
     LNK_BASE=r.base||LNK_BASE;
     const bl=document.getElementById('lnkBase'); if(bl) bl.textContent=_lnkBaseLabel(LNK_BASE);
-    lnkRenderList(r.links||[]);
+    const _page=listOf(r,'links');
+    LNK_ROWS = LNK_OFFSET ? LNK_ROWS.concat(_page) : _page;
+    LNK_TOTAL = totalOf(r, LNK_ROWS);
+    lnkRenderList(LNK_ROWS);
   } catch(e){ list.innerHTML='<div style="padding:14px;opacity:.6;font-size:13px">Не удалось загрузить: '+_lnkEsc(errRu(e,'ошибка'))+'</div>'; }
 }
 
 function lnkRenderList(items) {
   const list=document.getElementById('lnkList');
-  const cnt=document.getElementById('lnkCount'); if(cnt) cnt.textContent=items.length?('· '+items.length):'';
+  // Число рядом с заголовком — сколько ссылок ВСЕГО, а не сколько влезло на
+  // страницу: длина страницы, выданная за итог, прятала остальные.
+  const cnt=document.getElementById('lnkCount');
+  if(cnt) cnt.textContent = items.length
+    ? ('· ' + (LNK_TOTAL > items.length
+        ? num(items.length) + ' из ' + num(LNK_TOTAL) : num(LNK_TOTAL || items.length)))
+    : '';
   if(!items.length){ list.innerHTML='<div style="padding:14px;opacity:.6;font-size:13px">Пока ссылок нет — создайте первую выше.</div>'; return; }
   let html='';
   for(const it of items){
@@ -13821,6 +13849,7 @@ function lnkRenderList(items) {
     html+='<button class="btn btn-s" onclick="lnkDelete(\''+c+'\')" title="Удалить">🗑</button>';
     html+='</div></div>';
   }
+  html += moreBtn(items.length, LNK_TOTAL, 'lnkLoadMore()');
   list.innerHTML=html;
 }
 
@@ -14830,16 +14859,48 @@ async function checkProxyIsolation() {
     box.innerHTML = h;
   } catch(e) { box.innerHTML = '<div class="err-msg-txt">⚠️ '+esc(errRu(e,'Ошибка'))+'</div>'; }
 }
+// Сервер берёт за один запрос не больше PROXY_IMPORT_BATCH строк (500), и
+// потолок стоял в значении по умолчанию его разборщика, а не в тексте ручки.
+// Вставка на 800 прокси добавляла первые 500, экран говорил «Добавлено: 500»
+// и очищал поле — остальные 300 пропадали совсем. Теперь отправляем пачками
+// поменьше серверной, называем общий итог, а неотправленное оставляем в поле.
+const PROXY_IMPORT_CHUNK = 400;
 async function submitProxyImport() {
-  const raw = document.getElementById('proxyImport').value.trim();
+  const el = document.getElementById('proxyImport');
+  const raw = (el.value || '').trim();
   if (!raw) { toast('❗ Вставьте список прокси'); return; }
+  const lines = raw.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+  const chunks = [];
+  for (let i = 0; i < lines.length; i += PROXY_IMPORT_CHUNK)
+    chunks.push(lines.slice(i, i + PROXY_IMPORT_CHUNK));
+  let added = 0, skipped = 0, dup = 0, done = 0, lost = 0;
   try {
-    const r = await api('/api/miniapp/proxies/import', {method:'POST', body:JSON.stringify({proxies:raw})});
-    toast(`✅ Добавлено: ${r.added}${r.skipped?' · пропущено: '+r.skipped:''}`);
-    document.getElementById('proxyImport').value='';
-    toggleProxyImport();
-    loadProxies();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
+    for (let i = 0; i < chunks.length; i++) {
+      if (chunks.length > 1) toast(`⏳ Пачка ${i + 1} из ${chunks.length} · прокси: ${num(lines.length)}`);
+      const r = await api('/api/miniapp/proxies/import',
+        {method:'POST', body:JSON.stringify({proxies: chunks[i].join('\n')})});
+      added += r.added || 0; skipped += r.skipped || 0; dup += r.duplicates || 0;
+      done = i + 1;
+      // Сервер снизил пачку ниже нашей — остаток этой пачки не ушёл, и дальше
+      // идти нельзя: иначе снова потеряем строки молча.
+      if (r.overflow > 0) { lost = r.overflow; break; }
+    }
+  } catch(e) {
+    toast('⚠️ '+errRu(e,'Ошибка').substring(0,60));
+  }
+  // Что не ушло — остаётся в поле: иначе повторить было бы нечем.
+  const sent = done * PROXY_IMPORT_CHUNK - lost;
+  const left = lines.slice(Math.max(0, sent));
+  el.value = left.join('\n');
+  if (added || skipped || dup) {
+    let msg = `✅ Добавлено: ${num(added)}`;
+    if (dup) msg += ` · уже были: ${num(dup)}`;
+    if (skipped) msg += ` · не прокси: ${num(skipped)}`;
+    if (left.length) msg += ` · осталось в поле: ${num(left.length)}`;
+    toast(msg);
+  }
+  if (!left.length) toggleProxyImport();
+  loadProxies();
 }
 
 // Выпадашки назначения прокси показывали серверный срез как весь парк: прокси
@@ -15658,7 +15719,7 @@ async function openDeeplinks(botId) {
   push('s-deeplinks');
   loadDeeplinks();
 }
-let _DL_ROWS = [];
+let _DL_ROWS = [], _DL_OFFSET = 0;
 let _DL_BOT_UNAME = '';
 // Ссылка — то, ради чего экран и существует: её отдают людям. Экран показывал
 // «?start=promo» и кнопку удаления, а самой ссылки не было нигде.
@@ -15681,24 +15742,33 @@ function dlShare(i) {
   try { if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); return; } } catch(_) {}
   copyToClipboard(u, '🔗 Ссылка скопирована');
 }
-async function loadDeeplinks() {
-  txt('dlList', '<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('dlStats', '');
+async function loadDeeplinks(more) {
+  // Плитки называют ВСЕ ссылки бота, а не показанную страницу: раньше у бота с
+  // сорока ссылками было написано «Ссылок 30», а клики складывались по этим же
+  // тридцати. Страница доклеивается по смещению, поэтому «Показать ещё»
+  // исчезает ровно там, где ссылки закончились.
+  if (!more) { _DL_OFFSET = 0; _DL_ROWS = [];
+    txt('dlList', '<div class="spin-wrap"><div class="spin"></div></div>');
+    txt('dlStats', ''); }
   try {
-    const d = await api('/api/miniapp/bot/'+DL_BOT_ID+'/deeplinks');
-    const links = d.links||[];
+    const d = await api('/api/miniapp/bot/'+DL_BOT_ID+'/deeplinks?limit=30&offset='+_DL_OFFSET);
+    const page = listOf(d,'links');
+    const links = more ? _DL_ROWS.concat(page) : page;
+    const linksTotal = totalOf(d, links);
     _DL_ROWS = links;
+    _DL_OFFSET = links.length;
     _DL_BOT_UNAME = (d.bot_username||'').replace(/^@/,'');
     txt('dlStats', `
-      <div class="kpi-card"><div class="kpi-val">${links.length}</div><div class="kpi-lbl">Ссылок</div></div>
+      <div class="kpi-card"><div class="kpi-val">${num(linksTotal)}</div><div class="kpi-lbl">Ссылок</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(d.total_clicks)}</div><div class="kpi-lbl">Кликов</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(d.referrals)}</div><div class="kpi-lbl">Рефералов</div></div>
     `);
     if (!links.length) { txt('dlList', empty('🔗','Ссылок пока нет','Ссылка приводит человека в бота с меткой: видно, откуда он пришёл и сколько таких',{label:'➕ Создать ссылку',fn:'openDlModal()'})); return; }
-    if (!_DL_BOT_UNAME) {
-      txt('dlList', `<div style="font-size:12px;color:var(--orange);padding:0 16px 8px;line-height:1.4">⚠️ У бота не записано имя, поэтому ссылку собрать не из чего. Откройте карточку бота и обновите данные.</div>`);
-    }
-    txt('dlList', (document.getElementById('dlList').innerHTML||'') + links.map((l,i)=>`
+    // Предупреждение собирается в ту же строку, что и список. Раньше оно
+    // писалось в dlList, а список доклеивался к его innerHTML — с «Показать
+    // ещё» так дописалась бы ВТОРАЯ копия уже показанных ссылок.
+    const dlHead = _DL_BOT_UNAME ? '' : `<div style="font-size:12px;color:var(--orange);padding:0 16px 8px;line-height:1.4">⚠️ У бота не записано имя, поэтому ссылку собрать не из чего. Откройте карточку бота и обновите данные.</div>`;
+    txt('dlList', dlHead + links.map((l,i)=>`
       <div class="li tap" onclick="dlCopy(${i})" role="button" tabindex="0">
         <div class="row-ico" style="background:var(--bg-violet-16)">🔗</div>
         <div class="row-body">
@@ -15711,8 +15781,8 @@ async function loadDeeplinks() {
           <button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${Number(l.id)}, this)" aria-label="Удалить">✕</button>
         </div>
       </div>
-    `).join(''));
-  } catch(e) { txt('dlList', empty('⚠️','Ошибка загрузки',errRu(e))); }
+    `).join('') + moreBtn(links.length, linksTotal, 'loadDeeplinks(1)'));
+  } catch(e) { txt('dlList', errHtml(errRu(e),'loadDeeplinks()')); }
 }
 function openDlModal() {
   document.getElementById('dlName').value='';
@@ -16272,9 +16342,19 @@ function exportCSV(path) {
   toast('✅ Файл открывается для скачивания…');
 }
 
-function exportOpsCSV() {
-  // Выгрузку делает БЭКЕНД (/api/miniapp/operations/export): он отдаёт 500
-  // последних операций владельца со всеми полями.
+// Предохранитель выгрузки на сервере — 50 000 строк. Если история больше,
+// об этом говорим ДО скачивания: обрезанный файл несут наружу и считают
+// полным, а по такому отчёту принимают решения.
+const OPS_EXPORT_CAP = 50000;
+async function exportOpsCSV() {
+  if (OPS_TOTAL > OPS_EXPORT_CAP) {
+    const ok = await askConfirm(`В истории ${num(OPS_TOTAL)} операций, а в файл `
+      + `уйдут последние ${num(OPS_EXPORT_CAP)}. Остальные в выгрузку не попадут. `
+      + `Скачать?`);
+    if (!ok) return;
+  }
+  // Выгрузку делает БЭКЕНД (/api/miniapp/operations/export): он отдаёт до
+  // 50 000 последних операций владельца со всеми полями.
   //
   // Раньше эта кнопка собирала CSV из РАЗМЕТКИ экрана: querySelectorAll по
   // #opsList. Отсюда три беды, и ни одна не выглядела как ошибка. Первая: в
@@ -16297,18 +16377,23 @@ function nuSwitch(which) {
   if (!onBots) loadPlatformUsers();
 }
 
-let NU_LIMIT = 100;
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
+// нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
+// остаётся и перестаёт работать.
+let NU_ROWS = [], NU_OFFSET = 0;
 // «Показать ещё» на ленте подписчиков: экран уже открыт, поэтому повторно
 // push() делать нельзя — иначе в стеке появится второй такой же экран.
-async function openNewUsersMore() { NU_LIMIT += 400; await openNewUsers(true); }
+async function openNewUsersMore() { NU_OFFSET = NU_ROWS.length; await openNewUsers(true); }
 async function openNewUsers(keep) {
-  if (!keep) { NU_LIMIT = 100; push('s-newusers'); }
+  if (!keep) { NU_ROWS = []; NU_OFFSET = 0; push('s-newusers'); }
   if (!keep) nuSwitch('bots');
   if (!keep) txt('newUsersList','<div class="spin-wrap"><div class="spin"></div></div>');
   // Подписчики ботов
   try {
-    const d = await api('/api/miniapp/new_users?limit='+NU_LIMIT);
-    const us = listOf(d,'users');
+    const d = await api('/api/miniapp/new_users?limit=100&offset='+NU_OFFSET);
+    const _page = listOf(d,'users');
+    NU_ROWS = NU_OFFSET ? NU_ROWS.concat(_page) : _page;
+    const us = NU_ROWS;
     const nuTotal = totalOf(d, us);
     if (!us.length) { txt('newUsersList', empty('🆕','Пока нет подписчиков','Появятся, как только кто-то напишет вашим ботам')); }
     else txt('newUsersList', us.map(u=>{
@@ -19424,12 +19509,25 @@ function _cloudIcon(name) {
 }
 let _CLOUD_FILES = {};   // id → запись файла (имя берём отсюда, без экранирования в onclick)
 
-async function cloudRefreshList() {
+// Файлы приходили одной страницей по двести, и потолок стоял в значении по
+// умолчанию движка. Двести первый файл нельзя было ни скачать, ни удалить, ни
+// починить ему копии — а щит «⚠️ кусок недоступен» живёт в строке, то есть про
+// недоступный кусок владелец бы и не узнал.
+let CLD_ROWS = [], CLD_OFFSET = 0, CLD_TOTAL = 0;
+async function cloudLoadMore() {
+  CLD_OFFSET = CLD_ROWS.length;
+  await cloudRefreshList(true);
+}
+async function cloudRefreshList(keep) {
   const box = document.getElementById('cloudFiles');
   if (!box) return;
+  if (!keep) { CLD_ROWS = []; CLD_OFFSET = 0; CLD_TOTAL = 0; }
   try {
-    const d = await api('/api/miniapp/cloud/files');
-    const files = d.files || [];
+    const d = await api('/api/miniapp/cloud/files?limit=200&offset=' + CLD_OFFSET);
+    const _page = listOf(d, 'files');
+    CLD_ROWS = CLD_OFFSET ? CLD_ROWS.concat(_page) : _page;
+    CLD_TOTAL = totalOf(d, CLD_ROWS);
+    const files = CLD_ROWS;
     _CLOUD_FILES = {};
     files.forEach(f => { _CLOUD_FILES[f.id] = f; });
     if (!files.length) { box.innerHTML = empty('☁️','Пока пусто','Загрузите первый файл кнопкой выше'); return; }
@@ -19457,7 +19555,8 @@ async function cloudRefreshList() {
         <button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudSave(${f.id})" title="Сохранить">⬇️</button>
         <button class="btn btn-s" style="padding:6px 10px;font-size:12px;color:var(--red)" onclick="cloudDelete(${f.id})" title="Удалить">🗑</button>
       </div>`;
-    }).join('');
+    }).join('')
+      + moreBtn(files.length, CLD_TOTAL, 'cloudLoadMore()');   // «Показать ещё · N из M»
   } catch (e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Ошибка'))}</div>`; }
 }
 
@@ -20279,14 +20378,19 @@ async function submitAiMemory() {
   finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
 }
 const MEM_KIND = {note:'📝',instruction:'📋',fact:'💡',rule:'⚙️'};
-let AIMEM_LIMIT = 50;
-async function openAiMemoryMore() { AIMEM_LIMIT += 200; await openAiMemory(true); }
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
+// нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
+// остаётся и перестаёт работать.
+let AIMEM_ROWS = [], AIMEM_OFFSET = 0;
+async function openAiMemoryMore() { AIMEM_OFFSET = AIMEM_ROWS.length; await openAiMemory(true); }
 async function openAiMemory(keep) {
-  if (!keep) { AIMEM_LIMIT = 50; push('s-aimemory'); }
+  if (!keep) { AIMEM_ROWS = []; AIMEM_OFFSET = 0; push('s-aimemory'); }
   if (!keep) txt('aiMemoryList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/ai_memory?limit='+AIMEM_LIMIT);
-    const mems = listOf(d,'memories');
+    const d = await api('/api/miniapp/ai_memory?limit=50&offset='+AIMEM_OFFSET);
+    const _page = listOf(d,'memories');
+    AIMEM_ROWS = AIMEM_OFFSET ? AIMEM_ROWS.concat(_page) : _page;
+    const mems = AIMEM_ROWS;
     const memTotal = totalOf(d, mems);
     // Плитка называет ВСЁ число записей, а не длину показанной страницы.
     txt('m-aimem-val',`${num(memTotal)} записей`);
@@ -21056,7 +21160,17 @@ function checkInviteRights() {
   el.innerHTML = '<span style="color:var(--hint)">Проверяю права в чате…</span>';
   _rightsT = setTimeout(async () => {
     try {
-      const d = await api('/api/miniapp/invite/rights_check?group=' + encodeURIComponent(group));
+      // Отмеченные аккаунты уходят в проверку первыми: живьём проверяется
+      // горсть, и без подсказки владельца его аккаунт-админ мог в неё не попасть.
+      const _tk = [...document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]:checked')]
+        .map(c=>parseInt(c.value)).filter(n=>!isNaN(n));
+      const d = await api('/api/miniapp/invite/rights_check?group=' + encodeURIComponent(group)
+        + (_tk.length ? '&account_ids=' + _tk.join(',') : ''));
+      const _sc = d.scanned || d.usable || 0, _fl = d.fleet || _sc;
+      const _ofAll = _fl > _sc ? ` из ${num(_fl)}` : '';
+      const _pickHint = _fl > _sc
+        ? ' Проверены не все: отметьте ниже аккаунт, который админ этого чата, и проверка пойдёт с него.'
+        : '';
       const box = (bg, col, html) => `<div style="padding:7px 9px;background:${bg};border-left:3px solid ${col};border-radius:8px;line-height:1.4">${html}</div>`;
       if (d.has_promoter) {
         el.innerHTML = box('rgba(52,211,153,.10)', '#22c55e',
@@ -21071,10 +21185,10 @@ function checkInviteRights() {
         // Ни один аккаунт не ответил о правах: не в чате или не подключился.
         // Это НЕ «админа нет» — проверить было некому.
         el.innerHTML = box('rgba(251,191,36,.10)', '#f59e0b',
-          `⚠️ Права проверить не удалось: ни один из ${d.usable} проверенных аккаунтов не состоит в чате или не подключился. Нажмите «Вступить всеми», затем проверьте готовность флота.`);
+          `⚠️ Права проверить не удалось: ни один из ${num(_sc)}${_ofAll} проверенных аккаунтов не состоит в чате или не подключился. Нажмите «Вступить всеми», затем проверьте готовность флота.`);
       } else {
         el.innerHTML = box('rgba(248,113,113,.10)', '#ef4444',
-          `⚠️ Ни один из ваших аккаунтов не админ этого чата. Инвайтеры <b>вступят, но не смогут приглашать</b>. Сделайте один свой аккаунт админом чата с правом «Назначать администраторов» и включите его в операцию.`);
+          `⚠️ Среди проверенных аккаунтов (${num(_sc)}${_ofAll}) нет админа этого чата. Инвайтеры <b>вступят, но не смогут приглашать</b>. Сделайте один свой аккаунт админом чата с правом «Назначать администраторов» и включите его в операцию.${_pickHint}`);
       }
     } catch(e) { el.innerHTML=''; }  // не мешаем запуску, если проверка недоступна
   }, 400);
@@ -21103,7 +21217,10 @@ async function loadFleetReadiness() {
       `<div style="padding:8px 10px;background:var(--bg2);border-radius:10px;line-height:1.6">`
       + `👑 Админы: <b>${c.admin||0}</b> · ✅ В группе: <b>${c.member||0}</b> · 🚪 Не в группе: <b>${c.not_member||0}</b><br>`
       + `❌ Не подключились: <b>${c.no_connect||0}</b>${c.group_bad?` · 🚫 Группа недоступна: <b>${c.group_bad}</b>`:''}<br>`
-      + `🎯 Готовы инвайтить: <b>${d.ready||0}</b> из <b>${d.total||0}</b>`
+      // «из N» — это из ПРОВЕРЕННЫХ, а не из флота: живьём проверяется выборка,
+      // и без размера флота строка читалась как итог по всем аккаунтам.
+      + `🎯 Готовы инвайтить: <b>${d.ready||0}</b> из <b>${d.total||0}</b> проверенных`
+      + ((d.fleet||0) > (d.total||0) ? ` <span style="color:var(--hint)">(всего пригодно: ${num(d.fleet)})</span>` : '')
       + reasonsHtml
       + `<div style="margin-top:6px;color:var(--hint)">💡 ${esc(d.verdict||'')}</div></div>`;
   } catch(e) { el.innerHTML = '<span style="color:#ef4444">'+esc(errRu(e,'Ошибка проверки'))+'</span>'; }
@@ -21619,14 +21736,19 @@ async function submitRegCheck() {
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='🔍 Проверить'; }
 }
-let REGCHK_LIMIT = 30;
-async function openRegCheckMore() { REGCHK_LIMIT += 200; await openRegCheck(true); }
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
+// нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
+// остаётся и перестаёт работать.
+let REGCHK_ROWS = [], REGCHK_OFFSET = 0;
+async function openRegCheckMore() { REGCHK_OFFSET = REGCHK_ROWS.length; await openRegCheck(true); }
 async function openRegCheck(keep) {
-  if (!keep) { REGCHK_LIMIT = 30; push('s-regcheck'); }
+  if (!keep) { REGCHK_ROWS = []; REGCHK_OFFSET = 0; push('s-regcheck'); }
   if (!keep) txt('regCheckList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/reg_check/history?limit='+REGCHK_LIMIT);
-    const checks = listOf(d,'checks');
+    const d = await api('/api/miniapp/reg_check/history?limit=30&offset='+REGCHK_OFFSET);
+    const _page = listOf(d,'checks');
+    REGCHK_ROWS = REGCHK_OFFSET ? REGCHK_ROWS.concat(_page) : _page;
+    const checks = REGCHK_ROWS;
     const rcTotal = totalOf(d, checks);
     if (!checks.length) { txt('regCheckList', empty('📅','История пуста','Нажмите Проверить')); return; }
     txt('regCheckList', checks.map(c=>`
@@ -21773,7 +21895,9 @@ let _DMR_RECENT = [];      // последние отправки на экра�
 let _DMR_STATUSES = [];    // строки сводки «Исходы»
 let _DMR_ERRS = [];        // строки сводки «Частые причины недоставки»
 let _DMR_LOG = [];         // получатели на подэкране списка
-let _DMRL_Q = null;        // фильтр открытого списка: {status, reason, title, limit}
+let _DMRL_Q = null;        // фильтр открытого списка: {status, reason, failed, title}
+let _DMRL_OFFSET = 0;      // сколько записей журнала уже доклеено
+let _DMRL_TOTAL = 0;       // сколько их всего по этому фильтру — по серверу
 function dmrRow(src, i) {
   const r = (src === 'rep' ? _DMR_RECENT : _DMR_LOG)[i];
   if (!r) return '';
@@ -21880,17 +22004,29 @@ async function openDmLog(q) {
   if (_DMR_ID == null) return;
   _DMRL_Q = {status:(q&&q.status)||'', reason:(q&&q.reason)||'',
              failed:!!(q&&q.failed),
-             title:(q&&q.title)||'Получатели', limit:Number(q&&q.limit)||100};
+             title:(q&&q.title)||'Получатели'};
+  _DMRL_OFFSET = 0; _DMRL_TOTAL = 0; _DMR_LOG = [];
   push('s-dmrlog');
   txt('dmrl-title', _DMRL_Q.title);
   txt('dmrlBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadDmLogPage();
+}
+// Страница журнала по СМЕЩЕНИЮ. Раньше «Показать ещё» удваивало limit, и на
+// пятистах — предел самой ручки — список упирался в стену: кнопка оставалась
+// (всего больше показанного), но нажатие уже ничего не добавляло, а «номера»
+// копировались те же пятьсот. Для списка, который открывают, чтобы вычистить
+// мёртвые контакты, недостижимая запись — это запись, которую не вычистить.
+async function loadDmLogPage() {
+  if (!_DMRL_Q) return;
   try {
-    const p = new URLSearchParams({limit:String(_DMRL_Q.limit)});
+    const p = new URLSearchParams({limit:'100', offset:String(_DMRL_OFFSET)});
     if (_DMRL_Q.status) p.set('status', _DMRL_Q.status);
     if (_DMRL_Q.reason) p.set('reason', _DMRL_Q.reason);
     if (_DMRL_Q.failed) p.set('failed', '1');
     const d = await api('/api/miniapp/dm_campaign/'+_DMR_ID+'/log?'+p.toString());
-    _DMR_LOG = d.items||[];
+    const page = listOf(d, 'items');
+    _DMR_LOG = _DMRL_OFFSET ? _DMR_LOG.concat(page) : page;
+    _DMRL_TOTAL = totalOf(d, _DMR_LOG);
     if (!_DMR_LOG.length) {
       txt('dmrlBody', empty('📭','Таких получателей нет',
         'По этому фильтру в журнале кампании пока нет ни одной записи'));
@@ -21898,17 +22034,19 @@ async function openDmLog(q) {
     }
     txt('dmrlBody',
       `<div class="lst">` + _DMR_LOG.map((r,i)=>dmrRow('log',i)).join('') + `</div>`
-      + moreBtn(_DMR_LOG.length, d.total||0, 'openDmLogMore()')
+      + moreBtn(_DMR_LOG.length, _DMRL_TOTAL, 'openDmLogMore()')
       // Список нужен не для чтения, а для работы: выгрузить в другой канал,
-      // вычистить из базы, передать коллеге. Без копирования это тупик.
-      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="dmrCopyIds('log')">📋 Скопировать номера (${num(_DMR_LOG.length)})</button>`);
+      // вычистить из базы, передать коллеге. Без копирования это тупик. Кнопка
+      // называет ровно то, что скопирует: «500 из 1 200» — не «1 200».
+      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="dmrCopyIds('log')">📋 Скопировать номера (${_DMRL_TOTAL > _DMR_LOG.length ? num(_DMR_LOG.length)+' из '+num(_DMRL_TOTAL) : num(_DMR_LOG.length)})</button>`);
   } catch(e) {
-    txt('dmrlBody', errHtml(errRu(e),'openDmLogMore()'));
+    txt('dmrlBody', errHtml(errRu(e),'loadDmLogPage()'));
   }
 }
 function openDmLogMore() {
   if (!_DMRL_Q) return;
-  openDmLog(Object.assign({}, _DMRL_Q, {limit: Math.min(_DMRL_Q.limit*2, 500)}));
+  _DMRL_OFFSET = _DMR_LOG.length;
+  loadDmLogPage();
 }
 
 // Правка неидущей кампании: раньше опечатка в тексте означала удалить её и
@@ -22525,7 +22663,8 @@ async function meshStopTask() {
     openBotMeshTask(_MESH_TASK_ID, true);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
-let MESH_LIMIT = 30;
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let MESH_ROWS = [], MESH_OFFSET = 0;
 
 
 // Повтор без аргумента невозможен — id задачи держим рядом, как у других
@@ -22534,14 +22673,18 @@ let _MESH_TASK_ID = null;
 
 
 
-let NOTARY_LIMIT = 100;
-async function openNotaryMore() { NOTARY_LIMIT += 400; await openNotary(true); }
+// Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
+// нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
+// остаётся и перестаёт работать.
+let NOTARY_OFFSET = 0;
+async function openNotaryMore() { NOTARY_OFFSET = (NOTARY_WATCHES||[]).length; await openNotary(true); }
 async function openNotary(keep) {
-  if (!keep) { NOTARY_LIMIT = 100; push('s-notary'); }
+  if (!keep) { NOTARY_WATCHES = []; NOTARY_OFFSET = 0; push('s-notary'); }
   if (!keep) txt('notaryList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/notary?limit='+NOTARY_LIMIT);
-    NOTARY_WATCHES = listOf(d,'watches');
+    const d = await api('/api/miniapp/notary?limit=100&offset='+NOTARY_OFFSET);
+    const _page = listOf(d,'watches');
+    NOTARY_WATCHES = NOTARY_OFFSET ? (NOTARY_WATCHES||[]).concat(_page) : _page;
     const notaryTotal = totalOf(d, NOTARY_WATCHES);
     const el = document.getElementById('m-notary-val');
     // Плитка называет ВСЁ число наблюдений, а не длину показанной страницы.
@@ -22662,14 +22805,17 @@ async function notaryCancel(id) {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
 }
 
-let FOLDERS_LIMIT = 100;
-async function openFoldersMore() { FOLDERS_LIMIT += 400; await openFolders(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let FOLDERS_ROWS = [], FOLDERS_OFFSET = 0;
+async function openFoldersMore() { FOLDERS_OFFSET = FOLDERS_ROWS.length; await openFolders(true); }
 async function openFolders(keep) {
-  if (!keep) { FOLDERS_LIMIT = 100; push('s-folders'); }
+  if (!keep) { FOLDERS_ROWS = []; FOLDERS_OFFSET = 0; push('s-folders'); }
   if (!keep) txt('foldersList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/chatlist_folders?limit='+FOLDERS_LIMIT);
-    const fs = listOf(d,'folders');
+    const d = await api('/api/miniapp/chatlist_folders?limit=100&offset='+FOLDERS_OFFSET);
+    const _page = listOf(d,'folders');
+    FOLDERS_ROWS = FOLDERS_OFFSET ? FOLDERS_ROWS.concat(_page) : _page;
+    const fs = FOLDERS_ROWS;
     const foldersTotal = totalOf(d, fs);
     if (!fs.length) { txt('foldersList', empty('📁','Пока нет папок','Соберите подборку своих каналов и раздайте одну ссылку')); return; }
     txt('foldersList', fs.map(f=>{
@@ -22733,12 +22879,25 @@ const REHAB_COLOR = {appeal:'var(--blue,#3b82f6)', warming:'var(--green)',
                      recheck:'var(--blue,#3b82f6)', freed:'var(--green)',
                      stuck:'var(--orange,#f59e0b)', gone:'var(--hint)',
                      off:'var(--hint)'};
-async function openRehab() {
-  push('s-rehab');
-  txt('rehabStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('rehabList','');
+// Список реабилитации приходил одной страницей по сто, и потолок стоял в
+// значении по умолчанию движка (`list_for_owner(pool, owner_id, limit=100)`).
+// Кнопки ⏩/⏹/🔁 живут в строке: при волне блокировок аккаунт за сотым нельзя
+// было ни поторопить, ни остановить, а плитка сверху при этом честно писала
+// «Восстанавливаются: 143» над списком из ста.
+let RHB_ROWS = [], RHB_OFFSET = 0, RHB_TOTAL = 0;
+async function rehabLoadMore() {
+  RHB_OFFSET = RHB_ROWS.length;
+  await openRehab(true);
+}
+async function openRehab(keep) {
+  if (!keep) {
+    push('s-rehab');
+    txt('rehabStats','<div class="spin-wrap"><div class="spin"></div></div>');
+    txt('rehabList','');
+    RHB_ROWS = []; RHB_OFFSET = 0; RHB_TOTAL = 0;
+  }
   try {
-    const d = await api('/api/miniapp/rehab');
+    const d = await api('/api/miniapp/rehab?limit=100&offset=' + RHB_OFFSET);
     // «Возвращены» и «Нужен разбор» — это срезы списка аккаунтов, а не просто
     // цифры. «Восстанавливаются» никуда не ведёт нарочно: их список прямо ниже.
     txt('rehabStats',`
@@ -22747,7 +22906,10 @@ async function openRehab() {
       <div class="kpi-card tap-card" onclick="healthGoAccounts('spamblock','')" role="button" tabindex="0"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(d.stuck||0)}</div><div class="kpi-lbl">Нужен разбор ›</div></div>
     `);
     txt('m-rehab-val', (d.in_progress||0) ? `${d.in_progress} в работе${(d.stuck||0)?' · '+d.stuck+' ⚠️':''}` : ((d.stuck||0)?`${d.stuck} ждут разбора`:'нет ограниченных'));
-    const accs = d.accounts||[];
+    const _page = listOf(d, 'accounts');
+    RHB_ROWS = RHB_OFFSET ? RHB_ROWS.concat(_page) : _page;
+    RHB_TOTAL = totalOf(d, RHB_ROWS);
+    const accs = RHB_ROWS;
     if (!accs.length) { txt('rehabList', empty('🩹','Восстанавливать некого',
       'Ни один аккаунт не под спам-блоком — это хорошая новость',
       {label:'📱 К аккаунтам', fn:"healthGoAccounts('all','')"})); return; }
@@ -22771,7 +22933,7 @@ async function openRehab() {
           ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')" aria-label="Повторить шаг">🔁</button>`:''}
         </div>
       </div>`;
-    }).join(''));
+    }).join('') + moreBtn(accs.length, RHB_TOTAL, 'rehabLoadMore()'));
   } catch(e) {
     txt('rehabStats','');
     txt('rehabList', errHtml(errRu(e), 'openRehab()'));
@@ -23532,10 +23694,11 @@ async function toggleRelay(botId, enable) {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
 // id переписки держим рядом: строку в onclick без кавычек не унести.
-let _RELAY_ARGS = null, RELAY_LIMIT = 100;
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let _RELAY_ARGS = null, RELAY_ROWS = [], RELAY_OFFSET = 0;
 async function openRelaySessionMore() {
   if (!_RELAY_ARGS) return;
-  RELAY_LIMIT += 400;
+  RELAY_OFFSET = RELAY_ROWS.length;
   await openRelaySession(_RELAY_ARGS[0], _RELAY_ARGS[1], true);
 }
 function retryRelaySession() {
@@ -23543,11 +23706,13 @@ function retryRelaySession() {
 }
 async function openRelaySession(sessionId, name, keep) {
   _RELAY_ARGS = [sessionId, name];
-  if (!keep) { RELAY_LIMIT = 100; txt('relaymsgs-title', '💬 '+name); push('s-relaymsgs'); }
+  if (!keep) { RELAY_ROWS = []; RELAY_OFFSET = 0; txt('relaymsgs-title', '💬 '+name); push('s-relaymsgs'); }
   if (!keep) txt('relayMsgBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/relay/session/'+sessionId+'/messages?limit='+RELAY_LIMIT);
-    const msgs = listOf(d,'messages');
+    const d = await api('/api/miniapp/relay/session/'+sessionId+'/messages?limit=100&offset='+RELAY_OFFSET);
+    const _page = listOf(d,'messages');
+    RELAY_ROWS = RELAY_OFFSET ? RELAY_ROWS.concat(_page) : _page;
+    const msgs = RELAY_ROWS;
     const relTotal = totalOf(d, msgs);
     if (!msgs.length) { txt('relayMsgBody', empty('💬','Нет сообщений','')); return; }
     document.getElementById('relayMsgBody').innerHTML = msgs.map(m=>{
@@ -23890,16 +24055,20 @@ function showParserTab(tab) {
   document.getElementById('parserTabAudience').className = tab==='audience'?'btn btn-p':'btn btn-s';
   if (tab==='audience') loadParsedAudience('');
 }
-let PRUNS_LIMIT = 30;
-async function loadParserRunsMore() { PRUNS_LIMIT += 200; await loadParserRuns(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let PRUNS_OFFSET = 0;
+async function loadParserRunsMore() { PRUNS_OFFSET = (PARSER_RUNS||[]).length; await loadParserRuns(true); }
 async function loadParserRuns(keep) {
-  if (!keep) PRUNS_LIMIT = 30;
+  if (!keep) { PARSER_RUNS = []; PRUNS_OFFSET = 0; }
   if (!keep) txt('parserRunList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/parser/runs?limit='+PRUNS_LIMIT);
-    const runs = listOf(d,'runs');
+    const d = await api('/api/miniapp/parser/runs?limit=30&offset='+PRUNS_OFFSET);
+    const _page = listOf(d,'runs');
+    // PARSER_RUNS — он же хранилище для «→ в рассылку», поэтому страница
+    // доклеивается в него, а не в отдельный массив.
+    PARSER_RUNS = PRUNS_OFFSET ? (PARSER_RUNS||[]).concat(_page) : _page;
+    const runs = PARSER_RUNS;
     const prTotal = totalOf(d, runs);
-    PARSER_RUNS = runs;   // для «→ в рассылку» без проблем с экранированием
     if (!runs.length) { txt('parserRunList', empty('⏱','Нет запусков','Запустите первый парсинг')); return; }
     // Причина обрыва и оговорка о полноте — целиком, отдельной строкой: раньше
     // её резало до 60 знаков, и «Список подписчиков канала Telegram…» не
@@ -24076,18 +24245,31 @@ async function submitParser() {
 }
 
 // ── CRM Deals ──────────────────────────────────────────
-let DEALS_DATA = [], DEALS_FILTER = null;
+let DEALS_DATA = [], DEALS_FILTER = null, DEALS_OFFSET = 0;
 const STAGE_LABELS = {lead:'🎯 Лид',contact:'📞 Контакт',proposal:'📄 Предложение',negotiation:'🤝 Переговоры',won:'✅ Выиграно',lost:'❌ Проиграно'};
 async function openCRMDeals() {
   DEALS_FILTER = null;
   push('s-crmdeals');
   loadDeals();
 }
-async function loadDeals() {
-  txt('dealList','<div class="spin-wrap"><div class="spin"></div></div>');
+// Пятьдесят сделок были потолком, а не страницей: сделка пятьдесят первая не
+// открывалась никак, шапка писала «50 сделок» при сотне, а чипы над списком
+// считают всю воронку и показывали настоящее число над обрезанным списком.
+// Теперь потолок растёт по нажатию, а число в шапке — серверное.
+async function loadDeals(more) {
+  // Страница доклеивается к показанному, а не растит потолок: потолок рано или
+  // поздно упирается в серверный предел, и тогда кнопка обещает продолжение,
+  // которого не будет. Со смещением «Показать ещё» исчезает ровно там, где
+  // список закончился, на любом числе сделок.
+  if (!more) { DEALS_OFFSET = 0; DEALS_DATA = [];
+    txt('dealList','<div class="spin-wrap"><div class="spin"></div></div>'); }
   try {
-    const d = await api('/api/miniapp/crm/deals'+(DEALS_FILTER?'?stage='+DEALS_FILTER:''));
-    DEALS_DATA = d.deals||[];
+    const d = await api('/api/miniapp/crm/deals?limit=50&offset='+DEALS_OFFSET
+                        +(DEALS_FILTER?'&stage='+DEALS_FILTER:''));
+    const dealsPage = listOf(d,'deals');
+    DEALS_DATA = more ? DEALS_DATA.concat(dealsPage) : dealsPage;
+    DEALS_OFFSET = DEALS_DATA.length;
+    const dealsTotal = totalOf(d, DEALS_DATA);
     // Summary bar
     const sum = d.summary||{};
     const stages = ['lead','contact','proposal','negotiation','won','lost'];
@@ -24095,7 +24277,7 @@ async function loadDeals() {
       const c = sum[s]?.count||0;
       return c>0?`<div class="kpi-card" style="min-width:70px;text-align:center"><div style="font-size:16px;font-weight:700">${c}</div><div style="font-size:10px;color:var(--hint)">${STAGE_LABELS[s].split(' ')[1]||s}</div></div>`:''
     }).join(''));
-    txt('m-deal-cnt', DEALS_DATA.length+' сделок');
+    txt('m-deal-cnt', dealsTotal+' сделок');
     if (!DEALS_DATA.length) {
       // Под выбранным этапом сделок нет — это НЕ «сделок нет вообще». Предлагать
       // здесь «создайте первую» значит врать человеку, у которого их сорок на
@@ -24113,8 +24295,8 @@ async function loadDeals() {
       return `<div class="row">
         <div class="row-ico" style="background:var(--bg-green-16)">💼</div>
         <div class="row-body">
-          <div class="row-name">${esc(d2.title)}</div>
-          <div class="row-val">${STAGE_LABELS[d2.stage]||d2.stage}${d2.contact?' · '+esc(d2.contact):''}${d2.value?` · $${d2.value.toFixed(0)}`:''}</div>
+          <div class="row-name">${esc(d2.title||'Сделка без названия')}</div>
+          <div class="row-val">${esc(STAGE_LABELS[d2.stage]||d2.stage||'этап не указан')}${d2.contact?' · '+esc(d2.contact):''}${d2.value?` · $${d2.value.toFixed(0)}`:''}</div>
           <div class="row-val" style="color:var(--hint)">${ago(d2.updated_at)}</div>
         </div>
         <div class="row-right" style="display:flex;gap:5px;flex-direction:column">
@@ -24122,8 +24304,8 @@ async function loadDeals() {
           <button class="btn btn-d" style="padding:4px 8px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id}, this)" aria-label="Удалить">✕</button>
         </div>
       </div>`;
-    }).join(''));
-  } catch(e) { txt('dealList', empty('⚠️','Ошибка',errRu(e))); }
+    }).join('') + moreBtn(DEALS_DATA.length, dealsTotal, 'loadDeals(1)'));
+  } catch(e) { txt('dealList', errHtml(errRu(e),'loadDeals()')); }
 }
 function filterDeals(stage, btn) {
   DEALS_FILTER = stage;
@@ -24604,16 +24786,19 @@ function filterAssetTpl(type, btn) {
   if (btn) btn.classList.add('btn-p');
   loadAssetTpl(type);
 }
-let AT_LIMIT = 50, AT_TYPE = null;
-async function loadAssetTplMore() { AT_LIMIT += 200; await loadAssetTpl(AT_TYPE, true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let AT_ROWS = [], AT_OFFSET = 0, AT_TYPE = null;
+async function loadAssetTplMore() { AT_OFFSET = AT_ROWS.length; await loadAssetTpl(AT_TYPE, true); }
 async function loadAssetTpl(type, keep) {
   AT_TYPE = type || null;
-  if (!keep) { AT_LIMIT = 50; txt('atList','<div class="spin-wrap"><div class="spin"></div></div>'); }
+  if (!keep) { AT_ROWS = []; AT_OFFSET = 0; txt('atList','<div class="spin-wrap"><div class="spin"></div></div>'); }
   try {
-    const url = '/api/miniapp/asset_templates?limit='+AT_LIMIT
+    const url = '/api/miniapp/asset_templates?limit=50&offset='+AT_OFFSET
               + (type?`&type=${encodeURIComponent(type)}`:'');
     const d = await api(url);
-    const rows = listOf(d,'items');
+    const _page = listOf(d,'items');
+    AT_ROWS = AT_OFFSET ? AT_ROWS.concat(_page) : _page;
+    const rows = AT_ROWS;
     const atTotal = totalOf(d, rows);
     if (!rows.length) { txt('atList', empty('📐','Шаблонов нет','Нажмите + Создать')); return; }
     const typeIco={bot:'🤖',channel:'📢',group:'👥',post:'📝'};
@@ -24810,14 +24995,17 @@ async function openSwarm() {
 }
 
 // ── Presence Packs ──────────────────────────────────────
-let PP_LIMIT = 30;
-async function openPresencePacksMore() { PP_LIMIT += 200; await openPresencePacks(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let PP_ROWS = [], PP_OFFSET = 0;
+async function openPresencePacksMore() { PP_OFFSET = PP_ROWS.length; await openPresencePacks(true); }
 async function openPresencePacks(keep) {
-  if (!keep) { PP_LIMIT = 30; push('s-presencepacks'); }
+  if (!keep) { PP_ROWS = []; PP_OFFSET = 0; push('s-presencepacks'); }
   if (!keep) txt('ppList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/presence_packs?limit='+PP_LIMIT);
-    const rows = listOf(d,'items');
+    const d = await api('/api/miniapp/presence_packs?limit=30&offset='+PP_OFFSET);
+    const _page = listOf(d,'items');
+    PP_ROWS = PP_OFFSET ? PP_ROWS.concat(_page) : _page;
+    const rows = PP_ROWS;
     const ppTotal = totalOf(d, rows);
     if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать')); return; }
     txt('ppList', rows.map(r=>`
@@ -25012,11 +25200,23 @@ function pmCoverageHelp(level) {
   toast(t);
 }
 
-async function openGlobalPresence() {
-  push('s-globalpresence');
-  txt('gpList','<div class="spin-wrap"><div class="spin"></div></div>');
+// Планы отдавались голым массивом из двадцати: плитка писала «20 планов»
+// (длину страницы), а двадцать первый не открывался никак. Теперь страницы по
+// смещению и честный итог с сервера.
+let GP_ROWS = [], GP_OFFSET = 0;
+async function openGlobalPresence(more) {
+  if (more) { GP_OFFSET = GP_ROWS.length; }
+  else {
+    GP_ROWS = []; GP_OFFSET = 0;
+    push('s-globalpresence');
+    txt('gpList','<div class="spin-wrap"><div class="spin"></div></div>');
+  }
   try {
-    const rows = await api('/api/miniapp/global_presence');
+    const d = await api('/api/miniapp/global_presence?limit=20&offset='+GP_OFFSET);
+    const _page = listOf(d,'plans');
+    GP_ROWS = GP_OFFSET ? GP_ROWS.concat(_page) : _page;
+    const rows = GP_ROWS;
+    const gpTotal = totalOf(d, rows);
     if (!rows.length) { txt('gpList', empty('🌍','Планов нет','Нажмите + Создать в шапке экрана')); return; }
     txt('gpList', rows.map(r => {
       const done=r.done_targets||0, total=r.total_targets||0;
@@ -25033,10 +25233,15 @@ async function openGlobalPresence() {
           <div class="row-right chev">›</div>
         </div>
       `;
-    }).join(''));
+    }).join('') + moreBtn(rows.length, gpTotal, 'openGlobalPresence(1)'));
+    // «N активных» считается по загруженным строкам, поэтому называется только
+    // когда загружены ВСЕ планы: иначе число описывало бы страницу, а не план.
     const active = rows.filter(r=>r.status==='running').length;
-    document.getElementById('m-gp-val').textContent = active?`${active} активных`:rows.length+' планов';
-  } catch(e) { txt('gpList', empty('⚠️','Ошибка',errRu(e))); }
+    const el = document.getElementById('m-gp-val');
+    if (el) el.textContent = (active && rows.length >= gpTotal)
+      ? `${num(active)} активных`
+      : num(gpTotal)+' '+plural(gpTotal,'план','плана','планов');
+  } catch(e) { txt('gpList', errHtml(errRu(e),'openGlobalPresence()')); }
 }
 
 // Отметка «выбрать все» в этом списке накрывает ровно то, что в нём показано,
@@ -25213,16 +25418,31 @@ async function submitGpCreate() {
     openGlobalPresence();
   } catch(e) { errEl.textContent = errRu(e,'Ошибка'); }
 }
-async function openGpDetail(planId, planName) {
-  push('s-gpdetail');
-  document.getElementById('gpdetail-name').textContent = planName||'План';
-  txt('gpdetail-body','<div class="spin-wrap"><div class="spin"></div></div>');
+let _GPD_ARGS = null, GPD_ROWS = [], GPD_OFFSET = 0;
+async function openGpDetailMore() {
+  if (!_GPD_ARGS) return;
+  GPD_OFFSET = GPD_ROWS.length;
+  await openGpDetail(_GPD_ARGS[0], _GPD_ARGS[1], true);
+}
+async function openGpDetail(planId, planName, more) {
+  _GPD_ARGS = [planId, planName];
+  if (!more) {
+    GPD_ROWS = []; GPD_OFFSET = 0;
+    push('s-gpdetail');
+    document.getElementById('gpdetail-name').textContent = planName||'План';
+    txt('gpdetail-body','<div class="spin-wrap"><div class="spin"></div></div>');
+  }
   try {
-    const d = await api(`/api/miniapp/global_presence/${planId}`);
+    const d = await api(`/api/miniapp/global_presence/${planId}?limit=100&offset=${GPD_OFFSET}`);
     const p = d.plan;
     const selection = typeof p.geo_selection === 'string' ? JSON.parse(p.geo_selection||'{}') : (p.geo_selection||{});
     const va = selection.virtual_admin;
-    const targets = d.targets||[];
+    const _tPage = listOf(d,'targets');
+    GPD_ROWS = GPD_OFFSET ? GPD_ROWS.concat(_tPage) : _tPage;
+    const targets = GPD_ROWS;
+    // Итог целей считает сервер. Раньше подпись брала число из спека (сколько
+    // целей ПЛАНИРОВАЛОСЬ), и после сотни дойти до остальных было нечем.
+    const targetsTotal = (d.targets_total!=null) ? d.targets_total : targets.length;
     const dr = d.dressing||{};
     const vaCoverage = d.virtual_admin_coverage||{};
     const stCls = {done:'b-gr',failed:'b-rd',running:'b-or',pending:'b-gy',skipped:'b-gy'};
@@ -25253,7 +25473,7 @@ async function openGpDetail(planId, planName) {
       <div class="hint" style="padding:6px 16px 0">Значения считаются для каждого объекта отдельно — по его городу и тематике.</div>
       ` : ''}
       ${va?.enabled && vaCoverage.eligible > vaCoverage.installed ? `<div style="padding:8px 16px"><button class="btn" onclick="gpRetryVa(${p.id})">Повторить подключение администратора</button></div>` : ''}
-      <div class="sec" style="margin-top:8px">Цели (показаны ${targets.length} из ${selection.count||targets.length})</div>
+      <div class="sec" style="margin-top:8px">Цели (показаны ${num(targets.length)} из ${num(targetsTotal)})</div>
       <div class="lst" style="margin:0 16px">
     `;
     if (!targets.length) {
@@ -25273,6 +25493,7 @@ async function openGpDetail(planId, planName) {
       });
     }
     html += '</div>';
+    html += moreBtn(targets.length, targetsTotal, 'openGpDetailMore()');
     if (p.status === 'pending' || p.status === 'failed') {
       html += `<div style="padding:12px 16px"><button class="btn btn-p" onclick="launchGpPlan(${p.id})" style="width:100%">🚀 Запустить план</button></div>`;
     }
@@ -25409,8 +25630,22 @@ async function submitDmAdhoc() {
     })});
     toast(`✉️ Рассылка запущена · ${r.recipients} получателей × ${r.accounts} акк. · ~${humanDur(r.eta_seconds||0)} · #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Рассылка в ЛС');
-    document.getElementById('daUsers').value = '';
-    openMassOps();
+    // Подтверждение честно предупреждало «за раз уйдёт только первая 1000 из
+    // 1500» — и поле очищалось, то есть пятьсот оставшихся адресатов исчезали
+    // вместе с текстом, а «следующего раза» взяться было неоткуда. Сервер
+    // присылает их число в `truncated`: оставляем неотправленных в поле.
+    const _sentN = r.recipients || willSend;
+    const _keep = uniq.slice(_sentN);
+    if (r.truncated > 0 && _keep.length) {
+      const _keepSet = new Set(_keep);
+      document.getElementById('daUsers').value = usernames
+        .filter(u => _keepSet.has(u.replace(/^@/,'').toLowerCase()))
+        .join('\n');
+      toast(`📋 Осталось в поле: ${num(_keep.length)} ${plural(_keep.length,'получатель','получателя','получателей')} — отправьте следующей партией`);
+    } else {
+      document.getElementById('daUsers').value = '';
+      openMassOps();
+    }
   } catch(e) { errEl.textContent = errRu(e,'Ошибка'); }
 }
 
@@ -25894,14 +26129,17 @@ async function openChannelFactory(asGroup) {
 function cfAccAll(on) {
   document.querySelectorAll('#cfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on; });
 }
-let CFR_LIMIT = 20;
-async function loadCfRecentMore() { CFR_LIMIT += 200; await loadCfRecent(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let CFR_ROWS = [], CFR_OFFSET = 0;
+async function loadCfRecentMore() { CFR_OFFSET = CFR_ROWS.length; await loadCfRecent(true); }
 async function loadCfRecent(keep) {
-  if (!keep) CFR_LIMIT = 20;
+  if (!keep) { CFR_ROWS = []; CFR_OFFSET = 0; }
   if (!keep) txt('cfRecent','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/channel_factory/recent?limit='+CFR_LIMIT);
-    const rows = listOf(d,'items');
+    const d = await api('/api/miniapp/channel_factory/recent?limit=20&offset='+CFR_OFFSET);
+    const _page = listOf(d,'items');
+    CFR_ROWS = CFR_OFFSET ? CFR_ROWS.concat(_page) : _page;
+    const rows = CFR_ROWS;
     const cfTotal = totalOf(d, rows);
     if (!rows.length) { txt('cfRecent', empty('📢','Нет каналов','')); return; }
     txt('cfRecent', rows.map(r=>`
@@ -26418,7 +26656,18 @@ async function submitMultigeoSet() {
   errEl.textContent='';
   try {
     const r = await api(`/api/miniapp/bot/${botId}/multigeo`,{method:'POST',body:JSON.stringify(body)});
-    if (!r.ok) { errEl.textContent='Ошибки: '+r.errors?.join(', '); return; }
+    if (!r.ok) {
+      // Сервер перечисляет НЕ сохранённые поля своими ключами (name,
+      // description, short_description) — владельцу они ничего не говорят, а
+      // по-английски он не читает. Переводим в названия полей формы.
+      const FLD = {name:'название', description:'описание',
+                   short_description:'короткое описание'};
+      const bad = (r.errors||[]).map(f=>FLD[f]||f);
+      errEl.textContent = bad.length
+        ? 'Телеграм не принял: ' + bad.join(', ')
+        : 'Телеграм не принял профиль';
+      return;
+    }
     toast('✅ Профиль обновлён');
     closeModal('mo-multigeo');
     loadMultigeo();
@@ -26513,14 +26762,17 @@ async function submitCloner() {
 }
 
 // ── Clone Adapt ─────────────────────────────────────────
-let CA_LIMIT = 30;
-async function openCloneAdaptMore() { CA_LIMIT += 200; await openCloneAdapt(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let CA_ROWS = [], CA_OFFSET = 0;
+async function openCloneAdaptMore() { CA_OFFSET = CA_ROWS.length; await openCloneAdapt(true); }
 async function openCloneAdapt(keep) {
-  if (!keep) { CA_LIMIT = 30; push('s-cloneadapt'); }
+  if (!keep) { CA_ROWS = []; CA_OFFSET = 0; push('s-cloneadapt'); }
   if (!keep) txt('caHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/clone_adapt/history?limit='+CA_LIMIT);
-    const rows = listOf(d,'items');
+    const d = await api('/api/miniapp/clone_adapt/history?limit=30&offset='+CA_OFFSET);
+    const _page = listOf(d,'items');
+    CA_ROWS = CA_OFFSET ? CA_ROWS.concat(_page) : _page;
+    const rows = CA_ROWS;
     const caTotal = totalOf(d, rows);
     if (!rows.length) { txt('caHistory', empty('🔄','Нет истории','')); return; }
     txt('caHistory', rows.map(r => {
@@ -26853,14 +27105,17 @@ async function submitMeshCreate() {
 }
 
 // ── Narrative Engine ────────────────────────────────────
-let NARR_LIMIT = 30;
-async function openNarrativeMore() { NARR_LIMIT += 200; await openNarrative(true); }
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let NARR_ROWS = [], NARR_OFFSET = 0;
+async function openNarrativeMore() { NARR_OFFSET = NARR_ROWS.length; await openNarrative(true); }
 async function openNarrative(keep) {
-  if (!keep) { NARR_LIMIT = 30; push('s-narrative'); }
+  if (!keep) { NARR_ROWS = []; NARR_OFFSET = 0; push('s-narrative'); }
   if (!keep) txt('narrativeList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/narrative?limit='+NARR_LIMIT);
-    const rows = listOf(d,'items');
+    const d = await api('/api/miniapp/narrative?limit=30&offset='+NARR_OFFSET);
+    const _page = listOf(d,'items');
+    NARR_ROWS = NARR_OFFSET ? NARR_ROWS.concat(_page) : _page;
+    const rows = NARR_ROWS;
     const narrTotal = totalOf(d, rows);
     if (!rows.length) { txt('narrativeList', empty('📖','Кампаний нет','Нажмите + Создать')); return; }
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
@@ -27227,10 +27482,11 @@ async function openSemanticMemory() {
     `).join(''));
   } catch(e) { txt('semList', errHtml(errRu(e), 'openSemanticMemory()')); }
 }
-let _SEMF_ARGS = null, SEMF_LIMIT = 100;
+// Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
+let _SEMF_ARGS = null, SEMF_ROWS = [], SEMF_OFFSET = 0;
 async function openSemFactsMore() {
   if (!_SEMF_ARGS) return;
-  SEMF_LIMIT += 400;
+  SEMF_OFFSET = SEMF_ROWS.length;
   await openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
 }
 function retrySemFacts() {
@@ -27239,14 +27495,16 @@ function retrySemFacts() {
 async function openSemFacts(botId, botName, keep) {
   _SEMF_ARGS = [botId, botName];
   if (!keep) {
-    SEMF_LIMIT = 100;
+    SEMF_ROWS = []; SEMF_OFFSET = 0;
     push('s-semfacts');
     document.getElementById('semfacts-name').textContent = botName + ' — факты';
     txt('semfactsList', '<div class="spin-wrap"><div class="spin"></div></div>');
   }
   try {
-    const d = await api(`/api/miniapp/semantic_memory/${botId}?limit=${SEMF_LIMIT}`);
-    const rows = listOf(d,'items');
+    const d = await api(`/api/miniapp/semantic_memory/${botId}?limit=100&offset=${SEMF_OFFSET}`);
+    const _page = listOf(d,'items');
+    SEMF_ROWS = SEMF_OFFSET ? SEMF_ROWS.concat(_page) : _page;
+    const rows = SEMF_ROWS;
     const semTotal = totalOf(d, rows);
     if (!rows.length) { txt('semfactsList', empty('🧬','Бот ещё ничего не запомнил',
       'Факты о собеседнике извлекаются из переписки: имя, город, интересы, что человек хотел купить. Они появятся, когда с ботом начнут разговаривать.')); return; }
@@ -27294,6 +27552,10 @@ async function forgetSemUser(userId, factCount, el) {
   try {
     const r = await api(`/api/miniapp/semantic_memory/${botId}/user/${userId}`, {method:'DELETE'});
     toast(`🗑 Забыто: ${num(r.facts||0)} ${plural(r.facts||0,'факт','факта','фактов')}`);
+    // Перерисовка НА МЕСТЕ после удаления: список читается с начала, иначе при
+    // нажатом «Показать ещё» страница по старому смещению доклеилась бы к уже
+    // показанным строкам — и забытый собеседник остался бы на экране.
+    SEMF_ROWS = []; SEMF_OFFSET = 0;
     openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
@@ -28300,8 +28562,10 @@ function rebuildPlanPrices() {
   ];
   _PLAN_PRICES = periods.map(p=>{
     const d = Number(disc[String(p.months)]||0);
-    const total = Math.round(base * p.months * (1 - d/100));
-    return {...p, price:'$'+total, save: d?d+'%':null};
+    // До цента, как считает бот: Math.round показывал $78 там, где счёт
+    // выставлялся на $78.30.
+    const total = Math.round(base * p.months * (1 - d/100) * 100) / 100;
+    return {...p, price:'$'+(Number.isInteger(total) ? total : total.toFixed(2)), save: d?d+'%':null};
   });
 }
 rebuildPlanPrices();
@@ -28384,11 +28648,11 @@ async function openBilling() {
         <div class="row">
           <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
           <div class="row-body">
-            <div class="row-name">${esc(p.plan||'—')} · ${p.period_months||1} мес.</div>
+            <div class="row-name">${esc(({paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',strike:'Массовые жалобы',host_server:'Host-Server'})[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+p.period_months+' мес.':''}</div>
             <div class="row-val">${p.currency||'—'} · $${p.amount_usd||0}</div>
             <div class="row-val" style="color:var(--hint)">${ago(p.created_at)}</div>
           </div>
-          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${p.status==='confirmed'?'✓ Оплачен':'—'}</span></div>
+          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${({confirmed:'✓ Оплачен',pending:'⏳ Ждёт оплаты',confirming:'⏳ Подтверждается',expired:'Истёк',failed:'Ошибка'})[p.status]||'—'}</span></div>
         </div>
       `).join(''));
     }
@@ -28397,8 +28661,10 @@ async function openBilling() {
   }
 }
 function initPayment(planKey, label, price) {
-  if (tg && tg.openTelegramLink) {
-    const botUsername = window._botUsername || 'infragram_bot';
+  // Имя бота — только из конфигурации сервера. Раньше при неизвестном имени
+  // открывался @infragram_bot — чужой бот, которому человек понёс бы деньги.
+  const botUsername = (window._botUsername || '').replace(/^@/, '');
+  if (tg && tg.openTelegramLink && botUsername) {
     tg.openTelegramLink(`https://t.me/${botUsername}?start=pay_${planKey}`);
   } else {
     toast(`❗ Для оплаты перейдите в бот и выберите тариф «${label}» (${price})`);

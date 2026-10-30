@@ -577,8 +577,15 @@ async def set_enabled(pool, owner_id: int, acc_id: int, enabled: bool) -> bool:
         return False
 
 
-async def list_for_owner(pool, owner_id: int, limit: int = 100) -> list[dict]:
-    """Аккаунты владельца в реабилитации — с человеческим описанием фазы."""
+async def list_for_owner(pool, owner_id: int, limit: int = 100,
+                         offset: int = 0) -> list[dict]:
+    """Аккаунты владельца в реабилитации — с человеческим описанием фазы.
+
+    Страница, а не весь список: при волне блокировок на флоте строк тут больше
+    сотни, а кнопки ⏩/⏹/🔁 живут в строке — аккаунт за потолком нельзя было ни
+    поторопить, ни остановить. Порядок кладёт наверх тех, кому нужен разбор,
+    поэтому за потолком оставалось самое спокойное, но и его не было видно.
+    """
     try:
         rows = await pool.fetch(
             """SELECT r.acc_id, r.phase, r.kind, r.attempts, r.appeal_count,
@@ -588,11 +595,14 @@ async def list_for_owner(pool, owner_id: int, limit: int = 100) -> list[dict]:
                  FROM account_rehab_state r
                  JOIN tg_accounts a ON a.id = r.acc_id
                 WHERE r.owner_id=$1
+                -- `updated_at` у двух строк совпадает запросто (один проход
+                -- автоматики правит их вместе), а со сдвигом страницы без
+                -- уникального хвоста теряют и повторяют аккаунты.
                 ORDER BY (r.phase = 'stuck') DESC,
                          (r.phase IN ('appeal','warming','recheck')) DESC,
-                         r.updated_at DESC
-                LIMIT $2""",
-            owner_id, limit)
+                         r.updated_at DESC, r.acc_id
+                LIMIT $2 OFFSET $3""",
+            owner_id, max(1, min(500, int(limit))), max(0, int(offset or 0)))
     except Exception as e:
         log.debug("rehab: список для владельца %s не получен: %s", owner_id, e)
         return []

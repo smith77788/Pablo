@@ -163,10 +163,16 @@ def test_only_one_client_is_created_per_function(fn):
 # обёрткой сломала бы код, который достаёт оттуда настоящий клиент.
 UNBOXED_BY_DESIGN = {
     "confirm_code", "confirm_2fa", "confirm_qr_2fa",
-    "start_qr_login", "wait_qr_login",
-    "get_client_info_and_session", "get_account_info",
-    "validate_session_import",
+    "wait_qr_login",
+    "get_client_info_and_session",
 }
+# start_qr_login, get_account_info и validate_session_import убраны из списка:
+# потолок им поставлен поштучно — `asyncio.wait_for(...)` вокруг самого запроса,
+# а НЕ подменой клиента на timeboxed. Именно поэтому передача клиента через
+# _pending_qr осталась цела: из словаря по-прежнему достаётся настоящий клиент.
+# В start_qr_login потолком накрыт только `client.qr_login()` — он лишь строит
+# ссылку. Человеческое ожидание сканирования живёт в `qr.wait()` внутри
+# wait_qr_login, и эта функция в списке осталась: ждать человека там законно.
 # import_from_tdata убран из списка: переписанный импорт tdata больше НЕ делает
 # «голых» запросов к Telegram. opentele-ветка извлекает ключ оффлайн и проверяет
 # сессию через `_verify_tdata_session` (там свой asyncio.wait_for), нативная —

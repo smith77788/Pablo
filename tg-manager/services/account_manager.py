@@ -2802,7 +2802,10 @@ async def start_qr_login(user_id: int) -> bytes:
     # то есть приходит ещё и CancelledError. Поэтому ловим BaseException.
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        qr = await client.qr_login()
+        # Потолок: `qr_login()` только СОЗДАЁТ ссылку, ждать сканирования будет
+        # `qr.wait()` у вызывающего. Без потолка мёртвый сокет оставлял бы
+        # владельца перед экраном без QR и без ошибки.
+        qr = await asyncio.wait_for(client.qr_login(), timeout=_OP_TIMEOUT)
         img = qrcode.make(qr.url)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
@@ -2904,7 +2907,7 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        me = await client.get_me()
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         return {
             "tg_user_id": me.id,
             "phone": me.phone or "",
@@ -3698,11 +3701,13 @@ _SPAMBOT_LIMIT_PATTERNS = (
     "ваш аккаунт ограничен",
     "недоступны",           # «некоторые функции будут недоступны до …»
 )
-_VERIFIED_RESTRICTION_STATUSES = frozenset({"spamblock", "banned", "deactivated"})
+_VERIFIED_RESTRICTION_STATUSES = frozenset(
+    {"spamblock", "banned", "deactivated", "frozen"}
+)
 
 
 def classify_spambot_reply(reply_text: str) -> str | None:
-    """'active' | 'spamblock' | None (не распознано).
+    """'active' | 'frozen' | 'banned' | 'spamblock' | None (не распознано).
 
     @SpamBot отвечает на языке аккаунта (lang_code). Классификация вынесена в
     services/spambot_i18n.py и покрывает все 10 локалей, которые раздаёт
@@ -3879,7 +3884,8 @@ async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dic
     last_text = ""
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
-        if not await client.is_user_authorized():
+        if not await asyncio.wait_for(
+                client.is_user_authorized(), timeout=_OP_TIMEOUT):
             return {"ok": False, "status": "no_session", "reply": "", "steps": 0}
 
         spam_bot = await asyncio.wait_for(client.get_entity("@SpamBot"), timeout=10.0)
@@ -4054,6 +4060,34 @@ async def check_account_status_full(
                     return {
                         "status": "active",
                         "reason": "Аккаунт активен, ограничений нет",
+                        "display_name": display_name,
+                        "profile": profile,
+                    }
+                if spambot_status == "frozen":
+                    # Заморозка (read-only) — средняя ступень между спамблоком и
+                    # баном. Раньше этот ответ @SpamBot не распознавался и уходил
+                    # в 'unknown' — acc_status не менялся, и замороженный аккаунт
+                    # продолжали брать в работу. 'frozen' ∈ DEAD_STATUSES →
+                    # выводит из ротации, при этом ∈ RESTRICTED_STATUSES (не
+                    # LOST): снимается апелляцией, а не потерян навсегда.
+                    return {
+                        "status": "frozen",
+                        "reason": f"@SpamBot: аккаунт заморожен (read-only) за "
+                                  f"нарушение условий Telegram, снимается "
+                                  f"апелляцией — {reply_text[:120]}",
+                        "display_name": display_name,
+                        "profile": profile,
+                    }
+                if spambot_status == "banned":
+                    # Терминальный бан (нарушение условий), а не снимаемый
+                    # спамблок. Раньше этот ответ не распознавался и уходил в
+                    # 'unknown' — acc_status не менялся, и забаненный аккаунт
+                    # продолжали брать в работу. 'banned' ∈ LOST_STATUSES →
+                    # выводит из ротации и персистится.
+                    return {
+                        "status": "banned",
+                        "reason": f"@SpamBot: аккаунт заблокирован за нарушение "
+                                  f"условий Telegram — {reply_text[:120]}",
                         "display_name": display_name,
                         "profile": profile,
                     }
@@ -9731,7 +9765,7 @@ async def validate_session_import(session_str: str, proxy_url: str | None = None
         device = {"proxy_url": proxy_url or "", "proxy_id": None, "cf_relay_url": ""}
         client = _make_client(session_str, device)
         await asyncio.wait_for(client.connect(), timeout=15)
-        me = await client.get_me()
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         return {"valid": True, "phone": me.phone or "", "user_id": me.id}
     except Exception as e:
         return {"valid": False, "error": str(e)[:200]}

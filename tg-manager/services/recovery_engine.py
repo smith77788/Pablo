@@ -519,10 +519,28 @@ async def _dead_letter_op(pool, owner_id: int, op_id: int, stuck_min: int,
             {"status": status, "ok": ok_n, "failed": failed_n,
              "reason": msg, "summary": summary},
             op_type, dur_s or 0.0)
-        await pool.execute(
+        # Та же форма, что у `_finish_poisoned_op`: строка УЖЕ терминальна
+        # ('failed'), и запись дописывает ей точный статус и цифры. Поэтому
+        # общая дверь завершения (`_op_closed_by_us`) здесь не годится — она
+        # охраняет ПЕРЕХОД в терминальный статус. Но цена потери та же:
+        # операция остаётся терминальной и ПУСТОЙ (`result IS NULL`), владелец
+        # видит «Ошибка» без единой цифры, и починить это нечем — сторож сирот
+        # трогает только 'cancelled'. Прежде потеря уходила в `log.debug`, то
+        # есть в прод не попадала вовсе и ни на одном счётчике не всплывала.
+        _res = await _ow._retrying_execute(
+            pool,
             "UPDATE operation_queue SET status=$2, result=$3::jsonb "
             "WHERE id=$1 AND status='failed'",
-            op_id, status, _json.dumps(result, ensure_ascii=False))
+            op_id, status, _json.dumps(result, ensure_ascii=False),
+            log_ctx=f"[recovery_finish op={op_id}]",
+            where="recovery_finish",
+            metric="infragram_op_close_write_failures_total",
+            lost="итог операции, уточнённый восстановлением, не сохранён")
+        if str(_res or "").strip() == "ERROR":
+            # В БД осталось ровное 'failed' без цифр. Объявляем ровно то, что
+            # сохранено: иначе доклад владельцу разойдётся с карточкой
+            # операции, где он те же цифры и ищет.
+            status = _ost.FAILED
     except Exception as e:
         log.debug("recovery: итог операции op=%d не уточнён: %s", op_id, e)
         status = _ost.FAILED
