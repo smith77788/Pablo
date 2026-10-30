@@ -355,6 +355,37 @@ async function coveredSelfCheck() {
   }, COVERED.toString());
 }
 
+let selScreens = 0;                // на скольких экранах удалось выделить строки
+
+// Полоса действий над выделением (`.sel-bar`) лежит поверх списка и
+// показывается, только когда что-то выделено. Пока обход ничего не выделял,
+// самый вероятный случай закрытого текста мерке был не виден. Нажимаем ту же
+// ссылку «Все», что и владелец: показать полосу руками через `display` значило
+// бы померить состояние, в котором приложение не бывает.
+//
+// Зовётся и из прохода по открывашкам, и из прохода по вкладкам. Первый раз
+// проход стоял только в открывашках, и знаменатель это показал: полос
+// выделения в разметке три, а сработала одна — две другие живут на вкладках
+// «Аккаунты» и «Боты», куда проход по открывашкам не заходит.
+async function coveredWithSelection() {
+  const clicked = await page.evaluate(() => {
+    const scr = document.querySelector('.screen.show');
+    if (!scr) return false;
+    const link = [...scr.querySelectorAll('.sel-bar-link')]
+      .find(e => (e.textContent || '').trim() === 'Все');
+    if (!link) return false;
+    link.click();
+    return true;
+  });
+  if (!clicked) return null;
+  selScreens++;
+  await page.waitForTimeout(140);
+  await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
+  await page.waitForTimeout(80);
+  const sv = await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString());
+  return sv.n ? `ЗАКРЫТО ПРИ ВЫДЕЛЕНИИ ${sv.n}: ` + sv.worst.join(' ; ') : null;
+}
+
 // Четыре экрана обход не показывал — и не потому, что они сломаны. Их
 // открывашка требует состояния, которое в живом приложении оставляет
 // ПРЕДЫДУЩИЙ экран: выбранный бот, отмеченные подарки, загруженный список
@@ -437,7 +468,6 @@ if (sweepMode) {
   const mute = [];                 // открывашки, не открывшие ничего
   const hints = [];                // машинный текст: подсказка, не находка
   const seedDead = [];             // затравка есть, а экран всё равно не открылся
-  let selScreens = 0;              // на скольких экранах удалось выделить строки
   let probesShown = 0, probesTotal = 0;
   for (const { name: fn, args, want, probe } of fns) {
     live = [];
@@ -522,29 +552,8 @@ if (sweepMode) {
     }
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
     if (cv.n) problems.push(`ЗАКРЫТО ${cv.n}: ` + cv.worst.join(' ; '));
-    // Полоса действий над выделением (`.sel-bar`) лежит поверх списка и
-    // показывается, только когда что-то выделено. Пока обход ничего не
-    // выделял, самый вероятный случай закрытого текста мерке был не виден.
-    // Нажимаем ту же ссылку «Все», что и владелец: показать полосу руками
-    // через `display` значило бы померить состояние, в котором приложение не
-    // бывает.
-    const selClicked = await page.evaluate(() => {
-      const scr = document.querySelector('.screen.show');
-      if (!scr) return false;
-      const link = [...scr.querySelectorAll('.sel-bar-link')]
-        .find(e => (e.textContent || '').trim() === 'Все');
-      if (!link) return false;
-      link.click();
-      return true;
-    });
-    if (selClicked) {
-      selScreens++;
-      await page.waitForTimeout(140);
-      await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
-      await page.waitForTimeout(80);
-      const sv = await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString());
-      if (sv.n) problems.push(`ЗАКРЫТО ПРИ ВЫДЕЛЕНИИ ${sv.n}: ` + sv.worst.join(' ; '));
-    }
+    const sel = await coveredWithSelection();
+    if (sel) problems.push(sel);
     const gb = await page.evaluate((src) => new Function('return (' + src + ')()')(), GIBBERISH.toString());
     // В находки это НЕ идёт — см. заголовок раздела при печати. Заглушка
     // отдаёт одну форму на 1019 маршрутов, и поле, которое на одном экране
@@ -589,6 +598,8 @@ if (sweepMode) {
     const problems = [];
     if (live.length) problems.push(...live.slice(0, 2));
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
+    const sel = await coveredWithSelection();
+    if (sel) problems.push(sel);
     if (problems.length) report.push('вкладка ' + t + ' | ' + problems.join(' | '));
   }
 
