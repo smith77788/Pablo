@@ -99,6 +99,10 @@ _HELP = {
     "infragram_queue_frozen_check_failures_total":
         "Сбои проверки «очередь не разбирается» (детектор остановки исполнителя ослеп, "
         "и остановка выглядит обычным ожиданием)",
+    "infragram_executor_standdown_tasks_left_total":
+        "Задачи операций, не свернувшиеся за отведённое время при передаче "
+        "очереди другому процессу (их сессии могут достаться двум процессам "
+        "сразу)",
     "infragram_journal_write_failures_total":
         "Потерянные строки успеха в журнале целей (повтор сделает цель второй раз)",
     "infragram_account_cooldown_write_failures_total":
