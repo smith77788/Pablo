@@ -8,8 +8,15 @@
 списку (о чём в CLAUDE.md есть отдельный разбор).
 
 Открывающей считается функция, в теле которой есть `push('s-…')` — именно так
-мини-апп показывает экран. Берутся только функции БЕЗ обязательных аргументов:
-остальные требуют id сущности, и позвать их вслепую нечем.
+мини-апп показывает экран.
+
+Функции с ОДНИМ обязательным аргументом тоже идут в список — строкой вида
+`имя|1`. Раньше их отбрасывали «нечем позвать вслепую», и обход показывал 111
+экранов из 185: треть приложения не мерилась, а отчёт об этом молчал. Звать их
+есть чем: заглушка отдаёт одни и те же данные на любой URL, так что экран
+детали рисуется при любом id. Обход помечает такой вызов как пробный — если
+функция упадёт на подставленном аргументе, это не находка, а просто непокрытый
+экран, и он виден в строке охвата.
 
 Использование:
     python3.12 deploy/scripts/miniapp_screen_openers.py > /tmp/openers.txt
@@ -41,17 +48,27 @@ def _body(src: str, start: int) -> str | None:
     return None
 
 
+def _params(raw: str) -> list[str]:
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _required(params: list[str]) -> int:
+    """Сколько аргументов обязательны: со значением по умолчанию — не в счёт."""
+    return sum(1 for p in params if "=" not in p and not p.startswith("..."))
+
+
 def openers() -> list[str]:
     files = [ROOT / "index.html"] + sorted((ROOT / "screens").glob("*.js"))
     out: list[str] = []
     for f in files:
         src = f.read_text(encoding="utf-8")
         for m in _FN.finditer(src):
-            if m.group(2).strip():
-                continue                      # нужен id сущности — вслепую не позвать
+            need = _required(_params(m.group(2)))
+            if need > 1:
+                continue                      # чем заполнить второй — неизвестно
             body = _body(src, m.end() - 1)
             if body and _PUSH.search(body):
-                out.append(m.group(1))
+                out.append(m.group(1) if need == 0 else m.group(1) + "|1")
     return out
 
 
