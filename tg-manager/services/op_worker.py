@@ -151,6 +151,34 @@ async def _retrying_fetchrow(
     return None
 
 
+def _note_protective_write_cancelled(
+    where: str, log_ctx: str, lost: str,
+) -> None:
+    """Защитная запись не состоялась из-за ОТМЕНЫ задачи, а не отказа БД.
+
+    Три писателя защиты ловят `except Exception`, а `asyncio.CancelledError` с
+    Python 3.8 не `Exception` — поэтому отмена проходила сквозь них без лога и
+    без счётчика. Слепыми оказывались ровно наши собственные остановки:
+    `shutdown` по SIGTERM и `_stand_down_after_lease_loss` при передаче
+    очереди. Хуже всего это для журнала целей: он пишется ПОСЛЕ доставки, а
+    `shutdown` возвращает операции в очередь, то есть повторный прогон не
+    «возможен», а гарантирован — и сделает цель второй раз.
+
+    ПОЧЕМУ СЧЁТЧИК ОТДЕЛЬНЫЙ И НЕ В `_PROTECTIVE_FAILURE_COUNTERS`. Деплой —
+    штатное и частое событие (автодеплой на каждый пуш), а тревога, приходящая
+    владельцу на каждый выпуск, перестаёт читаться, и в этом шуме потеряется
+    настоящий сбой защиты. Поэтому WARNING и свой счётчик: потеря видна, а
+    тревога не обесценена.
+    """
+    log.warning(
+        "op_worker: защитная запись не состоялась — задачу отменили%s (%s). "
+        "Это остановка процесса, а не отказ базы, но потеря настоящая",
+        log_ctx, lost,
+    )
+    _reliability_metric("infragram_protective_write_cancelled_total",
+                        where=where or "unknown")
+
+
 async def _journal_write(
     pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
 ) -> str:
@@ -174,6 +202,15 @@ async def _journal_write(
     for attempt in (1, 2):
         try:
             return await pool.execute(query, *args)
+        except asyncio.CancelledError:
+            # Отмену НЕ глотаем (задача, не заметившая отмены, продолжает
+            # работать сессией с уже снятой арендой — AUTH_KEY_DUPLICATED),
+            # но и молчать о потерянной отметке нельзя.
+            _note_protective_write_cancelled(
+                where or "journal", log_ctx,
+                "отметка о сделанной цели потеряна, повторный прогон сделает "
+                "её второй раз")
+            raise
         except Exception as e:
             last = e
             if attempt == 1:
@@ -202,6 +239,11 @@ async def _journal_writemany(
     Гасить исключение вокруг этого вызова не нужно и вредно: писатель их не
     бросает, и `except` вокруг него — мёртвый код, который прячет от читателя
     тот факт, что потеря уже обработана внутри.
+
+    Единственное, что отсюда вылетает, — `asyncio.CancelledError`: она не
+    ошибка записи, а остановка задачи, и глотать её нельзя (см.
+    `_note_protective_write_cancelled`). Проходила она сквозь писателя и
+    раньше, теперь лишь оставляет след.
     """
     last: Exception | None = None
     _rows = list(rows or [])
@@ -210,6 +252,12 @@ async def _journal_writemany(
     for attempt in (1, 2):
         try:
             return await pool.executemany(query, _rows) or "INSERT"
+        except asyncio.CancelledError:
+            _note_protective_write_cancelled(
+                where or "journal", log_ctx,
+                f"пачка из {len(_rows)} отметок потеряна, повторный прогон "
+                "сделает эти цели второй раз")
+            raise
         except Exception as e:
             last = e
             if attempt == 1:
@@ -246,6 +294,10 @@ async def _retrying_execute(
     for attempt in (1, 2):
         try:
             return await pool.execute(query, *args)
+        except asyncio.CancelledError:
+            _note_protective_write_cancelled(
+                where or "requeue", log_ctx, lost)
+            raise
         except Exception as e:
             last = e
             if attempt == 1:
