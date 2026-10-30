@@ -712,6 +712,16 @@ _CHANNEL_IRREVERSIBLE_OPS = frozenset({"delete", "clear"})
 CHANNEL_CONFIRM_WORD = "УДАЛИТЬ"
 
 
+def managed_channel_role(ch) -> str:
+    """Роль аккаунта в канале — как в списке каналов (owner/admin/member/unknown).
+    По ней карточка предлагает «Удалить в Telegram» создателю и «Покинуть» чужому."""
+    if ch.get("is_creator"):
+        return "owner"
+    if ch.get("is_admin"):
+        return "admin"
+    return "member" if ch.get("is_admin") is False else "unknown"
+
+
 def channel_manage_worker_op(op) -> str | None:
     """UI-op ('delete'|'clear'|'leave') → воркер-op, либо None если не поддержан."""
     return _CHANNEL_MANAGE_OPS.get(op)
@@ -3435,14 +3445,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неверный идентификатор канала", 400)
         ch = await _safe_fetchrow(pool,
             """SELECT channel_id, username, title, type,
-                      COALESCE(members_count, 0) AS member_count,
-                      acc_id, added_at, is_admin, is_creator,
-                      CASE WHEN is_creator THEN 'owner'
-                           WHEN is_admin THEN 'admin'
-                           WHEN is_admin IS FALSE THEN 'member'
-                           ELSE 'unknown'
-                      END AS role
-               FROM managed_channels WHERE channel_id=$1 AND owner_id=$2""", ch_id, uid)
+                      COALESCE(members_count, 0) AS member_count, acc_id, added_at, is_admin,
+                      is_creator FROM managed_channels WHERE channel_id=$1 AND owner_id=$2""", ch_id, uid)
         if not ch:
             return _err("Канал не найден", 404)
         acc = None
@@ -3497,7 +3501,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.debug("channel_detail: posts_published failed ch=%d", ch_id)
         return _json_resp({
-            "channel": ch,
+            "channel": {**dict(ch), "role": managed_channel_role(ch)},
             "linked_account": acc,
             "recent_ops": recent_ops,
             "member_growth": member_growth,

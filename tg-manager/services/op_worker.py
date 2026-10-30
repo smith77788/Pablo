@@ -9827,8 +9827,10 @@ async def _forget_managed_channel(pool: asyncpg.Pool, owner_id: int, ch_id: int)
         ("DELETE FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2", (owner_id, ch_id)),
         ("DELETE FROM va_channel_brain WHERE owner_id=$1 AND channel_key=$2", (owner_id, key)),
         ("DELETE FROM va_channel_posts WHERE owner_id=$1 AND channel_key=$2", (owner_id, key)),
+        # Идущую сейчас не трогаем (status <> 'running'), завершённую — тоже.
         ("UPDATE operation_queue SET status='cancelled' "
-         "WHERE owner_id=$1 AND status IN ('pending','paused') "
+         f"WHERE owner_id=$1 AND status NOT IN {op_status.sql_terminal_list()} "
+         "AND status <> 'running' "
          "AND (params->>'channel_ref' = $2 "
          "     OR params->'channel_ids' = jsonb_build_array($2::bigint))", (owner_id, key)),
     ):
@@ -9860,7 +9862,7 @@ async def _chan_destructive_step(
     r = await call(acc["session_str"], ch_id, **kw, **extra)
     flood = int(r.get("flood") or 0)
     if not r.get("ok") and 0 < flood <= 60:
-        await asyncio.sleep(flood + 1)
+        await bounded_flood_sleep(flood + 1, "chan_destructive")
         r = await call(acc["session_str"], ch_id, **kw, **extra)
     if not r.get("ok"):
         return False, f"❌ {chan_title}: {_html.escape(str(r.get('error') or 'ошибка'))}"
