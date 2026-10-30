@@ -100,7 +100,72 @@ def test_the_screen_list_is_built_from_the_source_and_did_not_shrink():
         "а не приложение; прежний режим проверял пять вкладок, и возврат к "
         "этому числу надо замечать")
     assert len(set(names)) == len(names), "в списке повторы"
-    assert "openSettings" in names and "openDashboard" in names
+    calls = [n.split()[0] for n in names]
+    assert "openSettings" in calls and "openDashboard" in calls
+
+
+def test_every_opener_says_which_screen_it_opens():
+    """Без имени экрана обход засчитывает чужую работу.
+
+    `openSalesManager(1)` с подставленным id уходит прямо в редактор менеджера.
+    Экран сменился — значит «открылось», попытка в зачёте, а `s-sales` остаётся
+    непоказанным: числитель считает одно, знаменатель недосчитывается другого, и
+    оба при этом выглядят правдоподобно. Имя экрана из собственного `push`
+    открывашки закрывает эту щель и заодно даёт обходу повод попробовать вызов
+    без аргументов, когда подставленный id увёл не туда.
+    """
+    out = subprocess.run([sys.executable, str(_OPENERS)], capture_output=True,
+                         text=True, timeout=120)
+    assert out.returncode == 0, out.stderr[-400:]
+    names = [n for n in out.stdout.split("\n") if n.strip()]
+    named = [n for n in names if re.search(r"\ss-[\w-]+$", n)]
+    # Знаменатель вслух: «все строки с именем экрана» ничего не значит, если
+    # строк осталось три.
+    assert len(names) >= 100 and len(named) >= len(names) - 5, (
+        f"имя экрана несёт {len(named)} строк из {len(names)} — разбор `push` "
+        "в теле открывашки сломан")
+
+
+def test_a_foreign_screen_does_not_count_as_opened():
+    src = _src()
+    assert "shownId === want" in src and "now === want" in src, (
+        "обход снова засчитывает любой появившийся экран, а не свой")
+
+
+def test_the_seed_is_checked_for_having_worked():
+    """Затравка состояния обязана кричать, когда перестала работать.
+
+    Четыре экрана открываются только из состояния, которое оставляет предыдущий
+    экран (выбранный бот, отмеченные подарки, загруженный список сегментов).
+    Затравка его ставит. Переименуют переменную — экран молча выпадет из охвата
+    обратно, а это ровно то молчание, против которого она и заведена.
+    """
+    src = _src()
+    assert "const SEED = {" in src, "затравка состояния пропала"
+    assert "ЗАТРАВКА НЕ СРАБОТАЛА" in src, (
+        "сломанная затравка больше не говорит об этом вслух")
+    assert re.search(r"seedDead\.length[\s\S]{0,400}?exitCode = 2", src), (
+        "сломанная затравка не красит прогон")
+
+
+def test_the_seed_check_is_not_wired_into_the_mute_list():
+    """Оператор между `if` и `else` перевешивает `else` на себя.
+
+    Проверено на себе: вставленная между ними строка про затравку собрала в
+    список немых открывашек как раз те, что отработали. Падение проверки видно
+    было бы только глазами по списку, которому веришь.
+    """
+    src = _src()
+    assert re.search(
+        r"if \(opened\) \{[^\n]*\}\n(?:\s*//[^\n]*\n)*\s*else if \(!probe\) mute\.push",
+        src), "между `if (opened)` и его `else` что-то вклинилось"
+
+
+def test_a_silent_opener_says_what_stayed_on_screen():
+    src = _src()
+    assert "${beforeId}→${shownId}" in src, (
+        "«экран не сменился» без имён экранов одинаково звучит и когда "
+        "открывашка ничего не сделала, и когда она открыла уже показанный экран")
 
 
 def test_the_sweep_mode_exists_and_reports_its_findings():

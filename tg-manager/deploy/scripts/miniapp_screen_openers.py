@@ -20,6 +20,10 @@
 функция упадёт на подставленном аргументе, это не находка, а просто непокрытый
 экран, и он виден в строке охвата.
 
+Формат строки: `имя[|1…][ s-экран]`. Хвост после пробела — экран, который
+открывашка показывает своим `push`; обход засчитывает попытку, только когда на
+виду оказался именно он.
+
 Использование:
     python3.12 deploy/scripts/miniapp_screen_openers.py > /tmp/openers.txt
     node deploy/scripts/render_miniapp.mjs sweep /tmp/openers.txt
@@ -32,7 +36,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "mini_app"
 _FN = re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)")
-_PUSH = re.compile(r"push\(\s*['\"]s-[\w-]+['\"]")
+_PUSH = re.compile(r"push\(\s*['\"](s-[\w-]+)['\"]")
 
 
 def _body(src: str, start: int) -> str | None:
@@ -77,11 +81,26 @@ def openers() -> list[str]:
             if len(need) > 4:
                 continue                      # чем заполнить пятый — неизвестно
             body = _body(src, m.end() - 1)
-            if body and _PUSH.search(body):
-                # Хвостовые флаги не подставляем вовсе: пусть придут undefined.
-                while need and need[-1] in _FLAGS:
-                    need.pop()
-                out.append(m.group(1) + "|1" * len(need))
+            if not body:
+                continue
+            want = sorted({p for p in _PUSH.findall(body)})
+            if not want:
+                continue
+            # Хвостовые флаги не подставляем вовсе: пусть придут undefined.
+            while need and need[-1] in _FLAGS:
+                need.pop()
+            call = m.group(1) + "|1" * len(need)
+            # Имя экрана, который открывашка показывает СВОИМ `push`. Обход без
+            # него засчитывал чужую работу: `openSalesManager(1)` с
+            # подставленным id уходит сразу в редактор менеджера, экран
+            # появился — значит «открылось», и `s-sales` оставался непокрытым,
+            # хотя попытка числилась удачной. Знание ожидаемого экрана делает
+            # числитель честным и заодно даёт обходу повод попробовать вызов
+            # без аргументов, когда подставленный id увёл не туда.
+            #
+            # Если `push` в теле не один — экран зависит от данных, и обещать
+            # обходу нечего: строка уходит без имени.
+            out.append(f"{call} {want[0]}" if len(want) == 1 else call)
     return out
 
 
