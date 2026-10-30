@@ -248,10 +248,19 @@ if (sweepMode) {
   }
   const report = [];
   const seen = new Set();          // какие экраны обход ДЕЙСТВИТЕЛЬНО показал
+  const mute = [];                 // открывашки, не открывшие ничего
   let probesShown = 0, probesTotal = 0;
   for (const { name: fn, arg, probe } of fns) {
     live = [];
     if (probe) probesTotal++;
+    // Какой экран показан ДО вызова. Без этого «показалось 57 из 57» было
+    // неправдой: упавшая открывашка оставляет на виду прежний экран, и в
+    // зачёт шёл он. Числитель, который считает чужую работу своей, не лучше
+    // отсутствующего знаменателя.
+    const beforeId = await page.evaluate(() => {
+      const el = document.querySelector('.screen.show');
+      return el ? el.id : null;
+    });
     const r = await page.evaluate(async ({ name, a }) => {
       if (typeof window[name] !== 'function') return { missing: true };
       try { a === undefined ? await window[name]() : await window[name](a); }
@@ -270,7 +279,9 @@ if (sweepMode) {
       const el = document.querySelector('.screen.show');
       return el ? el.id : null;
     });
-    if (shownId) { seen.add(shownId); if (probe) probesShown++; }
+    const opened = shownId && shownId !== beforeId;
+    if (opened) { seen.add(shownId); if (probe) probesShown++; }
+    else if (!probe) mute.push(fn);   // позвали без аргументов, экран не сменился
     const problems = [];
     // У пробного вызова падение значит «подставленный id не подошёл», а не
     // поломку: в находки оно не идёт, иначе отчёт утонет в шуме и перестанет
@@ -367,6 +378,10 @@ if (sweepMode) {
     + `(ширина окна ${VW}); окон проверено: ${modalIds.length}`);
   console.log(`из них пробными вызовами с подставленным id: ${probesShown} `
     + `из ${probesTotal} попыток`);
+  if (mute.length) {
+    console.log(`открывашек без аргументов, НЕ открывших свой экран: ${mute.length}`
+      + ` — ${mute.slice(0, 12).join(' ')}` + (mute.length > 12 ? ' …' : ''));
+  }
   if (missed.length) {
     console.log(`не показано экранов: ${missed.length} — ${missed.slice(0, 12).join(' ')}`
       + (missed.length > 12 ? ' …' : ''));

@@ -122,6 +122,17 @@ def test_the_sweep_says_how_much_of_the_app_it_saw():
         "знаменатель подгоняется под числитель")
 
 
+def test_the_numerator_counts_only_screens_this_call_opened():
+    """Упавшая открывашка оставляет на виду прежний экран — он не в зачёт."""
+    src = _src()
+    assert "beforeId" in src and "shownId !== beforeId" in src, (
+        "обход снова засчитывает в охват экран, который был показан ДО "
+        "вызова: числитель, считающий чужую работу своей, не лучше "
+        "отсутствующего знаменателя (так «57 из 57» оказалось «45 из 57»)")
+    assert "НЕ открывших свой экран" in src, (
+        "обход перестал называть открывашки, которые ничего не открыли")
+
+
 def test_the_sweep_opens_modals_and_tabs_too():
     src = _src()
     assert ".mbg" in src and "окон проверено" in src, (
