@@ -46,11 +46,18 @@ def ow():
 def _clean_state(ow):
     from services import metrics as _m
     _m.reset()
+    # Флаг плановой остановки — глобал процесса: его мог оставить включённым
+    # ЧУЖОЙ тест (любой, кто звал `shutdown`), и тогда проверка тревоги при
+    # передаче очереди зависела бы от порядка запуска.
+    _m.set_shutting_down(False)
+    ow._shutting_down = False
     yield
     ow._active_op_ids.clear()
     ow._active_op_tasks.clear()
     ow._accounts_in_use.clear()
     _m.reset()
+    _m.set_shutting_down(False)
+    ow._shutting_down = False
 
 
 class _Pool:
@@ -218,4 +225,96 @@ def test_the_counter_reaches_the_owner(ow):
     """Счётчик обязан быть в списке защитных: иначе он виден только на /metrics."""
     assert COUNTER in ow._PROTECTIVE_FAILURE_COUNTERS, (
         "счётчик не в _PROTECTIVE_FAILURE_COUNTERS — владелец о нём не узнает"
+    )
+
+
+# ── Стык со вторым механизмом: передача очереди — НЕ плановая остановка ──────
+
+def test_a_handover_is_not_marked_as_a_planned_stop(ow, monkeypatch):
+    """На этом различии держится вся громкость потерь при передаче очереди.
+
+    `note_write_cancelled` молчит тревогой на плановой остановке (деплой на
+    каждый пуш, оповещение на каждый выпуск перестанут читать) и поднимает её
+    на всякой другой. Если сдача аренды начнёт отмечать себя плановой —
+    например, кто-то «за компанию» поставит здесь `_shutting_down` — тревога
+    умолкнет ровно в том случае, для которого её и завели. Поэтому отдельная
+    проверка, а не доверие к тому, что флаг никто не поставит.
+    """
+    from services import metrics as _m
+
+    async def _fake_release(ids):
+        return None
+
+    monkeypatch.setattr(ow, "_db_release", _fake_release)
+    _m.set_shutting_down(False)
+
+    async def _go():
+        ow._accounts_in_use.add(42)
+        await ow._stand_down_after_lease_loss(_Pool(), grace_s=0.1)
+
+    _run(_go)
+
+    assert _m._shutting_down is False, (
+        "сдача аренды отметилась плановой остановкой — потери защитных записей "
+        "при передаче очереди перестанут поднимать тревогу"
+    )
+    assert ow._shutting_down is False, (
+        "сдача аренды поставила _shutting_down — процесс обязан уметь "
+        "продолжить работу, аренду можно получить назад"
+    )
+
+
+def test_a_write_cancelled_by_the_handover_raises_the_alarm(ow, monkeypatch):
+    """Сквозная проверка обещания: потеря при передаче очереди БУДИТ владельца.
+
+    По отдельности это проверено (сдача гасит задачи; отменённая защитная
+    запись считается и делится на плановую и внеплановую), а стык — нет. Стык
+    и есть то, что обещано владельцу.
+    """
+    from services import metrics as _m
+    UNPLANNED = "infragram_unplanned_write_cancel_failures_total"
+
+    async def _fake_release(ids):
+        return None
+
+    monkeypatch.setattr(ow, "_db_release", _fake_release)
+
+    class _SlowPool(_Pool):
+        async def execute(self, q, *a):
+            # Отмена задачи доходит до исполнителя именно здесь: уборка ждёт
+            # базу, а база отвечает не мгновенно.
+            await asyncio.sleep(5)
+            return "UPDATE 1"
+
+    wrote: list = []
+
+    async def _worker():
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            # Уборка исполнителя: отметка в журнале целей ПОСЛЕ доставки.
+            wrote.append(await ow._journal_write(
+                _SlowPool(), "INSERT INTO operation_log VALUES (1)",
+                log_ctx="[op=11]", where="journal"))
+
+    async def _go():
+        task = asyncio.create_task(_worker())
+        await asyncio.sleep(0)
+        ow._active_op_tasks.add(task)
+        ow._active_op_ids.add(11)
+        await ow._stand_down_after_lease_loss(_Pool(), grace_s=0.1)
+        if not task.done():
+            try:
+                await asyncio.wait_for(task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+
+    _run(_go)
+
+    counters = (_m.snapshot() or {}).get("counters") or {}
+    got = sum(float(v) for k, v in counters.items()
+              if k == UNPLANNED or k.startswith(UNPLANNED + "{"))
+    assert got >= 1, (
+        "защитная запись потеряна при передаче очереди, а тревоги нет — "
+        f"обещание владельцу не выполняется; счётчики: {sorted(counters)}"
     )
