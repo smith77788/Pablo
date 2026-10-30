@@ -50,8 +50,10 @@ def ow():
 def _fresh_metrics():
     from services import metrics as _m
     _m.reset()
+    _m.set_shutting_down(False)
     yield
     _m.reset()
+    _m.set_shutting_down(False)
 
 
 def _counter(name: str) -> float:
@@ -250,4 +252,69 @@ def test_no_protective_writer_is_blind_to_cancellation():
     assert not blind, (
         "писатели защиты считают потерю записи, но слепы к отмене "
         f"({len(blind)}): {blind}"
+    )
+
+
+# ── Плановый выпуск и внеплановая передача очереди — не одно и то же ─────────
+
+UNPLANNED = "infragram_unplanned_write_cancel_failures_total"
+
+
+def test_an_unplanned_loss_raises_the_alarm(ow):
+    """Передача очереди или снятие зависшего прогона — тревога владельцу.
+
+    Процесс при этом ЖИВ и очередь достаётся другому: потеря ровно та же, а
+    повод к ней редкий, так что шума тревога не даёт.
+    """
+    async def _go():
+        with pytest.raises(asyncio.CancelledError):
+            await _call(ow, "_journal_write", _CancellingPool())
+
+    asyncio.run(_go())
+
+    assert _counter(UNPLANNED) >= 1, (
+        "внеплановая потеря защитной записи не поднимает тревогу — владелец "
+        "узнает о повторных действиях только из жалоб"
+    )
+
+
+def test_a_planned_shutdown_loses_the_same_write_without_an_alarm():
+    """На деплое тревоги быть не может: он на каждый пуш, и её перестанут читать."""
+    from services import metrics as _m
+    _m.set_shutting_down(True)
+
+    async def _go():
+        from services import op_worker as _ow
+        with pytest.raises(asyncio.CancelledError):
+            await _call(_ow, "_journal_write", _CancellingPool())
+
+    asyncio.run(_go())
+
+    assert _counter(CANCELLED) >= 1, "потеря на деплое перестала считаться вовсе"
+    assert _counter(UNPLANNED) == 0, (
+        "плановый выпуск поднял тревогу — она будет приходить на каждый пуш"
+    )
+
+
+def test_the_alarm_counter_reaches_the_owner(ow):
+    """Внеплановая потеря обязана быть в списке защитных тревог."""
+    assert UNPLANNED in ow._PROTECTIVE_FAILURE_COUNTERS, (
+        "счётчик внеплановой потери не в _PROTECTIVE_FAILURE_COUNTERS — "
+        "владелец о нём не узнает"
+    )
+
+
+def test_shutdown_tells_the_metrics_it_is_planned():
+    """Без этой проводки весь раздел не работает: флаг никто не поставит."""
+    import ast
+    import inspect
+    from services import op_worker as _ow
+
+    src = inspect.getsource(_ow.shutdown)
+    tree = ast.parse(__import__("textwrap").dedent(src))
+    calls = [ast.unparse(n.func) for n in ast.walk(tree)
+             if isinstance(n, ast.Call)]
+    assert any("set_shutting_down" in c for c in calls), (
+        "shutdown не отмечает плановую остановку в метриках — тогда деплой "
+        "неотличим от передачи очереди, и тревога пойдёт на каждый пуш"
     )

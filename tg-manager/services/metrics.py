@@ -104,6 +104,9 @@ _HELP = {
         "Задачи операций, не свернувшиеся за отведённое время при передаче "
         "очереди другому процессу (их сессии могут достаться двум процессам "
         "сразу)",
+    "infragram_unplanned_write_cancel_failures_total":
+        "Защитные записи, потерянные НЕ на плановой остановке: передача "
+        "очереди другому процессу или снятие зависшего прогона",
     "infragram_protective_write_cancelled_total":
         "Защитные записи, не состоявшиеся из-за остановки процесса (деплой, "
         "передача очереди): потеря настоящая, но это не отказ базы",
@@ -267,6 +270,20 @@ def reset() -> None:
         _gauges.clear()
 
 
+
+# Плановая ли остановка процесса. Ставится один раз из `op_worker.shutdown`
+# (SIGTERM на деплое) и больше не снимается: процесс после этого умирает.
+# Нужен, чтобы отличить потерю защитной записи на штатном выпуске от потери
+# при передаче очереди или снятии зависшего прогона — первое случается на
+# каждый пуш и тревогой быть не может, второе редко и обязано ею быть.
+_shutting_down = False
+
+
+def set_shutting_down(value: bool = True) -> None:
+    """Отметить плановую остановку процесса. Зовётся из `op_worker.shutdown`."""
+    global _shutting_down
+    _shutting_down = bool(value)
+
 def note_write_cancelled(
     module: str, where: str, ctx: str = "", lost: str = "",
 ) -> None:
@@ -303,8 +320,20 @@ def note_write_cancelled(
         )
     except Exception:
         pass
+    planned = bool(_shutting_down)
     try:
         inc("infragram_protective_write_cancelled_total",
-            {"where": str(where) or "unknown"})
+            {"where": str(where) or "unknown",
+             "planned": "1" if planned else "0"})
     except Exception:
         pass
+    if not planned:
+        # НЕ плановая остановка — значит это не деплой, а передача очереди
+        # другому процессу или снятие зависшего прогона сторожем живучести.
+        # Такое случается редко, поэтому тревога владельцу здесь шума не даёт,
+        # а потеря ровно та же: повторный прогон сделает цель второй раз.
+        try:
+            inc("infragram_unplanned_write_cancel_failures_total",
+                {"where": str(where) or "unknown"})
+        except Exception:
+            pass

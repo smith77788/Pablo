@@ -3864,6 +3864,11 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "срок, а аренды их аккаунтов уже сняты: тот же аккаунт может "
         "оказаться в работе у двух процессов сразу (AUTH_KEY_DUPLICATED) — "
         "проверьте аккаунты операций из лога",
+    "infragram_unplanned_write_cancel_failures_total":
+        "защитная запись потеряна не на плановом выпуске, а при передаче "
+        "очереди другому процессу или снятии зависшего прогона: повторный "
+        "прогон может сделать те же цели второй раз (повторные приглашения, "
+        "второй пост, второе сообщение человеку)",
     "infragram_maintenance_step_failures_total":
         "сторож воркера падает: сброс зависших операций, уборка занятых "
         "аккаунтов или оповещения могли не сработать",
@@ -4368,6 +4373,15 @@ async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:
     """
     global _shutting_down
     _shutting_down = True
+    # Тот же факт — в метрики: только по нему `note_write_cancelled` отличает
+    # штатный выпуск (потеря есть, но тревоги быть не может — деплой на каждый
+    # пуш) от передачи очереди и снятия зависшего прогона.
+    try:
+        from services import metrics as _m_sd
+
+        _m_sd.set_shutting_down(True)
+    except Exception:
+        pass
 
     async with _active_lock:
         op_ids = sorted(_active_op_ids)
