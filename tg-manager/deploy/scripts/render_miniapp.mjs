@@ -57,12 +57,28 @@ const CHROME = process.env.CHROME_BIN || [
 ].find(p => { try { fs.accessSync(p); return true; } catch { return false; } });
 
 const browser = await chromium.launch(CHROME ? { executablePath: CHROME } : {});
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: sweepMode ? 1 : 2 });
+// Ширина окна — главный множитель обрезки, и 390 (iPhone 14) её почти не
+// вызывает. Узкие телефоны в ходу: 320 — iPhone SE первого поколения и
+// недорогие Android. MINIAPP_WIDTH позволяет прогнать обход по обеим.
+const VW = Number(process.env.MINIAPP_WIDTH) || 390;
+const ctx = await browser.newContext({ viewport: { width: VW, height: 844 }, deviceScaleFactor: sweepMode ? 1 : 2 });
 const page = await ctx.newPage();
 await page.addInitScript((fat) => {
-  window.Telegram = { WebApp: { ready(){}, expand(){}, initData:'', initDataUnsafe:{ user:{ id:1, first_name:'Test' } }, colorScheme:'dark', themeParams:{}, MainButton:{show(){},hide(){},setText(){},onClick(){}}, BackButton:{show(){},hide(){},onClick(){}}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}}, onEvent(){}, offEvent(){}, openTelegramLink(){}, showAlert(){}, showConfirm(){}, close(){}, setHeaderColor(){}, setBackgroundColor(){} } };
+  // Заглушку надо ДЕРЖАТЬ, а не просто поставить. Рядом с index.html лежит
+  // настоящий telegram-web-app.js, он грузится и делает `window.Telegram = {...}`,
+  // затем `window.Telegram.WebApp = ...` — то есть затирает заглушку, и
+  // initData становится пустой. Приложение уходит в ветку связывания
+  // устройства, поверх всего встаёт оверлей ввода кода, boot() до конца не
+  // доходит: любой снимок — это фотография окна входа, а не приложения.
+  // Поэтому и `Telegram`, и `Telegram.WebApp` отдаются через getter с
+  // глотающим setter: присваивание SDK молча проходит и ничего не меняет
+  // (бросать нельзя — упадёт сам SDK, а с ним и загрузка страницы).
+  const WA = { ready(){}, expand(){}, initData:'stub-init-data', initDataUnsafe:{ user:{ id:1, first_name:'Test' } }, colorScheme:'dark', themeParams:{}, MainButton:{show(){},hide(){},setText(){},onClick(){}}, BackButton:{show(){},hide(){},onClick(){}}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}}, onEvent(){}, offEvent(){}, openTelegramLink(){}, showAlert(){}, showConfirm(){}, close(){}, setHeaderColor(){}, setBackgroundColor(){} };
+  const TGSTUB = {};
+  Object.defineProperty(TGSTUB, 'WebApp', { get: () => WA, set: () => {}, configurable: true });
+  Object.defineProperty(window, 'Telegram', { get: () => TGSTUB, set: () => {}, configurable: true });
   const ok = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  const EMPTY = { ok:true, accounts:[], bots:[], channels:[], keywords:[], alerts:[], suggestions:[], bot_suggestions:[], rows:[], items:[], stats:{}, total:0, count:0, presets:[], recent:[], history:[], top_channels:[], recent_activity:[], by_stage:[] };
+  const EMPTY = { ok:true, token:'stub-token', accounts:[], bots:[], channels:[], keywords:[], alerts:[], suggestions:[], bot_suggestions:[], rows:[], items:[], stats:{}, total:0, count:0, presets:[], recent:[], history:[], top_channels:[], recent_activity:[], by_stage:[] };
   if (!fat) { window.fetch = async () => ok(EMPTY); return; }
   // «Толстые» данные: длинные строки — главная причина обрезки по ширине.
   // Пустой ответ проверяет только пустые состояния экранов.
@@ -91,7 +107,7 @@ await page.addInitScript((fat) => {
     'steps','funnels','subscribers','logs','events','reminders','duplicates',
     'conflicts','networks','instances','ecosystems','gifts','stars','strikes'];
   window.fetch = async () => {
-    const o = { ok:true, total: 1234567, count: 1234567, stats: {}, page: { limit: 25, offset: 0, has_more: true } };
+    const o = { ok:true, token:'stub-token', total: 1234567, count: 1234567, stats: {}, page: { limit: 25, offset: 0, has_more: true } };
     for (const k of ARRAY_KEYS) o[k] = ROWS;
     return ok(o);
   };
@@ -163,6 +179,12 @@ if (sweepMode) {
       return {};
     }, fn);
     await page.waitForTimeout(220);
+    // MINIAPP_SHOT_DIR — снимок каждого экрана обхода. Отчёт говорит, ЧТО
+    // обрезано, а посмотреть, как это выглядит, иначе нечем: экраны обхода не
+    // вкладки, и одиночный режим их не открывает.
+    if (process.env.MINIAPP_SHOT_DIR) {
+      await page.screenshot({ path: path.join(process.env.MINIAPP_SHOT_DIR, `miniapp_${fn}.png`) });
+    }
     const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
     const problems = [];
     if (r.missing) problems.push('НЕТ ФУНКЦИИ');
@@ -173,7 +195,7 @@ if (sweepMode) {
     await page.evaluate(() => { try { while (typeof STACK !== 'undefined' && STACK.length) back(); } catch(_) {} });
     await page.waitForTimeout(60);
   }
-  console.log(`экранов проверено: ${fns.length}`);
+  console.log(`экранов проверено: ${fns.length} (ширина окна ${VW})`);
   console.log(`с находками: ${report.length}`);
   report.forEach(r => console.log('  ' + r));
   if (report.length) process.exitCode = 1;

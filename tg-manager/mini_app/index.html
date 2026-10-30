@@ -354,7 +354,23 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
    Имени отдаём не меньше 45% ширины строки, а действиям разрешаем
    переноситься на вторую строку, когда они перестают помещаться. */
 .li-body{flex:1 1 auto;min-width:45%}
-.li-body + div{min-width:0;flex-wrap:wrap;justify-content:flex-end;row-gap:4px}
+/* `flex-shrink` здесь обязателен, иначе перенос выше — обещание, которое не
+   может исполниться. `.li-right{flex-shrink:0}` ниже запрещает колонке
+   действий ужиматься, а не ужимающаяся колонка никогда не становится узкой —
+   значит и строки в ней не переносятся. При 320px выходило так: аватар 40 +
+   имя 116 (те самые 45%) + колонка 124 = 300 при 258 доступных, и «🗑»
+   уезжала за край экрана — нажать её на узком телефоне было нечем. Ужимается
+   КОЛОНКА, а сами кнопки сохраняют размер (у них свой flex-shrink:0), то
+   есть перенос происходит ровно так, как и описано выше. */
+.li-body + div{min-width:0;flex-shrink:1;flex-wrap:wrap;justify-content:flex-end;row-gap:4px}
+/* Колоночный вариант колонки действий. Ужимать его НЕЛЬЗЯ: в колоночном flex
+   поперечная ось — горизонтальная, и ужатие сводит контейнер почти к нулю, а
+   кнопки внутри сохраняют ширину и вылезают за него. Проверено обходом: с
+   общим `flex-shrink:1` кнопки «A»/«B» на экране расхождений уезжали за край
+   при 320px — то есть правка одного экрана ломала другой. Здесь кнопки и так
+   стоят друг под другом, ужимать нечего. */
+.li-right.col{flex-direction:column;flex-shrink:0}
+.li-right.col.end{align-items:flex-end;gap:2px}
 /* Значок статуса не сжимается: иначе место отбиралось у него, и вместо
    «Ожидает» и «Готово» в строке стояло многоточие. Ужиматься и переноситься
    должны ссылки-действия рядом, а не сам статус. */
@@ -2766,7 +2782,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-presencemap">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🗺️ Карта присутствия</div></div>
   <div class="sub-sb">
-    <div id="pmTotals" style="display:flex;gap:8px;padding:6px 16px 4px;flex-wrap:wrap"></div>
+    <div id="pmTotals" class="kpi-row" style="padding:6px 16px 4px"></div>
     <div class="sec">Флот по странам</div>
     <div class="lst" id="pmGeo"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Пробелы присутствия</div>
@@ -4534,7 +4550,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openDlModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
-    <div id="dlStats" style="display:flex;gap:10px;padding:10px 16px 4px"></div>
+    <div id="dlStats" class="kpi-row" style="padding:10px 16px 4px"></div>
     <div class="sec">Ссылки</div>
     <div class="lst" id="dlList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -4939,7 +4955,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">🏭 Фабрика ботов</div>
   </div>
   <div class="sub-sb">
-    <div id="botFactoryStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
+    <div id="botFactoryStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="sec">Создание ботов</div>
     <div style="display:flex;gap:6px;padding:6px 0 2px">
       <button class="btn btn-s" id="bfModeNewBtn" onclick="bfSetMode('new')" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🏭 Создать новых</button>
@@ -5023,7 +5039,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">🎭 Персоны</div>
   </div>
   <div class="sub-sb">
-    <div id="personaStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
+    <div id="personaStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:12px">Создать персону</div>
     <div style="padding:8px 16px">
@@ -5070,7 +5086,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">📱 Авторег</div>
   </div>
   <div class="sub-sb">
-    <div id="autoregStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
+    <div id="autoregStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="sec">Новая регистрация</div>
     <div style="padding:8px 16px">
       <div class="field">
@@ -5164,7 +5180,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       2. Добавьте бота в группу как администратора<br>
       3. Скопируйте идентификатор чата (Chat ID) и нажмите «+ Добавить»
     </div>
-    <div id="nodesStats" style="display:flex;gap:10px;padding:4px 16px 10px"></div>
+    <div id="nodesStats" class="kpi-row" style="padding:4px 16px 10px"></div>
     <div class="lst" id="nodesList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -5238,7 +5254,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="scanGifts()">📡 Скан</button></div>
   </div>
   <div class="sub-sb">
-    <div id="giftsStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
+    <div id="giftsStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="lst" id="giftsList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div id="giftsBar" style="padding:10px 16px 16px"></div>
   </div>
@@ -5788,7 +5804,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCmpModal()">+ Новая</button></div>
   </div>
   <div class="sub-sb">
-    <div id="dmStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
+    <div id="dmStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="lst" id="dmList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -5825,7 +5841,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWarmupModal()">+ Запустить</button></div>
   </div>
   <div class="sub-sb">
-    <div id="warmupStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
+    <div id="warmupStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div id="warmupWarn" style="display:none;margin-bottom:8px"></div>
     <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="bulkWarmup()">🔥 Прогреть все подходящие аккаунты</button>
     <div class="sec">Активные планы</div>
@@ -5844,7 +5860,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       держит аккаунт живым только пассивными действиями и перепроверяет статус.
       Ничего никому не рассылается.
     </div>
-    <div id="rehabStats" style="display:flex;gap:10px;padding:0 16px 10px"></div>
+    <div id="rehabStats" class="kpi-row" style="padding:0 16px 10px"></div>
     <div class="lst" id="rehabList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -5985,7 +6001,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       Боты, найденные на ваших аккаунтах через @BotFather. Подключение забирает
       токен у BotFather от лица аккаунта-владельца — после этого ботом можно управлять.
     </div>
-    <div id="foundBotsStats" style="display:flex;gap:10px;padding:0 16px 10px"></div>
+    <div id="foundBotsStats" class="kpi-row" style="padding:0 16px 10px"></div>
     <div class="lst" id="foundBotsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -6090,7 +6106,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Канал</button></div>
   </div>
   <div class="sub-sb">
-    <div id="adIntelStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
+    <div id="adIntelStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="sec">Топ каналов по качеству</div>
     <div class="lst" id="adIntelChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Топ рекламодателей</div>
@@ -6105,7 +6121,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">🕸 Сеть ботов</div>
   </div>
   <div class="sub-sb">
-    <div id="networkStats" style="display:flex;gap:10px;padding:8px 16px 12px"></div>
+    <div id="networkStats" class="kpi-row" style="padding:8px 16px 12px"></div>
     <div id="networkClusters"></div>
   </div>
 </div>
@@ -6312,7 +6328,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openDealModal()">+ Сделка</button></div>
   </div>
   <div class="sub-sb">
-    <div id="dealSummary" style="display:flex;gap:8px;overflow-x:auto;padding:6px 16px 10px;-webkit-overflow-scrolling:touch"></div>
+    <div id="dealSummary" class="kpi-row" style="padding:6px 16px 10px"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 0 8px">
       <button class="btn btn-p" onclick="filterDeals(null,this)" id="dealFilterAll">Все</button>
       <button class="btn btn-s" onclick="filterDeals('lead',this)" id="dealFilterLead">Лид</button>
@@ -7800,6 +7816,20 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
     }).catch(()=>{});
     // Приложение встало на ноги: ранний обработчик в <head> больше не нужен.
     window.__appBooted = true;
+    // Загрузчики экранов ниже живут не здесь: loadBots() — в
+    // screens/bots_list.js, а те <script src> подключены ПОСЛЕ этого скрипта,
+    // то есть до конца разбора страницы их просто нет. Сейчас это сходится
+    // только по совпадению: ответ /auth идёт из сети, и разбор за это время
+    // успевает дойти до конца <body>. Стоит ответу прийти БЕЗ выхода в цикл
+    // событий — кэш service worker'а, заглушка в проверке вёрстки — и
+    // loadBots() бросает ReferenceError прямо посередине boot(): всё, что
+    // идёт после (админский раздел, разбор deep-link из нуджа, спасательный
+    // recoverNudgeOpen), молча не выполняется, а человек видит одно
+    // «сбой в приложении» и главную без половины данных.
+    // Поэтому зависимость названа явно, а не оставлена на удачу разбора.
+    if (document.readyState === 'loading') {
+      await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
+    }
     loadHome();
     openSSE();
     loadSub();
@@ -18612,7 +18642,7 @@ async function openUchConflicts() {
     let html = '';
     conflicts.forEach(c=>{
       html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(c.first_name||'')} ${esc(c.last_name||'')} · ${esc(c.field_name)}</div><div class="li-sub">A: ${esc(c.value_a||'')} vs B: ${esc(c.value_b||'')}</div></div>
-        <div class="li-right" style="flex-direction:column;gap:4px">
+        <div class="li-right col" style="gap:4px">
           <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="resolveConflict(${c.id},'accepted','${esc((c.value_a||'').replace(/'/g,"\\'"))}')">A</button>
           <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="resolveConflict(${c.id},'accepted','${esc((c.value_b||'').replace(/'/g,"\\'"))}')">B</button>
         </div></div>`;
@@ -28883,7 +28913,7 @@ function renderRankingList(kw) {
         <div class="li-name">${esc(k.keyword)}</div>
         <div class="li-sub">${regionFlags[region] || ''} ${esc(k.bot_username || '—')} · ${k.last_checked ? ago(k.last_checked) : 'не проверено'}</div>
       </div>
-      <div class="li-right" style="flex-direction:column;align-items:flex-end;gap:2px">
+      <div class="li-right col end">
         <span class="badge ${pc}">${posStr}</span>
         <span style="font-size:11px;color:${trendColor}">${trend}</span>
       </div>
@@ -29644,7 +29674,7 @@ function renderAudSegments(segments) {
         ${s.description ? `<div class="li-sub" style="opacity:.7">${esc(s.description)}</div>` : ''}
         <div class="prog"><div class="prog-fill" style="width:${barW}%;background:${s.color || 'var(--accent)'}"></div></div>
       </div>
-      <div class="li-right" style="flex-direction:column;align-items:flex-end;gap:2px">
+      <div class="li-right col end">
         <span style="font-size:12px;color:${growthColor}">${growth}</span>
         ${s.key?'<span class="chev">›</span>':''}
       </div>
