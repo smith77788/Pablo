@@ -360,26 +360,27 @@ async function coveredSelfCheck() {
     const covered = new Function('return (' + src + ')()');
     const scr = document.querySelector('.screen.show');
     if (!scr) return { ran: false };
-    // Сравниваем с собственным фоном, а не с нулём: на экране могут быть и
-    // настоящие находки, и тогда «после снятия полосы ноль» — требование не к
-    // мерке, а к приложению, и самопроверка падала бы на чужой беде.
+    // Три замера, а не два. Сравнивать «с полосой» с нулём нельзя: на экране
+    // бывают и настоящие находки. Сравнивать с фоном БЕЗ подопытной строки
+    // тоже мало — на 320 подопытное место само лежит под настоящей полосой, и
+    // строка там закрыта независимо от нашей. Поэтому: фон, фон со строкой,
+    // и только потом строка под полосой.
     const base = covered().n;
     const line = document.createElement('div');
-    // Выше настоящих полос: на `bottom:30px` подопытную строку накрывает сам
-    // `#tabbar`, и самопроверка засчитывала это себе — «после снятия полосы»
-    // находка оставалась, хотя снимать надо было не ту полосу.
     line.style.cssText = 'position:fixed;left:20px;bottom:200px;width:180px;height:24px';
     line.textContent = 'заведомо закрытая строка';
     scr.appendChild(line);
+    const withLine = covered().n;
     const bar = document.createElement('div');
     bar.style.cssText = 'position:fixed;left:0;right:0;bottom:180px;height:60px;'
       + 'background:#123;z-index:999';
     document.body.appendChild(bar);
-    const caught = covered().n > base;
+    const caught = covered().n > withLine;
     bar.remove();
-    const afterBar = covered().n - base;
     line.remove();
-    return { ran: true, caught, afterBar };
+    // Всё снято — находок должно стать ровно столько же, сколько было.
+    const restored = covered().n === base;
+    return { ran: true, caught, restored, base };
   }, COVERED.toString());
 }
 
@@ -516,8 +517,9 @@ if (sweepMode) {
   }
   const cs = await coveredSelfCheck();
   console.log(`самопроверка мерки закрытого текста: заведомо закрытая строка`
-    + ` найдена=${cs.caught} | без полосы находок=${cs.afterBar}`);
-  if (!cs.caught || cs.afterBar !== 0) {
+    + ` найдена=${cs.caught} | после снятия находок столько же=${cs.restored}`
+    + ` | своих находок на экране: ${cs.base}`);
+  if (!cs.caught || !cs.restored) {
     console.log('МЕРКА ЗАКРЫТОГО ТЕКСТА СЛЕПА — «закрытого нет» ничего не означает');
     process.exitCode = 2;
   }
