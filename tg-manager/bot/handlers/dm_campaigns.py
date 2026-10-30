@@ -1249,18 +1249,32 @@ async def cb_dm_pause(
     pool: asyncpg.Pool,
 ) -> None:
     campaign_id = callback_data.campaign_id
-    # Cancel running operation_queue entry for this campaign (if any).
-    # op_worker checks for cancellation every iteration and will stop the dm_engine loop.
+    # Отмену операции ставит ШИНА (`operation_bus.cancel`), а не свой UPDATE.
+    # op_worker увидит 'cancelled' на очередном шаге и остановит цикл
+    # dm_engine — это не изменилось. Изменилось то, что дверь дописывает
+    # `result` и объявляет исход: своя отмена оставляла операцию терминальной и
+    # ПУСТОЙ, и владелец видел «Отменено» без единой цифры, хотя часть писем
+    # уже ушла. Отмены не было ни на графике исходов, ни в аудит-трейле.
+    #
+    # Операцию приходится сначала НАЙТИ: дверь принимает op_id, а эта
+    # поверхность знает только кампанию. Гонки это не добавляет — дверь
+    # перепроверяет статус внутри своего UPDATE, поэтому операция, успевшая
+    # стартовать или завершиться между выборкой и отменой, будет обработана по
+    # факту, а не по устаревшему ответу.
     try:
-        await pool.execute(
-            """UPDATE operation_queue
-               SET status='cancelled', finished_at=NOW()
-               WHERE owner_id=$1 AND op_type='dm_campaign'
-                 AND params->>'campaign_id' = $2::text
-                 AND status IN ('pending','running')""",
+        from services import operation_bus as _obus
+
+        _ops = await pool.fetch(
+            """SELECT id FROM operation_queue
+                WHERE owner_id=$1 AND op_type='dm_campaign'
+                  AND params->>'campaign_id' = $2::text
+                  AND status = ANY($3::text[])""",
             callback.from_user.id,
             str(campaign_id),
+            list(_obus.CANCELLABLE),
         )
+        for _op in _ops:
+            await _obus.cancel(pool, int(_op["id"]), callback.from_user.id)
     except Exception as e:
         log.warning("dm_pause: operation_queue cancel failed campaign_id=%d: %s", campaign_id, e)
     # Also update dm_campaigns status so dm_engine loop exits on next poll

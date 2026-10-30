@@ -249,3 +249,127 @@ def test_the_one_door_detector_bites():
             if "operation_queue" in flat and "finished_at" in flat:
                 found.append(node.lineno)
     assert found, "детектор не видит запись финала мимо двери — он сломан"
+
+
+# ── Та же проверка видит и запись, сделанную ЧЕРЕЗ fetch ────────────────────
+#
+# Храповик выше смотрит только на `_safe_execute`/`_retrying_execute` и только
+# в `services/op_worker.py`. Запись с `RETURNING` выдаётся не через execute, а
+# через fetch/fetchrow — и такой терминальный UPDATE для него невидим ПО
+# ПОСТРОЕНИЮ. Сейчас таких три, и все три — осознанный приём «погасить одним
+# атомарным UPDATE, а итог и доклад дописать вторым шагом» (так и сказано в
+# докстринге `_finish_poisoned_op`). Но ничто этого не держало: новый путь мог
+# бы закрыть операцию через `fetchrow` и не объявить исход вовсе, оставшись
+# зелёным.
+
+_TREE_SKIP_DIRS = {"tests", "__pycache__", ".git", "node_modules", "venv",
+                   ".venv", "migrations"}
+
+# Атомарное гашение с RETURNING, у которого итог дописывает ВТОРОЙ шаг.
+# Исключение проверяемое: тест ниже требует, чтобы путь передавал строку
+# дозакрывающей функции, а не просто значился в этом словаре.
+CLOSES_THEN_HANDS_OFF = {
+    "_reset_stale_running": "_finish_poisoned_op",
+    "_watchdog_stale": "_finish_poisoned_op",
+    "_dead_letter_op": "_announce_op_outcome",
+}
+
+_ANNOUNCING_CLOSERS = ("_op_closed_by_us", "_finish_poisoned_op",
+                       "_finish_cancelled_op", "_announce_op_outcome")
+
+
+def _terminal_writes_anywhere():
+    """Терминальные записи (`finished_at` в SET) любым доступом к БД."""
+    out = []
+    for base, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in _TREE_SKIP_DIRS]
+        for f in sorted(files):
+            if not f.endswith(".py"):
+                continue
+            path = os.path.join(base, f)
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+            if "operation_queue" not in src:
+                continue
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue
+            rel = os.path.relpath(path, ROOT)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                door = ast.unparse(node.func).split(".")[-1]
+                sql = " ".join(ast.unparse(a) for a in node.args[:3])
+                if not re.search(r"UPDATE\s+operation_queue", sql):
+                    continue
+                set_part = re.split(r"\bWHERE\b", sql, flags=re.I)[0]
+                if "finished_at" not in set_part:
+                    continue
+                fn, span = "?", None
+                for g in ast.walk(tree):
+                    if (isinstance(g, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and g.lineno <= node.lineno <= (g.end_lineno or g.lineno)):
+                        s = (g.end_lineno or g.lineno) - g.lineno
+                        if span is None or s < span:
+                            fn, span = g.name, s
+                out.append((rel, fn, door, node.lineno))
+    return out
+
+
+def test_the_terminal_census_sees_the_fetch_shaped_writes():
+    """Самопроверка: запись с RETURNING обязана попадать в выборку."""
+    found = {fn for _, fn, _, _ in _terminal_writes_anywhere()}
+    for name in CLOSES_THEN_HANDS_OFF:
+        assert name in found, (
+            f"`{name}` закрывает операцию через RETURNING, но перепись его не "
+            "видит — отбор снова смотрит только на execute")
+    assert "_run_op_task" in found, "перепись не видит обычную запись финала"
+
+
+def test_every_terminal_write_announces_or_hands_off():
+    bad = [(rel, fn, door, ln)
+           for rel, fn, door, ln in _terminal_writes_anywhere()
+           if door not in _ANNOUNCING_CLOSERS and fn not in CLOSES_THEN_HANDS_OFF]
+    assert not bad, (
+        "операция закрывается терминально мимо объявляющей двери: "
+        f"{bad}. Такой путь не отличит «закрыл кто-то другой» от «запись не "
+        "прошла», и исход не попадёт ни на график, ни в аудит-трейл. Если "
+        "итог дописывает второй шаг — впишите путь в CLOSES_THEN_HANDS_OFF, "
+        "указав, КОМУ он передаёт строку")
+
+
+def test_the_hand_off_excuse_is_checkable():
+    """Исключение обязано быть видно в коде: путь реально передаёт строку.
+
+    Иначе словарь превращается в записку «мы подумали, что тут всё хорошо», а
+    именно такие записки и переживают правку, которая их опровергает.
+    """
+    for fn_name, closer in CLOSES_THEN_HANDS_OFF.items():
+        found_in = None
+        for base, dirs, files in os.walk(ROOT):
+            dirs[:] = [d for d in dirs if d not in _TREE_SKIP_DIRS]
+            for f in files:
+                if not f.endswith(".py"):
+                    continue
+                path = os.path.join(base, f)
+                with open(path, encoding="utf-8") as fh:
+                    src = fh.read()
+                if f"def {fn_name}" not in src:
+                    continue
+                node = next((n for n in ast.walk(ast.parse(src))
+                             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                             and n.name == fn_name), None)
+                if node is None:
+                    continue
+                body = "\n".join(
+                    src.splitlines()[node.lineno - 1:node.end_lineno])
+                found_in = (os.path.relpath(path, ROOT), body)
+                break
+            if found_in:
+                break
+        assert found_in, f"`{fn_name}` из CLOSES_THEN_HANDS_OFF больше нет"
+        rel, body = found_in
+        assert closer in body, (
+            f"{rel}: `{fn_name}` гасит операцию, но строку `{closer}` больше "
+            "не передаёт — исход останется необъявленным, а храповик молчит")

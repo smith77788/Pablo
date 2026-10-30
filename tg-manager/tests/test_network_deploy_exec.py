@@ -42,8 +42,11 @@ def test_executor_creates_persists_and_wires():
                    "_exec_deploy_network")
     # создаёт объекты через фабрику аккаунта
     assert "account_manager.create_channel" in fn
-    # пишет id обратно в узел
-    assert "update_node_status" in fn and "ref_id=ch_id" in fn
+    # пишет id обратно в узел — через дверь `_record_network_node`: сам UPDATE
+    # переехал в неё, потому что каталог и отметка узла обязаны лечь одной
+    # транзакцией, а результат записи — проверяться (см.
+    # tests/test_a_network_node_is_not_built_twice.py).
+    assert "_record_network_node" in fn and "ref_id=int(ch_id)" in fn
     # вяжет admin-рёбра
     assert "promote_to_admin" in fn
     # темп под губернатором

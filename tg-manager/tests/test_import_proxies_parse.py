@@ -29,7 +29,7 @@ def test_valid_dedup_and_skips():
         "http://127.0.0.1:8080\n"      # loopback — skip
         "http://2.2.2.2:3128"
     )
-    purls, skipped = _collect_valid_proxies(raw)
+    purls, skipped, _over = _collect_valid_proxies(raw)
     assert purls == ["socks5://1.1.1.1:1080", "http://2.2.2.2:3128"]
     assert skipped == 2  # ftp + loopback; пустая и дубль НЕ считаются
 
@@ -37,25 +37,39 @@ def test_valid_dedup_and_skips():
 def test_separators_and_overlong():
     long = "http://" + "a" * 600  # > 500 символов → skip
     raw = f"socks4://3.3.3.3:1080;{long},socks5://4.4.4.4:1080"
-    purls, skipped = _collect_valid_proxies(raw)
+    purls, skipped, _over = _collect_valid_proxies(raw)
     assert purls == ["socks4://3.3.3.3:1080", "socks5://4.4.4.4:1080"]
     assert skipped == 1
 
 
-def test_cap_500():
+def test_cap_500_says_how_much_did_not_fit():
+    """Сто строк за потолком — не «пропущено 0», а своё число.
+
+    Эта проверка сама же и утверждала `skipped == 0` на вставке из шестисот:
+    потолок молчал, и сто прокси пропадали, а экран ещё и очищал поле.
+    """
     raw = "\n".join(f"socks5://1.2.3.{i}:1080" for i in range(600))
-    purls, skipped = _collect_valid_proxies(raw)
+    purls, skipped, overflow = _collect_valid_proxies(raw)
     assert len(purls) == 500
-    assert skipped == 0
+    assert skipped == 0        # невалидных среди них нет
+    assert overflow == 100, (
+        "разборщик не говорит, сколько строк осталось за потолком: вставка "
+        "больше пачки снова потеряется молча")
+
+
+def test_what_fits_reports_no_overflow():
+    raw = "\n".join(f"socks5://5.6.7.{i}:1080" for i in range(7))
+    purls, skipped, overflow = _collect_valid_proxies(raw)
+    assert len(purls) == 7 and skipped == 0 and overflow == 0
 
 
 def test_loopback_substring_filter():
     # адрес, оканчивающийся на 0.0.0.0, отсекается тем же фильтром (сохранённое
     # поведение) — сеть-адрес всё равно не рабочий прокси-хост
-    purls, skipped = _collect_valid_proxies("socks5://10.0.0.0:1080")
+    purls, skipped, _over = _collect_valid_proxies("socks5://10.0.0.0:1080")
     assert purls == [] and skipped == 1
 
 
 def test_empty_inputs():
-    assert _collect_valid_proxies("") == ([], 0)
-    assert _collect_valid_proxies(None) == ([], 0)  # type: ignore[arg-type]
+    assert _collect_valid_proxies("") == ([], 0, 0)
+    assert _collect_valid_proxies(None) == ([], 0, 0)  # type: ignore[arg-type]

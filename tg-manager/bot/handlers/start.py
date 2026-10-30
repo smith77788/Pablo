@@ -477,6 +477,12 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
                    COUNT(*) FILTER (WHERE status='pending')  AS pending,
                    COUNT(*) FILTER (WHERE status='done'
                        AND finished_at > NOW() - INTERVAL '24h') AS done_24h,
+                   -- 'partial' — «работа была, но не доведена»: отдельный
+                   -- терминальный исход (см. services/op_status). Без своего
+                   -- числа такая операция не попадала НИ в «завершено», НИ в
+                   -- «ошибок».
+                   COUNT(*) FILTER (WHERE status='partial'
+                       AND finished_at > NOW() - INTERVAL '24h') AS partial_24h,
                    COUNT(*) FILTER (WHERE status='failed'
                        AND created_at > NOW() - INTERVAL '24h')  AS failed_24h,
                    COUNT(*) AS total
@@ -511,6 +517,7 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
     running = int(op_stats["running"] or 0) if op_stats else 0
     pending = int(op_stats["pending"] or 0) if op_stats else 0
     done_24h = int(op_stats["done_24h"] or 0) if op_stats else 0
+    partial_24h = int(op_stats["partial_24h"] or 0) if op_stats else 0
     failed_24h = int(op_stats["failed_24h"] or 0) if op_stats else 0
     total_ops = int(op_stats["total"] or 0) if op_stats else 0
 
@@ -535,7 +542,10 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
         f"⚙️ <b>Операции:</b>\n"
         f"   🔄 Активных: <b>{running}</b>  ⏳ Ожидают: <b>{pending}</b>\n"
         f"   ✅ Завершено (24ч): <b>{done_24h}</b>  ❌ Ошибок (24ч): <b>{failed_24h}</b>\n"
-        f"   Всего в очереди: <b>{total_ops}</b>\n\n"
+        # Строка только при ненулевом числе — см. тот же приём в /ops.
+        + (f"   ⚠️ Частично (24ч): <b>{partial_24h}</b> — работа была, но не доведена\n"
+           if partial_24h else "")
+        + f"   Всего в очереди: <b>{total_ops}</b>\n\n"
         f"🛡 <b>Здоровье:</b>\n"
         f"   ⚡ Flood-событий (24ч): <b>{floods_24h}</b>\n"
         f"   📋 Ошибок операций (24ч): <b>{errors_24h}</b>\n"

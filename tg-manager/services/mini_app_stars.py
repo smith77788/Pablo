@@ -40,7 +40,7 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты звёзд, подарков и продвижения."""
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, _safe_fetch,
-        _safe_fetchrow, log,
+        _safe_fetchrow, int_field, log,
     )
     from services.security import validate_string
 
@@ -395,10 +395,15 @@ def setup_routes(app: web.Application, pool) -> None:
         bot_id = data.get("bot_id")
         name = str(data.get("name", "")).strip()
         content_type = data.get("content_type", "message")
-        price_a = int(data.get("price_a", 50))
-        price_b = int(data.get("price_b", 100))
+        # Пустая цена в форме — это ValueError из int() и 500 в ответ вместо
+        # русской причины: цену спрашивают у владельца, а не у программиста.
+        try:
+            price_a = int_field(data.get("price_a"), "Цена варианта A", default=50)
+            price_b = int_field(data.get("price_b"), "Цена варианта B", default=100)
+        except ValueError as exc:
+            return _err(str(exc), 400)
         if not bot_id or not name:
-            return _err("bot_id и name обязательны", 400)
+            return _err("Выберите бота и укажите название", 400)
         if content_type not in ("message", "media", "subscription", "gift"):
             content_type = "message"
         if price_a < 1 or price_b < 1:
@@ -530,7 +535,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not keyword:
-            return _err("keyword обязателен", 400)
+            return _err("Укажите ключевое слово", 400)
         if target_position < 1 or target_position > 50:
             return _err("Позиция цели — от 1 до 50", 400)
 
@@ -640,7 +645,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not bot_username:
-            return _err("bot_username обязателен", 400)
+            return _err("Укажите @username бота", 400)
         try:
             from datetime import datetime, timezone, timedelta
             now = datetime.now(tz=timezone.utc)

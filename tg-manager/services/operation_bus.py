@@ -1658,7 +1658,8 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
     row = await pool.fetchrow(
         "SELECT owner_id, op_type, params, label, status, total_items, done_items, "
         "       (SELECT COUNT(*) FROM operation_log ol "
-        "          WHERE ol.op_id = operation_queue.id AND ol.status='error') AS err_cnt "
+        "          WHERE ol.op_id = operation_queue.id AND ol.status='error'"
+        + REAL_TARGET_SQL + ") AS err_cnt "
         "  FROM operation_queue WHERE id=$1", op_id)
     if not row or int(row["owner_id"]) != int(owner_id):
         return {"ok": False, "op_id": None, "count": 0, "code": 404,

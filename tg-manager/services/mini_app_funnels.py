@@ -180,7 +180,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             delay_minutes = max(0, min(43200, int(body.get("delay_minutes") or 0)))  # ≤30 дней
         except (TypeError, ValueError):
-            return _err("delay_minutes должен быть числом", 400)
+            return _err("Задержка должна быть числом минут", 400)
         # Ограничение на число шагов (защита от разрастания).
         cnt = await _safe_count(pool, "SELECT COUNT(*) FROM funnel_steps WHERE funnel_id=$1", funnel_id)
         if cnt >= 50:

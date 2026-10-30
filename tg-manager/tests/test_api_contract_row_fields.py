@@ -16,10 +16,11 @@
 Оба раза поломка молчала: пустое значение неотличимо от отсутствия данных.
 
 Третья поломка нашлась, когда гейт научился ВЫВОДИТЬ форму из запроса. Ответы
-вида `[dict(r) for r in rows]` и `[{**dict(r), 'created_at': …} …]` считались
-динамическими и не сравнивались вовсе — а имена полей у них не динамические:
-их задаёт список выборки, который лежит в той же функции. Сравнимых ключей
-стало 21 вместо 11, и в новой трети обнаружилось, что «Топики узла» рисуют
+вида `[dict(r) for r in rows]`, `[{**dict(r), 'created_at': …} …]` и просто
+`{"items": rows}` (домашний `_safe_fetch` сам приводит строки к словарям)
+считались динамическими и не сравнивались вовсе — а имена полей у них не
+динамические: их задаёт список выборки, который лежит в той же функции.
+Сравнимых ключей стало 32 вместо 11, и в новой части обнаружилось, что «Топики узла» рисуют
 `#${t.tg_thread_id}`, а запрос этой колонки не выбирал: справа в каждой строке
 стояла одинокая решётка. Колонка в таблице есть (`bm_node_threads.tg_thread_id`),
 и именно по ней топик находят в группе, — поэтому починка на стороне запроса.
@@ -227,6 +228,73 @@ def _sql_item_keys(fn: ast.AST, node: ast.AST) -> set[str] | None:
     return (names | extra) if names else None
 
 
+def _rows_var_keys(fn: ast.AST, node: ast.AST) -> set[str] | None:
+    """Поля элемента, когда в ответ уходит ПЕРЕМЕННАЯ со строками запроса.
+
+    Домашний помощник слоя `_safe_fetch` сам делает `[dict(r) for r in rows]`,
+    поэтому ручка пишет просто `{"items": rows}` — и для гейта это выглядело
+    динамикой, хотя список выборки лежит рядом. Так из-под защиты выпадали
+    двадцать два ключа, среди них списки кампаний, воронок, ключевых слов и
+    журнала ЛС.
+
+    Две оговорки, без которых вывод соврёт:
+
+      * поля, ДОПИСАННЫЕ после запроса (`r["sent_at"] = …isoformat()` и
+        подобное), добавляются к множеству: иначе честный `sent_at` выглядел бы
+        чтением несуществующего поля;
+      * если переменной присваивают больше одного раза или дописывают ключ
+        невычислимым именем, форма не выводится вовсе.
+    """
+    if not isinstance(node, ast.Name):
+        return None
+    var = node.id
+    sql = None
+    assigns = 0
+    for n in ast.walk(fn):
+        if not (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name)
+                and n.targets[0].id == var):
+            continue
+        assigns += 1
+        call = n.value
+        if isinstance(call, ast.Await):
+            call = call.value
+        if not isinstance(call, ast.Call):
+            continue
+        name = (call.func.id if isinstance(call.func, ast.Name)
+                else getattr(call.func, "attr", ""))
+        if name == "_safe_fetch" and len(call.args) >= 2:
+            sql = _sql_text(call.args[1])
+        elif name == "fetch" and call.args:
+            sql = _sql_text(call.args[0])
+    if sql is None or assigns != 1:
+        return None
+    names = _select_list_names(sql)
+    if not names:
+        return None
+
+    # Дописанные поля: `for r in rows: r["x"] = …`
+    for n in ast.walk(fn):
+        if not (isinstance(n, ast.For) and isinstance(n.iter, ast.Name)
+                and n.iter.id == var and isinstance(n.target, ast.Name)):
+            continue
+        item = n.target.id
+        for sub in ast.walk(n):
+            if not (isinstance(sub, (ast.Assign, ast.AugAssign))):
+                continue
+            targets = sub.targets if isinstance(sub, ast.Assign) else [sub.target]
+            for t in targets:
+                if not (isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name)
+                        and t.value.id == item):
+                    continue
+                key = t.slice
+                if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                    names.add(key.value)
+                else:
+                    return None
+    return names
+
+
 def _answers() -> list[tuple[ast.AST, ast.Dict]]:
     """Пары «функция — словарь ответа», где функция — САМАЯ внутренняя.
 
@@ -267,7 +335,8 @@ def _response_item_shapes() -> dict[str, set[str]]:
         for k, v in zip(answer.keys, answer.values):
             if not (isinstance(k, ast.Constant) and isinstance(k.value, str)):
                 continue
-            keys = _literal_item_keys(v) or _sql_item_keys(fn, v)
+            keys = (_literal_item_keys(v) or _sql_item_keys(fn, v)
+                    or _rows_var_keys(fn, v))
             if keys:
                 known.setdefault(k.value, set()).update(keys)
             else:
@@ -349,14 +418,14 @@ def test_frontend_reads_only_item_fields_backend_puts_there():
 def test_the_gate_actually_compares_something():
     """Если разбор перестанет находить пары, гейт станет зелёным навсегда.
 
-    Порог низкий осознанно: однозначных (без омонимов) списочных ключей всего 21
+    Порог низкий осознанно: однозначных (без омонимов) списочных ключей всего 32
     — это цена точности, а не слабость разбора. Числа ниже — замер, а не
-    пожелание: 21 ключ и 12 сопоставленных пар. Упало — значит разбор ответа
+    пожелание: 32 ключа и 17 сопоставленных пар. Упало — значит разбор ответа
     или JS сломался, и гейт зеленеет ни на чём."""
     shapes = _response_item_shapes()
-    assert len(shapes) >= 18, f"разобрано лишь {len(shapes)} списочных ответов"
+    assert len(shapes) >= 28, f"разобрано лишь {len(shapes)} списочных ответов"
     compared = sum(1 for k in shapes if _fields_read_on(k))
-    assert compared >= 10, f"сопоставлено лишь {compared} пар — разбор JS сломался"
+    assert compared >= 15, f"сопоставлено лишь {compared} пар — разбор JS сломался"
 
 
 # ── Проверка самого измерителя ─────────────────────────────────────────────
@@ -490,3 +559,55 @@ async def h(request):
 """, "подстановка вместо списка выборки"),
     ):
         assert keys_of(silent) is None, f"мерка разобрала то, что не должна: {why}"
+
+
+def test_gate_derives_fields_when_rows_go_out_as_a_variable():
+    """`{"items": rows}` — не динамика: список выборки лежит рядом.
+
+    И дважды проверяется молчание. Поле, ДОПИСАННОЕ после запроса, обязано
+    попасть в множество (иначе честный `sent_at` выглядел бы чтением
+    несуществующего), а переменная, которой присваивают дважды, формы не
+    задаёт вовсе.
+    """
+    def keys_of(src: str):
+        fn = ast.parse(src).body[0]
+        for n in ast.walk(fn):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "_json_resp"):
+                return _rows_var_keys(fn, n.args[0].values[0])
+        raise AssertionError("ответ не найден в примере")
+
+    plain = """
+async def h(request):
+    rows = await _safe_fetch(pool, "SELECT l.tg_user_id, status FROM dm_campaign_log")
+    return _json_resp({"items": rows})
+"""
+    assert keys_of(plain) == {"tg_user_id", "status"}
+
+    written = """
+async def h(request):
+    rows = await _safe_fetch(pool, "SELECT tg_user_id, sent_at FROM dm_campaign_log")
+    for r in rows:
+        r["sent_at"] = r["sent_at"].isoformat()
+        r["name"] = "кто-то"
+    return _json_resp({"items": rows})
+"""
+    assert keys_of(written) == {"tg_user_id", "sent_at", "name"}
+
+    twice = """
+async def h(request):
+    rows = await _safe_fetch(pool, "SELECT tg_user_id FROM dm_campaign_log")
+    if flag:
+        rows = await _safe_fetch(pool, "SELECT status FROM dm_campaign_log")
+    return _json_resp({"items": rows})
+"""
+    assert keys_of(twice) is None, "две разные выборки — форма не выводится"
+
+    computed = """
+async def h(request):
+    rows = await _safe_fetch(pool, "SELECT tg_user_id FROM dm_campaign_log")
+    for r in rows:
+        r[name] = 1
+    return _json_resp({"items": rows})
+"""
+    assert keys_of(computed) is None, "ключ с невычислимым именем — форма не выводится"

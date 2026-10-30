@@ -1369,18 +1369,43 @@ async def update_order(pool, order_id: int, owner_id: int, **fields) -> dict | N
     return dict(r) if r else None
 
 
-async def list_orders(pool, owner_id: int, *, bot_id: int | None = None,
-                      status: str | None = None, limit: int = 100) -> list[dict]:
+def _order_conds(owner_id: int, bot_id: int | None,
+                 status: str | None) -> tuple[list[str], list]:
     conds, args = ["owner_id=$1"], [owner_id]
     if bot_id is not None:
         args.append(bot_id); conds.append(f"bot_id=${len(args)}")
     if status:
         args.append(status); conds.append(f"status=${len(args)}")
+    return conds, args
+
+
+async def list_orders(pool, owner_id: int, *, bot_id: int | None = None,
+                      status: str | None = None, limit: int = 100,
+                      offset: int = 0) -> list[dict]:
+    """Страница заказов. `created_at` не уникален, поэтому в порядке есть `id`:
+    без разрыва ничьих соседние страницы теряли бы и повторяли заказы."""
+    conds, args = _order_conds(owner_id, bot_id, status)
     args.append(max(1, min(500, limit)))
+    _lim = len(args)
+    args.append(max(0, int(offset or 0)))
     rows = await pool.fetch(
         f"SELECT * FROM bot_sales_orders WHERE {' AND '.join(conds)} "
-        f"ORDER BY created_at DESC LIMIT ${len(args)}", *args)
+        f"ORDER BY created_at DESC, id DESC LIMIT ${_lim} OFFSET ${len(args)}", *args)
     return [dict(r) for r in rows]
+
+
+async def count_orders(pool, owner_id: int, *, bot_id: int | None = None,
+                       status: str | None = None) -> int:
+    """Сколько заказов всего при ТЕХ ЖЕ условиях, что у страницы.
+
+    Экран показывал длину страницы как число заказов, а потолок стоял в
+    значении по умолчанию `list_orders` — сотый заказ был последним, который
+    владелец мог увидеть, и экспорт CSV уходил в бухгалтерию такой же урезанный.
+    """
+    conds, args = _order_conds(owner_id, bot_id, status)
+    return int(await pool.fetchval(
+        f"SELECT COUNT(*) FROM bot_sales_orders WHERE {' AND '.join(conds)}",
+        *args) or 0)
 
 
 # ── Фоллоуап: дожим замолчавшего клиента ─────────────────────────────────────

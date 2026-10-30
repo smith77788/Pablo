@@ -40,6 +40,9 @@ from services import mini_app_presence
 from services import mini_app_cloud
 from services import mini_app_mp
 from services import mini_app_networks
+from services import mini_app_fleet
+from services import mini_app_rankings
+from services import mini_app_links
 from services import mini_app_sales
 from services import mini_app_va
 from services import mini_app_warmup
@@ -1023,11 +1026,18 @@ def _reject_proxy_reason(purl: str) -> str | None:
     return None
 
 
-def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
+PROXY_IMPORT_BATCH = 500   # сколько прокси сервер берёт за один запрос
+
+
+def _collect_valid_proxies(
+        raw: str, limit: int = PROXY_IMPORT_BATCH) -> tuple[list[str], int, int]:
     """Разобрать вставленный список прокси для массового импорта.
 
     Возвращает (уникальные валидные URL в порядке появления, число пропущенных
-    невалидных). Правила (паритет с add_proxy + защита): пустые строки не
+    невалидных, число непустых строк ЗА потолком). Третье число раньше не
+    считалось вовсе: вставка на 800 прокси добавляла первые 500, экран говорил
+    «Добавлено: 500» и очищал поле — остальные 300 пропадали без следа, и узнать
+    о них владельцу было негде. Правила (паритет с add_proxy + защита): пустые строки не
     считаются; длиннее 500 символов, loopback/внутренние адреса и неподдержанные
     схемы — пропускаются (skipped); дубли в пределах вставки схлопываются по
     детерминированному proxy_fingerprint (тот же ключ, что у одиночного добавления
@@ -1039,7 +1049,9 @@ def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
     skipped = 0
     seen: set[str] = set()
     out: list[str] = []
-    for line in _re.split(r"[\n,;]+", raw or ""):
+    overflow = 0
+    _parts = _re.split(r"[\n,;]+", raw or "")
+    for _i, line in enumerate(_parts):
         purl = line.strip()
         if not purl:
             continue
@@ -1052,8 +1064,9 @@ def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
         seen.add(fp)
         out.append(purl)
         if len(out) >= limit:
+            overflow = sum(1 for _r in _parts[_i + 1:] if _r.strip())
             break
-    return out, skipped
+    return out, skipped, overflow
 
 
 # Единый источник фильтров parsed_audiences (парсер-вью + инвайт + DM) —
@@ -1515,6 +1528,43 @@ def _str_list(value) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(x).strip() for x in value if str(x).strip()]
     return []
+
+
+from urllib.parse import urlparse as _urlparse  # noqa: E402
+
+
+# ── Сокращатель ссылок: адрес короткой ссылки и свои хосты ────────────────
+#
+# Модульные и чистые (зависят только от request), поэтому остались здесь, а
+# ручки `/api/miniapp/links/*` уехали в `services/mini_app_links.py`: их
+# зовёт и публичный редирект `/{code}`, который остался в монолите.
+def _short_base(request: web.Request) -> str:
+    """Базовый адрес короткой ссылки: env SHORT_LINK_BASE (напр.
+    https://infragram.app) либо домен текущего запроса (учитывая прокси
+    Railway через X-Forwarded-*)."""
+    base = (os.getenv("SHORT_LINK_BASE") or "").strip().rstrip("/")
+    if base:
+        return base
+    _proto = (request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip()
+              or request.scheme or "https")
+    _host = (request.headers.get("X-Forwarded-Host", "").split(",")[0].strip()
+             or request.headers.get("Host", "") or request.host or "")
+    return f"{_proto}://{_host}" if _host else ""
+
+
+def _self_hosts(request: web.Request) -> set[str]:
+    """Наши собственные хосты — чтобы не дать завернуть ссылку на наш же
+    редирект (бесконечная петля)."""
+    hosts: set[str] = set()
+    for h in (os.getenv("SHORT_LINK_BASE"),
+              request.headers.get("X-Forwarded-Host"),
+              request.headers.get("Host"), request.host):
+        if not h:
+            continue
+        _n = _urlparse(h if "://" in h else "http://" + h).hostname
+        if _n:
+            hosts.add(_n.lower())
+    return hosts
 
 
 def _list_offset(request: web.Request, maximum: int = 10_000_000) -> int:
@@ -2400,74 +2450,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Замер позиций каналов/чатов в поиске ─────────────────────────────────
 
-    async def channel_rankings_list(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import channel_ranking
-        rows = await channel_ranking.list_positions(pool, uid)
-        out = [{
-            "id": r["id"], "channel_id": str(r["channel_id"]),
-            "keyword": r["keyword"], "title": r.get("title") or "",
-            "username": r.get("username") or "",
-            "position": r.get("pos"), "prev_position": r.get("prev_pos"),
-            "checked_at": str(r["checked_at"]) if r.get("checked_at") else None,
-        } for r in rows]
-        return _json_resp({"keywords": out})
 
-    async def channel_rankings_add(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        try:
-            channel_id = int(data.get("channel_id"))
-        except (TypeError, ValueError):
-            return _err("Неверный канал")
-        keyword = validate_string(data.get("keyword"), max_len=64) or ""
-        if not keyword:
-            return _err("Введите ключевое слово")
-        # Канал должен принадлежать владельцу.
-        owns = await _safe_fetchval(
-            pool, "SELECT 1 FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-            uid, channel_id)
-        if not owns:
-            return _err("Канал не найден среди ваших", 404)
-        from services import channel_ranking
-        ok = await channel_ranking.add_keyword(pool, uid, channel_id, keyword)
-        return _json_resp({"ok": bool(ok)})
 
-    async def channel_rankings_remove(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-            kid = int(data.get("id"))
-        except (TypeError, ValueError, Exception):
-            return _err("Неверный идентификатор")
-        from services import channel_ranking
-        ok = await channel_ranking.remove_keyword(pool, uid, kid)
-        return _json_resp({"ok": bool(ok)})
 
-    async def channel_rankings_check(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "check_channel_rankings", {},
-                label="Замер позиций каналов в поиске")
-            return _json_resp({"ok": True, "op_id": op_id})
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channel_rankings_check uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
     # ── Dashboard ────────────────────────────────────────────────────────────
 
@@ -2650,7 +2635,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if op not in ("name", "avatar", "2fa"):
-            return _err("Операция: name, avatar или 2fa", 400)
+            return _err("Операция: имя, аватар или двухфакторная защита", 400)
         if acc_count < 0:
             return _err("Число аккаунтов не может быть отрицательным", 400)
         try:
@@ -2754,7 +2739,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not op or not account_id:
             return _err("Неверное тело запроса", 400)
         if op not in ("leave_all_chats", "delete_contacts"):
-            return _err("Операция: leave_all_chats или delete_contacts", 400)
+            return _err("Операция: выйти из всех чатов или удалить контакты", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
@@ -2871,8 +2856,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
                WHERE mb.added_by = $1 AND bu.user_id > 0
-               ORDER BY bu.first_seen DESC NULLS LAST
-               LIMIT $2""", uid, lim)
+               ORDER BY bu.first_seen DESC NULLS LAST, bu.user_id DESC,
+                        bu.bot_id DESC
+               LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request))
         total = await _safe_count(pool,
             """SELECT COUNT(*) FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
@@ -3481,7 +3467,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # через BotFather — отдельная операция op_type="bot_factory" (в боте).
         ecosystem_id = data.get("ecosystem_id")
         if not token:
-            return _err("token обязателен", 400)
+            return _err("Укажите токен бота", 400)
         if not name_template:
             return _err("имя бота обязательно", 400)
         if not validate_bot_token(token):
@@ -3593,7 +3579,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 acc_ids = [int(x) for x in raw_ids][:200]
             except (TypeError, ValueError):
-                return _err("account_ids должен быть списком чисел", 400)
+                return _err("Список аккаунтов должен быть списком чисел", 400)
             acc_ids = [a for a in acc_ids if a > 0]
             if not acc_ids:
                 return _err("Выберите хотя бы один аккаунт", 400)
@@ -3879,93 +3865,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
 
-    async def fleet_diagnose(request: web.Request) -> web.Response:
-        """Диагностика «почему флот не исполняет»: воронка отбора аккаунтов +
-        конфиг + залипшие операции + последние реальные ошибки."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import fleet_doctor
-            return _json_resp(await fleet_doctor.diagnose(pool, uid))
-        except Exception:
-            log.exception("fleet_diagnose uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def fleet_diagnose_blocked(request: web.Request) -> web.Response:
-        """Какие именно аккаунты отсеялись на шаге воронки — и чем они больны.
-
-        Вердикт «Ни у одного аккаунта нет сессии» называет болезнь, но не
-        больных: выяснить, какие это аккаунты, экран не позволял, и чинить
-        приходилось наугад по всему флоту.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import fleet_doctor
-        step = validate_string(request.query.get("step"), 32, required=False) or ""
-        if step not in fleet_doctor.FUNNEL_STEPS:
-            return _err("Неизвестный шаг воронки", 400)
-        limit = _list_limit(request, 100, 300)
-        rows = await _safe_fetch(
-            pool,
-            "SELECT id, phone, first_name, username, is_active, "
-            "(session_str IS NOT NULL AND session_str <> '') AS has_session, "
-            "COALESCE(acc_status,'active') AS acc_status, "
-            "(cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS cd_active, "
-            "trust_score "
-            "FROM tg_accounts WHERE owner_id=$1 ORDER BY id",
-            uid,
-        )
-        blocked = fleet_doctor.step_blockers([dict(r) for r in rows], step)
-        items = [{
-            "id": b.get("id"),
-            "label": (b.get("first_name") or (("@" + b["username"]) if b.get("username") else None)
-                      or b.get("phone") or f"Аккаунт {b.get('id')}"),
-            "reason": b.get("reason", ""),
-        } for b in blocked[:limit]]
-        return _json_resp({"step": step, "items": items, "total": len(blocked)})
-
-    async def fleet_sweep(request: web.Request) -> web.Response:
-        """Единое обслуживание флота «сделать всё разом»: параллельно по ботам,
-        аккаунтам и каналам — проверить живость и (по желанию) удалить мёртвое.
-
-        body: {delete: bool, preview: bool}. delete=false — только проверка;
-        delete=true,preview=true — посчитать, что удалится (без удаления);
-        delete=true,preview=false — удалить мёртвое. Удаляется только то, что
-        ТОЧНО мёртвое (бот с отозванным токеном, аккаунт с терминальным
-        статусом); «не ответившие» не трогаются.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        want_delete = bool(body.get("delete"))
-        preview = bool(body.get("preview"))
-        try:
-            from services import fleet_maintenance
-            return _json_resp(await fleet_maintenance.sweep_fleet(
-                pool, uid, delete=want_delete, preview=preview))
-        except Exception:
-            log.exception("fleet_sweep uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
 
 
-    async def fleet_governor_status(request: web.Request) -> web.Response:
-        """Состояние глобального губернатора темпа: уровень, множитель, причина."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import fleet_governor
-            return _json_resp(await fleet_governor.status(pool, uid))
-        except Exception:
-            log.exception("fleet_governor_status uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
+
+
 
 
 
@@ -4720,13 +4624,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         node_type = str(data.get("node_type", "workspace")).strip()
         name = str(data.get("name", "")).strip()
         if not tg_chat_id_raw or not name:
-            return _err("tg_chat_id и name обязательны", 400)
+            return _err("Укажите идентификатор чата и название", 400)
         if node_type not in ("proxies", "accounts", "tasks", "alerts", "workspace"):
             node_type = "workspace"
         try:
             tg_chat_id = int(str(tg_chat_id_raw).replace("-100", "-100").strip())
         except (ValueError, TypeError):
-            return _err("tg_chat_id должен быть числом (например -1001234567890)", 400)
+            return _err("Идентификатор чата должен быть числом (например -1001234567890)", 400)
         try:
             nid = await pool.fetchval(
                 """INSERT INTO bm_telegram_nodes (owner_id, tg_chat_id, node_type, name)
@@ -5038,8 +4942,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """SELECT entity_id, entity_type, entity_name, username,
                           reg_date, method, checked_at
                    FROM reg_check_cache WHERE checked_by=$1
-                   ORDER BY checked_at DESC LIMIT $2""",
-                uid, _list_limit(request, 30, 1000),
+                   ORDER BY checked_at DESC, entity_id DESC, entity_type
+                   LIMIT $2 OFFSET $3""",
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM reg_check_cache WHERE checked_by=$1", uid)
@@ -5276,7 +5181,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 if _pad > 0:
                     _params["per_account_daily"] = max(1, min(200, _pad))
             except (TypeError, ValueError):
-                return _err("per_account_daily должен быть числом", 400)
+                return _err("Дневной лимит на аккаунт должен быть числом", 400)
         params_json = _json.dumps(_params)
         try:
             try:
@@ -5471,8 +5376,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.warning("rehab_overview uid=%d", uid, exc_info=True)
             counts = {"in_progress": 0, "freed": 0, "stuck": 0, "gone": 0, "by_phase": {}}
-        return _json_resp({"ok": True, **counts,
-                           "accounts": await _rh.list_for_owner(pool, uid)})
+        lim = _list_limit(request, 100, 500)
+        off = _list_offset(request)
+        accounts = await _rh.list_for_owner(pool, uid, limit=lim, offset=off)
+        # Итог берём из той же сводки, что и плитки сверху — лишнего запроса не
+        # нужно: `by_phase` считает ВСЕ строки реабилитации. Если сводка не
+        # получилась, итог не меньше того, что уже на экране.
+        total = max(sum(int(v) for v in (counts.get("by_phase") or {}).values()),
+                    off + len(accounts))
+        return _json_resp({"ok": True, **counts, "accounts": accounts,
+                           "total": total,
+                           "page": {"limit": lim, "offset": off,
+                                    "has_more": off + len(accounts) < total}})
 
     async def rehab_action(request: web.Request) -> web.Response:
         """Ручное управление восстановлением одного аккаунта.
@@ -5763,7 +5678,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not channel:
-            return _err("channel обязателен", 400)
+            return _err("Укажите канал", 400)
         label = f"Разведка рекламы @{channel}"
         try:
             op_id = await _obus.submit(
@@ -5810,8 +5725,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             msgs = await pool.fetch(
                 "SELECT id, direction, text, created_at FROM relay_messages "
-                "WHERE session_id=$1 ORDER BY created_at ASC LIMIT $2",
-                session_id, _list_limit(request, 100, 2000),
+                "WHERE session_id=$1 ORDER BY created_at ASC, id "
+                "LIMIT $2 OFFSET $3",
+                session_id, _list_limit(request, 100, 2000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM relay_messages WHERE session_id=$1", session_id)
@@ -6016,7 +5932,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         rows = await _safe_fetch(pool,
             """SELECT id, username, label, channel_id, last_members, last_checked, created_at
                FROM competitors WHERE owner_id=$1
-               ORDER BY created_at DESC LIMIT $2""", uid, _list_limit(request, 50, 1000))
+               ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3""",
+            uid, _list_limit(request, 50, 1000), _list_offset(request))
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM competitors WHERE owner_id=$1", uid)
         return _json_resp({"competitors": rows, "total": total})
@@ -6159,7 +6076,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                FROM tracked_keywords tk
                JOIN managed_bots mb ON mb.bot_id=tk.bot_id
                WHERE tk.owner_id=$1
-               ORDER BY tk.created_at DESC LIMIT $2""", uid, _list_limit(request, 50, 1000))
+               ORDER BY tk.created_at DESC, tk.id DESC LIMIT $2 OFFSET $3""",
+            uid, _list_limit(request, 50, 1000), _list_offset(request))
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM tracked_keywords tk JOIN managed_bots mb "
             "ON mb.bot_id=tk.bot_id WHERE tk.owner_id=$1", uid)
@@ -6829,8 +6747,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if asset_type:
                 rows = await pool.fetch(
                     "SELECT id, asset_type, name, created_at FROM asset_templates "
-                    "WHERE owner_id=$1 AND asset_type=$2 ORDER BY created_at DESC LIMIT $3",
-                    uid, asset_type, lim,
+                    "WHERE owner_id=$1 AND asset_type=$2 "
+                    "ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4",
+                    uid, asset_type, lim, _list_offset(request),
                 )
                 total = await _safe_count(pool,
                     "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1 AND asset_type=$2",
@@ -6838,8 +6757,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             else:
                 rows = await pool.fetch(
                     "SELECT id, asset_type, name, created_at FROM asset_templates "
-                    "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
-                    uid, lim,
+                    "WHERE owner_id=$1 ORDER BY created_at DESC, id DESC "
+                    "LIMIT $2 OFFSET $3",
+                    uid, lim, _list_offset(request),
                 )
                 total = await _safe_count(pool,
                     "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1", uid)
@@ -6956,8 +6876,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, name, description, target_url, target_label, bot_id "
-                "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC LIMIT $2",
-                uid, _list_limit(request, 30, 1000),
+                "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM presence_packs WHERE owner_id=$1", uid)
@@ -7019,7 +6940,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось разобрать запрос")
         action = (body.get("action") or "both").strip()
         if action not in ("about", "avatar", "both"):
-            return _err("Действие: about, avatar или both", 400)
+            return _err("Действие: описания, аватары или и то и другое", 400)
         about_template = (body.get("about_template") or "").strip()
 
         try:
@@ -7144,8 +7065,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, title, username, type, added_at FROM managed_channels "
-                "WHERE owner_id=$1 ORDER BY added_at DESC LIMIT $2",
-                uid, _list_limit(request, 20, 1000),
+                "WHERE owner_id=$1 ORDER BY added_at DESC, id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, _list_limit(request, 20, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
@@ -7656,12 +7578,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         _seen_order: deque[int] = deque()
 
         async def fetch_completed_ops() -> list:
+            # `partial` — терминальный исход недоведённой работы (op_status.py), и
+            # именно он требует от владельца решения. В этом потоке его не было:
+            # операция, закрытая «частично», не давала ни плашки итога, ни
+            # быстрых действий, ни перечитывания списка — она просто исчезала из
+            # прогресса, а итог доходил только в чат бота. Плашка на неполном
+            # исходе уже верна: `ok = status === 'done'`, то есть ⚠️ и «Повторить».
             try:
                 rows = await pool.fetch(
                     """SELECT id, op_type, COALESCE(label, op_type) AS label,
                               total_items, done_items, status, error_msg,
                               COALESCE(result->>'summary', result->>'reason') AS summary
-                       FROM operation_queue WHERE owner_id=$1 AND status IN ('done','failed')
+                       FROM operation_queue WHERE owner_id=$1
+                         AND status IN ('done','partial','failed')
                          AND finished_at > now() - make_interval(mins => 30)
                        ORDER BY finished_at DESC LIMIT 20""",
                     uid)
@@ -7765,36 +7694,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _sse_streams.pop(uid, None)
         return response
 
-    # ── Сокращатель ссылок («bit.ly для себя») ─────────────────────────────────
+    # ── Сокращатель ссылок: публичный редирект ─────────────────────────────────
+    #
+    # Ручки `/api/miniapp/links/*` уехали в `services/mini_app_links.py`. Здесь
+    # остался редирект: он не часть API мини-аппа, а публичный вход по короткому
+    # коду, и живёт на корне (`/{code}`) вместе с остальными корневыми путями.
     from services import link_shortener as _lnk
-    from urllib.parse import urlparse as _urlparse
-
-    def _short_base(request: web.Request) -> str:
-        """Базовый адрес короткой ссылки: env SHORT_LINK_BASE (напр.
-        https://infragram.app) либо домен текущего запроса (учитывая прокси
-        Railway через X-Forwarded-*)."""
-        base = (os.getenv("SHORT_LINK_BASE") or "").strip().rstrip("/")
-        if base:
-            return base
-        _proto = (request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip()
-                  or request.scheme or "https")
-        _host = (request.headers.get("X-Forwarded-Host", "").split(",")[0].strip()
-                 or request.headers.get("Host", "") or request.host or "")
-        return f"{_proto}://{_host}" if _host else ""
-
-    def _self_hosts(request: web.Request) -> set[str]:
-        """Наши собственные хосты — чтобы не дать завернуть ссылку на наш же
-        редирект (бесконечная петля)."""
-        hosts: set[str] = set()
-        for h in (os.getenv("SHORT_LINK_BASE"),
-                  request.headers.get("X-Forwarded-Host"),
-                  request.headers.get("Host"), request.host):
-            if not h:
-                continue
-            _n = _urlparse(h if "://" in h else "http://" + h).hostname
-            if _n:
-                hosts.add(_n.lower())
-        return hosts
 
     async def short_link_redirect(request: web.Request) -> web.Response:
         """Публичный редирект: короткая ссылка → 302 на цель + учёт клика."""
@@ -7805,93 +7710,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                 content_type="text/plain", charset="utf-8")
         raise web.HTTPFound(target)
 
-    async def links_create(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        target = validate_string(body.get("target_url") or body.get("url"), max_len=2048)
-        title = validate_string(body.get("title"), max_len=200, required=False)
-        code = validate_string(body.get("code"), max_len=40, required=False)
-        tags = validate_string(body.get("tags"), max_len=400, required=False)
-        expires_at = validate_string(body.get("expires_at"), max_len=40, required=False)
-        _utm_in = body.get("utm") if isinstance(body.get("utm"), dict) else {}
-        utm = {k: validate_string(_utm_in.get(k), max_len=100, required=False) or ""
-               for k in ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content")}
-        res = await _lnk.create(pool, uid, target or "", title,
-                                self_hosts=_self_hosts(request),
-                                custom_code=(code or None), utm=utm,
-                                tags=(tags or None), expires_at=(expires_at or None))
-        if not res.get("ok"):
-            return _err(res.get("error") or "Не удалось создать ссылку")
-        res["short_url"] = f"{_short_base(request)}/{res['code']}"
-        if body.get("qr"):
-            res["qr"] = _lnk.make_qr_data_uri(res["short_url"])
-        return _json_resp(res)
-
-    async def links_qr(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        code = validate_string(body.get("code"), max_len=40)
-        link = await _lnk.get_one(pool, uid, code or "")
-        if not link:
-            return _err("Ссылка не найдена", 404)
-        short_url = f"{_short_base(request)}/{code}"
-        qr = _lnk.make_qr_data_uri(short_url)
-        if not qr:
-            return _err("QR временно недоступен")
-        return _json_resp({"ok": True, "qr": qr, "short_url": short_url})
-
-    async def links_list(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        items = await _lnk.list_for_owner(pool, uid)
-        base = _short_base(request)
-        for it in items:
-            it["short_url"] = f"{base}/{it['code']}"
-        return _json_resp({"links": items, "base": base})
-
-    async def links_toggle(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        code = validate_string(body.get("code"), max_len=40)
-        ok = await _lnk.set_disabled(pool, uid, code or "", bool(body.get("disabled")))
-        return _json_resp({"ok": ok}) if ok else _err("Ссылка не найдена", 404)
-
-    async def links_delete(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        code = validate_string(body.get("code"), max_len=40)
-        ok = await _lnk.delete(pool, uid, code or "")
-        return _json_resp({"ok": ok}) if ok else _err("Ссылка не найдена", 404)
-
     # ── Route registration ────────────────────────────────────────────────────
 
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
-    app.router.add_post("/api/miniapp/links/create", links_create)
-    app.router.add_get("/api/miniapp/links", links_list)
-    app.router.add_post("/api/miniapp/links/toggle", links_toggle)
-    app.router.add_post("/api/miniapp/links/delete", links_delete)
-    app.router.add_post("/api/miniapp/links/qr", links_qr)
     app.router.add_get("/s/{code}", short_link_redirect)
     app.router.add_post("/api/miniapp/auth", auth)
     app.router.add_post("/api/miniapp/pair", pair_device)
@@ -7899,10 +7720,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/devices", devices_list)
     app.router.add_post("/api/miniapp/devices/revoke", devices_revoke)
     app.router.add_post("/api/miniapp/factory/name_preview", factory_name_preview)
-    app.router.add_get("/api/miniapp/channel_rankings", channel_rankings_list)
-    app.router.add_post("/api/miniapp/channel_rankings/add", channel_rankings_add)
-    app.router.add_post("/api/miniapp/channel_rankings/remove", channel_rankings_remove)
-    app.router.add_post("/api/miniapp/channel_rankings/check", channel_rankings_check)
     # Bots
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)
     app.router.add_post("/api/miniapp/bot_factory/create_new", bot_factory_create_new)
@@ -7910,11 +7727,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_get("/api/miniapp/mass_targets", mass_targets)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
-    app.router.add_get("/api/miniapp/fleet/governor", fleet_governor_status)
     app.router.add_get("/api/miniapp/onboarding", onboarding_status)
-    app.router.add_get("/api/miniapp/fleet/diagnose", fleet_diagnose)
-    app.router.add_get("/api/miniapp/fleet/diagnose/blocked", fleet_diagnose_blocked)
-    app.router.add_post("/api/miniapp/fleet/sweep", fleet_sweep)
     app.router.add_post("/api/miniapp/dm/preview", dm_preview)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
     app.router.add_post("/api/miniapp/mass_report", mass_report_submit)
@@ -7973,6 +7786,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_dm.setup_routes(app, pool)
     mini_app_warmup.setup_routes(app, pool)
     mini_app_accounts.setup_routes(app, pool)
+    mini_app_links.setup_routes(app, pool)
+    mini_app_fleet.setup_routes(app, pool)
+    mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
     mini_app_mp.setup_routes(app, pool)
@@ -8822,30 +8638,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def _segment_pressure_ok(uid: int, op_name: str) -> tuple[bool, str]:
         return await _segments.pressure_ok(pool, uid, op_name)
 
-    async def fleet_warnings(request: web.Request) -> web.Response:
-        """Мягкие предупреждения перед массовой операцией.
-
-        Оба предупреждения давно существуют, но показывались ТОЛЬКО в боте:
-        основной интерфейс — мини-апп — запускал массовые операции вслепую.
-        Fail-open: предупреждения не должны мешать работать.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        warnings = []
-        try:
-            from services import infra_orchestrator as _io
-            for fn in (_io.get_pressure_warning, _io.get_readiness_warning,
-                       _io.get_dead_proxy_warning):
-                try:
-                    w = await fn(pool, uid)
-                except Exception:
-                    w = None
-                if w:
-                    warnings.append(w)
-        except Exception:
-            log.debug("fleet_warnings uid=%s", uid, exc_info=True)
-        return _json_resp({"warnings": warnings})
 
 
 
@@ -9110,7 +8902,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # обычная функция, и ссылка на ещё не созданную локальную функцию даёт
     # UnboundLocalError. Раньше эта строка стояла на 600 строк выше — сервер
     # не собирался вообще, мини-апп отвечал «Application failed to respond».
-    app.router.add_get("/api/miniapp/fleet/warnings", fleet_warnings)
     app.router.add_get("/api/miniapp/ab/results", ab_results)
     app.router.add_post("/api/miniapp/ab/followup", ab_followup)
 

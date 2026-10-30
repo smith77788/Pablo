@@ -797,10 +797,28 @@ async function spTest(pid) {
 
 let _spOrdersCache = [];
 
-function spExportOrdersCsv() {
+// Экспорт шёл из того, что лежит на экране, — то есть из первой страницы.
+// В бухгалтерию уходили первые сто заказов, и файл не говорил, что он урезан.
+// Теперь экспорт сам доходит до конца списка, а если не дошёл — говорит.
+async function spExportOrdersCsv() {
   const out = document.getElementById('spCsvOut');
+  if (out) out.innerHTML = '<div style="font-size:12px;color:var(--hint)">⏳ Собираю все заказы…</div>';
+  let all = (_spOrdersCache || []).slice(), total = SP_ORD_TOTAL || all.length, cut = false;
+  try {
+    let guard = 0;
+    while (all.length < total && guard++ < 200) {
+      const d = await api('/api/miniapp/sales/orders?limit=500&offset=' + all.length);
+      const page = listOf(d, 'orders');
+      if (!page.length) break;
+      all = all.concat(page);
+      total = totalOf(d, all);
+    }
+  } catch (e) {
+    cut = true;
+  }
+  if (all.length < total) cut = true;
   const rows = [['id', 'status', 'customer', 'phone', 'items', 'total', 'currency', 'promo']];
-  (_spOrdersCache || []).forEach(o => {
+  all.forEach(o => {
     let contact = o.contact;
     if (typeof contact === 'string') { try { contact = JSON.parse(contact); } catch (_) { contact = {}; } }
     let items = o.items;
@@ -817,8 +835,15 @@ function spExportOrdersCsv() {
     return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }).join(',')).join('\n');
   if (out) {
-    out.innerHTML = '<div style="font-size:12px;color:var(--hint);margin-bottom:4px">' +
-      'Скопируйте CSV:</div><textarea class="inp" rows="6" style="width:100%;font-family:monospace;font-size:11px" ' +
+    const note = cut
+      ? '<div style="font-size:12px;color:var(--orange);margin-bottom:4px">⚠️ В файле '
+        + num(all.length) + ' из ' + num(total) + ' заказов: остальные не загрузились, '
+        + 'попробуйте ещё раз</div>'
+      : '';
+    out.innerHTML = note +
+      '<div style="font-size:12px;color:var(--hint);margin-bottom:4px">' +
+      'Скопируйте CSV · заказов: ' + num(all.length) +
+      '</div><textarea class="inp" rows="6" style="width:100%;font-family:monospace;font-size:11px" ' +
       'onclick="this.select()">' + esc(csv) + '</textarea>';
   }
 }
@@ -919,14 +944,31 @@ async function spChatSend() {
   }
 }
 
-async function spOrders(pid) {
-  _spScreen('s-salesorders', '📦 Заказы менеджера', '');
-  push('s-salesorders');
+// Заказы приходили одной страницей по сто: сотый заказ был последним, который
+// владелец мог увидеть, и экспорт CSV уходил в бухгалтерию такой же урезанный.
+// Потолок стоял в значении по умолчанию движка (`list_orders(..., limit=100)`),
+// а не в тексте ручки, поэтому в запросе его было не видно.
+let SP_ORD_ROWS = [], SP_ORD_OFFSET = 0, SP_ORD_TOTAL = 0;
+
+async function spOrdersMore() {
+  SP_ORD_OFFSET = SP_ORD_ROWS.length;
+  await spOrders(null, true);
+}
+
+async function spOrders(pid, keep) {
+  if (!keep) {
+    _spScreen('s-salesorders', '📦 Заказы менеджера', '');
+    push('s-salesorders');
+    SP_ORD_ROWS = []; SP_ORD_OFFSET = 0; SP_ORD_TOTAL = 0;
+  }
   const body = document.getElementById('s-salesorders-body');
-  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  if (!keep) body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/sales/orders');
-    const orders = d.orders || [];
+    const d = await api('/api/miniapp/sales/orders?limit=100&offset=' + SP_ORD_OFFSET);
+    const _page = listOf(d, 'orders');
+    SP_ORD_ROWS = SP_ORD_OFFSET ? SP_ORD_ROWS.concat(_page) : _page;
+    SP_ORD_TOTAL = totalOf(d, SP_ORD_ROWS);
+    const orders = SP_ORD_ROWS;
     if (!orders.length) {
       body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:30px">Заказов пока нет</div>';
       return;
@@ -934,7 +976,11 @@ async function spOrders(pid) {
     const st = { new: '🆕 новый', confirmed: '✅ подтверждён', handoff: '🆘 оператору',
                  cancelled: '❌ отменён', done: '📦 выполнен' };
     _spOrdersCache = orders;
-    body.innerHTML = '<button class="btn btn-s" style="width:100%;margin-bottom:10px" ' +
+    // Итог в заголовке — чтобы число было видно ДО прокрутки; «показано N из M»
+    // говорит сама кнопка «Показать ещё» внизу списка.
+    body.innerHTML = '<div style="color:var(--hint);font-size:12px;margin-bottom:6px">Заказов: '
+      + num(SP_ORD_TOTAL) + '</div>' +
+      '<button class="btn btn-s" style="width:100%;margin-bottom:10px" ' +
       'onclick="spExportOrdersCsv()">⬇️ Экспорт CSV</button>' +
       '<div id="spCsvOut"></div>' + orders.map(o => {
       let contact = o.contact;
@@ -954,7 +1000,7 @@ async function spOrders(pid) {
         '<div class="row-val">' + (st[o.status] || esc(o.status)) + ' · ' + total + phone + '</div>' +
         itemsLine +
         '</div></div>';
-    }).join('');
+    }).join('') + moreBtn(orders.length, SP_ORD_TOTAL, 'spOrdersMore()');
   } catch (e) {
     // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
     // экран без единой кнопки, а таббар на подэкране скрыт.

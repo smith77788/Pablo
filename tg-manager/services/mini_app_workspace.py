@@ -29,7 +29,8 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты пространств, папок чатов и памяти ассистента."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        _safe_count,
         _safe_fetch, log,
     )
     from services.security import validate_string
@@ -51,8 +52,9 @@ def setup_routes(app: web.Application, pool) -> None:
             rows = await pool.fetch(
                 """SELECT id, kind, title, body, tags, pinned, created_at, updated_at
                    FROM botmother_memory WHERE owner_id=$1
-                   ORDER BY pinned DESC, updated_at DESC LIMIT $2""",
-                uid, _list_limit(request, 50, 1000),
+                   ORDER BY pinned DESC, updated_at DESC, id DESC
+                   LIMIT $2 OFFSET $3""",
+                uid, _list_limit(request, 50, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM botmother_memory WHERE owner_id=$1", uid)
@@ -117,7 +119,9 @@ def setup_routes(app: web.Application, pool) -> None:
             """SELECT id, title, chat_count, status, invite_link, error,
                       instance_id, join_count, created_at
                  FROM chatlist_folders WHERE owner_id=$1
-                ORDER BY created_at DESC LIMIT $2""", uid, _list_limit(request, 100, 2000))
+                ORDER BY created_at DESC, id DESC
+                LIMIT $2 OFFSET $3""", uid, _list_limit(request, 100, 2000),
+            _list_offset(request))
         out = []
         for r in (rows or []):
             d = dict(r)
@@ -250,7 +254,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not name:
-            return _err("name обязателен", 400)
+            return _err("Укажите название рабочего пространства", 400)
         try:
             ws_id = await pool.fetchval(
                 "INSERT INTO workspaces(owner_id, name, description) VALUES($1,$2,$3) RETURNING id",

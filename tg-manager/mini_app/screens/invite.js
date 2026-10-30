@@ -583,7 +583,12 @@ async function massInviteGrantAdmin() {
   if (!group) { toast('Укажите группу'); return; }
   if (!await askConfirm('Выдать всем вашим аккаунтам право приглашать в «'+group+'»?\n\nНужен аккаунт-админ чата с правом «Назначать администраторов» — он назначит остальных.')) return;
   try {
-    const r = await api('/api/miniapp/invite/grant_admin', {method:'POST', body:JSON.stringify({group})});
+    // Отмеченные аккаунты проверяются первыми: иначе промоутер искался среди
+    // горсти аккаунтов с наименьшими id, а отказ говорил «ни один не админ».
+    const _tk = [...document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]:checked')]
+      .map(c=>parseInt(c.value)).filter(n=>!isNaN(n));
+    const _body = {group}; if (_tk.length) _body.account_ids = _tk;
+    const r = await api('/api/miniapp/invite/grant_admin', {method:'POST', body:JSON.stringify(_body)});
     if (r.no_promoter) { toast('⚠️ '+(r.message||'Нет аккаунта-админа чата')); return; }
     toast('🛡 Выдаю права инвайтерам (операция #'+r.op_id+')');
     setTimeout(checkInviteRights, 1500);  // обновим баннер после запуска

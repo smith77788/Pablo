@@ -86,6 +86,20 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
             "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
             owner_id, int(limit))
     accounts = [dict(r) for r in rows]
+    # Сколько аккаунтов пригодно ВСЕГО. Живьём проверяется выборка — полный флот
+    # не укладывается в таймаут шлюза, — а экран писал «готовы инвайтить X из Y»,
+    # где Y был размером выборки. На флоте в две сотни это читалось как итог по
+    # всему флоту: шестнадцать проверенных выдавались за всех.
+    if account_ids:
+        fleet = len(accounts)
+    else:
+        try:
+            fleet = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 "
+                "AND is_active=TRUE AND session_str IS NOT NULL", owner_id) or 0)
+        except Exception:
+            log.debug("run_preflight: размер флота не посчитался", exc_info=True)
+            fleet = len(accounts)
 
     # Захватываем СВОБОДНЫЕ аккаунты на время пре-чека (предотвращаем гонку с
     # фоновыми коннектами). Занятые реальной операцией — пропускаем из живой
@@ -154,6 +168,8 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
     verdict = _verdict(total, counts)
     return {"total": total, "counts": counts, "ready": ready,
             "can_invite": can_invite, "admins": counts["admin"], "busy": len(busy_ids),
+            # fleet — весь пригодный флот, total — сколько из него проверено.
+            "fleet": max(fleet, total),
             "details": details, "reasons": top_reasons, "verdict": verdict}
 
 

@@ -118,7 +118,12 @@ def _is_boxed_scope(scope) -> bool:
     снова остался бы без потолка.
     """
     src = ast.unparse(scope)
-    return "timeboxed(" in src and src.count("_make_client(") == 1
+    # Клиентов в узле не больше одного: второй, созданный мимо обёртки, снова
+    # остался бы без потолка. НОЛЬ — это законный случай, и раньше он отвергался:
+    # условие `== 1` само было названо через способ (считало, что обёрнутый узел
+    # обязан был клиента создать). Узел, ПОЛУЧИВШИЙ клиент параметром, обёртку
+    # ставит той же одной строкой, и потолок у его запросов такой же.
+    return "timeboxed(" in src and src.count("_make_client(") <= 1
 
 
 def naked_in_scope(scope) -> list[int]:
@@ -159,12 +164,34 @@ def naked_requests(src: str) -> list[int]:
     return sorted(set(out))
 
 
+def _takes_a_client(src: str) -> bool:
+    """В модуле есть функция, ПОЛУЧАЮЩАЯ клиент параметром.
+
+    Выборка «модуль создаёт клиент» была названа через СПОСОБ, и модуль,
+    который клиента не создаёт, а принимает, не выбирался никогда — у переписи
+    не было к нему вопросов. Так прятались примитивы прогрева
+    (services/warmup_actions.py: 27 запросов и ни одного потолка): клиент им
+    передаёт account_warmer, который сам пройден и потому выглядел чистым.
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return False
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names = [a.arg for a in n.args.args] + [a.arg for a in n.args.kwonlyargs]
+            if any(a in _CLIENT_NAMES for a in names):
+                return True
+    return False
+
+
 def _modules_with_clients() -> dict[str, str]:
+    """Модули, РАБОТАЮЩИЕ с клиентом: создают его или получают параметром."""
     out = {}
     for path in sorted(glob.glob(os.path.join(ROOT, "services", "*.py"))):
         with open(path, encoding="utf-8") as f:
             src = f.read()
-        if "_make_client(" in src or "TelegramClient(" in src:
+        if "_make_client(" in src or "TelegramClient(" in src or _takes_a_client(src):
             out[os.path.basename(path)[:-3]] = src
     return out
 
@@ -249,6 +276,11 @@ def test_allowlist_has_no_clean_entries():
     ("content_mesh", "_TG_TIMEOUT"),
     ("chat_warmup", "_TG_TIMEOUT"),
     ("invite_behavior", "_TG_TIMEOUT"),
+    # Модули, которые клиента не создают, а получают: до расширения выборки
+    # перепись их не видела вовсе.
+    ("warmup_actions", "_TG_TIMEOUT"),
+    ("smart_invite", "_TG_TIMEOUT"),
+    ("brand_injection", "_TG_TIMEOUT"),
 ])
 def test_single_request_timeout_is_generous(mod, const):
     """Занижение опаснее отсутствия: ложный таймаут уводит цель в лишний повтор."""
@@ -262,6 +294,16 @@ def test_single_request_timeout_is_generous(mod, const):
     assert ns.get(const, 0) >= 30, (
         f"{mod}.{const} опустили ниже 30с: живой ответ через медленный прокси "
         f"начнёт считаться сбоем")
+
+
+def test_downloading_a_photo_has_its_own_larger_ceiling():
+    """Фотографию прогрев действительно скачивает — потолок запроса ей тесен."""
+    src = _modules_with_clients()["warmup_actions"]
+    media = next(ast.literal_eval(n.value) for n in ast.parse(src).body
+                 if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+                 and n.targets[0].id == "_MEDIA_TIMEOUT")
+    assert media >= 120, "потолок скачивания фото занижен — оборвёт здоровую загрузку"
+    assert "timeboxed(client, _MEDIA_TIMEOUT)" in src
 
 
 def test_media_transfer_has_its_own_larger_ceiling():
@@ -352,3 +394,51 @@ def test_one_boxed_function_does_not_cover_the_whole_module():
     found = naked_requests(_ONE_FUNCTION_BOXED_OTHER_NOT)
     assert found, "голая функция рядом с обёрнутой осталась незамеченной"
     assert len(found) == 1, f"найдено лишнее: {found}"
+
+
+# ── Сторожа ВЫБОРКИ: кого перепись вообще спрашивает ─────────────────────────
+
+_ONLY_RECEIVES_A_CLIENT = '''
+async def do_a_thing(client, target=""):
+    entity = await client.get_entity(target)
+    return await client.get_messages(entity, limit=10)
+'''
+
+_BOXED_WITHOUT_CREATING_A_CLIENT = '''
+async def do_a_thing(client, target=""):
+    client = account_manager.timeboxed(client, 45)
+    entity = await client.get_entity(target)
+    return await client.get_messages(entity, limit=10)
+'''
+
+
+def test_a_module_that_only_receives_a_client_is_selected():
+    """Выборка «модуль СОЗДАЁТ клиент» была названа через способ.
+
+    Так прятались примитивы прогрева: 27 запросов и ни одного потолка. Клиент
+    им передаёт account_warmer, который сам пройден, поэтому выглядел чистым и
+    он.
+    """
+    assert _takes_a_client(_ONLY_RECEIVES_A_CLIENT), (
+        "модуль, работающий с чужим клиентом, снова не выбирается — у переписи "
+        "к нему нет вопросов, сколько бы голых запросов в нём ни было")
+    assert "_make_client(" not in _ONLY_RECEIVES_A_CLIENT, "пример устарел"
+
+
+def test_the_wrapper_counts_when_no_client_was_created():
+    """Ноль созданных клиентов — законный случай, и раньше он отвергался."""
+    assert naked_requests(_BOXED_WITHOUT_CREATING_A_CLIENT) == [], (
+        "обёртка не признана потолком только потому, что узел не создавал "
+        "клиент сам — условие проверки само названо через способ")
+
+
+def test_the_selection_actually_grew():
+    """Выборка, которая ничего не добавила, выглядит рабочей и потому опасна."""
+    mods = _modules_with_clients()
+    creators = {m for m, src in mods.items()
+                if "_make_client(" in src or "TelegramClient(" in src}
+    assert "warmup_actions" in set(mods) - creators, (
+        "примитивы прогрева снова вне переписи")
+    assert len(mods) > len(creators) + 5, (
+        f"выборка выросла всего на {len(mods) - len(creators)} модулей — "
+        f"похоже, признак «получает клиент параметром» сломан")

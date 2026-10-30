@@ -22,7 +22,8 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import operation_bus as _obus
     from services.mini_app_api import (
         _INTERNAL_ERROR, _dna_to_dict, _err, _get_uid, _json_resp, _list_limit,
-        _safe_count, _safe_fetch, _safe_fetchrow, _spintax_pack, log,
+        _list_offset, _safe_count, _safe_fetch, _safe_fetchrow, _spintax_pack,
+        int_field, log,
     )
     from services.security import validate_integer, validate_string
 
@@ -52,9 +53,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 FROM clone_adapt_history h
                 LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
                 LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
-                WHERE h.owner_id=$1 ORDER BY h.created_at DESC LIMIT $2
+                WHERE h.owner_id=$1 ORDER BY h.created_at DESC, h.id DESC
+                LIMIT $2 OFFSET $3
                 """,
-                uid, _list_limit(request, 30, 1000),
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM clone_adapt_history WHERE owner_id=$1", uid)
@@ -99,7 +101,7 @@ def setup_routes(app: web.Application, pool) -> None:
         target_bot_id = data.get("target_bot_id")
         fields = data.get("fields", "name,desc")
         if not source_bot_id or not target_bot_id:
-            return _err("source_bot_id и target_bot_id обязательны", 400)
+            return _err("Выберите бота-источник и бота-получателя", 400)
         if int(source_bot_id) == int(target_bot_id):
             return _err("Источник и цель должны быть разными ботами", 400)
         try:
@@ -143,10 +145,16 @@ def setup_routes(app: web.Application, pool) -> None:
         name = str(data.get("name", "")).strip()
         source_channel = str(data.get("source_channel", "")).strip() or None
         source_account_id = data.get("source_account_id")
-        delay_minutes = int(data.get("delay_minutes", 30))
+        # int(data.get(...)) на пустом поле кидает ValueError НАРУЖУ: ответом
+        # уходит не русская причина, а 500. int_field говорит, чего не хватает.
+        try:
+            delay_minutes = int_field(data.get("delay_minutes"),
+                                      "Задержка между постами (минуты)", default=30)
+        except ValueError as exc:
+            return _err(str(exc), 400)
         append_text = str(data.get("append_text", "")).strip() or None
         if not name:
-            return _err("name обязателен", 400)
+            return _err("Укажите название связки", 400)
         if delay_minutes < 1:
             delay_minutes = 1
         try:
@@ -395,8 +403,9 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, topic, campaign_type, spread_hours, posts_total, posts_published, status, created_at "
-                "FROM narrative_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
-                uid, _list_limit(request, 30, 1000),
+                "FROM narrative_campaigns WHERE owner_id=$1 "
+                "ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
+                uid, _list_limit(request, 30, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM narrative_campaigns WHERE owner_id=$1", uid)
@@ -482,10 +491,14 @@ def setup_routes(app: web.Application, pool) -> None:
         topic = str(data.get("topic", "")).strip()
         core_message = str(data.get("core_message", "")).strip()
         campaign_type = data.get("campaign_type", "trend")
-        spread_hours = int(data.get("spread_hours", 4))
+        try:
+            spread_hours = int_field(data.get("spread_hours"),
+                                     "Разброс по часам", default=4)
+        except ValueError as exc:
+            return _err(str(exc), 400)
         channel_ids = data.get("channel_ids") or []
         if not topic or not core_message:
-            return _err("topic и core_message обязательны", 400)
+            return _err("Укажите тему и главное сообщение", 400)
         if not channel_ids:
             return _err("Выберите хотя бы один канал", 400)
         if campaign_type not in ("trend", "launch", "awareness", "counter"):
@@ -614,11 +627,11 @@ def setup_routes(app: web.Application, pool) -> None:
         cta_url = str(data.get("cta_url", "")).strip() or None
         add_referral = bool(data.get("add_referral", False))
         if not title or not content:
-            return _err("title и content обязательны", 400)
+            return _err("Укажите заголовок и текст", 400)
         if style not in ("direct", "native"):
             style = "direct"
         if len(content) > 4096:
-            return _err("content слишком длинный (макс 4096 символов)", 400)
+            return _err("Текст слишком длинный: максимум 4096 символов", 400)
         try:
             tid = await pool.fetchval(
                 """INSERT INTO self_promo_templates
@@ -788,8 +801,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 "       bu.first_name, bu.last_name, bu.username "
                 "FROM bot_user_facts f "
                 "LEFT JOIN bot_users bu ON bu.bot_id = f.bot_id AND bu.user_id = f.user_id "
-                "WHERE f.bot_id=$1 ORDER BY f.updated_at DESC LIMIT $2",
-                bot_id, _list_limit(request, 100, 2000),
+                "WHERE f.bot_id=$1 "
+                "ORDER BY f.updated_at DESC, f.user_id, f.fact_key, f.id "
+                "LIMIT $2 OFFSET $3",
+                bot_id, _list_limit(request, 100, 2000), _list_offset(request),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM bot_user_facts WHERE bot_id=$1", bot_id)

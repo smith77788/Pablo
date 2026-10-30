@@ -64,8 +64,13 @@ def setup_routes(app: web.Application, pool) -> None:
         _q = (request.query.get("q") or "").strip()[:64]
         # err_cnt — число упавших под-элементов (каналов) для показа кнопки
         # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
+        # Служебные строки журнала (выдача админки, промоут-трюк, фолбэк
+        # ссылкой) — не цели, и провалом операции они не являются: иначе кнопка
+        # «повторить неудавшиеся» зажигалась бы там, где не упало ни одной
+        # цели. Правда про них одна — operation_bus.REAL_TARGET_SQL.
         _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
-                    "WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt")
+                    "WHERE ol.op_id=oq.id AND ol.status='error'"
+                    + _obus.REAL_TARGET_SQL + ") AS err_cnt")
         # Страница и честные счётчики. Раньше запрос был жёстко LIMIT 30 без
         # offset и без общего числа: истории дальше тридцати операций просто не
         # существовало, а плитки на экране («Всего», «Готово», «Ошибки»)
@@ -615,11 +620,19 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор операции", 400)
         try:
+            # Подзапрос собирается ОТДЕЛЬНО, а основной запрос остаётся
+            # одним литералом: храповик скоупа по владельцу читает SQL-литералы
+            # функции и ищет в них колонку владения. Склейка через `+` разбивает
+            # литерал, `owner_id` уезжает в кусок без SELECT, и ручка читается
+            # как не скоупленная — хотя скоуп на месте. Первая версия этой
+            # правки так и покраснела.
+            _err_cnt = ("(SELECT COUNT(*) FROM operation_log ol "
+                        " WHERE ol.op_id=operation_queue.id AND ol.status='error'"
+                        + _obus.REAL_TARGET_SQL + ") AS err_cnt")
             row = await pool.fetchrow(
-                "SELECT op_type, params, label, status, total_items, done_items, "
-                "(SELECT COUNT(*) FROM operation_log ol "
-                " WHERE ol.op_id=operation_queue.id AND ol.status='error') AS err_cnt "
-                "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+                f"SELECT op_type, params, label, status, total_items, done_items, "
+                f"{_err_cnt} "
+                f"FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
                 return _err("Не найдено", 404)
@@ -751,17 +764,29 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Unauthorized", 401)
         from services import operation_retry as _oretry
 
+        # Подзапрос отдельной строкой — см. комментарий в retry_operation:
+        # склейка через `+` прячет owner_id от храповика скоупа.
+        _err_cnt = ("(SELECT COUNT(*) FROM operation_log ol "
+                    " WHERE ol.op_id=oq.id AND ol.status='error'"
+                    + _obus.REAL_TARGET_SQL + ") AS err_cnt")
         rows = await _safe_fetch(pool,
-            """SELECT oq.id, oq.op_type, oq.label, oq.status,
+            f"""SELECT oq.id, oq.op_type, oq.label, oq.status,
                       oq.done_items, oq.total_items,
-                      (SELECT COUNT(*) FROM operation_log ol
-                        WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt
+                      {_err_cnt}
                  FROM operation_queue oq
                 WHERE oq.owner_id=$1
                   AND oq.status IN ('failed','cancelled','done')
                   AND oq.created_at > now() - INTERVAL '7 days'
-                ORDER BY oq.created_at DESC
-                LIMIT 100""", uid)
+                  -- Уже перезапущенные из выборки исключаются, иначе каждое
+                  -- нажатие брало ОДНИ И ТЕ ЖЕ двадцать пять новейших: дедуп
+                  -- превращал их в ничто, остальные недоведённые не брались
+                  -- никогда, и «нажмите ещё раз» было бы неправдой.
+                  AND NOT EXISTS (
+                        SELECT 1 FROM operation_queue r
+                         WHERE r.owner_id=$1
+                           AND r.params->>'retry_of_op' = oq.id::text)
+                ORDER BY oq.created_at DESC, oq.id DESC
+                LIMIT 300""", uid)
         candidates = _oretry.pick_retryable([dict(r) for r in (rows or [])])
         if not candidates:
             return _json_resp({"ok": True, "retried": 0,
@@ -822,13 +847,20 @@ def setup_routes(app: web.Application, pool) -> None:
         # молчаливое ничегонеделание. Частичный успех остаётся успехом.
         if not retried and skipped:
             return _err("Повтор отклонён тарифом: " + (skipped[0]["why"] or "требуется подписка"), 403)
+        # Кнопка называется «перезапустить все», а за нажатие ставится не
+        # больше двадцати пяти: иначе одно нажатие заваливает очередь. Молчать
+        # об остатке нельзя — владелец читает «Перезапущено 25» как «всё», и
+        # недоведённые операции так и остаются недоведёнными.
+        left = max(0, len(candidates) - len(chosen))
         return _json_resp({
             "ok": True, "retried": len(retried), "skipped": len(skipped),
-            "candidates": len(candidates), "items": retried[:25],
+            "candidates": len(candidates), "left": left, "items": retried[:25],
             "note": (f"Перезапущено {len(retried)}"
                      + (f", пропущено {len(skipped)}" if skipped else "")
                      + (f". Разовым запуском, без копирования расписания: "
-                        f"{dropped_schedules}" if dropped_schedules else "")),
+                        f"{dropped_schedules}" if dropped_schedules else "")
+                     + (f". Осталось недоведённых: {left} — нажмите ещё раз"
+                        if left else "")),
         })
 
     async def operation_export(request: web.Request) -> web.Response:
@@ -837,16 +869,28 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Unauthorized", 401)
         fmt = request.query.get("format", "csv")
         try:
+            # Потолок — предохранитель от выгрузки на миллион строк, а не
+            # продуктовое ограничение. Было 500: владелец скачивал
+            # operations.csv, считая, что это история, а получал последние
+            # полтораста часов работы. Выгрузку несут из приложения наружу — в
+            # отчёт, в таблицу, в переписку, — и обрезанная выгрузка хуже
+            # отказа: по ней принимают решения, не зная, что её обрезали.
+            cap = 50_000
             rows = await pool.fetch(
                 # Колонки err_cnt нет — экспорт падал всегда. Число неудачных
                 # попыток в этой схеме — retry_count.
                 """SELECT id, op_type, label, status, total_items, done_items,
                           COALESCE(retry_count, 0) AS err_cnt, created_at, finished_at
-                   FROM operation_queue WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 500""",
-                uid,
+                   FROM operation_queue WHERE owner_id=$1
+                   ORDER BY created_at DESC, id DESC LIMIT $2""",
+                uid, cap,
             )
             if fmt == "json":
-                return _json_resp({"operations": [dict(r) for r in rows]})
+                total = await _safe_count(pool,
+                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", uid)
+                return _json_resp({"operations": [dict(r) for r in rows],
+                                   "total": total,
+                                   "truncated": len(rows) >= cap})
             header = ["ID", "Тип", "Метка", "Статус", "Всего", "Сделано", "Ошибок", "Создано", "Завершено"]
             data = [[
                 r["id"], r["op_type"], r["label"] or "", r["status"],
