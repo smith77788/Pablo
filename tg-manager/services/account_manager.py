@@ -3874,7 +3874,8 @@ async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dic
 
     Пишет /start боту @SpamBot и последовательно нажимает кнопки аппеляции
     («This is a mistake» → «Yes»), читая ответ на каждом шаге. Возвращает
-    {ok, status: 'free'|'still_blocked'|'appeal_sent'|'no_session', reply, steps}.
+    {ok, status: 'free'|'still_blocked'|'appeal_sent'|'frozen'|'banned'|'no_session',
+    reply, steps}. На 'frozen'/'banned' НЕ нажимает ни одной кнопки.
     Ничего не рассылает третьим лицам — только диалог с системным ботом Telegram.
     """
     if not session_string or len(session_string.strip()) < 10:
@@ -3903,6 +3904,13 @@ async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dic
             status = classify_spambot_reply(last_text)
             if status == "active":
                 return {"ok": True, "status": "free", "reply": last_text[:200], "steps": steps}
+            if status in ("frozen", "banned"):
+                # Ни одной кнопки. У заморозки кнопка «This is a mistake» —
+                # вход в анкету (ФИО, почта, причина) и капчу «подтвердите, что
+                # вы человек»: её проходит сам владелец, автоматика туда не
+                # ходит. Нажать и бросить на полпути — хуже, чем не нажимать.
+                # У бана снимать нечего. Вызывающий получает честный статус.
+                return {"ok": True, "status": status, "reply": last_text[:200], "steps": steps}
             btn_text = _pick_appeal_button(msg)
             if not btn_text:
                 break  # кнопок аппеляции нет — дальше нажимать нечего
@@ -3944,7 +3952,13 @@ def should_persist_account_status(
     *,
     auth_error: bool = False,
     has_session: bool = True,
+    restriction_checked: bool = True,
 ) -> bool:
+    # «Активен» без проверки ограничений (проверка без @SpamBot или сессия была
+    # занята и проверки не было вовсе) — это «сессия жива», а не «здоров».
+    # Записать его значит затереть spamblock/frozen и вернуть аккаунт в работу.
+    if status == "active" and not restriction_checked:
+        return False
     if status in {"active", "cooldown", "spamblock"}:
         return True
     if not is_verified_account_restriction(status, has_session=has_session):
@@ -3999,6 +4013,8 @@ async def check_account_status_full(
             "reason": "Аккаунт сейчас занят операцией (сессия жива) — проверка отложена.",
             "display_name": "",
             "session_busy": True,
+            # Проверки не было вовсе — см. should_persist_account_status.
+            "restriction_checked": False,
         }
     client = _make_client(session_string, _acc, _mutex_managed=True)  # мьютекс держим сами (выше)
     try:
@@ -4033,11 +4049,17 @@ async def check_account_status_full(
         }
 
         if not check_spambot:
+            # Без @SpamBot видно только, что сессия жива. Спам-блок и заморозку
+            # так не увидеть: замороженный аккаунт (режим «только чтение»)
+            # get_me проходит. Поэтому ответ помечен как «ограничения не
+            # проверялись», и записывать его поверх spamblock/frozen нельзя —
+            # иначе фоновый монитор сессий возвращал бы такие аккаунты в работу.
             return {
                 "status": "active",
-                "reason": "Аккаунт активен",
+                "reason": "Сессия жива (ограничения не проверялись)",
                 "display_name": display_name,
                 "profile": profile,
+                "restriction_checked": False,
             }
 
         # Check SpamBot for spamblock detection
@@ -4335,6 +4357,17 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
                 await pool.execute(
                     "UPDATE tg_accounts SET session_conflict_at = NULL WHERE id=$1",
                     acc["id"])
+
+            # Монитор ходит БЕЗ @SpamBot: его «активен» значит «сессия жива», и
+            # ограничение он не видит. Замороженный аккаунт get_me проходит, и
+            # раньше раз в шесть часов его (и спам-блок) молча переписывало в
+            # 'active' — то есть возвращало в работу. Снимать ограничение может
+            # только проверка, которая его видит.
+            from services.account_status import RESTRICTED_STATUSES as _RESTRICTED
+            if (new_status == "active"
+                    and result.get("restriction_checked") is False
+                    and str(old_status).lower() in _RESTRICTED):
+                new_status = old_status
 
             # Update status if changed
             if new_status != old_status:
@@ -9553,6 +9586,9 @@ _BF_RATE_LIMIT = (
     "попробуй",
 )
 _BF_USERNAME_TAKEN = ("already", "taken", "занят", "sorry", "exists")
+# Ответ BotFather на /newbot у аккаунта, исчерпавшего предел Telegram:
+# «That I cannot do. You come to me asking for more than 20 bots…».
+_BF_BOT_LIMIT = ("more than 20 bots", "20 bots", "больше 20 ботов", "20 ботов")
 
 
 # Длинный лимит BotFather («…try again in N seconds») бывает СУТОЧНЫМ (десятки
@@ -9686,6 +9722,16 @@ async def create_bot_via_botfather(
                     "error": f"BotFather: слишком много попыток, подождите {wait}с",
                     "flood_wait": wait,
                 }
+
+        # Предел Telegram — 20 ботов на аккаунт («…asking for more than 20 bots»).
+        # Это не сбой диалога, а исчерпанный аккаунт: вызывающему нужен признак,
+        # чтобы больше не ставить на него шаги (иначе мульти-фабрика выбирала бы
+        # его снова и снова — у него меньше всех созданных в этом прогоне).
+        if resp and any(k in resp_low for k in _BF_BOT_LIMIT):
+            await _bf_cancel()
+            return {"error": "На аккаунте уже 20 ботов — это предел Telegram. "
+                             "Удалите ненужных ботов через @BotFather или возьмите другой аккаунт.",
+                    "bot_limit": True}
 
         if not resp or not any(k in resp_low for k in _BF_STEP_NAME):
             await _bf_cancel()

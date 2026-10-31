@@ -529,6 +529,7 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
                 status,
                 auth_error=auth_error,
                 has_session=not result.get("no_session", False),
+                restriction_checked=result.get("restriction_checked", True),
             ):
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",

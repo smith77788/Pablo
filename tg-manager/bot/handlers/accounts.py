@@ -81,6 +81,8 @@ _STATUS_EMOJI: dict[str, str] = {
     "spamblock": "⚠️",
     "banned": "❌",
     "deactivated": "💀",
+    "deleted": "💀",
+    "frozen": "🧊",
     "session_expired": "🔑",
     "archived": "📦",
 }
@@ -107,6 +109,8 @@ def _display_acc_status_label(acc: dict) -> str:
         "spamblock": "⚠️ Спам-ограничения",
         "banned": "❌ Заблокирован",
         "deactivated": "💀 Деактивирован",
+        "deleted": "💀 Удалён в Telegram",
+        "frozen": "🧊 Заморожен Telegram",
         "session_expired": "🔑 Сессия истекла",
         "archived": "⏸ Отключён",
     }
@@ -1502,6 +1506,12 @@ async def cb_acc_spamblock_appeal(
         "still_blocked": "⛔️ Аккаунт всё ещё ограничен.",
         "appeal_sent": "📨 Апелляция отправлена, ждём решения Telegram.",
         "no_session": "⚠️ Сессия недоступна.",
+        # Заморозку автоматика НЕ обжалует: @SpamBot ведёт в анкету с капчей
+        # «подтвердите, что вы человек» — её проходит только сам владелец.
+        "frozen": ("🧊 Аккаунт заморожен Telegram. Апелляцию подайте сами: "
+                   "откройте @SpamBot с этого аккаунта и пройдите шаги — иначе "
+                   "Telegram удалит аккаунт после даты из сообщения."),
+        "banned": "❌ Аккаунт заблокирован Telegram — апелляция не поможет.",
     }
     head = _status_map.get(res.get("status"), "ℹ️ Готово.")
     reply = escape((res.get("reply") or "")[:500])

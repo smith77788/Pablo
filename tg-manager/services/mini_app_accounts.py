@@ -1354,8 +1354,15 @@ def setup_routes(app: web.Application, pool) -> None:
                   "appeal_sent": "📨 Аппеляция отправлена — ждите решения",
                   "still_blocked": "🔴 Спамблок активен, кнопки аппеляции нет",
                   "error": "⚠️ Ошибка обращения к @SpamBot",
-                  "no_session": "⚠️ Сессия недоступна"}
-        if not res.get("ok") and res.get("status") not in ("still_blocked", "appeal_sent", "free"):
+                  "no_session": "⚠️ Сессия недоступна",
+                  # Заморозку автоматика не обжалует: дальше анкета с капчей
+                  # «подтвердите, что вы человек», её проходит сам владелец.
+                  "frozen": ("🧊 Аккаунт заморожен Telegram — апелляцию подайте "
+                             "сами в @SpamBot с этого аккаунта, иначе Telegram "
+                             "удалит его после даты из сообщения"),
+                  "banned": "❌ Аккаунт заблокирован Telegram — апелляция не поможет"}
+        if not res.get("ok") and res.get("status") not in (
+                "still_blocked", "appeal_sent", "free", "frozen", "banned"):
             # Ответ @SpamBot в текст ошибки не подмешиваем: это внешний текст
             # (данные, не сообщение продукта), он и так есть в поле reply успеха.
             return _err(labels.get(res.get("status"), "Не выполнено"), 400)

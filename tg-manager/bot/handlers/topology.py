@@ -145,8 +145,11 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "active": "✅",
         "cooldown": "⏳",
         "spamblock": "⚠️",
+        "frozen": "🧊",
         "banned": "❌",
         "deactivated": "💀",
+        "deleted": "💀",
+        "session_expired": "🔑",
     }
     for i, (aid, data) in enumerate(acc_map.items()):
         si = status_icons.get(data["status"], "❓")
@@ -235,8 +238,11 @@ async def cb_topo_acc_list(
         "active": "✅",
         "cooldown": "⏳",
         "spamblock": "⚠️",
+        "frozen": "🧊",
         "banned": "❌",
         "deactivated": "💀",
+        "deleted": "💀",
+        "session_expired": "🔑",
     }
 
     lines = ["📱 <b>Топология — по аккаунтам</b>\n"]
@@ -343,8 +349,11 @@ async def cb_topo_acc_view(
         "active": "✅",
         "cooldown": "⏳",
         "spamblock": "⚠️",
+        "frozen": "🧊",
         "banned": "❌",
         "deactivated": "💀",
+        "deleted": "💀",
+        "session_expired": "🔑",
     }
     si = st_icons.get(status, "❓")
 
@@ -506,7 +515,8 @@ async def cb_topo_chan_view(
         )
         si = {
             "active": "✅", "cooldown": "⏳", "spamblock": "⚠️",
-            "banned": "❌", "deactivated": "💀",
+            "frozen": "🧊", "banned": "❌", "deactivated": "💀",
+            "deleted": "💀", "session_expired": "🔑",
         }.get(
             effective_account_status(
                 acc.get("acc_status"),

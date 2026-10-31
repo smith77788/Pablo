@@ -343,7 +343,8 @@ function accGeoClear() {
 
 function accRu(v) {
   return {active:'🟢 Активен', ok:'🟢 Активен', banned:'🚫 Забанен',
-          deactivated:'⚫ Удалён', session_expired:'🔑 Нужна переавторизация',
+          deactivated:'⚫ Удалён', deleted:'⚫ Удалён в Telegram',
+          session_expired:'🔑 Нужна переавторизация',
           spamblock:'🔇 Спам-блок', limited:'⚠️ Ограничен',
           // cooldown и no_session возвращает check_account_status_full, а в
           // этой таблице их не было — на экране диагностики они уезжали

@@ -516,7 +516,8 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
             continue
 
         if not should_persist_account_status(
-            status, auth_error=auth_error, has_session=True
+            status, auth_error=auth_error, has_session=True,
+            restriction_checked=result.get("restriction_checked", True),
         ):
             continue
 

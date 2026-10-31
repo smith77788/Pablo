@@ -1398,6 +1398,7 @@ async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> 
                     status,
                     auth_error=bool(res.get("auth_error")),
                     has_session=not res.get("no_session", False),
+                    restriction_checked=res.get("restriction_checked", True),
                 ):
                     await pool.execute(
                         "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",

@@ -459,15 +459,19 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     _STATUS_EMOJI = {
         "active": "✅",
         "spamblock": "🚫",
+        "frozen": "🧊",
         "cooldown": "⏸",
         "banned": "⛔",
         "deactivated": "🗑",
+        "deleted": "🗑",
         "session_expired": "🔑",
     }
     _STATUS_LABEL = {
         "spamblock": "СПАМ-БЛОК",
+        "frozen": "ЗАМОРОЖЕН",
         "banned": "ЗАБЛОКИРОВАН",
         "deactivated": "УДАЛЁН",
+        "deleted": "УДАЛЁН В TELEGRAM",
         "session_expired": "СЕССИЯ ИСТЕКЛА",
         "cooldown": "ПАУЗА",
     }
@@ -664,18 +668,22 @@ async def cb_health_real_check(
     status_label = {
         "active": "активен",
         "spamblock": "спам-ограничения",
+        "frozen": "заморожен Telegram (снимается апелляцией)",
         "cooldown": "пауза",
         "banned": "заблокирован Telegram",
         "deactivated": "удалён",
+        "deleted": "удалён в Telegram",
         "session_expired": "сессия истекла",
         "error": "ошибка",
     }
     status_emoji = {
         "active": "✅",
         "spamblock": "🚫",
+        "frozen": "🧊",
         "cooldown": "⏸",
         "banned": "⛔",
         "deactivated": "🗑",
+        "deleted": "🗑",
         "session_expired": "🔑",
         "error": "⚠️",
     }
@@ -717,6 +725,7 @@ async def cb_health_real_check(
                 status,
                 auth_error=bool(res.get("auth_error")),
                 has_session=not res.get("no_session", False),
+                restriction_checked=res.get("restriction_checked", True),
             ):
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",

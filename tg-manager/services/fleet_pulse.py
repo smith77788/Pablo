@@ -275,7 +275,7 @@ def _dead_reason(status: str) -> str:
         "session_expired": "сессия истекла — перезалейте аккаунт",
         "spamblock": "спам-блок — идёт реабилитация/нужна перезаливка",
         "deleted": "аккаунт удалён в Telegram — не восстановить",
-        "frozen": "аккаунт заморожен Telegram — нужен разбор/перезаливка",
+        "frozen": "аккаунт заморожен Telegram — подайте апелляцию в @SpamBot, иначе его удалят",
     }.get(status, status)
 
 

@@ -4620,6 +4620,73 @@ async def completed_steps(pool: asyncpg.Pool, op_id: int) -> set[int]:
     return out
 
 
+# Метка аккаунта в строке успеха фабрики ботов: по ней повтор восстанавливает,
+# сколько ботов уже создал каждый аккаунт (см. _bot_factory_made_by_acc).
+_BF_ACC_MARK = "аккаунт #"
+_BF_ACC_MARK_RE = re.compile(r"аккаунт #(\d+)")
+# Сколько фабрика вправе ждать суточный лимит BotFather отсрочками. Дольше —
+# закрываемся честным итогом: аккаунт, который не отпускает лимит третьи сутки,
+# ждать дальше незачем, а бесконечные отсрочки выглядели бы вечной операцией.
+_BF_DEFER_MAX_AGE_S = 72 * 3600
+# Сколько обычных ошибок диалога подряд терпим от одного аккаунта в прогоне.
+_BF_ACC_MAX_ERRORS = 2
+
+
+async def _bot_factory_made_by_acc(pool: asyncpg.Pool, op_id: int) -> dict[int, int]:
+    """Сколько ботов уже создал каждый аккаунт в этой работе — по журналу.
+
+    Потолок «ботов на аккаунт» обязан пережить повтор операции. Без этого
+    повтор (отсрочка до конца лимита BotFather, сброс зависшей, деплой)
+    начинал счёт с нуля, и аккаунт, уже сделавший свою квоту, получал её
+    второй раз — ровно то, на что жаловался владелец («указал 2, создалось 5»).
+
+    Читается СТРОГО (`_journal_fetch`): пустой ответ на сбое базы означал бы
+    «никто ещё ничего не создал». Строки без метки (журнал до этой правки)
+    не считаются — это недосчёт в сторону старого поведения, не перебор.
+    """
+    rows = await _journal_fetch(
+        pool,
+        "SELECT step_num, message FROM operation_log "
+        " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND step_num IS NOT NULL",
+        await journal_op_ids(pool, op_id),
+        log_ctx=f"[bot_factory_made_by_acc op={op_id}]", where="bot_factory_made_by_acc",
+    )
+    by_step: dict[int, int] = {}
+    for r in (rows or []):
+        try:
+            m = _BF_ACC_MARK_RE.search(str(r["message"] or ""))
+            if m:
+                by_step[int(r["step_num"])] = int(m.group(1))
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+    out: dict[int, int] = {}
+    for acc_id in by_step.values():
+        out[acc_id] = out.get(acc_id, 0) + 1
+    return out
+
+
+async def _bot_factory_may_defer(pool: asyncpg.Pool, op_id: int) -> bool:
+    """Можно ли отложить фабрику до конца лимита BotFather, а не закрывать.
+
+    Не дольше `_BF_DEFER_MAX_AGE_S` от создания операции. Не прочитали возраст —
+    не откладываем: честный итог лучше вечной отсрочки.
+    """
+    age = await _safe_fetchval(
+        pool,
+        "SELECT EXTRACT(EPOCH FROM (now() - created_at)) FROM operation_queue WHERE id=$1",
+        op_id, log_ctx=f"[bot_factory_may_defer op={op_id}]")
+    try:
+        return age is not None and float(age) < _BF_DEFER_MAX_AGE_S
+    except (TypeError, ValueError):
+        return False
+
+
+def _bf_human_wait(seconds: int) -> str:
+    h, rem = divmod(max(0, int(seconds)), 3600)
+    m = rem // 60
+    return f"{h} ч {m} мин" if h else f"{m} мин"
+
+
 async def settled_targets(pool: asyncpg.Pool, op_id: int) -> dict[str, str]:
     """Цели, по которым вопрос уже ЗАКРЫТ, и чем именно: {цель: 'ok' | 'skip'}.
 
@@ -10960,7 +11027,6 @@ async def _exec_bot_factory_multi(
                 "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
-    _claimed_total = len(active_accounts)
     total = len(active_accounts) * bot_count
     await _safe_execute(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
@@ -10975,6 +11041,15 @@ async def _exec_bot_factory_multi(
     # выбор берём тех, кто ещё под потолком, — это и потолок, и равномерность.
     from collections import defaultdict as _defaultdict
     made_by_acc: dict[int, int] = _defaultdict(int)
+    # Обычные ошибки диалога по аккаунту в этом прогоне: аккаунт с ошибкой
+    # остаётся «наименее загруженным» и без счётчика выбирался бы снова и
+    # снова, собирая на себя все шаги.
+    fail_by_acc: dict[int, int] = _defaultdict(int)
+    # Почему аккаунт выбыл из ротации — для честного итога.
+    lost_reason: dict[int, str] = {}
+    # Выбывшие по длинному лимиту BotFather — их квоту можно добрать после паузы.
+    flood_wait_by_acc: dict[int, int] = {}
+    created_this_run = 0
 
     # SEO-массив для ботов: имя из ключей (перестановка), @username вращением
     # ключей с суффиксом bot. Иначе — прежняя нумерация unique_bot_username.
@@ -10995,12 +11070,19 @@ async def _exec_bot_factory_multi(
     # пропуск тогда закроет не тот шаг. Это принятый в продукте компромисс,
     # ровно так же устроено массовое создание каналов; даже со сдвигом это
     # лучше, чем гарантированный второй комплект.
-    _done_steps = await completed_steps(pool, op_id)
-    if _done_steps:
-        log.info("bot_factory_multi op=%d: повтор — %d ботов уже созданы, пропускаем",
-                 op_id, len(_done_steps))
-
     try:
+        # Чтения журнала — внутри try: оба строгие и на сбое поднимают
+        # исключение, а аккаунты уже захвачены, и без finally остались бы
+        # «занятыми» до перезапуска процесса.
+        _done_steps = await completed_steps(pool, op_id)
+        if _done_steps:
+            log.info("bot_factory_multi op=%d: повтор — %d ботов уже созданы, пропускаем",
+                     op_id, len(_done_steps))
+            # Потолок «ботов на аккаунт» переживает повтор: считаем, кто сколько
+            # уже создал в прошлых прогонах этой работы.
+            for _aid, _n in (await _bot_factory_made_by_acc(pool, op_id)).items():
+                made_by_acc[int(_aid)] += int(_n)
+
         for global_i in range(total):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -11049,7 +11131,8 @@ async def _exec_bot_factory_multi(
                         and int(a["id"]) not in tried]
                 if not elig:
                     break
-                elig.sort(key=lambda a: made_by_acc[int(a["id"])])
+                elig.sort(key=lambda a: (made_by_acc[int(a["id"])],
+                                         fail_by_acc[int(a["id"])]))
                 cand = elig[0]
                 tried.add(int(cand["id"]))
                 result = await account_manager.create_bot_via_botfather(
@@ -11063,6 +11146,14 @@ async def _exec_bot_factory_multi(
                         "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", cand["id"]
                     )
                     active_accounts = [a for a in active_accounts if a["id"] != cand["id"]]
+                    lost_reason[int(cand["id"])] = "бан/мёртвая сессия"
+                    continue
+                if result.get("bot_limit"):
+                    # На аккаунте уже 20 ботов — предел Telegram, дальше он не
+                    # создаст ни одного. Без признака он оставался бы «наименее
+                    # загруженным» и собирал бы на себя все шаги.
+                    active_accounts = [a for a in active_accounts if a["id"] != cand["id"]]
+                    lost_reason[int(cand["id"])] = "предел 20 ботов"
                     continue
                 if result.get("peer_flood") or result.get("flood_wait"):
                     # Помечаем флуд на аккаунте (срок берём как при инвайте) и
@@ -11081,8 +11172,13 @@ async def _exec_bot_factory_multi(
                             pool, int(cand["id"]),
                             result.get("flood_wait") or 0, "create_bot", op_id)
                     active_accounts = [a for a in active_accounts if a["id"] != cand["id"]]
+                    if result.get("flood_wait"):
+                        flood_wait_by_acc[int(cand["id"])] = int(result["flood_wait"])
+                        lost_reason[int(cand["id"])] = "лимит BotFather"
+                    else:
+                        lost_reason[int(cand["id"])] = "PeerFlood"
                     continue
-                # Успех или обычная ошибка (не вина аккаунта) — аккаунт выбран.
+                # Успех или обычная ошибка — аккаунт выбран на этот шаг.
                 candidate = cand
                 break
 
@@ -11096,6 +11192,8 @@ async def _exec_bot_factory_multi(
                 # Бот создан — слот BotFather этого аккаунта потрачен, засчитываем
                 # в потолок ДАЖЕ если getMe ниже не ответит (бот уже существует).
                 made_by_acc[int(candidate["id"])] += 1
+                fail_by_acc[int(candidate["id"])] = 0
+                created_this_run += 1
                 token = result["token"]
                 actual_uname = result.get("username", username)
                 created_tokens.append(token)
@@ -11128,7 +11226,8 @@ async def _exec_bot_factory_multi(
                         op_id,
                         _step,
                         display_name,
-                        "бот создан, но getMe не ответил — токен не сохранён в списке ботов")
+                        "бот создан, но getMe не ответил — токен не сохранён в списке ботов"
+                        f" · {_BF_ACC_MARK}{int(candidate['id'])}")
                     await _safe_execute(
                         pool,
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
@@ -11157,9 +11256,20 @@ async def _exec_bot_factory_multi(
                     op_id,
                     _step,
                     display_name,
-                    f"@{actual_uname}")
+                    f"@{actual_uname} · {_BF_ACC_MARK}{int(candidate['id'])}")
             else:
                 failed_count += 1
+                # Обычная ошибка диалога. «Не нашлось свободного @username» —
+                # не вина аккаунта; остальное (неожиданный ответ, нет токена,
+                # сбой связи) копится, и после _BF_ACC_MAX_ERRORS аккаунт
+                # выходит из ротации, чтобы не собирать на себя все шаги.
+                _err_txt = str(result.get("error") or "")
+                if "свободный username" not in _err_txt:
+                    _cid = int(candidate["id"])
+                    fail_by_acc[_cid] += 1
+                    if fail_by_acc[_cid] >= _BF_ACC_MAX_ERRORS:
+                        active_accounts = [a for a in active_accounts if int(a["id"]) != _cid]
+                        lost_reason[_cid] = "ошибки диалога с BotFather"
                 await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -11181,7 +11291,22 @@ async def _exec_bot_factory_multi(
     finally:
         await release_accounts(claimed_ids)
 
-    _lost = _claimed_total - len(active_accounts)
+    # Квоту аккаунтов, выбывших по ДЛИННОМУ лимиту BotFather, можно добрать
+    # после паузы: лимит назван точно, и он истекает. Тогда операция не
+    # закрывается недоделанной, а откладывается до конца самой короткой паузы
+    # (сделанные шаги пропустит журнал, потолок — счётчик по журналу).
+    _pending = {a: w for a, w in flood_wait_by_acc.items()
+                if made_by_acc[a] < bot_count}
+    if created_count < total and _pending and await _bot_factory_may_defer(pool, op_id):
+        _wait = min(_pending.values())
+        return {
+            "status": "requeue",
+            "defer_s": _wait + 60,
+            "reason": (f"BotFather ограничил создание ботов на {len(_pending)} акк. — "
+                       f"ближайший освободится через {_bf_human_wait(_wait)}. "
+                       f"Создано: {created_count} из {total}; остальные — после паузы."),
+        }
+
     if created_count >= total:
         _status = "done"
     elif created_count > 0:
@@ -11189,8 +11314,12 @@ async def _exec_bot_factory_multi(
     else:
         _status = "failed"
     _summary = f"Создано ботов: {created_count} из {total}, ошибок: {failed_count}"
-    if _lost:
-        _summary += f", аккаунтов выбыло (бан/флуд): {_lost}"
+    if lost_reason:
+        _by: dict[str, int] = {}
+        for _r in lost_reason.values():
+            _by[_r] = _by.get(_r, 0) + 1
+        _summary += ", аккаунтов выбыло: " + ", ".join(
+            f"{_r} — {_n}" for _r, _n in sorted(_by.items(), key=lambda kv: -kv[1]))
     if _busy:
         _summary += f", пропущено занятых аккаунтов: {_busy}"
     return {
@@ -11254,6 +11383,7 @@ async def _exec_bot_factory(
         created_count = 0
         failed_count = 0
         created_tokens: list[str] = []
+        _stop_note = ""   # почему остаток не создан (предел/лимит BotFather)
 
         # SEO-массив для ботов: имя из ключей (перестановка), @username вращением
         # ключей с обязательным суффиксом bot. Иначе — прежнее «Имя 1, Имя 2».
@@ -11323,6 +11453,25 @@ async def _exec_bot_factory(
                 _acc=acc,
             )
 
+            if result.get("bot_limit"):
+                # Предел Telegram: 20 ботов на аккаунт. Остальные шаги этого
+                # аккаунта не пройдут точно — засчитываем их сразу, а не шлём
+                # /newbot ещё count-i раз (каждый — лишний след у BotFather).
+                _left = count - i
+                failed_count += _left
+                _stop_note = "\n⛔ " + str(result.get("error") or "")[:200]
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, num, display_name, str(result.get("error") or "")[:200],
+                )
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                    op_id, _left)
+                break
+
             if result.get("token"):
                 token = result["token"]
                 actual_uname = result.get("username", username_base)
@@ -11380,6 +11529,37 @@ async def _exec_bot_factory(
                     # Та же причина, что выше: пауза переживает прогон.
                     await _note_flood_penalty(
                         pool, int(acc["id"]), wait_secs, "create_bot", op_id)
+                    if wait_secs > 600:
+                        # Длинный лимит BotFather (бывает суточным). Раньше шаг
+                        # засчитывался ошибкой, и цикл шёл дальше — то есть
+                        # слал /newbot тому же аккаунту на КАЖДОМ оставшемся
+                        # шаге, продлевая ему штраф. Аккаунт у этого пути один:
+                        # откладываем операцию до конца паузы (сделанные шаги
+                        # пропустит журнал), а если ждать уже некуда — честно
+                        # закрываем остаток.
+                        if await _bot_factory_may_defer(pool, op_id):
+                            return {
+                                "status": "requeue",
+                                "defer_s": wait_secs + 60,
+                                "reason": (f"BotFather ограничил создание ботов на аккаунте "
+                                           f"на {_bf_human_wait(wait_secs)}. Создано: "
+                                           f"{created_count} из {count}; остальные — после паузы."),
+                            }
+                        _left = count - i
+                        failed_count += _left
+                        _stop_note = (f"\n⏳ BotFather ограничил аккаунт ещё на "
+                                      f"{_bf_human_wait(wait_secs)} — остальные боты не созданы")
+                        await _journal_write(
+                            pool,
+                            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                            "VALUES($1,$2,$3,'error',$4)",
+                            op_id, num, display_name, err_msg,
+                        )
+                        await _safe_execute(
+                            pool,
+                            "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                            op_id, _left)
+                        break
                     if wait_secs <= 600:
                         log.info(
                             "_exec_bot_factory: FloodWait %ds, sleeping...", wait_secs + 15
@@ -11461,7 +11641,8 @@ async def _exec_bot_factory(
             "ok": created_count,
             "failed": failed_count,
             "created_tokens": created_tokens[:10],
-            "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
+            "summary": (f"Создано ботов: {created_count} из {count}, ошибок: {failed_count}"
+                        + _stop_note),
         }
     finally:
         await release_accounts([_claimed_acc])
@@ -14687,11 +14868,16 @@ async def _exec_check_accounts_health(
     # порядок в итоге: от здоровых к проблемным, ошибки проверки в конце.
     _STATUS_LABELS = {
         "active": "✅ активен",
+        # Проверка без @SpamBot (или сессия занята): видно только, что сессия
+        # жива. Звать это «активен» нельзя — спам-блок и заморозку так не видно.
+        "alive_unchecked": "🟢 сессия жива (ограничения не проверялись)",
         "spamblock": "🚫 спам-блок",
+        "frozen": "🧊 заморожен (снимается только апелляцией)",
         "cooldown": "⏳ FloodWait",
         "banned": "❌ заблокирован",
         "session_expired": "🔑 сессия отозвана",
         "deactivated": "❌ аккаунт удалён",
+        "deleted": "❌ аккаунт удалён в Telegram",
         "no_session": "⚪ нет сессии",
         "unknown": "❓ ошибка проверки",
     }
@@ -14720,7 +14906,10 @@ async def _exec_check_accounts_health(
             errors += 1
 
         status = result.get("status", "unknown")
-        status_counts[status] = status_counts.get(status, 0) + 1
+        _weak_active = (status == "active"
+                        and result.get("restriction_checked") is False)
+        _count_key = "alive_unchecked" if _weak_active else status
+        status_counts[_count_key] = status_counts.get(_count_key, 0) + 1
         if status == "spamblock":
             if result.get("spamblock_kind") == "temp":
                 spamblock_temp += 1
@@ -14758,6 +14947,26 @@ async def _exec_check_accounts_health(
                 deactivated += 1
             except Exception as e:
                 log.warning("check_accounts_health: deactivate acc %s failed: %s", acc["id"], e)
+        elif _weak_active:
+            # Сессия жива, но ограничения НЕ проверялись. Вернуть в строй можно
+            # только аккаунт, выключенный разовой auth-ошибкой, и только если он
+            # не под спам-блоком/заморозкой: снимать ограничение может лишь
+            # проверка, которая его видит. Статус в базе такой ответ не меняет.
+            try:
+                _res = await pool.execute(
+                    "UPDATE tg_accounts SET acc_status='active', status_reason=NULL, "
+                    "is_active=TRUE WHERE id=$1 AND is_active=FALSE "
+                    "AND COALESCE(acc_status,'active') NOT IN ("
+                    + _acc_status.sql_status_list(
+                        _acc_status.RESTRICTED_STATUSES) + ")",
+                    acc["id"],
+                )
+                if str(_res).endswith(" 1"):
+                    reactivated += 1
+                else:
+                    unchanged += 1
+            except Exception as e:
+                log.warning("check_accounts_health: reactivate acc %s failed: %s", acc["id"], e)
         elif status == "active":
             # Подтверждённо рабочий аккаунт (get_me прошёл, ограничений нет):
             # вернуть в строй, если был ошибочно деактивирован разовой auth-ошибкой
@@ -14791,7 +15000,7 @@ async def _exec_check_accounts_health(
         # Per-account запись в лог операции — чтобы секция «📋 Лог» в деталях
         # (mini-app) показывала вердикт по каждому аккаунту, а не пустоту.
         _acc_label = acc.get("first_name") or acc.get("phone") or f"acc#{acc['id']}"
-        _verdict = _STATUS_LABELS.get(status, status)
+        _verdict = _STATUS_LABELS.get(_count_key, _count_key)
         _reason = (result.get("reason") or "").strip()
         _log_msg = f"{_verdict}{(' — ' + _reason) if _reason else ''}"
         await _journal_write(

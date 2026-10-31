@@ -49,7 +49,16 @@ _MAX_RECHECKS = 8            # после стольких безуспешны�
 # частить бессмысленно и подозрительно; растягиваем интервал.
 _RECHECK_BACKOFF_H = (6, 12, 24, 24, 48, 48, 72, 72)
 
-_DEAD_STATUSES = ("banned", "deactivated", "session_expired")
+_DEAD_STATUSES = ("banned", "deactivated", "deleted", "session_expired")
+
+# Заморозка — не «мёртвый» и не спам-блок. Аккаунт в режиме «только чтение»
+# снимается ТОЛЬКО апелляцией, которую подаёт сам владелец: @SpamBot ведёт в
+# анкету (ФИО, почта, причина) и капчу «подтвердите, что вы человек». Прогрев
+# и автоаппеляция тут бессмысленны (а нажатие «This is a mistake» автоматикой
+# бросило бы анкету на полпути), поэтому реабилитация передаёт такой аккаунт
+# человеку — фаза 'stuck', но с честной причиной, а не «стоит заменить».
+_FROZEN_NOTE = ("заморожен Telegram — апелляцию подаёт владелец сам в @SpamBot, "
+                "иначе аккаунт удалят после даты из сообщения")
 
 
 def _disabled() -> bool:
@@ -85,16 +94,22 @@ async def _sync_enrollment(pool) -> None:
         """UPDATE account_rehab_state r
            SET phase = CASE
                    WHEN COALESCE(a.acc_status,'active') = ANY($1::text[]) THEN 'gone'
+                   -- Заморозка — не «снят»: без этой ветки замороженный аккаунт
+                   -- записывался в восстановленные, и итог реабилитации врал.
+                   WHEN COALESCE(a.acc_status,'active') = 'frozen' THEN 'stuck'
                    ELSE 'freed' END,
+               note = CASE WHEN COALESCE(a.acc_status,'active') = 'frozen'
+                   THEN $2 ELSE r.note END,
                freed_at = CASE WHEN r.freed_at IS NULL
-                   AND COALESCE(a.acc_status,'active') <> ANY($1::text[])
+                   AND NOT (COALESCE(a.acc_status,'active') = ANY($1::text[]))
+                   AND COALESCE(a.acc_status,'active') <> 'frozen'
                    THEN now() ELSE r.freed_at END,
                updated_at = now()
            FROM tg_accounts a
            WHERE a.id = r.acc_id
              AND r.phase IN ('appeal','warming','recheck','off')
              AND COALESCE(a.acc_status,'active') <> 'spamblock'""",
-        list(_DEAD_STATUSES),
+        list(_DEAD_STATUSES), _FROZEN_NOTE,
     )
     # 'off' в списке намеренно: пока аккаунт под блоком, выключенное вручную
     # восстановление остаётся выключенным (условие выше это гарантирует).
@@ -146,6 +161,29 @@ async def _advance(
         inc_attempts, inc_appeals, inc_warm_cycles, inc_warm_actions,
         delay_sec, freed,
     )
+
+
+async def _hand_over_terminal(pool, acc_id: int, status: str, *,
+                              inc_attempts: int = 0, inc_appeals: int = 0) -> None:
+    """@SpamBot ответил заморозкой или баном — реабилитация здесь не лечит.
+
+    Статус пишется правдой (иначе операции продолжат брать аккаунт под
+    'spamblock'), а реабилитация отдаёт аккаунт: заморозку — человеку
+    ('stuck' с причиной, апелляцию подаёт он сам), бан — в 'gone'.
+    """
+    from services import account_status
+
+    frozen = status == "frozen"
+    await account_status.set_status(
+        pool, acc_id, status,
+        reason=("Реабилитация: @SpamBot сообщил о заморозке аккаунта" if frozen
+                else "Реабилитация: @SpamBot сообщил о блокировке аккаунта"),
+        source="rehab")
+    await _advance(pool, acc_id,
+                   phase="stuck" if frozen else "gone",
+                   note=_FROZEN_NOTE if frozen else "заблокирован Telegram — восстанавливать нечего",
+                   inc_attempts=inc_attempts, inc_appeals=inc_appeals)
+    log.info("rehab: acc=%d передан из реабилитации — %s", acc_id, status)
 
 
 # ── Тихий пассивный прогрев ────────────────────────────────────────────────────
@@ -246,6 +284,9 @@ async def _process(pool, r: dict) -> None:
         except Exception as e:
             res = {"ok": False, "status": "error", "reply": str(e)[:120]}
         st = res.get("status")
+        if st in ("frozen", "banned"):
+            await _hand_over_terminal(pool, acc_id, st, inc_appeals=0)
+            return
         if st == "free":
             await account_status.set_status(
                 pool, acc_id, "active", reason="Спам-блок снят (аппеляция)", source="rehab")
@@ -292,6 +333,10 @@ async def _process(pool, r: dict) -> None:
             await _advance(pool, acc_id, phase="freed",
                            note="снят по перепроверке", inc_attempts=1, freed=True)
             log.info("rehab: acc=%d освобождён после прогрева (попытка %d)", acc_id, attempts)
+            return
+
+        if status == "frozen":
+            await _hand_over_terminal(pool, acc_id, "frozen", inc_attempts=1)
             return
 
         if status in _DEAD_STATUSES:
@@ -436,6 +481,16 @@ def describe(row: dict, now=None) -> dict[str, Any]:
     phase = (row.get("phase") or "appeal").lower()
     label = PHASE_LABEL.get(phase, phase)
     hint = PHASE_HINT.get(phase, "")
+    # Заморозка лежит в той же фазе «нужен ваш разбор», но совет у неё другой:
+    # общий текст «стоит заменить» для неё неверен — аккаунт возвращается
+    # апелляцией, и её подаёт только сам владелец.
+    frozen = phase == "stuck" and str(row.get("acc_status") or "").lower() == "frozen"
+    if frozen:
+        label = "🧊 Заморожен — нужна ваша апелляция"
+        hint = ("Telegram заморозил аккаунт: режим «только чтение». Автоматика"
+                " это не снимает — апелляцию подаёте вы. Откройте @SpamBot с этого аккаунта, нажмите"
+                " «This is a mistake» и ответьте на вопросы — иначе Telegram"
+                " удалит аккаунт после даты, указанной в сообщении.")
     nxt = row.get("next_action_at")
     wait_s = None
     if phase in ACTIVE_PHASES and nxt is not None:
@@ -456,11 +511,13 @@ def describe(row: dict, now=None) -> dict[str, Any]:
         "active": phase in ACTIVE_PHASES,
         "attention": phase in ATTENTION_PHASES,
         # Перезапуск имеет смысл только там, где автоматика уже сдалась.
-        "restartable": phase in ("stuck", "off"),
+        # Заморозку перезапуск не снимет: её обжалует только человек.
+        "restartable": phase in ("stuck", "off") and not frozen,
     }
 
 
-def build_terminal_alert(name: str, phase: str, attempts: int) -> str:
+def build_terminal_alert(name: str, phase: str, attempts: int,
+                         frozen: bool = False) -> str:
     """Сообщение об итоге восстановления. Оба итога важны и оба молчали.
 
     `freed` — аккаунт вернулся в строй, и человек должен об этом знать, иначе
@@ -473,6 +530,15 @@ def build_terminal_alert(name: str, phase: str, attempts: int) -> str:
             f"<b>{name}</b> — спам-блок снят, аккаунт снова участвует в операциях.\n\n"
             "Не нагружайте его сразу: дайте пару дней спокойного режима,"
             " иначе ограничение вернётся."
+        )
+    if frozen:
+        return (
+            "🧊 <b>Аккаунт заморожен Telegram</b>\n\n"
+            f"<b>{name}</b> — режим «только чтение», из работы выведен.\n\n"
+            "Автоматика это не снимает: апелляцию подаёте вы. Откройте"
+            " @SpamBot с этого аккаунта, нажмите «This is a mistake» и ответьте"
+            " на вопросы. Если не успеть до даты из сообщения, Telegram удалит"
+            " аккаунт."
         )
     return (
         "🛠 <b>Аккаунт не удалось восстановить</b>\n\n"
@@ -492,7 +558,7 @@ async def notify_terminal(pool, bot) -> int:
     try:
         rows = await pool.fetch(
             """SELECT r.acc_id, r.owner_id, r.phase, r.attempts,
-                      a.phone, a.first_name
+                      a.phone, a.first_name, a.acc_status
                  FROM account_rehab_state r
                  JOIN tg_accounts a ON a.id = r.acc_id
                 WHERE r.phase IN ('freed','stuck')
@@ -510,7 +576,9 @@ async def notify_terminal(pool, bot) -> int:
 
             await _db.notify_if_enabled(
                 pool, bot, r["owner_id"], "restriction",
-                build_terminal_alert(name, r["phase"], r["attempts"]),
+                build_terminal_alert(
+                    name, r["phase"], r["attempts"],
+                    frozen=str(r.get("acc_status") or "").lower() == "frozen"),
                 dedup_key=f"rehab:{r['acc_id']}:{r['phase']}")
             sent += 1
         except Exception:
@@ -595,6 +663,25 @@ async def record_manual_appeal(pool, owner_id: int, acc_id: int, status: str) ->
                     WHERE acc_id=$1 AND owner_id=$2
                       AND phase IN ('appeal','warming','recheck','off','stuck')""",
                 acc_id, owner_id)
+            return
+        if status in ("frozen", "banned"):
+            # @SpamBot ответил заморозкой/баном — ни одной кнопки не нажато
+            # (см. appeal_spamblock). Статус пишется правдой, иначе операции
+            # продолжат брать аккаунт; реабилитация его отдаёт.
+            frozen = status == "frozen"
+            if cur != status:
+                await account_status.set_status(
+                    pool, acc_id, status,
+                    reason=("@SpamBot: аккаунт заморожен (ручная проверка)" if frozen
+                            else "@SpamBot: аккаунт заблокирован (ручная проверка)"),
+                    source="manual_appeal")
+            await pool.execute(
+                """UPDATE account_rehab_state
+                      SET phase=$3, note=$4, last_action_at = now(), updated_at = now()
+                    WHERE acc_id=$1 AND owner_id=$2
+                      AND phase IN ('appeal','warming','recheck','off','stuck')""",
+                acc_id, owner_id, "stuck" if frozen else "gone",
+                _FROZEN_NOTE if frozen else "заблокирован Telegram — восстанавливать нечего")
             return
         if status not in ("appeal_sent", "still_blocked"):
             return
