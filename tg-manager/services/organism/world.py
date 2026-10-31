@@ -102,10 +102,18 @@ async def _vlayer(pool, owner_id: int) -> dict:
 
     # Ходят по кругу: невидимый триггер, которого нет как события Telegram.
     try:
+        # Купившие по кругу больше не ходят. Без этого исключения отметка
+        # «bouncing» жила вечно, и владелец получал «5 ходят по кругу» про
+        # людей, которые уже заплатили. Условие то же, что в списке на экране
+        # (virtual_layer.bouncing_list) — число и список обязаны совпадать.
         out["bouncing"] = int(await pool.fetchval(
-            "SELECT COUNT(*) FROM virtual_states WHERE owner_id=$1 "
-            "AND entity_type='user' AND state_key='pattern' "
-            "AND value='bouncing'", owner_id) or 0)
+            "SELECT COUNT(*) FROM virtual_states p WHERE p.owner_id=$1 "
+            "AND p.entity_type='user' AND p.state_key='pattern' "
+            "AND p.value='bouncing' AND NOT EXISTS ("
+            "  SELECT 1 FROM virtual_states f WHERE f.owner_id=p.owner_id "
+            "  AND f.entity_type=p.entity_type AND f.entity_id=p.entity_id "
+            "  AND f.state_key='funnel' AND f.value='purchased')",
+            owner_id) or 0)
     except Exception:
         log.debug("world._vlayer bouncing failed owner=%s", owner_id)
 

@@ -5325,7 +5325,47 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "funnel": ov["funnel"], "hot": ov["hot"],
                            "ladder": ov.get("ladder") or [], "cooling": cooling,
                            "total": ov["total"], "audience": ov.get("audience"),
-                           "bots": ov.get("bots") or [], "events": events})
+                           "bots": ov.get("bots") or [], "events": events,
+                           "bouncing": ov.get("bouncing") or []})
+
+    async def vlayer_mark_purchased(request: web.Request) -> web.Response:
+        """Владелец отмечает «купил» прямо из модели поведения.
+
+        Оплата часто проходит мимо системы (перевод, наличные), и тогда
+        модель продолжала считать покупателя «ходит по кругу» и напоминать о
+        нём каждые несколько часов. Заодно ставим стадию CRM «Выиграно»,
+        чтобы карточка контакта и модель говорили одно и то же.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        etype = (request.match_info.get("entity_type") or "").strip()
+        eid = (request.match_info.get("entity_id") or "").strip()
+        if etype != _vl.USER:
+            return _err("Отметить покупку можно только у человека", 400)
+        if not eid or len(eid) > 128:
+            return _err("Неверный идентификатор", 400)
+        # Чужой или несуществующий контакт не трогаем: id приходит из адреса.
+        try:
+            known = await pool.fetchval(
+                "SELECT 1 FROM unified_contacts WHERE owner_id=$1 AND id::text=$2",
+                uid, eid)
+        except Exception:
+            known = None
+        if not known:
+            return _err("Контакт не найден", 404)
+        try:
+            await _vl.mark_purchased(pool, uid, _vl.USER, eid, source="owner")
+        except Exception:
+            log.exception("vlayer_mark_purchased uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        try:
+            from services.contacts_hub.crm_engine import upsert_crm
+            await upsert_crm(pool, uid, eid, {"stage": "won"})
+        except Exception:
+            log.debug("vlayer_mark_purchased crm failed uid=%s", uid, exc_info=True)
+        return _json_resp({"ok": True})
 
     async def vlayer_entity(request: web.Request) -> web.Response:
         """История переходов одной сущности: «заходил и уходил» видно только так.
@@ -7914,6 +7954,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/vlayer/overview", vlayer_overview)
     app.router.add_get("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}",
                        vlayer_entity)
+    app.router.add_post(
+        "/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased",
+        vlayer_mark_purchased)
     app.router.add_get("/api/miniapp/vlayer/analytics", vlayer_analytics)
     app.router.add_get("/api/miniapp/vlayer/segment/{value}", vlayer_segment)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
