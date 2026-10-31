@@ -22787,7 +22787,7 @@ async function openVLayerEntity(entityType, entityId) {
 // Отметить покупку: модель снимает «ходит по кругу», CRM ставит «Выиграно».
 async function vlMarkPurchased(entityId, backToOverview) {
   try {
-    await api('/api/miniapp/vlayer/entity/user/' + encodeURIComponent(entityId) + '/purchased',
+    await api('/api/miniapp/vlayer/entity/' + 'user/' + encodeURIComponent(entityId) + '/purchased',
       {method: 'POST', body: '{}'});
     toast('✅ Отмечено: купил');
   } catch(e) {

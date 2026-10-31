@@ -7954,9 +7954,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/vlayer/overview", vlayer_overview)
     app.router.add_get("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}",
                        vlayer_entity)
-    app.router.add_post(
-        "/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased",
-        vlayer_mark_purchased)
+    app.router.add_post("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased",
+                        vlayer_mark_purchased)
     app.router.add_get("/api/miniapp/vlayer/analytics", vlayer_analytics)
     app.router.add_get("/api/miniapp/vlayer/segment/{value}", vlayer_segment)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)

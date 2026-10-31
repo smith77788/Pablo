@@ -122,9 +122,8 @@ def test_done_bot_order_reaches_the_layer():
 
 
 def test_owner_can_mark_purchase_from_miniapp():
-    from pathlib import Path
-    api = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
-    assert "/purchased" in api.read_text(encoding="utf-8")
-    html = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
-    t = html.read_text(encoding="utf-8")
+    from tests.miniapp_source import api_routes, miniapp_source
+    assert ("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased"
+            in api_routes())
+    t = miniapp_source()
     assert "vlMarkPurchased" in t and "Ходят по кругу" in t
