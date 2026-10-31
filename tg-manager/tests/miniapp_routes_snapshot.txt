@@ -982,6 +982,7 @@ POST /api/miniapp/va/drafts/{did}/reject
 POST /api/miniapp/va/references/{rid}/refresh
 POST /api/miniapp/vault/chat/{chat_id}/reply
 POST /api/miniapp/vault/settings
+POST /api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased
 POST /api/miniapp/warmup
 POST /api/miniapp/warmup/bulk_start
 POST /api/miniapp/warmup/{plan_id}/cancel

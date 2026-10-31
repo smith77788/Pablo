@@ -519,6 +519,11 @@ async def signal(pool, owner_id: int, entity_type: str, entity_id,
 
     if change.get("value_changed") is False:
         return change                        # только уверенность/срок — событие не рождаем
+    if change["value"] == "purchased" and state_key == "funnel":
+        # Купил — круг закончился. Отметка «ходит по кругу» живёт отдельным
+        # ключом и сама не снималась никогда: владелец получал «N ходят по
+        # кругу» каждые несколько часов про людей, которые уже заплатили.
+        await clear_bouncing(pool, owner_id, entity_type, eid)
     ev = virtual_event_for(from_value, change["value"])
     if ev:
         try:
@@ -972,6 +977,12 @@ async def detect_bouncing(pool, owner_id: int, *, entity_type: str = USER,
     for eid, transitions in by_entity.items():
         if temporal_pattern(transitions) != "bouncing":
             continue
+        # Купивший по кругу больше не ходит: в его истории те же «подходил и
+        # отходил», но круг закончился покупкой. Без этой проверки он снова
+        # попадал в «ходят по кругу» на следующем же проходе.
+        funnel = await get_state(pool, owner_id, entity_type, eid, state_key)
+        if (funnel or {}).get("value") == "purchased":
+            continue
         current = await get_state(pool, owner_id, entity_type, eid, PATTERN_KEY)
         if (current or {}).get("value") == "bouncing":
             continue                       # уже отмечен — не шумим повторно
@@ -988,6 +999,86 @@ async def detect_bouncing(pool, owner_id: int, *, entity_type: str = USER,
         except Exception:
             log.debug("virtual_layer: bouncing emit failed", exc_info=True)
     return fresh
+
+
+CONVERTED = "converted"
+PATTERN_LABEL[CONVERTED] = "✅ Круг закончился покупкой"
+
+
+async def clear_bouncing(pool, owner_id: int, entity_type: str, entity_id) -> bool:
+    """Снять отметку «ходит по кругу» после покупки.
+
+    Отметка живёт отдельным ключом и сама не исчезала: человек купил, а
+    организм продолжал присылать «N ходят по кругу» и советовать ему «другое
+    предложение». Возвращает True, если отметка была и снята. Fail-open.
+    """
+    eid = str(entity_id)
+    try:
+        current = await get_state(pool, owner_id, entity_type, eid, PATTERN_KEY)
+        if (current or {}).get("value") != "bouncing":
+            return False
+        await _write(pool, owner_id, entity_type, eid, PATTERN_KEY,
+                     {"value": CONVERTED, "confidence": 1.0,
+                      "expires_at": None, "reason": "purchase"},
+                     "purchase", "bouncing")
+        return True
+    except Exception:
+        log.debug("virtual_layer.clear_bouncing failed owner=%s", owner_id,
+                  exc_info=True)
+        return False
+
+
+async def mark_purchased(pool, owner_id: int, entity_type: str, entity_id, *,
+                         source: str = "owner") -> dict | None:
+    """Владелец сам отмечает: «этот человек купил».
+
+    Оплата часто проходит мимо системы (перевод, наличные, другой магазин), и
+    тогда модель продолжала считать покупателя «ходит по кругу». Сигнал тот
+    же, что и у автоматической оплаты, — одна дорога в «Купил». Отметку круга
+    снимаем и тогда, когда «Купил» уже стоял (данные до этой правки).
+    """
+    change = await signal(pool, owner_id, entity_type, entity_id, "paid",
+                          confidence=0.95, source=source)
+    await clear_bouncing(pool, owner_id, entity_type, entity_id)
+    return change
+
+
+async def bouncing_list(pool, owner_id: int, *, entity_type: str = USER,
+                        state_key: str = "funnel", limit: int = 50) -> list[dict]:
+    """Кто сейчас «ходит по кругу» — без тех, кто уже купил.
+
+    Уведомление говорило «5 ходят по кругу», а «Открыть» вело на экран, где
+    этих пятерых не было: ни узнать, кто это, ни отметить, что они купили.
+    Условие «не купил» — то же, что в счётчике уведомления (organism.world).
+    """
+    try:
+        rows = await pool.fetch(
+            "SELECT p.entity_type, p.entity_id, p.updated_at, f.value AS funnel "
+            "FROM virtual_states p "
+            "LEFT JOIN virtual_states f ON f.owner_id=p.owner_id "
+            "  AND f.entity_type=p.entity_type AND f.entity_id=p.entity_id "
+            "  AND f.state_key=$3 "
+            "WHERE p.owner_id=$1 AND p.entity_type=$2 AND p.state_key=$4 "
+            "AND p.value='bouncing' "
+            "AND COALESCE(f.value, '') <> 'purchased' "
+            "ORDER BY p.updated_at DESC LIMIT $5",
+            owner_id, entity_type, state_key, PATTERN_KEY, int(limit))
+        out = [{"entity_type": r["entity_type"], "entity_id": r["entity_id"],
+                "value": r["funnel"],
+                "label": VALUE_LABEL.get(r["funnel"], r["funnel"] or "")}
+               for r in rows]
+    except Exception:
+        log.debug("virtual_layer.bouncing_list failed owner=%s", owner_id)
+        return []
+    try:
+        names = await resolve_names(pool, owner_id, out)
+        for b in out:
+            name = names.get(str(b["entity_id"]))
+            if name:
+                b["name"] = name
+    except Exception:
+        log.debug("virtual_layer.bouncing_list names failed owner=%s", owner_id)
+    return out
 
 
 async def entity_history(pool, owner_id: int, entity_type: str, entity_id,
@@ -1051,6 +1142,13 @@ async def entity_history(pool, owner_id: int, entity_type: str, entity_id,
             }
     except Exception:
         log.debug("virtual_layer.entity_history state failed owner=%s", owner_id)
+
+    # Рисунок «по кругу» в истории остаётся и после покупки — но круг уже
+    # закончился. Показывать покупателю «🔁 Заходил и уходил» — та же ошибка,
+    # что и в уведомлении.
+    if (out["current"] or {}).get("value") == "purchased" and pattern == "bouncing":
+        out["pattern"] = CONVERTED
+        out["pattern_label"] = PATTERN_LABEL[CONVERTED]
 
     out["name"] = await _entity_name(pool, owner_id, entity_type, eid)
     return out
@@ -1128,7 +1226,7 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
     поэтому здесь только состояния. Fail-open: пустая сводка вместо падения.
     """
     out = {"funnel": [], "ladder": [], "hot": [], "cooling": [], "total": 0,
-           "audience": None, "bots": []}
+           "audience": None, "bots": [], "bouncing": []}
     try:
         # Просроченность спрашиваем вместе со значением: распределение
         # воронки считалось по СЫРОМУ value, и на том же экране получалось
@@ -1222,6 +1320,9 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
                 c["name"] = name
     except Exception:
         log.debug("virtual_layer.overview cooling failed owner=%s", owner_id)
+    # «Ходят по кругу» — на них ведёт уведомление, значит они должны быть здесь.
+    out["bouncing"] = await bouncing_list(pool, owner_id, entity_type=entity_type,
+                                          state_key=state_key)
     # Температура аудитории (каскад): hot|warm|None.
     try:
         aud = await get_state(pool, owner_id, NETWORK, "audience", state_key)

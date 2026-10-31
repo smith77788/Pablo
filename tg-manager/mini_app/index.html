@@ -22600,6 +22600,23 @@ async function openVLayer() {
       </div>`).join('');
       html += '</div>';
     }
+    // «Ходят по кругу» — на этот список ведёт уведомление. Раньше его здесь
+    // не было: владелец не мог ни узнать, кто это, ни отметить, что купили.
+    const bouncing = d.bouncing || [];
+    if (bouncing.length) {
+      html += '<div class="sec">🔁 Ходят по кругу</div>';
+      html += '<div style="padding:0 16px 6px;font-size:12px;color:var(--hint);line-height:1.4">Уже купил? Нажмите «✅ Купил» — человек уйдёт из этого списка и из напоминаний.</div>';
+      html += '<div class="lst">';
+      html += bouncing.slice(0, 30).map(b => `<div class="row">
+        <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">🔁</div>
+        <div class="row-body" onclick="openVLayerEntity('${esc(String(b.entity_type||'user'))}','${esc(b.entity_id)}')" style="cursor:pointer">
+          <div class="row-name">${esc(b.name || _vlWho(b))}</div>
+          <div class="row-val">${b.label ? esc(b.label) + ' · ' : ''}история →</div></div>
+        <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px"
+          onclick="event.stopPropagation();vlMarkPurchased('${esc(b.entity_id)}', true)">✅ Купил</button>
+      </div>`).join('');
+      html += '</div>';
+    }
     // Лента виртуальных событий — «что слой понял».
     html += '<div class="sec">События поведения</div>';
     if (!events.length) {
@@ -22742,6 +22759,12 @@ async function openVLayerEntity(entityType, entityId) {
     if (entityType === 'user') {
       html += `<button class="btn btn-p" style="width:100%;margin-bottom:10px"
         onclick="openContactDetail('${esc(entityId)}')">👤 Открыть карточку контакта</button>`;
+      // Оплата часто проходит мимо системы — отметить покупку должно быть можно
+      // прямо здесь, иначе модель так и будет считать покупателя «по кругу».
+      if (cur.value !== 'purchased') {
+        html += `<button class="btn btn-s" style="width:100%;margin-bottom:10px"
+          onclick="vlMarkPurchased('${esc(entityId)}', false)">✅ Отметить: купил</button>`;
+      }
     }
     const tr = d.transitions || [];
     html += '<div class="sec">История переходов</div>';
@@ -22759,6 +22782,19 @@ async function openVLayerEntity(entityType, entityId) {
   } catch(e) {
     txt('vlayerBody', errHtml(errRu(e), "openVLayerEntity('" + entityType + "','" + entityId + "')"));
   }
+}
+
+// Отметить покупку: модель снимает «ходит по кругу», CRM ставит «Выиграно».
+async function vlMarkPurchased(entityId, backToOverview) {
+  try {
+    await api('/api/miniapp/vlayer/entity/' + 'user/' + encodeURIComponent(entityId) + '/purchased',
+      {method: 'POST', body: '{}'});
+    toast('✅ Отмечено: купил');
+  } catch(e) {
+    toast('⚠️ ' + errRu(e));
+    return;
+  }
+  if (backToOverview) openVLayer(); else openVLayerEntity('user', entityId);
 }
 
 // ── «Нотариус»: заверение рекламных размещений ───────────────────────────

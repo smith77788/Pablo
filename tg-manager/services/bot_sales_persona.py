@@ -1366,6 +1366,19 @@ async def update_order(pool, order_id: int, owner_id: int, **fields) -> dict | N
     r = await pool.fetchrow(
         f"UPDATE bot_sales_orders SET {', '.join(sets)}, updated_at=now() "
         f"WHERE id=${len(args)-1} AND owner_id=${len(args)} RETURNING *", *args)
+    # Выполненный заказ — покупка. Без этого сигнала модель поведения не знала,
+    # что клиент бота купил, и продолжала числить его «ходит по кругу».
+    # Fail-open: заказ уже сохранён, сбой модели его не откатывает.
+    if r and fields.get("status") == "done":
+        try:
+            from services import virtual_layer
+            await virtual_layer.signal_for_telegram_user(
+                pool, owner_id, r["customer_chat_id"], "paid",
+                confidence=0.95, source="bot_order",
+                identity={"username": r["customer_username"] or None,
+                          "first_name": r["customer_name"] or None})
+        except Exception:
+            log.debug("bot_sales: virtual_layer purchase failed order=%s", order_id)
     return dict(r) if r else None
 
 
