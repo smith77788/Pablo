@@ -27035,9 +27035,11 @@ async function submitCloner() {
     + ' Отменить публикацию в канале будет нельзя.');
   if (!ok) return;
   try {
-    await api('/api/miniapp/content_cloner/submit',{method:'POST',body:JSON.stringify({
-      source:src, msg_count:count, channel_ids: toAll ? [] : picked,
-    })});
+    // «Во все» — это ОТСУТСТВИЕ списка: пустой список сервер отбивает как
+    // пустой выбор, иначе любой сбой выбора становился бы публикацией во все.
+    const _cl = {source:src, msg_count:count};
+    if (!toAll) _cl.channel_ids = picked;
+    await api('/api/miniapp/content_cloner/submit',{method:'POST',body:JSON.stringify(_cl)});
     toast('✅ Операция клонирования запущена');
     document.getElementById('clonerSrc').value='';
     boxes.forEach(b=>{b.checked=false;});

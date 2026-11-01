@@ -66,6 +66,7 @@ from services.security import (
     rate_limit_response,
     validate_integer,
     validate_string,
+    selection_ids,
     sanitize_search_query,
     check_sql_suspicious,
     escape_html,
@@ -6119,8 +6120,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Нужен текст")
         if len(text) > 4096:
             return _err("Текст длиннее 4096 символов")
-        # Опциональный выбор ботов: bot_ids → рассылка только выбранным
-        sel_ids = [int(x) for x in (body.get("bot_ids") or []) if str(x).lstrip("-").isdigit()]
+        # Опциональный выбор ботов: bot_ids → рассылка только выбранным. Ключа
+        # нет — все боты; список есть, но пуст или с мусором — отказ, а НЕ
+        # рассылка по аудиториям всех ботов (сообщения живым людям).
+        sel_ids, _sel_err = selection_ids(body, "bot_ids", what="бот")
+        if _sel_err:
+            return _err(_sel_err, 400)
         if sel_ids:
             bots = await _safe_fetch(pool,
                 """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
@@ -6343,7 +6348,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось разобрать запрос")
         text = validate_string(body.get("text"), max_len=4096)
         delay = validate_integer(body.get("delay", 30), min_val=-1, max_val=300) or 30
-        channel_ids = body.get("channel_ids")  # optional list; None = all channels
+        # Ключа нет — все каналы; список передан, но пуст или с мусором — отказ.
+        # Раньше `[]` и `["abc"]` становились «во все каналы», а публикация
+        # наружу необратима.
+        channel_ids, _sel_err = selection_ids(body, "channel_ids", what="канал")
+        if _sel_err:
+            return _err(_sel_err, 400)
         if not text:
             return _err("Нужен текст")
         from services import postbot as _postbot
@@ -6353,12 +6363,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Недопустимые символы в тексте")
         if delay not in (5, 30, 60, -1):
             delay = 30
-        # Validate channel IDs if provided
-        if channel_ids:
-            try:
-                channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
-            except (TypeError, ValueError):
-                return _err("Неверные идентификаторы каналов", 400)
         # Count target channels
         if channel_ids:
             total = len(channel_ids)
@@ -7440,9 +7444,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # ВО ВСЕ каналы владельца разом, молча: выбора на экране не было, а
         # публикация наружу — необратима. Теперь цели можно назвать явно, и
         # «во все» остаётся только как осознанный выбор на экране.
-        want_ids = [i for i in (
-            validate_integer(x, min_val=-(2 ** 63), max_val=2 ** 63 - 1)
-            for x in (body.get("channel_ids") or [])[:500]) if i is not None]
+        # Ключа нет — во все; переданный пустой или битый список — отказ, а не
+        # «во все каналы» (так раньше читался и `[]`, и список из мусора).
+        want_ids, _sel_err = selection_ids(body, "channel_ids", what="канал", cap=500)
+        if _sel_err:
+            return _err(_sel_err, 400)
         if want_ids:
             chan_rows = await _safe_fetch(pool,
                 "SELECT username, channel_id FROM managed_channels "

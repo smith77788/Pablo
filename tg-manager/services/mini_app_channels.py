@@ -33,7 +33,7 @@ def setup_routes(app: web.Application, pool) -> None:
         channel_manage_confirmed, channel_manage_worker_op, managed_channel_role,
     )
     from services.security import (
-        check_sql_suspicious, validate_integer, validate_string,
+        check_sql_suspicious, selection_ids, validate_integer, validate_string,
     )
 
     # Режимы задержки массового вступления. Единственный потребитель —
@@ -497,9 +497,10 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверный запрос", 400)
         op = body.get("op")
-        ids_in = [int(x) for x in (body.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
+        ids_in, _sel_err = selection_ids(body, "channel_ids", what="канал")
         if not ids_in:
-            return _err("Выберите каналы", 400)
+            return _err(_sel_err if _sel_err and "Неверный" in _sel_err
+                        else "Выберите каналы", 400)
         chans = await _safe_fetch(pool,
             "SELECT channel_id, title, acc_id, access_hash, username, type FROM managed_channels "
             "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, ids_in)
@@ -932,7 +933,10 @@ def setup_routes(app: web.Application, pool) -> None:
         if check_sql_suspicious(text):
             return _err("Недопустимые символы в тексте", 400)
 
-        wanted = [int(x) for x in (data.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
+        # Ключа нет — все каналы аккаунта; пустой или битый список — отказ.
+        wanted, _sel_err = selection_ids(data, "channel_ids", what="канал")
+        if _sel_err:
+            return _err(_sel_err, 400)
         rows = await _safe_fetch(
             pool,
             "SELECT channel_id FROM managed_channels WHERE owner_id=$1 AND acc_id=$2"

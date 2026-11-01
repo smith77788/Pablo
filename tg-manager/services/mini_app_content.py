@@ -496,11 +496,13 @@ def setup_routes(app: web.Application, pool) -> None:
                                      "Разброс по часам", default=4)
         except ValueError as exc:
             return _err(str(exc), 400)
-        channel_ids = data.get("channel_ids") or []
         if not topic or not core_message:
             return _err("Укажите тему и главное сообщение", 400)
-        if not channel_ids:
-            return _err("Выберите хотя бы один канал", 400)
+        from services.security import selection_ids
+        channel_ids, _sel_err = selection_ids(data, "channel_ids", what="канал")
+        if channel_ids is None:
+            return _err(_sel_err if _sel_err and "Неверный" in _sel_err
+                        else "Выберите хотя бы один канал", 400)
         if campaign_type not in ("trend", "launch", "awareness", "counter"):
             campaign_type = "trend"
         if spread_hours < 1:

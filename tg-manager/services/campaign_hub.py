@@ -133,8 +133,18 @@ def _common_send_params(spec: dict) -> dict:
 
 
 def _plan_channels(spec: dict, tgt: dict) -> list[PlannedOp]:
-    channel_ids = _int_list(tgt.get("channel_ids"))
-    # Пустой список = «во все управляемые каналы» (поведение mass_publish).
+    # «Во все управляемые каналы» — это ОТСУТСТВИЕ списка (так шлёт экран
+    # кампании). Переданный, но пустой или битый список — пустой выбор, а не
+    # «все»: публикация во все каналы необратима, и любая поломка выбора на
+    # экране не должна в неё превращаться.
+    from services.security import selection_ids
+
+    channel_ids, _err = selection_ids(tgt, "channel_ids", what="канал")
+    if _err:
+        raise CampaignSpecError(
+            "Отметьте каналы или выберите «Во все мои каналы»"
+            if "Не выбран" in _err else _err)
+    channel_ids = channel_ids or []
     params = _common_send_params(spec)
     params["target"] = "channels"
     if channel_ids:
