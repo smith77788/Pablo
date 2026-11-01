@@ -112,3 +112,83 @@ def test_log_rows_open_with_full_details():
     assert "function openOpLogRow(i)" in render
     fn = render[render.index("function openOpLogRow(i)"):]
     assert "l.message" in fn and "created_at" in fn
+
+
+# ── «Правка ботов» (bulk_bot_edit): тот же журнал, что был у #771 ────────────
+
+class _Resp:
+    def __init__(self, data):
+        self._d = data
+
+    async def json(self):
+        return self._d
+
+
+class _Sess:
+    def __init__(self, answers):
+        self._answers = answers
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, url, json=None, timeout=None):
+        tok = url.split("/bot", 1)[1].split("/", 1)[0]
+        return _Resp(self._answers[tok])
+
+
+def _run_bulk_bot_edit(monkeypatch, bots, answers, field="desc", value="Новое описание"):
+    import asyncio as _aio
+    from database import db as _db
+
+    async def _fetch(pool, sql, *a):
+        return bots
+
+    rows: list[tuple] = []
+
+    async def _jw(pool, sql, op_id, step, target, *rest, **k):
+        status = "ok" if "'ok'" in sql else "error"
+        rows.append((target, status, rest[0] if rest else ""))
+        return "OK"
+
+    async def _no(*a, **k):
+        return False
+
+    async def _exec(*a, **k):
+        return "OK"
+
+    async def _nosleep(*a, **k):
+        return None
+
+    monkeypatch.setattr(_db, "fetch_bots", _fetch)
+    monkeypatch.setattr(op_worker, "_journal_write", _jw)
+    monkeypatch.setattr(op_worker, "_is_cancelled", _no)
+    monkeypatch.setattr(op_worker, "_safe_execute", _exec)
+    monkeypatch.setattr(op_worker.aiohttp, "ClientSession", lambda *a, **k: _Sess(answers))
+    monkeypatch.setattr(op_worker.asyncio, "sleep", _nosleep)
+    res = _aio.run(
+        op_worker._exec_bulk_bot_edit(None, None, 5, 99, {"field": field, "value": value}))
+    return res, rows
+
+
+def test_bulk_bot_edit_names_the_bot_and_what_was_set(monkeypatch):
+    bots = [{"id": 3, "bot_id": 111, "token": "T1", "username": "shopbot"}]
+    res, rows = _run_bulk_bot_edit(monkeypatch, bots, {"T1": {"ok": True}})
+    assert res["ok"] == 1
+    target, status, msg = rows[0]
+    assert target == "@shopbot", f"в журнале снова номер строки: {target!r}"
+    assert status == "ok" and "описание: → «Новое описание»" in msg, msg
+
+
+def test_bulk_bot_edit_failure_is_in_the_log_with_its_reason(monkeypatch):
+    bots = [{"id": 3, "bot_id": 111, "token": "T1", "username": "shopbot"},
+            {"id": 4, "bot_id": 222, "token": "T2", "username": None}]
+    res, rows = _run_bulk_bot_edit(monkeypatch, bots, {
+        "T1": {"ok": True},
+        "T2": {"ok": False, "description": "Too Many Requests: retry after 30"}})
+    assert res["ok"] == 1 and res["failed"] == 1
+    err = [r for r in rows if r[1] == "error"]
+    assert err, "провал не попал в лог операции — владелец не узнает, какой бот не изменён"
+    assert err[0][0] == "бот 222" and "retry after 30" in err[0][2]

@@ -6350,11 +6350,12 @@ async def _exec_bulk_bot_edit(
     from database.db import fetch_bots as _fetch_bots_op
     bots_rows = await _fetch_bots_op(
         pool,
-        "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
+        "SELECT id, bot_id, username, token FROM managed_bots "
+        "WHERE added_by=$1 AND is_active=TRUE ORDER BY id",
         owner_id,
     )
     if not bots_rows:
-        return {"status": "failed", "summary": "⚠️ Bulk Bot Edit: нет активных ботов"}
+        return {"status": "failed", "summary": "⚠️ Правка ботов: нет активных ботов"}
 
     ok_count = 0
     fail_count = 0
@@ -6425,21 +6426,33 @@ async def _exec_bulk_bot_edit(
                 data_resp = await resp.json()
                 if data_resp.get("ok"):
                     ok_count += 1
+                    # Цель — @username бота (а не номер строки базы), сообщение —
+                    # что именно поставлено: владелец открывает строку лога и
+                    # видит, какой бот и как изменён.
                     await _journal_write(
                         pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'ok',$4)",
                         op_id,
                         ok_count + fail_count,
-                        str(b["id"]),
+                        _bp_bot_label(b),
+                        _bbe_change(field, value, commands_payload),
                         log_ctx=f" op={op_id}", where="bulk_bot_edit",
                     )
                 else:
                     fail_count += 1
+                    _why = str(data_resp.get("description") or "Telegram отклонил изменение")
                     log.warning(
                         "op_worker bulk_bot_edit: bot=%s field=%s api_error=%s",
-                        b.get("id"),
-                        field,
-                        data_resp.get("description"),
+                        b.get("id"), field, _why,
+                    )
+                    await _journal_write(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'error',$4)",
+                        op_id, ok_count + fail_count, _bp_bot_label(b),
+                        f"{_bbe_change(field, value, commands_payload)} — не вышло: {_why}"[:500],
+                        log_ctx=f" op={op_id}", where="bulk_bot_edit",
                     )
             except Exception as e:
                 fail_count += 1
@@ -6448,6 +6461,15 @@ async def _exec_bulk_bot_edit(
                     b.get("id"),
                     field,
                     e,
+                )
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, ok_count + fail_count, _bp_bot_label(b),
+                    f"{_bbe_change(field, value, commands_payload)} — не вышло: "
+                    "нет ответа от Telegram",
+                    log_ctx=f" op={op_id}", where="bulk_bot_edit",
                 )
             await _safe_execute(
                     pool,
@@ -6461,6 +6483,19 @@ async def _exec_bulk_bot_edit(
         "failed": fail_count,
         "summary": f"Обновлено: {ok_count} ботов, ошибок: {fail_count}",
     }
+
+
+_BBE_FIELD_LABEL = {"name": "имя", "desc": "описание",
+                    "short_desc": "краткое описание", "commands": "команды"}
+
+
+def _bbe_change(field: str, value: str, commands: "list | None" = None) -> str:
+    """Что «Правка ботов» ставит боту — строкой для журнала операции."""
+    lbl = _BBE_FIELD_LABEL.get(field, field)
+    if field == "commands":
+        cmds = ", ".join("/" + c["command"] for c in (commands or []))
+        return f"{lbl}: {cmds or 'пусто'}"
+    return f"{lbl}: → «{_bp_short(value)}»"
 
 
 _BP_FIELD_LABEL = {"name": "имя", "description": "описание",
@@ -6479,7 +6514,13 @@ def _bp_bot_label(row) -> str:
         uname = (row.get("username") or "").strip().lstrip("@")
     except AttributeError:
         uname = ""
-    return f"@{uname}" if uname else f"бот {row['bot_id']}"
+    if uname:
+        return f"@{uname}"
+    try:
+        bid = row["bot_id"]
+    except (KeyError, TypeError, IndexError):
+        bid = None
+    return f"бот {bid}" if bid else f"бот #{row['id']}"
 
 
 def _bp_short(v, n: int = 70) -> str:
@@ -6514,8 +6555,10 @@ async def _exec_bulk_bot_profile(
     (локальное правило auto_replies).
 
     params: {bot_ids?: [bot_id...], name?, description?, short_description?,
-    greeting?}. Пустое/отсутствующее поле — НЕ трогаем. Пустой/отсутствующий
-    bot_ids — все активные боты владельца.
+    greeting?, all?}. Пустое/отсутствующее поле — НЕ трогаем. Все активные
+    боты владельца — ТОЛЬКО при явном `all: true`; без выбора и без отметки
+    операция отказывается (раньше пустой bot_ids значил «все», и правка одного
+    бота уходила на весь парк).
 
     Идемпотентно: setMy*-методы и замена приветствия приводят к тому же
     состоянию при повторе. Уже успешно обработанных ботов пропускаем по
@@ -6556,6 +6599,10 @@ async def _exec_bulk_bot_profile(
             bot_ids.append(int(x))
         except (TypeError, ValueError):
             continue
+    if not bot_ids and params.get("all") is not True:
+        return {"status": "failed",
+                "summary": "⚠️ Не выбран ни один бот — профиль не меняли. "
+                           "Выберите ботов (или «все боты») и запустите заново"}
     if bot_ids:
         bots_rows = await _fetch_bots_op(
             pool,
@@ -7004,6 +7051,12 @@ async def _exec_mass_publish(
 
     delay = int(params.get("delay_seconds") or params.get("delay") or 30)
     explicit_channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
+    # «Во все каналы» — это ОТСУТСТВИЕ списка. Список, переданный пустым, —
+    # пустой выбор: публиковать некуда, а не «во все» (публикация необратима).
+    if "channel_ids" in params and params.get("channel_ids") is not None \
+            and not explicit_channel_ids:
+        return {"status": "failed",
+                "summary": "⚠️ Не выбран ни один канал — публикацию не запускали"}
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None

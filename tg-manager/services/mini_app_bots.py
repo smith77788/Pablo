@@ -1564,6 +1564,10 @@ def setup_routes(app: web.Application, pool) -> None:
                   "short_description": short_description, "greeting": greeting}
         if bot_ids:
             params["bot_ids"] = bot_ids
+        else:
+            # «Все боты» записывается в операцию явно: исполнитель без выбора и
+            # без этой отметки править никого не станет (см. _exec_bulk_bot_profile).
+            params["all"] = True
         try:
             op_id = await _obus.submit(
                 pool, uid, "bulk_bot_profile", params,
