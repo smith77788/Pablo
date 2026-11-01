@@ -192,6 +192,8 @@ GET /api/miniapp/health
 GET /api/miniapp/host_server/market
 GET /api/miniapp/host_server/my
 GET /api/miniapp/host_server/status
+GET /api/miniapp/inbox
+GET /api/miniapp/inbox/{peer_user_id}
 GET /api/miniapp/infra
 GET /api/miniapp/infra_health
 GET /api/miniapp/integrations
@@ -212,6 +214,7 @@ GET /api/miniapp/mass_publish/targets
 GET /api/miniapp/mass_targets
 GET /api/miniapp/mesh/task/{task_id}
 GET /api/miniapp/mesh/tasks
+GET /api/miniapp/money_funnel
 GET /api/miniapp/monitor/status
 GET /api/miniapp/mp/admin/providers
 GET /api/miniapp/mp/catalog
@@ -497,6 +500,8 @@ HEAD /api/miniapp/health
 HEAD /api/miniapp/host_server/market
 HEAD /api/miniapp/host_server/my
 HEAD /api/miniapp/host_server/status
+HEAD /api/miniapp/inbox
+HEAD /api/miniapp/inbox/{peer_user_id}
 HEAD /api/miniapp/infra
 HEAD /api/miniapp/infra_health
 HEAD /api/miniapp/integrations
@@ -517,6 +522,7 @@ HEAD /api/miniapp/mass_publish/targets
 HEAD /api/miniapp/mass_targets
 HEAD /api/miniapp/mesh/task/{task_id}
 HEAD /api/miniapp/mesh/tasks
+HEAD /api/miniapp/money_funnel
 HEAD /api/miniapp/monitor/status
 HEAD /api/miniapp/mp/admin/providers
 HEAD /api/miniapp/mp/catalog
@@ -839,6 +845,8 @@ POST /api/miniapp/host_server/price
 POST /api/miniapp/host_server/rent
 POST /api/miniapp/host_server/rental/{rental_id}/status
 POST /api/miniapp/import_sessions
+POST /api/miniapp/inbox/{peer_user_id}/read
+POST /api/miniapp/inbox/{peer_user_id}/reply
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
 POST /api/miniapp/invite/grant_admin
 POST /api/miniapp/invite/join_all
@@ -854,6 +862,7 @@ POST /api/miniapp/mass_publish
 POST /api/miniapp/mass_report
 POST /api/miniapp/mesh/task
 POST /api/miniapp/mesh/task/{task_id}/drop
+POST /api/miniapp/money_funnel/spend
 POST /api/miniapp/monitor/toggle
 POST /api/miniapp/mp/admin/provider/{pid}/status
 POST /api/miniapp/mp/provider/{pid}/apikey

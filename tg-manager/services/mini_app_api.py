@@ -62,6 +62,7 @@ from services import mini_app_protection
 from services import mini_app_growth
 from services import mini_app_parser
 from services import mini_app_workspace
+from services import mini_app_crm
 from services.security import (
     check_rate_limit,
     rate_limit_response,
@@ -7838,6 +7839,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_fleet.setup_routes(app, pool)
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
+    mini_app_crm.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
     mini_app_mp.setup_routes(app, pool)
     mini_app_integrations.setup_routes(app, pool)

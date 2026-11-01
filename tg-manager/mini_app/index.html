@@ -2270,6 +2270,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">CRM</div>
         <div class="mgmt-tile-val" id="m-crm-cnt"></div>
       </div>
+      <div class="mgmt-tile" onclick="openInbox(false)">
+        <div class="mgmt-tile-ico">📥</div>
+        <div class="mgmt-tile-lbl">Входящие</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openCRMDeals()">
         <div class="mgmt-tile-ico">💼</div>
         <div class="mgmt-tile-lbl">Сделки</div>
@@ -2278,6 +2283,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="openDeals()">
         <div class="mgmt-tile-ico">🗂</div>
         <div class="mgmt-tile-lbl">Канбан сделок</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMoneyFunnel(30)">
+        <div class="mgmt-tile-ico">💰</div>
+        <div class="mgmt-tile-lbl">Воронка денег</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSalesManager()">
@@ -8802,6 +8812,8 @@ const MODULE_DESCS = {
   'Интеграции':'Вебхуки на события, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
   'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
+  'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
+  'Воронка денег':'Охват → ответ → покупка по кампаниям, цена лида',
 };
 function buildDrawer() {
   const body = document.getElementById('navBody');
@@ -17980,7 +17992,7 @@ async function openContactDetail(id) {
       html += '</div>';
     }
     html += `<div class="sec" style="margin-top:8px">Действия</div><div style="padding:4px 16px 12px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0 0 auto">📅 Хронология</button>
+      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0 0 auto">🧭 Путь клиента</button>
       <button class="btn btn-s" onclick="openContactVersions('${id}')" style="flex:0 0 auto">📜 Версии</button>
       <button class="btn btn-s" onclick="openContactRelationships('${id}')" style="flex:0 0 auto">🕸 Связи</button>
       <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0 0 auto">🔑 Личность</button>
@@ -18516,8 +18528,9 @@ async function openContactTimeline(id) {
   try {
     const d = await api('/api/miniapp/uch/contacts/'+id+'/timeline');
     const items = d.timeline||[];
-    if (!items.length) { txt('cdBody', empty('📅','Нет событий','Касания появятся здесь: правки, источники, сигналы намерений')); return; }
-    let html = '<div style="padding:12px 16px">';
+    const jr = contactJourneyHtml(d.journey);
+    if (!items.length) { txt('cdBody', jr + empty('📅','Нет событий','Касания появятся здесь: правки, источники, рассылки, ответы и заказы')); return; }
+    let html = jr + '<div style="padding:12px 16px">';
     items.forEach(t=>{
       const date = t.ts ? new Date(t.ts).toLocaleString('ru-RU') : '';
       html += `<div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start">
@@ -18536,6 +18549,32 @@ async function openContactTimeline(id) {
     html += '</div>';
     txt('cdBody', html);
   } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+}
+
+// Путь клиента — четыре вопроса карточки одной сводкой над лентой: откуда
+// пришёл, что получил, что ответил, что купил. Считает сервер
+// (contacts_hub.timeline.build_journey); здесь только вывод.
+function contactJourneyHtml(j) {
+  if (!j) return '';
+  const cell = (ico, lbl, val, sub) =>
+    `<div style="flex:1 1 45%;background:var(--bg2);border-radius:10px;padding:8px 10px">
+      <div style="font-size:11px;color:var(--hint)">${ico} ${lbl}</div>
+      <div style="font-size:14px;margin-top:2px">${val}</div>
+      ${sub?`<div style="font-size:11px;color:var(--hint);margin-top:2px;white-space:normal">${sub}</div>`:''}
+    </div>`;
+  const src = j.source ? esc(j.source.label||'—') : '—';
+  const srcSub = j.source && j.source.at ? esc(new Date(j.source.at).toLocaleDateString('ru-RU')) : '';
+  const rc = j.received||{}, rp = j.replied||{}, bt = j.bought||{};
+  const camps = (rc.campaigns||[]).slice(0,3).map(esc).join(', ');
+  const rev = (bt.revenue||[]).map(r=>esc(r.text)).join(' + ');
+  const fn = j.funnel ? `<div style="font-size:12px;color:var(--hint);margin-top:6px">Стадия воронки: ${esc(j.funnel.label||j.funnel.value||'')}</div>` : '';
+  return `<div style="padding:12px 16px 0"><div class="sec" style="margin:0 0 6px">🧭 Путь клиента</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${cell('📍','Откуда пришёл', src, srcSub)}
+      ${cell('📨','Что получил', rc.count ? num(rc.count)+' сообщ.' : 'ничего', camps)}
+      ${cell('💬','Что ответил', rp.count ? num(rp.count)+' сообщ.' : 'молчит', rp.last_text ? '«'+esc(rp.last_text)+'»' : '')}
+      ${cell('🛒','Что купил', bt.orders ? num(bt.orders)+' заказ.' : 'пока ничего', rev)}
+    </div>${fn}</div>`;
 }
 
 async function openContactVersions(id) {
@@ -30205,6 +30244,8 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_detail.js"></script>
 <script src="screens/bot_factory.js"></script>
 <script src="screens/bot_mesh.js"></script>
+<script src="screens/crm_inbox.js"></script>
+<script src="screens/money_funnel.js"></script>
 <script src="screens/deals_board.js"></script>
 </body>
 </html>

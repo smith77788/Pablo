@@ -37,7 +37,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.contacts_hub.repository import BadDate
     from services.mini_app_api import (
         _BAD_BODY, _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
-        _safe_fetch, _safe_fetchrow, alive_accounts, log,
+        _safe_fetch, _safe_fetchrow, _safe_fetchval, alive_accounts, log,
         read_upload, read_upload_text, UploadTooLarge,
         bad_body_response,
     )
@@ -1191,6 +1191,13 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_rollback")
             return _err(_INTERNAL_ERROR, 500)
 
+    def _isoify(v):
+        if isinstance(v, dict):
+            return {k: _isoify(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [_isoify(x) for x in v]
+        return v.isoformat() if hasattr(v, "isoformat") else v
+
     async def uch_timeline(request: web.Request) -> web.Response:
         """Карточка-360: единая лента касаний контакта из всех подсистем —
         правки полей, источники, CRM-стадия и события организма (intent с этим
@@ -1212,6 +1219,13 @@ def setup_routes(app: web.Application, pool) -> None:
                 uid, str(cid))
             crm_row = await _safe_fetchrow(pool,
                 'SELECT stage, updated_at FROM contact_crm WHERE contact_id=$1', cid)
+            # Что получил / что ответил / что купил — по Telegram-id человека:
+            # рассылки, инбокс и заказы ключуются им, а не id контакта.
+            tg_id = await _safe_fetchval(pool,
+                'SELECT telegram_user_id FROM unified_contacts WHERE id=$1 AND owner_id=$2',
+                cid, uid)
+            from services.contacts_hub.journey import journey_parts as _jp
+            journey_parts = await _jp(pool, uid, tg_id)
             from services.contacts_hub import timeline as _tl
             def _payload(p):
                 if isinstance(p, dict):
@@ -1228,7 +1242,17 @@ def setup_routes(app: web.Application, pool) -> None:
                          "created_at": r["created_at"]} for r in (events or [])],
                 sources=[{"account_id": r["account_id"], "discovered_at": r["first_seen_at"]}
                          for r in (srcs or [])],
-                crm=dict(crm_row) if crm_row else None)
+                crm=dict(crm_row) if crm_row else None,
+                received=journey_parts["received"],
+                replies=journey_parts["replies"],
+                orders=journey_parts["orders"])
+            journey = _tl.build_journey(
+                sources=[{"label": f"аккаунт #{r['account_id']}", "at": r["first_seen_at"]}
+                         for r in (srcs or [])] + journey_parts["bot_sources"],
+                received=journey_parts["received"],
+                replies=journey_parts["replies"],
+                orders=journey_parts["orders"],
+                funnel=journey_parts["funnel"])
             out = [{**i, "ts": i["ts"].isoformat() if hasattr(i["ts"], "isoformat") else i["ts"]}
                    for i in items]
             # Лента склеена из разных источников, поэтому «сколько всего» для
@@ -1237,7 +1261,8 @@ def setup_routes(app: web.Application, pool) -> None:
             # более ранние касания в ленту просто не попали.
             truncated = len(history or []) >= 60 or len(events or []) >= 60
             return _json_resp({'timeline': out, 'count': len(out),
-                               'truncated': truncated})
+                               'truncated': truncated,
+                               'journey': _isoify(journey)})
         except Exception:
             log.exception("uch_timeline")
             return _err(_INTERNAL_ERROR, 500)

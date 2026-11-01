@@ -25,7 +25,7 @@ async def _pool():
     import asyncpg
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     conn = await asyncpg.connect(DSN)
-    await conn.execute(open(os.path.join(here, "schema_v265_ai_gateway.sql"),
+    await conn.execute(open(os.path.join(here, "schema_v266_ai_gateway.sql"),
                             encoding="utf-8").read())
     for t in ("ai_reply_log", "llm_owner_usage"):
         await conn.execute(f"DELETE FROM {t} WHERE owner_id = ANY($1::bigint[])",
