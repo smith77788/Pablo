@@ -1,8 +1,14 @@
 """Кампании личных сообщений — маршруты мини-аппа.
 
-Вынесено из `services/mini_app_api.py`: семь маршрутов
-`/api/miniapp/dm_campaign*` и семь функций — создание, правка, запуск, пауза,
-отчёт, журнал, удаление.
+Вынесено из `services/mini_app_api.py`: маршруты `/api/miniapp/dm_campaign/{id}*`
+— правка, запуск, пауза, отчёт, журнал, удаление.
+
+Создание кампании здесь НЕ живёт и не должно: создаёт её одна ручка
+`POST /api/miniapp/dm_campaigns` (`mini_app_api.dm_campaign_create`) — сегменты,
+когорты, полный список целей. Здесь была вторая, `POST /api/miniapp/dm_campaign`,
+со своей проверкой и половиной целей (crm и parsed_audience ложились с нулём
+получателей); экран её не звал, но она ждала, пока её выберут вместо живой.
+Стережёт `tests/test_dm_campaign_single_create_route.py`.
 
 Рассылка в личные — самая баноопасная операция после инвайта, и отвечает за
 неё не этот файл: темп, лимиты и карантин аккаунтов живут в
@@ -25,60 +31,6 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.security import (
         check_sql_suspicious, is_safe_public_url, validate_string,
     )
-
-    async def create_dm_campaign(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        name = validate_string(body.get("name"), max_len=200)
-        text_template = validate_string(body.get("text_template"), max_len=4096)
-        target_type = validate_string(body.get("target_type"), max_len=30) or "all_bots"
-        target_id = body.get("target_id")
-        if not name:
-            return _err("Нужно название")
-        if not text_template:
-            return _err("Нужен шаблон текста")
-        if check_sql_suspicious(text_template):
-            return _err("Недопустимые символы в тексте сообщения")
-        if target_type not in ("bot_users", "all_bots", "crm", "parsed_audience"):
-            return _err("Неверный тип цели")
-        if target_type == "bot_users" and not target_id:
-            return _err("Для рассылки подписчикам бота нужно выбрать бота")
-        total_targets = 0
-        if target_type == "bot_users" and target_id:
-            try:
-                bot_id_int = int(target_id)
-            except (TypeError, ValueError):
-                return _err("Неверный идентификатор цели", 400)
-            # IDOR-защита: бот должен принадлежать пользователю, иначе можно
-            # разослать DM подписчикам чужого бота и узнать их число.
-            owns_bot = await _safe_count(pool,
-                "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id_int, uid)
-            if not owns_bot:
-                return _err("Бот не найден", 404)
-            total_targets = await _safe_count(pool,
-                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true "
-                "AND is_blocked=false AND suspect=false", bot_id_int)
-        elif target_type == "all_bots":
-            total_targets = await _safe_count(pool,
-                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
-                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                   WHERE mb.added_by=$1 AND bu.is_active=true
-                     AND bu.is_blocked=false AND bu.suspect=false""", uid)
-        try:
-            row = await pool.fetchrow(
-                """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status, total_targets)
-                   VALUES($1,$2,$3,$4,$5,'draft',$6) RETURNING id""",
-                uid, name, text_template, target_type,
-                int(target_id) if target_id else None, total_targets)
-            return _json_resp({"ok": True, "id": row["id"], "total_targets": total_targets})
-        except Exception:
-            log.exception("create_dm_campaign uid=%d", uid)
-            return _err("Не удалось создать кампанию", 500)
 
     async def dm_campaign_launch(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -476,7 +428,6 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("dm_campaign_delete uid=%d cid=%d", uid, campaign_id)
             return _err(_INTERNAL_ERROR, 500)
 
-    app.router.add_post("/api/miniapp/dm_campaign", create_dm_campaign)
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/launch", dm_campaign_launch)
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/pause", dm_campaign_pause)
     app.router.add_get("/api/miniapp/dm_campaign/{campaign_id}/report", dm_campaign_report)
