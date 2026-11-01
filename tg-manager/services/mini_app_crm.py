@@ -54,7 +54,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not pid:
             return _err("Неверный собеседник", 400)
         try:
-            return _json_resp(await _ui.get_thread(pool, uid, pid))
+            return _json_resp(await _ui.get_thread(pool, uid, pid, limit=200))
         except Exception:
             log.exception("inbox_thread uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -119,7 +119,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 ok, _ = await _bapi.send_message(http, sess["token"], sess["user_id"],
                                                  _html.escape(text))
             if not ok:
-                return _err("Не удалось отправить: человек мог заблокировать бота", 502)
+                return _err("Не удалось отправить: человек мог заблокировать бота", 409)
             await _db.save_relay_message(pool, sess["id"], "out", text)
             return _json_resp({"ok": True})
         except Exception:

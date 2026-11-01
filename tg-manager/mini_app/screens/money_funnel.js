@@ -110,7 +110,8 @@ async function openMoneyFunnel(days) {
           (r.cost_per_lead != null ? ' · лид ' + num(Math.round(r.cost_per_lead)) : '') +
           (r.cost_per_buyer != null ? ' · покупатель ' + num(Math.round(r.cost_per_buyer)) : '') +
           (r.romi != null ? ' · окупаемость ' + Math.round(r.romi * 100) + '%' : '') +
-          ' <a href="#" onclick="mfEditSpend(' + i + ');return false">✏️</a></div>' : '') +
+          '</div>' +
+          '<button class="btn btn-s" style="margin-top:6px;font-size:12px" onclick="mfEditSpend(' + i + ')">✏️ Указать расход</button>' : '') +
         (sig ? '<div style="font-size:11px;margin-top:2px">' + sig + '</div>' : '') +
       '</div>';
     }).join('');

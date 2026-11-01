@@ -359,6 +359,10 @@ async def get_thread(pool, owner_id: int, peer_user_id: int, limit: int = 200) -
     return {
         "peer_user_id": pid, "name": name, "username": username, "contact_id": cid,
         "messages": [{**m, "at": _iso_v(m["at"])} for m in msgs],
+        # Каждый источник взят с потолком 200: достигнут хоть один — ранние
+        # сообщения в ленту не попали, и экран обязан это сказать.
+        "truncated": any(len(x) >= 200 for x in (fleet, vault, relay))
+                     or len(msgs) >= int(limit),
     }
 
 

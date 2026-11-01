@@ -45,7 +45,7 @@ async function openInbox(waiting) {
   const body = document.getElementById('s-inbox-body');
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/inbox' + (_ibWaiting ? '?waiting=1' : ''));
+    const d = await api(_ibWaiting ? '/api/miniapp/inbox?waiting=1' : '/api/miniapp/inbox');
     _ibRows = d.threads || [];
     let out = '<div class="seg" style="margin:8px 16px">' +
       '<div class="seg-opt' + (_ibWaiting ? '' : ' on') + '" role="button" tabindex="0" onclick="openInbox(false)">Все · ' + num(d.total || 0) + '</div>' +
@@ -110,6 +110,9 @@ async function openInboxThread(i) {
         '</div></div>';
     }).join('');
     out += '</div>';
+    if (d.truncated) {
+      out += '<div style="margin:0 16px 8px;font-size:11px;color:var(--hint)">Показаны последние сообщения — более ранние сюда не вошли.</div>';
+    }
     const canRelay = (t.channels || []).some(function (c) { return c.source === 'relay'; });
     if (canRelay) {
       out += '<div style="padding:0 16px 8px">' +
