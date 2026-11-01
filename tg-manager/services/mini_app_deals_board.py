@@ -152,7 +152,12 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать ручку канбана сделок на приложении мини-аппа."""
     from services.contacts_hub.crm_engine import STAGE_LABELS
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        _INTERNAL_ERROR,
+        _err,
+        _get_uid,
+        _json_resp,
+        _list_limit,
+        _list_offset,
     )
 
     async def crm_board(request: web.Request) -> web.Response:

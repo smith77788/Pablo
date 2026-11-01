@@ -17,13 +17,14 @@ import uuid
 
 from services import mini_app_deals_board as board
 from services.contacts_hub.crm_engine import STAGE_LABELS
+
 from tests.miniapp_source import api_routes, api_source, miniapp_html, miniapp_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _row(stage, name="", username="", value=0.0, currency="USD", **kw):
-    now = dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
+    now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
     r = {
         "crm_id": 1, "contact_id": uuid.uuid4(), "stage": stage,
         "deal_value": value, "currency": currency,
@@ -109,9 +110,9 @@ def test_card_payload_is_json_ready():
 
 
 def test_route_registered_and_rejects_unknown_stage():
+    import services.mini_app_api as api
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
-    import services.mini_app_api as api
 
     orig = api._get_uid
     api._get_uid = lambda request: 7   # до setup_routes: ручка берёт его при регистрации
