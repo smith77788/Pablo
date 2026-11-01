@@ -47,7 +47,10 @@ def _acc(acc_id: int, *, leased: bool = False, cooling: bool = False,
         "is_active": is_active,
         "has_session": has_session,
         "acc_status": status,
-        "cooldown_until": (_now() + dt.timedelta(minutes=30)) if cooling else None,
+        # Строки параметризации собираются при СБОРЕ тестов, а проверка идёт
+        # позже: в полном прогоне дольше получаса «остывание на 30 минут»
+        # успевало истечь, и тест краснел сам по себе. Берём заведомо далёкое.
+        "cooldown_until": (_now() + dt.timedelta(days=30)) if cooling else None,
         "leased": leased,
         "trust_score": trust,
     }

@@ -76,9 +76,10 @@ class _Req:
         # разбирает его через mini_app_api.parse_token — вот его и подменяем
         # (см. _call). Так проверка работает одинаково и для монолита, и для
         # вынесенных модулей.
-        self.query = {"token": "t"}
+        # D19: токен приходит заголовком — `?token=` сервер больше не принимает.
+        self.query = {}
         self.match_info = {}
-        self.headers = {}
+        self.headers = {"Authorization": "Bearer t"}
         self.app = web.Application()
 
     async def json(self):
