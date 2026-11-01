@@ -90,7 +90,10 @@ def test_allowed_updates_cover_new_types_without_dropping_old():
               "poll_answer", "chat_member"):
         assert t in au, f"опрос перестанет получать {t}"
     assert not any(x.startswith("business") for x in au)  # Хранилище не задето
-    assert "pre_checkout_query" not in au                 # не берём платёжный тип
+    # Платёжный запрос теперь берём: счёт сценария и заказа ИИ-продавца
+    # подтверждаются в опросе (auto_responder._answer_pre_checkout), а боты
+    # со счётом в ожидании опрашиваются раз в секунду — 10 секунд хватает.
+    assert "pre_checkout_query" in au
 
 
 def test_loop_wires_payment_poll_and_member():

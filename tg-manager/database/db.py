@@ -2372,7 +2372,13 @@ async def update_bot_metrics(
 
 
 async def add_user_tag(pool, bot_id: int, user_id: int, tag: str) -> bool:
-    """Returns True if tag was new."""
+    """Returns True if tag was new.
+
+    Новый тег — событие шины автоматизации (`contact.tag_added`): на него
+    запускаются сценарии с триггером «Человеку поставили тег». Пишется
+    ТОЛЬКО на действительно новый тег, иначе повторная пометка запускала бы
+    сценарий снова.
+    """
     try:
         await pool.execute(
             "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3)",
@@ -2380,6 +2386,11 @@ async def add_user_tag(pool, bot_id: int, user_id: int, tag: str) -> bool:
             user_id,
             tag,
         )
+        if user_id:
+            from services import automation_events
+            await automation_events.emit(pool, None, "contact.tag_added",
+                                         {"tag": tag}, bot_id=bot_id,
+                                         chat_id=user_id)
         return True
     except Exception:
         log.debug(

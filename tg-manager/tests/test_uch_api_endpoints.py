@@ -1927,14 +1927,17 @@ class TestWorkflowEngine:
     @pytest.mark.asyncio
     async def test_workflow_execute(self):
         from services.workflow_engine import execute_workflow
+        # Сценарий без бота: прогон заводится без получателя (в нём имеют
+        # смысл действия и вебхуки), шаги исполняет workflow_runtime.
         pool = FakePool(
-            fetch_row={"id": 1, "steps": '[{"action": "post"}]'},
-            fetch_rows=[{"id": 1, "steps": '[{"action": "post"}]'}],
+            fetch_row={"id": 1, "owner_id": 123, "bot_id": None,
+                       "steps": '[{"type": "webhook", "url": "https://example.com/h"}]'},
+            fetch_val=42,
         )
         result = await execute_workflow(pool, 123, 1, {"channel": "test"})
         assert result["ok"] is True
-        assert "run_id" in result
-        assert "total_steps" in result
+        assert result["run_id"] == 42
+        assert result["total_steps"] == 1
 
     @pytest.mark.asyncio
     async def test_workflow_execute_not_found(self):
@@ -1942,7 +1945,7 @@ class TestWorkflowEngine:
         pool = FakePool(fetch_row=None)
         result = await execute_workflow(pool, 123, 999)
         assert result["ok"] is False
-        assert "not found" in result["error"].lower()
+        assert "не найден" in result["error"].lower()
 
     @pytest.mark.asyncio
     async def test_workflow_status(self):

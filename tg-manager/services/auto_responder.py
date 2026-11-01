@@ -9,8 +9,10 @@ from datetime import datetime
 import aiohttp
 import asyncpg
 from database import db
+from services import automation_events
 from services import bot_api
 from services import brand_injection
+from services import workflow_runtime as _wf_rt
 from services import routing_engine
 from services.logger import log_exc_swallow
 from bot.utils.template_validator import replace_placeholders
@@ -54,10 +56,12 @@ _MANAGED_BOT_ALLOWED_UPDATES = [
     "message", "callback_query", "my_chat_member", "message_reaction",
     # Больше входных сигналов для «Модели поведения»: голос в опросе и
     # вступление/выход участника (чаты/каналы, где бот админ). Платёж ловим из
-    # поля message.successful_payment — отдельного типа ему не нужно. Намеренно
-    # НЕ берём pre_checkout_query: его пришлось бы отвечать за 10 сек, иначе
-    # оплата срывается — а это не наша зона здесь.
+    # поля message.successful_payment — отдельного типа ему не нужно.
     "poll_answer", "chat_member",
+    # Оплата счёта сценария или заказа: Telegram спрашивает подтверждение
+    # и ждёт ответа 10 секунд. Боты со счётом в ожидании опрос берёт каждую
+    # секунду (workflow_runtime.hot_bots), поэтому успеваем.
+    "pre_checkout_query",
 ]
 
 
@@ -567,6 +571,67 @@ async def _maybe_handle_mesh(pool, http, token, bot_id: int, msg: dict) -> bool:
     return True
 
 
+# Полный проход по всем ботам — раз в столько секунд; между ними секундный
+# опрос «горячих» (см. run).
+_FULL_POLL_EVERY = 10
+# Боты, которых прямо сейчас опрашивают. Быстрый и полный проходы идут
+# параллельно, а два getUpdates одного бота разом обработали бы один пакет
+# дважды (оффсет сдвигается в конце): дважды авто-ответ, дважды шаг.
+_bot_busy: set[int] = set()
+
+
+async def _poll_one(pool, http, bot_id: int, token: str, main_bot=None) -> None:
+    if bot_id in _bot_busy:
+        return
+    _bot_busy.add(bot_id)
+    try:
+        await _process_bot(pool, http, bot_id, token, main_bot)
+    finally:
+        _bot_busy.discard(bot_id)
+
+
+async def _answer_pre_checkout(pool, http, token, bot_id: int, pcq: dict) -> None:
+    """Ответ на pre_checkout_query: счёт сценария или заказ ИИ-продавца.
+
+    Отвечаем ВСЕГДА: неотвеченный запрос Telegram через 10 секунд считает
+    отказом, и деньги не списываются, а человек видит «оплата не прошла».
+    """
+    ok, error = True, None
+    payload = pcq.get("invoice_payload") or ""
+    try:
+        if payload.startswith(_wf_rt.CALLBACK_PREFIX):
+            ok, error = await _wf_rt.check_pre_checkout(pool, bot_id, pcq)
+        elif payload.startswith("order:"):
+            from services import bot_sales_persona as _bsp
+            ok, error = await _bsp.check_order_pre_checkout(pool, bot_id, pcq)
+    except Exception:
+        log_exc_swallow(log, f"auto_responder: pre_checkout bot={bot_id}")
+        ok, error = False, "Не удалось проверить счёт. Попробуйте ещё раз."
+    params = {"pre_checkout_query_id": pcq.get("id"), "ok": bool(ok and not error)}
+    if error:
+        params["error_message"] = error[:200]
+    try:
+        await bot_api._call(http, token, "answerPreCheckoutQuery", **params)
+    except Exception:
+        log_exc_swallow(log, f"auto_responder: answerPreCheckoutQuery bot={bot_id}")
+
+
+async def _handle_successful_payment(pool, http, token, bot_id: int, chat_id,
+                                     payment: dict) -> None:
+    """Успешная оплата: продолжить сценарий или подтвердить заказ."""
+    if not chat_id:
+        return
+    payload = payment.get("invoice_payload") or ""
+    try:
+        if payload.startswith(_wf_rt.CALLBACK_PREFIX):
+            await _wf_rt.on_payment(pool, bot_id, int(chat_id), payment)
+        elif payload.startswith("order:"):
+            from services import bot_sales_persona as _bsp
+            await _bsp.mark_order_paid(pool, http, token, bot_id, int(chat_id), payment)
+    except Exception:
+        log_exc_swallow(log, f"auto_responder: оплата bot={bot_id}")
+
+
 async def _send_ai_reply(http, token: str, chat_id: int, text: str,
                          system_prompt: str, *, owner_id, bot_id: int,
                          is_free: bool) -> bool:
@@ -747,9 +812,25 @@ async def _process_bot(
             if uid > max_update_id:
                 max_update_id = uid
 
+            # Подтверждение оплаты: ответить Telegram, пока не истекли 10 секунд.
+            pcq = upd.get("pre_checkout_query")
+            if pcq:
+                await _answer_pre_checkout(pool, http, token, bot_id, pcq)
+                continue
+
             # Answer callback_query to dismiss the button spinner in managed bots
             cbq = upd.get("callback_query")
             if cbq:
+                # Кнопка сценария: ветка прогона. Разбирается ДО прочего —
+                # такое нажатие не должно уйти в другие обработчики.
+                _cbchat = ((cbq.get("message") or {}).get("chat") or {}).get("id") \
+                    or (cbq.get("from") or {}).get("id")
+                if (cbq.get("data") or "").startswith(_wf_rt.CALLBACK_PREFIX) and _cbchat:
+                    try:
+                        await _wf_rt.on_button(pool, http, token, bot_id,
+                                               int(_cbchat), cbq)
+                    except Exception:
+                        log_exc_swallow(log, f"auto_responder: кнопка сценария bot={bot_id}")
                 cbq_id = cbq.get("id")
                 if cbq_id:
                     try:
@@ -838,6 +919,8 @@ async def _process_bot(
             if msg.get("successful_payment"):
                 _pf = msg.get("from") or {}
                 await _vl_signal(_pf.get("id"), "paid", 0.98, _pf)
+                await _handle_successful_payment(pool, http, token, bot_id,
+                                                 chat_id, msg["successful_payment"])
             text = msg.get("text", "")
             if not chat_id or not text:
                 continue
@@ -869,6 +952,13 @@ async def _process_bot(
                 log.info("auto_responder: bot=%s user=%s отписан от %d воронок",
                          bot_id, chat_id, _dropped)
                 await _vl_signal(chat_id, "unsubscribed", 0.9)
+                # «Стоп» останавливает и сценарии, а не только воронки.
+                try:
+                    await _wf_rt.cancel_for_contact(pool, bot_id, chat_id)
+                except Exception:
+                    log_exc_swallow(log, "auto_responder: остановка сценариев по «стоп»")
+                await automation_events.emit(pool, None, "contact.opted_out", {},
+                                             bot_id=bot_id, chat_id=chat_id)
                 continue
 
             # Extract user info once (used for notification + registration below)
@@ -979,6 +1069,35 @@ async def _process_bot(
                             await db.record_referral(
                                 pool, bot_id, referrer_id, chat_id, link_id
                             )
+
+            # Сценарий ждёт ответ на вопрос — сообщение принадлежит ему.
+            # Ни правила, ни ИИ-продавец, ни воронки на него не отвечают:
+            # человек ответил «Иван» на «Как вас зовут?», и ответ «Иван»
+            # ещё и от ИИ был бы бессмыслицей.
+            if not is_start:
+                try:
+                    _wr = await _wf_rt.on_reply(pool, bot_id, chat_id, text)
+                except Exception:
+                    log_exc_swallow(log, f"auto_responder: ответ сценарию bot={bot_id}")
+                    _wr = {"consumed": False}
+                if _wr.get("consumed"):
+                    if _wr.get("reply"):
+                        await bot_api.send_message(http, token, chat_id, _wr["reply"])
+                    continue
+
+            # Событие для сценариев: «открыл бота» (с параметром диплинка) или
+            # «написал». Триггеры сценариев читают их из шины.
+            if is_start:
+                _parts = text.strip().split(None, 1)
+                await automation_events.emit(
+                    pool, (bot_row or {}).get("added_by"), "contact.started",
+                    {"param": _parts[1].strip()[:64] if len(_parts) == 2 else "",
+                     "new": bool(is_new_user)},
+                    bot_id=bot_id, chat_id=chat_id)
+            else:
+                await automation_events.emit(
+                    pool, (bot_row or {}).get("added_by"), "message.received",
+                    {"text": text[:1000]}, bot_id=bot_id, chat_id=chat_id)
 
             # Track non-command keywords for SEO analytics
             if not text.startswith("/"):
@@ -1122,6 +1241,19 @@ async def _process_bot(
                         await _notify_operator_order(
                             http, token, _res["order_operator"],
                             chat_id, from_user, _res.get("order_summary") or "")
+                    if _res.get("order_confirmed") and _res.get("order_id"):
+                        await automation_events.emit(
+                            pool, (bot_row or {}).get("added_by"), "order.created",
+                            {"order_id": _res["order_id"],
+                             "summary": _res.get("order_summary") or ""},
+                            bot_id=bot_id, chat_id=chat_id)
+                        # Оплата в чате (если включена в персоне): счёт сразу
+                        # после подтверждения, пока человек в переписке.
+                        try:
+                            await _bsp.send_order_invoice(
+                                pool, http, token, bot_id, chat_id, int(_res["order_id"]))
+                        except Exception:
+                            log_exc_swallow(log, f"auto_responder: счёт за заказ bot={bot_id}")
                     try:
                         await pool.execute(
                             "INSERT INTO auto_reply_log(bot_id, chat_id, rule_type, "
@@ -1586,6 +1718,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
     # Stagger startup — don't hammer DB immediately alongside other services
     await asyncio.sleep(10)
     _cycle = 0
+    _last_bots: list[dict] = []
     while True:
         try:
             # Раз в ~5 минут — рассказать о ботах, которые молчат и сами не
@@ -1627,6 +1760,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                 except Exception:
                     log.debug("auto_responder: уведомления о сломанных ботах не отправлены")
             bots = await db.get_bots_for_polling(pool)
+            _last_bots = bots or []
             if bots:
                 now = time.monotonic()
                 pollable = [
@@ -1635,7 +1769,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                 ]
                 await asyncio.gather(
                     *(
-                        _process_bot(pool, http, b["bot_id"], b["token"], main_bot)
+                        _poll_one(pool, http, b["bot_id"], b["token"], main_bot)
                         for b in pollable
                     ),
                     return_exceptions=True,
@@ -1644,7 +1778,27 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
             raise
         except Exception:
             log.exception("Auto-responder loop error")
-        await asyncio.sleep(10)
+        # Между полными проходами (раз в 10 секунд) — быстрый опрос «горячих»
+        # ботов раз в секунду: тех, где сценарий ждёт нажатия, ответа или
+        # оплаты. На pre_checkout_query Telegram даёт 10 секунд — при опросе
+        # раз в 10 секунд счёт срывался бы через раз.
+        for _ in range(_FULL_POLL_EVERY):
+            await asyncio.sleep(1)
+            hot = _wf_rt.hot_bots()
+            if not hot:
+                continue
+            try:
+                await asyncio.gather(
+                    *(
+                        _poll_one(pool, http, b["bot_id"], b["token"], main_bot)
+                        for b in _last_bots if b["bot_id"] in hot
+                    ),
+                    return_exceptions=True,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Auto-responder hot-poll error")
 
 
 async def run_cloud_reconcile_sweep(pool: asyncpg.Pool) -> None:

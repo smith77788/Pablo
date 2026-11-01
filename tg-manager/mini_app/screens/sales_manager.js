@@ -14,6 +14,9 @@ const SP_SELECTS = {
   gender: [['unspecified', 'Не указан'], ['female', 'Женский'], ['male', 'Мужской']],
   sales_intensity: [['soft', 'Мягкий (консультирует)'], ['balanced', 'Сбалансированный'],
                     ['aggressive', 'Активный (дожимает)']],
+  payment_in_chat: [['', 'Выключена (реквизиты или оператор)'],
+                    ['stars', 'Звёзды Telegram — без провайдера'],
+                    ['provider', 'Карта через платёжного провайдера']],
 };
 
 // Пресеты персон — типовые заготовки под бизнес (заполняют поля формы).
@@ -124,6 +127,12 @@ const SP_FORM = [
     ph: 'Оплата на карту 0000 0000 0000 0000 (Тинькофф), после перевода пришлите чек.' },
   { k: 'payment_via_operator', label: 'Оплату принимает живой оператор (перевести на него)', type: 'bool' },
   { k: 'require_payment_proof', label: 'Требовать подтверждение оплаты (чек/скрин)', type: 'bool' },
+  // Оплата в чате: после подтверждения заказа бот сам выставляет счёт, и
+  // заказ становится оплаченным без скриншотов и ручной сверки.
+  { k: 'payment_in_chat', label: 'Оплата прямо в чате (счёт Telegram)', type: 'select' },
+  { k: 'stars_per_unit', label: 'Звёзд за 1.00 валюты (для оплаты Звёздами)', type: 'number', ph: '50' },
+  { k: 'payment_provider_token', label: 'Токен провайдера (@BotFather → Payments)', type: 'secret',
+    ph: '123456:LIVE:…' },
 
   { sec: '🔔 Дожим (фоллоуап)' },
   { k: 'followup_enabled', label: 'Писать самому, если клиент замолчал', type: 'bool' },
@@ -291,6 +300,11 @@ function _spField(f) {
     return '<div class="field" style="display:flex;align-items:center;gap:10px;justify-content:space-between">' +
       '<label class="chk-row" for="' + id + '" style="margin:0;flex:1;justify-content:space-between;cursor:pointer">' +
       esc(f.label) + '<input type="checkbox" id="' + id + '"></label></div>';
+  } else if (f.type === 'secret') {
+    // Секрет не возвращается с сервера: поле всегда пустое, пустое при
+    // сохранении значит «не менять».
+    inner = '<input type="password" autocomplete="off" id="' + id + '"' + ph + '>' +
+      '<div class="hint" id="' + id + '_state" style="margin-top:4px"></div>';
   } else if (f.type === 'number') {
     inner = '<input type="number" id="' + id + '"' + ph + '>';
   } else if (f.type === 'money') {
@@ -629,6 +643,12 @@ function _spFillForm(p) {
     const el = document.getElementById('f_' + f.k);
     if (!el) continue;
     let v = p[f.k];
+    if (f.type === 'secret') {
+      el.value = '';
+      const st = document.getElementById('f_' + f.k + '_state');
+      if (st) st.textContent = p.payment_provider_set ? '✅ Задан. Оставьте поле пустым, чтобы не менять.' : 'Не задан.';
+      continue;
+    }
     if (f.type === 'bool') {
       el.checked = (v === undefined || v === null) ? _spDefaultBool(f.k) : !!v;
     } else if (f.type === 'money') {
@@ -664,6 +684,10 @@ function _spCollect() {
     if (!el) continue;
     if (f.type === 'bool') { out[f.k] = el.checked; continue; }
     const raw = (el.value || '').trim();
+    if (f.type === 'secret') {
+      if (raw) out[f.k] = raw;
+      continue;
+    }
     if (f.type === 'number') {
       if (raw === '') continue;
       out[f.k] = f.k === 'temperature' ? parseFloat(raw) : parseInt(raw, 10);

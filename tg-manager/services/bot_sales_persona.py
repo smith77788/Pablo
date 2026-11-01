@@ -905,6 +905,7 @@ _PERSONA_TEXT = {
     "order_rules", "payment_details",
     "work_start", "work_end", "work_days", "offhours_message", "sales_intensity",
     "followup_message", "age_confirm_message",
+    "payment_in_chat",
 }
 _PERSONA_BOOL = {
     "mirror_language", "disclose_prices", "can_take_orders", "can_consult",
@@ -916,7 +917,7 @@ _PERSONA_BOOL = {
 _PERSONA_INT = {"age", "humor_level", "max_tokens", "operator_chat_id",
                 "tz_offset", "min_order_total", "free_delivery_threshold",
                 "followup_delay_min", "rate_limit_per_min", "discount_max_percent",
-                "notify_channel_chat_id"}
+                "notify_channel_chat_id", "stars_per_unit"}
 _PERSONA_JSON = {"channels", "order_fields"}
 
 
@@ -935,23 +936,34 @@ async def create_persona(pool, owner_id: int, name: str, **fields) -> dict:
     return d
 
 
+def _persona_out(r) -> dict | None:
+    """Строка персоны наружу. Токен платёжного провайдера не покидает базу
+    даже зашифрованным: экрану достаточно знать, задан ли он."""
+    if not r:
+        return None
+    d = dict(r)
+    if "payment_provider_token" in d:
+        d["payment_provider_set"] = bool(d.pop("payment_provider_token"))
+    return d
+
+
 async def get_persona(pool, persona_id: int) -> dict | None:
     r = await pool.fetchrow("SELECT * FROM bot_sales_personas WHERE id=$1", persona_id)
-    return dict(r) if r else None
+    return _persona_out(r)
 
 
 async def get_persona_for_bot(pool, bot_id: int) -> dict | None:
     r = await pool.fetchrow(
         "SELECT * FROM bot_sales_personas WHERE bot_id=$1 AND is_active=TRUE LIMIT 1",
         bot_id)
-    return dict(r) if r else None
+    return _persona_out(r)
 
 
 async def list_personas(pool, owner_id: int) -> list[dict]:
     rows = await pool.fetch(
         "SELECT * FROM bot_sales_personas WHERE owner_id=$1 ORDER BY created_at DESC",
         owner_id)
-    return [dict(r) for r in rows]
+    return [_persona_out(r) for r in rows]
 
 
 async def update_persona(pool, persona_id: int, owner_id: int, **fields) -> dict | None:
@@ -959,6 +971,8 @@ async def update_persona(pool, persona_id: int, owner_id: int, **fields) -> dict
     for k, v in fields.items():
         if v is None:
             continue
+        if k == "payment_in_chat" and str(v).strip() not in PAYMENT_MODES:
+            raise ValueError("Неизвестный способ оплаты в чате")
         if k in _PERSONA_TEXT:
             args.append(str(v).strip()); sets.append(f"{k}=${len(args)}")
         elif k in _PERSONA_BOOL:
@@ -969,13 +983,23 @@ async def update_persona(pool, persona_id: int, owner_id: int, **fields) -> dict
             args.append(round(float(v), 2)); sets.append(f"temperature=${len(args)}")
         elif k in _PERSONA_JSON:
             args.append(json.dumps(v)); sets.append(f"{k}=${len(args)}::jsonb")
+        elif k == "payment_provider_token":
+            # Токен провайдера (из @BotFather → Payments) — секрет: хранится
+            # зашифрованным, пустая строка снимает его.
+            tok = str(v).strip()
+            if tok:
+                from services.token_vault import encrypt_token
+                args.append(encrypt_token(tok))
+            else:
+                args.append(None)
+            sets.append(f"payment_provider_token=${len(args)}")
     if not sets:
         return await get_persona(pool, persona_id)
     args.extend([persona_id, owner_id])
     r = await pool.fetchrow(
         f"UPDATE bot_sales_personas SET {', '.join(sets)}, updated_at=now() "
         f"WHERE id=${len(args)-1} AND owner_id=${len(args)} RETURNING *", *args)
-    return dict(r) if r else None
+    return _persona_out(r)
 
 
 async def assign_to_bot(pool, persona_id: int, owner_id: int, bot_id: int) -> dict | None:
@@ -1737,3 +1761,178 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
             "order_id": order_id, "order_confirmed": order_confirmed,
             "order_summary": order_summary, "order_operator": order_operator,
             "channels": channels or [], "persona_id": pid}
+
+
+# ── Оплата заказа в чате (Telegram Payments / Звёзды) ─────────────────────────
+# Раньше заказ закрывался скриншотом чека: бот называл реквизиты, человек
+# переводил деньги где-то ещё и присылал картинку, а владелец сверял вручную.
+# Теперь, если в персоне включена оплата в чате, после подтверждения заказа
+# бот выставляет счёт прямо в переписке, Telegram списывает деньги, и заказ
+# сам становится оплаченным.
+#
+#   payment_in_chat = ''         — выключено (как раньше: реквизиты/оператор);
+#                     'stars'    — Звёзды Telegram, провайдер не нужен;
+#                     'provider' — карта через платёжного провайдера бота
+#                                  (токен из @BotFather → Payments).
+PAYMENT_MODES = ("", "stars", "provider")
+ORDER_PAYLOAD_PREFIX = "order:"
+
+
+def order_invoice_amount(order: dict, persona: dict) -> tuple[str, int] | None:
+    """(валюта, сумма в минимальных единицах) для счёта или None. ЧИСТАЯ.
+
+    Деньги заказа — центы валюты персоны. Звёзды — целые, курс задаёт
+    владелец (`stars_per_unit` — звёзд за 1.00 валюты), округление вверх:
+    счёт меньше цены заказа был бы убытком владельца.
+    """
+    mode = (persona.get("payment_in_chat") or "").strip()
+    total = int(order.get("total_cents") or 0)
+    if total <= 0 or mode not in ("stars", "provider"):
+        return None
+    if mode == "stars":
+        rate = int(persona.get("stars_per_unit") or 0)
+        if rate <= 0:
+            return None
+        return "XTR", max(1, -(-total * rate // 100))
+    currency = (order.get("currency") or persona.get("currency") or "USD").upper()
+    return currency, total
+
+
+async def _persona_provider_token(pool, persona_id) -> str | None:
+    raw = await pool.fetchval(
+        "SELECT payment_provider_token FROM bot_sales_personas WHERE id=$1", persona_id)
+    if not raw:
+        return None
+    from services.token_vault import decrypt_token
+    return decrypt_token(raw)
+
+
+async def send_order_invoice(pool, http, token: str, bot_id: int, chat_id: int,
+                             order_id: int) -> bool:
+    """Выставить счёт за подтверждённый заказ. True — счёт ушёл."""
+    from services import bot_api
+    order = await pool.fetchrow(
+        "SELECT * FROM bot_sales_orders WHERE id=$1 AND bot_id=$2 AND customer_chat_id=$3",
+        order_id, bot_id, chat_id)
+    if not order or order["paid_at"] is not None:
+        return False
+    persona = await get_persona_for_bot(pool, bot_id)
+    if not persona:
+        return False
+    priced = order_invoice_amount(dict(order), persona)
+    if not priced:
+        return False
+    currency, amount = priced
+    provider = ""
+    if currency != "XTR":
+        provider = await _persona_provider_token(pool, persona["id"]) or ""
+        if not provider:
+            log.info("bsp: у персоны %s не задан токен провайдера — счёт не выставлен",
+                     persona["id"])
+            return False
+    items = order["items"]
+    if isinstance(items, str):
+        items = json.loads(items or "[]")
+    names = ", ".join(f"{it.get('name')} ×{it.get('qty')}"
+                      for it in (items or []) if it.get("name"))
+    company = (persona.get("company_name") or "").strip()
+    data = await bot_api._call(
+        http, token, "sendInvoice", chat_id=chat_id,
+        title=(f"Заказ №{order_id}" + (f" — {company}" if company else ""))[:32],
+        description=(names or f"Оплата заказа №{order_id}")[:255],
+        payload=f"{ORDER_PAYLOAD_PREFIX}{order_id}",
+        provider_token=provider, currency=currency,
+        prices=[{"label": f"Заказ №{order_id}"[:32], "amount": int(amount)}])
+    if not data.get("ok"):
+        log.warning("bsp: счёт за заказ %s не выставлен: %s", order_id,
+                    str(data.get("description"))[:200])
+        return False
+    await pool.execute(
+        "UPDATE bot_sales_orders SET invoice_sent_at=now(), invoice_currency=$2, "
+        "invoice_amount=$3 WHERE id=$1", order_id, currency, int(amount))
+    try:
+        from services import workflow_runtime
+        workflow_runtime.mark_hot(bot_id)
+    except Exception:
+        log.debug("bsp: mark_hot", exc_info=True)
+    return True
+
+
+def _order_id_of(payload: str) -> int | None:
+    if not payload or not payload.startswith(ORDER_PAYLOAD_PREFIX):
+        return None
+    try:
+        return int(payload[len(ORDER_PAYLOAD_PREFIX):])
+    except ValueError:
+        return None
+
+
+async def check_order_pre_checkout(pool, bot_id: int, query: dict) -> tuple[bool, str | None]:
+    """pre_checkout_query по счёту заказа: брать ли деньги.
+
+    Отказ, если заказ отменён, уже оплачен или сумма/валюта счёта не
+    совпадает с тем, что мы выставили (подмена счёта)."""
+    oid = _order_id_of(query.get("invoice_payload") or "")
+    if oid is None:
+        return False, None
+    user_id = (query.get("from") or {}).get("id")
+    order = await pool.fetchrow(
+        "SELECT status, paid_at, invoice_currency, invoice_amount FROM bot_sales_orders "
+        "WHERE id=$1 AND bot_id=$2 AND customer_chat_id=$3", oid, bot_id, user_id)
+    if not order:
+        return True, "Заказ не найден."
+    if order["paid_at"] is not None:
+        return True, "Этот заказ уже оплачен."
+    if order["status"] == "cancelled":
+        return True, "Заказ отменён."
+    if (order["invoice_currency"] != query.get("currency")
+            or int(order["invoice_amount"] or 0) != int(query.get("total_amount") or 0)):
+        return True, "Сумма счёта изменилась. Запросите новый счёт."
+    return True, None
+
+
+async def mark_order_paid(pool, http, token, bot_id: int, chat_id: int,
+                          payment: dict) -> bool:
+    """Успешная оплата заказа: отметить оплату, подтвердить клиенту, событие.
+
+    Идемпотентно по `telegram_payment_charge_id`: повтор того же апдейта
+    (оффсет опроса сдвигается после обработки пакета) не задвоит оплату."""
+    from services import automation_events, bot_api
+    oid = _order_id_of(payment.get("invoice_payload") or "")
+    if oid is None:
+        return False
+    charge = payment.get("telegram_payment_charge_id") or ""
+    row = await pool.fetchrow(
+        """UPDATE bot_sales_orders
+              SET paid_at=now(), paid_amount=$4, paid_currency=$5,
+                  payment_charge_id=$6,
+                  status=CASE WHEN status IN ('new','confirmed') THEN 'confirmed'
+                              ELSE status END,
+                  updated_at=now()
+            WHERE id=$1 AND bot_id=$2 AND customer_chat_id=$3 AND paid_at IS NULL
+        RETURNING owner_id, total_cents, currency""",
+        oid, bot_id, chat_id, int(payment.get("total_amount") or 0),
+        payment.get("currency") or "", charge)
+    if not row:
+        return False
+    try:
+        await bot_api.send_message(
+            http, token, chat_id,
+            f"✅ Оплата получена. Заказ №{oid} передан в работу.")
+    except Exception:
+        log.debug("bsp: подтверждение оплаты не отправлено", exc_info=True)
+    await automation_events.emit(
+        pool, row["owner_id"], "payment.received",
+        {"source": "order", "order_id": oid,
+         "amount": payment.get("total_amount"), "currency": payment.get("currency"),
+         "order_total_cents": row["total_cents"], "order_currency": row["currency"],
+         "charge_id": charge},
+        bot_id=bot_id, chat_id=chat_id)
+    try:
+        from services import virtual_layer
+        await virtual_layer.signal_for_telegram_user(
+            pool, row["owner_id"], chat_id, "paid", confidence=0.98,
+            source="bot_order_payment")
+    except Exception:
+        log.debug("bsp: virtual_layer paid", exc_info=True)
+    return True
