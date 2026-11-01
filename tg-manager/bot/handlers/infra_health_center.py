@@ -483,3 +483,52 @@ async def cb_hc_back(callback: CallbackQuery) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="🏠 Infragram OS", callback_data=BmCb(action="main"))
     await safe_edit(callback, "Выберите раздел:", reply_markup=kb.as_markup())
+
+
+@router.callback_query(InfraHCCb.filter(F.action.in_({"mute_anomaly", "unmute_anomaly"})))
+async def cb_hc_mute_anomaly(
+    callback: CallbackQuery,
+    callback_data: InfraHCCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """«Не присылать» под тревогой об аномалии — глушит только этот тип.
+
+    Раньше заглушить тревогу было нечем: категорию «ограничения» целиком
+    выключать нельзя (в ней баны и заморозки), а «Разрешить» в списке не
+    помогало — детектор через полчаса заводил новую запись и присылал то же
+    сообщение снова.
+    """
+    from services import anomaly_detector
+
+    types = anomaly_detector.ANOMALY_TYPES
+    idx = int(callback_data.page or 0)
+    if not 0 <= idx < len(types):
+        await safe_answer(callback)
+        return
+    a_type = types[idx]
+    label = anomaly_detector.ANOMALY_LABEL.get(a_type, a_type)
+    unmute = callback_data.action == "unmute_anomaly"
+    hours = 0 if unmute else max(1, min(int(callback_data.item_id or 24), 24 * 30))
+    ok = await anomaly_detector.mute(pool, callback.from_user.id, a_type, hours)
+    if not ok:
+        await callback.answer("⚠️ Не получилось сохранить — попробуйте ещё раз",
+                              show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    if unmute:
+        note = f"🔔 Уведомления «{label}» снова включены"
+        kb.button(text="🔕 Не присылать 24 ч",
+                  callback_data=InfraHCCb(action="mute_anomaly", item_id=24, page=idx))
+    else:
+        when = f"{hours // 24} дн." if hours >= 48 else f"{hours} ч"
+        note = f"🔕 «{label}» не присылаю {when}. Список аномалий остаётся в центре здоровья."
+        kb.button(text="🔔 Вернуть уведомления",
+                  callback_data=InfraHCCb(action="unmute_anomaly", page=idx))
+    kb.button(text="⚡ Все аномалии", callback_data=InfraHCCb(action="anomalies"))
+    kb.adjust(1)
+    await callback.answer(note, show_alert=True)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
+    except Exception:
+        log_exc_swallow(log, "infra_hc: не обновил кнопки под тревогой")
