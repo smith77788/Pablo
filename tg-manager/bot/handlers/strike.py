@@ -1367,7 +1367,7 @@ async def cb_email_oauth(
         return
     if not await require_feature(pool, callback.from_user.id, "email_oauth"):
         await callback.answer(
-            "OAuth почты доступен в MAX / Enterprise.", show_alert=True
+            "OAuth почты доступен по подписке.", show_alert=True
         )
         return
 

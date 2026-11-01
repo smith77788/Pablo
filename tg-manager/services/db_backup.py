@@ -19,8 +19,10 @@ FK-триггерах (session_replication_role=replica) залить данны
 секвенции. Схема воспроизводима из миграций репозитория, поэтому дамп — data-only,
 что делает его версионно-независимым.
 
-Ничего секретного в дамп не попадает сверх того, что и так в БД; отправка идёт
-только в заданный владельцем чат (DB_BACKUP_CHAT_ID / первый ADMIN_IDS).
+Архив шифруется AES-256-GCM перед отправкой (см. «Шифрование архива» ниже);
+отправка идёт только в заданный владельцем чат (DB_BACKUP_CHAT_ID / первый
+ADMIN_IDS). Расшифровать вручную:
+    python -m services.db_backup decrypt backup.tar.gz.enc backup.tar.gz
 """
 from __future__ import annotations
 
@@ -82,6 +84,84 @@ def backup_chat_id() -> Optional[int]:
     except Exception:
         pass
     return None
+
+
+# ── Шифрование архива ─────────────────────────────────────────────────────────
+#
+# ЗАЧЕМ. Архив уходит документом в Telegram-чат и живёт там бессрочно. Секреты в
+# нём и так зашифрованы token_vault, но всё остальное — телефоны, юзернеймы,
+# собранные аудитории, переписка, платежи всех владельцев — лежало в CSV
+# открытым текстом. Утечка одного сообщения из чата бэкапов (чужой админ в
+# канале, угнанный аккаунт владельца, пересылка) отдавала базу целиком.
+#
+# КАК. AES-256-GCM поверх готового tar.gz. Ключ — DB_BACKUP_KEY, а если он не
+# задан, ключ хранилища секретов (TOKEN_ENCRYPTION_KEY и его связка). Отдельный
+# DB_BACKUP_KEY лучше: его можно хранить вне Railway (в менеджере паролей) и
+# расшифровать бэкап, даже если окружение сервиса потеряно. Восстановление
+# понимает и зашифрованные, и старые открытые архивы.
+#
+# Формат: b"IGBK1" + nonce(12) + tag(16) + ciphertext.
+_ENC_MAGIC = b"IGBK1"
+
+
+def _encrypt_enabled() -> bool:
+    return os.getenv("DB_BACKUP_ENCRYPT", "1").strip().lower() not in ("0", "false", "no")
+
+
+def _backup_keys() -> list[bytes]:
+    """Ключи для расшифровки архива: DB_BACKUP_KEY первым, затем связка vault."""
+    import hashlib
+
+    keys: list[bytes] = []
+    raw = os.getenv("DB_BACKUP_KEY", "").strip()
+    if raw:
+        keys.append(hashlib.sha256(raw.encode()).digest())
+    try:
+        from services.token_vault import _decrypt_keys
+        keys.extend(k for k in _decrypt_keys() if k not in keys)
+    except Exception:
+        log.warning("db_backup: связка ключей token_vault недоступна", exc_info=True)
+    return keys
+
+
+def encrypt_archive(archive: bytes) -> bytes:
+    """Зашифровать архив первым ключом из _backup_keys()."""
+    from Crypto.Cipher import AES as _AES
+
+    keys = _backup_keys()
+    if not keys:
+        raise RuntimeError("db_backup: нет ключа для шифрования бэкапа")
+    nonce = os.urandom(12)
+    cipher = _AES.new(keys[0], _AES.MODE_GCM, nonce=nonce)
+    ct, tag = cipher.encrypt_and_digest(archive)
+    return _ENC_MAGIC + nonce + tag + ct
+
+
+def is_encrypted_archive(blob: bytes) -> bool:
+    return bool(blob) and blob[:len(_ENC_MAGIC)] == _ENC_MAGIC
+
+
+def decrypt_archive(blob: bytes) -> bytes:
+    """Снять шифр с архива; открытый tar.gz возвращается как есть.
+
+    Бросает ValueError, если ни один ключ не подошёл: молча вернуть мусор в
+    restore хуже, чем внятный отказ.
+    """
+    if not is_encrypted_archive(blob):
+        return blob
+    from Crypto.Cipher import AES as _AES
+
+    body = blob[len(_ENC_MAGIC):]
+    nonce, tag, ct = body[:12], body[12:28], body[28:]
+    for key in _backup_keys():
+        try:
+            return _AES.new(key, _AES.MODE_GCM, nonce=nonce).decrypt_and_verify(ct, tag)
+        except Exception:
+            continue
+    raise ValueError(
+        "бэкап зашифрован, но ни DB_BACKUP_KEY, ни TOKEN_ENCRYPTION_KEY (с "
+        "TOKEN_ENCRYPTION_KEYS_PREVIOUS) его не открывают — задайте ключ, "
+        "которым он был снят")
 
 
 # ── Снятие дампа ───────────────────────────────────────────────────────────────
@@ -170,8 +250,9 @@ async def send_backup(bot, chat_id: int, archive: bytes, *, caption_note: str = 
     parts = split_parts(archive, _PART_LIMIT)
     total = len(parts)
     for idx, part in enumerate(parts, 1):
-        name = f"infragram_backup_{ts}.tar.gz" if total == 1 \
-            else f"infragram_backup_{ts}.tar.gz.part{idx:03d}of{total:03d}"
+        ext = "tar.gz.enc" if is_encrypted_archive(archive) else "tar.gz"
+        name = f"infragram_backup_{ts}.{ext}" if total == 1 \
+            else f"infragram_backup_{ts}.{ext}.part{idx:03d}of{total:03d}"
         cap = None
         if idx == 1:
             size_mb = len(archive) / (1024 * 1024)
@@ -207,7 +288,8 @@ async def send_backup(bot, chat_id: int, archive: bytes, *, caption_note: str = 
 
 # ── Восстановление ─────────────────────────────────────────────────────────────
 def parse_archive(archive: bytes) -> tuple[dict, dict[str, bytes]]:
-    """Разобрать tar.gz → (manifest, {table: csv_bytes})."""
+    """Разобрать tar.gz (зашифрованный или открытый) → (manifest, {table: csv_bytes})."""
+    archive = decrypt_archive(archive)
     tables: dict[str, bytes] = {}
     manifest: dict = {}
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
@@ -276,8 +358,22 @@ async def run_backup_once(pool, bot, *, note: str = "") -> dict:
     except Exception as e:
         log.warning("db_backup: снятие дампа упало: %s", e, exc_info=True)
         return {"ok": False, "error": f"дамп: {e}"}
+    payload = archive
+    if _encrypt_enabled():
+        try:
+            payload = encrypt_archive(archive)
+        except Exception as e:
+            # Отправить открытым, раз шифрование сломалось, — ровно та утечка,
+            # от которой оно защищает. Лучше пропустить бэкап и сказать об этом.
+            log.error("db_backup: шифрование архива упало, бэкап НЕ отправлен: %s", e,
+                      exc_info=True)
+            return {"ok": False, "error": f"шифрование: {e}", "size": len(archive)}
+        note = (note + "\n" if note else "") + (
+            "🔒 Зашифрован ключом "
+            + ("DB_BACKUP_KEY" if os.getenv("DB_BACKUP_KEY", "").strip()
+               else "TOKEN_ENCRYPTION_KEY"))
     try:
-        parts = await send_backup(bot, chat_id, archive, caption_note=note)
+        parts = await send_backup(bot, chat_id, payload, caption_note=note)
     except Exception as e:
         log.warning("db_backup: отправка упала: %s", e, exc_info=True)
         return {"ok": False, "error": f"отправка: {e}", "size": len(archive)}
@@ -306,3 +402,20 @@ async def run_backup_loop(pool, bot) -> None:
         except Exception:
             log.warning("db_backup: цикл упал", exc_info=True)
         await asyncio.sleep(_INTERVAL_SEC)
+
+
+def _cli(argv: list[str]) -> int:
+    """python -m services.db_backup decrypt <вход> <выход> — снять шифр с архива."""
+    if len(argv) != 3 or argv[0] != "decrypt":
+        print("использование: python -m services.db_backup decrypt <вход.tar.gz.enc> <выход.tar.gz>")
+        return 2
+    with open(argv[1], "rb") as f:
+        blob = f.read()
+    with open(argv[2], "wb") as f:
+        f.write(decrypt_archive(blob))
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    raise SystemExit(_cli(sys.argv[1:]))
