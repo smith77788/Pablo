@@ -3,6 +3,8 @@
 from __future__ import annotations
 import asyncio
 import csv
+import functools
+import hmac as _hmac
 import html as _html
 import io
 import logging
@@ -425,12 +427,87 @@ async def cmd_reconcile_payments(message: Message, pool: asyncpg.Pool, bot) -> N
 # ── Секретная фраза для входа в админку ────────────────────────────────────────
 
 
-@router.message(F.text.func(lambda t: bool(ADMIN_SECRET) and t == ADMIN_SECRET))
-async def cmd_admin_secret(message: Message, pool: asyncpg.Pool = None) -> None:
+# Короче этой длины фраза не принимается вовсе. Фраза даёт ПОЛНЫЙ доступ к
+# платформе (все аккаунты, сессии, платежи всех владельцев), а угадывать её
+# можно сообщениями боту без ограничения попыток — короткую переберут. Порог
+# мягкий (энтропию длина не меряет), но отсекает «admin», «1234» и им подобные.
+ADMIN_SECRET_MIN_LEN = 12
+
+
+@functools.lru_cache(maxsize=1)
+def _complain_short_secret() -> None:
+    """Сказать в лог, почему вход по фразе выключен. Не чаще раза за процесс."""
+    log.error(
+        "admin: ADMIN_SECRET короче %d символов — вход в админку по секретной "
+        "фразе ОТКЛЮЧЁН. Задайте длинную случайную фразу или впишите свой ID "
+        "в ADMIN_IDS.", ADMIN_SECRET_MIN_LEN)
+
+
+def admin_secret_matches(text: str | None, secret: str | None = None) -> bool:
+    """Совпало ли сообщение с секретной фразой входа в админку.
+
+    Три условия, и каждое закрывает свою дыру:
+      * фраза задана и не короче ADMIN_SECRET_MIN_LEN — иначе её перебирают;
+      * сравнение через compare_digest по байтам — без утечки по времени и без
+        TypeError на не-ASCII;
+      * пробелы по краям не прощаются: фраза — это секрет, а не команда.
+    """
+    secret = ADMIN_SECRET if secret is None else secret
+    if not secret or not text:
+        return False
+    if len(secret) < ADMIN_SECRET_MIN_LEN:
+        _complain_short_secret()
+        return False
+    return _hmac.compare_digest(text.encode("utf-8"), secret.encode("utf-8"))
+
+
+async def _notify_admins_of_grant(bot, message: Message) -> None:
+    """Сообщить постоянным админам, что кто-то вошёл по секретной фразе.
+
+    Выдача платформенного доступа — событие, о котором владелец должен узнать
+    сразу, а не найти в логе: если фраза утекла, это единственный сигнал.
+    Сам вошедший уведомление не получает (он и так видит ответ).
+    """
+    try:
+        from config import ADMIN_IDS
+    except Exception:
+        return
+    u = message.from_user
+    who = f"@{u.username}" if getattr(u, "username", None) else (u.full_name or "без имени")
+    text = (
+        "🔐 <b>Вход в админку по секретной фразе</b>\n\n"
+        f"Кто: {_html.escape(who)} (ID <code>{u.id}</code>)\n"
+        f"Срок доступа: {_ADMIN_SESSION_TTL_H} ч\n\n"
+        "Если это не вы и не ваш сотрудник — смените ADMIN_SECRET и "
+        "перезапустите сервис: сессия истечёт, новая по старой фразе не выдастся."
+    )
+    for aid in ADMIN_IDS:
+        if int(aid) == int(u.id):
+            continue
+        try:
+            await bot.send_message(int(aid), text, parse_mode="HTML")
+        except Exception:
+            log_exc_swallow(log, "Не удалось уведомить админа о входе по фразе",
+                            user_id=int(aid))
+
+
+@router.message(
+    F.chat.type == "private",
+    F.text.func(lambda t: admin_secret_matches(t)),
+)
+async def cmd_admin_secret(message: Message, pool: asyncpg.Pool = None, bot=None) -> None:
     # Секретная фраза совпала — даём сессионный доступ без проверки ADMIN_IDS.
     # Пишем СКВОЗЬ в БД: иначе доступ виден только этому процессу (в мини-аппе
     # или на другой реплике человек остался бы не-админом) и не истекал бы.
+    #
+    # Только личный чат: в группе фраза видна всем участникам, и удалить её бот
+    # может лишь с правами администратора чата.
     await grant_session_admin(pool, message.from_user.id)
+    log.warning("AUDIT admin_session_granted user_id=%s username=%s ttl_h=%s",
+                message.from_user.id, getattr(message.from_user, "username", None),
+                _ADMIN_SESSION_TTL_H)
+    if bot is not None:
+        await _notify_admins_of_grant(bot, message)
     try:
         await message.delete()
     except Exception:
