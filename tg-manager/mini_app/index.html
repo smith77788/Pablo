@@ -12774,13 +12774,40 @@ function renderOpLog() {
   const el = document.getElementById('oplogList');
   if (el) {
     el.innerHTML = OPLOG_ROWS.length
-      ? OPLOG_ROWS.map(l=>`<div class="row"><div class="row-body">
+      ? OPLOG_ROWS.map((l,i)=>`<div class="row" style="cursor:pointer" role="button" tabindex="0" onclick="openOpLogRow(${i})"><div class="row-body">
           <div class="row-name">${esc(l.target||'')}</div>
-          <div class="row-val" style="white-space:normal">${esc(l.message||'').substring(0,160)} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
-        </div></div>`).join('')
+          <div class="row-val" style="white-space:normal">${esc(l.message||'').substring(0,160)}${(l.message||'').length>160?'…':''} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
+        </div><div class="row-right"><span class="chev">›</span></div></div>`).join('')
       : `<div style="padding:14px;font-size:13px;color:var(--hint);text-align:center">${OPLOG_Q ? 'По этому поиску записей нет.' : 'По этому срезу записей нет.'}</div>`;
   }
   renderOpLogMore();
+}
+// Строка лога открывается целиком. Раньше строку нельзя было нажать, а текст
+// обрезался на 160 символах: «что именно поменялось у этого бота» (было →
+// стало) или полная причина ошибки оставались недоступны.
+function openOpLogRow(i) {
+  const l = OPLOG_ROWS[i];
+  if (!l) return;
+  let when = '';
+  try { if (l.created_at) when = new Date(l.created_at).toLocaleString('ru-RU'); } catch(_) {}
+  const bg = document.createElement('div');
+  bg.className = 'mbg show';
+  bg.style.zIndex = '9999';
+  const msg = (l.message || '').trim();
+  bg.innerHTML = '<div class="modal">'
+    + '<div class="modal-title" style="word-break:break-word">' + esc(l.target || 'Цель') + '</div>'
+    + '<div style="margin-bottom:10px;font-size:12px;color:var(--hint)">'
+    + '<span class="badge ' + (_opLogOk(l.status) ? 'b-gr' : 'b-rd') + '">' + esc(_opLogStRu(l.status)) + '</span>'
+    + (l.step_num != null ? ' · шаг ' + esc(String(l.step_num)) : '')
+    + (when ? ' · ' + esc(when) : '') + '</div>'
+    + '<div style="white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.5;max-height:55vh;overflow-y:auto">'
+    + (msg ? esc(msg.split('; ').join('\n')) : '<span style="color:var(--hint)">Подробностей нет: по этой цели записан только итог.</span>')
+    + '</div>'
+    + '<button class="btn btn-s" style="width:100%;margin-top:14px">Закрыть</button></div>';
+  const close = () => { try { bg.remove(); } catch(_) {} };
+  bg.querySelector('button').onclick = close;
+  bg.onclick = (e) => { if (e.target === bg) close(); };
+  document.body.appendChild(bg);
 }
 function renderOpLogChips() {
   const box = document.getElementById('oplogChips');
