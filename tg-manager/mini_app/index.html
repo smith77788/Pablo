@@ -29892,7 +29892,7 @@ const WF_TRIGGER_PH = {
   start: 'Параметр ссылки ?start=… (пусто — любой вход)',
   keyword: 'Слова через запятую: цена, купить',
   tag_added: 'Имя тега',
-  event: 'payment.received, order.created, deal.created…',
+  event: 'Выберите событие из подсказок к полю',
 };
 function wfTriggerHint(prefix) {
   const t = document.getElementById(prefix + 'Trigger').value;
@@ -29936,10 +29936,14 @@ async function openWorkflowDetail(wfId, wfName) {
     const trig = d.trigger_type || 'manual';
     const trigOpts = Object.entries(d.triggers || {}).map(([k, v]) =>
       `<option value="${esc(k)}"${k === trig ? ' selected' : ''}>${esc(v)}</option>`).join('');
+    // Подсказки для триггера «событие»: код события и его подпись по-русски.
+    const evOpts = Object.entries(d.events || {}).map(([k, v]) =>
+      `<option value="${esc(k)}">${esc(v)}</option>`).join('');
     html += `<div class="sec">⚡ Когда запускать</div>
       <div style="padding:0 16px 8px">
         <select id="wfdTrigger" class="sel" onchange="wfTriggerHint('wfd')">${trigOpts}</select>
-        <input type="text" id="wfdTriggerVal" class="inp" style="margin-top:6px" value="${esc(d.trigger_value || '')}">
+        <input type="text" id="wfdTriggerVal" class="inp" style="margin-top:6px" list="wfdEventList" value="${esc(d.trigger_value || '')}">
+        <datalist id="wfdEventList">${evOpts}</datalist>
         <label class="chk-row" style="margin-top:6px"><input type="checkbox" id="wfdReentry" ${d.allow_reentry ? 'checked' : ''}> Можно проходить повторно</label>
         <button class="btn btn-s" style="width:100%;margin-top:6px" onclick="saveWorkflowTrigger(${wfId})">💾 Сохранить способ запуска</button>
         ${(!d.active && trig !== 'manual') ? '<div class="hint" style="margin-top:6px">Сценарий выключен — сам он не запустится, пока вы его не активируете.</div>' : ''}
