@@ -1,0 +1,71 @@
+/* ── Дизайн-система мини-аппа: токены и компоненты (начало) ─────────────────
+   Правила — в docs/DESIGN_SYSTEM.md. Коротко:
+   * цвет, отступ, радиус и размер шрифта берутся ТОЛЬКО из токенов --ui-*;
+     новых #hex в разметке и в screens/*.js не заводим;
+   * токены --ui-* построены поверх палитры :root из index.html, поэтому смена
+     палитры (и будущая светлая тема) меняет и компоненты;
+   * компонент — это класс .ui-<имя> плюс функция UI.<имя>() в
+     screens/ui_kit.js. Экран собирает разметку из функций, а не пишет
+     style="…" руками. */
+:root{
+  /* Отступы: шкала 4px */
+  --ui-s1:4px; --ui-s2:8px; --ui-s3:12px; --ui-s4:16px; --ui-s5:20px; --ui-s6:24px;
+  /* Радиусы */
+  --ui-r-sm:10px; --ui-r:var(--radius,14px); --ui-r-lg:var(--radius-lg,18px);
+  /* Типографика */
+  --ui-fs-xs:11px; --ui-fs-sm:12px; --ui-fs:14px; --ui-fs-lg:17px; --ui-fs-xl:22px;
+  --ui-fw:500; --ui-fw-b:700;
+  /* Поверхности и текст */
+  --ui-surface:var(--bg2,#161d27);
+  --ui-surface-2:var(--bg3,#1d2733);
+  --ui-line:var(--border,rgba(255,255,255,.085));
+  --ui-text:var(--text,#c8d2df);
+  --ui-muted:var(--hint,#7f8c9d);
+  --ui-accent:var(--accent,#3bb6a6);
+  /* Смысловые цвета */
+  --ui-good:var(--green,#5cc49a);
+  --ui-warn:var(--orange,#e0b268);
+  --ui-bad:var(--red,#e58e8e);
+  --ui-info:var(--blue,#74a4de);
+}
+
+/* Блок: заголовок + содержимое, отступ от краёв экрана как у .sec */
+.ui-block{margin:var(--ui-s3) var(--ui-s4) 0}
+.ui-block-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:var(--ui-s2);margin:0 0 var(--ui-s2)}
+.ui-block-title{font-size:var(--ui-fs);font-weight:var(--ui-fw-b);color:var(--ui-text)}
+.ui-link{font-size:var(--ui-fs-sm);color:var(--ui-accent);cursor:pointer;white-space:nowrap}
+
+/* Показатель: подпись, крупное число, изменение к прошлому периоду */
+.ui-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--ui-s2)}
+.ui-stat{background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-r);padding:var(--ui-s3);min-width:0;cursor:pointer}
+.ui-stat-lbl{font-size:var(--ui-fs-sm);color:var(--ui-muted);display:flex;gap:6px;align-items:center}
+.ui-stat-val{font-size:var(--ui-fs-xl);font-weight:var(--ui-fw-b);color:var(--ui-text);margin-top:var(--ui-s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ui-stat-val.is-empty{font-size:var(--ui-fs);font-weight:var(--ui-fw);color:var(--ui-muted)}
+.ui-stat-sub{font-size:var(--ui-fs-xs);color:var(--ui-muted);margin-top:2px;min-height:14px}
+.ui-up{color:var(--ui-good)} .ui-down{color:var(--ui-bad)}
+
+/* Карточка «требует внимания» */
+.ui-alert{display:flex;gap:var(--ui-s3);align-items:flex-start;background:var(--ui-surface);border:1px solid var(--ui-line);border-left:3px solid var(--ui-info);border-radius:var(--ui-r);padding:var(--ui-s3);margin-bottom:var(--ui-s2)}
+.ui-alert.is-high{border-left-color:var(--ui-bad)}
+.ui-alert.is-medium{border-left-color:var(--ui-warn)}
+.ui-alert-body{flex:1;min-width:0}
+.ui-alert-title{font-size:var(--ui-fs);font-weight:600;color:var(--ui-text)}
+.ui-alert-detail{font-size:var(--ui-fs-sm);color:var(--ui-muted);margin-top:2px;line-height:1.4}
+.ui-btn{display:inline-block;margin-top:var(--ui-s2);font-size:var(--ui-fs-sm);font-weight:600;padding:7px 12px;border-radius:var(--ui-r-sm);background:var(--ui-surface-2);color:var(--ui-text);border:1px solid var(--ui-line);cursor:pointer}
+.ui-btn[disabled]{opacity:.5;pointer-events:none}
+
+/* Плитка раздела: значок, название, одна строка «что здесь делают» */
+.ui-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--ui-s2)}
+.ui-section{background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-r);padding:var(--ui-s3);cursor:pointer;min-width:0}
+.ui-section-ico{font-size:20px;line-height:1}
+.ui-section-title{font-size:var(--ui-fs);font-weight:var(--ui-fw-b);color:var(--ui-text);margin-top:6px}
+.ui-section-desc{font-size:var(--ui-fs-xs);color:var(--ui-muted);margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* Пустое состояние: зачем раздел и одно первое действие */
+.ui-empty{text-align:center;color:var(--ui-muted);font-size:var(--ui-fs-sm);padding:var(--ui-s4) var(--ui-s3);background:var(--ui-surface);border:1px dashed var(--ui-line);border-radius:var(--ui-r)}
+.ui-ok{display:flex;gap:var(--ui-s2);align-items:center;font-size:var(--ui-fs-sm);color:var(--ui-muted);padding:var(--ui-s3);background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-r)}
+
+/* Скелет загрузки */
+.ui-skel{background:var(--ui-surface);border-radius:var(--ui-r);min-height:76px;animation:uiPulse 1.2s ease-in-out infinite}
+@keyframes uiPulse{0%,100%{opacity:.55}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.ui-skel{animation:none}}

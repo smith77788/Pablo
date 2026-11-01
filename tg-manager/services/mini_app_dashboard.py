@@ -275,9 +275,20 @@ def setup_routes(app: web.Application, pool) -> None:
 
         return _json_resp(await attention_items(pool, uid))
 
+    async def results_summary(request: web.Request) -> web.Response:
+        """«Итоги»: деньги, лиды, ответы и охват за период плюс до трёх
+        карточек «требует внимания». Тот же расчёт показывает бот
+        (`services/results_summary.py`)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import results_summary as _rs
+        return _json_resp(await _rs.compute(pool, uid, request.query.get("days", 7)))
+
     app.router.add_get("/api/miniapp/dashboard", dashboard)
     app.router.add_get("/api/miniapp/dashboard/visual", dashboard_visual)
     app.router.add_get("/api/miniapp/dashboard/attention", dashboard_attention)
+    app.router.add_get("/api/miniapp/summary", results_summary)
 
 
 async def attention_items(pool, uid: int) -> dict:
