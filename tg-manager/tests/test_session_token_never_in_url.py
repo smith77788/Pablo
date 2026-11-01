@@ -18,6 +18,10 @@ import pytest
 from aiohttp.test_utils import make_mocked_request
 
 from services import mini_app_api as M
+
+# Настоящая функция, взятая при сборе: соседние тесты в общем прогоне
+# подменяют M._get_uid мимо monkeypatch, и к нашему запуску там чужая лямбда.
+_REAL_GET_UID = M._get_uid
 from services.mini_app_auth import (
     URL_TICKET_TTL, make_token, make_url_ticket, parse_token, parse_url_ticket,
 )
@@ -61,13 +65,13 @@ def test_forged_ticket_rejected():
 
 def test_session_token_in_query_is_refused():
     tok = make_token(UID, BOT)
-    assert M._get_uid(_req(f"/api/miniapp/events?token={tok}")) is None
+    assert _REAL_GET_UID(_req(f"/api/miniapp/events?token={tok}")) is None
 
 
 def test_ticket_in_query_and_bearer_header_are_accepted():
-    assert M._get_uid(_req(f"/x?ticket={make_url_ticket(UID, BOT)}")) == UID
+    assert _REAL_GET_UID(_req(f"/x?ticket={make_url_ticket(UID, BOT)}")) == UID
     tok = make_token(UID, BOT)
-    assert M._get_uid(_req("/x", {"Authorization": f"Bearer {tok}"})) == UID
+    assert _REAL_GET_UID(_req("/x", {"Authorization": f"Bearer {tok}"})) == UID
 
 
 def test_redact_query_masks_secret_values_only():
@@ -105,3 +109,11 @@ def test_client_never_puts_the_session_token_in_a_url():
                       for p in (ROOT / "mini_app" / "screens").glob("*.js"))
     hits = re.findall(r"token='\s*\+\s*encodeURIComponent\(TK\)|[?&]token=", ui + screens)
     assert not hits, f"токен сессии снова уходит в адрес: {hits[:3]}"
+
+
+def test_ticket_cannot_buy_a_new_ticket():
+    """Утёкшая ссылка не должна продлевать себя бесконечно."""
+    src = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    i = src.index("async def url_ticket(")
+    body = src[i:i + 1200]
+    assert 'request.query.get("ticket")' in body and "401" in body

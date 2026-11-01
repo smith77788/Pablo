@@ -7825,10 +7825,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         Только по Bearer-токену: билетом нельзя получить новый билет, иначе
         утёкшая ссылка продлевала бы себя бесконечно.
         """
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
+        if request.query.get("ticket"):
             return _err("Нужна авторизация", 401)
-        uid = parse_token(auth[7:], _bot_token())
+        uid = _get_uid(request)
         if not uid:
             return _err("Сессия истекла — откройте мини-апп заново", 401)
         from services.mini_app_auth import URL_TICKET_TTL, make_url_ticket

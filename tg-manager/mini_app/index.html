@@ -19500,7 +19500,7 @@ async function applySmartTags() {
 // собравший срез, получал вместо него весь справочник. Срез считает сервер по
 // ТЕМ ЖЕ параметрам, что список (contactFilterParams), — «выгружаю то, что вижу».
 const UCH_EXPORT_CAP = 5000;
-function uchExport(fmt, opts) {
+async function uchExport(fmt, opts) {
   const f = (fmt === 'vcf' || fmt === 'json') ? fmt : 'csv';
   opts = opts || {};
   const params = (opts.slice ? contactFilterParams() : new URLSearchParams());
@@ -19517,8 +19517,10 @@ function uchExport(fmt, opts) {
     toast('⚠️ В срезе ' + num(CONTACT_SLICE_TOTAL) + ' контактов, за раз выгружается ' + num(UCH_EXPORT_CAP) + '. Сузьте фильтр.');
     return;
   }
-  params.set('token', TK);
-  const url = '/api/miniapp/uch/export/' + f + '?' + params.toString();
+  // D19: в адрес идёт короткий билет, а не токен сессии.
+  let url;
+  try { url = await ticketUrl('/api/miniapp/uch/export/' + f + '?' + params.toString()); }
+  catch(e) { toast('❌ ' + errRu(e, 'Не удалось подготовить файл')); return; }
   if (tg?.openLink) tg.openLink(location.origin + url); else window.open(url, '_blank');
 }
 
