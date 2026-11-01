@@ -162,6 +162,7 @@ from services import account_monitor
 from services import trust_engine
 from services import shadowban_monitor
 from services import service_supervisor
+from services import platform_alert
 from services import op_worker
 from services import behavioral_engine
 from services import account_warmer
@@ -1046,6 +1047,9 @@ async def main() -> None:
 
     _svc_stagger_index = 0
 
+    # Падение фонового сервиса уходит админу сообщением, а не только в лог (D27).
+    _svc_alert = platform_alert.make_alerter(pool, bot)
+
     async def _resilient(name: str, fn, *args):
         """Wrap a background service factory with auto-restart on crash.
         fn(*args) is called fresh each restart so the coroutine is never reused.
@@ -1073,6 +1077,7 @@ async def main() -> None:
             restart_delay=30.0,
             start_delay=_svc_stagger_index * 2,   # разносим старты по 2с
             restart_on_return=False,              # вернулся значит выключен
+            alert=_svc_alert,                     # падение — админу (D27)
         )
 
     async def _web_resilient(name: str, fn, *args):
@@ -1088,6 +1093,7 @@ async def main() -> None:
             # Сетевому сервису положено работать всегда: вернулся — поднимаем
             # снова, но через паузу, а не вхолостую в тесном цикле.
             restart_on_return=True,
+            alert=_svc_alert,
         )
 
     # Определяем webhook режим ДО старта сервера, чтобы передать dp в payment_webhook
