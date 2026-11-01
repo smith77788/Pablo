@@ -77,6 +77,10 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
             await pool.execute("DELETE FROM tg_accounts WHERE owner_id = ANY($1::bigint[])", [OWNER, OTHER])
             await pool.execute("DELETE FROM managed_channels WHERE owner_id = ANY($1::bigint[])", [OWNER, OTHER])
 
+            # Номера аккаунтов — вне диапазона, который успевает набрать
+            # последовательность tg_accounts.id в общей базе части CI: соседний
+            # файл, вставляющий аккаунты без явного id, иначе занимал 501 раньше
+            # этого теста (UniqueViolation tg_accounts_pkey).
             # Боты владельца: жив, мёртв, не ответил. Плюс чужой мёртвый.
             for bid, tok, owner in [
                 (301, "t_alive_301", OWNER), (302, "t_dead_302", OWNER),
@@ -89,12 +93,12 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
             # Плюс чужой забаненный. Проверяем, что session_expired переживает
             # очистку: сессия переподключается, выбрасывать его нельзя.
             for aid, status, owner in [
-                (501, "active", OWNER), (502, "banned", OWNER),
-                (503, "deactivated", OWNER), (504, "cooldown", OWNER),
-                (505, "session_expired", OWNER), (601, "banned", OTHER)]:
+                (99501, "active", OWNER), (99502, "banned", OWNER),
+                (99503, "deactivated", OWNER), (99504, "cooldown", OWNER),
+                (99505, "session_expired", OWNER), (99601, "banned", OTHER)]:
                 await pool.execute(
                     "INSERT INTO tg_accounts(id, owner_id, phone, session_str, acc_status) "
-                    "VALUES($1,$2,$3,$4,$5)", aid, owner, f"+7900{aid}", "sess", status)
+                    "VALUES($1,$2,$3,$4,$5)", aid, owner, f"+79{aid}", "sess", status)
             # Каналы владельца — для счёта.
             for cid in (701, 702):
                 await pool.execute(
@@ -143,12 +147,12 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
                 assert bots_left == {301, 303}, f"удалён не тот бот: {bots_left}"
                 accs_left = {r["id"] for r in await pool.fetch(
                     "SELECT id FROM tg_accounts WHERE owner_id=$1", OWNER)}
-                # 501 рабочий, 504 кулдаун, 505 session_expired — все восстановимы.
-                assert accs_left == {501, 504, 505}, f"удалён не тот аккаунт: {accs_left}"
+                # 99501 рабочий, 99504 кулдаун, 99505 session_expired — все восстановимы.
+                assert accs_left == {99501, 99504, 99505}, f"удалён не тот аккаунт: {accs_left}"
 
                 # Чужое не тронуто.
                 assert await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE bot_id=401") == 1
-                assert await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE id=601") == 1
+                assert await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE id=99601") == 1
 
                 # 4) Повтор удаления идемпотентен: мёртвых больше нет.
                 r = await client.post("/api/miniapp/fleet/sweep", headers=hdr,
