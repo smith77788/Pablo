@@ -168,10 +168,13 @@ def compose_digest(snap: dict, suggestions=None, narrative_text: str = "",
     }
 
 
-async def build(pool, owner_id: int) -> dict:
+async def build(pool, owner_id: int, *, state_key: str = _DIGEST_STATE_KEY) -> dict:
     """Собрать дайджест из живого организма и обновить базу трендов.
 
     Fail-open поблочно: любой сбой источника не роняет отчёт целиком.
+    `state_key` — где лежит база трендов. Экран мини-аппа сравнивает с прошлым
+    открытием, еженедельный отчёт в бот (services.weekly_report) — со своим
+    прошлым отчётом, иначе его «за неделю» значило бы «с последнего открытия».
     """
     from services.organism import world, brain, spine
     snap = await world.snapshot(pool, owner_id)
@@ -185,13 +188,13 @@ async def build(pool, owner_id: int) -> dict:
         narrative_text = ""
     prev = None
     try:
-        prev = await spine.state_get(pool, owner_id, _DIGEST_STATE_KEY, None)
+        prev = await spine.state_get(pool, owner_id, state_key, None)
     except Exception:
         prev = None
     digest = compose_digest(snap, suggestions, narrative_text, prev)
     # Сохраняем текущие метрики как базу для трендов следующего дайджеста.
     try:
-        await spine.state_set(pool, owner_id, _DIGEST_STATE_KEY, _flat_metrics(snap))
+        await spine.state_set(pool, owner_id, state_key, _flat_metrics(snap))
     except Exception:
         pass
     return digest
