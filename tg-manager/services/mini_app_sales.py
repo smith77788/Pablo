@@ -442,7 +442,9 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Фильтр журнала: bad, guard или без фильтра", 400)
         page = await _aq.list_replies(pool, uid, limit=_list_limit(request, 30, 100),
                                       offset=_list_offset(request), only=only)
-        return _json_resp(page)
+        # Итог и остаток — в ответе явно: экран пишет «Показать ещё · N из M».
+        return _json_resp({"items": page["items"], "total": page["total"],
+                           "offset": page["offset"], "remaining": page["remaining"]})
 
     async def ai_journal_rate(request):
         uid = _get_uid(request)
