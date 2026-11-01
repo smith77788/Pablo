@@ -49,6 +49,7 @@ DELETE /api/miniapp/uch/smart-tags/rules/{rule_id}
 DELETE /api/miniapp/va/channel/{cid}/media/{mid}
 DELETE /api/miniapp/va/references/{rid}
 DELETE /api/miniapp/warmup/{plan_id}
+DELETE /api/miniapp/webhooks/{wh_id}
 DELETE /api/miniapp/workflow/{wf_id}
 DELETE /api/miniapp/workflows/{wf_id}
 DELETE /api/miniapp/workspace/{ws_id}
@@ -193,6 +194,7 @@ GET /api/miniapp/host_server/my
 GET /api/miniapp/host_server/status
 GET /api/miniapp/infra
 GET /api/miniapp/infra_health
+GET /api/miniapp/integrations
 GET /api/miniapp/invite/account/{acc_id}
 GET /api/miniapp/invite/advice
 GET /api/miniapp/invite/analytics
@@ -346,6 +348,7 @@ GET /api/miniapp/vlayer/overview
 GET /api/miniapp/vlayer/segment/{value}
 GET /api/miniapp/warmup
 GET /api/miniapp/warmup/{plan_id}/log
+GET /api/miniapp/webhooks/{wh_id}/deliveries
 GET /api/miniapp/workflow/{wf_id}/status
 GET /api/miniapp/workflows
 GET /api/miniapp/workflows/{wf_id}
@@ -496,6 +499,7 @@ HEAD /api/miniapp/host_server/my
 HEAD /api/miniapp/host_server/status
 HEAD /api/miniapp/infra
 HEAD /api/miniapp/infra_health
+HEAD /api/miniapp/integrations
 HEAD /api/miniapp/invite/account/{acc_id}
 HEAD /api/miniapp/invite/advice
 HEAD /api/miniapp/invite/analytics
@@ -649,6 +653,7 @@ HEAD /api/miniapp/vlayer/overview
 HEAD /api/miniapp/vlayer/segment/{value}
 HEAD /api/miniapp/warmup
 HEAD /api/miniapp/warmup/{plan_id}/log
+HEAD /api/miniapp/webhooks/{wh_id}/deliveries
 HEAD /api/miniapp/workflow/{wf_id}/status
 HEAD /api/miniapp/workflows
 HEAD /api/miniapp/workflows/{wf_id}
@@ -931,6 +936,10 @@ POST /api/miniapp/seo/apply
 POST /api/miniapp/seo/apply_all
 POST /api/miniapp/seo/apply_bot
 POST /api/miniapp/settings
+POST /api/miniapp/sheets/check
+POST /api/miniapp/sheets/connect
+POST /api/miniapp/sheets/disconnect
+POST /api/miniapp/sheets/export
 POST /api/miniapp/shield/config
 POST /api/miniapp/spintax/expand
 POST /api/miniapp/spintax/generate
@@ -997,6 +1006,11 @@ POST /api/miniapp/warmup/bulk_start
 POST /api/miniapp/warmup/{plan_id}/cancel
 POST /api/miniapp/warmup/{plan_id}/pause
 POST /api/miniapp/warmup/{plan_id}/resume
+POST /api/miniapp/webhook_delivery/{delivery_id}/retry
+POST /api/miniapp/webhooks
+POST /api/miniapp/webhooks/{wh_id}
+POST /api/miniapp/webhooks/{wh_id}/rotate
+POST /api/miniapp/webhooks/{wh_id}/test
 POST /api/miniapp/workflow/create
 POST /api/miniapp/workflow/{wf_id}/execute
 POST /api/miniapp/workflow/{wf_id}/pause

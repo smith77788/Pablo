@@ -144,8 +144,7 @@ def test_export_links_carry_the_token():
     assert 'href="/api/miniapp/uch/export/csv"' not in h, (
         "ссылка выгрузки без токена вернётся 401 в новой вкладке")
     body = _js_func("uchExport")
-    # Параметры собираются через URLSearchParams, а он кодирует значения сам:
-    # требовать ручной encodeURIComponent значит требовать двойного
-    # кодирования. Проверяем то, что важно — токен уходит в ссылку.
-    assert "params.set('token', TK)" in body, "ссылка выгрузки без токена = 401"
-    assert "openLink" in body, "выгрузка должна открываться тем же способом, что и остальные файлы"
+    # Внешний браузер не несёт заголовка, а токен сессии в адресе запрещён
+    # (D19): ссылка получает одноразовый пропуск на свой путь.
+    assert "openTicketLink(" in body, "ссылка выгрузки без пропуска = 401"
+    assert "'token'" not in body and "TK" not in body, "токен сессии не ходит в адресе"
