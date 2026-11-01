@@ -32,9 +32,11 @@ re-run; idempotent SQL keeps that re-run safe:
 - `schema_v2.sql` through `schema_v193_channel_ownership.sql` — incremental
   migrations (194 files as of 2026-09-03; growth flagged as technical debt, see
   `docs/SCHEMA_CONSOLIDATION_PLAN.md` for the phased consolidation)
-- `schema_baseline.sql` + `.manifest` — optional snapshot that replaces the whole
-  history on a provably empty database (built by
-  `deploy/scripts/make_schema_baseline.py`)
+- `database/baseline/baseline.sql` + `baseline.manifest` — snapshot that replaces
+  the whole history on a provably empty database (built by
+  `deploy/scripts/make_schema_baseline.py`). It lives outside the `schema*.sql`
+  mask on purpose: under that mask the runner would execute it on every
+  database, production included, as an ordinary migration.
 
 Each file runs in its own transaction with a savepoint per statement, under a
 `lock_timeout`, so a blocked `ALTER` fails and retries instead of freezing

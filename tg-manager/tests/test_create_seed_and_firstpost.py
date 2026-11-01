@@ -27,6 +27,12 @@ class _Pool:
 
 
 def _install(monkeypatch, submitted, posts):
+    # Прогрев-пауза «создан → стал публичным» (30–90 с по умолчанию) здесь
+    # НАСТОЯЩИЙ сон: тест спал по полторы минуты на канал и был самым долгим в
+    # наборе (129 с на CI-прогон). Порядок «пост раньше @username» проверяют
+    # не часы, а последовательность вызовов; 0 отключает паузу штатно.
+    monkeypatch.setenv("CHANNEL_WARMUP_MIN_S", "0")
+    monkeypatch.setenv("CHANNEL_WARMUP_MAX_S", "0")
     accs = [{"id": 1, "session_str": "s1", "first_name": "A"},
             {"id": 2, "session_str": "s2", "first_name": "B"}]
 

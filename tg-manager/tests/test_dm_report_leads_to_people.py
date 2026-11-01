@@ -28,7 +28,12 @@ API = api_source()
 def _fn(name: str) -> str:
     m = re.search(r"(?:async\s+)?function\s+" + re.escape(name) + r"\s*\(", HTML)
     assert m, f"функция {name} не найдена"
-    i = HTML.index("{", m.end() - 1)
+    return _body_from(m.end() - 1)
+
+
+def _body_from(pos: int) -> str:
+    """Тело функции, чья сигнатура кончается на `pos`: от `{` до парной `}`."""
+    i = HTML.index("{", pos)
     depth = 0
     for j in range(i, len(HTML)):
         if HTML[j] == "{":
@@ -37,7 +42,7 @@ def _fn(name: str) -> str:
             depth -= 1
             if depth == 0:
                 return HTML[i:j + 1]
-    raise AssertionError(name)
+    raise AssertionError(f"незакрытое тело функции с позиции {pos}")
 
 
 def _handler(name: str) -> str:
@@ -130,8 +135,11 @@ def _journal_screen() -> str:
     месте. Экран здесь определяется тем, во что он пишет — `dmrlBody`.
     """
     out = []
+    # Тело берём с найденной позиции, а не повторным поиском по имени: поиск
+    # по имени заново сканировал весь фронт на каждую из ~1500 функций, и
+    # один этот тест шёл 76 с — дольше почти любого e2e.
     for m in re.finditer(r"(?:async\s+)?function\s+(\w+)\s*\(", HTML):
-        body = _fn(m.group(1))
+        body = _body_from(m.end() - 1)
         if "'dmrlBody'" in body or '"dmrlBody"' in body:
             out.append(body)
     assert out, "экран журнала получателей не найден: никто не пишет в dmrlBody"

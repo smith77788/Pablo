@@ -3852,6 +3852,10 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
 # второй раз (повторные приглашения, второй пост, второе сообщение человеку),
 # а узнать об этом было негде.
 _PROTECTIVE_FAILURE_COUNTERS = {
+    "infragram_pacing_sync_errors_total":
+        "обмен темпом флота с базой не удался: соседние процессы не видят "
+        "флудов этого, а после рестарта выученная осторожность аккаунтов "
+        "может потеряться — проверьте доступность базы",
     "infragram_requeue_write_failures_total":
         "повтор операции — не записался, и операцию, которую ошибка только "
         "отложила, автомат не поднял: её придётся запустить заново вручную",
@@ -4076,11 +4080,13 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
 
     ОЧЕРЕДЬ РАЗБИРАЕТ ОДИН ПРОЦЕСС, и это держится арендой исполнителя
     (`replica_guard.acquire_executor_lease`), а не договорённостью. Почему так:
-    лимиты флуда, потолки параллельности на владельца и троттлы восстановления
-    живут в ПАМЯТИ процесса, поэтому две реплики с ролью worker разгоняют темп
-    по флоту вдвое — прямой риск бана, самая дорогая поломка продукта. Одной
-    опечатки в переменных окружения Railway для этого достаточно, а до сих пор
-    это только писалось в лог, которого никто не читает.
+    исходно лимиты флуда, потолки параллельности на владельца и троттлы
+    восстановления жили в ПАМЯТИ процесса, и две реплики с ролью worker
+    разгоняли темп по флоту вдвое. С 01.11.2026 темп флота и осторожность
+    аккаунтов общие (Postgres, `services/pacing_store.py`), потолок на
+    владельца держит SQL поллера, но в памяти ещё остаются троттлы
+    восстановления и др. (`KNOWN_DIVERGENCE`), а сторожа ниже не отличают
+    свои операции от чужих.
 
     Второй процесс при этом живёт и отдаёт мини-апп и бота — он лишь не берёт
     операции и не водит сторожей. Сторожа без аренды особенно опасны:
@@ -4132,7 +4138,7 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
                 log.warning(
                     "op_worker: очередь разбирает другой процесс (аренда "
                     "исполнителя у %s), этот ждёт и операций не берёт. Так "
-                    "лимиты флуда не разъезжаются по репликам; если держатель "
+                    "сторожа не снимают чужие живые операции; если держатель "
                     "умрёт, аренда освободится сама.",
                     await _rguard.executor_lease_holder(pool) or "неизвестно")
             # Пропустить круг недостаточно: операции, запущенные здесь до
@@ -10163,11 +10169,21 @@ async def _exec_global_presence_bot(
                     "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
                 }
 
-            # Use per-target assigned account; fall back to round-robin if not set
+            # Use per-target assigned account; fall back to round-robin if not set.
+            # Гео-fallback: если планировщик аккаунт не привязал, предпочитаем
+            # аккаунт из СТРАНЫ цели (его прокси там) — бот под страну X
+            # создаётся с аккаунта X; нет такого в пуле — прежний round-robin.
             acc_id = target["selected_account_id"]
             acc = acc_by_id.get(acc_id) if acc_id else None
             if not acc:
-                acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
+                try:
+                    _tcc = (target["country_code"] or "").strip().upper()
+                except (KeyError, TypeError):
+                    _tcc = ""
+                _geo_pool = [a for a in accounts_list
+                             if str(a.get("geo_country") or "").strip().upper() == _tcc] if _tcc else []
+                _pool = _geo_pool or accounts_list
+                acc = dict(_pool[acc_rr_idx % len(_pool)])
                 acc_rr_idx += 1
 
             bot_name = target["planned_name"] or f"Bot {i + 1}"
@@ -15527,16 +15543,21 @@ async def _exec_check_owned_restrictions(
 async def _exec_check_bot_geoban(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Проверка НАШИХ ботов на ГЕО-БАН: ограничен в одних странах, чист в других.
+    """Гео-доступность НАШИХ каналов, чатов и ботов: где открываются, где нет.
 
     Read-only. Telegram отдаёт флаг `restricted`/`restriction_reason` сущности
-    ОТНОСИТЕЛЬНО страны смотрящего аккаунта (его прокси/IP). Поэтому один бот из
-    РФ может быть ограничен, а из DE — доступен: это и есть гео-бан. Отличить его
-    от ОБЩЕГО бана можно только пробой с аккаунтов РАЗНЫХ стран — проверяем бота
-    с одного здорового аккаунта на каждую различимую страну (geo_country прокси),
-    затем `entity_restriction_check.classify_geoban` сводит пробы в вердикт.
-    Находки гео-бана пишем в restriction_events (общий пульс), темп — бережный и
-    отменяемый (cancellable_pause).
+    ОТНОСИТЕЛЬНО страны смотрящего аккаунта (его прокси/IP). Поэтому один ресурс
+    из РФ может быть ограничен, а из DE — доступен: это и есть гео-бан. Отличить
+    его от ОБЩЕГО бана можно только пробой с аккаунтов РАЗНЫХ стран — проверяем
+    каждый ресурс с одного здорового аккаунта на каждую различимую страну
+    (geo_country прокси), затем `entity_restriction_check.classify_geoban` сводит
+    пробы в вердикт, а `build_geo_report` — в пострановый отчёт.
+
+    Проверяются только ПУБЛИЧНЫЕ ресурсы (с @username): приватный канал
+    наблюдатель из другой страны не откроет, и это было бы не «заблокирован»,
+    а «нечем проверить». Тип операции остался `check_bot_geoban` — под ним уже
+    стоят рекуррентные круги авто-мониторинга. Находки гео-бана пишем в
+    restriction_events (общий пульс), темп — бережный и отменяемый.
     """
     from services import account_manager
     from services import entity_restriction_check as _erc
@@ -15545,21 +15566,55 @@ async def _exec_check_bot_geoban(
     _GEO_MAX = 6  # потолок различимых стран на бота: n_ботов × стран резолвов к Telegram
 
     only_bots = [int(x) for x in (params.get("bot_ids") or [])]
-    _bot_where = "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''"
-    _bot_args: list = [owner_id]
-    if only_bots:
-        _bot_where += " AND bot_id = ANY($2::bigint[])"
-        _bot_args.append(only_bots)
-    bot_rows = await _safe_fetch(
-        pool, f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
-        *_bot_args)
-    bots = [{"bot_id": int(r["bot_id"]),
-             "username": (r.get("username") or "").strip().lstrip("@") or None,
-             "title": r.get("first_name")}
-            for r in (bot_rows or []) if (r.get("username") or "").strip()]
-    if not bots:
+    only_channels = [int(x) for x in (params.get("channel_ids") or [])]
+    # Выбор подмножества: прислали только ботов — каналы не трогаем, и наоборот.
+    # Ничего не прислали — проверяем всё публичное.
+    want_bots = bool(only_bots) or not only_channels
+    want_channels = bool(only_channels) or not only_bots
+
+    resources: list = []
+    if want_channels:
+        _ch_where = "WHERE owner_id=$1 AND username IS NOT NULL AND username <> ''"
+        _ch_args: list = [owner_id]
+        if only_channels:
+            _ch_where += " AND channel_id = ANY($2::bigint[])"
+            _ch_args.append(only_channels)
+        # Один канал может вести несколько аккаунтов — строк в managed_channels
+        # тогда несколько, а ресурс один.
+        ch_rows = await _safe_fetch(
+            pool,
+            "SELECT DISTINCT ON (channel_id) channel_id, username, title, type "
+            f"FROM managed_channels {_ch_where} ORDER BY channel_id",
+            *_ch_args)
+        for r in ch_rows or []:
+            _uname = (r.get("username") or "").strip().lstrip("@")
+            if not _uname:
+                continue
+            _type = (r.get("type") or "").lower()
+            resources.append({
+                "kind": ("group" if _type in ("megagroup", "supergroup", "group", "chat")
+                         else "channel"),
+                "id": int(r["channel_id"]), "username": _uname,
+                "title": r.get("title"), "bot_id": None})
+    if want_bots:
+        _bot_where = "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''"
+        _bot_args: list = [owner_id]
+        if only_bots:
+            _bot_where += " AND bot_id = ANY($2::bigint[])"
+            _bot_args.append(only_bots)
+        bot_rows = await _safe_fetch(
+            pool, f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
+            *_bot_args)
+        for r in bot_rows or []:
+            _uname = (r.get("username") or "").strip().lstrip("@")
+            if not _uname:
+                continue
+            resources.append({"kind": "bot", "id": int(r["bot_id"]), "username": _uname,
+                              "title": r.get("first_name"), "bot_id": int(r["bot_id"])})
+    if not resources:
         return {"status": "failed",
-                "summary": "⚠️ Нет публичных ботов (с @username) для проверки гео-бана."}
+                "summary": "⚠️ Нет публичных каналов, чатов или ботов (с @username) "
+                           "для проверки гео-доступности."}
 
     acc_rows = await _safe_fetch(
         pool,
@@ -15601,7 +15656,7 @@ async def _exec_check_bot_geoban(
             break
     distinct_geos = len(geo_acc)
 
-    n = len(bots)
+    n = len(resources)
     await _safe_execute(
         pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2", n, op_id)
 
@@ -15611,10 +15666,10 @@ async def _exec_check_bot_geoban(
         have = (", ".join(sorted(geo_acc)) or "ни одной")
         return {
             "status": "done", "checked": 0, "counts": {}, "findings": [],
-            "summary": ("Проверка гео-бана требует аккаунтов с прокси минимум в "
+            "summary": ("Проверка гео-доступности требует аккаунтов с прокси минимум в "
                         f"2 разных странах — сейчас различима {distinct_geos} "
                         f"(страны: {have}).\n\nПодключите аккаунты с прокси ещё "
-                        "хотя бы одной страны и повторите: тогда видно, где бот "
+                        "хотя бы одной страны и повторите: тогда видно, где ресурс "
                         "ограничен, а где доступен."),
         }
 
@@ -15641,8 +15696,9 @@ async def _exec_check_bot_geoban(
 
     counts: dict = {}
     findings: list = []
+    report_rows: list = []
     try:
-        for idx, b in enumerate(bots):
+        for idx, b in enumerate(resources):
             if await _is_cancelled(pool, op_id):
                 return {"status": "cancelled",
                         "summary": f"Отменено. Проверено: {idx}/{n}\n"
@@ -15653,8 +15709,10 @@ async def _exec_check_bot_geoban(
                 if client is None:
                     continue
                 try:
+                    # access_hash не передаём: он привязан к аккаунту, а смотреть
+                    # нужно глазами страны — по публичному @username.
                     r = await _erc.resolve_flags(
-                        client, kind="bot", entity_id=b["bot_id"],
+                        client, kind=b["kind"], entity_id=b["id"],
                         username=b["username"], do_bot_ping=False)
                     sig = r.get("signals") or {}
                     per_geo.append({
@@ -15676,34 +15734,44 @@ async def _exec_check_bot_geoban(
             verdict = _erc.classify_geoban(per_geo)
             status = verdict["status"]
             counts[status] = counts.get(status, 0) + 1
-            _title = b.get("title") or (f"@{b['username']}" if b.get("username") else str(b["bot_id"]))
+            _title = b.get("title") or f"@{b['username']}"
+            report_rows.append({"kind": b["kind"], "title": b.get("title"),
+                                "username": b["username"], "verdict": verdict})
             await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,$4,$5)",
-                op_id, idx + 1, f"Бот «{_title}»"[:64],
-                "error" if status == _erc.GEO_BANNED else "ok",
+                op_id, idx + 1,
+                _erc.resource_label(b["kind"], b.get("title"), b["username"])[:64],
+                "error" if status in (_erc.GEO_BANNED, _erc.GEO_GLOBAL) else "ok",
                 f"{verdict['label']} — {verdict['reason_ru']}"[:200])
 
             if status == _erc.GEO_BANNED:
-                findings.append({"bot_id": b["bot_id"], "title": _title,
+                findings.append({"kind": b["kind"], "id": b["id"],
+                                 "bot_id": b["bot_id"], "title": _title,
+                                 "username": b["username"],
                                  "blocked_geos": verdict["blocked_geos"],
-                                 "clean_geos": verdict["clean_geos"]})
+                                 "clean_geos": verdict["clean_geos"],
+                                 "blocked_reasons": verdict.get("blocked_reasons") or {}})
+                _details = {"kind": b["kind"], "username": b.get("username"),
+                            "title": _title, "blocked_geos": verdict["blocked_geos"],
+                            "clean_geos": verdict["clean_geos"],
+                            "reason": verdict["reason_ru"]}
+                if b["kind"] == "bot":
+                    _details["bot_id"] = b["bot_id"]
+                else:
+                    _details["channel_id"] = b["id"]
                 try:
                     await _sbm._record_event(
-                        pool, owner_id, "bot_geoban", "critical",
-                        {"bot_id": b["bot_id"], "username": b.get("username"),
-                         "title": _title, "blocked_geos": verdict["blocked_geos"],
-                         "clean_geos": verdict["clean_geos"],
-                         "reason": verdict["reason_ru"]},
-                        bot_id=b["bot_id"])
+                        pool, owner_id, f"{b['kind']}_geoban", "critical",
+                        _details, bot_id=b["bot_id"])
                 except Exception as e:
                     log.debug("check_bot_geoban: record_event failed: %s", e)
 
             await _safe_execute(
                 pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             if idx + 1 < n:
-                await cancellable_pause(pool, op_id, random.uniform(2.0, 4.0), "geoban next bot")
+                await cancellable_pause(pool, op_id, random.uniform(2.0, 4.0), "geoban next resource")
     finally:
         for c in _clients.values():
             try:
@@ -15713,7 +15781,17 @@ async def _exec_check_bot_geoban(
 
     summary = _erc.build_geoban_summary(counts, n)
     summary += f"\n\nℹ️ Проверено стран: {distinct_geos} ({', '.join(sorted(geo_acc))})."
+    _report = _erc.build_geo_report(report_rows, sorted(geo_acc))
+    if _report:
+        summary += "\n\n" + _report
     return {"status": "done", "checked": n, "counts": counts,
+            "geos": sorted(geo_acc),
+            "report": [{"kind": r["kind"], "title": r.get("title"),
+                        "username": r["username"],
+                        "status": r["verdict"]["status"],
+                        "per_geo": r["verdict"].get("per_geo") or {},
+                        "blocked_reasons": r["verdict"].get("blocked_reasons") or {}}
+                       for r in report_rows][:200],
             "findings": findings[:50], "summary": summary}
 
 

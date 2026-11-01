@@ -118,10 +118,19 @@ def test_chat_and_account_errors_are_returned_not_retried(name, check):
     assert check(res)
 
 
-def test_flood_wait_seconds_survive_the_batch():
+def test_flood_wait_seconds_survive_the_batch(monkeypatch):
+    # Короткий флуд пакет пережидает на месте — здесь это были настоящие 42 с
+    # сна на каждый прогон набора. Длину паузы проверяем записью, а не часами.
+    slept: list[float] = []
+
+    async def _no_sleep(seconds, *a, **k):
+        slept.append(float(seconds))
+
+    monkeypatch.setattr(mie.asyncio, "sleep", _no_sleep)
     c = _Client(raise_on_invite=_named("FloodWaitError", seconds=42))
     res, _ = _bulk(c, ["@a", "@b"])
     assert res["flood_wait"] == 42
+    assert slept == [42.0], "короткий флуд пакет обязан переждать ровно его длину"
 
 
 def test_per_target_error_falls_back_to_one_by_one():

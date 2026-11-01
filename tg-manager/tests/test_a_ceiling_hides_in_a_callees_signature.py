@@ -162,25 +162,25 @@ def _innermost(tree: ast.Module) -> dict[int, ast.AST]:
     Ближайшая, а не любая: `setup_routes` объемлет все обработчики файла, и его
     тело содержит честные ключи ЧУЖИХ ручек — по нему судить значит оправдывать
     молчащую ручку итогом соседней.
+
+    Один проход с текущей функцией на стеке. Раньше для каждой функции
+    обходилось её тело, а для каждого вызова в нём — ещё раз всё тело, чтобы
+    узнать глубину: квадрат на файлах в десятки тысяч строк, 94 с на прогон.
+    Объемлющая функция «ближайшая» ровно тогда, когда она последняя на пути
+    от корня — это и есть верх стека.
     """
     out: dict[int, ast.AST] = {}
-    for fn in ast.walk(tree):
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for n in ast.walk(fn):
-            if isinstance(n, ast.Call):
-                prev = out.get(id(n))
-                if prev is None or _depth(fn, n) < _depth(prev, n):
-                    out[id(n)] = fn
+
+    def _visit(node: ast.AST, cur: "ast.AST | None") -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            cur = node
+        if cur is not None and isinstance(node, ast.Call):
+            out[id(node)] = cur
+        for child in ast.iter_child_nodes(node):
+            _visit(child, cur)
+
+    _visit(tree, None)
     return out
-
-
-def _depth(fn: ast.AST, call: ast.AST) -> int:
-    """Насколько глубоко вызов лежит внутри функции (меньше — ближе)."""
-    for d, node in enumerate(ast.walk(fn)):
-        if node is call:
-            return d
-    return 10 ** 6
 
 
 def _findings(files=None) -> list[str]:

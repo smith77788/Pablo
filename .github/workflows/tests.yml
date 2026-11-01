@@ -27,22 +27,35 @@ concurrency:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    # НАБОР ИДЁТ ЧЕТЫРЬМЯ ЧАСТЯМИ ПАРАЛЛЕЛЬНО (с 01.11.2026). Одним прогоном он
+    # занимал 18–24 минуты и рос; части делятся по файлам с учётом веса
+    # (tests/sharding.py, веса — tests/shard_weights.json), у каждой свой
+    # раннер и своя база Postgres, то есть изоляция та же, что у одного
+    # прогона. Что каждый файл попадает ровно в одну часть, проверяет
+    # tests/test_sharding.py — иначе зелёный CI поверх невыполненного файла.
+    #
+    # fail-fast: false — красная часть не должна гасить остальные: иначе
+    # список упавших тестов виден только по одной части, и на разбор уходит
+    # повторный прогон.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: pytest (часть ${{ matrix.shard }} из 4)
     # Предел нужен: без него зависший тест удерживает runner до стандартного
     # шестичасового лимита GitHub и при частых push накапливает очередь
     # прогонов вместо быстрого красного сигнала.
     #
-    # 23.10.2026: было 20, и набор в этот предел перестал влезать. GitHub
-    # помечает убитую по таймауту работу как CANCELLED, а не как failure,
-    # поэтому обрыв читался как «отменили лишний прогон» и никто не заметил:
-    # c650b3b прошёл за 16м43с, 69fe7e1 — за 16м10с, а дальше ab76e05,
-    # 83526a8 и 7ba2711 оборвались ровно на 20м18с каждый. Ветка
-    # автодеплойная, то есть код уезжал в прод вообще без прогона тестов.
+    # 23.10.2026: было 20 на весь набор, и набор в этот предел перестал
+    # влезать. GitHub помечает убитую по таймауту работу как CANCELLED, а не
+    # как failure, поэтому обрыв читался как «отменили лишний прогон» и никто
+    # не заметил: ab76e05, 83526a8 и 7ba2711 оборвались ровно на 20м18с.
+    # Ветка автодеплойная, то есть код уезжал в прод без прогона тестов.
     #
-    # Предел поднят с запасом, а не вплотную: впритык его пришлось бы двигать
-    # на каждый десяток новых тестов, и каждый раз через ту же немую
-    # «отмену». Чтобы рост был виден заранее, прогон печатает самые долгие
-    # тесты (--durations ниже).
-    timeout-minutes: 45
+    # Теперь предел — на ЧАСТЬ: она идёт около четверти набора (5–7 минут
+    # вместе с установкой), предел с запасом больше чем вчетверо. Рост виден
+    # заранее: каждая часть печатает свои самые долгие тесты (--durations).
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: tg-manager
@@ -71,7 +84,7 @@ jobs:
         # Без health-check шаг тестов стартует раньше, чем база примет
         # соединение, и весь слой снова молча уйдёт в skip.
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -82,6 +95,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          # Кэш скачанных колёс pip: четыре части ставят одно и то же, и без
+          # кэша каждая заново тянет aiogram/openai/anthropic/pydantic.
+          cache: pip
+          cache-dependency-path: tg-manager/requirements*.txt
 
       - name: Install deps (runtime subset + test tooling; telethon — отдельным шагом ниже)
         run: |
@@ -128,10 +145,26 @@ jobs:
       # и синтаксис его не ловит. Набор правил и обоснование, почему сюда не
       # берутся стилевые правила, — в tests/test_no_undefined_names.py.
       - name: Несуществующие имена (ruff)
+        # Проверка всего дерева, а не части тестов, — достаточно одной части.
+        if: matrix.shard == 1
         run: |
           ruff check . --select \
             F821,F822,F823,F601,F602,F632,F702,E711,E714,F502,F506,F522,F901 \
             --output-format concise
+
+      # ЛОГ БАЗЫ — ТИШЕ. При остановке службы GitHub печатает в конец лога
+      # работы весь лог контейнера Postgres, а тесты намеренно гоняют сотни
+      # ломаных запросов (пробы схемы): хвост лога целиком занят ими, и
+      # сводка pytest в него не попадает (через API отдаётся только хвост).
+      # Ошибки запросов тестам видны сами по себе — в логе сервера они не нужны.
+      - name: Тише лог Postgres
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d infra -v ON_ERROR_STOP=1 \
+            -c "ALTER SYSTEM SET log_min_messages = 'fatal'" \
+            -c "ALTER SYSTEM SET log_min_error_statement = 'panic'" \
+            -c "SELECT pg_reload_conf()" || true
 
       - name: Run tests
         # Схему по базе раскатывают сами тесты (все schema*.sql по возрастанию
@@ -144,11 +177,24 @@ jobs:
         # набор уже однажды перерос предел по времени молча (см. комментарий
         # к timeout-minutes), и единственный способ увидеть рост заранее —
         # иметь имена долгих тестов в каждом прогоне.
+        #
+        # `--junitxml` — время каждого файла: из этих отчётов пересчитываются
+        # веса частей (`python -m tests.sharding --update *.xml`).
         env:
           INFRAGRAM_TEST_DSN: postgresql://postgres:postgres@127.0.0.1:5432/infra
+          INFRAGRAM_TEST_SHARD: ${{ matrix.shard }}/4
         run: |
           set -o pipefail
-          python -m pytest tests/ -q -rf --durations=25 | tee /tmp/pytest-out.txt
+          python -m pytest tests/ -q -rf --durations=25 --junitxml=/tmp/junit-${{ matrix.shard }}.xml | tee /tmp/pytest-out.txt
+
+      - name: Отчёт о времени (для весов частей)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ matrix.shard }}
+          path: /tmp/junit-${{ matrix.shard }}.xml
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Какие тесты упали — аннотацией к прогону и в отчёт шага.
       #
@@ -193,4 +239,4 @@ jobs:
           # сообщения аннотации, иначе GitHub оставит только первую строку.
           ENCODED=$(printf '%s\n%s' "$FAILS" "$TOTAL" \
             | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk '{printf "%s%%0A", $0}')
-          echo "::error title=Упавшие тесты::${ENCODED}"
+          echo "::error title=Упавшие тесты (часть ${{ matrix.shard }})::${ENCODED}"

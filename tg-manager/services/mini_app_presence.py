@@ -722,11 +722,19 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(va_error, 400)
 
         acc_ids_int = [int(x) for x in account_ids if str(x).isdigit()]
+        account_geo: dict[int, str] = {}
         if acc_ids_int:
+            # Тянем ещё и страну прокси аккаунта: build_targets привяжет цель
+            # под страну X к аккаунту из страны X, когда такой есть.
             owned = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                "SELECT a.id, p.geo_country "
+                "FROM tg_accounts a "
+                "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
                 uid, acc_ids_int)
             acc_ids_int = [int(r["id"]) for r in (owned or [])]
+            account_geo = {int(r["id"]): (r.get("geo_country") or "")
+                           for r in (owned or [])}
 
         # Генерируем цели тем же конвейером, что и бот (build_targets → рендер
         # плейсхолдеров per-city). Раньше mini-app путь цели НЕ создавал вообще —
@@ -735,6 +743,7 @@ def setup_routes(app: web.Application, pool) -> None:
             geo_list,
             "channel" if asset_type in ("package", "full_package") else asset_type,
             name_pattern, username_pattern or None, acc_ids_int,
+            account_geo=account_geo,
         )
         if not targets:
             return _err("Не удалось сгенерировать цели из гео", 400)

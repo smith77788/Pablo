@@ -207,26 +207,71 @@ def plan_target(
     return name, username
 
 
+def assign_accounts_by_geo(
+    target_countries: list[str | None],
+    account_ids: list[int],
+    account_geo: dict[int, str] | None,
+) -> list[int | None]:
+    """Привязать к каждой цели аккаунт, ПРЕДПОЧТИТЕЛЬНО из её страны.
+
+    Для цели со страной ISO2 берём аккаунт, чей прокси в той же стране
+    (round-robin внутри страны, чтобы не грузить один аккаунт). Если аккаунтов
+    этой страны нет — глобальный round-robin по всем (прежнее поведение). Так
+    бот/канал под страну X создаётся с аккаунта из страны X, когда такой есть.
+
+    ЧИСТАЯ функция (без сети/БД): привязка детерминирована и тестируема.
+    account_geo пуст/None → везде глобальный round-robin, как раньше.
+    """
+    n = len(account_ids)
+    account_geo = account_geo or {}
+    by_cc: dict[str, list[int]] = {}
+    for aid in account_ids:
+        cc = (account_geo.get(aid) or "").strip().upper()
+        if cc:
+            by_cc.setdefault(cc, []).append(aid)
+    geo_rr: dict[str, int] = {}
+    glob = 0
+    out: list[int | None] = []
+    for tc in target_countries:
+        cc = (tc or "").strip().upper()
+        pool_cc = by_cc.get(cc) if cc else None
+        if pool_cc:
+            j = geo_rr.get(cc, 0)
+            out.append(pool_cc[j % len(pool_cc)])
+            geo_rr[cc] = j + 1
+        elif n:
+            out.append(account_ids[glob % n])
+            glob += 1
+        else:
+            out.append(None)
+    return out
+
+
 def build_targets(
     geo_list: list[dict],
     asset_type: str,
     name_pattern: str,
     username_pattern: str | None,
     account_ids: list[int],
+    account_geo: dict[int, str] | None = None,
 ) -> list[dict]:
     """Build list of target dicts for insertion into global_presence_targets.
 
     name_pattern/username_pattern могут быть пулом шаблонов (см. plan_target) —
     вариант выбирается детерминированно на город, чтобы предпросмотр совпадал.
+    account_geo (id аккаунта → ISO2 страна прокси) включает ГЕО-привязку: цель
+    под страну X получает аккаунт из страны X, когда такой есть (см.
+    assign_accounts_by_geo); иначе — прежний глобальный round-robin.
     """
-    n_accs = len(account_ids)
     targets: list[dict] = []
+    _acc_for_target = assign_accounts_by_geo(
+        [(g.get("country_code") or "") for g in geo_list], account_ids, account_geo)
 
     for i, geo in enumerate(geo_list):
         planned_name, planned_username = plan_target(
             geo, i + 1, name_pattern, username_pattern
         )
-        selected_account_id = account_ids[i % n_accs] if n_accs else None
+        selected_account_id = _acc_for_target[i]
 
         targets.append(
             {

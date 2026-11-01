@@ -1250,6 +1250,13 @@ async def main() -> None:
         _spawn(
             _resilient("infra_memory", infra_memory.run_flush_loop, pool)
         )
+        # Темп флота и выученная осторожность аккаунтов — в базе, общие для
+        # всех процессов и переживающие деплой (services/pacing_store.py).
+        from services import pacing_store as _pacing_store
+        _spawn(
+            _resilient("pacing_store", _pacing_store.run_sync_loop, pool,
+                       op_worker._WORKER_ID)
+        )
         _spawn(
             _resilient("infra_copilot", infra_copilot.run_copilot_loop, pool, bot)
         )
