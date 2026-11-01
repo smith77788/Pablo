@@ -63,7 +63,7 @@ from miniapp_source import api_files, miniapp_source  # noqa: E402
 # ранжирует, больше такого в продукте нет нигде; её дверь — «Похожие контакты»
 # на пустом результате поиска, и подсказка открывает ОДНУ карточку, а не задаёт
 # срез, поэтому второй поверхности поиска не появилось.
-CEILING = 53
+CEILING = 51
 
 _ROUTE = re.compile(
     r'app\.router\.add_(get|post|put|patch|delete)\(\s*"(/api/miniapp/[^"]+)"')

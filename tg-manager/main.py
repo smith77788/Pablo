@@ -683,6 +683,8 @@ async def main() -> None:
         for _env_name, _skey in (
             ("TRON_WALLET", "pay_tron_wallet"),
             ("TON_WALLET", "pay_ton_wallet"),
+            # Звёзд за $1 для оплаты подписки Stars — тот же экран настройки.
+            ("STARS_PER_USD", "pay_stars_per_usd"),
         ):
             _val = await _db.get_platform_setting(pool, _skey, "")
             if _val:
