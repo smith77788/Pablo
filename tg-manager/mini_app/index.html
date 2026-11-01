@@ -8114,10 +8114,20 @@ let _sseRetry = 0;
 // них рвал уже поднятое соединение, чтобы открыть новое: живой поток мигал
 // «Переподключение…» вместо того, чтобы работать.
 let _sseTimer = null;
-function openSSE() {
+// Номер попытки открыть поток: пропуск берётся запросом, и два таймера,
+// сработавших почти разом, открыли бы два потока. Открывает только последний.
+let _sseGen = 0;
+async function openSSE() {
   clearTimeout(_sseTimer); _sseTimer = null;
-  if (SSE) { try{SSE.close()}catch(_){} }
-  SSE = new EventSource('/api/miniapp/events?token='+encodeURIComponent(TK));
+  if (SSE) { try{SSE.close()}catch(_){} SSE = null; }
+  const gen = ++_sseGen;
+  // Токен сессии в адрес не кладём (оседает в логах) — только пропуск на этот
+  // путь (см. urlTicket). Не дали пропуск — пробуем позже, как при обрыве.
+  let ticket;
+  try { ticket = await urlTicket('/api/miniapp/events'); }
+  catch(_) { if (!_sseTimer) _sseTimer = setTimeout(openSSE, 15000); return; }
+  if (gen !== _sseGen) return;
+  SSE = new EventSource('/api/miniapp/events?ticket='+encodeURIComponent(ticket));
   SSE.addEventListener('stats', e => {
     try { renderCards(JSON.parse(e.data)); } catch(_) {}
   });
@@ -16529,11 +16539,40 @@ async function submitBoost() {
 
 // ── Новые пользователи ───────────────────────────────────
 // Экспорт CSV — открываем ссылку с токеном в внешнем браузере (надёжно в TMA)
-function exportCSV(path) {
-  const url = path + (path.includes('?')?'&':'?') + 'token=' + encodeURIComponent(TK);
-  try { tg.openLink(url, {try_instant_view:false}); }
-  catch(_) { window.open(url, '_blank'); }
-  toast('✅ Файл открывается для скачивания…');
+async function exportCSV(path) {
+  await openTicketLink(path, '✅ Файл открывается для скачивания…');
+}
+
+// Пропуск на GET одного пути вместо токена сессии в адресе. Токен в строке
+// запроса оседал в журнале доступа сервера и в истории ВНЕШНЕГО браузера
+// (выгрузки открываются через tg.openLink) — двухчасовой ключ ко всем данным.
+// Пропуск открывает только этот путь и живёт две минуты (поток — как сессия).
+async function urlTicket(path) {
+  const d = await api('/api/miniapp/url_ticket', {method:'POST',
+    body: JSON.stringify({path: path.split('?')[0]})});
+  if (!d || !d.ticket) throw new Error('Не удалось получить ссылку');
+  return d.ticket;
+}
+function _withTicket(path, ticket) {
+  return path + (path.includes('?')?'&':'?') + 'ticket=' + encodeURIComponent(ticket);
+}
+// Открыть ссылку с пропуском во внешнем браузере. Telegram разрешает openLink
+// только в ответ на касание, а пропуск приходит запросом — касание к этому
+// моменту может «остыть». Тогда спрашиваем ещё раз: нажатие «Да» — новое касание.
+async function openTicketLink(path, okMsg) {
+  let url;
+  try { url = location.origin + _withTicket(path, await urlTicket(path)); }
+  catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось подготовить файл')); return; }
+  const open = () => {
+    try { tg.openLink(url, {try_instant_view:false}); }
+    catch(_) { window.open(url, '_blank'); }
+  };
+  try { open(); }
+  catch(_) {
+    if (!await askConfirm('Файл готов. Открыть?')) return;
+    open();
+  }
+  if (okMsg) toast(okMsg);
 }
 
 // Предохранитель выгрузки на сервере — 50 000 строк. Если история больше,
@@ -19804,8 +19843,8 @@ async function cloudUpload(input) {
 
 // Сохранить файл на устройство. В Telegram WebView программный клик по ссылке-
 // загрузке НЕ качает — поэтому сначала пробуем нативный загрузчик Telegram
-// (Bot API 8.0+): он сам скачивает файл системно. Токен кладём в query (эндпойнт
-// это допускает) — запрос идёт к НАШЕМУ серверу, не третьей стороне. Фолбэк для
+// (Bot API 8.0+): он сам скачивает файл системно. Заголовок ему не передать,
+// поэтому в адресе — пропуск на этот путь (urlTicket), не токен сессии. Фолбэк для
 // старых клиентов — blob-ссылка (срабатывает не везде, поэтому и есть предпросмотр).
 async function cloudSave(fileId) {
   const f = _CLOUD_FILES[fileId] || {};
@@ -19813,7 +19852,7 @@ async function cloudSave(fileId) {
   const path = '/api/miniapp/cloud/file/' + fileId + '/download';
   if (tg && typeof tg.downloadFile === 'function') {
     try {
-      tg.downloadFile({ url: location.origin + path + '?token=' + encodeURIComponent(TK), file_name: name });
+      tg.downloadFile({ url: location.origin + _withTicket(path, await urlTicket(path)), file_name: name });
       return;
     } catch (_) {}
   }
@@ -24382,10 +24421,9 @@ async function audLoadMore() {
   if (b) { b.disabled = true; b.textContent = 'Загружаю…'; }
   await loadParsedAudience(AUD_SOURCE, true);
 }
-function exportAudience(fmt) {
+async function exportAudience(fmt) {
   const f = (fmt==='txt'||fmt==='json') ? fmt : 'csv';
-  const url = '/api/miniapp/parser/audience/export?format='+f+'&token='+encodeURIComponent(TK)+audFilterQS();
-  if (tg?.openLink) tg.openLink(location.origin+url); else window.open(url,'_blank');
+  await openTicketLink('/api/miniapp/parser/audience/export?format='+f+audFilterQS());
 }
 async function loadParsedAudience(source, append) {
   AUD_SOURCE = source||'';

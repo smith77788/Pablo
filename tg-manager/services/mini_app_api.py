@@ -21,7 +21,8 @@ from services import account_status as _acc_status
 from services import operation_bus as _obus
 from services import op_status
 from services.mini_app_auth import (validate_init_data, make_token, parse_token,
-                                    signing_secret_ok)
+                                    signing_secret_ok, make_url_ticket,
+                                    parse_url_ticket, url_ticket_ttl)
 from services.secret_masking import redact_secrets, scrub_payload
 from services import mini_app_host_server
 from services import mini_app_vault
@@ -1168,11 +1169,21 @@ def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dic
 
 
 def _get_uid(request: web.Request) -> int | None:
+    """Владелец запроса: токен сессии — ТОЛЬКО из заголовка.
+
+    В адресе токен не принимается: строка запроса оседает в журнале доступа,
+    в логах платформы и в истории внешнего браузера (SECURITY.md). Ссылке,
+    которой заголовок не передать (выгрузка в браузере, нативное сохранение
+    файла, EventSource), выдаётся `?ticket=` — пропуск на GET одного пути с
+    коротким сроком (`/api/miniapp/url_ticket`, mini_app_auth.make_url_ticket).
+    """
     auth = request.headers.get("Authorization", "")
-    token = auth[7:] if auth.startswith("Bearer ") else request.query.get("token")
-    if not token:
-        return None
-    return parse_token(token, _bot_token())
+    if auth.startswith("Bearer "):
+        return parse_token(auth[7:], _bot_token())
+    ticket = request.query.get("ticket")
+    if ticket and request.method == "GET":
+        return parse_url_ticket(ticket, _bot_token(), request.path)
+    return None
 
 
 def _admin_ids() -> set[int]:
@@ -2375,6 +2386,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         })
 
     # ── Auth ────────────────────────────────────────────────────────────────
+
+    async def url_ticket(request: web.Request) -> web.Response:
+        """Пропуск для ссылки, которой не передать заголовок (см. _get_uid)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        path = str(body.get("path") or "").split("?", 1)[0]
+        if not path.startswith("/api/miniapp/") or ".." in path or len(path) > 300:
+            return _err("Неверный адрес", 400)
+        try:
+            ticket = make_url_ticket(uid, _bot_token(), path)
+        except ValueError:
+            return _err(_NO_SIGNING_SECRET, 403)
+        return _json_resp({"ticket": ticket, "ttl": url_ticket_ttl(path)})
 
     async def auth(request: web.Request) -> web.Response:
         try:
@@ -7777,6 +7806,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
     app.router.add_get("/s/{code}", short_link_redirect)
     app.router.add_post("/api/miniapp/auth", auth)
+    app.router.add_post("/api/miniapp/url_ticket", url_ticket)
     app.router.add_post("/api/miniapp/pair", pair_device)
     app.router.add_post("/api/miniapp/pair/exchange", pair_exchange)
     app.router.add_get("/api/miniapp/devices", devices_list)
