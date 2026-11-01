@@ -5143,6 +5143,13 @@ async def notify_if_enabled(
         if not settings.get(pref, True):
             return True
         _last_exc: "Exception | None" = None
+        if bot is None:
+            # Отправлять нечем — и повтор этого не изменит. Раньше `None.
+            # send_message` уходил в круг повторов как временный сбой и
+            # проспал 1 + 4 с на КАЖДОМ уведомлении (кампания рассылки, запущенная
+            # без бота, теряла на этом по 5 с на событие). Исход прежний: ошибка
+            # в лог и метрику, False («временный сбой»), только без сна.
+            raise RuntimeError("нет объекта бота — уведомление отправить нечем")
         for _attempt in range(1 + len(_NOTIFY_RETRY_DELAYS)):
             try:
                 await bot.send_message(
