@@ -10163,11 +10163,21 @@ async def _exec_global_presence_bot(
                     "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
                 }
 
-            # Use per-target assigned account; fall back to round-robin if not set
+            # Use per-target assigned account; fall back to round-robin if not set.
+            # Гео-fallback: если планировщик аккаунт не привязал, предпочитаем
+            # аккаунт из СТРАНЫ цели (его прокси там) — бот под страну X
+            # создаётся с аккаунта X; нет такого в пуле — прежний round-robin.
             acc_id = target["selected_account_id"]
             acc = acc_by_id.get(acc_id) if acc_id else None
             if not acc:
-                acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
+                try:
+                    _tcc = (target["country_code"] or "").strip().upper()
+                except (KeyError, TypeError):
+                    _tcc = ""
+                _geo_pool = [a for a in accounts_list
+                             if str(a.get("geo_country") or "").strip().upper() == _tcc] if _tcc else []
+                _pool = _geo_pool or accounts_list
+                acc = dict(_pool[acc_rr_idx % len(_pool)])
                 acc_rr_idx += 1
 
             bot_name = target["planned_name"] or f"Bot {i + 1}"
