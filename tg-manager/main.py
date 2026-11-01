@@ -1266,6 +1266,10 @@ async def main() -> None:
         _spawn(
             _resilient("anomaly_detector", anomaly_detector.run_anomaly_loop, pool, bot)
         )
+        # Исходящие вебхуки и лента событий в Google Sheets (schema_v262):
+        # раскладывает события по получателям и доставляет с повторами.
+        from services import webhooks as _webhooks
+        _spawn(_resilient("webhooks", _webhooks.run, pool))
         from services import follow_checker as _follow_checker
         _spawn(
             _resilient("follow_checker", _follow_checker.run_follow_checker, pool, bot)

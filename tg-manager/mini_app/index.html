@@ -2465,6 +2465,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Глобальный поиск</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openIntegrations()">
+        <div class="mgmt-tile-ico">🔌</div>
+        <div class="mgmt-tile-lbl">Интеграции</div>
+        <div class="mgmt-tile-val">API · вебхуки · Sheets</div>
+      </div>
       <div class="mgmt-tile" onclick="openApiKeys()">
         <div class="mgmt-tile-ico">🔑</div>
         <div class="mgmt-tile-lbl">API Ключи</div>
@@ -6202,6 +6207,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-apikey')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔑 Новый API ключ</div>
     <div class="field"><label>Название ключа</label><input id="ak-name" type="text" maxlength="64" placeholder="Мой сервис" class="inp"></div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0 8px"><input id="ak-readonly" type="checkbox"> Только чтение (без отправки сообщений от имени аккаунтов)</label>
     <div id="ak-result" style="display:none;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.3);border-radius:10px;padding:12px;margin:10px 0">
       <div style="font-size:13px;color:var(--hint);margin-bottom:6px">⚠️ Скопируйте ключ сейчас — он больше не будет показан!</div>
       <div id="ak-key-display" style="font-family:monospace;font-size:13px;word-break:break-all;color:var(--green);user-select:all"></div>
@@ -23960,7 +23966,7 @@ async function openApiKeys() {
         <div class="row-ico" style="background:var(--bg-yellow-16)">🔑</div>
         <div class="row-body">
           <div class="row-name">${esc(k.name)||'Без названия'} ${k.is_active?'🟢':'🔴'}</div>
-          <div class="row-val"><code>${esc(k.prefix)}****</code>${k.last_used_at?' · исп. '+ago(k.last_used_at):''}</div>
+          <div class="row-val"><code>${esc(k.prefix)}…</code> · ${(k.scopes||[]).includes('write')?'полный доступ':'только чтение'}${k.last_used_at?' · исп. '+ago(k.last_used_at):''}</div>
           <div class="row-val" style="color:var(--hint)">Создан ${ago(k.created_at)}</div>
         </div>
         ${k.is_active?`<div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="revokeApiKey(${k.id})">Откл</button></div>`:''}
@@ -23978,6 +23984,7 @@ async function revokeApiKey(keyId) {
 }
 function openApiKeyModal() {
   document.getElementById('ak-name').value='';
+  const _akRo = document.getElementById('ak-readonly'); if (_akRo) _akRo.checked=false;
   document.getElementById('ak-err').textContent='';
   document.getElementById('ak-result').style.display='none';
   document.getElementById('ak-btns').style.display='flex';
@@ -23993,7 +24000,8 @@ async function submitApiKeyCreate() {
   btn.disabled=true; btn.textContent='⏳ Создание...';
   errEl.textContent='';
   try {
-    const r = await api('/api/miniapp/api_key',{method:'POST',body:JSON.stringify({name})});
+    const ro = document.getElementById('ak-readonly')?.checked;
+    const r = await api('/api/miniapp/api_key',{method:'POST',body:JSON.stringify({name, scopes: ro ? ['read'] : ['read','write']})});
     _lastApiKey = r.key;
     document.getElementById('ak-key-display').textContent = r.key;
     document.getElementById('ak-result').style.display='block';
@@ -30044,6 +30052,7 @@ function renderAudSegChart(segments) {
 <script src="screens/channel_manage.js"></script>
 <script src="screens/shield_check.js"></script>
 <script src="screens/account_login.js"></script>
+<script src="screens/integrations.js"></script>
 <script src="screens/accounts_list.js"></script>
 <script src="screens/bots_list.js"></script>
 <script src="screens/bot_detail.js"></script>
