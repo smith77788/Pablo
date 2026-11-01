@@ -4826,7 +4826,8 @@ async def check_and_grant_rewards(
             "gold": "🥇 Золото",
             "platinum": "💎 Платина",
         }
-        plan_names = {"starter": "Starter", "pro": "Pro", "enterprise": "Enterprise"}
+        # Starter/Pro/Enterprise — псевдонимы платного тарифа (tariffs.PLAN_ALIASES).
+        plan_names = {"starter": "подписки", "pro": "подписки", "enterprise": "подписки"}
         try:
             await bot.send_message(
                 referrer_id,
@@ -4881,7 +4882,7 @@ async def give_welcome_bonus(pool: asyncpg.Pool, referred_id: int, bot) -> bool:
         await bot.send_message(
             referred_id,
             "🎁 <b>Подарок от реферальной программы!</b>\n\n"
-            "Вы пришли по реферальной ссылке и получаете <b>7 дней Starter бесплатно!</b>\n\n"
+            "Вы пришли по реферальной ссылке и получаете <b>7 дней подписки бесплатно!</b>\n\n"
             "💡 Поделитесь своей ссылкой — и вы тоже можете получить бесплатный тариф:\n"
             "/referral",
             parse_mode="HTML",
