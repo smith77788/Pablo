@@ -139,13 +139,13 @@ def test_rating_is_an_integer():
         "оценка уходит в запрос как есть — дробную asyncpg отвергнет")
 
 
-def test_export_links_carry_the_token():
+def test_export_links_carry_a_ticket():
     h = _html()
     assert 'href="/api/miniapp/uch/export/csv"' not in h, (
-        "ссылка выгрузки без токена вернётся 401 в новой вкладке")
+        "ссылка выгрузки без пропуска вернётся 401 в новой вкладке")
     body = _js_func("uchExport")
-    # Параметры собираются через URLSearchParams, а он кодирует значения сам:
-    # требовать ручной encodeURIComponent значит требовать двойного
-    # кодирования. Проверяем то, что важно — токен уходит в ссылку.
-    assert "params.set('token', TK)" in body, "ссылка выгрузки без токена = 401"
-    assert "openLink" in body, "выгрузка должна открываться тем же способом, что и остальные файлы"
+    # Токен сессии в адресе сервер больше не принимает (_get_uid читает его
+    # только из заголовка): ссылка с ?token= отвечала 401. Выгрузка обязана
+    # открываться с одноразовым пропуском на свой путь — openTicketLink.
+    assert "params.set('token'" not in body, "токен в адресе сервер отвергает — 401"
+    assert "openTicketLink(" in body, "выгрузка открывается по пропуску (openTicketLink)"
