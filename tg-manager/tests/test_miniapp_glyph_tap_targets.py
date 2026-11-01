@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import pathlib
 import re
 
 import pytest
@@ -34,7 +35,15 @@ _CLICKABLE = re.compile(r"<(span|div|a)\b([^>]*\bonclick=[^>]*)>([^<]{0,14})</\1
 
 
 def _css() -> str:
-    return "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", miniapp_html(), re.S))
+    """Встроенные стили index.html плюс подключённые таблицы mini_app/*.css
+    (ui_kit.css — токены и компоненты дизайн-системы)."""
+    parts = re.findall(r"<style[^>]*>(.*?)</style>", miniapp_html(), re.S)
+    root = pathlib.Path(__file__).resolve().parents[1] / "mini_app"
+    for href in re.findall(r'<link rel="stylesheet" href="([\w.-]+\.css)">', miniapp_html()):
+        p = root / href
+        if p.exists():
+            parts.append(p.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
 def _declared_height(decls: str) -> int:

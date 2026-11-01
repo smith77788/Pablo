@@ -288,6 +288,7 @@ GET /api/miniapp/strike/history
 GET /api/miniapp/strike/status
 GET /api/miniapp/strike/takedown_kit
 GET /api/miniapp/subscription
+GET /api/miniapp/summary
 GET /api/miniapp/swarm
 GET /api/miniapp/sys_health
 GET /api/miniapp/team/audit
@@ -589,6 +590,7 @@ HEAD /api/miniapp/strike/history
 HEAD /api/miniapp/strike/status
 HEAD /api/miniapp/strike/takedown_kit
 HEAD /api/miniapp/subscription
+HEAD /api/miniapp/summary
 HEAD /api/miniapp/swarm
 HEAD /api/miniapp/sys_health
 HEAD /api/miniapp/team/audit
@@ -979,6 +981,7 @@ POST /api/miniapp/uch/smart-tags/apply
 POST /api/miniapp/uch/smart-tags/rules
 POST /api/miniapp/uch/sync
 POST /api/miniapp/uch/trust/update
+POST /api/miniapp/url_ticket
 POST /api/miniapp/va/channel/{cid}/install
 POST /api/miniapp/va/channel/{cid}/learning/rollback
 POST /api/miniapp/va/channel/{cid}/post_now

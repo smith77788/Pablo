@@ -1,4 +1,15 @@
-"""Infragram — главное Telegram-native OS меню (9 секций)."""
+"""Infragram — главное меню бота: пульт по шести разделам-задачам.
+
+Бот — пульт: итоги, уведомления, статусы, быстрые действия и двери в
+мини-апп. Полный интерфейс — мини-апп. Разделы главного меню берутся из одной
+карты `services/task_sections.py`, той же, по которой собран экран «Разделы»
+мини-аппа, — чтобы одну функцию не искали в двух разных местах.
+
+Прежнее меню из восьми разделов по устройству системы («Активы & Сети»,
+«Мониторинг & Защита» …) не удалено: оно живёт за кнопкой «🧰 Все
+инструменты бота» (`BmCb(action="tools")`), и все его подразделы работают как
+раньше.
+"""
 
 from __future__ import annotations
 
@@ -179,23 +190,124 @@ def _format_progress_bar(done: int, total: int, width: int = 10) -> str:
     return "#" * filled + "-" * (width - filled)
 
 
+def _app_button(kb, text: str, screen: str = "") -> bool:
+    """Кнопка-дверь в мини-апп (раздел — через #<kind>, см. runPulseAction)."""
+    if not _APP_URL:
+        return False
+    url = f"{_APP_URL}#{screen}" if screen else _APP_URL
+    kb.button(text=text, web_app=_WebAppInfo(url=url))
+    return True
+
+
 def _main_menu_kb():
+    """Главное меню: Итоги, шесть разделов по задачам, уведомления и двери.
+
+    Порядок и названия разделов — из `services.task_sections.CORE`.
+    """
+    from services.task_sections import CORE
+
     kb = InlineKeyboardBuilder()
-    if _APP_URL:
-        kb.button(text="🌐 Открыть приложение", web_app=_WebAppInfo(url=_APP_URL))
+    rows: list[int] = []
+    if _app_button(kb, "🌐 Открыть приложение"):
+        rows.append(1)
+    kb.button(text="📊 Итоги за неделю", callback_data=BmCb(action="summary"))
+    rows.append(1)
+    secs = [s for s in CORE if s.key != "overview"]
+    for sec in secs:
+        kb.button(text=f"{sec.emoji} {sec.title}", callback_data=BmCb(action="section", sub=sec.key))
+    rows += [2] * (len(secs) // 2) + ([1] if len(secs) % 2 else [])
     kb.button(text="🎯 Умные цели (ИИ-помощник)", callback_data=IntentCb(action="menu"))
+    kb.button(text="🔔 Уведомления", callback_data=BmCb(action="notifications"))
+    kb.button(text="🧰 Все инструменты бота", callback_data=BmCb(action="tools"))
+    kb.button(text="⚙️ Настройки", callback_data=BmCb(action="settings"))
+    rows += [1, 2, 1]
+    kb.adjust(*rows)
+    return kb.as_markup()
+
+
+def _tools_kb():
+    """Прежнее меню из восьми разделов — за кнопкой «Все инструменты бота»."""
+    kb = InlineKeyboardBuilder()
     kb.button(text="🏗 Активы & Сети", callback_data=BmCb(action="assets"))
     kb.button(text="⚡ Операции", callback_data=BmCb(action="operations"))
     kb.button(text="📢 Рассылки & Связь", callback_data=BmCb(action="comms"))
     kb.button(text="📊 Аналитика", callback_data=BmCb(action="analytics"))
     kb.button(text="🛡️ Мониторинг & Защита", callback_data=BmCb(action="monitoring"))
     kb.button(text="🚀 Рост & Продвижение", callback_data=BmCb(action="growth"))
-    kb.button(text="⚙️ Настройки", callback_data=BmCb(action="settings"))
-    # Layout: app(1)|intent(1)|assets+ops(2)|comms+analytics(2)|monitoring+growth(2)|settings(1)
-    if _APP_URL:
-        kb.adjust(1, 1, 2, 2, 2, 1)  # 9 buttons
-    else:
-        kb.adjust(1, 2, 2, 2, 1)     # 8 buttons
+    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(2, 2, 2, 1)
+    return kb.as_markup()
+
+
+def _section_buttons(key: str, plan: str = "free") -> list[tuple[str, object]]:
+    """Быстрые действия раздела в самом боте — то, что удобно сделать с телефона.
+
+    Остальное — в мини-аппе: кнопка «Открыть раздел в приложении» ведёт ровно
+    туда же, куда плитка раздела на главном экране приложения.
+    """
+    from bot.callbacks import ContactsHubCb, TaskCb
+
+    if key == "audience":
+        return [
+            ("👥 Парсер аудитории", ParserCb(action="menu")),
+            ("🎯 Перехватчик лидов", KwCb(action="menu")),
+            ("📨 Инвайтер", InviterCb(action="menu")),
+            ("📇 Контакты", ContactsHubCb(action="menu")),
+            ("🧬 ДНК аудитории", DnaCb(action="menu")),
+        ]
+    if key == "messages":
+        return [
+            ("📢 Рассылка через бота", BotCb(action="list", page=0)),
+            ("🌐 Рассылка по сети ботов", NetBcCb(action="choose_target")),
+            ("📨 Личные сообщения", DmCb(action="menu")),
+            ("📅 Расписание", BmCb(action="schedules")),
+            ("🤖 Авто-ответы", BmCb(action="pick_bot_for", sub="ar")),
+            ("🔗 Воронки", BmCb(action="pick_bot_for", sub="fn")),
+            (f"{_lock(plan, 'starter')}📤 Публикация в каналы", MassPubCb(action="menu")),
+        ]
+    if key == "channels":
+        return [
+            ("🤖 Мои боты", BotCb(action="list", page=0)),
+            ("📡 Каналы", ChanCb(action="menu")),
+            ("👥 Группы", GroupFCb(action="menu")),
+            ("🏭 Фабрика каналов", ChanFactCb(action="menu")),
+            ("🚀 Продвижение ботов", PromoCb(action="menu")),
+            ("🚀 Накрутка", BoostCb(action="menu")),
+            (f"{_lock(plan, 'enterprise')}⚔️ Массовые жалобы", StrikeCb(action="menu")),
+        ]
+    if key == "sales":
+        return [
+            ("💬 Ответы оператора", BmCb(action="pick_bot_for", sub="relay")),
+            ("📇 Контакты и сделки", ContactsHubCb(action="menu")),
+            ("⭐ Звёзды", StarsCb(action="menu")),
+            ("👥 Рефералы", RefCb(action="menu")),
+        ]
+    if key == "accounts":
+        return [
+            ("📱 TG-аккаунты", AccCb(action="menu")),
+            ("💓 Пульс флота", BotCb(action="pulse")),
+            ("❤️ Здоровье", HealthCb(action="menu")),
+            ("🔥 Прогрев", WarmupCb(action="menu")),
+            ("🌐 Прокси", ProxyCb(action="menu")),
+            ("🛡️ Щит", ShieldCb(action="menu")),
+            ("💸 Экономика флота", BotCb(action="budget")),
+            ("⚡ Активные задачи", TaskCb(action="list")),
+        ]
+    return []
+
+
+def _section_kb(key: str, plan: str = "free"):
+    kb = InlineKeyboardBuilder()
+    rows: list[int] = []
+    if _app_button(kb, "🌐 Открыть раздел в приложении", f"section:{key}"):
+        rows.append(1)
+    btns = _section_buttons(key, plan)
+    for text, cb in btns:
+        kb.button(text=text, callback_data=cb)
+    rows += [2] * (len(btns) // 2) + ([1] if len(btns) % 2 else [])
+    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    rows.append(1)
+    kb.adjust(*rows)
     return kb.as_markup()
 
 
@@ -362,15 +474,27 @@ def _wip_kb(back_action: str = "main"):
 
 
 _MAIN_MENU_TEXT = (
-    "🏠 <b>Infragram OS</b>\n\n"
-    "🎯 <b>Умные цели</b> — скажи что нужно, ИИ выберет инструмент\n"
+    "🏠 <b>Infragram</b>\n\n"
+    "📊 <b>Итоги</b> — деньги, лиды, ответы и охват за неделю\n"
+    "👥 <b>Аудитория</b> — собрать людей, база контактов, инвайт\n"
+    "✉️ <b>Сообщения</b> — рассылки, публикации, воронки\n"
+    "📡 <b>Каналы и боты</b> — создать, оформить, продвинуть\n"
+    "💰 <b>Продажи</b> — клиенты, сделки, оплаты\n"
+    "📱 <b>Аккаунты</b> — аккаунты, прокси, прогрев, защита\n\n"
+    "<i>Полный интерфейс — в приложении. Прежнее меню по модулям — "
+    "«🧰 Все инструменты бота».</i>"
+)
+
+_TOOLS_MENU_TEXT = (
+    "🧰 <b>Все инструменты бота</b>\n\n"
+    "Прежнее меню по модулям: всё, что умеет бот, разложено по устройству "
+    "системы.\n\n"
     "🏗 <b>Активы и сети</b> — аккаунты, боты, каналы, группы, кластеры\n"
     "⚡ <b>Операции</b> — жалобы, присутствие, публикация, массовые действия\n"
     "📢 <b>Рассылки и связь</b> — рассылки, личные сообщения, авто-ответы\n"
     "📊 <b>Аналитика</b> — позиции, SEO, конкуренты, поведение аудитории\n"
     "🛡️ <b>Мониторинг и защита</b> — прогрев, прокси, Призрак, Физика, Щит\n"
-    "🚀 <b>Рост и продвижение</b> — продвижение, Агент роста, Звёзды, сети контента\n"
-    "⚙️ <b>Настройки</b> — подписка, ИИ, шаблоны, API, персоны"
+    "🚀 <b>Рост и продвижение</b> — продвижение, Агент роста, Звёзды, сети контента"
 )
 
 # ── /menu command ─────────────────────────────────────────────────────────
@@ -507,6 +631,62 @@ async def cb_main(
             await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
 
     spawn(_push_stats())
+
+
+# ── Итоги, разделы по задачам, все инструменты ─────────────────────────────
+
+
+@router.callback_query(BmCb.filter(F.action == "summary"))
+async def cb_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """«Итоги за неделю» прямо в боте — тот же расчёт, что на главном экране
+    мини-аппа (`services/results_summary.py`): деньги, лиды, ответы, охват и
+    до трёх карточек «требует внимания». Кнопки ведут в приложение — бот
+    здесь пульт, а работа с проблемой — в полном интерфейсе."""
+    await safe_answer(callback)
+    from services import results_summary as _rs
+
+    try:
+        summary = await asyncio.wait_for(_rs.compute(pool, callback.from_user.id, 7), 8)
+        text = _rs.bot_text(summary)
+    except Exception:
+        log_exc_swallow(log, "cb_summary: итоги не посчитались")
+        text = "📊 <b>Итоги за 7 дн.</b>\n\n⚠️ Сейчас не удалось посчитать — попробуйте через минуту."
+    kb = InlineKeyboardBuilder()
+    rows: list[int] = []
+    if _app_button(kb, "🌐 Открыть итоги в приложении", "summary"):
+        rows.append(1)
+    kb.button(text="🔄 Обновить", callback_data=BmCb(action="summary"))
+    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    rows.append(2)
+    kb.adjust(*rows)
+    await _edit(callback, text, kb.as_markup())
+
+
+@router.callback_query(BmCb.filter(F.action == "section"))
+async def cb_section(
+    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
+) -> None:
+    """Раздел по задаче: что в нём делают, быстрые действия в боте и дверь
+    в тот же раздел мини-аппа."""
+    await safe_answer(callback)
+    from services.task_sections import BY_KEY
+
+    sec = BY_KEY.get(callback_data.sub or "")
+    if sec is None:
+        await _edit(callback, "⚠️ Такого раздела больше нет.", _main_menu_kb())
+        return
+    plan = await _get_user_plan(pool, callback.from_user.id)
+    text = f"{sec.emoji} <b>{html.escape(sec.title)}</b>\n\n{html.escape(sec.desc)}"
+    if _APP_URL:
+        text += "\n\n<i>Все инструменты раздела — в приложении. Здесь — быстрые действия.</i>"
+    await _edit(callback, text, _section_kb(sec.key, plan))
+
+
+@router.callback_query(BmCb.filter(F.action == "tools"))
+async def cb_tools(callback: CallbackQuery) -> None:
+    """Прежнее меню по модулям — целиком, за одной кнопкой."""
+    await safe_answer(callback)
+    await _edit(callback, _TOOLS_MENU_TEXT, _tools_kb())
 
 
 # ── Assets ────────────────────────────────────────────────────────────────

@@ -17,11 +17,14 @@ def _ui():
 
 def test_section_descriptions_present():
     ui = _ui()
-    # все ключевые секции каталога аннотированы
-    for name in ("Основное", "Управление аккаунтами", "Продвижение",
-                 "Безопасность", "Фабрики"):
-        assert f'class="sec">{name}</div>' in ui
-    assert ui.count('margin:-6px 0 8px') >= 9  # 9 section-desc
+    # Каталог разложен по разделам-задачам (services/task_sections.py), и у
+    # каждого раздела есть строка «что здесь делают».
+    from services.task_sections import SECTIONS
+    for sec in SECTIONS:
+        assert f'data-section="{sec.key}"' in ui, sec.key
+        assert f'>{sec.emoji} {sec.title}</div>' in ui, sec.title
+        assert f'padding:0 2px">{sec.desc}</div>' in ui, sec.title
+    assert ui.count('margin:-6px 0 8px') >= len(SECTIONS)
 
 
 def test_module_descriptions_wired():
