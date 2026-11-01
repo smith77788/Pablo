@@ -51,6 +51,7 @@ DELETE /api/miniapp/va/references/{rid}
 DELETE /api/miniapp/warmup/{plan_id}
 DELETE /api/miniapp/workflow/{wf_id}
 DELETE /api/miniapp/workflows/{wf_id}
+DELETE /api/miniapp/workflows/{wf_id}/steps/{idx}
 DELETE /api/miniapp/workspace/{ws_id}
 DELETE /api/miniapp/workspace/{ws_id}/member/{member_id}
 GET /.well-known/assetlinks.json
@@ -989,6 +990,7 @@ POST /api/miniapp/warmup/{plan_id}/cancel
 POST /api/miniapp/warmup/{plan_id}/pause
 POST /api/miniapp/warmup/{plan_id}/resume
 POST /api/miniapp/workflow/create
+POST /api/miniapp/workflow/run/{run_id}/cancel
 POST /api/miniapp/workflow/{wf_id}/execute
 POST /api/miniapp/workflow/{wf_id}/pause
 POST /api/miniapp/workflow/{wf_id}/resume

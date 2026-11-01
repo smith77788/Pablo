@@ -38,6 +38,9 @@ _RETENTION: list[tuple[str, str, str]] = [
     # operation_log в этом списке НЕТ намеренно: по одному возрасту его чистить
     # нельзя, см. _prune_operation_log (на журнале стоит идемпотентность повтора).
     ("restriction_events", "created_at", "90 days"),
+    # Шина автоматизации: события нужны исполнителю сценариев на секунды,
+    # интеграциям — до доставки; месяца хватает с запасом для разборов.
+    ("automation_events", "created_at", "30 days"),
     ("account_flood_log", "created_at", "30 days"),
     ("search_rankings", "checked_at", "90 days"),
     ("search_snapshots", "captured_at", "14 days"),

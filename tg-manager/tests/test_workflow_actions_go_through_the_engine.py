@@ -262,7 +262,12 @@ def test_a_broken_step_is_refused(step, why):
     {"type": "delay", "delay_minutes": 60},
     {"type": "condition", "condition": "subscribed", "condition_value": "x"},
     {"type": "webhook", "url": "https://example.com/hook"},
-    {"type": "action", "action": "warmup"},
+    # Действие — из словаря исполнителя. Раньше здесь стоял «warmup»: любое
+    # имя сохранялось и не означало ничего, исполнять шаги было некому.
+    {"type": "action", "action": "add_tag", "value": "клиент"},
+    {"type": "message", "text": "Выбор", "buttons": [{"text": "Да", "goto": 3}]},
+    {"type": "ask", "text": "Ваш телефон?", "save_as": "phone", "validate": "phone"},
+    {"type": "invoice", "title": "Консультация", "amount": 100, "currency": "XTR"},
 ])
 def test_a_good_step_is_saved(step):
     """Обратный контроль: проверка не запрещает то, что экран умеет прислать."""
@@ -384,14 +389,14 @@ def test_the_launch_of_a_missing_workflow_is_not_a_success():
         "кодом 200, и экран показывал успех на несуществующем сценарии")
 
 
-def test_the_launch_does_not_claim_the_steps_ran():
-    """Исполнителя сценариев нет — ответ обязан это говорить."""
-    pool = _Pool(row={"id": 7, "steps": [{"type": "message", "text": "раз"}]})
-    resp = _call(pool, "POST", "/api/miniapp/workflow/{wf_id}/execute",
-                 _Req(wf_id=7))
-    data = _body(resp)
-    assert data.get("executed") is False, f"ответ обещает исполнение: {data}"
-    assert "не выполняются" in (data.get("note") or ""), data
+def test_an_action_the_runtime_cannot_do_is_refused():
+    """Шаги теперь исполняются: действие, которого исполнитель не знает,
+    отвергается при сохранении, а не пропадает молча в прогоне."""
+    pool = _Pool(row={"steps": []})
+    resp = _call(pool, "POST", "/api/miniapp/workflows/{wf_id}/steps",
+                 _Req({"type": "action", "action": "warmup"}, wf_id=7))
+    assert resp.status == 400
+    assert not any("UPDATE workflow_definitions" in q for q, _ in pool.calls)
 
 
 # ── Храповики ────────────────────────────────────────────────────────────────

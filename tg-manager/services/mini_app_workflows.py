@@ -40,10 +40,10 @@
 «📊 Последние запуски» на экране деталей был написан по полю `runs`, которого
 обработчик не отдавал: разметка существовала и не показывалась никогда.
 
-Чего здесь по-прежнему НЕТ. Сценарий не исполняется: `execute_workflow` только
-заводит строку в `workflow_runs` со статусом `running`, шаги не выполняет
-никто, запуска по событию и по расписанию нет. Экран об этом говорит прямо
-(подсказка на `s-workflows`), и эти обработчики ничего обратного не обещают.
+ИСПОЛНЕНИЕ. Раньше сценарий не исполнялся: `execute_workflow` только заводил
+строку в `workflow_runs`. Теперь шаги выполняет `services/workflow_runtime.py`:
+по способу запуска (триггеру) — сам, по кнопке «Тестовый запуск» — на
+владельце или на указанном подписчике.
 
 Что маршруты не потерялись, стережёт слепок в
 `tests/test_miniapp_routes_are_not_lost.py`.
@@ -165,14 +165,24 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(str(e), 400)
         # Сценарий создаётся ВЫКЛЮЧЕННЫМ: включать то, что ещё не исполняется,
         # значит обещать работу, которой не будет.
+        from services import workflow_runtime as _rt
+        try:
+            # Способ запуска: с экрана или из шаблона («Приветствие» — по /start).
+            trig = _rt.validate_trigger(
+                body.get("trigger_type") or (tpl or {}).get("trigger_type"),
+                body.get("trigger_value") or (tpl or {}).get("trigger_value"))
+        except ValueError as e:
+            return _err(str(e), 400)
         res = await _wf.create_workflow(pool, uid, name,
                                         description=desc or "", steps=steps,
                                         is_active=False, bot_id=bot_id)
         if not res.get("ok"):
             log.warning("workflow_create_plural uid=%s: %s", uid, res.get("error"))
             return _err(_INTERNAL_ERROR, 500)
+        if trig[0]:
+            await _wf.set_trigger(pool, uid, res["id"], trig[0], trig[1])
         out = {"ok": True, "id": res["id"], "steps": len(steps),
-               "bot_id": bot_id}
+               "bot_id": bot_id, "trigger_type": trig[0] or "manual"}
         if tpl:
             out.update(template=tpl["key"], template_label=tpl["label"])
         return _json_resp(out)
@@ -224,6 +234,8 @@ def setup_routes(app: web.Application, pool) -> None:
         row = await _safe_fetchrow(pool,
             "SELECT wd.id, wd.name, wd.description, wd.steps, wd.bot_id, "
             "       COALESCE(wd.is_active,FALSE) AS is_active, "
+            "       wd.trigger_type, wd.trigger_value, "
+            "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
             "       b.username AS bot_username "
             "  FROM workflow_definitions wd "
             "  LEFT JOIN managed_bots b ON b.bot_id = wd.bot_id "
@@ -232,6 +244,8 @@ def setup_routes(app: web.Application, pool) -> None:
         if not row:
             return _err("Воркфлоу не найден", 404)
         from services import workflow_engine as _wf
+        from services import workflow_runtime as _rt
+        from services import automation_events as _bus
         try:
             runs = await _wf.recent_runs(pool, uid, wid)
         except Exception:
@@ -244,7 +258,15 @@ def setup_routes(app: web.Application, pool) -> None:
                            "active": bool(row["is_active"]),
                            "bot_id": row["bot_id"],
                            "bot_username": row["bot_username"],
-                           "steps": _steps_of(row), "runs": runs})
+                           "trigger_type": row.get("trigger_type") or "manual",
+                           "trigger_value": row.get("trigger_value") or "",
+                           "allow_reentry": bool(row.get("allow_reentry")),
+                           "steps": _steps_of(row), "runs": runs,
+                           # Словари для экрана: что умеет исполнитель.
+                           "triggers": _rt.TRIGGER_TYPES,
+                           "events": _bus.EVENT_LABELS,
+                           "actions": _wf.WORKFLOW_ACTIONS,
+                           "conditions": _wf.WORKFLOW_CONDITIONS})
 
     async def workflow_add_step(request: web.Request) -> web.Response:
         """Добавить шаг: POST /workflows/{id}/steps {type,...} — аппенд в steps jsonb."""
@@ -299,14 +321,84 @@ def setup_routes(app: web.Application, pool) -> None:
         return _json_resp({"ok": True, **res})
 
     async def workflow_toggle_plural(request: web.Request) -> web.Response:
-        """Активировать/поставить на паузу: PATCH /workflows/{id} {active}."""
+        """PATCH /workflows/{id}: {active} — пауза/активация;
+        {trigger_type, trigger_value, allow_reentry} — способ запуска.
+
+        Ключ, которого нет в теле, не меняется: раньше отсутствие `active`
+        читалось как False, и любая другая правка ставила сценарий на паузу.
+        """
         try:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
         if not isinstance(body, dict):
             return _err("Неверный запрос", 400)
+        if "trigger_type" in body or "allow_reentry" in body:
+            uid = _get_uid(request)
+            if not uid:
+                return _err("Unauthorized", 401)
+            wid = _wf_id(request)
+            if wid is None:
+                return _err("Неверный идентификатор", 400)
+            from services import workflow_engine as _wf
+            from services import workflow_runtime as _rt
+            cur = await _safe_fetchrow(pool,
+                "SELECT trigger_type, trigger_value FROM workflow_definitions "
+                "WHERE id=$1 AND owner_id=$2", wid, uid)
+            if not cur:
+                return _err("Воркфлоу не найден", 404)
+            try:
+                ttype, tval = _rt.validate_trigger(
+                    body.get("trigger_type", cur["trigger_type"]),
+                    body.get("trigger_value", cur["trigger_value"]))
+            except ValueError as e:
+                return _err(str(e), 400)
+            reentry = body.get("allow_reentry")
+            await _wf.set_trigger(pool, uid, wid, ttype, tval,
+                                  None if reentry is None else bool(reentry))
+            if "active" not in body:
+                return _json_resp({"ok": True, "trigger_type": ttype or "manual",
+                                   "trigger_value": tval or ""})
+        if "active" not in body:
+            return _err("Нечего менять", 400)
         return await _toggle(request, bool(body.get("active")))
+
+    async def workflow_delete_step(request: web.Request) -> web.Response:
+        """Удалить шаг: DELETE /workflows/{id}/steps/{idx} (idx с нуля).
+
+        Без этого ошибочный шаг можно было убрать только вместе со всем
+        сценарием. Идущие прогоны это не задевает: у них снимок шагов.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        try:
+            idx = int(request.match_info["idx"])
+        except (KeyError, ValueError, TypeError):
+            idx = None
+        if wid is None or idx is None or idx < 0:
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        left = await _wf.delete_step(pool, uid, wid, idx)
+        if left is None:
+            return _err("Шаг не найден", 404)
+        return _json_resp({"ok": True, "steps": left})
+
+    async def workflow_cancel_run(request: web.Request) -> web.Response:
+        """Остановить прогон: POST /workflow/run/{run_id}/cancel."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            run_id = int(request.match_info["run_id"])
+        except (KeyError, ValueError, TypeError):
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        res = await _wf.cancel_workflow(pool, uid, run_id)
+        if not res.get("ok"):
+            return _err("Прогон не найден или уже завершён", 404)
+        return _json_resp({"ok": True})
 
     async def workflow_pause(request: web.Request) -> web.Response:
         return await _toggle(request, False)
@@ -342,11 +434,10 @@ def setup_routes(app: web.Application, pool) -> None:
     # ── Запуск и состояние ───────────────────────────────────────────────────
 
     async def workflow_execute(request: web.Request) -> web.Response:
-        """Завести прогон сценария.
+        """Тестовый запуск сценария: POST /workflow/{id}/execute {chat_id?}.
 
-        Шаги этот вызов НЕ выполняет — исполнителя у сценариев нет. Поэтому
-        ответ прямо говорит, что прогон только зарегистрирован, а не «пошёл»:
-        экран не должен обещать владельцу работу, которой не будет.
+        Шаги выполняет исполнитель сценариев. Получатель — указанный
+        подписчик бота или сам владелец (проверить сценарий на себе).
         """
         uid = _get_uid(request)
         if not uid:
@@ -354,23 +445,34 @@ def setup_routes(app: web.Application, pool) -> None:
         wid = _wf_id(request)
         if wid is None:
             return _err("Неверный идентификатор сценария", 400)
+        chat_id = None
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except Exception:
+            body = {}
+        raw = (body or {}).get("chat_id") if isinstance(body, dict) else None
+        if raw not in (None, "", 0, "0"):
+            try:
+                chat_id = int(raw)
+            except (TypeError, ValueError):
+                return _err("Неверный получатель", 400)
         from services import workflow_engine as _wf
         try:
-            result = await _wf.execute_workflow(pool, uid, wid)
+            result = await _wf.execute_workflow(pool, uid, wid, chat_id=chat_id)
         except Exception:
             log.exception("workflow_execute uid=%s wf=%s", uid, wid)
             return _err(_INTERNAL_ERROR, 500)
         if not result.get("ok"):
             # Раньше здесь стояло `{"ok": True, **result}`: отказ уходил кодом
             # 200, и экран показывал успех на несуществующем сценарии.
-            log.warning("workflow_execute uid=%s wf=%s: %s", uid, wid,
-                        result.get("error"))
-            return _err("Воркфлоу не найден", 404)
+            return _err(result.get("error") or "Воркфлоу не найден",
+                        int(result.get("code") or 404))
         return _json_resp({"ok": True, "run_id": result.get("run_id"),
                            "total_steps": result.get("total_steps", 0),
-                           "executed": False,
-                           "note": "Прогон зарегистрирован. Шаги пока не "
-                                   "выполняются: исполнителя сценариев нет."})
+                           "chat_id": result.get("chat_id"),
+                           "executed": True,
+                           "note": "Прогон запущен: первые шаги уйдут в течение "
+                                   "нескольких секунд."})
 
     async def workflow_status(request: web.Request) -> web.Response:
         """Состояние сценария — его ПОСЛЕДНИЙ прогон (GET /workflow/{id}/status)."""
@@ -403,6 +505,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_patch("/api/miniapp/workflows/{wf_id}", workflow_toggle_plural)
     app.router.add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_any)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)
+    app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
+    app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/execute", workflow_execute)
     app.router.add_get("/api/miniapp/workflow/{wf_id}/status", workflow_status)

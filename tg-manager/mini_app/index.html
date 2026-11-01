@@ -7489,7 +7489,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-running" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">Выполняется</div></div>
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-failed" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Ошибки</div></div>
     </div>
-    <div class="hint" style="margin:0 14px 10px">Сценарий сохраняется как схема шагов. Автоматически он пока не выполняется — запуска по событию и по расписанию ещё нет.</div>
+    <div class="hint" style="margin:0 14px 10px">Сценарий выполняется сам: запускается по выбранному событию (например, когда человек открыл бота) и проходит шаги — сообщения с кнопками, вопросы, паузы, условия, счёт на оплату. Включите сценарий, чтобы он заработал, а проверить его можно кнопкой «Тестовый запуск» на себе.</div>
     <div class="sec">Шаблоны воркфлоу</div>
     <div style="display:flex;gap:8px;padding:4px 16px 8px;overflow-x:auto">
       <div class="mgmt-tile" onclick="createWorkflowFromTemplate('welcome')" style="min-width:100px;flex:1">
@@ -7507,6 +7507,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="createWorkflowFromTemplate('condition')" style="min-width:100px;flex:1">
         <div class="mgmt-tile-ico">🔀</div>
         <div class="mgmt-tile-lbl">Условие</div>
+      </div>
+      <div class="mgmt-tile" onclick="createWorkflowFromTemplate('lead')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">🎯</div>
+        <div class="mgmt-tile-lbl">Заявка</div>
       </div>
     </div>
     <div class="sec">Мои воркфлоу</div>
@@ -7530,6 +7534,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Описание</label>
       <textarea id="wfCreateDesc" rows="2" placeholder="Назначение воркфлоу…" class="input-bc"></textarea>
+    </div>
+    <div class="field">
+      <label>Когда запускать</label>
+      <select id="wfCreateTrigger" class="sel" onchange="wfTriggerHint('wfCreate')">
+        <option value="manual">Только вручную</option>
+        <option value="start">Человек открыл бота (/start)</option>
+        <option value="keyword">Сообщение со словом</option>
+        <option value="tag_added">Человеку поставили тег</option>
+        <option value="event">Событие</option>
+      </select>
+      <input type="text" id="wfCreateTriggerVal" placeholder="" class="inp" style="margin-top:6px;display:none">
     </div>
     <div class="field-err" id="wfCreateErr"></div>
     <button class="btn btn-p" id="wfCreateBtn" onclick="submitWorkflowCreate()" style="width:100%">🔄 Создать</button>
@@ -7555,29 +7570,83 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <label>Тип шага *</label>
       <select id="wfStepType" class="sel">
         <option value="message">💬 Сообщение</option>
+        <option value="ask">❓ Вопрос (сохранить ответ)</option>
         <option value="delay">⏳ Задержка</option>
         <option value="condition">🔀 Условие</option>
         <option value="action">⚡ Действие</option>
+        <option value="invoice">💳 Счёт на оплату</option>
         <option value="webhook">🌐 Вебхук</option>
       </select>
     </div>
     <div class="field" id="wfStepMsgField">
-      <label>Текст сообщения</label>
-      <textarea id="wfStepMsg" rows="3" placeholder="Текст сообщения пользователю…" class="input-bc"></textarea>
+      <label id="wfStepMsgLbl">Текст сообщения</label>
+      <textarea id="wfStepMsg" rows="3" placeholder="Текст сообщения пользователю… Подстановки: {{FIRST_NAME}}, {{name}} и другие поля" class="input-bc"></textarea>
+    </div>
+    <div class="field" id="wfStepButtonsField">
+      <label>Кнопки (по одной в строке, необязательно)</label>
+      <textarea id="wfStepButtons" rows="3" placeholder="Хочу купить -> 3&#10;Подробнее | https://example.com&#10;Дальше" class="input-bc"></textarea>
+      <div class="hint">«Текст -> 3» — кнопка ведёт к шагу 3; «Текст | ссылка» — кнопка-ссылка; просто «Текст» — к следующему шагу. Сценарий ждёт нажатия.</div>
+    </div>
+    <div class="field" id="wfStepAskField" style="display:none">
+      <label>Сохранить ответ в поле</label>
+      <input type="text" id="wfStepSaveAs" placeholder="name, phone, city…" class="inp">
+      <label style="margin-top:6px">Проверка ответа</label>
+      <select id="wfStepValidate" class="sel">
+        <option value="any">Любой текст</option>
+        <option value="phone">Телефон</option>
+        <option value="email">Почта</option>
+        <option value="number">Число</option>
+      </select>
     </div>
     <div class="field" id="wfStepDelayField" style="display:none">
       <label>Задержка (минуты)</label>
-      <input type="number" id="wfStepDelay" min="1" max="1440" placeholder="60" class="inp">
+      <input type="number" id="wfStepDelay" min="1" max="43200" placeholder="60" class="inp">
     </div>
     <div class="field" id="wfStepConditionField" style="display:none">
       <label>Условие</label>
       <select id="wfStepCondition" class="sel">
-        <option value="subscribed">Подписан на канал</option>
-        <option value="clicked">Нажал кнопку</option>
-        <option value="inactive_days">Дней неактивен (≥)</option>
         <option value="tag_has">Есть тег</option>
+        <option value="tag_not">Нет тега</option>
+        <option value="clicked">Нажал кнопку (текст кнопки)</option>
+        <option value="field_equals">Поле равно (поле=значение)</option>
+        <option value="field_set">Поле заполнено (имя поля)</option>
+        <option value="paid">Оплатил</option>
+        <option value="subscribed">Подписан на канал (@канал)</option>
+        <option value="inactive_days">Дней неактивен (≥)</option>
       </select>
       <input type="text" id="wfStepConditionVal" placeholder="Значение (если нужно)" class="inp" style="margin-top:6px">
+      <input type="number" id="wfStepElseGoto" min="1" placeholder="Если нет — перейти к шагу № (пусто = завершить)" class="inp" style="margin-top:6px">
+    </div>
+    <div class="field" id="wfStepActionField" style="display:none">
+      <label>Действие</label>
+      <select id="wfStepAction" class="sel">
+        <option value="add_tag">Поставить тег</option>
+        <option value="remove_tag">Снять тег</option>
+        <option value="set_field">Записать поле (поле=значение)</option>
+        <option value="create_deal">Создать сделку в CRM</option>
+        <option value="notify_owner">Уведомить меня</option>
+        <option value="goto">Перейти к шагу №</option>
+        <option value="stop">Завершить сценарий</option>
+      </select>
+      <input type="text" id="wfStepActionVal" placeholder="Значение" class="inp" style="margin-top:6px">
+    </div>
+    <div class="field" id="wfStepInvoiceField" style="display:none">
+      <label>Название счёта</label>
+      <input type="text" id="wfStepInvTitle" maxlength="32" placeholder="Консультация" class="inp">
+      <label style="margin-top:6px">Сумма</label>
+      <input type="number" id="wfStepInvAmount" min="1" placeholder="100" class="inp">
+      <label style="margin-top:6px">Валюта</label>
+      <select id="wfStepInvCurrency" class="sel">
+        <option value="XTR">⭐ Звёзды Telegram (сумма — в звёздах)</option>
+        <option value="RUB">₽ Рубли (сумма — в копейках)</option>
+        <option value="USD">$ Доллары (сумма — в центах)</option>
+        <option value="EUR">€ Евро (сумма — в центах)</option>
+      </select>
+      <div class="hint">Звёзды работают сразу. Для рублей и других валют подключите платёжного провайдера в настройках ИИ-продавца бота. После оплаты сценарий идёт дальше, условие «Оплатил» становится верным.</div>
+    </div>
+    <div class="field" id="wfStepWebhookField" style="display:none">
+      <label>Адрес (https)</label>
+      <input type="url" id="wfStepUrl" placeholder="https://example.com/hook" class="inp">
     </div>
     <div class="field-err" id="wfStepErr"></div>
     <button class="btn btn-p" onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
@@ -29637,6 +29706,9 @@ function openWorkflowCreateModal() {
   }).join('');
   document.getElementById('wfCreateName').value = '';
   document.getElementById('wfCreateDesc').value = '';
+  document.getElementById('wfCreateTrigger').value = 'start';
+  document.getElementById('wfCreateTriggerVal').value = '';
+  wfTriggerHint('wfCreate');
   document.getElementById('wfCreateErr').style.display = 'none';
   document.getElementById('wfCreateBtn').disabled = false;
   document.getElementById('mo-wf-create').classList.add('show');
@@ -29653,7 +29725,13 @@ async function submitWorkflowCreate() {
   const btn = document.getElementById('wfCreateBtn');
   btn.disabled = true; btn.textContent = '⏳ Создание...';
   try {
-    const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name, bot_id, description }) });
+    const trigger_type = document.getElementById('wfCreateTrigger').value;
+    const trigger_value = document.getElementById('wfCreateTriggerVal').value.trim();
+    if (trigger_type !== 'manual' && trigger_type !== 'start' && !trigger_value) {
+      errEl.textContent = 'Укажите значение для способа запуска'; errEl.style.display = 'block';
+      btn.disabled = false; btn.textContent = '🔄 Создать'; return;
+    }
+    const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name, bot_id, description, trigger_type, trigger_value }) });
     closeModal('mo-wf-create');
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Воркфлоу создан');
@@ -29663,11 +29741,28 @@ async function submitWorkflowCreate() {
   } finally { btn.disabled = false; btn.textContent = '🔄 Создать'; }
 }
 
+// Подсказка к полю значения триггера: что именно туда писать.
+const WF_TRIGGER_PH = {
+  start: 'Параметр ссылки ?start=… (пусто — любой вход)',
+  keyword: 'Слова через запятую: цена, купить',
+  tag_added: 'Имя тега',
+  event: 'payment.received, order.created, deal.created…',
+};
+function wfTriggerHint(prefix) {
+  const t = document.getElementById(prefix + 'Trigger').value;
+  const inp = document.getElementById(prefix + 'TriggerVal');
+  inp.style.display = t === 'manual' ? 'none' : 'block';
+  inp.placeholder = WF_TRIGGER_PH[t] || '';
+}
+
 async function createWorkflowFromTemplate(tpl) {
-  const tplNames = { welcome: '👋 Приветствие', drip: '💧 Дрип-серия', react: '⚡ Реакция на событие', condition: '🔀 Условная логика' };
+  const tplNames = { welcome: '👋 Приветствие', drip: '💧 Дрип-серия', react: '⚡ Реакция на событие', condition: '🔀 Условная логика', lead: '🎯 Квалификация заявки' };
   if (!await askConfirm('Создать воркфлоу по шаблону "' + tplNames[tpl] + '"?')) return;
+  // Шаблон отправляет сообщения — значит, ему нужен бот. Первый бот владельца;
+  // сменить можно в деталях, пересоздав сценарий.
+  const bot_id = (BOTS && BOTS.length) ? BOTS[0].bot_id : undefined;
   try {
-    const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name: tplNames[tpl], template: tpl }) });
+    const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name: tplNames[tpl], template: tpl, bot_id }) });
     toast(`✅ Воркфлоу по шаблону создан · ${(d && d.steps) || 0} шагов`);
     loadWorkflows();
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
@@ -29688,17 +29783,30 @@ async function openWorkflowDetail(wfId, wfName) {
     }
     html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
       <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
+      <button class="btn btn-s" onclick="runWorkflowTest(${wfId}, this)" style="flex:1 1 auto;font-size:13px;padding:8px">🧪 Тестовый запуск</button>
       <button class="btn btn-r" onclick="deleteWorkflow(${wfId}, this)" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Удалить">🗑</button>
     </div>`;
+    // Способ запуска: без него включённый сценарий не запустится сам.
+    const trig = d.trigger_type || 'manual';
+    const trigOpts = Object.entries(d.triggers || {}).map(([k, v]) =>
+      `<option value="${esc(k)}"${k === trig ? ' selected' : ''}>${esc(v)}</option>`).join('');
+    html += `<div class="sec">⚡ Когда запускать</div>
+      <div style="padding:0 16px 8px">
+        <select id="wfdTrigger" class="sel" onchange="wfTriggerHint('wfd')">${trigOpts}</select>
+        <input type="text" id="wfdTriggerVal" class="inp" style="margin-top:6px" value="${esc(d.trigger_value || '')}">
+        <label class="chk-row" style="margin-top:6px"><input type="checkbox" id="wfdReentry" ${d.allow_reentry ? 'checked' : ''}> Можно проходить повторно</label>
+        <button class="btn btn-s" style="width:100%;margin-top:6px" onclick="saveWorkflowTrigger(${wfId})">💾 Сохранить способ запуска</button>
+        ${(!d.active && trig !== 'manual') ? '<div class="hint" style="margin-top:6px">Сценарий выключен — сам он не запустится, пока вы его не активируете.</div>' : ''}
+      </div>`;
 
     if (!steps.length) {
       html += empty('📝', 'Нет шагов', 'Нажмите + Шаг для добавления');
     } else {
       html += '<div class="funnel-flow">';
       steps.forEach((s, i) => {
-        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐' };
-        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)' };
-        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК' };
+        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳' };
+        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)', ask: 'var(--blue)', invoice: 'var(--green)' };
+        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК', ask: 'ВОПРОС', invoice: 'СЧЁТ' };
         // Шаг без type ронял ВЕСЬ экран: undefined.toUpperCase() — TypeError,
         // он уходил в общий catch, и вместо сценария показывалась ошибка. Такие
         // шаги писал POST /workflow/create, требовавший ключ action вместо type.
@@ -29708,8 +29816,18 @@ async function openWorkflowDetail(wfId, wfName) {
         const color = typeColors[stype] || 'var(--hint)';
         const icon = typeIcons[stype] || '•';
         const label = typeNames[stype] || (stype ? stype.toUpperCase() : 'ШАГ НЕИЗВЕСТНОГО ТИПА');
-        const body = s.text || s.condition || s.url || s.action
+        const condName = (d.conditions || {})[s.condition] || s.condition;
+        const actName = (d.actions || {})[s.action] || s.action;
+        let body = s.text || (s.condition ? condName + (s.condition_value ? ': ' + s.condition_value : '') : '')
+          || s.url || (s.action ? actName + (s.value ? ': ' + s.value : '') + (s.goto ? ' → шаг ' + s.goto : '') : '')
           || (stype === 'delay' ? 'Пауза перед следующим шагом' : 'Нечего показать: шаг сохранён без параметров');
+        // Детали, без которых шаг не понять: куда ведут кнопки, куда пишется ответ.
+        const extra = [];
+        (s.buttons || []).forEach(b => extra.push('🔘 ' + b.text + (b.url ? ' (ссылка)' : (b.goto ? ' → шаг ' + b.goto : ' → дальше'))));
+        if (stype === 'ask') extra.push('💾 в поле «' + s.save_as + '»' + (s.validate && s.validate !== 'any' ? ' · проверка: ' + s.validate : ''));
+        if (stype === 'invoice') extra.push((s.currency === 'XTR' ? '⭐ ' + s.amount + ' звёзд' : (s.amount / 100) + ' ' + s.currency) + ' · ' + (s.title || ''));
+        if (s.else_goto) extra.push('иначе → шаг ' + s.else_goto);
+        if (s.timeout_goto) extra.push('нет ответа → шаг ' + s.timeout_goto);
         const isLast = i === steps.length - 1;
         html += `<div class="ffstep">
           <div class="ffstep-line">
@@ -29717,8 +29835,9 @@ async function openWorkflowDetail(wfId, wfName) {
             ${!isLast ? '<div class="ffstep-tail"></div>' : ''}
           </div>
           <div class="ffstep-body" style="border-left:3px solid ${color}">
-            <div class="ffstep-delay" style="color:${color}">${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : ''}</div>
+            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : ''}</span><span class="tap" role="button" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span></div>
             <div class="ffstep-text">${esc(body)}</div>
+            ${extra.length ? '<div class="hint" style="margin-top:4px">' + extra.map(esc).join('<br>') + '</div>' : ''}
           </div>
         </div>`;
       });
@@ -29731,9 +29850,12 @@ async function openWorkflowDetail(wfId, wfName) {
       // cancelled. 'completed' не писал никто, зато 'cancelled' попадал в
       // ветку «иначе» и отменённый прогон показывался как «🔵 В работе».
       const runNames = { done: '✅ Выполнен', completed: '✅ Выполнен', failed: '❌ Ошибка',
-                         cancelled: '🚫 Отменён', pending: '⏳ Ожидает', running: '🔵 В работе' };
+                         cancelled: '🚫 Отменён', pending: '⏳ Ожидает', running: '🔵 В работе',
+                         waiting: '💬 Ждёт ответа', expired: '⌛ Не ответил в срок',
+                         stopped: '⛔ Получатель недоступен' };
       const runColors = { done: 'var(--green)', completed: 'var(--green)', failed: 'var(--red)',
-                          cancelled: 'var(--hint)', pending: 'var(--orange)', running: 'var(--blue)' };
+                          cancelled: 'var(--hint)', pending: 'var(--orange)', running: 'var(--blue)',
+                          waiting: 'var(--blue)', expired: 'var(--hint)', stopped: 'var(--orange)' };
       html += '<div class="lst">' + d.runs.slice(0, 5).map(r => {
         const st = (r.status || '').toLowerCase();
         const sc = runColors[st] || 'var(--hint)';
@@ -29741,14 +29863,58 @@ async function openWorkflowDetail(wfId, wfName) {
           <div class="ava" style="background:${sc}15;color:${sc}">▶️</div>
           <div class="li-body">
             <div class="li-name">${runNames[st] || esc(st || 'неизвестно')}</div>
-            <div class="li-sub">Шаг ${r.current_step || 0}/${r.total_steps || 0} · ${ago(r.started_at)}</div>
+            <div class="li-sub">Шаг ${Math.min((r.current_step || 0) + 1, r.total_steps || 0)}/${r.total_steps || 0} · ${ago(r.started_at)}${r.error_message ? ' · ' + esc(r.error_message) : ''}</div>
           </div>
+          ${['running', 'waiting', 'pending'].includes(st) ? `<div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="cancelWorkflowRun(${r.id})">⏹ Стоп</button></div>` : ''}
         </div>`;
       }).join('') + '</div>';
     }
 
     txt('wfd-body', html);
+    wfTriggerHint('wfd');
   } catch(e) { txt('wfd-body', errHtml(errRu(e))); }
+}
+
+function _wfReopen() {
+  openWorkflowDetail(_currentWfId, document.getElementById('wfd-name').textContent.replace('🔄 ', ''));
+}
+
+async function saveWorkflowTrigger(wfId) {
+  const trigger_type = document.getElementById('wfdTrigger').value;
+  const trigger_value = document.getElementById('wfdTriggerVal').value.trim();
+  const allow_reentry = document.getElementById('wfdReentry').checked;
+  try {
+    await api(`/api/miniapp/workflows/${wfId}`, { method: 'PATCH', body: JSON.stringify({ trigger_type, trigger_value, allow_reentry }) });
+    toast('✅ Способ запуска сохранён');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+}
+
+async function runWorkflowTest(wfId, el) {
+  if (el) el.disabled = true;
+  try {
+    const d = await api(`/api/miniapp/workflow/${wfId}/execute`, { method: 'POST', body: '{}' });
+    toast('🧪 Запущено — сообщения придут вам в бота');
+    setTimeout(_wfReopen, 4000);
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+  finally { if (el) el.disabled = false; }
+}
+
+async function deleteWorkflowStep(wfId, idx, el) {
+  if (!await confirmDelete('Удалить шаг ' + (idx + 1), el)) return;
+  try {
+    await api(`/api/miniapp/workflows/${wfId}/steps/${idx}`, { method: 'DELETE' });
+    toast('🗑 Шаг удалён');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+}
+
+async function cancelWorkflowRun(runId) {
+  try {
+    await api(`/api/miniapp/workflow/run/${runId}/cancel`, { method: 'POST', body: '{}' });
+    toast('⏹ Прогон остановлен');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
 }
 
 async function toggleWorkflow(wfId, active) {
@@ -29772,9 +29938,9 @@ async function deleteWorkflow(wfId, _el) {
 
 function openWfAddStepModal() {
   if (!_currentWfId) return;
-  document.getElementById('wfStepMsg').value = '';
-  document.getElementById('wfStepDelay').value = '';
-  document.getElementById('wfStepConditionVal').value = '';
+  ['wfStepMsg', 'wfStepDelay', 'wfStepConditionVal', 'wfStepButtons', 'wfStepSaveAs',
+   'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('wfStepErr').style.display = 'none';
   document.getElementById('mo-wf-step').classList.add('show');
   tg.HapticFeedback?.impactOccurred('medium');
@@ -29782,34 +29948,68 @@ function openWfAddStepModal() {
 
 document.getElementById('wfStepType')?.addEventListener('change', function() {
   const v = this.value;
-  document.getElementById('wfStepMsgField').style.display = v === 'message' ? 'block' : 'none';
-  document.getElementById('wfStepDelayField').style.display = v === 'delay' ? 'block' : 'none';
-  document.getElementById('wfStepConditionField').style.display = v === 'condition' ? 'block' : 'none';
+  const show = (id, on) => { document.getElementById(id).style.display = on ? 'block' : 'none'; };
+  show('wfStepMsgField', ['message', 'ask', 'invoice'].includes(v));
+  document.getElementById('wfStepMsgLbl').textContent = v === 'ask' ? 'Вопрос' : (v === 'invoice' ? 'Описание счёта' : 'Текст сообщения');
+  show('wfStepButtonsField', v === 'message');
+  show('wfStepAskField', v === 'ask');
+  show('wfStepDelayField', v === 'delay');
+  show('wfStepConditionField', v === 'condition');
+  show('wfStepActionField', v === 'action');
+  show('wfStepInvoiceField', v === 'invoice');
+  show('wfStepWebhookField', v === 'webhook');
 });
+
+// «Текст -> 3», «Текст | https://…», «Текст» — в кнопки шага.
+function _wfParseButtons(raw) {
+  return (raw || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const u = l.split('|');
+    if (u.length > 1) return { text: u[0].trim(), url: u.slice(1).join('|').trim() };
+    const g = l.split('->');
+    if (g.length > 1) return { text: g[0].trim(), goto: parseInt(g[1], 10) || undefined };
+    return { text: l };
+  });
+}
 
 async function submitWfAddStep() {
   if (!_currentWfId) return;
-  const type = document.getElementById('wfStepType').value;
-  const text = document.getElementById('wfStepMsg').value.trim();
-  const delay_minutes = parseInt(document.getElementById('wfStepDelay').value) || null;
-  const condition = document.getElementById('wfStepCondition').value;
-  const condition_val = document.getElementById('wfStepConditionVal').value.trim();
+  const val = id => (document.getElementById(id).value || '').trim();
+  const type = val('wfStepType');
+  const text = val('wfStepMsg');
   const errEl = document.getElementById('wfStepErr');
   errEl.style.display = 'none';
-
-  if (type === 'message' && !text) { errEl.textContent = 'Введите текст сообщения'; errEl.style.display = 'block'; return; }
-  if (type === 'delay' && !delay_minutes) { errEl.textContent = 'Укажите задержку'; errEl.style.display = 'block'; return; }
-
+  const fail = m => { errEl.textContent = m; errEl.style.display = 'block'; };
+  const payload = { type };
+  if (type === 'message') {
+    if (!text) return fail('Введите текст сообщения');
+    payload.text = text;
+    const buttons = _wfParseButtons(val('wfStepButtons'));
+    if (buttons.length) payload.buttons = buttons;
+  } else if (type === 'ask') {
+    if (!text) return fail('Введите вопрос');
+    if (!val('wfStepSaveAs')) return fail('Укажите поле, куда сохранить ответ');
+    Object.assign(payload, { text, save_as: val('wfStepSaveAs'), validate: val('wfStepValidate') });
+  } else if (type === 'delay') {
+    const m = parseInt(val('wfStepDelay'), 10);
+    if (!m) return fail('Укажите задержку');
+    payload.delay_minutes = m;
+  } else if (type === 'condition') {
+    Object.assign(payload, { condition: val('wfStepCondition'), condition_value: val('wfStepConditionVal') });
+    const eg = parseInt(val('wfStepElseGoto'), 10);
+    if (eg) payload.else_goto = eg;
+  } else if (type === 'action') {
+    Object.assign(payload, { action: val('wfStepAction'), value: val('wfStepActionVal') });
+  } else if (type === 'invoice') {
+    Object.assign(payload, { title: val('wfStepInvTitle'), text, amount: parseInt(val('wfStepInvAmount'), 10), currency: val('wfStepInvCurrency') });
+  } else if (type === 'webhook') {
+    payload.url = val('wfStepUrl');
+  }
   try {
-    const payload = { type };
-    if (type === 'message') payload.text = text;
-    if (type === 'delay') payload.delay_minutes = delay_minutes;
-    if (type === 'condition') { payload.condition = condition; payload.condition_value = condition_val; }
     await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });
     closeModal('mo-wf-step');
     toast('✅ Шаг добавлен');
-    openWorkflowDetail(_currentWfId, document.getElementById('wfd-name').textContent.replace('🔄 ', ''));
-  } catch(e) { errEl.textContent = 'Ошибка: ' + errRu(e); errEl.style.display = 'block'; }
+    _wfReopen();
+  } catch(e) { fail('Ошибка: ' + errRu(e)); }
 }
 
 // ══════════════════════════════════════════════════════════════════════

@@ -165,24 +165,26 @@ def test_an_unknown_template_is_refused():
     assert not any("INSERT INTO workflow_definitions" in q for q, _ in pool.calls)
 
 
-def test_the_screen_does_not_promise_execution_that_does_not_exist():
-    """Пока шаги не исполняет никто, «Активен» нельзя оставлять без пояснения."""
+def test_the_screen_says_how_a_workflow_starts():
+    """Сценарий исполняется сам — экран обязан объяснить, когда и как.
+
+    Раньше здесь стояло предупреждение «пока не выполняется»: исполнителя не
+    было. Он появился (services/workflow_runtime.py), и экран обязан
+    говорить обратное — что сценарий запускается по событию и его можно
+    проверить тестовым запуском."""
     html = INDEX.read_text("utf-8")
     i = html.index('<div class="hdr-title">🔄 Воркфлоу</div>')
-    # Границы — по разделу шаблонов, не окном фиксированной длины.
     head = html[i:html.index('<div class="sec">Шаблоны воркфлоу</div>', i)]
-    assert "пока не выполняется" in head, (
-        "с экрана исчезло предупреждение, что сценарий не исполняется — "
-        "«🟢 Активен» снова читается как «работает»")
+    assert "пока не выполняется" not in head, "экран снова отрицает исполнение"
+    assert "Тестовый запуск" in head and "запускается" in head
 
 
-def test_execution_is_still_only_a_record_so_the_warning_is_true():
-    """Страховка от обратного: появится настоящий исполнитель — предупреждение
-    надо снять, и тест об этом напомнит."""
+def test_execution_is_handed_to_the_runtime():
+    """Запуск больше не «только запись»: прогон заводит исполнитель."""
     src = Path(WF.__file__).read_text("utf-8")
     i = src.index("async def execute_workflow")
     body = src[i:src.index("async def get_workflow_status")]
-    assert "INSERT INTO workflow_runs" in body
+    assert "start_run(" in body
     for marker in ("send_message", "operation_bus", "submit("):
         assert marker not in body, (
             "в execute_workflow появилось настоящее исполнение шагов — пора "

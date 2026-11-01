@@ -1146,6 +1146,10 @@ async def main() -> None:
         )
         _spawn(_resilient("relay", relay_service.run, pool, http))
         _spawn(_resilient("funnel_runner", funnel_runner.run, pool, http))
+        # Исполнитель сценариев: шаги, кнопки-ветки, вопросы, счета; запуск
+        # по событиям шины automation_events.
+        from services import workflow_runtime as _wf_runtime
+        _spawn(_resilient("workflow_runtime", _wf_runtime.run, pool, http, bot))
         _spawn(_resilient("keyword_watcher", keyword_watcher.run, pool, bot))
         # Сметатель капчи «Модератора чатов»: кикает новичков, не прошедших
         # проверку «Я не бот» к дедлайну.
