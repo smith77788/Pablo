@@ -2270,6 +2270,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">CRM</div>
         <div class="mgmt-tile-val" id="m-crm-cnt"></div>
       </div>
+      <div class="mgmt-tile" onclick="openInbox(false)">
+        <div class="mgmt-tile-ico">📥</div>
+        <div class="mgmt-tile-lbl">Входящие</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openCRMDeals()">
         <div class="mgmt-tile-ico">💼</div>
         <div class="mgmt-tile-lbl">Сделки</div>
@@ -2278,6 +2283,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="openDeals()">
         <div class="mgmt-tile-ico">🗂</div>
         <div class="mgmt-tile-lbl">Канбан сделок</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMoneyFunnel(30)">
+        <div class="mgmt-tile-ico">💰</div>
+        <div class="mgmt-tile-lbl">Воронка денег</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSalesManager()">
@@ -2404,16 +2414,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">🔑</div>
         <div class="mgmt-tile-lbl">API Ключи</div>
         <div class="mgmt-tile-val" id="m-apikey-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openInbox(false)">
-        <div class="mgmt-tile-ico">📥</div>
-        <div class="mgmt-tile-lbl">Входящие</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openMoneyFunnel(30)">
-        <div class="mgmt-tile-ico">💰</div>
-        <div class="mgmt-tile-lbl">Воронка денег</div>
-        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openWorkspaces()">
         <div class="mgmt-tile-ico">🏢</div>
@@ -8806,6 +8806,8 @@ const MODULE_DESCS = {
   'API Ключи':'Ключи API и интеграции','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
   'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
+  'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
+  'Воронка денег':'Охват → ответ → покупка по кампаниям, цена лида',
 };
 function buildDrawer() {
   const body = document.getElementById('navBody');
