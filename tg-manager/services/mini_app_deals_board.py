@@ -31,13 +31,12 @@ log = logging.getLogger(__name__)
 BOARD_PAGE_DEFAULT = 30
 BOARD_PAGE_MAX = 100
 
-# Порядок карточек в колонке: сначала то, что требует действия (напоминание,
-# у которого подошёл срок), потом свежие касания. Без добора по id карточки
-# с одинаковым updated_at прыгали бы между страницами.
-_CARD_ORDER = (
-    "(cc.next_reminder_at IS NOT NULL AND cc.next_reminder_at <= NOW()) DESC, "
-    "COALESCE(cc.last_interaction_at, cc.updated_at) DESC NULLS LAST, cc.id DESC"
-)
+# Порядок карточек в колонке один на доску и на «Показать ещё»: сначала то,
+# что требует действия (напоминание, у которого подошёл срок), потом свежие
+# касания. Добор по cc.id обязателен: без него карточки с одинаковым временем
+# прыгали бы между страницами. Порядок написан в самих запросах, а не
+# подставлен строкой: так его видит проверка листания
+# (tests/test_paging_does_not_skip_or_repeat_people.py).
 
 _CARD_COLUMNS = (
     "cc.id AS crm_id, cc.contact_id, COALESCE(cc.stage, 'lead') AS stage, "
@@ -91,7 +90,8 @@ async def load_board(pool, owner_id: int, per_stage: int) -> dict:
         f"""SELECT * FROM (
                 SELECT {_CARD_COLUMNS},
                        ROW_NUMBER() OVER (PARTITION BY COALESCE(cc.stage, 'lead')
-                                          ORDER BY {_CARD_ORDER}) AS rn
+                                          ORDER BY (cc.next_reminder_at IS NOT NULL AND cc.next_reminder_at <= NOW()) DESC,
+                     COALESCE(cc.last_interaction_at, cc.updated_at) DESC NULLS LAST, cc.id DESC) AS rn
                 FROM contact_crm cc
                 JOIN unified_contacts uc
                   ON uc.id = cc.contact_id AND uc.owner_id = cc.owner_id
@@ -129,7 +129,8 @@ async def load_column(pool, owner_id: int, stage: str, limit: int, offset: int) 
             JOIN unified_contacts uc
               ON uc.id = cc.contact_id AND uc.owner_id = cc.owner_id
             WHERE cc.owner_id = $1 AND COALESCE(cc.stage, 'lead') = $2
-            ORDER BY {_CARD_ORDER}
+            ORDER BY (cc.next_reminder_at IS NOT NULL AND cc.next_reminder_at <= NOW()) DESC,
+                     COALESCE(cc.last_interaction_at, cc.updated_at) DESC NULLS LAST, cc.id DESC
             LIMIT $3 OFFSET $4""",
         owner_id, stage, limit, offset,
     )
@@ -172,9 +173,17 @@ def setup_routes(app: web.Application, pool) -> None:
                 # выглядела бы правдой («там никого»).
                 if stage not in STAGE_LABELS:
                     return _err("Неизвестная стадия сделки", 400)
-                return _json_resp(await load_column(
-                    pool, uid, stage, limit, _list_offset(request)))
-            return _json_resp(await load_board(pool, uid, limit))
+                col = await load_column(pool, uid, stage, limit, _list_offset(request))
+                # Итог и признак продолжения называются здесь, в ответе ручки:
+                # колонка с потолком, которая молчит о нём, выглядела бы всей.
+                return _json_resp({"stage": col["stage"], "cards": col["cards"],
+                                   "total": col["total"], "has_more": col["has_more"]})
+            b = await load_board(pool, uid, limit)
+            # У каждой колонки свой count и has_more (load_board), а у доски —
+            # общий итог.
+            return _json_resp({"columns": b["columns"], "total": b["total"],
+                               "reminders_7d": b["reminders_7d"],
+                               "per_stage": b["per_stage"]})
         except Exception:
             log.exception("crm_board uid=%s stage=%s", uid, stage or "-")
             return _err(_INTERNAL_ERROR, 500)
