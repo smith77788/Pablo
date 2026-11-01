@@ -1002,9 +1002,10 @@ async def on_stars_paid(message: Message, pool: asyncpg.Pool) -> None:
         )
         await message.answer(
             "⚠️ Оплата получена, но подписку не удалось включить автоматически. "
-            "Мы уже знаем об этом — напишите в поддержку, указав ID платежа "
-            f"<code>{sp.telegram_payment_charge_id}</code>.",
+            "Напишите в поддержку и укажите ID платежа "
+            f"<code>{sp.telegram_payment_charge_id}</code> — подписку включат вручную.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     if expires is None:

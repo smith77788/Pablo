@@ -14,7 +14,7 @@ import os
 
 import pytest
 
-UTC = datetime.timezone.utc
+UTC = datetime.UTC
 MONDAY_9 = datetime.datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
 
 
@@ -156,7 +156,6 @@ def test_sales_query_runs_on_real_schema():
     if not DSN:
         pytest.skip("нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
     import asyncpg
-
     from services import weekly_report as wr
 
     owner = 99_000_777

@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html import escape
 
 log = logging.getLogger(__name__)
@@ -123,7 +123,6 @@ async def sales_week(pool, owner_id: int) -> list[dict]:
 
 def _kb():
     from aiogram.utils.keyboard import InlineKeyboardBuilder
-
     from bot.callbacks import SnoozeCb
 
     kb = InlineKeyboardBuilder()
@@ -135,9 +134,10 @@ def _kb():
 async def maybe_send(pool, bot, owner_id: int, *, now: datetime | None = None) -> bool:
     """Отправить отчёт недели, если пора и ещё не отправлен. True — отправлен."""
     from database import db
+
     from services.organism import digest, spine
 
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if not in_window(now):
         return False
     try:

@@ -18,10 +18,9 @@ import datetime
 import os
 
 import pytest
-
 from bot.callbacks import SubCb
 
-UTC = datetime.timezone.utc
+UTC = datetime.UTC
 
 
 @pytest.fixture(autouse=True)
@@ -132,11 +131,9 @@ class _RecPool:
 
     async def fetchrow(self, q, *a):
         self.queries.append((q, a))
-        return None
 
     async def fetchval(self, q, *a):
         self.queries.append((q, a))
-        return None
 
     async def execute(self, q, *a):
         self.queries.append((q, a))
@@ -275,7 +272,6 @@ async def test_stars_button_and_invoice(monkeypatch):
 
 def test_gate_lets_successful_payment_through():
     from aiogram.types import Chat, Message, SuccessfulPayment, User
-
     from bot.middlewares import subscription_gate as gate
 
     gate.set_gate_enabled(True)
@@ -312,7 +308,6 @@ def test_stars_payment_confirms_once_on_real_schema():
     if not DSN:
         pytest.skip("нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
     import asyncpg
-
     from bot.handlers import subscription as sh
 
     async def go():
