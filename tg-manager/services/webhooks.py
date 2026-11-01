@@ -57,6 +57,19 @@ EVENTS: dict[str, str] = {
     "webhook.test": "Тестовое событие",
 }
 
+# События сценариев (services/automation_events.py, schema_v268) доходят сюда
+# триггером schema_v270. Подписи берутся у шины, чтобы новый тип события
+# сценария появлялся в выборе подписки без правки этого файла.
+# webhook.received не пересылается (петля вход → выход), см. миграцию.
+AUTOMATION_NOT_FORWARDED = frozenset({"webhook.received"})
+try:
+    from services.automation_events import EVENT_LABELS as _AUTOMATION_LABELS
+except Exception:  # шина ещё не в ветке — вебхуки работают без её событий
+    _AUTOMATION_LABELS = {}
+for _ev, _label in _AUTOMATION_LABELS.items():
+    if _ev not in AUTOMATION_NOT_FORWARDED:
+        EVENTS.setdefault(_ev, _label)
+
 KINDS = ("http", "sheets")
 MAX_ENDPOINTS = 20
 MAX_ATTEMPTS = 8
