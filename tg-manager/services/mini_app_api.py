@@ -43,6 +43,7 @@ from services import mini_app_networks
 from services import mini_app_fleet
 from services import mini_app_rankings
 from services import mini_app_links
+from services import mini_app_deals_board
 from services import mini_app_sales
 from services import mini_app_va
 from services import mini_app_warmup
@@ -7886,6 +7887,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_warmup.setup_routes(app, pool)
     mini_app_accounts.setup_routes(app, pool)
     mini_app_links.setup_routes(app, pool)
+    mini_app_deals_board.setup_routes(app, pool)
     mini_app_fleet.setup_routes(app, pool)
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
