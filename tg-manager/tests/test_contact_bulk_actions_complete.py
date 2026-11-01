@@ -139,13 +139,12 @@ def test_rating_is_an_integer():
         "оценка уходит в запрос как есть — дробную asyncpg отвергнет")
 
 
-def test_export_links_carry_a_ticket():
+def test_export_links_carry_the_token():
     h = _html()
     assert 'href="/api/miniapp/uch/export/csv"' not in h, (
-        "ссылка выгрузки без пропуска вернётся 401 в новой вкладке")
+        "ссылка выгрузки без токена вернётся 401 в новой вкладке")
     body = _js_func("uchExport")
-    # Токен сессии в адресе сервер больше не принимает (_get_uid читает его
-    # только из заголовка): ссылка с ?token= отвечала 401. Выгрузка обязана
-    # открываться с одноразовым пропуском на свой путь — openTicketLink.
-    assert "params.set('token'" not in body, "токен в адресе сервер отвергает — 401"
-    assert "openTicketLink(" in body, "выгрузка открывается по пропуску (openTicketLink)"
+    # Внешний браузер не несёт заголовка, а токен сессии в адресе запрещён
+    # (D19): ссылка получает одноразовый пропуск на свой путь.
+    assert "openTicketLink(" in body, "ссылка выгрузки без пропуска = 401"
+    assert "'token'" not in body and "TK" not in body, "токен сессии не ходит в адресе"

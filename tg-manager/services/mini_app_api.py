@@ -40,6 +40,7 @@ from services import mini_app_content
 from services import mini_app_presence
 from services import mini_app_cloud
 from services import mini_app_mp
+from services import mini_app_integrations
 from services import mini_app_networks
 from services import mini_app_fleet
 from services import mini_app_rankings
@@ -5872,75 +5873,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         ]})
 
 
-    # ── API Keys (API Hub) ─────────────────────────────────────────────────────
-
-    async def api_keys_list(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            rows = await pool.fetch(
-                """SELECT id, name, key_prefix, is_active, created_at, last_used_at
-                   FROM api_keys WHERE user_id=$1 ORDER BY created_at DESC""",
-                uid,
-            )
-        except Exception:
-            log.exception("api_keys_list uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"keys": [
-            {
-                "id": r["id"], "name": r["name"] or "",
-                "prefix": r["key_prefix"] or "",
-                "is_active": bool(r["is_active"]),
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "last_used_at": r["last_used_at"].isoformat() if r["last_used_at"] else None,
-            }
-            for r in rows
-        ]})
-
-    async def revoke_api_key(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            key_id = int(request.match_info["key_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор ключа", 400)
-        try:
-            res = await pool.execute(
-                "UPDATE api_keys SET is_active=FALSE WHERE id=$1 AND user_id=$2",
-                key_id, uid,
-            )
-            if res == "UPDATE 0":
-                return _err("Не найдено", 404)
-            return _json_resp({"ok": True})
-        except Exception:
-            log.exception("revoke_api_key uid=%d key=%d", uid, key_id)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def create_api_key(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        name = (body.get("name") or "Mini App Key").strip()[:64]
-        import secrets
-        raw_key = secrets.token_urlsafe(32)
-        prefix = raw_key[:8]
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-        try:
-            row = await pool.fetchrow(
-                """INSERT INTO api_keys(user_id, key_hash, key_prefix, name)
-                   VALUES($1,$2,$3,$4) RETURNING id""",
-                uid, key_hash, prefix, name,
-            )
-            return _json_resp({"ok": True, "id": row["id"], "key": raw_key, "prefix": prefix, "name": name})
-        except Exception:
-            log.exception("create_api_key uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
+    # ── API Keys (API Hub) — переехали в services/mini_app_integrations.py ──
 
     # ── Multigeo (per-language bot profile) ───────────────────────────────────
 
@@ -7909,6 +7842,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_crm.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
     mini_app_mp.setup_routes(app, pool)
+    mini_app_integrations.setup_routes(app, pool)
     mini_app_cf.setup_routes(app, pool)
     mini_app_content.setup_routes(app, pool)
     mini_app_presence.setup_routes(app, pool)
@@ -7943,9 +7877,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Relay (Inbox)
     app.router.add_get("/api/miniapp/relay/session/{session_id}/messages", relay_session_messages)
     # API Keys
-    app.router.add_get("/api/miniapp/api_keys", api_keys_list)
-    app.router.add_post("/api/miniapp/api_key", create_api_key)
-    app.router.add_delete("/api/miniapp/api_key/{key_id}", revoke_api_key)
     # Strike history
     # Host-Server: маркетплейс инфраструктуры вынесен в свой модуль.
     mini_app_host_server.setup_routes(app, pool)

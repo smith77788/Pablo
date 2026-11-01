@@ -69,18 +69,19 @@ class _Pool:
 class _Req:
     def __init__(self, body: dict):
         self._body = body
-        # Токен в заголовке запроса, а не подменённый _get_uid: ручки, вынесенные из
+        # Токен в запросе, а не подменённый _get_uid: ручки, вынесенные из
         # монолита в отдельные модули слоя, забирают _get_uid ПО ЗНАЧЕНИЮ в
         # момент сборки приложения, то есть раньше, чем monkeypatch успеет
         # что-то подменить. Настоящий _get_uid читает токен из запроса и
         # разбирает его через mini_app_api.parse_token — вот его и подменяем
         # (см. _call). Так проверка работает одинаково и для монолита, и для
         # вынесенных модулей.
-        # Токен — в заголовке: из адреса сервер его больше не берёт.
+        # Токен сессии — только в заголовке (D19): ?token= больше не принимается.
         self.query = {}
         self.match_info = {}
         self.headers = {"Authorization": "Bearer t"}
         self.method = "POST"
+        self.path = "/api/miniapp/test"
         self.app = web.Application()
 
     async def json(self):

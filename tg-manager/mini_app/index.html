@@ -2398,7 +2398,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- ⚙️ Настройки — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="settings">⚙️ Настройки</div>
-    <div class="sec-desc" data-section="settings" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Тариф, ключи API и рабочие пространства.</div>
+    <div class="sec-desc" data-section="settings" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Тариф, интеграции, ключи API и рабочие пространства.</div>
     <div class="mgmt-grid" data-section="settings">
       <div class="mgmt-tile" onclick="openSettings()">
         <div class="mgmt-tile-ico">⚙️</div>
@@ -2409,6 +2409,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">💳</div>
         <div class="mgmt-tile-lbl">Тариф</div>
         <div class="mgmt-tile-val" id="m-billing-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openIntegrations()">
+        <div class="mgmt-tile-ico">🔌</div>
+        <div class="mgmt-tile-lbl">Интеграции</div>
+        <div class="mgmt-tile-val">API · вебхуки · Sheets</div>
       </div>
       <div class="mgmt-tile" onclick="openApiKeys()">
         <div class="mgmt-tile-ico">🔑</div>
@@ -6218,6 +6223,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-apikey')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔑 Новый API ключ</div>
     <div class="field"><label>Название ключа</label><input id="ak-name" type="text" maxlength="64" placeholder="Мой сервис" class="inp"></div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0 8px"><input id="ak-readonly" type="checkbox"> Только чтение (без отправки сообщений от имени аккаунтов)</label>
     <div id="ak-result" style="display:none;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.3);border-radius:10px;padding:12px;margin:10px 0">
       <div style="font-size:13px;color:var(--hint);margin-bottom:6px">⚠️ Скопируйте ключ сейчас — он больше не будет показан!</div>
       <div id="ak-key-display" style="font-family:monospace;font-size:13px;word-break:break-all;color:var(--green);user-select:all"></div>
@@ -8803,7 +8809,7 @@ const MODULE_DESCS = {
   'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и оповещения',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
-  'API Ключи':'Ключи API и интеграции','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
+  'Интеграции':'Вебхуки на события, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
   'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
@@ -19645,7 +19651,7 @@ async function applySmartTags() {
 // собравший срез, получал вместо него весь справочник. Срез считает сервер по
 // ТЕМ ЖЕ параметрам, что список (contactFilterParams), — «выгружаю то, что вижу».
 const UCH_EXPORT_CAP = 5000;
-function uchExport(fmt, opts) {
+async function uchExport(fmt, opts) {
   const f = (fmt === 'vcf' || fmt === 'json') ? fmt : 'csv';
   opts = opts || {};
   const params = (opts.slice ? contactFilterParams() : new URLSearchParams());
@@ -19662,9 +19668,8 @@ function uchExport(fmt, opts) {
     toast('⚠️ В срезе ' + num(CONTACT_SLICE_TOTAL) + ' контактов, за раз выгружается ' + num(UCH_EXPORT_CAP) + '. Сузьте фильтр.');
     return;
   }
-  // Токен сессии в адресе сервер больше не принимает: ссылка выгрузки
-  // открывается с одноразовым пропуском на этот путь (openTicketLink).
-  openTicketLink('/api/miniapp/uch/export/' + f + '?' + params.toString(), 'Выгрузка открыта');
+  // Токен сессии в адрес не кладём — пропуск на этот путь (openTicketLink).
+  await openTicketLink('/api/miniapp/uch/export/' + f + '?' + params.toString());
 }
 
 function uchExportSelected(fmt) {
@@ -24134,7 +24139,7 @@ async function openApiKeys() {
         <div class="row-ico" style="background:var(--bg-yellow-16)">🔑</div>
         <div class="row-body">
           <div class="row-name">${esc(k.name)||'Без названия'} ${k.is_active?'🟢':'🔴'}</div>
-          <div class="row-val"><code>${esc(k.prefix)}****</code>${k.last_used_at?' · исп. '+ago(k.last_used_at):''}</div>
+          <div class="row-val"><code>${esc(k.prefix)}…</code> · ${(k.scopes||[]).includes('write')?'полный доступ':'только чтение'}${k.last_used_at?' · исп. '+ago(k.last_used_at):''}</div>
           <div class="row-val" style="color:var(--hint)">Создан ${ago(k.created_at)}</div>
         </div>
         ${k.is_active?`<div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="revokeApiKey(${k.id})">Откл</button></div>`:''}
@@ -24152,6 +24157,7 @@ async function revokeApiKey(keyId) {
 }
 function openApiKeyModal() {
   document.getElementById('ak-name').value='';
+  const _akRo = document.getElementById('ak-readonly'); if (_akRo) _akRo.checked=false;
   document.getElementById('ak-err').textContent='';
   document.getElementById('ak-result').style.display='none';
   document.getElementById('ak-btns').style.display='flex';
@@ -24167,7 +24173,8 @@ async function submitApiKeyCreate() {
   btn.disabled=true; btn.textContent='⏳ Создание...';
   errEl.textContent='';
   try {
-    const r = await api('/api/miniapp/api_key',{method:'POST',body:JSON.stringify({name})});
+    const ro = document.getElementById('ak-readonly')?.checked;
+    const r = await api('/api/miniapp/api_key',{method:'POST',body:JSON.stringify({name, scopes: ro ? ['read'] : ['read','write']})});
     _lastApiKey = r.key;
     document.getElementById('ak-key-display').textContent = r.key;
     document.getElementById('ak-result').style.display='block';
@@ -30231,6 +30238,7 @@ function renderAudSegChart(segments) {
 <script src="screens/channel_manage.js"></script>
 <script src="screens/shield_check.js"></script>
 <script src="screens/account_login.js"></script>
+<script src="screens/integrations.js"></script>
 <script src="screens/accounts_list.js"></script>
 <script src="screens/bots_list.js"></script>
 <script src="screens/bot_detail.js"></script>

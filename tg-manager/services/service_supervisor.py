@@ -39,6 +39,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from services.platform_alert import Alerter, esc, safe_alert
+
 log = logging.getLogger(__name__)
 
 
@@ -49,6 +51,7 @@ async def supervise(
     restart_delay: float = 30.0,
     start_delay: float = 0.0,
     restart_on_return: bool = False,
+    alert: Alerter | None = None,
 ) -> None:
     """Держать фоновый сервис живым, перезапуская его после падений.
 
@@ -64,6 +67,10 @@ async def supervise(
         restart_on_return— перезапускать ли после ШТАТНОГО возврата. False для
                            фоновых циклов (вернулся значит выключен), True для
                            сетевых сервисов, которым положено подниматься снова.
+        alert            — оповещение админов (`platform_alert.make_alerter`).
+                           Падение и неожиданный возврат сетевого сервиса
+                           сообщаются админу, а не только пишутся в лог (D27);
+                           повтор по одному сервису — не чаще раза в час.
 
     Отмена (CancelledError) пробрасывается: остановка процесса — не сбой.
     """
@@ -77,6 +84,7 @@ async def supervise(
         pass
     if start_delay > 0:
         await asyncio.sleep(start_delay)
+    crashes = 0
     while True:
         try:
             await fn(*args)
@@ -86,6 +94,14 @@ async def supervise(
             log.error(
                 "Сервис %s упал: %s — перезапуск через %.0fс",
                 name, e, restart_delay, exc_info=True,
+            )
+            crashes += 1
+            await safe_alert(
+                alert, f"svc-crash:{name}",
+                f"⚠️ <b>Фоновый сервис упал:</b> <code>{esc(name)}</code>\n"
+                f"{esc(type(e).__name__)}: {esc(e)}\n"
+                f"Перезапуск через {restart_delay:.0f}с. "
+                f"Падений с запуска процесса: {crashes}.",
             )
             await asyncio.sleep(restart_delay)
             continue
@@ -103,5 +119,10 @@ async def supervise(
         log.warning(
             "Сервис %s завершился штатно, хотя должен работать постоянно — "
             "перезапуск через %.0fс", name, restart_delay,
+        )
+        await safe_alert(
+            alert, f"svc-returned:{name}",
+            f"⚠️ <b>Сервис остановился сам:</b> <code>{esc(name)}</code>\n"
+            f"Он должен работать постоянно. Перезапуск через {restart_delay:.0f}с.",
         )
         await asyncio.sleep(restart_delay)

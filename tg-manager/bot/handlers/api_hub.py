@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import secrets
 
 import asyncpg
 from aiogram import F, Router
@@ -23,14 +21,6 @@ log = logging.getLogger(__name__)
 router = Router()
 
 _MAX_KEYS = 5
-
-
-def _hash_key(raw: str) -> str:
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def _prefix(raw: str) -> str:
-    return raw[:8]
 
 
 async def _list_keys(pool: asyncpg.Pool, user_id: int) -> list[dict]:
@@ -79,12 +69,12 @@ def _menu_text(keys: list[dict]) -> str:
             last    = k["last_used_at"].strftime("%d.%m %H:%M") if k.get("last_used_at") else "—"
             reqs    = int(k["requests_total"] or 0)
             lines.append(
-                f"\n• <code>bm_{k['key_prefix']}...</code> «{k['name']}»\n"
+                f"\n• <code>{k['key_prefix']}…</code> «{k['name']}»\n"
                 f"  Создан: {created} · Использован: {last} · Запросов: {reqs}"
             )
         _cap_text_note(lines, keys, _shown_t, "ключей")
         lines.append(
-            "\n\n<b>API:</b> <code>POST /api/v1/my/operations</code>\n"
+            "\n\n<b>API:</b> <code>GET /api/v1/operations</code>\n"
             "<b>Аутентификация:</b> <code>X-Api-Key: bm_xxxxxxxx...</code>"
         )
     return "\n".join(lines)
@@ -105,7 +95,7 @@ async def cb_api_menu(
     _shown = _cap(keys)
     for k in _shown:
         kb.button(
-            text=f"🗑 bm_{k['key_prefix']}... «{k['name']}»",
+            text=f"🗑 {k['key_prefix']}… «{k['name']}»",
             callback_data=ApiHubCb(action="revoke", item_id=k["id"]),
         )
     _cap_note(kb, keys, _shown, what="acc")
@@ -155,29 +145,19 @@ async def msg_api_key_name(
 
     await state.clear()
 
-    # Generate key: bm_ + 32 random URL-safe chars
-    raw_key = "bm_" + secrets.token_urlsafe(32)
-    key_hash   = _hash_key(raw_key)
-    key_prefix = _prefix(raw_key[3:])  # prefix after "bm_"
-
+    # Выдача — одна на бот и мини-апп (services/api_keys.py): ключ, который
+    # выдают здесь, обязан приниматься REST API, а раньше не принимался.
+    from services import api_keys as _keys
     try:
-        count = await _count_keys(pool, message.from_user.id)
-        if count >= _MAX_KEYS:
-            await message.answer(f"Максимум {_MAX_KEYS} ключей.")
-            return
-
-        await pool.execute(
-            """INSERT INTO api_keys (user_id, key_hash, key_prefix, name)
-               VALUES ($1,$2,$3,$4)""",
-            message.from_user.id,
-            key_hash,
-            key_prefix,
-            name,
-        )
+        created = await _keys.create_key(pool, message.from_user.id, name)
+    except ValueError as e:
+        await message.answer(str(e))
+        return
     except Exception as e:
         log.warning("api_hub: key create error: %s", e)
         await message.answer("❌ Ошибка создания ключа. Попробуйте позже.")
         return
+    raw_key = created["key"]
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔑 К API ключам", callback_data=ApiHubCb(action="menu"))
@@ -188,7 +168,7 @@ async def msg_api_key_name(
         f"⚠️ <b>Сохраните ключ — он показывается только один раз!</b>\n\n"
         f"<b>Использование:</b>\n"
         f"<code>curl -H 'X-Api-Key: {raw_key}' \\\n"
-        f"     /api/v1/health</code>",
+        f"     /api/v1/me</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -240,7 +220,7 @@ async def cb_api_revoke_confirm(
     _shown = _cap(keys)
     for k in _shown:
         kb.button(
-            text=f"🗑 bm_{k['key_prefix']}... «{k['name']}»",
+            text=f"🗑 {k['key_prefix']}… «{k['name']}»",
             callback_data=ApiHubCb(action="revoke", item_id=k["id"]),
         )
     _cap_note(kb, keys, _shown, what="acc")
@@ -261,9 +241,13 @@ async def cb_api_docs(
         "📖 <b>Infragram Compute API</b>\n\n"
         "<b>Аутентификация:</b>\n"
         "<code>X-Api-Key: bm_your_key</code>\n\n"
+        "Владелец берётся из ключа — owner_id передавать не нужно.\n\n"
         "<b>Эндпоинты:</b>\n"
         "<code>GET  /api/v1/health</code>\n"
+        "<code>GET  /api/v1/me</code>\n"
         "<code>GET  /api/v1/accounts</code>\n"
+        "<code>GET  /api/v1/operations</code>\n"
+        "<code>GET  /api/v1/operations/{id}</code>\n"
         "<code>POST /api/v1/send_message</code>\n"
         "<code>POST /api/v1/click_button</code>\n"
         "<code>GET  /api/v1/get_messages</code>\n\n"
@@ -271,8 +255,9 @@ async def cb_api_docs(
         "<code>curl -X POST /api/v1/send_message \\\n"
         "  -H 'X-Api-Key: bm_...' \\\n"
         "  -H 'Content-Type: application/json' \\\n"
-        "  -d '{\"owner_id\":123,\"account_id\":456,\n"
-        "       \"chat_id\":789,\"text\":\"hello\"}'</code>"
+        "  -d '{\"account_id\":456,\n"
+        "       \"chat_id\":789,\"text\":\"привет\"}'</code>\n\n"
+        "Вебхуки на события и Google Sheets — в мини-аппе, раздел «Интеграции»."
     )
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=ApiHubCb(action="menu"))
