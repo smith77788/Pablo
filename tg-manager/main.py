@@ -588,6 +588,10 @@ async def main() -> None:
     _set_boot_phase("db-pool+migrations")
     pool = await _create_pool_resilient()
     _set_boot_phase("init")
+    # D27: детекторы поломок (падение фонового сервиса, всплеск ошибок) шлют
+    # тревогу админам через этот модуль — привязываем пул и бота сразу.
+    from services import platform_alerts
+    platform_alerts.bind(pool, bot)
     # Диагностика подключения к БД — печатает host и число записей в ключевых
     # таблицах в ЛОГ. Нужна при инциденте «данные пропали»: видно, в ту ли базу
     # смотрим и есть ли данные — без SQL-клиента. КРИТИЧНО: только в ФОНЕ и с

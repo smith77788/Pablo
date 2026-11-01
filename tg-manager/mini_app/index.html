@@ -8029,6 +8029,19 @@ function _errText(r, j, fallback) {
   return (j && (j.message || j.error)) || fallback;
 }
 
+// D19: токен сессии в URL больше не кладём — он оседал в логах и истории.
+// Ссылкам без заголовка (SSE, выгрузки, downloadFile) сервер выдаёт билет на
+// 2 минуты; получаем его по обычному запросу с Bearer-токеном.
+async function urlTicket() {
+  const r = await api('/api/miniapp/url-ticket', {method:'POST', body:'{}'});
+  if (!r || !r.ticket) throw new Error('Не удалось получить ссылку — откройте мини-апп заново');
+  return r.ticket;
+}
+async function ticketUrl(path) {
+  const t = await urlTicket();
+  return path + (path.includes('?')?'&':'?') + 'ticket=' + encodeURIComponent(t);
+}
+
 async function api(path, opts={}) {
   const _m = String(opts.method || 'GET').toUpperCase();
   const _isFormBody = (typeof FormData !== 'undefined' && opts.body instanceof FormData);
@@ -8113,10 +8126,24 @@ let _sseRetry = 0;
 // них рвал уже поднятое соединение, чтобы открыть новое: живой поток мигал
 // «Переподключение…» вместо того, чтобы работать.
 let _sseTimer = null;
+// Поколение открытия: пока билет едет, могли позвать openSSE ещё раз —
+// открывает поток только последний вызов.
+let _sseGen = 0;
 function openSSE() {
   clearTimeout(_sseTimer); _sseTimer = null;
-  if (SSE) { try{SSE.close()}catch(_){} }
-  SSE = new EventSource('/api/miniapp/events?token='+encodeURIComponent(TK));
+  if (SSE) { try{SSE.close()}catch(_){} SSE = null; }
+  const gen = ++_sseGen;
+  ticketUrl('/api/miniapp/events').then(url => {
+    if (gen === _sseGen) _openSSEAt(url);
+  }).catch(() => {
+    if (gen !== _sseGen || _sseTimer) return;
+    _sseRetry = Math.min(_sseRetry + 1, 5);
+    if (_sseRetry === 2) _reAuth();
+    _sseTimer = setTimeout(openSSE, Math.min(6000 * Math.pow(2, _sseRetry - 1), 60000));
+  });
+}
+function _openSSEAt(url) {
+  SSE = new EventSource(url);
   SSE.addEventListener('stats', e => {
     try { renderCards(JSON.parse(e.data)); } catch(_) {}
   });
@@ -16501,8 +16528,10 @@ async function submitBoost() {
 
 // ── Новые пользователи ───────────────────────────────────
 // Экспорт CSV — открываем ссылку с токеном в внешнем браузере (надёжно в TMA)
-function exportCSV(path) {
-  const url = path + (path.includes('?')?'&':'?') + 'token=' + encodeURIComponent(TK);
+async function exportCSV(path) {
+  let url;
+  try { url = await ticketUrl(path); }
+  catch(e) { toast('❌ ' + errRu(e, 'Не удалось подготовить файл')); return; }
   try { tg.openLink(url, {try_instant_view:false}); }
   catch(_) { window.open(url, '_blank'); }
   toast('✅ Файл открывается для скачивания…');
@@ -19785,7 +19814,7 @@ async function cloudSave(fileId) {
   const path = '/api/miniapp/cloud/file/' + fileId + '/download';
   if (tg && typeof tg.downloadFile === 'function') {
     try {
-      tg.downloadFile({ url: location.origin + path + '?token=' + encodeURIComponent(TK), file_name: name });
+      tg.downloadFile({ url: location.origin + await ticketUrl(path), file_name: name });
       return;
     } catch (_) {}
   }
@@ -24354,9 +24383,11 @@ async function audLoadMore() {
   if (b) { b.disabled = true; b.textContent = 'Загружаю…'; }
   await loadParsedAudience(AUD_SOURCE, true);
 }
-function exportAudience(fmt) {
+async function exportAudience(fmt) {
   const f = (fmt==='txt'||fmt==='json') ? fmt : 'csv';
-  const url = '/api/miniapp/parser/audience/export?format='+f+'&token='+encodeURIComponent(TK)+audFilterQS();
+  let url;
+  try { url = await ticketUrl('/api/miniapp/parser/audience/export?format='+f+audFilterQS()); }
+  catch(e) { toast('❌ ' + errRu(e, 'Не удалось подготовить файл')); return; }
   if (tg?.openLink) tg.openLink(location.origin+url); else window.open(url,'_blank');
 }
 async function loadParsedAudience(source, append) {

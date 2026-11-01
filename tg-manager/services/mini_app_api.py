@@ -1167,11 +1167,21 @@ def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dic
 
 
 def _get_uid(request: web.Request) -> int | None:
+    """Кто пришёл: Bearer-токен в заголовке или короткий билет `?ticket=`.
+
+    D19: токен сессии в строке запроса (`?token=`) больше не принимается —
+    он оседал в access-логе и истории. Ссылкам без заголовка (SSE, выгрузки,
+    `downloadFile`) выдаётся билет на 2 минуты: POST /api/miniapp/url-ticket.
+    """
     auth = request.headers.get("Authorization", "")
-    token = auth[7:] if auth.startswith("Bearer ") else request.query.get("token")
-    if not token:
-        return None
-    return parse_token(token, _bot_token())
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+        return parse_token(token, _bot_token()) if token else None
+    ticket = request.query.get("ticket")
+    if ticket:
+        from services.mini_app_auth import parse_url_ticket
+        return parse_url_ticket(ticket, _bot_token())
+    return None
 
 
 def _admin_ids() -> set[int]:
@@ -7809,11 +7819,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                 content_type="text/plain", charset="utf-8")
         raise web.HTTPFound(target)
 
+    async def url_ticket(request: web.Request) -> web.Response:
+        """Билет на 2 минуты для ссылок без заголовка (SSE, выгрузки). D19.
+
+        Только по Bearer-токену: билетом нельзя получить новый билет, иначе
+        утёкшая ссылка продлевала бы себя бесконечно.
+        """
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return _err("Нужна авторизация", 401)
+        uid = parse_token(auth[7:], _bot_token())
+        if not uid:
+            return _err("Сессия истекла — откройте мини-апп заново", 401)
+        from services.mini_app_auth import URL_TICKET_TTL, make_url_ticket
+        return web.json_response({
+            "ticket": make_url_ticket(uid, _bot_token()),
+            "ttl": URL_TICKET_TTL,
+        })
+
     # ── Route registration ────────────────────────────────────────────────────
 
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
     app.router.add_get("/s/{code}", short_link_redirect)
     app.router.add_post("/api/miniapp/auth", auth)
+    app.router.add_post("/api/miniapp/url-ticket", url_ticket)
     app.router.add_post("/api/miniapp/pair", pair_device)
     app.router.add_post("/api/miniapp/pair/exchange", pair_exchange)
     app.router.add_get("/api/miniapp/devices", devices_list)

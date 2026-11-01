@@ -113,3 +113,50 @@ def parse_token(token: str, bot_token: str, max_age: int = 7200) -> Optional[int
         return int(uid)
     except Exception:
         return None
+
+
+# ── Билет для ссылки (D19) ───────────────────────────────────────────────
+#
+# EventSource и `tg.downloadFile` не умеют слать заголовок Authorization, и
+# раньше токен сессии (живёт 2 ч) шёл в строке запроса `?token=`. Строка
+# запроса оседает в access-логе, истории браузера и логах прокси — значит,
+# двухчасовой ключ от аккаунта владельца лежал в чужих логах. Теперь в URL
+# идёт только билет: живёт 2 минуты, подписан в отдельном домене (сессией его
+# не предъявить, и наоборот), выдаётся по Bearer-токену.
+
+URL_TICKET_TTL = 120
+_TICKET_PREFIX = "t1"
+
+
+def _ticket_sig(payload: str, bot_token: str) -> str:
+    secret = hashlib.sha256(("url-ticket:" + bot_token).encode()).digest()
+    return hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def make_url_ticket(user_id: int, bot_token: str) -> str:
+    """Короткоживущий билет для URL: `t1.<uid>.<ts>.<sig>`."""
+    if not signing_secret_ok(bot_token):
+        raise ValueError("нет ключа подписи: BOT_TOKEN не задан")
+    payload = f"{_TICKET_PREFIX}.{int(user_id)}.{int(time.time())}"
+    return f"{payload}.{_ticket_sig(payload, bot_token)}"
+
+
+def parse_url_ticket(ticket: str, bot_token: str,
+                     max_age: int = URL_TICKET_TTL) -> Optional[int]:
+    """Проверить билет, вернуть user_id или None."""
+    if not signing_secret_ok(bot_token) or not ticket:
+        return None
+    try:
+        prefix, uid, ts_s, sig = ticket.split(".")
+        if prefix != _TICKET_PREFIX:
+            return None
+        age = time.time() - int(ts_s)
+        if age > max_age or age < -30:
+            return None
+        expected = _ticket_sig(f"{prefix}.{uid}.{ts_s}", bot_token)
+        if not hmac.compare_digest(expected, sig):
+            return None
+        return int(uid)
+    except Exception:
+        return None
+

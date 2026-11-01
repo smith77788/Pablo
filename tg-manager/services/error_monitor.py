@@ -202,15 +202,40 @@ class ErrorMonitorMiddleware(BaseMiddleware):
             
             # Check if we should alert
             if monitor.should_alert(error_code):
+                _count = monitor.get_recent_count(error_code)
+                _pat = monitor.get_pattern(error_code)
+                _users = len(_pat.affected_users) if _pat else 0
                 log.warning(
                     "Error pattern detected: %s (count=%d, users=%d)",
-                    error_code.value,
-                    monitor.get_recent_count(error_code),
-                    len(monitor.get_pattern(error_code).affected_users) if monitor.get_pattern(error_code) else 0,
+                    error_code.value, _count, _users,
                 )
+                # D27: всплеск ошибок раньше оставался в логе. Теперь он
+                # доходит до админов; отправка в фоне, чтобы не держать хендлер.
+                _alert_spike(error_code, _count, _users, exc,
+                             monitor._window_seconds)
             
             # Re-raise the exception
             raise
+
+
+def _alert_spike(error_code: ErrorCode, count: int, users: int,
+                 exc: BaseException, window_s: int) -> None:
+    """Поставить в фон тревогу о всплеске ошибок. Никогда не бросает."""
+    try:
+        from services import platform_alerts
+
+        platform_alerts.alert_soon(
+            f"err_spike:{error_code.value}",
+            "🟠 <b>Всплеск ошибок у пользователей</b>\n\n"
+            f"Код: <code>{platform_alerts.clean(error_code.value, 80)}</code>\n"
+            f"За {max(1, window_s // 60)} мин: {count} ошибок, "
+            f"затронуто пользователей: {users}\n"
+            f"Последняя: {platform_alerts.clean(type(exc).__name__, 80)}: "
+            f"{platform_alerts.clean(exc)}\n\n"
+            "Повтор этой тревоги — не чаще раза в час.",
+        )
+    except Exception:
+        log.exception("error_monitor: тревога о всплеске не поставлена")
 
 
 def install_error_monitoring(dp) -> None:

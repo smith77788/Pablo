@@ -97,11 +97,15 @@ def test_the_endpoint_gives_what_the_screen_cannot():
 
 
 def test_the_shared_download_helper_carries_the_token():
-    """Ссылку открывает внешний браузер: без токена в адресе придёт 401."""
+    """Ссылку открывает внешний браузер: без билета в адресе придёт 401.
+
+    D19: в адрес идёт короткий билет (ticketUrl), а не токен сессии.
+    """
     body = _fn("exportCSV")
-    assert "token=" in body and "encodeURIComponent" in body, (
-        "общий помощник выгрузки перестал подставлять токен — в браузере "
+    assert "ticketUrl(" in body, (
+        "общий помощник выгрузки перестал подставлять билет — в браузере "
         "заголовка Authorization нет, и ручка ответит 401")
+    assert "TK" not in body, "токен сессии снова уходит в адрес ссылки"
 
 
 def test_the_probe_reads_the_real_ui():

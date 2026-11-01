@@ -59,7 +59,7 @@ def _events_app(monkeypatch, uid_sequence):
 async def _read_stream(base: str, seconds: float) -> str:
     out = bytearray()
     async with ClientSession() as s:
-        async with s.get(base + "/api/miniapp/events?token=whatever") as r:
+        async with s.get(base + "/api/miniapp/events?ticket=whatever") as r:
             assert r.status == 200, f"поток не открылся: {r.status}"
             try:
                 async def pump():
@@ -127,7 +127,9 @@ def test_tick_is_a_named_constant():
 # ── Клиент: одно запланированное переподключение, а не пачка ─────────────────
 
 def _open_sse_js() -> str:
-    return js_function("openSSE")
+    # D19: поток открывается в два шага — openSSE берёт билет, _openSSEAt
+    # открывает EventSource и вешает обработчики. Проверяем оба как одно целое.
+    return js_function("openSSE") + "\n" + js_function("_openSSEAt")
 
 
 def test_client_schedules_one_reconnect_at_a_time():
