@@ -94,6 +94,54 @@ def _extract_text(message) -> str:
     return "".join(parts).strip()
 
 
+# Живой разговор с клиентом (продавец в боте, AI-автоответ): важна скорость и
+# надёжность, а не глубина рассуждений. Отдельная модель и низкий effort —
+# чтобы ответ клиенту не ждал минуту, как пост в канал на xhigh.
+CHAT_MODEL: str = os.getenv("ANTHROPIC_CHAT_MODEL", "claude-opus-5-5")
+CHAT_EFFORT: str = os.getenv("ANTHROPIC_CHAT_EFFORT", "low")
+# Запас под рассуждения: при adaptive thinking они входят в max_tokens, и
+# потолок «400 токенов на реплику» оборвал бы ответ раньше, чем модель его начнёт.
+_CHAT_MIN_TOKENS = 2000
+
+
+async def chat(system: str, messages: list[dict], *, max_tokens: int = 400,
+               timeout: float = 30.0) -> tuple[str, dict]:
+    """Многоходовый диалог (system + история user/assistant) — для разговоров с
+    клиентом. Возвращает (текст, usage), где usage = {input_tokens,
+    output_tokens, model}. Отказ модели (stop_reason=refusal) и пустой ответ —
+    исключение: вызывающий уходит на другого провайдера, клиент без ответа не
+    остаётся."""
+    if not enabled():
+        raise RuntimeError("Anthropic не настроен")
+    client = _make_client(timeout)
+    # Claude принимает только user/assistant в messages; первая реплика — user.
+    clean = [{"role": m["role"], "content": str(m.get("content") or "")}
+             for m in messages if m.get("role") in ("user", "assistant")
+             and str(m.get("content") or "").strip()]
+    while clean and clean[0]["role"] != "user":
+        clean.pop(0)
+    if not clean:
+        raise ValueError("пустой диалог")
+    message = await client.messages.create(
+        model=CHAT_MODEL,
+        max_tokens=max(int(max_tokens or 0), _CHAT_MIN_TOKENS),
+        output_config={"effort": CHAT_EFFORT},
+        system=system,
+        messages=clean,
+    )
+    if getattr(message, "stop_reason", None) == "refusal":
+        raise RuntimeError("модель отказалась отвечать")
+    text = _extract_text(message)
+    if not text:
+        raise RuntimeError("пустой ответ")
+    usage = getattr(message, "usage", None)
+    return text, {
+        "model": CHAT_MODEL,
+        "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+        "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+    }
+
+
 async def complete(system: str, user: str, *, timeout: float = 120.0) -> str:
     """Единичный запрос к Claude Opus 4.8 (adaptive thinking, effort=xhigh),
     стримингом. Возвращает текст ответа. Кидает, если ключ не задан или SDK/сеть

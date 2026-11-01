@@ -209,7 +209,9 @@ async function openSalesManager(botId) {
       'Живой ИИ-менеджер для бота: консультирует, называет цены из вашего прайса, ' +
       'принимает заказы, переводит на оператора и делится каналами.</div>' +
       '<button class="btn btn-p" style="width:100%;margin-bottom:12px" ' +
-      'onclick="openPersonaEditor(0)">➕ Создать менеджера</button>';
+      'onclick="openPersonaEditor(0)">➕ Создать менеджера</button>' +
+      '<button class="btn btn-s" style="width:100%;margin-bottom:12px" ' +
+      'onclick="spAiJournal()">📋 Что ИИ отвечает клиентам</button>';
     if (!list.length) {
       h += '<div style="text-align:center;color:var(--hint);padding:30px">Пока нет ни одного менеджера</div>';
     } else {
@@ -1005,5 +1007,118 @@ async function spOrders(pid, keep) {
     // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
     // экран без единой кнопки, а таббар на подэкране скрыт.
     body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'spOrders(' + JSON.stringify(pid) + ')');
+  }
+}
+
+// ── Журнал ответов ИИ клиентам ──────────────────────────────────────────────────
+// Что продавец и правило «AI-ответ» написали клиентам, какие ответы задержала
+// проверка цен и скидок, и оценка владельца «хорошо / плохо». Сводка сверху —
+// доля плохих среди оценённых и задержка: по ним видно, стало ли лучше после
+// правки персоны. Бэкенд — services/ai_quality.py, /api/miniapp/sales/ai-*.
+let SP_AI_ROWS = [], SP_AI_TOTAL = 0, SP_AI_ONLY = '';
+const SP_AI_GUARD = { price: '💲 цена не из прайса', discount: '🏷 скидка сверх лимита',
+                      injection: '🛡 попытка сменить правила' };
+const SP_AI_TASK = { customer: 'ответы клиентам', background: 'выжимки диалогов',
+                     assistant: 'помощник' };
+
+async function spAiJournal(only, keep) {
+  if (!keep) {
+    _spScreen('s-salesai', '📋 Ответы ИИ клиентам', 'spAiJournal(SP_AI_ONLY)');
+    push('s-salesai');
+    SP_AI_ROWS = []; SP_AI_TOTAL = 0;
+    SP_AI_ONLY = only || '';
+  }
+  const body = document.getElementById('s-salesai-body');
+  if (!keep) body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const q = '/api/miniapp/sales/ai-journal?limit=30&offset=' + SP_AI_ROWS.length +
+      (SP_AI_ONLY ? '&only=' + SP_AI_ONLY : '');
+    const [d, s, u] = await Promise.all([
+      api(q),
+      keep ? Promise.resolve(null) : api('/api/miniapp/sales/ai-quality?days=7'),
+      keep ? Promise.resolve(null) : api('/api/miniapp/sales/ai-usage?days=7'),
+    ]);
+    const page = listOf(d, 'items');
+    SP_AI_ROWS = SP_AI_ROWS.concat(page);
+    SP_AI_TOTAL = totalOf(d, SP_AI_ROWS);
+    if (s) _spAiSummary = _spAiSummaryHtml(s, u);
+    _spAiRender();
+  } catch (e) {
+    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'spAiJournal(SP_AI_ONLY)');
+  }
+}
+
+let _spAiSummary = '';
+
+function _spAiSummaryHtml(s, u) {
+  const cell = (label, val) =>
+    '<div style="flex:1;min-width:90px;padding:8px;background:var(--bg2);border-radius:8px">' +
+    '<div style="font-size:18px;font-weight:600">' + esc(String(val)) + '</div>' +
+    '<div style="font-size:11px;color:var(--hint)">' + esc(label) + '</div></div>';
+  const bad = (s.bad_share === null || s.bad_share === undefined) ? '—'
+    : Math.round(s.bad_share * 100) + '%';
+  const guards = (s.guard_price || 0) + (s.guard_discount || 0);
+  let usage = '';
+  const days = (u && u.days) || [];
+  if (days.length) {
+    const byTask = {};
+    days.forEach(r => { byTask[r.task] = (byTask[r.task] || 0) + (r.calls || 0); });
+    usage = '<div style="font-size:12px;color:var(--hint);margin:6px 2px 0">Обращений к ИИ за 7 дней: ' +
+      Object.keys(byTask).map(t => esc(SP_AI_TASK[t] || t) + ' — ' + num(byTask[t])).join(', ') +
+      '</div>';
+  }
+  return '<div style="font-size:12px;color:var(--hint);padding:0 2px 6px">За 7 дней</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    cell('Ответов', s.replies || 0) +
+    cell('Плохих из оценённых', bad) +
+    cell('Задержано проверкой', guards) +
+    cell('Ответ, 9 из 10 быстрее', s.latency_p90_ms ? (s.latency_p90_ms / 1000).toFixed(1) + ' с' : '—') +
+    '</div>' + usage;
+}
+
+function _spAiRender() {
+  const body = document.getElementById('s-salesai-body');
+  if (!body) return;
+  const tab = (key, label) =>
+    '<button class="btn ' + (SP_AI_ONLY === key ? 'btn-p' : 'btn-s') + '" style="flex:1" ' +
+    'onclick="spAiJournal(\'' + key + '\')">' + label + '</button>';
+  let h = _spAiSummary +
+    '<div style="display:flex;gap:6px;margin:12px 0 8px">' +
+    tab('', 'Все') + tab('bad', '👎 Плохие') + tab('guard', '🛡 Проверка') + '</div>';
+  if (!SP_AI_ROWS.length) {
+    h += '<div style="text-align:center;color:var(--hint);padding:30px">' +
+      (SP_AI_ONLY ? 'Таких ответов нет' : 'ИИ пока никому не отвечал') + '</div>';
+    body.innerHTML = h;
+    return;
+  }
+  h += SP_AI_ROWS.map(r => {
+    const when = r.created_at ? new Date(r.created_at).toLocaleString('ru-RU') : '';
+    const guard = r.guard ? '<div class="row-val" style="color:var(--red)">' +
+      esc(SP_AI_GUARD[r.guard] || r.guard) +
+      (r.guard_detail && r.guard !== 'injection' ? ': ' + esc(r.guard_detail) : '') +
+      '</div>' : '';
+    const rate = (v, ico) =>
+      '<button class="btn ' + (r.rating === v ? 'btn-p' : 'btn-s') + '" style="padding:4px 10px" ' +
+      'onclick="spAiRate(' + r.id + ',' + (r.rating === v ? 'null' : v) + ')">' + ico + '</button>';
+    return '<div class="row"><div class="row-body">' +
+      '<div class="row-val">' + esc(when) + (r.source === 'auto_reply' ? ' · правило «AI-ответ»' : '') + '</div>' +
+      '<div class="row-name" style="white-space:pre-wrap">🙋 ' + esc(r.user_text || '') + '</div>' +
+      '<div style="white-space:pre-wrap;margin:4px 0">🤖 ' + esc(r.reply || '') + '</div>' +
+      guard +
+      '<div style="display:flex;gap:6px;margin-top:6px">' + rate(1, '👍') + rate(-1, '👎') + '</div>' +
+      '</div></div>';
+  }).join('') + moreBtn(SP_AI_ROWS.length, SP_AI_TOTAL, 'spAiJournal(SP_AI_ONLY, true)');
+  body.innerHTML = h;
+}
+
+async function spAiRate(id, rating) {
+  try {
+    await api('/api/miniapp/sales/ai-journal/' + id + '/rate',
+      { method: 'POST', body: JSON.stringify({ rating: rating }) });
+    const row = SP_AI_ROWS.find(r => r.id === id);
+    if (row) row.rating = rating;
+    _spAiRender();
+  } catch (e) {
+    toast((e && e.message) || 'Оценка не сохранилась');
   }
 }

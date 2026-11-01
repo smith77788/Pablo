@@ -274,6 +274,9 @@ GET /api/miniapp/referral/detail
 GET /api/miniapp/reg_check/history
 GET /api/miniapp/rehab
 GET /api/miniapp/relay/session/{session_id}/messages
+GET /api/miniapp/sales/ai-journal
+GET /api/miniapp/sales/ai-quality
+GET /api/miniapp/sales/ai-usage
 GET /api/miniapp/sales/orders
 GET /api/miniapp/sales/persona/{pid}
 GET /api/miniapp/sales/persona/{pid}/stats
@@ -579,6 +582,9 @@ HEAD /api/miniapp/referral/detail
 HEAD /api/miniapp/reg_check/history
 HEAD /api/miniapp/rehab
 HEAD /api/miniapp/relay/session/{session_id}/messages
+HEAD /api/miniapp/sales/ai-journal
+HEAD /api/miniapp/sales/ai-quality
+HEAD /api/miniapp/sales/ai-usage
 HEAD /api/miniapp/sales/orders
 HEAD /api/miniapp/sales/persona/{pid}
 HEAD /api/miniapp/sales/persona/{pid}/stats
@@ -920,6 +926,7 @@ POST /api/miniapp/ranking/untrack
 POST /api/miniapp/reg_check
 POST /api/miniapp/rehab/{acc_id}/{action}
 POST /api/miniapp/reporter
+POST /api/miniapp/sales/ai-journal/{rid}/rate
 POST /api/miniapp/sales/persona
 POST /api/miniapp/sales/persona/{pid}/assign
 POST /api/miniapp/sales/persona/{pid}/chat

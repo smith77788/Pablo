@@ -133,6 +133,16 @@ class _Req:
 _STATE = {}
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_get_uid():
+    """Вернуть настоящий `_get_uid` после файла: подмена из `_routes` иначе
+    переживает его, и test_session_token_never_in_url получает чужого владельца."""
+    from services import mini_app_api
+    original = mini_app_api._get_uid
+    yield
+    mini_app_api._get_uid = original
+
+
 def _routes():
     """Собрать приложение на живом пуле и вернуть изменяющие ручки мини-аппа."""
     if _STATE:
