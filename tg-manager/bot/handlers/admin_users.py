@@ -785,11 +785,11 @@ async def cb_quick_grant30(
         log_exc_swallow(log, "cb_quick_grant30: DB write failed", user_id=user_id)
         await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
         return
-    await callback.answer(f"✅ #{user_id} +30д Starter", show_alert=True)
+    await callback.answer(f"✅ #{user_id} +30д подписки", show_alert=True)
     try:
         await callback.bot.send_message(
             user_id,
-            "🎉 <b>Вам выдана подписка Starter на 30 дней!</b>\n\nИспользуйте /menu для начала работы.",
+            "🎉 <b>Вам выдана подписка на 30 дней!</b>\n\nИспользуйте /menu для начала работы.",
             parse_mode="HTML",
         )
     except Exception as e:

@@ -281,7 +281,7 @@ async def _process_intent(
     message: Message, pool: asyncpg.Pool, description: str, owner_id: int
 ) -> None:
     if not await require_plan(pool, owner_id, "starter"):
-        await message.answer("🔒 Навигатор целей доступен с тарифа Starter.")
+        await message.answer("🔒 Навигатор целей доступен по подписке: /subscription")
         return
 
     wait_msg = await message.answer("🧠 Собираю план и проверяю ресурсы...")

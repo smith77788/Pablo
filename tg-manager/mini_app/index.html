@@ -2070,7 +2070,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="openOps()">
         <div class="mgmt-tile-ico">⚙️</div>
         <div class="mgmt-tile-lbl">Операции</div>
-        <div class="mgmt-tile-val" id="m-ops-cnt"></div>
+        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openProxies()">
         <div class="mgmt-tile-ico">🌐</div>
@@ -2121,7 +2121,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="openBotFactory()">
         <div class="mgmt-tile-ico">🏭</div>
         <div class="mgmt-tile-lbl">Фабрика ботов</div>
-        <div class="mgmt-tile-val" id="m-botfactory-val"></div>
+        <div class="mgmt-tile-val" id="m-botfactory-val-2"></div>
       </div>
       <div class="mgmt-tile" onclick="openGrowthHub()">
         <div class="mgmt-tile-ico">📈</div>
@@ -2951,7 +2951,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <select id="bpAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"><option value="">Выберите аккаунт…</option></select>
       <textarea id="bpText" rows="3" placeholder="{{Новость|Обновление}}: текст поста…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <button class="btn btn-p" style="width:100%" onclick="submitBulkPostChans()">📤 Опубликовать во все</button>
-      <div id="bpErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
+      <div id="bpcErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
 
     <div class="sec">🚨 Массовая жалоба</div>
@@ -3234,33 +3234,33 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- Modal: Bot Profile (имя/описание бота) -->
-<div class="mbg" id="mo-bot-profile" onclick="if(event.target===this)closeModal('mo-bot-profile')">
+<div class="mbg" id="mo-bot-profile-one" onclick="if(event.target===this)closeModal('mo-bot-profile-one')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-bot-profile')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-bot-profile-one')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">⚙️ Профиль бота</div>
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Меняется через Bot API. Заполните только нужные поля.</div>
     <div class="field">
       <label>Имя бота (до 64)</label>
-      <input type="text" id="bpName" maxlength="64" placeholder="Отображаемое имя" class="inp">
+      <input type="text" id="bpoName" maxlength="64" placeholder="Отображаемое имя" class="inp">
     </div>
     <div class="field">
       <label>Описание (экран «О боте», до 512)</label>
-      <textarea id="bpDesc" maxlength="512" rows="3" placeholder="Показывается до старта бота" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      <textarea id="bpoDesc" maxlength="512" rows="3" placeholder="Показывается до старта бота" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
     <div class="field">
       <label>Краткое описание (профиль, до 120)</label>
-      <textarea id="bpShort" maxlength="120" rows="2" placeholder="Показывается в профиле и при шаринге" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      <textarea id="bpoShort" maxlength="120" rows="2" placeholder="Показывается в профиле и при шаринге" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
     <div class="field">
       <label>Аватар бота (публичный https URL картинки)</label>
-      <input type="url" id="bpAvatar" placeholder="https://example.com/avatar.jpg" class="inp">
+      <input type="url" id="bpoAvatar" placeholder="https://example.com/avatar.jpg" class="inp">
       <div style="display:flex;gap:8px;margin-top:6px">
         <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:8px" onclick="setBotAvatar()">🖼 Поставить</button>
         <button class="btn btn-d" style="flex:1 1 auto;font-size:13px;padding:8px" onclick="deleteBotAvatar()">🗑 Удалить фото</button>
       </div>
     </div>
-    <div class="field-err" id="bpErr"></div>
-    <button class="btn btn-p" id="bpBtn" onclick="submitBotProfile()" style="width:100%">Сохранить</button>
+    <div class="field-err" id="bpoErr"></div>
+    <button class="btn btn-p" id="bpoBtn" onclick="submitBotProfile()" style="width:100%">Сохранить</button>
   </div>
 </div>
 
@@ -6014,8 +6014,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="font-size:11px;opacity:.6;margin:-4px 0 6px">Отметьте каналы — по ссылке они добавятся человеку одним блоком.</div>
       <div class="lst" id="fcChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
     </div>
-    <div class="field-err" id="fcErr"></div>
-    <button class="btn btn-p" id="fcBtn" style="width:100%" onclick="submitFolder()">📁 Создать и получить ссылку</button>
+    <div class="field-err" id="fdErr"></div>
+    <button class="btn btn-p" id="fdBtn" style="width:100%" onclick="submitFolder()">📁 Создать и получить ссылку</button>
   </div>
 </div>
 
@@ -12784,13 +12784,40 @@ function renderOpLog() {
   const el = document.getElementById('oplogList');
   if (el) {
     el.innerHTML = OPLOG_ROWS.length
-      ? OPLOG_ROWS.map(l=>`<div class="row"><div class="row-body">
+      ? OPLOG_ROWS.map((l,i)=>`<div class="row" style="cursor:pointer" role="button" tabindex="0" onclick="openOpLogRow(${i})"><div class="row-body">
           <div class="row-name">${esc(l.target||'')}</div>
-          <div class="row-val" style="white-space:normal">${esc(l.message||'').substring(0,160)} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
-        </div></div>`).join('')
+          <div class="row-val" style="white-space:normal">${esc(l.message||'').substring(0,160)}${(l.message||'').length>160?'…':''} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
+        </div><div class="row-right"><span class="chev">›</span></div></div>`).join('')
       : `<div style="padding:14px;font-size:13px;color:var(--hint);text-align:center">${OPLOG_Q ? 'По этому поиску записей нет.' : 'По этому срезу записей нет.'}</div>`;
   }
   renderOpLogMore();
+}
+// Строка лога открывается целиком. Раньше строку нельзя было нажать, а текст
+// обрезался на 160 символах: «что именно поменялось у этого бота» (было →
+// стало) или полная причина ошибки оставались недоступны.
+function openOpLogRow(i) {
+  const l = OPLOG_ROWS[i];
+  if (!l) return;
+  let when = '';
+  try { if (l.created_at) when = new Date(l.created_at).toLocaleString('ru-RU'); } catch(_) {}
+  const bg = document.createElement('div');
+  bg.className = 'mbg show';
+  bg.style.zIndex = '9999';
+  const msg = (l.message || '').trim();
+  bg.innerHTML = '<div class="modal">'
+    + '<div class="modal-title" style="word-break:break-word">' + esc(l.target || 'Цель') + '</div>'
+    + '<div style="margin-bottom:10px;font-size:12px;color:var(--hint)">'
+    + '<span class="badge ' + (_opLogOk(l.status) ? 'b-gr' : 'b-rd') + '">' + esc(_opLogStRu(l.status)) + '</span>'
+    + (l.step_num != null ? ' · шаг ' + esc(String(l.step_num)) : '')
+    + (when ? ' · ' + esc(when) : '') + '</div>'
+    + '<div style="white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.5;max-height:55vh;overflow-y:auto">'
+    + (msg ? esc(msg.split('; ').join('\n')) : '<span style="color:var(--hint)">Подробностей нет: по этой цели записан только итог.</span>')
+    + '</div>'
+    + '<button class="btn btn-s" style="width:100%;margin-top:14px">Закрыть</button></div>';
+  const close = () => { try { bg.remove(); } catch(_) {} };
+  bg.querySelector('button').onclick = close;
+  bg.onclick = (e) => { if (e.target === bg) close(); };
+  document.body.appendChild(bg);
 }
 function renderOpLogChips() {
   const box = document.getElementById('oplogChips');
@@ -23098,7 +23125,7 @@ async function openFolderCompose(){
   push('s-foldercompose');
   FC_SEL = new Set();
   document.getElementById('fcTitle').value='';
-  document.getElementById('fcErr').textContent='';
+  document.getElementById('fdErr').textContent='';
   txt('fcChannels','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     // Свои каналы берём из уже существующего списка каналов владельца.
@@ -23118,10 +23145,10 @@ async function openFolderCompose(){
 function fcToggle(cid, on){ if(on) FC_SEL.add(cid); else FC_SEL.delete(cid); }
 async function submitFolder(){
   const title=document.getElementById('fcTitle').value.trim();
-  const err=document.getElementById('fcErr'); err.textContent='';
+  const err=document.getElementById('fdErr'); err.textContent='';
   const ids=[...FC_SEL];
   if(!ids.length){ err.textContent='Отметьте хотя бы один канал'; return; }
-  const btn=document.getElementById('fcBtn'); btn.disabled=true; btn.textContent='Создаю…';
+  const btn=document.getElementById('fdBtn'); btn.disabled=true; btn.textContent='Создаю…';
   try{
     const r=await api('/api/miniapp/chatlist_folders',{method:'POST',body:JSON.stringify({title, chat_ids:ids})});
     toast(`📁 Папка из ${r.chat_count} ${plural(r.chat_count,'чат','чата','чатов')} создаётся — ссылка появится в списке`);
@@ -25906,7 +25933,7 @@ async function submitDmAdhoc() {
 
 // Пост во все каналы аккаунта — операция bulk_post_chans, как в боте.
 async function submitBulkPostChans() {
-  const errEl = document.getElementById('bpErr');
+  const errEl = document.getElementById('bpcErr');
   errEl.textContent = '';
   const accId = document.getElementById('bpAccount')?.value;
   const text = (document.getElementById('bpText')?.value || '').trim();
