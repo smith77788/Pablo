@@ -39,6 +39,9 @@ _RETENTION: list[tuple[str, str, str]] = [
     # нельзя, см. _prune_operation_log (на журнале стоит идемпотентность повтора).
     ("restriction_events", "created_at", "90 days"),
     ("account_flood_log", "created_at", "30 days"),
+    # Окно темпа флота: решения смотрят на последнюю сотню строк, двое суток —
+    # с запасом на разбор после инцидента (services/pacing_store.py).
+    ("fleet_pacing_events", "created_at", "2 days"),
     ("search_rankings", "checked_at", "90 days"),
     ("search_snapshots", "captured_at", "14 days"),
     # EPOCH VI tables
@@ -64,7 +67,7 @@ _RETENTION: list[tuple[str, str, str]] = [
     # Учёт запросов к ИИ по дням и истёкшие паузы моделей (schema_v239).
     ("llm_usage", "day", "90 days"),
     ("llm_cooldowns", "until", "7 days"),
-    # Расход ИИ по владельцам и журнал ответов ИИ клиентам (schema_v262):
+    # Расход ИИ по владельцам и журнал ответов ИИ клиентам (schema_v263):
     # оценка качества смотрит последние недели, год переписки ни к чему.
     ("llm_owner_usage", "day", "180 days"),
     ("ai_reply_log", "created_at", "90 days"),

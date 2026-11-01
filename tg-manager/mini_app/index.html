@@ -746,6 +746,12 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 
 /* ─── Management tile grid ───────────────────────────────── */
 .mgmt-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 16px 4px}
+/* Лаборатория выключена по умолчанию: раздел в разметке есть (у каждого экрана
+   остаётся дверь), но не встречает новичка. Поиск находит его плитки и при
+   выключенной Лаборатории — класс lab-search снимает скрытие на время запроса. */
+#s-more.lab-off:not(.lab-search) [data-section="lab"]{display:none!important}
+.lab-toggle{margin:14px 16px 4px;padding:12px 14px;border-radius:14px;border:1px dashed var(--sep);display:flex;align-items:center;gap:10px;font-size:13px;color:var(--hint);cursor:pointer}
+.lab-toggle b{color:var(--text)}
 .mgmt-tile{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 7px 11px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:transform .18s var(--spring),box-shadow .2s var(--ease),border-color .2s,background .2s;text-align:center;min-height:78px;justify-content:flex-start;box-shadow:var(--shadow)}
 .mgmt-tile:active{transform:translateY(1px) scale(.95);box-shadow:var(--shadow-lg);border-color:var(--border-strong);background:var(--bg3)}
 /* Иконочный чип: своя приглушённая заливка по currentColor (hue-класс задаёт цвет).
@@ -1065,6 +1071,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     });
   }
 </script>
+<link rel="stylesheet" href="ui_kit.css">
 </head>
 <body>
 <!-- Экран фатальной ошибки старта. Лежит в разметке СТАТИЧЕСКИ: если скрипт
@@ -1092,7 +1099,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen show" id="s-home">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
-    <div class="hdr-title">⚡ Infragram</div>
+    <div class="hdr-title">📊 Итоги</div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
@@ -1100,6 +1107,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
   </div>
   <div class="sb">
+    <!-- 📊 Итоги: результат за 7 дней + «требует внимания» + шесть разделов
+         (screens/summary.js, /api/miniapp/summary). Стоит ПЕРВЫМ: главный
+         экран отвечает на вопрос «что мне это принесло», а состояние флота
+         ниже. -->
+    <div id="summaryWrap"></div>
     <!-- KPI scroll row -->
     <div class="kpi-scroll" id="kpiScroll">
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
@@ -1957,7 +1969,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ MORE ══════════════════════ -->
 <div class="screen" id="s-more">
-  <div class="hdr"><div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div><div class="hdr-title">⚙️ Ещё</div></div>
+  <div class="hdr"><div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div><div class="hdr-title">🧭 Разделы</div></div>
   <div class="sb">
 
     <!-- Статус аккаунта -->
@@ -1981,80 +1993,137 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="moreCatBar" style="display:flex;gap:8px;overflow-x:auto;padding:8px 16px 4px;-ms-overflow-style:none;scrollbar-width:none;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)"></div>
     <div id="moreNoResult"  class="empty-inline" style="display:none">Ничего не найдено</div>
 
-    <!-- ⚡ Быстрые действия (всегда наверху) -->
-    <div class="sec">⚡ Быстрые действия</div>
-    <div class="mgmt-grid">
+    <!-- 📊 Итоги — состав раздела: services/task_sections.py -->
+    <div class="sec" data-section="overview">📊 Итоги</div>
+    <div class="sec-desc" data-section="overview" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Результат за неделю, операции и позиции в поиске.</div>
+    <div class="mgmt-grid" data-section="overview">
       <div class="mgmt-tile" onclick="openUnifiedDashboard()">
         <div class="mgmt-tile-ico">📊</div>
         <div class="mgmt-tile-lbl">Дашборд</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openNewUsers()">
-        <div class="mgmt-tile-ico">🆕</div>
-        <div class="mgmt-tile-lbl">Новые подписчики</div>
-        <div class="mgmt-tile-val"></div>
+      <div class="mgmt-tile" onclick="openDashboard()">
+        <div class="mgmt-tile-ico">📊</div>
+        <div class="mgmt-tile-lbl">Сводка</div>
+        <div class="mgmt-tile-val" id="m-dash-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openOps()">
         <div class="mgmt-tile-ico">⚙️</div>
         <div class="mgmt-tile-lbl">Операции</div>
         <div class="mgmt-tile-val" id="m-ops-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openMassPub()">
-        <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Публикация / рассылка</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <!-- Виртуальный администратор жил только кнопкой внутри «Каналов»:
-           владелец, открывший «Ещё», его не находил. -->
-      <div class="mgmt-tile" onclick="openVaAdmin()">
-        <div class="mgmt-tile-ico">🧠</div>
-        <div class="mgmt-tile-lbl">Виртуальный администратор</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openSpintax()">
-        <div class="mgmt-tile-ico">🎲</div>
-        <div class="mgmt-tile-lbl">Спинтакс</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openBotFactory()">
-        <div class="mgmt-tile-ico">🏭</div>
-        <div class="mgmt-tile-lbl">Фабрика ботов</div>
-        <div class="mgmt-tile-val" id="m-botfactory-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openChannelFactory()">
-        <div class="mgmt-tile-ico">📢</div>
-        <div class="mgmt-tile-lbl">Фабрика каналов</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-    </div>
-
-    <!-- Основное -->
-    <div class="sec">Основное</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Ядро работы: дашборд, боты, аккаунты, каналы, рассылки.</div>
-    <div class="mgmt-grid">
       <div class="mgmt-tile" onclick="openDiag()">
         <div class="mgmt-tile-ico">🩺</div>
         <div class="mgmt-tile-lbl">Диагностика</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="goTab('bots')">
-        <div class="mgmt-tile-ico">🤖</div>
-        <div class="mgmt-tile-lbl">Боты</div>
-        <div class="mgmt-tile-val" id="m-bots-cnt"></div>
+      <div class="mgmt-tile" onclick="openAudienceAnalytics()">
+        <div class="mgmt-tile-ico">👥</div>
+        <div class="mgmt-tile-lbl">Аудитория+</div>
+        <div class="mgmt-tile-val" id="m-audana-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="goTab('accounts')">
-        <div class="mgmt-tile-ico">📱</div>
-        <div class="mgmt-tile-lbl">Аккаунты</div>
-        <div class="mgmt-tile-val" id="m-acc-cnt"></div>
+      <div class="mgmt-tile" onclick="openKeywordsScreen()">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">Позиции</div>
+        <div class="mgmt-tile-val" id="kw-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openChannels()">
-        <div class="mgmt-tile-ico">📡</div>
-        <div class="mgmt-tile-lbl">Каналы</div>
-        <div class="mgmt-tile-val" id="m-ch-cnt"></div>
+      <div class="mgmt-tile" onclick="openChannelRanks()">
+        <div class="mgmt-tile-ico">📈</div>
+        <div class="mgmt-tile-lbl">Позиции в поиске</div>
+        <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openRanking()">
+        <div class="mgmt-tile-ico">🏆</div>
+        <div class="mgmt-tile-lbl">Рейтинг</div>
+        <div class="mgmt-tile-val" id="m-ranking-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCompetitors()">
+        <div class="mgmt-tile-ico">📈</div>
+        <div class="mgmt-tile-lbl">Конкуренты</div>
+        <div class="mgmt-tile-val" id="m-comp-cnt"></div>
+      </div>
+    </div>
+
+    <!-- 👥 Аудитория — состав раздела: services/task_sections.py -->
+    <div class="sec" data-section="audience">👥 Аудитория</div>
+    <div class="sec-desc" data-section="audience" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Собрать людей, вести базу контактов и приглашать в свои каналы.</div>
+    <div class="mgmt-grid" data-section="audience">
+      <div class="mgmt-tile" onclick="openNewUsers()">
+        <div class="mgmt-tile-ico">🆕</div>
+        <div class="mgmt-tile-lbl">Новые подписчики</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openParser()">
+        <div class="mgmt-tile-ico">🔭</div>
+        <div class="mgmt-tile-lbl">Парсер</div>
+        <div class="mgmt-tile-val" id="m-parser-cnt"></div>
+      </div>
+      <!-- Единый хаб контактов: ОДНА плитка «Контакты». Синхронизация, граф,
+           дубликаты, конфликты, теги, напоминания и экспорт — не отдельные
+           плитки, а инструменты ВНУТРИ хаба (панель инструментов на s-contacts).
+           Раньше это были 8 плиток на один и тот же модуль — «центр
+           синхронизации» дублировал кнопку синхронизации в самих контактах. -->
+      <div class="mgmt-tile" onclick="openContacts()">
+        <div class="mgmt-tile-ico">📇</div>
+        <div class="mgmt-tile-lbl">Контакты</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAudienceDna()">
+        <div class="mgmt-tile-ico">🔬</div>
+        <div class="mgmt-tile-lbl">ДНК аудитории</div>
+        <div class="mgmt-tile-val" id="m-dna-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMassInvite()">
+        <div class="mgmt-tile-ico">📨</div>
+        <div class="mgmt-tile-lbl">Массовый инвайт</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGlobalSearch()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Глобальный поиск</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openFolders()">
+        <div class="mgmt-tile-ico">📁</div>
+        <div class="mgmt-tile-lbl">Общие папки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <!-- Инвайт «от обратного»: одна ссылка добавляет человеку сразу всю
+           связку каналов+чат общей папкой Telegram. -->
+      <div class="mgmt-tile" onclick="openNotary()">
+        <div class="mgmt-tile-ico">⚖️</div>
+        <div class="mgmt-tile-lbl">Нотариус</div>
+        <div class="mgmt-tile-val" id="m-notary-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCommunity()">
+        <div class="mgmt-tile-ico">🏛</div>
+        <div class="mgmt-tile-lbl">Комьюнити</div>
+        <div class="mgmt-tile-val" id="m-community-val"></div>
+      </div>
+    </div>
+
+    <!-- ✉️ Сообщения — состав раздела: services/task_sections.py -->
+    <div class="sec" data-section="messages">✉️ Сообщения</div>
+    <div class="sec-desc" data-section="messages" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Рассылки, публикации, расписание, воронки и шаблоны текста.</div>
+    <div class="mgmt-grid" data-section="messages">
       <div class="mgmt-tile" onclick="goTab('broadcasts')">
         <div class="mgmt-tile-ico">📨</div>
         <div class="mgmt-tile-lbl">Рассылки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMassPub()">
+        <div class="mgmt-tile-ico">📣</div>
+        <div class="mgmt-tile-lbl">Публикация / рассылка</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openUniCampaign()">
+        <div class="mgmt-tile-ico">🚀</div>
+        <div class="mgmt-tile-lbl">Единая кампания</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNetBcModal()">
+        <div class="mgmt-tile-ico">📣</div>
+        <div class="mgmt-tile-lbl">Рассылка по сети ботов</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openBroadcastSchedule()">
@@ -2067,50 +2136,29 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">A/B Тесты</div>
         <div class="mgmt-tile-val" id="m-exp-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openOps()">
-        <div class="mgmt-tile-ico">⚙️</div>
-        <div class="mgmt-tile-lbl">Операции</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openProxies()">
-        <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Прокси</div>
-        <div class="mgmt-tile-val" id="m-proxy-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openProxyPool()">
-        <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Пул прокси</div>
-        <div class="mgmt-tile-val" id="m-proxy-pool-val"></div>
-      </div>
-    </div>
-
-    <!-- Инструменты ботов -->
-    <div class="sec">Инструменты ботов</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Массовое редактирование, фабрика, клонирование и самопиар ботов.</div>
-    <div class="mgmt-grid">
       <div class="mgmt-tile" onclick="openAutoFunnels()">
         <div class="mgmt-tile-ico">🔀</div>
         <div class="mgmt-tile-lbl">Авто-воронки</div>
         <div class="mgmt-tile-val" id="m-af-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openBotMesh()">
-        <div class="mgmt-tile-ico">🔗</div>
-        <div class="mgmt-tile-lbl">Задачи между ботами</div>
-        <div class="mgmt-tile-val" id="m-botmesh-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openSalesManager()">
-        <div class="mgmt-tile-ico">🧑‍💼</div>
-        <div class="mgmt-tile-lbl">Менеджер продаж</div>
-        <div class="mgmt-tile-val"></div>
+      <div class="mgmt-tile" onclick="openWorkflows()">
+        <div class="mgmt-tile-ico">🔄</div>
+        <div class="mgmt-tile-lbl">Воркфлоу</div>
+        <div class="mgmt-tile-val" id="m-workflow-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openTemplates()">
         <div class="mgmt-tile-ico">📝</div>
         <div class="mgmt-tile-lbl">Шаблоны</div>
         <div class="mgmt-tile-val" id="m-tpl-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openMassPub()">
-        <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Публикация / рассылка</div>
+      <div class="mgmt-tile" onclick="openSpintax()">
+        <div class="mgmt-tile-ico">🎲</div>
+        <div class="mgmt-tile-lbl">Спинтакс</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openContentCloner()">
+        <div class="mgmt-tile-ico">📋</div>
+        <div class="mgmt-tile-lbl">Клонер контента</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openLinks()">
@@ -2118,37 +2166,151 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Короткие ссылки</div>
         <div class="mgmt-tile-val" id="m-links-cnt"></div>
       </div>
+    </div>
+
+    <!-- 📡 Каналы и боты — состав раздела: services/task_sections.py -->
+    <div class="sec" data-section="channels">📡 Каналы и боты</div>
+    <div class="sec-desc" data-section="channels" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Свои каналы, группы и боты: создать, оформить, продвинуть.</div>
+    <div class="mgmt-grid" data-section="channels">
+      <div class="mgmt-tile" onclick="goTab('bots')">
+        <div class="mgmt-tile-ico">🤖</div>
+        <div class="mgmt-tile-lbl">Боты</div>
+        <div class="mgmt-tile-val" id="m-bots-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openChannels()">
+        <div class="mgmt-tile-ico">📡</div>
+        <div class="mgmt-tile-lbl">Каналы</div>
+        <div class="mgmt-tile-val" id="m-ch-cnt"></div>
+      </div>
+      <!-- Виртуальный администратор жил только кнопкой внутри «Каналов»:
+           владелец, открывший «Ещё», его не находил. -->
+      <div class="mgmt-tile" onclick="openVaAdmin()">
+        <div class="mgmt-tile-ico">🧠</div>
+        <div class="mgmt-tile-lbl">Виртуальный администратор</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openBotFactory()">
         <div class="mgmt-tile-ico">🏭</div>
         <div class="mgmt-tile-lbl">Фабрика ботов</div>
         <div class="mgmt-tile-val" id="m-botfactory-val-2"></div>
       </div>
-      <div class="mgmt-tile" onclick="openGrowthHub()">
-        <div class="mgmt-tile-ico">📈</div>
-        <div class="mgmt-tile-lbl">Мотор роста</div>
-        <div class="mgmt-tile-val" id="m-growthhub-val"></div>
+      <div class="mgmt-tile" onclick="openChannelFactory()">
+        <div class="mgmt-tile-ico">📢</div>
+        <div class="mgmt-tile-lbl">Фабрика каналов</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openChannelFactory(true)">
+        <div class="mgmt-tile-ico">👥</div>
+        <div class="mgmt-tile-lbl">Фабрика групп</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNetwork()">
+        <div class="mgmt-tile-ico">🕸</div>
+        <div class="mgmt-tile-lbl">Сеть ботов</div>
+        <div class="mgmt-tile-val" id="m-net-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openBotMesh()">
+        <div class="mgmt-tile-ico">🔗</div>
+        <div class="mgmt-tile-lbl">Задачи между ботами</div>
+        <div class="mgmt-tile-val" id="m-botmesh-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openPresencePacks()">
+        <div class="mgmt-tile-ico">🔗</div>
+        <div class="mgmt-tile-lbl">Связки (бот+каналы)</div>
+        <div class="mgmt-tile-val" id="m-pp-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAssetTemplates()">
+        <div class="mgmt-tile-ico">📐</div>
+        <div class="mgmt-tile-lbl">Шаблоны ассетов</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSeo()">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">SEO</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openPromo()">
+        <div class="mgmt-tile-ico">🚀</div>
+        <div class="mgmt-tile-lbl">Топ поиска</div>
+        <div class="mgmt-tile-val" id="m-promo-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSelfPromo()">
         <div class="mgmt-tile-ico">📣</div>
         <div class="mgmt-tile-lbl">Самопиар</div>
         <div class="mgmt-tile-val" id="m-selfpromo-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openGrowthHub()">
+        <div class="mgmt-tile-ico">📈</div>
+        <div class="mgmt-tile-lbl">Мотор роста</div>
+        <div class="mgmt-tile-val" id="m-growthhub-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openBoost()">
         <div class="mgmt-tile-ico">🚀</div>
         <div class="mgmt-tile-lbl">Накрутка</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openGrowth()">
-        <div class="mgmt-tile-ico">🌿</div>
-        <div class="mgmt-tile-lbl">Агент роста</div>
+      <div class="mgmt-tile" onclick="openCompliance()">
+        <div class="mgmt-tile-ico">✅</div>
+        <div class="mgmt-tile-lbl">Комплаенс</div>
+        <div class="mgmt-tile-val" id="m-compliance-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openStrike()">
+        <div class="mgmt-tile-ico">⚔️</div>
+        <div class="mgmt-tile-lbl">Массовые жалобы</div>
         <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
-    <!-- Управление аккаунтами -->
-    <div class="sec">Управление аккаунтами</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Telegram-аккаунты: прогрев, прокси/уникальный IP, изоляция, чистка, восстановление.</div>
-    <div class="mgmt-grid">
+    <!-- 💰 Продажи — состав раздела: services/task_sections.py -->
+    <div class="sec" data-section="sales">💰 Продажи</div>
+    <div class="sec-desc" data-section="sales" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Клиенты, сделки, ИИ-менеджер продаж и оплаты.</div>
+    <div class="mgmt-grid" data-section="sales">
+      <div class="mgmt-tile" onclick="openCRM()">
+        <div class="mgmt-tile-ico">👤</div>
+        <div class="mgmt-tile-lbl">CRM</div>
+        <div class="mgmt-tile-val" id="m-crm-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCRMDeals()">
+        <div class="mgmt-tile-ico">💼</div>
+        <div class="mgmt-tile-lbl">Сделки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openDeals()">
+        <div class="mgmt-tile-ico">🗂</div>
+        <div class="mgmt-tile-lbl">Канбан сделок</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSalesManager()">
+        <div class="mgmt-tile-ico">🧑‍💼</div>
+        <div class="mgmt-tile-lbl">Менеджер продаж</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openStars()">
+        <div class="mgmt-tile-ico">⭐</div>
+        <div class="mgmt-tile-lbl">Звёзды</div>
+        <div class="mgmt-tile-val" id="m-stars-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGifts()">
+        <div class="mgmt-tile-ico">🎁</div>
+        <div class="mgmt-tile-lbl">Перевод подарков</div>
+        <div class="mgmt-tile-val" id="m-gifts-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openReferral()">
+        <div class="mgmt-tile-ico">🤝</div>
+        <div class="mgmt-tile-lbl">Реферальная программа</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+    </div>
+
+    <!-- 📱 Аккаунты — состав раздела: services/task_sections.py -->
+    <div class="sec" data-section="accounts">📱 Аккаунты</div>
+    <div class="sec-desc" data-section="accounts" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Telegram-аккаунты, прокси, прогрев и защита от бана.</div>
+    <div class="mgmt-grid" data-section="accounts">
+      <div class="mgmt-tile" onclick="goTab('accounts')">
+        <div class="mgmt-tile-ico">📱</div>
+        <div class="mgmt-tile-lbl">Аккаунты</div>
+        <div class="mgmt-tile-val" id="m-acc-cnt"></div>
+      </div>
       <div class="mgmt-tile" onclick="openWarmup()">
         <div class="mgmt-tile-ico">🌱</div>
         <div class="mgmt-tile-lbl">Прогрев</div>
@@ -2172,11 +2334,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Очистка</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openGhost()">
-        <div class="mgmt-tile-ico">👻</div>
-        <div class="mgmt-tile-lbl">Призрак</div>
-        <div class="mgmt-tile-val" id="m-ghost-val"></div>
-      </div>
       <div class="mgmt-tile" onclick="openPersonas()">
         <div class="mgmt-tile-ico">🎭</div>
         <div class="mgmt-tile-lbl">Персоны</div>
@@ -2192,112 +2349,137 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Авторег Pro</div>
         <div class="mgmt-tile-val" id="m-autoreg-pro-val"></div>
       </div>
-      <!-- Единый хаб контактов: ОДНА плитка «Контакты». Синхронизация, граф,
-           дубликаты, конфликты, теги, напоминания и экспорт — не отдельные
-           плитки, а инструменты ВНУТРИ хаба (панель инструментов на s-contacts).
-           Раньше это были 8 плиток на один и тот же модуль — «центр
-           синхронизации» дублировал кнопку синхронизации в самих контактах. -->
-      <div class="mgmt-tile" onclick="openContacts()">
-        <div class="mgmt-tile-ico">📇</div>
-        <div class="mgmt-tile-lbl">Контакты</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
       <div class="mgmt-tile" onclick="openCloud()">
         <div class="mgmt-tile-ico">☁️</div>
         <div class="mgmt-tile-lbl">Облако</div>
         <div class="mgmt-tile-val" id="m-cloud-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openProxies()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Прокси</div>
+        <div class="mgmt-tile-val" id="m-proxy-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openProxyPool()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Пул прокси</div>
+        <div class="mgmt-tile-val" id="m-proxy-pool-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openShield()">
+        <div class="mgmt-tile-ico">🛡</div>
+        <div class="mgmt-tile-lbl">Щит</div>
+        <div class="mgmt-tile-val" id="m-shield-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openShieldCheck()">
+        <div class="mgmt-tile-ico">🕶</div>
+        <div class="mgmt-tile-lbl">Проверка ограничений</div>
+        <div class="mgmt-tile-val">каналы, чаты, боты</div>
+      </div>
+      <div class="mgmt-tile" onclick="openHealth()">
+        <div class="mgmt-tile-ico">❤️</div>
+        <div class="mgmt-tile-lbl">Дэшборд здоровья</div>
+        <div class="mgmt-tile-val" id="m-health-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openInfraHealth()">
+        <div class="mgmt-tile-ico">🏥</div>
+        <div class="mgmt-tile-lbl">Здоровье инфры</div>
+        <div class="mgmt-tile-val" id="m-ih-val"></div>
+      </div>
     </div>
 
-    <!-- Аналитика и CRM -->
-    <div class="sec">Аналитика и CRM</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Статистика, аудитория ботов, контакты, воронки и A/B-эксперименты.</div>
-    <div class="mgmt-grid">
-      <div class="mgmt-tile" onclick="openDashboard()">
-        <div class="mgmt-tile-ico">📊</div>
-        <div class="mgmt-tile-lbl">Сводка</div>
-        <div class="mgmt-tile-val" id="m-dash-val"></div>
+    <!-- ⚙️ Настройки — состав раздела: services/task_sections.py -->
+    <div class="sec" data-section="settings">⚙️ Настройки</div>
+    <div class="sec-desc" data-section="settings" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Тариф, ключи API и рабочие пространства.</div>
+    <div class="mgmt-grid" data-section="settings">
+      <div class="mgmt-tile" onclick="openSettings()">
+        <div class="mgmt-tile-ico">⚙️</div>
+        <div class="mgmt-tile-lbl">Настройки</div>
+        <div class="mgmt-tile-val" id="m-settings-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openKeywordsScreen()">
-        <div class="mgmt-tile-ico">🔍</div>
-        <div class="mgmt-tile-lbl">Позиции</div>
-        <div class="mgmt-tile-val" id="kw-val"></div>
+      <div class="mgmt-tile" onclick="openBilling()">
+        <div class="mgmt-tile-ico">💳</div>
+        <div class="mgmt-tile-lbl">Тариф</div>
+        <div class="mgmt-tile-val" id="m-billing-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openCRM()">
-        <div class="mgmt-tile-ico">👤</div>
-        <div class="mgmt-tile-lbl">CRM</div>
-        <div class="mgmt-tile-val" id="m-crm-cnt"></div>
+      <div class="mgmt-tile" onclick="openApiKeys()">
+        <div class="mgmt-tile-ico">🔑</div>
+        <div class="mgmt-tile-lbl">API Ключи</div>
+        <div class="mgmt-tile-val" id="m-apikey-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openAudienceDna()">
-        <div class="mgmt-tile-ico">🔬</div>
-        <div class="mgmt-tile-lbl">ДНК аудитории</div>
-        <div class="mgmt-tile-val" id="m-dna-val"></div>
+      <div class="mgmt-tile" onclick="openWorkspaces()">
+        <div class="mgmt-tile-ico">🏢</div>
+        <div class="mgmt-tile-lbl">Рабочие пространства</div>
+        <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openCompetitors()">
-        <div class="mgmt-tile-ico">📈</div>
-        <div class="mgmt-tile-lbl">Конкуренты</div>
-        <div class="mgmt-tile-val" id="m-comp-cnt"></div>
+    </div>
+
+    <!-- 🧪 Лаборатория — состав раздела: services/task_sections.py -->
+    <div class="sec" data-section="lab" data-lab="1">🧪 Лаборатория</div>
+    <div class="sec-desc" data-section="lab" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Экспериментальные инструменты. Работают, но ещё не стали частью основных разделов.</div>
+    <div class="mgmt-grid" data-section="lab">
+      <div class="mgmt-tile" onclick="openGhost()">
+        <div class="mgmt-tile-ico">👻</div>
+        <div class="mgmt-tile-lbl">Призрак</div>
+        <div class="mgmt-tile-val" id="m-ghost-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openPhysics()">
+        <div class="mgmt-tile-ico">⚛️</div>
+        <div class="mgmt-tile-lbl">Физика</div>
+        <div class="mgmt-tile-val" id="m-physics-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGraph()">
+        <div class="mgmt-tile-ico">🕸</div>
+        <div class="mgmt-tile-lbl">Граф-хаб</div>
+        <div class="mgmt-tile-val" id="m-graph-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAdIntel()">
+        <div class="mgmt-tile-ico">📡</div>
+        <div class="mgmt-tile-lbl">Разведка рекламы</div>
+        <div class="mgmt-tile-val" id="m-adintel-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSwarm()">
+        <div class="mgmt-tile-ico">🐝</div>
+        <div class="mgmt-tile-lbl">Рой</div>
+        <div class="mgmt-tile-val" id="m-swarm-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openVLayer()">
+        <div class="mgmt-tile-ico">🧠</div>
+        <div class="mgmt-tile-lbl">Модель поведения</div>
+        <div class="mgmt-tile-val" id="m-vlayer-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openEcosystems()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Экосистемы</div>
+        <div class="mgmt-tile-val" id="m-eco-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openTopology()">
+        <div class="mgmt-tile-ico">🗺</div>
+        <div class="mgmt-tile-lbl">Топология</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openInfra()">
+        <div class="mgmt-tile-ico">⚡</div>
+        <div class="mgmt-tile-lbl">Инфра</div>
+        <div class="mgmt-tile-val" id="m-infra-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNodes()">
+        <div class="mgmt-tile-ico">🖥</div>
+        <div class="mgmt-tile-lbl">Ноды</div>
+        <div class="mgmt-tile-val" id="m-nodes-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openAiMemory()">
         <div class="mgmt-tile-ico">🧠</div>
         <div class="mgmt-tile-lbl">ИИ Память</div>
         <div class="mgmt-tile-val" id="m-aimem-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openRanking()">
-        <div class="mgmt-tile-ico">🏆</div>
-        <div class="mgmt-tile-lbl">Рейтинг</div>
-        <div class="mgmt-tile-val" id="m-ranking-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openNetworkBuilder()">
-        <div class="mgmt-tile-ico">🕸️</div>
-        <div class="mgmt-tile-lbl">Сетки</div>
-        <div class="mgmt-tile-val" id="m-netbuild-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openWorkflows()">
-        <div class="mgmt-tile-ico">🔄</div>
-        <div class="mgmt-tile-lbl">Воркфлоу</div>
-        <div class="mgmt-tile-val" id="m-workflow-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openAudienceAnalytics()">
-        <div class="mgmt-tile-ico">👥</div>
-        <div class="mgmt-tile-lbl">Аудитория+</div>
-        <div class="mgmt-tile-val" id="m-audana-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUnifiedDashboard()">
-        <div class="mgmt-tile-ico">📈</div>
-        <div class="mgmt-tile-lbl">Дашборд</div>
-        <div class="mgmt-tile-val" id="m-anadash-val"></div>
-      </div>
       <div class="mgmt-tile" onclick="openSemanticMemory()">
         <div class="mgmt-tile-ico">🧬</div>
         <div class="mgmt-tile-lbl">Семантическая память</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openCRMDeals()">
-        <div class="mgmt-tile-ico">💼</div>
-        <div class="mgmt-tile-lbl">Сделки</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-    </div>
-
-    <!-- Продвижение -->
-    <div class="sec">Продвижение</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Инвайт, парсинг аудитории, SEO/позиции, гео-присутствие, накрутка.</div>
-    <div class="mgmt-grid">
-      <div class="mgmt-tile" onclick="openPromo()">
-        <div class="mgmt-tile-ico">🚀</div>
-        <div class="mgmt-tile-lbl">Топ поиска</div>
-        <div class="mgmt-tile-val" id="m-promo-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openMultigeo()">
-        <div class="mgmt-tile-ico">🌍</div>
-        <div class="mgmt-tile-lbl">Мультигео</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openSeo()">
-        <div class="mgmt-tile-ico">🔍</div>
-        <div class="mgmt-tile-lbl">SEO</div>
-        <div class="mgmt-tile-val"></div>
+      <div class="mgmt-tile" onclick="openNetworkBuilder()">
+        <div class="mgmt-tile-ico">🕸️</div>
+        <div class="mgmt-tile-lbl">Сетки</div>
+        <div class="mgmt-tile-val" id="m-netbuild-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openNarrative()">
         <div class="mgmt-tile-ico">📖</div>
@@ -2314,129 +2496,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Гео-сеть: создать</div>
         <div class="mgmt-tile-val" id="m-gp-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openReferral()">
-        <div class="mgmt-tile-ico">🤝</div>
-        <div class="mgmt-tile-lbl">Реферальная программа</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-    </div>
-
-    <!-- Безопасность -->
-    <div class="sec">Безопасность</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Жалобы/страйки по целям, снятие ресурсов, проверка на запрещёнку, теневой бан.</div>
-    <div class="mgmt-grid">
-      <div class="mgmt-tile" onclick="openShield()">
-        <div class="mgmt-tile-ico">🛡</div>
-        <div class="mgmt-tile-lbl">Щит</div>
-        <div class="mgmt-tile-val" id="m-shield-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openShieldCheck()">
-        <div class="mgmt-tile-ico">🕶</div>
-        <div class="mgmt-tile-lbl">Проверка ограничений</div>
-        <div class="mgmt-tile-val">каналы, чаты, боты</div>
-      </div>
-      <div class="mgmt-tile" onclick="openCompliance()">
-        <div class="mgmt-tile-ico">✅</div>
-        <div class="mgmt-tile-lbl">Комплаенс</div>
-        <div class="mgmt-tile-val" id="m-compliance-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openInfraHealth()">
-        <div class="mgmt-tile-ico">🏥</div>
-        <div class="mgmt-tile-lbl">Здоровье инфры</div>
-        <div class="mgmt-tile-val" id="m-ih-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openHealth()">
-        <div class="mgmt-tile-ico">❤️</div>
-        <div class="mgmt-tile-lbl">Дэшборд здоровья</div>
-        <div class="mgmt-tile-val" id="m-health-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openPhysics()">
-        <div class="mgmt-tile-ico">⚛️</div>
-        <div class="mgmt-tile-lbl">Физика</div>
-        <div class="mgmt-tile-val" id="m-physics-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openStrike()">
-        <div class="mgmt-tile-ico">⚔️</div>
-        <div class="mgmt-tile-lbl">Массовые жалобы</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-    </div>
-
-    <!-- Расширенные -->
-    <div class="sec">Расширенные</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Экосистемы, сети, топология, ИИ-инструменты, узлы.</div>
-    <div class="mgmt-grid">
-      <div class="mgmt-tile" onclick="openGraph()">
-        <div class="mgmt-tile-ico">🕸</div>
-        <div class="mgmt-tile-lbl">Граф-хаб</div>
-        <div class="mgmt-tile-val" id="m-graph-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openAdIntel()">
-        <div class="mgmt-tile-ico">📡</div>
-        <div class="mgmt-tile-lbl">Разведка рекламы</div>
-        <div class="mgmt-tile-val" id="m-adintel-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openSwarm()">
-        <div class="mgmt-tile-ico">🐝</div>
-        <div class="mgmt-tile-lbl">Рой</div>
-        <div class="mgmt-tile-val" id="m-swarm-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openMassInvite()">
-        <div class="mgmt-tile-ico">📨</div>
-        <div class="mgmt-tile-lbl">Массовый инвайт</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <!-- Инвайт «от обратного»: одна ссылка добавляет человеку сразу всю
-           связку каналов+чат общей папкой Telegram. -->
-      <div class="mgmt-tile" onclick="openNotary()">
-        <div class="mgmt-tile-ico">⚖️</div>
-        <div class="mgmt-tile-lbl">Нотариус</div>
-        <div class="mgmt-tile-val" id="m-notary-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openVLayer()">
-        <div class="mgmt-tile-ico">🧠</div>
-        <div class="mgmt-tile-lbl">Модель поведения</div>
-        <div class="mgmt-tile-val" id="m-vlayer-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openFolders()">
-        <div class="mgmt-tile-ico">📁</div>
-        <div class="mgmt-tile-lbl">Общие папки</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openParser()">
-        <div class="mgmt-tile-ico">🔭</div>
-        <div class="mgmt-tile-lbl">Парсер</div>
-        <div class="mgmt-tile-val" id="m-parser-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openEcosystems()">
-        <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Экосистемы</div>
-        <div class="mgmt-tile-val" id="m-eco-val"></div>
-      </div>
-    </div>
-
-    <!-- Фабрики -->
-    <div class="sec">Фабрики</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Массовое создание каналов, групп и ботов по шаблонам.</div>
-    <div class="mgmt-grid">
-      <div class="mgmt-tile" onclick="openChannelFactory()">
-        <div class="mgmt-tile-ico">📢</div>
-        <div class="mgmt-tile-lbl">Фабрика каналов</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openChannelFactory(true)">
-        <div class="mgmt-tile-ico">👥</div>
-        <div class="mgmt-tile-lbl">Фабрика групп</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openChannelRanks()">
-        <div class="mgmt-tile-ico">📈</div>
-        <div class="mgmt-tile-lbl">Позиции в поиске</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openContentCloner()">
-        <div class="mgmt-tile-ico">📋</div>
-        <div class="mgmt-tile-lbl">Клонер контента</div>
+      <div class="mgmt-tile" onclick="openMultigeo()">
+        <div class="mgmt-tile-ico">🌍</div>
+        <div class="mgmt-tile-lbl">Мультигео</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openCloneAdapt()">
@@ -2444,92 +2506,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Клон и адаптация</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openTopology()">
-        <div class="mgmt-tile-ico">🗺</div>
-        <div class="mgmt-tile-lbl">Топология</div>
+      <div class="mgmt-tile" onclick="openGrowth()">
+        <div class="mgmt-tile-ico">🌿</div>
+        <div class="mgmt-tile-lbl">Агент роста</div>
         <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openInfra()">
-        <div class="mgmt-tile-ico">⚡</div>
-        <div class="mgmt-tile-lbl">Инфра</div>
-        <div class="mgmt-tile-val" id="m-infra-val"></div>
       </div>
     </div>
 
-    <!-- Дополнительно -->
-    <div class="sec">Дополнительно</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Прочие инструменты и интеграции.</div>
-    <div class="mgmt-grid">
-      <div class="mgmt-tile" onclick="openGlobalSearch()">
-        <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Глобальный поиск</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openApiKeys()">
-        <div class="mgmt-tile-ico">🔑</div>
-        <div class="mgmt-tile-lbl">API Ключи</div>
-        <div class="mgmt-tile-val" id="m-apikey-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openNetwork()">
-        <div class="mgmt-tile-ico">🕸</div>
-        <div class="mgmt-tile-lbl">Сеть ботов</div>
-        <div class="mgmt-tile-val" id="m-net-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openNodes()">
-        <div class="mgmt-tile-ico">🖥</div>
-        <div class="mgmt-tile-lbl">Ноды</div>
-        <div class="mgmt-tile-val" id="m-nodes-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openCommunity()">
-        <div class="mgmt-tile-ico">🏛</div>
-        <div class="mgmt-tile-lbl">Комьюнити</div>
-        <div class="mgmt-tile-val" id="m-community-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openGifts()">
-        <div class="mgmt-tile-ico">🎁</div>
-        <div class="mgmt-tile-lbl">Перевод подарков</div>
-        <div class="mgmt-tile-val" id="m-gifts-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openStars()">
-        <div class="mgmt-tile-ico">⭐</div>
-        <div class="mgmt-tile-lbl">Звёзды</div>
-        <div class="mgmt-tile-val" id="m-stars-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openPresencePacks()">
-        <div class="mgmt-tile-ico">🔗</div>
-        <div class="mgmt-tile-lbl">Связки (бот+каналы)</div>
-        <div class="mgmt-tile-val" id="m-pp-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openSettings()">
-        <div class="mgmt-tile-ico">⚙️</div>
-        <div class="mgmt-tile-lbl">Настройки</div>
-        <div class="mgmt-tile-val" id="m-settings-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openBilling()">
-        <div class="mgmt-tile-ico">💳</div>
-        <div class="mgmt-tile-lbl">Тариф</div>
-        <div class="mgmt-tile-val" id="m-billing-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUniCampaign()">
-        <div class="mgmt-tile-ico">🚀</div>
-        <div class="mgmt-tile-lbl">Единая кампания</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openNetBcModal()">
-        <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Рассылка по сети ботов</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openAssetTemplates()">
-        <div class="mgmt-tile-ico">📐</div>
-        <div class="mgmt-tile-lbl">Шаблоны ассетов</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openWorkspaces()">
-        <div class="mgmt-tile-ico">🏢</div>
-        <div class="mgmt-tile-lbl">Рабочие пространства</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
+    <!-- Переключатель Лаборатории: экспериментальные хабы скрыты, пока их не
+         включат. Функции не удалены — у каждого экрана остаётся дверь. -->
+    <div class="lab-toggle" role="button" tabindex="0" onclick="toggleLab()">
+      <span style="font-size:20px">🧪</span>
+      <span><b id="labToggleLbl">Показать Лабораторию</b><br>Экспериментальные инструменты: Физика, Призрак, Граф-хаб и другие.</span>
     </div>
 
     <!-- Админ-панель (только для админов) -->
@@ -3015,6 +3003,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📢 Фабрика каналов</div></div>
   <div class="sub-sb">
     <div class="sec">Создать каналы / группы массово</div>
+    <!-- Мост к Гео-сети: создание каналов/групп ПО ГОРОДАМ/СТРАНАМ с
+         локализованными SEO-именами идёт её пайплайном (op
+         global_presence_channel), а не вторым в фабрике. Тип актива — по
+         чекбоксу «группа/канал». Аккаунты гео-сеть подбирает по стране цели. -->
+    <div class="lst" style="margin:0 16px 10px;padding:10px;border:1px solid rgba(96,165,250,.35);background:rgba(96,165,250,.06)">
+      <div style="font-size:13px;color:var(--blue);font-weight:600;margin-bottom:4px">🌍 Создать по гео</div>
+      <div style="font-size:12px;color:var(--hint);line-height:1.45">Каналы/группы по городам/странам с локализованными SEO-именами — плейсхолдеры <code>{{CITY_NAME}}</code>, <code>{{COUNTRY}}</code> и перестановка ключей. Аккаунты подберутся по стране цели.</div>
+      <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="cfOpenGeo()">🌍 По гео (города/страны) →</button>
+    </div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <input type="text" id="cfTitle" placeholder="Название (общее для всех)" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
       <textarea id="cfAbout" placeholder="Описание (необязательно)" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
@@ -4984,6 +4981,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:8px 16px">
       <!-- РЕЖИМ «создать новых»: аккаунт реально переписывается с @BotFather -->
       <div id="bfNewFields">
+        <!-- Мост к Гео-сети: создание ботов ПО ГОРОДАМ/СТРАНАМ с локализованными
+             SEO-именами идёт её пайплайном (op global_presence_bot), а не вторым
+             в фабрике. Отсюда — одна кнопка-вход на тип актива «бот». -->
+        <div class="field" style="border:1px solid rgba(96,165,250,.35);border-radius:10px;padding:10px;background:rgba(96,165,250,.06)">
+          <div style="font-size:13px;color:var(--blue);font-weight:600;margin-bottom:4px">🌍 Создать ботов по гео</div>
+          <div class="field-note" style="margin-top:0">Боты по городам/странам с локализованными SEO-именами — плейсхолдеры <code>{{CITY_NAME}}</code>, <code>{{COUNTRY}}</code> и перестановка ключей. Аккаунты для @BotFather выбираются в окне.</div>
+          <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="openGpCreateModal('bot')">🌍 По гео (города/страны) →</button>
+        </div>
         <div class="field">
           <label>Аккаунты для @BotFather * (можно несколько)</label>
           <div style="display:flex;gap:8px;margin-bottom:6px">
@@ -6536,11 +6541,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ TABBAR ══════════════════════ -->
 <div id="tabbar">
-  <div class="tab on" id="t-home" onclick="goTab('home')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5Z"/></svg></span><span class="tab-lbl">Главная</span></div>
+  <div class="tab on" id="t-home" onclick="goTab('home')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5Z"/></svg></span><span class="tab-lbl">Итоги</span></div>
   <div class="tab" id="t-bots" onclick="goTab('bots')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="2.6" r="1.3"/><circle cx="9" cy="14" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="14" r="1.2" fill="currentColor" stroke="none"/></svg></span><span class="tab-lbl">Боты</span></div>
   <div class="tab" id="t-accounts" onclick="goTab('accounts')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="2.5"/><line x1="11" y1="18" x2="13" y2="18"/></svg></span><span class="tab-lbl">Аккаунты</span></div>
-  <div class="tab" id="t-broadcasts" onclick="goTab('broadcasts')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></span><span class="tab-lbl">Рассылки</span></div>
-  <div class="tab" id="t-more" onclick="goTab('more')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><span class="tab-lbl">Ещё</span></div>
+  <div class="tab" id="t-broadcasts" onclick="goTab('broadcasts')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></span><span class="tab-lbl">Сообщения</span></div>
+  <div class="tab" id="t-more" onclick="goTab('more')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><span class="tab-lbl">Разделы</span></div>
 </div>
 
 <div id="toast"></div>
@@ -7850,6 +7855,7 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
     if (document.readyState === 'loading') {
       await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
     }
+    applyLabState();
     loadHome();
     openSSE();
     loadSub();
@@ -8558,9 +8564,12 @@ function buildMoreCategories() {
   if (!more || !bar || bar.dataset.built) return;
   const secs = Array.from(more.querySelectorAll('.sec'));
   let html = '<span class="chip on" onclick="moreCategory(\'all\',this)">📂 Все</span>';
+  const labOn = labEnabled();
   secs.forEach((s,i)=>{
     s.dataset.catIdx = String(i);
-    html += `<span class="chip" onclick="moreCategory('${i}',this)">${esc(s.textContent)}</span>`;
+    // Выключенная Лаборатория не получает и чипа: иначе чип вёл бы в пустоту.
+    if (s.dataset.section === 'lab' && !labOn) return;
+    html += `<span class="chip" data-section="${esc(s.dataset.section||'')}" onclick="moreCategory('${i}',this)">${esc(s.textContent)}</span>`;
   });
   bar.innerHTML = html;
   bar.dataset.built = '1';
@@ -8576,13 +8585,59 @@ function moreCategory(cat, el) {
   more.querySelectorAll('.sec').forEach(s=>{
     const show = (cat==='all') || (s.dataset.catIdx===cat);
     s.style.display = show ? '' : 'none';
+    // Пояснение раздела прячется вместе с ним: раньше оно оставалось висеть
+    // строкой без заголовка над чужой сеткой.
     let g = s.nextElementSibling;
-    while (g && !g.classList.contains('mgmt-grid')) g = g.nextElementSibling;
+    while (g && !g.classList.contains('mgmt-grid')) {
+      if (g.classList.contains('sec-desc')) g.style.display = show ? '' : 'none';
+      g = g.nextElementSibling;
+    }
     if (g) {
       g.style.display = show ? '' : 'none';
       g.querySelectorAll('.mgmt-tile').forEach(t=>t.style.display='');  // сброс фильтра поиска
     }
   });
+}
+// Открыть раздел по ключу карты (services/task_sections.py): из плиток главной,
+// из бокового меню и из диплинка бота #section:<key>.
+function openSection(key) {
+  goTab('more');
+  buildMoreCategories();
+  const more = document.getElementById('s-more');
+  const sec = more && more.querySelector('.sec[data-section="' + key + '"]');
+  if (!sec) { toast('⚠️ Нет такого раздела'); return false; }
+  if (key === 'lab' && !labEnabled()) setLab(true);
+  const chip = document.querySelector('#moreCatBar .chip[data-section="' + key + '"]');
+  moreCategory(sec.dataset.catIdx, chip);
+  return true;
+}
+// ── Лаборатория: экспериментальные хабы, выключены по умолчанию ─────────
+// Выбор помнит браузер зрителя: это удобство одного человека, а не данные
+// продукта. Хранилище может быть недоступно (приватный режим) — тогда
+// Лаборатория просто остаётся выключенной.
+function labEnabled() {
+  try { return localStorage.getItem('ig_lab_on') === '1'; } catch(_) { return false; }
+}
+function applyLabState() {
+  const more = document.getElementById('s-more');
+  if (!more) return;
+  const on = labEnabled();
+  more.classList.toggle('lab-off', !on);
+  const t = document.getElementById('labToggleLbl');
+  if (t) t.textContent = on ? 'Скрыть Лабораторию' : 'Показать Лабораторию';
+}
+function setLab(on) {
+  try { localStorage.setItem('ig_lab_on', on ? '1' : '0'); } catch(_) {}
+  applyLabState();
+  // Чипы и боковое меню собраны один раз — пересобрать под новое состояние.
+  const bar = document.getElementById('moreCatBar'); if (bar) delete bar.dataset.built;
+  const nb = document.getElementById('navBody'); if (nb) delete nb.dataset.built;
+  buildMoreCategories();
+}
+function toggleLab() {
+  const on = !labEnabled();
+  setLab(on);
+  toast(on ? '🧪 Лаборатория включена — раздел внизу списка' : '🧪 Лаборатория скрыта');
 }
 
 // ── Поиск по функциям на экране «Ещё» ───────────────────
@@ -8628,6 +8683,9 @@ function filterMore(q) {
   const more = document.getElementById('s-more');
   if (!more) return;
   const query = (q||'').trim().toLowerCase();
+  // Поиск находит и плитки выключенной Лаборатории: функция есть — значит
+  // по задаче её должно быть можно найти.
+  more.classList.toggle('lab-search', !!query);
   // Поиск работает по всем категориям: сбрасываем выбор категории на «Все».
   if (query) {
     document.querySelectorAll('#moreCatBar .chip').forEach((c,i)=>c.classList.toggle('on', i===0));
@@ -8652,6 +8710,8 @@ function filterMore(q) {
     let sec = grid.previousElementSibling;
     while (sec && !sec.classList.contains('sec')) sec = sec.previousElementSibling;
     if (sec) sec.style.display = (!query || hasVisible) ? '' : 'none';
+    let d = grid.previousElementSibling;
+    if (d && d.classList.contains('sec-desc')) d.style.display = (!query || hasVisible) ? '' : 'none';
   });
   const nr = document.getElementById('moreNoResult');
   if (nr) nr.style.display = (query && !anyVisible) ? 'block' : 'none';
@@ -8735,6 +8795,7 @@ const MODULE_DESCS = {
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
   'API Ключи':'Ключи API и интеграции','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
+  'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
 };
 function buildDrawer() {
   const body = document.getElementById('navBody');
@@ -8742,8 +8803,8 @@ function buildDrawer() {
   let html = '';
   // 1) Верхний блок — основные вкладки
   html += '<div class="nav-cat">Навигация</div>';
-  [['home','📊','Дашборд'],['bots','🤖','Боты'],['accounts','📱','Аккаунты'],
-   ['broadcasts','📨','Рассылки'],['more','🧩','Все функции']].forEach(([tab,ico,lbl])=>{
+  [['home','📊','Итоги'],['bots','🤖','Боты'],['accounts','📱','Аккаунты'],
+   ['broadcasts','✉️','Сообщения'],['more','🧭','Разделы']].forEach(([tab,ico,lbl])=>{
     html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
   });
   // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки), НО
@@ -8752,11 +8813,13 @@ function buildDrawer() {
   //    пропускается целиком (она дублирует навигацию и живёт на главном).
   const more = document.getElementById('s-more');
   if (more) {
-    const seen = new Set(['дашборд','боты','аккаунты','рассылки','все функции']);
+    // «Рассылки» — та же вкладка, что «Сообщения» сверху: второй раз не выводим.
+    const seen = new Set(['итоги','боты','аккаунты','рассылки','сообщения','разделы']);
+    const labOn = labEnabled();
     const _norm = s => (s||'').toLowerCase().replace(/\s+/g,' ').trim();
     more.querySelectorAll('.sec').forEach(sec=>{
       const secName = _norm(sec.textContent);
-      if (secName.includes('быстрые действия')) return;  // дубль навигации
+      if (sec.dataset.section === 'lab' && !labOn) return;  // Лаборатория выключена
       let grid = sec.nextElementSibling;
       while (grid && !grid.classList.contains('mgmt-grid')) grid = grid.nextElementSibling;
       if (!grid) return;
@@ -9018,6 +9081,7 @@ async function loadHome() {
   loadOnboarding();
   loadOrganismPulse();
   renderFrequent();
+  if (typeof loadSummary === 'function') loadSummary();
 }
 
 // 🚀 Онбординг: путь новичка от аккаунта до ПЕРВОГО РЕЗУЛЬТАТА
@@ -9625,6 +9689,10 @@ function runPulseAction(a) {
   // Онбординг из бота (/start новичка): к чеклисту и к подключению аккаунта.
   if (k==='onboarding') { goTab('home'); setTimeout(()=>{ const c=document.getElementById('onboardCard'); if (c) c.scrollIntoView({behavior:'smooth', block:'start'}); }, 300); return; }
   if (k==='accounts_add') return openAccImportModal();
+  // Раздел по задаче из карты services/task_sections.py: кнопки разделов в
+  // меню бота открывают мини-апп сразу в нужном месте.
+  if (k==='section' && prm) return openSection(String(prm));
+  if (k==='summary') { goTab('home'); return; }
   // «Открываю…» было обещанием, за которым ничего не следовало: человек нажимал
   // «Открыть», читал, что раздел открывается, и оставался на месте. Неизвестный
   // раздел — это поломка ссылки, и сказать надо именно это.
@@ -25552,8 +25620,12 @@ async function _gpLoadAccs(q) {
   }
 }
 
-async function openGpCreateModal() {
+async function openGpCreateModal(presetAssetType) {
   showModal('mo-gp-create');
+  // Мост из Фабрики ботов: открыть сразу на нужном типе актива (напр. 'bot').
+  // gpAssetType в сброс полей ниже НЕ входит, поэтому предустановка держится.
+  { const _at=document.getElementById('gpAssetType');
+    if (_at && presetAssetType) _at.value = presetAssetType; }
   ['gpRefName','gpRefUsername','gpRefCity','gpNamePattern','gpUsernamePattern','gpCustomCities'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
   { const _g=document.getElementById('gpGeoPreset'); if(_g) _g.value=''; gpGeoToggle(); }
   loadGpGeoPresets();
@@ -25834,7 +25906,7 @@ const MASS_OP_LABELS = {
   niche_growth_post:'🌿 Агент роста',
   check_accounts_health:'🔍 Проверка аккаунтов', scan_owned_resources:'🔎 Скан ресурсов',
   check_owned_restrictions:'🕶 Проверка ограничений',
-  check_bot_geoban:'🌍 Гео-бан ботов',
+  check_bot_geoban:'🌍 Гео-доступность',
   reclassify_channels:'🔄 Переопределение инфраструктуры',
   channel_import_all:'📡 Импорт каналов', group_import_all:'📥 Импорт групп',
   promote_all_admins:'👑 Назначение админами', strike:'⚔️ Массовые жалобы',
@@ -26398,6 +26470,12 @@ async function openEcoDetail(ecoId, ecoName) {
 }
 
 // ── Channel Factory ─────────────────────────────────────
+// Мост к Гео-сети: создать каналы/группы по гео. Тип актива — по чекбоксу
+// «группа/канал» на экране фабрики. Гео-создание идёт пайплайном гео-сети.
+function cfOpenGeo() {
+  const g = document.getElementById('cfIsGroup');
+  openGpCreateModal(g && g.checked ? 'group' : 'channel');
+}
 async function openChannelFactory(asGroup) {
   push('s-chanfactory');
   document.getElementById('cfTitle').value='';
@@ -27035,9 +27113,11 @@ async function submitCloner() {
     + ' Отменить публикацию в канале будет нельзя.');
   if (!ok) return;
   try {
-    await api('/api/miniapp/content_cloner/submit',{method:'POST',body:JSON.stringify({
-      source:src, msg_count:count, channel_ids: toAll ? [] : picked,
-    })});
+    // «Во все» — это ОТСУТСТВИЕ списка: пустой список сервер отбивает как
+    // пустой выбор, иначе любой сбой выбора становился бы публикацией во все.
+    const _cl = {source:src, msg_count:count};
+    if (!toAll) _cl.channel_ids = picked;
+    await api('/api/miniapp/content_cloner/submit',{method:'POST',body:JSON.stringify(_cl)});
     toast('✅ Операция клонирования запущена');
     document.getElementById('clonerSrc').value='';
     boxes.forEach(b=>{b.checked=false;});
@@ -28603,7 +28683,7 @@ const OP_RU = {
   phone_check:'Проверка номеров', reg_check:'Проверка регистрации',
   account_warmup:'Прогрев аккаунта', check_accounts_health:'Проверка здоровья аккаунтов',
   check_owned_restrictions:'Проверка ограничений каналов/чатов/ботов',
-  check_bot_geoban:'Проверка ботов на гео-бан (ограничение по странам)',
+  check_bot_geoban:'Гео-доступность каналов, чатов и ботов по странам',
   strike:'Страйк', self_promo_blast:'Самореклама',
   niche_growth_post:'Продвижение в нише', ad_intel_scan:'Разведка рекламы',
   compliance_scan:'Проверка соответствия', find_contact:'Поиск контакта',
@@ -30095,6 +30175,8 @@ function renderAudSegChart(segments) {
      долг»). Подключаются ПОСЛЕ основного скрипта — используют его глобальные
      хелперы (push/txt/esc/api/toast/empty), которые к этому моменту уже
      определены. -->
+<script src="screens/ui_kit.js"></script>
+<script src="screens/summary.js"></script>
 <script src="screens/spintax.js"></script>
 <script src="screens/cmdcenter.js"></script>
 <script src="screens/dashboard.js"></script>

@@ -5,8 +5,6 @@ Webhook Server — HTTP endpoint для входящих webhook-уведомл�
 Порт: WEBHOOK_PORT (default 8080, Railway проксирует автоматически)
 
 Поддерживает:
-- TON/TRON через внешние сервисы (например, tonapi.io webhooks)
-- Кастомный JSON-хук: POST /webhook/payment с {user_id, amount, currency, tx_hash}
 - Railway deploy webhook: POST /webhook/deploy — уведомления о деплоях
 
 Входа CryptoPay (/webhook/cryptopay) больше нет: счетов CryptoPay продукт не
@@ -15,21 +13,20 @@ Webhook Server — HTTP endpoint для входящих webhook-уведомл�
 принял бы никогда. Мёртвая денежная дверь — только поверхность атаки. История
 старых оплат CryptoPay/Stars по-прежнему читается services/payment_recovery.
 
-Денежный хук (payment) проверяет подпись ВСЕГДА. Не задан секрет —
-хук закрыт и отвечает 503: раздать платный тариф без проверки хуже, чем не
-принять платёж (живой путь оплаты — services/payment_checker.py, проверка
-транзакции в блокчейне).
+Универсального денежного хука (/webhook/payment) тоже больше нет. Его не звал
+ни один провайдер, а при заданном WEBHOOK_SECRET тело без поля `plan` выдавало
+месяц подписки за любую сумму от 90 % цены, и срок из тела не сверялся со
+списком сроков. Живой путь оплаты один — services/payment_checker.py,
+проверка транзакции в блокчейне. Понадобится провайдер — хук пишется под его
+формат подписи и его счета, а не «универсальный».
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
 
 import asyncpg
 from aiohttp import web
@@ -39,138 +36,13 @@ from services.logger import log_exc_swallow
 from services.security import (
     check_rate_limit,
     rate_limit_response,
-    validate_integer,
     escape_html,
 )
 
 log = logging.getLogger(__name__)
 
-_WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 # Railway sets PORT env var for web services; WEBHOOK_PORT is our fallback
 _WEBHOOK_PORT = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8080")))
-
-_PLAN_MAP = {
-    # Current canonical plan names
-    "paid_1m": ("paid", 1),
-    "paid_3m": ("paid", 3),
-    "paid_6m": ("paid", 6),
-    "paid_12m": ("paid", 12),
-    # Legacy plan name aliases (kept for backward compatibility)
-    "starter_1m": ("paid", 1),
-    "starter_3m": ("paid", 3),
-    "pro_1m": ("paid", 1),
-    "pro_3m": ("paid", 3),
-    "pro_6m": ("paid", 6),
-    "enterprise_1m": ("paid", 1),
-    "enterprise_6m": ("paid", 6),
-    "enterprise_12m": ("paid", 12),
-}
-
-
-def _webhook_closed(var_name: str) -> web.Response:
-    """Отказ денежного хука, у которого не настроен секрет.
-
-    503, а не 403: это не «неверная подпись», а «приём не настроен». В тексте —
-    имя переменной окружения, иначе отказ выглядит поломкой и его ищут в коде.
-    """
-    log.error(
-        "%s не задан — денежный хук закрыт, запрос отклонён", var_name
-    )
-    return web.Response(
-        status=503,
-        text=f"Приём платёжных уведомлений не настроен: задайте {var_name}",
-    )
-
-
-def _verify_signature(body: bytes, signature: str) -> bool:
-    """Проверить HMAC-SHA256 подпись хука.
-
-    Без секрета — ВСЕГДА False. Раньше здесь стояло `return True`: переменная
-    WEBHOOK_SECRET нигде в деплое не задана, поэтому подпись фактически никто не
-    проверял, и любой запрос с {"user_id": N, "plan": "pro_1m"} выдавал платный
-    тариф. Проверка, которая при отсутствии настройки пропускает всех, — не
-    проверка.
-    """
-    if not _WEBHOOK_SECRET:
-        return False
-    expected = hmac.new(_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature.removeprefix("sha256="))
-
-
-async def _activate_subscription(
-    pool: asyncpg.Pool,
-    bot: Bot,
-    user_id: int,
-    plan: str,
-    months: int,
-    tx_ref: str,
-    currency: str,
-    amount: float,
-) -> None:
-    """Активировать подписку после успешного платежа."""
-    from bot.utils import tariffs
-    from services import billing
-
-    # Нормализация/валидация плана — из единого источника (никаких локальных карт).
-    if not billing.is_subscription_plan(plan):
-        log.warning(
-            "payment_webhook: unknown plan %r for user=%d, skipping", plan, user_id
-        )
-        return
-    plan = tariffs.normalize_plan(plan)
-
-    # Записать платёж ПЕРВЫМ — если запись упадёт, подписка не активируется и вебхук можно переповторить.
-    # Без этого подписка активируется без платёжной записи → финансовые данные теряются безвозвратно.
-    # reference = tx_ref (уникален для каждой транзакции); wallet_address='webhook' — заглушка для NOT NULL
-    safe_ref = (tx_ref or "")[:200] or f"wh_{user_id}_{plan}"
-    # Идемпотентность: повторная доставка вебхука (частое явление у платёжных
-    # систем) НЕ должна повторно продлевать подписку. Продлеваем только если
-    # этот платёж реально новый/перешёл в confirmed (RETURNING id; иначе дубль).
-    expires = None
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            payment_id = await conn.fetchval(
-                """INSERT INTO payments(user_id, amount_usd, amount_crypto, currency, tx_hash,
-                                        plan, period_months, status, wallet_address, reference)
-                   VALUES($1,$2,$2,$3,$4,$5,$6,'confirmed','webhook',$4)
-                   ON CONFLICT (reference) DO UPDATE
-                   SET status='confirmed', tx_hash=EXCLUDED.tx_hash
-                   WHERE payments.status <> 'confirmed'
-                   RETURNING id""",
-                user_id, amount, currency, safe_ref, plan, months,
-            )
-            if payment_id is None:
-                # Дубликат уже подтверждённого платежа — не продлеваем повторно.
-                log.info("payment webhook: дубликат подтверждённого платежа ref=%s — продление пропущено", safe_ref)
-                return
-            # Активация подписки + синк platform_users — единая логика (billing),
-            # в той же транзакции, что и запись платежа.
-            expires = await billing.activate_subscription(conn, user_id, plan, months)
-    if expires is None:
-        # RETURNING всегда должен вернуть строку при успешном upsert; запасной
-        # вариант на случай неожиданного None — не даёт уведомлению упасть.
-        expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
-
-    try:
-        await bot.send_message(
-            user_id,
-            f"✅ <b>Оплата подтверждена!</b>\n\n"
-            f"Подписка активирована на {months} мес.\n"
-            f"Действует до: <b>{expires.strftime('%d.%m.%Y')}</b>\n\n"
-            f"Ref: <code>{tx_ref}</code>",
-            parse_mode="HTML",
-        )
-    except Exception:
-        log_exc_swallow(
-            log,
-            "Сбой уведомления пользователя об активации подписки",
-            user_id=user_id,
-            plan=plan,
-        )
-    log.info(
-        "payment_webhook: activated %s %s/%dm user=%d", currency, plan, months, user_id
-    )
-
 
 def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app = web.Application()
@@ -184,75 +56,6 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     async def root_redirect(request: web.Request) -> web.Response:
         """Redirect root URL to Mini App so MINI_APP_URL can be set without /miniapp/ suffix."""
         return web.HTTPFound("/miniapp/")
-
-    async def payment_webhook(request: web.Request) -> web.Response:
-        """Универсальный webhook для платёжных систем."""
-        # Rate limit webhook requests per IP
-        if not await check_rate_limit(request, max_requests=60, window=60):
-            return rate_limit_response(request)
-
-        if not _WEBHOOK_SECRET:
-            return _webhook_closed("WEBHOOK_SECRET")
-
-        body = await request.read()
-        sig = request.headers.get("X-Webhook-Signature", "")
-        if not _verify_signature(body, sig):
-            log.warning("payment_webhook: invalid signature")
-            return web.Response(status=403, text="Invalid signature")
-
-        try:
-            data = json.loads(body)
-        except json.JSONDecodeError:
-            return web.Response(status=400, text="Invalid JSON")
-
-        # Извлечь поля из webhook-тела с валидацией
-        user_id = data.get("user_id") or data.get("payload", {}).get("user_id")
-        amount_raw = data.get("amount", 0)
-        try:
-            amount = float(amount_raw)
-        except (TypeError, ValueError):
-            return web.Response(status=400, text="Invalid amount")
-        currency = (data.get("currency") or data.get("asset", "TON")).upper()
-        tx_ref = (
-            data.get("hash") or data.get("tx_hash") or data.get("invoice_id") or "wh"
-        )
-        plan_key = data.get("plan") or data.get("description", "")
-
-        if not user_id:
-            return web.Response(status=400, text="Missing user_id")
-
-        user_id = validate_integer(user_id, min_val=1)
-        if user_id is None:
-            return web.Response(status=400, text="Invalid user_id")
-
-        # Попытаться определить план из description/plan поля
-        plan, months = None, None
-        for key, (p, m) in _PLAN_MAP.items():
-            if key in plan_key.lower():
-                plan, months = p, m
-                break
-
-        if not plan:
-            # Fallback: определить по сумме в USD
-            from config import PLAN_PRICES_USD
-
-            prices_sorted = sorted(PLAN_PRICES_USD.items(), key=lambda x: x[1])
-            for p, price_usd in prices_sorted:
-                if amount >= price_usd * 0.9:
-                    plan, months = p, 1
-
-        if not plan:
-            log.warning("payment_webhook: can't determine plan from %s", data)
-            return web.Response(status=422, text="Unknown plan")
-
-        try:
-            await _activate_subscription(
-                pool, bot, user_id, plan, int(months or 1), tx_ref, currency, amount
-            )
-        except Exception:
-            log.exception("payment_webhook: _activate_subscription failed user=%d", user_id)
-            return web.Response(status=500, text="Internal error")
-        return web.Response(status=200, text="OK")
 
     async def deploy_webhook(request: web.Request) -> web.Response:
         """Railway deployment webhook — уведомление админов о деплое."""
@@ -351,7 +154,6 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app.router.add_get("/health", health)
     app.router.add_get("/", root_redirect)        # root → /miniapp/ redirect
     app.router.add_get("/webhook/deploy", deploy_health)
-    app.router.add_post("/webhook/payment", payment_webhook)
     app.router.add_post("/webhook/deploy", deploy_webhook)
 
     from services import email_oauth, rest_api, mini_app_api, managed_bot_webhooks
