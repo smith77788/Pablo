@@ -30,6 +30,26 @@ _FLOOD_WAVE_THRESHOLD = 5  # 5+ flood событий за 1ч → wave
 _LATENCY_SPIKE_MS = 3000  # средняя латентность > 3с → spike
 _TRUST_COLLAPSE_DROP = 0.20  # trust упал на 20% за 2ч → collapse
 
+# Типы аномалий. Порядок — номер типа в кнопке «не присылать» (callback_data
+# у Telegram короткая, строку туда не положить), поэтому только дописывать.
+ANOMALY_TYPES = ("error_spike", "success_drop", "queue_surge", "flood_wave",
+                 "trust_collapse", "latency_spike", "queue_frozen")
+ANOMALY_LABEL = {
+    "error_spike": "Всплеск ошибок",
+    "success_drop": "Падение успешности",
+    "queue_surge": "Рост очереди",
+    "flood_wave": "Волна флудов",
+    "trust_collapse": "Падение доверия",
+    "latency_spike": "Медленные прокси",
+    "queue_frozen": "Очередь не разбирается",
+}
+# Эпизод аномалии: обнаружения одного типа без перерыва дольше этого — одно
+# событие, о котором владелец узнаёт ОДИН раз. Детектор смотрит каждые 5 минут
+# и пишет запись не чаще раза в 30 минут, поэтому длящийся эпизод разрывов
+# больше получаса не даёт.
+_EPISODE_GAP_SQL = "INTERVAL '2 hours'"
+_MUTE_KEY = "anomaly_mute:"
+
 # In-memory baseline per owner (обновляются каждый цикл)
 _baseline_cache: dict[int, dict[str, Any]] = {}
 # Дедуп аномалий вынесен в БД (anomaly_events.detected_at) — переживает рестарт.
@@ -73,9 +93,11 @@ async def run_full_detection(pool: asyncpg.Pool, bot) -> list[Anomaly]:
     try:
         for a in await _detect_queue_frozen(pool):
             if await _should_record(pool, a):
+                _first = await _is_new_episode(pool, a)
                 await _record_anomaly(pool, a)
                 all_anomalies.append(a)
-                await _notify_anomaly(pool, bot, a)
+                if _first:
+                    await _notify_anomaly(pool, bot, a)
     except Exception as e:
         log.debug("anomaly_detector: проверка разбора очереди не удалась: %s", e)
 
@@ -85,9 +107,12 @@ async def run_full_detection(pool: asyncpg.Pool, bot) -> list[Anomaly]:
             anomalies = await _detect_owner(pool, owner_id)
             for a in anomalies:
                 if await _should_record(pool, a):
+                    # Решение «сообщать ли» — ДО записи: запись этого прогона
+                    # сама по себе продолжила бы эпизод.
+                    _first = a.severity == "critical" and await _is_new_episode(pool, a)
                     await _record_anomaly(pool, a)
                     all_anomalies.append(a)
-                    if a.severity == "critical":
+                    if _first:
                         await _notify_anomaly(pool, bot, a)
         except Exception as e:
             log.debug("anomaly_detector: owner=%d failed: %s", owner_id, e)
@@ -371,15 +396,28 @@ async def _detect_queue_surge(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly
 
 
 async def _detect_flood_wave(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly]:
-    """Волна флуд-блокировок за последний час — признак системной перегрузки."""
+    """Волна флуд-блокировок за последний час — признак системной перегрузки.
+
+    Считается по журналу флудов за ЧАС (`account_flood_log`), а не по
+    `flood_count_7d`. Тот счётчик — сумма за неделю: после одной волны он
+    держит «48 из 50» ещё семь дней, и владелец получал тревогу о перегрузке
+    на флоте, который давно работает без ограничений. Волна — это то, что
+    происходит сейчас.
+    """
     anomalies: list[Anomaly] = []
     try:
         row = await pool.fetchrow(
             """SELECT
-                   COUNT(*) FILTER (WHERE flood_count_7d > 0) AS accounts_with_flood,
-                   SUM(COALESCE(flood_count_7d, 0)) AS total_floods,
-                   COUNT(*) FILTER (WHERE is_active) AS active_total
-               FROM tg_accounts WHERE owner_id=$1""",
+                   (SELECT COUNT(DISTINCT l.account_id)
+                      FROM account_flood_log l JOIN tg_accounts a ON a.id = l.account_id
+                     WHERE a.owner_id = $1 AND a.is_active
+                       AND l.created_at > NOW() - INTERVAL '1 hour') AS accounts_with_flood,
+                   (SELECT COUNT(*)
+                      FROM account_flood_log l JOIN tg_accounts a ON a.id = l.account_id
+                     WHERE a.owner_id = $1 AND a.is_active
+                       AND l.created_at > NOW() - INTERVAL '1 hour') AS total_floods,
+                   (SELECT COUNT(*) FROM tg_accounts
+                     WHERE owner_id = $1 AND is_active) AS active_total""",
             owner_id,
         )
         if not row:
@@ -404,8 +442,8 @@ async def _detect_flood_wave(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly]
                     title=f"Волна флудов: {accounts_with_flood}/{active_total} аккаунтов",
                     description=(
                         f"{accounts_with_flood} из {active_total} активных аккаунтов ({dev}%) "
-                        f"получили флуд-блокировки за последние 7 дней (всего {total_floods} блокировок). "
-                        f"Признак системной перегрузки или скоординированных действий."
+                        f"получили флуд-блокировки за последний час (всего {total_floods}). "
+                        f"Признак перегрузки: снизьте темп операций или дайте флоту отдохнуть."
                     ),
                     owner_id=owner_id,
                     baseline_value=0.2,
@@ -605,18 +643,106 @@ async def _record_anomaly(pool: asyncpg.Pool, anomaly: Anomaly) -> None:
         log.debug("_record_anomaly failed: %s", e)
 
 
+async def _is_new_episode(pool: asyncpg.Pool, anomaly: Anomaly) -> bool:
+    """Первое ли это обнаружение эпизода — то есть стоит ли говорить владельцу.
+
+    Раньше уведомление уходило при каждой новой записи аномалии, а записи
+    защищены от дублей лишь на 30 минут: длящаяся волна присылала одно и то же
+    сообщение каждые полчаса (жалоба: «за час несколько раз одно и то же»).
+    Теперь сообщение — одно на эпизод: если такая же аномалия той же
+    тяжести уже фиксировалась в последние два часа, эпизод продолжается и
+    владелец о нём уже знает. Рост тяжести (warning → critical) — новый эпизод.
+    Сбой чтения — сообщаем: лучше лишнее сообщение, чем потерянная тревога.
+    """
+    try:
+        prev = await pool.fetchval(
+            "SELECT 1 FROM anomaly_events "
+            "WHERE owner_id=$1 AND anomaly_type=$2 AND severity=$3 "
+            f"  AND detected_at > NOW() - {_EPISODE_GAP_SQL} "
+            "LIMIT 1",
+            anomaly.owner_id, anomaly.anomaly_type, anomaly.severity,
+        )
+        return prev is None
+    except Exception as exc:
+        log.debug("_is_new_episode fail-open (%s): %s", anomaly.anomaly_type, exc)
+        return True
+
+
+async def is_muted(pool: asyncpg.Pool, owner_id: int, anomaly_type: str) -> bool:
+    """Владелец попросил не присылать этот тип аномалий до какого-то срока."""
+    try:
+        row = await pool.fetchval(
+            "SELECT 1 FROM notification_dedup "
+            "WHERE user_id=$1 AND dedup_key=$2 AND last_sent > NOW()",
+            int(owner_id), _MUTE_KEY + str(anomaly_type),
+        )
+        return row is not None
+    except Exception as exc:
+        log.debug("is_muted fail-open: %s", exc)
+        return False
+
+
+async def mute(pool: asyncpg.Pool, owner_id: int, anomaly_type: str, hours: int) -> bool:
+    """Не присылать аномалии этого типа `hours` часов (0 — снять).
+
+    Срок лежит в `notification_dedup.last_sent` как момент В БУДУЩЕМ: таблица
+    уже есть (персистентный анти-спам уведомлений) и переживает рестарт.
+    Записи аномалий и экран «Аномалии» это не трогает — глушится только
+    сообщение.
+    """
+    try:
+        await pool.execute(
+            "INSERT INTO notification_dedup(user_id, dedup_key, last_sent) "
+            "VALUES($1, $2, NOW() + make_interval(hours => $3)) "
+            "ON CONFLICT(user_id, dedup_key) DO UPDATE SET last_sent = EXCLUDED.last_sent",
+            int(owner_id), _MUTE_KEY + str(anomaly_type), max(0, int(hours)),
+        )
+        return True
+    except Exception as exc:
+        log.warning("anomaly mute не записан owner=%s type=%s: %s",
+                    owner_id, anomaly_type, exc)
+        return False
+
+
+def _mute_keyboard(anomaly_type: str):
+    """Кнопки под тревогой: заглушить именно этот тип и открыть список."""
+    try:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import InfraHCCb
+
+        idx = ANOMALY_TYPES.index(anomaly_type)
+    except Exception:
+        return None
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔕 Не присылать 24 ч",
+              callback_data=InfraHCCb(action="mute_anomaly", item_id=24, page=idx))
+    kb.button(text="🔕 Не присылать неделю",
+              callback_data=InfraHCCb(action="mute_anomaly", item_id=168, page=idx))
+    kb.button(text="⚡ Все аномалии", callback_data=InfraHCCb(action="anomalies"))
+    kb.adjust(2, 1)
+    return kb.as_markup()
+
+
 async def _notify_anomaly(pool: asyncpg.Pool, bot, anomaly: Anomaly) -> None:
     """Уведомить владельца о критической аномалии."""
     try:
         from database import db as _db
 
+        if await is_muted(pool, anomaly.owner_id, anomaly.anomaly_type):
+            return
+        # Раньше здесь стояло «Recovery Engine анализирует ситуацию…» — по
+        # аномалии ничего не запускается, это было обещание, которого никто не
+        # выполнял (и по-английски).
         text = (
             f"🚨 <b>Аномалия обнаружена</b>\n\n"
             f"<b>{anomaly.title}</b>\n"
             f"{anomaly.description}\n\n"
-            f"<i>Recovery Engine анализирует ситуацию...</i>"
+            f"<i>Повторно об этом не напишу, пока аномалия длится. Сообщу снова, "
+            f"только если она закончится и начнётся заново.</i>"
         )
-        await _db.notify_if_enabled(pool, bot, anomaly.owner_id, "restriction", text)
+        await _db.notify_if_enabled(pool, bot, anomaly.owner_id, "restriction", text,
+                                    reply_markup=_mute_keyboard(anomaly.anomaly_type),
+                                    dedup_key=f"anomaly:{anomaly.anomaly_type}")
     except Exception as e:
         log.debug("_notify_anomaly failed: %s", e)
 

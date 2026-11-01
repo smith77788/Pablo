@@ -22,7 +22,9 @@ _TIERS = [
     ("gold", "paid", 10, "pro", 30, "🥇 Золото"),
     ("platinum", "paid", 25, "enterprise", 30, "💎 Платина"),
 ]
-_PLAN_LABEL = {"starter": "Starter", "pro": "Pro", "enterprise": "Enterprise"}
+# Тарифов Starter/Pro/Enterprise больше нет: все три — псевдонимы платного
+# (tariffs.PLAN_ALIASES). Награду показываем так, как её видит человек.
+_PLAN_LABEL = {"starter": "подписки", "pro": "подписки", "enterprise": "подписки"}
 
 
 def _build_dashboard(stats: dict, bot_username: str) -> str:
@@ -55,7 +57,7 @@ def _build_dashboard(stats: dict, bot_username: str) -> str:
     lines += [
         "━━━━━━━━━━━━━━━━━━",
         "",
-        "💡 <b>Каждый приглашённый получает 7 дней Starter бесплатно</b> — "
+        "💡 <b>Каждый приглашённый получает 7 дней подписки бесплатно</b> — "
         "это мотивирует их делиться вашей ссылкой!",
         "",
         "📌 <b>Условия:</b>",
@@ -106,7 +108,7 @@ async def cb_ref_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         text += (
             "\n\n💡 <b>Как начать?</b>\n"
             "Скопируйте свою реферальную ссылку и поделитесь ею с друзьями, "
-            "коллегами или аудиторией. Каждый приглашённый получит 7 дней Starter бесплатно!"
+            "коллегами или аудиторией. Каждый приглашённый получит 7 дней подписки бесплатно!"
         )
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=_dashboard_keyboard(share_url=share_url)

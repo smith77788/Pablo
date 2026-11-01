@@ -101,6 +101,13 @@ async def _tick(pool, bot) -> int:
                 sent += 1
         except Exception:
             log.debug("organism.runner: owner %s failed", oid, exc_info=True)
+        # Еженедельный отчёт: сам решает, пора ли (окно понедельника + отметка
+        # недели), поэтому вызывать его на каждом такте дёшево и безопасно.
+        try:
+            from services import weekly_report
+            await weekly_report.maybe_send(pool, bot, oid)
+        except Exception:
+            log.debug("organism.runner: weekly report failed owner=%s", oid, exc_info=True)
         # Каскад аудитории: свернуть состояния всех контактов владельца в единую
         # «температуру» (много «горячих» → аудитория горячая). Чистого маппинга
         # контакт→бот нет, поэтому катим на уровень аудитории — это и есть

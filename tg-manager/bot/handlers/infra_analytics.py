@@ -625,9 +625,9 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     from bot.keyboards import subscription_locked_markup
 
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer("🔒 Реестр ассетов — Starter+", show_alert=True)
+        await callback.answer("🔒 Реестр ассетов — по подписке", show_alert=True)
         await callback.message.edit_text(
-            "🔒 <b>Реестр ассетов — Starter+</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Реестр ассетов — по подписке</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="monitoring")),
         )
@@ -1064,7 +1064,7 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            "🔒 <b>Авто-балансировка — Starter+</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Авто-балансировка — по подписке</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="monitoring")),
         )

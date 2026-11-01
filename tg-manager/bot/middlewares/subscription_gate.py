@@ -143,6 +143,12 @@ class SubscriptionGateMiddleware(BaseMiddleware):
         if not isinstance(event, (Message, CallbackQuery)):
             return await handler(event, data)
 
+        # Подтверждение оплаты пропускаем всегда: звёзды уже списаны, и гейт,
+        # остановивший successful_payment, оставил бы человека без подписки,
+        # за которую он заплатил.
+        if isinstance(event, Message) and event.successful_payment:
+            return await handler(event, data)
+
         user = event.from_user
         if not user:
             return await handler(event, data)
