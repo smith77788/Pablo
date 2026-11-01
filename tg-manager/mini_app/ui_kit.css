@@ -33,7 +33,7 @@
 .ui-block{margin:var(--ui-s3) var(--ui-s4) 0}
 .ui-block-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:var(--ui-s2);margin:0 0 var(--ui-s2)}
 .ui-block-title{font-size:var(--ui-fs);font-weight:var(--ui-fw-b);color:var(--ui-text)}
-.ui-link{font-size:var(--ui-fs-sm);color:var(--ui-accent);cursor:pointer;white-space:nowrap}
+.ui-link{display:inline-flex;align-items:center;min-height:32px;font-size:var(--ui-fs-sm);color:var(--ui-accent);cursor:pointer;white-space:nowrap}
 
 /* Показатель: подпись, крупное число, изменение к прошлому периоду */
 .ui-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--ui-s2)}
@@ -51,7 +51,7 @@
 .ui-alert-body{flex:1;min-width:0}
 .ui-alert-title{font-size:var(--ui-fs);font-weight:600;color:var(--ui-text)}
 .ui-alert-detail{font-size:var(--ui-fs-sm);color:var(--ui-muted);margin-top:2px;line-height:1.4}
-.ui-btn{display:inline-block;margin-top:var(--ui-s2);font-size:var(--ui-fs-sm);font-weight:600;padding:7px 12px;border-radius:var(--ui-r-sm);background:var(--ui-surface-2);color:var(--ui-text);border:1px solid var(--ui-line);cursor:pointer}
+.ui-btn{display:inline-flex;align-items:center;min-height:32px;box-sizing:border-box;margin-top:var(--ui-s2);font-size:var(--ui-fs-sm);font-weight:600;padding:7px 12px;border-radius:var(--ui-r-sm);background:var(--ui-surface-2);color:var(--ui-text);border:1px solid var(--ui-line);cursor:pointer}
 .ui-btn[disabled]{opacity:.5;pointer-events:none}
 
 /* Плитка раздела: значок, название, одна строка «что здесь делают» */

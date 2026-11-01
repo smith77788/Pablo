@@ -54,7 +54,7 @@ def test_screen_reads_summary_endpoint_and_uses_components():
 
 
 def test_kit_escapes_and_refuses_code_from_data():
-    assert "function esc(s)" in KIT_JS
+    assert "function uiEsc(s)" in KIT_JS
     # onclick собирается только из имени функции и простых аргументов.
     assert r"/^[A-Za-z_$][\w$]*$/" in KIT_JS
     assert r"/^[a-z0-9_-]{1,40}$/i" in KIT_JS

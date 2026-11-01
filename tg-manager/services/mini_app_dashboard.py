@@ -299,9 +299,8 @@ async def attention_items(pool, uid: int) -> dict:
     сводка в боте. Один источник — чтобы бот и мини-апп не расходились в том,
     что считать проблемой.
     """
-    from services import op_status
     from services.mini_app_api import (
-        _safe_fetch, _safe_fetchrow, _safe_fetchval, account_health_summary, log,
+        _safe_fetch, _safe_fetchrow, _safe_fetchval, account_health_summary, log, op_status,
     )
 
     items: list[dict] = []
