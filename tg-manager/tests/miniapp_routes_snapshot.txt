@@ -49,6 +49,7 @@ DELETE /api/miniapp/uch/smart-tags/rules/{rule_id}
 DELETE /api/miniapp/va/channel/{cid}/media/{mid}
 DELETE /api/miniapp/va/references/{rid}
 DELETE /api/miniapp/warmup/{plan_id}
+DELETE /api/miniapp/webhooks/{wh_id}
 DELETE /api/miniapp/workflow/{wf_id}
 DELETE /api/miniapp/workflows/{wf_id}
 DELETE /api/miniapp/workspace/{ws_id}
@@ -191,8 +192,11 @@ GET /api/miniapp/health
 GET /api/miniapp/host_server/market
 GET /api/miniapp/host_server/my
 GET /api/miniapp/host_server/status
+GET /api/miniapp/inbox
+GET /api/miniapp/inbox/{peer_user_id}
 GET /api/miniapp/infra
 GET /api/miniapp/infra_health
+GET /api/miniapp/integrations
 GET /api/miniapp/invite/account/{acc_id}
 GET /api/miniapp/invite/advice
 GET /api/miniapp/invite/analytics
@@ -210,6 +214,7 @@ GET /api/miniapp/mass_publish/targets
 GET /api/miniapp/mass_targets
 GET /api/miniapp/mesh/task/{task_id}
 GET /api/miniapp/mesh/tasks
+GET /api/miniapp/money_funnel
 GET /api/miniapp/monitor/status
 GET /api/miniapp/mp/admin/providers
 GET /api/miniapp/mp/catalog
@@ -343,6 +348,7 @@ GET /api/miniapp/vlayer/overview
 GET /api/miniapp/vlayer/segment/{value}
 GET /api/miniapp/warmup
 GET /api/miniapp/warmup/{plan_id}/log
+GET /api/miniapp/webhooks/{wh_id}/deliveries
 GET /api/miniapp/workflow/{wf_id}/status
 GET /api/miniapp/workflows
 GET /api/miniapp/workflows/{wf_id}
@@ -491,8 +497,11 @@ HEAD /api/miniapp/health
 HEAD /api/miniapp/host_server/market
 HEAD /api/miniapp/host_server/my
 HEAD /api/miniapp/host_server/status
+HEAD /api/miniapp/inbox
+HEAD /api/miniapp/inbox/{peer_user_id}
 HEAD /api/miniapp/infra
 HEAD /api/miniapp/infra_health
+HEAD /api/miniapp/integrations
 HEAD /api/miniapp/invite/account/{acc_id}
 HEAD /api/miniapp/invite/advice
 HEAD /api/miniapp/invite/analytics
@@ -510,6 +519,7 @@ HEAD /api/miniapp/mass_publish/targets
 HEAD /api/miniapp/mass_targets
 HEAD /api/miniapp/mesh/task/{task_id}
 HEAD /api/miniapp/mesh/tasks
+HEAD /api/miniapp/money_funnel
 HEAD /api/miniapp/monitor/status
 HEAD /api/miniapp/mp/admin/providers
 HEAD /api/miniapp/mp/catalog
@@ -643,6 +653,7 @@ HEAD /api/miniapp/vlayer/overview
 HEAD /api/miniapp/vlayer/segment/{value}
 HEAD /api/miniapp/warmup
 HEAD /api/miniapp/warmup/{plan_id}/log
+HEAD /api/miniapp/webhooks/{wh_id}/deliveries
 HEAD /api/miniapp/workflow/{wf_id}/status
 HEAD /api/miniapp/workflows
 HEAD /api/miniapp/workflows/{wf_id}
@@ -828,6 +839,8 @@ POST /api/miniapp/host_server/price
 POST /api/miniapp/host_server/rent
 POST /api/miniapp/host_server/rental/{rental_id}/status
 POST /api/miniapp/import_sessions
+POST /api/miniapp/inbox/{peer_user_id}/read
+POST /api/miniapp/inbox/{peer_user_id}/reply
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
 POST /api/miniapp/invite/grant_admin
 POST /api/miniapp/invite/join_all
@@ -843,6 +856,7 @@ POST /api/miniapp/mass_publish
 POST /api/miniapp/mass_report
 POST /api/miniapp/mesh/task
 POST /api/miniapp/mesh/task/{task_id}/drop
+POST /api/miniapp/money_funnel/spend
 POST /api/miniapp/monitor/toggle
 POST /api/miniapp/mp/admin/provider/{pid}/status
 POST /api/miniapp/mp/provider/{pid}/apikey
@@ -924,6 +938,10 @@ POST /api/miniapp/seo/apply
 POST /api/miniapp/seo/apply_all
 POST /api/miniapp/seo/apply_bot
 POST /api/miniapp/settings
+POST /api/miniapp/sheets/check
+POST /api/miniapp/sheets/connect
+POST /api/miniapp/sheets/disconnect
+POST /api/miniapp/sheets/export
 POST /api/miniapp/shield/config
 POST /api/miniapp/spintax/expand
 POST /api/miniapp/spintax/generate
@@ -990,6 +1008,11 @@ POST /api/miniapp/warmup/bulk_start
 POST /api/miniapp/warmup/{plan_id}/cancel
 POST /api/miniapp/warmup/{plan_id}/pause
 POST /api/miniapp/warmup/{plan_id}/resume
+POST /api/miniapp/webhook_delivery/{delivery_id}/retry
+POST /api/miniapp/webhooks
+POST /api/miniapp/webhooks/{wh_id}
+POST /api/miniapp/webhooks/{wh_id}/rotate
+POST /api/miniapp/webhooks/{wh_id}/test
 POST /api/miniapp/workflow/create
 POST /api/miniapp/workflow/{wf_id}/execute
 POST /api/miniapp/workflow/{wf_id}/pause

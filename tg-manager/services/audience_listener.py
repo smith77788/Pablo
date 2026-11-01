@@ -61,8 +61,13 @@ def _peer_from_sender(sender: Any) -> dict[str, Any]:
     }
 
 
-async def _on_incoming_message(pool, bot, owner_id: int, event) -> None:
-    """Обработчик events.NewMessage(incoming=True) на слушающем клиенте."""
+async def _on_incoming_message(pool, bot, owner_id: int, event,
+                               acc_id: int | None = None) -> None:
+    """Обработчик events.NewMessage(incoming=True) на слушающем клиенте.
+
+    Личное сообщение ещё и сохраняется в единый инбокс (inbox_messages):
+    раньше текст уходил только сенсору намерений, и ответ человека на
+    рассылку было не прочитать нигде, кроме самого аккаунта в Telegram."""
     from services.logger import log_exc_swallow
 
     try:
@@ -77,6 +82,17 @@ async def _on_incoming_message(pool, bot, owner_id: int, event) -> None:
             "peer_user_id": getattr(event, "sender_id", None),
             "peer_name": None, "peer_username": None,
         }
+        if acc_id is not None and getattr(event, "is_private", False):
+            try:
+                from services import unified_inbox
+
+                await unified_inbox.record_incoming(
+                    pool, owner_id, acc_id, peer,
+                    getattr(event.message, "id", None), text,
+                    getattr(event.message, "date", None))
+            except Exception:
+                log_exc_swallow(log, f"audience_listener: запись в инбокс owner={owner_id} упала")
+
         from services import intent_sensor
 
         await intent_sensor.scan_incoming(pool, bot, owner_id, peer, text)
@@ -120,7 +136,8 @@ async def _start_one(pool, bot, acc_id: int) -> bool:
 
             owner_id = int(acc["owner_id"])
             client.add_event_handler(
-                lambda e, _p=pool, _b=bot, _o=owner_id: _on_incoming_message(_p, _b, _o, e),
+                lambda e, _p=pool, _b=bot, _o=owner_id, _a=acc_id: _on_incoming_message(
+                    _p, _b, _o, e, _a),
                 events.NewMessage(incoming=True),
             )
         except BaseException:

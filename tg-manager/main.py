@@ -162,6 +162,7 @@ from services import account_monitor
 from services import trust_engine
 from services import shadowban_monitor
 from services import service_supervisor
+from services import platform_alert
 from services import op_worker
 from services import behavioral_engine
 from services import account_warmer
@@ -588,10 +589,6 @@ async def main() -> None:
     _set_boot_phase("db-pool+migrations")
     pool = await _create_pool_resilient()
     _set_boot_phase("init")
-    # D27: детекторы поломок (падение фонового сервиса, всплеск ошибок) шлют
-    # тревогу админам через этот модуль — привязываем пул и бота сразу.
-    from services import platform_alerts
-    platform_alerts.bind(pool, bot)
     # Диагностика подключения к БД — печатает host и число записей в ключевых
     # таблицах в ЛОГ. Нужна при инциденте «данные пропали»: видно, в ту ли базу
     # смотрим и есть ли данные — без SQL-клиента. КРИТИЧНО: только в ФОНЕ и с
@@ -1050,6 +1047,9 @@ async def main() -> None:
 
     _svc_stagger_index = 0
 
+    # Падение фонового сервиса уходит админу сообщением, а не только в лог (D27).
+    _svc_alert = platform_alert.make_alerter(pool, bot)
+
     async def _resilient(name: str, fn, *args):
         """Wrap a background service factory with auto-restart on crash.
         fn(*args) is called fresh each restart so the coroutine is never reused.
@@ -1077,6 +1077,7 @@ async def main() -> None:
             restart_delay=30.0,
             start_delay=_svc_stagger_index * 2,   # разносим старты по 2с
             restart_on_return=False,              # вернулся значит выключен
+            alert=_svc_alert,                     # падение — админу (D27)
         )
 
     async def _web_resilient(name: str, fn, *args):
@@ -1092,6 +1093,7 @@ async def main() -> None:
             # Сетевому сервису положено работать всегда: вернулся — поднимаем
             # снова, но через паузу, а не вхолостую в тесном цикле.
             restart_on_return=True,
+            alert=_svc_alert,
         )
 
     # Определяем webhook режим ДО старта сервера, чтобы передать dp в payment_webhook
@@ -1279,6 +1281,10 @@ async def main() -> None:
         _spawn(
             _resilient("anomaly_detector", anomaly_detector.run_anomaly_loop, pool, bot)
         )
+        # Исходящие вебхуки и лента событий в Google Sheets (schema_v262):
+        # раскладывает события по получателям и доставляет с повторами.
+        from services import webhooks as _webhooks
+        _spawn(_resilient("webhooks", _webhooks.run, pool))
         from services import follow_checker as _follow_checker
         _spawn(
             _resilient("follow_checker", _follow_checker.run_follow_checker, pool, bot)

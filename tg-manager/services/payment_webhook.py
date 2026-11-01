@@ -5,7 +5,12 @@ Webhook Server — HTTP endpoint для входящих webhook-уведомл�
 Порт: WEBHOOK_PORT (default 8080, Railway проксирует автоматически)
 
 Поддерживает:
-- Railway deploy webhook: POST /webhook/deploy — уведомления о деплоях
+- Railway deploy webhook: POST /webhook/deploy — уведомления о деплоях.
+  Закрыт секретом `DEPLOY_WEBHOOK_SECRET` (D31): Railway тело не подписывает,
+  поэтому секрет ставится в адрес хука в настройках Railway
+  (`/webhook/deploy?secret=…`) или в заголовок `X-Deploy-Secret`. Без
+  переменной хук закрыт: раньше любой мог прислать админу «деплой» с
+  подставленной веткой, коммитом и статусом.
 
 Входа CryptoPay (/webhook/cryptopay) больше нет: счетов CryptoPay продукт не
 выставляет (createInvoice нигде не вызывался), а проверка в нём ждала токен
@@ -24,6 +29,7 @@ Webhook Server — HTTP endpoint для входящих webhook-уведомл�
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -44,6 +50,20 @@ log = logging.getLogger(__name__)
 # Railway sets PORT env var for web services; WEBHOOK_PORT is our fallback
 _WEBHOOK_PORT = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8080")))
 
+def deploy_secret_ok(request) -> bool | None:
+    """Подлинность вызова деплой-хука.
+
+    None — секрет не задан (хук закрыт), False — секрет не совпал, True — ок.
+    Сравнение за постоянное время.
+    """
+    secret = os.getenv("DEPLOY_WEBHOOK_SECRET", "").strip()
+    if not secret:
+        return None
+    got = (request.headers.get("X-Deploy-Secret")
+           or request.query.get("secret") or "")
+    return hmac.compare_digest(got.encode(), secret.encode())
+
+
 def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app = web.Application()
     # Apply security middleware (rate limiting + security headers)
@@ -62,6 +82,13 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         # Rate limit deploy webhook requests
         if not await check_rate_limit(request, max_requests=20, window=60):
             return rate_limit_response(request)
+
+        ok = deploy_secret_ok(request)
+        if ok is None:
+            log.warning("deploy_webhook: DEPLOY_WEBHOOK_SECRET не задан — хук закрыт")
+            return web.Response(status=404, text="Not Found")
+        if not ok:
+            return web.Response(status=403, text="Forbidden")
 
         body = await request.read()
         try:

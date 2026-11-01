@@ -200,42 +200,37 @@ class ErrorMonitorMiddleware(BaseMiddleware):
                 message=str(exc),
             )
             
-            # Check if we should alert
+            # Всплеск — админу сообщением, а не только в лог (D27).
             if monitor.should_alert(error_code):
-                _count = monitor.get_recent_count(error_code)
-                _pat = monitor.get_pattern(error_code)
-                _users = len(_pat.affected_users) if _pat else 0
-                log.warning(
-                    "Error pattern detected: %s (count=%d, users=%d)",
-                    error_code.value, _count, _users,
-                )
-                # D27: всплеск ошибок раньше оставался в логе. Теперь он
-                # доходит до админов; отправка в фоне, чтобы не держать хендлер.
-                _alert_spike(error_code, _count, _users, exc,
-                             monitor._window_seconds)
+                await _report_spike(monitor, error_code, data)
             
             # Re-raise the exception
             raise
 
 
-def _alert_spike(error_code: ErrorCode, count: int, users: int,
-                 exc: BaseException, window_s: int) -> None:
-    """Поставить в фон тревогу о всплеске ошибок. Никогда не бросает."""
-    try:
-        from services import platform_alerts
+async def _report_spike(monitor: ErrorMonitor, error_code: ErrorCode,
+                        data: dict[str, Any]) -> None:
+    """Всплеск ошибок — в лог и сообщением админам платформы.
 
-        platform_alerts.alert_soon(
-            f"err_spike:{error_code.value}",
-            "🟠 <b>Всплеск ошибок у пользователей</b>\n\n"
-            f"Код: <code>{platform_alerts.clean(error_code.value, 80)}</code>\n"
-            f"За {max(1, window_s // 60)} мин: {count} ошибок, "
-            f"затронуто пользователей: {users}\n"
-            f"Последняя: {platform_alerts.clean(type(exc).__name__, 80)}: "
-            f"{platform_alerts.clean(exc)}\n\n"
-            "Повтор этой тревоги — не чаще раза в час.",
-        )
-    except Exception:
-        log.exception("error_monitor: тревога о всплеске не поставлена")
+    Пул и бот берутся из данных апдейта (`start_polling(pool=pool)` кладёт
+    пул туда же, куда aiogram кладёт бота) — без глобального состояния.
+    """
+    from services.platform_alert import esc, make_alerter
+
+    count = monitor.get_recent_count(error_code)
+    pattern = monitor.get_pattern(error_code)
+    users = len(pattern.affected_users) if pattern else 0
+    log.warning("Error pattern detected: %s (count=%d, users=%d)",
+                error_code.value, count, users)
+    sample = pattern.sample_messages[-1] if pattern and pattern.sample_messages else ""
+    minutes = max(1, monitor._window_seconds // 60)
+    text = (
+        f"⚠️ <b>Всплеск ошибок в боте:</b> <code>{esc(error_code.value)}</code>\n"
+        f"{count} за {minutes} мин, затронуто пользователей: {users}."
+        + (f"\nПример: {esc(sample, 200)}" if sample else "")
+    )
+    await make_alerter(data.get("pool"), data.get("bot"))(
+        f"err-spike:{error_code.value}", text)
 
 
 def install_error_monitoring(dp) -> None:

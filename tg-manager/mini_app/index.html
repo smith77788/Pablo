@@ -2270,6 +2270,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">CRM</div>
         <div class="mgmt-tile-val" id="m-crm-cnt"></div>
       </div>
+      <div class="mgmt-tile" onclick="openInbox(false)">
+        <div class="mgmt-tile-ico">📥</div>
+        <div class="mgmt-tile-lbl">Входящие</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openCRMDeals()">
         <div class="mgmt-tile-ico">💼</div>
         <div class="mgmt-tile-lbl">Сделки</div>
@@ -2278,6 +2283,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="openDeals()">
         <div class="mgmt-tile-ico">🗂</div>
         <div class="mgmt-tile-lbl">Канбан сделок</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMoneyFunnel(30)">
+        <div class="mgmt-tile-ico">💰</div>
+        <div class="mgmt-tile-lbl">Воронка денег</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSalesManager()">
@@ -2388,7 +2398,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- ⚙️ Настройки — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="settings">⚙️ Настройки</div>
-    <div class="sec-desc" data-section="settings" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Тариф, ключи API и рабочие пространства.</div>
+    <div class="sec-desc" data-section="settings" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Тариф, интеграции, ключи API и рабочие пространства.</div>
     <div class="mgmt-grid" data-section="settings">
       <div class="mgmt-tile" onclick="openSettings()">
         <div class="mgmt-tile-ico">⚙️</div>
@@ -2399,6 +2409,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">💳</div>
         <div class="mgmt-tile-lbl">Тариф</div>
         <div class="mgmt-tile-val" id="m-billing-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openIntegrations()">
+        <div class="mgmt-tile-ico">🔌</div>
+        <div class="mgmt-tile-lbl">Интеграции</div>
+        <div class="mgmt-tile-val">API · вебхуки · Sheets</div>
       </div>
       <div class="mgmt-tile" onclick="openApiKeys()">
         <div class="mgmt-tile-ico">🔑</div>
@@ -6208,6 +6223,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-apikey')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔑 Новый API ключ</div>
     <div class="field"><label>Название ключа</label><input id="ak-name" type="text" maxlength="64" placeholder="Мой сервис" class="inp"></div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0 8px"><input id="ak-readonly" type="checkbox"> Только чтение (без отправки сообщений от имени аккаунтов)</label>
     <div id="ak-result" style="display:none;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.3);border-radius:10px;padding:12px;margin:10px 0">
       <div style="font-size:13px;color:var(--hint);margin-bottom:6px">⚠️ Скопируйте ключ сейчас — он больше не будет показан!</div>
       <div id="ak-key-display" style="font-family:monospace;font-size:13px;word-break:break-all;color:var(--green);user-select:all"></div>
@@ -8793,9 +8809,11 @@ const MODULE_DESCS = {
   'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и оповещения',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
-  'API Ключи':'Ключи API и интеграции','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
+  'Интеграции':'Вебхуки на события, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
   'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
+  'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
+  'Воронка денег':'Охват → ответ → покупка по кампаниям, цена лида',
 };
 function buildDrawer() {
   const body = document.getElementById('navBody');
@@ -17974,7 +17992,7 @@ async function openContactDetail(id) {
       html += '</div>';
     }
     html += `<div class="sec" style="margin-top:8px">Действия</div><div style="padding:4px 16px 12px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0 0 auto">📅 Хронология</button>
+      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0 0 auto">🧭 Путь клиента</button>
       <button class="btn btn-s" onclick="openContactVersions('${id}')" style="flex:0 0 auto">📜 Версии</button>
       <button class="btn btn-s" onclick="openContactRelationships('${id}')" style="flex:0 0 auto">🕸 Связи</button>
       <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0 0 auto">🔑 Личность</button>
@@ -18510,8 +18528,9 @@ async function openContactTimeline(id) {
   try {
     const d = await api('/api/miniapp/uch/contacts/'+id+'/timeline');
     const items = d.timeline||[];
-    if (!items.length) { txt('cdBody', empty('📅','Нет событий','Касания появятся здесь: правки, источники, сигналы намерений')); return; }
-    let html = '<div style="padding:12px 16px">';
+    const jr = contactJourneyHtml(d.journey);
+    if (!items.length) { txt('cdBody', jr + empty('📅','Нет событий','Касания появятся здесь: правки, источники, рассылки, ответы и заказы')); return; }
+    let html = jr + '<div style="padding:12px 16px">';
     items.forEach(t=>{
       const date = t.ts ? new Date(t.ts).toLocaleString('ru-RU') : '';
       html += `<div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start">
@@ -18530,6 +18549,32 @@ async function openContactTimeline(id) {
     html += '</div>';
     txt('cdBody', html);
   } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+}
+
+// Путь клиента — четыре вопроса карточки одной сводкой над лентой: откуда
+// пришёл, что получил, что ответил, что купил. Считает сервер
+// (contacts_hub.timeline.build_journey); здесь только вывод.
+function contactJourneyHtml(j) {
+  if (!j) return '';
+  const cell = (ico, lbl, val, sub) =>
+    `<div style="flex:1 1 45%;background:var(--bg2);border-radius:10px;padding:8px 10px">
+      <div style="font-size:11px;color:var(--hint)">${ico} ${lbl}</div>
+      <div style="font-size:14px;margin-top:2px">${val}</div>
+      ${sub?`<div style="font-size:11px;color:var(--hint);margin-top:2px;white-space:normal">${sub}</div>`:''}
+    </div>`;
+  const src = j.source ? esc(j.source.label||'—') : '—';
+  const srcSub = j.source && j.source.at ? esc(new Date(j.source.at).toLocaleDateString('ru-RU')) : '';
+  const rc = j.received||{}, rp = j.replied||{}, bt = j.bought||{};
+  const camps = (rc.campaigns||[]).slice(0,3).map(esc).join(', ');
+  const rev = (bt.revenue||[]).map(r=>esc(r.text)).join(' + ');
+  const fn = j.funnel ? `<div style="font-size:12px;color:var(--hint);margin-top:6px">Стадия воронки: ${esc(j.funnel.label||j.funnel.value||'')}</div>` : '';
+  return `<div style="padding:12px 16px 0"><div class="sec" style="margin:0 0 6px">🧭 Путь клиента</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${cell('📍','Откуда пришёл', src, srcSub)}
+      ${cell('📨','Что получил', rc.count ? num(rc.count)+' сообщ.' : 'ничего', camps)}
+      ${cell('💬','Что ответил', rp.count ? num(rp.count)+' сообщ.' : 'молчит', rp.last_text ? '«'+esc(rp.last_text)+'»' : '')}
+      ${cell('🛒','Что купил', bt.orders ? num(bt.orders)+' заказ.' : 'пока ничего', rev)}
+    </div>${fn}</div>`;
 }
 
 async function openContactVersions(id) {
@@ -19606,7 +19651,7 @@ async function applySmartTags() {
 // собравший срез, получал вместо него весь справочник. Срез считает сервер по
 // ТЕМ ЖЕ параметрам, что список (contactFilterParams), — «выгружаю то, что вижу».
 const UCH_EXPORT_CAP = 5000;
-function uchExport(fmt, opts) {
+async function uchExport(fmt, opts) {
   const f = (fmt === 'vcf' || fmt === 'json') ? fmt : 'csv';
   opts = opts || {};
   const params = (opts.slice ? contactFilterParams() : new URLSearchParams());
@@ -19623,9 +19668,8 @@ function uchExport(fmt, opts) {
     toast('⚠️ В срезе ' + num(CONTACT_SLICE_TOTAL) + ' контактов, за раз выгружается ' + num(UCH_EXPORT_CAP) + '. Сузьте фильтр.');
     return;
   }
-  // D19: токен сессии сервер в адресе больше не принимает — ссылка открывается с
-  // пропуском на этот путь (openTicketLink), как остальные выгрузки.
-  openTicketLink('/api/miniapp/uch/export/' + f + '?' + params.toString());
+  // Токен сессии в адрес не кладём — пропуск на этот путь (openTicketLink).
+  await openTicketLink('/api/miniapp/uch/export/' + f + '?' + params.toString());
 }
 
 function uchExportSelected(fmt) {
@@ -24095,7 +24139,7 @@ async function openApiKeys() {
         <div class="row-ico" style="background:var(--bg-yellow-16)">🔑</div>
         <div class="row-body">
           <div class="row-name">${esc(k.name)||'Без названия'} ${k.is_active?'🟢':'🔴'}</div>
-          <div class="row-val"><code>${esc(k.prefix)}****</code>${k.last_used_at?' · исп. '+ago(k.last_used_at):''}</div>
+          <div class="row-val"><code>${esc(k.prefix)}…</code> · ${(k.scopes||[]).includes('write')?'полный доступ':'только чтение'}${k.last_used_at?' · исп. '+ago(k.last_used_at):''}</div>
           <div class="row-val" style="color:var(--hint)">Создан ${ago(k.created_at)}</div>
         </div>
         ${k.is_active?`<div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="revokeApiKey(${k.id})">Откл</button></div>`:''}
@@ -24113,6 +24157,7 @@ async function revokeApiKey(keyId) {
 }
 function openApiKeyModal() {
   document.getElementById('ak-name').value='';
+  const _akRo = document.getElementById('ak-readonly'); if (_akRo) _akRo.checked=false;
   document.getElementById('ak-err').textContent='';
   document.getElementById('ak-result').style.display='none';
   document.getElementById('ak-btns').style.display='flex';
@@ -24128,7 +24173,8 @@ async function submitApiKeyCreate() {
   btn.disabled=true; btn.textContent='⏳ Создание...';
   errEl.textContent='';
   try {
-    const r = await api('/api/miniapp/api_key',{method:'POST',body:JSON.stringify({name})});
+    const ro = document.getElementById('ak-readonly')?.checked;
+    const r = await api('/api/miniapp/api_key',{method:'POST',body:JSON.stringify({name, scopes: ro ? ['read'] : ['read','write']})});
     _lastApiKey = r.key;
     document.getElementById('ak-key-display').textContent = r.key;
     document.getElementById('ak-result').style.display='block';
@@ -30192,11 +30238,14 @@ function renderAudSegChart(segments) {
 <script src="screens/channel_manage.js"></script>
 <script src="screens/shield_check.js"></script>
 <script src="screens/account_login.js"></script>
+<script src="screens/integrations.js"></script>
 <script src="screens/accounts_list.js"></script>
 <script src="screens/bots_list.js"></script>
 <script src="screens/bot_detail.js"></script>
 <script src="screens/bot_factory.js"></script>
 <script src="screens/bot_mesh.js"></script>
+<script src="screens/crm_inbox.js"></script>
+<script src="screens/money_funnel.js"></script>
 <script src="screens/deals_board.js"></script>
 </body>
 </html>

@@ -65,8 +65,7 @@
 
 - [ ] Сообщение о деплое (`deploy_notifier`) пришло админу — путь доставки
       платформенных тревог жив.
-- [ ] В логах платформы нет строк `platform_alerts: сообщить некому` и
-      `platform_alerts: не привязано`.
+- [ ] В логах платформы нет строки `platform_alert: сообщить некому`.
 - [ ] В access-логе строки запроса с `ticket=` и `token=` показаны как `***`
       (`services/secret_masking.RedactingAccessLogger`).
 
