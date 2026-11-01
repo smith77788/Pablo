@@ -152,6 +152,20 @@ jobs:
             F821,F822,F823,F601,F602,F632,F702,E711,E714,F502,F506,F522,F901 \
             --output-format concise
 
+      # ЛОГ БАЗЫ — ТИШЕ. При остановке службы GitHub печатает в конец лога
+      # работы весь лог контейнера Postgres, а тесты намеренно гоняют сотни
+      # ломаных запросов (пробы схемы): хвост лога целиком занят ими, и
+      # сводка pytest в него не попадает (через API отдаётся только хвост).
+      # Ошибки запросов тестам видны сами по себе — в логе сервера они не нужны.
+      - name: Тише лог Postgres
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d infra -v ON_ERROR_STOP=1 \
+            -c "ALTER SYSTEM SET log_min_messages = 'fatal'" \
+            -c "ALTER SYSTEM SET log_min_error_statement = 'panic'" \
+            -c "SELECT pg_reload_conf()" || true
+
       - name: Run tests
         # Схему по базе раскатывают сами тесты (все schema*.sql по возрастанию
         # версии) — отдельного шага миграций не нужно.
