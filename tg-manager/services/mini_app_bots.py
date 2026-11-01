@@ -1416,6 +1416,23 @@ def setup_routes(app: web.Application, pool) -> None:
         except (TypeError, ValueError):
             return None
 
+    def _profile_targets(body) -> "tuple[list[int] | None, str | None]":
+        """Кого меняет массовая правка профиля: (bot_ids | None=все, ошибка).
+
+        «Все боты» — только ЯВНО (`all: true`). Раньше пустой или
+        отсутствующий список означал «все», и это стоило владельцу правки ВСЕХ
+        ботов: окно профиля одного бота делило id с массовым окном, на экран
+        вставало массовое, оно слало `bot_ids: []` — и описание одного бота
+        уходило на весь парк. Отсутствие выбора — это ошибка, а не «все».
+        """
+        if body.get("all") is True:
+            return None, None
+        raw = body.get("bot_ids")
+        bot_ids = _parse_bot_ids(raw)
+        if not bot_ids:
+            return None, "Не выбран ни один бот"
+        return bot_ids, None
+
     def _deleted_count(res) -> int:
         """Число строк из тега asyncpg «DELETE N» (0 при любом другом ответе)."""
         s = str(res)
@@ -1507,8 +1524,8 @@ def setup_routes(app: web.Application, pool) -> None:
         """Массово изменить профиль выбранных (или ВСЕХ) ботов владельца:
         имя, описание, короткое описание (Bot API) и приветствие на /start.
 
-        Пустое поле — не трогаем. Пустой/отсутствующий bot_ids — все активные
-        боты. Ставит операцию bulk_bot_profile (по-ботный журнал, прогресс,
+        Пустое поле — не трогаем. Цели — `bot_ids`; ВСЕ боты только при явном
+        `all: true` (см. _profile_targets). Ставит операцию bulk_bot_profile (по-ботный журнал, прогресс,
         идемпотентность — в исполнителе)."""
         uid = _get_uid(request)
         if not uid:
@@ -1529,10 +1546,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not (name or description or short_description or greeting):
             return _err("Укажите хотя бы одно поле: имя, описание или приветствие", 400)
 
-        raw = body.get("bot_ids")
-        bot_ids = _parse_bot_ids(raw) if raw else None  # None/пусто = все боты
-        if raw and bot_ids is None:
-            return _err("Неверный список ботов", 400)
+        bot_ids, _terr = _profile_targets(body)   # None — «все», только по all:true
+        if _terr:
+            return _err(_terr, 400)
 
         if bot_ids:
             cnt = await _safe_count(
@@ -1548,6 +1564,10 @@ def setup_routes(app: web.Application, pool) -> None:
                   "short_description": short_description, "greeting": greeting}
         if bot_ids:
             params["bot_ids"] = bot_ids
+        else:
+            # «Все боты» записывается в операцию явно: исполнитель без выбора и
+            # без этой отметки править никого не станет (см. _exec_bulk_bot_profile).
+            params["all"] = True
         try:
             op_id = await _obus.submit(
                 pool, uid, "bulk_bot_profile", params,
@@ -1586,10 +1606,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not after:
             return _err("Укажите хотя бы одно поле", 400)
 
-        raw = body.get("bot_ids")
-        bot_ids = _parse_bot_ids(raw) if raw else None
-        if raw and bot_ids is None:
-            return _err("Неверный список ботов", 400)
+        bot_ids, _terr = _profile_targets(body)   # None — «все», только по all:true
+        if _terr:
+            return _err(_terr, 400)
         if bot_ids:
             total = await _safe_count(
                 pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "

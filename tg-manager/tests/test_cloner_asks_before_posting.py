@@ -44,7 +44,9 @@ def _handler(name: str) -> str:
 
 def test_submit_accepts_explicit_targets():
     h = _handler("content_cloner_submit")
-    assert 'body.get("channel_ids")' in h, "цели нельзя назвать явно — уйдёт во все"
+    assert ('body.get("channel_ids")' in h
+            or 'selection_ids(body, "channel_ids"' in h), \
+        "цели нельзя назвать явно — уйдёт во все"
     assert "channel_id = ANY($2::bigint[])" in h
 
 

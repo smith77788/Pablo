@@ -21,7 +21,8 @@ from services import account_status as _acc_status
 from services import operation_bus as _obus
 from services import op_status
 from services.mini_app_auth import (validate_init_data, make_token, parse_token,
-                                    signing_secret_ok)
+                                    signing_secret_ok, make_url_ticket,
+                                    parse_url_ticket, url_ticket_ttl)
 from services.secret_masking import redact_secrets, scrub_payload
 from services import mini_app_host_server
 from services import mini_app_vault
@@ -43,6 +44,7 @@ from services import mini_app_networks
 from services import mini_app_fleet
 from services import mini_app_rankings
 from services import mini_app_links
+from services import mini_app_deals_board
 from services import mini_app_sales
 from services import mini_app_va
 from services import mini_app_warmup
@@ -64,6 +66,7 @@ from services.security import (
     rate_limit_response,
     validate_integer,
     validate_string,
+    selection_ids,
     sanitize_search_query,
     check_sql_suspicious,
     escape_html,
@@ -1167,11 +1170,21 @@ def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dic
 
 
 def _get_uid(request: web.Request) -> int | None:
+    """Владелец запроса: токен сессии — ТОЛЬКО из заголовка.
+
+    В адресе токен не принимается: строка запроса оседает в журнале доступа,
+    в логах платформы и в истории внешнего браузера (SECURITY.md). Ссылке,
+    которой заголовок не передать (выгрузка в браузере, нативное сохранение
+    файла, EventSource), выдаётся `?ticket=` — пропуск на GET одного пути с
+    коротким сроком (`/api/miniapp/url_ticket`, mini_app_auth.make_url_ticket).
+    """
     auth = request.headers.get("Authorization", "")
-    token = auth[7:] if auth.startswith("Bearer ") else request.query.get("token")
-    if not token:
-        return None
-    return parse_token(token, _bot_token())
+    if auth.startswith("Bearer "):
+        return parse_token(auth[7:], _bot_token())
+    ticket = request.query.get("ticket")
+    if ticket and request.method == "GET":
+        return parse_url_ticket(ticket, _bot_token(), request.path)
+    return None
 
 
 def _admin_ids() -> set[int]:
@@ -2374,6 +2387,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         })
 
     # ── Auth ────────────────────────────────────────────────────────────────
+
+    async def url_ticket(request: web.Request) -> web.Response:
+        """Пропуск для ссылки, которой не передать заголовок (см. _get_uid)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        path = str(body.get("path") or "").split("?", 1)[0]
+        if not path.startswith("/api/miniapp/") or ".." in path or len(path) > 300:
+            return _err("Неверный адрес", 400)
+        try:
+            ticket = make_url_ticket(uid, _bot_token(), path)
+        except ValueError:
+            return _err(_NO_SIGNING_SECRET, 403)
+        return _json_resp({"ticket": ticket, "ttl": url_ticket_ttl(path)})
 
     async def auth(request: web.Request) -> web.Response:
         try:
@@ -6089,8 +6120,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Нужен текст")
         if len(text) > 4096:
             return _err("Текст длиннее 4096 символов")
-        # Опциональный выбор ботов: bot_ids → рассылка только выбранным
-        sel_ids = [int(x) for x in (body.get("bot_ids") or []) if str(x).lstrip("-").isdigit()]
+        # Опциональный выбор ботов: bot_ids → рассылка только выбранным. Ключа
+        # нет — все боты; список есть, но пуст или с мусором — отказ, а НЕ
+        # рассылка по аудиториям всех ботов (сообщения живым людям).
+        sel_ids, _sel_err = selection_ids(body, "bot_ids", what="бот")
+        if _sel_err:
+            return _err(_sel_err, 400)
         if sel_ids:
             bots = await _safe_fetch(pool,
                 """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
@@ -6313,7 +6348,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось разобрать запрос")
         text = validate_string(body.get("text"), max_len=4096)
         delay = validate_integer(body.get("delay", 30), min_val=-1, max_val=300) or 30
-        channel_ids = body.get("channel_ids")  # optional list; None = all channels
+        # Ключа нет — все каналы; список передан, но пуст или с мусором — отказ.
+        # Раньше `[]` и `["abc"]` становились «во все каналы», а публикация
+        # наружу необратима.
+        channel_ids, _sel_err = selection_ids(body, "channel_ids", what="канал")
+        if _sel_err:
+            return _err(_sel_err, 400)
         if not text:
             return _err("Нужен текст")
         from services import postbot as _postbot
@@ -6323,12 +6363,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Недопустимые символы в тексте")
         if delay not in (5, 30, 60, -1):
             delay = 30
-        # Validate channel IDs if provided
-        if channel_ids:
-            try:
-                channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
-            except (TypeError, ValueError):
-                return _err("Неверные идентификаторы каналов", 400)
         # Count target channels
         if channel_ids:
             total = len(channel_ids)
@@ -7410,9 +7444,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # ВО ВСЕ каналы владельца разом, молча: выбора на экране не было, а
         # публикация наружу — необратима. Теперь цели можно назвать явно, и
         # «во все» остаётся только как осознанный выбор на экране.
-        want_ids = [i for i in (
-            validate_integer(x, min_val=-(2 ** 63), max_val=2 ** 63 - 1)
-            for x in (body.get("channel_ids") or [])[:500]) if i is not None]
+        # Ключа нет — во все; переданный пустой или битый список — отказ, а не
+        # «во все каналы» (так раньше читался и `[]`, и список из мусора).
+        want_ids, _sel_err = selection_ids(body, "channel_ids", what="канал", cap=500)
+        if _sel_err:
+            return _err(_sel_err, 400)
         if want_ids:
             chan_rows = await _safe_fetch(pool,
                 "SELECT username, channel_id FROM managed_channels "
@@ -7536,44 +7572,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
 
-
-    # ПРИМЕЧАНИЕ: дубль topology_links (co-membership граф, отдавал {links}) удалён —
-    # он затенял основной topology_links выше (accounts/bots drill-down, ~стр. 2830)
-    # из-за одинакового имени в одной области видимости (Python: последнее опреде-
-    # ление побеждает). Фронт (openTopology) читает links.accounts/links.bots, а
-    # затеняющий возвращал {links} → «Карта связей» всегда показывала «Связей пока
-    # нет». Коллизия параллельных агентов; оставлена одна рабочая версия.
-
-    async def schedule_post(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-            channel_id = data.get("channel_id")
-            text = data.get("text", "")
-            scheduled_at = data.get("scheduled_at")
-            if not channel_id or not text or not scheduled_at:
-                return _err("Нужны канал, текст и время публикации")
-            # Раньше здесь был прямой INSERT со строкой в scheduled_for БЕЗ
-            # ::timestamptz — asyncpg на строку в timestamptz кидает DataError,
-            # т.е. эндпойнт падал 500 при любом вызове. operation_bus.submit
-            # кастует ($5::timestamptz) и заодно применяет проверки плана/лимитов.
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "mass_publish",
-                {"channel_ids": [channel_id], "text": text},
-                total_items=1,
-                label=f"Отложенный пост в #{channel_id}",
-                scheduled_for=scheduled_at,
-            )
-            return _json_resp({"status": "scheduled", "op_id": op_id})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("schedule_post uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
     # ── SSE ──────────────────────────────────────────────────────────────────
 
@@ -7814,6 +7812,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
     app.router.add_get("/s/{code}", short_link_redirect)
     app.router.add_post("/api/miniapp/auth", auth)
+    app.router.add_post("/api/miniapp/url_ticket", url_ticket)
     app.router.add_post("/api/miniapp/pair", pair_device)
     app.router.add_post("/api/miniapp/pair/exchange", pair_exchange)
     app.router.add_get("/api/miniapp/devices", devices_list)
@@ -7836,7 +7835,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/auto_reply/{reply_id}/toggle", toggle_auto_reply)
     app.router.add_delete("/api/miniapp/auto_reply/{reply_id}", delete_auto_reply)
     # Broadcasts
-    # Алиас: фронт зовёт множественное /broadcasts/schedule (был 404).
     # Channels
     # Campaigns / Funnels
     app.router.add_get("/api/miniapp/campaigns", campaigns)
@@ -7873,7 +7871,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)
     app.router.add_put("/api/miniapp/editorial/policy", editorial_policy_save)
     app.router.add_post("/api/miniapp/editorial/review", editorial_review_draft)
-    app.router.add_post("/api/miniapp/schedule_post", schedule_post)
     # ── Прокси ───────────────────────────────────────────────────────────────
     mini_app_proxies.setup_routes(app, pool)
     mini_app_uch.setup_routes(app, pool)
@@ -7886,6 +7883,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_warmup.setup_routes(app, pool)
     mini_app_accounts.setup_routes(app, pool)
     mini_app_links.setup_routes(app, pool)
+    mini_app_deals_board.setup_routes(app, pool)
     mini_app_fleet.setup_routes(app, pool)
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)

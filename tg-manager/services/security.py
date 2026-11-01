@@ -257,6 +257,43 @@ def validate_string(value: Any, max_len: int = 1000, required: bool = True) -> O
     return s[:max_len]
 
 
+def selection_ids(
+    body: Any, key: str, *, what: str = "объект", cap: Optional[int] = None,
+) -> "tuple[Optional[list[int]], Optional[str]]":
+    """Выбор целей массового действия из тела запроса: (ids | None=все, ошибка).
+
+    Три случая, и смешивать их нельзя:
+
+    * ключа нет (или он null) — осознанное «все»: экран, который шлёт во все,
+      ключ НЕ передаёт;
+    * список передан, но пуст или с мусором — это ОШИБКА выбора, а не «все».
+      Прежняя форма `[int(x) for x in (body.get(key) or []) if ...]` превращала
+      `[]` и `["abc"]` в пустой список, а пустой список — в «все каналы/боты»:
+      правка одного бота уходила на весь парк, пост — во все каналы;
+    * иначе — список целых без повторов, в исходном порядке.
+    """
+    raw = body.get(key) if isinstance(body, dict) else None
+    if raw is None:
+        return None, None
+    if not isinstance(raw, list) or not raw:
+        return None, f"Не выбран ни один {what}"
+    out: list[int] = []
+    seen: set[int] = set()
+    for x in raw:
+        if isinstance(x, bool):
+            return None, f"Неверный идентификатор: {what}"
+        try:
+            v = int(str(x).strip())
+        except (TypeError, ValueError):
+            return None, f"Неверный идентификатор: {what}"
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    if cap is not None and len(out) > cap:
+        return None, f"Слишком много выбрано: не больше {cap} за раз"
+    return out, None
+
+
 # ── SSRF-гард ────────────────────────────────────────────────────────────────
 # Гард жил ДВАЖДЫ: синтаксическая проверка по регуляркам внутри mini_app_api и
 # усиленная версия в ветке аудита, которая так и не была влита. Работала первая —

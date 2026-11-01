@@ -33,7 +33,7 @@ def setup_routes(app: web.Application, pool) -> None:
         channel_manage_confirmed, channel_manage_worker_op, managed_channel_role,
     )
     from services.security import (
-        check_sql_suspicious, validate_integer, validate_string,
+        check_sql_suspicious, selection_ids, validate_integer, validate_string,
     )
 
     # Режимы задержки массового вступления. Единственный потребитель —
@@ -153,15 +153,17 @@ def setup_routes(app: web.Application, pool) -> None:
             sched = (_dt.now(_tz.utc) + _td(minutes=schedule_minutes)).isoformat()
         try:
             from services.operation_bus import submit
-            # Контракт _exec_bulk_post_to_channel: account_ids[], channel_ref (числовой
-            # channel_id), text_to_post, bulk_access_hash. Раньше слали channel_id/
-            # account_id/text — воркер их не читал и пост в канал ничего не делал.
-            op_id = await submit(pool, uid, "bulk_post_to_channel", {
+            # Пост в свой канал — та же операция, что единая публикация
+            # (mass_publish): гейт запрещённого контента и правила редактора
+            # канала стоят только в ней. bulk_post_to_channel — это «несколько
+            # аккаунтов в один чужой чат», и карточке своего канала он не нужен.
+            op_id = await submit(pool, uid, "mass_publish", {
                 "account_ids": [int(ch["acc_id"])],
-                "channel_ref": int(ch_id),
-                "text_to_post": text,
-                "bulk_access_hash": int(ch.get("access_hash") or 0),
-            }, total_items=1, scheduled_for=sched)
+                "channel_ids": [int(ch_id)],
+                "text": text,
+                "target": "all",
+            }, total_items=1, scheduled_for=sched,
+                label=f"Пост в канал «{(ch.get('title') or ch_id)}»")
             return _json_resp({"ok": True, "op_id": op_id, "scheduled_minutes": schedule_minutes})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -495,9 +497,10 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверный запрос", 400)
         op = body.get("op")
-        ids_in = [int(x) for x in (body.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
+        ids_in, _sel_err = selection_ids(body, "channel_ids", what="канал")
         if not ids_in:
-            return _err("Выберите каналы", 400)
+            return _err(_sel_err if _sel_err and "Неверный" in _sel_err
+                        else "Выберите каналы", 400)
         chans = await _safe_fetch(pool,
             "SELECT channel_id, title, acc_id, access_hash, username, type FROM managed_channels "
             "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, ids_in)
@@ -930,7 +933,10 @@ def setup_routes(app: web.Application, pool) -> None:
         if check_sql_suspicious(text):
             return _err("Недопустимые символы в тексте", 400)
 
-        wanted = [int(x) for x in (data.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
+        # Ключа нет — все каналы аккаунта; пустой или битый список — отказ.
+        wanted, _sel_err = selection_ids(data, "channel_ids", what="канал")
+        if _sel_err:
+            return _err(_sel_err, 400)
         rows = await _safe_fetch(
             pool,
             "SELECT channel_id FROM managed_channels WHERE owner_id=$1 AND acc_id=$2"
@@ -943,9 +949,12 @@ def setup_routes(app: web.Application, pool) -> None:
 
         try:
             from services import operation_bus
+            # Одна операция публикации в каналы — mass_publish (см.
+            # tests/test_channel_publish_one_op.py).
             op_id = await operation_bus.submit(
-                pool, uid, "bulk_post_chans",
-                {"acc_id": int(acc_id), "channel_ids": channel_ids, "text": text},
+                pool, uid, "mass_publish",
+                {"account_ids": [int(acc_id)], "channel_ids": channel_ids,
+                 "text": text, "target": "all"},
                 total_items=len(channel_ids),
                 label=f"Пост · каналов: {len(channel_ids)} · аккаунт #{acc_id}",
             )

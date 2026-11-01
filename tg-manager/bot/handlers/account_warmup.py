@@ -652,9 +652,8 @@ async def cb_warmup_delete_plan(
 
 @router.callback_query(WarmupCb.filter(F.action == "run_now"))
 async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer("▶️ Запускаю в фоне...")
-    from services.account_warmer import get_active_plans, run_daily_warmup
-    from services import task_registry
+    await callback.answer("▶️ Ставлю в очередь...")
+    from services.account_warmer import get_active_plans
 
     plans = await get_active_plans(pool, callback.from_user.id)
     if not plans:
@@ -666,34 +665,42 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         return
 
     user_id = callback.from_user.id
-
-    async def _run_all():
-        for plan in plans:
-            label = (
-                plan.get("first_name")
-                or plan.get("phone")
-                or str(plan.get("account_id", ""))
-            )
-            try:
-                await run_daily_warmup(pool, plan)
-            except Exception as exc:
-                log.warning("warmup run_all error acc=%s: %s", label, exc)
-
-    task = asyncio.create_task(_run_all())
-    task_registry.register(
-        user_id, "warmup", f"Разогрев всех аккаунтов ({len(plans)})", task
-    )
-
+    # День прогрева — операция шины, а не фоновая задача процесса: у неё есть
+    # тариф, история, итог и отмена (см. op_worker._warmup_day_now).
+    queued, refused = await _submit_warmup_days(pool, user_id, plans)
     await callback.message.edit_text(
-        f"🌡 <b>Разогрев запущен в фоне</b>\n\n"
-        f"Планов: <b>{len(plans)}</b>\n"
-        "Процесс займёт время (20-90с между действиями).\n\n"
-        "♻️ <b>Авто-возобновление:</b> при перезапуске бота разогрев "
-        "продолжится автоматически в течение 1 часа.\n\n"
-        "Следите за прогрессом в <b>⚡ Активные задачи</b>.",
+        f"🌡 <b>Разогрев поставлен в очередь</b>\n\n"
+        f"Планов: <b>{queued}</b> из {len(plans)}\n"
+        + (f"Не поставлено: {html.escape(refused)}\n" if refused else "")
+        + "Итог каждого дня — в /ops.",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
+
+
+async def _submit_warmup_days(pool: asyncpg.Pool, user_id: int, plans: list) -> tuple[int, str]:
+    """Поставить «день прогрева сейчас» операцией на каждый план.
+
+    Возвращает (сколько поставлено, причина отказа шины или ""). Отказ по
+    тарифу или Ban Weather одинаков для всех планов владельца, поэтому на нём
+    останавливаемся, а не повторяем его N раз."""
+    from services import operation_bus
+
+    queued = 0
+    for plan in plans:
+        label = plan.get("first_name") or plan.get("phone") or str(plan.get("account_id", ""))
+        try:
+            await operation_bus.submit(
+                pool, user_id, "account_warmup",
+                {"account_id": int(plan["account_id"]),
+                 "plan_type": plan.get("plan_type") or "standard", "run_now": True},
+                total_items=1, label=f"День прогрева сейчас: {label}")
+            queued += 1
+        except PermissionError as exc:
+            return queued, str(exc) or "требуется подписка"
+        except Exception:
+            log.exception("warmup run_now submit acc=%s", plan.get("account_id"))
+    return queued, ""
 
 
 # ── Запуск разогрева для конкретного аккаунта ────────────────────────────────
@@ -704,9 +711,8 @@ async def cb_warmup_run_one(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
     """Запускает один цикл разогрева для выбранного плана в фоне."""
-    await callback.answer("▶️ Запускаю в фоне...")
-    from services.account_warmer import get_active_plans, run_daily_warmup
-    from services import task_registry
+    await callback.answer("▶️ Ставлю в очередь...")
+    from services.account_warmer import get_active_plans
 
     plan_id = callback_data.plan_id
     acc_id = callback_data.account_id
@@ -726,8 +732,14 @@ async def cb_warmup_run_one(
     daily = plan.get("daily_actions", 5)
     user_id = callback.from_user.id
 
-    task = asyncio.create_task(run_daily_warmup(pool, plan))
-    task_registry.register(user_id, "warmup", f"Разогрев: {label}", task)
+    queued, refused = await _submit_warmup_days(pool, user_id, [plan])
+    if not queued:
+        await callback.message.edit_text(
+            f"⚠️ Разогрев не запущен: {html.escape(refused or 'попробуйте ещё раз')}",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -738,10 +750,9 @@ async def cb_warmup_run_one(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        f"🌡 <b>Разогрев запущен: {html.escape(label)}</b>\n\n"
+        f"🌡 <b>Разогрев поставлен в очередь: {html.escape(label)}</b>\n\n"
         f"Действий: <b>{daily}</b>\n"
-        "Работает в фоне. Лог обновится после завершения.\n\n"
-        "Следите за прогрессом в <b>⚡ Активные задачи</b>.",
+        "Итог дня — в /ops, лог обновится после завершения.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1563,7 +1574,7 @@ async def cb_wu_sess_run(
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
         return
-    await callback.answer("▶️ Запускаю в фоне...")
+    await callback.answer("▶️ Ставлю в очередь...")
 
     task = asyncio.create_task(run_warmup_session(pool, dict(s)))
     task_registry.register(
@@ -2176,7 +2187,7 @@ async def cb_ract_run(
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
         return
-    await callback.answer("▶️ Запускаю в фоне...")
+    await callback.answer("▶️ Ставлю в очередь...")
 
     task = asyncio.create_task(run_resource_activity_session(pool, dict(s)))
     task_registry.register(
