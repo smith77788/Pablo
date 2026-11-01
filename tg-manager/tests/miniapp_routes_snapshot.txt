@@ -146,6 +146,7 @@ GET /api/miniapp/content_cloner/history
 GET /api/miniapp/content_mesh/{mesh_id}
 GET /api/miniapp/content_mesh/{mesh_id}/targets
 GET /api/miniapp/content_meshes
+GET /api/miniapp/crm/board
 GET /api/miniapp/crm/contacts
 GET /api/miniapp/crm/deals
 GET /api/miniapp/crosspost/links
@@ -444,6 +445,7 @@ HEAD /api/miniapp/content_cloner/history
 HEAD /api/miniapp/content_mesh/{mesh_id}
 HEAD /api/miniapp/content_mesh/{mesh_id}/targets
 HEAD /api/miniapp/content_meshes
+HEAD /api/miniapp/crm/board
 HEAD /api/miniapp/crm/contacts
 HEAD /api/miniapp/crm/deals
 HEAD /api/miniapp/crosspost/links
