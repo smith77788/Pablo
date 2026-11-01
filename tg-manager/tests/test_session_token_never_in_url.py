@@ -25,6 +25,12 @@ import pytest
 from services import mini_app_api as M
 from services import mini_app_auth as A
 
+# Настоящая функция, взятая при сборе: скан «мусор в теле»
+# (test_every_action_survives_rubbish_in_its_body_postgres) подменяет
+# M._get_uid мимо monkeypatch, и в общем прогоне к нашему запуску там
+# чужая лямбда — тест проверял бы её, а не вход.
+_REAL_GET_UID = M._get_uid
+
 ROOT = Path(__file__).resolve().parents[1]
 BOT = "123456789:AAEhBP0abcdefghijklmnopqrstuvwxyz12345678"
 UID = 424242
@@ -45,19 +51,19 @@ def _token(monkeypatch):
 
 def test_header_token_still_works():
     tok = A.make_token(UID, BOT)
-    assert M._get_uid(_Req(EXPORT, headers={"Authorization": "Bearer " + tok})) == UID
+    assert _REAL_GET_UID(_Req(EXPORT, headers={"Authorization": "Bearer " + tok})) == UID
 
 
 def test_session_token_in_query_is_refused():
     tok = A.make_token(UID, BOT)
-    assert M._get_uid(_Req(EXPORT, query={"token": tok})) is None
+    assert _REAL_GET_UID(_Req(EXPORT, query={"token": tok})) is None
 
 
 def test_ticket_opens_only_its_path_and_only_get():
     t = A.make_url_ticket(UID, BOT, EXPORT)
-    assert M._get_uid(_Req(EXPORT, query={"ticket": t})) == UID
-    assert M._get_uid(_Req("/api/miniapp/accounts/export", query={"ticket": t})) is None
-    assert M._get_uid(_Req(EXPORT, method="POST", query={"ticket": t})) is None
+    assert _REAL_GET_UID(_Req(EXPORT, query={"ticket": t})) == UID
+    assert _REAL_GET_UID(_Req("/api/miniapp/accounts/export", query={"ticket": t})) is None
+    assert _REAL_GET_UID(_Req(EXPORT, method="POST", query={"ticket": t})) is None
 
 
 def test_ticket_is_not_a_session_token_and_vice_versa():
