@@ -85,9 +85,33 @@ def ordered_migration_files(paths: list[str]) -> list[str]:
         name = os.path.basename(path)
         if name in seen:
             continue
+        # Снимок схемы — НЕ миграция. Под маску `schema*.sql` он попадал бы,
+        # лежи он под старым именем `schema_baseline.sql`, и тогда исполнялся
+        # бы на КАЖДОЙ базе, включая продовую: поверх живой схемы, вместе с
+        # настройками сессии из дампа. Снимок живёт в database/baseline/
+        # (маска его не видит), а это правило страхует от возврата имени.
+        if name.startswith("schema_baseline"):
+            continue
         seen.add(name)
         out.append(path)
     return out
+
+
+# Под этим именем применённый снимок записывается в журнал schema_migrations.
+# Имя прежнее (до переезда снимка в database/baseline/), чтобы журнал уже
+# поднятых снимком баз читался одинаково.
+BASELINE_JOURNAL_NAME = "schema_baseline.sql"
+
+
+def baseline_paths(base_dir: str) -> tuple[str, str]:
+    """Где лежат снимок схемы и его манифест: `database/baseline/`.
+
+    Не в корне и не под именем `schema*.sql`: этой маской раннер и тесты
+    собирают историю миграций, и снимок под ней исполнялся бы как миграция на
+    каждой базе (см. `ordered_migration_files`).
+    """
+    d = os.path.join(base_dir, "database", "baseline")
+    return os.path.join(d, "baseline.sql"), os.path.join(d, "baseline.manifest")
 
 
 def parse_baseline_manifest(text: str) -> set[str]:
@@ -370,8 +394,7 @@ async def create_pool() -> asyncpg.Pool:
         # снимок затирал бы данные, а у наполовину мигрированного — молча
         # пометил бы непроигранные файлы применёнными.
         # Сам файл снимка генерируется из живой базы: deploy/scripts/make_schema_baseline.py.
-        _baseline_sql = os.path.join(base_dir, "schema_baseline.sql")
-        _baseline_manifest = os.path.join(base_dir, "schema_baseline.manifest")
+        _baseline_sql, _baseline_manifest = baseline_paths(base_dir)
         _baselined: set[str] = set()
         if not _applied_ok and os.path.exists(_baseline_sql) and os.path.exists(_baseline_manifest):
             try:
@@ -384,12 +407,21 @@ async def create_pool() -> asyncpg.Pool:
                 with open(_baseline_sql, encoding="utf-8") as _bf:
                     _b_stmts = _split_sql_statements(_bf.read())
                 _b_ok, _b_errs, _b_last = await apply_migration_statements(
-                    conn, _b_stmts, "schema_baseline.sql")
+                    conn, _b_stmts, BASELINE_JOURNAL_NAME)
+                # Хвост истории после снимка идёт по ЭТОМУ ЖЕ соединению.
+                # Снимок генератор чистит от настроек сессии, но если в него
+                # всё же попадёт потолок блокировки или search_path, хвост не
+                # должен унаследовать чужие настройки.
+                try:
+                    await conn.execute("RESET search_path")
+                except Exception:
+                    pass
+                await apply_schema_lock_timeout(conn)
                 if _b_ok:
                     log.info("Schema baseline применён: %d операторов, %d файлов "
                              "истории помечены применёнными",
                              len(_b_stmts), len(_baselined))
-                    for _bn_b in sorted(_baselined) + ["schema_baseline.sql"]:
+                    for _bn_b in sorted(_baselined) + [BASELINE_JOURNAL_NAME]:
                         try:
                             await conn.execute(
                                 """INSERT INTO schema_migrations(filename, status, error_count, applied_at)
