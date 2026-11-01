@@ -154,6 +154,21 @@ def _collect() -> tuple[list[tuple[str, object]], object]:
 _ROUTES, _CTX = (None, None)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_get_uid():
+    """Вернуть настоящий `_get_uid` после файла.
+
+    `_collect` подменяет его на уровне модуля mini_app_api и не возвращал:
+    подмена переживала этот файл, и следующие тесты, зовущие настоящий
+    `_get_uid` (test_session_token_never_in_url), получали владельца-пустышку
+    998877665544 — падение зависело от порядка тестов в части CI.
+    """
+    from services import mini_app_api
+    original = mini_app_api._get_uid
+    yield
+    mini_app_api._get_uid = original
+
+
 def _routes():
     global _ROUTES, _CTX
     if _ROUTES is None:
