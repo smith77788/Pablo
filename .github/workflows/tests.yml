@@ -84,7 +84,7 @@ jobs:
         # Без health-check шаг тестов стартует раньше, чем база примет
         # соединение, и весь слой снова молча уйдёт в skip.
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
