@@ -326,7 +326,13 @@ def setup_routes(app: web.Application, pool) -> None:
 
         Ключ, которого нет в теле, не меняется: раньше отсутствие `active`
         читалось как False, и любая другая правка ставила сценарий на паузу.
+
+        Вход проверяется ДО разбора тела: иначе посторонний без токена
+        получал 400 «Нечего менять» вместо 401.
         """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
         try:
             body = await request.json()
         except Exception:
@@ -334,9 +340,6 @@ def setup_routes(app: web.Application, pool) -> None:
         if not isinstance(body, dict):
             return _err("Неверный запрос", 400)
         if "trigger_type" in body or "allow_reentry" in body:
-            uid = _get_uid(request)
-            if not uid:
-                return _err("Unauthorized", 401)
             wid = _wf_id(request)
             if wid is None:
                 return _err("Неверный идентификатор", 400)

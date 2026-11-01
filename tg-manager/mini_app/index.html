@@ -29862,7 +29862,7 @@ async function openWorkflowDetail(wfId, wfName) {
             ${!isLast ? '<div class="ffstep-tail"></div>' : ''}
           </div>
           <div class="ffstep-body" style="border-left:3px solid ${color}">
-            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : ''}</span><span class="tap" role="button" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span></div>
+            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : ''}</span><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span></div>
             <div class="ffstep-text">${esc(body)}</div>
             ${extra.length ? '<div class="hint" style="margin-top:4px">' + extra.map(esc).join('<br>') + '</div>' : ''}
           </div>
