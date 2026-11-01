@@ -37,6 +37,7 @@ async def _cleanup(p):
         await p.execute("DELETE FROM restriction_events WHERE owner_id=$1", o)
         await p.execute("DELETE FROM tg_accounts WHERE owner_id=$1", o)
         await p.execute("DELETE FROM api_keys WHERE user_id=$1", o)
+        await p.execute("DELETE FROM automation_events WHERE owner_id=$1", o)
 
 
 @pytest.fixture(scope="module")
@@ -296,3 +297,21 @@ def test_prune_drops_old_finished_events(pool):
     _run(wh.prune(pool))
     assert _run(pool.fetchval("SELECT COUNT(*) FROM integration_events WHERE id=$1", eid)) == 0
     assert _run(pool.fetchval("SELECT COUNT(*) FROM webhook_deliveries WHERE event_id=$1", eid)) == 0
+
+
+def test_automation_events_reach_subscribed_endpoints_only(pool):
+    """Событие сценария копируется, только если на него есть подписка;
+    входящий вебхук наружу не пересылается (петля)."""
+    from services import webhooks as wh
+    ep = _run(_endpoint(pool, events=["payment.received"]))
+    for ev in ("message.received", "payment.received", "webhook.received"):
+        _run(pool.execute(
+            "INSERT INTO automation_events (owner_id, event_type, bot_id, data) "
+            "VALUES ($1, $2, 77, '{\"amount\": 5}'::jsonb)", OWNER, ev))
+    got = _run(pool.fetch("SELECT event, payload FROM integration_events WHERE owner_id=$1", OWNER))
+    assert [g["event"] for g in got] == ["payment.received"]
+    payload = json.loads(got[0]["payload"])
+    assert payload["amount"] == 5 and payload["bot_id"] == 77
+    _run(wh.fan_out(pool))
+    assert _run(pool.fetchval(
+        "SELECT COUNT(*) FROM webhook_deliveries WHERE endpoint_id=$1", ep["id"])) == 1

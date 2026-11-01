@@ -55,9 +55,15 @@ def test_every_catalog_event_has_a_source_in_the_migration():
     sql = open(os.path.join(ROOT, "schema_v262_integrations.sql"), encoding="utf-8").read()
     op_statuses = set(re.search(
         r"NEW\.status IN \(([^)]*)\)", sql).group(1).replace("'", "").replace(" ", "").split(","))
+    from services.automation_events import EVENT_LABELS
+    auto = open(os.path.join(ROOT, "schema_v270_integration_automation_events.sql"),
+                encoding="utf-8").read()
+    assert "AFTER INSERT ON automation_events" in auto
     for ev in wh.EVENTS:
         if ev == "webhook.test":
             continue
+        if ev in EVENT_LABELS:
+            continue  # источник — общий триггер шины сценариев (schema_v270)
         if ev.startswith("operation."):
             assert ev.split(".", 1)[1] in op_statuses, ev
             assert "'operation.' || NEW.status" in sql
@@ -126,3 +132,13 @@ def test_secret_is_returned_under_a_name_the_scrubber_keeps():
     assert scrub_payload({"signing_secret": "whsec_abc"})["signing_secret"] == "whsec_abc"
     src = open(os.path.join(ROOT, "services", "mini_app_integrations.py"), encoding="utf-8").read()
     assert '"signing_secret": secret' in src
+
+
+def test_automation_events_are_offered_except_the_loop():
+    from services.automation_events import EVENT_LABELS
+    for ev in EVENT_LABELS:
+        if ev == "webhook.received":
+            assert ev not in wh.EVENTS, "входящий вебхук наружу — петля"
+        else:
+            assert ev in wh.EVENTS, ev
+    assert wh.normalize_events(["payment.received"]) == ["payment.received"]
