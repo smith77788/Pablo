@@ -14361,7 +14361,13 @@ async def _exec_bulk_chan_exec(
 async def _exec_bulk_post_chans(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Post text to multiple channels belonging to one account."""
+    """Пост одного аккаунта в несколько своих каналов.
+
+    Новых операций этого типа поверхности больше не ставят: публикация в
+    каналы — одна операция, `mass_publish` (у неё гейт запрещённого контента и
+    правила редактора, которых здесь нет). Исполнитель остаётся, чтобы честно
+    доделать уже стоящие в очереди и рекуррентные круги — так же, как у
+    `quick_post`. Стережёт `tests/test_channel_publish_one_op.py`."""
     from services import account_manager
     from database import db as _db
     from bot.utils.op_helpers import backoff
@@ -22506,6 +22512,40 @@ async def _exec_niche_growth_post(
 
 # ── Mini App handlers ─────────────────────────────────────────────────────────
 
+async def _warmup_day_now(pool: asyncpg.Pool, owner_id: int, plan_id: int, name: str) -> dict:
+    """Прогнать день прогрева сразу — «▶️ Запустить сейчас» в боте.
+
+    Раньше кнопка звала `run_daily_warmup` через `asyncio.create_task` мимо
+    шины: у запуска не было ни операции, ни истории, ни итога, а процесс,
+    упавший посреди дня, молча терял его. Теперь это операция
+    `account_warmup` с `run_now`, и итог честный: день, который движок
+    пропустил (нет подписки, аккаунт занят, мёртв, ночь по гео), — это отказ
+    с причиной, а не «выполнено, 0 действий».
+    """
+    from services import account_warmer, warmup_status
+
+    row = await _safe_fetchrow(
+        pool, "SELECT * FROM account_warmup_plans WHERE id=$1 AND owner_id=$2 "
+              "AND status='active'", plan_id, owner_id)
+    if not row:
+        return {"status": "failed", "summary": f"⚠️ У {name} нет активного плана прогрева"}
+    # Причину пропуска берём только ЭТОГО запуска: старая метка от прошлого
+    # круга назвала бы не ту причину. Часы — базы, как у самой метки.
+    started = await pool.fetchval("SELECT now()")
+    res = await account_warmer.run_daily_warmup(pool, dict(row))
+    done = int(res.get("actions_done") or 0)
+    if not done:
+        why = await pool.fetchval(
+            "SELECT last_skip_reason FROM account_warmup_plans "
+            "WHERE id=$1 AND last_skip_at >= $2", plan_id, started)
+        return {"status": "failed", "plan_id": plan_id,
+                "summary": f"⏸ День прогрева {name} не выполнен: "
+                           f"{warmup_status.skip_label(why) if why else 'план уже выполняется'}"}
+    return {"status": "done", "plan_id": plan_id,
+            "summary": f"🌡️ День прогрева {name}: действий {int(res.get('actions_ok') or 0)} "
+                       f"из {done}" + (" · прогрев завершён" if res.get("completed") else "")}
+
+
 async def _exec_account_warmup(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -22548,11 +22588,19 @@ async def _exec_account_warmup(
             # плану — включая отменённый и остановленный движком. Операция
             # сообщала об успехе, а прогрев не шёл: классический ложный успех.
             if (existing["status"] or "") == "active":
+                if params.get("run_now"):
+                    return await _warmup_day_now(pool, owner_id, existing["id"], name)
                 return {
                     "status": "done",
                     "plan_id": existing["id"],
                     "summary": f"🌡️ Прогрев активен для {name} (план: {plan_type})",
                 }
+            if params.get("run_now"):
+                # «Запустить сейчас» по плану, который уже не идёт, не должно
+                # молча заводить новый: человек просил прогнать день, а не
+                # перезапустить прогрев с нуля.
+                return {"status": "failed",
+                        "summary": f"⚠️ У {name} нет активного плана прогрева"}
         # Плана нет или он не идёт (отменён, завершён, остановлен движком) —
         # заводим через общую дверь. Раньше неактивный план поднимался здесь
         # своим UPDATE без проверки аккаунта, и операция «возобновляла»

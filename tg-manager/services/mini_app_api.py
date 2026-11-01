@@ -7537,44 +7537,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
 
-    # ПРИМЕЧАНИЕ: дубль topology_links (co-membership граф, отдавал {links}) удалён —
-    # он затенял основной topology_links выше (accounts/bots drill-down, ~стр. 2830)
-    # из-за одинакового имени в одной области видимости (Python: последнее опреде-
-    # ление побеждает). Фронт (openTopology) читает links.accounts/links.bots, а
-    # затеняющий возвращал {links} → «Карта связей» всегда показывала «Связей пока
-    # нет». Коллизия параллельных агентов; оставлена одна рабочая версия.
-
-    async def schedule_post(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-            channel_id = data.get("channel_id")
-            text = data.get("text", "")
-            scheduled_at = data.get("scheduled_at")
-            if not channel_id or not text or not scheduled_at:
-                return _err("Нужны канал, текст и время публикации")
-            # Раньше здесь был прямой INSERT со строкой в scheduled_for БЕЗ
-            # ::timestamptz — asyncpg на строку в timestamptz кидает DataError,
-            # т.е. эндпойнт падал 500 при любом вызове. operation_bus.submit
-            # кастует ($5::timestamptz) и заодно применяет проверки плана/лимитов.
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "mass_publish",
-                {"channel_ids": [channel_id], "text": text},
-                total_items=1,
-                label=f"Отложенный пост в #{channel_id}",
-                scheduled_for=scheduled_at,
-            )
-            return _json_resp({"status": "scheduled", "op_id": op_id})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("schedule_post uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
     # ── SSE ──────────────────────────────────────────────────────────────────
 
     async def events(request: web.Request) -> web.StreamResponse:
@@ -7836,7 +7798,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/auto_reply/{reply_id}/toggle", toggle_auto_reply)
     app.router.add_delete("/api/miniapp/auto_reply/{reply_id}", delete_auto_reply)
     # Broadcasts
-    # Алиас: фронт зовёт множественное /broadcasts/schedule (был 404).
     # Channels
     # Campaigns / Funnels
     app.router.add_get("/api/miniapp/campaigns", campaigns)
@@ -7873,7 +7834,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)
     app.router.add_put("/api/miniapp/editorial/policy", editorial_policy_save)
     app.router.add_post("/api/miniapp/editorial/review", editorial_review_draft)
-    app.router.add_post("/api/miniapp/schedule_post", schedule_post)
     # ── Прокси ───────────────────────────────────────────────────────────────
     mini_app_proxies.setup_routes(app, pool)
     mini_app_uch.setup_routes(app, pool)

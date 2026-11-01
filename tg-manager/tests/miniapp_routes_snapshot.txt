@@ -731,7 +731,6 @@ POST /api/miniapp/bots/profile_preview
 POST /api/miniapp/bots/scan_fleet
 POST /api/miniapp/broadcast
 POST /api/miniapp/broadcast/ab_test
-POST /api/miniapp/broadcast/schedule
 POST /api/miniapp/broadcast/{bc_id}/resend
 POST /api/miniapp/broadcasts/schedule
 POST /api/miniapp/campaign/launch
@@ -787,7 +786,6 @@ POST /api/miniapp/crosspost/run
 POST /api/miniapp/devices/revoke
 POST /api/miniapp/dm/adhoc_send
 POST /api/miniapp/dm/preview
-POST /api/miniapp/dm_campaign
 POST /api/miniapp/dm_campaign/{campaign_id}/launch
 POST /api/miniapp/dm_campaign/{campaign_id}/pause
 POST /api/miniapp/dm_campaigns
@@ -915,7 +913,6 @@ POST /api/miniapp/sales/persona/{pid}/promo
 POST /api/miniapp/sales/persona/{pid}/test
 POST /api/miniapp/sales/persona/{pid}/unassign
 POST /api/miniapp/schedule/{sch_id}/cancel
-POST /api/miniapp/schedule_post
 POST /api/miniapp/self_promo/template
 POST /api/miniapp/self_promo/{tpl_id}/launch
 POST /api/miniapp/seo/analyze
