@@ -1071,6 +1071,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     });
   }
 </script>
+<link rel="stylesheet" href="ui_kit.css">
 </head>
 <body>
 <!-- Экран фатальной ошибки старта. Лежит в разметке СТАТИЧЕСКИ: если скрипт
@@ -1098,7 +1099,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen show" id="s-home">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
-    <div class="hdr-title">⚡ Infragram</div>
+    <div class="hdr-title">📊 Итоги</div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
@@ -1106,6 +1107,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
   </div>
   <div class="sb">
+    <!-- 📊 Итоги: результат за 7 дней + «требует внимания» + шесть разделов
+         (screens/summary.js, /api/miniapp/summary). Стоит ПЕРВЫМ: главный
+         экран отвечает на вопрос «что мне это принесло», а состояние флота
+         ниже. -->
+    <div id="summaryWrap"></div>
     <!-- KPI scroll row -->
     <div class="kpi-scroll" id="kpiScroll">
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
@@ -9041,6 +9047,7 @@ async function loadHome() {
   loadOnboarding();
   loadOrganismPulse();
   renderFrequent();
+  if (typeof loadSummary === 'function') loadSummary();
 }
 
 // 🚀 Онбординг: путь новичка от аккаунта до ПЕРВОГО РЕЗУЛЬТАТА
@@ -30067,6 +30074,8 @@ function renderAudSegChart(segments) {
      долг»). Подключаются ПОСЛЕ основного скрипта — используют его глобальные
      хелперы (push/txt/esc/api/toast/empty), которые к этому моменту уже
      определены. -->
+<script src="screens/ui_kit.js"></script>
+<script src="screens/summary.js"></script>
 <script src="screens/spintax.js"></script>
 <script src="screens/cmdcenter.js"></script>
 <script src="screens/dashboard.js"></script>

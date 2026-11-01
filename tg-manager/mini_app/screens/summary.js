@@ -17,26 +17,40 @@ let _SUM_ATT = [];
 
 const _SUM_CUR = { USD: '$', EUR: '€', RUB: '₽', XTR: '⭐' };
 
+// Деньги в разных валютах не складываются: крупным числом показываем основную
+// валюту (больше всего заказов на сумму), остальные — подписью. Изменение к
+// прошлой неделе — тоже по основной валюте: сумма рублей с долларами дала бы
+// бессмысленный процент.
+function _sumMainCur(m) {
+  const e = Object.entries((m && m.by_currency) || {}).filter(([, c]) => c).sort((a, b) => b[1] - a[1]);
+  return e.length ? e[0][0] : null;
+}
+function _sumFmtCur(cur, cents) {
+  const v = UI.num(cents / 100);
+  const s = _SUM_CUR[cur];
+  return s ? s + v : v + ' ' + cur;
+}
 function _sumMoney(m) {
   if (!m) return null;
-  const parts = Object.entries(m.by_currency || {})
-    .filter(([, c]) => c)
-    .sort((a, b) => b[1] - a[1])
-    .map(([cur, cents]) => {
-      const v = UI.num(cents / 100);
-      const s = _SUM_CUR[cur];
-      return s ? s + v : v + ' ' + cur;
-    });
-  if (m.deals_won) parts.push('сделки ' + UI.num(m.deals_value));
-  return parts.length ? parts.slice(0, 2).join(' · ') : '0';
+  const cur = _sumMainCur(m);
+  if (cur) return _sumFmtCur(cur, m.by_currency[cur]);
+  if (m.deals_won) return UI.num(m.deals_value);
+  return '0';
 }
-
+function _sumMoneySub(m) {
+  if (!m) return '';
+  const cur = _sumMainCur(m);
+  const rest = Object.entries(m.by_currency || {}).filter(([c, v]) => v && c !== cur)
+    .map(([c, v]) => '+ ' + _sumFmtCur(c, v));
+  const parts = ['заказов: ' + UI.num(m.orders)];
+  if (m.deals_won) parts.push(cur ? 'сделок: ' + UI.num(m.deals_won) : 'выиграно сделок: ' + UI.num(m.deals_won));
+  return rest.concat(parts).join(' · ');
+}
 function _sumMoneyDelta(m) {
-  if (!m) return null;
-  let cur = 0, prev = 0;
-  Object.values(m.by_currency || {}).forEach(v => { cur += v || 0; });
-  Object.values(m.prev_by_currency || {}).forEach(v => { prev += v || 0; });
-  return prev ? Math.round((cur - prev) * 100 / prev) : null;
+  const cur = _sumMainCur(m);
+  if (!cur) return null;
+  const prev = (m.prev_by_currency || {})[cur] || 0;
+  return prev ? Math.round((m.by_currency[cur] - prev) * 100 / prev) : null;
 }
 
 // Куда ведёт нажатие на показатель. Явный список, а не имя функции из ответа
@@ -100,7 +114,7 @@ function renderSummary(d) {
   const leads = d.leads || {}, replies = d.replies || {}, reach = d.reach || {};
   const statsHtml = UI.stats([
     { ico: '💰', label: 'Деньги', value: _sumMoney(d.money), delta: _sumMoneyDelta(d.money),
-      sub: d.money ? ('заказов: ' + UI.num(d.money.orders)) : '', fn: 'sumOpen', args: ['money'] },
+      sub: _sumMoneySub(d.money), fn: 'sumOpen', args: ['money'] },
     { ico: '🧲', label: 'Лиды', value: leads.value == null ? null : UI.num(leads.value),
       delta: leads.delta_pct, sub: 'новые подписчики ботов', fn: 'sumOpen', args: ['leads'] },
     { ico: '💬', label: 'Ответы', value: replies.value == null ? null : UI.num(replies.value),

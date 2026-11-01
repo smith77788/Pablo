@@ -44,13 +44,13 @@ const UI = (() => {
     const empty = value === null || value === undefined;
     let d = '';
     if (!empty && delta !== null && delta !== undefined && isFinite(delta)) {
-      d = `<span class="${delta >= 0 ? 'ui-up' : 'ui-down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}%</span> к прошлому периоду`;
+      d = `<span class="${delta >= 0 ? 'ui-up' : 'ui-down'}" title="к прошлому периоду той же длины">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}%</span>`;
     }
     const oc = fn ? ` onclick="${call(fn, ...(args || []))}" role="button" tabindex="0"` : '';
     return `<div class="ui-stat"${oc}>` +
       `<div class="ui-stat-lbl">${ico ? `<span>${esc(ico)}</span>` : ''}${esc(label)}</div>` +
       `<div class="ui-stat-val${empty ? ' is-empty' : ''}">${empty ? 'нет данных' : esc(value)}</div>` +
-      `<div class="ui-stat-sub">${d || esc(sub || '')}</div></div>`;
+      `<div class="ui-stat-sub">${[d, esc(sub || '')].filter(Boolean).join(' · ')}</div></div>`;
   }
   function stats(items) { return `<div class="ui-stats">${items.map(stat).join('')}</div>`; }
   // Карточка «требует внимания». Кнопку рисует экран (у него свой обработчик),
