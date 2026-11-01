@@ -42,7 +42,7 @@ def _body_from(pos: int) -> str:
             depth -= 1
             if depth == 0:
                 return HTML[i:j + 1]
-    raise AssertionError(name)
+    raise AssertionError(f"незакрытое тело функции с позиции {pos}")
 
 
 def _handler(name: str) -> str:
