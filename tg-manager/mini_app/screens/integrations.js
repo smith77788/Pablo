@@ -102,7 +102,7 @@ function _igRender(d) {
     h += _igBox('<div><b>Подключено:</b> <code style="word-break:break-all">' + esc(d.sheets.client_email) + '</code></div>' +
       _igHint('Откройте свою таблицу на эту почту с правом <b>редактора</b> — иначе Google не даст в неё писать.') +
       '<div style="display:flex;gap:8px;margin-top:8px">' +
-        '<button class="btn btn-s" style="flex:1" onclick="copyToClipboard(' + esc(JSON.stringify(d.sheets.client_email)) + ')">📋 Почта</button>' +
+        '<button class="btn btn-s" style="flex:1" onclick="igCopySheetsEmail()">📋 Почта</button>' +
         '<button class="btn btn-d" style="flex:1" onclick="igSheetsDisconnect()">Отключить</button>' +
       '</div>', 'ok');
     h += '<div class="field"><label>Ссылка на таблицу</label>' +
@@ -125,6 +125,11 @@ function _igRender(d) {
       '<button class="btn btn-p" style="width:100%;margin-top:8px" onclick="igSheetsConnect()">Подключить</button>');
   }
   return h;
+}
+
+function igCopySheetsEmail() {
+  const em = _igData && _igData.sheets && _igData.sheets.client_email;
+  if (em) copyToClipboard(em);
 }
 
 // ── Ключи ──────────────────────────────────────────────────────────────────
@@ -234,7 +239,7 @@ async function openWebhook(id) {
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const d = await api('/api/miniapp/webhooks/' + id + '/deliveries');
-    body.innerHTML = _igRenderWebhook(d.endpoint, d.deliveries || []);
+    body.innerHTML = _igRenderWebhook(d.endpoint, d.deliveries || [], d.total || 0);
   } catch (e) {
     body.innerHTML = errHtml(errRu(e), 'openWebhook(' + id + ')');
   }
@@ -242,7 +247,7 @@ async function openWebhook(id) {
 
 const _IG_STATUS = { delivered: '✅ доставлено', pending: '⏳ в очереди', failed: '❌ не доставлено', skipped: '⏭ пропущено' };
 
-function _igRenderWebhook(ep, items) {
+function _igRenderWebhook(ep, items, total) {
   let h = '';
   const where = ep.kind === 'sheets'
     ? '📊 Лист «' + esc(ep.sheet_name) + '»'
@@ -260,7 +265,7 @@ function _igRenderWebhook(ep, items) {
   h += '<div class="sec">События</div>' + _igHint('Ничего не отмечено — придут все события.') +
     '<div style="margin-top:6px">' + _igEventChecks(ep.events) + '</div>' +
     '<button class="btn btn-s" style="width:100%;margin:6px 0 10px" onclick="igSaveEvents(' + ep.id + ')">Сохранить события</button>';
-  h += '<div class="sec">Последние доставки</div>';
+  h += '<div class="sec">Последние доставки' + (total > items.length ? ' (' + items.length + ' из ' + total + ')' : '') + '</div>';
   if (!items.length) {
     h += empty('📭', 'Доставок пока не было', 'Как только случится событие, оно появится здесь');
   }
@@ -287,7 +292,8 @@ async function igTestWebhook(id) {
       : _igBox('❌ ' + esc(r.error || 'Не доставлено') + (r.status_code ? ' (код ' + r.status_code + ')' : ''), 'bad');
     if (box) box.innerHTML = html;
   } catch (e) {
-    if (box) box.innerHTML = _igBox('❌ ' + esc(errRu(e)), 'bad');
+    if (box) box.innerHTML = _igBox('❌ ' + esc(errRu(e)) +
+      '<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="igTestWebhook(' + id + ')">Повторить</button>', 'bad');
   }
 }
 
@@ -360,7 +366,8 @@ async function igSheetsCheck() {
       body: JSON.stringify({ spreadsheet: document.getElementById('ig-sheet').value }) });
     res.innerHTML = _igBox('✅ Доступ есть. Листы: ' + esc((r.sheets || []).join(', ') || '—'), 'ok');
   } catch (e) {
-    res.innerHTML = _igBox('❌ ' + esc(errRu(e)), 'bad');
+    res.innerHTML = _igBox('❌ ' + esc(errRu(e)) +
+      '<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="igSheetsCheck()">Повторить</button>', 'bad');
   }
 }
 

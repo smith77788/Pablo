@@ -20,6 +20,9 @@ def _api_base(request: web.Request) -> str:
     return f"{proto}://{host}/api/v1"
 
 
+_DELIVERY_PAGE = 100
+
+
 def setup_routes(app: web.Application, pool) -> None:
     from services import api_keys as _keys
     from services import google_sheets as _gs
@@ -223,11 +226,16 @@ def setup_routes(app: web.Application, pool) -> None:
             ep = await _wh.get_endpoint(pool, uid, wh_id)
             if not ep:
                 return _err("Получатель не найден", 404)
-            items = await _wh.list_deliveries(pool, uid, wh_id)
+            # Журнал — последние доставки, а не вся история (её чистит
+            # prune через 14 дней): экран показывает, сколько всего, чтобы
+            # обрезка не выглядела полной лентой.
+            items = await _wh.list_deliveries(pool, uid, wh_id, limit=_DELIVERY_PAGE)
+            total = await _wh.count_deliveries(pool, uid, wh_id)
         except Exception:
             log.exception("webhook_deliveries uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"endpoint": ep, "deliveries": items})
+        return _json_resp({"endpoint": ep, "deliveries": items, "total": total,
+                           "limit": _DELIVERY_PAGE})
 
     async def webhook_redeliver(request):
         uid = _get_uid(request)

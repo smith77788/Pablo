@@ -325,6 +325,12 @@ async def list_deliveries(pool, owner_id: int, endpoint_id: int, limit: int = 50
     return out
 
 
+async def count_deliveries(pool, owner_id: int, endpoint_id: int) -> int:
+    return int(await pool.fetchval(
+        "SELECT COUNT(*) FROM webhook_deliveries WHERE endpoint_id=$1 AND owner_id=$2",
+        endpoint_id, owner_id) or 0)
+
+
 async def redeliver(pool, owner_id: int, delivery_id: int) -> bool:
     """Повторить доставку (из журнала) — сразу, с новым счётом попыток."""
     res = await pool.execute(
