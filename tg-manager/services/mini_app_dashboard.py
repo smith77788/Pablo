@@ -24,7 +24,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import account_status as _acc_status
     from services.mini_app_api import (
         _cached_user, _dashboard_query, _err, _get_uid, _json_resp,
-        _resolve_best_plan, _safe_fetch, _safe_fetchrow, _safe_fetchval, _stats,
+        _resolve_best_plan, _safe_fetch, _safe_fetchrow, _stats,
         _wants_platform_scope, account_health_summary, log, op_status,
     )
 
@@ -273,214 +273,230 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
 
-        items: list[dict] = []
-
-        def add(kind, sev, title, detail, count, action=None):
-            it = {"kind": kind, "severity": sev, "title": title,
-                  "detail": detail, "count": int(count)}
-            if action:
-                it["action"] = action
-            items.append(it)
-
-        # ── Операции, которые упали ────────────────────────────────────────
-        try:
-            rows = await _safe_fetch(pool,
-                "SELECT id, op_type, label, "
-                f"{op_status.sql_error_reason()} AS last_error, finished_at "
-                "FROM operation_queue WHERE owner_id=$1 AND status='failed' "
-                "  AND COALESCE(finished_at, created_at) > NOW() - INTERVAL '7 days' "
-                "ORDER BY COALESCE(finished_at, created_at) DESC LIMIT 5", uid)
-            if rows:
-                n = int(await _safe_fetchval(pool,
-                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 "
-                    "AND status='failed' AND COALESCE(finished_at, created_at) "
-                    "> NOW() - INTERVAL '7 days'", uid) or len(rows))
-                first = rows[0]
-                add("ops_failed", "high",
-                    f"Операций упало за неделю: {n}",
-                    (first["label"] or first["op_type"] or "операция")
-                    + (f" — {str(first['last_error'])[:90]}" if first["last_error"] else ""),
-                    n,
-                    {"label": "↻ Повторить последнюю",
-                     "endpoint": f"/api/miniapp/operation/{int(first['id'])}/retry",
-                     "method": "POST", "reload": True})
-        except Exception:
-            log.warning("attention: ops_failed", exc_info=True)
-
-        # ── Очередь вообще не разбирается ──────────────────────────────────
-        # Отдельная карточка от «застрявших в работе»: там операция идёт слишком
-        # долго, здесь её никто не начинал. Пока исполнитель операций не работает,
-        # экран показывал ровно «ожидает» — без причины и без срока, то есть
-        # владелец не мог отличить нормальную очередь от остановленного продукта.
-        # Карточка НАМЕРЕННО без кнопки: изнутри мини-аппа поднять исполнителя
-        # нельзя, а «поставить очередь на паузу» здесь было бы прямо во вред.
-        try:
-            from services import operation_bus as _obus_att
-
-            _frozen_att = await _obus_att.queue_frozen(pool)
-            if _frozen_att and int(_frozen_att.get("owners", {}).get(uid, 0)) > 0:
-                _n_att = int(_frozen_att["owners"][uid])
-                add("ops_frozen", "high",
-                    f"Операции не запускаются: {_n_att}",
-                    f"Самая старая ждёт {int(_frozen_att.get('oldest_min') or 0)} мин, "
-                    "а исполнитель операций не отвечает. Очередь не потеряна — "
-                    "операции стартуют сами, как только он заработает.",
-                    _n_att)
-        except Exception:
-            log.warning("attention: ops_frozen", exc_info=True)
-
-        # ── Операции, застрявшие в работе ──────────────────────────────────
-        # Порог — СОБСТВЕННЫЙ потолок прогона операции (op_worker.stuck_after_s),
-        # а не плоские два часа, и выполняющиеся прямо сейчас операции
-        # исключаются. Плоский порог был вдвое-втрое меньше разрешённого прогона
-        # (потолок 6 часов), поэтому здоровый массовый инвайт с пейсингом на часы
-        # поднимал эту карточку — да ещё с кнопкой «поставить очередь на паузу»,
-        # то есть владельца прямо подталкивали остановить работающую операцию.
-        try:
-            import datetime as _dt_att
-
-            from services import op_worker as _ow_att
-
-            try:
-                _active_att = await _ow_att.active_op_ids()
-            except Exception:
-                _active_att = frozenset()
-            _rows_att = await _safe_fetch(pool,
-                "SELECT id, op_type, started_at FROM operation_queue "
-                "WHERE owner_id=$1 AND status='running' AND started_at IS NOT NULL",
-                uid) or []
-            _now_att = _dt_att.datetime.now(_dt_att.timezone.utc)
-            n = 0
-            for _r_att in _rows_att:
-                if int(_r_att["id"]) in _active_att:
-                    continue
-                _st_att = _r_att["started_at"]
-                if _st_att.tzinfo is None:
-                    _st_att = _st_att.replace(tzinfo=_dt_att.timezone.utc)
-                if (_now_att - _st_att).total_seconds() >= _ow_att.stuck_after_s(
-                        _r_att["op_type"]):
-                    n += 1
-            if n:
-                add("ops_stuck", "high",
-                    f"Операций работает дольше отведённого времени: {n}",
-                    "Обычно это оборванная сессия или недоступный Telegram. "
-                    "Пауза остановит очередь, не теряя прогресс.",
-                    n,
-                    {"label": "⏸ Поставить очередь на паузу",
-                     "endpoint": "/api/miniapp/operations/pause",
-                     "method": "POST", "reload": True})
-        except Exception:
-            log.warning("attention: ops_stuck", exc_info=True)
-
-        # ── Мёртвые прокси ─────────────────────────────────────────────────
-        try:
-            row = await _safe_fetchrow(pool,
-                "SELECT COUNT(*) AS dead, "
-                "  (SELECT COUNT(*) FROM tg_accounts a JOIN user_proxies p ON p.id=a.proxy_id "
-                "   WHERE a.owner_id=$1 AND a.is_active AND p.is_alive=FALSE) AS stranded "
-                "FROM user_proxies WHERE owner_id=$1 AND is_alive=FALSE", uid)
-            dead = int(row["dead"]) if row else 0
-            stranded = int(row["stranded"]) if row else 0
-            if dead:
-                add("proxy_dead", "high" if stranded else "medium",
-                    f"Мёртвых прокси: {dead}",
-                    (f"На них сидит аккаунтов: {stranded}. Пока прокси мёртв, "
-                     "аккаунт не работает и выглядит сломанным."
-                     if stranded else "Аккаунтов на них нет — можно просто убрать."),
-                    dead,
-                    {"label": "🚚 Переселить аккаунты" if stranded else "🧹 Убрать мёртвые",
-                     "endpoint": "/api/miniapp/proxy/evacuate" if stranded
-                                 else "/api/miniapp/proxy/cleanup_dead",
-                     "method": "POST", "reload": True})
-        except Exception:
-            log.warning("attention: proxy_dead", exc_info=True)
-
-        # ── Активные аккаунты вообще без прокси ────────────────────────────
-        try:
-            n = int(await _safe_fetchval(pool,
-                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active "
-                "AND proxy_id IS NULL", uid) or 0)
-            if n:
-                add("acc_no_proxy", "medium",
-                    f"Аккаунтов без прокси: {n}",
-                    "Они выходят с общего адреса сервера. Для флота это самый "
-                    "заметный признак связки аккаунтов между собой.",
-                    n,
-                    {"label": "🔀 Раздать прокси",
-                     "endpoint": "/api/miniapp/proxy/rotate",
-                     "method": "POST", "reload": True})
-        except Exception:
-            log.warning("attention: acc_no_proxy", exc_info=True)
-
-        # ── Карантин по единому пульсу здоровья ────────────────────────────
-        try:
-            summ = await _account_health_summary(uid)
-            q = int(summ.get("quarantine") or 0)
-            risk = int(summ.get("at_risk") or 0)
-            if q or risk:
-                add("acc_health", "high" if q else "medium",
-                    f"В карантине: {q} · под риском: {risk}",
-                    "Пульс сводит ограничения, флуд и доверие в один сигнал. "
-                    "Операции такие аккаунты пропускают.",
-                    q + risk,
-                    {"label": "❤️ Открыть здоровье", "screen": "health"})
-        except Exception:
-            log.warning("attention: acc_health", exc_info=True)
-
-        # ── Молчащие боты (schema_v198) ────────────────────────────────────
-        try:
-            n = int(await _safe_fetchval(pool,
-                "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
-                "AND COALESCE(fail_streak,0) > 0", uid) or 0)
-            if n:
-                add("bots_silent", "high",
-                    f"Ботов не отвечают: {n}",
-                    "Подписчики пишут, бот молчит. Чаще всего отозван токен — "
-                    "его можно заменить, не теряя аудиторию.",
-                    n,
-                    {"label": "🤖 Открыть ботов", "screen": "bots"})
-        except Exception:
-            log.warning("attention: bots_silent", exc_info=True)
-
-        # ── Аккаунты на восстановлении ─────────────────────────────────────
-        try:
-            n = int(await _safe_fetchval(pool,
-                "SELECT COUNT(*) FROM account_rehab_state WHERE owner_id=$1 "
-                "AND phase IN ('appeal','warming','recheck')", uid) or 0)
-            if n:
-                add("acc_rehab", "info",
-                    f"Восстанавливается аккаунтов: {n}",
-                    "Апелляция, прогрев и перепроверка идут сами. "
-                    "Вмешательство не нужно — это статус, а не поломка.",
-                    n)
-        except Exception:
-            log.warning("attention: acc_rehab", exc_info=True)
-
-        # ── Каналы без числа участников ────────────────────────────────────
-        try:
-            n = int(await _safe_fetchval(pool,
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 "
-                "AND COALESCE(members_count,0) = 0", uid) or 0)
-            if n:
-                add("ch_stale", "info",
-                    f"Каналов без данных: {n}",
-                    "Имя, ссылка и число участников подтягиваются из Telegram. "
-                    "Если канал меняли не через Infragram — обновите список.",
-                    n,
-                    {"label": "🔄 Обновить каналы",
-                     "endpoint": "/api/miniapp/channels/reclassify",
-                     "method": "POST", "body": {"prune": False}, "reload": True})
-        except Exception:
-            log.warning("attention: ch_stale", exc_info=True)
-
-        _order = {"high": 0, "medium": 1, "info": 2}
-        items.sort(key=lambda i: (_order.get(i["severity"], 3), -i["count"]))
-        return _json_resp({
-            "items": items,
-            "high": sum(1 for i in items if i["severity"] == "high"),
-            "total": len(items),
-        })
+        return _json_resp(await attention_items(pool, uid))
 
     app.router.add_get("/api/miniapp/dashboard", dashboard)
     app.router.add_get("/api/miniapp/dashboard/visual", dashboard_visual)
     app.router.add_get("/api/miniapp/dashboard/attention", dashboard_attention)
+
+
+async def attention_items(pool, uid: int) -> dict:
+    """Список «что требует внимания» владельца — без HTTP.
+
+    Тело перенесено из обработчика `/api/miniapp/dashboard/attention` как
+    есть: его читают и этот маршрут, и экран «Итоги» (`results_summary`), и
+    сводка в боте. Один источник — чтобы бот и мини-апп не расходились в том,
+    что считать проблемой.
+    """
+    from services import op_status
+    from services.mini_app_api import (
+        _safe_fetch, _safe_fetchrow, _safe_fetchval, account_health_summary, log,
+    )
+
+    items: list[dict] = []
+
+    def add(kind, sev, title, detail, count, action=None):
+        it = {"kind": kind, "severity": sev, "title": title,
+              "detail": detail, "count": int(count)}
+        if action:
+            it["action"] = action
+        items.append(it)
+
+    # ── Операции, которые упали ────────────────────────────────────────
+    try:
+        rows = await _safe_fetch(pool,
+            "SELECT id, op_type, label, "
+            f"{op_status.sql_error_reason()} AS last_error, finished_at "
+            "FROM operation_queue WHERE owner_id=$1 AND status='failed' "
+            "  AND COALESCE(finished_at, created_at) > NOW() - INTERVAL '7 days' "
+            "ORDER BY COALESCE(finished_at, created_at) DESC LIMIT 5", uid)
+        if rows:
+            n = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 "
+                "AND status='failed' AND COALESCE(finished_at, created_at) "
+                "> NOW() - INTERVAL '7 days'", uid) or len(rows))
+            first = rows[0]
+            add("ops_failed", "high",
+                f"Операций упало за неделю: {n}",
+                (first["label"] or first["op_type"] or "операция")
+                + (f" — {str(first['last_error'])[:90]}" if first["last_error"] else ""),
+                n,
+                {"label": "↻ Повторить последнюю",
+                 "endpoint": f"/api/miniapp/operation/{int(first['id'])}/retry",
+                 "method": "POST", "reload": True})
+    except Exception:
+        log.warning("attention: ops_failed", exc_info=True)
+
+    # ── Очередь вообще не разбирается ──────────────────────────────────
+    # Отдельная карточка от «застрявших в работе»: там операция идёт слишком
+    # долго, здесь её никто не начинал. Пока исполнитель операций не работает,
+    # экран показывал ровно «ожидает» — без причины и без срока, то есть
+    # владелец не мог отличить нормальную очередь от остановленного продукта.
+    # Карточка НАМЕРЕННО без кнопки: изнутри мини-аппа поднять исполнителя
+    # нельзя, а «поставить очередь на паузу» здесь было бы прямо во вред.
+    try:
+        from services import operation_bus as _obus_att
+
+        _frozen_att = await _obus_att.queue_frozen(pool)
+        if _frozen_att and int(_frozen_att.get("owners", {}).get(uid, 0)) > 0:
+            _n_att = int(_frozen_att["owners"][uid])
+            add("ops_frozen", "high",
+                f"Операции не запускаются: {_n_att}",
+                f"Самая старая ждёт {int(_frozen_att.get('oldest_min') or 0)} мин, "
+                "а исполнитель операций не отвечает. Очередь не потеряна — "
+                "операции стартуют сами, как только он заработает.",
+                _n_att)
+    except Exception:
+        log.warning("attention: ops_frozen", exc_info=True)
+
+    # ── Операции, застрявшие в работе ──────────────────────────────────
+    # Порог — СОБСТВЕННЫЙ потолок прогона операции (op_worker.stuck_after_s),
+    # а не плоские два часа, и выполняющиеся прямо сейчас операции
+    # исключаются. Плоский порог был вдвое-втрое меньше разрешённого прогона
+    # (потолок 6 часов), поэтому здоровый массовый инвайт с пейсингом на часы
+    # поднимал эту карточку — да ещё с кнопкой «поставить очередь на паузу»,
+    # то есть владельца прямо подталкивали остановить работающую операцию.
+    try:
+        import datetime as _dt_att
+
+        from services import op_worker as _ow_att
+
+        try:
+            _active_att = await _ow_att.active_op_ids()
+        except Exception:
+            _active_att = frozenset()
+        _rows_att = await _safe_fetch(pool,
+            "SELECT id, op_type, started_at FROM operation_queue "
+            "WHERE owner_id=$1 AND status='running' AND started_at IS NOT NULL",
+            uid) or []
+        _now_att = _dt_att.datetime.now(_dt_att.timezone.utc)
+        n = 0
+        for _r_att in _rows_att:
+            if int(_r_att["id"]) in _active_att:
+                continue
+            _st_att = _r_att["started_at"]
+            if _st_att.tzinfo is None:
+                _st_att = _st_att.replace(tzinfo=_dt_att.timezone.utc)
+            if (_now_att - _st_att).total_seconds() >= _ow_att.stuck_after_s(
+                    _r_att["op_type"]):
+                n += 1
+        if n:
+            add("ops_stuck", "high",
+                f"Операций работает дольше отведённого времени: {n}",
+                "Обычно это оборванная сессия или недоступный Telegram. "
+                "Пауза остановит очередь, не теряя прогресс.",
+                n,
+                {"label": "⏸ Поставить очередь на паузу",
+                 "endpoint": "/api/miniapp/operations/pause",
+                 "method": "POST", "reload": True})
+    except Exception:
+        log.warning("attention: ops_stuck", exc_info=True)
+
+    # ── Мёртвые прокси ─────────────────────────────────────────────────
+    try:
+        row = await _safe_fetchrow(pool,
+            "SELECT COUNT(*) AS dead, "
+            "  (SELECT COUNT(*) FROM tg_accounts a JOIN user_proxies p ON p.id=a.proxy_id "
+            "   WHERE a.owner_id=$1 AND a.is_active AND p.is_alive=FALSE) AS stranded "
+            "FROM user_proxies WHERE owner_id=$1 AND is_alive=FALSE", uid)
+        dead = int(row["dead"]) if row else 0
+        stranded = int(row["stranded"]) if row else 0
+        if dead:
+            add("proxy_dead", "high" if stranded else "medium",
+                f"Мёртвых прокси: {dead}",
+                (f"На них сидит аккаунтов: {stranded}. Пока прокси мёртв, "
+                 "аккаунт не работает и выглядит сломанным."
+                 if stranded else "Аккаунтов на них нет — можно просто убрать."),
+                dead,
+                {"label": "🚚 Переселить аккаунты" if stranded else "🧹 Убрать мёртвые",
+                 "endpoint": "/api/miniapp/proxy/evacuate" if stranded
+                             else "/api/miniapp/proxy/cleanup_dead",
+                 "method": "POST", "reload": True})
+    except Exception:
+        log.warning("attention: proxy_dead", exc_info=True)
+
+    # ── Активные аккаунты вообще без прокси ────────────────────────────
+    try:
+        n = int(await _safe_fetchval(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active "
+            "AND proxy_id IS NULL", uid) or 0)
+        if n:
+            add("acc_no_proxy", "medium",
+                f"Аккаунтов без прокси: {n}",
+                "Они выходят с общего адреса сервера. Для флота это самый "
+                "заметный признак связки аккаунтов между собой.",
+                n,
+                {"label": "🔀 Раздать прокси",
+                 "endpoint": "/api/miniapp/proxy/rotate",
+                 "method": "POST", "reload": True})
+    except Exception:
+        log.warning("attention: acc_no_proxy", exc_info=True)
+
+    # ── Карантин по единому пульсу здоровья ────────────────────────────
+    try:
+        summ = await account_health_summary(pool, uid)
+        q = int(summ.get("quarantine") or 0)
+        risk = int(summ.get("at_risk") or 0)
+        if q or risk:
+            add("acc_health", "high" if q else "medium",
+                f"В карантине: {q} · под риском: {risk}",
+                "Пульс сводит ограничения, флуд и доверие в один сигнал. "
+                "Операции такие аккаунты пропускают.",
+                q + risk,
+                {"label": "❤️ Открыть здоровье", "screen": "health"})
+    except Exception:
+        log.warning("attention: acc_health", exc_info=True)
+
+    # ── Молчащие боты (schema_v198) ────────────────────────────────────
+    try:
+        n = int(await _safe_fetchval(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
+            "AND COALESCE(fail_streak,0) > 0", uid) or 0)
+        if n:
+            add("bots_silent", "high",
+                f"Ботов не отвечают: {n}",
+                "Подписчики пишут, бот молчит. Чаще всего отозван токен — "
+                "его можно заменить, не теряя аудиторию.",
+                n,
+                {"label": "🤖 Открыть ботов", "screen": "bots"})
+    except Exception:
+        log.warning("attention: bots_silent", exc_info=True)
+
+    # ── Аккаунты на восстановлении ─────────────────────────────────────
+    try:
+        n = int(await _safe_fetchval(pool,
+            "SELECT COUNT(*) FROM account_rehab_state WHERE owner_id=$1 "
+            "AND phase IN ('appeal','warming','recheck')", uid) or 0)
+        if n:
+            add("acc_rehab", "info",
+                f"Восстанавливается аккаунтов: {n}",
+                "Апелляция, прогрев и перепроверка идут сами. "
+                "Вмешательство не нужно — это статус, а не поломка.",
+                n)
+    except Exception:
+        log.warning("attention: acc_rehab", exc_info=True)
+
+    # ── Каналы без числа участников ────────────────────────────────────
+    try:
+        n = int(await _safe_fetchval(pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 "
+            "AND COALESCE(members_count,0) = 0", uid) or 0)
+        if n:
+            add("ch_stale", "info",
+                f"Каналов без данных: {n}",
+                "Имя, ссылка и число участников подтягиваются из Telegram. "
+                "Если канал меняли не через Infragram — обновите список.",
+                n,
+                {"label": "🔄 Обновить каналы",
+                 "endpoint": "/api/miniapp/channels/reclassify",
+                 "method": "POST", "body": {"prune": False}, "reload": True})
+    except Exception:
+        log.warning("attention: ch_stale", exc_info=True)
+
+    _order = {"high": 0, "medium": 1, "info": 2}
+    items.sort(key=lambda i: (_order.get(i["severity"], 3), -i["count"]))
+    return {
+        "items": items,
+        "high": sum(1 for i in items if i["severity"] == "high"),
+        "total": len(items),
+    }
