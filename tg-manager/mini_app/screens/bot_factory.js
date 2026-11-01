@@ -38,7 +38,8 @@ async function openBotFactory() {
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего ботов</div></div>
       <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active,'green')}">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
     `);
-    txt('m-botfactory-val',`${d.total||0} ботов · ${d.active||0} активных`);
+    { const _v=`${d.total||0} ботов · ${d.active||0} активных`;
+      txt('m-botfactory-val',_v); txt('m-botfactory-val-2',_v); }
     const recent = d.recent||[];
     txt('botFactoryRecent', recent.length ? recent.map(b=>`
       <div class="row">
