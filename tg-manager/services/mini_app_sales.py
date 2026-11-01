@@ -429,6 +429,64 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не найдено", 404)
         return _json_resp({"ok": True, "order": r})
 
+    # ── Качество ответов ИИ: журнал, оценка владельца, сводка и расход ──────
+    from services import ai_gateway as _gw
+    from services import ai_quality as _aq
+
+    async def ai_journal(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        only = request.rel_url.query.get("only") or None
+        if only not in (None, "bad", "guard"):
+            return _err("Фильтр журнала: bad, guard или без фильтра", 400)
+        page = await _aq.list_replies(pool, uid, limit=_list_limit(request, 30, 100),
+                                      offset=_list_offset(request), only=only)
+        return _json_resp(page)
+
+    async def ai_journal_rate(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rid = int(request.match_info["rid"])
+            d = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        rating = d.get("rating") if isinstance(d, dict) else "нет"
+        if rating not in (1, -1, None):
+            return _err("Оценка: 1 — хорошо, -1 — плохо, пусто — снять", 400)
+        if not await _aq.rate_reply(pool, uid, rid, rating):
+            return _err("Не найдено", 404)
+        return _json_resp({"ok": True, "id": rid, "rating": rating})
+
+    async def ai_quality(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            days = int(request.rel_url.query.get("days") or 7)
+        except ValueError:
+            return _err("Период в днях — целое число", 400)
+        return _json_resp(await _aq.summary(pool, uid, days=days))
+
+    async def ai_usage(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            days = int(request.rel_url.query.get("days") or 30)
+        except ValueError:
+            return _err("Период в днях — целое число", 400)
+        rows = await _gw.owner_usage(pool, uid, days=days)
+        for r in rows:
+            r["day"] = r["day"].isoformat()
+        return _json_resp({"days": rows})
+
+    app.router.add_get("/api/miniapp/sales/ai-journal", ai_journal)
+    app.router.add_post("/api/miniapp/sales/ai-journal/{rid}/rate", ai_journal_rate)
+    app.router.add_get("/api/miniapp/sales/ai-quality", ai_quality)
+    app.router.add_get("/api/miniapp/sales/ai-usage", ai_usage)
     app.router.add_get("/api/miniapp/sales/personas", sp_list)
     app.router.add_post("/api/miniapp/sales/persona", sp_create)
     app.router.add_get("/api/miniapp/sales/persona/{pid}", sp_detail)
