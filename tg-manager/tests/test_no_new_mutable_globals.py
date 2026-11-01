@@ -163,6 +163,12 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/error_reporting.py:_default_reporter": "синглтон процесса",
     "services/managed_bot_webhooks.py:_queues": "asyncio.Queue",
     "services/op_worker.py:_active_op_ids": "операции, выполняемые ЭТИМ процессом",
+    "services/op_worker.py:_owner_semaphores": (
+        "местная подстраховка потолка параллельности на владельца. Сам потолок "
+        "держит SQL поллера (owner_running считает 'running' по ВСЕЙ очереди, "
+        "то есть по всем процессам) — семафор только блокирует и пропустить "
+        "лишнее не может. Раньше числился в KNOWN_DIVERGENCE как «N× по "
+        "репликам», но после переноса гейта в SQL это уже неправда"),
     "services/op_worker.py:_declared_pause_until": (
         "дедлайны ОСОЗНАННЫХ пауз прогона: их объявляет пауза, читает сторож "
         "застоя, и оба живут в одном процессе с самой задачей операции. "
@@ -181,7 +187,10 @@ PROCESS_LOCAL: dict[str, str] = {
         "это ровно то, что нужно"),
     "services/op_circuit_breaker.py:_db_pool": "пул asyncpg привязан к циклу событий",
     "services/organism/spine.py:_SUBS": "подписчики внутрипроцессной шины",
-    "services/pacing_engine.py:_engine": "синглтон процесса",
+    "services/pacing_engine.py:_engine": (
+        "синглтон процесса; окно решений собирается из fleet_pacing_events "
+        "всех процессов (services/pacing_store.py), в памяти — очередь записи "
+        "и последнее прочитанное окно"),
     "services/relay.py:_offsets": "offset getUpdates: один бот опрашивает один процесс",
     "services/session_pool.py:_check_lock": "asyncio.Lock",
     "services/session_pool.py:_registry": "живые клиенты Telethon — объекты процесса",
@@ -256,6 +265,12 @@ DB_BACKED: dict[str, str] = {
     "services/infra_copilot.py:_snooze_until": "platform_settings, перечитывается циклом",
     "services/flood_engine.py:_flood_state": "гидрируется из БД на старте операции",
     "services/flood_engine.py:_hydrated": "отметка «уже гидрировали» для _flood_state",
+    "services/flood_engine.py:_hydrated_at": (
+        "когда аккаунт гидрировали: состояние перечитывается из базы не реже "
+        "раза в минуту, чтобы аккаунт после соседнего процесса пришёл свежим"),
+    "services/flood_engine.py:_dirty": (
+        "очередь записи обучаемого состояния в account_pacing_state "
+        "(services/pacing_store.py), как _dirty_account_keys у infra_memory"),
     "services/infra_memory.py:_account_memory": "infra_memory_accounts, флаш приростом",
     "services/infra_memory.py:_proxy_memory": "infra_memory_proxies, флаш приростом",
     "services/infra_memory.py:_dirty_account_keys": "очередь флаша",
@@ -269,8 +284,6 @@ KNOWN_DIVERGENCE: dict[str, str] = {
     "services/recovery_engine.py:_last_account_recovery":
         "троттл восстановления: реплики могут повторить попытку",
     "services/recovery_engine.py:_last_proxy_recovery": "то же для прокси",
-    "services/op_worker.py:_owner_semaphores":
-        "потолок параллельности на владельца считается в каждом процессе → N×",
     "services/auto_responder.py:_cycle_rule_counts": "лимит срабатываний правила за круг → N×",
     "services/auto_responder.py:_dead_token_cooldown": "пауза по мёртвому токену → повторные попытки",
     "services/chat_guard.py:_FLOOD": "антифлуд чата считается по процессу → порог мягче",
@@ -337,7 +350,7 @@ def test_no_duplicate_classification():
 
 def test_known_divergence_does_not_grow():
     """Принятый долг не должен расти: новое состояние с ценой — сразу в БД."""
-    assert len(KNOWN_DIVERGENCE) <= 16, (
+    assert len(KNOWN_DIVERGENCE) <= 15, (
         f"список принятых расхождений вырос до {len(KNOWN_DIVERGENCE)}. "
         "Это не место для новых записей — выносите состояние в БД. "
         "Уменьшили список? Опустите и порог, чтобы храповик не откатывался."

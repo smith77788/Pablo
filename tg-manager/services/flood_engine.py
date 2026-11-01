@@ -122,6 +122,57 @@ def get_account_state(account_id: int) -> _AccountFloodState:
 # БД повторно на каждый вызов операции.
 _hydrated: set[int] = set()
 
+# Когда аккаунт гидрировали в последний раз (monotonic). Гидрация больше не
+# разовая: аккаунт, которым только что работал ДРУГОЙ процесс (соседний
+# исполнитель, или этот же до рестарта), приходит сюда со свежим состоянием в
+# базе, и прочитанное час назад уже неправда. Чаще срока не перечитываем —
+# hydrate_states зовётся на старте каждой операции.
+_HYDRATE_TTL_S = 60.0
+_hydrated_at: dict[int, float] = {}
+
+# Аккаунты, чьё обучаемое состояние (серия флудов, риск, выученные паузы)
+# изменилось и ещё не записано в account_pacing_state. Пишет его
+# services/pacing_store.py: раньше это состояние жило только в памяти и
+# пропадало на каждом деплое, а второй процесс его не видел вовсе.
+_dirty: set[int] = set()
+
+
+def _mark_dirty(account_id: int) -> None:
+    try:
+        _dirty.add(int(account_id))
+    except (TypeError, ValueError):
+        pass
+
+
+def drain_dirty_states() -> list[dict]:
+    """Снять изменённые состояния для записи в базу (и очистить отметки).
+
+    Время последнего флуда отдаётся «сколько секунд назад»: в памяти оно на
+    monotonic-часах процесса, которые другому процессу ничего не скажут.
+    """
+    ids = list(_dirty)
+    _dirty.clear()
+    now = time.monotonic()
+    out = []
+    for aid in ids:
+        st = _flood_state.get(aid)
+        if st is None:
+            continue
+        out.append({
+            "account_id": aid,
+            "consecutive_floods": int(st.consecutive_floods),
+            "risk_score": float(st.risk_score),
+            "action_delays": dict(st.action_delays),
+            "flood_ago_s": (now - st.last_flood_at) if st.last_flood_at else None,
+        })
+    return out
+
+
+def requeue_dirty(account_ids) -> None:
+    """Вернуть отметки, если запись в базу не удалась."""
+    for aid in account_ids:
+        _mark_dirty(aid)
+
 
 async def hydrate_states(pool, account_ids) -> int:
     """Восстановить in-memory flood-state из ДОЛГОВЕЧНЫХ полей БД после рестарта.
@@ -135,10 +186,12 @@ async def hydrate_states(pool, account_ids) -> int:
     """
     if not pool or not account_ids:
         return 0
-    ids = [int(a) for a in account_ids if int(a) not in _hydrated]
+    now_mono = time.monotonic()
+    ids = [int(a) for a in account_ids
+           if int(a) not in _hydrated
+           or now_mono - _hydrated_at.get(int(a), 0.0) > _HYDRATE_TTL_S]
     if not ids:
         return 0
-    now_mono = time.monotonic()
     try:
         rows = await pool.fetch(
             "SELECT id, EXTRACT(EPOCH FROM (cooldown_until - NOW())) AS cd_left "
@@ -165,7 +218,49 @@ async def hydrate_states(pool, account_ids) -> int:
             st.risk_score = min(1.0, max(st.risk_score, 0.15 * n))
     except Exception as e:
         log_exc_swallow(log, f"flood_engine.hydrate_states log read: {e}")
+    # Обучаемое состояние — общее для всех процессов (account_pacing_state).
+    # Своё незаписанное (_dirty) свежее базы: его не затираем, а берём
+    # строжайшее. Остальное база знает лучше — там последняя запись того
+    # процесса, который работал аккаунтом последним, включая снижение риска
+    # после успешных действий.
+    try:
+        prow = await pool.fetch(
+            "SELECT account_id, consecutive_floods, risk_score, action_delays, "
+            "EXTRACT(EPOCH FROM (NOW() - last_flood_at)) AS flood_ago "
+            "FROM account_pacing_state WHERE account_id = ANY($1::bigint[])", ids)
+        for r in prow:
+            aid = int(r["account_id"])
+            st = get_account_state(aid)
+            delays = r["action_delays"]
+            if isinstance(delays, str):
+                import json as _json
+                try:
+                    delays = _json.loads(delays)
+                except ValueError:
+                    delays = {}
+            delays = {str(k): float(v) for k, v in (delays or {}).items()}
+            ago = r["flood_ago"]
+            db_last = (now_mono - float(ago)) if ago is not None else 0.0
+            if aid in _dirty:
+                st.consecutive_floods = max(st.consecutive_floods,
+                                            int(r["consecutive_floods"] or 0))
+                st.risk_score = max(st.risk_score, float(r["risk_score"] or 0.0))
+                for k, v in delays.items():
+                    st.action_delays[k] = max(st.action_delays.get(k, 0.0), v)
+                st.last_flood_at = max(st.last_flood_at, db_last)
+            else:
+                st.consecutive_floods = int(r["consecutive_floods"] or 0)
+                # риск по суткам флудов (выше) — нижняя граница: база не
+                # может «простить» флуды, которые лежат в журнале
+                st.risk_score = max(float(r["risk_score"] or 0.0),
+                                    min(1.0, 0.15 * st.total_floods_24h))
+                st.action_delays = delays
+                st.last_flood_at = db_last
+    except Exception as e:
+        log_exc_swallow(log, f"flood_engine.hydrate_states pacing read: {e}")
     _hydrated.update(ids)
+    for aid in ids:
+        _hydrated_at[aid] = now_mono
     return len(ids)
 
 
@@ -658,7 +753,10 @@ def _decayed_flood_penalty(state) -> tuple[float, float]:
     истекает сам). last_flood_at — monotonic (см. record_flood)."""
     risk = state.risk_score
     floods = state.consecutive_floods
-    if state.last_flood_at > 0 and (risk > 0 or floods > 0):
+    # `!= 0`, а не `> 0`: время флуда, поднятое из базы (account_pacing_state),
+    # переводится на monotonic-часы этого процесса и для флуда старше
+    # аптайма отрицательно. С `> 0` такой штраф не затухал бы никогда.
+    if state.last_flood_at != 0 and (risk > 0 or floods > 0):
         age = time.monotonic() - state.last_flood_at
         if age > 0:
             import math
@@ -771,6 +869,7 @@ async def record_flood(
     state.consecutive_floods += 1
     state.total_floods_24h += 1
     state.last_flood_at = now
+    _mark_dirty(account_id)
 
     # Exponential backoff: base wait + consecutive penalty
     penalty = min(state.consecutive_floods * 30, 300)  # up to +5 min penalty
@@ -1022,6 +1121,7 @@ async def apply_post_action_cooldown(
 async def record_success(account_id: int, action_type: str = "default") -> None:
     """Record a successful action — gradually reduce risk score and action delay."""
     state = get_account_state(account_id)
+    _mark_dirty(account_id)
     # Decay risk score on success
     state.risk_score = max(0.0, state.risk_score - 0.05)
     state.consecutive_floods = max(0, state.consecutive_floods - 1)

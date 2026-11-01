@@ -39,6 +39,9 @@ _RETENTION: list[tuple[str, str, str]] = [
     # нельзя, см. _prune_operation_log (на журнале стоит идемпотентность повтора).
     ("restriction_events", "created_at", "90 days"),
     ("account_flood_log", "created_at", "30 days"),
+    # Окно темпа флота: решения смотрят на последнюю сотню строк, двое суток —
+    # с запасом на разбор после инцидента (services/pacing_store.py).
+    ("fleet_pacing_events", "created_at", "2 days"),
     ("search_rankings", "checked_at", "90 days"),
     ("search_snapshots", "captured_at", "14 days"),
     # EPOCH VI tables
