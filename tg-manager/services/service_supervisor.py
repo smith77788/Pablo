@@ -87,6 +87,10 @@ async def supervise(
                 "Сервис %s упал: %s — перезапуск через %.0fс",
                 name, e, restart_delay, exc_info=True,
             )
+            # D27: раньше падение видел только лог, и владелец узнавал о
+            # поломке от пользователя. Анти-повтор в platform_alerts — раз в
+            # час на сервис, поэтому цикл «упал — поднялся» не заваливает чат.
+            await _alert_crash(name, e, restart_delay)
             await asyncio.sleep(restart_delay)
             continue
 
@@ -105,3 +109,22 @@ async def supervise(
             "перезапуск через %.0fс", name, restart_delay,
         )
         await asyncio.sleep(restart_delay)
+
+
+async def _alert_crash(name: str, exc: BaseException, restart_delay: float) -> None:
+    """Сообщить админам о падении фонового сервиса. Никогда не бросает."""
+    try:
+        from services import platform_alerts
+
+        await platform_alerts.alert(
+            f"svc_crash:{name}",
+            "🔴 <b>Фоновый сервис упал</b>\n\n"
+            f"Сервис: <code>{platform_alerts.clean(name, 80)}</code>\n"
+            f"Ошибка: {platform_alerts.clean(type(exc).__name__, 80)}: "
+            f"{platform_alerts.clean(exc)}\n\n"
+            f"Перезапуск через {restart_delay:.0f} с. Если сервис падает снова, "
+            "следующее напоминание придёт через час — подробности в логе.",
+        )
+    except Exception:
+        log.exception("supervise: тревога о падении %s не ушла", name)
+

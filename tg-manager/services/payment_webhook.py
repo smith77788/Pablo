@@ -198,7 +198,9 @@ async def run(
         except Exception:
             log.exception("Failed to register aiogram webhook handler — falling back to polling")
 
-    runner = web.AppRunner(app)
+    # D19: строка запроса в access-логе — без значений токенов и пропусков.
+    from services.secret_masking import RedactingAccessLogger
+    runner = web.AppRunner(app, access_log_class=RedactingAccessLogger)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", _WEBHOOK_PORT)
     try:

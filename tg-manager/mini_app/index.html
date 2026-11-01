@@ -19623,9 +19623,9 @@ function uchExport(fmt, opts) {
     toast('⚠️ В срезе ' + num(CONTACT_SLICE_TOTAL) + ' контактов, за раз выгружается ' + num(UCH_EXPORT_CAP) + '. Сузьте фильтр.');
     return;
   }
-  params.set('token', TK);
-  const url = '/api/miniapp/uch/export/' + f + '?' + params.toString();
-  if (tg?.openLink) tg.openLink(location.origin + url); else window.open(url, '_blank');
+  // D19: токен сессии сервер в адресе больше не принимает — ссылка открывается с
+  // пропуском на этот путь (openTicketLink), как остальные выгрузки.
+  openTicketLink('/api/miniapp/uch/export/' + f + '?' + params.toString());
 }
 
 function uchExportSelected(fmt) {
