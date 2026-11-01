@@ -454,3 +454,28 @@ def _reset_worker_pools():
     _clear()
     yield
     _clear()
+
+
+# ── Деление набора на части для CI (tests/sharding.py) ──────────────────────
+_SHARD_FILES: "set[str] | None" = None
+
+
+def pytest_configure(config):
+    global _SHARD_FILES
+    from tests import sharding as _sh
+
+    spec = _sh.parse_shard(os.getenv(_sh.ENV))
+    if spec is not None:
+        _SHARD_FILES = _sh.files_for(*spec)
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Файл чужой части не импортируется вовсе — делится и сбор, не только
+    прогон. Касается только файлов тестов верхнего уровня tests/."""
+    if _SHARD_FILES is None:
+        return None
+    name = collection_path.name
+    if (name.startswith("test_") and name.endswith(".py")
+            and collection_path.parent.name == "tests"):
+        return name not in _SHARD_FILES or None
+    return None
