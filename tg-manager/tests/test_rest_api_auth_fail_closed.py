@@ -62,9 +62,15 @@ def test_decorator_has_no_open_branch_either():
 
 def test_every_dangerous_route_checks_auth():
     src = open(rest_api.__file__, encoding="utf-8").read()
-    for handler in ("api_accounts", "api_send_message",
+    for handler in ("api_accounts", "api_send_message", "api_me",
+                    "api_operations", "api_operation",
                     "api_click_button", "api_get_messages"):
         m = re.search(rf"async def {handler}\(.*?\n(.*?)\n    (async def|app\.router)",
                       src, re.DOTALL)
         assert m, f"{handler} не найден"
-        assert "_check_auth(request)" in m.group(1), f"{handler} без проверки ключа"
+        # Калитка `_gate` = `_authorize` (ADMIN_SECRET через `_check_auth`,
+        # затем личный ключ владельца) + область + лимит.
+        assert "await _gate(request" in m.group(1), f"{handler} без проверки ключа"
+    gate = src[src.index("async def _authorize("):src.index("def _scope_denied(")]
+    assert "if _check_auth(request):" in gate
+    assert "return None" in gate, "без ключа калитка обязана отказывать"
