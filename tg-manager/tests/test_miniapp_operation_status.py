@@ -98,8 +98,12 @@ def test_open_op_detail_fetches_by_id():
 
 def test_build_drawer_dedupes_nav():
     """Регрессия «много дублей / несколько дашбордов» в меню: buildDrawer не
-    выводит повторно верхние вкладки, дедупит ярлыки и пропускает «Быстрые
-    действия» (дубль навигации), не плодит пустые категории."""
+    выводит повторно верхние вкладки, дедупит ярлыки, не показывает
+    выключенную Лабораторию и не плодит пустые категории.
+
+    01.11.2026 каталог разложен по разделам-задачам (services/task_sections.py):
+    секции «Быстрые действия» больше нет, верхняя вкладка главного экрана
+    называется «Итоги», а «Рассылки» — «Сообщения»."""
     html = _index_html()
     m = re.search(
         r"function buildDrawer\(\)\s*\{(.*?)\n\}", html, re.DOTALL
@@ -107,12 +111,12 @@ def test_build_drawer_dedupes_nav():
     assert m, "buildDrawer не найдена"
     body = m.group(1)
     # верхние вкладки засеяны в set, чтобы каталог их не повторял
-    assert "const seen = new Set(" in body and "'дашборд'" in body, (
+    assert "const seen = new Set(" in body and "'итоги'" in body and "'рассылки'" in body, (
         "buildDrawer должна засеивать seen верхними вкладками"
     )
     assert "seen.has(key)" in body, "buildDrawer должна дедупить плитки по ярлыку"
-    assert "быстрые действия" in body, (
-        "buildDrawer должна пропускать секцию «Быстрые действия» (дубль навигации)"
+    assert "sec.dataset.section === 'lab' && !labOn" in body, (
+        "buildDrawer должна пропускать выключенную Лабораторию"
     )
 
 

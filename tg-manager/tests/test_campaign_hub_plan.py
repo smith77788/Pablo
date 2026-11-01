@@ -78,11 +78,21 @@ def test_enabled_kinds_order_is_stable():
 
 
 def test_channels_without_ids_means_all_managed():
+    # «Во все» — это отсутствие списка (так шлёт экран кампании).
     spec = _full_spec()
-    spec["targets"] = {"channels": {"enabled": True, "channel_ids": []}}
+    spec["targets"] = {"channels": {"enabled": True}}
     ops = ch.plan_campaign(spec)
     assert len(ops) == 1 and ops[0]["op_type"] == "mass_publish"
-    assert "channel_ids" not in ops[0]["params"]  # пусто = все управляемые
+    assert "channel_ids" not in ops[0]["params"]
+
+
+@pytest.mark.parametrize("bad", [[], ["abc"]])
+def test_an_empty_or_broken_channel_pick_is_not_all(bad):
+    # Раньше `[]` (и список из мусора) значил «во все управляемые каналы».
+    spec = _full_spec()
+    spec["targets"] = {"channels": {"enabled": True, "channel_ids": bad}}
+    with pytest.raises(ch.CampaignSpecError):
+        ch.plan_campaign(spec)
 
 
 def test_empty_content_rejected():

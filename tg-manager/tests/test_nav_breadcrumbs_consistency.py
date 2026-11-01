@@ -45,11 +45,17 @@ def test_no_stale_navigation_labels():
 
 
 def test_canonical_assets_label_matches_menu_button():
-    """Каноничный ярлык раздела = ровно кнопка в _assets_kb (единый источник)."""
+    """Приветствие /start ведёт в разделы, которые реально есть в главном меню.
+
+    01.11.2026 главное меню перестроено по разделам-задачам из одной карты
+    services/task_sections.py: «/menu → 📡 Каналы и боты» и «/menu → 📱
+    Аккаунты» — это заголовки разделов карты, а кнопки меню строятся из неё.
+    Прежний раздел «🏗 Активы & Сети» жив за «🧰 Все инструменты бота»."""
+    from services.task_sections import BY_KEY
+
     menu = (ROOT / "bot" / "handlers" / "botmother_menu.py").read_text(encoding="utf-8")
-    # кнопка входа в раздел
     assert 'text="🏗 Активы & Сети"' in menu
-    # приветствие /start ведёт именно туда
     start = (ROOT / "bot" / "handlers" / "start.py").read_text(encoding="utf-8")
-    assert "🏗 Активы & Сети → 📡 Каналы" in start
-    assert "🏗 Активы & Сети → 📱 TG-аккаунты" in start
+    for key in ("channels", "accounts"):
+        sec = BY_KEY[key]
+        assert f"/menu → {sec.emoji} {sec.title}" in start, sec.title

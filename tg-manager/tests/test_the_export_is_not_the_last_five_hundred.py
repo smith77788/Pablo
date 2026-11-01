@@ -140,7 +140,10 @@ def test_the_screen_warns_before_a_truncated_export():
     from tests.miniapp_source import api_source, miniapp_source
 
     front = re.search(r"OPS_EXPORT_CAP\s*=\s*(\d+)", miniapp_source())
-    back = re.search(r"\bcap\s*=\s*([\d_]+)", api_source())
+    # Именно присваивание потолка отдельной строкой: `cap=500` бывает и
+    # именованным аргументом чужого вызова (selection_ids(..., cap=500)), и
+    # первое вхождение в файле оказалось бы чужим числом.
+    back = re.search(r"^\s*cap\s*=\s*([\d_]+)\s*$", api_source(), re.M)
     assert front and back, "потолок выгрузки больше не находится в коде"
     assert int(front.group(1)) == int(back.group(1).replace("_", "")), (
         f"экран грозит {front.group(1)}, а сервер отдаёт {back.group(1)}")
