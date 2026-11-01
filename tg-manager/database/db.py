@@ -564,6 +564,21 @@ async def verify_vault_key(conn, *, strict: bool = False) -> str:
         return "skipped"
 
     if matches:
+        # Канарейка открылась ПРЕЖНИМ ключом из TOKEN_ENCRYPTION_KEYS_PREVIOUS:
+        # идёт ротация. Переписываем её текущим ключом, чтобы следующий старт
+        # без прежнего ключа не принял законченную ротацию за смену ключа.
+        try:
+            from services.token_vault import needs_reencrypt, reencrypt_token
+            if needs_reencrypt(row["canary"]):
+                await conn.execute(
+                    "UPDATE vault_key_check SET canary=$1 WHERE id=1",
+                    reencrypt_token(row["canary"]))
+                log.warning(
+                    "vault_key_check: канарейка была зашифрована прежним ключом — "
+                    "идёт ротация ключа. Перешифруйте остальные секреты: "
+                    "deploy/scripts/rotate_vault_key.py --apply")
+        except Exception:
+            log.warning("vault_key_check: не удалось обновить канарейку", exc_info=True)
         return "ok"
 
     log.error(
@@ -573,8 +588,9 @@ async def verify_vault_key(conn, *, strict: bool = False) -> str:
         "(smm_panels). Аккаунты будут по одному переставать подключаться, и "
         "выглядеть это будет как отказ Telegram. Верните прежний "
         "TOKEN_ENCRYPTION_KEY — данные при этом не теряются, они просто "
-        "зашифрованы старым ключом. Если ключ сменён намеренно, перешифруйте "
-        "секреты старым ключом на новый и обновите строку vault_key_check. "
+        "зашифрованы старым ключом. Если ключ сменён намеренно, положите прежний "
+        "в TOKEN_ENCRYPTION_KEYS_PREVIOUS и перешифруйте секреты: "
+        "deploy/scripts/rotate_vault_key.py --apply. "
         "Частая причина: TOKEN_ENCRYPTION_KEY не задан, ключ выводится из "
         "токена бота, и токен бота ротировали."
     )
