@@ -118,24 +118,28 @@ async function shMonToggle(kind, enabled) {
   }
 }
 
-// Блок проверки гео-бана ботов: ограничен ли бот в ОДНИХ странах и доступен в
-// ДРУГИХ. Виден только при аккаунтах минимум в 2 странах — честно про это пишем.
+// Блок гео-доступности: открываются ли наши каналы, чаты и боты в ОДНИХ
+// странах и закрыты ли в ДРУГИХ. Виден только при аккаунтах минимум в 2
+// странах — честно про это пишем.
 function _shGeoRender(g) {
   if (!g) return '';
   const bots = Number(g.bots) || 0;
+  const channels = Number(g.channels) || 0;
+  const total = Number(g.total) || (bots + channels);
   const geos = Number(g.geos) || 0;
-  if (bots === 0) return '';
+  if (total === 0) return '';
   let note, btn;
   if (geos < 2) {
-    note = 'Для проверки гео-бана нужны аккаунты с прокси минимум в <b>2 разных странах</b> — ' +
+    note = 'Для проверки гео-доступности нужны аккаунты с прокси минимум в <b>2 разных странах</b> — ' +
            'сейчас различимо: <b>' + geos + '</b>. Добавьте прокси ещё одной страны прямо здесь — ' +
            'страна определится автоматически.';
     btn = '<button class="btn btn-s" disabled style="width:100%;margin-bottom:8px">🌍 Нужны аккаунты в 2+ странах</button>';
   } else {
-    note = 'Проверит каждого публичного бота с аккаунтов <b>' + geos + '</b> разных стран и покажет, ' +
-           'где он ограничен, а где доступен. Ничего не меняет.';
+    note = 'Откроет каждый ваш публичный канал, чат и бота (' + channels + ' ' + _shChanPlural(channels) +
+           ', ' + bots + ' ' + _shBotPlural(bots) + ') с аккаунтов <b>' + geos + '</b> разных стран ' +
+           'и покажет отчёт: где ресурс доступен, а где заблокирован. Ничего не меняет.';
     btn = '<button class="btn btn-p" id="shGeoBtn" onclick="runBotGeoban()" style="width:100%;margin-bottom:8px">' +
-          '🌍 Проверить гео-бан ' + bots + ' ' + _shBotPlural(bots) + '</button>';
+          '🌍 Проверить ' + total + ' ' + _shResPlural(total) + ' по странам</button>';
   }
   // Добавить прокси прямо отсюда (страна определится авто) + обновить счётчик.
   const tools =
@@ -144,12 +148,25 @@ function _shGeoRender(g) {
       '<button class="btn btn-s" onclick="_shLoadBody()" style="flex:0 0 auto;font-size:13px;padding:10px 12px" title="Обновить счётчик стран">🔄</button>' +
     '</div>';
   return '' +
-    '<div class="sec">🌍 Гео-бан ботов</div>' +
+    '<div class="sec">🌍 Гео-доступность ресурсов</div>' +
     '<div class="lst" style="padding:14px">' +
       '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin-bottom:12px">' + note + '</div>' +
       btn +
       tools +
     '</div>';
+}
+
+function _shResPlural(n) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'ресурс';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'ресурса';
+  return 'ресурсов';
+}
+
+function _shChanPlural(n) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'канал или чат';
+  return 'каналов и чатов';
 }
 
 // Добавить прокси, не уходя с экрана: открываем общую модалку. Страну новый
@@ -173,13 +190,13 @@ async function runBotGeoban() {
     if (d && d.op_id && typeof openOpDetail === 'function') {
       openOpDetail(d.op_id);
     } else {
-      toast('🌍 Проверка гео-бана запущена');
+      toast('🌍 Проверка гео-доступности запущена');
       loadShieldOps();
     }
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
-    toast((e && e.message) || 'Не удалось запустить проверку гео-бана');
-    if (btn) { btn.disabled = false; btn.textContent = '🌍 Проверить гео-бан'; }
+    toast((e && e.message) || 'Не удалось запустить проверку гео-доступности');
+    if (btn) { btn.disabled = false; btn.textContent = '🌍 Проверить по странам'; }
   }
 }
 

@@ -6350,11 +6350,12 @@ async def _exec_bulk_bot_edit(
     from database.db import fetch_bots as _fetch_bots_op
     bots_rows = await _fetch_bots_op(
         pool,
-        "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
+        "SELECT id, bot_id, username, token FROM managed_bots "
+        "WHERE added_by=$1 AND is_active=TRUE ORDER BY id",
         owner_id,
     )
     if not bots_rows:
-        return {"status": "failed", "summary": "⚠️ Bulk Bot Edit: нет активных ботов"}
+        return {"status": "failed", "summary": "⚠️ Правка ботов: нет активных ботов"}
 
     ok_count = 0
     fail_count = 0
@@ -6425,21 +6426,33 @@ async def _exec_bulk_bot_edit(
                 data_resp = await resp.json()
                 if data_resp.get("ok"):
                     ok_count += 1
+                    # Цель — @username бота (а не номер строки базы), сообщение —
+                    # что именно поставлено: владелец открывает строку лога и
+                    # видит, какой бот и как изменён.
                     await _journal_write(
                         pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'ok',$4)",
                         op_id,
                         ok_count + fail_count,
-                        str(b["id"]),
+                        _bp_bot_label(b),
+                        _bbe_change(field, value, commands_payload),
                         log_ctx=f" op={op_id}", where="bulk_bot_edit",
                     )
                 else:
                     fail_count += 1
+                    _why = str(data_resp.get("description") or "Telegram отклонил изменение")
                     log.warning(
                         "op_worker bulk_bot_edit: bot=%s field=%s api_error=%s",
-                        b.get("id"),
-                        field,
-                        data_resp.get("description"),
+                        b.get("id"), field, _why,
+                    )
+                    await _journal_write(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'error',$4)",
+                        op_id, ok_count + fail_count, _bp_bot_label(b),
+                        f"{_bbe_change(field, value, commands_payload)} — не вышло: {_why}"[:500],
+                        log_ctx=f" op={op_id}", where="bulk_bot_edit",
                     )
             except Exception as e:
                 fail_count += 1
@@ -6448,6 +6461,15 @@ async def _exec_bulk_bot_edit(
                     b.get("id"),
                     field,
                     e,
+                )
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, ok_count + fail_count, _bp_bot_label(b),
+                    f"{_bbe_change(field, value, commands_payload)} — не вышло: "
+                    "нет ответа от Telegram",
+                    log_ctx=f" op={op_id}", where="bulk_bot_edit",
                 )
             await _safe_execute(
                     pool,
@@ -6463,6 +6485,68 @@ async def _exec_bulk_bot_edit(
     }
 
 
+_BBE_FIELD_LABEL = {"name": "имя", "desc": "описание",
+                    "short_desc": "краткое описание", "commands": "команды"}
+
+
+def _bbe_change(field: str, value: str, commands: "list | None" = None) -> str:
+    """Что «Правка ботов» ставит боту — строкой для журнала операции."""
+    lbl = _BBE_FIELD_LABEL.get(field, field)
+    if field == "commands":
+        cmds = ", ".join("/" + c["command"] for c in (commands or []))
+        return f"{lbl}: {cmds or 'пусто'}"
+    return f"{lbl}: → «{_bp_short(value)}»"
+
+
+_BP_FIELD_LABEL = {"name": "имя", "description": "описание",
+                   "short_description": "краткое описание", "greeting": "приветствие"}
+
+
+def _bp_bot_label(row) -> str:
+    """Как бот называется в журнале операции: @username, иначе «бот <id>».
+
+    Раньше в журнал шёл внутренний номер строки (`managed_bots.id`), и владелец
+    видел в логе «3», «4» — по такой строке не понять, какой бот изменён.
+    Имя из профиля (first_name) не годится: у двух ботов оно бывает одинаковым,
+    а по этой подписи повтор операции пропускает уже сделанных.
+    """
+    try:
+        uname = (row.get("username") or "").strip().lstrip("@")
+    except AttributeError:
+        uname = ""
+    if uname:
+        return f"@{uname}"
+    try:
+        bid = row["bot_id"]
+    except (KeyError, TypeError, IndexError):
+        bid = None
+    return f"бот {bid}" if bid else f"бот #{row['id']}"
+
+
+def _bp_short(v, n: int = 70) -> str:
+    v = " ".join(str(v or "").split())
+    return (v[:n] + "…") if len(v) > n else (v or "пусто")
+
+
+def _bp_diff(before: dict, after: dict) -> str:
+    """«описание: «было» → «стало»» по каждому изменённому полю — для журнала.
+
+    Владелец открывает строку лога и видит, ЧТО именно поменялось. «Было»
+    берётся из снимка, который исполнитель снимает для отката ДО изменения;
+    если снять не удалось, пишем только новое значение.
+    """
+    parts = []
+    for key, new in after.items():
+        if not new:
+            continue
+        lbl = _BP_FIELD_LABEL.get(key, key)
+        if key in before:
+            parts.append(f"{lbl}: «{_bp_short(before.get(key))}» → «{_bp_short(new)}»")
+        else:
+            parts.append(f"{lbl}: → «{_bp_short(new)}»")
+    return "; ".join(parts)
+
+
 async def _exec_bulk_bot_profile(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -6471,8 +6555,10 @@ async def _exec_bulk_bot_profile(
     (локальное правило auto_replies).
 
     params: {bot_ids?: [bot_id...], name?, description?, short_description?,
-    greeting?}. Пустое/отсутствующее поле — НЕ трогаем. Пустой/отсутствующий
-    bot_ids — все активные боты владельца.
+    greeting?, all?}. Пустое/отсутствующее поле — НЕ трогаем. Все активные
+    боты владельца — ТОЛЬКО при явном `all: true`; без выбора и без отметки
+    операция отказывается (раньше пустой bot_ids значил «все», и правка одного
+    бота уходила на весь парк).
 
     Идемпотентно: setMy*-методы и замена приветствия приводят к тому же
     состоянию при повторе. Уже успешно обработанных ботов пропускаем по
@@ -6513,17 +6599,21 @@ async def _exec_bulk_bot_profile(
             bot_ids.append(int(x))
         except (TypeError, ValueError):
             continue
+    if not bot_ids and params.get("all") is not True:
+        return {"status": "failed",
+                "summary": "⚠️ Не выбран ни один бот — профиль не меняли. "
+                           "Выберите ботов (или «все боты») и запустите заново"}
     if bot_ids:
         bots_rows = await _fetch_bots_op(
             pool,
-            "SELECT id, bot_id, token FROM managed_bots "
+            "SELECT id, bot_id, token, username FROM managed_bots "
             "WHERE added_by=$1 AND is_active=TRUE AND bot_id = ANY($2::bigint[]) ORDER BY id",
             owner_id, bot_ids,
         )
     else:
         bots_rows = await _fetch_bots_op(
             pool,
-            "SELECT id, bot_id, token FROM managed_bots "
+            "SELECT id, bot_id, token, username FROM managed_bots "
             "WHERE added_by=$1 AND is_active=TRUE ORDER BY id",
             owner_id,
         )
@@ -6546,8 +6636,11 @@ async def _exec_bulk_bot_profile(
                     "status": "cancelled", "ok": ok_count, "failed": fail_count,
                     "summary": f"Отменено. Обновлено: {ok_count}, ошибок: {fail_count}",
                 }
-            target = str(b["id"])
-            if target in already:
+            # Подпись бота в журнале — его @username (см. _bp_bot_label). Старый
+            # номер строки тоже считается сделанным: операция, начатая до этой
+            # правки, при повторе не тронет уже изменённых ботов второй раз.
+            target = _bp_bot_label(b)
+            if target in already or str(b["id"]) in already:
                 await _safe_execute(
                     pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
@@ -6607,7 +6700,11 @@ async def _exec_bulk_bot_profile(
                 ok_count += 1
                 # Через дверь журнала (не raw execute): потеря отметки «ok»
                 # заставила бы повтор изменить этого бота второй раз.
-                await _journal_done(pool, op_id, ok_count + fail_count, target)
+                await _journal_done(
+                    pool, op_id, ok_count + fail_count, target,
+                    _bp_diff(_before, {"name": name, "description": description,
+                                       "short_description": short_description,
+                                       "greeting": greeting})[:900])
             else:
                 fail_count += 1
                 await _journal_write(
@@ -6664,9 +6761,10 @@ async def _exec_bulk_bot_profile_rollback(
     target_ids = [int(s["target_id"]) for s in snaps]
     rows = await _fetch_bots_op(
         pool,
-        "SELECT bot_id, token FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
         owner_id, target_ids)
     tok_by_bot = {int(r["bot_id"]): r["token"] for r in rows}
+    label_by_bot = {int(r["bot_id"]): _bp_bot_label(r) for r in rows}
 
     await _safe_execute(
         pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(snaps), op_id)
@@ -6735,15 +6833,23 @@ async def _exec_bulk_bot_profile_rollback(
                     "UPDATE bulk_edit_snapshots SET reverted_at=now() WHERE id=$1", s["id"])
                 # Через дверь журнала: потеря «ok» заставила бы повтор откатить
                 # этого бота второй раз (хотя reverted_at уже защищает — журнал
-                # держим единообразно, как требует храповик).
-                await _journal_done(pool, op_id, ok_count + fail_count, target)
+                # держим единообразно, как требует храповик). Цель — номер
+                # снимка (по нему пропуск при повторе), а ЧТО вернули и какому
+                # боту — в сообщении: в логе владелец видит бота, не номер.
+                _restored = "; ".join(
+                    f"{_BP_FIELD_LABEL.get(k, k)}: «{_bp_short(v)}»"
+                    for k, v in before.items())
+                await _journal_done(
+                    pool, op_id, ok_count + fail_count, target,
+                    (f"{label_by_bot.get(bid, f'бот {bid}')} · вернули: {_restored}")[:900])
             else:
                 fail_count += 1
                 await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
-                    op_id, ok_count + fail_count, target, "; ".join(reasons)[:300],
+                    op_id, ok_count + fail_count, target,
+                    (f"{label_by_bot.get(bid, f'бот {bid}')} · " + "; ".join(reasons))[:300],
                     log_ctx=f" profile_rollback op={op_id}")
             await _safe_execute(
                 pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
@@ -6945,6 +7051,12 @@ async def _exec_mass_publish(
 
     delay = int(params.get("delay_seconds") or params.get("delay") or 30)
     explicit_channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
+    # «Во все каналы» — это ОТСУТСТВИЕ списка. Список, переданный пустым, —
+    # пустой выбор: публиковать некуда, а не «во все» (публикация необратима).
+    if "channel_ids" in params and params.get("channel_ids") is not None \
+            and not explicit_channel_ids:
+        return {"status": "failed",
+                "summary": "⚠️ Не выбран ни один канал — публикацию не запускали"}
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None
@@ -10051,11 +10163,21 @@ async def _exec_global_presence_bot(
                     "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
                 }
 
-            # Use per-target assigned account; fall back to round-robin if not set
+            # Use per-target assigned account; fall back to round-robin if not set.
+            # Гео-fallback: если планировщик аккаунт не привязал, предпочитаем
+            # аккаунт из СТРАНЫ цели (его прокси там) — бот под страну X
+            # создаётся с аккаунта X; нет такого в пуле — прежний round-robin.
             acc_id = target["selected_account_id"]
             acc = acc_by_id.get(acc_id) if acc_id else None
             if not acc:
-                acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
+                try:
+                    _tcc = (target["country_code"] or "").strip().upper()
+                except (KeyError, TypeError):
+                    _tcc = ""
+                _geo_pool = [a for a in accounts_list
+                             if str(a.get("geo_country") or "").strip().upper() == _tcc] if _tcc else []
+                _pool = _geo_pool or accounts_list
+                acc = dict(_pool[acc_rr_idx % len(_pool)])
                 acc_rr_idx += 1
 
             bot_name = target["planned_name"] or f"Bot {i + 1}"
@@ -14361,7 +14483,13 @@ async def _exec_bulk_chan_exec(
 async def _exec_bulk_post_chans(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Post text to multiple channels belonging to one account."""
+    """Пост одного аккаунта в несколько своих каналов.
+
+    Новых операций этого типа поверхности больше не ставят: публикация в
+    каналы — одна операция, `mass_publish` (у неё гейт запрещённого контента и
+    правила редактора, которых здесь нет). Исполнитель остаётся, чтобы честно
+    доделать уже стоящие в очереди и рекуррентные круги — так же, как у
+    `quick_post`. Стережёт `tests/test_channel_publish_one_op.py`."""
     from services import account_manager
     from database import db as _db
     from bot.utils.op_helpers import backoff
@@ -15409,16 +15537,21 @@ async def _exec_check_owned_restrictions(
 async def _exec_check_bot_geoban(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Проверка НАШИХ ботов на ГЕО-БАН: ограничен в одних странах, чист в других.
+    """Гео-доступность НАШИХ каналов, чатов и ботов: где открываются, где нет.
 
     Read-only. Telegram отдаёт флаг `restricted`/`restriction_reason` сущности
-    ОТНОСИТЕЛЬНО страны смотрящего аккаунта (его прокси/IP). Поэтому один бот из
-    РФ может быть ограничен, а из DE — доступен: это и есть гео-бан. Отличить его
-    от ОБЩЕГО бана можно только пробой с аккаунтов РАЗНЫХ стран — проверяем бота
-    с одного здорового аккаунта на каждую различимую страну (geo_country прокси),
-    затем `entity_restriction_check.classify_geoban` сводит пробы в вердикт.
-    Находки гео-бана пишем в restriction_events (общий пульс), темп — бережный и
-    отменяемый (cancellable_pause).
+    ОТНОСИТЕЛЬНО страны смотрящего аккаунта (его прокси/IP). Поэтому один ресурс
+    из РФ может быть ограничен, а из DE — доступен: это и есть гео-бан. Отличить
+    его от ОБЩЕГО бана можно только пробой с аккаунтов РАЗНЫХ стран — проверяем
+    каждый ресурс с одного здорового аккаунта на каждую различимую страну
+    (geo_country прокси), затем `entity_restriction_check.classify_geoban` сводит
+    пробы в вердикт, а `build_geo_report` — в пострановый отчёт.
+
+    Проверяются только ПУБЛИЧНЫЕ ресурсы (с @username): приватный канал
+    наблюдатель из другой страны не откроет, и это было бы не «заблокирован»,
+    а «нечем проверить». Тип операции остался `check_bot_geoban` — под ним уже
+    стоят рекуррентные круги авто-мониторинга. Находки гео-бана пишем в
+    restriction_events (общий пульс), темп — бережный и отменяемый.
     """
     from services import account_manager
     from services import entity_restriction_check as _erc
@@ -15427,21 +15560,55 @@ async def _exec_check_bot_geoban(
     _GEO_MAX = 6  # потолок различимых стран на бота: n_ботов × стран резолвов к Telegram
 
     only_bots = [int(x) for x in (params.get("bot_ids") or [])]
-    _bot_where = "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''"
-    _bot_args: list = [owner_id]
-    if only_bots:
-        _bot_where += " AND bot_id = ANY($2::bigint[])"
-        _bot_args.append(only_bots)
-    bot_rows = await _safe_fetch(
-        pool, f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
-        *_bot_args)
-    bots = [{"bot_id": int(r["bot_id"]),
-             "username": (r.get("username") or "").strip().lstrip("@") or None,
-             "title": r.get("first_name")}
-            for r in (bot_rows or []) if (r.get("username") or "").strip()]
-    if not bots:
+    only_channels = [int(x) for x in (params.get("channel_ids") or [])]
+    # Выбор подмножества: прислали только ботов — каналы не трогаем, и наоборот.
+    # Ничего не прислали — проверяем всё публичное.
+    want_bots = bool(only_bots) or not only_channels
+    want_channels = bool(only_channels) or not only_bots
+
+    resources: list = []
+    if want_channels:
+        _ch_where = "WHERE owner_id=$1 AND username IS NOT NULL AND username <> ''"
+        _ch_args: list = [owner_id]
+        if only_channels:
+            _ch_where += " AND channel_id = ANY($2::bigint[])"
+            _ch_args.append(only_channels)
+        # Один канал может вести несколько аккаунтов — строк в managed_channels
+        # тогда несколько, а ресурс один.
+        ch_rows = await _safe_fetch(
+            pool,
+            "SELECT DISTINCT ON (channel_id) channel_id, username, title, type "
+            f"FROM managed_channels {_ch_where} ORDER BY channel_id",
+            *_ch_args)
+        for r in ch_rows or []:
+            _uname = (r.get("username") or "").strip().lstrip("@")
+            if not _uname:
+                continue
+            _type = (r.get("type") or "").lower()
+            resources.append({
+                "kind": ("group" if _type in ("megagroup", "supergroup", "group", "chat")
+                         else "channel"),
+                "id": int(r["channel_id"]), "username": _uname,
+                "title": r.get("title"), "bot_id": None})
+    if want_bots:
+        _bot_where = "WHERE added_by=$1 AND username IS NOT NULL AND username <> ''"
+        _bot_args: list = [owner_id]
+        if only_bots:
+            _bot_where += " AND bot_id = ANY($2::bigint[])"
+            _bot_args.append(only_bots)
+        bot_rows = await _safe_fetch(
+            pool, f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
+            *_bot_args)
+        for r in bot_rows or []:
+            _uname = (r.get("username") or "").strip().lstrip("@")
+            if not _uname:
+                continue
+            resources.append({"kind": "bot", "id": int(r["bot_id"]), "username": _uname,
+                              "title": r.get("first_name"), "bot_id": int(r["bot_id"])})
+    if not resources:
         return {"status": "failed",
-                "summary": "⚠️ Нет публичных ботов (с @username) для проверки гео-бана."}
+                "summary": "⚠️ Нет публичных каналов, чатов или ботов (с @username) "
+                           "для проверки гео-доступности."}
 
     acc_rows = await _safe_fetch(
         pool,
@@ -15483,7 +15650,7 @@ async def _exec_check_bot_geoban(
             break
     distinct_geos = len(geo_acc)
 
-    n = len(bots)
+    n = len(resources)
     await _safe_execute(
         pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2", n, op_id)
 
@@ -15493,10 +15660,10 @@ async def _exec_check_bot_geoban(
         have = (", ".join(sorted(geo_acc)) or "ни одной")
         return {
             "status": "done", "checked": 0, "counts": {}, "findings": [],
-            "summary": ("Проверка гео-бана требует аккаунтов с прокси минимум в "
+            "summary": ("Проверка гео-доступности требует аккаунтов с прокси минимум в "
                         f"2 разных странах — сейчас различима {distinct_geos} "
                         f"(страны: {have}).\n\nПодключите аккаунты с прокси ещё "
-                        "хотя бы одной страны и повторите: тогда видно, где бот "
+                        "хотя бы одной страны и повторите: тогда видно, где ресурс "
                         "ограничен, а где доступен."),
         }
 
@@ -15523,8 +15690,9 @@ async def _exec_check_bot_geoban(
 
     counts: dict = {}
     findings: list = []
+    report_rows: list = []
     try:
-        for idx, b in enumerate(bots):
+        for idx, b in enumerate(resources):
             if await _is_cancelled(pool, op_id):
                 return {"status": "cancelled",
                         "summary": f"Отменено. Проверено: {idx}/{n}\n"
@@ -15535,8 +15703,10 @@ async def _exec_check_bot_geoban(
                 if client is None:
                     continue
                 try:
+                    # access_hash не передаём: он привязан к аккаунту, а смотреть
+                    # нужно глазами страны — по публичному @username.
                     r = await _erc.resolve_flags(
-                        client, kind="bot", entity_id=b["bot_id"],
+                        client, kind=b["kind"], entity_id=b["id"],
                         username=b["username"], do_bot_ping=False)
                     sig = r.get("signals") or {}
                     per_geo.append({
@@ -15558,34 +15728,44 @@ async def _exec_check_bot_geoban(
             verdict = _erc.classify_geoban(per_geo)
             status = verdict["status"]
             counts[status] = counts.get(status, 0) + 1
-            _title = b.get("title") or (f"@{b['username']}" if b.get("username") else str(b["bot_id"]))
+            _title = b.get("title") or f"@{b['username']}"
+            report_rows.append({"kind": b["kind"], "title": b.get("title"),
+                                "username": b["username"], "verdict": verdict})
             await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,$4,$5)",
-                op_id, idx + 1, f"Бот «{_title}»"[:64],
-                "error" if status == _erc.GEO_BANNED else "ok",
+                op_id, idx + 1,
+                _erc.resource_label(b["kind"], b.get("title"), b["username"])[:64],
+                "error" if status in (_erc.GEO_BANNED, _erc.GEO_GLOBAL) else "ok",
                 f"{verdict['label']} — {verdict['reason_ru']}"[:200])
 
             if status == _erc.GEO_BANNED:
-                findings.append({"bot_id": b["bot_id"], "title": _title,
+                findings.append({"kind": b["kind"], "id": b["id"],
+                                 "bot_id": b["bot_id"], "title": _title,
+                                 "username": b["username"],
                                  "blocked_geos": verdict["blocked_geos"],
-                                 "clean_geos": verdict["clean_geos"]})
+                                 "clean_geos": verdict["clean_geos"],
+                                 "blocked_reasons": verdict.get("blocked_reasons") or {}})
+                _details = {"kind": b["kind"], "username": b.get("username"),
+                            "title": _title, "blocked_geos": verdict["blocked_geos"],
+                            "clean_geos": verdict["clean_geos"],
+                            "reason": verdict["reason_ru"]}
+                if b["kind"] == "bot":
+                    _details["bot_id"] = b["bot_id"]
+                else:
+                    _details["channel_id"] = b["id"]
                 try:
                     await _sbm._record_event(
-                        pool, owner_id, "bot_geoban", "critical",
-                        {"bot_id": b["bot_id"], "username": b.get("username"),
-                         "title": _title, "blocked_geos": verdict["blocked_geos"],
-                         "clean_geos": verdict["clean_geos"],
-                         "reason": verdict["reason_ru"]},
-                        bot_id=b["bot_id"])
+                        pool, owner_id, f"{b['kind']}_geoban", "critical",
+                        _details, bot_id=b["bot_id"])
                 except Exception as e:
                     log.debug("check_bot_geoban: record_event failed: %s", e)
 
             await _safe_execute(
                 pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             if idx + 1 < n:
-                await cancellable_pause(pool, op_id, random.uniform(2.0, 4.0), "geoban next bot")
+                await cancellable_pause(pool, op_id, random.uniform(2.0, 4.0), "geoban next resource")
     finally:
         for c in _clients.values():
             try:
@@ -15595,7 +15775,17 @@ async def _exec_check_bot_geoban(
 
     summary = _erc.build_geoban_summary(counts, n)
     summary += f"\n\nℹ️ Проверено стран: {distinct_geos} ({', '.join(sorted(geo_acc))})."
+    _report = _erc.build_geo_report(report_rows, sorted(geo_acc))
+    if _report:
+        summary += "\n\n" + _report
     return {"status": "done", "checked": n, "counts": counts,
+            "geos": sorted(geo_acc),
+            "report": [{"kind": r["kind"], "title": r.get("title"),
+                        "username": r["username"],
+                        "status": r["verdict"]["status"],
+                        "per_geo": r["verdict"].get("per_geo") or {},
+                        "blocked_reasons": r["verdict"].get("blocked_reasons") or {}}
+                       for r in report_rows][:200],
             "findings": findings[:50], "summary": summary}
 
 
@@ -22506,6 +22696,40 @@ async def _exec_niche_growth_post(
 
 # ── Mini App handlers ─────────────────────────────────────────────────────────
 
+async def _warmup_day_now(pool: asyncpg.Pool, owner_id: int, plan_id: int, name: str) -> dict:
+    """Прогнать день прогрева сразу — «▶️ Запустить сейчас» в боте.
+
+    Раньше кнопка звала `run_daily_warmup` через `asyncio.create_task` мимо
+    шины: у запуска не было ни операции, ни истории, ни итога, а процесс,
+    упавший посреди дня, молча терял его. Теперь это операция
+    `account_warmup` с `run_now`, и итог честный: день, который движок
+    пропустил (нет подписки, аккаунт занят, мёртв, ночь по гео), — это отказ
+    с причиной, а не «выполнено, 0 действий».
+    """
+    from services import account_warmer, warmup_status
+
+    row = await _safe_fetchrow(
+        pool, "SELECT * FROM account_warmup_plans WHERE id=$1 AND owner_id=$2 "
+              "AND status='active'", plan_id, owner_id)
+    if not row:
+        return {"status": "failed", "summary": f"⚠️ У {name} нет активного плана прогрева"}
+    # Причину пропуска берём только ЭТОГО запуска: старая метка от прошлого
+    # круга назвала бы не ту причину. Часы — базы, как у самой метки.
+    started = await pool.fetchval("SELECT now()")
+    res = await account_warmer.run_daily_warmup(pool, dict(row))
+    done = int(res.get("actions_done") or 0)
+    if not done:
+        why = await pool.fetchval(
+            "SELECT last_skip_reason FROM account_warmup_plans "
+            "WHERE id=$1 AND last_skip_at >= $2", plan_id, started)
+        return {"status": "failed", "plan_id": plan_id,
+                "summary": f"⏸ День прогрева {name} не выполнен: "
+                           f"{warmup_status.skip_label(why) if why else 'план уже выполняется'}"}
+    return {"status": "done", "plan_id": plan_id,
+            "summary": f"🌡️ День прогрева {name}: действий {int(res.get('actions_ok') or 0)} "
+                       f"из {done}" + (" · прогрев завершён" if res.get("completed") else "")}
+
+
 async def _exec_account_warmup(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -22548,11 +22772,19 @@ async def _exec_account_warmup(
             # плану — включая отменённый и остановленный движком. Операция
             # сообщала об успехе, а прогрев не шёл: классический ложный успех.
             if (existing["status"] or "") == "active":
+                if params.get("run_now"):
+                    return await _warmup_day_now(pool, owner_id, existing["id"], name)
                 return {
                     "status": "done",
                     "plan_id": existing["id"],
                     "summary": f"🌡️ Прогрев активен для {name} (план: {plan_type})",
                 }
+            if params.get("run_now"):
+                # «Запустить сейчас» по плану, который уже не идёт, не должно
+                # молча заводить новый: человек просил прогнать день, а не
+                # перезапустить прогрев с нуля.
+                return {"status": "failed",
+                        "summary": f"⚠️ У {name} нет активного плана прогрева"}
         # Плана нет или он не идёт (отменён, завершён, остановлен движком) —
         # заводим через общую дверь. Раньше неактивный план поднимался здесь
         # своим UPDATE без проверки аккаунта, и операция «возобновляла»

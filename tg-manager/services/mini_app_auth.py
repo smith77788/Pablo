@@ -115,48 +115,57 @@ def parse_token(token: str, bot_token: str, max_age: int = 7200) -> Optional[int
         return None
 
 
-# ── Билет для ссылки (D19) ───────────────────────────────────────────────
+# ── Пропуск для одной ссылки ────────────────────────────────────────────────
 #
-# EventSource и `tg.downloadFile` не умеют слать заголовок Authorization, и
-# раньше токен сессии (живёт 2 ч) шёл в строке запроса `?token=`. Строка
-# запроса оседает в access-логе, истории браузера и логах прокси — значит,
-# двухчасовой ключ от аккаунта владельца лежал в чужих логах. Теперь в URL
-# идёт только билет: живёт 2 минуты, подписан в отдельном домене (сессией его
-# не предъявить, и наоборот), выдаётся по Bearer-токену.
+# Токен сессии раньше ездил в строке запроса (`?token=`): так открывались
+# выгрузки во внешнем браузере (`tg.openLink`), нативное сохранение файла
+# (`tg.downloadFile`) и живой поток (EventSource не умеет заголовки). Строка
+# запроса оседает в журнале доступа aiohttp, в логах платформы и в истории
+# внешнего браузера — то есть двухчасовой ключ ко ВСЕМ данным владельца
+# лежал там, куда владелец не заглядывает. SECURITY.md это прямо запрещает.
+#
+# Пропуск отличается от токена тремя вещами: подписан с другой меткой (токеном
+# сессии его не подменить и наоборот), привязан к ОДНОМУ пути и живёт столько,
+# сколько нужно одной ссылке. Утёкший пропуск выгрузки через две минуты мёртв
+# и ничего, кроме этой выгрузки, не открывал.
 
 URL_TICKET_TTL = 120
-_TICKET_PREFIX = "t1"
+# EventSource переподключается САМ, повторяя тот же адрес, поэтому пропуск
+# потока живёт как сессия; сервер всё равно закрывает поток по его сроку.
+EVENTS_PATH = "/api/miniapp/events"
+EVENTS_TICKET_TTL = 7200
 
 
-def _ticket_sig(payload: str, bot_token: str) -> str:
-    secret = hashlib.sha256(("url-ticket:" + bot_token).encode()).digest()
-    return hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()[:32]
+def url_ticket_ttl(path: str) -> int:
+    return EVENTS_TICKET_TTL if path == EVENTS_PATH else URL_TICKET_TTL
 
 
-def make_url_ticket(user_id: int, bot_token: str) -> str:
-    """Короткоживущий билет для URL: `t1.<uid>.<ts>.<sig>`."""
+def _ticket_sig(uid: int, ts: int, path: str, bot_token: str) -> str:
+    secret = hashlib.sha256(bot_token.encode()).digest()
+    msg = f"url-ticket|{uid}|{ts}|{path}".encode()
+    return hmac.new(secret, msg, hashlib.sha256).hexdigest()[:32]
+
+
+def make_url_ticket(user_id: int, bot_token: str, path: str) -> str:
+    """Пропуск на GET одного пути. Формат `uid.ts.sig` — без двоеточий, чтобы
+    parse_token не принял его за токен сессии."""
     if not signing_secret_ok(bot_token):
         raise ValueError("нет ключа подписи: BOT_TOKEN не задан")
-    payload = f"{_TICKET_PREFIX}.{int(user_id)}.{int(time.time())}"
-    return f"{payload}.{_ticket_sig(payload, bot_token)}"
+    ts = int(time.time())
+    return f"{int(user_id)}.{ts}.{_ticket_sig(int(user_id), ts, path, bot_token)}"
 
 
-def parse_url_ticket(ticket: str, bot_token: str,
-                     max_age: int = URL_TICKET_TTL) -> Optional[int]:
-    """Проверить билет, вернуть user_id или None."""
+def parse_url_ticket(ticket: str, bot_token: str, path: str) -> Optional[int]:
+    """uid, если пропуск подписан для ЭТОГО пути и не истёк; иначе None."""
     if not signing_secret_ok(bot_token) or not ticket:
         return None
     try:
-        prefix, uid, ts_s, sig = ticket.split(".")
-        if prefix != _TICKET_PREFIX:
+        uid_s, ts_s, sig = ticket.split(".")
+        uid, ts = int(uid_s), int(ts_s)
+        if not 0 <= time.time() - ts <= url_ticket_ttl(path):
             return None
-        age = time.time() - int(ts_s)
-        if age > max_age or age < -30:
+        if not hmac.compare_digest(_ticket_sig(uid, ts, path, bot_token), sig):
             return None
-        expected = _ticket_sig(f"{prefix}.{uid}.{ts_s}", bot_token)
-        if not hmac.compare_digest(expected, sig):
-            return None
-        return int(uid)
+        return uid
     except Exception:
         return None
-

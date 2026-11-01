@@ -59,7 +59,7 @@ A/B тестирование рассылок. Принимает список �
 | GET | `/broadcast/{id}` | Статус рассылки |
 | POST | `/broadcast/{id}/cancel` | Отмена рассылки |
 | GET | `/broadcast/{id}/analytics` | Аналитика рассылки |
-| POST | `/broadcast/schedule` | Создание отложенной рассылки |
+| POST | `/broadcasts/schedule` | Создание отложенной рассылки |
 | POST | `/broadcast/ab-test` | A/B тестирование |
 
 ## Примеры использования

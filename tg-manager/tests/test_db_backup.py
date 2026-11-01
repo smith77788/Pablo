@@ -265,7 +265,9 @@ def test_run_backup_once_sends_via_fake_bot():
             res = await bk.run_backup_once(pool, bot, note="тест")
             assert res["ok"] is True and res["parts"] == 1
             assert bot.docs and bot.docs[0][0] == 999  # ушло в заданный чат
-            assert bot.docs[0][1].endswith(".tar.gz")
+            # По умолчанию архив шифруется перед отправкой (DB_BACKUP_ENCRYPT=1):
+            # открытый tar.gz в чате бэкапов — это база целиком в одном сообщении.
+            assert bot.docs[0][1].endswith(".tar.gz.enc")
         finally:
             await pool.close()
             admin = await asyncpg.connect(DSN)

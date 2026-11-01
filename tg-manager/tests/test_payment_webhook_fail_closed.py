@@ -1,6 +1,6 @@
 """Хук, выдающий платный доступ, не должен работать без проверки подписи.
 
-POST /webhook/payment активирует подписку по user_id из тела запроса. Проверка
+POST /webhook/payment активировал подписку по user_id из тела запроса. Проверка
 подписи стояла под условием «если задан WEBHOOK_SECRET», а переменная нигде в
 деплое не задаётся — значит любой, кто знает адрес, мог выдать себе платный
 тариф одним запросом.
@@ -44,30 +44,32 @@ def _module(monkeypatch, **env):
     return importlib.reload(pw)
 
 
-def test_signature_check_does_not_pass_without_a_secret(monkeypatch):
-    pw = _module(monkeypatch)
-    assert pw._verify_signature(b'{"user_id":1}', "") is False
-    assert pw._verify_signature(b'{"user_id":1}', "deadbeef") is False
+def test_universal_payment_hook_is_gone(monkeypatch):
+    """Универсальный денежный хук снят (D29 карты дефектов).
 
-
-def test_signature_check_accepts_only_the_right_signature(monkeypatch):
+    Его не звал ни один провайдер. Закрытым он был только пока не задан
+    WEBHOOK_SECRET; с секретом тело без поля `plan` выдавало месяц подписки за
+    любую сумму от 90 % цены, а срок из тела не сверялся со списком сроков.
+    Живой путь оплаты — payment_checker (транзакция в блокчейне).
+    """
     pw = _module(monkeypatch, WEBHOOK_SECRET="s3cr3t")
-    body = b'{"user_id":1,"plan":"pro_1m"}'
-    good = hmac.new(b"s3cr3t", body, hashlib.sha256).hexdigest()
-    assert pw._verify_signature(body, good) is True
-    assert pw._verify_signature(body, "sha256=" + good) is True
-    assert pw._verify_signature(body, good[:-1] + "0") is False
-    assert pw._verify_signature(body + b" ", good) is False
+    src = open(pw.__file__, encoding="utf-8").read()
+    assert '"/webhook/payment"' not in src, "универсальный денежный хук вернулся"
+    for name in ("payment_webhook", "_activate_subscription", "_PLAN_MAP"):
+        assert not hasattr(pw, name) and f"def {name}" not in src, name
 
 
-def test_webhook_is_closed_when_no_secret_is_configured(monkeypatch):
-    """Источник правды — тело обработчика: он обязан отказывать без секрета."""
-    pw = _module(monkeypatch)
-    body = _func_src(pw, "payment_webhook")
-    assert "_WEBHOOK_SECRET and not _verify_signature" not in body, (
-        "проверка подписи снова стоит под условием «если секрет задан» — "
-        "без переменной хук опять раздаёт тарифы кому угодно")
-    assert "_webhook_closed(" in body, "нет секрета — должен быть явный отказ"
+def test_no_route_in_the_app_grants_a_subscription(monkeypatch):
+    """Источник правды — собранное приложение, а не текст файла."""
+    pw = _module(monkeypatch, WEBHOOK_SECRET="s3cr3t")
+
+    class _P:
+        pass
+
+    app = pw.make_app(_P(), None)
+    paths = {r.resource.canonical for r in app.router.routes() if r.resource is not None}
+    assert "/webhook/payment" not in paths
+    assert "/webhook/cryptopay" not in paths
 
 
 def test_dead_cryptopay_door_is_gone(monkeypatch):
@@ -82,11 +84,3 @@ def test_dead_cryptopay_door_is_gone(monkeypatch):
     assert 'add_post("/webhook/cryptopay"' not in src, (
         "мёртвый вход CryptoPay вернулся: счетов CryptoPay в коде нет")
     assert "def cryptopay_webhook" not in src
-
-
-def test_closed_response_names_the_missing_variable(monkeypatch):
-    """Отказ должен объяснять, что настроить, иначе он выглядит поломкой."""
-    pw = _module(monkeypatch)
-    resp = pw._webhook_closed("WEBHOOK_SECRET")
-    assert resp.status == 503
-    assert "WEBHOOK_SECRET" in resp.text

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import ast
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -250,7 +249,6 @@ async def test_cancellation_propagates_and_stops_all_readers(env, monkeypatch, c
 
 @pytest.mark.parametrize("found", [False, True])
 async def test_api_wrapper_delegates_without_changing_response(env, monkeypatch, found):
-    path = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
     tree = ast.parse(api_source())
     names = {"_va_payload", "va_channel_get_for"}
     functions = [node for node in ast.walk(tree)
@@ -262,7 +260,7 @@ async def test_api_wrapper_delegates_without_changing_response(env, monkeypatch,
     scope = {"pool": env.pool, "_json_resp": lambda data: data,
              "_err": lambda message, status: (message, status)}
     module = ast.Module(body=functions, type_ignores=[])
-    exec(compile(module, str(path), "exec"), scope)  # noqa: S102 - только локальный код API
+    exec(compile(module, "<api_source>", "exec"), scope)  # noqa: S102 - только локальный код API
     response = await scope["va_channel_get_for"](OWNER, CHANNEL)
     loader.assert_awaited_once_with(env.pool, OWNER, CHANNEL)
     if found:

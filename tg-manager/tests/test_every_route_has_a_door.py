@@ -50,8 +50,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # `admin/*`, `cloud/set-paid`, `sys_health`, `circuit_breaker`, `audit`,
 # `topology/nodes`, `analytics/realtime` — служебные/админские.
 #
-# Остальные — одиночные ручки без экрана: `schedule_post`,
-# `broadcast/schedule`, `broadcast/ab_test`, `channel_factory/submit`,
+# Остальные — одиночные ручки без экрана: `broadcast/ab_test`, `channel_factory/submit`,
 # `workflow/create`, `team/members`, `team/audit`, `my_activity`,
 # `accounts/health`, `audience/analyze/{bot_id}`, `audience/segment/{bot_id}`.
 _KNOWN_DOORLESS = frozenset({
@@ -63,7 +62,6 @@ _KNOWN_DOORLESS = frozenset({
     "/api/miniapp/audience/segment/{bot_id}",
     "/api/miniapp/audit",
     "/api/miniapp/broadcast/ab_test",
-    "/api/miniapp/broadcast/schedule",
     "/api/miniapp/channel_factory/submit",
     "/api/miniapp/circuit_breaker",
     "/api/miniapp/cloud/set-paid",
@@ -101,7 +99,6 @@ _KNOWN_DOORLESS = frozenset({
     "/api/miniapp/ranking/record",
     "/api/miniapp/ranking/stats",
     "/api/miniapp/ranking/track",
-    "/api/miniapp/schedule_post",
     "/api/miniapp/sys_health",
     "/api/miniapp/team/audit",
     "/api/miniapp/team/members",

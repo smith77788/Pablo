@@ -30,12 +30,17 @@ DASH = (ROOT / "mini_app" / "screens" / "dashboard.js").read_text(encoding="utf-
 
 
 def _attention_source() -> str:
-    """Тело обработчика сводки."""
+    """Тело сводки «что требует внимания».
+
+    Сборка списка вынесена из обработчика маршрута в модульную
+    `attention_items`: её читают и маршрут, и экран «Итоги», и сводка в боте.
+    Проверяем именно её — обработчик теперь только делегирует.
+    """
     tree = ast.parse(API)
     for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "dashboard_attention":
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "attention_items":
             return ast.unparse(node)
-    raise AssertionError("обработчик dashboard_attention не найден")
+    raise AssertionError("сборка сводки attention_items не найдена")
 
 
 def _registered_routes() -> frozenset[str]:

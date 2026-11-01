@@ -146,6 +146,7 @@ GET /api/miniapp/content_cloner/history
 GET /api/miniapp/content_mesh/{mesh_id}
 GET /api/miniapp/content_mesh/{mesh_id}/targets
 GET /api/miniapp/content_meshes
+GET /api/miniapp/crm/board
 GET /api/miniapp/crm/contacts
 GET /api/miniapp/crm/deals
 GET /api/miniapp/crosspost/links
@@ -285,6 +286,7 @@ GET /api/miniapp/strike/history
 GET /api/miniapp/strike/status
 GET /api/miniapp/strike/takedown_kit
 GET /api/miniapp/subscription
+GET /api/miniapp/summary
 GET /api/miniapp/swarm
 GET /api/miniapp/sys_health
 GET /api/miniapp/team/audit
@@ -444,6 +446,7 @@ HEAD /api/miniapp/content_cloner/history
 HEAD /api/miniapp/content_mesh/{mesh_id}
 HEAD /api/miniapp/content_mesh/{mesh_id}/targets
 HEAD /api/miniapp/content_meshes
+HEAD /api/miniapp/crm/board
 HEAD /api/miniapp/crm/contacts
 HEAD /api/miniapp/crm/deals
 HEAD /api/miniapp/crosspost/links
@@ -583,6 +586,7 @@ HEAD /api/miniapp/strike/history
 HEAD /api/miniapp/strike/status
 HEAD /api/miniapp/strike/takedown_kit
 HEAD /api/miniapp/subscription
+HEAD /api/miniapp/summary
 HEAD /api/miniapp/swarm
 HEAD /api/miniapp/sys_health
 HEAD /api/miniapp/team/audit
@@ -731,7 +735,6 @@ POST /api/miniapp/bots/profile_preview
 POST /api/miniapp/bots/scan_fleet
 POST /api/miniapp/broadcast
 POST /api/miniapp/broadcast/ab_test
-POST /api/miniapp/broadcast/schedule
 POST /api/miniapp/broadcast/{bc_id}/resend
 POST /api/miniapp/broadcasts/schedule
 POST /api/miniapp/campaign/launch
@@ -787,7 +790,6 @@ POST /api/miniapp/crosspost/run
 POST /api/miniapp/devices/revoke
 POST /api/miniapp/dm/adhoc_send
 POST /api/miniapp/dm/preview
-POST /api/miniapp/dm_campaign
 POST /api/miniapp/dm_campaign/{campaign_id}/launch
 POST /api/miniapp/dm_campaign/{campaign_id}/pause
 POST /api/miniapp/dm_campaigns
@@ -915,7 +917,6 @@ POST /api/miniapp/sales/persona/{pid}/promo
 POST /api/miniapp/sales/persona/{pid}/test
 POST /api/miniapp/sales/persona/{pid}/unassign
 POST /api/miniapp/schedule/{sch_id}/cancel
-POST /api/miniapp/schedule_post
 POST /api/miniapp/self_promo/template
 POST /api/miniapp/self_promo/{tpl_id}/launch
 POST /api/miniapp/seo/analyze
@@ -971,7 +972,7 @@ POST /api/miniapp/uch/smart-tags/apply
 POST /api/miniapp/uch/smart-tags/rules
 POST /api/miniapp/uch/sync
 POST /api/miniapp/uch/trust/update
-POST /api/miniapp/url-ticket
+POST /api/miniapp/url_ticket
 POST /api/miniapp/va/channel/{cid}/install
 POST /api/miniapp/va/channel/{cid}/learning/rollback
 POST /api/miniapp/va/channel/{cid}/post_now

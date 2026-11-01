@@ -96,16 +96,14 @@ def test_the_endpoint_gives_what_the_screen_cannot():
         "шапка CSV перестала быть русской — владелец английского не читает")
 
 
-def test_the_shared_download_helper_carries_the_token():
-    """Ссылку открывает внешний браузер: без билета в адресе придёт 401.
-
-    D19: в адрес идёт короткий билет (ticketUrl), а не токен сессии.
-    """
+def test_the_shared_download_helper_carries_a_ticket():
+    """Ссылку открывает внешний браузер: заголовка Authorization там нет, и без
+    пропуска в адресе придёт 401. Пропуск, а не токен сессии — тот оседал бы в
+    истории браузера (tests/test_session_token_never_in_url.py)."""
     body = _fn("exportCSV")
-    assert "ticketUrl(" in body, (
-        "общий помощник выгрузки перестал подставлять билет — в браузере "
-        "заголовка Authorization нет, и ручка ответит 401")
-    assert "TK" not in body, "токен сессии снова уходит в адрес ссылки"
+    assert "openTicketLink(" in body, (
+        "общий помощник выгрузки перестал подставлять пропуск — ручка ответит 401")
+    assert "token=" not in body
 
 
 def test_the_probe_reads_the_real_ui():

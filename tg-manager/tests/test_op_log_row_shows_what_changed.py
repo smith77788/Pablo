@@ -1,0 +1,194 @@
+"""Строка лога операции открывается и говорит, ЧТО изменилось и у кого.
+
+Жалоба владельца (Операция #771 «Профиль ботов»): «не могу нажать на
+результат операции, посмотреть детали и изменения». В логе стояли строки «3»
+и «4» со значком «Успешно» — и всё:
+
+* целью в журнал писался внутренний номер строки `managed_bots.id`, по нему
+  не понять, какой бот изменён;
+* у успешной строки не было сообщения, хотя «как было» исполнитель снимает
+  перед правкой (для отката) — то есть «было → стало» лежало под рукой;
+* строку лога нельзя было нажать, а текст обрезался на 160 символах.
+
+Теперь: цель — @username бота, сообщение — «описание: «было» → «стало»»,
+строка открывается окном с полным текстом. Повтор операции, начатой ДО
+правки, не меняет второй раз ботов, отмеченных старым номером.
+"""
+from __future__ import annotations
+
+import os
+
+import pytest
+
+from services import op_worker
+from tests.test_bulk_bot_profile import _Pool, _patch_common
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _capture_journal(monkeypatch):
+    rows: list[tuple] = []
+
+    async def _done(pool, op_id, step, target, message=None, **k):
+        rows.append((str(target), message or ""))
+        return True
+
+    monkeypatch.setattr(op_worker, "_journal_done", _done)
+    return rows
+
+
+def _getters(monkeypatch, before: dict):
+    from services import bot_api
+
+    async def _name(sess, token, language_code=""):
+        return before.get("name", "")
+
+    async def _desc(sess, token, language_code=""):
+        return before.get("description", "")
+
+    monkeypatch.setattr(bot_api, "get_my_name", _name)
+    monkeypatch.setattr(bot_api, "get_my_description", _desc)
+
+
+@pytest.mark.asyncio
+async def test_success_row_names_the_bot_and_the_change(monkeypatch):
+    bots = [{"id": 3, "bot_id": 111, "token": "T1", "username": "dostavkaenbot"}]
+    _patch_common(monkeypatch, bots, {"ok": True})
+    _getters(monkeypatch, {"description": "Старое описание"})
+    rows = _capture_journal(monkeypatch)
+    res = await op_worker._exec_bulk_bot_profile(
+        _Pool(), None, 771, 99, {"bot_ids": [111], "description": "Новое описание"})
+    assert res["ok"] == 1
+    target, msg = rows[0]
+    assert target == "@dostavkaenbot", f"в журнале опять номер строки: {target!r}"
+    assert "описание: «Старое описание» → «Новое описание»" in msg, msg
+
+
+@pytest.mark.asyncio
+async def test_bot_without_username_is_named_by_its_id(monkeypatch):
+    bots = [{"id": 4, "bot_id": 222, "token": "T2", "username": None}]
+    _patch_common(monkeypatch, bots, {"ok": True})
+    _getters(monkeypatch, {"name": "Было"})
+    rows = _capture_journal(monkeypatch)
+    await op_worker._exec_bulk_bot_profile(
+        _Pool(), None, 771, 99, {"bot_ids": [222], "name": "Стало"})
+    assert rows[0][0] == "бот 222"
+
+
+@pytest.mark.asyncio
+async def test_retry_of_an_old_op_does_not_edit_a_bot_twice(monkeypatch):
+    # Операция начата ДО правки: в её журнале бот отмечен старым номером «3».
+    bots = [{"id": 3, "bot_id": 111, "token": "T1", "username": "dostavkaenbot"}]
+    api_calls = _patch_common(monkeypatch, bots, {"ok": True})
+
+    async def _already(pool, op_id):
+        return {"3"}
+
+    monkeypatch.setattr(op_worker, "completed_targets", _already)
+    _capture_journal(monkeypatch)
+    await op_worker._exec_bulk_bot_profile(
+        _Pool(), None, 771, 99, {"bot_ids": [111], "description": "Новое"})
+    assert not [m for _, m, _ in api_calls if m.startswith("set")], \
+        "бот, уже изменённый до правки, изменён повтором второй раз"
+
+
+@pytest.mark.asyncio
+async def test_rollback_row_names_the_bot(monkeypatch):
+    snap = [{"id": 9, "target_id": 111, "before": '{"description": "Старое"}'}]
+    bots = [{"bot_id": 111, "token": "T1", "username": "dostavkaenbot"}]
+    _patch_common(monkeypatch, bots, {"ok": True})
+    rows = _capture_journal(monkeypatch)
+    res = await op_worker._exec_bulk_bot_profile_rollback(
+        _Pool(snap_rows=snap), None, 772, 99, {"source_op_id": 771})
+    assert res["ok"] == 1
+    assert rows[0][1].startswith("@dostavkaenbot · вернули: описание: «Старое»"), rows
+
+
+def test_log_rows_open_with_full_details():
+    with open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    render = html[html.index("function renderOpLog()"):html.index("function renderOpLogChips()")]
+    assert 'onclick="openOpLogRow(${i})"' in render, "строку лога по-прежнему нельзя нажать"
+    assert "function openOpLogRow(i)" in render
+    fn = render[render.index("function openOpLogRow(i)"):]
+    assert "l.message" in fn and "created_at" in fn
+
+
+# ── «Правка ботов» (bulk_bot_edit): тот же журнал, что был у #771 ────────────
+
+class _Resp:
+    def __init__(self, data):
+        self._d = data
+
+    async def json(self):
+        return self._d
+
+
+class _Sess:
+    def __init__(self, answers):
+        self._answers = answers
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, url, json=None, timeout=None):
+        tok = url.split("/bot", 1)[1].split("/", 1)[0]
+        return _Resp(self._answers[tok])
+
+
+def _run_bulk_bot_edit(monkeypatch, bots, answers, field="desc", value="Новое описание"):
+    import asyncio as _aio
+    from database import db as _db
+
+    async def _fetch(pool, sql, *a):
+        return bots
+
+    rows: list[tuple] = []
+
+    async def _jw(pool, sql, op_id, step, target, *rest, **k):
+        status = "ok" if "'ok'" in sql else "error"
+        rows.append((target, status, rest[0] if rest else ""))
+        return "OK"
+
+    async def _no(*a, **k):
+        return False
+
+    async def _exec(*a, **k):
+        return "OK"
+
+    async def _nosleep(*a, **k):
+        return None
+
+    monkeypatch.setattr(_db, "fetch_bots", _fetch)
+    monkeypatch.setattr(op_worker, "_journal_write", _jw)
+    monkeypatch.setattr(op_worker, "_is_cancelled", _no)
+    monkeypatch.setattr(op_worker, "_safe_execute", _exec)
+    monkeypatch.setattr(op_worker.aiohttp, "ClientSession", lambda *a, **k: _Sess(answers))
+    monkeypatch.setattr(op_worker.asyncio, "sleep", _nosleep)
+    res = _aio.run(
+        op_worker._exec_bulk_bot_edit(None, None, 5, 99, {"field": field, "value": value}))
+    return res, rows
+
+
+def test_bulk_bot_edit_names_the_bot_and_what_was_set(monkeypatch):
+    bots = [{"id": 3, "bot_id": 111, "token": "T1", "username": "shopbot"}]
+    res, rows = _run_bulk_bot_edit(monkeypatch, bots, {"T1": {"ok": True}})
+    assert res["ok"] == 1
+    target, status, msg = rows[0]
+    assert target == "@shopbot", f"в журнале снова номер строки: {target!r}"
+    assert status == "ok" and "описание: → «Новое описание»" in msg, msg
+
+
+def test_bulk_bot_edit_failure_is_in_the_log_with_its_reason(monkeypatch):
+    bots = [{"id": 3, "bot_id": 111, "token": "T1", "username": "shopbot"},
+            {"id": 4, "bot_id": 222, "token": "T2", "username": None}]
+    res, rows = _run_bulk_bot_edit(monkeypatch, bots, {
+        "T1": {"ok": True},
+        "T2": {"ok": False, "description": "Too Many Requests: retry after 30"}})
+    assert res["ok"] == 1 and res["failed"] == 1
+    err = [r for r in rows if r[1] == "error"]
+    assert err, "провал не попал в лог операции — владелец не узнает, какой бот не изменён"
+    assert err[0][0] == "бот 222" and "retry after 30" in err[0][2]
