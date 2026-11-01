@@ -76,7 +76,10 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
         Inline keyboard markup with main menu buttons.
     """
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Infragram OS", callback_data=BmCb(action="main"))
+    # Первым — результат и разделы по задачам (botmother_menu): бот — пульт,
+    # полный интерфейс — мини-апп.
+    kb.button(text="📊 Итоги за неделю", callback_data=BmCb(action="summary"))
+    kb.button(text="🧭 Разделы", callback_data=BmCb(action="main"))
     kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
     kb.button(text="⚡ Активные задачи", callback_data=TaskCb(action="list"))
     kb.button(text="❓ Справка", callback_data=BotCb(action="help"))
@@ -87,7 +90,7 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb.button(text="💸 Экономика флота", callback_data=BotCb(action="budget"))
     if is_admin:
         kb.button(text="⚙️ Админка", callback_data="adm:main")
-    kb.adjust(1, 2, 2, 1, 1, 1 if not is_admin else 2)
+    kb.adjust(2, 2, 2, 1, 1, 1 if not is_admin else 2)
     return kb.as_markup()
 
 
