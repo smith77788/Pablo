@@ -307,13 +307,13 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
             "→ ➕ Добавить бота → вставить токен от @BotFather\n"
             "→ Рассылки, аудитория, авто-ответы, CRM\n\n"
             "📡 <b>Хочу управлять каналами</b>\n"
-            "→ /menu → 🏗 Активы & Сети → 📡 Каналы\n"
+            "→ /menu → 📡 Каналы и боты\n"
             "→ Импорт, создание, публикация во все каналы\n\n"
             "📱 <b>Хочу операции через аккаунт</b>\n"
-            "→ /menu → 🏗 Активы & Сети → 📱 TG-аккаунты\n"
+            "→ /menu → 📱 Аккаунты\n"
             "→ Создание каналов/групп, вступление, публикация\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "💡 <b>Полное меню OS:</b> /menu\n"
+            "💡 <b>Разделы по задачам:</b> /menu\n"
             "❓ <b>Помощь:</b> /help\n\n"
             f"<i>ID: <code>{uid}</code></i>",
             parse_mode="HTML",
@@ -346,9 +346,22 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     summary = " · ".join(stats_lines[:2])
     extra = f"\n{stats_lines[2]}" if active_broadcasts else ""
 
+    # Итог недели одной строкой — тот же расчёт, что «📊 Итоги»: вернувшийся
+    # владелец первым видит результат, а не только число ботов. Ограничен по
+    # времени и глушится: /start не должен ждать медленную базу.
+    result_line = ""
+    try:
+        from services import results_summary as _rs
+
+        _sum = await asyncio.wait_for(
+            _rs.compute(pool, uid, 7, with_attention=False), 3)
+        result_line = f"\n📊 {_rs.one_line(_sum)}"
+    except Exception:
+        log_exc_swallow(log, "/start: итоги недели не посчитались")
+
     await message.answer(
         f"👋 <b>Infragram OS</b>  <code>v{BUILD_VERSION}</code>\n\n"
-        f"{summary}{extra}\n\n"
+        f"{summary}{extra}{result_line}\n\n"
         f"ID: <code>{uid}</code>\n\n"
         f"💡 Нажмите на бота из списка → откроется меню управления",
         parse_mode="HTML",
