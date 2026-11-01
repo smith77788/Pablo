@@ -1522,16 +1522,21 @@ async def fsm_bpchans_text(
         return
 
     total = len(selected_ids)
+    # Публикация в каналы — одна операция, mass_publish: у неё гейт контента,
+    # правила редактора, медиа и отложка. Свой тип bulk_post_chans обходил
+    # первые два (см. tests/test_channel_publish_one_op.py).
     op_id = await operation_bus.submit(
         pool,
         message.from_user.id,
-        "bulk_post_chans",
+        "mass_publish",
         {
-            "acc_id": acc_id,
-            "channel_ids": selected_ids,
+            "account_ids": [int(acc_id)],
+            "channel_ids": [int(c) for c in selected_ids],
             "text": text,
+            "target": "all",
         },
         total_items=total,
+        label=f"Пост · каналов: {total} · аккаунт #{acc_id}",
     )
     await message.answer(
         f"📤 <b>Публикация в {total} каналов поставлена в очередь</b>\n\n"

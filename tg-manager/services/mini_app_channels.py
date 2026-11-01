@@ -153,15 +153,17 @@ def setup_routes(app: web.Application, pool) -> None:
             sched = (_dt.now(_tz.utc) + _td(minutes=schedule_minutes)).isoformat()
         try:
             from services.operation_bus import submit
-            # Контракт _exec_bulk_post_to_channel: account_ids[], channel_ref (числовой
-            # channel_id), text_to_post, bulk_access_hash. Раньше слали channel_id/
-            # account_id/text — воркер их не читал и пост в канал ничего не делал.
-            op_id = await submit(pool, uid, "bulk_post_to_channel", {
+            # Пост в свой канал — та же операция, что единая публикация
+            # (mass_publish): гейт запрещённого контента и правила редактора
+            # канала стоят только в ней. bulk_post_to_channel — это «несколько
+            # аккаунтов в один чужой чат», и карточке своего канала он не нужен.
+            op_id = await submit(pool, uid, "mass_publish", {
                 "account_ids": [int(ch["acc_id"])],
-                "channel_ref": int(ch_id),
-                "text_to_post": text,
-                "bulk_access_hash": int(ch.get("access_hash") or 0),
-            }, total_items=1, scheduled_for=sched)
+                "channel_ids": [int(ch_id)],
+                "text": text,
+                "target": "all",
+            }, total_items=1, scheduled_for=sched,
+                label=f"Пост в канал «{(ch.get('title') or ch_id)}»")
             return _json_resp({"ok": True, "op_id": op_id, "scheduled_minutes": schedule_minutes})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -943,9 +945,12 @@ def setup_routes(app: web.Application, pool) -> None:
 
         try:
             from services import operation_bus
+            # Одна операция публикации в каналы — mass_publish (см.
+            # tests/test_channel_publish_one_op.py).
             op_id = await operation_bus.submit(
-                pool, uid, "bulk_post_chans",
-                {"acc_id": int(acc_id), "channel_ids": channel_ids, "text": text},
+                pool, uid, "mass_publish",
+                {"account_ids": [int(acc_id)], "channel_ids": channel_ids,
+                 "text": text, "target": "all"},
                 total_items=len(channel_ids),
                 label=f"Пост · каналов: {len(channel_ids)} · аккаунт #{acc_id}",
             )

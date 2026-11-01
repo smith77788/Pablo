@@ -681,7 +681,11 @@ def setup_routes(app: web.Application, pool) -> None:
         })
 
     async def broadcast_schedule(request: web.Request) -> web.Response:
-        """Рассылка с расписанием: POST /api/miniapp/broadcast/schedule"""
+        """Рассылка с расписанием: POST /api/miniapp/broadcasts/schedule.
+
+        Адрес один. Был ещё алиас в единственном числе (`/broadcast/schedule`)
+        на тот же обработчик — экран его не звал, а второй адрес одной ручки
+        только путает того, кто ищет, откуда приходит запрос."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -815,7 +819,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/campaign/launch", campaign_launch)
     app.router.add_get("/api/miniapp/campaign/{campaign_id}", campaign_status_get)
     app.router.add_get("/api/miniapp/broadcasts", broadcasts_list)
-    app.router.add_post("/api/miniapp/broadcast/schedule", broadcast_schedule)
     app.router.add_post("/api/miniapp/broadcasts/schedule", broadcast_schedule)
     app.router.add_get("/api/miniapp/templates", templates)
     app.router.add_post("/api/miniapp/template", create_template)

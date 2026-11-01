@@ -247,14 +247,14 @@ function fillBcastBots(selectedId) {
 
 function openBotProfile(botId) {
   BP_BOT_ID = botId;
-  ['bpName','bpDesc','bpShort','bpAvatar'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  const e=document.getElementById('bpErr'); if(e) e.textContent='';
-  showModal('mo-bot-profile');
+  ['bpoName','bpoDesc','bpoShort','bpoAvatar'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const e=document.getElementById('bpoErr'); if(e) e.textContent='';
+  showModal('mo-bot-profile-one');
 }
 
 async function setBotAvatar() {
-  const url=document.getElementById('bpAvatar').value.trim();
-  const errEl=document.getElementById('bpErr'); errEl.textContent='';
+  const url=document.getElementById('bpoAvatar').value.trim();
+  const errEl=document.getElementById('bpoErr'); errEl.textContent='';
   if(!url){ errEl.textContent='Вставьте https URL картинки'; return; }
   toast('🖼 Загружаю аватар…');
   try {
@@ -272,16 +272,16 @@ async function deleteBotAvatar() {
 }
 
 async function submitBotProfile() {
-  const errEl=document.getElementById('bpErr'); errEl.textContent='';
-  const name=document.getElementById('bpName').value.trim();
-  const description=document.getElementById('bpDesc').value.trim();
-  const short_description=document.getElementById('bpShort').value.trim();
+  const errEl=document.getElementById('bpoErr'); errEl.textContent='';
+  const name=document.getElementById('bpoName').value.trim();
+  const description=document.getElementById('bpoDesc').value.trim();
+  const short_description=document.getElementById('bpoShort').value.trim();
   if(!name && !description && !short_description){ errEl.textContent='Заполните хотя бы одно поле'; return; }
-  const btn=document.getElementById('bpBtn'); btn.disabled=true; btn.textContent='Сохраняю…';
+  const btn=document.getElementById('bpoBtn'); btn.disabled=true; btn.textContent='Сохраняю…';
   try {
     const payload={}; if(name)payload.name=name; if(description)payload.description=description; if(short_description)payload.short_description=short_description;
     const r=await api('/api/miniapp/bot/'+BP_BOT_ID+'/profile',{method:'POST',body:JSON.stringify(payload)});
-    if(r.ok){ toast('✅ Профиль бота обновлён'); closeModal('mo-bot-profile'); }
+    if(r.ok){ toast('✅ Профиль бота обновлён'); closeModal('mo-bot-profile-one'); }
     else { errEl.textContent='Telegram отклонил изменение (проверьте текст/лимиты)'; }
   } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='Сохранить'; }
