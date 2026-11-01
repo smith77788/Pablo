@@ -43,7 +43,7 @@ def _creating_routes(src: str) -> list[str]:
 
 def test_layer_is_found():
     # Пустой glob сделал бы проверку ниже зелёной ни о чём.
-    assert any(p.name == "mini_app_api.py" for p in _LAYER)
+    assert len(_LAYER) >= 2
     assert any(p.name == "mini_app_dm.py" for p in _LAYER)
 
 

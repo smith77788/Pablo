@@ -86,7 +86,7 @@ def test_frontend_never_puts_the_session_token_in_a_url():
     bad = []
     for p in sources:
         for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-            if re.search(r"""token=['"]?\s*\+\s*encodeURIComponent\(TK\)|[?&]token=""", line):
+            if re.search(r"""token=['"]?\s*\+\s*encodeURIComponent\(TK\)|[?&]token=|\.set\(\s*['"]token['"]\s*,\s*TK""", line):
                 bad.append(f"{p.name}:{i}: {line.strip()[:90]}")
     assert not bad, bad
 

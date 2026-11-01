@@ -70,11 +70,16 @@ CREATE INDEX idx_audit_account ON operation_audit(account_id);
 - После миграций проверяются критичные таблицы. По умолчанию их отсутствие —
   ERROR в лог (падать нельзя: получился бы цикл перезапусков); `SCHEMA_STRICT=1`
   превращает это в отказ старта.
-- Baseline (`schema_baseline.sql` + `schema_baseline.manifest`): на **заведомо
-  чистой** базе — пустой журнал И нет `tg_accounts` — применяется снимок схемы,
-  а покрытые им файлы истории помечаются применёнными. Снимок генерируется из
-  живой базы: `deploy/scripts/make_schema_baseline.py`. У существующего
-  окружения baseline не берётся никогда.
+- Baseline (`database/baseline/baseline.sql` + `baseline.manifest`, снят
+  2026-11-01 на `schema_v261`, покрывает все 273 файла): на **заведомо чистой**
+  базе — пустой журнал И нет `tg_accounts` — применяется снимок схемы, а
+  покрытые им файлы истории помечаются применёнными. У существующего окружения
+  baseline не берётся никогда. Снимок лежит ВНЕ маски `schema*.sql`
+  намеренно: под ней раннер исполнил бы его на проде как миграцию. Равенство
+  снимка и истории проверяет `tests/test_schema_baseline_matches_history_postgres.py`
+  (две чистые базы настоящим стартом, сравнение каталогов). Пересъёмка:
+  `deploy/scripts/make_schema_baseline.py` с базы, поднятой историей; порог —
+  больше 40 файлов после снимка (`tests/test_schema_baseline.py`).
 - Идемпотентны (IF NOT EXISTS)
 - Только ADD COLUMN, не удалять (в 194 файлах на 2026-09-03 нет ни одного
   `DROP TABLE`/`DROP COLUMN`)

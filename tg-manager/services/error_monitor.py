@@ -200,17 +200,37 @@ class ErrorMonitorMiddleware(BaseMiddleware):
                 message=str(exc),
             )
             
-            # Check if we should alert
+            # Всплеск — админу сообщением, а не только в лог (D27).
             if monitor.should_alert(error_code):
-                log.warning(
-                    "Error pattern detected: %s (count=%d, users=%d)",
-                    error_code.value,
-                    monitor.get_recent_count(error_code),
-                    len(monitor.get_pattern(error_code).affected_users) if monitor.get_pattern(error_code) else 0,
-                )
+                await _report_spike(monitor, error_code, data)
             
             # Re-raise the exception
             raise
+
+
+async def _report_spike(monitor: ErrorMonitor, error_code: ErrorCode,
+                        data: dict[str, Any]) -> None:
+    """Всплеск ошибок — в лог и сообщением админам платформы.
+
+    Пул и бот берутся из данных апдейта (`start_polling(pool=pool)` кладёт
+    пул туда же, куда aiogram кладёт бота) — без глобального состояния.
+    """
+    from services.platform_alert import esc, make_alerter
+
+    count = monitor.get_recent_count(error_code)
+    pattern = monitor.get_pattern(error_code)
+    users = len(pattern.affected_users) if pattern else 0
+    log.warning("Error pattern detected: %s (count=%d, users=%d)",
+                error_code.value, count, users)
+    sample = pattern.sample_messages[-1] if pattern and pattern.sample_messages else ""
+    minutes = max(1, monitor._window_seconds // 60)
+    text = (
+        f"⚠️ <b>Всплеск ошибок в боте:</b> <code>{esc(error_code.value)}</code>\n"
+        f"{count} за {minutes} мин, затронуто пользователей: {users}."
+        + (f"\nПример: {esc(sample, 200)}" if sample else "")
+    )
+    await make_alerter(data.get("pool"), data.get("bot"))(
+        f"err-spike:{error_code.value}", text)
 
 
 def install_error_monitoring(dp) -> None:
