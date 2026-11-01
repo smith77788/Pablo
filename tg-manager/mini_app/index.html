@@ -3003,6 +3003,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📢 Фабрика каналов</div></div>
   <div class="sub-sb">
     <div class="sec">Создать каналы / группы массово</div>
+    <!-- Мост к Гео-сети: создание каналов/групп ПО ГОРОДАМ/СТРАНАМ с
+         локализованными SEO-именами идёт её пайплайном (op
+         global_presence_channel), а не вторым в фабрике. Тип актива — по
+         чекбоксу «группа/канал». Аккаунты гео-сеть подбирает по стране цели. -->
+    <div class="lst" style="margin:0 16px 10px;padding:10px;border:1px solid rgba(96,165,250,.35);background:rgba(96,165,250,.06)">
+      <div style="font-size:13px;color:var(--blue);font-weight:600;margin-bottom:4px">🌍 Создать по гео</div>
+      <div style="font-size:12px;color:var(--hint);line-height:1.45">Каналы/группы по городам/странам с локализованными SEO-именами — плейсхолдеры <code>{{CITY_NAME}}</code>, <code>{{COUNTRY}}</code> и перестановка ключей. Аккаунты подберутся по стране цели.</div>
+      <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="cfOpenGeo()">🌍 По гео (города/страны) →</button>
+    </div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <input type="text" id="cfTitle" placeholder="Название (общее для всех)" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
       <textarea id="cfAbout" placeholder="Описание (необязательно)" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
@@ -26461,6 +26470,12 @@ async function openEcoDetail(ecoId, ecoName) {
 }
 
 // ── Channel Factory ─────────────────────────────────────
+// Мост к Гео-сети: создать каналы/группы по гео. Тип актива — по чекбоксу
+// «группа/канал» на экране фабрики. Гео-создание идёт пайплайном гео-сети.
+function cfOpenGeo() {
+  const g = document.getElementById('cfIsGroup');
+  openGpCreateModal(g && g.checked ? 'group' : 'channel');
+}
 async function openChannelFactory(asGroup) {
   push('s-chanfactory');
   document.getElementById('cfTitle').value='';

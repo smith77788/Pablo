@@ -35,3 +35,23 @@ def test_geo_bot_pipeline_is_live():
     assert '"global_presence_bot": _exec_global_presence_bot' in api
     # Гео-сеть предлагает тип актива «бот» в модалке.
     assert '<option value="bot">' in HTML
+
+
+# ── Фабрика каналов/чатов → Гео-сеть ──────────────────────────────────────────
+
+def test_channel_factory_has_geo_bridge():
+    # Кнопка-мост на экране фабрики каналов + хелпер, выбирающий тип актива по
+    # чекбоксу «группа/канал».
+    assert "cfOpenGeo()" in HTML
+    m = re.search(r"function cfOpenGeo\(\)\s*\{(.*?)\}", HTML, re.S)
+    assert m, "нет хелпера cfOpenGeo"
+    body = m.group(1)
+    assert "cfIsGroup" in body
+    assert "openGpCreateModal(" in body
+    assert "'group'" in body and "'channel'" in body
+
+
+def test_geo_channel_pipeline_is_live():
+    from services.operation_bus import OP_REGISTRY
+    assert "global_presence_channel" in OP_REGISTRY
+    assert '<option value="channel">' in HTML and '<option value="group">' in HTML
