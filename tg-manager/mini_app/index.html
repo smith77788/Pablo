@@ -4972,6 +4972,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:8px 16px">
       <!-- РЕЖИМ «создать новых»: аккаунт реально переписывается с @BotFather -->
       <div id="bfNewFields">
+        <!-- Мост к Гео-сети: создание ботов ПО ГОРОДАМ/СТРАНАМ с локализованными
+             SEO-именами идёт её пайплайном (op global_presence_bot), а не вторым
+             в фабрике. Отсюда — одна кнопка-вход на тип актива «бот». -->
+        <div class="field" style="border:1px solid rgba(96,165,250,.35);border-radius:10px;padding:10px;background:rgba(96,165,250,.06)">
+          <div style="font-size:13px;color:var(--blue);font-weight:600;margin-bottom:4px">🌍 Создать ботов по гео</div>
+          <div class="field-note" style="margin-top:0">Боты по городам/странам с локализованными SEO-именами — плейсхолдеры <code>{{CITY_NAME}}</code>, <code>{{COUNTRY}}</code> и перестановка ключей. Аккаунты для @BotFather выбираются в окне.</div>
+          <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="openGpCreateModal('bot')">🌍 По гео (города/страны) →</button>
+        </div>
         <div class="field">
           <label>Аккаунты для @BotFather * (можно несколько)</label>
           <div style="display:flex;gap:8px;margin-bottom:6px">
@@ -25603,8 +25611,12 @@ async function _gpLoadAccs(q) {
   }
 }
 
-async function openGpCreateModal() {
+async function openGpCreateModal(presetAssetType) {
   showModal('mo-gp-create');
+  // Мост из Фабрики ботов: открыть сразу на нужном типе актива (напр. 'bot').
+  // gpAssetType в сброс полей ниже НЕ входит, поэтому предустановка держится.
+  { const _at=document.getElementById('gpAssetType');
+    if (_at && presetAssetType) _at.value = presetAssetType; }
   ['gpRefName','gpRefUsername','gpRefCity','gpNamePattern','gpUsernamePattern','gpCustomCities'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
   { const _g=document.getElementById('gpGeoPreset'); if(_g) _g.value=''; gpGeoToggle(); }
   loadGpGeoPresets();
