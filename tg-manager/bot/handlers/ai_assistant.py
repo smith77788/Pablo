@@ -26,7 +26,7 @@ from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
 from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
 
-from services import ai_memory
+from services import ai_gateway, ai_memory, llm_gate
 from services.ai_providers import configured_providers
 from services.logger import log_exc_swallow
 
@@ -516,6 +516,16 @@ async def _call_ai_providers(
     except ImportError:
         return "⚠️ Библиотека openai не установлена."
 
+    # Тот же дневной потолок по тарифу, что и у остальных вызовов ИИ (ai_gateway).
+    allowed, lim = await ai_gateway.check_limit(user_id, ai_gateway.TASK_ASSISTANT, pool=pool)
+    if not allowed:
+        return (
+            "⚠️ <b>Дневной лимит ИИ исчерпан</b>\n\n"
+            f"Тариф «{escape(ai_gateway.plan_label(str(lim.get('plan') or '')))}»: "
+            f"{lim.get('used')} из {lim.get('limit')} обращений сегодня. "
+            "Лимит обновится завтра, а на старшем тарифе он выше."
+        )
+
     memory_context = ""
     try:
         last_user_message = next(
@@ -538,13 +548,15 @@ async def _call_ai_providers(
     base_messages.extend(list(messages))
 
     tools = _openai_tools()
-    primary_label = f"{providers[0].name}/{providers[0].models[0]}"
+    # Порядок моделей — как у всего ИИ (ai_gateway.order_candidates): для
+    # помощника платные и не «:free» впереди бесплатных.
+    ordered = ai_gateway.order_candidates(providers, ai_gateway.TASK_ASSISTANT)
+    primary_label = f"{ordered[0][0].name}/{ordered[0][1]}" if ordered else ""
     attempts = [
         (provider, model, max_tokens, use_tools)
         for use_tools in (True, False)
         for max_tokens in (1500, 600)
-        for provider in providers
-        for model in provider.models
+        for provider, model in ordered
     ]
     seen: set[tuple[str, str, int, bool]] = set()
 
@@ -553,6 +565,9 @@ async def _call_ai_providers(
         if attempt_key in seen:
             continue
         seen.add(attempt_key)
+        # Модель на паузе по лимиту (llm_gate) не дёргаем: повтор только жжёт квоту.
+        if await llm_gate.blocked_until(provider.name, model):
+            continue
         client = AsyncOpenAI(
             api_key=provider.api_key,
             base_url=provider.base_url,
@@ -571,6 +586,12 @@ async def _call_ai_providers(
                     completion_kwargs["tools"] = tools
                     completion_kwargs["tool_choice"] = "auto"
                 response = await client.chat.completions.create(**completion_kwargs)
+                usage = getattr(response, "usage", None)
+                await ai_gateway.record_usage(
+                    user_id, ai_gateway.TASK_ASSISTANT, ok=True,
+                    input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                    output_tokens=int(getattr(usage, "completion_tokens", 0) or 0))
+                await llm_gate.note_ok(provider.name, model)
                 choice = response.choices[0]
                 msg = choice.message
 
@@ -642,6 +663,9 @@ async def _call_ai_providers(
             return "Превышен лимит итераций инструментов."
 
         except Exception as e:
+            if not await llm_gate.note_limit(provider.name, model, e):
+                await llm_gate.note_call(provider.name, ok=False)
+            await ai_gateway.record_usage(user_id, ai_gateway.TASK_ASSISTANT, ok=False)
             err_str = str(e).lower()
             should_retry = any(
                 x in err_str

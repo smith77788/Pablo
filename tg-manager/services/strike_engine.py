@@ -4319,64 +4319,35 @@ async def _ai_classify_with_providers(
     user_content: str,
     temperature: float = 0.1,
 ) -> dict | None:
-    """Общий вызов AI через провайдеры (failover OpenRouter → Groq → Gemini)."""
+    """Классификация через единый шлюз; ответ модели — JSON.
+
+    Две попытки: шлюз сам перебирает провайдеров при сбое, а вторая попытка
+    ловит ответ, который пришёл, но не разобрался как JSON."""
     import json as _json
 
-    from services.ai_providers import configured_providers
-
-    providers = configured_providers()
-    if not providers:
-        log.warning("ai_content_detection: no AI providers configured")
-        return None
-
-    try:
-        from openai import AsyncOpenAI
-    except ImportError:
-        log.warning("ai_content_detection: openai library not installed")
-        return None
+    from services import ai_gateway
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
     ]
-
-    for provider in providers:
-        for model in provider.models[:3]:
-            client = AsyncOpenAI(
-                api_key=provider.api_key,
-                base_url=provider.base_url,
-                timeout=30.0,
-            )
-            try:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=500,
-                    temperature=temperature,
-                )
-                text = (response.choices[0].message.content or "").strip()
-                if not text:
-                    continue
-                # Очистка от markdown-обёрток
-                if text.startswith("```"):
-                    text = text.split("\n", 1)[-1]
-                    if text.endswith("```"):
-                        text = text[:-3]
-                    text = text.strip()
-                return _json.loads(text)
-            except _json.JSONDecodeError:
-                log_exc_swallow(
-                    log,
-                    f"ai_content_detection: JSON parse failed provider={provider.name}",
-                )
-                continue
-            except Exception as exc:
-                log_exc_swallow(
-                    log,
-                    f"ai_content_detection: provider={provider.name} model={model} failed: {exc}",
-                )
-                continue
-
+    for _attempt in range(2):
+        r = await ai_gateway.chat(messages, task=ai_gateway.TASK_BACKGROUND,
+                                  max_tokens=500, temperature=temperature,
+                                  timeout=30.0)
+        text = (r.text or "").strip()
+        if not text:
+            log.warning("ai_content_detection: нет ответа ИИ: %s", "; ".join(r.errors)[:300])
+            return None
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+        try:
+            return _json.loads(text)
+        except _json.JSONDecodeError:
+            log_exc_swallow(log, f"ai_content_detection: JSON не разобран ({r.provider}/{r.model})")
     return None
 
 

@@ -38,13 +38,7 @@ async def generate_keywords(
 
 
 async def _keywords_via_ai(description: str, ai_provider: Any) -> list[str]:
-    import openai  # type: ignore
-
-    client = openai.AsyncOpenAI(
-        api_key=ai_provider.api_key,
-        base_url=ai_provider.base_url,
-    )
-    model = ai_provider.models[0] if ai_provider.models else "gpt-3.5-turbo"
+    from services import ai_gateway
 
     prompt = (
         "Ты помогаешь найти Telegram-группы и чаты по заданной нише.\n"
@@ -61,16 +55,10 @@ async def _keywords_via_ai(description: str, ai_provider: Any) -> list[str]:
         "- Верни ТОЛЬКО список запросов, каждый на новой строке, без нумерации"
     )
 
-    resp = await asyncio.wait_for(
-        client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=300,
-            temperature=0.7,
-        ),
-        timeout=20.0,
-    )
-    text = (resp.choices[0].message.content or "").strip()
+    text = await ai_gateway.complete(prompt, task=ai_gateway.TASK_BACKGROUND,
+                                     max_tokens=300, timeout=20.0)
+    if not text:
+        raise RuntimeError("ИИ не ответил")
     raw = [line.strip().lstrip("-•*0123456789.) ") for line in text.splitlines()]
     keywords = [k for k in raw if 2 < len(k) < 80]
     return keywords[:12]
