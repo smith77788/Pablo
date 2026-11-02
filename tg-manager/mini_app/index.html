@@ -29049,11 +29049,8 @@ let _PLAN_PRICES = [];
 // различается лимит аккаунтов. Список и цены — из /api/miniapp/config.
 window._tier = window._tier || 'pro';
 function _tierList() {
-  return window._tiers || [
-    {key:'start', name:'Старт', price:15, accounts:'до 10 аккаунтов'},
-    {key:'pro', name:'Про', price:29, accounts:'до 50 аккаунтов'},
-    {key:'business', name:'Бизнес', price:79, accounts:'без лимита аккаунтов'},
-  ];
+  // Только из конфигурации сервера: зашитый список разошёлся бы с тарифами.
+  return Array.isArray(window._tiers) ? window._tiers : [];
 }
 function pickTier(key) {
   window._tier = key;
@@ -29061,10 +29058,13 @@ function pickTier(key) {
   renderBillingPlans();
 }
 function rebuildPlanPrices() {
-  const tier = _tierList().find(t => t.key === window._tier) || _tierList()[1] || _tierList()[0];
-  const base = Number(tier.price) || window._paidPrice || 29;
+  const list = _tierList();
+  const tier = list.find(t => t.key === window._tier) || list[1] || list[0] || null;
+  // Тарифы не загрузились — прежние карточки по базовой цене, тариф бот
+  // спросит сам (диплинк pay_paid_<N>m).
+  const base = (tier && Number(tier.price)) || window._paidPrice || 29;
   const disc = window._periodDiscounts || {'1':0,'3':10,'6':15,'12':20};
-  const k = tier.key;
+  const k = tier ? tier.key : 'paid';
   const periods = [
     {key:k+'_1m', label:'1 месяц', months:1, popular:false},
     {key:k+'_3m', label:'3 месяца', months:3, popular:true},
@@ -29149,8 +29149,9 @@ function renderBillingPlans() {
         <div style="font-size:13px;color:var(--accent)">$${esc(String(t.price))}/мес</div>
         <div style="font-size:11px;color:var(--hint)">${esc(t.accounts)}</div>
       </div>`).join('');
-    txt('billingPlansList', `<div style="font-size:12px;color:var(--hint);margin:0 2px 6px">Возможности у тарифов одинаковые — различается размер флота.</div>
-      <div style="display:flex;gap:6px;margin-bottom:10px">${chips}</div>` + _PLAN_PRICES.map(p=>`
+    const head = chips ? `<div style="font-size:12px;color:var(--hint);margin:0 2px 6px">Возможности у тарифов одинаковые — различается размер флота.</div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">${chips}</div>` : '';
+    txt('billingPlansList', head + _PLAN_PRICES.map(p=>`
       <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div>
