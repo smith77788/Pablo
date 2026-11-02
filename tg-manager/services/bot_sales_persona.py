@@ -86,6 +86,34 @@ def detect_actions(text: str, persona: dict) -> dict:
     return {"handoff": handoff, "order_intent": order_intent, "phone": phone}
 
 
+_NUMBER_WORDS = {
+    "один": 1, "одна": 1, "одну": 1, "одно": 1, "два": 2, "две": 2, "пару": 2,
+    "пара": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6, "семь": 7,
+    "восемь": 8, "девять": 9, "десять": 10,
+}
+
+
+def _number_word(before: str) -> int | None:
+    """Количество словом прямо перед товаром: «две маргариты», «три колы»."""
+    words = re.findall(r"[а-яё]+", (before or "").lower())
+    return _NUMBER_WORDS.get(words[-1]) if words else None
+
+
+def _word_in_text(pr: dict, products: list[dict], tl: str) -> str | None:
+    """Слово из текста, которым назван товар (для окна количества)."""
+    from services import sales_guard
+    own = sales_guard._words(pr.get("name") or "")
+    others = set()
+    for p in products or []:
+        if p is not pr:
+            others |= sales_guard._words(p.get("name") or "")
+    own = (own - others) or own
+    for w in re.findall(r"[0-9a-zа-яё]+", tl.replace("ё", "е")):
+        if len(w) >= 3 and any(sales_guard._same_word(w, o) for o in own):
+            return w
+    return None
+
+
 def match_order_items(text: str, products: list[dict]) -> tuple[list[dict], int]:
     """Сопоставляет упоминания товаров из прайса в тексте → позиции заказа. ЧИСТАЯ.
 
@@ -93,9 +121,13 @@ def match_order_items(text: str, products: list[dict]) -> tuple[list[dict], int]
     число рядом с названием («2 эспрессо», «эспрессо x3», «эспрессо 2 шт»), иначе 1.
     Берём только товары, реально существующие в прайсе (без выдумывания).
     """
+    from services import sales_guard
     tl = (text or "").lower()
     items: list[dict] = []
     total = 0
+    # Товар назван не полным именем, а своим словом в другом падеже: «две
+    # маргариты» — это «Пицца Маргарита». Общее слово («пицца») не считается.
+    by_word = {id(p) for p in sales_guard._mentioned(products or [], text or "")}
     for pr in products or []:
         nm = (pr.get("name") or "").strip()
         nml = nm.lower()
@@ -110,6 +142,8 @@ def match_order_items(text: str, products: list[dict]) -> tuple[list[dict], int]
         if len(nml) > 6:
             cands.append(nml[:-2])
         matched = next((c for c in cands if c in tl), None)
+        if not matched and id(pr) in by_word:
+            matched = _word_in_text(pr, products, tl)
         if not matched:
             continue
         qty = 1
@@ -117,6 +151,9 @@ def match_order_items(text: str, products: list[dict]) -> tuple[list[dict], int]
         nml = matched  # для окна количества используем реально найденную основу
         window = tl[max(0, pos - 12):pos] + " " + tl[pos + len(nml):pos + len(nml) + 12]
         m = re.search(r"(\d{1,4})\s*(?:шт|штук|x|х|\*)?", window)
+        word_qty = _number_word(tl[max(0, pos - 14):pos])
+        if not m and word_qty:
+            qty = word_qty
         if m:
             try:
                 q = int(m.group(1))
@@ -698,7 +735,88 @@ def build_system_prompt(persona: dict, products: list[dict],
         if prefs:
             L.append("Предпочтения клиента: "
                      + ", ".join(f"{k}: {v}" for k, v in prefs.items()))
+    L.append(ACTIONS_INSTRUCTION if p.get("can_take_orders", True)
+             else ACTIONS_INSTRUCTION_NO_ORDERS)
     return "\n".join(L)
+
+
+# ── Действия модели: заказ, промокод, оператор ──────────────────────────────
+# Раньше заказ, промокод и перевод на оператора ловились только словами клиента
+# («заказать», полное название товара): «две маргариты» без слова «пицца» не
+# попадали в заказ вовсе. Теперь модель, которая и так понимает разговор,
+# говорит, что сделать, служебным блоком в конце ответа. Блок клиенту не
+# уходит, а каждое действие сверяется с прайсом и промокодами на сервере:
+# модель не может заказать несуществующий товар или выдумать промокод.
+ACTIONS_INSTRUCTION = (
+    "Служебный блок. Если в этой реплике клиент выбрал товары, назвал промокод "
+    "или просит живого человека — допиши В САМОМ КОНЦЕ ответа одну строку "
+    "<действие>{\"заказ\": [{\"товар\": \"точное название из прайса\", "
+    "\"кол\": 2}], \"промокод\": \"КОД\", \"оператор\": true}</действие>. "
+    "Указывай только то, что есть; поля без данных не пиши. Клиент этот блок не "
+    "увидит. Без действий блок не пиши.")
+ACTIONS_INSTRUCTION_NO_ORDERS = (
+    "Служебный блок. Если клиент просит живого человека — допиши в самом конце "
+    "ответа <действие>{\"оператор\": true}</действие>. Клиент его не увидит.")
+_ACTIONS_RE = re.compile(r"<действие>(.*?)(?:</действие>|$)", re.S | re.I)
+
+
+def parse_actions(text: str) -> tuple[str, dict]:
+    """(текст без служебного блока, действия). ЧИСТАЯ.
+
+    Блок вырезается всегда — даже кривой, недописанный или с неверным JSON:
+    клиент не должен увидеть служебную разметку."""
+    t = text or ""
+    actions: dict = {}
+    for m in _ACTIONS_RE.finditer(t):
+        raw = (m.group(1) or "").strip()
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(data, dict):
+            actions.update(data)
+    clean = _ACTIONS_RE.sub("", t).strip()
+    return clean, actions
+
+
+def validate_actions(actions: dict, products: list[dict],
+                     promos: list[dict] | None = None) -> dict:
+    """Действия модели, сверенные с прайсом. ЧИСТАЯ.
+
+    {items: [{name, qty, price_cents}], promo: dict|None, handoff: bool}.
+    Товар принимается, только если он есть в прайсе (по названию, с учётом
+    падежа); количество — целое 1…99 и не меньше минимального заказа."""
+    from services import sales_guard
+    out: dict = {"items": [], "promo": None, "handoff": bool(actions.get("оператор") is True)}
+    by_name = {(p.get("name") or "").strip().lower(): p for p in products or []
+               if (p.get("name") or "").strip()}
+    for it in actions.get("заказ") or []:
+        if not isinstance(it, dict):
+            continue
+        name = str(it.get("товар") or "").strip().lower()
+        pr = by_name.get(name)
+        if pr is None and name:
+            found = sales_guard._mentioned(products or [], name)
+            pr = found[0] if len(found) == 1 else None
+        if pr is None:
+            continue
+        try:
+            qty = int(it.get("кол") or 1)
+        except (TypeError, ValueError):
+            qty = 1
+        qty = max(1, min(qty, 99))
+        try:
+            mq = int(pr.get("min_qty") or 1)
+        except (TypeError, ValueError):
+            mq = 1
+        qty = max(qty, mq)
+        out["items"].append({"name": pr.get("name"), "qty": qty,
+                             "price_cents": int(pr.get("price_cents") or 0)})
+    code = str(actions.get("промокод") or "").strip()
+    if code:
+        # Тот же разбор, что и для слов клиента: активен, не истёк.
+        out["promo"] = find_promo_in_text(code, promos or [])
+    return out
 
 
 def _history_messages(dialog: dict | None) -> list[dict]:
@@ -801,6 +919,11 @@ async def generate_reply(persona: dict, products: list[dict], dialog: dict | Non
         if not txt:
             log.warning("bot_sales_persona: generation failed (%s) — fallback",
                         "; ".join(info["errors"])[:300] or "нет провайдеров")
+            return _fallback
+        txt, model_actions = parse_actions(txt)
+        if isinstance(dialog, dict):
+            dialog["_ai_actions"] = model_actions
+        if not txt:
             return _fallback
         bad_prices = (sales_guard.check_prices(txt, persona, products, delivery,
                                                promos, extra, context=user_text or "")
@@ -1549,6 +1672,38 @@ async def sandbox_reply(pool, persona: dict, text: str,
 
 
 # ── Высокоуровневый вход: обработка сообщения клиента ─────────────────────────
+async def _apply_model_order(pool, persona: dict, owner_id: int, bot_id: int,
+                             chat_id: int, username: str, name: str,
+                             order_id: int | None, acts: dict, *,
+                             use_items: bool) -> int | None:
+    """Положить в заказ то, что модель поняла из разговора. Позиции — только
+    если слова клиента сами ничего не нашли в этой реплике (иначе одно и то же
+    посчиталось бы дважды); промокод — только существующий и только один раз."""
+    try:
+        order = await open_order_for_dialog(
+            pool, owner_id, bot_id, persona["id"], chat_id,
+            customer_username=username, customer_name=name)
+        oid = order["id"]
+        cur = order.get("items") or []
+        if isinstance(cur, str):
+            cur = json.loads(cur or "[]")
+        if use_items and acts["items"]:
+            cur, total = _merge_items(cur, acts["items"])
+            await update_order(pool, oid, owner_id, items=cur, total_cents=total)
+        promo = acts["promo"]
+        if promo and not (order.get("promo_code") or ""):
+            base = sum(int(it.get("qty") or 0) * int(it.get("price_cents") or 0) for it in cur)
+            if base and find_promo_in_text(promo["code"], [promo], base):
+                disc, new_total = apply_promo(base, promo)
+                if disc > 0:
+                    await update_order(pool, oid, owner_id, total_cents=new_total,
+                                       discount_cents=disc, promo_code=promo["code"])
+        return oid
+    except Exception:
+        log.warning("bsp handle_incoming: заказ по действию модели не записан", exc_info=False)
+        return order_id
+
+
 async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
                           text: str, *, username: str = "", name: str = "") -> dict | None:
     """Полный ход: клиент написал боту → ответ менеджера + побочные действия.
@@ -1648,6 +1803,7 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
     order_note = ""
     order_confirmed = False
     order_summary = ""
+    kw_items: list[dict] = []
     if persona.get("can_take_orders", True) and (actions["order_intent"] or actions["phone"]):
         try:
             order = await open_order_for_dialog(
@@ -1658,6 +1814,7 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
             # уже сохранены в заказе и подхватятся merge — иначе телефон/числа из
             # прошлых сообщений попадают в количество).
             new_items, _ = match_order_items(text, products)
+            kw_items = new_items
             cur_items = order.get("items") or []
             if isinstance(cur_items, str):
                 cur_items = json.loads(cur_items or "[]")
@@ -1722,6 +1879,27 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
             latency_ms=meta.get("latency_ms"), pool=pool)
     if order_note and order_note not in reply:
         reply = f"{reply}\n\n{order_note}"
+
+    # 3b) Действия модели (служебный блок ответа), сверенные с прайсом.
+    model_acts = validate_actions((dialog.get("_ai_actions") if isinstance(dialog, dict)
+                                   else None) or {}, products, promos)
+    if model_acts["handoff"] and has_operator and not order_confirmed:
+        try:
+            await append_turn(pool, dialog["id"], text, reply,
+                              stage="handoff", handed_off=True)
+        except Exception:
+            log.warning("bsp handle_incoming: append_turn(model handoff) failed")
+        return {
+            "reply": reply, "handoff": True, "silent": False,
+            "operator": {"username": persona.get("operator_username"),
+                         "chat_id": persona.get("operator_chat_id")},
+            "order_id": order_id, "persona_id": pid, "channels": [],
+            "handoff_by": "model",
+        }
+    if persona.get("can_take_orders", True) and (model_acts["items"] or model_acts["promo"]):
+        order_id = await _apply_model_order(pool, persona, owner_id, bot_id, chat_id,
+                                            username, name, order_id, model_acts,
+                                            use_items=not kw_items) or order_id
 
     stage = ("order" if order_id else
              dialog.get("stage") if dialog.get("stage") not in (None, "greeting")

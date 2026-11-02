@@ -282,3 +282,52 @@ def test_помощник_владельца_под_лимитом_паузам�
                    "llm_gate.blocked_until", "llm_gate.note_limit",
                    "ai_gateway.record_usage"):
         assert needle in src, needle
+
+
+# ── Действия модели: заказ, промокод, оператор ───────────────────────────────
+_CAT = [{"name": "Пицца Маргарита", "price_cents": 1250},
+        {"name": "Пицца Пепперони", "price_cents": 1490, "min_qty": 1},
+        {"name": "Кола 0.5", "price_cents": 300, "min_qty": 2}]
+
+
+def test_служебный_блок_вырезается_всегда():
+    txt, acts = bsp.parse_actions(
+        'Отлично! <действие>{"заказ": [{"товар": "маргарита", "кол": 2}]}</действие>')
+    assert txt == "Отлично!" and acts["заказ"][0]["кол"] == 2
+    assert bsp.parse_actions("Ок <действие>{сломано")[0] == "Ок"
+    assert bsp.parse_actions("Без блока")[1] == {}
+
+
+def test_действия_сверяются_с_прайсом():
+    acts = bsp.validate_actions(
+        {"заказ": [{"товар": "маргарита", "кол": 2}, {"товар": "Гавайская", "кол": 1},
+                   {"товар": "Кола 0.5", "кол": 1}, {"товар": "Пицца Пепперони", "кол": 500}],
+         "промокод": "ВЫДУМАН", "оператор": True},
+        _CAT, [{"code": "OSEN15", "percent": 15}])
+    assert [(i["name"], i["qty"]) for i in acts["items"]] == [
+        ("Пицца Маргарита", 2), ("Кола 0.5", 2), ("Пицца Пепперони", 99)]
+    assert acts["promo"] is None and acts["handoff"] is True
+    ok = bsp.validate_actions({"промокод": "osen15"}, _CAT, [{"code": "OSEN15", "percent": 15}])
+    assert ok["promo"]["code"] == "OSEN15" and ok["handoff"] is False
+    assert bsp.validate_actions({"оператор": "да"}, _CAT)["handoff"] is False
+
+
+def test_заказ_по_словам_клиента_понимает_падежи_и_числа_словами():
+    items, total = bsp.match_order_items("Две маргариты и колу", _CAT)
+    assert [(i["name"], i["qty"]) for i in items] == [("Пицца Маргарита", 2), ("Кола 0.5", 2)]
+    assert total == 2 * 1250 + 2 * 300
+    assert bsp.match_order_items("пиццу хочу", _CAT)[0] == [], "категория — не позиция"
+
+
+def test_модель_не_отдаёт_клиенту_служебный_блок(monkeypatch):
+    _scripted(monkeypatch, ['Записала! <действие>{"оператор": true}</действие>'])
+    dialog = {}
+    out = _run(bsp.generate_reply(_PERSONA, _PRODUCTS, dialog, "позовите человека"))
+    assert out == "Записала!" and dialog["_ai_actions"] == {"оператор": True}
+
+
+def test_промпт_просит_служебный_блок():
+    p = bsp.build_system_prompt({"name": "Аня"}, _PRODUCTS)
+    assert "<действие>" in p and "заказ" in p
+    p = bsp.build_system_prompt({"name": "Аня", "can_take_orders": False}, _PRODUCTS)
+    assert "<действие>" in p and "\"заказ\"" not in p

@@ -115,3 +115,35 @@ async def summary(pool, owner_id: int, *, days: int = 7) -> dict:
     out["days"] = days
     out["bad_share"] = round(out["bad"] / rated, 3) if rated else None
     return out
+
+
+async def sales_funnel(pool, owner_id: int, *, days: int = 7) -> dict:
+    """Что ИИ-продавец сделал за days дней: сколько было диалогов, сколько он
+    отдал оператору, сколько довёл до подтверждённого заказа сам и сколько из
+    них оплачено. Метрика «решено без человека» — та, по которой рынок (Fin и
+    другие) меряет AI-агента в переписке."""
+    days = max(1, min(int(days or 7), 90))
+    row = await pool.fetchrow(
+        "WITH d AS (SELECT bot_id, customer_chat_id, handed_off FROM bot_sales_dialogs "
+        "           WHERE owner_id=$1 AND last_at >= now() - make_interval(days => $2)), "
+        "o AS (SELECT bot_id, customer_chat_id, status, paid_at FROM bot_sales_orders "
+        "      WHERE owner_id=$1 AND created_at >= now() - make_interval(days => $2)) "
+        "SELECT (SELECT COUNT(*) FROM d) AS dialogs, "
+        "(SELECT COUNT(*) FROM d WHERE handed_off) AS handed_off, "
+        "(SELECT COUNT(*) FROM o) AS orders, "
+        "(SELECT COUNT(*) FROM o WHERE status IN ('confirmed','done') OR paid_at IS NOT NULL) "
+        "  AS confirmed, "
+        "(SELECT COUNT(*) FROM o WHERE paid_at IS NOT NULL) AS paid, "
+        "(SELECT COUNT(*) FROM o WHERE (status IN ('confirmed','done') OR paid_at IS NOT NULL) "
+        "   AND NOT EXISTS (SELECT 1 FROM bot_sales_dialogs x WHERE x.bot_id=o.bot_id "
+        "                   AND x.customer_chat_id=o.customer_chat_id AND x.handed_off)) "
+        "  AS confirmed_without_operator",
+        int(owner_id), days)
+    keys = ("dialogs", "handed_off", "orders", "confirmed", "paid",
+            "confirmed_without_operator")
+    out = {k: (int(row[k]) if row and row[k] is not None else 0) for k in keys}
+    out["days"] = days
+    d = out["dialogs"]
+    out["conversion"] = round(out["confirmed"] / d, 3) if d else None
+    out["resolved_without_operator"] = round((d - out["handed_off"]) / d, 3) if d else None
+    return out
