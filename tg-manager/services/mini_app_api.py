@@ -7,6 +7,7 @@ import hashlib
 import json
 import json as _json  # модульный алиас: ряд эндпоинтов используют _json без локального import
 import logging
+import hmac
 import os
 import re  # модульный: часть хендлеров зовёт re.split/re.sub без локального import
 import time
@@ -1169,6 +1170,29 @@ def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dic
             }
         )
     return items
+
+
+def metrics_request_allowed(request: web.Request) -> bool:
+    """Можно ли отдать /metrics этому запросу.
+
+    Раньше эндпоинт был открыт всем с расчётом «закроют сетью». Но на Railway у
+    сервиса один публичный порт, и /metrics читался из интернета: темп
+    операций, флуды, смерти сессий, насыщение пула — карта нагрузки и
+    уязвимых мест платформы для любого.
+
+    Правило:
+      * задан METRICS_TOKEN — нужен заголовок ``Authorization: Bearer <токен>``
+        (Prometheus, Grafana Agent и VictoriaMetrics умеют его слать);
+      * не задан — только запросы мимо публичного прокси, то есть без
+        X-Forwarded-For: внутренняя сеть (Railway private network, docker
+        compose) и локальные проверки. Всё, что пришло через прокси, — отказ.
+    """
+    token = os.getenv("METRICS_TOKEN", "").strip()
+    if token:
+        got = request.headers.get("Authorization", "")
+        got = got[7:].strip() if got.startswith("Bearer ") else ""
+        return hmac.compare_digest(got.encode("utf-8"), token.encode("utf-8"))
+    return not request.headers.get("X-Forwarded-For")
 
 
 def _get_uid(request: web.Request) -> int | None:
@@ -9213,6 +9237,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         сборщик его не прочитает.
         """
         from services import metrics as _m
+        if not metrics_request_allowed(request):
+            # 404, а не 401: снаружи эндпоинт не должен даже обозначать себя.
+            return web.Response(status=404, text="Not Found")
         return web.Response(text=_m.render(),
                             content_type="text/plain", charset="utf-8")
 
