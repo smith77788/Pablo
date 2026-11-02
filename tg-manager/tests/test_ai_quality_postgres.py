@@ -136,3 +136,87 @@ def test_сегмент_из_фразы_считает_размер_на_жив�
         finally:
             await pool.close()
     _run(body())
+
+
+def test_прогноз_покупок_и_тег_сегмента_на_живой_базе():
+    """SQL выборки покупателей (оплаченные и подтверждённые заказы, переписка
+    ботов) и тег сегмента на карточках контактов — с проверкой, что тег
+    снимается с выбывших и не дублируется."""
+    from services import ai_predict as ap
+
+    async def body():
+        pool = await _pool()
+        try:
+            for t in ("bot_sales_orders", "bot_sales_dialogs", "unified_contacts"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", _OWNER)
+            # 501 — постоянный, пропустил ритм: три покупки 100/90/80 дней назад.
+            for days in (100, 90, 80):
+                await pool.execute(
+                    "INSERT INTO bot_sales_orders (owner_id, bot_id, customer_chat_id, "
+                    "customer_name, status, total_cents, created_at) "
+                    "VALUES ($1, 77, 501, 'Оля', 'done', 1250, now() - make_interval(days => $2))",
+                    _OWNER, days)
+            await pool.execute(  # неподтверждённый заказ — не покупка
+                "INSERT INTO bot_sales_orders (owner_id, bot_id, customer_chat_id, status) "
+                "VALUES ($1, 77, 502, 'new')", _OWNER)
+            await pool.execute(
+                "INSERT INTO bot_sales_dialogs (bot_id, customer_chat_id, owner_id, last_at, history) "
+                "VALUES (77, 502, $1, now() - interval '2 hours', $2::jsonb)",
+                _OWNER, '[{"role": "user", "content": "Сколько стоит доставка?"}]')
+            for peer, tags in ((501, ["vip"]), (503, ["прогноз_под_угрозой"])):
+                await pool.execute(
+                    "INSERT INTO unified_contacts (owner_id, telegram_user_id, tags) "
+                    "VALUES ($1, $2, $3)", _OWNER, peer, tags)
+            f = await ap.forecast(pool, _OWNER)
+            seg = {s["id"]: s["count"] for s in f["segments"]}
+            assert seg["at_risk"] == 1 and seg["hot_leads"] == 1 and f["buyers"] == 1
+            assert f["top"][0]["peer_user_id"] == 502
+            assert not f["backtest"]["enough"]
+            r = await ap.tag_segment(pool, _OWNER, "at_risk")
+            assert (r["in_segment"], r["tagged"], r["added"], r["removed"]) == (1, 1, 1, 1)
+            again = await ap.tag_segment(pool, _OWNER, "at_risk")
+            assert (again["added"], again["removed"]) == (0, 0), "повтор не дублирует тег"
+            tags = {row["telegram_user_id"]: row["tags"] for row in await pool.fetch(
+                "SELECT telegram_user_id, tags FROM unified_contacts WHERE owner_id=$1", _OWNER)}
+            assert tags[501] == ["vip", "прогноз_под_угрозой"] and tags[503] == []
+            assert (await ap.tag_segment(pool, _OWNER, "нет"))["error"]
+            assert (await ap.forecast(pool, _OTHER))["buyers"] == 0
+        finally:
+            for t in ("bot_sales_orders", "bot_sales_dialogs", "unified_contacts"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", _OWNER)
+            await pool.close()
+    _run(body())
+
+
+def test_копайлот_помнит_реакции_и_зовёт_к_ждущим_на_живой_базе():
+    from services import next_actions as na
+
+    async def body():
+        pool = await _pool()
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        await pool.execute(open(os.path.join(here, "schema_v281_copilot_feedback.sql"),
+                                encoding="utf-8").read())
+        try:
+            await pool.execute("DELETE FROM copilot_feedback WHERE owner_id=$1", _OWNER)
+            for t in ("bot_sales_orders", "bot_sales_dialogs"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", _OWNER)
+            await pool.execute(
+                "INSERT INTO bot_sales_dialogs (bot_id, customer_chat_id, owner_id, last_at, history) "
+                "VALUES (77, 601, $1, now() - interval '2 hours', $2::jsonb)",
+                _OWNER, '[{"role": "user", "content": "Беру, как оплатить?"}]')
+            ids = [a["id"] for a in await na.compute_next_actions(pool, _OWNER, limit=8)]
+            assert "contacts_hot_waiting" in ids and "contacts_hot_leads" in ids
+            assert await na.record_feedback(pool, _OWNER, "contacts_hot_waiting", "snoozed")
+            assert not await na.record_feedback(pool, _OWNER, "x", "неизвестно")
+            await na.record_feedback(pool, _OWNER, "contacts_hot_leads", "opened")
+            acts = {a["id"]: a for a in await na.compute_next_actions(pool, _OWNER, limit=8)}
+            assert "contacts_hot_waiting" not in acts, "отложенная спрятана"
+            assert acts["contacts_hot_leads"]["priority"] == 78
+            stats = await na.feedback_stats(pool, _OTHER)
+            assert stats == {}
+        finally:
+            await pool.execute("DELETE FROM copilot_feedback WHERE owner_id=$1", _OWNER)
+            for t in ("bot_sales_orders", "bot_sales_dialogs"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", _OWNER)
+            await pool.close()
+    _run(body())

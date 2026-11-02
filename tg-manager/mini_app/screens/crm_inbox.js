@@ -38,6 +38,9 @@ function _ibWhen(ts) {
   try { return ago(ts); } catch (_) { return ''; }
 }
 
+// Вход из подсказки копайлота «N горячих ждут ответа» — сразу фильтр ждущих.
+function openInboxWaiting() { return openInbox(true); }
+
 async function openInbox(waiting) {
   if (waiting !== undefined) _ibWaiting = !!waiting;
   _ibScreen('s-inbox', '📥 Входящие', 'openInbox()');
