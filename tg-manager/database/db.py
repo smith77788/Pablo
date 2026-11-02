@@ -5244,6 +5244,12 @@ async def notify_if_enabled(
         settings = await get_notification_settings(pool, user_id)
         if not settings.get(pref, True):
             return True
+        # Тихие часы (services/quiet_hours.py): несрочное ночью — в сводку,
+        # она придёт одним сообщением, когда окно закончится. Сбой очереди —
+        # отправка как обычно: потерять отчёт хуже, чем разбудить.
+        from services import quiet_hours as _qh
+        if await _qh.should_hold(pool, user_id, pref) and await _qh.hold(pool, user_id, pref, text):
+            return True
         _last_exc: "Exception | None" = None
         if bot is None:
             # Отправлять нечем — и повтор этого не изменит. Раньше `None.

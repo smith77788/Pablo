@@ -6484,6 +6484,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <span style="font-size:14px">📈 Изменение позиций в поиске</span>
         <input type="checkbox" id="set-notif-position" style="width:18px;height:18px;accent-color:var(--accent)" checked>
       </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-top:1px solid var(--sep)">
+        <span style="font-size:14px">🌙 Тихие часы</span>
+        <input type="checkbox" id="set-quiet" style="width:18px;height:18px;accent-color:var(--accent)">
+      </label>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0 8px">
+        <select id="set-quiet-window" style="flex:1;min-height:36px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);padding:6px 8px;font-size:13px">
+          <option value="22-8">22:00–08:00</option>
+          <option value="23-8" selected>23:00–08:00</option>
+          <option value="0-9">00:00–09:00</option>
+        </select>
+      </div>
+      <div id="set-quiet-hint" style="font-size:12px;color:var(--hint);line-height:1.4">Ночью несрочное не будит: операции, подписчики и позиции придут утром одной сводкой. Ограничения и флуд аккаунтов — сразу.</div>
     </div>
 
     <div class="sec" style="margin-top:16px">Безопасность</div>
@@ -29200,6 +29212,11 @@ async function openSettings() {
       setChk('set-notif-error', backend.notif_error, true);
       setChk('set-notif-newuser', backend.notif_new_user, true);
       setChk('set-notif-position', backend.notif_position, true);
+      setChk('set-quiet', backend.quiet_enabled, false);
+      const qw = document.getElementById('set-quiet-window');
+      const qv = (backend.quiet_start ?? 23) + '-' + (backend.quiet_end ?? 8);
+      if (qw && [...qw.options].some(o => o.value === qv)) qw.value = qv;
+      if (backend.quiet_held) txt('set-quiet-hint', 'Сейчас в сводке ждут: ' + num(backend.quiet_held) + '. Ограничения и флуд аккаунтов приходят сразу.');
       if (ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
     }
   } catch(e) {/* ok, settings from local */}
@@ -29213,9 +29230,19 @@ async function saveSettings() {
     proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
   };
   _saveLocalSettings(s);
+  // Тихие часы считаются по местному времени — пояс берём у браузера.
+  const _qw = (document.getElementById('set-quiet-window')?.value || '23-8').split('-');
+  s.quiet_enabled = !!document.getElementById('set-quiet')?.checked;
+  s.quiet_start = Number(_qw[0]); s.quiet_end = Number(_qw[1]);
+  try { s.tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch(_) { s.tz = null; }
   try {
     await api('/api/miniapp/settings', {method:'POST', body: JSON.stringify(s)});
-  } catch(e) {/* saved locally, backend optional */}
+  } catch(e) {
+    // Тумблеры уведомлений и тихие часы живут только на сервере: «сохранено»
+    // при отказе было бы неправдой.
+    toast('⚠️ ' + errRu(e, 'Настройки не сохранились'));
+    return;
+  }
   const msgEl = document.getElementById('set-save-msg');
   if (msgEl) { msgEl.style.display='block'; msgEl.textContent='✅ Настройки сохранены'; setTimeout(()=>msgEl.style.display='none', 2500); }
 }

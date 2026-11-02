@@ -1235,6 +1235,9 @@ async def main() -> None:
             _resilient("account_monitor", account_monitor.run, pool, bot)
         )
         _spawn(_resilient("trust_engine", trust_engine.run, pool, bot))
+        # Сводка за тихие часы: придержанное ночью уходит одним сообщением.
+        from services import quiet_hours as _quiet_hours
+        _spawn(_resilient("quiet_hours", _quiet_hours.run, pool, bot))
         _spawn(
             _resilient("shadowban_monitor", shadowban_monitor.run, pool, bot)
         )
