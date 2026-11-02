@@ -173,6 +173,7 @@ GET /api/miniapp/error_reports
 GET /api/miniapp/events
 GET /api/miniapp/experiment/{exp_id}
 GET /api/miniapp/experiments
+GET /api/miniapp/find
 GET /api/miniapp/fleet/diagnose
 GET /api/miniapp/fleet/diagnose/blocked
 GET /api/miniapp/fleet/governor
@@ -486,6 +487,7 @@ HEAD /api/miniapp/error_reports
 HEAD /api/miniapp/events
 HEAD /api/miniapp/experiment/{exp_id}
 HEAD /api/miniapp/experiments
+HEAD /api/miniapp/find
 HEAD /api/miniapp/fleet/diagnose
 HEAD /api/miniapp/fleet/diagnose/blocked
 HEAD /api/miniapp/fleet/governor
