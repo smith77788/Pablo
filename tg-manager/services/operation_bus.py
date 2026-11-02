@@ -885,11 +885,57 @@ async def submit(
     # TOCTOU без изменения схемы); внутри окна ищем ещё-в-полёте идентичную
     # операцию. Отличающиеся params (в т.ч. per-account циклы) не дедупятся —
     # ложных слияний нет. Отключается dedup_window_sec=0.
-    reused = False
     try:
-        op_id, reused = await _insert_or_reuse(
-            pool, owner_id, op_type, params_json, sensitive_params_fp, sched,
-            dedup_window_sec, total_items, template_id, retries, op_label)
+        reused = False
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                if dedup_window_sec and dedup_window_sec > 0:
+                    dedup_identity = sensitive_params_fp or params_json
+                    _dedup_statuses = _dedup_status_sql()
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                        f"opbus|{owner_id}|{op_type}|{dedup_identity}|{sched}",
+                    )
+                    if sensitive_params_fp:
+                        existing = await conn.fetchval(
+                            f"""SELECT id FROM operation_queue
+                               WHERE owner_id = $1 AND op_type = $2
+                                 AND status IN {_dedup_statuses}
+                                 AND params->>'_sealed_params_fp' = $3
+                                 AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
+                                 AND created_at > NOW() - make_interval(secs => $5)
+                               ORDER BY id DESC LIMIT 1""",
+                            owner_id, op_type, sensitive_params_fp, sched,
+                            dedup_window_sec,
+                        )
+                    else:
+                        existing = await conn.fetchval(
+                            f"""SELECT id FROM operation_queue
+                               WHERE owner_id = $1 AND op_type = $2
+                                 AND status IN {_dedup_statuses}
+                                 AND params = $3::jsonb
+                                 AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
+                                 AND created_at > NOW() - make_interval(secs => $5)
+                               ORDER BY id DESC LIMIT 1""",
+                            owner_id, op_type, params_json, sched, dedup_window_sec,
+                        )
+                    if existing is not None:
+                        op_id = int(existing)
+                        reused = True
+                if not reused:
+                    row = await conn.fetchrow(
+                        """INSERT INTO operation_queue
+                               (owner_id, op_type, status, params,
+                                total_items, done_items,
+                                scheduled_for, template_id, max_retries, label, created_at)
+                           VALUES ($1, $2, 'pending', $3::jsonb,
+                                   $4, 0,
+                                   $5::timestamptz, $6, $7, $8, NOW())
+                           RETURNING id""",
+                        owner_id, op_type, params_json, total_items, sched,
+                        template_id, retries, op_label,
+                    )
+                    op_id = int(row["id"])
     except Exception:
         if _by_quota:
             from services import free_quota
@@ -927,64 +973,6 @@ async def submit(
     except Exception:
         pass
     return op_id
-
-
-async def _insert_or_reuse(pool, owner_id, op_type, params_json, sensitive_params_fp,
-                           sched, dedup_window_sec, total_items, template_id,
-                           retries, op_label) -> tuple[int, bool]:
-    """Постановка с дедупом повтора (тело submit, вынесено для возврата квоты)."""
-    reused = False
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            if dedup_window_sec and dedup_window_sec > 0:
-                dedup_identity = sensitive_params_fp or params_json
-                _dedup_statuses = _dedup_status_sql()
-                await conn.execute(
-                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                    f"opbus|{owner_id}|{op_type}|{dedup_identity}|{sched}",
-                )
-                if sensitive_params_fp:
-                    existing = await conn.fetchval(
-                        f"""SELECT id FROM operation_queue
-                           WHERE owner_id = $1 AND op_type = $2
-                             AND status IN {_dedup_statuses}
-                             AND params->>'_sealed_params_fp' = $3
-                             AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
-                             AND created_at > NOW() - make_interval(secs => $5)
-                           ORDER BY id DESC LIMIT 1""",
-                        owner_id, op_type, sensitive_params_fp, sched,
-                        dedup_window_sec,
-                    )
-                else:
-                    existing = await conn.fetchval(
-                        f"""SELECT id FROM operation_queue
-                           WHERE owner_id = $1 AND op_type = $2
-                             AND status IN {_dedup_statuses}
-                             AND params = $3::jsonb
-                             AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
-                             AND created_at > NOW() - make_interval(secs => $5)
-                           ORDER BY id DESC LIMIT 1""",
-                        owner_id, op_type, params_json, sched, dedup_window_sec,
-                    )
-                if existing is not None:
-                    op_id = int(existing)
-                    reused = True
-            if not reused:
-                row = await conn.fetchrow(
-                    """INSERT INTO operation_queue
-                           (owner_id, op_type, status, params,
-                            total_items, done_items,
-                            scheduled_for, template_id, max_retries, label, created_at)
-                       VALUES ($1, $2, 'pending', $3::jsonb,
-                               $4, 0,
-                               $5::timestamptz, $6, $7, $8, NOW())
-                       RETURNING id""",
-                    owner_id, op_type, params_json, total_items, sched,
-                    template_id, retries, op_label,
-                )
-                op_id = int(row["id"])
-
-    return op_id, reused
 
 
 # Из каких состояний операцию можно отменить. Поверхности просят разные наборы:
