@@ -38,6 +38,21 @@ function _ibWhen(ts) {
   try { return ago(ts); } catch (_) { return ''; }
 }
 
+// Счётчик «ждут ответа» на плитке «Входящие»: сколько людей написали и ещё не
+// получили ответа. Без него, чтобы узнать, есть ли кому отвечать, надо было
+// открыть экран. Плитка с ждущими открывает сразу фильтр ждущих.
+var _ibWaitingCount = 0;
+let _ibBadgeAt = 0;
+async function loadInboxBadge() {
+  if (Date.now() - _ibBadgeAt < 60e3) return;   // не чаще раза в минуту
+  _ibBadgeAt = Date.now();
+  try {
+    const d = await api('/api/miniapp/inbox?waiting=1&limit=1');
+    _ibWaitingCount = Number(d.waiting || 0);
+    txt('m-inbox-cnt', _ibWaitingCount ? '⏳ ' + num(_ibWaitingCount) + ' ждут' : (d.total ? 'все отвечены' : ''));
+  } catch (_) { _ibBadgeAt = 0; }
+}
+
 // Вход из подсказки копайлота «N горячих ждут ответа» — сразу фильтр ждущих.
 function openInboxWaiting() { return openInbox(true); }
 
@@ -50,6 +65,8 @@ async function openInbox(waiting) {
   try {
     const d = await api(_ibWaiting ? '/api/miniapp/inbox?waiting=1' : '/api/miniapp/inbox');
     _ibRows = d.threads || [];
+    _ibWaitingCount = Number(d.waiting || 0);
+    txt('m-inbox-cnt', _ibWaitingCount ? '⏳ ' + num(_ibWaitingCount) + ' ждут' : (d.total ? 'все отвечены' : ''));
     let out = '<div class="seg" style="margin:8px 16px">' +
       '<div class="seg-opt' + (_ibWaiting ? '' : ' on') + '" role="button" tabindex="0" onclick="openInbox(false)">Все · ' + num(d.total || 0) + '</div>' +
       '<div class="seg-opt' + (_ibWaiting ? ' on' : '') + '" role="button" tabindex="0" onclick="openInbox(true)">⏳ Ждут ответа · ' + num(d.waiting || 0) + '</div>' +

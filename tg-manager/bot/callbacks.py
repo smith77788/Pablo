@@ -818,3 +818,12 @@ class OnbCb(CallbackData, prefix="onb"):
 
     action: str      # goal — запомнить цель; change — снова показать выбор
     g: str = ""      # ключ цели
+
+
+class DealMsgCb(CallbackData, prefix="dmsg"):
+    """«В сделку» у пересланного сообщения клиента (bot/handlers/deal_from_message.py)."""
+
+    action: str      # add — завести сделку; st — сменить стадию
+    b: int = 0       # bot_id, через которого написал клиент
+    u: int = 0       # Telegram-id клиента
+    s: str = ""      # стадия (для st)

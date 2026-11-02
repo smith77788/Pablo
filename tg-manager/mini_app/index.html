@@ -2272,10 +2272,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">CRM</div>
         <div class="mgmt-tile-val" id="m-crm-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openInbox(false)">
+      <div class="mgmt-tile" onclick="openInbox(_ibWaitingCount > 0)">
         <div class="mgmt-tile-ico">📥</div>
         <div class="mgmt-tile-lbl">Входящие</div>
-        <div class="mgmt-tile-val"></div>
+        <div class="mgmt-tile-val" id="m-inbox-cnt"></div>
       </div>
       <div class="mgmt-tile" onclick="openCRMDeals()">
         <div class="mgmt-tile-ico">💼</div>
@@ -8902,7 +8902,7 @@ function goTab(tab) {
   const ti = document.getElementById('t-'+tab);
   if (ti) ti.classList.add('on');
   CUR = tab;
-  if (tab === 'more') buildMoreCategories();
+  if (tab === 'more') { buildMoreCategories(); try { loadInboxBadge(); } catch(_) {} }
   tg.HapticFeedback?.impactOccurred('light');
   if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
   try { markDrawerActive(); } catch(_) {}
@@ -9892,6 +9892,9 @@ function runPulseAction(a) {
   // Онбординг из бота (/start новичка): к чеклисту и к подключению аккаунта.
   if (k==='onboarding') { goTab('home'); setTimeout(()=>{ const c=document.getElementById('onboardCard'); if (c) c.scrollIntoView({behavior:'smooth', block:'start'}); }, 300); return; }
   if (k==='accounts_add') return openAccImportModal();
+  // «Открыть канбан» у сообщения клиента в боте и «ждут ответа» из уведомлений.
+  if (k==='deals') return openDeals();
+  if (k==='inbox') return openInbox(true);
   // Раздел по задаче из карты services/task_sections.py: кнопки разделов в
   // меню бота открывают мини-апп сразу в нужном месте.
   if (k==='section' && prm) return openSection(String(prm));
