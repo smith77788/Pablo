@@ -757,6 +757,10 @@ async def main() -> None:
         # старых исполнителя фильтруют по ней — без колонки встали бы оба.
         "ALTER TABLE funnel_subscriptions ADD COLUMN IF NOT EXISTS workflow_run_id BIGINT",
         "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS workflow_run_id BIGINT",
+        # Бот на вебхуке (schema_v225/v285): опрос фильтрует по use_webhook,
+        # сверка вебхуков — по webhook_failed_at.
+        "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS use_webhook BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS webhook_failed_at TIMESTAMPTZ",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",

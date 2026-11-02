@@ -191,8 +191,9 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     # Telegram Mini App API + SSE real-time dashboard
     mini_app_api.setup_routes(app, pool)
 
-    # Managed bot webhook receiver (item 5: webhooks instead of polling)
-    app.router.add_post("/tgbot/hook/", managed_bot_webhooks.make_webhook_route(pool))
+    # Подключённые боты на вебхуке: POST /tgbot/hook/{bot_id} — обновление
+    # разбирает тот же auto_responder, что и опрос (managed_bot_webhooks).
+    managed_bot_webhooks.add_routes(app, pool, main_bot=bot)
 
     return app
 
