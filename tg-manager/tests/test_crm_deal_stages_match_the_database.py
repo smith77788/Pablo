@@ -20,14 +20,17 @@ import pathlib
 import re
 
 from database import db
+from tests.miniapp_source import api_source
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def _allowed() -> set[str]:
-    src = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    # Проверку ставит слой API; ищем во всём слое, а не в одном файле, чтобы
+    # тест не ослеп, когда список DDL переедет из монолита.
+    src = api_source()
     m = re.search(r"crm_deals_stage_check \"\s*\"CHECK \(stage IN \(([^)]*)\)\)", src)
-    assert m, "проверка crm_deals_stage_check не найдена в mini_app_api.py"
+    assert m, "проверка crm_deals_stage_check не найдена в слое API"
     return set(re.findall(r"'([a-z]+)'", m.group(1)))
 
 
