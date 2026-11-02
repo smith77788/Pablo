@@ -84,7 +84,7 @@ def _fast_and_fake(monkeypatch):
 def _audited(pool):
     """Записи журнала как (admin_id, action, target, details-dict)."""
     out = []
-    for admin_id, action, target, details in pool.audit:
+    for admin_id, action, target, details, *_source in pool.audit:
         out.append((admin_id, action, target, json.loads(details)))
     return out
 

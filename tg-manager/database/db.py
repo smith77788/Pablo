@@ -5988,8 +5988,13 @@ async def log_admin_action(
     action: str,
     target_user_id: int | None = None,
     details: dict | None = None,
+    *,
+    source: str = "app",
 ) -> None:
     """Записать админ-действие в журнал. Один вход для всех таких записей.
+
+    source — откуда действие: 'bot' (админ-панель бота), 'miniapp' (ручки
+    /api/miniapp/admin/*), 'secret' (вход по секретной фразе), 'app' — прочее.
 
     Раньше INSERT в admin_audit_log был выписан в каждом месте отдельно, и они
     разошлись: часть оборачивалась в try, часть нет. Где не оборачивалась, сбой
@@ -6002,10 +6007,10 @@ async def log_admin_action(
     """
     try:
         await pool.execute(
-            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-               VALUES ($1, $2, $3, $4)""",
+            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details, source)
+               VALUES ($1, $2, $3, $4, $5)""",
             admin_id, action, target_user_id,
-            json.dumps(details or {}, ensure_ascii=False, default=str),
+            json.dumps(details or {}, ensure_ascii=False, default=str), source,
         )
     except Exception:
         log_exc_swallow(

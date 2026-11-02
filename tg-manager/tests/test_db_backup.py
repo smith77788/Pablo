@@ -74,6 +74,21 @@ class _FakeBot:
         self.docs.append((chat_id, getattr(document, "filename", "?"), caption))
 
 
+def _tiny_archive() -> bytes:
+    """Настоящий tar.gz из одной таблицы: перед отправкой архив проверяется
+    на восстановимость, и байты-заглушка эту проверку честно не проходят."""
+    import io as _io
+    import tarfile as _tar
+    buf = _io.BytesIO()
+    with _tar.open(fileobj=buf, mode="w:gz") as tar:
+        for name, raw in (("data/t.csv", b"id\n1\n"),
+                          ("manifest.json", b'{"version": 1, "tables": ["t"]}')):
+            info = _tar.TarInfo(name)
+            info.size = len(raw)
+            tar.addfile(info, _io.BytesIO(raw))
+    return buf.getvalue()
+
+
 def _acoro(v):
     async def _c(*a, **k):
         return v
@@ -96,14 +111,15 @@ def test_run_backup_once_dump_failure(monkeypatch):
 
 def test_run_backup_once_send_failure(monkeypatch):
     monkeypatch.setattr(bk, "backup_chat_id", lambda: 5)
-    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(b"arch"))
+    arch = _tiny_archive()
+    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(arch))
     res = _run(bk.run_backup_once(object(), _FakeBot(fail=True)))
-    assert res["ok"] is False and "отправка" in res["error"] and res["size"] == 4
+    assert res["ok"] is False and "отправка" in res["error"] and res["size"] == len(arch)
 
 
 def test_run_backup_once_ok(monkeypatch):
     monkeypatch.setattr(bk, "backup_chat_id", lambda: 42)
-    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(b"hello"))
+    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(_tiny_archive()))
     bot = _FakeBot()
     res = _run(bk.run_backup_once(object(), bot))
     assert res["ok"] is True and res["parts"] == 1 and bot.docs[0][0] == 42
@@ -150,7 +166,7 @@ def test_loop_runs_one_iteration_then_cancels(monkeypatch):
     monkeypatch.setattr(bk, "backup_chat_id", lambda: 5)
     ran = []
     monkeypatch.setattr(bk, "run_backup_once",
-                        lambda pool, bot, note="": _record(ran, note))
+                        lambda pool, bot, note="", drill=False: _record(ran, (note, drill)))
     calls = {"n": 0}
 
     async def sleeper(*a, **k):
@@ -161,7 +177,8 @@ def test_loop_runs_one_iteration_then_cancels(monkeypatch):
     monkeypatch.setattr(bk.asyncio, "sleep", sleeper)
     with pytest.raises(asyncio.CancelledError):
         _run(bk.run_backup_loop(object(), _FakeBot()))
-    assert ran == ["автоматический"]
+    # Первый бэкап после старта — с учением восстановления.
+    assert ran == [("автоматический", True)]
 
 
 def _record(bucket, item):
@@ -282,3 +299,14 @@ def test_run_backup_once_sends_via_fake_bot():
         _run(_r(None))
     finally:
         os.environ.pop("DB_BACKUP_CHAT_ID", None)
+
+
+def test_broken_archive_is_not_sent(monkeypatch):
+    """Архив, который не разбирается обратно, не уходит: «бэкап» без
+    возможности восстановления хуже честной ошибки."""
+    monkeypatch.setattr(bk, "backup_chat_id", lambda: 5)
+    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(b"not-a-tar"))
+    bot = _FakeBot()
+    res = _run(bk.run_backup_once(object(), bot))
+    assert res["ok"] is False and "проверка архива" in res["error"]
+    assert bot.docs == []
