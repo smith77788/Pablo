@@ -288,6 +288,6 @@ def test_unknown_event_is_a_noop_not_a_failure():
 def test_migration_allows_crm_kinds():
     import os
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sql = open(os.path.join(root, "schema_v273_crm_connectors.sql"), encoding="utf-8").read()
+    sql = open(os.path.join(root, "schema_v275_crm_connectors.sql"), encoding="utf-8").read()
     for k in crm.CRM_KINDS:
         assert f"'{k}'" in sql

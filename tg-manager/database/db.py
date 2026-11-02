@@ -3714,7 +3714,15 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
     return d
 
 
-class AccountIdentityMissing(ValueError):
+class AccountNotSaved(ValueError):
+    """Аккаунт не записан по понятной человеку причине; текст — для экрана."""
+
+
+class AccountLimitReached(AccountNotSaved):
+    """Флот владельца уже на лимите тарифа (services/tiers.py) — новый не пишем."""
+
+
+class AccountIdentityMissing(AccountNotSaved):
     """Telegram не вернул ни номера, ни id аккаунта — записать нечего.
 
     Без обоих ключей строка легла бы с phone='' и на уникальном
@@ -3741,6 +3749,42 @@ def normalize_account_phone(phone, tg_user_id) -> str:
         return f"id:{uid}"
     raise AccountIdentityMissing(
         "Telegram не вернул ни номер, ни id аккаунта — сессию не записать")
+
+
+async def check_account_cap(pool, conn, owner_id: int) -> None:
+    """Бросает AccountLimitReached, если новый аккаунт не входит в тариф.
+
+    Лимит — services.tiers.owner_account_cap: тариф Старт/Про/Бизнес, без
+    лимита у подписки до тарифов и у админа; на бесплатном — 1 аккаунт, если
+    ещё положен пробный период (он выдаётся после первого аккаунта и здесь же,
+    когда второй упирается в бесплатный лимит).
+    """
+    from bot.utils import tariffs
+    from services import tiers
+
+    cap = await tiers.owner_account_cap(pool, owner_id)
+    if cap >= tariffs.UNLIMITED:
+        return
+    count = int(await conn.fetchval(
+        "SELECT count(*) FROM tg_accounts WHERE owner_id=$1", owner_id) or 0)
+    if count < cap:
+        return
+    if count >= 1:
+        from services import trial
+        try:
+            if await trial.maybe_grant(pool, owner_id):
+                cap = await tiers.owner_account_cap(pool, owner_id)
+                if count < cap:
+                    return
+        except Exception:
+            log.warning("check_account_cap: trial grant failed owner=%s", owner_id,
+                        exc_info=True)
+    if cap <= 0:
+        raise AccountLimitReached(
+            "Аккаунты Telegram подключаются по подписке. Выберите тариф в /subscription")
+    raise AccountLimitReached(
+        f"Лимит тарифа — {cap} аккаунтов, подключено {count}. Перейдите на тариф "
+        "больше в /subscription или удалите ненужные аккаунты")
 
 
 async def upsert_tg_account(
@@ -3828,59 +3872,71 @@ async def upsert_tg_account(
     if auto_proxy and not proxy_id:
         proxy_id = await _least_loaded_proxy(pool, owner_id)
 
-    row = await pool.fetchrow(
-        """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
-               first_name, username, device_model, system_version, app_version,
-               lang_code, system_lang_code, session_fp, api_id, proxy_id)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-           ON CONFLICT (owner_id, phone) DO UPDATE
-           SET session_str=$3,
-               tg_user_id=COALESCE($4, tg_accounts.tg_user_id),
-               first_name=COALESCE(NULLIF($5, ''), tg_accounts.first_name),
-               username=COALESCE(NULLIF($6, ''), tg_accounts.username),
-               device_model=COALESCE($7, tg_accounts.device_model),
-               system_version=COALESCE($8, tg_accounts.system_version),
-               app_version=COALESCE($9, tg_accounts.app_version),
-               lang_code=COALESCE($10, tg_accounts.lang_code),
-               system_lang_code=COALESCE($11, tg_accounts.system_lang_code),
-               session_fp=$12,
-               api_id=COALESCE(tg_accounts.api_id, $13),
-               proxy_id=CASE WHEN $15 THEN COALESCE($14, tg_accounts.proxy_id)
-                             ELSE COALESCE(tg_accounts.proxy_id, $14) END,
-               acc_status='active',
-               status_reason=NULL,
-               status_checked_at=now(),
-               is_active=true,
-               -- Переимпорт = НОВАЯ рабочая сессия: снимаем ВСЕ операционные
-               -- блокировки, унаследованные от прошлой (сожжённой) сессии, иначе
-               -- «переподключил, а флот не работает» — аккаунт молча исключался
-               -- из операций/мониторов:
-               --  • in_operation — залипший lock исключал из выборки/прогрева;
-               --  • cooldown_until — старый кулдаун держал respect_cooldown-фильтр;
-               --  • trust_score — крит-обнуление (trust_engine) не проходило
-               --    min_trust-гейт операций и показывало 0% здоровья.
-               in_operation=FALSE,
-               cooldown_until=NULL,
-               trust_score=GREATEST(COALESCE(tg_accounts.trust_score, 1.0), 1.0),
-               flood_count_7d=0,
-               last_used=now()
-           RETURNING id, (xmax = 0) AS created, proxy_id""",
-        owner_id,
-        phone,
-        _enc_session,
-        _uid_val or None,
-        first_name or "",
-        username or "",
-        device_model,
-        system_version,
-        app_version,
-        lang_code,
-        system_lang_code,
-        _fp,
-        api_id,
-        proxy_id,
-        bool(override_proxy),
-    )
+    # Лимит флота тарифа (services/tiers.py) — только для НОВОГО аккаунта:
+    # переимпорт уже подключённого лимит не тратит. Проверка и запись идут под
+    # блокировкой владельца одной транзакцией: пакетный импорт сессий пишет
+    # параллельно и иначе проскочил бы лимит пачкой.
+    is_new = _existing_phone is None and not await pool.fetchval(
+        "SELECT 1 FROM tg_accounts WHERE owner_id=$1 AND phone=$2", owner_id, phone)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if is_new:
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))",
+                                   f"tg_accounts_cap|{owner_id}")
+                await check_account_cap(pool, conn, owner_id)
+            row = await conn.fetchrow(
+                """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
+                       first_name, username, device_model, system_version, app_version,
+                       lang_code, system_lang_code, session_fp, api_id, proxy_id)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                   ON CONFLICT (owner_id, phone) DO UPDATE
+                   SET session_str=$3,
+                       tg_user_id=COALESCE($4, tg_accounts.tg_user_id),
+                       first_name=COALESCE(NULLIF($5, ''), tg_accounts.first_name),
+                       username=COALESCE(NULLIF($6, ''), tg_accounts.username),
+                       device_model=COALESCE($7, tg_accounts.device_model),
+                       system_version=COALESCE($8, tg_accounts.system_version),
+                       app_version=COALESCE($9, tg_accounts.app_version),
+                       lang_code=COALESCE($10, tg_accounts.lang_code),
+                       system_lang_code=COALESCE($11, tg_accounts.system_lang_code),
+                       session_fp=$12,
+                       api_id=COALESCE(tg_accounts.api_id, $13),
+                       proxy_id=CASE WHEN $15 THEN COALESCE($14, tg_accounts.proxy_id)
+                                     ELSE COALESCE(tg_accounts.proxy_id, $14) END,
+                       acc_status='active',
+                       status_reason=NULL,
+                       status_checked_at=now(),
+                       is_active=true,
+                       -- Переимпорт = НОВАЯ рабочая сессия: снимаем ВСЕ операционные
+                       -- блокировки, унаследованные от прошлой (сожжённой) сессии, иначе
+                       -- «переподключил, а флот не работает» — аккаунт молча исключался
+                       -- из операций/мониторов:
+                       --  • in_operation — залипший lock исключал из выборки/прогрева;
+                       --  • cooldown_until — старый кулдаун держал respect_cooldown-фильтр;
+                       --  • trust_score — крит-обнуление (trust_engine) не проходило
+                       --    min_trust-гейт операций и показывало 0% здоровья.
+                       in_operation=FALSE,
+                       cooldown_until=NULL,
+                       trust_score=GREATEST(COALESCE(tg_accounts.trust_score, 1.0), 1.0),
+                       flood_count_7d=0,
+                       last_used=now()
+                   RETURNING id, (xmax = 0) AS created, proxy_id""",
+                owner_id,
+                phone,
+                _enc_session,
+                _uid_val or None,
+                first_name or "",
+                username or "",
+                device_model,
+                system_version,
+                app_version,
+                lang_code,
+                system_lang_code,
+                _fp,
+                api_id,
+                proxy_id,
+                bool(override_proxy),
+            )
     acc_id = row["id"]
     # След в журнале действий: подключение и переподключение аккаунта раньше
     # не оставляли ничего — на вопрос «откуда этот аккаунт и когда ему сменили
