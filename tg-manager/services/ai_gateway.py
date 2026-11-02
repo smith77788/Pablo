@@ -43,19 +43,21 @@ _PAID_PROVIDERS = ("openai",)
 
 _POOL: dict[str, Any] = {"pool": None}
 
-# Дневной потолок вызовов ИИ на владельца: тариф → (ответы клиентам,
-# помощник и фон). None — без потолка. Переопределяется JSON в AI_DAILY_LIMITS:
-# {"free": [200, 30], "pro": [null, 2000]}.
+# Дневной потолок вызовов ИИ на владельца: уровень доступа → (ответы
+# клиентам, помощник и фон). None — без потолка. Переопределяется JSON в
+# AI_DAILY_LIMITS: {"free": [200, 30], "paid": [null, 2000]}.
+#
+# Уровней доступа ровно два — free и paid (bot/utils/tariffs.PLAN_LEVELS):
+# get_plan других не возвращает, а тарифы Старт/Про/Бизнес различаются только
+# размером флота (services/tiers.py, решение владельца). Здесь раньше стояли
+# ещё starter/pro/enterprise со своими потолками — они не срабатывали НИКОГДА,
+# а пример `"pro": [...]` в настройке молча не делал ничего.
 _DEFAULT_LIMITS: dict[str, tuple[Optional[int], Optional[int]]] = {
     "free": (200, 30),
-    "starter": (2000, 200),
-    "pro": (10000, 1000),
     "paid": (None, None),
-    "enterprise": (None, None),
 }
 LIMIT_MESSAGE = "дневной лимит ИИ по тарифу исчерпан"
-_PLAN_LABELS = (("free", "Бесплатный"), ("starter", "Старт"), ("pro", "Про"),
-                ("paid", "Платный"), ("enterprise", "Корпоративный"))
+_PLAN_LABELS = (("free", "Бесплатный"), ("paid", "Платный"))
 
 
 def plan_label(plan: str) -> str:
@@ -69,9 +71,16 @@ def daily_limits() -> dict[str, tuple[Optional[int], Optional[int]]]:
         return out
     try:
         for plan, pair in json.loads(raw).items():
+            key = str(plan).strip().lower()
+            if key not in _DEFAULT_LIMITS:
+                # Тарифа с таким именем у get_plan нет — запись не сработала бы
+                # ни для кого. Говорим об этом, а не молчим.
+                log.warning("ai_gateway: в AI_DAILY_LIMITS уровень %r не существует "
+                            "(есть только free и paid) — запись пропущена", plan)
+                continue
             cust, other = (list(pair) + [None, None])[:2]
-            out[str(plan)] = (None if cust is None else int(cust),
-                              None if other is None else int(other))
+            out[key] = (None if cust is None else int(cust),
+                        None if other is None else int(other))
     except Exception as exc:  # noqa: BLE001 - кривой env не должен ронять ИИ
         log.warning("ai_gateway: AI_DAILY_LIMITS не разобран (%s), беру значения по умолчанию", exc)
     return out
@@ -83,8 +92,8 @@ def _limit_group(task: str) -> tuple[str, ...]:
 
 async def _owner_plan(pool, owner_id: int) -> str:
     try:
-        from bot.utils.subscription import get_plan
-        return str(await get_plan(pool, int(owner_id)) or "free")
+        from bot.utils.subscription import coerce_plan, get_plan
+        return coerce_plan(await get_plan(pool, int(owner_id)))
     except Exception as exc:  # noqa: BLE001 - тариф не прочитан — считаем бесплатным
         log.warning("ai_gateway: тариф владельца %s не прочитан: %s", owner_id, exc)
         return "free"

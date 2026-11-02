@@ -232,16 +232,43 @@ def test_ответы_клиентам_считаются_отдельно_от_
 
 
 def test_старший_тариф_без_потолка_и_env_переопределяет(monkeypatch):
+    # get_plan отдаёт только free/paid (bot/utils/tariffs.PLAN_LEVELS) —
+    # раньше тест подменял его значением "enterprise", которого настоящая
+    # функция не возвращает никогда, и проверял потолок, не срабатывающий в проде.
     pool = _UsagePool(used=10**6)
     monkeypatch.setattr(ai_gateway, "_pool", lambda: pool)
-    _plan(monkeypatch, "enterprise")
+    _plan(monkeypatch, "paid")
     ok, info = _run(ai_gateway.check_limit(5, ai_gateway.TASK_ASSISTANT))
     assert ok and info["limit"] is None
-    monkeypatch.setenv("AI_DAILY_LIMITS", '{"enterprise": [null, 5]}')
+    monkeypatch.setenv("AI_DAILY_LIMITS", '{"paid": [null, 5]}')
     ok, info = _run(ai_gateway.check_limit(5, ai_gateway.TASK_ASSISTANT))
     assert not ok and info["limit"] == 5
     monkeypatch.setenv("AI_DAILY_LIMITS", "не json")
     assert ai_gateway.daily_limits()["free"] == (200, 30)
+
+
+def test_лимиты_знают_только_настоящие_уровни_доступа():
+    from bot.utils import tariffs
+    assert set(ai_gateway.daily_limits()) == set(tariffs.PLAN_LEVELS), (
+        "потолок ИИ задан для уровня, которого get_plan не возвращает — "
+        "он не сработает ни для кого")
+
+
+def test_несуществующий_уровень_в_настройке_пропускается_громко(monkeypatch, caplog):
+    monkeypatch.setenv("AI_DAILY_LIMITS", '{"pro": [10, 10]}')
+    with caplog.at_level("WARNING"):
+        lim = ai_gateway.daily_limits()
+    assert "pro" not in lim
+    assert any("AI_DAILY_LIMITS" in r.message for r in caplog.records)
+
+
+def test_старое_имя_тарифа_сводится_к_уровню(monkeypatch):
+    # Подписка, записанная старым именем, — платная, а не бесплатная.
+    pool = _UsagePool(used=10**6)
+    monkeypatch.setattr(ai_gateway, "_pool", lambda: pool)
+    _plan(monkeypatch, "pro")
+    ok, info = _run(ai_gateway.check_limit(5, ai_gateway.TASK_ASSISTANT))
+    assert ok and info["plan"] == "paid" and info["limit"] is None
 
 
 def test_без_владельца_лимита_нет(monkeypatch):
