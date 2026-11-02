@@ -51,7 +51,7 @@ PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
         "🌐 Массовые операции (bulk join/leave/edit)",
         "🧪 A/B тесты сообщений",
         "🌍 Мультигео (имена/описания по языку)",
-        "📱 Личные Telegram-аккаунты — без ограничений",
+        "📱 Личные Telegram-аккаунты — по тарифу: 10, 50 или без лимита",
         "🤖 ИИ-ассистент для анализа и генерации контента",
         "📩 Кампании в ЛС (личные сообщения в масштабе)",
         "🌐 Гео-сеть (массовое присутствие)",
@@ -144,6 +144,11 @@ ALLOWED_CURRENCIES: tuple[str, ...] = ("TON", "USDT_TRC20", "XTR")
 
 # Код валюты Telegram Stars в Bot API.
 STARS_CURRENCY = "XTR"
+# Подписка звёздами с автопродлением: Telegram сам списывает звёзды раз в
+# 30 дней (subscription_period — единственное значение, которое он принимает).
+STARS_SUB = "XTR_SUB"
+STARS_SUB_WALLET = "telegram_stars_sub"
+STARS_SUB_PERIOD_S = 30 * 86400
 _STARS_MAX_PER_USD = 1000
 # Счёт подписки в Stars: '<user_id>:<plan>:<months>:<reference>'. Первые три
 # поля — тот же формат, который читает services.payment_recovery.parse_payload:
@@ -192,7 +197,7 @@ def valid_period(months) -> int | None:
 
 
 def _calc(plan: str, months: int, currency: str, promo: int = 0,
-          ton_rate: float | None = None) -> tuple[float, float]:
+          ton_rate: float | None = None, tier: str | None = None) -> tuple[float, float]:
     """Returns (usd_total, crypto_amount).
 
     Бросает ValueError на сроке вне ALLOWED_PERIODS и на нулевой цене: счёт на
@@ -202,7 +207,10 @@ def _calc(plan: str, months: int, currency: str, promo: int = 0,
     """
     if valid_period(months) is None:
         raise ValueError(f"недопустимый срок подписки: {months!r}")
-    base = PLAN_PRICES_USD.get(plan, 0)
+    from services import tiers
+
+    t = tiers.coerce_tier(tier)
+    base = tiers.price_usd(t) if t else PLAN_PRICES_USD.get(plan, 0)
     disc = promo if (promo and months > 1) else PERIOD_DISCOUNTS.get(months, 0)
     usd = round(base * months * (1 - disc / 100), 2)
     if usd <= 0:
@@ -331,6 +339,8 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
             plan_info = f"Текущий план: <b>{emoji} ПЛАТНЫЙ</b> · ∞ ботов и каналов\n{days_badge}"
         else:
             plan_info = f"Текущий план: <b>{emoji} ПЛАТНЫЙ</b> · ∞ ботов и каналов"
+        if not sub_utils.is_platform_admin(user_id):
+            plan_info += "\n" + await _fleet_line(pool, user_id)
 
     price_paid = PLAN_PRICES_USD["paid"]
     promo_disc = promo_disc or 0
@@ -356,6 +366,11 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
     else:
         period_hint = f"💰 Оплата на 12 мес — скидка {PERIOD_DISCOUNTS.get(12, 0)}%"
 
+    from services import tiers
+    min_price = min(tiers.price_usd(t) for t in tiers.TIERS)
+    tier_lines = "\n".join(
+        f"{tiers.emoji(t)} {tiers.name(t)} — ${tiers.price_usd(t)}/мес · {tiers.cap_label(t)}"
+        for t in tiers.TIERS)
     quota_line = (f"\n+ {quota} платных операций в месяц (рассылка, инвайт, парсер…)"
                   if quota else "")
     text = (
@@ -368,8 +383,9 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
         f"<i>До 5 ботов · До 5 каналов\n"
         f"Описание, приветствие, базовая рассылка"
         f"{quota_line}</i>\n\n"
-        f"💎 <b>ПОДПИСКА</b> — ${price_paid}/мес\n"
-        f"<i>∞ ботов и каналов · CRM · Воронки\n"
+        f"💎 <b>ПОДПИСКА</b> — от ${min_price}/мес, три тарифа по размеру флота\n"
+        f"{tier_lines}\n"
+        f"<i>Во всех: ∞ ботов и каналов · CRM · Воронки\n"
         f"Кампании в ЛС · ИИ-ассистент · Рассылки по сети\n"
         f"Парсер · Фабрики · Аналитика · Массовые жалобы · и всё остальное</i>\n\n"
         f"<i>{period_hint}</i>\n"
@@ -379,22 +395,25 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
     kb = InlineKeyboardBuilder()
     prefix = "✅ " if is_paid else ""
     kb.button(
-        text=f"{prefix}💎 Оформить подписку — ${price_paid}/мес",
+        text=f"{prefix}💎 Выбрать тариф — от ${min_price}/мес",
         callback_data=SubCb(action="choose_plan", plan="paid"),
     )
     kb.button(
         text="❓ Что входит в подписку",
         callback_data=SubCb(action="plan_features", plan="paid"),
     )
+    stars_sub = await active_stars_subscription(pool, user_id)
+    if stars_sub:
+        kb.button(text="⏹ Отключить автопродление Stars",
+                  callback_data=SubCb(action="stars_cancel"))
     if sub_utils.is_platform_admin(user_id):
         kb.button(
             text="⚙️ Настройка оплаты", callback_data=SubCb(action="payment_settings")
         )
         kb.button(text="◀️ Настройки", callback_data=BmCb(action="settings"))
-        kb.adjust(1, 1, 2)
     else:
         kb.button(text="◀️ Настройки", callback_data=BmCb(action="settings"))
-        kb.adjust(1, 1, 1)
+    kb.adjust(1)
     return text, kb.as_markup()
 
 
@@ -481,7 +500,8 @@ async def cb_plan_features(
         features = PLAN_DETAILED_FEATURES.get("paid", [])
     await safe_answer(callback)
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
-    price = PLAN_PRICES_USD.get(plan, PLAN_PRICES_USD["paid"])
+    from services import tiers
+    price = min(tiers.price_usd(t) for t in tiers.TIERS)
     bot_limit = sub_utils.BOT_LIMITS.get(plan, tariffs.UNLIMITED)
     limit_label = tariffs.format_limit(bot_limit)
     features_text = "\n".join(f"  {f}" for f in features)
@@ -495,14 +515,16 @@ async def cb_plan_features(
     kb = InlineKeyboardBuilder()
     if plan == "paid" and not is_current:
         kb.button(
-            text=f"💳 Оформить подписку — ${price}/мес",
+            text=f"💳 Выбрать тариф — от ${price}/мес",
             callback_data=SubCb(action="choose_plan", plan=plan),
         )
     kb.button(text="◀️ Назад к подписке", callback_data=SubCb(action="menu"))
     kb.adjust(1)
 
     if plan == "paid":
-        header = f"💎 <b>ПОДПИСКА</b> — ${price}/мес · ∞ ботов и каналов"
+        header = (f"💎 <b>ПОДПИСКА</b> — от ${price}/мес · ∞ ботов и каналов\n"
+                  + "\n".join(f"{tiers.emoji(t)} {tiers.name(t)} — ${tiers.price_usd(t)}/мес · "
+                              f"{tiers.cap_label(t)}" for t in tiers.TIERS))
     else:
         header = f"🆓 <b>БЕСПЛАТНЫЙ план</b> · до {limit_label} ботов"
 
@@ -522,49 +544,102 @@ async def cb_plan_features(
 
 @router.callback_query(SubCb.filter(F.action == "choose_plan"))
 async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
+    from services import tiers
+
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
     await safe_answer(callback)
-    base = PLAN_PRICES_USD[plan]
-    em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
+    tier = tiers.coerce_tier(callback_data.tier)
+    if tier is None:
+        text, markup = await _tier_picker(pool, callback.from_user.id,
+                                          valid_period(callback_data.months)
+                                          if callback_data.months > 1 else None)
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+        return
+    base = tiers.price_usd(tier)
+    em = tiers.emoji(tier)
     promo, promo_until = await _get_promo(pool)
     kb = InlineKeyboardBuilder()
     for months in ALLOWED_PERIODS:
         std_disc = PERIOD_DISCOUNTS.get(months, 0)
+        cb = SubCb(action="choose_period", plan=plan, months=months, tier=tier)
         if promo and months > 1:
             total = round(base * months * (1 - promo / 100), 2)
-            std_total = round(base * months * (1 - std_disc / 100), 2)
-            label = f"{months} мес. — <s>${std_total}</s> 🔥 ${total} (-{promo}%)"
-            kb.button(
-                text=f"🔥 {months} мес. — ${total} (-{promo}%)",
-                callback_data=SubCb(action="choose_period", plan=plan, months=months),
-            )
+            kb.button(text=f"🔥 {months} мес. — ${total} (-{promo}%)", callback_data=cb)
         else:
             total = round(base * months * (1 - std_disc / 100), 2)
             disc_txt = f" (-{std_disc}%)" if std_disc else ""
-            kb.button(
-                text=f"{months} мес. — ${total}{disc_txt}",
-                callback_data=SubCb(action="choose_period", plan=plan, months=months),
-            )
-    kb.button(text="◀️ Назад", callback_data=SubCb(action="menu"))
+            kb.button(text=f"{months} мес. — ${total}{disc_txt}", callback_data=cb)
+    kb.button(text="◀️ Другой тариф", callback_data=SubCb(action="choose_plan", plan=plan))
     kb.adjust(1)
+    head = (f"💳 {em} <b>Тариф «{tiers.name(tier)}»</b> — {tiers.cap_label(tier)}\n"
+            f"Базовая цена: <b>${base}/мес</b>\n\n")
     if promo:
-        header = (
-            f"💳 {em} <b>{sub_utils.plan_name_ru(plan)}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
+        header = head + (
             f"🔥 <b>АКЦИЯ −{promo}%</b> на 3, 6, 12 мес. — до {promo_until}\n"
             f"<i>Чем дольше — тем выгоднее (1 мес — без акции)</i>"
         )
     else:
-        header = (
-            f"💳 {em} <b>{sub_utils.plan_name_ru(plan)}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
-            f"📅 Выберите период (чем дольше — тем дешевле):"
-        )
-    await callback.message.edit_text(
-        header,
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+        header = head + "📅 Выберите период (чем дольше — тем дешевле):"
+    await callback.message.edit_text(header, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+async def _fleet_line(pool: asyncpg.Pool, user_id: int) -> str:
+    """«Тариф Старт · аккаунтов 7 из 10» — для экрана подписки."""
+    from services import tiers
+
+    try:
+        _, tier = await tiers.active_tier(pool, user_id)
+    except Exception:
+        tier = None
+    fleet = await _fleet_size(pool, user_id)
+    if tier is None:
+        return f"Аккаунтов: <b>{fleet}</b> · без лимита"
+    cap = tiers.account_cap(tier)
+    used = f"{fleet} из {cap}" if cap < tariffs.UNLIMITED else f"{fleet}, без лимита"
+    warn = " — лимит исчерпан, новые не добавятся" if fleet >= cap else ""
+    return f"Тариф <b>«{tiers.name(tier)}»</b> · аккаунтов <b>{used}</b>{warn}"
+
+
+async def _fleet_size(pool: asyncpg.Pool, user_id: int) -> int:
+    try:
+        return int(await pool.fetchval(
+            "SELECT count(*) FROM tg_accounts WHERE owner_id=$1", user_id) or 0)
+    except Exception:
+        log.warning("subscription: размер флота не прочитан user=%s", user_id, exc_info=True)
+        return 0
+
+
+async def _tier_picker(pool: asyncpg.Pool, user_id: int, months: int | None = None):
+    """Экран выбора тарифа: три тарифа, подходящий под флот отмечен.
+
+    `months` — срок, уже выбранный в мини-аппе: кнопка тарифа ведёт сразу к
+    способу оплаты этого срока.
+    """
+    from services import tiers
+
+    fleet = await _fleet_size(pool, user_id)
+    fit = tiers.for_fleet(fleet)
+    lines = ["💳 <b>Выберите тариф</b>\n",
+             "Возможности у всех тарифов одинаковые — различается размер флота.\n"]
+    kb = InlineKeyboardBuilder()
+    for t in tiers.TIERS:
+        mark = " ⭐" if t == fit else ""
+        lines.append(f"{tiers.emoji(t)} <b>{tiers.name(t)}</b> — ${tiers.price_usd(t)}/мес · "
+                     f"{tiers.cap_label(t)}{mark}")
+        if months:
+            cb = SubCb(action="choose_period", plan="paid", months=months, tier=t)
+        else:
+            cb = SubCb(action="choose_plan", plan="paid", tier=t)
+        kb.button(text=f"{tiers.emoji(t)} {tiers.name(t)} — ${tiers.price_usd(t)}/мес{mark}",
+                  callback_data=cb)
+    if fleet:
+        lines.append(f"\n⭐ — подходит под ваш флот: сейчас аккаунтов <b>{fleet}</b>.")
+    lines.append("\n<i>Перейти на другой тариф можно при следующей оплате.</i>")
+    kb.button(text="◀️ Назад", callback_data=SubCb(action="menu"))
+    kb.adjust(1)
+    return "\n".join(lines), kb.as_markup()
 
 
 async def _reject_bad_period(callback: CallbackQuery) -> None:
@@ -584,6 +659,8 @@ async def cb_choose_period(
     callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool,
     http: aiohttp.ClientSession | None = None,
 ) -> None:
+    from services import tiers
+
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
@@ -591,7 +668,15 @@ async def cb_choose_period(
     if months is None:
         await _reject_bad_period(callback)
         return
-    em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
+    tier = tiers.coerce_tier(callback_data.tier)
+    if tier is None:
+        # Срок пришёл без тарифа (диплинк мини-аппа, старая кнопка) — сначала тариф.
+        await safe_answer(callback)
+        text, markup = await _tier_picker(pool, callback.from_user.id, months)
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+        return
+    em = tiers.emoji(tier)
+    what = f"«{tiers.name(tier)}»"
     ton = _ton_wallet()
     tron = _tron_wallet()
     promo, _ = await _get_promo(pool)
@@ -606,12 +691,12 @@ async def cb_choose_period(
 
     if not ton and not tron and not stars_on:
         # No wallets configured
-        usd, _ = _calc(plan, months, "USDT_TRC20", promo)
+        usd, _ = _calc(plan, months, "USDT_TRC20", promo, tier=tier)
         kb = InlineKeyboardBuilder()
         if sub_utils.is_platform_admin(callback.from_user.id):
             kb.button(
                 text="🎁 Активировать себе (админ)",
-                callback_data=SubCb(action="admin_grant", plan=plan, months=months),
+                callback_data=SubCb(action="admin_grant", plan=plan, months=months, tier=tier),
             )
             kb.button(
                 text="⚙️ Настроить кошельки",
@@ -620,12 +705,12 @@ async def cb_choose_period(
         else:
             kb.button(
                 text="📩 Запросить подписку",
-                callback_data=SubCb(action="request_sub", plan=plan, months=months),
+                callback_data=SubCb(action="request_sub", plan=plan, months=months, tier=tier),
             )
-        kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
+        kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan, tier=tier))
         kb.adjust(1)
         await callback.message.edit_text(
-            f"💳 <b>{em} Подписка × {months} мес.</b> — <b>${usd}</b>\n\n"
+            f"💳 <b>{em} {what} × {months} мес.</b> — <b>${usd}</b>\n\n"
             f"⚠️ Автоматическая оплата не настроена.\n\n"
             f"Нажмите <b>«📩 Запросить подписку»</b> — администратор активирует вручную после оплаты.",
             parse_mode="HTML",
@@ -636,33 +721,42 @@ async def cb_choose_period(
     # Wallets configured — show currency selection
     kb = InlineKeyboardBuilder()
     if ton:
-        usd_ton, crypto_ton = _calc(plan, months, "TON", promo, rate)
+        usd_ton, crypto_ton = _calc(plan, months, "TON", promo, rate, tier)
         kb.button(
             text=f"💎 TON — {crypto_ton:.2f} TON (≈${usd_ton})",
-            callback_data=SubCb(action="pay", plan=plan, months=months, currency="TON"),
+            callback_data=SubCb(action="pay", plan=plan, months=months, currency="TON", tier=tier),
         )
     if tron:
-        usd_usdt, _ = _calc(plan, months, "USDT_TRC20", promo)
+        usd_usdt, _ = _calc(plan, months, "USDT_TRC20", promo, tier=tier)
         kb.button(
             text=f"💵 USDT TRC-20 — {usd_usdt:.2f} USDT",
             callback_data=SubCb(
-                action="pay", plan=plan, months=months, currency="USDT_TRC20"
+                action="pay", plan=plan, months=months, currency="USDT_TRC20",
+                tier=tier,
             ),
         )
+    if stars_on and months == 1:
+        usd_sub, _ = _calc(plan, 1, STARS_CURRENCY, 0, tier=tier)
+        kb.button(
+            text=f"🔁 Stars с автопродлением — {stars_amount(usd_sub)} ⭐/мес",
+            callback_data=SubCb(action="pay", plan=plan, months=1, currency=STARS_SUB,
+                                tier=tier),
+        )
     if stars_on:
-        usd_xtr, _ = _calc(plan, months, STARS_CURRENCY, promo)
+        usd_xtr, _ = _calc(plan, months, STARS_CURRENCY, promo, tier=tier)
         kb.button(
             text=f"⭐ Telegram Stars — {stars_amount(usd_xtr)} ⭐",
             callback_data=SubCb(
-                action="pay", plan=plan, months=months, currency=STARS_CURRENCY
+                action="pay", plan=plan, months=months, currency=STARS_CURRENCY,
+                tier=tier,
             ),
         )
-    kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
+    kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan, tier=tier))
     kb.adjust(1)
-    usd_show, _ = _calc(plan, months, "USDT_TRC20", promo)
+    usd_show, _ = _calc(plan, months, "USDT_TRC20", promo, tier=tier)
     promo_line = f"\n🔥 <i>Включена скидка −{promo}%</i>" if promo and months > 1 else ""
     await callback.message.edit_text(
-        f"💳 <b>{em} Подписка × {months} мес.</b>{promo_line}\n\n"
+        f"💳 <b>{em} {what} × {months} мес.</b>{promo_line}\n\n"
         f"Итого: <b>${usd_show}</b>\n\nВыберите способ оплаты:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -685,11 +779,21 @@ async def cb_pay(
         await _reject_bad_period(callback)
         return
     currency = callback_data.currency or ""
+    if currency == STARS_SUB:
+        from services import tiers as _t
+        await _pay_stars_sub(callback, pool, plan,
+                             _t.coerce_tier(callback_data.tier) or _t.DEFAULT_TIER)
+        return
     if currency not in ALLOWED_CURRENCIES:
         await callback.answer("Этот способ оплаты не поддерживается.", show_alert=True)
         return
+    from services import tiers
+
+    # Кнопка без тарифа — из сообщения, отправленного до тарифов: прежняя
+    # цена 29 $ — это «Про».
+    tier = tiers.coerce_tier(callback_data.tier) or tiers.DEFAULT_TIER
     if currency == STARS_CURRENCY:
-        await _pay_stars(callback, pool, plan, months)
+        await _pay_stars(callback, pool, plan, months, tier)
         return
     wallet = _ton_wallet() if currency == "TON" else _tron_wallet()
     if not wallet:
@@ -712,7 +816,7 @@ async def cb_pay(
         )
         return
     try:
-        usd, crypto = _calc(plan, months, currency, promo, rate)
+        usd, crypto = _calc(plan, months, currency, promo, rate, tier)
     except ValueError:
         log.error("cb_pay: нулевая или неверная цена plan=%s months=%s promo=%s",
                   plan, months, promo)
@@ -751,12 +855,13 @@ async def cb_pay(
                 amount_usd=usd,
                 wallet=wallet,
                 reference=ref,
+                tier=tier,
             )
         else:
             await pool.execute(
                 """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto, amount_usd,
-                                          wallet_address, reference, expires_at)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + INTERVAL '24 hours')""",
+                                          wallet_address, reference, expires_at, tier)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + INTERVAL '24 hours', $9)""",
                 callback.from_user.id,
                 plan,
                 months,
@@ -765,6 +870,7 @@ async def cb_pay(
                 usd,
                 wallet,
                 ref,
+                tier,
             )
     except usdt_invoice.NoFreeAmountError as exc:
         await callback.message.edit_text(
@@ -804,7 +910,7 @@ async def cb_pay(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        f"💳 <b>Оплата: {sub_utils.plan_name_ru(plan).lower()} на {months} мес.</b>\n\n"
+        f"💳 <b>Оплата: тариф «{tiers.name(tier)}» на {months} мес.</b>\n\n"
         f"Сумма: <b>{crypto_str}</b> (≈ ${usd})\n"
         f"Кошелёк: <code>{wallet}</code>\n\n"
         f"{note}\n\n"
@@ -833,7 +939,8 @@ async def _unique_ref(pool: asyncpg.Pool) -> str:
 
 
 async def _pay_stars(
-    callback: CallbackQuery, pool: asyncpg.Pool, plan: str, months: int
+    callback: CallbackQuery, pool: asyncpg.Pool, plan: str, months: int,
+    tier: str | None = None,
 ) -> None:
     """Счёт подписки в Telegram Stars: строка payments + инвойс в чат.
 
@@ -848,7 +955,7 @@ async def _pay_stars(
     await safe_answer(callback)
     promo, _ = await _get_promo(pool)
     try:
-        usd, _ = _calc(plan, months, STARS_CURRENCY, promo)
+        usd, _ = _calc(plan, months, STARS_CURRENCY, promo, tier=tier)
     except ValueError:
         log.error("_pay_stars: нулевая или неверная цена plan=%s months=%s", plan, months)
         await callback.message.edit_text(
@@ -862,9 +969,9 @@ async def _pay_stars(
     try:
         await pool.execute(
             """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto,
-                                      amount_usd, wallet_address, reference, expires_at)
-               VALUES ($1,$2,$3,$4,$5,$6,'telegram_stars',$7, now() + INTERVAL '24 hours')""",
-            uid, plan, months, STARS_CURRENCY, stars, usd, ref,
+                                      amount_usd, wallet_address, reference, expires_at, tier)
+               VALUES ($1,$2,$3,$4,$5,$6,'telegram_stars',$7, now() + INTERVAL '24 hours', $8)""",
+            uid, plan, months, STARS_CURRENCY, stars, usd, ref, tier,
         )
     except Exception:
         log_exc_swallow(log, "_pay_stars: failed to insert payment record")
@@ -873,13 +980,15 @@ async def _pay_stars(
             parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
-    title = f"Подписка Infragram на {months} мес."
+    from services import tiers
+
+    title = f"Infragram «{tiers.name(tier)}» на {months} мес."
     try:
         await callback.message.answer_invoice(
             title=title,
             description=(
-                "Безлимит ботов и каналов, CRM, воронки, рассылки, парсер и "
-                "операции с аккаунтами. Подписка включится сразу после оплаты."
+                f"Все функции, {tiers.cap_label(tier)}: CRM, воронки, рассылки, "
+                "парсер и операции с аккаунтами. Подписка включится сразу после оплаты."
             ),
             payload=f"{uid}:{plan}:{months}:{ref}",
             currency=STARS_CURRENCY,
@@ -905,6 +1014,161 @@ async def _pay_stars(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+async def _pay_stars_sub(callback: CallbackQuery, pool: asyncpg.Pool, plan: str,
+                         tier: str) -> None:
+    """Подписка звёздами с автопродлением раз в 30 дней.
+
+    Telegram выставляет такие счета только ссылкой (createInvoiceLink с
+    subscription_period). Первый платёж подтверждается как обычный счёт Stars,
+    каждое следующее списание приходит successful_payment с is_recurring —
+    его ведёт renew_stars_subscription. Отключить — кнопка на экране подписки.
+    """
+    from services import tiers
+
+    per_usd = _stars_per_usd()
+    if per_usd <= 0:
+        await callback.answer("Оплата звёздами сейчас выключена.", show_alert=True)
+        return
+    await safe_answer(callback)
+    try:
+        usd, _ = _calc(plan, 1, STARS_CURRENCY, 0, tier=tier)
+    except ValueError:
+        log.error("_pay_stars_sub: неверная цена plan=%s tier=%s", plan, tier)
+        await callback.message.edit_text(
+            "❌ <b>Не удалось рассчитать цену.</b>\n\nОбратитесь в поддержку.",
+            parse_mode="HTML", reply_markup=terminal_kb())
+        return
+    stars = stars_amount(usd, per_usd)
+    uid = callback.from_user.id
+    ref = await _unique_ref(pool)
+    title = f"Infragram «{tiers.name(tier)}» — каждый месяц"
+    try:
+        await pool.execute(
+            """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto,
+                                      amount_usd, wallet_address, reference, expires_at, tier)
+               VALUES ($1,$2,1,$3,$4,$5,$6,$7, now() + INTERVAL '24 hours', $8)""",
+            uid, plan, STARS_CURRENCY, stars, usd, STARS_SUB_WALLET, ref, tier,
+        )
+        link = await callback.bot.create_invoice_link(
+            title=title,
+            description=(f"Все функции, {tiers.cap_label(tier)}. Звёзды списываются раз "
+                         "в 30 дней, отключить можно в любой момент в /subscription."),
+            payload=f"{uid}:{plan}:1:{ref}",
+            currency=STARS_CURRENCY,
+            prices=[LabeledPrice(label=title, amount=stars)],
+            subscription_period=STARS_SUB_PERIOD_S,
+        )
+    except Exception:
+        log_exc_swallow(log, "_pay_stars_sub: счёт не выставлен")
+        await pool.execute(
+            "UPDATE payments SET status='failed' WHERE reference=$1 AND status='pending'", ref)
+        await callback.message.edit_text(
+            "❌ <b>Не удалось выставить подписку в Stars.</b>\n\n"
+            "Попробуйте позже или оплатите срок разово.",
+            parse_mode="HTML", reply_markup=terminal_kb())
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"⭐ Оформить — {stars} ⭐/мес", url=link)
+    kb.button(text="◀️ Назад к планам", callback_data=SubCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🔁 <b>Подписка «{tiers.name(tier)}» с автопродлением</b>\n\n"
+        f"{stars} ⭐ в месяц (≈ ${usd}). Telegram сам списывает звёзды раз в 30 дней, "
+        "подписка продлевается без новых счетов. Отключить автопродление можно в "
+        "любой момент на экране /subscription.\n\n"
+        f"<i>ID платежа: {ref}</i>",
+        parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+async def renew_stars_subscription(pool: asyncpg.Pool, user_id: int, payload: str,
+                                   charge_id: str, total_amount: int):
+    """Очередное автосписание подписки Stars → +1 месяц, одной транзакцией.
+
+    Возвращает (expires_at, доля рефереру) или None — платёж уже учтён
+    (повторная доставка) или исходной подписки нет. Каждое продление — своя
+    строка payments (recurring_of = reference первого платежа, tx_hash = id
+    списания): история оплат честная, а повтор отсекается по tx_hash.
+    """
+    from services import billing, referral_commission
+
+    parsed = parse_stars_payload(payload)
+    if not parsed or parsed[0] != user_id or not charge_id:
+        return None
+    origin_ref = parsed[3]
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", charge_id)
+            if await conn.fetchval("SELECT 1 FROM payments WHERE tx_hash=$1", charge_id):
+                return None
+            origin = await conn.fetchrow(
+                """SELECT plan, amount_usd, tier FROM payments
+                    WHERE reference=$1 AND user_id=$2 AND currency=$3
+                      AND wallet_address=$4 AND status='confirmed'""",
+                origin_ref, user_id, STARS_CURRENCY, STARS_SUB_WALLET)
+            if not origin:
+                log.error("stars: продление без исходной подписки ref=%s user=%s",
+                          origin_ref, user_id)
+                return None
+            ref = _gen_ref()
+            await conn.execute(
+                """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto,
+                                          amount_usd, wallet_address, reference, expires_at,
+                                          tier, status, tx_hash, confirmed_at, recurring_of)
+                   VALUES ($1,$2,1,$3,$4,$5,$6,$7, now(), $8, 'confirmed', $9, now(), $10)""",
+                user_id, origin["plan"], STARS_CURRENCY, int(total_amount),
+                origin["amount_usd"], STARS_SUB_WALLET, ref, origin["tier"], charge_id,
+                origin_ref)
+            expires = await billing.activate_subscription(
+                conn, user_id, origin["plan"], 1, origin["tier"])
+            credited = await referral_commission.credit_in_tx(conn, user_id, ref, 1)
+    return expires, credited
+
+
+async def active_stars_subscription(pool: asyncpg.Pool, user_id: int):
+    """Действующая подписка Stars с автопродлением: строка первого платежа или None."""
+    try:
+        return await pool.fetchrow(
+            """SELECT reference, tx_hash, tier FROM payments
+                WHERE user_id=$1 AND currency=$2 AND wallet_address=$3
+                  AND status='confirmed' AND recurring_of IS NULL
+                  AND recurring_canceled_at IS NULL AND tx_hash IS NOT NULL
+                ORDER BY confirmed_at DESC LIMIT 1""",
+            user_id, STARS_CURRENCY, STARS_SUB_WALLET)
+    except Exception:
+        log.warning("stars: подписка не прочитана user=%s", user_id, exc_info=True)
+        return None
+
+
+@router.callback_query(SubCb.filter(F.action == "stars_cancel"))
+async def cb_stars_cancel(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    uid = callback.from_user.id
+    row = await active_stars_subscription(pool, uid)
+    if not row:
+        await callback.answer("Автопродление уже отключено.", show_alert=True)
+        return
+    await safe_answer(callback)
+    try:
+        await callback.bot.edit_user_star_subscription(
+            user_id=uid, telegram_payment_charge_id=row["tx_hash"], is_canceled=True)
+    except Exception:
+        log_exc_swallow(log, "cb_stars_cancel: Telegram не отключил подписку")
+        await callback.message.edit_text(
+            "⚠️ <b>Telegram не принял отключение.</b>\n\nПопробуйте через минуту — "
+            "или отключите подписку в настройках Telegram: Настройки → Мои звёзды.",
+            parse_mode="HTML", reply_markup=terminal_kb())
+        return
+    await pool.execute(
+        "UPDATE payments SET recurring_canceled_at=now() WHERE reference=$1", row["reference"])
+    _, expires = await _get_plan_expiry(pool, uid)
+    until = f" до <b>{expires.strftime('%d.%m.%Y')}</b>" if expires else ""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К подписке", callback_data=SubCb(action="menu"))
+    await callback.message.edit_text(
+        f"⏹ <b>Автопродление отключено.</b>\n\nОплаченная подписка действует{until}, "
+        "больше звёзды списываться не будут.",
+        parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 async def _stars_invoice_row(pool: asyncpg.Pool, payload: str, user_id: int):
@@ -980,7 +1244,7 @@ async def confirm_stars_payment(
                     WHERE reference=$1 AND user_id=$2 AND currency='XTR'
                       AND status IN ('pending','expired')
                       AND confirmed_at IS NULL
-                RETURNING plan, period_months, amount_crypto""",
+                RETURNING plan, period_months, amount_crypto, tier""",
                 ref, user_id, charge_id,
             )
             if not row:
@@ -992,7 +1256,7 @@ async def confirm_stars_payment(
                     total_amount, row["amount_crypto"], ref,
                 )
             expires = await billing.activate_subscription(
-                conn, user_id, row["plan"], int(row["period_months"])
+                conn, user_id, row["plan"], int(row["period_months"]), row["tier"]
             )
             from services import referral_commission
 
@@ -1025,10 +1289,18 @@ async def _after_stars_payment(pool, bot, user_id: int, credited) -> None:
 async def on_stars_paid(message: Message, pool: asyncpg.Pool) -> None:
     sp = message.successful_payment
     try:
-        confirmed = await confirm_stars_payment(
-            pool, message.from_user.id, sp.invoice_payload,
-            sp.telegram_payment_charge_id, sp.total_amount,
-        )
+        confirmed = None
+        if not (sp.is_recurring and not sp.is_first_recurring):
+            confirmed = await confirm_stars_payment(
+                pool, message.from_user.id, sp.invoice_payload,
+                sp.telegram_payment_charge_id, sp.total_amount,
+            )
+        if confirmed is None and sp.is_recurring:
+            # Очередное автосписание подписки Stars: исходный счёт уже закрыт.
+            confirmed = await renew_stars_subscription(
+                pool, message.from_user.id, sp.invoice_payload,
+                sp.telegram_payment_charge_id, sp.total_amount,
+            )
     except Exception:
         log.exception(
             "on_stars_paid: подтверждение не записано user=%s charge=%s",
@@ -1117,8 +1389,11 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
-    usd, _ = _calc(plan, months, "TON")
-    em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
+    from services import tiers
+
+    tier = tiers.coerce_tier(callback_data.tier) or tiers.DEFAULT_TIER
+    usd, _ = _calc(plan, months, "USDT_TRC20", tier=tier)
+    em = tiers.emoji(tier)
     uid = callback.from_user.id
     user_label = (
         f"@{callback.from_user.username}"
@@ -1145,7 +1420,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
             "⚠️ <b>Оплата пока не настроена</b>\n\n"
             "Администратор ещё не указал канал для заявок на подписку. "
             "Попробуйте позже или напишите владельцу сервиса напрямую.\n\n"
-            f"Вы выбрали: <b>{em} {sub_utils.plan_name_ru(plan)}</b> × {months} мес. — <b>${usd}</b>",
+            f"Вы выбрали: <b>{em} тариф «{tiers.name(tier)}»</b> × {months} мес. — <b>${usd}</b>",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -1153,7 +1428,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     notify = (
         f"💳 <b>Запрос на подписку</b>\n\n"
         f"Пользователь: {user_label} (<code>{uid}</code>)\n"
-        f"План: <b>{em} {sub_utils.plan_name_ru(plan)}</b> × {months} мес.\n"
+        f"План: <b>{em} тариф «{tiers.name(tier)}»</b> × {months} мес.\n"
         f"Сумма: <b>${usd}</b>\n\n"
         f"Чтобы активировать после получения оплаты:\n"
         f"<b>/admin</b> → 💰 Выдать подписку →\n"
@@ -1172,7 +1447,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     await callback.message.edit_text(
         f"✅ <b>Запрос отправлен!</b>\n\n"
         f"Администратор получил уведомление о вашем запросе:\n"
-        f"<b>{em} {sub_utils.plan_name_ru(plan)}</b> × {months} мес. — <b>${usd}</b>\n\n"
+        f"<b>{em} тариф «{tiers.name(tier)}»</b> × {months} мес. — <b>${usd}</b>\n\n"
         f"Подписка будет активирована после подтверждения оплаты.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1199,12 +1474,15 @@ async def cb_admin_grant(
         plan = "paid"
     from datetime import datetime, timedelta, timezone
 
+    from services import tiers
+
     try:
         await pool.execute(
-            """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-               VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
+            """INSERT INTO subscriptions(user_id, plan, expires_at, is_active, tier)
+               VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true, $4)
                ON CONFLICT(user_id) DO UPDATE
                SET plan      = EXCLUDED.plan,
+                   tier      = EXCLUDED.tier,
                    is_active = true,
                    expires_at = CASE
                        WHEN subscriptions.expires_at > now()
@@ -1214,6 +1492,7 @@ async def cb_admin_grant(
             callback.from_user.id,
             plan,
             str(months),
+            tiers.coerce_tier(callback_data.tier),
         )
     except Exception:
         log_exc_swallow(log, "cb_admin_grant: failed to upsert subscription")

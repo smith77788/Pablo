@@ -563,7 +563,8 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
                 await host_server.grant_access(conn, user_id, payment["reference"])
             else:
                 period_months = int(payment["period_months"] or 1)
-                await _activate_subscription(conn, user_id, plan, period_months)
+                await _activate_subscription(conn, user_id, plan, period_months,
+                                             payment.get("tier"))
                 # Доля рефереру с КАЖДОЙ оплаты — в той же транзакции, во
                 # вложенной точке сохранения (services/referral_commission).
                 from services import referral_commission
@@ -666,11 +667,12 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         )
 
 
-async def _activate_subscription(executor, user_id: int, plan: str, months: int) -> None:
+async def _activate_subscription(executor, user_id: int, plan: str, months: int,
+                                 tier: str | None = None) -> None:
     # Единая точка активации (see services/billing.py) — та же логика, что у
     # webhook, чтобы подписка/synced platform_users никогда не расходились.
     # executor — пул ИЛИ открытое соединение: подтверждение платежа вызывает
     # это внутри своей транзакции.
     from services import billing
 
-    await billing.activate_subscription(executor, user_id, plan, months)
+    await billing.activate_subscription(executor, user_id, plan, months, tier)

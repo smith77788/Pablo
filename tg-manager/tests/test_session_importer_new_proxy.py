@@ -108,3 +108,34 @@ async def test_import_no_proxy_stays_direct():
     assert res["imported"] == 1
     assert not pool.proxy_insert_seen
     assert pool.inserted_account_args[13] is None
+
+
+# Дверь записи аккаунта (db.upsert_tg_account) пишет одной транзакцией под
+# блокировкой владельца и сверяет лимит флота тарифа (services/tiers.py).
+# Фейку — соединение-он-сам; лимит здесь не проверяется
+# (tests/test_subscription_tiers.py).
+from contextlib import asynccontextmanager as _acm  # noqa: E402
+
+
+@_acm
+async def _same_conn(self):
+    yield self
+
+
+@_acm
+async def _no_tx(self):
+    yield None
+
+
+_DispatchPool.acquire = _same_conn
+_DispatchPool.transaction = _no_tx
+
+
+@pytest.fixture(autouse=True)
+def _no_fleet_cap(monkeypatch):
+    from bot.utils import tariffs
+    from services import tiers
+
+    async def _unlimited(pool, owner_id):
+        return tariffs.UNLIMITED
+    monkeypatch.setattr(tiers, "owner_account_cap", _unlimited)

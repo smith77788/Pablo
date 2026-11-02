@@ -408,7 +408,7 @@ def test_payment_checker_activates_host_server_as_module_not_subscription(monkey
     async def _grant(executor, user_id, payment_ref=None, granted_by=None):
         выдано.append((user_id, payment_ref))
 
-    async def _activate(executor, user_id, plan, months):
+    async def _activate(executor, user_id, plan, months, tier=None):
         подписка.append((user_id, plan, months))
 
     monkeypatch.setattr(_hs, "grant_access", _grant)
@@ -434,7 +434,7 @@ def test_payment_checker_confirms_and_grants_in_one_transaction(monkeypatch):
 
     внутри: list = []
 
-    async def _activate(executor, user_id, plan, months):
+    async def _activate(executor, user_id, plan, months, tier=None):
         # Внутри транзакции нам отдают соединение, а не пул: у пула есть
         # acquire, у соединения — нет.
         внутри.append(hasattr(executor, "acquire"))
