@@ -30174,7 +30174,7 @@ async function openWorkflowRunLog(runId) {
     const labels = d.outcome_labels || {};
     const who = d.username ? '@' + d.username : (d.first_name || (d.chat_id ? 'id ' + d.chat_id : 'без получателя'));
     let html = `<div class="hint" style="margin-bottom:8px">👤 ${esc(who)}${d.source ? ' · пришёл из «' + esc(d.source) + '»' : ''} · начат ${ago(d.started_at)}${d.goal_reached_at ? ' · 🎯 цель достигнута' : ''}</div>`;
-    const rows = d.log || [];
+    const rows = d.steps_log || [];
     if (!rows.length) {
       html += empty('🧾', 'Журнал пуст', 'Шаги этого прогона ещё не выполнялись');
     } else {

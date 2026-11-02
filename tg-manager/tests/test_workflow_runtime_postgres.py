@@ -480,7 +480,7 @@ def test_the_journal_counts_people_per_step_and_revenue_once(pool, tg):
             "AND event_type='payment.received'", OWNER)
         assert payments == 1, "повтор апдейта оплаты записал второе событие"
         journal = await wf.run_log(pool, OWNER, run["id"])
-        outcomes = [r["outcome"] for r in journal["log"]]
+        outcomes = [r["outcome"] for r in journal["steps_log"]]
         assert outcomes[:3] == ["sent", "button:0", "sent"] and "paid" in outcomes
         assert await wf.run_log(pool, OWNER + 1, run["id"]) is None  # чужой
 

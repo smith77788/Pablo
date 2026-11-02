@@ -832,7 +832,12 @@ async def run_log(pool: asyncpg.Pool, owner_id: int, run_id: int) -> Optional[di
             WHERE run_id=$1 AND owner_id=$2
             ORDER BY id LIMIT 300""", run_id, owner_id)
     out = dict(run)
-    out["log"] = [dict(r) for r in rows]
+    out["steps_log"] = [
+        {"step_idx": r["step_idx"], "step_type": r["step_type"],
+         "outcome": r["outcome"], "detail": r["detail"],
+         "amount": r["amount"], "currency": r["currency"],
+         "created_at": r["created_at"]}
+        for r in rows]
     return out
 
 
