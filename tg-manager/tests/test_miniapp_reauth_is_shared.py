@@ -96,6 +96,7 @@ async function fetchT(path, opts) {
 }
 
 __REAUTH__
+__BOOTING__
 __APIRAW__
 
 (async () => {
@@ -114,6 +115,10 @@ __APIRAW__
 def _run() -> dict:
     src = (HARNESS
            .replace("__REAUTH__", _fn_source("_reAuth"))
+           # Проверка «сервер перезапускается» вызывается из _apiRaw; у
+           # подставных ответов нет заголовков — она обязана сказать «нет».
+           .replace("__BOOTING__", "const BOOT_RETRY_MAX = 6, BOOT_RETRY_MS = 1;\n"
+                    "const BOOT_MSG = 'перезапуск';\n" + _fn_source("_serverBooting"))
            .replace("__APIRAW__", _fn_source("_apiRaw")))
     # `_reAuth` опирается на переменную-ссылку рядом с собой; в вырезанном куске
     # её нет, поэтому объявляем сами — так же, как объявлены подставные fetchT и tg.

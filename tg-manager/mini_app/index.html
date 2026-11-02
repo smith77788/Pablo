@@ -485,8 +485,10 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 @keyframes sp{to{transform:rotate(360deg)}}
 
 /* ─── Toast ──────────────────────────────────────────────────── */
-#toast{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 14px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(30,41,55,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:8px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:400;white-space:nowrap;max-width:calc(100vw - 32px);text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.35)}
-#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 14px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(30,41,55,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:8px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:400;white-space:normal;overflow-wrap:anywhere;max-width:calc(100vw - 32px);width:max-content;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.35);display:flex;align-items:center;gap:10px;cursor:pointer}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto}
+#toast .toast-msg{flex:1 1 auto;line-height:1.35}
+#toast .toast-x{flex:0 0 auto;width:24px;height:24px;margin-right:-8px;border:0;border-radius:50%;background:rgba(255,255,255,.1);color:var(--text);font-size:14px;line-height:24px;padding:0;cursor:pointer}
 /* Плашка итога операции: тот же слой, что и тост, но кликабельная и живёт
    дольше — итог массовой операции нужно успеть прочитать и открыть детали. */
 #opDone{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 14px);left:16px;right:16px;background:rgba(30,41,55,.97);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:11px 14px;border-radius:14px;font-size:13px;opacity:0;transform:translateY(10px);transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:401;box-shadow:0 8px 32px rgba(0,0,0,.4)}
@@ -8191,6 +8193,16 @@ async function _apiRaw(path, opts={}) {
     } catch(e) { throw new Error((e && e.message) || 'Нет соединения с сервером'); }
     if (r.status === 401) throw new Error('Сессия истекла, перезапустите приложение');
   }
+  // Сервер перезапускается после деплоя: пока идёт старт, порт держит
+  // временный сервер. Запрос до приложения не дошёл и ничего не изменил, так
+  // что его безопасно повторить — ждём старта молча, а не показываем ошибку.
+  for (let _i = 0; _i < BOOT_RETRY_MAX && await _serverBooting(r); _i++) {
+    await new Promise(res => setTimeout(res, BOOT_RETRY_MS));
+    try {
+      r = await fetchT(path, { ...opts, headers: _hdr() }, _ms);
+    } catch(e) { throw new Error((e && e.message) || 'Нет соединения с сервером'); }
+  }
+  if (await _serverBooting(r)) throw new Error(BOOT_MSG);
   if (!r.ok) {
     let msg, _j;
     try { _j=await r.json(); msg=_j.message||_j.error||_j.detail||null; } catch(_){}
@@ -8212,7 +8224,28 @@ async function _apiRaw(path, opts={}) {
     if (r.status === 500) msg = 'Внутренняя ошибка сервиса — попробуйте позже';
     throw new Error(msg);
   }
-  try { return await r.json(); } catch(_) { throw new Error('Ответ сервера не является JSON'); }
+  try { return await r.json(); } catch(_) { throw new Error('Сервер прислал неожиданный ответ — обновите экран'); }
+}
+
+// Признак перезапуска сервера. Новый стартовый сервер отвечает на /api 503 с
+// `starting: true`; старый (до этой правки, он ещё живёт в момент деплоя)
+// отвечал текстом «starting: …» с кодом 200 — его мини-апп и выдавал за
+// «Ответ сервера не является JSON». Тело читаем из копии: исходный ответ
+// остаётся целым для обычного разбора.
+const BOOT_RETRY_MAX = 6, BOOT_RETRY_MS = 4000;
+const BOOT_MSG = 'Сервис перезапускается — через минуту всё заработает';
+async function _serverBooting(r) {
+  try {
+    const ct = (r.headers.get('Content-Type') || '').toLowerCase();
+    if (r.status === 503 && ct.includes('json')) {
+      const j = await r.clone().json();
+      return !!(j && j.starting);
+    }
+    if (r.ok && !ct.includes('json')) {
+      return /^starting:/.test(await r.clone().text());
+    }
+  } catch(_) {}
+  return false;
 }
 
 // Глобальная сеть безопасности: любая НЕпойманная ошибка (баг рендера, отвалившийся
@@ -28939,15 +28972,41 @@ function outRu(v) {
           skipped:'— Пропущено', timeout:'⏱ Таймаут'}[String(v||'').toLowerCase()] || (v || '—');
 }
 let _tt=null;
+// Уведомление внизу экрана. Закрывается тапом по нему или по «✕» и само
+// скрывается: обычное — через 3 с, ошибка — через 5 (её успевают прочесть).
+// Раньше тост был прозрачен для пальца (pointer-events:none) и обрезался в
+// одну строку, а фоновые запросы, падающие по кругу, показывали его снова и
+// снова — выглядело как плашка, которую не закрыть. Поэтому та же ошибка,
+// которую только что закрыли или показали, повторно не всплывает 15 с.
+const TOAST_MS = 3000, TOAST_ERR_MS = 5000, TOAST_REPEAT_MS = 15000;
+let _toastLast = {msg:'', at:0};
+function hideToast() {
+  const el=document.getElementById('toast');
+  if (el) el.classList.remove('show');
+  clearTimeout(_tt);
+}
 function toast(msg) {
   const el=document.getElementById('toast');
-  el.textContent=msg; el.classList.add('show');
-  clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),2800);
+  if (!el) return;
+  msg = String(msg == null ? '' : msg);
+  const isErr = /⚠️|ошибк|не удал|❌/i.test(msg);
+  const now = Date.now();
+  if (isErr && msg === _toastLast.msg && now - _toastLast.at < TOAST_REPEAT_MS) return;
+  _toastLast = {msg, at: now};
+  if (!el._wired) {
+    el._wired = true;
+    el.setAttribute('role','status');
+    el.addEventListener('click', hideToast);
+  }
+  el.innerHTML = '<span class="toast-msg"></span><button type="button" class="toast-x" aria-label="Закрыть">✕</button>';
+  el.firstChild.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_tt); _tt=setTimeout(hideToast, isErr ? TOAST_ERR_MS : TOAST_MS);
   // Тактильный отклик (как в нативных Telegram Mini App)
   try {
     const h = tg && tg.HapticFeedback;
     if (h) {
-      if (/⚠️|ошибк|Ошибк|не удал|❌/.test(msg)) h.notificationOccurred('error');
+      if (isErr) h.notificationOccurred('error');
       else if (/✅|🚀|📢|готов|запущен|создан|добавлен|сохран/i.test(msg)) h.notificationOccurred('success');
       else h.impactOccurred('light');
     }

@@ -341,6 +341,30 @@ def _set_boot_phase(phase: str) -> None:
     log.info("boot phase: %s", phase)
 
 
+BOOT_API_MESSAGE = "Сервис перезапускается — через минуту всё заработает"
+
+
+def _bootstrap_response(web_mod, path: str):
+    """Ответ стартового сервера на один запрос.
+
+    Health-check'у платформы и людям — 200 с текущей фазой (при зависании
+    видно, где застряли). А мини-аппу на /api/ — 503 и JSON: раньше и ему
+    уходило «starting: …» с кодом 200, мини-апп честно пытался разобрать это
+    как данные и показывал владельцу «Ответ сервера не является JSON» на
+    каждом экране, пока шёл деплой. 503 + `starting` — сигнал фронту, что это
+    перезапуск: он сам повторит запрос, а не сыплет ошибками.
+    """
+    if path.startswith("/api/"):
+        return web_mod.json_response(
+            {"ok": False, "starting": True, "phase": _boot_phase,
+             "error": BOOT_API_MESSAGE},
+            status=503,
+            headers={"Retry-After": "5", "Cache-Control": "no-store"},
+        )
+    # Отдаём текущую фазу (не голое "starting") — при зависании видно где.
+    return web_mod.Response(text=f"starting: {_boot_phase}", status=200)
+
+
 async def _start_bootstrap_health_server() -> None:
     """Занять $PORT минимальным health-сервером до тяжёлой инициализации.
 
@@ -358,8 +382,7 @@ async def _start_bootstrap_health_server() -> None:
         _app = _web.Application()
 
         async def _ok(_req):
-            # Отдаём текущую фазу (не голое "starting") — при зависании видно где.
-            return _web.Response(text=f"starting: {_boot_phase}", status=200)
+            return _bootstrap_response(_web, _req.path)
 
         _app.router.add_route("*", "/{tail:.*}", _ok)
         _bootstrap_runner = _web.AppRunner(_app)
