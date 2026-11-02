@@ -29,13 +29,17 @@ from bot.utils.op_helpers import safe_answer
 router = Router()
 log = logging.getLogger(__name__)
 
-_PIPELINE_STAGES = ["new", "contacted", "qualified", "won", "lost"]
+# Те же стадии, что разрешает база (crm_deals_stage_check) и показывает
+# мини-апп: старый набор new/contacted/qualified база отвергала, и ни создать,
+# ни передвинуть сделку из бота было нельзя.
+_PIPELINE_STAGES = list(db.CRM_DEAL_STAGES)
 _STAGE_LABELS = {
-    "new": "🆕 Новый",
-    "contacted": "📞 Контакт",
-    "qualified": "✅ Квал-н",
-    "won": "🏆 Выигран",
-    "lost": "❌ Проигран",
+    "lead": "🆕 Лид",
+    "contact": "📞 Контакт",
+    "proposal": "📄 Предложение",
+    "negotiation": "🤝 Переговоры",
+    "won": "🏆 Выиграно",
+    "lost": "❌ Проиграно",
 }
 
 
@@ -1031,7 +1035,8 @@ async def cb_deal_view(
 async def cb_deal_move(
     callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
 ) -> None:
-    new_stage = callback_data.tag or "new"
+    # Кнопки, отправленные до обновления, несут старые имена — переводим.
+    new_stage = db.normalize_crm_stage(callback_data.tag, None)
     if new_stage not in _PIPELINE_STAGES:
         await callback.answer("Неверная стадия.", show_alert=True)
         return
@@ -1169,7 +1174,7 @@ async def _finish_deal_creation(
     title = data.get("deal_title", "Новая сделка")
     contact = data.get("deal_contact", "")
     deal_id = await db.create_crm_deal(
-        pool, owner_id, title, contact=contact, stage="new", value=value
+        pool, owner_id, title, contact=contact, stage="lead", value=value
     )
     await db.add_crm_activity(pool, owner_id, deal_id, "Сделка создана")
     kb = InlineKeyboardBuilder()
@@ -1185,7 +1190,7 @@ async def _finish_deal_creation(
         f"Название: <b>{title}</b>\n"
         f"Контакт: {contact or '—'}\n"
         f"Сумма: {val_str}\n"
-        f"Стадия: {_STAGE_LABELS['new']}",
+        f"Стадия: {_STAGE_LABELS['lead']}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1281,7 +1286,7 @@ async def cb_csv_import_prompt(callback: CallbackQuery, state: FSMContext) -> No
         "Отправьте <b>.csv файл</b> или вставьте данные текстом.\n\n"
         "Формат (первая строка — заголовки):\n"
         "<code>title,contact,value,stage,notes</code>\n\n"
-        "Допустимые стадии: new, contacted, qualified, won, lost\n"
+        "Стадии: лид, контакт, предложение, переговоры, выиграно, проиграно (или lead, contact, proposal, negotiation, won, lost)\n"
         "Разделитель: запятая или точка с запятой.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1339,8 +1344,7 @@ async def _process_csv_import(
             continue
 
         contact = norm.get("contact", "")
-        stage_raw = (norm.get("stage") or "new").lower()
-        stage = stage_raw if stage_raw in _PIPELINE_STAGES else "new"
+        stage = db.normalize_crm_stage(norm.get("stage"))
         notes = norm.get("notes", "")
         try:
             value = float(

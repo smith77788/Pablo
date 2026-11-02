@@ -116,7 +116,7 @@ jobs:
           # прогон ветки красный, и на его фоне настоящие падения не видны.
           # Тоже есть в requirements.txt (qrcode[pil]>=7.4).
           pip install \
-            "aiogram==3.30.0" "asyncpg==0.29.0" aiohttp openai anthropic python-dotenv \
+            "aiogram==3.30.0" "asyncpg==0.29.0" "aiohttp==3.14.5" openai anthropic python-dotenv \
             openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks "qrcode[pil]" \
             pytest pytest-asyncio ruff
 
@@ -140,6 +140,17 @@ jobs:
       - name: Install telethon (нужен только тестам старта подпроцессом)
         continue-on-error: true
         run: pip install "telethon==1.45.0" pyaes rsa
+
+      # Известные уязвимости в зависимостях прода. До 2026-11-02 проверки не было,
+      # и прод жил на aiohttp 3.10.10 с 80 опубликованными уязвимостями — это
+      # публичный HTTP-сервер мини-аппа и вебхуков. Проверяется requirements.txt,
+      # то есть ровно то, чем собирается образ, а не набор пакетов этого джоба.
+      # Ложное срабатывание или уязвимость без исправления — `--ignore-vuln <ID>`
+      # здесь же, с комментарием почему, а не отключение шага.
+      - name: Уязвимости зависимостей (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --progress-spinner off
 
       # Обращение к несуществующему имени — это падение при исполнении строки,
       # и синтаксис его не ловит. Набор правил и обоснование, почему сюда не

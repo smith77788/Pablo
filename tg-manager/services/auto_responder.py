@@ -1466,7 +1466,7 @@ async def _process_bot(
                                 await pool.execute(
                                     """INSERT INTO crm_deals
                                            (owner_id, title, contact, stage, created_at)
-                                       VALUES ($1, $2, $3, 'new', NOW())""",
+                                       VALUES ($1, $2, $3, 'lead', NOW())""",
                                     _deal_owner,
                                     deal_title,
                                     user_label,
@@ -1949,7 +1949,7 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
                         await pool.execute(
                             """INSERT INTO crm_deals
                                    (owner_id, title, contact, stage, created_at)
-                               VALUES ($1, $2, $3, 'new', NOW())""",
+                               VALUES ($1, $2, $3, 'lead', NOW())""",
                             _deal_owner,
                             f"{title_prefix} — id{chat_id}",
                             str(chat_id),

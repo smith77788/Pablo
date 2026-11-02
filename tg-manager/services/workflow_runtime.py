@@ -723,7 +723,7 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
         title = (value or "Заявка из сценария") + f" — {label}"
         deal_id = await pool.fetchval(
             """INSERT INTO crm_deals (owner_id, title, contact, stage, notes, created_at)
-               VALUES ($1, $2, $3, 'new', $4, now()) RETURNING id""",
+               VALUES ($1, $2, $3, 'lead', $4, now()) RETURNING id""",
             owner, title[:200], label[:200],
             "\n".join(f"{k}: {v}" for k, v in fields.items())[:2000] or None)
         await bus.emit(pool, owner, "deal.created",
