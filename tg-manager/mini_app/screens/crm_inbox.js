@@ -10,6 +10,18 @@
 let _ibWaiting = false;
 let _ibRows = [];
 let _ibPeer = null;
+// Куда рисуется переписка: экран s-inboxthread (телефон) или правая колонка
+// s-inbox-pane (широкий экран). Поля ответа и ИИ ищутся ВНУТРИ него: в DOM
+// могут жить оба места сразу, и getElementById взял бы чужое.
+let _ibHost = null;
+function _ibEl(id) {
+  return (_ibHost && _ibHost.querySelector('#' + id)) || document.getElementById(id);
+}
+// Широкий экран: список слева, переписка справа, как в почте и в amoCRM.
+// Решение принимается в момент клика: окно могли сузить между открытиями.
+function _ibSplit() {
+  return document.body.classList.contains('wide');
+}
 
 function _ibScreen(id, title, refreshFn) {
   let el = document.getElementById(id);
@@ -78,13 +90,13 @@ async function openInbox(waiting) {
       body.innerHTML = out;
       return;
     }
-    out += '<div class="lst" style="margin:0 16px">';
+    out += '<div class="ib-split"><div class="ib-list"><div class="lst" style="margin:0 16px">';
     out += _ibRows.map(function (t, i) {
       const nm = t.name || (t.username ? '@' + t.username : 'ID ' + t.peer_user_id);
       const ch = (t.channels || []).map(function (c) {
         return (IB_SRC_ICON[c.source] || '•') + ' ' + esc(c.label || '');
       }).join(' · ');
-      return '<div class="row" role="button" tabindex="0" onclick="openInboxThread(' + i + ')">' +
+      return '<div class="row ib-row" data-i="' + i + '" role="button" tabindex="0" onclick="openInboxThread(' + i + ')">' +
         '<div class="row-body">' +
           '<div class="row-name">' + (t.waiting ? '⏳ ' : '') + esc(nm) +
             (t.unread ? ' <span style="color:var(--accent);font-size:12px">· ' + num(t.unread) + ' нов.</span>' : '') + '</div>' +
@@ -94,8 +106,14 @@ async function openInbox(waiting) {
         '<div style="font-size:11px;color:var(--hint);margin-top:2px">' + ch + '</div>' +
       '</div>';
     }).join('');
-    out += '</div>';
+    out += '</div></div>' +
+      '<div class="ib-pane" id="s-inbox-pane">' +
+        '<div style="padding:40px 16px;text-align:center;color:var(--hint);font-size:13px">Выберите разговор слева</div>' +
+      '</div></div>';
     body.innerHTML = out;
+    // На широком экране сразу открыт первый разговор: пустая правая половина
+    // ничего не сообщает, а первый в списке — тот, кто ждёт дольше всех.
+    if (_ibSplit()) openInboxThread(0);
   } catch (e) {
     body.innerHTML = errHtml(errRu(e), 'openInbox()');
   }
@@ -105,12 +123,25 @@ async function openInboxThread(i) {
   const t = _ibRows[i];
   if (!t) return;
   _ibPeer = t;
-  _ibScreen('s-inboxthread', '💬 Переписка', 'openInboxThread(' + i + ')');
-  push('s-inboxthread');
   const nm = t.name || (t.username ? '@' + t.username : 'ID ' + t.peer_user_id);
-  const ttl = document.getElementById('s-inboxthread-title');
-  if (ttl) ttl.textContent = '💬 ' + nm;
-  const body = document.getElementById('s-inboxthread-body');
+  const pane = document.getElementById('s-inbox-pane');
+  const inList = pane && document.getElementById('s-inbox')?.classList.contains('show');
+  let body;
+  if (_ibSplit() && inList) {
+    // Правая колонка: без перехода на другой экран, список остаётся на месте.
+    document.querySelectorAll('#s-inbox .ib-row').forEach(function (r) {
+      r.classList.toggle('on', r.dataset.i === String(i));
+    });
+    pane.innerHTML = '<div class="ib-pane-hdr">💬 ' + esc(nm) + '</div><div id="s-inbox-pane-body"></div>';
+    body = document.getElementById('s-inbox-pane-body');
+  } else {
+    _ibScreen('s-inboxthread', '💬 Переписка', 'openInboxThread(' + i + ')');
+    push('s-inboxthread');
+    const ttl = document.getElementById('s-inboxthread-title');
+    if (ttl) ttl.textContent = '💬 ' + nm;
+    body = document.getElementById('s-inboxthread-body');
+  }
+  _ibHost = body;
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const d = await api('/api/miniapp/inbox/' + t.peer_user_id);
@@ -173,7 +204,7 @@ function _ibAiIntent(x) {
 
 async function inboxAiDraft() {
   const t = _ibPeer;
-  const box = document.getElementById('ibAiOut');
+  const box = _ibEl('ibAiOut');
   if (!t || !box) return;
   box.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:6px 0">⏳ ИИ пишет черновик…</div>';
   try {
@@ -182,7 +213,7 @@ async function inboxAiDraft() {
       box.innerHTML = _ibAiIntent(d.intent) + '<div style="font-size:12px;color:var(--hint);padding:6px 0">' + esc(d.reason || 'Черновика нет') + '</div>';
       return;
     }
-    const ta = document.getElementById('ibReplyText');
+    const ta = _ibEl('ibReplyText');
     if (ta) {
       ta.value = d.draft;
       box.innerHTML = _ibAiIntent(d.intent) + '<div style="font-size:12px;color:var(--hint);padding:6px 0">Черновик в поле ответа — проверьте и отправьте сами.</div>';
@@ -198,7 +229,7 @@ async function inboxAiDraft() {
 
 async function inboxAiSummary() {
   const t = _ibPeer;
-  const box = document.getElementById('ibAiOut');
+  const box = _ibEl('ibAiOut');
   if (!t || !box) return;
   box.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:6px 0">⏳ ИИ сводит разговор…</div>';
   try {
@@ -213,7 +244,7 @@ async function inboxAiSummary() {
 
 async function sendInboxReply() {
   const t = _ibPeer;
-  const el = document.getElementById('ibReplyText');
+  const el = _ibEl('ibReplyText');
   const text = (el && el.value || '').trim();
   if (!t || !text) { toast('Напишите ответ'); return; }
   const relay = (t.channels || []).find(function (c) { return c.source === 'relay'; }) || {};
