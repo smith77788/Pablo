@@ -58,6 +58,9 @@ async def _broken_conflict_bots(pool) -> list[dict]:
             """SELECT bot_id, added_by, token, username, first_name, fail_streak
                  FROM managed_bots
                 WHERE is_active AND fail_streak > 0
+                  -- Вебхук бота на вебхуке поставили мы: снимать его нельзя
+                  -- (services/managed_bot_webhooks.py).
+                  AND NOT COALESCE(use_webhook, FALSE)
                   AND lower(last_error) = $1
                   AND dead_notified_at IS NULL
                 LIMIT 50""", CONFLICT)

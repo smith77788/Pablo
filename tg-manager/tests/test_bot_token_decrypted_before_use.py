@@ -151,15 +151,17 @@ def test_webhook_registration_decrypts():
 
 
 def test_webhook_secret_is_derived_from_one_form_of_token():
-    """Секрет вебхука считается от расшифрованного токена в обе стороны.
+    """Секрет вебхука считается от расшифрованного токена с обеих сторон.
 
-    Иначе снятие вебхука не найдёт свою же запись в карте секретов.
+    Регистрация передаёт его Telegram, приёмник сверяет заголовок с ним же.
+    Посчитай одна сторона от шифротекста — каждое обновление получало бы 401.
     """
     from services import managed_bot_webhooks as m
 
     reg = inspect.getsource(m.register_webhook)
-    unreg = inspect.getsource(m.unregister_webhook)
-    for src in (reg, unreg):
-        i_dec = src.index("decrypt_token(bot_token")
-        i_sec = src.index("_make_secret(bot_token)")
-        assert i_dec < i_sec, "секрет считается раньше расшифровки"
+    i_dec = reg.index("decrypt_token(bot_token")
+    i_sec = reg.index("_make_secret(bot_token)")
+    assert i_dec < i_sec, "секрет считается раньше расшифровки"
+    hook = inspect.getsource(m.make_webhook_route)
+    assert hook.index("decrypt_token(") < hook.index("_make_secret(token)"), (
+        "приёмник сверяет секрет с нерасшифрованным токеном")

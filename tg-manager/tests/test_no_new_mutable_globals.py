@@ -178,7 +178,10 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/error_monitor.py:_default_monitor": "синглтон процесса",
     "services/error_recovery.py:_default_manager": "синглтон процесса",
     "services/error_reporting.py:_default_reporter": "синглтон процесса",
-    "services/managed_bot_webhooks.py:_queues": "asyncio.Queue",
+    "services/managed_bot_webhooks.py:_locks": (
+        "asyncio.Lock на бота: обновления одного бота разбираются по одному в "
+        "процессе, который принимает HTTP; порядок между процессами держит "
+        "max_connections=1 у вебхука"),
     "services/op_worker.py:_active_op_ids": "операции, выполняемые ЭТИМ процессом",
     "services/op_worker.py:_owner_semaphores": (
         "местная подстраховка потолка параллельности на владельца. Сам потолок "
@@ -316,8 +319,6 @@ KNOWN_DIVERGENCE: dict[str, str] = {
     "services/resource_selector.py:_account_usage": "равномерность ротации аккаунтов",
     "services/session_simulator.py:_adaptive_data": "адаптация поведения, копится заново",
     "services/ai_providers.py:_KEY_OVERRIDES": "ключ, заданный в рантайме, виден одному процессу",
-    "services/managed_bot_webhooks.py:_secret_map":
-        "секрет вебхука зарегистрирован в одном процессе (есть запасной путь)",
     "services/metrics.py:_counters": "метрики процесса; агрегируются на стороне сборщика",
     "services/metrics.py:_gauges": "то же: значения процесса, суммирует сборщик",
     "services/metrics.py:_sums": "то же: гистограммы процесса, суммирует сборщик",

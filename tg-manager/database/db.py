@@ -1758,9 +1758,14 @@ async def get_bots_with_auto_replies(pool: asyncpg.Pool) -> list[dict]:
 
 
 async def get_bots_for_polling(pool: asyncpg.Pool) -> list[dict]:
-    """Return all active managed bots for polling (activity, deep links, swarm, A/B, etc.)."""
+    """Return all active managed bots for polling (activity, deep links, swarm, A/B, etc.).
+
+    Боты на вебхуке (`use_webhook`) получают обновления сами
+    (services/managed_bot_webhooks.py): их опрос получил бы 409.
+    """
     rows = await pool.fetch(
-        "SELECT bot_id, token FROM managed_bots WHERE is_active=true"
+        "SELECT bot_id, token FROM managed_bots "
+        "WHERE is_active=true AND NOT COALESCE(use_webhook, false)"
     )
     return _dec_bot_rows(rows)
 

@@ -1,52 +1,98 @@
-"""Managed bot webhooks — replace long-polling with HTTP webhooks per bot.
+"""Подключённые боты получают обновления вебхуком, а не опросом.
 
-Architecture:
-- Each managed bot gets Telegram webhook: POST /tgbot/hook/
-- Telegram identifies the bot via X-Telegram-Bot-Api-Secret-Token header
-- We store secret -> bot_token in memory (rebuilt on startup from DB)
-- Incoming updates go into per-bot asyncio.Queue for auto_responder to consume
+ЧТО БЫЛО. Каждый подключённый бот опрашивался `getUpdates` раз в 10 секунд
+(services/auto_responder.py), «горячие» — раз в секунду. Человек нажимал
+кнопку или писал боту и ждал ответа до 10 секунд; на тысячах ботов опрос —
+это тысячи пустых запросов к Telegram каждые 10 секунд. Модуль вебхуков
+здесь уже был, но наполовину: регистрацию никто не вызывал, очередь
+обновлений никто не читал, а обработчик находил бота по первой попавшейся
+очереди.
 
-Integration:
-- Call register_webhook() when a bot is added (bot_factory.py)
-- Call unregister_webhook() when a bot is removed
-- auto_responder can call get_update_queue(bot_id) to receive updates
+КАК ТЕПЕРЬ.
+  * Адрес бота — `{база}/tgbot/hook/{bot_id}`, секрет — sha256 от токена
+    бота (Telegram присылает его в X-Telegram-Bot-Api-Secret-Token). Чужой
+    запрос без верного секрета получает 401 и ничего не трогает.
+  * Обновление разбирает тот же `auto_responder._process_bot`, что и опрос:
+    одна логика, один оффсет. Повтор того же обновления (Telegram повторяет,
+    если не дождался ответа) отсекается по оффсету; `max_connections=1`
+    держит обновления бота строго по порядку, как и опрос.
+  * `sync` (раз в ~5 минут из цикла опроса): ставит вебхук активным ботам,
+    помечает их `use_webhook`, и опрос их больше не трогает. Если Telegram
+    не может достучаться до нас (ошибка доставки и копится очередь), бот
+    возвращается на опрос и не переводится на вебхук `_RETRY_AFTER`.
+  * Включено, когда известен публичный HTTPS-адрес (PUBLIC_BASE_URL или
+    адрес вебхука главного бота WEBHOOK_URL). MANAGED_BOTS_DELIVERY=polling
+    возвращает всех ботов на опрос на следующем проходе.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import logging
 import os
-from typing import Optional
+import time
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
-import asyncpg
 import aiohttp
-from services.secret_masking import mask_bot_token
+import asyncpg
 
 log = logging.getLogger(__name__)
 
-# secret_token (64-char hex) -> bot_token
-_secret_map: dict[str, str] = {}
+HOOK_PREFIX = "/tgbot/hook/"
+_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
+# Бот, до которого Telegram не достучался, возвращается на опрос и не
+# переводится обратно столько времени.
+_RETRY_AFTER = timedelta(hours=6)
+# Ошибка доставки свежее этого и непустая очередь — вебхук не работает.
+_ERROR_FRESH = timedelta(minutes=10)
+_SYNC_BATCH = 200
 
-# bot_id -> Queue[dict] of raw Telegram update dicts
-_queues: dict[int, asyncio.Queue] = {}
+# Обновления одного бота разбираются строго по одному: опрос делал так же,
+# а оффсет — один на бота. Живёт в процессе, который принимает HTTP.
+_locks: dict[int, asyncio.Lock] = {}
 
 
 def _make_secret(bot_token: str) -> str:
-    """Deterministic per-bot webhook secret (max 256 chars, alphanumeric+_-)."""
+    """Секрет вебхука бота: sha256 от расшифрованного токена (64 hex-символа,
+    Telegram разрешает 1–256 символов A-Za-z0-9_-). Считается заново на
+    обеих сторонах — хранить его негде и незачем."""
     return hashlib.sha256(bot_token.encode()).hexdigest()
 
 
-def get_update_queue(bot_id: int) -> asyncio.Queue:
-    """Return (or create) the asyncio Queue for a managed bot's updates."""
-    if bot_id not in _queues:
-        _queues[bot_id] = asyncio.Queue(maxsize=2000)
-    return _queues[bot_id]
+def base_url() -> str | None:
+    """Публичный HTTPS-адрес сервера или None (тогда только опрос)."""
+    if os.getenv("MANAGED_BOTS_DELIVERY", "").strip().lower() == "polling":
+        return None
+    raw = (os.getenv("PUBLIC_BASE_URL", "") or "").strip()
+    if not raw:
+        main_hook = (os.getenv("WEBHOOK_URL", "") or "").strip()
+        if main_hook:
+            parts = urlsplit(main_hook)
+            raw = f"{parts.scheme}://{parts.netloc}" if parts.netloc else ""
+    raw = raw.rstrip("/")
+    if raw.endswith("/miniapp"):
+        raw = raw[: -len("/miniapp")]
+    return raw if raw.startswith("https://") else None
 
 
-def get_bot_token_by_secret(secret: str) -> Optional[str]:
-    """Look up the bot token for an incoming webhook secret."""
-    return _secret_map.get(secret)
+def hook_url(base: str, bot_id: int) -> str:
+    return f"{base.rstrip('/')}{HOOK_PREFIX}{int(bot_id)}"
+
+
+def webhook_broken(info: dict, now: datetime | None = None) -> bool:
+    """Вебхук стоит, но Telegram не может доставить: свежая ошибка доставки
+    и копящаяся очередь. ЧИСТАЯ."""
+    now = now or datetime.now(timezone.utc)
+    err_at = info.get("last_error_date")
+    if not err_at or not info.get("pending_update_count"):
+        return False
+    try:
+        when = datetime.fromtimestamp(int(err_at), tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return False
+    return now - when <= _ERROR_FRESH
 
 
 async def register_webhook(
@@ -55,42 +101,34 @@ async def register_webhook(
     bot_id: int,
     base_url: str,
 ) -> bool:
-    """Register a Telegram webhook for one managed bot.
-
-    base_url: public HTTPS URL of the running server (e.g. https://app.railway.app)
-    """
-    # Токен приходит прямо из managed_bots.token, а он хранится зашифрованным.
-    # Раньше шифротекст уходил и в адрес («/botENC:…/setWebhook» → 401, вебхук
-    # не регистрировался вовсе), и в _secret_map, откуда его берут для ответов
-    # боту. Расшифровываем на входе, чтобы дальше по функции был один вид
-    # токена. Passthrough для старых незашифрованных строк.
+    """Поставить вебхук одному боту. True — Telegram принял."""
+    # Токен приходит прямо из managed_bots.token, а он хранится зашифрованным:
+    # шифротекст в адресе Telegram — это 401. Расшифровываем на входе, чтобы
+    # секрет и адрес считались от одного вида токена.
+    from services import bot_api
+    from services.auto_responder import _MANAGED_BOT_ALLOWED_UPDATES
     from services.token_vault import decrypt_token
 
     bot_token = decrypt_token(bot_token or "")
-
     secret = _make_secret(bot_token)
-    _secret_map[secret] = bot_token
-    get_update_queue(bot_id)  # ensure queue exists
-
-    webhook_url = f"{base_url.rstrip('/')}/tgbot/hook/"
-    tg_url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
     try:
-        async with http.post(tg_url, json={
-            "url": webhook_url,
-            "secret_token": secret,
-            "allowed_updates": ["message", "callback_query", "chat_member"],
-            "drop_pending_updates": False,
-            "max_connections": 40,
-        }) as r:
-            data = await r.json()
-            if data.get("ok"):
-                log.info("managed_bot_webhooks: registered webhook for bot_id=%d", bot_id)
-                return True
-            log.warning("managed_bot_webhooks: setWebhook failed for bot_id=%d: %s", bot_id, data)
-            return False
+        data = await bot_api._call(
+            http, bot_token, "setWebhook",
+            url=hook_url(base_url, bot_id), secret_token=secret,
+            allowed_updates=_MANAGED_BOT_ALLOWED_UPDATES,
+            # Ожидающие обновления не выбрасываем: их доставит вебхук, а
+            # повтор уже разобранного отсечёт оффсет.
+            drop_pending_updates=False,
+            max_connections=1,
+        )
     except Exception as e:
-        log.warning("managed_bot_webhooks: register_webhook error bot_id=%d: %s", bot_id, e)
+        log.warning("managed_bot_webhooks: setWebhook bot=%d: %s", bot_id, e)
         return False
+    if not data.get("ok"):
+        log.warning("managed_bot_webhooks: setWebhook bot=%d отклонён: %s",
+                    bot_id, str(data.get("description"))[:200])
+        return False
+    return True
 
 
 async def unregister_webhook(
@@ -98,104 +136,157 @@ async def unregister_webhook(
     bot_token: str,
     bot_id: int,
 ) -> bool:
-    """Remove the Telegram webhook for a managed bot (back to polling)."""
-    # Тот же токен и та же причина, что в register_webhook: секрет должен
-    # считаться от ОДНОГО И ТОГО ЖЕ вида токена, иначе снятие не найдёт запись.
+    """Снять вебхук (бот возвращается на опрос). Очередь не выбрасываем."""
+    from services import bot_api
     from services.token_vault import decrypt_token
 
     bot_token = decrypt_token(bot_token or "")
-
-    secret = _make_secret(bot_token)
-    _secret_map.pop(secret, None)
-
-    tg_url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
     try:
-        async with http.post(tg_url, json={"drop_pending_updates": False}) as r:
-            data = await r.json()
-            ok = data.get("ok", False)
-            log.info("managed_bot_webhooks: unregistered bot_id=%d ok=%s", bot_id, ok)
-            return ok
+        data = await bot_api._call(http, bot_token, "deleteWebhook",
+                                   drop_pending_updates=False)
     except Exception as e:
-        log.warning("managed_bot_webhooks: unregister error bot_id=%d: %s", bot_id, e)
+        log.warning("managed_bot_webhooks: deleteWebhook bot=%d: %s", bot_id, e)
         return False
+    return bool(data.get("ok"))
 
 
-async def restore_from_db(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-    """On startup: re-register webhooks for all active managed bots that have webhooks enabled.
+# ── Сверка: кому вебхук, кому опрос ─────────────────────────────────────────
 
-    Only runs if MINI_APP_URL / PUBLIC_BASE_URL is configured.
-    """
-    base_url = os.getenv("MINI_APP_URL", "") or os.getenv("PUBLIC_BASE_URL", "")
-    if not base_url:
-        log.debug("managed_bot_webhooks: no base URL configured, skipping webhook restore")
-        return
+async def _set_mode(pool, bot_id: int, on: bool, failed: bool = False) -> None:
+    await pool.execute(
+        """UPDATE managed_bots
+              SET use_webhook=$2,
+                  webhook_failed_at = CASE WHEN $3 THEN now() ELSE webhook_failed_at END
+            WHERE bot_id=$1""", bot_id, on, failed)
 
-    # Strip /miniapp/ suffix if present
-    base_url = base_url.rstrip("/")
-    if base_url.endswith("/miniapp"):
-        base_url = base_url[:-8]
 
-    try:
+async def sync(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> dict:
+    """Один проход сверки. {'on': n, 'off': n, 'fallback': n}."""
+    from services import bot_api
+    from services.token_vault import decrypt_token
+
+    stats = {"on": 0, "off": 0, "fallback": 0}
+    base = base_url()
+    if not base:
         rows = await pool.fetch(
-            """SELECT bot_id, token FROM managed_bots
-               WHERE is_active = true AND COALESCE(use_webhook, false) = true
-               LIMIT 500"""
-        )
-    except Exception as e:
-        log.debug("managed_bot_webhooks: restore_from_db query error: %s", e)
-        return
+            "SELECT bot_id, token FROM managed_bots WHERE COALESCE(use_webhook,FALSE)")
+        for r in rows:
+            if await unregister_webhook(http, r["token"], r["bot_id"]):
+                await _set_mode(pool, r["bot_id"], False)
+                stats["off"] += 1
+        return stats
 
-    if not rows:
-        return
-
-    log.info("managed_bot_webhooks: restoring webhooks for %d bots", len(rows))
-    tasks = [
-        register_webhook(http, r["token"], r["bot_id"], base_url)
-        for r in rows
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    ok = sum(1 for r in results if r is True)
-    log.info("managed_bot_webhooks: restored %d/%d webhooks", ok, len(rows))
-
-
-def make_webhook_route(pool: asyncpg.Pool):
-    """Return an aiohttp route handler for POST /tgbot/hook/"""
-    import json as _json
-
-    async def handler(request) -> aiohttp.web.Response:
-        from aiohttp import web as _web
-        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        bot_token = get_bot_token_by_secret(secret)
-        if not bot_token:
-            # Unknown secret — Telegram sent to wrong endpoint or no secret registered
-            return _web.Response(status=200, text="OK")  # always 200 to Telegram
-
+    # Боты на вебхуке: Telegram до нас достаёт? Адрес наш?
+    live = await pool.fetch(
+        """SELECT bot_id, token FROM managed_bots
+            WHERE is_active AND COALESCE(use_webhook,FALSE) LIMIT $1""", _SYNC_BATCH)
+    for r in live:
+        token = decrypt_token(r["token"] or "")
         try:
-            body = await request.read()
-            update = _json.loads(body)
+            info = (await bot_api._call(http, token, "getWebhookInfo")).get("result") or {}
         except Exception:
-            return _web.Response(status=200, text="OK")
+            continue
+        if webhook_broken(info):
+            log.warning("managed_bot_webhooks: bot=%d вебхук не доставляется (%s) — "
+                        "возвращаю на опрос", r["bot_id"],
+                        str(info.get("last_error_message"))[:120])
+            if await unregister_webhook(http, r["token"], r["bot_id"]):
+                await _set_mode(pool, r["bot_id"], False, failed=True)
+                stats["fallback"] += 1
+        elif info.get("url") != hook_url(base, r["bot_id"]):
+            # Вебхук сняли или поставили чужой — возвращаем свой; не вышло —
+            # бот уходит на опрос, а не глохнет.
+            if not await register_webhook(http, r["token"], r["bot_id"], base):
+                await _set_mode(pool, r["bot_id"], False, failed=True)
+                stats["fallback"] += 1
 
-        # Look up bot_id from token (local cache lookup)
-        bot_id = None
-        for bid, q in _queues.items():
-            # find by matching the secret we stored
-            _s = _make_secret(bot_token)
-            if _secret_map.get(_s) == bot_token:
-                bot_id = bid
-                break
-
-        if bot_id is not None:
-            q = get_update_queue(bot_id)
-            try:
-                q.put_nowait({"bot_token": bot_token, "bot_id": bot_id, "update": update})
-            except asyncio.QueueFull:
-                log.warning("managed_bot_webhooks: queue full for bot_id=%d, update dropped", bot_id)
+    # Боты на опросе — на вебхук (кроме недавно не доставлявшихся).
+    todo = await pool.fetch(
+        """SELECT bot_id, token FROM managed_bots
+            WHERE is_active AND NOT COALESCE(use_webhook,FALSE)
+              AND (webhook_failed_at IS NULL OR webhook_failed_at < now() - $1::interval)
+            ORDER BY bot_id LIMIT $2""", _RETRY_AFTER, _SYNC_BATCH)
+    for r in todo:
+        # Сначала флаг: опрос этого бота прекращается, и его getUpdates не
+        # успеет получить 409 и снять только что поставленный вебхук.
+        await _set_mode(pool, r["bot_id"], True)
+        if await register_webhook(http, r["token"], r["bot_id"], base):
+            stats["on"] += 1
         else:
-            # bot_id unknown — queue with token only, auto_responder can process by token
-            log.debug("managed_bot_webhooks: update received for unknown bot_id, %s",
-                      mask_bot_token(bot_token))
+            await _set_mode(pool, r["bot_id"], False, failed=True)
+    if any(stats.values()):
+        log.info("managed_bot_webhooks: сверка %s", stats)
+    return stats
 
+
+# ── Приём обновлений ────────────────────────────────────────────────────────
+
+def make_webhook_route(pool: asyncpg.Pool, http_getter=None, main_bot=None):
+    """Обработчик POST /tgbot/hook/{bot_id}."""
+    import json as _json
+    from aiohttp import web as _web
+
+    _own_http: dict = {}
+
+    def _http() -> aiohttp.ClientSession:
+        sess = http_getter() if http_getter else None
+        if sess is not None and not sess.closed:
+            return sess
+        cur = _own_http.get("s")
+        if cur is None or cur.closed:
+            cur = _own_http["s"] = aiohttp.ClientSession()
+        return cur
+
+    async def handler(request: _web.Request) -> _web.Response:
+        try:
+            bot_id = int(request.match_info.get("bot_id", ""))
+        except (TypeError, ValueError):
+            return _web.Response(status=404, text="not found")
+        from services.token_vault import decrypt_token
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND is_active", bot_id)
+        if not row:
+            return _web.Response(status=404, text="not found")
+        token = decrypt_token(row["token"] or "")
+        got = request.headers.get(_SECRET_HEADER, "")
+        # Сравнение байтами: compare_digest на строке с не-ASCII символами
+        # бросает TypeError, и чужой заголовок давал бы 500 вместо 401.
+        if not got or not hmac.compare_digest(
+                got.encode("utf-8", "replace"), _make_secret(token).encode()):
+            return _web.Response(status=401, text="unauthorized")
+        try:
+            update = _json.loads(await request.read())
+        except Exception:
+            # Нечитаемое тело повтор не исправит — отвечаем 200, чтобы
+            # Telegram не долбил им очередь бота.
+            return _web.Response(status=200, text="OK")
+        if not isinstance(update, dict):
+            return _web.Response(status=200, text="OK")
+        from services import auto_responder
+        lock = _locks.setdefault(bot_id, asyncio.Lock())
+        started = time.monotonic()
+        async with lock:
+            # Ошибки разбора _process_bot глотает и сдвигает оффсет сам
+            # (ядовитое обновление не повторяется) — ровно как при опросе.
+            await auto_responder._process_bot(
+                pool, _http(), bot_id, token, main_bot, updates=[update])
+        took = time.monotonic() - started
+        if took > 20:
+            log.warning("managed_bot_webhooks: bot=%d обновление разбиралось %.0f с",
+                        bot_id, took)
         return _web.Response(status=200, text="OK")
 
+    async def _close(_app=None) -> None:
+        sess = _own_http.pop("s", None)
+        if sess is not None and not sess.closed:
+            await sess.close()
+
+    handler.aclose = _close
     return handler
+
+
+def add_routes(app, pool: asyncpg.Pool, http_getter=None, main_bot=None) -> None:
+    handler = make_webhook_route(pool, http_getter, main_bot)
+    app.router.add_post(HOOK_PREFIX + "{bot_id}", handler)
+    # Своя HTTP-сессия приёмника закрывается вместе с сервером.
+    app.on_cleanup.append(handler.aclose)
