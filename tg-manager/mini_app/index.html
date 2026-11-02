@@ -288,6 +288,28 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   .hdr-meta:has(.btn) .hdr-user{display:none}
 }
 
+/* ─── Широкий экран: две колонки ─────────────────────────────────
+   На компьютере (Telegram Desktop во весь экран, web.telegram.org, браузер)
+   приложение растягивалось на всю ширину: строки списков по 1400px, кнопки
+   у правого края, а меню разделов пряталось за ☰, как на телефоне. Лидеры
+   на десктопе показывают навигацию слева постоянно, а работу — колонкой
+   читаемой ширины справа. Класс wide ставит screens/desktop.js по ширине
+   окна, а не по платформе: узкое окно на компьютере остаётся телефонной
+   раскладкой, и ничего не ломается. */
+body.wide{--tab-h:0px;--nav-w:280px}
+body.wide #navDrawer{transform:none;width:var(--nav-w);max-width:none;box-shadow:none;z-index:90;transition:none}
+body.wide #navOverlay{display:none}
+body.wide #navDrawer .nav-head .hdr-burger{display:none}
+body.wide #app{margin-left:var(--nav-w)}
+body.wide .screen .hdr-burger{display:none}
+body.wide #tabbar{display:none !important}
+body.wide .screen{padding-left:max(0px,calc((100% - 880px) / 2));padding-right:max(0px,calc((100% - 880px) / 2))}
+body.wide .mbg{align-items:center;justify-content:center;left:var(--nav-w)}
+body.wide .modal{max-width:620px;border-radius:var(--radius-xl);max-height:88vh;padding-bottom:20px}
+body.wide #toast{left:calc(50% + var(--nav-w) / 2)}
+body.wide #opDone{left:calc(var(--nav-w) + 16px);right:auto;width:min(560px,calc(100vw - var(--nav-w) - 32px))}
+body.wide .sel-bar{left:var(--nav-w);bottom:16px}
+
 /* ─── Tabbar ─────────────────────────────────────────────────── */
 #tabbar{position:fixed;bottom:0;left:0;right:0;height:calc(var(--tab-h) + var(--safe-b));padding-bottom:var(--safe-b);background:var(--glass);backdrop-filter:saturate(150%) blur(20px);-webkit-backdrop-filter:saturate(150%) blur(20px);border-top:1px solid var(--glass-border);display:flex;z-index:100}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;user-select:none;transition:transform .15s var(--spring)}
@@ -6526,6 +6548,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <div id="set-home-status" style="font-size:12px;color:var(--hint);margin-top:2px"></div>
         </div>
         <button id="set-home-btn" class="btn btn-s" onclick="addAppToHomeScreen()" style="padding:6px 12px;font-size:12px;flex:0 0 auto">Добавить</button>
+      </div>
+      <div id="set-full-row" style="display:none;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--sep)">
+        <div style="min-width:0">
+          <div style="font-size:14px">🖥 Во весь экран</div>
+          <div id="set-full-status" style="font-size:12px;color:var(--hint);margin-top:2px"></div>
+        </div>
+        <button id="set-full-btn" class="btn btn-s" onclick="toggleAppFullscreen()" style="padding:6px 12px;font-size:12px;flex:0 0 auto">Развернуть</button>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0">
         <span style="font-size:14px">📋 ID пользователя</span>
@@ -29214,6 +29243,7 @@ async function openSettings() {
   txt('set-save-msg','');
   txt('set-err','');
   try { loadHomeScreenStatus(); } catch(_) {}
+  try { renderFullscreenRow(); } catch(_) {}
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
     // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше
@@ -30857,5 +30887,6 @@ function renderAudSegChart(segments) {
 <script src="screens/home_screen.js"></script>
 <script src="screens/find_mine.js"></script>
 <script src="screens/workflow_map.js"></script>
+<script src="screens/desktop.js"></script>
 </body>
 </html>
