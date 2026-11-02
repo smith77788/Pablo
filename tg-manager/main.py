@@ -561,8 +561,15 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     dp.include_router(spintax_handler.router)
     dp.include_router(about_handler.router)
     dp.include_router(fleet_pulse_handler.router)
+    # Выгрузка и удаление своих данных (152-ФЗ / GDPR): команды, раньше relay.
+    from bot.handlers import my_data as my_data_handler
+    dp.include_router(my_data_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
+    # Журнал действий админов: каждая кнопка и команда двух админ-роутеров
+    # уходит в admin_audit_log (bot/middlewares/admin_audit.py).
+    from bot.middlewares import admin_audit as _admin_audit
+    _admin_audit.install(admin_users_handler.router, admin_handler.router)
     dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
     dp.error.register(_global_error_handler)

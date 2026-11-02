@@ -348,8 +348,172 @@ async def restore_archive(pool, archive: bytes, *, truncate: bool = True) -> dic
 
 
 # ── Один прогон и фоновый цикл ─────────────────────────────────────────────────
-async def run_backup_once(pool, bot, *, note: str = "") -> dict:
-    """Снять и отправить один бэкап. Возвращает {ok, parts, size, error?}."""
+# ── Проверка архива и учение восстановления ───────────────────────────────────
+#
+# ЗАЧЕМ. Бэкап, который ни разу не восстанавливали, — гипотеза, а не бэкап.
+# После потери базы 30.08.2026 автобэкап появился, но его годность никто не
+# проверял: сломанный архив (ошибка шифрования, обрезанная часть, таблица,
+# которую COPY не переварит) выяснился бы ровно в день аварии.
+#
+# Два уровня:
+#   * verify_payload — перед КАЖДОЙ отправкой: шифротекст расшифровывается
+#     обратно и разбирается. Дешево, ловит порчу архива и ключа.
+#   * restore_drill — раз в DB_RESTORE_DRILL_EVERY бэкапов (по умолчанию 28,
+#     около недели при шаге 6 ч) архив по-настоящему заливается COPY во
+#     временную схему той же базы, и число строк сверяется с CSV. Всё внутри
+#     транзакции, которая откатывается: следов в базе не остаётся, отдельная
+#     база и права CREATE DATABASE не нужны.
+
+
+def verify_payload(payload: bytes, archive: bytes) -> dict:
+    """Проверить, что отправляемое восстанавливается в исходный архив."""
+    plain = decrypt_archive(payload)
+    if plain != archive:
+        raise ValueError("архив после расшифровки не совпадает с исходным")
+    manifest, tables = parse_archive(plain)
+    missing = [t for t in manifest.get("tables", []) if t not in tables]
+    if missing:
+        raise ValueError(f"в архиве нет таблиц из манифеста: {missing[:5]}")
+    return {"tables": len(tables)}
+
+
+def _csv_rows(raw: bytes) -> int:
+    """Число строк данных в CSV (с учётом переводов строк внутри кавычек)."""
+    import csv
+
+    reader = csv.reader(io.StringIO(raw.decode("utf-8")))
+    return max(0, sum(1 for _ in reader) - 1)
+
+
+async def restore_drill(pool, archive: bytes) -> dict:
+    """Учение: залить архив во временную схему и сверить строки. Без следов.
+
+    Возвращает {ok, tables, rows, mismatched: [...], skipped: [...]}.
+    """
+    _manifest, tables = parse_archive(archive)
+    report = {"ok": False, "tables": 0, "rows": 0, "mismatched": [], "skipped": []}
+    schema = "restore_drill_tmp"
+    async with pool.acquire() as conn:
+        tr = conn.transaction()
+        await tr.start()
+        try:
+            await conn.execute(f'CREATE SCHEMA "{schema}"')
+            for tbl, raw in tables.items():
+                if await conn.fetchval("SELECT to_regclass($1)", f'public."{tbl}"') is None:
+                    report["skipped"].append(tbl)
+                    continue
+                await conn.execute(
+                    f'CREATE TABLE "{schema}"."{tbl}" (LIKE public."{tbl}" INCLUDING DEFAULTS)')
+                await conn.copy_to_table(tbl, schema_name=schema, source=io.BytesIO(raw),
+                                         format="csv", header=True)
+                got = await conn.fetchval(f'SELECT count(*) FROM "{schema}"."{tbl}"')
+                want = _csv_rows(raw)
+                report["tables"] += 1
+                report["rows"] += int(got)
+                if int(got) != want:
+                    report["mismatched"].append(f"{tbl}: {got} из {want}")
+            report["ok"] = not report["mismatched"]
+        finally:
+            await tr.rollback()
+    return report
+
+
+def _drill_every() -> int:
+    try:
+        return max(0, int(os.getenv("DB_RESTORE_DRILL_EVERY", "28")))
+    except ValueError:
+        return 28
+
+
+def _drill_max_bytes() -> int:
+    try:
+        return int(float(os.getenv("DB_RESTORE_DRILL_MAX_MB", "500")) * 1024 * 1024)
+    except ValueError:
+        return 500 * 1024 * 1024
+
+
+# ── Копия вне Telegram: S3-совместимое хранилище ──────────────────────────────
+#
+# Telegram-чат — единственное внешнее хранилище, и его потеря (бан бота,
+# удалённый чат, угнанный аккаунт владельца) уносит все копии разом. Вторая
+# копия — в любом S3-совместимом хранилище (AWS S3, Backblaze B2, Cloudflare
+# R2, Yandex Object Storage, MinIO). Включается переменными BACKUP_S3_*;
+# подпись AWS SigV4 без boto3 (зависимости в проекте курируются).
+
+
+def _s3_config() -> Optional[dict]:
+    endpoint = os.getenv("BACKUP_S3_ENDPOINT", "").strip().rstrip("/")
+    bucket = os.getenv("BACKUP_S3_BUCKET", "").strip()
+    access = os.getenv("BACKUP_S3_ACCESS_KEY", "").strip()
+    secret = os.getenv("BACKUP_S3_SECRET_KEY", "").strip()
+    if not (endpoint and bucket and access and secret):
+        return None
+    return {"endpoint": endpoint, "bucket": bucket, "access": access,
+            "secret": secret, "region": os.getenv("BACKUP_S3_REGION", "us-east-1").strip(),
+            "prefix": os.getenv("BACKUP_S3_PREFIX", "infragram/").strip()}
+
+
+def s3_sign_put(cfg: dict, key: str, body: bytes, now: datetime) -> tuple[str, dict]:
+    """URL и заголовки PUT-запроса с подписью AWS Signature V4 (path-style)."""
+    import hashlib
+    import hmac
+    from urllib.parse import quote, urlsplit
+
+    u = urlsplit(cfg["endpoint"])
+    host = u.netloc
+    path = "/" + quote(cfg["bucket"], safe="") + "/" + quote(key, safe="/-_.~")
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    day = now.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(body).hexdigest()
+    headers = {"host": host, "x-amz-content-sha256": payload_hash, "x-amz-date": amz_date}
+    signed = ";".join(sorted(headers))
+    canonical = "\n".join([
+        "PUT", path, "",
+        "".join(f"{k}:{headers[k]}\n" for k in sorted(headers)),
+        signed, payload_hash])
+    scope = f"{day}/{cfg['region']}/s3/aws4_request"
+    to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope,
+                         hashlib.sha256(canonical.encode()).hexdigest()])
+
+    def _h(k: bytes, m: str) -> bytes:
+        return hmac.new(k, m.encode(), hashlib.sha256).digest()
+
+    k = _h(("AWS4" + cfg["secret"]).encode(), day)
+    k = _h(k, cfg["region"])
+    k = _h(k, "s3")
+    k = _h(k, "aws4_request")
+    sig = hmac.new(k, to_sign.encode(), hashlib.sha256).hexdigest()
+    out = {
+        "x-amz-content-sha256": payload_hash, "x-amz-date": amz_date,
+        "Authorization": (f"AWS4-HMAC-SHA256 Credential={cfg['access']}/{scope}, "
+                          f"SignedHeaders={signed}, Signature={sig}"),
+    }
+    return f"{u.scheme}://{host}{path}", out
+
+
+async def upload_to_s3(payload: bytes, filename: str) -> Optional[str]:
+    """Положить архив в S3-совместимое хранилище. None — не настроено."""
+    cfg = _s3_config()
+    if cfg is None:
+        return None
+    import aiohttp
+
+    key = cfg["prefix"] + filename
+    url, headers = s3_sign_put(cfg, key, payload, datetime.now(timezone.utc))
+    timeout = aiohttp.ClientTimeout(total=_SEND_TIMEOUT_S)
+    async with aiohttp.ClientSession(timeout=timeout) as http:
+        async with http.put(url, data=payload, headers=headers) as r:
+            if r.status >= 300:
+                text = (await r.text())[:300]
+                raise RuntimeError(f"S3 ответил {r.status}: {text}")
+    return key
+
+
+async def run_backup_once(pool, bot, *, note: str = "", drill: bool = False) -> dict:
+    """Снять, проверить и отправить один бэкап. drill=True — с учением восстановления.
+
+    Возвращает {ok, parts, size, verified, drill?, s3?, error?}.
+    """
     chat_id = backup_chat_id()
     if chat_id is None:
         return {"ok": False, "error": "нет назначения: задайте DB_BACKUP_CHAT_ID или ADMIN_IDS"}
@@ -373,13 +537,54 @@ async def run_backup_once(pool, bot, *, note: str = "") -> dict:
             + ("DB_BACKUP_KEY" if os.getenv("DB_BACKUP_KEY", "").strip()
                else "TOKEN_ENCRYPTION_KEY"))
     try:
+        verify_payload(payload, archive)
+    except Exception as e:
+        log.error("db_backup: архив не прошёл проверку восстановимости, НЕ отправлен: %s",
+                  e, exc_info=True)
+        return {"ok": False, "error": f"проверка архива: {e}", "size": len(archive)}
+    result: dict = {"ok": True, "size": len(archive), "verified": True}
+    if drill:
+        if len(archive) > _drill_max_bytes():
+            log.warning("db_backup: учение восстановления пропущено — архив %.0f МБ "
+                        "больше DB_RESTORE_DRILL_MAX_MB", len(archive) / 1048576)
+            result["drill"] = {"ok": None, "skipped": "size"}
+        else:
+            try:
+                rep = await restore_drill(pool, archive)
+                result["drill"] = rep
+                if rep["ok"]:
+                    note = (note + "\n" if note else "") + (
+                        f"🧪 Учение восстановления: {rep['tables']} таблиц, "
+                        f"{rep['rows']} строк — ок")
+                else:
+                    log.error("db_backup: учение восстановления НЕ сошлось: %s",
+                              rep["mismatched"][:10])
+                    note = (note + "\n" if note else "") + (
+                        "⚠️ Учение восстановления: расхождения в "
+                        f"{len(rep['mismatched'])} таблицах")
+            except Exception as e:
+                log.error("db_backup: учение восстановления упало: %s", e, exc_info=True)
+                result["drill"] = {"ok": False, "error": str(e)}
+                note = (note + "\n" if note else "") + "⚠️ Учение восстановления упало"
+    try:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ext = "tar.gz.enc" if is_encrypted_archive(payload) else "tar.gz"
+        key = await upload_to_s3(payload, f"infragram_backup_{ts}.{ext}")
+        if key:
+            result["s3"] = key
+            note = (note + "\n" if note else "") + "☁️ Копия в S3"
+    except Exception as e:
+        # Копия в S3 — второй рубеж; её сбой не отменяет отправку в Telegram.
+        log.error("db_backup: загрузка в S3 упала: %s", e, exc_info=True)
+        result["s3_error"] = str(e)
+    try:
         parts = await send_backup(bot, chat_id, payload, caption_note=note)
     except Exception as e:
         log.warning("db_backup: отправка упала: %s", e, exc_info=True)
-        return {"ok": False, "error": f"отправка: {e}", "size": len(archive)}
+        return {**result, "ok": bool(result.get("s3")), "error": f"отправка: {e}"}
     log.info("db_backup: бэкап отправлен (%.1f МБ, %d частей) в чат %s",
              len(archive) / (1024 * 1024), parts, chat_id)
-    return {"ok": True, "parts": parts, "size": len(archive)}
+    return {**result, "parts": parts}
 
 
 async def run_backup_loop(pool, bot) -> None:
@@ -394,9 +599,14 @@ async def run_backup_loop(pool, bot) -> None:
     log.info("db_backup: автобэкап запущен (каждые %dч)", _INTERVAL_SEC // 3600)
     # Первый бэкап — вскоре после старта, но не мгновенно (дать БД подняться).
     await asyncio.sleep(120)
+    every = _drill_every()
+    n = 0
     while True:
         try:
-            await run_backup_once(pool, bot, note="автоматический")
+            # Учение на первом бэкапе после старта и далее раз в `every`.
+            await run_backup_once(pool, bot, note="автоматический",
+                                  drill=bool(every) and n % every == 0)
+            n += 1
         except asyncio.CancelledError:
             raise
         except Exception:
