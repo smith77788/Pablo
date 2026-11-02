@@ -257,6 +257,25 @@ def validate_string(value: Any, max_len: int = 1000, required: bool = True) -> O
     return s[:max_len]
 
 
+# Идентификаторы Telegram — 64-битные со знаком: у групп и каналов они
+# отрицательные (-100…), у пользователей и ботов давно больше 2**31
+# (боты, созданные с 2023 года, — десятизначные 6…/7…/8…). Граница
+# validate_integer по умолчанию (0 … 2**31-1) такие id молча отбрасывает,
+# и ручка отвечает «нужен идентификатор», хотя он передан.
+TG_ID_MIN = -(2 ** 63)
+TG_ID_MAX = 2 ** 63 - 1
+
+
+def tg_id(value: Any, *, positive: bool = False) -> Optional[int]:
+    """id из Telegram (чат, пользователь, бот, канал) или None.
+
+    Ноль id не бывает — это «не передан». `positive=True` — для id, которые
+    отрицательными не бывают (бот, пользователь, владелец).
+    """
+    v = validate_integer(value, min_val=1 if positive else TG_ID_MIN, max_val=TG_ID_MAX)
+    return v if v else None
+
+
 def selection_ids(
     body: Any, key: str, *, what: str = "объект", cap: Optional[int] = None,
 ) -> "tuple[Optional[list[int]], Optional[str]]":

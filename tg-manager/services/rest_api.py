@@ -39,6 +39,7 @@ from services.logger import log_exc_swallow
 from services.security import (
     check_rate_limit,
     rate_limit_response,
+    tg_id,
     validate_integer,
     validate_string,
     check_sql_suspicious,
@@ -122,7 +123,7 @@ def resolve_owner(ctx: dict, supplied) -> tuple[int | None, str | None]:
     был опасен общий ADMIN_SECRET). Служебный ключ: owner_id обязателен.
     Чистая функция — тестируема.
     """
-    sup = validate_integer(supplied, min_val=1) if supplied not in (None, "") else None
+    sup = tg_id(supplied, positive=True) if supplied not in (None, "") else None
     if supplied not in (None, "") and sup is None:
         return None, "owner_id должен быть положительным числом"
     if ctx.get("admin"):
@@ -415,7 +416,7 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
         if err is not None:
             return err
         account_id = validate_integer(data.get("account_id"), min_val=1)
-        chat_id = validate_integer(data.get("chat_id"))
+        chat_id = tg_id(data.get("chat_id"))
         text = validate_string(data.get("text"), max_len=4096)
         if not all([owner_id, account_id, chat_id, text]):
             return _bad("account_id, chat_id, text are required")
@@ -450,7 +451,7 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
         if err is not None:
             return err
         account_id = validate_integer(data.get("account_id"), min_val=1)
-        chat_id = validate_integer(data.get("chat_id"))
+        chat_id = tg_id(data.get("chat_id"))
         message_id = validate_integer(data.get("message_id"), min_val=1)
         button_data = validate_string(data.get("button_data"), max_len=512)
         if not all([owner_id, account_id, chat_id, message_id, button_data]):
@@ -483,7 +484,7 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
         if err is not None:
             return err
         account_id = validate_integer(request.query.get("account_id"), min_val=1)
-        chat_id = validate_integer(request.query.get("chat_id"))
+        chat_id = tg_id(request.query.get("chat_id"))
         if not all([owner_id, account_id, chat_id]):
             return _bad("account_id, chat_id are required")
         limit = min(validate_integer(request.query.get("limit", "20"), min_val=1, max_val=100) or 20, 100)

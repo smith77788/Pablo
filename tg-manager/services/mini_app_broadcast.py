@@ -40,7 +40,7 @@ def setup_routes(app: web.Application, pool) -> None:
         _safe_fetch, _safe_fetchrow, _text, log,
     )
     from services.security import (
-        check_sql_suspicious, escape_html, validate_integer, validate_string,
+        check_sql_suspicious, escape_html, tg_id, validate_integer, validate_string,
     )
 
 
@@ -52,7 +52,7 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        bot_id = validate_integer(body.get("bot_id"), min_val=1)
+        bot_id = tg_id(body.get("bot_id"), positive=True)
         text = validate_string(body.get("text"), max_len=4096)
         if not bot_id or not text:
             return _err("Нужны идентификатор бота и текст")
@@ -187,7 +187,7 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        bot_id = validate_integer(request.rel_url.query.get("bot_id"), min_val=1)
+        bot_id = tg_id(request.rel_url.query.get("bot_id"), positive=True)
         if not bot_id:
             return _err("Нужен идентификатор бота", 400)
         segment = validate_string(request.rel_url.query.get("segment") or "all", max_len=20) or "all"
@@ -236,7 +236,7 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        bot_id = validate_integer(body.get("bot_id"), min_val=1)
+        bot_id = tg_id(body.get("bot_id"), positive=True)
         variants = body.get("variants")
         if not bot_id or not variants:
             return _err("Нужны идентификатор бота и варианты")
@@ -690,7 +690,7 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        bot_id = validate_integer(body.get("bot_id"), min_val=1)
+        bot_id = tg_id(body.get("bot_id"), positive=True)
         # Фронт (submitScheduledBroadcast) шлёт message_text/scheduled_at — принимаем
         # оба контракта (иначе кнопка «Запланировать» отдавала бы 400/404).
         text = validate_string(body.get("text") or body.get("message_text"), max_len=4096)
