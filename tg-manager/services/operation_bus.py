@@ -76,7 +76,7 @@ class PlanRequiredError(PermissionError):
     хендлер забывал гейт, free-юзер мог поставить платную операцию.
     """
 
-    def __init__(self, op_type: str, required_plan: str) -> None:
+    def __init__(self, op_type: str, required_plan: str, *, quota_spent: bool = False) -> None:
         self.op_type = op_type
         self.required_plan = required_plan
         # Текст исключения — это РОВНО то, что увидит человек: сорок с лишним
@@ -88,7 +88,14 @@ class PlanRequiredError(PermissionError):
         # оформления, то есть в лучшей точке конверсии путь к оплате обрывался.
         # Тип операции и требуемый тариф остаются полями исключения — для логов.
         what = (OP_REGISTRY.get(op_type) or {}).get("description") or op_type
-        super().__init__(f"Операция «{what}» доступна по подписке")
+        self.quota_spent = quota_spent
+        if quota_spent:
+            from services import free_quota
+            super().__init__(
+                f"Бесплатные {free_quota.monthly_limit()} операций в этом месяце "
+                f"закончились. Операция «{what}» доступна по подписке")
+        else:
+            super().__init__(f"Операция «{what}» доступна по подписке")
 
 
 class ImmunityBlockedError(PermissionError):
@@ -128,24 +135,31 @@ async def _enforce_immunity(pool, owner_id: int, op_type: str) -> None:
                                    "Тип операции временно приостановлен", policy.get("until"))
 
 
-async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> None:
+async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict,
+                            *, consume_quota: bool = False) -> bool:
     """Проверить подписку владельца против min_plan операции.
 
     Fail-open: если сам механизм проверки недоступен/упал — НЕ блокируем (лучше
     пропустить, чем сломать масс-операцию из-за бага в проверке). Блокируем
     только при однозначно недостаточном тарифе. Админы и free-mode пропускаются
     внутри require_plan.
+
+    consume_quota=True (только постановка в submit): владельцу без подписки,
+    у которого кончился или не положен триал, операция списывается из
+    месячной квоты бесплатного тарифа (services/free_quota.py). Возвращает
+    True, если пропустила именно квота — тогда submit вернёт единицу, если
+    операция дальше не встанет.
     """
     min_plan = meta.get("min_plan")
     if not min_plan:
-        return
+        return False
     try:
         from bot.utils.subscription import require_plan, coerce_plan
     except Exception:
         log.warning("operation_bus: subscription module unavailable — skip plan gate", exc_info=True)
-        return
+        return False
     if coerce_plan(min_plan) == "free":
-        return
+        return False
     try:
         allowed = await require_plan(pool, owner_id, min_plan)
     except Exception:
@@ -153,7 +167,7 @@ async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> No
             "operation_bus: plan check errored for op=%s owner=%s — allowing (fail-open)",
             op_type, owner_id, exc_info=True,
         )
-        return
+        return False
     if not allowed:
         # Новичок с живым аккаунтом ещё не брал пробный период — выдаём его
         # здесь, в момент первого платного действия (services/trial.py), а не
@@ -164,8 +178,15 @@ async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> No
                 allowed = await require_plan(pool, owner_id, min_plan)
         except Exception:
             log.warning("operation_bus: trial grant errored owner=%s", owner_id, exc_info=True)
-    if not allowed:
-        raise PlanRequiredError(op_type, coerce_plan(min_plan))
+    if allowed:
+        return False
+    if consume_quota:
+        from services import free_quota
+        if await free_quota.consume(pool, owner_id, op_type):
+            return True
+        if free_quota.covers(op_type):
+            raise PlanRequiredError(op_type, coerce_plan(min_plan), quota_spent=True)
+    raise PlanRequiredError(op_type, coerce_plan(min_plan))
 
 
 async def enforce_gates(pool, owner_id: int, op_type: str) -> None:
@@ -780,81 +801,10 @@ def _coerce_scheduled_for(value):
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
 
-async def submit(
-    pool: asyncpg.Pool,
-    owner_id: int,
-    op_type: str,
-    params: dict[str, Any],
-    *,
-    total_items: int = 0,
-    scheduled_for: Optional[object] = None,   # ISO-строка или datetime
-    template_id: Optional[int] = None,
-    max_retries: Optional[int] = None,
-    label: Optional[str] = None,
-    bypass_plan_check: bool = False,
-    dedup_window_sec: int = DEFAULT_DEDUP_WINDOW_SEC,
-) -> int:
-    """Поставить операцию в очередь. Возвращает op_id.
-
-    Параметры:
-      pool         — asyncpg pool
-      owner_id     — telegram user_id владельца
-      op_type      — тип операции (из OP_REGISTRY)
-      params       — словарь параметров операции
-      total_items  — общее количество элементов (для прогресс-бара)
-      scheduled_for — ISO timestamp запуска (NULL = немедленно)
-      template_id  — id шаблона (если применимо)
-      max_retries  — переопределить количество повторов (None = из OP_REGISTRY)
-      label        — человекочитаемая метка операции в очереди (None = описание
-                     из OP_REGISTRY). Нужна, чтобы миграция прямых INSERT на шину
-                     не теряла label, который они писали (см. Волна S/1A).
-      dedup_window_sec — окно идемпотентности постановки (сек). Повторный сабмит
-                     идентичной операции (owner+op_type+params+scheduled_for),
-                     пока прежняя ещё в работе либо только что успешно
-                     завершилась, вернёт её op_id вместо создания дубля.
-                     Защищает от двойного тапа и retry после таймаута, включая
-                     гонку «первый запрос уже успел завершиться». 0 = отключить
-                     (для намеренных серий идентичных операций).
-
-    Raises:
-      ValueError — если op_type не зарегистрирован в OP_REGISTRY
-      PlanRequiredError — если у владельца нет подписки под min_plan операции
-    """
-    if op_type not in OP_REGISTRY:
-        raise ValueError(
-            f"operation_bus: unknown op_type={op_type!r}. Register in OP_REGISTRY first."
-        )
-
-    meta = OP_REGISTRY[op_type]
-    # Централизованный тариф-гейт (defense-in-depth поверх гейтов в хендлерах):
-    # объявленный min_plan становится авторитетным — free-юзер не поставит
-    # платную операцию, даже если какой-то хендлер забыл проверку.
-    if not bypass_plan_check:
-        await _enforce_min_plan(pool, owner_id, op_type, meta)
-
-    # Предохранитель Ban Weather: если этот тип операции прямо сейчас массово
-    # убивает аккаунты владельца — не ставим новые, пока волна не спадёт.
-    # Замыкает петлю «исход → причина → защита»: без этого детектор вспышек
-    # оставался бы просто дашбордом. Fail-open внутри.
-    await _enforce_immunity(pool, owner_id, op_type)
-
-    retries = max_retries if max_retries is not None else meta.get("max_retries", 3)
-    op_label = label or meta.get("description") or op_type
-
-    from services.operation_secrets import seal_operation_params
-
-    stored_params, sensitive_params_fp = seal_operation_params(params)
-    params_json = json.dumps(stored_params, ensure_ascii=False)
-    sched = _coerce_scheduled_for(scheduled_for)
-
-    # Идемпотентность постановки. Двойной тап кнопки или retry клиента после
-    # таймаута НЕ должны плодить дубль-операцию: 82 вызова submit() идут через
-    # этот choke point, поэтому дедуп здесь защищает весь продукт от двойного
-    # исполнения (двойная стоимость расходников, удвоенный риск для аккаунтов).
-    # pg_advisory_xact_lock сериализует одновременные идентичные сабмиты (закрывает
-    # TOCTOU без изменения схемы); внутри окна ищем ещё-в-полёте идентичную
-    # операцию. Отличающиеся params (в т.ч. per-account циклы) не дедупятся —
-    # ложных слияний нет. Отключается dedup_window_sec=0.
+async def _insert_or_reuse(pool, owner_id, op_type, params_json, sensitive_params_fp,
+                           sched, dedup_window_sec, total_items, template_id,
+                           retries, op_label) -> tuple[int, bool]:
+    """Постановка с дедупом повтора (тело submit, вынесено для возврата квоты)."""
     reused = False
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -905,6 +855,108 @@ async def submit(
                     template_id, retries, op_label,
                 )
                 op_id = int(row["id"])
+
+    return op_id, reused
+
+
+async def submit(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    op_type: str,
+    params: dict[str, Any],
+    *,
+    total_items: int = 0,
+    scheduled_for: Optional[object] = None,   # ISO-строка или datetime
+    template_id: Optional[int] = None,
+    max_retries: Optional[int] = None,
+    label: Optional[str] = None,
+    bypass_plan_check: bool = False,
+    dedup_window_sec: int = DEFAULT_DEDUP_WINDOW_SEC,
+) -> int:
+    """Поставить операцию в очередь. Возвращает op_id.
+
+    Параметры:
+      pool         — asyncpg pool
+      owner_id     — telegram user_id владельца
+      op_type      — тип операции (из OP_REGISTRY)
+      params       — словарь параметров операции
+      total_items  — общее количество элементов (для прогресс-бара)
+      scheduled_for — ISO timestamp запуска (NULL = немедленно)
+      template_id  — id шаблона (если применимо)
+      max_retries  — переопределить количество повторов (None = из OP_REGISTRY)
+      label        — человекочитаемая метка операции в очереди (None = описание
+                     из OP_REGISTRY). Нужна, чтобы миграция прямых INSERT на шину
+                     не теряла label, который они писали (см. Волна S/1A).
+      dedup_window_sec — окно идемпотентности постановки (сек). Повторный сабмит
+                     идентичной операции (owner+op_type+params+scheduled_for),
+                     пока прежняя ещё в работе либо только что успешно
+                     завершилась, вернёт её op_id вместо создания дубля.
+                     Защищает от двойного тапа и retry после таймаута, включая
+                     гонку «первый запрос уже успел завершиться». 0 = отключить
+                     (для намеренных серий идентичных операций).
+
+    Raises:
+      ValueError — если op_type не зарегистрирован в OP_REGISTRY
+      PlanRequiredError — если у владельца нет подписки под min_plan операции
+    """
+    if op_type not in OP_REGISTRY:
+        raise ValueError(
+            f"operation_bus: unknown op_type={op_type!r}. Register in OP_REGISTRY first."
+        )
+
+    meta = OP_REGISTRY[op_type]
+    # Централизованный тариф-гейт (defense-in-depth поверх гейтов в хендлерах):
+    # объявленный min_plan становится авторитетным — free-юзер не поставит
+    # платную операцию, даже если какой-то хендлер забыл проверку.
+    _by_quota = False
+    if not bypass_plan_check:
+        _by_quota = await _enforce_min_plan(pool, owner_id, op_type, meta,
+                                            consume_quota=True)
+
+    # Предохранитель Ban Weather: если этот тип операции прямо сейчас массово
+    # убивает аккаунты владельца — не ставим новые, пока волна не спадёт.
+    # Замыкает петлю «исход → причина → защита»: без этого детектор вспышек
+    # оставался бы просто дашбордом. Fail-open внутри.
+    try:
+        await _enforce_immunity(pool, owner_id, op_type)
+    except Exception:
+        if _by_quota:
+            # Операция не встала — единица квоты бесплатного тарифа не сгорает.
+            from services import free_quota
+            await free_quota.refund(pool, owner_id)
+        raise
+
+    retries = max_retries if max_retries is not None else meta.get("max_retries", 3)
+    op_label = label or meta.get("description") or op_type
+
+    from services.operation_secrets import seal_operation_params
+
+    stored_params, sensitive_params_fp = seal_operation_params(params)
+    params_json = json.dumps(stored_params, ensure_ascii=False)
+    sched = _coerce_scheduled_for(scheduled_for)
+
+    # Идемпотентность постановки. Двойной тап кнопки или retry клиента после
+    # таймаута НЕ должны плодить дубль-операцию: 82 вызова submit() идут через
+    # этот choke point, поэтому дедуп здесь защищает весь продукт от двойного
+    # исполнения (двойная стоимость расходников, удвоенный риск для аккаунтов).
+    # pg_advisory_xact_lock сериализует одновременные идентичные сабмиты (закрывает
+    # TOCTOU без изменения схемы); внутри окна ищем ещё-в-полёте идентичную
+    # операцию. Отличающиеся params (в т.ч. per-account циклы) не дедупятся —
+    # ложных слияний нет. Отключается dedup_window_sec=0.
+    reused = False
+    try:
+        op_id, reused = await _insert_or_reuse(
+            pool, owner_id, op_type, params_json, sensitive_params_fp, sched,
+            dedup_window_sec, total_items, template_id, retries, op_label)
+    except Exception:
+        if _by_quota:
+            from services import free_quota
+            await free_quota.refund(pool, owner_id)
+        raise
+    if reused and _by_quota:
+        # Двойной тап: операция уже стоит, вторую единицу квоты не берём.
+        from services import free_quota
+        await free_quota.refund(pool, owner_id)
 
     if reused:
         log.info(

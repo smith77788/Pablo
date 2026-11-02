@@ -298,12 +298,18 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
 
     # Блок информации о текущем плане
     is_paid = plan == "paid"
+    from services import free_quota
+    quota = free_quota.monthly_limit()
     if plan == "free":
         plan_info = (
             f"Текущий план: <b>{emoji} БЕСПЛАТНЫЙ</b>\n"
             f"До {lim_label} ботов · До 5 каналов\n"
             f"Доступно: описание, приветствие, рассылка"
         )
+        if quota:
+            left = await free_quota.remaining(pool, user_id)
+            plan_info += (f"\nПлатных операций в этом месяце: осталось "
+                          f"<b>{left} из {quota}</b>")
     else:
         if sub_utils.is_platform_admin(user_id):
             plan_info = f"Текущий план: <b>{emoji} ПЛАТНЫЙ</b> · ∞ ботов и каналов\n🔑 <i>Администратор платформы</i>"
@@ -350,6 +356,8 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
     else:
         period_hint = f"💰 Оплата на 12 мес — скидка {PERIOD_DISCOUNTS.get(12, 0)}%"
 
+    quota_line = (f"\n+ {quota} платных операций в месяц (рассылка, инвайт, парсер…)"
+                  if quota else "")
     text = (
         f"💳 <b>Подписка Infragram</b>\n\n"
         f"{plan_info}\n"
@@ -358,7 +366,8 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🆓 <b>БЕСПЛАТНО</b> — навсегда\n"
         f"<i>До 5 ботов · До 5 каналов\n"
-        f"Описание, приветствие, базовая рассылка</i>\n\n"
+        f"Описание, приветствие, базовая рассылка"
+        f"{quota_line}</i>\n\n"
         f"💎 <b>ПОДПИСКА</b> — ${price_paid}/мес\n"
         f"<i>∞ ботов и каналов · CRM · Воронки\n"
         f"Кампании в ЛС · ИИ-ассистент · Рассылки по сети\n"

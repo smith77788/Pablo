@@ -113,7 +113,7 @@ def test_the_window_never_swallows_a_retry_of_a_failed_operation():
     """
     from services import operation_bus
 
-    src = inspect.getsource(operation_bus.submit)
+    src = inspect.getsource(operation_bus.submit) + inspect.getsource(operation_bus._insert_or_reuse)
     statuses = _dedup_statuses_live()
     assert statuses, "окно дедупа перестало ограничиваться статусами"
     assert "pending" in statuses and "running" in statuses, (
