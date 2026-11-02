@@ -1104,13 +1104,23 @@ function _spAiSummaryHtml(s, u) {
     usage += '<div style="font-size:12px;color:var(--hint);margin:6px 2px 0">Лимит тарифа ' +
       esc(String(u.plan || '')) + ':' + limits + '</div>';
   }
+  const f = s.funnel || {};
+  const pct = v => (v === null || v === undefined) ? '—' : Math.round(v * 100) + '%';
+  const funnel = f.dialogs ?
+    '<div style="font-size:12px;color:var(--hint);padding:10px 2px 6px">Продажи за 7 дней</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    cell('Диалогов', f.dialogs) +
+    cell('Без оператора', pct(f.resolved_without_operator)) +
+    cell('Заказов подтверждено', (f.confirmed || 0) + (f.paid ? ' · оплачено ' + f.paid : '')) +
+    cell('Диалог → заказ', pct(f.conversion)) +
+    '</div>' : '';
   return '<div style="font-size:12px;color:var(--hint);padding:0 2px 6px">За 7 дней</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
     cell('Ответов', s.replies || 0) +
     cell('Плохих из оценённых', bad) +
     cell('Задержано проверкой', guards) +
     cell('Ответ, 9 из 10 быстрее', s.latency_p90_ms ? (s.latency_p90_ms / 1000).toFixed(1) + ' с' : '—') +
-    '</div>' + usage;
+    '</div>' + funnel + usage;
 }
 
 function _spAiRender() {

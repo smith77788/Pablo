@@ -470,7 +470,9 @@ def setup_routes(app: web.Application, pool) -> None:
             days = int(request.rel_url.query.get("days") or 7)
         except ValueError:
             return _err("Период в днях — целое число", 400)
-        return _json_resp(await _aq.summary(pool, uid, days=days))
+        out = await _aq.summary(pool, uid, days=days)
+        out["funnel"] = await _aq.sales_funnel(pool, uid, days=days)
+        return _json_resp(out)
 
     async def ai_usage(request):
         uid = _get_uid(request)

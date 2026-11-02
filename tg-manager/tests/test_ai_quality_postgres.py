@@ -85,3 +85,54 @@ def test_учёт_расхода_складывается_за_день():
             gw.attach(None)
             await pool.close()
     _run(body())
+
+
+def test_воронка_продаж_считает_заказы_без_оператора():
+    from services import ai_quality as aq
+
+    async def body():
+        pool = await _pool()
+        try:
+            await pool.execute("DELETE FROM bot_sales_orders WHERE owner_id=$1", _OWNER)
+            await pool.execute("DELETE FROM bot_sales_dialogs WHERE owner_id=$1", _OWNER)
+            for chat, off in ((1, False), (2, True), (3, False), (4, False)):
+                await pool.execute(
+                    "INSERT INTO bot_sales_dialogs (bot_id, customer_chat_id, owner_id, handed_off) "
+                    "VALUES (77, $1, $2, $3)", chat, _OWNER, off)
+            for chat, status, paid in ((1, "confirmed", False), (2, "confirmed", False),
+                                       (3, "new", False), (4, "done", True)):
+                await pool.execute(
+                    "INSERT INTO bot_sales_orders (owner_id, bot_id, customer_chat_id, status, paid_at) "
+                    "VALUES ($1, 77, $2, $3, CASE WHEN $4 THEN now() END)",
+                    _OWNER, chat, status, paid)
+            f = await aq.sales_funnel(pool, _OWNER, days=7)
+            assert (f["dialogs"], f["handed_off"], f["orders"], f["confirmed"], f["paid"],
+                    f["confirmed_without_operator"]) == (4, 1, 4, 3, 1, 2)
+            assert f["conversion"] == 0.75 and f["resolved_without_operator"] == 0.75
+            assert (await aq.sales_funnel(pool, _OTHER))["conversion"] is None
+        finally:
+            await pool.execute("DELETE FROM bot_sales_orders WHERE owner_id=$1", _OWNER)
+            await pool.execute("DELETE FROM bot_sales_dialogs WHERE owner_id=$1", _OWNER)
+            await pool.close()
+    _run(body())
+
+
+def test_сегмент_из_фразы_считает_размер_на_живой_базе(monkeypatch):
+    """SQL словаря владельца (теги через unnest, группы) и подсчёт среза тем же
+    count_segment, что у превью рассылки, — на настоящей схеме."""
+    from services import ai_gateway as gw, ai_segment as seg
+
+    async def _chat(messages, **k):
+        return gw.AiReply(text='{"gender": "f", "unsupported": "купили на прошлой неделе"}',
+                          providers=["p"])
+    monkeypatch.setattr(gw, "chat", _chat)
+
+    async def body():
+        pool = await _pool()
+        try:
+            out = await seg.from_text(pool, _OWNER, "женщины, купившие на прошлой неделе")
+            assert out["filters"] == {"gender": "f"} and out["total"] == 0
+            assert out["explained"] == ["женщины"] and "прошлой неделе" in out["unsupported"]
+        finally:
+            await pool.close()
+    _run(body())
