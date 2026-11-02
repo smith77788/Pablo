@@ -54,6 +54,9 @@ EVENTS: dict[str, str] = {
     "account.lost": "Аккаунт потерян (бан, спамблок, заморозка, сессия)",
     "account.status_changed": "Статус аккаунта изменился",
     "account.restricted": "Ограничение от Telegram",
+    # Источник — триггеры schema_v272 (воронка контактов и простые сделки).
+    "pipeline.updated": "Контакт в воронке: новый, другой этап или сумма",
+    "deal.updated": "Сделка создана или изменена",
     "webhook.test": "Тестовое событие",
 }
 
@@ -71,6 +74,9 @@ for _ev, _label in _AUTOMATION_LABELS.items():
         EVENTS.setdefault(_ev, _label)
 
 KINDS = ("http", "sheets")
+# Подключения CRM — тоже получатели (services/crm_connectors.py), но
+# создаются своим мастером: через create_endpoint их не завести.
+CRM_KINDS = ("amocrm", "bitrix24")
 MAX_ENDPOINTS = 20
 MAX_ATTEMPTS = 8
 # Пауза перед попыткой N+1 после неудачной попытки N (секунды).
@@ -167,6 +173,22 @@ def summarize(event: str, data: dict) -> str:
         if event == "account.restricted":
             return f"{label}: {who} ({d.get('kind')}, {d.get('severity')})"
         return f"{label}: {who}"
+    if event == "pipeline.updated":
+        try:
+            from services.contacts_hub.crm_engine import STAGE_LABELS as _st
+        except Exception:
+            _st = {}
+        stage = _st.get(d.get("stage"), d.get("stage") or "")
+        old = _st.get(d.get("old_stage"), d.get("old_stage") or "")
+        move = f"{old} → {stage}" if old and old != stage else stage
+        val = d.get("deal_value")
+        tail = f", {val:g} {d.get('currency') or ''}".rstrip() if isinstance(val, (int, float)) and val else ""
+        return f"{label}: {move}{tail}"[:500]
+    if event == "deal.updated":
+        return f"{label}: {d.get('title') or '#' + str(d.get('deal_id'))} ({d.get('stage') or ''})"[:500]
+    if d.get("bot_id") or d.get("chat_id"):
+        extra = d.get("field") or d.get("order_id") or d.get("param") or ""
+        return f"{label}" + (f": {extra}" if extra else "")
     return label
 
 
@@ -424,7 +446,8 @@ async def _claim_due(pool) -> list[dict]:
         "SELECT id, payload, created_at FROM integration_events WHERE id = ANY($1::bigint[])",
         ids)}
     ends = {r["id"]: r for r in await pool.fetch(
-        """SELECT id, owner_id, kind, url, secret_enc, spreadsheet_id, sheet_name, is_active
+        """SELECT id, owner_id, kind, url, secret_enc, spreadsheet_id, sheet_name, is_active,
+                  crm_config
            FROM webhook_endpoints WHERE id = ANY($1::bigint[])""", eps)}
     out = []
     for r in rows:
@@ -484,9 +507,11 @@ async def send_http(http, endpoint: dict, event: str, event_id: int, created_at,
 async def _record(pool, item: dict, ok: bool, code: int | None, err: str) -> None:
     did, ep_id = item["id"], item["endpoint_id"]
     if ok:
+        # На успехе err — пометка («пропущено: событие не для CRM»), не ошибка.
         await pool.execute(
             """UPDATE webhook_deliveries SET status='delivered', delivered_at=now(),
-                   last_status_code=$2, last_error=NULL WHERE id=$1""", did, code)
+                   last_status_code=$2, last_error=NULLIF($3, '') WHERE id=$1""",
+            did, code, (err or "")[:500])
         await pool.execute(
             """UPDATE webhook_endpoints SET consecutive_failures=0, last_success_at=now()
                WHERE id=$1""", ep_id)
@@ -537,13 +562,16 @@ async def deliver_due(pool, http) -> int:
     items = await _claim_due(pool)
     if not items:
         return 0
-    live, sheets = [], []
+    live, sheets, crm = [], [], {}
     for it in items:
         ep = it["endpoint"]
         if not ep or not ep["is_active"]:
             await pool.execute(
                 "UPDATE webhook_deliveries SET status='skipped', last_error=$2 WHERE id=$1",
                 it["id"], "получатель выключен")
+            continue
+        if ep["kind"] in CRM_KINDS:
+            crm.setdefault(it["endpoint_id"], []).append(it)
             continue
         (sheets if ep["kind"] == "sheets" else live).append(it)
     sem = asyncio.Semaphore(_CONCURRENCY)
@@ -558,7 +586,19 @@ async def deliver_due(pool, http) -> int:
                 ok, code, err = False, None, f"внутренняя ошибка: {type(e).__name__}"
             await _record(pool, it, ok, code, err)
 
-    await asyncio.gather(*(_one(it) for it in live))
+    async def _crm(group):
+        from services import crm_connectors as _crm_mod
+        async with sem:
+            done, left = await _crm_mod.deliver_group(pool, http, group)
+            for it, (ok, code, err) in done:
+                await _record(pool, it, ok, code, err)
+            if left:  # не успели в бюджет — обратно в очередь, попытка не потрачена
+                await pool.execute(
+                    """UPDATE webhook_deliveries SET attempts = GREATEST(attempts - 1, 0),
+                           next_attempt_at = now() WHERE id = ANY($1::bigint[])""",
+                    [it["id"] for it in left])
+
+    await asyncio.gather(*(_one(it) for it in live), *(_crm(g) for g in crm.values()))
     if sheets:
         await _deliver_sheets(pool, sheets)
     return len(items)
@@ -571,6 +611,9 @@ async def send_test(pool, http, owner_id: int, endpoint_id: int) -> dict:
            FROM webhook_endpoints WHERE id=$1 AND owner_id=$2""", endpoint_id, owner_id)
     if not r:
         return {"ok": False, "error": "Получатель не найден"}
+    if r["kind"] in CRM_KINDS:
+        from services import crm_connectors as _crm_mod
+        return await _crm_mod.check(pool, http, owner_id, endpoint_id)
     now = _dt.datetime.now(_dt.timezone.utc)
     data = {"message": "Проверка связи с Infragram", "endpoint_id": endpoint_id}
     if r["kind"] == "sheets":
