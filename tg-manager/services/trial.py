@@ -39,15 +39,19 @@ _DEAD = tuple(sorted(DEAD_STATUSES))
 
 
 def trial_days() -> int:
-    """Длина триала в днях (env TRIAL_DAYS, по умолчанию 3; 0 — триал выключен)."""
+    """Длина триала в днях (env TRIAL_DAYS, по умолчанию 7; 0 — триал выключен).
+
+    Было 3: за три дня новичок успевал подключить аккаунт и прогреть его, но не
+    дойти до первой рассылки или инвайта — триал кончался раньше результата.
+    """
     raw = (os.getenv("TRIAL_DAYS") or "").strip()
     if not raw:
-        return 3
+        return 7
     try:
         return max(0, min(30, int(raw)))
     except ValueError:
-        log.warning("trial: bad TRIAL_DAYS=%r — using 3", raw)
-        return 3
+        log.warning("trial: bad TRIAL_DAYS=%r — using 7", raw)
+        return 7
 
 
 async def is_eligible(pool, owner_id: int, *, need_account: bool = True) -> bool:
