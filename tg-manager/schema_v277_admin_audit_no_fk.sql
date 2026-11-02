@@ -9,4 +9,3 @@ ALTER TABLE admin_audit_log DROP CONSTRAINT IF EXISTS admin_audit_log_admin_id_f
 ALTER TABLE admin_audit_log DROP CONSTRAINT IF EXISTS admin_audit_log_target_user_id_fkey;
 -- Источник записи: бот, мини-апп или вход по секретной фразе.
 ALTER TABLE admin_audit_log ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'app';
-CREATE INDEX IF NOT EXISTS idx_admin_audit_created_at ON admin_audit_log(created_at DESC);

@@ -15,6 +15,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, Message
 
+from bot.utils.op_helpers import terminal_kb
 from services import owner_data
 
 log = logging.getLogger(__name__)
@@ -31,13 +32,15 @@ async def cmd_my_data(message: Message, pool: asyncpg.Pool) -> None:
         blob, counts = await owner_data.export_owner_data(pool, uid)
     except Exception:
         log.exception("my_data: выгрузка упала owner=%s", uid)
-        await message.answer("❌ Не получилось собрать выгрузку. Попробуйте позже.")
+        await message.answer("❌ Не получилось собрать выгрузку. Попробуйте позже.",
+                             reply_markup=terminal_kb())
         return
     total = sum(counts.values())
     await message.answer_document(
         BufferedInputFile(blob, filename=f"infragram_my_data_{uid}.zip"),
         caption=(f"Ваши данные: {len(counts)} разделов, {total} записей.\n"
-                 "Строки сессий, токены и прокси в файл не включены."))
+                 "Строки сессий, токены и прокси в файл не включены."),
+        reply_markup=terminal_kb())
 
 
 @router.message(Command("delete_my_data"), F.chat.type == "private")
@@ -54,7 +57,7 @@ async def cmd_delete_my_data(message: Message, command: CommandObject,
             "хранения требует учёт. Имя в профиле будет стёрто.\n\n"
             "Сначала можно забрать копию: /my_data\n\n"
             f"Чтобы удалить, отправьте: <code>/delete_my_data {CONFIRM_WORD}</code>",
-            parse_mode="HTML")
+            parse_mode="HTML", reply_markup=terminal_kb())
         return
     try:
         res = await owner_data.delete_owner_data(pool, uid)
@@ -62,11 +65,14 @@ async def cmd_delete_my_data(message: Message, command: CommandObject,
         log.error("delete_my_data: не удалено owner=%s: %s", uid, e)
         await message.answer(
             "❌ Удалить не получилось, ничего не изменено. Мы уже видим ошибку; "
-            "напишите в поддержку, если повторная попытка не поможет.")
+            "напишите в поддержку, если повторная попытка не поможет.",
+            reply_markup=terminal_kb())
         return
     except Exception:
         log.exception("delete_my_data: упало owner=%s", uid)
-        await message.answer("❌ Удалить не получилось, ничего не изменено.")
+        await message.answer("❌ Удалить не получилось, ничего не изменено.",
+                             reply_markup=terminal_kb())
         return
     rows = sum(res["deleted"].values())
-    await message.answer(f"✅ Удалено записей: {rows}. Ваши данные стёрты.")
+    await message.answer(f"✅ Удалено записей: {rows}. Ваши данные стёрты.",
+                         reply_markup=terminal_kb())
