@@ -124,15 +124,27 @@ def _rate(num, den):
     return round(num / den, 4) if den else None
 
 
+def _in_main(convert, revenue: dict):
+    """Выручка {валюта: центы} в основной валюте; None — есть валюта без курса."""
+    total = 0.0
+    for cur, cents in revenue.items():
+        v = convert(cents / 100, cur)
+        if v is None:
+            return None
+        total += v
+    return round(total, 2)
+
+
 def summarize(buckets: dict, names: dict | None = None, spend: dict | None = None,
-              min_sample: int = 30) -> dict:
+              min_sample: int = 30, convert=None) -> dict:
     """Свести корзины атрибуции в ответ экрана.
 
     names: {campaign_id: имя}; spend: {campaign_id: {"amount": float, "currency": str}}.
 
     Для каждой кампании: шаги воронки (люди), доли от охвата, выручка по
     валютам, расход, стоимость лида (расход / ответившие), стоимость покупателя,
-    окупаемость (если расход и выручка в одной валюте). Плюс сравнение
+    окупаемость (если расход и выручка в одной валюте или есть курс
+    пересчёта `convert(сумма, валюта) → основная валюта`). Плюс сравнение
     ответов с лучшей кампанией: z-тест двух долей, значимо при |z| ≥ 1,96 и
     выборке не меньше min_sample у обеих.
     """
@@ -153,6 +165,14 @@ def summarize(buckets: dict, names: dict | None = None, spend: dict | None = Non
         amount = float(sp.get("amount") or 0)
         sp_cur = sp.get("currency") or None
         rev_same = b["revenue"].get(sp_cur) if sp_cur else None
+        romi = (round((rev_same / 100 - amount) / amount, 3)
+                if amount and rev_same is not None
+                and set(b["revenue"]) <= {sp_cur} else None)
+        rev_main = _in_main(convert, b["revenue"]) if convert else None
+        if romi is None and amount and convert and rev_main is not None:
+            sp_main = convert(amount, sp_cur)
+            if sp_main:
+                romi = round((rev_main - sp_main) / sp_main, 3)
         rows.append({
             "campaign_id": cid,
             "name": ("Без рассылки" if cid == NO_CAMPAIGN
@@ -167,8 +187,8 @@ def summarize(buckets: dict, names: dict | None = None, spend: dict | None = Non
                               if amount and n["replied"] else None),
             "cost_per_buyer": (round(amount / n["bought"], 2)
                                if amount and n["bought"] else None),
-            "romi": (round((rev_same / 100 - amount) / amount, 3)
-                     if amount and rev_same is not None else None),
+            "revenue_main": rev_main,
+            "romi": romi,
         })
     # Сравнение по ответам — только среди настоящих кампаний: у органики
     # охвата нет, доля ответа у неё не определена.
@@ -199,6 +219,14 @@ def summarize(buckets: dict, names: dict | None = None, spend: dict | None = Non
             c = sp.get("currency") or "RUB"
             total_spend[c] = total_spend.get(c, 0.0) + float(sp["amount"])
     one_cur = list(total_spend.items())[0] if len(total_spend) == 1 else None
+    spend_main = None
+    if convert and total_spend:
+        vals = [convert(v, c) for c, v in total_spend.items()]
+        spend_main = None if None in vals else round(sum(vals), 2)
+    cpl = (round(one_cur[1] / n_tot["replied"], 2)
+           if one_cur and n_tot["replied"] else None)
+    if cpl is None and spend_main and n_tot["replied"]:
+        cpl = round(spend_main / n_tot["replied"], 2)
     return {
         "steps": [{"key": s, "label": STEP_LABEL[s], "count": n_tot[s],
                    "rate": _rate(n_tot[s], n_tot["reached"]) if s != "reached" else None}
@@ -206,8 +234,9 @@ def summarize(buckets: dict, names: dict | None = None, spend: dict | None = Non
         "orders": total_orders,
         "revenue": [{"currency": c, "total_cents": v} for c, v in sorted(total_rev.items())],
         "spend": [{"currency": c, "amount": round(v, 2)} for c, v in sorted(total_spend.items())],
-        "cost_per_lead": (round(one_cur[1] / n_tot["replied"], 2)
-                          if one_cur and n_tot["replied"] else None),
+        "revenue_main": _in_main(convert, total_rev) if convert else None,
+        "spend_main": spend_main,
+        "cost_per_lead": cpl,
         "campaigns": rows,
         "best_campaign_id": best["campaign_id"] if best else None,
         "window_days": ATTRIBUTION_WINDOW_DAYS,
@@ -301,7 +330,10 @@ async def build(pool, owner_id: int, days: int = 30) -> dict:
                       AND campaign_id = ANY($2::bigint[])""", uid, ids):
             spend[r["campaign_id"]] = {"amount": float(r["amount"] or 0),
                                        "currency": r["currency"]}
-    out = summarize(buckets, names, spend)
+    from services import owner_currency
+    conv, money = await owner_currency.load(pool, uid)
+    out = summarize(buckets, names, spend, convert=conv.convert)
+    out["money"] = money
     out["days"] = days
     return out
 
