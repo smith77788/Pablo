@@ -152,6 +152,7 @@ GET /api/miniapp/content_meshes
 GET /api/miniapp/crm/board
 GET /api/miniapp/crm/contacts
 GET /api/miniapp/crm/deals
+GET /api/miniapp/crm_connections/{wh_id}
 GET /api/miniapp/crosspost/links
 GET /api/miniapp/dashboard
 GET /api/miniapp/dashboard/attention
@@ -462,6 +463,7 @@ HEAD /api/miniapp/content_meshes
 HEAD /api/miniapp/crm/board
 HEAD /api/miniapp/crm/contacts
 HEAD /api/miniapp/crm/deals
+HEAD /api/miniapp/crm_connections/{wh_id}
 HEAD /api/miniapp/crosspost/links
 HEAD /api/miniapp/dashboard
 HEAD /api/miniapp/dashboard/attention
@@ -808,6 +810,9 @@ POST /api/miniapp/content_mesh
 POST /api/miniapp/content_mesh/{mesh_id}/target
 POST /api/miniapp/crm/contact
 POST /api/miniapp/crm/deal
+POST /api/miniapp/crm_connections
+POST /api/miniapp/crm_connections/{wh_id}
+POST /api/miniapp/crm_connections/{wh_id}/backfill
 POST /api/miniapp/crosspost/run
 POST /api/miniapp/devices/revoke
 POST /api/miniapp/dm/adhoc_send
@@ -1036,6 +1041,7 @@ POST /api/miniapp/workflows/{wf_id}/steps
 POST /api/miniapp/workspace
 POST /api/miniapp/workspace/join
 POST /api/miniapp/workspace/{ws_id}/invite
+POST /webhook/crm/{token}
 PUT /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/toggle
 PUT /api/miniapp/auto_reply/{reply_id}/toggle
