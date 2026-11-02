@@ -713,3 +713,54 @@ def test_diagnose_reports_provider_error(monkeypatch):
     # openai не установлен в тест-среде ИЛИ вызов упадёт — в любом случае error непустой,
     # провайдер виден в списке (на неудаче provider=None — успеха не было)
     assert r["ok"] is False and "openai" in r["providers"] and r["error"]
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_действия_модели_кладут_заказ_и_зовут_оператора_postgres(monkeypatch):
+    """Клиент пишет «две маргариты и OSEN15» без слова «заказать» — раньше
+    заказ не открывался вовсе. Теперь модель отдаёт служебный блок, сервер
+    сверяет его с прайсом и кладёт позиции и промокод в заказ."""
+    import asyncio
+    import asyncpg
+
+    replies = iter([
+        'Принято! <действие>{"заказ": [{"товар": "маргарита", "кол": 2}, '
+        '{"товар": "Гавайская", "кол": 1}], "промокод": "OSEN15"}</действие>',
+        'Сейчас позову коллегу <действие>{"оператор": true}</действие>',
+    ])
+
+    async def _fake(persona, messages):
+        return next(replies), {"providers": ["x"], "provider": "x", "model": "m",
+                               "errors": [], "latency_ms": 1}
+    monkeypatch.setattr(bsp, "_run_completion", _fake)
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+        own, bot = 800999, 556999
+
+        async def _cl():
+            await pool.execute("DELETE FROM bot_sales_dialogs WHERE owner_id=$1", own)
+            await pool.execute("DELETE FROM bot_sales_orders WHERE owner_id=$1", own)
+            await pool.execute("DELETE FROM bot_sales_personas WHERE owner_id=$1", own)
+        try:
+            await _cl()
+            p = await bsp.create_persona(pool, own, "Ника", operator_username="@op")
+            await bsp.add_product(pool, p["id"], own, "Пицца Маргарита", price_cents=1250)
+            await bsp.add_promo(pool, p["id"], own, "OSEN15", 15)
+            await bsp.assign_to_bot(pool, p["id"], own, bot)
+            r = await bsp.handle_incoming(pool, bot, own, 90, "две маргариты, промокод OSEN15")
+            assert "<действие>" not in r["reply"] and r["order_id"]
+            o = (await bsp.list_orders(pool, own, bot_id=bot))[0]
+            items = o["items"] if not isinstance(o["items"], str) else json.loads(o["items"])
+            assert [(i["name"], i["qty"]) for i in items] == [("Пицца Маргарита", 2)]
+            assert o["promo_code"] == "OSEN15" and o["total_cents"] == 2500 - 375
+            r2 = await bsp.handle_incoming(pool, bot, own, 90, "дайте кого-нибудь постарше, бот не понимает")
+            assert r2["handoff"] and r2["operator"]["username"] == "@op"
+            assert r2.get("handoff_by") == "model", "словами клиента не ловится — позвала модель"
+            r3 = await bsp.handle_incoming(pool, bot, own, 90, "ау")
+            assert r3.get("silent")
+            await _cl()
+        finally:
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())

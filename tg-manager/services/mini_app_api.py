@@ -7891,6 +7891,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_crm.setup_routes(app, pool)
+    # ИИ в переписке оператора: черновик ответа и сводка (services/ai_inbox_assist).
+    from services import ai_inbox_assist
+    ai_inbox_assist.setup_routes(app, pool)
+    # Сегмент контактов из фразы (services/ai_segment).
+    from services import ai_segment
+    ai_segment.setup_routes(app, pool)
+    # Прогноз покупок: RFM-сегменты и вероятность покупки (services/ai_predict).
+    from services import ai_predict
+    ai_predict.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
     mini_app_mp.setup_routes(app, pool)
     mini_app_integrations.setup_routes(app, pool)
@@ -8193,6 +8202,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result = await _apply_next_action(pool, uid, action_id)
             if result.get("error"):
                 return _err(result["error"], 400)
+            try:
+                from services import next_actions as _na
+                await _na.record_feedback(pool, uid, action_id, "applied")
+            except Exception:  # учёт реакции не должен ломать применение
+                log.debug("next_actions feedback applied", exc_info=True)
             return _json_resp(result)
         except PermissionError as exc:
             # Нет подписки или предохранитель Ban Weather — честный отказ с
@@ -8201,6 +8215,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("next_actions_apply id=%s uid=%s", action_id, uid)
             return _err("Не удалось применить действие", 500)
+
+    async def next_actions_feedback(request: web.Request) -> web.Response:
+        """Реакция на подсказку Copilot: opened | snoozed. Копайлот поднимает
+        то, чем владелец пользуется, и прячет отложенное на всех устройствах."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        kind = str(body.get("kind") or "")
+        if kind not in ("opened", "snoozed"):
+            return _err("Неизвестная реакция на подсказку", 400)
+        try:
+            from services import next_actions as _na
+            ok = await _na.record_feedback(pool, uid, str(body.get("id") or ""), kind)
+            if not ok:
+                return _err("Не указана подсказка", 400)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("next_actions_feedback uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def op_chain_launch(request: web.Request) -> web.Response:
         """Запустить связку «итог операции → следующий модуль» в одно нажатие.
@@ -8549,6 +8588,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # (так 2026-09-04 лёг мини-апп целиком).
     app.router.add_get("/api/miniapp/next_actions", next_actions)
     app.router.add_post("/api/miniapp/next_actions/apply", next_actions_apply)
+    app.router.add_post("/api/miniapp/next_actions/feedback", next_actions_feedback)
     app.router.add_post("/api/miniapp/op_chain/launch", op_chain_launch)
     app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
     app.router.add_get("/api/miniapp/audience_analytics/segment", audience_segment_members)

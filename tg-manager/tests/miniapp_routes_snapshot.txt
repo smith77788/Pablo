@@ -73,6 +73,7 @@ GET /api/miniapp/admin/ops/stats
 GET /api/miniapp/admin/stats
 GET /api/miniapp/admin/user/{user_id}
 GET /api/miniapp/admin/users
+GET /api/miniapp/ai/forecast
 GET /api/miniapp/ai/status
 GET /api/miniapp/ai_memory
 GET /api/miniapp/analytics
@@ -385,6 +386,7 @@ HEAD /api/miniapp/admin/ops/stats
 HEAD /api/miniapp/admin/stats
 HEAD /api/miniapp/admin/user/{user_id}
 HEAD /api/miniapp/admin/users
+HEAD /api/miniapp/ai/forecast
 HEAD /api/miniapp/ai/status
 HEAD /api/miniapp/ai_memory
 HEAD /api/miniapp/analytics
@@ -727,6 +729,8 @@ POST /api/miniapp/admin/user/{user_id}/ban
 POST /api/miniapp/admin/user/{user_id}/grant
 POST /api/miniapp/admin/user/{user_id}/revoke
 POST /api/miniapp/admin/user/{user_id}/unban
+POST /api/miniapp/ai/forecast/tag
+POST /api/miniapp/ai/segment-from-text
 POST /api/miniapp/ai/test
 POST /api/miniapp/ai_comment
 POST /api/miniapp/ai_memory
@@ -857,6 +861,8 @@ POST /api/miniapp/host_server/price
 POST /api/miniapp/host_server/rent
 POST /api/miniapp/host_server/rental/{rental_id}/status
 POST /api/miniapp/import_sessions
+POST /api/miniapp/inbox/{peer_user_id}/ai-draft
+POST /api/miniapp/inbox/{peer_user_id}/ai-summary
 POST /api/miniapp/inbox/{peer_user_id}/read
 POST /api/miniapp/inbox/{peer_user_id}/reply
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
@@ -894,6 +900,7 @@ POST /api/miniapp/networks/{net_id}/deploy
 POST /api/miniapp/networks/{net_id}/edges
 POST /api/miniapp/networks/{net_id}/nodes
 POST /api/miniapp/next_actions/apply
+POST /api/miniapp/next_actions/feedback
 POST /api/miniapp/node
 POST /api/miniapp/notary
 POST /api/miniapp/notary/{watch_id}/check

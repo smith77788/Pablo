@@ -39,7 +39,7 @@ def _api_sources() -> list[str]:
     маршруты невидимыми — храповик кричал о 404, которых нет."""
     api = api_source()
     out = [api]
-    for mod in sorted(set(re.findall(r"\b(mini_app_\w+)\.setup_routes\(\s*app", api))):
+    for mod in sorted(set(re.findall(r"\b(mini_app_\w+|ai_\w+)\.setup_routes\(\s*app", api))):
         path = os.path.join(os.path.dirname(_API), mod + ".py")
         if os.path.exists(path):
             out.append(open(path, encoding="utf-8").read())
