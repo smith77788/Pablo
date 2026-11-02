@@ -7932,6 +7932,7 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
       if(cfg.bot_username) window._botUsername = cfg.bot_username;
       if(cfg.paid_price) window._paidPrice = cfg.paid_price;
       if(cfg.period_discounts) window._periodDiscounts = cfg.period_discounts;
+      if(Array.isArray(cfg.tiers) && cfg.tiers.length) window._tiers = cfg.tiers;
       if(cfg.plans) window._planMatrix = cfg.plans;
       rebuildPlanPrices();
     }).catch(()=>{});
@@ -8889,7 +8890,7 @@ const MODULE_DESCS = {
   'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и оповещения',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
-  'Интеграции':'Вебхуки на события, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
+  'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
   'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
@@ -29109,14 +29110,31 @@ function _planLines(plan) {
 // Цены строятся из конфига (базовая цена + скидки за период), чтобы совпадать
 // с реальным расчётом списания на бэкенде: base*months*(1-disc/100).
 let _PLAN_PRICES = [];
+// Три тарифа по размеру флота (services/tiers.py): возможности одинаковые,
+// различается лимит аккаунтов. Список и цены — из /api/miniapp/config.
+window._tier = window._tier || 'pro';
+function _tierList() {
+  // Только из конфигурации сервера: зашитый список разошёлся бы с тарифами.
+  return Array.isArray(window._tiers) ? window._tiers : [];
+}
+function pickTier(key) {
+  window._tier = key;
+  rebuildPlanPrices();
+  renderBillingPlans();
+}
 function rebuildPlanPrices() {
-  const base = window._paidPrice || 29;
+  const list = _tierList();
+  const tier = list.find(t => t.key === window._tier) || list[1] || list[0] || null;
+  // Тарифы не загрузились — прежние карточки по базовой цене, тариф бот
+  // спросит сам (диплинк pay_paid_<N>m).
+  const base = (tier && Number(tier.price)) || window._paidPrice || 29;
   const disc = window._periodDiscounts || {'1':0,'3':10,'6':15,'12':20};
+  const k = tier ? tier.key : 'paid';
   const periods = [
-    {key:'paid_1m', label:'1 месяц', months:1, popular:false},
-    {key:'paid_3m', label:'3 месяца', months:3, popular:true},
-    {key:'paid_6m', label:'6 месяцев', months:6, popular:false},
-    {key:'paid_12m', label:'12 месяцев', months:12, popular:false},
+    {key:k+'_1m', label:'1 месяц', months:1, popular:false},
+    {key:k+'_3m', label:'3 месяца', months:3, popular:true},
+    {key:k+'_6m', label:'6 месяцев', months:6, popular:false},
+    {key:k+'_12m', label:'12 месяцев', months:12, popular:false},
   ];
   _PLAN_PRICES = periods.map(p=>{
     const d = Number(disc[String(p.months)]||0);
@@ -29172,17 +29190,7 @@ async function openBilling() {
     } else {
       txt('billingFeaturesList', `<div class="card" style="padding:12px 16px">${feats.map(f=>`<div style="padding:5px 0;font-size:13px;${f.startsWith('❌')?'color:var(--hint)':'color:var(--text)'}">${esc(f)}</div>`).join('')}</div>`);
     }
-    txt('billingPlansList', _PLAN_PRICES.map(p=>`
-      <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <div>
-            <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(167,139,250,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
-            ${p.save?`<div style="font-size:12px;color:var(--green)">Экономия ${p.save}</div>`:''}
-          </div>
-          <div style="font-size:20px;font-weight:700;color:var(--accent)">${p.price}</div>
-        </div>
-      </div>
-    `).join(''));
+    renderBillingPlans();
   } catch(e) {
     // Раньше здесь стояло txt('billingPlanName','Бесплатный'): запрос упал, а
     // экран уверенно называл тариф бесплатным. Человек, который платит, видел
@@ -29197,6 +29205,30 @@ async function openBilling() {
       Не удалось узнать ваш тариф.
       <button class="btn btn-s" style="margin-top:8px" onclick="openBilling()">↺ Повторить</button></div>`);
   }
+  await _billingHistory();
+}
+function renderBillingPlans() {
+    const chips = _tierList().map(t => `
+      <div class="card" style="flex:1;padding:10px 8px;min-height:auto;cursor:pointer;text-align:center;${t.key===window._tier?'border:1px solid rgba(167,139,250,.8);background:var(--bg-violet-16)':''}" onclick="pickTier('${esc(t.key)}')">
+        <div style="font-weight:700;font-size:14px">${esc(t.name)}</div>
+        <div style="font-size:13px;color:var(--accent)">$${esc(String(t.price))}/мес</div>
+        <div style="font-size:11px;color:var(--hint)">${esc(t.accounts)}</div>
+      </div>`).join('');
+    const head = chips ? `<div style="font-size:12px;color:var(--hint);margin:0 2px 6px">Возможности у тарифов одинаковые — различается размер флота.</div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">${chips}</div>` : '';
+    txt('billingPlansList', head + _PLAN_PRICES.map(p=>`
+      <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(167,139,250,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
+            ${p.save?`<div style="font-size:12px;color:var(--green)">Экономия ${p.save}</div>`:''}
+          </div>
+          <div style="font-size:20px;font-weight:700;color:var(--accent)">${p.price}</div>
+        </div>
+      </div>
+    `).join(''));
+}
+async function _billingHistory() {
   try {
     const hist = await api('/api/miniapp/payments');
     if (!hist || !hist.length) {

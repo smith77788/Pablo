@@ -1914,6 +1914,9 @@ def setup_routes(app: web.Application, pool) -> None:
             acc_id = await _persist_login(uid, session_str, info, pid)
             return _json_resp({"ok": True, "status": "done", "account_id": acc_id,
                                "username": info.get("username")})
+        except ValueError as ve:
+            # Лимит тарифа или нет личности аккаунта — причина для человека.
+            return _err(str(ve), 400)
         except Exception:
             log.exception("account_add_qr_poll uid=%s", uid)
             return _err("Ошибка ожидания QR", 400)
@@ -2003,7 +2006,10 @@ def setup_routes(app: web.Application, pool) -> None:
                     acc_id = await _persist_login(uid, session_str, info, pid)
                     added.append(acc_id)
                 except Exception as _pe:
-                    add_errors.append(f"{info.get('phone') or info.get('username') or '—'}: {str(_pe)[:80]}")
+                    # Причину отказа двери (лимит тарифа) не режем — это текст
+                    # для человека; техническое исключение — коротко.
+                    _why = str(_pe) if isinstance(_pe, ValueError) else str(_pe)[:80]
+                    add_errors.append(f"{info.get('phone') or info.get('username') or '—'}: {_why}")
             errors = (conv_errors + add_errors)[:8]
             return _json_resp({
                 "ok": bool(added),

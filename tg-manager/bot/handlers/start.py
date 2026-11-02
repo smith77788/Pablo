@@ -242,16 +242,22 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
         # Срок, выбранный в мини-аппе, ведёт сразу к выбору способа оплаты этого
         # срока. Раньше диплинк показывал «Тариф: PAID_3M» и отправлял в общее
         # меню, где срок выбирался заново.
+        from services import tiers as _tiers
         months = None
         if plan_key.endswith("m"):
             months = valid_period(plan_key.rsplit("_", 1)[-1][:-1])
+        # pay_<тариф>_<N>m — тариф выбран в мини-аппе (pay_paid_3m — старый
+        # формат без тарифа: бот сначала спросит тариф).
+        tier = _tiers.coerce_tier(plan_key.split("_", 1)[0])
         kb_pay = InlineKeyboardBuilder()
         if months:
             kb_pay.button(
-                text="💳 Выбрать способ оплаты",
-                callback_data=SubCb(action="choose_period", plan="paid", months=months),
+                text="💳 Выбрать способ оплаты" if tier else "💳 Выбрать тариф",
+                callback_data=SubCb(action="choose_period", plan="paid", months=months,
+                                    tier=tier),
             )
-            what = f"Подписка на {months} мес."
+            what = (f"«{_tiers.name(tier)}» на {months} мес." if tier
+                    else f"Подписка на {months} мес.")
         else:
             kb_pay.button(text="💳 Перейти к оплате", callback_data=SubCb(action="menu"))
             what = "Подписка"

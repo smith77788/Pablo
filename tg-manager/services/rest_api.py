@@ -51,6 +51,7 @@ log = logging.getLogger(__name__)
 
 import hashlib
 import hmac
+import json
 
 
 def _check_auth(request: web.Request) -> bool:
@@ -499,7 +500,26 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
             log_exc_swallow(log, "rest_api: api_get_messages error")
             return web.json_response({"error": "internal error"}, status=500)
 
+    def _docs_base(request: web.Request) -> str:
+        from services.mini_app_integrations import _public_base
+        return _public_base(request)
+
+    async def api_openapi(request: web.Request) -> web.Response:
+        """Спецификация OpenAPI 3.1 — без ключа: описание не секрет, а
+        Postman/генераторы клиентов скачивают её до того, как ключ вставлен."""
+        from services import api_docs
+        return web.json_response(api_docs.build_spec(_docs_base(request)),
+                                 dumps=lambda o: json.dumps(o, ensure_ascii=False))
+
+    async def api_docs_page(request: web.Request) -> web.Response:
+        from services import api_docs
+        return web.Response(text=api_docs.render_html(api_docs.build_spec(_docs_base(request))),
+                            content_type="text/html", charset="utf-8",
+                            headers={"Cache-Control": "public, max-age=300"})
+
     app.router.add_get("/api/v1/health", api_health)
+    app.router.add_get("/api/v1/openapi.json", api_openapi)
+    app.router.add_get("/api/docs", api_docs_page)
     app.router.add_get("/api/v1/me", api_me)
     app.router.add_get("/api/v1/accounts", api_accounts)
     app.router.add_get("/api/v1/operations", api_operations)
@@ -510,5 +530,5 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
 
     log.info(
         "REST API routes registered: /api/v1/{health,me,accounts,operations,"
-        "send_message,click_button,get_messages}"
+        "send_message,click_button,get_messages,openapi.json} + /api/docs"
     )

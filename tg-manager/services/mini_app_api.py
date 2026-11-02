@@ -9221,6 +9221,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.debug("miniapp_config: матрица тарифов недоступна", exc_info=True)
             plans = []
+        try:
+            from services import tiers as _tiers
+            tier_list = [{"key": t, "name": _tiers.name(t), "price": _tiers.price_usd(t),
+                          "accounts": _tiers.cap_label(t)} for t in _tiers.TIERS]
+        except Exception:
+            log.debug("miniapp_config: тарифы недоступны", exc_info=True)
+            tier_list = []
         return _json_resp({
             "bot_username": bot_username,
             "mini_app_url": mini_app_url,
@@ -9229,6 +9236,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "paid_price": paid_price,
             "period_discounts": period_discounts,
             "plans": plans,
+            "tiers": tier_list,
         })
 
     app.router.add_get("/api/miniapp/config", miniapp_config)
