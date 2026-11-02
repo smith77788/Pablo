@@ -137,6 +137,13 @@ def audience_to_json(users: list[dict]) -> str:
 # предыдущего и подвести аккаунт под спамблок.
 _FLOOD_INLINE_MAX_S = 120
 
+# Перебор по буквам для групп больше потолка выдачи (D20): латиница, цифры,
+# кириллица. Каждая буква — отдельный поиск по имени/юзернейму.
+_SEARCH_ALPHABET = tuple("abcdefghijklmnopqrstuvwxyz0123456789"
+                         "абвгдеёжзийклмнопрстуфхцчшщэюя")
+# Столько пустых букв подряд — и перебор прекращается (скрытый список).
+_SEARCH_BARREN_STOP = 6
+
 # Сколько авторов подряд может не разрешиться, прежде чем сбор признаёт обрыв.
 # Один-два удалённых аккаунта — норма, а десяток отказов подряд — это уже
 # мёртвая сеть или прокси: дальше каждый запрос стоит _OP_TIMEOUT впустую.
@@ -596,64 +603,102 @@ async def parse_members(
     from telethon.tl.types import ChannelParticipantsSearch
 
     async def _collect(client, entity, st: _ParseState) -> None:
-        offset = 0
         batch_size = 200
         reported = 0
-        while st.total_found < limit:
-            if await _check_stop(should_stop, st):
-                return
-            try:
-                result = await asyncio.wait_for(client(
-                    GetParticipantsRequest(
-                        entity,
-                        ChannelParticipantsSearch(""),
-                        offset=offset,
-                        limit=min(batch_size, limit - st.total_found),
-                        hash=0,
-                    )
-                ), timeout=_OP_TIMEOUT)
-            except Exception as e:
-                _fw = flood_seconds(e)
-                if _fw is None:
-                    raise
-                await _record_parse_flood(pool, st.account_id, _fw)
-                if _fw > _FLOOD_INLINE_MAX_S:
-                    log.info("parser: FloodWait %dс дольше порога — разбор оборван", _fw)
-                    st.flood_wait = _fw
-                    return
-                log.info("parser FloodWait %ds, sleeping", _fw)
-                await asyncio.sleep(_fw + 5)
-                continue
+        seen: set[int] = set()
 
-            reported = max(reported, int(getattr(result, "count", 0) or 0))
-            if not result.users:
-                break
-
-            users = [_user_row(u) for u in result.users if not getattr(u, "deleted", False)]
-            st.total_saved += await _save_users(
-                pool, owner_id, st.run_id, "channel", st.source_id,
-                st.source_title, st.source_username, users,
-            )
-            st.total_found += len(users)
-            offset += len(result.users)
-
-            if progress_cb:
+        async def _sweep(query: str) -> int | None:
+            """Пролистать выдачу по одному запросу. Возвращает, сколько НОВЫХ
+            людей он дал, или None — сбор оборван (отмена, долгий флуд)."""
+            nonlocal reported
+            offset = 0
+            fresh = 0
+            while st.total_found < limit:
+                if await _check_stop(should_stop, st):
+                    return None
+                want = min(batch_size, limit - st.total_found)
                 try:
-                    await progress_cb(st.total_found, min(limit, reported or limit))
-                except Exception:
-                    log_exc_swallow(log, "Сбой progress_cb в parser")
+                    result = await asyncio.wait_for(client(
+                        GetParticipantsRequest(
+                            entity,
+                            ChannelParticipantsSearch(query),
+                            offset=offset,
+                            limit=want,
+                            hash=0,
+                        )
+                    ), timeout=_OP_TIMEOUT)
+                except Exception as e:
+                    _fw = flood_seconds(e)
+                    if _fw is None:
+                        raise
+                    await _record_parse_flood(pool, st.account_id, _fw)
+                    if _fw > _FLOOD_INLINE_MAX_S:
+                        log.info("parser: FloodWait %dс дольше порога — разбор оборван", _fw)
+                        st.flood_wait = _fw
+                        return None
+                    log.info("parser FloodWait %ds, sleeping", _fw)
+                    await asyncio.sleep(_fw + 5)
+                    continue
 
-            if len(result.users) < batch_size:
-                break
+                if not query:
+                    reported = max(reported, int(getattr(result, "count", 0) or 0))
+                if not result.users:
+                    break
 
-            await asyncio.sleep(1.5)  # Anti-flood pause
+                users = []
+                for u in result.users:
+                    if getattr(u, "deleted", False) or u.id in seen:
+                        continue
+                    seen.add(u.id)
+                    users.append(_user_row(u))
+                if users:
+                    st.total_saved += await _save_users(
+                        pool, owner_id, st.run_id, "channel", st.source_id,
+                        st.source_title, st.source_username, users,
+                    )
+                    st.total_found += len(users)
+                    fresh += len(users)
+                offset += len(result.users)
 
-        # Потолок выдачи. Telegram отдаёт стороннему аккаунту не больше ~10 тыс.
-        # участников (а у группы со скрытым списком — только админов), хотя
-        # `count` называет всех. Без оговорки владелец считал собранное полным.
-        if (st.total_found < limit and reported > offset
+                if progress_cb:
+                    try:
+                        await progress_cb(st.total_found, min(limit, reported or limit))
+                    except Exception:
+                        log_exc_swallow(log, "Сбой progress_cb в parser")
+
+                # Конец выдачи — страница короче запрошенной. Сравнивать с
+                # batch_size нельзя: у хвоста лимита запрос меньше пачки, а
+                # повторы, отсечённые по id, не делают выдачу конченой.
+                if len(result.users) < want:
+                    break
+
+                await asyncio.sleep(1.5)  # Anti-flood pause
+            return fresh
+
+        if await _sweep("") is None:
+            return
+
+        # Потолок выдачи (D20). Telegram отдаёт стороннему аккаунту не больше
+        # ~10 тыс. участников по пустому запросу, хотя `count` называет всех.
+        # Поиск по имени выдаёт СВОИ до ~10 тыс. на каждый запрос, поэтому
+        # перебор по буквам добирает остальных. У скрытого списка (только
+        # админы) буквы ничего нового не дают — после нескольких пустых
+        # запросов подряд перебор прекращается, чтобы не жечь лимиты аккаунта.
+        if reported > len(seen) and st.total_found < limit:
+            barren = 0
+            for q in _SEARCH_ALPHABET:
+                if st.total_found >= limit or len(seen) >= reported:
+                    break
+                got = await _sweep(q)
+                if got is None:
+                    return
+                barren = barren + 1 if got == 0 else 0
+                if barren >= _SEARCH_BARREN_STOP:
+                    break
+
+        if (st.total_found < limit and reported > len(seen)
                 and not st.stop_reason and not st.flood_wait):
-            st.note = (f"Telegram показал {offset} из {reported} участников — "
+            st.note = (f"Telegram показал {len(seen)} из {reported} участников — "
                        "остальных он сторонним аккаунтам не отдаёт (потолок выдачи "
                        "или скрытый список участников).")
 
