@@ -92,4 +92,4 @@ def test_svg_draws_every_step_jumps_and_stats():
 def test_wired_in_workflow_screen():
     html = miniapp_html()
     assert '<script src="screens/workflow_map.js"></script>' in html
-    assert "openWorkflowMap(${wfId}" in html
+    assert "openWorkflowMap(${Number(wfId)})" in html

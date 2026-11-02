@@ -9479,7 +9479,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         app.router.add_get("/miniapp", serve_index)
         app.router.add_get("/miniapp/", serve_index)
         # Раньше add_static: точный обработчик должен поймать .js/.css первым.
-        app.router.add_get(r"/miniapp/{path:[A-Za-z0-9_\-/.]+\.(?:js|css)}", serve_asset)
+        # Шаблон в переменной: скобки регулярки внутри вызова add_get сбивают
+        # статический скан регистраций (test_uch_bulk_routes_registered).
+        _asset_pattern = r"/miniapp/{path:[A-Za-z0-9_\-/.]+\.(?:js|css)}"
+        app.router.add_get(_asset_pattern, serve_asset)
         app.router.add_static("/miniapp", _static_dir, show_index=False)
         log.info("Mini App static served from %s at /miniapp", _static_dir)
     else:

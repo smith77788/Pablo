@@ -122,14 +122,17 @@ function _wfmModal() {
   return mo;
 }
 
-async function openWorkflowMap(wfId, wfName) {
+// Название берётся из ответа API, а не из onclick: строка в атрибуте-обработчике
+// рвёт разметку на апострофе.
+async function openWorkflowMap(wfId) {
   const mo = _wfmModal();
-  txt('wfMapTitle', '🗺 ' + esc(wfName || 'Схема сценария'));
+  txt('wfMapTitle', '🗺 Схема сценария');
   txt('wfMapBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   mo.classList.add('show');
   let d;
   try { d = await api('/api/miniapp/workflows/' + Number(wfId)); }
   catch (e) { txt('wfMapBody', errHtml(errRu(e), 'openWorkflowMap(' + Number(wfId) + ')')); return; }
+  if (d.name) txt('wfMapTitle', '🗺 ' + esc(d.name));
   const steps = d.steps || [];
   if (!steps.length) { txt('wfMapBody', empty('🗺', 'Шагов пока нет', 'Добавьте шаги — схема появится здесь.')); return; }
   txt('wfMapBody', '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">' + _wfmSvg(steps, d.stats) + '</div>' +

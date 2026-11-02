@@ -30285,7 +30285,7 @@ async function openWorkflowDetail(wfId, wfName) {
       html += empty('📝', 'Нет шагов', 'Нажмите + Шаг для добавления');
     } else {
       // Схема со стрелками — screens/workflow_map.js.
-      html += `<div style="padding:0 16px 8px"><button class="btn btn-s" style="width:100%" onclick="openWorkflowMap(${wfId}, ${esc(JSON.stringify(String(wfName || '')))})">🗺 Схема сценария</button></div>`;
+      html += `<div style="padding:0 16px 8px"><button class="btn btn-s" style="width:100%" onclick="openWorkflowMap(${Number(wfId)})">🗺 Схема сценария</button></div>`;
       html += '<div class="funnel-flow">';
       steps.forEach((s, i) => {
         const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲' };
