@@ -220,7 +220,9 @@ async function openSalesManager(botId) {
       '<button class="btn btn-p" style="width:100%;margin-bottom:12px" ' +
       'onclick="openPersonaEditor(0)">➕ Создать менеджера</button>' +
       '<button class="btn btn-s" style="width:100%;margin-bottom:12px" ' +
-      'onclick="spAiJournal()">📋 Что ИИ отвечает клиентам</button>';
+      'onclick="spAiJournal()">📋 Что ИИ отвечает клиентам</button>' +
+      '<button class="btn btn-s" style="width:100%;margin-bottom:12px" ' +
+      'onclick="openPurchaseForecast()">🔮 Прогноз покупок</button>';
     if (!list.length) {
       h += '<div style="text-align:center;color:var(--hint);padding:30px">Пока нет ни одного менеджера</div>';
     } else {
@@ -243,6 +245,79 @@ async function openSalesManager(botId) {
     // экран без единой кнопки, а таббар на подэкране скрыт.
     body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'openSalesManager(' + JSON.stringify(botId) + ')');
   }
+}
+
+// ── Прогноз покупок (services/ai_predict) ─────────────────────────────────────
+// RFM-сегменты покупателей бота и вероятность покупки за 30 дней. Сегмент
+// ставится тегом на карточки контактов — дальше это обычный сегмент рассылки.
+function _fcPct(p) { return Math.round((Number(p) || 0) * 100) + '%'; }
+
+async function openPurchaseForecast() {
+  _spScreen('s-forecast', '🔮 Прогноз покупок', 'openPurchaseForecast()');
+  push('s-forecast');
+  const body = document.getElementById('s-forecast-body');
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/ai/forecast');
+    const segs = d.segments || [];
+    const any = segs.some(x => x.count);
+    let h = '<div style="padding:0 4px 10px;font-size:12px;color:var(--hint)">' +
+      'Считается по заказам и переписке ботов-продавцов: давность и частота покупок, ' +
+      'свой ритм клиента, тип последней реплики. Это правила по истории, а не обещание.</div>';
+    if (!any) {
+      body.innerHTML = h + '<div style="text-align:center;color:var(--hint);padding:30px">' +
+        'Пока нет покупок и разговоров с ботами-продавцами — прогнозировать не по чему.</div>';
+      return;
+    }
+    h += '<div class="row"><div class="row-body"><div class="row-name">Ожидаем покупателей за ' +
+      esc(String(d.horizon_days || 30)) + ' дней: ' + esc(String(d.expected_buyers)) +
+      '</div><div class="row-val">Всего покупали: ' + esc(String(d.buyers || 0)) + '</div></div></div>';
+    const bt = d.backtest || {};
+    h += '<div class="row"><div class="row-body"><div class="row-name">Проверка на ваших данных</div><div class="row-val">' +
+      (bt.enough
+        ? 'Прогноз месяц назад: ' + _fcPct(bt.predicted) + ' купят, купили ' + _fcPct(bt.actual) +
+          '. Из трети с лучшим прогнозом купили ' + _fcPct(bt.top_third_actual) +
+          ', из остальных — ' + _fcPct(bt.rest_actual) + '.'
+        : 'Нужно хотя бы 10 клиентов с покупками старше месяца, сейчас ' + esc(String(bt.checked || 0)) +
+          ' — точность пока не измерить.') + '</div></div></div>';
+    h += '<div style="font-weight:600;margin:12px 4px 6px">Сегменты</div>';
+    h += segs.map(x => '<div class="row"><div class="row-body"><div class="row-name">' +
+      esc(x.label) + ' · ' + esc(String(x.count)) + '</div><div class="row-val">' + esc(x.hint) +
+      '</div></div>' + (x.count
+        ? '<button class="btn btn-s" style="flex:none" onclick="forecastTag(\'' + esc(x.id) + '\',this)">🏷 #' + esc(x.tag) + '</button>'
+        : '') + '</div>').join('');
+    const top = d.top || [];
+    if (top.length) {
+      h += '<div style="font-weight:600;margin:12px 4px 6px">Скорее всего купят</div>';
+      h += top.map(c => '<div class="row"><div class="row-body"><div class="row-name">' +
+        esc(c.name || (c.username ? '@' + c.username : 'Клиент ' + c.peer_user_id)) + ' · ' + _fcPct(c.probability) +
+        '</div><div class="row-val">' + esc(_fcSegLabel(segs, c.segment)) +
+        (c.frequency ? ' · покупок: ' + esc(String(c.frequency)) : '') +
+        (c.recency_days != null ? ' · последняя ' + esc(String(Math.round(c.recency_days))) + ' дн. назад' : '') +
+        (c.rhythm_days ? ' · ритм ~' + esc(String(Math.round(c.rhythm_days))) + ' дн.' : '') +
+        '</div></div></div>').join('');
+    }
+    body.innerHTML = h;
+  } catch (e) {
+    body.innerHTML = errHtml(errRu(e), 'openPurchaseForecast()');
+  }
+}
+
+function _fcSegLabel(segs, id) {
+  const s = (segs || []).find(x => x.id === id);
+  return s ? s.label : '';
+}
+
+async function forecastTag(seg, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/miniapp/ai/forecast/tag', {method: 'POST', body: JSON.stringify({segment: seg})});
+    toast('🏷 #' + r.tag + ': ' + r.tagged + ' в контактах' +
+      (r.without_card ? ', ' + r.without_card + ' без карточки контакта' : '') +
+      '. Сегмент по тегу — в «Контактах» и рассылках.');
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Тег не поставлен'));
+  } finally { if (btn) btn.disabled = false; }
 }
 
 // ── Редактор персоны ────────────────────────────────────────────────────────────

@@ -11,14 +11,23 @@
 пользователю не нужно искать раздел вручную.
 
 Только реальные данные и реальные таблицы — никаких выдуманных метрик
-(см. tg-manager/CLAUDE.md, ловушки #1/#3). Ничего не пишет в БД, состояние
-подсказок не хранит — «отложить» реализуется на клиенте (localStorage).
+(см. tg-manager/CLAUDE.md, ловушки #1/#3).
+
+Кроме подсказок по системе есть подсказки по ЛЮДЯМ (contact_suggestions):
+«3 горячих ждут ответа больше часа», «5 постоянных клиентов пропустили свой
+ритм покупок» — из «Входящих» (services/unified_inbox) и прогноза покупок
+(services/ai_predict).
+
+Копайлот учится на реакциях владельца (copilot_feedback, schema_v281):
+«открыл» и «применил» поднимают подсказку, «отложил» — опускает и прячет её
+на срок `snooze_hours` на всех устройствах (rank_with_feedback).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 import asyncpg
 
@@ -735,6 +744,169 @@ def build_suggestions(state: dict) -> list[dict]:
     return uniq
 
 
+FEEDBACK_KINDS = ("opened", "applied", "snoozed")
+_FEEDBACK_DAYS = 30
+
+
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def contact_suggestions(cs: dict) -> list[dict]:
+    """Подсказки по людям: кто ждёт ответа, кто уходит, кто не дожат. ЧИСТАЯ.
+
+    cs: {hot_waiting, complaints_waiting, at_risk, hot_leads}."""
+    s: list[dict] = []
+    n = int(cs.get("hot_waiting") or 0)
+    if n:
+        s.append({
+            "id": "contacts_hot_waiting", "priority": 98, "icon": "🔥",
+            "title": f"{n} {_plural(n, 'горячий ждёт', 'горячих ждут', 'горячих ждут')} "
+                     "ответа больше часа",
+            "reason": "Спрашивали цену или готовы купить, а ответа нет — интерес "
+                      "остывает с каждым часом.",
+            "cta": "Открыть ждущих", "nav": None, "fn": "openInboxWaiting",
+            "snooze_hours": 3})
+    n = int(cs.get("complaints_waiting") or 0)
+    if n:
+        s.append({
+            "id": "contacts_complaints_waiting", "priority": 97, "icon": "⚠️",
+            "title": f"{n} {_plural(n, 'жалоба', 'жалобы', 'жалоб')} без ответа",
+            "reason": "Недовольный клиент без ответа уходит и рассказывает другим — "
+                      "ответьте первыми.",
+            "cta": "Открыть ждущих", "nav": None, "fn": "openInboxWaiting",
+            "snooze_hours": 3})
+    n = int(cs.get("at_risk") or 0)
+    if n:
+        s.append({
+            "id": "contacts_at_risk", "priority": 72, "icon": "📉",
+            "title": f"{n} {_plural(n, 'постоянный клиент пропустил', 'постоянных клиента пропустили', 'постоянных клиентов пропустили')} "
+                     "свой ритм покупок",
+            "reason": "Покупали не раз, но давно не возвращались. Отметьте их тегом "
+                      "и сделайте рассылку с поводом вернуться.",
+            "cta": "Открыть прогноз", "nav": None, "fn": "openPurchaseForecast"})
+    n = int(cs.get("hot_leads") or 0)
+    if n:
+        s.append({
+            "id": "contacts_hot_leads", "priority": 74, "icon": "🎯",
+            "title": f"{n} {_plural(n, 'человек спрашивал', 'человека спрашивали', 'человек спрашивали')} "
+                     "цену и не купил",
+            "reason": "Интерес был, заказа нет. Напишите им лично или отметьте "
+                      "тегом для рассылки.",
+            "cta": "Открыть прогноз", "nav": None, "fn": "openPurchaseForecast"})
+    return s
+
+
+def rank_with_feedback(items: list[dict], stats: dict, now: datetime | None = None) -> list[dict]:
+    """Подсказки с учётом реакций владельца. ЧИСТАЯ.
+
+    stats: {action_id: {used, snoozed, last_snoozed}} за 30 дней. Отложенная
+    прячется на snooze_hours (по умолчанию сутки); каждое открытие/применение
+    поднимает подсказку на 4 (до +20), каждое «отложить» опускает на 6 (до −30)."""
+    now = now or datetime.now(timezone.utc)
+    out = []
+    for it in items:
+        st = stats.get(it["id"]) or {}
+        last = st.get("last_snoozed")
+        hours = it.get("snooze_hours", 24)
+        if last and now - last < timedelta(hours=hours):
+            continue
+        used, snoozed = int(st.get("used") or 0), int(st.get("snoozed") or 0)
+        shift = 4 * min(used, 5) - 6 * min(snoozed, 5)
+        item = dict(it)
+        if shift:
+            item["priority"] = it["priority"] + shift
+            item["learned"] = ("Выше: вы часто этим пользуетесь" if shift > 0
+                               else "Ниже: вы это часто откладываете")
+        out.append(item)
+    out.sort(key=lambda x: (-x["priority"], x["id"]))
+    return out
+
+
+async def feedback_stats(pool: asyncpg.Pool, uid: int) -> dict:
+    rows = await _fr(
+        pool,
+        "SELECT action_id, "
+        "COUNT(*) FILTER (WHERE kind IN ('opened','applied')) AS used, "
+        "COUNT(*) FILTER (WHERE kind='snoozed') AS snoozed, "
+        "MAX(created_at) FILTER (WHERE kind='snoozed') AS last_snoozed "
+        "FROM copilot_feedback WHERE owner_id=$1 "
+        f"AND created_at > now() - interval '{_FEEDBACK_DAYS} days' GROUP BY action_id",
+        uid)
+    out: dict = {}
+    for r in rows:
+        r = dict(r)
+        if r.get("action_id"):  # битая строка или рассинхрон схемы — без учёта
+            out[r["action_id"]] = {"used": r.get("used") or 0,
+                                   "snoozed": r.get("snoozed") or 0,
+                                   "last_snoozed": r.get("last_snoozed")}
+    return out
+
+
+async def record_feedback(pool: asyncpg.Pool, uid: int, action_id: str, kind: str) -> bool:
+    action_id = (action_id or "").strip()[:80]
+    if kind not in FEEDBACK_KINDS or not action_id:
+        return False
+    await pool.execute(
+        "INSERT INTO copilot_feedback (owner_id, action_id, kind) VALUES ($1, $2, $3)",
+        int(uid), action_id, kind)
+    return True
+
+
+def _hours_since(v, now: datetime) -> float:
+    if isinstance(v, str):
+        try:
+            v = datetime.fromisoformat(v)
+        except ValueError:
+            return 0.0
+    if not isinstance(v, datetime):
+        return 0.0
+    if v.tzinfo is None:
+        v = v.replace(tzinfo=timezone.utc)
+    return (now - v).total_seconds() / 3600.0
+
+
+def count_waiting(threads: list[dict], now: datetime) -> dict:
+    """Ждущие ответа дольше часа: горячие и жалобы. ЧИСТАЯ."""
+    from services.ai_inbox_assist import classify_text
+
+    hot = complaints = 0
+    for t in threads:
+        if not t.get("waiting") or _hours_since(t.get("last_at"), now) < 1:
+            continue
+        kind = classify_text(t.get("last_text") or "")
+        if kind in ("ready_to_buy", "price"):
+            hot += 1
+        elif kind == "complaint":
+            complaints += 1
+    return {"hot_waiting": hot, "complaints_waiting": complaints}
+
+
+async def _contact_state(pool: asyncpg.Pool, uid: int) -> dict:
+    from services import ai_predict, unified_inbox
+
+    now = datetime.now(timezone.utc)
+    out: dict = {}
+    try:
+        threads = (await unified_inbox.list_threads(pool, uid, only_waiting=True,
+                                                    limit=500))["threads"]
+        out.update(count_waiting(threads, now))
+    except Exception as e:  # pragma: no cover - сбой одного источника
+        log.debug("next_actions inbox state failed: %s", e)
+    try:
+        scored = ai_predict.score_all(await ai_predict.load_customers(pool, uid), now)
+        out["at_risk"] = sum(1 for c in scored if c["segment"] == "at_risk")
+        out["hot_leads"] = sum(1 for c in scored if c["segment"] == "hot_leads")
+    except Exception as e:  # pragma: no cover
+        log.debug("next_actions forecast state failed: %s", e)
+    return out
+
+
 async def compute_next_actions(
     pool: asyncpg.Pool, uid: int, limit: int = 5
 ) -> list[dict]:
@@ -744,4 +916,10 @@ async def compute_next_actions(
     except Exception as e:  # pragma: no cover
         log.warning("next_actions state gather failed for uid=%s: %s", uid, e)
         return []
-    return build_suggestions(state)[: max(0, limit)]
+    items = build_suggestions(state)
+    people = contact_suggestions(await _contact_state(pool, uid))
+    if people:
+        # «Проверьте здоровье» — запасная подсказка на случай, когда делать
+        # нечего; при людях, которые ждут, она лишняя.
+        items = people + [i for i in items if i["id"] != "check_account_health"]
+    return rank_with_feedback(items, await feedback_stats(pool, uid))[: max(0, limit)]

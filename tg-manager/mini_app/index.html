@@ -9849,7 +9849,8 @@ async function dismissPulse(id) {
 // ── Copilot: контекстные подсказки «Что делать дальше» ──────────────
 // Открывает нужный раздел по подсказке: вкладка (nav) или глобальная
 // функция открытия экрана (fn). Пользователю не нужно искать раздел сам.
-function copilotOpen(nav, fn) {
+function copilotOpen(nav, fn, id) {
+  if (id) copilotFeedback(id, 'opened');
   try {
     if (nav) { goTab(nav); }
     else if (fn && typeof window[fn] === 'function') { window[fn](); }
@@ -9880,7 +9881,14 @@ async function launchChainStep(arg) {
   } catch(e) { toast('⚠️ ' + errRu(e, 'Шаг не запустился').substring(0, 140)); }
 }
 
-// «Отложить» — клиентское, на сутки, по id подсказки (без роста схемы БД).
+// Реакция на подсказку уходит на сервер: копайлот поднимает то, чем владелец
+// пользуется, и прячет отложенное на всех устройствах (services/next_actions).
+function copilotFeedback(id, kind) {
+  try { api('/api/miniapp/next_actions/feedback', {method:'POST', body:JSON.stringify({id, kind})}).catch(()=>{}); } catch(_) {}
+}
+// «Отложить» — сразу прячем на этом устройстве (localStorage) и сообщаем
+// серверу; срок — snooze_hours подсказки (горячие клиенты — 3 часа, а не сутки).
+let _copilotSnooze = {};
 function copilotDismissed() {
   try {
     const raw = localStorage.getItem('infragram_copilot_dismiss');
@@ -9894,9 +9902,10 @@ function copilotDismissed() {
 function copilotDismiss(id) {
   try {
     const obj = copilotDismissed();
-    obj[id] = Date.now() + 24*3600*1000;
+    obj[id] = Date.now() + (_copilotSnooze[id] || 24)*3600*1000;
     localStorage.setItem('infragram_copilot_dismiss', JSON.stringify(obj));
   } catch(_) {}
+  copilotFeedback(id, 'snoozed');
   loadNextActions();
 }
 
@@ -9908,12 +9917,13 @@ function renderNextActions(actions) {
   if (!lists.length) return;
   const dismissed = copilotDismissed();
   const items = (actions||[]).filter(a => !dismissed[a.id]);
+  (actions||[]).forEach(a => { if (a.snooze_hours) _copilotSnooze[a.id] = a.snooze_hours; });
   if (!items.length) {
     lists.forEach(l => { const w = l.closest('.copilot-wrap'); if (w) w.style.display='none'; l.innerHTML=''; });
     return;
   }
   const html = items.map(a => {
-    const navArg = `copilotOpen(${a.nav?`'${a.nav}'`:'null'},${a.fn?`'${a.fn}'`:'null'})`;
+    const navArg = `copilotOpen(${a.nav?`'${a.nav}'`:'null'},${a.fn?`'${a.fn}'`:'null'},'${esc(a.id)}')`;
     const hasApply = !!a.apply;
     // Есть действие в один клик → primary-кнопка «применить» + ссылка «открыть»
     // (для ручного контроля). Нет — вся карточка ведёт в раздел, как раньше.
@@ -9929,6 +9939,7 @@ function renderNextActions(actions) {
       <div class="copilot-body">
         <div class="copilot-title">${esc(a.title||'')}</div>
         <div class="copilot-reason">${esc(a.reason||'')}</div>
+        ${a.learned ? `<div class="copilot-reason" style="opacity:.7">🧠 ${esc(a.learned)}</div>` : ''}
         ${footer}
       </div>
       <div class="copilot-x" onclick="event.stopPropagation();copilotDismiss('${a.id}')" title="Отложить" role="button" tabindex="0">✕</div>
