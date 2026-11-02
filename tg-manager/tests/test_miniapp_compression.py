@@ -86,3 +86,62 @@ async def test_client_without_gzip_still_gets_full_file(client):
     assert r.status == 200
     assert r.headers.get("Content-Encoding") != "gzip"
     assert len(body) == os.path.getsize(INDEX)
+
+
+# ── Скрипты экранов и стили ──────────────────────────────────────────────────
+# Замер холодного старта (2026-11-02): index.html уже уходил сжатым, а ~30
+# файлов screens/*.js и ui_kit.css (~620 КБ) — как есть, на каждое открытие.
+
+SCREENS = os.path.join(ROOT, "mini_app", "screens")
+
+
+def _assets():
+    out = ["ui_kit.css"] + ["screens/" + n for n in sorted(os.listdir(SCREENS)) if n.endswith(".js")]
+    assert len(out) > 10
+    return out
+
+
+async def test_screen_scripts_are_gzipped_and_valid(client):
+    raw_total = wire_total = 0
+    for rel in _assets():
+        path = os.path.join(ROOT, "mini_app", rel)
+        r = await client.get("/miniapp/" + rel, headers={"Accept-Encoding": "gzip"})
+        body = await r.read()
+        assert r.status == 200, rel
+        assert r.headers.get("Content-Encoding") == "gzip", rel
+        assert gzip.decompress(body) == open(path, "rb").read(), rel
+        ctype = r.headers.get("Content-Type", "")
+        assert ("javascript" in ctype) if rel.endswith(".js") else ("text/css" in ctype), rel
+        raw_total += os.path.getsize(path)
+        wire_total += len(body)
+    # Итог замера: по сети уходит меньше трети исходных байт.
+    assert wire_total < raw_total / 3, f"{wire_total} из {raw_total}"
+
+
+async def test_screen_script_repeat_open_is_304(client):
+    rel = _assets()[1]
+    r1 = await client.get("/miniapp/" + rel, headers={"Accept-Encoding": "gzip"})
+    etag = r1.headers.get("ETag")
+    assert etag
+    r2 = await client.get("/miniapp/" + rel,
+                          headers={"Accept-Encoding": "gzip", "If-None-Match": etag})
+    assert r2.status == 304 and await r2.read() == b""
+
+
+async def test_screen_script_without_gzip_is_whole(client):
+    rel = _assets()[1]
+    r = await client.get("/miniapp/" + rel, headers={"Accept-Encoding": "identity"})
+    assert r.status == 200 and r.headers.get("Content-Encoding") != "gzip"
+    assert len(await r.read()) == os.path.getsize(os.path.join(ROOT, "mini_app", rel))
+
+
+async def test_asset_route_does_not_escape_the_folder(client):
+    for bad in ("/miniapp/../services/onboarding.js", "/miniapp/screens/%2e%2e/%2e%2e/main.js",
+                "/miniapp/nope.js"):
+        r = await client.get(bad, headers={"Accept-Encoding": "gzip"})
+        assert r.status == 404, bad
+
+
+async def test_other_static_still_served(client):
+    r = await client.get("/miniapp/manifest.webmanifest")
+    assert r.status == 200
