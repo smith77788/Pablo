@@ -9884,7 +9884,10 @@ async function launchChainStep(arg) {
 // Реакция на подсказку уходит на сервер: копайлот поднимает то, чем владелец
 // пользуется, и прячет отложенное на всех устройствах (services/next_actions).
 function copilotFeedback(id, kind) {
-  try { api('/api/miniapp/next_actions/feedback', {method:'POST', body:JSON.stringify({id, kind})}).catch(()=>{}); } catch(_) {}
+  // Учёт реакции — не загрузка экрана: его сбой ничего не прячет от
+  // владельца, подсказка уже скрыта или открыта на этом устройстве.
+  api('/api/miniapp/next_actions/feedback', {method:'POST', body:JSON.stringify({id, kind})})
+    .catch(e => console.warn('copilot feedback', e));
 }
 // «Отложить» — сразу прячем на этом устройстве (localStorage) и сообщаем
 // серверу; срок — snooze_hours подсказки (горячие клиенты — 3 часа, а не сутки).
