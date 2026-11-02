@@ -371,7 +371,7 @@ async def test_one_chain_transaction_confirms_only_one_invoice(monkeypatch):
 
     granted: list = []
 
-    async def _activate(executor, user_id, plan, months):
+    async def _activate(executor, user_id, plan, months, tier=None):
         granted.append(user_id)
 
     monkeypatch.setattr(pc, "_activate_subscription", _activate)

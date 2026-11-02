@@ -98,7 +98,7 @@ def test_checker_selects_open_invoices_and_refuses_reused_tx(pool, monkeypatch):
 
     granted: list = []
 
-    async def _activate(executor, user_id, plan, months):
+    async def _activate(executor, user_id, plan, months, tier=None):
         granted.append((user_id, months))
 
     monkeypatch.setattr(pc, "_activate_subscription", _activate)

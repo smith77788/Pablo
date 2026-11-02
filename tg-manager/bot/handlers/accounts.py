@@ -188,9 +188,19 @@ def _login_ru(exc) -> str:
         return "Telegram отклонил вход — попробуйте ещё раз"
 
 
+def _limit_reached_text(limit_label: str) -> str:
+    """Лимит флота тарифа исчерпан — что это и куда идти."""
+    from services import tiers
+
+    others = ", ".join(f"«{tiers.name(t)}» — {tiers.cap_label(t)}" for t in tiers.TIERS)
+    return (f"⚠️ Достигнут лимит аккаунтов вашего тарифа: <b>{limit_label}</b>.\n\n"
+            f"Тарифы: {others}. Сменить тариф — /subscription, "
+            "или удалите аккаунты, которые больше не нужны.")
+
+
 def _save_err_ru(exc) -> str:
     """Сбой записи аккаунта → причина для человека; техника — в лог."""
-    if isinstance(exc, db.AccountIdentityMissing):
+    if isinstance(exc, db.AccountNotSaved):
         return str(exc)
     log.warning("запись аккаунта не удалась: %s", exc, exc_info=exc)
     return "не удалось записать в базу — попробуйте ещё раз"
@@ -198,19 +208,25 @@ def _save_err_ru(exc) -> str:
 
 async def _get_account_limit(pool: asyncpg.Pool, user_id: int) -> tuple[str, int]:
     """Return (plan, limit) for this user."""
+    # Лимит — тот же, что держит дверь записи (db.check_account_cap):
+    # тариф Старт/Про/Бизнес (services/tiers.py), на бесплатном — 1 аккаунт,
+    # пока положен пробный период.
+    from services import tiers
+
     plan = await get_plan(pool, user_id)
-    limit = ACC_LIMITS.get(plan, 0)
-    if limit == 0:
-        # Бесплатный тариф аккаунтов не даёт, но пробный период выдаётся ПОСЛЕ
-        # первого аккаунта (services/trial.py). Без этого исключения новичок в
-        # боте упирался в замок раньше, чем мог получить триал.
+    try:
+        limit = await tiers.owner_account_cap(pool, user_id)
+    except Exception:
+        log_exc_swallow(log, "Не удалось прочитать лимит аккаунтов тарифа")
+        limit = ACC_LIMITS.get(plan, 0)
+    if plan == "free":
+        # Пробный период выдаётся ПОСЛЕ первого аккаунта (services/trial.py).
+        # Без этого новичок в боте упирался в замок раньше, чем мог его получить.
         try:
             from services import trial
             if await trial.maybe_grant(pool, user_id):
                 plan = await get_plan(pool, user_id)
-                limit = ACC_LIMITS.get(plan, 0)
-            elif await trial.is_eligible(pool, user_id, need_account=False):
-                limit = 1
+                limit = await tiers.owner_account_cap(pool, user_id)
         except Exception:
             log_exc_swallow(log, "Не удалось проверить право на пробный период")
     return plan, limit
@@ -617,9 +633,7 @@ async def cb_add_account(
         limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await callback.message.edit_text(
-            f"⚠️ Достигнут лимит аккаунтов для вашего плана "
-            f"(<b>{plan.upper()}</b>: {limit_label} аккаунт{'ов' if limit != 1 else ''}).\n\n"
-            f"Обновите подписку, чтобы добавить больше аккаунтов.",
+            _limit_reached_text(limit_label),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 upgrade_plan, back_callback=AccCb(action="menu")
@@ -827,10 +841,7 @@ async def cb_qr_login(
     if len(accounts) >= limit:
         limit_label = tariffs.format_limit(limit)
         await callback.message.edit_text(
-            f"⚠️ Достигнут лимит аккаунтов для вашего плана "
-            f"(<b>{plan.upper()}</b>: {limit_label} аккаунт"
-            f"{'ов' if limit != 1 else ''}).\n\n"
-            f"Обновите подписку, чтобы добавить больше аккаунтов.",
+            _limit_reached_text(limit_label),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 _next_account_plan(plan), back_callback=AccCb(action="menu")),
@@ -3506,8 +3517,7 @@ async def cb_import_menu(
         limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await callback.message.edit_text(
-            f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
-            "Обновите подписку для добавления новых аккаунтов.",
+            _limit_reached_text(limit_label),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 upgrade_plan, back_callback=AccCb(action="menu")
@@ -4022,8 +4032,7 @@ async def _finalize_import(
         limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await message.answer(
-            f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
-            "Обновите подписку для добавления новых аккаунтов.",
+            _limit_reached_text(limit_label),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 upgrade_plan, back_callback=AccCb(action="menu")
@@ -4055,7 +4064,7 @@ async def _finalize_import(
             lang_code=device.get("lang_code"),
             system_lang_code=device.get("system_lang_code"),
         )
-    except db.AccountIdentityMissing as exc:
+    except db.AccountNotSaved as exc:
         await message.answer(f"❌ {escape(str(exc))}", reply_markup=terminal_kb())
         return
     except Exception:
@@ -4330,7 +4339,7 @@ async def _do_batch_import(
                         "Ошибка привязки кластера при батч-импорте аккаунта",
                         account_id=acc_id,
                     )
-        except db.AccountIdentityMissing as e:
+        except db.AccountNotSaved as e:
             err_list.append(f"❌ Сессия #{i + 1}: {escape(str(e))}")
         except Exception as e:
             log.warning("batch import: сессия #%d: %s", i + 1, e)

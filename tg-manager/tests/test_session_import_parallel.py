@@ -173,3 +173,34 @@ def test_batch_fits_the_frontend_timeout():
     assert waves * SI.VALIDATE_TIMEOUT_S < 30, (
         f"худший случай {waves * SI.VALIDATE_TIMEOUT_S}s не влезает в тайм-аут фронта"
     )
+
+
+# Дверь записи аккаунта (db.upsert_tg_account) пишет одной транзакцией под
+# блокировкой владельца и сверяет лимит флота тарифа (services/tiers.py).
+# Фейку — соединение-он-сам; лимит здесь не проверяется
+# (tests/test_subscription_tiers.py).
+from contextlib import asynccontextmanager as _acm  # noqa: E402
+
+
+@_acm
+async def _same_conn(self):
+    yield self
+
+
+@_acm
+async def _no_tx(self):
+    yield None
+
+
+_Pool.acquire = _same_conn
+_Pool.transaction = _no_tx
+
+
+@pytest.fixture(autouse=True)
+def _no_fleet_cap(monkeypatch):
+    from bot.utils import tariffs
+    from services import tiers
+
+    async def _unlimited(pool, owner_id):
+        return tariffs.UNLIMITED
+    monkeypatch.setattr(tiers, "owner_account_cap", _unlimited)

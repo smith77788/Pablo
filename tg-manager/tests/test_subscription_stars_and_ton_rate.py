@@ -160,7 +160,7 @@ async def test_ton_is_hidden_when_there_is_no_rate(monkeypatch):
 
     monkeypatch.setattr(sh, "_live_ton_rate", _no_rate)
     cb = _Callback()
-    await sh.cb_choose_period(cb, SubCb(action="choose_period", plan="paid", months=1), _RecPool())
+    await sh.cb_choose_period(cb, SubCb(action="choose_period", plan="paid", months=1, tier="pro"), _RecPool())
     texts = _buttons(cb.message.edits[-1][1])
     assert not any("TON —" in t for t in texts), texts
     assert any("USDT" in t for t in texts), "USDT от курса не зависит и должен остаться"
@@ -253,7 +253,7 @@ async def test_stars_button_and_invoice(monkeypatch):
     monkeypatch.setattr(sh, "_tron_wallet", lambda: "")
     sh.set_pay_config({"STARS_PER_USD": "77"})
     cb = _Callback()
-    await sh.cb_choose_period(cb, SubCb(action="choose_period", plan="paid", months=1), _RecPool())
+    await sh.cb_choose_period(cb, SubCb(action="choose_period", plan="paid", months=1, tier="pro"), _RecPool())
     texts = _buttons(cb.message.edits[-1][1])
     assert any("Stars" in t for t in texts), texts
     assert not any("Запросить подписку" in t for t in texts), (
@@ -336,6 +336,7 @@ def test_stars_payment_confirms_once_on_real_schema():
 
     first, again, other, sub, pay = asyncio.new_event_loop().run_until_complete(go())
     assert first is not None, "оплата Stars не включила подписку"
+    first, _credited = first
     assert again is None, "повторная доставка апдейта продлила подписку второй раз"
     assert other is None, "чужой пользователь подтвердил чужой счёт"
     assert sub["expires_at"] == first

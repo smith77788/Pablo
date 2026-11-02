@@ -76,7 +76,7 @@ class PlanRequiredError(PermissionError):
     хендлер забывал гейт, free-юзер мог поставить платную операцию.
     """
 
-    def __init__(self, op_type: str, required_plan: str) -> None:
+    def __init__(self, op_type: str, required_plan: str, *, quota_spent: bool = False) -> None:
         self.op_type = op_type
         self.required_plan = required_plan
         # Текст исключения — это РОВНО то, что увидит человек: сорок с лишним
@@ -88,7 +88,14 @@ class PlanRequiredError(PermissionError):
         # оформления, то есть в лучшей точке конверсии путь к оплате обрывался.
         # Тип операции и требуемый тариф остаются полями исключения — для логов.
         what = (OP_REGISTRY.get(op_type) or {}).get("description") or op_type
-        super().__init__(f"Операция «{what}» доступна по подписке")
+        self.quota_spent = quota_spent
+        if quota_spent:
+            from services import free_quota
+            super().__init__(
+                f"Бесплатные {free_quota.monthly_limit()} операций в этом месяце "
+                f"закончились. Операция «{what}» доступна по подписке")
+        else:
+            super().__init__(f"Операция «{what}» доступна по подписке")
 
 
 class ImmunityBlockedError(PermissionError):
@@ -128,24 +135,31 @@ async def _enforce_immunity(pool, owner_id: int, op_type: str) -> None:
                                    "Тип операции временно приостановлен", policy.get("until"))
 
 
-async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> None:
+async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict,
+                            *, consume_quota: bool = False) -> bool:
     """Проверить подписку владельца против min_plan операции.
 
     Fail-open: если сам механизм проверки недоступен/упал — НЕ блокируем (лучше
     пропустить, чем сломать масс-операцию из-за бага в проверке). Блокируем
     только при однозначно недостаточном тарифе. Админы и free-mode пропускаются
     внутри require_plan.
+
+    consume_quota=True (только постановка в submit): владельцу без подписки,
+    у которого кончился или не положен триал, операция списывается из
+    месячной квоты бесплатного тарифа (services/free_quota.py). Возвращает
+    True, если пропустила именно квота — тогда submit вернёт единицу, если
+    операция дальше не встанет.
     """
     min_plan = meta.get("min_plan")
     if not min_plan:
-        return
+        return False
     try:
         from bot.utils.subscription import require_plan, coerce_plan
     except Exception:
         log.warning("operation_bus: subscription module unavailable — skip plan gate", exc_info=True)
-        return
+        return False
     if coerce_plan(min_plan) == "free":
-        return
+        return False
     try:
         allowed = await require_plan(pool, owner_id, min_plan)
     except Exception:
@@ -153,7 +167,7 @@ async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> No
             "operation_bus: plan check errored for op=%s owner=%s — allowing (fail-open)",
             op_type, owner_id, exc_info=True,
         )
-        return
+        return False
     if not allowed:
         # Новичок с живым аккаунтом ещё не брал пробный период — выдаём его
         # здесь, в момент первого платного действия (services/trial.py), а не
@@ -164,8 +178,15 @@ async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> No
                 allowed = await require_plan(pool, owner_id, min_plan)
         except Exception:
             log.warning("operation_bus: trial grant errored owner=%s", owner_id, exc_info=True)
-    if not allowed:
-        raise PlanRequiredError(op_type, coerce_plan(min_plan))
+    if allowed:
+        return False
+    if consume_quota:
+        from services import free_quota
+        if await free_quota.consume(pool, owner_id, op_type):
+            return True
+        if free_quota.covers(op_type):
+            raise PlanRequiredError(op_type, coerce_plan(min_plan), quota_spent=True)
+    raise PlanRequiredError(op_type, coerce_plan(min_plan))
 
 
 async def enforce_gates(pool, owner_id: int, op_type: str) -> None:
@@ -829,14 +850,23 @@ async def submit(
     # Централизованный тариф-гейт (defense-in-depth поверх гейтов в хендлерах):
     # объявленный min_plan становится авторитетным — free-юзер не поставит
     # платную операцию, даже если какой-то хендлер забыл проверку.
+    _by_quota = False
     if not bypass_plan_check:
-        await _enforce_min_plan(pool, owner_id, op_type, meta)
+        _by_quota = await _enforce_min_plan(pool, owner_id, op_type, meta,
+                                            consume_quota=True)
 
     # Предохранитель Ban Weather: если этот тип операции прямо сейчас массово
     # убивает аккаунты владельца — не ставим новые, пока волна не спадёт.
     # Замыкает петлю «исход → причина → защита»: без этого детектор вспышек
     # оставался бы просто дашбордом. Fail-open внутри.
-    await _enforce_immunity(pool, owner_id, op_type)
+    try:
+        await _enforce_immunity(pool, owner_id, op_type)
+    except Exception:
+        if _by_quota:
+            # Операция не встала — единица квоты бесплатного тарифа не сгорает.
+            from services import free_quota
+            await free_quota.refund(pool, owner_id)
+        raise
 
     retries = max_retries if max_retries is not None else meta.get("max_retries", 3)
     op_label = label or meta.get("description") or op_type
@@ -855,56 +885,66 @@ async def submit(
     # TOCTOU без изменения схемы); внутри окна ищем ещё-в-полёте идентичную
     # операцию. Отличающиеся params (в т.ч. per-account циклы) не дедупятся —
     # ложных слияний нет. Отключается dedup_window_sec=0.
-    reused = False
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            if dedup_window_sec and dedup_window_sec > 0:
-                dedup_identity = sensitive_params_fp or params_json
-                _dedup_statuses = _dedup_status_sql()
-                await conn.execute(
-                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                    f"opbus|{owner_id}|{op_type}|{dedup_identity}|{sched}",
-                )
-                if sensitive_params_fp:
-                    existing = await conn.fetchval(
-                        f"""SELECT id FROM operation_queue
-                           WHERE owner_id = $1 AND op_type = $2
-                             AND status IN {_dedup_statuses}
-                             AND params->>'_sealed_params_fp' = $3
-                             AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
-                             AND created_at > NOW() - make_interval(secs => $5)
-                           ORDER BY id DESC LIMIT 1""",
-                        owner_id, op_type, sensitive_params_fp, sched,
-                        dedup_window_sec,
+    try:
+        reused = False
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                if dedup_window_sec and dedup_window_sec > 0:
+                    dedup_identity = sensitive_params_fp or params_json
+                    _dedup_statuses = _dedup_status_sql()
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                        f"opbus|{owner_id}|{op_type}|{dedup_identity}|{sched}",
                     )
-                else:
-                    existing = await conn.fetchval(
-                        f"""SELECT id FROM operation_queue
-                           WHERE owner_id = $1 AND op_type = $2
-                             AND status IN {_dedup_statuses}
-                             AND params = $3::jsonb
-                             AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
-                             AND created_at > NOW() - make_interval(secs => $5)
-                           ORDER BY id DESC LIMIT 1""",
-                        owner_id, op_type, params_json, sched, dedup_window_sec,
+                    if sensitive_params_fp:
+                        existing = await conn.fetchval(
+                            f"""SELECT id FROM operation_queue
+                               WHERE owner_id = $1 AND op_type = $2
+                                 AND status IN {_dedup_statuses}
+                                 AND params->>'_sealed_params_fp' = $3
+                                 AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
+                                 AND created_at > NOW() - make_interval(secs => $5)
+                               ORDER BY id DESC LIMIT 1""",
+                            owner_id, op_type, sensitive_params_fp, sched,
+                            dedup_window_sec,
+                        )
+                    else:
+                        existing = await conn.fetchval(
+                            f"""SELECT id FROM operation_queue
+                               WHERE owner_id = $1 AND op_type = $2
+                                 AND status IN {_dedup_statuses}
+                                 AND params = $3::jsonb
+                                 AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
+                                 AND created_at > NOW() - make_interval(secs => $5)
+                               ORDER BY id DESC LIMIT 1""",
+                            owner_id, op_type, params_json, sched, dedup_window_sec,
+                        )
+                    if existing is not None:
+                        op_id = int(existing)
+                        reused = True
+                if not reused:
+                    row = await conn.fetchrow(
+                        """INSERT INTO operation_queue
+                               (owner_id, op_type, status, params,
+                                total_items, done_items,
+                                scheduled_for, template_id, max_retries, label, created_at)
+                           VALUES ($1, $2, 'pending', $3::jsonb,
+                                   $4, 0,
+                                   $5::timestamptz, $6, $7, $8, NOW())
+                           RETURNING id""",
+                        owner_id, op_type, params_json, total_items, sched,
+                        template_id, retries, op_label,
                     )
-                if existing is not None:
-                    op_id = int(existing)
-                    reused = True
-            if not reused:
-                row = await conn.fetchrow(
-                    """INSERT INTO operation_queue
-                           (owner_id, op_type, status, params,
-                            total_items, done_items,
-                            scheduled_for, template_id, max_retries, label, created_at)
-                       VALUES ($1, $2, 'pending', $3::jsonb,
-                               $4, 0,
-                               $5::timestamptz, $6, $7, $8, NOW())
-                       RETURNING id""",
-                    owner_id, op_type, params_json, total_items, sched,
-                    template_id, retries, op_label,
-                )
-                op_id = int(row["id"])
+                    op_id = int(row["id"])
+    except Exception:
+        if _by_quota:
+            from services import free_quota
+            await free_quota.refund(pool, owner_id)
+        raise
+    if reused and _by_quota:
+        # Двойной тап: операция уже стоит, вторую единицу квоты не берём.
+        from services import free_quota
+        await free_quota.refund(pool, owner_id)
 
     if reused:
         log.info(
