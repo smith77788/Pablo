@@ -59,7 +59,7 @@ def test_every_catalog_event_has_a_source_in_the_migration():
     auto = open(os.path.join(ROOT, "schema_v270_integration_automation_events.sql"),
                 encoding="utf-8").read()
     assert "AFTER INSERT ON automation_events" in auto
-    crm = open(os.path.join(ROOT, "schema_v272_crm_connectors.sql"), encoding="utf-8").read()
+    crm = open(os.path.join(ROOT, "schema_v273_crm_connectors.sql"), encoding="utf-8").read()
     for ev in wh.EVENTS:
         if ev == "webhook.test":
             continue
