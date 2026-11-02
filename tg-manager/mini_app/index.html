@@ -1983,9 +1983,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- Поиск по функциям -->
     <div style="padding:6px 0 2px">
-      <input type="text" id="moreSearch" oninput="filterMore(this.value)" placeholder="🔍 Поиск функции…"
+      <input type="text" id="moreSearch" oninput="filterMore(this.value);findMine(this.value)" placeholder="🔍 Функция, клиент, бот, аккаунт…"
              class="input-l">
     </div>
+    <!-- Найдено у вас: свои контакты, боты, аккаунты, каналы (screens/find_mine.js) -->
+    <div id="moreFindMine" style="display:none"></div>
     <!-- Категории действий -->
     <!-- Одиннадцать разделов: переносом они дают пять рядов и отодвигают сам
          каталог на 170px вниз — дороже, чем польза. Оставляем прокрутку, но
@@ -6518,6 +6520,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <span style="font-size:14px">💻 Связанные устройства</span>
         <button class="btn btn-s" onclick="openDevices()" style="padding:6px 12px;font-size:12px">Показать</button>
       </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--sep)">
+        <div style="min-width:0">
+          <div style="font-size:14px">📲 На главный экран</div>
+          <div id="set-home-status" style="font-size:12px;color:var(--hint);margin-top:2px"></div>
+        </div>
+        <button id="set-home-btn" class="btn btn-s" onclick="addAppToHomeScreen()" style="padding:6px 12px;font-size:12px;flex:0 0 auto">Добавить</button>
+      </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0">
         <span style="font-size:14px">📋 ID пользователя</span>
         <span id="set-uid-val" style="font-family:monospace;font-size:13px;color:var(--hint)"></span>
@@ -9349,6 +9358,7 @@ async function loadOnboarding() {
       <div style="font-size:13px;margin-top:4px">${esc(fr.title)}${fr.ok ? ' — <b>' + esc(fr.ok) + '</b>' : ''}</div>
       <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">Дальше подсказки — в «Пульсе» ниже.${d.trial ? ' Пробный период: осталось ' + esc(d.trial.days_left) + ' дн.' : ''}</div>
       ${fr.op_id ? `<button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="openMassOps(${Number(fr.op_id)})">Посмотреть итог →</button>` : ''}
+      ${(typeof _hsSupported === 'function' && _hsSupported()) ? `<button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="addAppToHomeScreen()">📲 На главный экран</button>` : ''}
     </div>`;
     el._dismissKey = _onboardDismissKey(d);
     el.style.display='block';
@@ -29203,6 +29213,7 @@ async function openSettings() {
   if (ppEl) ppEl.value = s.proxy_policy || 'allow_direct';
   txt('set-save-msg','');
   txt('set-err','');
+  try { loadHomeScreenStatus(); } catch(_) {}
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
     // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше
@@ -30841,5 +30852,7 @@ function renderAudSegChart(segments) {
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>
 <script src="screens/deals_board.js"></script>
+<script src="screens/home_screen.js"></script>
+<script src="screens/find_mine.js"></script>
 </body>
 </html>
