@@ -803,7 +803,7 @@ async def generate_reply(persona: dict, products: list[dict], dialog: dict | Non
                         "; ".join(info["errors"])[:300] or "нет провайдеров")
             return _fallback
         bad_prices = (sales_guard.check_prices(txt, persona, products, delivery,
-                                               promos, extra)
+                                               promos, extra, context=user_text or "")
                       if persona.get("disclose_prices", True) else [])
         bad_pcts = sales_guard.check_discount(txt, persona, promos)
         if not bad_prices and not bad_pcts:

@@ -22,21 +22,22 @@ with open(_PATH, encoding="utf-8") as _f:
 CAT = GOLDEN["catalog"]
 
 
-def _verdict(text: str) -> str | None:
-    if g.check_prices(text, CAT["persona"], CAT["products"], CAT["delivery"], CAT["promos"]):
+def _verdict(text: str, customer: str = "") -> str | None:
+    if g.check_prices(text, CAT["persona"], CAT["products"], CAT["delivery"], CAT["promos"],
+                      context=customer):
         return "price"
     if g.check_discount(text, CAT["persona"], CAT["promos"]):
         return "discount"
     return None
 
 
-_REPLIES = [(c["id"], r) for c in GOLDEN["cases"] for r in c["replies"]]
+_REPLIES = [(c["id"], c["customer"], r) for c in GOLDEN["cases"] for r in c["replies"]]
 
 
-@pytest.mark.parametrize("case_id,reply", _REPLIES,
-                         ids=[f"{cid}:{'ok' if r['ok'] else r['guard']}" for cid, r in _REPLIES])
-def test_эталонный_ответ_получает_ожидаемый_вердикт(case_id, reply):
-    got = _verdict(reply["text"])
+@pytest.mark.parametrize("case_id,customer,reply", _REPLIES,
+                         ids=[f"{cid}:{'ok' if r['ok'] else r['guard']}" for cid, _, r in _REPLIES])
+def test_эталонный_ответ_получает_ожидаемый_вердикт(case_id, customer, reply):
+    got = _verdict(reply["text"], customer)
     want = None if reply["ok"] else reply["guard"]
     assert got == want, f"{case_id}: «{reply['text']}» — ждали {want}, получили {got}"
 
@@ -75,3 +76,33 @@ def test_проверка_большого_каталога_укладывает
     g.check_prices("цена 99999 USD", {"discount_max_percent": 30}, big,
                    promos=[{"percent": 15}])
     assert time.monotonic() - started < 1.0
+
+
+def test_сумма_сверяется_с_названным_товаром_а_не_с_любым():
+    """«36 USD» за три маргариты по 12.50 раньше проходило: 36 — это суши и
+    доставка, а общий набор допустимых сумм был таким плотным, что почти любая
+    выдуманная сумма в него попадала."""
+    p, prods, dlv, promos = CAT["persona"], CAT["products"], CAT["delivery"], CAT["promos"]
+    assert g.check_prices("Три маргариты — 36 USD", p, prods, dlv, promos) == [3600]
+    assert g.check_prices("Сет и доставка — 36 USD", p, prods, dlv, promos) == []
+
+
+def test_сумма_без_товара_берёт_товар_из_вопроса_клиента():
+    p, prods, dlv, promos = CAT["persona"], CAT["products"], CAT["delivery"], CAT["promos"]
+    assert g.check_prices("Вместе 19 USD", p, prods, dlv, promos,
+                          context="маргариту и тирамису") == []
+    assert g.check_prices("Вместе 18.50 USD", p, prods, dlv, promos,
+                          context="маргариту и тирамису") == [1850]
+
+
+def test_итог_большого_заказа_из_четырёх_позиций():
+    p, prods, dlv, promos = CAT["persona"], CAT["products"], CAT["delivery"], CAT["promos"]
+    text = "Маргарита, пепперони, кола и тирамису — итого 36.90 USD"
+    assert g.check_prices(text, p, prods, dlv, promos) == []
+
+
+def test_процент_без_слова_скидка_тоже_проверяется():
+    p, promos = CAT["persona"], CAT["promos"]
+    assert g.check_discount("Хорошо, 30% для вас", p, promos) == [30]
+    assert g.check_discount("Моцарелла 45% жирности", p, promos) == []
+    assert g.check_discount("Скидка двадцать процентов не выйдет, только 10 процентов", p, promos) == []
