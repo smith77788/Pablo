@@ -59,6 +59,7 @@ def test_every_catalog_event_has_a_source_in_the_migration():
     auto = open(os.path.join(ROOT, "schema_v270_integration_automation_events.sql"),
                 encoding="utf-8").read()
     assert "AFTER INSERT ON automation_events" in auto
+    crm = open(os.path.join(ROOT, "schema_v275_crm_connectors.sql"), encoding="utf-8").read()
     for ev in wh.EVENTS:
         if ev == "webhook.test":
             continue
@@ -68,7 +69,7 @@ def test_every_catalog_event_has_a_source_in_the_migration():
             assert ev.split(".", 1)[1] in op_statuses, ev
             assert "'operation.' || NEW.status" in sql
         else:
-            assert f"'{ev}'" in sql, f"у события {ev} нет источника в миграции"
+            assert f"'{ev}'" in sql or f"'{ev}'" in crm, f"у события {ev} нет источника в миграции"
 
 
 def test_operation_events_cover_every_terminal_status():
