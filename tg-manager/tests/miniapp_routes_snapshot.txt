@@ -367,6 +367,7 @@ GET /api/miniapp/workspaces
 GET /metrics
 GET /miniapp
 GET /miniapp/
+GET /miniapp/{path}
 GET /s/{code}
 GET /{code}
 HEAD /.well-known/assetlinks.json
@@ -681,6 +682,7 @@ HEAD /api/miniapp/workspaces
 HEAD /metrics
 HEAD /miniapp
 HEAD /miniapp/
+HEAD /miniapp/{path}
 HEAD /s/{code}
 HEAD /{code}
 OPTIONS /api/miniapp/{path}
