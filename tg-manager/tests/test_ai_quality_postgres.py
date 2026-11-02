@@ -115,3 +115,24 @@ def test_воронка_продаж_считает_заказы_без_опер
             await pool.execute("DELETE FROM bot_sales_dialogs WHERE owner_id=$1", _OWNER)
             await pool.close()
     _run(body())
+
+
+def test_сегмент_из_фразы_считает_размер_на_живой_базе(monkeypatch):
+    """SQL словаря владельца (теги через unnest, группы) и подсчёт среза тем же
+    count_segment, что у превью рассылки, — на настоящей схеме."""
+    from services import ai_gateway as gw, ai_segment as seg
+
+    async def _chat(messages, **k):
+        return gw.AiReply(text='{"gender": "f", "unsupported": "купили на прошлой неделе"}',
+                          providers=["p"])
+    monkeypatch.setattr(gw, "chat", _chat)
+
+    async def body():
+        pool = await _pool()
+        try:
+            out = await seg.from_text(pool, _OWNER, "женщины, купившие на прошлой неделе")
+            assert out["filters"] == {"gender": "f"} and out["total"] == 0
+            assert out["explained"] == ["женщины"] and "прошлой неделе" in out["unsupported"]
+        finally:
+            await pool.close()
+    _run(body())

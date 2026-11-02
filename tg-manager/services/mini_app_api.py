@@ -7864,6 +7864,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_crm.setup_routes(app, pool)
+    # ИИ в переписке оператора: черновик ответа и сводка (services/ai_inbox_assist).
+    from services import ai_inbox_assist
+    ai_inbox_assist.setup_routes(app, pool)
+    # Сегмент контактов из фразы (services/ai_segment).
+    from services import ai_segment
+    ai_segment.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
     mini_app_mp.setup_routes(app, pool)
     mini_app_integrations.setup_routes(app, pool)

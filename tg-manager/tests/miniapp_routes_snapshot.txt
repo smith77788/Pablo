@@ -723,6 +723,7 @@ POST /api/miniapp/admin/user/{user_id}/ban
 POST /api/miniapp/admin/user/{user_id}/grant
 POST /api/miniapp/admin/user/{user_id}/revoke
 POST /api/miniapp/admin/user/{user_id}/unban
+POST /api/miniapp/ai/segment-from-text
 POST /api/miniapp/ai/test
 POST /api/miniapp/ai_comment
 POST /api/miniapp/ai_memory
@@ -850,6 +851,8 @@ POST /api/miniapp/host_server/price
 POST /api/miniapp/host_server/rent
 POST /api/miniapp/host_server/rental/{rental_id}/status
 POST /api/miniapp/import_sessions
+POST /api/miniapp/inbox/{peer_user_id}/ai-draft
+POST /api/miniapp/inbox/{peer_user_id}/ai-summary
 POST /api/miniapp/inbox/{peer_user_id}/read
 POST /api/miniapp/inbox/{peer_user_id}/reply
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
