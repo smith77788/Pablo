@@ -153,33 +153,22 @@ async def generate_persona_response(
     context: str,
     ai_provider,
 ) -> str:
-    """Generate an AI response in persona character using the given provider."""
-    try:
-        from openai import AsyncOpenAI
-    except ImportError:
-        return "⚠️ Библиотека openai не установлена."
+    """Ответ в образе персоны через единый шлюз (лимиты, учёт, запасные модели)."""
+    from services import ai_gateway
 
     system_prompt = build_persona_system_prompt(persona)
-
-    client = AsyncOpenAI(
-        api_key=ai_provider.api_key,
-        base_url=ai_provider.base_url,
-        timeout=25.0,
+    r = await ai_gateway.chat(
+        [{"role": "system", "content": system_prompt},
+         {"role": "user", "content": context}],
+        task=ai_gateway.TASK_ASSISTANT,
+        owner_id=getattr(persona, "owner_id", None),
+        max_tokens=512,
+        prefer_provider=getattr(ai_provider, "name", "") or "",
     )
-    model = ai_provider.models[0] if ai_provider.models else "gpt-3.5-turbo"
-    try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": context},
-            ],
-            max_tokens=512,
-        )
-        return response.choices[0].message.content or ""
-    except Exception as e:
-        log.warning("persona_engine generate_persona_response error: %s", e)
-        return f"⚠️ Ошибка генерации: {e}"
+    if r.text:
+        return r.text
+    log.warning("persona_engine generate_persona_response: %s", "; ".join(r.errors)[:300])
+    return "⚠️ Ошибка генерации: ИИ не ответил"
 
 
 # ── Memory ────────────────────────────────────────────────────────────────────

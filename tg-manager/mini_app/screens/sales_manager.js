@@ -1091,6 +1091,19 @@ function _spAiSummaryHtml(s, u) {
       Object.keys(byTask).map(t => esc(SP_AI_TASK[t] || t) + ' — ' + num(byTask[t])).join(', ') +
       '</div>';
   }
+  const t = (u && u.today) || {};
+  const lim = (x, label) => {
+    if (!x || x.limit === null || x.limit === undefined) return '';
+    const used = x.used || 0;
+    const warn = used >= x.limit ? ' style="color:var(--danger,#d33)"' : '';
+    return '<div' + warn + '>' + esc(label) + ': ' + num(used) + ' из ' + num(x.limit) +
+      (used >= x.limit ? ' — лимит исчерпан, ИИ молчит до завтра' : '') + '</div>';
+  };
+  const limits = lim(t.customer, 'Ответы клиентам сегодня') + lim(t.other, 'Помощник и фон сегодня');
+  if (limits) {
+    usage += '<div style="font-size:12px;color:var(--hint);margin:6px 2px 0">Лимит тарифа ' +
+      esc(String(u.plan || '')) + ':' + limits + '</div>';
+  }
   return '<div style="font-size:12px;color:var(--hint);padding:0 2px 6px">За 7 дней</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
     cell('Ответов', s.replies || 0) +

@@ -127,28 +127,21 @@ def _build_angle_prompt(
     )
 
 
-async def _call_ai(prompt: str, ai_provider) -> str:
-    """Вызов AI с fallback на заглушку если провайдер не задан."""
+async def _call_ai(prompt: str, ai_provider, owner_id: int | None = None) -> str:
+    """Вызов AI через единый шлюз; заглушка — если ИИ не настроен вовсе.
+
+    ai_provider оставлен как признак «ключи есть»: провайдера и модель выбирает
+    шлюз (services/ai_gateway) — с паузами по лимитам и учётом на владельца."""
     if ai_provider is None:
         return f"[Пост будет сгенерирован AI при наличии ключей]\n\n{prompt[:100]}..."
+    from services import ai_gateway
 
-    try:
-        import openai  # type: ignore
-        client = openai.AsyncOpenAI(
-            api_key=ai_provider.api_key,
-            base_url=ai_provider.base_url,
-        )
-        model = ai_provider.models[0] if ai_provider.models else "gpt-3.5-turbo"
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=600,
-            temperature=0.85,
-        )
-        return (resp.choices[0].message.content or "").strip()
-    except Exception as e:
-        log.warning("narrative_engine AI call failed: %s", e)
-        return f"[AI недоступен: {type(e).__name__}]\n\nТема: {prompt[:80]}..."
+    text = await ai_gateway.complete(prompt, task=ai_gateway.TASK_BACKGROUND,
+                                     owner_id=owner_id, max_tokens=600,
+                                     temperature=0.85)
+    if text:
+        return text
+    return f"[AI недоступен]\n\nТема: {prompt[:80]}..."
 
 
 async def generate_campaign_posts(
