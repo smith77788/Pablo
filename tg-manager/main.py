@@ -753,6 +753,10 @@ async def main() -> None:
         # Счётчик подряд идущих срывов шага: без него один блип БД писал
         # воронке человека status='error' навсегда.
         "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS fail_count INT DEFAULT 0",
+        # Подписка воронки, переданная движку сценариев (schema_v283): оба
+        # старых исполнителя фильтруют по ней — без колонки встали бы оба.
+        "ALTER TABLE funnel_subscriptions ADD COLUMN IF NOT EXISTS workflow_run_id BIGINT",
+        "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS workflow_run_id BIGINT",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",

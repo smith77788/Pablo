@@ -2016,7 +2016,10 @@ async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) 
                        SET current_step  = 0,
                            completed      = false,
                            dropped        = false,
-                           next_send_at   = $3
+                           next_send_at   = $3,
+                           -- Новый заход — новый прогон движка сценариев:
+                           -- старый уже закончился (services/legacy_funnels.py).
+                           workflow_run_id = NULL
                        WHERE funnel_subscriptions.completed = true
                           OR funnel_subscriptions.dropped = true""",
                 funnel_id,
@@ -2046,6 +2049,7 @@ async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[dict]:
            JOIN managed_bots mb ON mb.bot_id=f.bot_id AND mb.is_active=true
            WHERE fs.completed=false
              AND COALESCE(fs.dropped, false) = false
+             AND fs.workflow_run_id IS NULL
              AND fs.next_send_at<=now()""",
     )
     return _dec_bot_rows(rows)

@@ -64,6 +64,15 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     Called from the background ``run`` loop and also usable in tests /
     manual invocations.
     """
+    from services import legacy_funnels
+    try:
+        if await legacy_funnels.tick(pool, "funnel"):
+            # Воронки исполняет движок сценариев (services/legacy_funnels.py).
+            return
+    except Exception:
+        # Мост сорвался — старый путь берёт только НЕ переданные движку
+        # подписки (workflow_run_id IS NULL), так что двойной отправки нет.
+        log.exception("Funnel runner: мост к движку сценариев")
     try:
         due = await db.get_due_funnel_steps(pool)
         _steps_cache: dict[int, list] = {}

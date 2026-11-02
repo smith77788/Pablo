@@ -570,6 +570,14 @@ async def _claim_due(pool) -> list[dict]:
                    WHERE status = 'running'
                      AND next_run_at <= now()
                      AND (claimed_until IS NULL OR claimed_until < now())
+                     -- Воронка, выключенная в своём разделе, стоит на паузе
+                     -- целиком, как и у старого исполнителя
+                     -- (services/legacy_funnels.py).
+                     AND NOT EXISTS (
+                         SELECT 1 FROM workflow_definitions d
+                          WHERE d.id = workflow_runs.workflow_id
+                            AND d.legacy_kind IS NOT NULL
+                            AND d.is_active IS NOT TRUE)
                    ORDER BY next_run_at
                    LIMIT $1
                    FOR UPDATE SKIP LOCKED)
