@@ -512,6 +512,7 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
     """
     user_id = payment["user_id"]
     plan = payment["plan"]
+    credited = None
     async with pool.acquire() as conn:
         async with conn.transaction():
             # Одна транзакция блокчейна — один счёт. Проверка «хэш ещё не
@@ -563,6 +564,12 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
             else:
                 period_months = int(payment["period_months"] or 1)
                 await _activate_subscription(conn, user_id, plan, period_months)
+                # Доля рефереру с КАЖДОЙ оплаты — в той же транзакции, во
+                # вложенной точке сохранения (services/referral_commission).
+                from services import referral_commission
+
+                credited = await referral_commission.credit_in_tx(
+                    conn, user_id, payment["reference"], period_months)
 
     log.info(
         "Payment confirmed: user=%s plan=%s months=%s ref=%s tx=%s",
@@ -572,6 +579,13 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         payment["reference"],
         tx_hash[:16] if tx_hash else "",
     )
+
+    try:
+        from services import referral_commission
+
+        await referral_commission.notify(bot, credited)
+    except Exception:
+        log_exc_swallow(log, "Сбой уведомления о реферальной доле", user_id=user_id)
 
     # Referral system: mark paid + check rewards for referrer
     try:

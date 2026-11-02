@@ -101,3 +101,45 @@ async def activate_subscription(executor, user_id: int, plan: str, months: int) 
         log.warning("billing.activate_subscription: cache invalidation failed", exc_info=True)
 
     return expires
+
+
+_EXTEND_DAYS = """
+    INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+    VALUES($1, 'paid', now() + make_interval(days => $2), true)
+    ON CONFLICT(user_id) DO UPDATE
+    SET is_active  = true,
+        plan       = CASE WHEN subscriptions.expires_at > now()
+                          THEN subscriptions.plan ELSE 'paid' END,
+        expires_at = GREATEST(subscriptions.expires_at, now()) + make_interval(days => $2),
+        started_at = CASE WHEN subscriptions.expires_at > now()
+                          THEN subscriptions.started_at ELSE now() END
+    RETURNING plan, expires_at
+"""
+
+
+async def extend_days(executor, user_id: int, days: int) -> datetime | None:
+    """Продлить подписку на `days` дней (награды, бонусы). Возвращает expires_at.
+
+    Действующая подписка сохраняет свой тариф и продлевается от текущего конца;
+    истёкшая или отсутствующая начинается заново как платная. Синхронизирует
+    platform_users и кэш тарифа так же, как activate_subscription.
+    """
+    days = int(days or 0)
+    if days < 1:
+        return None
+    row = await executor.fetchrow(_EXTEND_DAYS, user_id, days)
+    if not row:
+        return None
+    try:
+        await executor.execute(_PLATFORM_USERS_SYNC, user_id,
+                               tariffs.normalize_plan(row["plan"]), row["expires_at"])
+    except Exception:
+        log.warning("billing.extend_days: platform_users sync failed for user=%s",
+                    user_id, exc_info=True)
+    try:
+        from bot.utils.subscription import invalidate_plan_cache
+
+        invalidate_plan_cache(user_id)
+    except Exception:
+        log.warning("billing.extend_days: cache invalidation failed", exc_info=True)
+    return row["expires_at"]

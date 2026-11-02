@@ -336,6 +336,7 @@ def test_stars_payment_confirms_once_on_real_schema():
 
     first, again, other, sub, pay = asyncio.new_event_loop().run_until_complete(go())
     assert first is not None, "оплата Stars не включила подписку"
+    first, _credited = first
     assert again is None, "повторная доставка апдейта продлила подписку второй раз"
     assert other is None, "чужой пользователь подтвердил чужой счёт"
     assert sub["expires_at"] == first

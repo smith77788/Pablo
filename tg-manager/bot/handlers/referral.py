@@ -41,8 +41,16 @@ def _build_dashboard(stats: dict, bot_username: str) -> str:
         f"👥 Приглашено:  <b>{total}</b> чел.",
         f"✅ Активных:    <b>{active}</b> (создали бота)",
         f"💳 Платящих:   <b>{paid}</b>\n",
-        "━━━━━━━━━━━━━━━━━━",
     ]
+    from services import referral_commission
+    pct = referral_commission.commission_pct()
+    if pct:
+        n, days = stats.get("commission", (0, 0))
+        lines.append(
+            f"💸 <b>{pct} % с каждой оплаты</b> приглашённого — днями вашей подписки "
+            f"(месяц у него = {referral_commission.commission_days(1)} дн. у вас)")
+        lines.append(f"Начислено: <b>{days} дн.</b> за {n} оплат\n")
+    lines.append("━━━━━━━━━━━━━━━━━━")
 
     for level, metric, threshold, plan, days, label in _TIERS:
         count = active if metric == "active" else paid
@@ -100,6 +108,8 @@ async def cb_ref_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
     uid = callback.from_user.id
     stats = await db.get_referral_stats(pool, uid)
+    from services import referral_commission
+    stats["commission"] = await referral_commission.totals(pool, uid)
     me = await callback.bot.get_me()
     bot_username = me.username or "bot"
     share_url = f"https://t.me/{bot_username}?start={stats['code']}"

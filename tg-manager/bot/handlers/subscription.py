@@ -962,9 +962,9 @@ async def confirm_stars_payment(
 ):
     """Подтвердить оплату Stars и включить подписку одной транзакцией.
 
-    Возвращает expires_at подписки; None — платёж уже был учтён (повторная
-    доставка апдейта) или счёт не найден. Звёзды к этому моменту уже списаны,
-    поэтому истёкший за время оплаты счёт тоже засчитывается.
+    Возвращает (expires_at, доля рефереру) или None — платёж уже был учтён
+    (повторная доставка апдейта) или счёт не найден. Звёзды к этому моменту уже
+    списаны, поэтому истёкший за время оплаты счёт тоже засчитывается.
     """
     from services import billing
 
@@ -991,16 +991,41 @@ async def confirm_stars_payment(
                     "подписка всё равно включается, звёзды уже списаны",
                     total_amount, row["amount_crypto"], ref,
                 )
-            return await billing.activate_subscription(
+            expires = await billing.activate_subscription(
                 conn, user_id, row["plan"], int(row["period_months"])
             )
+            from services import referral_commission
+
+            credited = await referral_commission.credit_in_tx(
+                conn, user_id, ref, int(row["period_months"]))
+    return expires, credited
+
+
+async def _after_stars_payment(pool, bot, user_id: int, credited) -> None:
+    """Реферальная часть оплаты Stars — та же, что у крипто-оплаты.
+
+    Доля с каждого платежа уже начислена в транзакции; здесь уведомление и
+    одноразовые пороговые награды за первую оплату приглашённого.
+    """
+    from services import referral_commission
+
+    await referral_commission.notify(bot, credited)
+    try:
+        from database import db as _db
+
+        referrer_id = await _db.mark_referral_paid(pool, user_id)
+        if referrer_id:
+            await _db.check_and_grant_rewards(pool, referrer_id, bot)
+    except Exception:
+        log.warning("stars: реферальные награды не проверены user=%s", user_id,
+                    exc_info=True)
 
 
 @router.message(F.successful_payment.invoice_payload.regexp(_STARS_PAYLOAD_RE))
 async def on_stars_paid(message: Message, pool: asyncpg.Pool) -> None:
     sp = message.successful_payment
     try:
-        expires = await confirm_stars_payment(
+        confirmed = await confirm_stars_payment(
             pool, message.from_user.id, sp.invoice_payload,
             sp.telegram_payment_charge_id, sp.total_amount,
         )
@@ -1017,9 +1042,11 @@ async def on_stars_paid(message: Message, pool: asyncpg.Pool) -> None:
             reply_markup=terminal_kb(),
         )
         return
-    if expires is None:
+    if confirmed is None:
         # Повторная доставка того же платежа — подписка уже включена.
         return
+    expires, credited = confirmed
+    await _after_stars_payment(pool, message.bot, message.from_user.id, credited)
     await message.answer(
         "✅ <b>Оплата получена, подписка активна.</b>\n\n"
         f"Действует до <b>{expires.strftime('%d.%m.%Y')}</b>.",
