@@ -15586,7 +15586,7 @@ function renderBcAnalytics(items, serverTotal, serverTotals) {
       <div style="width:100%;height:${h}px;background:var(--accent);border-radius:2px 2px 0 0;min-height:3px"></div>
     </div>`;
   }).join('');
-  if(labels) labels.innerHTML = bots.map(([name])=>`<span style="font-size:10px;color:var(--hint)">@${(name||'').substring(0,6)}</span>`).join('');
+  if(labels) labels.innerHTML = bots.map(([name])=>`<span style="font-size:10px;color:var(--hint)">@${esc((name||'').substring(0,6))}</span>`).join('');
   // Столбцы по ботам строятся по загруженной странице — если история длиннее,
   // говорим об этом, а не выдаём срез за всю картину.
   const barNote = document.getElementById('bcAnalyticsNote');
@@ -21553,7 +21553,7 @@ async function loadGovernorBar() {
     if (!gmOk && !gsOk) { el.style.display = 'none'; return; }
     const gm = gmOk ? String(+g.multiplier.toFixed(2)).replace('.', ',') : '—';
     const gs = gsOk ? g.score : '—';
-    el.innerHTML = `<b style="color:${c}">${g.emoji||''} Губернатор темпа: ×${gm}</b> · давление ${gs}/100<br>`
+    el.innerHTML = `<b style="color:${c}">${esc(g.emoji||'')} Губернатор темпа: ×${gm}</b> · давление ${gs}/100<br>`
       + `<span style="color:var(--hint)">${esc(g.explain||'')}</span>`;
   } catch(e) { el.style.display = 'none'; }
 }

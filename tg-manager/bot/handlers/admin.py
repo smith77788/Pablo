@@ -363,6 +363,33 @@ async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
     # Иначе — молчим (не раскрываем существование команды)
 
 
+@router.message(Command("admin_log"))
+async def cmd_admin_log(message: Message, pool: asyncpg.Pool) -> None:
+    """Последние 30 записей журнала админ-действий (admin_audit_log)."""
+    if not _is_admin(message.from_user.id):
+        return
+    try:
+        rows = await pool.fetch(
+            "SELECT admin_id, action, target_user_id, source, created_at "
+            "FROM admin_audit_log ORDER BY created_at DESC LIMIT 30")
+    except Exception:
+        log_exc_swallow(log, "admin_log: журнал не прочитан",
+                        user_id=message.from_user.id)
+        await message.answer("❌ Журнал сейчас недоступен.", reply_markup=terminal_kb())
+        return
+    if not rows:
+        await message.answer("Журнал админ-действий пуст.", reply_markup=terminal_kb())
+        return
+    lines = ["🧾 <b>Журнал админ-действий</b> (последние 30)", ""]
+    for r in rows:
+        ts = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "—"
+        tgt = f" → <code>{r['target_user_id']}</code>" if r["target_user_id"] else ""
+        lines.append(
+            f"{ts} · <code>{r['admin_id']}</code> · {_html.escape(r['source'] or '')} · "
+            f"{_html.escape((r['action'] or '')[:80])}{tgt}")
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=terminal_kb())
+
+
 @router.message(Command("backup"))
 async def cmd_backup(message: Message, pool: asyncpg.Pool, bot) -> None:
     """Снять бэкап БД по требованию и отправить его в чат назначения (админ)."""
@@ -506,6 +533,12 @@ async def cmd_admin_secret(message: Message, pool: asyncpg.Pool = None, bot=None
     log.warning("AUDIT admin_session_granted user_id=%s username=%s ttl_h=%s",
                 message.from_user.id, getattr(message.from_user, "username", None),
                 _ADMIN_SESSION_TTL_H)
+    if pool is not None:
+        await db.log_admin_action(
+            pool, message.from_user.id, "admin_session_granted", None,
+            {"ttl_h": _ADMIN_SESSION_TTL_H,
+             "username": getattr(message.from_user, "username", None)},
+            source="secret")
     if bot is not None:
         await _notify_admins_of_grant(bot, message)
     try:

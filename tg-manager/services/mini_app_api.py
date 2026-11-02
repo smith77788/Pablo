@@ -1195,6 +1195,12 @@ def metrics_request_allowed(request: web.Request) -> bool:
     return not request.headers.get("X-Forwarded-For")
 
 
+def is_audited_admin_request(method: str, path: str) -> bool:
+    """Пишется ли запрос в журнал админ-действий (изменяющий запрос к админке)."""
+    return (path.startswith("/api/miniapp/admin/")
+            and method.upper() in ("POST", "PUT", "PATCH", "DELETE"))
+
+
 def _get_uid(request: web.Request) -> int | None:
     """Владелец запроса: токен сессии — ТОЛЬКО из заголовка.
 
@@ -2399,6 +2405,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.middlewares.append(plan_gate_middleware)
     # Apply security middleware (rate limiting + security headers)
     app.middlewares.append(security_middleware())
+
+    # Журнал админ-действий мини-аппа: каждый изменяющий запрос к
+    # /api/miniapp/admin/* — кто, что, по какому пути и с каким итогом. До этого
+    # след оставляла только рассылка, а выдача тарифа, бан и разбан проходили
+    # бесследно. Тело запроса не пишется: в нём бывают тексты и ключи.
+    @web.middleware
+    async def admin_audit_middleware(request: web.Request, handler):
+        response = await handler(request)
+        if is_audited_admin_request(request.method, request.path):
+            uid = _get_uid(request)
+            if uid and _is_admin(uid):
+                from database.db import log_admin_action
+                target = request.match_info.get("user_id")
+                await log_admin_action(
+                    pool, uid, f"miniapp:{request.method} {request.path}",
+                    int(target) if target and target.isdigit() else None,
+                    {"status": getattr(response, "status", None)},
+                    source="miniapp")
+        return response
+
+    app.middlewares.append(admin_audit_middleware)
 
     async def _apply_inline_migrations(application: web.Application) -> None:
         await apply_inline_migrations(pool)
