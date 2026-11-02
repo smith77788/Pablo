@@ -36,8 +36,5 @@ def test_token_is_required_when_configured(monkeypatch):
 
 
 def test_handler_uses_the_gate():
-    import inspect
-    from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
-    body = src[src.index("async def prom_metrics"):src.index('app.router.add_get("/metrics"')]
-    assert "metrics_request_allowed(request)" in body
+    from tests.miniapp_source import api_function
+    assert "metrics_request_allowed(request)" in api_function("prom_metrics")
