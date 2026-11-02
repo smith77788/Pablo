@@ -39,6 +39,10 @@ def _run(coro):
 
 
 async def _cleanup(p):
+    await p.execute("DELETE FROM workflow_step_log WHERE owner_id=$1", OWNER)
+    await p.execute("DELETE FROM crm_deals WHERE owner_id=$1", OWNER)
+    await p.execute("DELETE FROM keyword_hits WHERE owner_id=$1", OWNER)
+    await p.execute("DELETE FROM keyword_watchers WHERE owner_id=$1", OWNER)
     await p.execute("DELETE FROM workflow_runs WHERE owner_id=$1", OWNER)
     await p.execute("DELETE FROM workflow_definitions WHERE owner_id=$1", OWNER)
     await p.execute("DELETE FROM automation_events WHERE owner_id=$1", OWNER)
@@ -403,3 +407,190 @@ def test_an_order_is_paid_once_and_a_tampered_amount_is_refused(pool, tg):
         assert raw and "secret" not in raw, "токен провайдера лежит в базе открытым"
 
     _run(go())
+
+
+# ── Цель, журнал, выручка, источник, сделка, A/B, умная задержка ────────────
+
+def test_reaching_the_goal_stops_the_follow_up(pool, tg):
+    """Человек оплатил (или получил тег-цель) — дожим больше не идёт.
+
+    Раньше сценарий не знал цели и слал «напоминаем об оплате» тому, кто уже
+    оплатил."""
+    from services import workflow_engine as wf, workflow_runtime as rt
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "message", "text": "Привет"},
+            {"type": "delay", "delay_minutes": 60},
+            {"type": "message", "text": "Напоминаем об оплате"},
+        ])
+        await wf.set_goal(pool, OWNER, wf_id, "tag_added", "клиент")
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        assert (await _run_row(pool, wf_id))["status"] == "running"  # ждёт паузу
+        await _emit_old(pool, "contact.tag_added", {"tag": "Клиент"})
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "completed" and run["goal_reached_at"] is not None
+        # Пауза истекла бы — но прогон закрыт, напоминание не уходит.
+        await pool.execute("UPDATE workflow_runs SET next_run_at=now() WHERE id=$1",
+                           run["id"])
+        await _tick(pool)
+        assert "Напоминаем об оплате" not in _texts(tg)
+        stats = await wf.workflow_stats(pool, OWNER, wf_id, "tag_added")
+        assert stats["runs"]["goal"] == 1 and stats["conversion"] == "goal"
+
+    _run(go())
+
+
+def test_the_journal_counts_people_per_step_and_revenue_once(pool, tg):
+    """Журнал шагов: сколько людей на каждом шаге, кто что нажал, сколько
+    денег. Повтор апдейта оплаты не удваивает выручку."""
+    from services import workflow_engine as wf, workflow_runtime as rt
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "message", "text": "Берёте?",
+             "buttons": [{"text": "Да", "goto": 2}, {"text": "Нет", "goto": 3}]},
+            {"type": "invoice", "title": "Курс", "amount": 70, "currency": "XTR"},
+            {"type": "message", "text": "Конец"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": "promo_tt"})
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["source"] == "promo_tt", "параметр ссылки не стал источником прогона"
+        kb = next(m for m in tg if m["method"] == "sendMessage")["reply_markup"]
+        cb = kb["inline_keyboard"][0][0]["callback_data"]
+        await rt.on_button(pool, None, None, BOT_ID, USER, {"data": cb})
+        await _tick(pool)
+        inv = next(m for m in tg if m["method"] == "sendInvoice")
+        pay = {"invoice_payload": inv["payload"], "total_amount": 70,
+               "currency": "XTR", "telegram_payment_charge_id": "ch-journal"}
+        await rt.on_payment(pool, BOT_ID, USER, pay)
+        await rt.on_payment(pool, BOT_ID, USER, pay)  # повтор апдейта
+        await _tick(pool)
+        stats = await wf.workflow_stats(pool, OWNER, wf_id)
+        assert stats["steps"]["0"]["outcomes"].get("button:0") == 1
+        assert stats["steps"]["1"]["outcomes"].get("paid") == 1
+        assert stats["revenue"] == [{"currency": "XTR", "amount": 70, "payments": 1}]
+        assert stats["sources"][0]["source"] == "promo_tt"
+        assert stats["sources"][0]["paid"] == 1
+        payments = await pool.fetchval(
+            "SELECT count(*) FROM automation_events WHERE owner_id=$1 "
+            "AND event_type='payment.received'", OWNER)
+        assert payments == 1, "повтор апдейта оплаты записал второе событие"
+        journal = await wf.run_log(pool, OWNER, run["id"])
+        outcomes = [r["outcome"] for r in journal["steps_log"]]
+        assert outcomes[:3] == ["sent", "button:0", "sent"] and "paid" in outcomes
+        assert await wf.run_log(pool, OWNER + 1, run["id"]) is None  # чужой
+
+    _run(go())
+
+
+def test_a_deal_from_a_scenario_is_created_and_won_by_payment(pool, tg):
+    """Регресс: «Создать сделку» писала этап 'new', которого не пускает
+    ограничение crm_deals — сделка не создавалась. Оплата счёта прогона
+    переводит его сделку в «выиграна» и пишет deal.stage_changed."""
+    from services import workflow_runtime as rt
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "action", "action": "create_deal", "value": "Заявка"},
+            {"type": "invoice", "title": "Курс", "amount": 10, "currency": "XTR"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        deal = await pool.fetchrow("SELECT * FROM crm_deals WHERE owner_id=$1", OWNER)
+        assert deal is not None, "сделка из сценария не создана"
+        assert deal["stage"] == "lead"
+        inv = next(m for m in tg if m["method"] == "sendInvoice")
+        await rt.on_payment(pool, BOT_ID, USER, {
+            "invoice_payload": inv["payload"], "total_amount": 10, "currency": "XTR",
+            "telegram_payment_charge_id": "ch-deal"})
+        assert (await pool.fetchval("SELECT stage FROM crm_deals WHERE id=$1",
+                                    deal["id"])) == "won"
+        ev = await pool.fetchrow(
+            "SELECT data FROM automation_events WHERE owner_id=$1 "
+            "AND event_type='deal.stage_changed'", OWNER)
+        data = json.loads(ev["data"]) if isinstance(ev["data"], str) else ev["data"]
+        assert data["from"] == "lead" and data["to"] == "won"
+
+    _run(go())
+
+
+def test_tags_removed_anywhere_and_keyword_hits_reach_the_bus(pool, tg):
+    """Снятие тега любым путём и находка ловца слов — события шины."""
+    from database import db
+    from services import keyword_watcher as kw
+
+    async def go():
+        await db.add_user_tag(pool, BOT_ID, USER, "лид")
+        await db.remove_user_tag(pool, BOT_ID, USER, "лид")
+        await db.remove_user_tag(pool, BOT_ID, USER, "лид")  # тега уже нет
+        n = await pool.fetchval(
+            "SELECT count(*) FROM automation_events WHERE owner_id=$1 "
+            "AND event_type='contact.tag_removed'", OWNER)
+        assert n == 1
+        wid = await pool.fetchval(
+            "INSERT INTO keyword_watchers(owner_id, account_id, chat_ref, keywords) "
+            "VALUES($1, 1, '@chat', '[\"куплю\"]'::jsonb) RETURNING id", OWNER)
+        watcher = dict(await pool.fetchrow("SELECT * FROM keyword_watchers WHERE id=$1", wid))
+
+        async def fetch(pool_, w, cursor, limit):
+            return [{"message_id": 5, "text": "Куплю бота", "from_user_id": 42,
+                     "from_username": "buyer"}]
+
+        async def deliver(*a, **k):
+            return True
+
+        kw_deliver = kw._deliver_hit
+        kw._deliver_hit = deliver
+        try:
+            await kw.poll_watcher(pool, None, watcher, fetch=fetch)
+        finally:
+            kw._deliver_hit = kw_deliver
+        ev = await pool.fetchrow(
+            "SELECT data FROM automation_events WHERE owner_id=$1 "
+            "AND event_type='keyword.hit'", OWNER)
+        assert ev is not None, "находка ловца не попала в шину"
+
+    _run(go())
+
+
+def test_split_sends_people_down_weighted_branches(pool, tg):
+    from services import workflow_engine as wf
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "split", "branches": [{"label": "A", "weight": 100, "goto": 2},
+                                           {"label": "B", "weight": 1, "goto": 3}]},
+            {"type": "message", "text": "Ветка A"},
+            {"type": "message", "text": "Ветка B"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        sent = _texts(tg)
+        run = await _run_row(pool, wf_id)
+        assert sent and sent[0] in ("Ветка A", "Ветка B"), {k: run[k] for k in ('status','current_step','exec_seq','fail_count','error_message','next_run_at','vars')} if run else None
+        stats = await wf.workflow_stats(pool, OWNER, wf_id)
+        sp = stats["splits"]["0"]
+        assert sum(b["sent"] for b in sp["branches"]) == 1
+
+    _run(go())
+
+
+def test_smart_delay_waits_for_the_persons_weekday_morning():
+    """«До 10:00 в будни по времени человека»: пятница вечер по Москве →
+    понедельник 10:00 по Москве (07:00 UTC)."""
+    from datetime import datetime, timezone
+    from services import workflow_runtime as rt
+
+    fri_evening = datetime(2026, 10, 30, 17, 0, tzinfo=timezone.utc)  # 20:00 МСК
+    when = rt.next_window(fri_evening, "10:00", True, rt.contact_tz({}, "ru"))
+    assert when == datetime(2026, 11, 2, 7, 0, tzinfo=timezone.utc)
+    # Без «только будни» — завтра, в субботу.
+    when = rt.next_window(fri_evening, "10:00", False, "Europe/Moscow")
+    assert when == datetime(2026, 10, 31, 7, 0, tzinfo=timezone.utc)
+    # Поле контакта timezone сильнее языка.
+    assert rt.contact_tz({"timezone": "Asia/Almaty"}, "ru") == "Asia/Almaty"
+    assert rt.contact_tz({}, "xx") == rt.DEFAULT_TZ

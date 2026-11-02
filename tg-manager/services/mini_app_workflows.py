@@ -236,6 +236,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "       COALESCE(wd.is_active,FALSE) AS is_active, "
             "       wd.trigger_type, wd.trigger_value, "
             "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
+            "       wd.goal_type, wd.goal_value, "
             "       b.username AS bot_username "
             "  FROM workflow_definitions wd "
             "  LEFT JOIN managed_bots b ON b.bot_id = wd.bot_id "
@@ -253,6 +254,11 @@ def setup_routes(app: web.Application, pool) -> None:
             # равно показываем, иначе ошибка в одном блоке гасит весь экран.
             log.exception("workflow_detail runs uid=%s wf=%s", uid, wid)
             runs = []
+        try:
+            stats = await _wf.workflow_stats(pool, uid, wid, row.get("goal_type"))
+        except Exception:
+            log.exception("workflow_detail stats uid=%s wf=%s", uid, wid)
+            stats = None
         return _json_resp({"id": row["id"], "name": row["name"],
                            "description": row["description"] or "",
                            "active": bool(row["is_active"]),
@@ -261,7 +267,11 @@ def setup_routes(app: web.Application, pool) -> None:
                            "trigger_type": row.get("trigger_type") or "manual",
                            "trigger_value": row.get("trigger_value") or "",
                            "allow_reentry": bool(row.get("allow_reentry")),
+                           "goal_type": row.get("goal_type") or "",
+                           "goal_value": row.get("goal_value") or "",
                            "steps": _steps_of(row), "runs": runs,
+                           "stats": stats,
+                           "goals": _rt.GOAL_TYPES,
                            # Словари для экрана: что умеет исполнитель.
                            "triggers": _rt.TRIGGER_TYPES,
                            "events": _bus.EVENT_LABELS,
@@ -339,6 +349,23 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный запрос", 400)
         if not isinstance(body, dict):
             return _err("Неверный запрос", 400)
+        if "goal_type" in body:
+            wid = _wf_id(request)
+            if wid is None:
+                return _err("Неверный идентификатор", 400)
+            from services import workflow_engine as _wf
+            from services import workflow_runtime as _rt
+            try:
+                gtype, gval = _rt.validate_goal(body.get("goal_type"),
+                                                body.get("goal_value"))
+            except ValueError as e:
+                return _err(str(e), 400)
+            if not await _wf.set_goal(pool, uid, wid, gtype, gval):
+                return _err("Воркфлоу не найден", 404)
+            if "active" not in body and "trigger_type" not in body \
+                    and "allow_reentry" not in body:
+                return _json_resp({"ok": True, "goal_type": gtype or "",
+                                   "goal_value": gval or ""})
         if "trigger_type" in body or "allow_reentry" in body:
             wid = _wf_id(request)
             if wid is None:
@@ -402,6 +429,23 @@ def setup_routes(app: web.Application, pool) -> None:
         if not res.get("ok"):
             return _err("Прогон не найден или уже завершён", 404)
         return _json_resp({"ok": True})
+
+    async def workflow_run_log(request: web.Request) -> web.Response:
+        """Журнал прогона: GET /workflow/run/{run_id}/log — что сценарий
+        сделал с этим человеком, по шагам."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            run_id = int(request.match_info["run_id"])
+        except (KeyError, ValueError, TypeError):
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        data = await _wf.run_log(pool, uid, run_id)
+        if data is None:
+            return _err("Прогон не найден", 404)
+        data["outcome_labels"] = _wf.STEP_OUTCOMES
+        return _json_resp(data)
 
     async def workflow_pause(request: web.Request) -> web.Response:
         return await _toggle(request, False)
@@ -510,6 +554,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)
     app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
+    app.router.add_get("/api/miniapp/workflow/run/{run_id}/log", workflow_run_log)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/execute", workflow_execute)
     app.router.add_get("/api/miniapp/workflow/{wf_id}/status", workflow_status)

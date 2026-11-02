@@ -2404,12 +2404,21 @@ async def add_user_tag(pool, bot_id: int, user_id: int, tag: str) -> bool:
 
 
 async def remove_user_tag(pool, bot_id: int, user_id: int, tag: str) -> None:
-    await pool.execute(
+    """Снять тег. Событие «с человека сняли тег» — только если тег был.
+
+    Раньше событие писал лишь исполнитель сценариев, а правила и экран
+    снимали тег молча: сценарий с триггером на это событие не видел их."""
+    res = await pool.execute(
         "DELETE FROM user_tags WHERE bot_id=$1 AND user_id=$2 AND tag=$3",
         bot_id,
         user_id,
         tag,
     )
+    if user_id and isinstance(res, str) and not res.endswith(" 0"):
+        from services import automation_events
+        await automation_events.emit(pool, None, "contact.tag_removed",
+                                     {"tag": tag}, bot_id=bot_id,
+                                     chat_id=user_id)
 
 
 async def get_user_tags(pool, bot_id: int, user_id: int) -> list[str]:
@@ -7587,12 +7596,34 @@ async def get_crm_deal(pool: asyncpg.Pool, deal_id: int, owner_id: int) -> async
 
 
 async def move_crm_deal_stage(
-    pool: asyncpg.Pool, deal_id: int, owner_id: int, stage: str
-) -> None:
-    await pool.execute(
-        "UPDATE crm_deals SET stage=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+    pool: asyncpg.Pool, deal_id: int, owner_id: int, stage: str,
+    *, source: str = "manual",
+) -> bool:
+    """Сменить этап сделки. False — сделки нет у владельца.
+
+    Единая дверь смены этапа: здесь же пишется событие
+    `deal.stage_changed` в шину сценариев (было в списке событий, но не
+    приходило ни разу — этап меняли прямым UPDATE в двух местах). Событие
+    только при реальной смене: повторный выбор того же этапа — не событие.
+    """
+    row = await pool.fetchrow(
+        """WITH old AS (
+               SELECT id, stage FROM crm_deals
+                WHERE id=$2 AND owner_id=$3 FOR UPDATE)
+           UPDATE crm_deals d SET stage=$1, updated_at=now()
+             FROM old WHERE d.id = old.id
+           RETURNING old.stage AS old_stage, d.title""",
         stage, deal_id, owner_id,
     )
+    if row is None:
+        return False
+    if row["old_stage"] != stage:
+        from services import automation_events
+        await automation_events.emit(
+            pool, owner_id, "deal.stage_changed",
+            {"deal_id": deal_id, "from": row["old_stage"], "to": stage,
+             "title": row["title"], "source": source})
+    return True
 
 
 async def delete_crm_deal(pool: asyncpg.Pool, deal_id: int, owner_id: int) -> None:
