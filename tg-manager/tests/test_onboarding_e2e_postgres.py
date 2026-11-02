@@ -39,7 +39,8 @@ async def _clean(p):
                    ("onboarding_progress", "owner_id"),
                    ("subscription_trials", "owner_id"),
                    ("subscriptions", "user_id"), ("platform_users", "user_id"),
-                   ("user_proxies", "owner_id")):
+                   ("user_proxies", "owner_id"), ("onboarding_goals", "owner_id"),
+                   ("contact_crm", "owner_id"), ("unified_contacts", "owner_id")):
         await p.execute(f"DELETE FROM {t} WHERE {col} = ANY($1::bigint[])", list(OWNERS))
     from bot.utils.subscription import invalidate_plan_cache
     for o in OWNERS:
@@ -267,3 +268,42 @@ def test_bot_account_limit_lets_trial_newcomer_add_first_account(pool):
     invalidate_plan_cache(OWNER)
     plan, limit = _run(bot_acc._get_account_limit(pool, OWNER))
     assert limit == 0          # триал использован — обычный замок
+
+
+def test_crm_goal_path_activates_on_first_deal(pool):
+    from services import onboarding
+    r = _checklist(pool)
+    assert r["needs_goal"] is True
+    _run(onboarding.set_goal(pool, OWNER, "crm"))
+    _acc(pool)
+    cid = _run(pool.fetchval(
+        "INSERT INTO unified_contacts(owner_id, display_name) VALUES($1,'Аня') RETURNING id",
+        OWNER))
+    r = _checklist(pool)
+    assert r["goal"] == "crm" and r["needs_goal"] is False
+    assert _step(r, "contacts")["done"] is True
+    assert r["activated"] is False and r["next_step"] == "first_result"
+
+    _run(pool.execute(
+        "INSERT INTO contact_crm(owner_id, contact_id, stage) VALUES($1,$2,'proposal')",
+        OWNER, cid))
+    r = _checklist(pool)
+    assert r["activated"] is True
+    rec = _run(pool.fetchrow("SELECT * FROM onboarding_progress WHERE owner_id=$1", OWNER))
+    assert rec["first_result_op_type"] == "crm_deal" and rec["first_result_op_id"] is None
+
+    # Цель меняется, строка одна; активация остаётся липкой.
+    _run(onboarding.set_goal(pool, OWNER, "sell_bot"))
+    assert _run(pool.fetchval(
+        "SELECT COUNT(*) FROM onboarding_goals WHERE owner_id=$1", OWNER)) == 1
+    r = _checklist(pool)
+    assert r["activated"] is True and r["goal"] == "sell_bot"
+    assert r["first_result"]["title"] == "Первая сделка в воронке"
+
+
+def test_seller_goal_path_reads_without_accounts(pool):
+    from services import onboarding
+    _run(onboarding.set_goal(pool, OWNER, "sell_bot"))
+    r = _checklist(pool)
+    assert [s["id"] for s in r["steps"]] == ["bot", "persona", "plan", "first_result"]
+    assert r["next_step"] == "bot" and r["activated"] is False

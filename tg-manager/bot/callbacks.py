@@ -809,3 +809,10 @@ class ChainCb(CallbackData, prefix="chn"):
     action: str      # go — запустить шаг
     op_id: int = 0   # исходная операция
     s: str = ""      # id шага op_chain
+
+
+class OnbCb(CallbackData, prefix="onb"):
+    """Онбординг в боте: выбор цели новичка (services/onboarding.py, GOALS)."""
+
+    action: str      # goal — запомнить цель; change — снова показать выбор
+    g: str = ""      # ключ цели

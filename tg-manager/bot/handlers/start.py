@@ -39,6 +39,7 @@ from bot.callbacks import (
     DmCb,
     QuickPostCb,
     SpinCb,
+    OnbCb,
 )
 from bot.handlers.admin import notify_new_platform_user
 from services.logger import log_exc_swallow
@@ -138,6 +139,8 @@ async def _onboarding_message(pool: asyncpg.Pool, uid: int):
         return None
     if not d or d.get("activated") or not d.get("steps"):
         return None
+    if d.get("needs_goal") and d.get("goals"):
+        return _onboarding_goal_message(d)
     from html import escape
     from aiogram.types import WebAppInfo
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -165,12 +168,85 @@ async def _onboarding_message(pool: asyncpg.Pool, uid: int):
     acc_step = next((st for st in d["steps"] if st["id"] == "accounts"), None)
     if acc_step and not acc_step["done"]:
         kb.button(text="📱 Подключить аккаунт здесь", callback_data=AccCb(action="add"))
+    bot_step = next((st for st in d["steps"] if st["id"] == "bot"), None)
+    if bot_step and not bot_step["done"]:
+        kb.button(text="🤖 Подключить бота здесь", callback_data=BotCb(action="add"))
     plan_step = next((st for st in d["steps"] if st["id"] == "plan"), None)
     if plan_step and not plan_step["done"] and plan_step.get("action"):
         kb.button(text="💳 Подписка", callback_data=SubCb(action="menu"))
+    if d.get("goals"):
+        title = next((g["title"] for g in d["goals"] if g["key"] == d.get("goal")), "")
+        kb.button(text=f"🎯 Цель: {title} · сменить" if title else "🎯 Сменить цель",
+                  callback_data=OnbCb(action="change"))
     kb.button(text="🏠 Все разделы", callback_data=BmCb(action="main"))
     kb.adjust(1)
     return text, kb.as_markup()
+
+
+def _onboarding_goal_message(d: dict):
+    """Первый вопрос новичку — зачем он пришёл. От ответа зависит путь
+    чеклиста: продавцу через бота не нужны аккаунт и прокси."""
+    from html import escape
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    lines = [f"{escape(g['title'])} — <i>{escape(g['desc'])}</i>" for g in d["goals"]]
+    text = (
+        "👋 <b>Добро пожаловать в Infragram!</b>\n\n"
+        "🚀 <b>Зачем вы пришли?</b> Выберите цель — покажу короткий путь "
+        "именно к ней. Сменить можно в любой момент.\n\n" + "\n".join(lines)
+    )
+    kb = InlineKeyboardBuilder()
+    for g in d["goals"]:
+        kb.button(text=g["title"], callback_data=OnbCb(action="goal", g=g["key"]))
+    kb.button(text="🏠 Все разделы", callback_data=BmCb(action="main"))
+    kb.adjust(1)
+    return text, kb.as_markup()
+
+
+@router.callback_query(OnbCb.filter(F.action == "goal"))
+async def cb_onboarding_goal(call: CallbackQuery, callback_data: OnbCb, pool: asyncpg.Pool) -> None:
+    from services import onboarding
+
+    uid = call.from_user.id
+    if callback_data.g not in onboarding.GOAL_KEYS:
+        await safe_answer(call, "Такой цели нет — откройте /start заново", show_alert=True)
+        return
+    try:
+        await onboarding.set_goal(pool, uid, callback_data.g)
+    except Exception:
+        log_exc_swallow(log, "Не удалось сохранить цель онбординга")
+        await safe_answer(call, "Не получилось сохранить цель, попробуйте ещё раз", show_alert=True)
+        return
+    await safe_answer(call)
+    msg = await _onboarding_message(pool, uid)
+    if msg is None:
+        # Результат уже есть — чеклиста нет, ведём в общее меню.
+        await call.message.answer("Цель сохранена.",
+                                  reply_markup=main_menu(is_admin=is_platform_admin(uid)))
+        return
+    text, kb = msg
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(OnbCb.filter(F.action == "change"))
+async def cb_onboarding_change(call: CallbackQuery, pool: asyncpg.Pool) -> None:
+    from services import onboarding
+
+    try:
+        d = await onboarding.load_checklist(pool, call.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "Не удалось собрать чеклист онбординга")
+        await safe_answer(call, "Не получилось открыть выбор, попробуйте /start", show_alert=True)
+        return
+    await safe_answer(call)
+    text, kb = _onboarding_goal_message(d)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(CommandStart())

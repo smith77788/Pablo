@@ -9182,6 +9182,11 @@ const _ONBOARD_ACT = {
   first_action:    'onboardFirstAction',
   operation:       'openMassOps',
   invite:          'openMassInvite',
+  add_bot:         'openBotAddModal',
+  sales_manager:   'openSalesManager',
+  inbox:           'openInbox',
+  contacts:        'openContacts',
+  deals:           'openDeals',
 };
 // Это первый экран нового владельца: кнопка, которая молча ничего не делает,
 // читается как «приложение сломано». Раньше и неизвестный шаг, и отсутствующая
@@ -9210,6 +9215,32 @@ async function onboardFirstAction() {
   if (typeof f !== 'function') { toast('⚠️ Раздел не открывается — сообщите нам'); return; }
   f();
 }
+// Цель новичка (services/onboarding.py, GOALS): от неё зависит путь чеклиста.
+// Пока цель не выбрана, карточка сначала спрашивает её — продавцу, пришедшему
+// ради бота, первым шагом больше не предлагают аккаунт и прокси.
+function _onboardGoalCard(d) {
+  const btns = (d.goals||[]).map(g =>
+    `<button class="btn ${g.key===d.goal?'btn-p':'btn-s'}" style="display:block;width:100%;text-align:left;margin-top:8px;padding:10px 12px" onclick="onboardSetGoal('${esc(g.key)}')">
+      <div style="font-size:13px;font-weight:700">${esc(g.title)}</div>
+      <div style="font-size:12px;opacity:.75;margin-top:2px;line-height:1.35;white-space:normal">${esc(g.desc)}</div>
+    </button>`).join('');
+  return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;box-shadow:var(--shadow)">
+    <div style="font-size:14px;font-weight:700">🚀 Зачем вы пришли?</div>
+    <div style="font-size:12px;color:var(--hint);margin-top:2px">Выберите цель — покажем короткий путь именно к ней. Сменить можно в любой момент.</div>
+    ${btns}
+  </div>`;
+}
+async function onboardSetGoal(goal) {
+  try { tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch(_) {}
+  try {
+    await api('/api/miniapp/onboarding/goal', {method:'POST', body:JSON.stringify({goal: goal})});
+  } catch(e) { toast('⚠️ ' + errRu(e)); return; }
+  loadOnboarding();
+}
+function onboardChangeGoal() {
+  const el = document.getElementById('onboardCard');
+  if (el && el._last) el.innerHTML = _onboardGoalCard(el._last);
+}
 function _onboardDismissKey(d) { return 'infra_onboard_done_' + String(d.activated_at || ''); }
 async function loadOnboarding() {
   const el = document.getElementById('onboardCard');
@@ -9218,6 +9249,12 @@ async function loadOnboarding() {
   try { d = await api('/api/miniapp/onboarding'); }
   catch(_) { el.style.display='none'; return; }   // fail-open: нет чеклиста ≠ блок экрана
   if (!d || !(d.steps||[]).length) { el.style.display='none'; el.innerHTML=''; return; }
+  el._last = d;
+  if (d.needs_goal && (d.goals||[]).length) {
+    el.innerHTML = _onboardGoalCard(d);
+    el.style.display='block';
+    return;
+  }
   if (d.activated) {
     // Обратная связь: первый результат показываем один раз и сутки, дальше
     // карточка уходит насовсем (активация липкая на сервере).
@@ -9267,6 +9304,7 @@ async function loadOnboarding() {
     </div>
     <div style="font-size:12px;color:var(--hint);margin-top:2px">Несколько шагов до первого результата — карточка уйдёт, когда он будет.</div>
     ${rows}
+    ${(d.goals||[]).length ? `<button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="onboardChangeGoal()">Цель: ${esc(((d.goals||[]).find(g=>g.key===d.goal)||{}).title||'—')} · сменить</button>` : ''}
   </div>`;
   el.style.display='block';
 }
