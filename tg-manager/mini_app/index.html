@@ -29938,7 +29938,7 @@ async function loadWorkflows() {
         <div class="ava" style="background:${color}15;color:${color}">🔄</div>
         <div class="li-body">
           <div class="li-name">${esc(w.name)}</div>
-          <div class="li-sub">${w.step_count || 0} шагов · Последний запуск: ${lastRun}</div>
+          <div class="li-sub">${w.legacy_kind ? '🔗 из раздела воронок · ' : ''}${w.step_count || 0} шагов · Последний запуск: ${lastRun}</div>
         </div>
         <div class="li-right"><span class="badge" style="background:${color}15;color:${color}">${stb(w.status)[1]}</span><span class="chev">›</span></div>
       </div>`;
@@ -30026,12 +30026,17 @@ async function openWorkflowDetail(wfId, wfName) {
   try {
     const d = await api('/api/miniapp/workflows/' + wfId);
     const steps = d.steps || [];
+    // Зеркало воронки или автоворонки: шаги, включение и удаление живут в их
+    // разделе, здесь — цель, статистика и журнал по людям.
+    const legacy = !!d.legacy_kind;
     let html = '';
 
     if (d.bot_id) {
       html += `<div class="hint" style="margin:0 14px 8px">🤖 Бот: ${d.bot_username ? '@' + esc(d.bot_username) : '#' + d.bot_id}</div>`;
     }
-    html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
+    if (legacy) {
+      html += `<div class="hint" style="margin:0 14px 8px">🔗 ${esc(d.legacy_note || '')}${d.active ? '' : ' Сейчас воронка выключена.'}</div>`;
+    } else html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
       <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
       <button class="btn btn-s" onclick="runWorkflowTest(${wfId}, this)" style="flex:1 1 auto;font-size:13px;padding:8px">🧪 Тестовый запуск</button>
       <button class="btn btn-r" onclick="deleteWorkflow(${wfId}, this)" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Удалить">🗑</button>
@@ -30043,7 +30048,7 @@ async function openWorkflowDetail(wfId, wfName) {
     // Подсказки для триггера «событие»: код события и его подпись по-русски.
     const evOpts = Object.entries(d.events || {}).map(([k, v]) =>
       `<option value="${esc(k)}">${esc(v)}</option>`).join('');
-    html += `<div class="sec">⚡ Когда запускать</div>
+    if (!legacy) html += `<div class="sec">⚡ Когда запускать</div>
       <div style="padding:0 16px 8px">
         <select id="wfdTrigger" class="sel" onchange="wfTriggerHint('wfd')">${trigOpts}</select>
         <input type="text" id="wfdTriggerVal" class="inp" style="margin-top:6px" list="wfdEventList" value="${esc(d.trigger_value || '')}">
@@ -30120,7 +30125,7 @@ async function openWorkflowDetail(wfId, wfName) {
             ${!isLast ? '<div class="ffstep-tail"></div>' : ''}
           </div>
           <div class="ffstep-body" style="border-left:3px solid ${color}">
-            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : (s.until_time ? '· до ' + esc(s.until_time) : '')}</span><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span></div>
+            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : (s.until_time ? '· до ' + esc(s.until_time) : '')}</span>${legacy ? '' : `<span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span>`}</div>
             <div class="ffstep-text">${esc(body)}</div>
             ${extra.length ? '<div class="hint" style="margin-top:4px">' + extra.map(esc).join('<br>') + '</div>' : ''}
           </div>
