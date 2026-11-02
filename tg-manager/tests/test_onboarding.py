@@ -191,3 +191,126 @@ def test_bot_deeplinks_are_handled_in_frontend():
     src = open(os.path.join(ROOT, "bot", "handlers", "start.py"), encoding="utf-8").read()
     assert "#onboarding" in src
     assert "_onboarding_message" in src
+
+
+# ── Цель новичка: свой путь на каждую ─────────────────────────────────────────
+
+def _ids(d):
+    return [s["id"] for s in d["steps"]]
+
+
+def test_no_goal_asks_for_it_and_keeps_the_original_path():
+    d = onboarding.build_checklist(accounts=0, plan_paid=False)
+    assert d["needs_goal"] is True and d["goal"] == onboarding.DEFAULT_GOAL
+    assert [g["key"] for g in d["goals"]] == ["sell_bot", "crm", "outreach"]
+    assert _ids(d)[0] == "accounts"
+    # Ветерану цель не навязывается: результат уже есть.
+    d = onboarding.build_checklist(accounts=1, first_result={"id": 1, "label": "x", "ok": 2})
+    assert d["needs_goal"] is False
+
+
+def test_unknown_goal_falls_back_to_original_path():
+    d = onboarding.build_checklist(accounts=0, goal="nonsense")
+    assert d["needs_goal"] is True and _ids(d)[0] == "accounts"
+
+
+def test_seller_path_has_no_accounts_or_proxy():
+    d = onboarding.build_checklist(accounts=0, plan_paid=False, goal="sell_bot")
+    assert d["needs_goal"] is False and d["goal"] == "sell_bot"
+    assert _ids(d) == ["bot", "persona", "plan", "first_result"]
+    assert d["next_step"] == "bot" and d["activated"] is False
+    assert d["steps"][0]["action"] == {"kind": "add_bot"}
+
+
+def test_seller_path_progress_and_result():
+    d = onboarding.build_checklist(accounts=0, goal="sell_bot", bots=1, personas_bound=1)
+    assert d["next_step"] == "first_result"
+    assert d["steps"][-1]["action"] == {"kind": "inbox"}
+    d = onboarding.build_checklist(accounts=0, goal="sell_bot", bots=1, personas_bound=1,
+                                   sales_dialogs=3)
+    assert d["activated"] is True and d["first_result"]["ok"] == 3
+    d = onboarding.build_checklist(accounts=0, goal="sell_bot", bots=1, personas_bound=1,
+                                   sales_dialogs=3, sales_orders=1)
+    assert "заказ" in d["first_result"]["title"]
+
+
+def test_crm_path_steps_and_result():
+    d = onboarding.build_checklist(accounts=0, goal="crm")
+    assert _ids(d) == ["accounts", "contacts", "first_result"]
+    assert "Сначала подключите аккаунт" in d["steps"][1]["hint"]
+    d = onboarding.build_checklist(accounts=1, accounts_alive=1, goal="crm", contacts=40)
+    assert d["next_step"] == "first_result"
+    assert d["steps"][-1]["action"] == {"kind": "deals"}
+    d = onboarding.build_checklist(accounts=1, accounts_alive=1, goal="crm",
+                                   contacts=40, deals=2)
+    assert d["activated"] is True and d["first_result"]["ok"] == 2
+
+
+def test_activated_veteran_keeps_stored_result_on_goal_path():
+    import datetime as dt
+    at = dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
+    fr = {"id": None, "label": "Первая сделка в воронке", "ok": 1}
+    for goal in ("sell_bot", "crm"):
+        d = onboarding.build_checklist(accounts=1, goal=goal, activated_at=at, first_result=fr)
+        assert d["activated"] is True
+        assert d["first_result"]["title"] == "Первая сделка в воронке"
+
+
+def test_goal_result_drives_activation():
+    assert onboarding.goal_result({"goal": "crm", "deals": 1})["op_type"] == "crm_deal"
+    assert onboarding.goal_result({"goal": "sell_bot", "sales_dialogs": 2})["ok"] == 2
+    assert onboarding.goal_result({"goal": "sell_bot", "sales_orders": 1,
+                                   "sales_dialogs": 2})["op_type"] == "bot_sales_order"
+    assert onboarding.goal_result({"goal": "outreach", "deals": 5}) is None
+    assert onboarding.goal_result({"goal": "crm"}) is None
+
+
+def test_set_goal_rejects_unknown():
+    import asyncio
+
+    import pytest
+
+    class _P:
+        async def execute(self, *a):
+            raise AssertionError("неизвестная цель не должна писаться")
+
+    with pytest.raises(ValueError):
+        asyncio.run(onboarding.set_goal(_P(), 1, "spam"))
+
+
+def test_goal_path_kinds_are_handled_in_frontend():
+    states = [
+        dict(accounts=0, goal="sell_bot"),
+        dict(accounts=0, goal="sell_bot", bots=1, personas_bound=1),
+        dict(accounts=0, goal="crm"),
+        dict(accounts=1, accounts_alive=1, goal="crm", contacts=3),
+    ]
+    kinds = set()
+    for st in states:
+        for s in onboarding.build_checklist(**st)["steps"]:
+            if s.get("action"):
+                kinds.add(s["action"]["kind"])
+    assert {"add_bot", "sales_manager", "inbox", "contacts", "deals"} <= kinds
+    html = _html()
+    i = html.find("const _ONBOARD_ACT")
+    body = html[i:html.index("};", i)]
+    for k in sorted(kinds):
+        assert re.search(rf"\b{k}\s*:", body), f"шаг '{k}' не обработан в _ONBOARD_ACT"
+
+
+def test_goal_chooser_wired_in_app_and_bot():
+    src = api_source()
+    assert '"/api/miniapp/onboarding/goal"' in src and "onboarding.set_goal" in src
+    html = _html()
+    assert "function onboardSetGoal" in html and "d.needs_goal" in html
+    assert "/api/miniapp/onboarding/goal" in html
+    bot = open(os.path.join(ROOT, "bot", "handlers", "start.py"), encoding="utf-8").read()
+    assert "OnbCb.filter(F.action == \"goal\")" in bot
+    assert "OnbCb.filter(F.action == \"change\")" in bot
+    assert "_onboarding_goal_message" in bot
+
+
+def test_goal_migration_registered():
+    name = "schema_v290_onboarding_goal.sql"
+    assert os.path.exists(os.path.join(ROOT, name))
+    assert name in open(os.path.join(ROOT, "schema_checksums.txt"), encoding="utf-8").read()

@@ -59,6 +59,28 @@ NOT_A_RESULT = tuple(sorted(SYSTEM_OP_TYPES | SERVICE_OP_TYPES))
 # Мёртвые статусы — единый словарь account_status (не пересказываем).
 _DEAD = tuple(sorted(DEAD_STATUSES))
 
+# Цель новичка. Лидеры (ManyChat, Salebot) первым вопросом спрашивают, ЗАЧЕМ
+# человек пришёл, и ведут каждого своим путём. У нас путь был один —
+# «аккаунт → прокси → подписка → операция», — и продавцу, пришедшему ради
+# бота с ИИ-менеджером, первым шагом предлагали подключать аккаунт и прокси.
+#
+# Порядок — порядок кнопок выбора. «outreach» — исходный путь: он же
+# действует, пока цель не выбрана, чтобы старые клиенты и бот не ломались.
+GOALS: tuple[tuple[str, str, str], ...] = (
+    ("sell_bot", "🤖 Продавать через бота",
+     "ИИ-менеджер отвечает клиентам в вашем боте и принимает заказы"),
+    ("crm", "📇 Вести клиентов в CRM",
+     "Контакты из ваших аккаунтов, стадии сделок, напоминания"),
+    ("outreach", "📨 Собрать аудиторию и написать ей",
+     "Сбор аудитории, прогрев аккаунтов, инвайт и рассылки"),
+)
+GOAL_KEYS = frozenset(k for k, _t, _d in GOALS)
+DEFAULT_GOAL = "outreach"
+
+
+def goals_payload() -> list[dict]:
+    return [{"key": k, "title": t, "desc": d} for k, t, d in GOALS]
+
 
 def _n(v) -> int:
     try:
@@ -96,8 +118,19 @@ def build_checklist(
     activated_at: Any = None,
     trial: Optional[dict] = None,
     trial_available: bool = False,
+    goal: Optional[str] = None,
+    bots: int = 0,
+    personas_bound: int = 0,
+    sales_dialogs: int = 0,
+    sales_orders: int = 0,
+    contacts: int = 0,
+    deals: int = 0,
 ) -> dict:
     """Собрать чеклист из снимка состояния владельца.
+
+    Путь зависит от цели (``goal``, см. GOALS). Пока цель не выбрана, чеклист
+    идёт исходным путём «outreach», а в ответе ``needs_goal`` — экран сначала
+    спрашивает цель.
 
     Обязательные шаги: живой аккаунт, подписка (операции платные), первое
     действие, первый результат. Прокси — рекомендуемый (без него аккаунт идёт
@@ -173,6 +206,20 @@ def build_checklist(
         plan_step["cta"] = None
         plan_step["action"] = None
 
+    chosen = goal if goal in GOAL_KEYS else None
+    # Активирован раньше (строка onboarding_progress): итог берётся оттуда,
+    # если счётчики пути цели его не дают — например, первым результатом была
+    # операция, а цель выбрана позже.
+    stored = ({"op_id": first_result.get("id"), "title": _op_title(first_result),
+               "ok": _n(first_result.get("ok"))} if first_result else None)
+    if chosen == "sell_bot":
+        return _sell_bot_checklist(plan_step, bots=bots, personas_bound=personas_bound,
+                                   dialogs=sales_dialogs, orders=sales_orders,
+                                   activated_at=activated_at, trial=trial, stored=stored)
+    if chosen == "crm":
+        return _crm_checklist(acc_step, alive=alive, contacts=contacts, deals=deals,
+                              activated_at=activated_at, trial=trial, stored=stored)
+
     op_step = {
         "id": "first_op",
         "title": "Запустить первое действие",
@@ -229,6 +276,9 @@ def build_checklist(
     next_step = next((s["id"] for s in steps if not s["done"] and not s["optional"]), None)
 
     return {
+        "goal": chosen or DEFAULT_GOAL,
+        "needs_goal": chosen is None and not has_result,
+        "goals": goals_payload(),
         "activated": has_result,
         "steps": steps,
         "done": done_count,
@@ -249,6 +299,108 @@ def build_checklist(
             if trial else None
         ),
     }
+
+
+def _iso(v):
+    return v.isoformat() if hasattr(v, "isoformat") else v
+
+
+def _trial_out(trial):
+    if not trial:
+        return None
+    return {"days_left": _n(trial.get("days_left")), "expires_at": _iso(trial.get("expires_at"))}
+
+
+def _finish(goal: str, steps: list, has_result: bool, first_result, activated_at, trial) -> dict:
+    """Общий хвост чеклиста цели: счёт, фокус, итог."""
+    nxt = next((s["id"] for s in steps if not s["done"] and not s["optional"]), None)
+    return {
+        "goal": goal,
+        "needs_goal": False,
+        "goals": goals_payload(),
+        "activated": has_result,
+        "steps": steps,
+        "done": sum(1 for s in steps if s["done"]),
+        "total": len(steps),
+        "next_step": None if has_result else nxt,
+        "first_result": first_result if has_result else None,
+        "activated_at": _iso(activated_at),
+        "trial": _trial_out(trial),
+    }
+
+
+def _sell_bot_checklist(plan_step: dict, *, bots, personas_bound, dialogs, orders,
+                        activated_at, trial, stored=None) -> dict:
+    """Путь продавца: бот → ИИ-менеджер на нём → подписка → первый диалог.
+
+    Аккаунтов и прокси тут нет вовсе: боту продавца они не нужны, а были
+    первым шагом единственного пути.
+    """
+    bots, personas_bound = _n(bots), _n(personas_bound)
+    dialogs, orders = _n(dialogs), _n(orders)
+    has_result = orders > 0 or dialogs > 0 or activated_at is not None
+    steps = [
+        {"id": "bot", "title": "Подключить бота" if not bots else f"Ботов подключено: {bots}",
+         "hint": "Создайте бота в @BotFather и вставьте его токен — в этом боте "
+                 "ИИ-менеджер будет отвечать вашим клиентам.",
+         "done": bots > 0, "optional": False, "cta": "Подключить",
+         "action": {"kind": "add_bot"}},
+        {"id": "persona", "title": "Настроить ИИ-менеджера",
+         "hint": "Выберите готовый пресет под нишу (кофейня, одежда, услуги, "
+                 "электроника), впишите свои товары и привяжите менеджера к боту.",
+         "done": personas_bound > 0, "optional": False, "cta": "Настроить",
+         "action": {"kind": "sales_manager"}},
+        plan_step,
+        {"id": "first_result", "title": "Первый диалог с клиентом",
+         "hint": "Откройте своего бота и напишите ему как клиент — менеджер "
+                 "ответит, и диалог появится во «Входящих».",
+         "done": has_result, "optional": False, "cta": None, "action": None},
+    ]
+    fr = None
+    if orders:
+        steps[-1]["title"] = f"Первый заказ получен — {orders}"
+        fr = {"op_id": None, "title": "Первый заказ через ИИ-менеджера", "ok": orders}
+    elif dialogs:
+        steps[-1]["title"] = "Первый диалог с клиентом состоялся"
+        fr = {"op_id": None, "title": "Первый диалог ИИ-менеджера с клиентом", "ok": dialogs}
+    elif activated_at is not None:
+        steps[-1]["title"] = "Первый результат получен"
+        fr = stored
+    elif personas_bound:
+        steps[-1]["cta"] = "Входящие"
+        steps[-1]["action"] = {"kind": "inbox"}
+    return _finish("sell_bot", steps, has_result, fr, activated_at, trial)
+
+
+def _crm_checklist(acc_step: dict, *, alive, contacts, deals, activated_at, trial,
+                   stored=None) -> dict:
+    """Путь CRM: аккаунт → контакты собраны → первая сделка на доске."""
+    contacts, deals = _n(contacts), _n(deals)
+    has_result = deals > 0 or activated_at is not None
+    steps = [
+        acc_step,
+        {"id": "contacts",
+         "title": "Контакты собраны" + (f": {contacts}" if contacts else ""),
+         "hint": "Контакты подтягиваются из ваших аккаунтов сами. Откройте хаб "
+                 "контактов — там видно, кто откуда и о чём вы говорили.",
+         "done": contacts > 0, "optional": False, "cta": "Открыть",
+         "action": {"kind": "contacts"}},
+        {"id": "first_result", "title": "Первая сделка в воронке",
+         "hint": "Откройте контакт и задайте ему стадию — он встанет в колонку "
+                 "канбана «Сделки».",
+         "done": has_result, "optional": False, "cta": "Канбан",
+         "action": {"kind": "deals"}},
+    ]
+    if not alive and not contacts:
+        steps[1]["hint"] = "Сначала подключите аккаунт: контакты собираются из него."
+    fr = None
+    if has_result:
+        steps[-1]["title"] = "Первая сделка в воронке" + (f" — {deals}" if deals else "")
+        steps[-1]["cta"] = None
+        steps[-1]["action"] = None
+        fr = ({"op_id": None, "title": "Первая сделка в воронке", "ok": deals}
+              if deals or not stored else stored)
+    return _finish("crm", steps, has_result, fr, activated_at, trial)
 
 
 # ── Чтение снимка из базы ────────────────────────────────────────────────────
@@ -287,6 +439,77 @@ async def _plan_state(pool, uid: int, *, alive: bool) -> dict:
     return {"plan_paid": paid, "trial": info, "trial_available": bool(available)}
 
 
+async def load_goal(pool, uid: int) -> Optional[str]:
+    """Выбранная цель или None. Нет таблицы (миграция v290 не накатилась) —
+    тоже None: чеклист идёт исходным путём, а не падает."""
+    try:
+        g = await pool.fetchval("SELECT goal FROM onboarding_goals WHERE owner_id=$1", uid)
+    except Exception:
+        log.warning("onboarding: goal read failed uid=%s", uid, exc_info=True)
+        return None
+    return g if g in GOAL_KEYS else None
+
+
+async def set_goal(pool, uid: int, goal: str) -> str:
+    """Запомнить цель новичка. Чужое значение — ValueError, а не запись."""
+    if goal not in GOAL_KEYS:
+        raise ValueError(f"unknown onboarding goal: {goal!r}")
+    await pool.execute(
+        "INSERT INTO onboarding_goals(owner_id, goal) VALUES ($1, $2) "
+        "ON CONFLICT (owner_id) DO UPDATE SET goal=EXCLUDED.goal, chosen_at=now()",
+        uid, goal)
+    return goal
+
+
+async def _count(pool, sql: str, uid: int) -> int:
+    try:
+        return _n(await pool.fetchval(sql, uid))
+    except Exception:
+        # Таблица модуля не накатилась — шаг покажется незакрытым, это честнее
+        # падения всего чеклиста.
+        log.warning("onboarding: count failed uid=%s sql=%s", uid, sql[:60], exc_info=True)
+        return 0
+
+
+async def _goal_counts(pool, uid: int, goal: Optional[str]) -> dict:
+    """Счётчики шагов пути цели. Читаются только для выбранной цели."""
+    if goal == "sell_bot":
+        return {
+            "bots": await _count(pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid),
+            "personas_bound": await _count(
+                pool, "SELECT COUNT(*) FROM bot_sales_personas "
+                      "WHERE owner_id=$1 AND bot_id IS NOT NULL", uid),
+            "sales_dialogs": await _count(
+                pool, "SELECT COUNT(*) FROM bot_sales_dialogs WHERE owner_id=$1", uid),
+            "sales_orders": await _count(
+                pool, "SELECT COUNT(*) FROM bot_sales_orders WHERE owner_id=$1", uid),
+        }
+    if goal == "crm":
+        return {
+            "contacts": await _count(
+                pool, "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1", uid),
+            "deals": await _count(
+                pool, "SELECT COUNT(*) FROM contact_crm WHERE owner_id=$1", uid),
+        }
+    return {}
+
+
+def goal_result(state: dict) -> Optional[dict]:
+    """Первый результат пути цели (не операции): заказ, диалог, сделка."""
+    goal = state.get("goal")
+    if goal == "sell_bot":
+        if _n(state.get("sales_orders")):
+            return {"label": "Первый заказ через ИИ-менеджера", "ok": _n(state["sales_orders"]),
+                    "op_type": "bot_sales_order"}
+        if _n(state.get("sales_dialogs")):
+            return {"label": "Первый диалог ИИ-менеджера с клиентом",
+                    "ok": _n(state["sales_dialogs"]), "op_type": "bot_sales_dialog"}
+    if goal == "crm" and _n(state.get("deals")):
+        return {"label": "Первая сделка в воронке", "ok": _n(state["deals"]),
+                "op_type": "crm_deal"}
+    return None
+
+
 async def load_state(pool, uid: int) -> dict:
     """Снимок состояния владельца для build_checklist. Только чтение, кроме
     фиксации активации (см. record_activation)."""
@@ -303,7 +526,8 @@ async def load_state(pool, uid: int) -> dict:
                   "label": stored["first_result_label"],
                   "ok": stored["first_result_ok"]}
         return {"accounts": 1, "first_result": fr,
-                "activated_at": stored["activated_at"]}
+                "activated_at": stored["activated_at"],
+                "goal": await load_goal(pool, uid)}
 
     acc = await pool.fetchrow(
         "SELECT COUNT(*) AS total, "
@@ -349,6 +573,9 @@ async def load_state(pool, uid: int) -> dict:
             if last_failed and last_failed.get("status") == op_status.CANCELLED:
                 last_failed["reason"] = last_failed.get("reason") or "отменена"
 
+    goal = await load_goal(pool, uid)
+    goal_counts = await _goal_counts(pool, uid, goal)
+
     warmup_days = 0
     if not first_result:
         warmup_days = await pool.fetchval(
@@ -367,20 +594,29 @@ async def load_state(pool, uid: int) -> dict:
         "first_result": first_result,
         "warmup_days": warmup_days,
         "activated_at": None,
+        "goal": goal,
+        **goal_counts,
     }
 
 
 async def record_activation(pool, uid: int, state: dict) -> None:
     """Зафиксировать первый результат: один раз на владельца (аудит + липкость)."""
     fr = state.get("first_result") or {}
-    label = _op_title(fr) if fr else ("Пройден день прогрева" if state.get("warmup_days") else None)
+    gr = None if fr else goal_result(state)
+    if gr:
+        # Результат пути цели: операции за ним нет, есть заказ/диалог/сделка.
+        op_id, op_type, label, ok = None, gr["op_type"], gr["label"], gr["ok"]
+    else:
+        label = _op_title(fr) if fr else ("Пройден день прогрева" if state.get("warmup_days") else None)
+        op_id = fr.get("id")
+        op_type = fr.get("op_type") or ("account_warmup" if not fr else None)
+        ok = _n(fr.get("ok")) if fr else _n(state.get("warmup_days"))
     inserted = await pool.fetchval(
         "INSERT INTO onboarding_progress(owner_id, activated_at, first_result_op_id, "
         "first_result_op_type, first_result_label, first_result_ok) "
         "VALUES ($1, now(), $2, $3, $4, $5) "
         "ON CONFLICT (owner_id) DO NOTHING RETURNING activated_at",
-        uid, fr.get("id"), fr.get("op_type") or ("account_warmup" if not fr else None),
-        label, _n(fr.get("ok")) if fr else _n(state.get("warmup_days")))
+        uid, op_id, op_type, label, ok)
     if inserted is not None:
         log.info("onboarding: owner=%s activated by op=%s (%s)", uid, fr.get("id"), label)
         state["activated_at"] = inserted
@@ -389,7 +625,8 @@ async def record_activation(pool, uid: int, state: dict) -> None:
 async def load_checklist(pool, uid: int) -> dict:
     """Снимок + чеклист; при первом результате фиксирует активацию."""
     state = await load_state(pool, uid)
-    if state.get("activated_at") is None and (state.get("first_result") or state.get("warmup_days")):
+    if state.get("activated_at") is None and (
+            state.get("first_result") or state.get("warmup_days") or goal_result(state)):
         try:
             await record_activation(pool, uid, state)
         except Exception:

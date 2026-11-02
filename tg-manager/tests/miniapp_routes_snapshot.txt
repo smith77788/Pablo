@@ -904,6 +904,7 @@ POST /api/miniapp/next_actions/feedback
 POST /api/miniapp/node
 POST /api/miniapp/notary
 POST /api/miniapp/notary/{watch_id}/check
+POST /api/miniapp/onboarding/goal
 POST /api/miniapp/op_chain/launch
 POST /api/miniapp/operation/{op_id}/cancel
 POST /api/miniapp/operation/{op_id}/pause

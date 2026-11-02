@@ -3999,6 +3999,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"activated": True, "steps": [], "done": 0,
                                "total": 0, "next_step": None})
 
+    async def onboarding_set_goal(request: web.Request) -> web.Response:
+        """Цель новичка (services/onboarding.py, GOALS): от неё зависит путь
+        чеклиста. В ответ — уже перестроенный чеклист, чтобы экран не делал
+        второй запрос."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import onboarding
+        try:
+            body = await request.json()
+        except Exception as e:
+            return bad_body_response(request, e) or _err(_BAD_BODY, 400)
+        goal = str((body or {}).get("goal") or "").strip() if isinstance(body, dict) else ""
+        if goal not in onboarding.GOAL_KEYS:
+            return _err("Неизвестная цель", 400)
+        try:
+            await onboarding.set_goal(pool, uid, goal)
+            return _json_resp(await onboarding.load_checklist(pool, uid))
+        except Exception:
+            log.exception("onboarding_set_goal uid=%s goal=%s", uid, goal)
+            return _err(_INTERNAL_ERROR, 500)
+
 
 
 
@@ -7829,6 +7851,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/mass_targets", mass_targets)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/onboarding", onboarding_status)
+    app.router.add_post("/api/miniapp/onboarding/goal", onboarding_set_goal)
     app.router.add_post("/api/miniapp/dm/preview", dm_preview)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
     app.router.add_post("/api/miniapp/mass_report", mass_report_submit)
