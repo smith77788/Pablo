@@ -1921,9 +1921,17 @@ async def mark_order_paid(pool, http, token, bot_id: int, chat_id: int,
             f"✅ Оплата получена. Заказ №{oid} передан в работу.")
     except Exception:
         log.debug("bsp: подтверждение оплаты не отправлено", exc_info=True)
+    # Источник контакта (параметр ссылки /start, первое касание) едет до
+    # оплаты: по нему владелец видит, какая реклама принесла деньги.
+    try:
+        contact_source = await pool.fetchval(
+            "SELECT fields->>'source' FROM bot_users WHERE bot_id=$1 AND user_id=$2",
+            bot_id, chat_id)
+    except Exception:
+        contact_source = None
     await automation_events.emit(
         pool, row["owner_id"], "payment.received",
-        {"source": "order", "order_id": oid,
+        {"source": "order", "order_id": oid, "contact_source": contact_source,
          "amount": payment.get("total_amount"), "currency": payment.get("currency"),
          "order_total_cents": row["total_cents"], "order_currency": row["currency"],
          "charge_id": charge},

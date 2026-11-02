@@ -353,6 +353,7 @@ GET /api/miniapp/vlayer/segment/{value}
 GET /api/miniapp/warmup
 GET /api/miniapp/warmup/{plan_id}/log
 GET /api/miniapp/webhooks/{wh_id}/deliveries
+GET /api/miniapp/workflow/run/{run_id}/log
 GET /api/miniapp/workflow/{wf_id}/status
 GET /api/miniapp/workflows
 GET /api/miniapp/workflows/{wf_id}
@@ -661,6 +662,7 @@ HEAD /api/miniapp/vlayer/segment/{value}
 HEAD /api/miniapp/warmup
 HEAD /api/miniapp/warmup/{plan_id}/log
 HEAD /api/miniapp/webhooks/{wh_id}/deliveries
+HEAD /api/miniapp/workflow/run/{run_id}/log
 HEAD /api/miniapp/workflow/{wf_id}/status
 HEAD /api/miniapp/workflows
 HEAD /api/miniapp/workflows/{wf_id}

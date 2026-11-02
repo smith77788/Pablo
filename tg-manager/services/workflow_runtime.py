@@ -39,10 +39,12 @@ import asyncio
 import html
 import json
 import logging
+import random
 import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -152,6 +154,119 @@ def validate_trigger(trigger_type, trigger_value) -> tuple[str | None, str | Non
     if ttype == "manual":
         return None, None
     return ttype, (value or None)
+
+
+# ── Цель сценария ───────────────────────────────────────────────────────────
+# Цель — то, ради чего сценарий существует: человек купил, поставил тег
+# «клиент», сделка выиграна. Достигнута — прогон завершается сам, и дожим
+# больше не идёт. Раньше сценарий не знал цели и слал «напоминаем об оплате»
+# человеку, который уже оплатил.
+GOAL_TYPES: dict[str, str] = {
+    "paid": "Человек оплатил",
+    "tag_added": "Человеку поставили тег",
+    "event": "Произошло событие",
+}
+
+
+def validate_goal(goal_type, goal_value) -> tuple[str | None, str | None]:
+    """Нормализовать цель с экрана. (None, None) — цели нет. ValueError."""
+    gtype = str(goal_type or "").strip().lower()
+    if not gtype or gtype == "none":
+        return None, None
+    if gtype not in GOAL_TYPES:
+        raise ValueError("Неизвестная цель сценария")
+    value = str(goal_value or "").strip()[:200]
+    if gtype in ("tag_added", "event") and not value:
+        raise ValueError(f"Для цели «{GOAL_TYPES[gtype]}» нужно значение")
+    return gtype, (value or None)
+
+
+def goal_matches(goal_type: str | None, goal_value: str | None,
+                 event: dict) -> bool:
+    """Достигнута ли цель этим событием. ЧИСТАЯ."""
+    gtype = (goal_type or "").strip().lower()
+    etype = event.get("event_type") or ""
+    data = event.get("data") or {}
+    value = (goal_value or "").strip()
+    if gtype == "paid":
+        return etype == "payment.received"
+    if gtype == "tag_added":
+        return (etype == "contact.tag_added" and bool(value)
+                and (data.get("tag") or "").strip().lower() == value.lower())
+    if gtype == "event":
+        return bool(value) and etype == _EVENT_ALIASES.get(value, value)
+    return False
+
+
+# ── Умная задержка: «до ближайшего будня 10:00 по времени человека» ─────────
+# Часовой пояс человека Telegram не сообщает. Берём по порядку: поле
+# контакта `timezone` (сценарий может спросить), язык клиента Telegram
+# (ru — Москва, uk — Киев …), часовой пояс шага, Москва.
+_LANG_TZ = {
+    "ru": "Europe/Moscow", "uk": "Europe/Kyiv", "be": "Europe/Minsk",
+    "kk": "Asia/Almaty", "uz": "Asia/Tashkent", "ky": "Asia/Bishkek",
+    "hy": "Asia/Yerevan", "ka": "Asia/Tbilisi", "az": "Asia/Baku",
+    "tg": "Asia/Dushanbe", "pl": "Europe/Warsaw", "de": "Europe/Berlin",
+    "lv": "Europe/Riga", "lt": "Europe/Vilnius", "et": "Europe/Tallinn",
+}
+DEFAULT_TZ = "Europe/Moscow"
+_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _zone(name: str | None):
+    if not name:
+        return None
+    try:
+        return ZoneInfo(str(name).strip())
+    except Exception:
+        return None
+
+
+def contact_tz(fields: dict | None, language_code: str | None,
+               step_tz: str | None = None) -> str:
+    """IANA-зона человека для умной задержки. ЧИСТАЯ."""
+    own = (fields or {}).get("timezone")
+    if own and _zone(own):
+        return str(own).strip()
+    lang = (language_code or "").split("-")[0].strip().lower()
+    if lang in _LANG_TZ:
+        return _LANG_TZ[lang]
+    if step_tz and _zone(step_tz):
+        return step_tz
+    return DEFAULT_TZ
+
+
+def next_window(now_utc: datetime, at: str, weekdays_only: bool,
+                tz_name: str) -> datetime:
+    """Ближайший момент «в HH:MM по зоне tz_name» (только будни, если
+    weekdays_only) строго позже now_utc. Возвращает UTC. ЧИСТАЯ."""
+    m = _HHMM_RE.match((at or "").strip())
+    if not m:
+        raise ValueError("время — в виде ЧЧ:ММ")
+    hh, mm = int(m.group(1)), int(m.group(2))
+    zone = _zone(tz_name) or ZoneInfo(DEFAULT_TZ)
+    local = now_utc.astimezone(zone)
+    cand = local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    for _ in range(8):
+        if cand > local and (not weekdays_only or cand.weekday() < 5):
+            return cand.astimezone(timezone.utc)
+        cand = (cand + timedelta(days=1)).replace(hour=hh, minute=mm)
+    return cand.astimezone(timezone.utc)
+
+
+def pick_split(branches: list[dict], rnd: float | None = None) -> int:
+    """Номер ветки A/B-деления по весам. ЧИСТАЯ при заданном rnd."""
+    weights = [max(0, int(b.get("weight") or 0)) for b in branches]
+    total = sum(weights)
+    if total <= 0:
+        return 0
+    x = (random.random() if rnd is None else rnd) * total
+    acc = 0
+    for i, w in enumerate(weights):
+        acc += w
+        if x < acc:
+            return i
+    return len(weights) - 1
 
 
 _PHONE_RE = re.compile(r"^\+?\d[\d\s\-()]{8,18}\d$")
@@ -277,7 +392,8 @@ def _goto_index(step: dict, key: str) -> int | None:
 async def start_run(pool, wf: dict, bot_id: int | None, chat_id: int | None, *,
                     input_data: dict | None = None,
                     trigger_event_id: int | None = None,
-                    force: bool = False) -> int | None:
+                    force: bool = False,
+                    source: str | None = None) -> int | None:
     """Завести прогон сценария для человека. id прогона или None.
 
     None — человек уже проходит этот сценарий (живой прогон есть) или уже
@@ -294,22 +410,105 @@ async def start_run(pool, wf: dict, bot_id: int | None, chat_id: int | None, *,
             wf["id"], bot_id, chat_id)
         if seen:
             return None
+    if source is None and bot_id and chat_id:
+        # Источник — первое касание человека (параметр ссылки /start),
+        # записанный в поле контакта: до оплаты он едет вместе с прогоном.
+        try:
+            source = await pool.fetchval(
+                "SELECT fields->>'source' FROM bot_users WHERE bot_id=$1 AND user_id=$2",
+                bot_id, chat_id)
+        except Exception:
+            source = None
     run_id = await pool.fetchval(
         """INSERT INTO workflow_runs
                (owner_id, workflow_id, status, input_data, current_step,
                 total_steps, started_at, bot_id, chat_id, steps_snapshot,
-                vars, next_run_at, trigger_event_id)
+                vars, next_run_at, trigger_event_id, source)
            VALUES ($1, $2, 'running', $3::jsonb, 0, $4, now(), $5, $6,
-                   $7::jsonb, '{}'::jsonb, now(), $8)
+                   $7::jsonb, '{}'::jsonb, now(), $8, $9)
            ON CONFLICT (workflow_id, bot_id, chat_id)
               WHERE status IN ('running', 'waiting') AND chat_id IS NOT NULL
            DO NOTHING
            RETURNING id""",
         wf["owner_id"], wf["id"], json.dumps(input_data or {}, default=str),
-        len(steps), bot_id, chat_id, json.dumps(steps), trigger_event_id)
+        len(steps), bot_id, chat_id, json.dumps(steps), trigger_event_id,
+        (source or None) and str(source)[:64])
     if run_id:
         wake()
     return run_id
+
+
+async def _remember_source(pool, ev: dict) -> None:
+    """Первое касание: параметр ссылки /start → поле контакта `source`.
+
+    Только если поля ещё нет: человек, пришедший по рекламе, а через неделю
+    открывший бота по ссылке из канала, остаётся «из рекламы»."""
+    param = ((ev.get("data") or {}).get("param") or "").strip()[:64]
+    if not param or not ev.get("bot_id") or not ev.get("chat_id"):
+        return
+    await pool.execute(
+        """UPDATE bot_users
+              SET fields = COALESCE(fields, '{}'::jsonb) || jsonb_build_object('source', $3::text)
+            WHERE bot_id=$1 AND user_id=$2
+              AND NOT (COALESCE(fields, '{}'::jsonb) ? 'source')""",
+        ev["bot_id"], ev["chat_id"], param)
+
+
+async def _check_goals(pool, ev: dict) -> int:
+    """Событие достигло цели живых прогонов этого человека — завершить их.
+
+    Только прогоны того же бота и человека: оплата одного клиента не
+    закрывает дожим другого."""
+    if not ev.get("chat_id"):
+        return 0
+    rows = await pool.fetch(
+        """SELECT r.*, d.goal_type, d.goal_value
+             FROM workflow_runs r
+             JOIN workflow_definitions d ON d.id = r.workflow_id
+            WHERE r.owner_id=$1 AND r.chat_id=$2
+              AND r.bot_id IS NOT DISTINCT FROM $3::bigint
+              AND r.status IN ('running', 'waiting')
+              AND d.goal_type IS NOT NULL""",
+        ev["owner_id"], ev["chat_id"], ev.get("bot_id"))
+    n = 0
+    for r in rows:
+        run = dict(r)
+        if not goal_matches(run.get("goal_type"), run.get("goal_value"), ev):
+            continue
+        res = await pool.execute(
+            """UPDATE workflow_runs
+                  SET status='completed', finished_at=now(), goal_reached_at=now(),
+                      error_message='Цель достигнута', wait_kind=NULL,
+                      wait_until=NULL, claimed_until=NULL
+                WHERE id=$1 AND status IN ('running', 'waiting')""", run["id"])
+        if isinstance(res, str) and res.endswith(" 1"):
+            n += 1
+            await _log(pool, run, int(run.get("current_step") or 0), "goal",
+                       "goal", ev.get("event_type"))
+            await bus.emit(pool, run["owner_id"], "workflow.completed",
+                           {"workflow_id": run.get("workflow_id"), "run_id": run["id"],
+                            "goal": True},
+                           bot_id=run.get("bot_id"), chat_id=run.get("chat_id"))
+    return n
+
+
+async def _log(pool, run: dict, idx: int, step_type: str, outcome: str,
+               detail: str | None = None, *, amount: int | None = None,
+               currency: str | None = None) -> None:
+    """Строка журнала шага. Не роняет прогон: журнал — для владельца, а не
+    для исполнения, и его сбой не должен останавливать сообщения людям."""
+    try:
+        await pool.execute(
+            """INSERT INTO workflow_step_log
+                   (run_id, workflow_id, owner_id, step_idx, step_type, outcome,
+                    detail, amount, currency)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
+            run["id"], run.get("workflow_id") or 0, run["owner_id"], int(idx),
+            (step_type or "?")[:32], outcome[:32],
+            (detail or None) and str(detail)[:300], amount, currency)
+    except Exception:
+        log.debug("workflow_runtime: журнал шага прогона %s", run.get("id"),
+                  exc_info=True)
 
 
 async def dispatch_events(pool) -> int:
@@ -332,16 +531,24 @@ async def dispatch_events(pool) -> int:
     for r in rows:
         by_owner.setdefault(r["owner_id"], []).append(dict(r))
     for ev in events:
+        try:
+            if ev["event_type"] == "contact.started":
+                await _remember_source(pool, ev)
+            await _check_goals(pool, ev)
+        except Exception:
+            log.exception("workflow_runtime: цель/источник по событию %s", ev["id"])
         for wf in by_owner.get(ev["owner_id"], []):
             if not trigger_matches(wf, ev):
                 continue
             bot_id = ev.get("bot_id") or wf.get("bot_id")
             try:
+                param = ((ev.get("data") or {}).get("param") or "") \
+                    if ev["event_type"] == "contact.started" else ""
                 rid = await start_run(
                     pool, wf, bot_id, ev.get("chat_id"),
                     input_data={"event_type": ev["event_type"],
                                 "event": ev.get("data") or {}},
-                    trigger_event_id=ev["id"])
+                    trigger_event_id=ev["id"], source=param or None)
             except Exception:
                 log.exception("workflow_runtime: запуск сценария %s по событию %s",
                               wf["id"], ev["id"])
@@ -396,6 +603,10 @@ async def _finish(pool, run: dict, status: str, note: str | None = None,
             WHERE id=$1 AND status IN ('running', 'waiting')""",
         run["id"], status, note,
         json.dumps(vars_, default=str) if vars_ is not None else None)
+    steps = _as_list(run.get("steps_snapshot"))
+    idx = int(run.get("current_step") or 0)
+    stype = steps[idx].get("type", "?") if 0 <= idx < len(steps) else "end"
+    await _log(pool, run, idx, stype, status, note)
     if status == "completed":
         await bus.emit(pool, run["owner_id"], "workflow.completed",
                        {"workflow_id": run.get("workflow_id"), "run_id": run["id"]},
@@ -416,7 +627,7 @@ async def _contact(pool, bot_id, chat_id) -> tuple[dict, dict]:
     if not bot_id or not chat_id:
         return {}, {}
     row = await pool.fetchrow(
-        """SELECT username, first_name, last_name, last_seen, fields
+        """SELECT username, first_name, last_name, last_seen, fields, language_code
              FROM bot_users WHERE bot_id=$1 AND user_id=$2""", bot_id, chat_id)
     if not row:
         return {}, {}
@@ -585,15 +796,41 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             return
 
         if stype == "delay":
-            minutes = int(step.get("delay_minutes") or 1)
+            now = datetime.now(timezone.utc)
+            if step.get("until_time"):
+                tz_name = contact_tz(fields, contact.get("language_code"),
+                                     step.get("tz"))
+                try:
+                    when = next_window(now, step["until_time"],
+                                       bool(step.get("weekdays_only")), tz_name)
+                except ValueError:
+                    when = now + timedelta(minutes=1)
+                detail = f"до {step['until_time']} ({tz_name})"
+            else:
+                minutes = int(step.get("delay_minutes") or 1)
+                when = now + timedelta(minutes=minutes)
+                detail = f"{minutes} мин"
             if not await _take_step(
                     pool, run["id"], seq, current_step=nxt,
-                    next_run_at=datetime.now(timezone.utc) + timedelta(minutes=minutes),
-                    claimed_until=None):
+                    next_run_at=when, claimed_until=None):
                 return
+            await _log(pool, run, idx, stype, "delay", detail)
             return
 
-        if stype == "condition":
+        if stype == "split":
+            branches = step.get("branches") or []
+            pick = pick_split(branches)
+            target = _goto_index(branches[pick], "goto") if branches else None
+            nxt = target if target is not None else idx + 1
+            if not await _take_step(
+                    pool, run["id"], seq, current_step=nxt,
+                    vars={**run_vars, "_split_" + str(idx + 1): pick}):
+                return
+            await _log(pool, run, idx, stype, f"branch:{pick}",
+                       (branches[pick].get("label") if branches else None)
+                       or chr(ord("A") + pick))
+
+        elif stype == "condition":
             try:
                 ok = await evaluate(pool, http, token, run, step, contact, fields)
             except Exception:
@@ -604,11 +841,13 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                 target = _goto_index(step, "else_goto")
                 if target is None:
                     if await _take_step(pool, run["id"], seq, current_step=len(steps)):
+                        await _log(pool, run, idx, stype, "no")
                         await _finish(pool, run, "completed", "Условие не выполнено")
                     return
                 nxt = target
             if not await _take_step(pool, run["id"], seq, current_step=nxt):
                 return
+            await _log(pool, run, idx, stype, "yes" if ok else "no")
 
         elif stype == "message":
             buttons = step.get("buttons") or []
@@ -625,8 +864,10 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             ok, retry, cat = await _send(pool, http, token, run, text,
                                          button_markup(run["id"], seq + 1, buttons))
             if not ok:
+                await _log(pool, run, idx, stype, "send_failed", cat)
                 await _send_failed(pool, run, idx, retry, cat)
                 return
+            await _log(pool, run, idx, stype, "sent")
             if branching:
                 _mark_hot(run.get("bot_id"))
                 return
@@ -640,8 +881,10 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             text = render(step.get("text") or "", contact, fields, run_vars)
             ok, retry, cat = await _send(pool, http, token, run, text)
             if not ok:
+                await _log(pool, run, idx, stype, "send_failed", cat)
                 await _send_failed(pool, run, idx, retry, cat)
                 return
+            await _log(pool, run, idx, stype, "sent")
             _mark_hot(run.get("bot_id"))
             return
 
@@ -653,8 +896,12 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                 return
             ok, cat = await send_invoice(pool, http, token, run, step, seq + 1)
             if not ok:
+                await _log(pool, run, idx, stype, "send_failed", cat)
                 await _send_failed(pool, run, idx, None, cat)
                 return
+            await _log(pool, run, idx, stype, "sent",
+                       amount=int(step.get("amount") or 0) or None,
+                       currency=step.get("currency") or "XTR")
             _mark_hot(run.get("bot_id"))
             return
 
@@ -665,20 +912,26 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                 nxt = target if target is not None else len(steps)
             if action == "stop":
                 if await _take_step(pool, run["id"], seq, current_step=len(steps)):
+                    await _log(pool, run, idx, stype, "done", "stop")
                     await _finish(pool, run, "completed")
                 return
             if not await _take_step(pool, run["id"], seq, current_step=nxt):
                 return
             try:
                 await _do_action(pool, run, step, contact, fields, main_bot)
+                await _log(pool, run, idx, stype, "done", action)
             except Exception:
                 log.warning("workflow_runtime: действие %s прогона %s не выполнено",
                             action, run["id"], exc_info=True)
+                await _log(pool, run, idx, stype, "error", action)
 
         elif stype == "webhook":
             if not await _take_step(pool, run["id"], seq, current_step=nxt):
                 return
-            await _do_webhook(http, run, step, contact, fields)
+            code = await _do_webhook(http, run, step, contact, fields)
+            await _log(pool, run, idx, stype,
+                       "done" if code and 200 <= code < 300 else "error",
+                       str(code) if code else "не доставлен")
 
         else:
             # Неизвестный тип (данные со старых времён) — пропустить, не падать.
@@ -708,9 +961,8 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
         if action == "add_tag":
             await db.add_user_tag(pool, bot_id, chat_id, value)
         else:
+            # Событие «тег снят» пишет сам db.remove_user_tag.
             await db.remove_user_tag(pool, bot_id, chat_id, value)
-            await bus.emit(pool, owner, "contact.tag_removed", {"tag": value},
-                           bot_id=bot_id, chat_id=chat_id)
     elif action == "set_field":
         name, _, val = value.partition("=")
         await _set_field(pool, bot_id, chat_id, name.strip(), val.strip(), owner)
@@ -723,13 +975,27 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
         title = (value or "Заявка из сценария") + f" — {label}"
         deal_id = await pool.fetchval(
             """INSERT INTO crm_deals (owner_id, title, contact, stage, notes, created_at)
-               VALUES ($1, $2, $3, 'new', $4, now()) RETURNING id""",
+               VALUES ($1, $2, $3, 'lead', $4, now()) RETURNING id""",
             owner, title[:200], label[:200],
             "\n".join(f"{k}: {v}" for k, v in fields.items())[:2000] or None)
+        # Сделка прогона запоминается: оплата счёта сценария переведёт её в
+        # «выиграна», а действие «Сменить этап сделки» — в любой этап.
+        await pool.execute(
+            "UPDATE workflow_runs SET vars = vars || jsonb_build_object('_deal_id', $2::bigint) "
+            "WHERE id=$1", run["id"], deal_id)
+        run.setdefault("vars", {})
+        if isinstance(run["vars"], dict):
+            run["vars"]["_deal_id"] = deal_id
         await bus.emit(pool, owner, "deal.created",
                        {"deal_id": deal_id, "title": title, "source": "workflow",
-                        "workflow_id": run.get("workflow_id")},
+                        "workflow_id": run.get("workflow_id"),
+                        "contact_source": run.get("source")},
                        bot_id=bot_id, chat_id=chat_id)
+    elif action == "move_deal":
+        deal_id = _as_dict(run.get("vars")).get("_deal_id")
+        if deal_id:
+            await db.move_crm_deal_stage(pool, int(deal_id), owner, value,
+                                         source="workflow")
     elif action == "notify_owner":
         if main_bot is None:
             return
@@ -835,6 +1101,7 @@ async def on_button(pool, http, token, bot_id: int, chat_id: int,
         run_id, seq, nxt, btn.get("text") or "")
     if not (isinstance(res, str) and res.endswith(" 1")):
         return True
+    await _log(pool, run, idx, "message", f"button:{bidx}", btn.get("text"))
     # Убрать клавиатуру с сообщения: второе нажатие той же кнопки иначе
     # выглядело бы рабочим, а не делало ничего.
     msg = callback.get("message") or {}
@@ -894,6 +1161,7 @@ async def on_reply(pool, bot_id: int, chat_id: int, text: str) -> dict:
             WHERE id=$1 AND status='waiting' AND exec_seq=$2""",
         run["id"], run["exec_seq"], idx + 1, name, value)
     if isinstance(res, str) and res.endswith(" 1"):
+        await _log(pool, run, idx, "ask", "answered", f"{name}: {value}"[:300])
         await _set_field(pool, bot_id, chat_id, name, value, run["owner_id"])
         wake()
     return {"consumed": True, "reply": None}
@@ -911,6 +1179,14 @@ async def on_payment(pool, bot_id: int, chat_id: int, payment: dict) -> bool:
     if not row:
         return True
     run = dict(row)
+    charge = payment.get("telegram_payment_charge_id")
+    if charge and await pool.fetchval(
+            "SELECT 1 FROM workflow_step_log WHERE run_id=$1 AND outcome='paid' "
+            "AND detail=$2 LIMIT 1", run_id, str(charge)[:300]):
+        # Повтор апдейта той же оплаты (оффсет опроса сдвигается после
+        # пакета): деньги уже учтены — второй раз не считать выручку и не
+        # писать второе событие «получена оплата».
+        return True
     amount = payment.get("total_amount")
     currency = payment.get("currency")
     paid_vars = {"paid": True, "paid_amount": amount, "paid_currency": currency,
@@ -929,10 +1205,25 @@ async def on_payment(pool, bot_id: int, chat_id: int, payment: dict) -> bool:
         # оставшихся шагах это видело.
         await pool.execute("UPDATE workflow_runs SET vars = vars || $2::jsonb "
                            "WHERE id=$1", run_id, json.dumps(paid_vars, default=str))
+    steps = _as_list(run.get("steps_snapshot"))
+    idx = int(run.get("current_step") or 0)
+    await _log(pool, run, idx, steps[idx].get("type", "invoice")
+               if 0 <= idx < len(steps) else "invoice", "paid",
+               payment.get("telegram_payment_charge_id"),
+               amount=int(amount or 0) or None, currency=currency)
+    deal_id = _as_dict(run.get("vars")).get("_deal_id")
+    if deal_id:
+        try:
+            from database import db
+            await db.move_crm_deal_stage(pool, int(deal_id), run["owner_id"], "won",
+                                         source="payment")
+        except Exception:
+            log.warning("workflow_runtime: сделка %s прогона %s не переведена в won",
+                        deal_id, run_id, exc_info=True)
     await bus.emit(pool, run["owner_id"], "payment.received",
                    {"amount": amount, "currency": currency,
                     "source": "workflow", "workflow_id": run.get("workflow_id"),
-                    "run_id": run_id,
+                    "run_id": run_id, "contact_source": run.get("source"),
                     "charge_id": payment.get("telegram_payment_charge_id")},
                    bot_id=bot_id, chat_id=chat_id)
     wake()
@@ -976,12 +1267,14 @@ async def sweep_timeouts(pool) -> int:
         step = steps[idx] if 0 <= idx < len(steps) else {}
         target = _goto_index(step, "timeout_goto")
         if target is not None:
-            await pool.execute(
+            res = await pool.execute(
                 """UPDATE workflow_runs
                       SET status='running', wait_kind=NULL, wait_until=NULL,
                           current_step=$3, next_run_at=now(), claimed_until=NULL
                     WHERE id=$1 AND status='waiting' AND exec_seq=$2""",
                 run["id"], run["exec_seq"], target)
+            if isinstance(res, str) and res.endswith(" 1"):
+                await _log(pool, run, idx, step.get("type", "?"), "timeout")
         else:
             await _finish(pool, run, "expired", "Человек не ответил в срок")
         n += 1
