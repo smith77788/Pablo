@@ -7460,16 +7460,39 @@ async def get_activity_stats(pool: asyncpg.Pool) -> dict:
 
 # ── CRM Deals ─────────────────────────────────────────────────────────────────
 
+# Стадии сделки — те, что разрешает crm_deals_stage_check (services/mini_app_api.py)
+# и показывают мини-апп и канбан. Бот раньше жил на старом наборе
+# new/contacted/qualified из schema_v90, и база отвергала каждую созданную или
+# перемещённую в боте сделку. Старые имена (из CSV, старых кнопок, сценариев)
+# переводятся в новые, а не роняют запрос.
+CRM_DEAL_STAGES = ("lead", "contact", "proposal", "negotiation", "won", "lost")
+_CRM_STAGE_ALIASES = {
+    "new": "lead", "contacted": "contact", "qualified": "proposal",
+    "лид": "lead", "новый": "lead", "контакт": "contact",
+    "предложение": "proposal", "переговоры": "negotiation",
+    "выиграно": "won", "выигран": "won", "проиграно": "lost", "проигран": "lost",
+}
+
+
+def normalize_crm_stage(stage, default: str | None = "lead") -> str | None:
+    """Стадия сделки в канонном имени; неизвестная — `default`."""
+    s = str(stage or "").strip().lower()
+    if s in CRM_DEAL_STAGES:
+        return s
+    return _CRM_STAGE_ALIASES.get(s, default)
+
+
 async def create_crm_deal(
     pool: asyncpg.Pool,
     owner_id: int,
     title: str,
     contact: str = "",
-    stage: str = "new",
+    stage: str = "lead",
     value: float = 0.0,
     notes: str = "",
 ) -> int:
     """Create a new CRM deal. Returns new deal id."""
+    stage = normalize_crm_stage(stage)
     row = await pool.fetchrow(
         """INSERT INTO crm_deals(owner_id, title, contact, stage, value, notes)
            VALUES($1,$2,$3,$4,$5,$6)
@@ -7542,9 +7565,12 @@ async def get_crm_dashboard_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
            FROM crm_deals WHERE owner_id=$1 GROUP BY stage""",
         owner_id,
     )
-    stats: dict = {s: {"count": 0, "value": 0.0} for s in ("new", "contacted", "qualified", "won", "lost")}
+    stats: dict = {s: {"count": 0, "value": 0.0} for s in CRM_DEAL_STAGES}
     for r in rows:
-        stats[r["stage"]] = {"count": r["cnt"], "value": float(r["total_val"])}
+        st = normalize_crm_stage(r["stage"], r["stage"])
+        cur = stats.setdefault(st, {"count": 0, "value": 0.0})
+        cur["count"] += r["cnt"]
+        cur["value"] += float(r["total_val"])
     return stats
 
 

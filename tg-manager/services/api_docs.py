@@ -206,7 +206,7 @@ def paths() -> dict:
 # ── Вебхуки ──────────────────────────────────────────────────────────────────
 
 # Пример данных (`data`) каждого события. Ключи — ровно те, что кладут
-# источники (триггеры schema_v262/v270/v272, шина сценариев).
+# источники (триггеры schema_v262/v270/v273, шина сценариев).
 EVENT_EXAMPLES: dict[str, dict] = {
     "operation.done": {"operation_id": 1842, "op_type": "broadcast", "status": "done",
                        "total_items": 500, "done_items": 500, "error": None,

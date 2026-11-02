@@ -2290,6 +2290,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Воронка денег</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openCohorts('month')">
+        <div class="mgmt-tile-ico">📈</div>
+        <div class="mgmt-tile-lbl">Когорты и LTV</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openSalesManager()">
         <div class="mgmt-tile-ico">🧑‍💼</div>
         <div class="mgmt-tile-lbl">Менеджер продаж</div>
@@ -8883,6 +8888,7 @@ const MODULE_DESCS = {
   'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
   'Воронка денег':'Охват → ответ → покупка по кампаниям, цена лида',
+  'Когорты и LTV':'Сколько приносит привлечённый человек и какой источник доходнее',
 };
 function buildDrawer() {
   const body = document.getElementById('navBody');
@@ -30450,6 +30456,7 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/money_funnel.js"></script>
+<script src="screens/cohorts.js"></script>
 <script src="screens/deals_board.js"></script>
 </body>
 </html>

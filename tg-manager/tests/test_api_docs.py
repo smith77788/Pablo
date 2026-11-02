@@ -69,7 +69,7 @@ def test_every_event_has_an_example_and_a_webhook_entry():
 
 
 def test_trigger_event_examples_use_the_keys_the_trigger_writes():
-    for fname, events in (("schema_v272_crm_connectors.sql", ("pipeline.updated", "deal.updated")),
+    for fname, events in (("schema_v273_crm_connectors.sql", ("pipeline.updated", "deal.updated")),
                           ("schema_v262_integrations.sql", ("account.added",))):
         sql = open(os.path.join(ROOT, fname), encoding="utf-8").read()
         for ev in events:

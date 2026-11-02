@@ -93,6 +93,10 @@ def pool():
     now = datetime.now(timezone.utc)
 
     async def _seed():
+        # Свежий курс: воронка пересчитывает выручку и не пойдёт за курсом в сеть.
+        await p.execute(
+            """INSERT INTO fx_rates(currency, rub_per_unit, fetched_at) VALUES('USD', 90, now())
+               ON CONFLICT (currency) DO UPDATE SET fetched_at=now()""")
         await p.execute(
             "INSERT INTO managed_bots(token, bot_id, username, is_active, added_by) "
             "VALUES($1,$2,'crm_funnel_bot',TRUE,$3)", f"1234:crm-{BOT_ID}", BOT_ID, OWNER)

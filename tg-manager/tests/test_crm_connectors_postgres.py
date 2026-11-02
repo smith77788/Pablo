@@ -2,7 +2,7 @@
 смена этапа в CRM → этап у нас, и без эха обратно.
 
 CRM подменена эмулятором API amoCRM (тот же набор адресов и форм ответа),
-база — настоящая: триггеры schema_v272, связи crm_links, очередь доставок.
+база — настоящая: триггеры schema_v273, связи crm_links, очередь доставок.
 Нужен Postgres (INFRAGRAM_TEST_DSN).
 """
 from __future__ import annotations
@@ -58,7 +58,7 @@ def pool():
     except Exception as exc:
         pytest.skip(f"Postgres по INFRAGRAM_TEST_DSN недоступен: {str(exc)[:120]}")
     assert _run(p.fetchval("SELECT to_regclass('crm_links') IS NOT NULL")), \
-        "schema_v272_crm_connectors.sql не применилась"
+        "schema_v273_crm_connectors.sql не применилась"
     _run(_cleanup(p))
     yield p
     _run(_cleanup(p))

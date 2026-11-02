@@ -136,6 +136,7 @@ GET /api/miniapp/clone_adapt/history
 GET /api/miniapp/cloud/file/{file_id}/download
 GET /api/miniapp/cloud/files
 GET /api/miniapp/cloud/status
+GET /api/miniapp/cohorts
 GET /api/miniapp/community/node/{node_id}/channels
 GET /api/miniapp/community/node/{node_id}/invite_link
 GET /api/miniapp/community/node/{node_id}/members
@@ -217,6 +218,7 @@ GET /api/miniapp/mass_targets
 GET /api/miniapp/mesh/task/{task_id}
 GET /api/miniapp/mesh/tasks
 GET /api/miniapp/money_funnel
+GET /api/miniapp/money_settings
 GET /api/miniapp/monitor/status
 GET /api/miniapp/mp/admin/providers
 GET /api/miniapp/mp/catalog
@@ -445,6 +447,7 @@ HEAD /api/miniapp/clone_adapt/history
 HEAD /api/miniapp/cloud/file/{file_id}/download
 HEAD /api/miniapp/cloud/files
 HEAD /api/miniapp/cloud/status
+HEAD /api/miniapp/cohorts
 HEAD /api/miniapp/community/node/{node_id}/channels
 HEAD /api/miniapp/community/node/{node_id}/invite_link
 HEAD /api/miniapp/community/node/{node_id}/members
@@ -526,6 +529,7 @@ HEAD /api/miniapp/mass_targets
 HEAD /api/miniapp/mesh/task/{task_id}
 HEAD /api/miniapp/mesh/tasks
 HEAD /api/miniapp/money_funnel
+HEAD /api/miniapp/money_settings
 HEAD /api/miniapp/monitor/status
 HEAD /api/miniapp/mp/admin/providers
 HEAD /api/miniapp/mp/catalog
@@ -869,6 +873,7 @@ POST /api/miniapp/mass_report
 POST /api/miniapp/mesh/task
 POST /api/miniapp/mesh/task/{task_id}/drop
 POST /api/miniapp/money_funnel/spend
+POST /api/miniapp/money_settings
 POST /api/miniapp/monitor/toggle
 POST /api/miniapp/mp/admin/provider/{pid}/status
 POST /api/miniapp/mp/provider/{pid}/apikey
