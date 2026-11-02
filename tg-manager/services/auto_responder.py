@@ -674,7 +674,10 @@ async def _process_bot(
     bot_id: int,
     token: str,
     main_bot=None,
+    updates: list | None = None,
 ) -> None:
+    """Разобрать обновления бота. `updates` — пришедшие вебхуком
+    (services/managed_bot_webhooks.py); без них — забрать опросом."""
     # ── ЯДОВИТЫЙ АПДЕЙТ ──────────────────────────────────────────────────────
     # Разбор одного апдейта — длинный путь: авто-ответы, правила автоматизации,
     # воронки, эксперименты, релей оператору. Любое исключение на этом пути
@@ -696,19 +699,37 @@ async def _process_bot(
     max_update_id = 0
     try:
         offset = await db.get_update_offset(pool, bot_id)
-        if offset == 0:
+        if updates is not None:
+            # Вебхук: тот же разбор и тот же оффсет. Повтор уже разобранного
+            # обновления (Telegram повторяет, не дождавшись ответа) отсекаем.
+            data = {"ok": True, "result": [
+                u for u in updates if int(u.get("update_id") or 0) > offset]}
+        elif offset == 0:
             await _init_offset(pool, http, bot_id, token)
             return
-        data = await bot_api._call(
-            http, token, "getUpdates", offset=offset + 1, limit=100, timeout=0,
-            allowed_updates=_MANAGED_BOT_ALLOWED_UPDATES,
-        )
+        else:
+            data = await bot_api._call(
+                http, token, "getUpdates", offset=offset + 1, limit=100, timeout=0,
+                allowed_updates=_MANAGED_BOT_ALLOWED_UPDATES,
+            )
         if not data.get("ok"):
             # Раньше ошибка getUpdates молча проглатывалась (updates=[]), из-за
             # чего бот переставал видеть сообщения — и новые пользователи не
             # детектировались — без единой записи в лог. Частая причина: на боте
             # активен webhook (409 Conflict) или отозван токен.
             err_desc = str(data.get("description") or data.get("error_code") or "unknown")
+            _ours = False
+            if "conflict" in err_desc.lower() or "webhook" in err_desc.lower():
+                # Вебхук поставили мы сами (managed_bot_webhooks.sync) в тот
+                # момент, когда этот проход опроса уже шёл, — его не трогаем.
+                try:
+                    _ours = bool(await pool.fetchval(
+                        "SELECT COALESCE(use_webhook, FALSE) FROM managed_bots "
+                        "WHERE bot_id=$1", bot_id))
+                except Exception:
+                    _ours = False
+            if _ours:
+                return
             if "conflict" in err_desc.lower() or "webhook" in err_desc.lower():
                 # Webhook перехватывает апдейты → polling не нужен; снимаем webhook,
                 # чтобы вернуть бота на polling (managed-боты работают через polling).
@@ -1466,7 +1487,7 @@ async def _process_bot(
                                 await pool.execute(
                                     """INSERT INTO crm_deals
                                            (owner_id, title, contact, stage, created_at)
-                                       VALUES ($1, $2, $3, 'new', NOW())""",
+                                       VALUES ($1, $2, $3, 'lead', NOW())""",
                                     _deal_owner,
                                     deal_title,
                                     user_label,
@@ -1747,6 +1768,15 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                 except Exception:
                     log.debug("auto_responder: сверка профилей ботов не выполнена")
             if _cycle % 30 == 1:
+                # Кому вебхук, кому опрос: боты на вебхуке получают обновления
+                # сразу и из опроса выпадают (services/managed_bot_webhooks.py).
+                try:
+                    from services import managed_bot_webhooks as _mbw
+                    await _mbw.sync(pool, http)
+                except Exception:
+                    log.warning("auto_responder: сверка вебхуков ботов не выполнена",
+                                exc_info=True)
+            if _cycle % 30 == 1:
                 # Честная живость ВСЕХ ботов (getMe), а не только тех, кому пишут.
                 # Делаем ДО уведомлений, чтобы сломанный бот без трафика попал в
                 # сводку этим же циклом.
@@ -1949,7 +1979,7 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
                         await pool.execute(
                             """INSERT INTO crm_deals
                                    (owner_id, title, contact, stage, created_at)
-                               VALUES ($1, $2, $3, 'new', NOW())""",
+                               VALUES ($1, $2, $3, 'lead', NOW())""",
                             _deal_owner,
                             f"{title_prefix} — id{chat_id}",
                             str(chat_id),

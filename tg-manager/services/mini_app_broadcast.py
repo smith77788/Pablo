@@ -419,11 +419,8 @@ def setup_routes(app: web.Application, pool) -> None:
         if stage not in valid_stages:
             return _err("Неверная стадия", 400)
         try:
-            res = await pool.execute(
-                "UPDATE crm_deals SET stage=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
-                stage, deal_id, uid,
-            )
-            if res == "UPDATE 0":
+            from database import db as _db
+            if not await _db.move_crm_deal_stage(pool, deal_id, uid, stage):
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True})
         except Exception:

@@ -73,6 +73,7 @@ GET /api/miniapp/admin/ops/stats
 GET /api/miniapp/admin/stats
 GET /api/miniapp/admin/user/{user_id}
 GET /api/miniapp/admin/users
+GET /api/miniapp/ai/forecast
 GET /api/miniapp/ai/status
 GET /api/miniapp/ai_memory
 GET /api/miniapp/analytics
@@ -136,6 +137,7 @@ GET /api/miniapp/clone_adapt/history
 GET /api/miniapp/cloud/file/{file_id}/download
 GET /api/miniapp/cloud/files
 GET /api/miniapp/cloud/status
+GET /api/miniapp/cohorts
 GET /api/miniapp/community/node/{node_id}/channels
 GET /api/miniapp/community/node/{node_id}/invite_link
 GET /api/miniapp/community/node/{node_id}/members
@@ -151,6 +153,7 @@ GET /api/miniapp/content_meshes
 GET /api/miniapp/crm/board
 GET /api/miniapp/crm/contacts
 GET /api/miniapp/crm/deals
+GET /api/miniapp/crm_connections/{wh_id}
 GET /api/miniapp/crosspost/links
 GET /api/miniapp/dashboard
 GET /api/miniapp/dashboard/attention
@@ -216,6 +219,7 @@ GET /api/miniapp/mass_targets
 GET /api/miniapp/mesh/task/{task_id}
 GET /api/miniapp/mesh/tasks
 GET /api/miniapp/money_funnel
+GET /api/miniapp/money_settings
 GET /api/miniapp/monitor/status
 GET /api/miniapp/mp/admin/providers
 GET /api/miniapp/mp/catalog
@@ -353,6 +357,7 @@ GET /api/miniapp/vlayer/segment/{value}
 GET /api/miniapp/warmup
 GET /api/miniapp/warmup/{plan_id}/log
 GET /api/miniapp/webhooks/{wh_id}/deliveries
+GET /api/miniapp/workflow/run/{run_id}/log
 GET /api/miniapp/workflow/{wf_id}/status
 GET /api/miniapp/workflows
 GET /api/miniapp/workflows/{wf_id}
@@ -381,6 +386,7 @@ HEAD /api/miniapp/admin/ops/stats
 HEAD /api/miniapp/admin/stats
 HEAD /api/miniapp/admin/user/{user_id}
 HEAD /api/miniapp/admin/users
+HEAD /api/miniapp/ai/forecast
 HEAD /api/miniapp/ai/status
 HEAD /api/miniapp/ai_memory
 HEAD /api/miniapp/analytics
@@ -444,6 +450,7 @@ HEAD /api/miniapp/clone_adapt/history
 HEAD /api/miniapp/cloud/file/{file_id}/download
 HEAD /api/miniapp/cloud/files
 HEAD /api/miniapp/cloud/status
+HEAD /api/miniapp/cohorts
 HEAD /api/miniapp/community/node/{node_id}/channels
 HEAD /api/miniapp/community/node/{node_id}/invite_link
 HEAD /api/miniapp/community/node/{node_id}/members
@@ -459,6 +466,7 @@ HEAD /api/miniapp/content_meshes
 HEAD /api/miniapp/crm/board
 HEAD /api/miniapp/crm/contacts
 HEAD /api/miniapp/crm/deals
+HEAD /api/miniapp/crm_connections/{wh_id}
 HEAD /api/miniapp/crosspost/links
 HEAD /api/miniapp/dashboard
 HEAD /api/miniapp/dashboard/attention
@@ -524,6 +532,7 @@ HEAD /api/miniapp/mass_targets
 HEAD /api/miniapp/mesh/task/{task_id}
 HEAD /api/miniapp/mesh/tasks
 HEAD /api/miniapp/money_funnel
+HEAD /api/miniapp/money_settings
 HEAD /api/miniapp/monitor/status
 HEAD /api/miniapp/mp/admin/providers
 HEAD /api/miniapp/mp/catalog
@@ -661,6 +670,7 @@ HEAD /api/miniapp/vlayer/segment/{value}
 HEAD /api/miniapp/warmup
 HEAD /api/miniapp/warmup/{plan_id}/log
 HEAD /api/miniapp/webhooks/{wh_id}/deliveries
+HEAD /api/miniapp/workflow/run/{run_id}/log
 HEAD /api/miniapp/workflow/{wf_id}/status
 HEAD /api/miniapp/workflows
 HEAD /api/miniapp/workflows/{wf_id}
@@ -719,6 +729,8 @@ POST /api/miniapp/admin/user/{user_id}/ban
 POST /api/miniapp/admin/user/{user_id}/grant
 POST /api/miniapp/admin/user/{user_id}/revoke
 POST /api/miniapp/admin/user/{user_id}/unban
+POST /api/miniapp/ai/forecast/tag
+POST /api/miniapp/ai/segment-from-text
 POST /api/miniapp/ai/test
 POST /api/miniapp/ai_comment
 POST /api/miniapp/ai_memory
@@ -804,6 +816,9 @@ POST /api/miniapp/content_mesh
 POST /api/miniapp/content_mesh/{mesh_id}/target
 POST /api/miniapp/crm/contact
 POST /api/miniapp/crm/deal
+POST /api/miniapp/crm_connections
+POST /api/miniapp/crm_connections/{wh_id}
+POST /api/miniapp/crm_connections/{wh_id}/backfill
 POST /api/miniapp/crosspost/run
 POST /api/miniapp/devices/revoke
 POST /api/miniapp/dm/adhoc_send
@@ -846,6 +861,8 @@ POST /api/miniapp/host_server/price
 POST /api/miniapp/host_server/rent
 POST /api/miniapp/host_server/rental/{rental_id}/status
 POST /api/miniapp/import_sessions
+POST /api/miniapp/inbox/{peer_user_id}/ai-draft
+POST /api/miniapp/inbox/{peer_user_id}/ai-summary
 POST /api/miniapp/inbox/{peer_user_id}/read
 POST /api/miniapp/inbox/{peer_user_id}/reply
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
@@ -864,6 +881,7 @@ POST /api/miniapp/mass_report
 POST /api/miniapp/mesh/task
 POST /api/miniapp/mesh/task/{task_id}/drop
 POST /api/miniapp/money_funnel/spend
+POST /api/miniapp/money_settings
 POST /api/miniapp/monitor/toggle
 POST /api/miniapp/mp/admin/provider/{pid}/status
 POST /api/miniapp/mp/provider/{pid}/apikey
@@ -882,6 +900,7 @@ POST /api/miniapp/networks/{net_id}/deploy
 POST /api/miniapp/networks/{net_id}/edges
 POST /api/miniapp/networks/{net_id}/nodes
 POST /api/miniapp/next_actions/apply
+POST /api/miniapp/next_actions/feedback
 POST /api/miniapp/node
 POST /api/miniapp/notary
 POST /api/miniapp/notary/{watch_id}/check
@@ -1032,6 +1051,7 @@ POST /api/miniapp/workflows/{wf_id}/steps
 POST /api/miniapp/workspace
 POST /api/miniapp/workspace/join
 POST /api/miniapp/workspace/{ws_id}/invite
+POST /webhook/crm/{token}
 PUT /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/toggle
 PUT /api/miniapp/auto_reply/{reply_id}/toggle

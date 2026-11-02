@@ -341,6 +341,30 @@ def _set_boot_phase(phase: str) -> None:
     log.info("boot phase: %s", phase)
 
 
+BOOT_API_MESSAGE = "Сервис перезапускается — через минуту всё заработает"
+
+
+def _bootstrap_response(web_mod, path: str):
+    """Ответ стартового сервера на один запрос.
+
+    Health-check'у платформы и людям — 200 с текущей фазой (при зависании
+    видно, где застряли). А мини-аппу на /api/ — 503 и JSON: раньше и ему
+    уходило «starting: …» с кодом 200, мини-апп честно пытался разобрать это
+    как данные и показывал владельцу «Ответ сервера не является JSON» на
+    каждом экране, пока шёл деплой. 503 + `starting` — сигнал фронту, что это
+    перезапуск: он сам повторит запрос, а не сыплет ошибками.
+    """
+    if path.startswith("/api/"):
+        return web_mod.json_response(
+            {"ok": False, "starting": True, "phase": _boot_phase,
+             "error": BOOT_API_MESSAGE},
+            status=503,
+            headers={"Retry-After": "5", "Cache-Control": "no-store"},
+        )
+    # Отдаём текущую фазу (не голое "starting") — при зависании видно где.
+    return web_mod.Response(text=f"starting: {_boot_phase}", status=200)
+
+
 async def _start_bootstrap_health_server() -> None:
     """Занять $PORT минимальным health-сервером до тяжёлой инициализации.
 
@@ -358,8 +382,7 @@ async def _start_bootstrap_health_server() -> None:
         _app = _web.Application()
 
         async def _ok(_req):
-            # Отдаём текущую фазу (не голое "starting") — при зависании видно где.
-            return _web.Response(text=f"starting: {_boot_phase}", status=200)
+            return _bootstrap_response(_web, _req.path)
 
         _app.router.add_route("*", "/{tail:.*}", _ok)
         _bootstrap_runner = _web.AppRunner(_app)
@@ -561,8 +584,15 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     dp.include_router(spintax_handler.router)
     dp.include_router(about_handler.router)
     dp.include_router(fleet_pulse_handler.router)
+    # Выгрузка и удаление своих данных (152-ФЗ / GDPR): команды, раньше relay.
+    from bot.handlers import my_data as my_data_handler
+    dp.include_router(my_data_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
+    # Журнал действий админов: каждая кнопка и команда двух админ-роутеров
+    # уходит в admin_audit_log (bot/middlewares/admin_audit.py).
+    from bot.middlewares import admin_audit as _admin_audit
+    _admin_audit.install(admin_users_handler.router, admin_handler.router)
     dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
     dp.error.register(_global_error_handler)
@@ -746,6 +776,14 @@ async def main() -> None:
         # Счётчик подряд идущих срывов шага: без него один блип БД писал
         # воронке человека status='error' навсегда.
         "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS fail_count INT DEFAULT 0",
+        # Подписка воронки, переданная движку сценариев (schema_v283): оба
+        # старых исполнителя фильтруют по ней — без колонки встали бы оба.
+        "ALTER TABLE funnel_subscriptions ADD COLUMN IF NOT EXISTS workflow_run_id BIGINT",
+        "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS workflow_run_id BIGINT",
+        # Бот на вебхуке (schema_v225/v285): опрос фильтрует по use_webhook,
+        # сверка вебхуков — по webhook_failed_at.
+        "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS use_webhook BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS webhook_failed_at TIMESTAMPTZ",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",

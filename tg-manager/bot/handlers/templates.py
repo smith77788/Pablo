@@ -53,37 +53,13 @@ def _ai_preview_kb(bot_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-async def _call_ai(prompt: str) -> str | None:
-    from services.ai_providers import configured_providers
+async def _call_ai(prompt: str, owner_id: int | None = None) -> str | None:
+    # Через единый шлюз: лимиты llm_gate, учёт и дневной потолок на владельца.
+    from services import ai_gateway
 
-    providers = configured_providers()
-    if not providers:
-        return None
-    try:
-        from openai import AsyncOpenAI
-    except ImportError:
-        return None
-    for provider in providers:
-        model = provider.models[0] if provider.models else ""
-        if not model:
-            continue
-        try:
-            client = AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url, timeout=25.0)
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": _AI_SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=800,
-                temperature=0.7,
-            )
-            text = (resp.choices[0].message.content or "").strip()
-            if text:
-                return text
-        except Exception as exc:
-            log.warning("AI template gen failed provider=%s: %s", provider.name, exc)
-    return None
+    return await ai_gateway.complete(prompt, system=_AI_SYSTEM,
+                                     task=ai_gateway.TASK_ASSISTANT,
+                                     owner_id=owner_id, max_tokens=800)
 
 
 @router.callback_query(TemplateCb.filter(F.action == "list"))
@@ -472,7 +448,8 @@ async def msg_ai_template_prompt(
 
     wait_msg = await message.answer("⏳ Генерирую текст…")
 
-    generated = await _call_ai(f"Создай шаблон сообщения для Telegram-бота: {prompt}")
+    generated = await _call_ai(f"Создай шаблон сообщения для Telegram-бота: {prompt}",
+                               owner_id=message.from_user.id if message.from_user else None)
 
     if not generated:
         await wait_msg.delete()
@@ -533,7 +510,8 @@ async def cb_template_ai_regen(
             reply_markup=kb.as_markup(),
         )
         return
-    generated = await _call_ai(f"Создай шаблон сообщения для Telegram-бота: {prompt}")
+    generated = await _call_ai(f"Создай шаблон сообщения для Telegram-бота: {prompt}",
+                               owner_id=callback.from_user.id if callback.from_user else None)
 
     if not generated:
         await callback.message.edit_text(

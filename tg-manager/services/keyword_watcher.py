@@ -215,6 +215,18 @@ async def poll_watcher(pool: asyncpg.Pool, bot, watcher: dict, *, fetch=None) ->
         if row is None:
             continue  # уже ловили это сообщение — не дубль, не шлём повторно
         new_hits += 1
+        # Находка — событие шины: сценарий с триггером «Найдено ключевое
+        # слово» создаёт сделку, шлёт вебхук или уведомление. Раньше находка
+        # только пересылалась владельцу, в CRM и сценарии лид не попадал.
+        # chat_id пуст: автор сообщения — не контакт бота, писать ему
+        # сценарий не может (только действия без чата).
+        from services import automation_events
+        await automation_events.emit(
+            pool, owner_id, "keyword.hit",
+            {"keyword": kw, "chat_ref": watcher.get("chat_ref"),
+             "message_id": mid, "from_user_id": m.get("from_user_id"),
+             "from_username": m.get("from_username"),
+             "text": (m.get("text") or "")[:1000], "hit_id": row["id"]})
         delivered = await _deliver_hit(bot, owner_id, watcher, m, kw)
         if delivered:
             await pool.execute(

@@ -1758,9 +1758,14 @@ async def get_bots_with_auto_replies(pool: asyncpg.Pool) -> list[dict]:
 
 
 async def get_bots_for_polling(pool: asyncpg.Pool) -> list[dict]:
-    """Return all active managed bots for polling (activity, deep links, swarm, A/B, etc.)."""
+    """Return all active managed bots for polling (activity, deep links, swarm, A/B, etc.).
+
+    Боты на вебхуке (`use_webhook`) получают обновления сами
+    (services/managed_bot_webhooks.py): их опрос получил бы 409.
+    """
     rows = await pool.fetch(
-        "SELECT bot_id, token FROM managed_bots WHERE is_active=true"
+        "SELECT bot_id, token FROM managed_bots "
+        "WHERE is_active=true AND NOT COALESCE(use_webhook, false)"
     )
     return _dec_bot_rows(rows)
 
@@ -2016,7 +2021,10 @@ async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) 
                        SET current_step  = 0,
                            completed      = false,
                            dropped        = false,
-                           next_send_at   = $3
+                           next_send_at   = $3,
+                           -- Новый заход — новый прогон движка сценариев:
+                           -- старый уже закончился (services/legacy_funnels.py).
+                           workflow_run_id = NULL
                        WHERE funnel_subscriptions.completed = true
                           OR funnel_subscriptions.dropped = true""",
                 funnel_id,
@@ -2046,6 +2054,7 @@ async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[dict]:
            JOIN managed_bots mb ON mb.bot_id=f.bot_id AND mb.is_active=true
            WHERE fs.completed=false
              AND COALESCE(fs.dropped, false) = false
+             AND fs.workflow_run_id IS NULL
              AND fs.next_send_at<=now()""",
     )
     return _dec_bot_rows(rows)
@@ -2404,12 +2413,21 @@ async def add_user_tag(pool, bot_id: int, user_id: int, tag: str) -> bool:
 
 
 async def remove_user_tag(pool, bot_id: int, user_id: int, tag: str) -> None:
-    await pool.execute(
+    """Снять тег. Событие «с человека сняли тег» — только если тег был.
+
+    Раньше событие писал лишь исполнитель сценариев, а правила и экран
+    снимали тег молча: сценарий с триггером на это событие не видел их."""
+    res = await pool.execute(
         "DELETE FROM user_tags WHERE bot_id=$1 AND user_id=$2 AND tag=$3",
         bot_id,
         user_id,
         tag,
     )
+    if user_id and isinstance(res, str) and not res.endswith(" 0"):
+        from services import automation_events
+        await automation_events.emit(pool, None, "contact.tag_removed",
+                                     {"tag": tag}, bot_id=bot_id,
+                                     chat_id=user_id)
 
 
 async def get_user_tags(pool, bot_id: int, user_id: int) -> list[str]:
@@ -3714,7 +3732,15 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
     return d
 
 
-class AccountIdentityMissing(ValueError):
+class AccountNotSaved(ValueError):
+    """Аккаунт не записан по понятной человеку причине; текст — для экрана."""
+
+
+class AccountLimitReached(AccountNotSaved):
+    """Флот владельца уже на лимите тарифа (services/tiers.py) — новый не пишем."""
+
+
+class AccountIdentityMissing(AccountNotSaved):
     """Telegram не вернул ни номера, ни id аккаунта — записать нечего.
 
     Без обоих ключей строка легла бы с phone='' и на уникальном
@@ -3741,6 +3767,42 @@ def normalize_account_phone(phone, tg_user_id) -> str:
         return f"id:{uid}"
     raise AccountIdentityMissing(
         "Telegram не вернул ни номер, ни id аккаунта — сессию не записать")
+
+
+async def check_account_cap(pool, conn, owner_id: int) -> None:
+    """Бросает AccountLimitReached, если новый аккаунт не входит в тариф.
+
+    Лимит — services.tiers.owner_account_cap: тариф Старт/Про/Бизнес, без
+    лимита у подписки до тарифов и у админа; на бесплатном — 1 аккаунт, если
+    ещё положен пробный период (он выдаётся после первого аккаунта и здесь же,
+    когда второй упирается в бесплатный лимит).
+    """
+    from bot.utils import tariffs
+    from services import tiers
+
+    cap = await tiers.owner_account_cap(pool, owner_id)
+    if cap >= tariffs.UNLIMITED:
+        return
+    count = int(await conn.fetchval(
+        "SELECT count(*) FROM tg_accounts WHERE owner_id=$1", owner_id) or 0)
+    if count < cap:
+        return
+    if count >= 1:
+        from services import trial
+        try:
+            if await trial.maybe_grant(pool, owner_id):
+                cap = await tiers.owner_account_cap(pool, owner_id)
+                if count < cap:
+                    return
+        except Exception:
+            log.warning("check_account_cap: trial grant failed owner=%s", owner_id,
+                        exc_info=True)
+    if cap <= 0:
+        raise AccountLimitReached(
+            "Аккаунты Telegram подключаются по подписке. Выберите тариф в /subscription")
+    raise AccountLimitReached(
+        f"Лимит тарифа — {cap} аккаунтов, подключено {count}. Перейдите на тариф "
+        "больше в /subscription или удалите ненужные аккаунты")
 
 
 async def upsert_tg_account(
@@ -3828,59 +3890,71 @@ async def upsert_tg_account(
     if auto_proxy and not proxy_id:
         proxy_id = await _least_loaded_proxy(pool, owner_id)
 
-    row = await pool.fetchrow(
-        """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
-               first_name, username, device_model, system_version, app_version,
-               lang_code, system_lang_code, session_fp, api_id, proxy_id)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-           ON CONFLICT (owner_id, phone) DO UPDATE
-           SET session_str=$3,
-               tg_user_id=COALESCE($4, tg_accounts.tg_user_id),
-               first_name=COALESCE(NULLIF($5, ''), tg_accounts.first_name),
-               username=COALESCE(NULLIF($6, ''), tg_accounts.username),
-               device_model=COALESCE($7, tg_accounts.device_model),
-               system_version=COALESCE($8, tg_accounts.system_version),
-               app_version=COALESCE($9, tg_accounts.app_version),
-               lang_code=COALESCE($10, tg_accounts.lang_code),
-               system_lang_code=COALESCE($11, tg_accounts.system_lang_code),
-               session_fp=$12,
-               api_id=COALESCE(tg_accounts.api_id, $13),
-               proxy_id=CASE WHEN $15 THEN COALESCE($14, tg_accounts.proxy_id)
-                             ELSE COALESCE(tg_accounts.proxy_id, $14) END,
-               acc_status='active',
-               status_reason=NULL,
-               status_checked_at=now(),
-               is_active=true,
-               -- Переимпорт = НОВАЯ рабочая сессия: снимаем ВСЕ операционные
-               -- блокировки, унаследованные от прошлой (сожжённой) сессии, иначе
-               -- «переподключил, а флот не работает» — аккаунт молча исключался
-               -- из операций/мониторов:
-               --  • in_operation — залипший lock исключал из выборки/прогрева;
-               --  • cooldown_until — старый кулдаун держал respect_cooldown-фильтр;
-               --  • trust_score — крит-обнуление (trust_engine) не проходило
-               --    min_trust-гейт операций и показывало 0% здоровья.
-               in_operation=FALSE,
-               cooldown_until=NULL,
-               trust_score=GREATEST(COALESCE(tg_accounts.trust_score, 1.0), 1.0),
-               flood_count_7d=0,
-               last_used=now()
-           RETURNING id, (xmax = 0) AS created, proxy_id""",
-        owner_id,
-        phone,
-        _enc_session,
-        _uid_val or None,
-        first_name or "",
-        username or "",
-        device_model,
-        system_version,
-        app_version,
-        lang_code,
-        system_lang_code,
-        _fp,
-        api_id,
-        proxy_id,
-        bool(override_proxy),
-    )
+    # Лимит флота тарифа (services/tiers.py) — только для НОВОГО аккаунта:
+    # переимпорт уже подключённого лимит не тратит. Проверка и запись идут под
+    # блокировкой владельца одной транзакцией: пакетный импорт сессий пишет
+    # параллельно и иначе проскочил бы лимит пачкой.
+    is_new = _existing_phone is None and not await pool.fetchval(
+        "SELECT 1 FROM tg_accounts WHERE owner_id=$1 AND phone=$2", owner_id, phone)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if is_new:
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))",
+                                   f"tg_accounts_cap|{owner_id}")
+                await check_account_cap(pool, conn, owner_id)
+            row = await conn.fetchrow(
+                """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
+                       first_name, username, device_model, system_version, app_version,
+                       lang_code, system_lang_code, session_fp, api_id, proxy_id)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                   ON CONFLICT (owner_id, phone) DO UPDATE
+                   SET session_str=$3,
+                       tg_user_id=COALESCE($4, tg_accounts.tg_user_id),
+                       first_name=COALESCE(NULLIF($5, ''), tg_accounts.first_name),
+                       username=COALESCE(NULLIF($6, ''), tg_accounts.username),
+                       device_model=COALESCE($7, tg_accounts.device_model),
+                       system_version=COALESCE($8, tg_accounts.system_version),
+                       app_version=COALESCE($9, tg_accounts.app_version),
+                       lang_code=COALESCE($10, tg_accounts.lang_code),
+                       system_lang_code=COALESCE($11, tg_accounts.system_lang_code),
+                       session_fp=$12,
+                       api_id=COALESCE(tg_accounts.api_id, $13),
+                       proxy_id=CASE WHEN $15 THEN COALESCE($14, tg_accounts.proxy_id)
+                                     ELSE COALESCE(tg_accounts.proxy_id, $14) END,
+                       acc_status='active',
+                       status_reason=NULL,
+                       status_checked_at=now(),
+                       is_active=true,
+                       -- Переимпорт = НОВАЯ рабочая сессия: снимаем ВСЕ операционные
+                       -- блокировки, унаследованные от прошлой (сожжённой) сессии, иначе
+                       -- «переподключил, а флот не работает» — аккаунт молча исключался
+                       -- из операций/мониторов:
+                       --  • in_operation — залипший lock исключал из выборки/прогрева;
+                       --  • cooldown_until — старый кулдаун держал respect_cooldown-фильтр;
+                       --  • trust_score — крит-обнуление (trust_engine) не проходило
+                       --    min_trust-гейт операций и показывало 0% здоровья.
+                       in_operation=FALSE,
+                       cooldown_until=NULL,
+                       trust_score=GREATEST(COALESCE(tg_accounts.trust_score, 1.0), 1.0),
+                       flood_count_7d=0,
+                       last_used=now()
+                   RETURNING id, (xmax = 0) AS created, proxy_id""",
+                owner_id,
+                phone,
+                _enc_session,
+                _uid_val or None,
+                first_name or "",
+                username or "",
+                device_model,
+                system_version,
+                app_version,
+                lang_code,
+                system_lang_code,
+                _fp,
+                api_id,
+                proxy_id,
+                bool(override_proxy),
+            )
     acc_id = row["id"]
     # След в журнале действий: подключение и переподключение аккаунта раньше
     # не оставляли ничего — на вопрос «откуда этот аккаунт и когда ему сменили
@@ -5932,8 +6006,13 @@ async def log_admin_action(
     action: str,
     target_user_id: int | None = None,
     details: dict | None = None,
+    *,
+    source: str = "app",
 ) -> None:
     """Записать админ-действие в журнал. Один вход для всех таких записей.
+
+    source — откуда действие: 'bot' (админ-панель бота), 'miniapp' (ручки
+    /api/miniapp/admin/*), 'secret' (вход по секретной фразе), 'app' — прочее.
 
     Раньше INSERT в admin_audit_log был выписан в каждом месте отдельно, и они
     разошлись: часть оборачивалась в try, часть нет. Где не оборачивалась, сбой
@@ -5946,10 +6025,10 @@ async def log_admin_action(
     """
     try:
         await pool.execute(
-            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-               VALUES ($1, $2, $3, $4)""",
+            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details, source)
+               VALUES ($1, $2, $3, $4, $5)""",
             admin_id, action, target_user_id,
-            json.dumps(details or {}, ensure_ascii=False, default=str),
+            json.dumps(details or {}, ensure_ascii=False, default=str), source,
         )
     except Exception:
         log_exc_swallow(
@@ -7460,16 +7539,39 @@ async def get_activity_stats(pool: asyncpg.Pool) -> dict:
 
 # ── CRM Deals ─────────────────────────────────────────────────────────────────
 
+# Стадии сделки — те, что разрешает crm_deals_stage_check (services/mini_app_api.py)
+# и показывают мини-апп и канбан. Бот раньше жил на старом наборе
+# new/contacted/qualified из schema_v90, и база отвергала каждую созданную или
+# перемещённую в боте сделку. Старые имена (из CSV, старых кнопок, сценариев)
+# переводятся в новые, а не роняют запрос.
+CRM_DEAL_STAGES = ("lead", "contact", "proposal", "negotiation", "won", "lost")
+_CRM_STAGE_ALIASES = {
+    "new": "lead", "contacted": "contact", "qualified": "proposal",
+    "лид": "lead", "новый": "lead", "контакт": "contact",
+    "предложение": "proposal", "переговоры": "negotiation",
+    "выиграно": "won", "выигран": "won", "проиграно": "lost", "проигран": "lost",
+}
+
+
+def normalize_crm_stage(stage, default: str | None = "lead") -> str | None:
+    """Стадия сделки в канонном имени; неизвестная — `default`."""
+    s = str(stage or "").strip().lower()
+    if s in CRM_DEAL_STAGES:
+        return s
+    return _CRM_STAGE_ALIASES.get(s, default)
+
+
 async def create_crm_deal(
     pool: asyncpg.Pool,
     owner_id: int,
     title: str,
     contact: str = "",
-    stage: str = "new",
+    stage: str = "lead",
     value: float = 0.0,
     notes: str = "",
 ) -> int:
     """Create a new CRM deal. Returns new deal id."""
+    stage = normalize_crm_stage(stage)
     row = await pool.fetchrow(
         """INSERT INTO crm_deals(owner_id, title, contact, stage, value, notes)
            VALUES($1,$2,$3,$4,$5,$6)
@@ -7503,12 +7605,34 @@ async def get_crm_deal(pool: asyncpg.Pool, deal_id: int, owner_id: int) -> async
 
 
 async def move_crm_deal_stage(
-    pool: asyncpg.Pool, deal_id: int, owner_id: int, stage: str
-) -> None:
-    await pool.execute(
-        "UPDATE crm_deals SET stage=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+    pool: asyncpg.Pool, deal_id: int, owner_id: int, stage: str,
+    *, source: str = "manual",
+) -> bool:
+    """Сменить этап сделки. False — сделки нет у владельца.
+
+    Единая дверь смены этапа: здесь же пишется событие
+    `deal.stage_changed` в шину сценариев (было в списке событий, но не
+    приходило ни разу — этап меняли прямым UPDATE в двух местах). Событие
+    только при реальной смене: повторный выбор того же этапа — не событие.
+    """
+    row = await pool.fetchrow(
+        """WITH old AS (
+               SELECT id, stage FROM crm_deals
+                WHERE id=$2 AND owner_id=$3 FOR UPDATE)
+           UPDATE crm_deals d SET stage=$1, updated_at=now()
+             FROM old WHERE d.id = old.id
+           RETURNING old.stage AS old_stage, d.title""",
         stage, deal_id, owner_id,
     )
+    if row is None:
+        return False
+    if row["old_stage"] != stage:
+        from services import automation_events
+        await automation_events.emit(
+            pool, owner_id, "deal.stage_changed",
+            {"deal_id": deal_id, "from": row["old_stage"], "to": stage,
+             "title": row["title"], "source": source})
+    return True
 
 
 async def delete_crm_deal(pool: asyncpg.Pool, deal_id: int, owner_id: int) -> None:
@@ -7542,9 +7666,12 @@ async def get_crm_dashboard_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
            FROM crm_deals WHERE owner_id=$1 GROUP BY stage""",
         owner_id,
     )
-    stats: dict = {s: {"count": 0, "value": 0.0} for s in ("new", "contacted", "qualified", "won", "lost")}
+    stats: dict = {s: {"count": 0, "value": 0.0} for s in CRM_DEAL_STAGES}
     for r in rows:
-        stats[r["stage"]] = {"count": r["cnt"], "value": float(r["total_val"])}
+        st = normalize_crm_stage(r["stage"], r["stage"])
+        cur = stats.setdefault(st, {"count": 0, "value": 0.0})
+        cur["count"] += r["cnt"]
+        cur["value"] += float(r["total_val"])
     return stats
 
 

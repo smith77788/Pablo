@@ -370,7 +370,7 @@ async def import_sessions(
                 api_id=_assign_api_id(_fp),
                 proxy_id=_acc_proxy,
             )
-        except _db.AccountIdentityMissing as e:
+        except _db.AccountNotSaved as e:
             failed += 1
             errors.append(f"Строка {i+1}: {e}")
             continue

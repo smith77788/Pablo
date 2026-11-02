@@ -440,7 +440,7 @@ async def _plan_state(pool, uid: int, *, alive: bool) -> dict:
 
 
 async def load_goal(pool, uid: int) -> Optional[str]:
-    """Выбранная цель или None. Нет таблицы (миграция v271 не накатилась) —
+    """Выбранная цель или None. Нет таблицы (миграция v290 не накатилась) —
     тоже None: чеклист идёт исходным путём, а не падает."""
     try:
         g = await pool.fetchval("SELECT goal FROM onboarding_goals WHERE owner_id=$1", uid)

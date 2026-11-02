@@ -122,7 +122,7 @@ def test_trial_granted_once_after_first_live_account(pool):
     _acc(pool, tg_user_id=555001)
     r = _checklist(pool)
     plan = _step(r, "plan")
-    assert plan["done"] is True and "осталось 3 дн." in plan["title"]
+    assert plan["done"] is True and "осталось 7 дн." in plan["title"]
     row = _run(pool.fetchrow(
         "SELECT s.plan, s.is_active, s.expires_at > now() + interval '2 days' AS long, "
         "t.account_tg_user_ids FROM subscriptions s JOIN subscription_trials t "

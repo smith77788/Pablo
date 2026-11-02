@@ -212,7 +212,7 @@ def test_encryption_failure_skips_backup_instead_of_sending_plain(env, monkeypat
     env(TOKEN_ENCRYPTION_KEY="key-0123456789abc")
     bk = _bk()
     monkeypatch.setattr(bk, "backup_chat_id", lambda: 7)
-    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(b"arch"))
+    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(_tar_gz()))
 
     def _boom(_a):
         raise RuntimeError("нет Crypto")
@@ -227,10 +227,11 @@ def test_encryption_can_be_switched_off_explicitly(env, monkeypatch):
     env(TOKEN_ENCRYPTION_KEY="key-0123456789abc", DB_BACKUP_ENCRYPT="0")
     bk = _bk()
     monkeypatch.setattr(bk, "backup_chat_id", lambda: 7)
-    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(b"arch"))
+    plain = _tar_gz()
+    monkeypatch.setattr(bk, "create_archive", lambda pool, **k: _acoro(plain))
     bot = _Bot()
     asyncio.run(bk.run_backup_once(object(), bot))
-    assert bot.docs[0][1] == b"arch" and bot.docs[0][0].endswith(".tar.gz")
+    assert bot.docs[0][1] == plain and bot.docs[0][0].endswith(".tar.gz")
 
 
 # ── 3. Вход по секретной фразе ───────────────────────────────────────────────

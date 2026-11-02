@@ -185,3 +185,149 @@ def test_правило_данные_не_инструкции_всегда_в_�
     seen = _scripted(monkeypatch, ["Здравствуйте!"])
     _run(bsp.generate_reply(_PERSONA, _PRODUCTS, {}, "привет"))
     assert sales_guard.DATA_NOT_INSTRUCTIONS in seen[0][0]["content"]
+
+
+# ── Дневной лимит ИИ по тарифу ───────────────────────────────────────────────
+class _UsagePool:
+    def __init__(self, used):
+        self.used, self.writes = used, []
+
+    async def fetchval(self, q, *a):
+        assert "llm_owner_usage" in q
+        return self.used
+
+    async def execute(self, q, *a):
+        self.writes.append(a)
+
+
+def _plan(monkeypatch, plan):
+    from bot.utils import subscription
+
+    async def _get(pool, uid):
+        return plan
+    monkeypatch.setattr(subscription, "get_plan", _get)
+
+
+def test_лимит_тарифа_останавливает_вызов_до_модели(monkeypatch):
+    pool = _UsagePool(used=30)
+    monkeypatch.setattr(ai_gateway, "_pool", lambda: pool)
+    _plan(monkeypatch, "free")
+    monkeypatch.setattr(ai_claude, "enabled", lambda: False)
+    monkeypatch.setattr(ai_providers, "configured_providers",
+                        lambda: [_prov("openai", ["gpt-x"])])
+    calls = _fake_openai(monkeypatch, {"gpt-x": "ок"})
+    r = _run(ai_gateway.chat([{"role": "user", "content": "u"}],
+                             task=ai_gateway.TASK_BACKGROUND, owner_id=5))
+    assert r.limited and r.text is None and calls == []
+    assert ai_gateway.LIMIT_MESSAGE in r.errors[0]
+    assert pool.writes == [], "отказ по лимиту не считается вызовом"
+
+
+def test_ответы_клиентам_считаются_отдельно_от_фона(monkeypatch):
+    pool = _UsagePool(used=30)          # фон выбрал свои 30 — клиенту это не мешает
+    monkeypatch.setattr(ai_gateway, "_pool", lambda: pool)
+    _plan(monkeypatch, "free")
+    ok, info = _run(ai_gateway.check_limit(5, ai_gateway.TASK_CUSTOMER))
+    assert ok and info["limit"] == 200
+
+
+def test_старший_тариф_без_потолка_и_env_переопределяет(monkeypatch):
+    pool = _UsagePool(used=10**6)
+    monkeypatch.setattr(ai_gateway, "_pool", lambda: pool)
+    _plan(monkeypatch, "enterprise")
+    ok, info = _run(ai_gateway.check_limit(5, ai_gateway.TASK_ASSISTANT))
+    assert ok and info["limit"] is None
+    monkeypatch.setenv("AI_DAILY_LIMITS", '{"enterprise": [null, 5]}')
+    ok, info = _run(ai_gateway.check_limit(5, ai_gateway.TASK_ASSISTANT))
+    assert not ok and info["limit"] == 5
+    monkeypatch.setenv("AI_DAILY_LIMITS", "не json")
+    assert ai_gateway.daily_limits()["free"] == (200, 30)
+
+
+def test_без_владельца_лимита_нет(monkeypatch):
+    monkeypatch.setattr(ai_gateway, "_pool", lambda: _UsagePool(used=10**6))
+    ok, _ = _run(ai_gateway.check_limit(None, ai_gateway.TASK_BACKGROUND))
+    assert ok
+
+
+def test_complete_отдаёт_текст_одного_промпта(monkeypatch):
+    monkeypatch.setattr(ai_claude, "enabled", lambda: False)
+    monkeypatch.setattr(ai_providers, "configured_providers",
+                        lambda: [_prov("groq", ["llama"])])
+    _fake_openai(monkeypatch, {"llama": "текст"})
+    assert _run(ai_gateway.complete("p", system="s")) == "текст"
+
+
+def test_генераторы_больше_не_перебирают_провайдеров_сами():
+    """Шаблоны, нарративы, ниши, персоны и проверка контента — через шлюз.
+
+    Контентный путь (spintax_ai, прогрев чатов) уже сверяется с llm_gate и
+    намеренно держит свои модели; картинки (va_image) — не чат."""
+    import inspect
+    from bot.handlers import templates
+    from services import narrative_engine, niche_searcher, persona_engine, strike_engine
+    for mod in (templates, narrative_engine, niche_searcher, persona_engine):
+        src = inspect.getsource(mod)
+        assert "chat.completions.create" not in src, mod.__name__
+        assert "ai_gateway" in src, mod.__name__
+    src = inspect.getsource(strike_engine._ai_classify_with_providers)
+    assert "chat.completions.create" not in src and "ai_gateway.chat" in src
+
+
+def test_помощник_владельца_под_лимитом_паузами_и_учётом():
+    import inspect
+    from bot.handlers import ai_assistant
+    src = inspect.getsource(ai_assistant._call_ai_providers)
+    for needle in ("ai_gateway.check_limit", "ai_gateway.order_candidates",
+                   "llm_gate.blocked_until", "llm_gate.note_limit",
+                   "ai_gateway.record_usage"):
+        assert needle in src, needle
+
+
+# ── Действия модели: заказ, промокод, оператор ───────────────────────────────
+_CAT = [{"name": "Пицца Маргарита", "price_cents": 1250},
+        {"name": "Пицца Пепперони", "price_cents": 1490, "min_qty": 1},
+        {"name": "Кола 0.5", "price_cents": 300, "min_qty": 2}]
+
+
+def test_служебный_блок_вырезается_всегда():
+    txt, acts = bsp.parse_actions(
+        'Отлично! <действие>{"заказ": [{"товар": "маргарита", "кол": 2}]}</действие>')
+    assert txt == "Отлично!" and acts["заказ"][0]["кол"] == 2
+    assert bsp.parse_actions("Ок <действие>{сломано")[0] == "Ок"
+    assert bsp.parse_actions("Без блока")[1] == {}
+
+
+def test_действия_сверяются_с_прайсом():
+    acts = bsp.validate_actions(
+        {"заказ": [{"товар": "маргарита", "кол": 2}, {"товар": "Гавайская", "кол": 1},
+                   {"товар": "Кола 0.5", "кол": 1}, {"товар": "Пицца Пепперони", "кол": 500}],
+         "промокод": "ВЫДУМАН", "оператор": True},
+        _CAT, [{"code": "OSEN15", "percent": 15}])
+    assert [(i["name"], i["qty"]) for i in acts["items"]] == [
+        ("Пицца Маргарита", 2), ("Кола 0.5", 2), ("Пицца Пепперони", 99)]
+    assert acts["promo"] is None and acts["handoff"] is True
+    ok = bsp.validate_actions({"промокод": "osen15"}, _CAT, [{"code": "OSEN15", "percent": 15}])
+    assert ok["promo"]["code"] == "OSEN15" and ok["handoff"] is False
+    assert bsp.validate_actions({"оператор": "да"}, _CAT)["handoff"] is False
+
+
+def test_заказ_по_словам_клиента_понимает_падежи_и_числа_словами():
+    items, total = bsp.match_order_items("Две маргариты и колу", _CAT)
+    assert [(i["name"], i["qty"]) for i in items] == [("Пицца Маргарита", 2), ("Кола 0.5", 2)]
+    assert total == 2 * 1250 + 2 * 300
+    assert bsp.match_order_items("пиццу хочу", _CAT)[0] == [], "категория — не позиция"
+
+
+def test_модель_не_отдаёт_клиенту_служебный_блок(monkeypatch):
+    _scripted(monkeypatch, ['Записала! <действие>{"оператор": true}</действие>'])
+    dialog = {}
+    out = _run(bsp.generate_reply(_PERSONA, _PRODUCTS, dialog, "позовите человека"))
+    assert out == "Записала!" and dialog["_ai_actions"] == {"оператор": True}
+
+
+def test_промпт_просит_служебный_блок():
+    p = bsp.build_system_prompt({"name": "Аня"}, _PRODUCTS)
+    assert "<действие>" in p and "заказ" in p
+    p = bsp.build_system_prompt({"name": "Аня", "can_take_orders": False}, _PRODUCTS)
+    assert "<действие>" in p and "\"заказ\"" not in p

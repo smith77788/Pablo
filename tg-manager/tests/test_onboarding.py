@@ -311,6 +311,6 @@ def test_goal_chooser_wired_in_app_and_bot():
 
 
 def test_goal_migration_registered():
-    name = "schema_v271_onboarding_goal.sql"
+    name = "schema_v290_onboarding_goal.sql"
     assert os.path.exists(os.path.join(ROOT, name))
     assert name in open(os.path.join(ROOT, "schema_checksums.txt"), encoding="utf-8").read()

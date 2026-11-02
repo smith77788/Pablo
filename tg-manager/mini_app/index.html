@@ -485,8 +485,10 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 @keyframes sp{to{transform:rotate(360deg)}}
 
 /* ─── Toast ──────────────────────────────────────────────────── */
-#toast{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 14px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(30,41,55,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:8px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:400;white-space:nowrap;max-width:calc(100vw - 32px);text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.35)}
-#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 14px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(30,41,55,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:8px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:400;white-space:normal;overflow-wrap:anywhere;max-width:calc(100vw - 32px);width:max-content;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.35);display:flex;align-items:center;gap:10px;cursor:pointer}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto}
+#toast .toast-msg{flex:1 1 auto;line-height:1.35}
+#toast .toast-x{flex:0 0 auto;width:24px;height:24px;margin-right:-8px;border:0;border-radius:50%;background:rgba(255,255,255,.1);color:var(--text);font-size:14px;line-height:24px;padding:0;cursor:pointer}
 /* Плашка итога операции: тот же слой, что и тост, но кликабельная и живёт
    дольше — итог массовой операции нужно успеть прочитать и открыть детали. */
 #opDone{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 14px);left:16px;right:16px;background:rgba(30,41,55,.97);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:11px 14px;border-radius:14px;font-size:13px;opacity:0;transform:translateY(10px);transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:401;box-shadow:0 8px 32px rgba(0,0,0,.4)}
@@ -2290,6 +2292,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Воронка денег</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openCohorts('month')">
+        <div class="mgmt-tile-ico">📈</div>
+        <div class="mgmt-tile-lbl">Когорты и LTV</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openSalesManager()">
         <div class="mgmt-tile-ico">🧑‍💼</div>
         <div class="mgmt-tile-lbl">Менеджер продаж</div>
@@ -4011,6 +4018,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
       Умный срез контактов как сущность («Горячие», «Молчуны 30д»). Один сегмент —
       одним тапом написать или пригласить. «Сохранить срез» — на экране Контактов.
+    </div>
+    <div style="background:var(--bg2);border-radius:12px;padding:10px;margin:6px 0 12px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">🧠 Сегмент из фразы</div>
+      <textarea id="segAiText" class="input-bc" rows="2" maxlength="500" style="width:100%" placeholder="Например: женщины на стадии переговоров с тегом vip"></textarea>
+      <button class="btn" style="width:100%;margin-top:6px" onclick="segmentFromText()">Подобрать фильтры</button>
+      <div id="segAiOut"></div>
     </div>
     <div class="lst" id="segmentsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -7597,6 +7610,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="condition">🔀 Условие</option>
         <option value="action">⚡ Действие</option>
         <option value="invoice">💳 Счёт на оплату</option>
+        <option value="split">🎲 A/B-деление</option>
         <option value="webhook">🌐 Вебхук</option>
       </select>
     </div>
@@ -7623,6 +7637,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field" id="wfStepDelayField" style="display:none">
       <label>Задержка (минуты)</label>
       <input type="number" id="wfStepDelay" min="1" max="43200" placeholder="60" class="inp">
+      <label style="margin-top:6px">Или ждать до времени человека (ЧЧ:ММ)</label>
+      <input type="text" id="wfStepUntil" placeholder="10:00" maxlength="5" class="inp">
+      <label class="chk-row" style="margin-top:6px"><input type="checkbox" id="wfStepWeekdays"> Только в будни</label>
+      <div class="hint">Время берётся по часовому поясу человека: поле контакта timezone, иначе язык Телеграма, иначе Москва. Если время задано, минуты не нужны.</div>
+    </div>
+    <div class="field" id="wfStepSplitField" style="display:none">
+      <label>Ветки (по одной в строке: название доля -> шаг)</label>
+      <textarea id="wfStepBranches" rows="3" placeholder="A 50 -> 3&#10;B 50 -> 6" class="input-bc"></textarea>
+      <div class="hint">Каждый человек случайно попадает в одну ветку по долям. В статистике видно, какая ветка чаще доводит до цели, и когда разница уже надёжна.</div>
     </div>
     <div class="field" id="wfStepConditionField" style="display:none">
       <label>Условие</label>
@@ -7646,6 +7669,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="remove_tag">Снять тег</option>
         <option value="set_field">Записать поле (поле=значение)</option>
         <option value="create_deal">Создать сделку в CRM</option>
+        <option value="move_deal">Сменить этап сделки: лид, контакт, предложение, переговоры, выиграна, проиграна</option>
         <option value="notify_owner">Уведомить меня</option>
         <option value="goto">Перейти к шагу №</option>
         <option value="stop">Завершить сценарий</option>
@@ -7672,6 +7696,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field-err" id="wfStepErr"></div>
     <button class="btn btn-p" onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
+  </div>
+</div>
+
+<!-- Журнал прогона: что сценарий сделал с конкретным человеком. -->
+<div class="mbg" id="mo-wf-runlog" onclick="if(event.target===this)closeModal('mo-wf-runlog')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-wf-runlog')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">🧾 Журнал прогона</div>
+    <div id="wfRunLogBody"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -7921,6 +7954,7 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
       if(cfg.bot_username) window._botUsername = cfg.bot_username;
       if(cfg.paid_price) window._paidPrice = cfg.paid_price;
       if(cfg.period_discounts) window._periodDiscounts = cfg.period_discounts;
+      if(Array.isArray(cfg.tiers) && cfg.tiers.length) window._tiers = cfg.tiers;
       if(cfg.plans) window._planMatrix = cfg.plans;
       rebuildPlanPrices();
     }).catch(()=>{});
@@ -8159,6 +8193,16 @@ async function _apiRaw(path, opts={}) {
     } catch(e) { throw new Error((e && e.message) || 'Нет соединения с сервером'); }
     if (r.status === 401) throw new Error('Сессия истекла, перезапустите приложение');
   }
+  // Сервер перезапускается после деплоя: пока идёт старт, порт держит
+  // временный сервер. Запрос до приложения не дошёл и ничего не изменил, так
+  // что его безопасно повторить — ждём старта молча, а не показываем ошибку.
+  for (let _i = 0; _i < BOOT_RETRY_MAX && await _serverBooting(r); _i++) {
+    await new Promise(res => setTimeout(res, BOOT_RETRY_MS));
+    try {
+      r = await fetchT(path, { ...opts, headers: _hdr() }, _ms);
+    } catch(e) { throw new Error((e && e.message) || 'Нет соединения с сервером'); }
+  }
+  if (await _serverBooting(r)) throw new Error(BOOT_MSG);
   if (!r.ok) {
     let msg, _j;
     try { _j=await r.json(); msg=_j.message||_j.error||_j.detail||null; } catch(_){}
@@ -8180,7 +8224,28 @@ async function _apiRaw(path, opts={}) {
     if (r.status === 500) msg = 'Внутренняя ошибка сервиса — попробуйте позже';
     throw new Error(msg);
   }
-  try { return await r.json(); } catch(_) { throw new Error('Ответ сервера не является JSON'); }
+  try { return await r.json(); } catch(_) { throw new Error('Сервер прислал неожиданный ответ — обновите экран'); }
+}
+
+// Признак перезапуска сервера. Новый стартовый сервер отвечает на /api 503 с
+// `starting: true`; старый (до этой правки, он ещё живёт в момент деплоя)
+// отвечал текстом «starting: …» с кодом 200 — его мини-апп и выдавал за
+// «Ответ сервера не является JSON». Тело читаем из копии: исходный ответ
+// остаётся целым для обычного разбора.
+const BOOT_RETRY_MAX = 6, BOOT_RETRY_MS = 4000;
+const BOOT_MSG = 'Сервис перезапускается — через минуту всё заработает';
+async function _serverBooting(r) {
+  try {
+    const ct = (r.headers.get('Content-Type') || '').toLowerCase();
+    if (r.status === 503 && ct.includes('json')) {
+      const j = await r.clone().json();
+      return !!(j && j.starting);
+    }
+    if (r.ok && !ct.includes('json')) {
+      return /^starting:/.test(await r.clone().text());
+    }
+  } catch(_) {}
+  return false;
 }
 
 // Глобальная сеть безопасности: любая НЕпойманная ошибка (баг рендера, отвалившийся
@@ -8878,11 +8943,12 @@ const MODULE_DESCS = {
   'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и оповещения',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
-  'Интеграции':'Вебхуки на события, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
+  'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
   'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
   'Воронка денег':'Охват → ответ → покупка по кампаниям, цена лида',
+  'Когорты и LTV':'Сколько приносит привлечённый человек и какой источник доходнее',
 };
 function buildDrawer() {
   const body = document.getElementById('navBody');
@@ -9854,7 +9920,8 @@ async function dismissPulse(id) {
 // ── Copilot: контекстные подсказки «Что делать дальше» ──────────────
 // Открывает нужный раздел по подсказке: вкладка (nav) или глобальная
 // функция открытия экрана (fn). Пользователю не нужно искать раздел сам.
-function copilotOpen(nav, fn) {
+function copilotOpen(nav, fn, id) {
+  if (id) copilotFeedback(id, 'opened');
   try {
     if (nav) { goTab(nav); }
     else if (fn && typeof window[fn] === 'function') { window[fn](); }
@@ -9885,7 +9952,17 @@ async function launchChainStep(arg) {
   } catch(e) { toast('⚠️ ' + errRu(e, 'Шаг не запустился').substring(0, 140)); }
 }
 
-// «Отложить» — клиентское, на сутки, по id подсказки (без роста схемы БД).
+// Реакция на подсказку уходит на сервер: копайлот поднимает то, чем владелец
+// пользуется, и прячет отложенное на всех устройствах (services/next_actions).
+function copilotFeedback(id, kind) {
+  // Учёт реакции — не загрузка экрана: его сбой ничего не прячет от
+  // владельца, подсказка уже скрыта или открыта на этом устройстве.
+  api('/api/miniapp/next_actions/feedback', {method:'POST', body:JSON.stringify({id, kind})})
+    .catch(e => console.warn('copilot feedback', e));
+}
+// «Отложить» — сразу прячем на этом устройстве (localStorage) и сообщаем
+// серверу; срок — snooze_hours подсказки (горячие клиенты — 3 часа, а не сутки).
+let _copilotSnooze = {};
 function copilotDismissed() {
   try {
     const raw = localStorage.getItem('infragram_copilot_dismiss');
@@ -9899,9 +9976,10 @@ function copilotDismissed() {
 function copilotDismiss(id) {
   try {
     const obj = copilotDismissed();
-    obj[id] = Date.now() + 24*3600*1000;
+    obj[id] = Date.now() + (_copilotSnooze[id] || 24)*3600*1000;
     localStorage.setItem('infragram_copilot_dismiss', JSON.stringify(obj));
   } catch(_) {}
+  copilotFeedback(id, 'snoozed');
   loadNextActions();
 }
 
@@ -9913,12 +9991,13 @@ function renderNextActions(actions) {
   if (!lists.length) return;
   const dismissed = copilotDismissed();
   const items = (actions||[]).filter(a => !dismissed[a.id]);
+  (actions||[]).forEach(a => { if (a.snooze_hours) _copilotSnooze[a.id] = a.snooze_hours; });
   if (!items.length) {
     lists.forEach(l => { const w = l.closest('.copilot-wrap'); if (w) w.style.display='none'; l.innerHTML=''; });
     return;
   }
   const html = items.map(a => {
-    const navArg = `copilotOpen(${a.nav?`'${a.nav}'`:'null'},${a.fn?`'${a.fn}'`:'null'})`;
+    const navArg = `copilotOpen(${a.nav?`'${a.nav}'`:'null'},${a.fn?`'${a.fn}'`:'null'},'${esc(a.id)}')`;
     const hasApply = !!a.apply;
     // Есть действие в один клик → primary-кнопка «применить» + ссылка «открыть»
     // (для ручного контроля). Нет — вся карточка ведёт в раздел, как раньше.
@@ -9934,6 +10013,7 @@ function renderNextActions(actions) {
       <div class="copilot-body">
         <div class="copilot-title">${esc(a.title||'')}</div>
         <div class="copilot-reason">${esc(a.reason||'')}</div>
+        ${a.learned ? `<div class="copilot-reason" style="opacity:.7">🧠 ${esc(a.learned)}</div>` : ''}
         ${footer}
       </div>
       <div class="copilot-x" onclick="event.stopPropagation();copilotDismiss('${a.id}')" title="Отложить" role="button" tabindex="0">✕</div>
@@ -15618,7 +15698,7 @@ function renderBcAnalytics(items, serverTotal, serverTotals) {
       <div style="width:100%;height:${h}px;background:var(--accent);border-radius:2px 2px 0 0;min-height:3px"></div>
     </div>`;
   }).join('');
-  if(labels) labels.innerHTML = bots.map(([name])=>`<span style="font-size:10px;color:var(--hint)">@${(name||'').substring(0,6)}</span>`).join('');
+  if(labels) labels.innerHTML = bots.map(([name])=>`<span style="font-size:10px;color:var(--hint)">@${esc((name||'').substring(0,6))}</span>`).join('');
   // Столбцы по ботам строятся по загруженной странице — если история длиннее,
   // говорим об этом, а не выдаём срез за всю картину.
   const barNote = document.getElementById('bcAnalyticsNote');
@@ -18262,6 +18342,59 @@ async function deleteSavedSegment(id, _el) {
   if (!await confirmDelete('Удалить сегмент', _el, '(контакты не трогаются)')) return;
   try { await api('/api/miniapp/uch/segments/'+id, {method:'DELETE'}); openSavedSegments(); }
   catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+// ── Сегмент из фразы: модель переводит описание в фильтры контактов ─────────
+let SEG_AI_FILTERS = null;
+async function segmentFromText() {
+  const el = document.getElementById('segAiText');
+  const out = document.getElementById('segAiOut');
+  const text = (el && el.value || '').trim();
+  if (!out) return;
+  if (!text) { toast('Опишите, кого выбрать'); return; }
+  SEG_AI_FILTERS = null;
+  out.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:8px 0">⏳ Подбираю фильтры…</div>';
+  try {
+    const d = await api('/api/miniapp/ai/segment-from-text', {method:'POST', body: JSON.stringify({text})});
+    let h = '';
+    if (d.filters) {
+      SEG_AI_FILTERS = d.filters;
+      h += '<div style="font-size:13px;padding:8px 0 4px">Условия: ' + esc((d.explained||[]).join(', ')) + '</div>' +
+        '<div style="font-size:13px;font-weight:600;padding:2px 0 6px">В сегменте: ' + num(d.total||0) + '</div>';
+    } else {
+      h += '<div style="font-size:12px;color:var(--hint);padding:8px 0 4px">' + esc(d.reason || 'Фильтры не подобрались') + '</div>';
+    }
+    if (d.unsupported) h += '<div style="font-size:12px;color:var(--warn,#c90);padding:2px 0">⚠️ Не учтено (фильтров таких нет): ' + esc(d.unsupported) + '</div>';
+    if ((d.dropped||[]).length) h += '<div style="font-size:12px;color:var(--warn,#c90);padding:2px 0">⚠️ Отброшено: ' + esc(d.dropped.join('; ')) + '</div>';
+    if (d.filters) {
+      h += '<div style="display:flex;gap:8px;margin-top:6px">' +
+        '<button class="btn btn-s" style="flex:1" onclick="segmentAiSave()">💾 Сохранить</button>' +
+        '<button class="btn btn-s" style="flex:1" onclick="segmentAiWrite()">✍️ Написать</button></div>';
+    }
+    out.innerHTML = h;
+  } catch (e) {
+    out.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:8px 0">⚠️ ' + esc(errRu(e, 'Не получилось')) + '</div>';
+  }
+}
+async function segmentAiSave() {
+  if (!SEG_AI_FILTERS) return;
+  const name = await askPrompt('Название сегмента');
+  if (!name || !name.trim()) return;
+  try {
+    await api('/api/miniapp/uch/segments/save', {method:'POST',
+      body: JSON.stringify({name: name.trim(), filters: SEG_AI_FILTERS})});
+    toast('💾 Сегмент сохранён');
+    openSavedSegments();
+  } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+function segmentAiWrite() {
+  if (!SEG_AI_FILTERS) return;
+  SEGMENT_TARGET = {mode:'whole', filters: SEG_AI_FILTERS};
+  const t=document.getElementById('ccwText'); if(t)t.value='';
+  const e=document.getElementById('ccwErr'); if(e)e.textContent='';
+  const ttl=document.getElementById('ccwTitle'); if(ttl)ttl.textContent='✍️ Написать сегменту';
+  _renderContactAccPicker('ccwAccts','all');
+  showModal('mo-contact-write');
+  _loadSegmentPreview('ccwPreview');
 }
 function segmentActFromSaved(id, kind) {
   SEGMENT_TARGET = {mode:'saved', id};
@@ -21585,7 +21718,7 @@ async function loadGovernorBar() {
     if (!gmOk && !gsOk) { el.style.display = 'none'; return; }
     const gm = gmOk ? String(+g.multiplier.toFixed(2)).replace('.', ',') : '—';
     const gs = gsOk ? g.score : '—';
-    el.innerHTML = `<b style="color:${c}">${g.emoji||''} Губернатор темпа: ×${gm}</b> · давление ${gs}/100<br>`
+    el.innerHTML = `<b style="color:${c}">${esc(g.emoji||'')} Губернатор темпа: ×${gm}</b> · давление ${gs}/100<br>`
       + `<span style="color:var(--hint)">${esc(g.explain||'')}</span>`;
   } catch(e) { el.style.display = 'none'; }
 }
@@ -28877,15 +29010,41 @@ function outRu(v) {
           skipped:'— Пропущено', timeout:'⏱ Таймаут'}[String(v||'').toLowerCase()] || (v || '—');
 }
 let _tt=null;
+// Уведомление внизу экрана. Закрывается тапом по нему или по «✕» и само
+// скрывается: обычное — через 3 с, ошибка — через 5 (её успевают прочесть).
+// Раньше тост был прозрачен для пальца (pointer-events:none) и обрезался в
+// одну строку, а фоновые запросы, падающие по кругу, показывали его снова и
+// снова — выглядело как плашка, которую не закрыть. Поэтому та же ошибка,
+// которую только что закрыли или показали, повторно не всплывает 15 с.
+const TOAST_MS = 3000, TOAST_ERR_MS = 5000, TOAST_REPEAT_MS = 15000;
+let _toastLast = {msg:'', at:0};
+function hideToast() {
+  const el=document.getElementById('toast');
+  if (el) el.classList.remove('show');
+  clearTimeout(_tt);
+}
 function toast(msg) {
   const el=document.getElementById('toast');
-  el.textContent=msg; el.classList.add('show');
-  clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),2800);
+  if (!el) return;
+  msg = String(msg == null ? '' : msg);
+  const isErr = /⚠️|ошибк|не удал|❌/i.test(msg);
+  const now = Date.now();
+  if (isErr && msg === _toastLast.msg && now - _toastLast.at < TOAST_REPEAT_MS) return;
+  _toastLast = {msg, at: now};
+  if (!el._wired) {
+    el._wired = true;
+    el.setAttribute('role','status');
+    el.addEventListener('click', hideToast);
+  }
+  el.innerHTML = '<span class="toast-msg"></span><button type="button" class="toast-x" aria-label="Закрыть">✕</button>';
+  el.firstChild.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_tt); _tt=setTimeout(hideToast, isErr ? TOAST_ERR_MS : TOAST_MS);
   // Тактильный отклик (как в нативных Telegram Mini App)
   try {
     const h = tg && tg.HapticFeedback;
     if (h) {
-      if (/⚠️|ошибк|Ошибк|не удал|❌/.test(msg)) h.notificationOccurred('error');
+      if (isErr) h.notificationOccurred('error');
       else if (/✅|🚀|📢|готов|запущен|создан|добавлен|сохран/i.test(msg)) h.notificationOccurred('success');
       else h.impactOccurred('light');
     }
@@ -29082,14 +29241,31 @@ function _planLines(plan) {
 // Цены строятся из конфига (базовая цена + скидки за период), чтобы совпадать
 // с реальным расчётом списания на бэкенде: base*months*(1-disc/100).
 let _PLAN_PRICES = [];
+// Три тарифа по размеру флота (services/tiers.py): возможности одинаковые,
+// различается лимит аккаунтов. Список и цены — из /api/miniapp/config.
+window._tier = window._tier || 'pro';
+function _tierList() {
+  // Только из конфигурации сервера: зашитый список разошёлся бы с тарифами.
+  return Array.isArray(window._tiers) ? window._tiers : [];
+}
+function pickTier(key) {
+  window._tier = key;
+  rebuildPlanPrices();
+  renderBillingPlans();
+}
 function rebuildPlanPrices() {
-  const base = window._paidPrice || 29;
+  const list = _tierList();
+  const tier = list.find(t => t.key === window._tier) || list[1] || list[0] || null;
+  // Тарифы не загрузились — прежние карточки по базовой цене, тариф бот
+  // спросит сам (диплинк pay_paid_<N>m).
+  const base = (tier && Number(tier.price)) || window._paidPrice || 29;
   const disc = window._periodDiscounts || {'1':0,'3':10,'6':15,'12':20};
+  const k = tier ? tier.key : 'paid';
   const periods = [
-    {key:'paid_1m', label:'1 месяц', months:1, popular:false},
-    {key:'paid_3m', label:'3 месяца', months:3, popular:true},
-    {key:'paid_6m', label:'6 месяцев', months:6, popular:false},
-    {key:'paid_12m', label:'12 месяцев', months:12, popular:false},
+    {key:k+'_1m', label:'1 месяц', months:1, popular:false},
+    {key:k+'_3m', label:'3 месяца', months:3, popular:true},
+    {key:k+'_6m', label:'6 месяцев', months:6, popular:false},
+    {key:k+'_12m', label:'12 месяцев', months:12, popular:false},
   ];
   _PLAN_PRICES = periods.map(p=>{
     const d = Number(disc[String(p.months)]||0);
@@ -29145,17 +29321,7 @@ async function openBilling() {
     } else {
       txt('billingFeaturesList', `<div class="card" style="padding:12px 16px">${feats.map(f=>`<div style="padding:5px 0;font-size:13px;${f.startsWith('❌')?'color:var(--hint)':'color:var(--text)'}">${esc(f)}</div>`).join('')}</div>`);
     }
-    txt('billingPlansList', _PLAN_PRICES.map(p=>`
-      <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <div>
-            <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(167,139,250,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
-            ${p.save?`<div style="font-size:12px;color:var(--green)">Экономия ${p.save}</div>`:''}
-          </div>
-          <div style="font-size:20px;font-weight:700;color:var(--accent)">${p.price}</div>
-        </div>
-      </div>
-    `).join(''));
+    renderBillingPlans();
   } catch(e) {
     // Раньше здесь стояло txt('billingPlanName','Бесплатный'): запрос упал, а
     // экран уверенно называл тариф бесплатным. Человек, который платит, видел
@@ -29170,6 +29336,30 @@ async function openBilling() {
       Не удалось узнать ваш тариф.
       <button class="btn btn-s" style="margin-top:8px" onclick="openBilling()">↺ Повторить</button></div>`);
   }
+  await _billingHistory();
+}
+function renderBillingPlans() {
+    const chips = _tierList().map(t => `
+      <div class="card" style="flex:1;padding:10px 8px;min-height:auto;cursor:pointer;text-align:center;${t.key===window._tier?'border:1px solid rgba(167,139,250,.8);background:var(--bg-violet-16)':''}" onclick="pickTier('${esc(t.key)}')">
+        <div style="font-weight:700;font-size:14px">${esc(t.name)}</div>
+        <div style="font-size:13px;color:var(--accent)">$${esc(String(t.price))}/мес</div>
+        <div style="font-size:11px;color:var(--hint)">${esc(t.accounts)}</div>
+      </div>`).join('');
+    const head = chips ? `<div style="font-size:12px;color:var(--hint);margin:0 2px 6px">Возможности у тарифов одинаковые — различается размер флота.</div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">${chips}</div>` : '';
+    txt('billingPlansList', head + _PLAN_PRICES.map(p=>`
+      <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(167,139,250,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
+            ${p.save?`<div style="font-size:12px;color:var(--green)">Экономия ${p.save}</div>`:''}
+          </div>
+          <div style="font-size:20px;font-weight:700;color:var(--accent)">${p.price}</div>
+        </div>
+      </div>
+    `).join(''));
+}
+async function _billingHistory() {
   try {
     const hist = await api('/api/miniapp/payments');
     if (!hist || !hist.length) {
@@ -29918,7 +30108,7 @@ async function loadWorkflows() {
         <div class="ava" style="background:${color}15;color:${color}">🔄</div>
         <div class="li-body">
           <div class="li-name">${esc(w.name)}</div>
-          <div class="li-sub">${w.step_count || 0} шагов · Последний запуск: ${lastRun}</div>
+          <div class="li-sub">${w.legacy_kind ? '🔗 из раздела воронок · ' : ''}${w.step_count || 0} шагов · Последний запуск: ${lastRun}</div>
         </div>
         <div class="li-right"><span class="badge" style="background:${color}15;color:${color}">${stb(w.status)[1]}</span><span class="chev">›</span></div>
       </div>`;
@@ -30006,12 +30196,17 @@ async function openWorkflowDetail(wfId, wfName) {
   try {
     const d = await api('/api/miniapp/workflows/' + wfId);
     const steps = d.steps || [];
+    // Зеркало воронки или автоворонки: шаги, включение и удаление живут в их
+    // разделе, здесь — цель, статистика и журнал по людям.
+    const legacy = !!d.legacy_kind;
     let html = '';
 
     if (d.bot_id) {
       html += `<div class="hint" style="margin:0 14px 8px">🤖 Бот: ${d.bot_username ? '@' + esc(d.bot_username) : '#' + d.bot_id}</div>`;
     }
-    html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
+    if (legacy) {
+      html += `<div class="hint" style="margin:0 14px 8px">🔗 ${esc(d.legacy_note || '')}${d.active ? '' : ' Сейчас воронка выключена.'}</div>`;
+    } else html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
       <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
       <button class="btn btn-s" onclick="runWorkflowTest(${wfId}, this)" style="flex:1 1 auto;font-size:13px;padding:8px">🧪 Тестовый запуск</button>
       <button class="btn btn-r" onclick="deleteWorkflow(${wfId}, this)" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Удалить">🗑</button>
@@ -30023,7 +30218,7 @@ async function openWorkflowDetail(wfId, wfName) {
     // Подсказки для триггера «событие»: код события и его подпись по-русски.
     const evOpts = Object.entries(d.events || {}).map(([k, v]) =>
       `<option value="${esc(k)}">${esc(v)}</option>`).join('');
-    html += `<div class="sec">⚡ Когда запускать</div>
+    if (!legacy) html += `<div class="sec">⚡ Когда запускать</div>
       <div style="padding:0 16px 8px">
         <select id="wfdTrigger" class="sel" onchange="wfTriggerHint('wfd')">${trigOpts}</select>
         <input type="text" id="wfdTriggerVal" class="inp" style="margin-top:6px" list="wfdEventList" value="${esc(d.trigger_value || '')}">
@@ -30032,15 +30227,27 @@ async function openWorkflowDetail(wfId, wfName) {
         <button class="btn btn-s" style="width:100%;margin-top:6px" onclick="saveWorkflowTrigger(${wfId})">💾 Сохранить способ запуска</button>
         ${(!d.active && trig !== 'manual') ? '<div class="hint" style="margin-top:6px">Сценарий выключен — сам он не запустится, пока вы его не активируете.</div>' : ''}
       </div>`;
+    // Цель: достигнута — прогон завершается сам, дожим больше не идёт.
+    const goal = d.goal_type || '';
+    const goalOpts = '<option value="">Без цели</option>' + Object.entries(d.goals || {}).map(([k, v]) =>
+      `<option value="${esc(k)}"${k === goal ? ' selected' : ''}>${esc(v)}</option>`).join('');
+    html += `<div class="sec">🎯 Цель сценария</div>
+      <div style="padding:0 16px 8px">
+        <select id="wfdGoal" class="sel" onchange="wfGoalHint()">${goalOpts}</select>
+        <input type="text" id="wfdGoalVal" class="inp" style="margin-top:6px" list="wfdEventList" value="${esc(d.goal_value || '')}" placeholder="Тег или событие">
+        <div class="hint" style="margin-top:4px">Когда цель достигнута, человек выходит из сценария: оплатившему не придёт напоминание об оплате.</div>
+        <button class="btn btn-s" style="width:100%;margin-top:6px" onclick="saveWorkflowGoal(${wfId})">💾 Сохранить цель</button>
+      </div>`;
+    html += _wfStatsSummary(d.stats);
 
     if (!steps.length) {
       html += empty('📝', 'Нет шагов', 'Нажмите + Шаг для добавления');
     } else {
       html += '<div class="funnel-flow">';
       steps.forEach((s, i) => {
-        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳' };
-        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)', ask: 'var(--blue)', invoice: 'var(--green)' };
-        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК', ask: 'ВОПРОС', invoice: 'СЧЁТ' };
+        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲' };
+        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)', ask: 'var(--blue)', invoice: 'var(--green)', split: 'var(--purple)' };
+        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК', ask: 'ВОПРОС', invoice: 'СЧЁТ', split: 'A/B-ДЕЛЕНИЕ' };
         // Шаг без type ронял ВЕСЬ экран: undefined.toUpperCase() — TypeError,
         // он уходил в общий catch, и вместо сценария показывалась ошибка. Такие
         // шаги писал POST /workflow/create, требовавший ключ action вместо type.
@@ -30054,7 +30261,7 @@ async function openWorkflowDetail(wfId, wfName) {
         const actName = (d.actions || {})[s.action] || s.action;
         let body = s.text || (s.condition ? condName + (s.condition_value ? ': ' + s.condition_value : '') : '')
           || s.url || (s.action ? actName + (s.value ? ': ' + s.value : '') + (s.goto ? ' → шаг ' + s.goto : '') : '')
-          || (stype === 'delay' ? 'Пауза перед следующим шагом' : 'Нечего показать: шаг сохранён без параметров');
+          || (stype === 'delay' ? 'Пауза перед следующим шагом' : (stype === 'split' ? 'Случайное деление людей по веткам' : 'Нечего показать: шаг сохранён без параметров'));
         // Детали, без которых шаг не понять: куда ведут кнопки, куда пишется ответ.
         const extra = [];
         (s.buttons || []).forEach(b => extra.push('🔘 ' + b.text + (b.url ? ' (ссылка)' : (b.goto ? ' → шаг ' + b.goto : ' → дальше'))));
@@ -30062,6 +30269,25 @@ async function openWorkflowDetail(wfId, wfName) {
         if (stype === 'invoice') extra.push((s.currency === 'XTR' ? '⭐ ' + s.amount + ' звёзд' : (s.amount / 100) + ' ' + s.currency) + ' · ' + (s.title || ''));
         if (s.else_goto) extra.push('иначе → шаг ' + s.else_goto);
         if (s.timeout_goto) extra.push('нет ответа → шаг ' + s.timeout_goto);
+        if (stype === 'delay' && s.until_time) extra.push('до ' + s.until_time + ' по времени человека' + (s.weekdays_only ? ', только будни' : ''));
+        (s.branches || []).forEach(b => extra.push('🎲 ' + b.label + ' · ' + b.weight + '% → шаг ' + b.goto));
+        const st = ((d.stats || {}).steps || {})[String(i)];
+        if (st) {
+          const labels = (d.stats || {}).outcome_labels || {};
+          const parts = Object.entries(st.outcomes || {}).map(([k, n]) => {
+            if (k.startsWith('button:')) { const b = (s.buttons || [])[parseInt(k.slice(7), 10)]; return '«' + (b ? b.text : k) + '» ' + n; }
+            if (k.startsWith('branch:')) { const b = (s.branches || [])[parseInt(k.slice(7), 10)]; return (b ? b.label : k) + ' ' + n; }
+            return (labels[k] || k) + ' ' + n;
+          });
+          extra.push('👥 дошли ' + (st.reached || 0) + (parts.length ? ' · ' + parts.join(' · ') : ''));
+        }
+        const sp = ((d.stats || {}).splits || {})[String(i)];
+        if (sp && sp.result) {
+          const r = sp.result;
+          const name = idx => ((s.branches || [])[idx] || {}).label || String.fromCharCode(65 + idx);
+          extra.push(r.confident ? '🏆 Ветка ' + name(r.winner) + ' надёжно лучше'
+            : (r.leader !== null && r.leader !== undefined ? '📈 Пока впереди ' + name(r.leader) + ', данных мало для вывода' : ''));
+        }
         const isLast = i === steps.length - 1;
         html += `<div class="ffstep">
           <div class="ffstep-line">
@@ -30069,7 +30295,7 @@ async function openWorkflowDetail(wfId, wfName) {
             ${!isLast ? '<div class="ffstep-tail"></div>' : ''}
           </div>
           <div class="ffstep-body" style="border-left:3px solid ${color}">
-            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : ''}</span><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span></div>
+            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : (s.until_time ? '· до ' + esc(s.until_time) : '')}</span>${legacy ? '' : `<span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span>`}</div>
             <div class="ffstep-text">${esc(body)}</div>
             ${extra.length ? '<div class="hint" style="margin-top:4px">' + extra.map(esc).join('<br>') + '</div>' : ''}
           </div>
@@ -30093,20 +30319,91 @@ async function openWorkflowDetail(wfId, wfName) {
       html += '<div class="lst">' + d.runs.slice(0, 5).map(r => {
         const st = (r.status || '').toLowerCase();
         const sc = runColors[st] || 'var(--hint)';
-        return `<div class="li">
-          <div class="ava" style="background:${sc}15;color:${sc}">▶️</div>
+        return `<div class="li" role="button" tabindex="0" onclick="openWorkflowRunLog(${r.id})">
+          <div class="ava" style="background:${sc}15;color:${sc}">${r.goal_reached_at ? '🎯' : '▶️'}</div>
           <div class="li-body">
             <div class="li-name">${runNames[st] || esc(st || 'неизвестно')}</div>
-            <div class="li-sub">Шаг ${Math.min((r.current_step || 0) + 1, r.total_steps || 0)}/${r.total_steps || 0} · ${ago(r.started_at)}${r.error_message ? ' · ' + esc(r.error_message) : ''}</div>
+            <div class="li-sub">Шаг ${Math.min((r.current_step || 0) + 1, r.total_steps || 0)}/${r.total_steps || 0} · ${ago(r.started_at)}${r.source ? ' · из «' + esc(r.source) + '»' : ''}${r.error_message ? ' · ' + esc(r.error_message) : ''}</div>
           </div>
-          ${['running', 'waiting', 'pending'].includes(st) ? `<div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="cancelWorkflowRun(${r.id})">⏹ Стоп</button></div>` : ''}
+          ${['running', 'waiting', 'pending'].includes(st) ? `<div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="event.stopPropagation();cancelWorkflowRun(${r.id})">⏹ Стоп</button></div>` : ''}
         </div>`;
       }).join('') + '</div>';
     }
 
     txt('wfd-body', html);
     wfTriggerHint('wfd');
+    wfGoalHint();
   } catch(e) { txt('wfd-body', errHtml(errRu(e))); }
+}
+
+// Сумма оплаты для экрана: звёзды целыми, валюта — из копеек/центов.
+function _wfMoney(amount, currency) {
+  const a = Number(amount || 0);
+  return currency === 'XTR' ? '⭐ ' + num(a) : num(Math.round(a) / 100) + ' ' + esc(currency || '');
+}
+
+// Сводка сценария: сколько людей, сколько дошло до цели, выручка, источники.
+function _wfStatsSummary(stats) {
+  if (!stats || !stats.runs || !Number(stats.runs.total)) return '';
+  const r = stats.runs;
+  const total = Number(r.total || 0);
+  const conv = stats.conversion === 'goal' ? Number(r.goal || 0) : Number(r.completed || 0);
+  const rate = total ? Math.round(conv * 1000 / total) / 10 : 0;
+  const rev = (stats.revenue || []).map(x => _wfMoney(x.amount, x.currency) + ' (' + x.payments + ')').join(' · ');
+  let html = `<div class="sec">📈 Результат</div>
+    <div class="hint" style="margin:0 16px 4px">Людей: ${num(total)} · сейчас в сценарии: ${num(r.active || 0)} · ${stats.conversion === 'goal' ? 'дошли до цели' : 'прошли до конца'}: ${num(conv)} (${String(rate).replace('.', ',')}%)${Number(r.dropped || 0) ? ' · отвалились: ' + num(r.dropped) : ''}</div>`;
+  if (rev) html += `<div class="hint" style="margin:0 16px 4px">💰 Выручка: ${rev}</div>`;
+  const src = (stats.sources || []).filter(x => x.source);
+  if (src.length) {
+    html += `<div class="hint" style="margin:0 16px 8px">🔗 Источники (параметр ссылки): ` +
+      src.map(x => '«' + esc(x.source) + '» ' + x.runs + ' чел.' + (x.paid ? ', оплатили ' + x.paid : '') + (x.goals ? ', цель ' + x.goals : '')).join(' · ') + '</div>';
+  }
+  return html;
+}
+
+function wfGoalHint() {
+  const g = document.getElementById('wfdGoal');
+  const v = document.getElementById('wfdGoalVal');
+  if (!g || !v) return;
+  v.style.display = (g.value === 'tag_added' || g.value === 'event') ? 'block' : 'none';
+  v.placeholder = g.value === 'tag_added' ? 'Имя тега' : 'Выберите событие из подсказок к полю';
+}
+
+async function saveWorkflowGoal(wfId) {
+  const goal_type = document.getElementById('wfdGoal').value;
+  const goal_value = document.getElementById('wfdGoalVal').value.trim();
+  try {
+    await api(`/api/miniapp/workflows/${wfId}`, { method: 'PATCH', body: JSON.stringify({ goal_type, goal_value }) });
+    toast('✅ Цель сохранена');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+}
+
+async function openWorkflowRunLog(runId) {
+  document.getElementById('mo-wf-runlog').classList.add('show');
+  txt('wfRunLogBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/workflow/run/${runId}/log`);
+    const labels = d.outcome_labels || {};
+    const who = d.username ? '@' + d.username : (d.first_name || (d.chat_id ? 'id ' + d.chat_id : 'без получателя'));
+    let html = `<div class="hint" style="margin-bottom:8px">👤 ${esc(who)}${d.source ? ' · пришёл из «' + esc(d.source) + '»' : ''} · начат ${ago(d.started_at)}${d.goal_reached_at ? ' · 🎯 цель достигнута' : ''}</div>`;
+    const rows = d.steps_log || [];
+    if (!rows.length) {
+      html += empty('🧾', 'Журнал пуст', 'Шаги этого прогона ещё не выполнялись');
+    } else {
+      html += '<div class="lst">' + rows.map(x => {
+        let what = labels[x.outcome] || x.outcome;
+        if (x.outcome.startsWith('button:')) what = 'нажал кнопку';
+        if (x.outcome.startsWith('branch:')) what = 'попал в ветку';
+        const money = x.amount ? ' · ' + _wfMoney(x.amount, x.currency) : '';
+        return `<div class="li"><div class="li-body">
+          <div class="li-name">Шаг ${x.step_idx + 1} · ${esc(what)}${money}</div>
+          <div class="li-sub">${x.detail ? esc(x.detail) + ' · ' : ''}${ago(x.created_at)}</div>
+        </div></div>`;
+      }).join('') + '</div>';
+    }
+    txt('wfRunLogBody', html);
+  } catch(e) { txt('wfRunLogBody', errHtml(errRu(e))); }
 }
 
 function _wfReopen() {
@@ -30173,7 +30470,8 @@ async function deleteWorkflow(wfId, _el) {
 function openWfAddStepModal() {
   if (!_currentWfId) return;
   ['wfStepMsg', 'wfStepDelay', 'wfStepConditionVal', 'wfStepButtons', 'wfStepSaveAs',
-   'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl']
+   'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl',
+   'wfStepUntil', 'wfStepBranches']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('wfStepErr').style.display = 'none';
   document.getElementById('mo-wf-step').classList.add('show');
@@ -30192,7 +30490,20 @@ document.getElementById('wfStepType')?.addEventListener('change', function() {
   show('wfStepActionField', v === 'action');
   show('wfStepInvoiceField', v === 'invoice');
   show('wfStepWebhookField', v === 'webhook');
+  show('wfStepSplitField', v === 'split');
 });
+
+// «A 50 -> 3» — ветка A-деления: название, доля, шаг перехода.
+function _wfParseBranches(raw) {
+  return (raw || '').split('\n').map(l => l.trim()).filter(Boolean).map((l, i) => {
+    const g = l.split('->');
+    const head = g[0].trim().split(/\s+/);
+    const weight = parseInt(head[head.length - 1], 10);
+    const label = isNaN(weight) ? head.join(' ') : head.slice(0, -1).join(' ');
+    return { label: label || String.fromCharCode(65 + i), weight: isNaN(weight) ? 50 : weight,
+             goto: g.length > 1 ? (parseInt(g[1], 10) || undefined) : undefined };
+  });
+}
 
 // «Текст -> 3», «Текст | https://…», «Текст» — в кнопки шага.
 function _wfParseButtons(raw) {
@@ -30224,9 +30535,19 @@ async function submitWfAddStep() {
     if (!val('wfStepSaveAs')) return fail('Укажите поле, куда сохранить ответ');
     Object.assign(payload, { text, save_as: val('wfStepSaveAs'), validate: val('wfStepValidate') });
   } else if (type === 'delay') {
-    const m = parseInt(val('wfStepDelay'), 10);
-    if (!m) return fail('Укажите задержку');
-    payload.delay_minutes = m;
+    const until = val('wfStepUntil');
+    if (until) {
+      payload.until_time = until;
+      payload.weekdays_only = document.getElementById('wfStepWeekdays').checked;
+    } else {
+      const m = parseInt(val('wfStepDelay'), 10);
+      if (!m) return fail('Укажите задержку в минутах или время');
+      payload.delay_minutes = m;
+    }
+  } else if (type === 'split') {
+    const branches = _wfParseBranches(val('wfStepBranches'));
+    if (branches.length < 2) return fail('Нужно хотя бы две ветки');
+    payload.branches = branches;
   } else if (type === 'condition') {
     Object.assign(payload, { condition: val('wfStepCondition'), condition_value: val('wfStepConditionVal') });
     const eg = parseInt(val('wfStepElseGoto'), 10);
@@ -30488,6 +30809,7 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/money_funnel.js"></script>
+<script src="screens/cohorts.js"></script>
 <script src="screens/deals_board.js"></script>
 </body>
 </html>

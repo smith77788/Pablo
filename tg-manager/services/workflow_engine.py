@@ -95,7 +95,7 @@ WORKFLOW_TEMPLATES: dict[str, dict] = {
 # Типы шагов, которые экран умеет показать. Шаг неизвестного типа в шаблоне
 # означал бы строку «⚫ undefined» в деталях сценария.
 WORKFLOW_STEP_TYPES = frozenset({"message", "delay", "condition", "action", "webhook",
-                                 "ask", "invoice"})
+                                 "ask", "invoice", "split"})
 
 # Действия шага `action` — ровно те, что исполнитель (services/workflow_runtime.py)
 # умеет выполнить. Раньше имя действия было произвольным текстом: шаг
@@ -107,12 +107,23 @@ WORKFLOW_ACTIONS: dict[str, str] = {
     "remove_tag": "Снять тег",
     "set_field": "Записать поле (поле=значение)",
     "create_deal": "Создать сделку в CRM",
+    "move_deal": "Сменить этап сделки прогона",
     "notify_owner": "Уведомить меня",
     "goto": "Перейти к шагу",
     "stop": "Завершить сценарий",
 }
+# Этапы сделки — ровно те, что пускает ограничение crm_deals_stage_check
+# (services/mini_app_api.py). Раньше действие «Создать сделку» писало этап
+# 'new', которого ограничение не пускает: сделка не создавалась вовсе, а
+# ошибка тонула в журнале исполнителя.
+DEAL_STAGES: dict[str, str] = {
+    "lead": "лид", "contact": "контакт", "proposal": "предложение",
+    "negotiation": "переговоры", "won": "выиграна", "lost": "проиграна",
+}
+
 # Действия, которым значение обязательно.
-_ACTIONS_NEED_VALUE = frozenset({"add_tag", "remove_tag", "set_field", "goto"})
+_ACTIONS_NEED_VALUE = frozenset({"add_tag", "remove_tag", "set_field", "goto",
+                                 "move_deal"})
 
 # Условия шага `condition` — те, что исполнитель умеет проверить.
 WORKFLOW_CONDITIONS: dict[str, str] = {
@@ -341,6 +352,20 @@ async def set_trigger(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     return not (isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0")
 
 
+async def set_goal(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                   goal_type: str | None, goal_value: str | None) -> bool:
+    """Записать цель сценария. False — сценарий не найден у владельца.
+
+    Цель действует и на уже идущие прогоны: она читается из определения в
+    момент события, а не из снимка шагов."""
+    res = await pool.execute(
+        """UPDATE workflow_definitions
+              SET goal_type=$3, goal_value=$4, updated_at=NOW()
+            WHERE id=$1 AND owner_id=$2""",
+        workflow_id, owner_id, goal_type, goal_value)
+    return not (isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0")
+
+
 async def get_workflow_status(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -566,15 +591,53 @@ def validate_step(step, index: int = 0) -> dict:
             out["buttons"] = buttons
 
     elif stype == "delay":
-        try:
-            minutes = int(step.get("delay_minutes"))
-        except (TypeError, ValueError):
-            raise ValueError(f"{where}: задержка в минутах не указана")
-        if not 1 <= minutes <= MAX_STEP_DELAY_MIN:
-            raise ValueError(
-                f"{where}: задержка от 1 до {MAX_STEP_DELAY_MIN} минут "
-                f"({MAX_STEP_DELAY_MIN // 1440} суток)")
-        out["delay_minutes"] = minutes
+        until = str(step.get("until_time") or "").strip()
+        if until:
+            # Умная задержка: до ближайшего «ЧЧ:ММ» по времени человека,
+            # по желанию только в будни.
+            if not _HHMM_RE.match(until):
+                raise ValueError(f"{where}: время задержки — в виде ЧЧ:ММ, например 10:00")
+            out["until_time"] = until.zfill(5)
+            out["weekdays_only"] = bool(step.get("weekdays_only"))
+            tz = str(step.get("tz") or "").strip()
+            if tz:
+                try:
+                    from zoneinfo import ZoneInfo
+                    ZoneInfo(tz)
+                except Exception:
+                    raise ValueError(f"{where}: неизвестный часовой пояс «{tz}»")
+                out["tz"] = tz
+        else:
+            try:
+                minutes = int(step.get("delay_minutes"))
+            except (TypeError, ValueError):
+                raise ValueError(f"{where}: задержка в минутах не указана")
+            if not 1 <= minutes <= MAX_STEP_DELAY_MIN:
+                raise ValueError(
+                    f"{where}: задержка от 1 до {MAX_STEP_DELAY_MIN} минут "
+                    f"({MAX_STEP_DELAY_MIN // 1440} суток)")
+            out["delay_minutes"] = minutes
+
+    elif stype == "split":
+        raw = step.get("branches")
+        if not isinstance(raw, list) or not 2 <= len(raw) <= 4:
+            raise ValueError(f"{where}: A/B-деление — от 2 до 4 веток")
+        branches = []
+        for i, b in enumerate(raw):
+            if not isinstance(b, dict):
+                raise ValueError(f"{where}: ветка {i + 1} описана неверно")
+            try:
+                weight = int(b.get("weight") or 0)
+            except (TypeError, ValueError):
+                raise ValueError(f"{where}: доля ветки {i + 1} — целое число")
+            if not 1 <= weight <= 100:
+                raise ValueError(f"{where}: доля ветки {i + 1} от 1 до 100")
+            goto = _goto(b, "goto", where)
+            if goto is None:
+                raise ValueError(f"{where}: у ветки {i + 1} нет шага перехода")
+            label = str(b.get("label") or chr(ord("A") + i)).strip()[:20]
+            branches.append({"label": label, "weight": weight, "goto": goto})
+        out["branches"] = branches
 
     elif stype == "condition":
         cond = str(step.get("condition") or "").strip().lower()
@@ -669,6 +732,13 @@ def validate_step(step, index: int = 0) -> dict:
                              "нужно значение")
         if name == "goto":
             out["goto"] = _goto({"goto": value}, "goto", where)
+        elif name == "move_deal":
+            stage = value.lower()
+            stage = {v: k for k, v in DEAL_STAGES.items()}.get(stage, stage)
+            if stage not in DEAL_STAGES:
+                raise ValueError(f"{where}: этап сделки — один из "
+                                 + ", ".join(f"{k} ({v})" for k, v in DEAL_STAGES.items()))
+            out["value"] = stage
         elif name == "set_field":
             fname, sep, fval = value.partition("=")
             if not sep:
@@ -678,6 +748,9 @@ def validate_step(step, index: int = 0) -> dict:
             out["value"] = value[:200]
 
     return out
+
+
+_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
 def validate_steps(steps, already: int = 0) -> list[dict]:
@@ -720,9 +793,138 @@ async def recent_runs(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     """
     rows = await pool.fetch(
         """SELECT id, status, current_step, total_steps, started_at, finished_at,
-                  error_message
+                  error_message, chat_id, source, goal_reached_at
              FROM workflow_runs
             WHERE workflow_id = $1 AND owner_id = $2
             ORDER BY id DESC LIMIT $3""",
         workflow_id, owner_id, max(1, min(int(limit or 5), 20)))
     return [dict(r) for r in rows]
+
+
+# Подписи исходов шага для журнала и статистики экрана.
+STEP_OUTCOMES: dict[str, str] = {
+    "sent": "отправлено", "send_failed": "не доставлено", "delay": "пауза",
+    "yes": "условие да", "no": "условие нет", "answered": "ответил",
+    "paid": "оплатил", "timeout": "не ответил в срок", "done": "выполнено",
+    "error": "ошибка", "goal": "цель достигнута", "completed": "завершён",
+    "failed": "сбой", "expired": "истёк срок", "stopped": "остановлен",
+    "cancelled": "отменён",
+}
+
+
+async def run_log(pool: asyncpg.Pool, owner_id: int, run_id: int) -> Optional[dict]:
+    """Журнал одного прогона: что сценарий сделал с человеком, по шагам.
+
+    None — прогона нет у владельца. Чужой прогон не отличим от
+    несуществующего."""
+    run = await pool.fetchrow(
+        """SELECT r.id, r.workflow_id, r.status, r.chat_id, r.bot_id, r.source,
+                  r.started_at, r.finished_at, r.goal_reached_at, r.error_message,
+                  u.username, u.first_name
+             FROM workflow_runs r
+             LEFT JOIN bot_users u ON u.bot_id = r.bot_id AND u.user_id = r.chat_id
+            WHERE r.id=$1 AND r.owner_id=$2""", run_id, owner_id)
+    if not run:
+        return None
+    rows = await pool.fetch(
+        """SELECT step_idx, step_type, outcome, detail, amount, currency, created_at
+             FROM workflow_step_log
+            WHERE run_id=$1 AND owner_id=$2
+            ORDER BY id LIMIT 300""", run_id, owner_id)
+    out = dict(run)
+    out["steps_log"] = [
+        {"step_idx": r["step_idx"], "step_type": r["step_type"],
+         "outcome": r["outcome"], "detail": r["detail"],
+         "amount": r["amount"], "currency": r["currency"],
+         "created_at": r["created_at"]}
+        for r in rows]
+    return out
+
+
+def _conversion_key(goal_type: str | None) -> str:
+    return "goal" if goal_type else "completed"
+
+
+async def workflow_stats(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                         goal_type: str | None = None) -> dict:
+    """Цифры сценария для экрана: прогоны, люди на каждом шаге, исходы,
+    выручка, источники и A/B-ветки с лидером.
+
+    Строится по журналу шагов (workflow_step_log): «на шаге» — число
+    РАЗНЫХ прогонов, дошедших до него, а не число строк (переход назад
+    исполняет шаг повторно).
+    """
+    from services import ab_engine
+    runs = await pool.fetchrow(
+        """SELECT count(*) AS total,
+                  count(*) FILTER (WHERE status IN ('running','waiting')) AS active,
+                  count(*) FILTER (WHERE status='completed') AS completed,
+                  count(*) FILTER (WHERE goal_reached_at IS NOT NULL) AS goal,
+                  count(*) FILTER (WHERE status IN ('failed','expired','stopped','cancelled')) AS dropped
+             FROM workflow_runs WHERE workflow_id=$1 AND owner_id=$2""",
+        workflow_id, owner_id)
+    step_rows = await pool.fetch(
+        """SELECT step_idx, outcome, count(DISTINCT run_id) AS n
+             FROM workflow_step_log
+            WHERE workflow_id=$1 AND owner_id=$2
+            GROUP BY step_idx, outcome""", workflow_id, owner_id)
+    steps: dict[int, dict] = {}
+    for r in step_rows:
+        st = steps.setdefault(int(r["step_idx"]), {"outcomes": {}})
+        st["outcomes"][r["outcome"]] = int(r["n"])
+    reached = await pool.fetch(
+        """SELECT step_idx, count(DISTINCT run_id) AS n FROM workflow_step_log
+            WHERE workflow_id=$1 AND owner_id=$2 GROUP BY step_idx""",
+        workflow_id, owner_id)
+    for r in reached:
+        steps.setdefault(int(r["step_idx"]), {"outcomes": {}})["reached"] = int(r["n"])
+    revenue = [dict(r) for r in await pool.fetch(
+        """SELECT currency, sum(amount) AS amount, count(*) AS payments
+             FROM workflow_step_log
+            WHERE workflow_id=$1 AND owner_id=$2 AND outcome='paid'
+              AND amount IS NOT NULL
+            GROUP BY currency ORDER BY 2 DESC""", workflow_id, owner_id)]
+    sources = [dict(r) for r in await pool.fetch(
+        """SELECT COALESCE(NULLIF(r.source, ''), '') AS source, count(*) AS runs,
+                  count(*) FILTER (WHERE r.goal_reached_at IS NOT NULL) AS goals,
+                  count(DISTINCT l.run_id) AS paid
+             FROM workflow_runs r
+             LEFT JOIN workflow_step_log l ON l.run_id = r.id AND l.outcome='paid'
+            WHERE r.workflow_id=$1 AND r.owner_id=$2
+            GROUP BY 1 ORDER BY 2 DESC LIMIT 10""", workflow_id, owner_id)]
+    # A/B: для каждого шага-деления — сколько прогонов ушло в ветку и
+    # сколько из них дошло до цели (или до конца, если цели нет).
+    conv = _conversion_key(goal_type)
+    split_rows = await pool.fetch(
+        f"""SELECT l.step_idx, l.outcome, count(DISTINCT l.run_id) AS sent,
+                   count(DISTINCT l.run_id) FILTER (
+                       WHERE {'r.goal_reached_at IS NOT NULL' if conv == 'goal'
+                              else "r.status='completed'"}) AS converted
+              FROM workflow_step_log l
+              JOIN workflow_runs r ON r.id = l.run_id
+             WHERE l.workflow_id=$1 AND l.owner_id=$2 AND l.step_type='split'
+               AND l.outcome LIKE 'branch:%'
+             GROUP BY l.step_idx, l.outcome""", workflow_id, owner_id)
+    splits: dict[int, dict] = {}
+    for r in split_rows:
+        try:
+            variant = int(str(r["outcome"]).split(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        sp = splits.setdefault(int(r["step_idx"]), {"branches": []})
+        sp["branches"].append({"variant": variant, "sent": int(r["sent"]),
+                               "converted": int(r["converted"])})
+    for sp in splits.values():
+        sp["branches"].sort(key=lambda b: b["variant"])
+        sp["result"] = ab_engine.pick_winner(sp["branches"])
+        sp["result"]["rates"] = {str(k): round(v, 4)
+                                 for k, v in sp["result"].get("rates", {}).items()}
+    return {
+        "runs": dict(runs) if runs else {},
+        "steps": {str(k): v for k, v in sorted(steps.items())},
+        "revenue": revenue,
+        "sources": sources,
+        "splits": {str(k): v for k, v in sorted(splits.items())},
+        "conversion": conv,
+        "outcome_labels": STEP_OUTCOMES,
+    }

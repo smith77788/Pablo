@@ -7,6 +7,7 @@ import hashlib
 import json
 import json as _json  # модульный алиас: ряд эндпоинтов используют _json без локального import
 import logging
+import hmac
 import os
 import re  # модульный: часть хендлеров зовёт re.split/re.sub без локального import
 import time
@@ -1169,6 +1170,35 @@ def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dic
             }
         )
     return items
+
+
+def metrics_request_allowed(request: web.Request) -> bool:
+    """Можно ли отдать /metrics этому запросу.
+
+    Раньше эндпоинт был открыт всем с расчётом «закроют сетью». Но на Railway у
+    сервиса один публичный порт, и /metrics читался из интернета: темп
+    операций, флуды, смерти сессий, насыщение пула — карта нагрузки и
+    уязвимых мест платформы для любого.
+
+    Правило:
+      * задан METRICS_TOKEN — нужен заголовок ``Authorization: Bearer <токен>``
+        (Prometheus, Grafana Agent и VictoriaMetrics умеют его слать);
+      * не задан — только запросы мимо публичного прокси, то есть без
+        X-Forwarded-For: внутренняя сеть (Railway private network, docker
+        compose) и локальные проверки. Всё, что пришло через прокси, — отказ.
+    """
+    token = os.getenv("METRICS_TOKEN", "").strip()
+    if token:
+        got = request.headers.get("Authorization", "")
+        got = got[7:].strip() if got.startswith("Bearer ") else ""
+        return hmac.compare_digest(got.encode("utf-8"), token.encode("utf-8"))
+    return not request.headers.get("X-Forwarded-For")
+
+
+def is_audited_admin_request(method: str, path: str) -> bool:
+    """Пишется ли запрос в журнал админ-действий (изменяющий запрос к админке)."""
+    return (path.startswith("/api/miniapp/admin/")
+            and method.upper() in ("POST", "PUT", "PATCH", "DELETE"))
 
 
 def _get_uid(request: web.Request) -> int | None:
@@ -2375,6 +2405,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.middlewares.append(plan_gate_middleware)
     # Apply security middleware (rate limiting + security headers)
     app.middlewares.append(security_middleware())
+
+    # Журнал админ-действий мини-аппа: каждый изменяющий запрос к
+    # /api/miniapp/admin/* — кто, что, по какому пути и с каким итогом. До этого
+    # след оставляла только рассылка, а выдача тарифа, бан и разбан проходили
+    # бесследно. Тело запроса не пишется: в нём бывают тексты и ключи.
+    @web.middleware
+    async def admin_audit_middleware(request: web.Request, handler):
+        response = await handler(request)
+        if is_audited_admin_request(request.method, request.path):
+            uid = _get_uid(request)
+            if uid and _is_admin(uid):
+                from database.db import log_admin_action
+                target = request.match_info.get("user_id")
+                await log_admin_action(
+                    pool, uid, f"miniapp:{request.method} {request.path}",
+                    int(target) if target and target.isdigit() else None,
+                    {"status": getattr(response, "status", None)},
+                    source="miniapp")
+        return response
+
+    app.middlewares.append(admin_audit_middleware)
 
     async def _apply_inline_migrations(application: web.Application) -> None:
         await apply_inline_migrations(pool)
@@ -7863,6 +7914,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_crm.setup_routes(app, pool)
+    # ИИ в переписке оператора: черновик ответа и сводка (services/ai_inbox_assist).
+    from services import ai_inbox_assist
+    ai_inbox_assist.setup_routes(app, pool)
+    # Сегмент контактов из фразы (services/ai_segment).
+    from services import ai_segment
+    ai_segment.setup_routes(app, pool)
+    # Прогноз покупок: RFM-сегменты и вероятность покупки (services/ai_predict).
+    from services import ai_predict
+    ai_predict.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
     mini_app_mp.setup_routes(app, pool)
     mini_app_integrations.setup_routes(app, pool)
@@ -8165,6 +8225,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result = await _apply_next_action(pool, uid, action_id)
             if result.get("error"):
                 return _err(result["error"], 400)
+            try:
+                from services import next_actions as _na
+                await _na.record_feedback(pool, uid, action_id, "applied")
+            except Exception:  # учёт реакции не должен ломать применение
+                log.debug("next_actions feedback applied", exc_info=True)
             return _json_resp(result)
         except PermissionError as exc:
             # Нет подписки или предохранитель Ban Weather — честный отказ с
@@ -8173,6 +8238,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("next_actions_apply id=%s uid=%s", action_id, uid)
             return _err("Не удалось применить действие", 500)
+
+    async def next_actions_feedback(request: web.Request) -> web.Response:
+        """Реакция на подсказку Copilot: opened | snoozed. Копайлот поднимает
+        то, чем владелец пользуется, и прячет отложенное на всех устройствах."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        kind = str(body.get("kind") or "")
+        if kind not in ("opened", "snoozed"):
+            return _err("Неизвестная реакция на подсказку", 400)
+        try:
+            from services import next_actions as _na
+            ok = await _na.record_feedback(pool, uid, str(body.get("id") or ""), kind)
+            if not ok:
+                return _err("Не указана подсказка", 400)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("next_actions_feedback uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def op_chain_launch(request: web.Request) -> web.Response:
         """Запустить связку «итог операции → следующий модуль» в одно нажатие.
@@ -8521,6 +8611,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # (так 2026-09-04 лёг мини-апп целиком).
     app.router.add_get("/api/miniapp/next_actions", next_actions)
     app.router.add_post("/api/miniapp/next_actions/apply", next_actions_apply)
+    app.router.add_post("/api/miniapp/next_actions/feedback", next_actions_feedback)
     app.router.add_post("/api/miniapp/op_chain/launch", op_chain_launch)
     app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
     app.router.add_get("/api/miniapp/audience_analytics/segment", audience_segment_members)
@@ -9214,6 +9305,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.debug("miniapp_config: матрица тарифов недоступна", exc_info=True)
             plans = []
+        try:
+            from services import tiers as _tiers
+            tier_list = [{"key": t, "name": _tiers.name(t), "price": _tiers.price_usd(t),
+                          "accounts": _tiers.cap_label(t)} for t in _tiers.TIERS]
+        except Exception:
+            log.debug("miniapp_config: тарифы недоступны", exc_info=True)
+            tier_list = []
         return _json_resp({
             "bot_username": bot_username,
             "mini_app_url": mini_app_url,
@@ -9222,6 +9320,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "paid_price": paid_price,
             "period_discounts": period_discounts,
             "plans": plans,
+            "tiers": tier_list,
         })
 
     app.router.add_get("/api/miniapp/config", miniapp_config)
@@ -9236,6 +9335,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         сборщик его не прочитает.
         """
         from services import metrics as _m
+        if not metrics_request_allowed(request):
+            # 404, а не 401: снаружи эндпоинт не должен даже обозначать себя.
+            return web.Response(status=404, text="Not Found")
         return web.Response(text=_m.render(),
                             content_type="text/plain", charset="utf-8")
 

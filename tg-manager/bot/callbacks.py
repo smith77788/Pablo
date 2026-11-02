@@ -212,6 +212,8 @@ class SubCb(CallbackData, prefix="sub"):
     plan: Optional[str] = None
     months: int = 1
     currency: Optional[str] = None
+    # Тариф по объёму флота (services/tiers.py): start / pro / business.
+    tier: Optional[str] = None
 
 
 class AiCb(CallbackData, prefix="ai"):

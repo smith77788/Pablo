@@ -79,6 +79,7 @@ async def create_payment(
     wallet: str,
     reference: str,
     ttl_hours: int = TTL_HOURS,
+    tier: str | None = None,
 ) -> float:
     """Завести счёт в USDT с уникальной суммой. Возвращает сумму к оплате.
 
@@ -97,9 +98,9 @@ async def create_payment(
             await conn.execute(
                 """INSERT INTO payments (user_id, plan, period_months, currency,
                                          amount_crypto, amount_usd, wallet_address,
-                                         reference, expires_at)
+                                         reference, expires_at, tier)
                    VALUES ($1, $2, $3, 'USDT_TRC20', $4, $5, $6, $7,
-                           now() + make_interval(hours => $8::int))""",
+                           now() + make_interval(hours => $8::int), $9)""",
                 user_id,
                 plan,
                 period_months,
@@ -108,5 +109,6 @@ async def create_payment(
                 wallet,
                 reference,
                 ttl_hours,
+                tier,
             )
     return amount

@@ -37,12 +37,22 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
 
 
 async def _process_due_runs(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    from services import legacy_funnels
+    try:
+        if await legacy_funnels.tick(pool, "auto_funnel"):
+            # Автоворонки исполняет движок сценариев (services/legacy_funnels.py).
+            return
+    except Exception:
+        # Мост сорвался — старый путь берёт только НЕ переданные движку
+        # запуски (workflow_run_id IS NULL), так что двойной отправки нет.
+        log.exception("Auto-Funnel: мост к движку сценариев")
     runs = await pool.fetch(
         """
         SELECT r.*, f.bot_id AS f_bot_id
         FROM auto_funnel_runs r
         JOIN auto_funnels f ON f.id = r.funnel_id
         WHERE r.status = 'active'
+          AND r.workflow_run_id IS NULL
           AND r.next_send_at <= NOW()
         ORDER BY r.next_send_at
         LIMIT $1

@@ -95,10 +95,10 @@ def resource_limits(resource: str) -> dict[str, int]:
     return {plan: resource_limit(resource, plan) for plan in PLANS}
 
 
-# Операции гейтятся строго по тарифу (OP_REGISTRY[op]['min_plan'], enforced в
-# operation_bus.submit()): на free — недоступны, на paid — без ограничений.
-# Отдельной месячной квоты операций нет намеренно (доступ бинарный по плану) —
-# так конфиг не расходится с фактическим поведением.
+# Операции гейтятся по тарифу (OP_REGISTRY[op]['min_plan'], enforced в
+# operation_bus.submit()): на paid — без ограничений, на free — из месячной
+# квоты `QUOTA_FREE_OPS_MONTH` (services/free_quota.py, по умолчанию 10
+# операций в месяц, прогрев не покрывает).
 
 
 # ── feature → required plan ──────────────────────────────────────────────────

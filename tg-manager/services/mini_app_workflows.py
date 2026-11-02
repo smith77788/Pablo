@@ -72,6 +72,18 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError, TypeError):
             return None
 
+    async def _legacy_block(wid: int, uid: int):
+        """Сценарий-зеркало воронки: шаги, включение и удаление — в разделе
+        воронок (иначе следующий круг моста молча вернул бы правку назад).
+        Ответ-ошибка или None."""
+        row = await _safe_fetchrow(pool,
+            "SELECT legacy_kind FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
+            wid, uid)
+        if row and row.get("legacy_kind"):
+            from services import legacy_funnels as _lf
+            return _err(_lf.guard_message(row["legacy_kind"]), 409)
+        return None
+
     def _steps_of(row) -> list:
         """steps из jsonb-колонки: без кодека asyncpg отдаёт строку."""
         steps = row["steps"] if row is not None else None
@@ -95,6 +107,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 """SELECT wd.id, wd.name,
                           CASE WHEN COALESCE(wd.is_active,FALSE) THEN 'active' ELSE 'paused' END AS status,
                           COALESCE(jsonb_array_length(wd.steps), 0) AS step_count,
+                          wd.legacy_kind,
                           (SELECT MAX(r.started_at) FROM workflow_runs r
                            WHERE r.workflow_id = wd.id) AS last_run,
                           (SELECT r.status FROM workflow_runs r
@@ -111,6 +124,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 # бывает только active/paused из is_active — обе плитки
                 # показывали ноль при любых данных.
                 "run_status": r["run_status"],
+                # Зеркало воронки или автоворонки: шаги меняются в их разделе.
+                "legacy_kind": r.get("legacy_kind") or "",
             } for r in (rows or [])]
             return _json_resp({"workflows": workflows})
         except Exception:
@@ -236,6 +251,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "       COALESCE(wd.is_active,FALSE) AS is_active, "
             "       wd.trigger_type, wd.trigger_value, "
             "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
+            "       wd.goal_type, wd.goal_value, wd.legacy_kind, "
             "       b.username AS bot_username "
             "  FROM workflow_definitions wd "
             "  LEFT JOIN managed_bots b ON b.bot_id = wd.bot_id "
@@ -246,6 +262,7 @@ def setup_routes(app: web.Application, pool) -> None:
         from services import workflow_engine as _wf
         from services import workflow_runtime as _rt
         from services import automation_events as _bus
+        from services import legacy_funnels as _lf
         try:
             runs = await _wf.recent_runs(pool, uid, wid)
         except Exception:
@@ -253,6 +270,11 @@ def setup_routes(app: web.Application, pool) -> None:
             # равно показываем, иначе ошибка в одном блоке гасит весь экран.
             log.exception("workflow_detail runs uid=%s wf=%s", uid, wid)
             runs = []
+        try:
+            stats = await _wf.workflow_stats(pool, uid, wid, row.get("goal_type"))
+        except Exception:
+            log.exception("workflow_detail stats uid=%s wf=%s", uid, wid)
+            stats = None
         return _json_resp({"id": row["id"], "name": row["name"],
                            "description": row["description"] or "",
                            "active": bool(row["is_active"]),
@@ -261,7 +283,14 @@ def setup_routes(app: web.Application, pool) -> None:
                            "trigger_type": row.get("trigger_type") or "manual",
                            "trigger_value": row.get("trigger_value") or "",
                            "allow_reentry": bool(row.get("allow_reentry")),
+                           "goal_type": row.get("goal_type") or "",
+                           "goal_value": row.get("goal_value") or "",
+                           "legacy_kind": row.get("legacy_kind") or "",
+                           "legacy_note": (_lf.guard_message(row["legacy_kind"])
+                                           if row.get("legacy_kind") else ""),
                            "steps": _steps_of(row), "runs": runs,
+                           "stats": stats,
+                           "goals": _rt.GOAL_TYPES,
                            # Словари для экрана: что умеет исполнитель.
                            "triggers": _rt.TRIGGER_TYPES,
                            "events": _bus.EVENT_LABELS,
@@ -276,6 +305,9 @@ def setup_routes(app: web.Application, pool) -> None:
         wid = _wf_id(request)
         if wid is None:
             return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
         try:
             body = await request.json()
         except Exception:
@@ -309,6 +341,9 @@ def setup_routes(app: web.Application, pool) -> None:
         wid = _wf_id(request)
         if wid is None:
             return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
         from services import workflow_engine as _wf
         try:
             res = await (_wf.resume_workflow if active else _wf.pause_workflow)(
@@ -339,10 +374,30 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный запрос", 400)
         if not isinstance(body, dict):
             return _err("Неверный запрос", 400)
+        if "goal_type" in body:
+            wid = _wf_id(request)
+            if wid is None:
+                return _err("Неверный идентификатор", 400)
+            from services import workflow_engine as _wf
+            from services import workflow_runtime as _rt
+            try:
+                gtype, gval = _rt.validate_goal(body.get("goal_type"),
+                                                body.get("goal_value"))
+            except ValueError as e:
+                return _err(str(e), 400)
+            if not await _wf.set_goal(pool, uid, wid, gtype, gval):
+                return _err("Воркфлоу не найден", 404)
+            if "active" not in body and "trigger_type" not in body \
+                    and "allow_reentry" not in body:
+                return _json_resp({"ok": True, "goal_type": gtype or "",
+                                   "goal_value": gval or ""})
         if "trigger_type" in body or "allow_reentry" in body:
             wid = _wf_id(request)
             if wid is None:
                 return _err("Неверный идентификатор", 400)
+            blocked = await _legacy_block(wid, uid)
+            if blocked is not None:
+                return blocked
             from services import workflow_engine as _wf
             from services import workflow_runtime as _rt
             cur = await _safe_fetchrow(pool,
@@ -382,6 +437,9 @@ def setup_routes(app: web.Application, pool) -> None:
             idx = None
         if wid is None or idx is None or idx < 0:
             return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
         from services import workflow_engine as _wf
         left = await _wf.delete_step(pool, uid, wid, idx)
         if left is None:
@@ -403,6 +461,23 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Прогон не найден или уже завершён", 404)
         return _json_resp({"ok": True})
 
+    async def workflow_run_log(request: web.Request) -> web.Response:
+        """Журнал прогона: GET /workflow/run/{run_id}/log — что сценарий
+        сделал с этим человеком, по шагам."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            run_id = int(request.match_info["run_id"])
+        except (KeyError, ValueError, TypeError):
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        data = await _wf.run_log(pool, uid, run_id)
+        if data is None:
+            return _err("Прогон не найден", 404)
+        data["outcome_labels"] = _wf.STEP_OUTCOMES
+        return _json_resp(data)
+
     async def workflow_pause(request: web.Request) -> web.Response:
         return await _toggle(request, False)
 
@@ -422,6 +497,9 @@ def setup_routes(app: web.Application, pool) -> None:
         wid = _wf_id(request)
         if wid is None:
             return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
         from services import workflow_engine as _wf
         try:
             ok = await _wf.delete_workflow(pool, uid, wid)
@@ -510,6 +588,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)
     app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
+    app.router.add_get("/api/miniapp/workflow/run/{run_id}/log", workflow_run_log)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/execute", workflow_execute)
     app.router.add_get("/api/miniapp/workflow/{wf_id}/status", workflow_status)

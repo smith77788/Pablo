@@ -470,7 +470,9 @@ def setup_routes(app: web.Application, pool) -> None:
             days = int(request.rel_url.query.get("days") or 7)
         except ValueError:
             return _err("Период в днях — целое число", 400)
-        return _json_resp(await _aq.summary(pool, uid, days=days))
+        out = await _aq.summary(pool, uid, days=days)
+        out["funnel"] = await _aq.sales_funnel(pool, uid, days=days)
+        return _json_resp(out)
 
     async def ai_usage(request):
         uid = _get_uid(request)
@@ -483,7 +485,12 @@ def setup_routes(app: web.Application, pool) -> None:
         rows = await _gw.owner_usage(pool, uid, days=days)
         for r in rows:
             r["day"] = r["day"].isoformat()
-        return _json_resp({"days": rows})
+        # Дневной потолок по тарифу: сколько уже потрачено сегодня и сколько можно.
+        _, cust = await _gw.check_limit(uid, _gw.TASK_CUSTOMER, pool=pool)
+        _, other = await _gw.check_limit(uid, _gw.TASK_ASSISTANT, pool=pool)
+        return _json_resp({"days": rows, "plan": _gw.plan_label(cust.get("plan") or other.get("plan") or ""),
+                           "today": {"customer": {"used": cust.get("used"), "limit": cust.get("limit")},
+                                     "other": {"used": other.get("used"), "limit": other.get("limit")}}})
 
     app.router.add_get("/api/miniapp/sales/ai-journal", ai_journal)
     app.router.add_post("/api/miniapp/sales/ai-journal/{rid}/rate", ai_journal_rate)

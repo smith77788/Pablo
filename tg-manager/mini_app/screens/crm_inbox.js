@@ -38,6 +38,9 @@ function _ibWhen(ts) {
   try { return ago(ts); } catch (_) { return ''; }
 }
 
+// Вход из подсказки копайлота «N горячих ждут ответа» — сразу фильтр ждущих.
+function openInboxWaiting() { return openInbox(true); }
+
 async function openInbox(waiting) {
   if (waiting !== undefined) _ibWaiting = !!waiting;
   _ibScreen('s-inbox', '📥 Входящие', 'openInbox()');
@@ -114,6 +117,12 @@ async function openInboxThread(i) {
       out += '<div style="margin:0 16px 8px;font-size:11px;color:var(--hint)">Показаны последние сообщения — более ранние сюда не вошли.</div>';
     }
     const canRelay = (t.channels || []).some(function (c) { return c.source === 'relay'; });
+    // ИИ для оператора: черновик ответа и сводка — по кнопке, а не сами:
+    // каждый вызов тратит обращение к ИИ из дневного лимита тарифа.
+    out += '<div style="display:flex;gap:8px;padding:0 16px 8px">' +
+      '<button class="btn btn-s" style="flex:1;font-size:12px;padding:10px 6px" onclick="inboxAiDraft()">✍️ Черновик ответа</button>' +
+      '<button class="btn btn-s" style="flex:1;font-size:12px;padding:10px 6px" onclick="inboxAiSummary()">📝 Сводка разговора</button>' +
+      '</div><div id="ibAiOut" style="padding:0 16px"></div>';
     if (canRelay) {
       out += '<div style="padding:0 16px 8px">' +
         '<textarea id="ibReplyText" class="input-bc" rows="3" maxlength="4000" placeholder="Ответ через бота…" style="width:100%"></textarea>' +
@@ -136,6 +145,52 @@ async function openInboxThread(i) {
     body.innerHTML = out;
   } catch (e) {
     body.innerHTML = errHtml(errRu(e), 'openInboxThread(' + i + ')');
+  }
+}
+
+function _ibAiIntent(x) {
+  if (!x || !x.label) return '';
+  return '<div style="display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg2);margin-bottom:6px">' +
+    esc(x.label) + (x.by === 'rules' ? ' · по фразам' : '') + '</div>';
+}
+
+async function inboxAiDraft() {
+  const t = _ibPeer;
+  const box = document.getElementById('ibAiOut');
+  if (!t || !box) return;
+  box.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:6px 0">⏳ ИИ пишет черновик…</div>';
+  try {
+    const d = await api('/api/miniapp/inbox/' + t.peer_user_id + '/ai-draft', {method: 'POST'});
+    if (!d.draft) {
+      box.innerHTML = _ibAiIntent(d.intent) + '<div style="font-size:12px;color:var(--hint);padding:6px 0">' + esc(d.reason || 'Черновика нет') + '</div>';
+      return;
+    }
+    const ta = document.getElementById('ibReplyText');
+    if (ta) {
+      ta.value = d.draft;
+      box.innerHTML = _ibAiIntent(d.intent) + '<div style="font-size:12px;color:var(--hint);padding:6px 0">Черновик в поле ответа — проверьте и отправьте сами.</div>';
+    } else {
+      box.innerHTML = _ibAiIntent(d.intent) +
+        '<div style="font-size:13px;white-space:pre-wrap;background:var(--bg2);border-radius:10px;padding:8px 10px">' + esc(d.draft) + '</div>' +
+        '<div style="font-size:11px;color:var(--hint);padding:6px 0">Скопируйте и отправьте из Telegram.</div>';
+    }
+  } catch (e) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:6px 0">⚠️ ' + esc(errRu(e, 'Черновик не получился')) + '</div>';
+  }
+}
+
+async function inboxAiSummary() {
+  const t = _ibPeer;
+  const box = document.getElementById('ibAiOut');
+  if (!t || !box) return;
+  box.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:6px 0">⏳ ИИ сводит разговор…</div>';
+  try {
+    const d = await api('/api/miniapp/inbox/' + t.peer_user_id + '/ai-summary', {method: 'POST'});
+    box.innerHTML = _ibAiIntent(d.intent) + (d.summary
+      ? '<div style="font-size:13px;white-space:pre-wrap;background:var(--bg2);border-radius:10px;padding:8px 10px">' + esc(d.summary) + '</div>'
+      : '<div style="font-size:12px;color:var(--hint);padding:6px 0">' + esc(d.reason || 'Сводки нет') + '</div>');
+  } catch (e) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:6px 0">⚠️ ' + esc(errRu(e, 'Сводка не получилась')) + '</div>';
   }
 }
 
