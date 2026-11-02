@@ -4,7 +4,11 @@
   ботов-продавцов одним списком (services/unified_inbox.py) и ответ через
   релей бота;
 * `/api/miniapp/money_funnel*` — охват → подписка → ответ → покупка по
-  кампаниям, расход и стоимость лида (services/money_funnel.py).
+  кампаниям, расход и стоимость лида (services/money_funnel.py);
+* `/api/miniapp/cohorts` — когорты по месяцу/неделе прихода, удержание и LTV
+  по источникам (services/cohorts.py);
+* `/api/miniapp/money_settings` — основная валюта отчётов и ручные курсы
+  (services/owner_currency.py).
 
 Всё скоупится по владельцу из сессии: чужой peer_user_id даёт пустую ленту,
 а не чужую переписку, потому что каждая выборка фильтруется owner_id.
@@ -17,7 +21,9 @@ from aiohttp import web
 
 
 def setup_routes(app: web.Application, pool) -> None:
+    from services import cohorts as _co
     from services import money_funnel as _mf
+    from services import owner_currency as _oc
     from services import unified_inbox as _ui
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, bad_body_response, log,
@@ -167,9 +173,62 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("money_funnel_spend uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def cohorts_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        grain = request.query.get("grain") or "month"
+        try:
+            periods = int(request.query.get("periods") or 0) or None
+        except ValueError:
+            periods = None
+        try:
+            return _json_resp(await _co.report(pool, uid, grain=grain, periods=periods))
+        except Exception:
+            log.exception("cohorts uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def money_settings_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            conv, money = await _oc.load(pool, uid)
+            money["effective_rates"] = {
+                c: conv.rate(c) for c in (*_oc.MAIN_CURRENCIES, "XTR")
+                if c != conv.main and conv.rate(c) is not None}
+            return _json_resp(money)
+        except Exception:
+            log.exception("money_settings uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def money_settings_set(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception as exc:
+            bad = bad_body_response(request, exc)
+            return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос", 400)
+        try:
+            res = await _oc.set_settings(pool, uid, body.get("currency"),
+                                         body.get("manual_rates"))
+            return _json_resp({"ok": True, **res})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception:
+            log.exception("money_settings_set uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     app.router.add_get("/api/miniapp/inbox", inbox_list)
     app.router.add_get("/api/miniapp/inbox/{peer_user_id}", inbox_thread)
     app.router.add_post("/api/miniapp/inbox/{peer_user_id}/read", inbox_read)
     app.router.add_post("/api/miniapp/inbox/{peer_user_id}/reply", inbox_reply)
     app.router.add_get("/api/miniapp/money_funnel", money_funnel_get)
     app.router.add_post("/api/miniapp/money_funnel/spend", money_funnel_spend)
+    app.router.add_get("/api/miniapp/cohorts", cohorts_get)
+    app.router.add_get("/api/miniapp/money_settings", money_settings_get)
+    app.router.add_post("/api/miniapp/money_settings", money_settings_set)

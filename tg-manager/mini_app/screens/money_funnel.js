@@ -42,6 +42,13 @@ function _mfMoney(list) {
   }).join(' + ');
 }
 
+function _mfMain(v, list, money) {
+  // Итог в основной валюте владельца, когда пересчёт возможен; иначе — по
+  // валютам без сложения.
+  if (v == null || !list || list.length < 2) return _mfMoney(list);
+  return num(Math.round(v)) + ' ' + esc((money && money.symbol) || '');
+}
+
 function _mfPct(v) {
   return v == null ? '—' : (Math.round(v * 1000) / 10) + '%';
 }
@@ -75,8 +82,8 @@ async function openMoneyFunnel(days) {
     }).join('');
     out += '</div>';
     out += '<div class="kpi" style="padding:0 16px">' +
-      '<div class="kpi-card"><div class="kpi-val">' + _mfMoney(d.revenue) + '</div><div class="kpi-lbl">Выручка</div></div>' +
-      '<div class="kpi-card"><div class="kpi-val">' + _mfMoney(d.spend) + '</div><div class="kpi-lbl">Расход</div></div>' +
+      '<div class="kpi-card"><div class="kpi-val">' + _mfMain(d.revenue_main, d.revenue, d.money) + '</div><div class="kpi-lbl">Выручка</div></div>' +
+      '<div class="kpi-card"><div class="kpi-val">' + _mfMain(d.spend_main, d.spend, d.money) + '</div><div class="kpi-lbl">Расход</div></div>' +
       '<div class="kpi-card"><div class="kpi-val">' + (d.cost_per_lead != null ? num(Math.round(d.cost_per_lead)) : '—') +
         '</div><div class="kpi-lbl">Цена лида</div></div></div>';
 
