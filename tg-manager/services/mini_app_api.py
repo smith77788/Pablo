@@ -8230,12 +8230,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = {}
         kind = str(body.get("kind") or "")
         if kind not in ("opened", "snoozed"):
-            return _err("kind — opened или snoozed", 400)
+            return _err("Неизвестная реакция на подсказку", 400)
         try:
             from services import next_actions as _na
             ok = await _na.record_feedback(pool, uid, str(body.get("id") or ""), kind)
             if not ok:
-                return _err("Нет id подсказки", 400)
+                return _err("Не указана подсказка", 400)
             return _json_resp({"ok": True})
         except Exception:
             log.exception("next_actions_feedback uid=%s", uid)
