@@ -149,6 +149,13 @@ class SubscriptionGateMiddleware(BaseMiddleware):
         if isinstance(event, Message) and event.successful_payment:
             return await handler(event, data)
 
+        # Права на свои данные (выгрузка и удаление, 152-ФЗ / GDPR) не зависят
+        # от подписки на каналы: требовать подписку ради удаления — отказ в
+        # праве, а не воронка.
+        if isinstance(event, Message) and (event.text or "").split(maxsplit=1)[:1] in (
+                ["/my_data"], ["/delete_my_data"]):
+            return await handler(event, data)
+
         user = event.from_user
         if not user:
             return await handler(event, data)

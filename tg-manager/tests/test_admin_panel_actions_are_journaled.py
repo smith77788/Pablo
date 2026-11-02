@@ -85,7 +85,8 @@ def test_only_mutating_admin_api_requests_are_journaled():
 def test_wiring_and_migration():
     main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     assert "_admin_audit.install(admin_users_handler.router, admin_handler.router)" in main
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    from tests.miniapp_source import api_source
+    api = api_source()
     assert "app.middlewares.append(admin_audit_middleware)" in api
     adm = open(os.path.join(ROOT, "bot", "handlers", "admin.py"), encoding="utf-8").read()
     assert '"admin_session_granted"' in adm and 'Command("admin_log")' in adm
