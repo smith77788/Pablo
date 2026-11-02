@@ -43,19 +43,27 @@ def test_bot_token_fallback_warns_once(vault, caplog):
     assert "TOKEN_ENCRYPTION_KEY" in warnings[0].getMessage()
 
 
-def test_default_key_is_an_error_not_a_warning(vault, caplog):
+def test_no_key_at_all_is_a_refusal_not_a_public_key(vault, caplog):
+    """Без обеих переменных ключа нет: отказ, а не ключ из исходников.
+
+    Раньше подставлялась строка из этого файла, и «зашифрованные» сессии
+    открывал любой, у кого есть дамп и репозиторий.
+    """
     tv = vault()
     with caplog.at_level(logging.WARNING):
-        tv._key()
+        with pytest.raises(tv.VaultKeyMissing):
+            tv._key()
+        with pytest.raises(tv.VaultKeyMissing):
+            tv.encrypt_token("1234567890:AAHsecret")
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]
-    assert len(errors) == 1
-    assert "НЕ ЗАШИФРОВАНЫ" in errors[0].getMessage()
+    assert len(errors) == 1, "ошибка должна быть одна за процесс"
+    assert "TOKEN_ENCRYPTION_KEY" in errors[0].getMessage()
+    assert not hasattr(tv, "_DEFAULT_KEY"), "ключ по умолчанию вернулся в исходники"
 
 
 def test_roundtrip_still_works_on_every_key_source(vault):
     for env in ({"TOKEN_ENCRYPTION_KEY": "k1"},
-                {"MANAGER_BOT_TOKEN": "1:t"},
-                {}):
+                {"MANAGER_BOT_TOKEN": "1:t"}):
         tv = vault(**env)
         enc = tv.encrypt_token("1234567890:AAHsecretsecretsecret")
         assert enc.startswith("ENC:")

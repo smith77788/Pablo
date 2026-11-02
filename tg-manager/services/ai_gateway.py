@@ -21,7 +21,9 @@ api.openai.com с зашитой gpt-4o-mini, а контент — через s
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -40,6 +42,76 @@ TASKS = (TASK_CUSTOMER, TASK_ASSISTANT, TASK_BACKGROUND)
 _PAID_PROVIDERS = ("openai",)
 
 _POOL: dict[str, Any] = {"pool": None}
+
+# Дневной потолок вызовов ИИ на владельца: тариф → (ответы клиентам,
+# помощник и фон). None — без потолка. Переопределяется JSON в AI_DAILY_LIMITS:
+# {"free": [200, 30], "pro": [null, 2000]}.
+_DEFAULT_LIMITS: dict[str, tuple[Optional[int], Optional[int]]] = {
+    "free": (200, 30),
+    "starter": (2000, 200),
+    "pro": (10000, 1000),
+    "paid": (None, None),
+    "enterprise": (None, None),
+}
+LIMIT_MESSAGE = "дневной лимит ИИ по тарифу исчерпан"
+_PLAN_LABELS = (("free", "Бесплатный"), ("starter", "Старт"), ("pro", "Про"),
+                ("paid", "Платный"), ("enterprise", "Корпоративный"))
+
+
+def plan_label(plan: str) -> str:
+    return dict(_PLAN_LABELS).get(plan or "", plan or "")
+
+
+def daily_limits() -> dict[str, tuple[Optional[int], Optional[int]]]:
+    out = dict(_DEFAULT_LIMITS)
+    raw = os.getenv("AI_DAILY_LIMITS", "").strip()
+    if not raw:
+        return out
+    try:
+        for plan, pair in json.loads(raw).items():
+            cust, other = (list(pair) + [None, None])[:2]
+            out[str(plan)] = (None if cust is None else int(cust),
+                              None if other is None else int(other))
+    except Exception as exc:  # noqa: BLE001 - кривой env не должен ронять ИИ
+        log.warning("ai_gateway: AI_DAILY_LIMITS не разобран (%s), беру значения по умолчанию", exc)
+    return out
+
+
+def _limit_group(task: str) -> tuple[str, ...]:
+    return (TASK_CUSTOMER,) if task == TASK_CUSTOMER else (TASK_ASSISTANT, TASK_BACKGROUND)
+
+
+async def _owner_plan(pool, owner_id: int) -> str:
+    try:
+        from bot.utils.subscription import get_plan
+        return str(await get_plan(pool, int(owner_id)) or "free")
+    except Exception as exc:  # noqa: BLE001 - тариф не прочитан — считаем бесплатным
+        log.warning("ai_gateway: тариф владельца %s не прочитан: %s", owner_id, exc)
+        return "free"
+
+
+async def check_limit(owner_id: Optional[int], task: str, *,
+                      pool=None) -> tuple[bool, dict]:
+    """Можно ли владельцу ещё раз позвать ИИ сегодня. Без пула или владельца —
+    можно (системные вызовы не лимитируются). Второе — {plan, used, limit}."""
+    pool = pool or _pool()
+    if pool is None or not owner_id:
+        return True, {}
+    plan = await _owner_plan(pool, owner_id)
+    cust, other = daily_limits().get(plan, _DEFAULT_LIMITS["free"])
+    limit = cust if task == TASK_CUSTOMER else other
+    if limit is None:
+        return True, {"plan": plan, "used": None, "limit": None}
+    try:
+        used = await pool.fetchval(
+            "SELECT COALESCE(SUM(calls), 0) FROM llm_owner_usage "
+            "WHERE day = CURRENT_DATE AND owner_id = $1 AND task = ANY($2::text[])",
+            int(owner_id), list(_limit_group(task)))
+    except Exception as exc:  # noqa: BLE001 - учёт недоступен — не режем ответ
+        log.warning("ai_gateway: расход владельца %s не прочитан: %s", owner_id, exc)
+        return True, {"plan": plan, "used": None, "limit": limit}
+    used = int(used or 0)
+    return used < limit, {"plan": plan, "used": used, "limit": limit}
 
 
 def attach(pool) -> None:
@@ -63,6 +135,7 @@ class AiReply:
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: int = 0
+    limited: bool = False
 
     @property
     def ok(self) -> bool:
@@ -115,10 +188,18 @@ def order_candidates(providers: list, task: str, *, prefer_provider: str = "",
     return out
 
 
+async def record_usage(owner_id: Optional[int], task: str, *, ok: bool,
+                       input_tokens: int = 0, output_tokens: int = 0) -> None:
+    """Учёт одного вызова для тех, кто ведёт переписку с моделью сам."""
+    r = AiReply(text="ок" if ok else None, input_tokens=int(input_tokens or 0),
+                output_tokens=int(output_tokens or 0))
+    await _record(owner_id, task, r)
+
+
 async def _record(owner_id: Optional[int], task: str, reply: AiReply) -> None:
     """Учёт вызова на владельца. Сбой записи не мешает ответу, но и не молчит."""
     pool = _pool()
-    if pool is None or not owner_id:
+    if pool is None or not owner_id or reply.limited:
         return
     try:
         await pool.execute(
@@ -219,6 +300,12 @@ async def chat(messages: list[dict], *, task: str = TASK_CUSTOMER,
         raise ValueError(f"неизвестная задача ИИ: {task}")
     started = time.monotonic()
     reply = AiReply()
+    allowed, info = await check_limit(owner_id, task)
+    if not allowed:
+        reply.limited = True
+        reply.errors.append(f"{LIMIT_MESSAGE}: тариф {info.get('plan')}, "
+                            f"{info.get('used')} из {info.get('limit')}")
+        return reply
     system = "\n\n".join(str(m.get("content") or "") for m in messages
                          if m.get("role") == "system")
     history = [m for m in messages if m.get("role") != "system"]
@@ -241,6 +328,21 @@ async def chat(messages: list[dict], *, task: str = TASK_CUSTOMER,
     reply.latency_ms = int((time.monotonic() - started) * 1000)
     await _record(owner_id, task, reply)
     return reply
+
+
+async def complete(prompt: str, *, system: str = "", task: str = TASK_BACKGROUND,
+                   owner_id: Optional[int] = None, max_tokens: int = 600,
+                   temperature: float = 0.7, timeout: float = 25.0) -> Optional[str]:
+    """Один промпт → текст или None. Для генераторов без диалога."""
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    r = await chat(messages, task=task, owner_id=owner_id, max_tokens=max_tokens,
+                   temperature=temperature, timeout=timeout)
+    if not r.ok:
+        log.warning("ai_gateway.complete: нет ответа (%s): %s", task, "; ".join(r.errors)[:300])
+    return r.text
 
 
 async def owner_usage(pool, owner_id: int, *, days: int = 30) -> list[dict]:

@@ -119,3 +119,34 @@ def test_a_healthy_import_is_untouched(_five_good_sessions, _working_vault):
     res = _import(_five_good_sessions, pool)
     assert res["imported"] == 5 and res["failed"] == 0
     assert len(pool.inserted) == 5
+
+
+# Дверь записи аккаунта (db.upsert_tg_account) пишет одной транзакцией под
+# блокировкой владельца и сверяет лимит флота тарифа (services/tiers.py).
+# Фейку — соединение-он-сам; лимит здесь не проверяется
+# (tests/test_subscription_tiers.py).
+from contextlib import asynccontextmanager as _acm  # noqa: E402
+
+
+@_acm
+async def _same_conn(self):
+    yield self
+
+
+@_acm
+async def _no_tx(self):
+    yield None
+
+
+_Pool.acquire = _same_conn
+_Pool.transaction = _no_tx
+
+
+@pytest.fixture(autouse=True)
+def _no_fleet_cap(monkeypatch):
+    from bot.utils import tariffs
+    from services import tiers
+
+    async def _unlimited(pool, owner_id):
+        return tariffs.UNLIMITED
+    monkeypatch.setattr(tiers, "owner_account_cap", _unlimited)
