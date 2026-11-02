@@ -2912,9 +2912,32 @@ def _notif_kb(row: asyncpg.Record) -> object:
         kb.button(
             text=f"{icon} {label}", callback_data=BmCb(action="notif_toggle", sub=field)
         )
+    q = _quiet_of(row)
+    if q:
+        from services.quiet_hours import window_label
+        kb.button(
+            text=("🌙 Тихие часы: " + window_label(q["start"], q["end"])) if q["on"]
+            else "🌙 Тихие часы: выкл",
+            callback_data=BmCb(action="notif_quiet", sub="toggle"),
+        )
+        if q["on"]:
+            for a, b in ((22, 8), (23, 8), (0, 9)):
+                mark = "• " if (a, b) == (q["start"], q["end"]) else ""
+                kb.button(text=f"{mark}{a:02d}–{b:02d}",
+                          callback_data=BmCb(action="notif_quiet", sub=f"{a}-{b}"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
-    kb.adjust(1)
+    n = len(_NOTIF_LABELS) + (1 if q else 0)
+    kb.adjust(*([1] * n), *([3] if q and q["on"] else []), 1)
     return kb.as_markup()
+
+
+def _quiet_of(row) -> dict | None:
+    """Тихие часы из строки настроек; None — колонок ещё нет (миграция v291)."""
+    try:
+        return {"on": bool(row["quiet_enabled"]), "start": int(row["quiet_start"]),
+                "end": int(row["quiet_end"])}
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _notif_text(row: asyncpg.Record) -> str:
@@ -2922,6 +2945,11 @@ def _notif_text(row: asyncpg.Record) -> str:
     for field, label in _NOTIF_LABELS.items():
         icon = "✅" if row[field] else "❌"
         lines.append(f"{icon} {label}")
+    q = _quiet_of(row)
+    if q and q["on"]:
+        from services.quiet_hours import window_label
+        lines.append(f"\n🌙 Тихие часы {window_label(q['start'], q['end'])}: несрочное "
+                     "придёт утром одной сводкой, ограничения и флуд — сразу.")
     lines.append("\n<i>Нажмите на пункт, чтобы включить / отключить уведомление.</i>")
     return "\n".join(lines)
 
@@ -2964,6 +2992,43 @@ async def cb_notif_toggle(
     if row is None:
         await callback.answer("Ошибка чтения настроек", show_alert=True)
         return
+    await _edit(callback, _notif_text(row), _notif_kb(row))
+
+
+@router.callback_query(BmCb.filter(F.action == "notif_quiet"))
+async def cb_notif_quiet(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """Тихие часы (services/quiet_hours.py): вкл/выкл и выбор окна."""
+    from services.quiet_hours import PRESETS
+
+    sub = callback_data.sub or ""
+    uid = callback.from_user.id
+    try:
+        if sub == "toggle":
+            await pool.execute(
+                "INSERT INTO notification_settings(user_id, quiet_enabled) VALUES($1, TRUE) "
+                "ON CONFLICT(user_id) DO UPDATE SET quiet_enabled = NOT "
+                "notification_settings.quiet_enabled, updated_at=now()", uid)
+        else:
+            try:
+                a, b = (int(x) for x in sub.split("-", 1))
+            except ValueError:
+                a = b = -1
+            if (a, b) not in PRESETS:
+                await safe_answer(callback, "Такого окна нет", show_alert=True)
+                return
+            await pool.execute(
+                "INSERT INTO notification_settings(user_id, quiet_enabled, quiet_start, quiet_end) "
+                "VALUES($1, TRUE, $2, $3) ON CONFLICT(user_id) DO UPDATE SET "
+                "quiet_enabled=TRUE, quiet_start=$2, quiet_end=$3, updated_at=now()", uid, a, b)
+        row = await pool.fetchrow("SELECT * FROM notification_settings WHERE user_id=$1", uid)
+    except Exception:
+        await safe_answer(callback, "❌ Не получилось сохранить тихие часы", show_alert=True)
+        return
+    await safe_answer(callback)
     await _edit(callback, _notif_text(row), _notif_kb(row))
 
 

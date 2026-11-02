@@ -6798,6 +6798,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             settings["notif_position"] = bool(_ns.get("position_change", True))
         except Exception as _e:
             log.debug("user_settings_get notif overlay uid=%d: %s", uid, _e)
+        # Тихие часы (services/quiet_hours.py) — тоже из notification_settings.
+        settings.update({"quiet_enabled": False, "quiet_start": 23, "quiet_end": 8, "tz": None})
+        try:
+            _q = await pool.fetchrow(
+                "SELECT quiet_enabled, quiet_start, quiet_end, tz "
+                "FROM notification_settings WHERE user_id=$1", uid)
+            if _q:
+                settings.update({"quiet_enabled": bool(_q["quiet_enabled"]),
+                                 "quiet_start": int(_q["quiet_start"]),
+                                 "quiet_end": int(_q["quiet_end"]), "tz": _q["tz"]})
+            settings["quiet_held"] = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM notification_held WHERE user_id=$1", uid) or 0)
+        except Exception as _e:
+            log.debug("user_settings_get quiet overlay uid=%d: %s", uid, _e)
         return _json_resp(settings)
 
     async def user_settings_save(request: web.Request) -> web.Response:
@@ -6853,6 +6867,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     )
             except Exception as _ne:
                 log.warning("settings→notification_settings sync failed uid=%d: %s", uid, _ne)
+            # Тихие часы — только если фронт их прислал (старый клиент не знает
+            # этих полей и не должен их сбрасывать). Часы вне 0..23 — 400.
+            if "quiet_enabled" in data:
+                from services import quiet_hours as _qh
+                try:
+                    _qs, _qe = int(data.get("quiet_start", 23)), int(data.get("quiet_end", 8))
+                except (TypeError, ValueError):
+                    return _err("Часы тишины — числа от 0 до 23", 400)
+                if not (0 <= _qs <= 23 and 0 <= _qe <= 23):
+                    return _err("Часы тишины — числа от 0 до 23", 400)
+                try:
+                    await _qh.save(pool, uid, bool(data.get("quiet_enabled")), _qs, _qe,
+                                   data.get("tz"))
+                except Exception as _qe_exc:
+                    log.warning("settings quiet hours save failed uid=%d: %s", uid, _qe_exc)
+                    return _err(_INTERNAL_ERROR, 500)
             return _json_resp({"ok": True})
         except Exception as e:
             _bad = bad_body_response(request, e)
