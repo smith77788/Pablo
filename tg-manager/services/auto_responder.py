@@ -1373,8 +1373,10 @@ async def _process_bot(
                     session_id = await db.get_or_create_relay_session(
                         pool, bot_id, chat_id, uname, fname
                     )
+                    from bot.handlers.deal_from_message import add_button_markup
                     sent = await main_bot.send_message(
-                        added_by, fwd_text, parse_mode="HTML"
+                        added_by, fwd_text, parse_mode="HTML",
+                        reply_markup=add_button_markup(bot_id, chat_id),
                     )
                     await db.save_relay_message(
                         pool,
@@ -1676,8 +1678,11 @@ async def _process_bot(
                         f"{text}\n\n"
                         f"<i>← Reply здесь чтобы ответить пользователю</i>"
                     )
+                    # «В сделку» у сообщения клиента (bot/handlers/deal_from_message.py).
+                    from bot.handlers.deal_from_message import add_button_markup
                     sent = await main_bot.send_message(
-                        operator_id, fwd_text, parse_mode="HTML"
+                        operator_id, fwd_text, parse_mode="HTML",
+                        reply_markup=add_button_markup(bot_id, chat_id),
                     )
                     await db.save_relay_message(
                         pool, session_id, "in", text,

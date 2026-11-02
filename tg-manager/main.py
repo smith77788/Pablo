@@ -587,6 +587,9 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     # Выгрузка и удаление своих данных (152-ФЗ / GDPR): команды, раньше relay.
     from bot.handlers import my_data as my_data_handler
     dp.include_router(my_data_handler.router)
+    # «В сделку» у пересланного сообщения клиента — кнопка, не reply.
+    from bot.handlers import deal_from_message as deal_msg_handler
+    dp.include_router(deal_msg_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     # Журнал действий админов: каждая кнопка и команда двух админ-роутеров
