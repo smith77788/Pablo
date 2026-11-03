@@ -260,6 +260,10 @@ EVENT_EXAMPLES: dict[str, dict] = {
                     "automation_event_id": 90222},
     "workflow.completed": {"workflow_id": 12, "run_id": 5501, "bot_id": 7012345678,
                            "chat_id": 555000111, "automation_event_id": 90223},
+    "workflow.failed": {"workflow_id": 12, "run_id": 5502, "step": 3,
+                        "reason": "Сообщение не отправлено 5 раз подряд (сеть)",
+                        "bot_id": 7012345678, "chat_id": 555000111,
+                        "automation_event_id": 90224},
     "webhook.test": {"message": "Проверка связи с Infragram", "endpoint_id": 3},
 }
 
