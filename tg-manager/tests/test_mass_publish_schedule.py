@@ -55,7 +55,11 @@ def test_operation_status_returns_scheduled_for():
     body = _fn("operation_status")
     assert "scheduled_for" in body
     # ISO-конвертация тоже покрывает scheduled_for
-    assert '("created_at", "finished_at", "scheduled_for")' in body
+    # Свойство, а не дословный кортеж: в списке ISO-конвертации есть
+    # scheduled_for (список растёт — добавилось started_at).
+    import re as _re
+    m = _re.search(r'for _k in \(([^)]*)\):\s*\n\s*if d\.get\(_k\) is not None and hasattr\(d\[_k\], "isoformat"\)', body)
+    assert m and '"scheduled_for"' in m.group(1), "scheduled_for не переводится в ISO"
 
 
 def test_ui_schedule_wired_with_utc_and_visibility():

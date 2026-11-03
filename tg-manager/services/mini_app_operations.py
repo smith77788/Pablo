@@ -172,7 +172,7 @@ def setup_routes(app: web.Application, pool) -> None:
             # попытка, рестарт воркера). Читая только первую, экран молчал о
             # том, что операция отложена Telegram на час.
             f"{op_status.sql_error_reason()} AS error_msg, "
-            "created_at, finished_at, scheduled_for, "
+            "created_at, started_at, finished_at, scheduled_for, "
             "COALESCE(result->>'summary', result->>'reason') AS summary, "
             f"result AS _result, params AS _params, {_err_cnt} "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
@@ -197,8 +197,27 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.debug("operation_status: быстрые действия недоступны op=%s", op_id)
             d["quick_actions"] = []
-        # ISO для фронта (детали операции: Создано/Завершено/Запланировано)
-        for _k in ("created_at", "finished_at", "scheduled_for"):
+        # С КАКИМИ настройками запускали: текст, цели, аккаунты, пауза.
+        # Карточка этого не показывала вовсе — params до экрана не доходили, и
+        # на вопрос «что я тогда запустил?» ответа не было.
+        try:
+            import json as _json_pv
+            from services import op_params_view as _pv
+            _p = _prm_raw if isinstance(_prm_raw, dict) else _json_pv.loads(_prm_raw or "{}")
+            d["params_view"] = _pv.describe(d.get("op_type"), _p)
+        except Exception:
+            d["params_view"] = []
+        # Длительность — от старта до конца (или до сейчас, пока идёт).
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            _st = d.get("started_at")
+            if _st is not None:
+                _end = d.get("finished_at") or _dt.now(_tz.utc)
+                d["duration_s"] = max(0, int((_end - _st).total_seconds()))
+        except Exception:
+            pass
+        # ISO для фронта (детали операции: Создано/Начато/Завершено/Запланировано)
+        for _k in ("created_at", "started_at", "finished_at", "scheduled_for"):
             if d.get(_k) is not None and hasattr(d[_k], "isoformat"):
                 d[_k] = d[_k].isoformat()
         # Влияние операции на аккаунты: какие аккаунты словили FloodWait за эту
@@ -871,6 +890,49 @@ def setup_routes(app: web.Application, pool) -> None:
                         if left else "")),
         })
 
+    async def operation_log_export(request: web.Request) -> web.Response:
+        """Журнал одной операции в CSV: все цели или только неудачные.
+
+        Ради журнала на него и смотрят: кого не пригласили, куда не ушёл пост,
+        и почему. Список из окошка на экране не скопировать и не передать
+        дальше — а по нему потом работают (повтор другим аккаунтом, чистка
+        мёртвых целей). `?status=error` — только неудачные.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор операции", 400)
+        owns = await _safe_fetchrow(pool,
+            "SELECT op_type, label FROM operation_queue WHERE id=$1 AND owner_id=$2",
+            op_id, uid)
+        if not owns:
+            return _err("Операция не найдена", 404)
+        only_errors = (request.query.get("status") or "").strip().lower() in (
+            "error", "failed", "fail")
+        cap = 50000
+        try:
+            rows = await pool.fetch(
+                "SELECT step_num, target, status, message, created_at "
+                "FROM operation_log WHERE op_id=$1"
+                + (" AND lower(status) IN ('error','failed','fail')" if only_errors else "")
+                + " ORDER BY step_num, id LIMIT $2", op_id, cap + 1)
+        except Exception:
+            log.exception("operation_log_export op=%s", op_id)
+            return _err(_INTERNAL_ERROR, 500)
+        st_ru = {"ok": "Успешно", "error": "Ошибка", "failed": "Ошибка", "fail": "Ошибка",
+                 "skip": "Пропущено", "skipped": "Пропущено"}
+        header = ["Шаг", "Цель", "Статус", "Причина / сообщение", "Время"]
+        data = [[r["step_num"], r["target"] or "", st_ru.get((r["status"] or "").lower(),
+                 r["status"] or ""), r["message"] or "", str(r["created_at"] or "")]
+                for r in rows[:cap]]
+        if len(rows) > cap:
+            data.append(["", "", "", f"Журнал длиннее {cap} строк — в файл вошли первые {cap}.", ""])
+        name = f"operation_{op_id}_{'errors' if only_errors else 'log'}.csv"
+        return _csv_resp(name, header, data)
+
     async def operation_export(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -900,8 +962,11 @@ def setup_routes(app: web.Application, pool) -> None:
                                    "total": total,
                                    "truncated": len(rows) >= cap})
             header = ["ID", "Тип", "Метка", "Статус", "Всего", "Сделано", "Ошибок", "Создано", "Завершено"]
+            # Тип и статус — словами, которые владелец видит на экране. Раньше
+            # в файл уходили внутренние имена («mass_invite», «partial»).
             data = [[
-                r["id"], r["op_type"], r["label"] or "", r["status"],
+                r["id"], _obus.OP_REGISTRY.get(r["op_type"], {}).get("description") or r["op_type"],
+                r["label"] or "", op_status.label(r["status"]),
                 r["total_items"] or 0, r["done_items"] or 0, r["err_cnt"] or 0,
                 str(r["created_at"] or ""), str(r["finished_at"] or ""),
             ] for r in rows]
@@ -913,6 +978,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/operations", operations)
     app.router.add_get("/api/miniapp/operation/{op_id}", operation_status)
     app.router.add_get("/api/miniapp/operation/{op_id}/log", operation_log)
+    app.router.add_get("/api/miniapp/operation/{op_id}/log.csv", operation_log_export)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/pause", pause_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/resume", resume_operation)

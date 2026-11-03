@@ -247,6 +247,7 @@ GET /api/miniapp/notary/{watch_id}
 GET /api/miniapp/onboarding
 GET /api/miniapp/operation/{op_id}
 GET /api/miniapp/operation/{op_id}/log
+GET /api/miniapp/operation/{op_id}/log.csv
 GET /api/miniapp/operations
 GET /api/miniapp/operations/export
 GET /api/miniapp/organism/digest
@@ -562,6 +563,7 @@ HEAD /api/miniapp/notary/{watch_id}
 HEAD /api/miniapp/onboarding
 HEAD /api/miniapp/operation/{op_id}
 HEAD /api/miniapp/operation/{op_id}/log
+HEAD /api/miniapp/operation/{op_id}/log.csv
 HEAD /api/miniapp/operations
 HEAD /api/miniapp/operations/export
 HEAD /api/miniapp/organism/digest

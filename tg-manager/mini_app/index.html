@@ -12956,6 +12956,8 @@ async function openOpDetail(opId) {
     // из-за чего завершённые/упавшие операции показывали «не найдена».
     const o = await api('/api/miniapp/operation/'+opId);
     if (!o || !o.id) { txt('opdetBody',empty('⚙️','Операция не найдена')); return; }
+    // Заголовок — что это за операция, а не только её номер.
+    txt('opdetTitle', (o.label || opRu(o.op_type) || 'Операция') + ' · #' + o.id);
     const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
     const dDone = o.total_items>0?Math.min(o.done_items||0,o.total_items):(o.done_items||0);
     const [bc,bl]=stb(o.status);
@@ -12979,13 +12981,23 @@ async function openOpDetail(opId) {
         <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val"><span data-op-cnt="${o.id}">${num(dDone)} / ${num(o.total_items||0)}</span> (<span data-op-pct="${o.id}">${pct}</span>%)</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru-RU'):''}</div></div></div>
         ${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?`<div class="row"><div class="row-body"><div class="row-name">⏰ Запланировано</div><div class="row-val" style="color:var(--orange)">${new Date(o.scheduled_for).toLocaleString('ru-RU')}</div></div></div>`:''}
+        ${o.started_at?`<div class="row"><div class="row-body"><div class="row-name">Начато</div><div class="row-val">${new Date(o.started_at).toLocaleString('ru-RU')}</div></div></div>`:''}
         ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru-RU')}</div></div></div>`:''}
+        ${(o.duration_s!=null)?`<div class="row"><div class="row-body"><div class="row-name">${o.finished_at?'Длительность':'Идёт уже'}</div><div class="row-val">${esc(_opDuration(o.duration_s))}${(o.duration_s>0&&dDone>0)?' · '+esc(_opSpeed(dDone,o.duration_s)):''}</div></div></div>`:''}
         ${(o.summary&&o.summary!==o.error_msg)?`<div class="row"><div class="row-body"><div class="row-name">Итог</div><div class="row-val" style="white-space:pre-line">${esc(o.summary)}</div></div></div>`:''}
         ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">${o.status==='failed'?'Причина ошибки':'Ошибка'}</div><div class="row-val" style="color:var(--red)">${esc(o.error_msg)}</div></div></div>`:''}
       </div>
     `;
     if (o.status==='running') {
       html += `<div style="padding:12px 16px"><div class="prog" style="margin-bottom:8px"><div class="prog-fill" data-op-bar="${o.id}" style="width:${pct}%"></div></div></div>`;
+    }
+    // С какими настройками запускали — текст, цели, аккаунты, пауза.
+    const _pv = Array.isArray(o.params_view) ? o.params_view : [];
+    if (_pv.length) {
+      html += `<div class="sec" style="margin-top:12px">🧾 Параметры запуска</div>
+        <div class="lst" style="margin:0 16px">` + _pv.map(p =>
+          `<div class="row"><div class="row-body"><div class="row-name">${esc(p.label)}</div>
+           <div class="row-val" style="white-space:pre-line">${esc(p.value)}</div></div></div>`).join('') + `</div>`;
     }
     // Кнопка «⏸ Приостановить» звала cancelOp — операция уходила в 'cancelled'
     // безвозвратно, хотя подпись обещала обратимое действие. Теперь пауза — это
@@ -13023,7 +13035,10 @@ async function openOpDetail(opId) {
     }
     // Быстрые действия по итогу — с объяснением, ПОЧЕМУ это предложено.
     // На экране деталей места хватает, поэтому показываем все, а не первые две.
-    const _qa = (o.quick_actions||[]).filter(a => typeof window[a.fn] === 'function');
+    // «Повторить» уже стоит кнопкой выше — второй раз в «Что сделать дальше» не нужен.
+    const _retryShown = opCanRetry(o);
+    const _qa = (o.quick_actions||[]).filter(a => typeof window[a.fn] === 'function'
+      && !(_retryShown && a.fn === 'retryOp'));
     if (_qa.length) {
       html += `<div class="sec" style="margin-top:12px">⚡ Что сделать дальше</div>
         <div class="lst" style="margin:0 16px">` + _qa.map(a=>{
@@ -13064,7 +13079,11 @@ async function openOpDetail(opId) {
       html += `<div class="sec" style="margin-top:12px" id="oplogSec"></div>
         <div style="padding:0 16px 8px"><input type="text" id="oplogSearch" class="inp" placeholder="🔍 Найти цель или причину" aria-label="Поиск по логу операции" autocomplete="off" value="${esc(OPLOG_Q)}" oninput="onOpLogSearch(this.value)"></div>
         <div id="oplogChips" class="lf-chips"></div>
-        <div class="lst" id="oplogList" style="margin:0 16px;max-height:300px;overflow-y:auto"></div>
+        <div style="padding:0 16px 8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-s" style="flex:1 1 auto" onclick="exportCSV('/api/miniapp/operation/${o.id}/log.csv')">⬇️ Журнал CSV</button>
+          ${(OPLOG_COUNTS.error||OPLOG_COUNTS.failed||OPLOG_COUNTS.fail)?`<button class="btn btn-s" style="flex:1 1 auto" onclick="exportCSV('/api/miniapp/operation/${o.id}/log.csv?status=error')">⬇️ Только ошибки</button>`:''}
+        </div>
+        <div class="lst" id="oplogList" style="margin:0 16px"></div>
         <div class="lst-more" id="oplogMore"></div>`;
     }
     if (logLoadError) {
@@ -13083,6 +13102,19 @@ async function openOpDetail(opId) {
 // называлась «Лог (500)», и это выдавалось за весь лог. Найти среди пятисот
 // строк неудачные цели было нечем — а ради них на лог и смотрят. Теперь видно
 // общее число, есть срез по статусу и догрузка остатка.
+function _opDuration(sec) {
+  sec = Math.max(0, Math.round(+sec||0));
+  const d = Math.floor(sec/86400), h = Math.floor(sec%86400/3600), m = Math.floor(sec%3600/60), s = sec%60;
+  if (d) return d+' д '+h+' ч';
+  if (h) return h+' ч '+m+' мин';
+  if (m) return m+' мин '+s+' с';
+  return s+' с';
+}
+function _opSpeed(done, sec) {
+  const perMin = done / Math.max(sec/60, 1/60);
+  return perMin >= 1 ? (Math.round(perMin*10)/10)+' в мин' : (Math.round(perMin*60*10)/10)+' в час';
+}
+
 const OPLOG_PAGE = 200;
 let OPLOG_ID = null, OPLOG_ROWS = [], OPLOG_TOTAL = 0, OPLOG_COUNTS = {},
     OPLOG_FILTER = '', OPLOG_LOADING = false, OPLOG_Q = '', OPLOG_T = null;
