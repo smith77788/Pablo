@@ -324,7 +324,10 @@ def test_a_missing_ai_key_is_named_as_such(monkeypatch):
     monkeypatch.setattr(ai_claude, "enabled", lambda: False)
     monkeypatch.setattr(_ap, "configured_providers", lambda: [])
     assert "ключ ИИ" in cw._no_text_reason()
-    assert "Ключи ИИ" in cw._no_text_reason(), "не сказано, где задать ключ"
+    reason = cw._no_text_reason()
+    assert "AI-ключи" in reason, "не сказано, где задать ключ"
+    assert "администратор платформы" in reason, (
+        "владелец не узнаёт, что это настройка администратора, и ищет её у себя")
 
     monkeypatch.setattr(_ap, "configured_providers", lambda: [object()])
     assert "ключ" not in cw._no_text_reason().lower(), (
