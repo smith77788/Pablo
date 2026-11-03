@@ -1640,6 +1640,16 @@ async def resubmit_unfinished(
              -- Окно здесь в часах, так что в норме таких тут и не бывает;
              -- условие стоит затем, что окно задаёт вызывающий.
              AND COALESCE(journal_pruned, FALSE) = FALSE
+             -- Только ПОСЛЕДНЕЕ звено цепочки повторов. Операция, у которой
+             -- уже есть повтор, эту работу передала: повтор либо ещё идёт,
+             -- либо сам лежит в этом же списке. Раньше перепоставлялись оба
+             -- звена (упавшая и её упавший повтор) — две операции шли
+             -- ПАРАЛЛЕЛЬНО по одним и тем же нетронутым целям, то есть
+             -- одним людям уходило по два приглашения или сообщения.
+             AND NOT EXISTS (
+                 SELECT 1 FROM operation_queue c
+                  WHERE c.owner_id = $1
+                    AND c.params->>'retry_of_op' = operation_queue.id::text)
            ORDER BY created_at DESC LIMIT {int(limit)}""",
         owner_id, hours)
     retried, skipped, dropped, plan_blocked = 0, 0, 0, 0
@@ -1679,6 +1689,70 @@ async def resubmit_unfinished(
             log.debug("resubmit_unfinished op_type=%s: %s", r["op_type"], exc)
     return {"ok": True, "retried": retried, "skipped": skipped,
             "recurrence_dropped": dropped, "plan_blocked": plan_blocked}
+
+
+async def retry_blocker(pool: asyncpg.Pool, op_id: int) -> dict | None:
+    """Почему эту операцию сейчас НЕЛЬЗЯ повторять, или None.
+
+    Общая проверка всех поверхностей повтора одной операции (бот — через
+    `resubmit_one`, мини-апп — `mini_app_operations.retry_operation`). Пока она
+    жила только в `resubmit_one`, мини-апп повторял операцию с убранным
+    журналом целиком заново. Возвращает {"reason": str, ...}.
+    """
+    # Журнал целей убран уборкой — повторять НЕЛЬЗЯ. Идемпотентность
+    # исполнителя стоит на `operation_log`: пустой журнал означает «ничего не
+    # сделано», и повтор прошёл бы ВСЕ цели заново — те же приглашения тем же
+    # людям (риск бана), второй пост в канал, второе сообщение человеку.
+    # Отметку ставит уборка (db_maintenance._prune_operation_log) и только у
+    # завершённых операций старше срока хранения. Проверяем всю семью повторов:
+    # у свежего повтора журнал свой, но идемпотентность он берёт из журнала
+    # ПРЕДКА — если убран он, молчаливый дубль даёт ровно тот же результат.
+    # То же решение, что у рассылок: `broadcasts.delivery_log_pruned` плюс
+    # отказ в «отправить недоставленным».
+    family = await retry_family_ids(pool, op_id)
+    try:
+        _pruned = await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue "
+            " WHERE id = ANY($1::bigint[]) AND journal_pruned",
+            family)
+    except Exception:
+        # Fail-open, как и остальные чтения тут: не прочитали отметку — ведём
+        # себя как раньше. Иначе сбой БД запрещал бы повтор всему продукту.
+        log.warning("resubmit_one: не прочитана отметка journal_pruned op=%s", op_id)
+        _pruned = 0
+    if int(_pruned or 0):
+        return {
+            "reason": (
+                "Журнал целей этой операции уже убран (ей больше месяца), "
+                "поэтому повтор сделал бы всю работу заново — те же "
+                "приглашения, посты и сообщения второй раз. Поставьте новую "
+                "операцию с нужными целями."),
+        }
+
+    from services import op_status as _ost_live
+
+    # Повтор этой же работы уже стоит в очереди или идёт. Второй повтор
+    # пошёл бы ПАРАЛЛЕЛЬНО первому по тем же нетронутым целям: журнал семьи
+    # каждый из них читает до действия, и пока первый не записал цель, второй
+    # её тоже берёт — двойное приглашение, второе сообщение тому же человеку.
+    # Типичный путь — повторное нажатие «Повторить» на исходной операции:
+    # её статус от повтора не меняется, и кнопка остаётся на месте.
+    try:
+        _live = await pool.fetchval(
+            "SELECT id FROM operation_queue "
+            " WHERE id = ANY($1::bigint[]) AND id <> $2 "
+            "   AND status = ANY($3::text[]) "
+            " ORDER BY id DESC LIMIT 1",
+            family, op_id, sorted(_ost_live.IN_FLIGHT))
+    except Exception:
+        log.warning("resubmit_one: не прочитаны живые повторы op=%s", op_id)
+        _live = None
+    if _live:
+        return {"live_op_id": int(_live),
+                "reason": (f"Повтор этой операции уже идёт (операция #{int(_live)}). "
+                           "Дождитесь его итога — второй повтор прошёл бы те же "
+                           "цели параллельно.")}
+    return None
 
 
 async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
@@ -1732,35 +1806,9 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
         return {"ok": False, "op_id": None, "count": 0, "code": 409,
                 "reason": f"Повтор невозможен: {_why}"}
 
-    # Журнал целей убран уборкой — повторять НЕЛЬЗЯ. Идемпотентность
-    # исполнителя стоит на `operation_log`: пустой журнал означает «ничего не
-    # сделано», и повтор прошёл бы ВСЕ цели заново — те же приглашения тем же
-    # людям (риск бана), второй пост в канал, второе сообщение человеку.
-    # Отметку ставит уборка (db_maintenance._prune_operation_log) и только у
-    # завершённых операций старше срока хранения. Проверяем всю семью повторов:
-    # у свежего повтора журнал свой, но идемпотентность он берёт из журнала
-    # ПРЕДКА — если убран он, молчаливый дубль даёт ровно тот же результат.
-    # То же решение, что у рассылок: `broadcasts.delivery_log_pruned` плюс
-    # отказ в «отправить недоставленным».
-    try:
-        _pruned = await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_queue "
-            " WHERE id = ANY($1::bigint[]) AND journal_pruned",
-            await retry_family_ids(pool, op_id))
-    except Exception:
-        # Fail-open, как и остальные чтения тут: не прочитали отметку — ведём
-        # себя как раньше. Иначе сбой БД запрещал бы повтор всему продукту.
-        log.warning("resubmit_one: не прочитана отметка journal_pruned op=%s", op_id)
-        _pruned = 0
-    if int(_pruned or 0):
-        return {
-            "ok": False, "op_id": None, "count": 0, "code": 409,
-            "reason": (
-                "Журнал целей этой операции уже убран (ей больше месяца), "
-                "поэтому повтор сделал бы всю работу заново — те же "
-                "приглашения, посты и сообщения второй раз. Поставьте новую "
-                "операцию с нужными целями."),
-        }
+    _blocked = await retry_blocker(pool, op_id)
+    if _blocked:
+        return {"ok": False, "op_id": None, "count": 0, "code": 409, **_blocked}
 
     params = info.get("params")
     if isinstance(params, str):

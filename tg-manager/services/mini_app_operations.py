@@ -692,6 +692,11 @@ def setup_routes(app: web.Application, pool) -> None:
                 op_id, uid)
             if not row:
                 return _err("Не найдено", 404)
+            # Общие запреты повтора (журнал убран, повтор уже идёт) — те же,
+            # что у бота: `operation_bus.retry_blocker`.
+            _blocked = await _obus.retry_blocker(pool, op_id)
+            if _blocked:
+                return _err(_blocked["reason"], 409)
 
             # Публикация: повторяем ТОЛЬКО упавшие каналы. Иначе успешные каналы
             # получили бы пост повторно (дубликаты). Работает и для
