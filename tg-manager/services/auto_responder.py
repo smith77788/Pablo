@@ -650,6 +650,46 @@ async def _poll_one(pool, http, bot_id: int, token: str, main_bot=None) -> None:
         _bot_busy.discard(bot_id)
 
 
+# Задачи опроса ботов, запущенные `_launch_polls`: сильные ссылки до конца.
+_poll_tasks: set[asyncio.Task] = set()
+
+
+def _on_poll_done(task: asyncio.Task) -> None:
+    _poll_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        log.error("auto_responder: опрос бота упал: %s", exc, exc_info=exc)
+
+
+def _launch_polls(pool, http, bots, main_bot=None) -> int:
+    """Запустить опрос ботов, НЕ дожидаясь его. Возвращает число запущенных.
+
+    Раньше проход ждал ВСЕХ ботов разом (`gather`), то есть шёл со скоростью
+    самого медленного: бот, у которого ИИ-продавец думает 30 секунд или
+    Telegram отвечает медленно, задерживал авто-ответы всех остальных ботов
+    всех клиентов на те же 30 секунд, а быстрый секундный опрос «горячих»
+    (счета и кнопки сценариев, где Telegram даёт 10 секунд на ответ) стоял
+    за этим проходом.
+
+    Теперь каждый бот — своя задача. Занятый бот пропускается (`_bot_busy`):
+    два getUpdates одного бота разом обработали бы пакет дважды. Медленный
+    бот просто пропускает свои следующие проходы, а не держит чужие.
+    """
+    n = 0
+    for b in bots or ():
+        if b["bot_id"] in _bot_busy:
+            continue
+        task = asyncio.create_task(
+            _poll_one(pool, http, b["bot_id"], b["token"], main_bot),
+            name=f"auto_responder_poll_{b['bot_id']}")
+        _poll_tasks.add(task)
+        task.add_done_callback(_on_poll_done)
+        n += 1
+    return n
+
+
 async def _answer_pre_checkout(pool, http, token, bot_id: int, pcq: dict) -> None:
     """Ответ на pre_checkout_query: счёт сценария или заказ ИИ-продавца.
 
@@ -1846,13 +1886,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                     b for b in bots
                     if now >= _dead_token_cooldown.get(b["bot_id"], (0, 0.0))[1]
                 ]
-                await asyncio.gather(
-                    *(
-                        _poll_one(pool, http, b["bot_id"], b["token"], main_bot)
-                        for b in pollable
-                    ),
-                    return_exceptions=True,
-                )
+                _launch_polls(pool, http, pollable, main_bot)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1867,15 +1901,8 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
             if not hot:
                 continue
             try:
-                await asyncio.gather(
-                    *(
-                        _poll_one(pool, http, b["bot_id"], b["token"], main_bot)
-                        for b in _last_bots if b["bot_id"] in hot
-                    ),
-                    return_exceptions=True,
-                )
-            except asyncio.CancelledError:
-                raise
+                _launch_polls(
+                    pool, http, [b for b in _last_bots if b["bot_id"] in hot], main_bot)
             except Exception:
                 log.exception("Auto-responder hot-poll error")
 
