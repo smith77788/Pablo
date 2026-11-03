@@ -18497,10 +18497,15 @@ async function cdEditGroups() {
 // рвётся. Поэтому повтор идёт через _retryContactAccPicker() без аргументов.
 let _CD_ACC_PICKER_ARGS = null;
 function _retryContactAccPicker() {
-  if (_CD_ACC_PICKER_ARGS) _renderContactAccPicker(_CD_ACC_PICKER_ARGS[0], _CD_ACC_PICKER_ARGS[1]);
+  if (_CD_ACC_PICKER_ARGS) _renderContactAccPicker(_CD_ACC_PICKER_ARGS[0], _CD_ACC_PICKER_ARGS[1], _CD_ACC_PICKER_ARGS[2]);
 }
-async function _renderContactAccPicker(containerId, preselectIds) {
-  _CD_ACC_PICKER_ARGS = [containerId, preselectIds];
+// Аккаунт, которым операция заведомо ничего не сделает: выбрать его — значит
+// получить провал на этой цели. В выборе он виден, но с причиной и неактивен.
+const _ACC_DEAD = new Set(['banned','deactivated','deleted','frozen','session_expired','spamblock']);
+const BOTFATHER_BOT_CAP = 20;
+async function _renderContactAccPicker(containerId, preselectIds, opts) {
+  opts = opts || {};
+  _CD_ACC_PICKER_ARGS = [containerId, preselectIds, opts];
   const el = document.getElementById(containerId);
   if (!el) return;
   el.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
@@ -18510,9 +18515,22 @@ async function _renderContactAccPicker(containerId, preselectIds) {
     if (!live.length) { el.innerHTML = '<div class="empty-inline">Нет активных аккаунтов</div>'; return; }
     const all = preselectIds === 'all';
     const pre = new Set((all ? [] : (preselectIds||[])).map(Number));
-    el.innerHTML = live.map(a=>`<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px">
-      <input type="checkbox" class="ca-acc-cb" value="${a.id}" ${all||pre.has(+a.id)?'checked':''}>
-      ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('');
+    // Имя и номер, а не только номер; статус по-русски; у фабрики ботов —
+    // сколько ботов у аккаунта уже есть (потолок @BotFather — 20).
+    el.innerHTML = live.map(a=>{
+      const st = String(a.acc_status||'ok').toLowerCase();
+      const dead = _ACC_DEAD.has(st) || a.has_session === false;
+      const bots = Number(a.bots_owned||0);
+      const full = !!opts.botLimit && bots >= BOTFATHER_BOT_CAP;
+      const off = dead || full;
+      const why = dead ? (a.has_session === false ? '🔌 Нет сессии' : accRu(st))
+                : full ? `лимит @BotFather: ${bots} из ${BOTFATHER_BOT_CAP}` : '';
+      const name = [a.first_name, a.phone].filter(Boolean).join(' · ') || ('#'+a.id);
+      const extra = opts.botLimit && !dead ? ` · ботов: ${num(bots)} из ${BOTFATHER_BOT_CAP}` : '';
+      return `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;${off?'opacity:.55':''}">
+      <input type="checkbox" class="ca-acc-cb" value="${a.id}" ${off?'disabled':''} ${!off&&(all||pre.has(+a.id))?'checked':''}>
+      <span>${esc(name)}<span style="color:var(--hint);font-size:12px">${esc(extra)}${why?' · '+esc(why):''}</span></span></label>`;
+    }).join('');
   } catch(e) { el.innerHTML = errHtml(errRu(e), '_retryContactAccPicker()'); }
 }
 function _contactPickedAccs() {
@@ -20932,7 +20950,8 @@ async function openContactStats() {
 let _BF_MODE = 'new';
 // Отметить/снять все аккаунты в пикере фабрики ботов.
 function bfAccAll(on) {
-  document.querySelectorAll('#bfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on; });
+  // Неактивный (мёртвый или упёршийся в лимит) аккаунт «Выбрать все» не берёт.
+  document.querySelectorAll('#bfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on && !cb.disabled; });
 }
 function bfSetMode(mode) {
   _BF_MODE = (mode === 'token') ? 'token' : 'new';
@@ -27029,7 +27048,8 @@ async function openChannelFactory(asGroup) {
 }
 // Отметить/снять все аккаунты в пикере фабрики каналов.
 function cfAccAll(on) {
-  document.querySelectorAll('#cfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on; });
+  // Неактивный (мёртвый или упёршийся в лимит) аккаунт «Выбрать все» не берёт.
+  document.querySelectorAll('#cfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on && !cb.disabled; });
 }
 // Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
 let CFR_ROWS = [], CFR_OFFSET = 0;

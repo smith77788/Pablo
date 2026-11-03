@@ -163,7 +163,11 @@ def setup_routes(app: web.Application, pool) -> None:
                       (SELECT p.is_alive FROM user_proxies p
                         WHERE p.id = tg_accounts.proxy_id) AS proxy_alive,
                       (SELECT COALESCE(p.label, p.geo_country) FROM user_proxies p
-                        WHERE p.id = tg_accounts.proxy_id) AS proxy_label
+                        WHERE p.id = tg_accounts.proxy_id) AS proxy_label,
+                      -- Сколько ботов уже у аккаунта: у @BotFather потолок 20,
+                      -- и фабрика ботов выбирала аккаунты вслепую.
+                      (SELECT COUNT(*) FROM managed_bots mb
+                        WHERE mb.acc_id = tg_accounts.id) AS bots_owned
                FROM tg_accounts WHERE {where}
                ORDER BY is_active DESC, last_used DESC NULLS LAST, id
                LIMIT ${len(args)+1} OFFSET ${len(args)+2}""", *page_args)

@@ -9,7 +9,7 @@ async function openBotFactory() {
   txt('botFactoryRecent','');
   bfSetMode(_BF_MODE);
   // Аккаунты для режима «создать новых»: каждый выбранный пишет @BotFather.
-  _renderContactAccPicker('bfAccts', []);
+  _renderContactAccPicker('bfAccts', [], {botLimit: true});
   // Пока идёт запрос, в выпадашке висели экосистемы с ПРОШЛОГО открытия — и
   // бот привязывался к той, которую человек выбрал из устаревшего списка.
   { const _bfE = document.getElementById('bfEcosystem');
