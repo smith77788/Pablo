@@ -1919,7 +1919,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-proxy-pool">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🌐 Пул прокси</div>
+    <div class="hdr-title">🔎 Поиск по прокси</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
@@ -2414,11 +2414,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">🌐</div>
         <div class="mgmt-tile-lbl">Прокси</div>
         <div class="mgmt-tile-val" id="m-proxy-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openProxyPool()">
-        <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Пул прокси</div>
-        <div class="mgmt-tile-val" id="m-proxy-pool-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openShield()">
         <div class="mgmt-tile-ico">🛡</div>
@@ -4575,6 +4570,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
+    <!-- Счётчики парка. Тап открывает поиск по парку с этим срезом: раньше
+         это был отдельный раздел «Пул прокси» с теми же данными. -->
+    <div class="kpi-row" id="proxyKpi" style="margin-bottom:8px"></div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
       <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="checkAllProxies()">🔄 Проверить все</button>
       <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="toggleProxyImport()">📥 Импорт списком</button>
@@ -9029,7 +9027,7 @@ const MODULE_DESCS = {
   'Каналы':'Ваши каналы и массовые действия по ним','Рассылки':'Массовые сообщения аудитории ботов','Рассылка':'Массовое сообщение аудитории бота',
   'Расписание':'Отложенные и повторяющиеся рассылки','A/B Тесты':'Сравнение вариантов рассылки по отклику',
   'Операции':'Очередь и история массовых операций','Новые подписчики':'Свежие подписчики ваших ботов','Диагностика':'Проверка связности и здоровья',
-  'Прокси':'Свои SOCKS5/HTTP-прокси и IP-изоляция','Пул прокси':'Общий пул прокси с авто-подбором',
+  'Прокси':'Свои SOCKS5/HTTP-прокси и IP-изоляция',
   'Фабрика ботов':'Массовое создание ботов по шаблонам','Создать ботов':'Массовое создание ботов','Фабрика каналов':'Массовое создание каналов',
   'Создать каналы':'Массовое создание каналов','Фабрика групп':'Массовое создание групп',
   'Массовая публикация':'Пост во все каналы/аккаунты разом','Массопубликация':'Пост во все каналы/аккаунты разом',
@@ -9660,7 +9658,9 @@ async function cwAiStatus(){
     if(eng.length){
       el.innerHTML='🧠 <span style="color:var(--green)">Модели разогрева:</span> '+eng.map(esc).join(' → ');
     }else{
-      el.innerHTML='⚠️ <span style="color:var(--orange)">Ключи ИИ не найдены</span> — задайте ключ (Claude/Groq) в админ-меню «Ключи ИИ», иначе флот вступит, но писать не будет.';
+      // Текст подсказки — с сервера: он знает, кто читает (владелец или
+      // администратор платформы), и отправляет туда, где настройка есть.
+      el.innerHTML='⚠️ <span style="color:var(--orange)">ИИ не подключён</span> — '+esc(s.hint||'флот вступит в чат, но писать не будет.');
     }
   }catch(e){ el.innerHTML=''; }
 }
@@ -10624,7 +10624,7 @@ async function loadAiStatus() {
   try {
     const d = await api('/api/miniapp/ai/status');
     if (!d.configured) {
-      box.innerHTML = `<div class="li" style="cursor:default"><div class="ava ava-orange">⚠️</div><div class="li-body"><div class="li-name">ИИ не настроен</div><div class="li-sub">Авто-ответы с ИИ работать не будут — не заданы ключи провайдеров ИИ.</div></div></div>`;
+      box.innerHTML = `<div class="li" style="cursor:default"><div class="ava ava-orange">⚠️</div><div class="li-body"><div class="li-name">ИИ не настроен</div><div class="li-sub">${esc(d.hint||'Авто-ответы с ИИ работать не будут.')}</div></div></div>`;
       return;
     }
     box.innerHTML = (d.providers||[]).map(p=>`<div class="li" style="cursor:default"><div class="ava ava-blue">🧠</div><div class="li-body"><div class="li-name">${esc(p.name)}</div><div class="li-sub">${esc(p.model||'')}</div></div><span class="badge b-gy">настроен</span></div>`).join('');
@@ -14991,6 +14991,21 @@ async function saveIpv6Subnet() {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,140)); }
   finally { if(btn){ btn.disabled=false; btn.textContent='💾 Сохранить IPv6-подсеть'; } }
 }
+// Счётчики парка над списком. Числа — серверные по всему парку (counts), а не
+// по загруженной странице; без них — «—», а не цифра со страницы.
+function _renderProxyKpi(d, total) {
+  const c = d && d.counts && d.counts.alive != null ? d.counts : null;
+  if (!total) { txt('proxyKpi', ''); return; }
+  const card = (ico, val, lbl, f, color) =>
+    `<div class="kpi-card" role="button" tabindex="0" style="cursor:pointer" onclick="openProxyPool('${f}')">`
+    + `<div class="kpi-val"${color ? ' style="color:var(--' + color + ')"' : ''}>${esc(String(val))}</div>`
+    + `<div class="kpi-lbl">${ico} ${esc(lbl)}</div></div>`;
+  txt('proxyKpi',
+    card('🔎', num(total), 'Всего', 'all')
+    + card('🟢', c ? num(c.alive) : '—', 'Живых', 'alive', 'green')
+    + card('🔴', c ? num(c.dead) : '—', 'Мёртвых', 'dead', 'red')
+    + card('⏱', c && c.avg_latency != null ? c.avg_latency + 'мс' : '—', 'Задержка', 'all'));
+}
 async function loadProxies() {
   loadCfPoolStatus(); loadTransport();
   try {
@@ -14999,6 +15014,7 @@ async function loadProxies() {
     // Число в шапке считалось по странице и называло её всем парком.
     const totalProxies = (d.total != null) ? d.total : items.length;
     txt('m-proxy-cnt', totalProxies ? totalProxies+' прокси' : 'Нет прокси');
+    _renderProxyKpi(d, totalProxies);
     if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить прокси',fn:'openProxyModal()'})); return; }
     const backupCount = items.filter(p=>p.is_backup).length;
     // Переселение показываем, только когда есть куда и откуда: failover умеет
@@ -15645,11 +15661,17 @@ function _proxyTruncOption(d, shown) {
 const PP_PAGE = 200;
 let _proxyPoolData = [];
 let PP_TOTAL = 0, PP_LOADING = false, PP_FILTER = 'all', PP_SEARCH = '', _ppSearchT = null;
-function openProxyPool() {
+// Поиск и срезы по парку прокси. Своей плитки у экрана нет: это часть раздела
+// «Прокси», и открывается он тапом по счётчику («Живых», «Мёртвых», …).
+function openProxyPool(filter) {
   push('s-proxy-pool');
   txt('proxyPoolList','<div class="spin-wrap"><div class="spin"></div></div>');
   const inp = document.getElementById('ppSearch'); if (inp) inp.value = '';
   PP_SEARCH = '';
+  const want = ['all','alive','dead','backup'].includes(filter) ? filter : 'all';
+  PP_FILTER = want;
+  document.querySelectorAll('#proxyPoolSeg .seg-opt').forEach(o =>
+    o.classList.toggle('on', (o.getAttribute('onclick')||'').includes("'"+want+"'")));
   loadProxyPool();
 }
 function _ppApplyCounts(d) {
