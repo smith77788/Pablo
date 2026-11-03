@@ -3928,6 +3928,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="seg-opt" onclick="filterOps('done',this)">✅ Готово</div>
       <div class="seg-opt" onclick="filterOps('partial',this)">⚠️ Недоведены</div>
     </div>
+    <!-- Тип и период: «что было с инвайтами за неделю» раньше искалось
+         перелистыванием. Выбор нескольких — чтобы не отменять и не повторять
+         по одной. -->
+    <div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
+      <select class="inp" id="opsType" style="flex:1 1 140px;min-width:0" onchange="onOpsType(this.value)" aria-label="Тип операции"><option value="">Все типы</option></select>
+      <select class="inp" id="opsDays" style="flex:1 1 110px;min-width:0" onchange="onOpsDays(this.value)" aria-label="Период">
+        <option value="">Всё время</option><option value="1">Сутки</option><option value="7">7 дней</option>
+        <option value="30">30 дней</option><option value="90">90 дней</option>
+      </select>
+      <button class="btn btn-s" id="opsSelBtn" onclick="toggleOpsSelect()">☑️ Выбрать</button>
+    </div>
+    <div id="opsSelBar"></div>
     <div style="padding:6px 0;display:flex;gap:6px">
       <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="pauseAllOps()" title="Приостановить все ожидающие в очереди (запущенные доигрывают)">⏸ Пауза</button>
       <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="resumeAllOps()" title="Вернуть в очередь все приостановленные">▶️ Старт</button>
@@ -12796,11 +12808,79 @@ function _opsQuery(offset, limit) {
   // экране тридцать операций из двух сотен, и «ничего не найдено» означало бы
   // всего лишь «нет среди этих тридцати».
   if (OPS_SEARCH) p.set('q', OPS_SEARCH);
+  if (OPS_TYPE) p.set('op_type', OPS_TYPE);
+  if (OPS_DAYS) p.set('days', OPS_DAYS);
   p.set('limit', Math.min(limit || OPS_PAGE, OPS_MAX)); p.set('offset', offset);
   return '/api/miniapp/operations?' + p.toString();
 }
 
 let OPS_SEARCH = '';
+let OPS_TYPE = '', OPS_DAYS = '';
+let OPS_SEL_MODE = false;
+const OPS_SEL = new Set();
+function _opsReload() {
+  OPS_ROWS = []; OPS_OFFSET = 0; OPS_TOTAL = 0;
+  const box = document.getElementById('opsLoadMore'); if (box) box.innerHTML = '';
+  txt('opsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  loadOps();
+}
+function onOpsType(v) { OPS_TYPE = v || ''; _opsReload(); }
+function onOpsDays(v) { OPS_DAYS = v || ''; _opsReload(); }
+function _renderOpsTypes(types) {
+  const sel = document.getElementById('opsType');
+  if (!sel || !Array.isArray(types)) return;
+  const cur = OPS_TYPE;
+  sel.innerHTML = '<option value="">Все типы</option>' + types.map(t =>
+    `<option value="${esc(t.op_type)}"${t.op_type===cur?' selected':''}>${esc(opRu(t.op_type))} · ${num(t.n)}</option>`).join('');
+}
+function toggleOpsSelect() {
+  OPS_SEL_MODE = !OPS_SEL_MODE;
+  OPS_SEL.clear();
+  const b = document.getElementById('opsSelBtn');
+  if (b) b.textContent = OPS_SEL_MODE ? '✖️ Готово' : '☑️ Выбрать';
+  renderOps();
+}
+function toggleOpSel(id) {
+  if (OPS_SEL.has(id)) OPS_SEL.delete(id); else OPS_SEL.add(id);
+  renderOps();
+}
+function _renderOpsSelBar() {
+  const bar = document.getElementById('opsSelBar');
+  if (!bar) return;
+  if (!OPS_SEL_MODE) { bar.innerHTML = ''; return; }
+  const picked = OPS_ROWS.filter(o => OPS_SEL.has(o.id));
+  const canCancel = picked.filter(o => ['pending','running','paused'].includes(o.status)).length;
+  const canRetry = picked.filter(opCanRetry).length;
+  bar.innerHTML = `<div class="card" style="padding:10px 12px;margin:0 0 8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <span style="font-size:13px;flex:1 1 100%">Выбрано: ${num(picked.length)}</span>
+    <button class="btn btn-s" style="flex:1 1 auto" onclick="selectAllOps()">Выбрать все на экране</button>
+    <button class="btn btn-r" style="flex:1 1 auto" ${canCancel?'':'disabled'} onclick="cancelSelectedOps()">✕ Отменить (${num(canCancel)})</button>
+    <button class="btn btn-p" style="flex:1 1 auto" ${canRetry?'':'disabled'} onclick="retrySelectedOps()">↺ Повторить (${num(canRetry)})</button>
+  </div>`;
+}
+function selectAllOps() { OPS_ROWS.forEach(o => OPS_SEL.add(o.id)); renderOps(); }
+async function cancelSelectedOps() {
+  const ids = OPS_ROWS.filter(o => OPS_SEL.has(o.id) && ['pending','running','paused'].includes(o.status)).map(o => o.id);
+  if (!ids.length) return;
+  if (!(await askConfirm(`Отменить ${ids.length} ${plural(ids.length,'операцию','операции','операций')}? Вернуть их в очередь будет нельзя — только повторить заново.`))) return;
+  let ok = 0;
+  for (const id of ids) {
+    try { await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'}); ok++; _opProgressMarkCancelled(id); } catch(_) {}
+  }
+  toast(ok === ids.length ? `⚠️ Отменено: ${ok}` : `⚠️ Отменено ${ok} из ${ids.length}`);
+  OPS_SEL.clear(); loadOps();
+}
+async function retrySelectedOps() {
+  const ids = OPS_ROWS.filter(o => OPS_SEL.has(o.id) && opCanRetry(o)).map(o => o.id);
+  if (!ids.length) return;
+  if (!(await askConfirm(`Повторить ${ids.length} ${plural(ids.length,'операцию','операции','операций')}? Уже обработанные цели заново не берутся.`))) return;
+  let ok = 0;
+  for (const id of ids) {
+    try { await api('/api/miniapp/operation/'+id+'/retry', {method:'POST'}); ok++; } catch(_) {}
+  }
+  toast(ok === ids.length ? `✅ Поставлено повторно: ${ok}` : `⚠️ Поставлено ${ok} из ${ids.length}`);
+  OPS_SEL.clear(); loadOps();
+}
 let _opsSearchT = null;
 function onOpsSearch(v) {
   OPS_SEARCH = (v || '').trim();
@@ -12831,8 +12911,10 @@ function opsGo(status) {
   loadOps();
 }
 function resetOpsFilters() {
-  OPS_SEARCH = ''; OPS_FILTER = null;
+  OPS_SEARCH = ''; OPS_FILTER = null; OPS_TYPE = ''; OPS_DAYS = '';
   const i = document.getElementById('opsSearch'); if (i) i.value = '';
+  const ts = document.getElementById('opsType'); if (ts) ts.value = '';
+  const ds = document.getElementById('opsDays'); if (ds) ds.value = '';
   document.querySelectorAll('#ops-seg .seg-opt').forEach((o, n) => o.classList.toggle('on', n === 0));
   OPS_ROWS = []; OPS_OFFSET = 0; OPS_TOTAL = 0;
   const box = document.getElementById('opsLoadMore'); if (box) box.innerHTML = '';
@@ -12879,6 +12961,7 @@ async function loadOps() {
     OPS_ROWS = d.operations||[];
     OPS_OFFSET = OPS_ROWS.length;
     OPS_TOTAL = (d.total != null ? d.total : OPS_ROWS.length);
+    _renderOpsTypes(d.types);
     // Счётчики — по всей очереди владельца. Если сервер их не прислал (старый
     // деплой), считаем по загруженному и НЕ выдаём это за общее число.
     // Пустой объект счётчиков = агрегат на сервере не отработал. Считать его
@@ -12909,7 +12992,10 @@ function renderOps() {
     const _why = [];
     if (OPS_SEARCH) _why.push('по запросу «' + OPS_SEARCH + '»');
     if (OPS_FILTER) _why.push('по фильтру «' + OPS_STATUS_RU(OPS_FILTER) + '»');
-    txt('opsList', (OPS_SEARCH || OPS_FILTER)
+    if (OPS_TYPE) _why.push('по типу «' + opRu(OPS_TYPE) + '»');
+    if (OPS_DAYS) _why.push('за ' + (OPS_DAYS==='1' ? 'сутки' : OPS_DAYS + ' дней'));
+    _renderOpsSelBar();
+    txt('opsList', (OPS_SEARCH || OPS_FILTER || OPS_TYPE || OPS_DAYS)
       ? empty('🔍','Ничего не найдено', _why.join(' и '),
               {label:'✖️ Сбросить поиск и фильтр', fn:'resetOpsFilters()'})
       : empty('⚙️','Нет операций','Запущенные задачи появятся здесь'));
@@ -12917,6 +13003,7 @@ function renderOps() {
     return;
   }
   renderOpsLoadMore();
+  _renderOpsSelBar();
   {
     txt('opsList', ops.map(o=>{
       const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
@@ -12926,8 +13013,10 @@ function renderOps() {
       // Приостановленную тоже можно отменить — иначе она висит в очереди, пока
       // пользователь не возобновит ВСЮ очередь целиком.
       const canCancel = o.status==='pending'||o.status==='running'||o.status==='paused';
-      return `<div class="li" id="op-row-${o.id}" style="display:block;cursor:pointer;padding:11px 14px" onclick="openOpDetail(${o.id})">
+      const _sel = OPS_SEL.has(o.id);
+      return `<div class="li" id="op-row-${o.id}" style="display:block;cursor:pointer;padding:11px 14px${_sel?';outline:1px solid var(--accent, #2dd4bf)':''}" onclick="${OPS_SEL_MODE?`toggleOpSel(${o.id})`:`openOpDetail(${o.id})`}">
         <div style="display:flex;align-items:center;gap:10px">
+          ${OPS_SEL_MODE?`<div class="acc-check ${_sel?'on':''}">${_sel?'✓':''}</div>`:''}
           <div class="ava ava-orange">⚙️</div>
           <div class="li-body">
             <div class="li-name">${esc(o.label||opRu(o.op_type)||'операция')}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰</span>':''}</div>

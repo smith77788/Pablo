@@ -96,9 +96,33 @@ def setup_routes(app: web.Application, pool) -> None:
         # Счётчики считаются под ТЕМ ЖЕ срезом, что и список. Иначе плитки
         # «Всего / Готово / Ошибки» отвечали бы на другой вопрос, чем список под
         # ними: ищешь «инвайт», видишь три строки и «Всего 214».
+        # Период: «что было за неделю» — первый вопрос к истории, а листать
+        # её до нужной даты было единственным способом. Только из списка, мусор
+        # — отказ, а не молча «всё время».
+        _days_raw = (request.query.get("days") or "").strip()
+        days = None
+        if _days_raw:
+            if _days_raw not in ("1", "7", "30", "90"):
+                return _err("Период — 1, 7, 30 или 90 дней", 400)
+            days = int(_days_raw)
+        # Какие типы операций вообще есть у владельца — для выбора типа на
+        # экране (ДО остальных запросов: гейт фильтра статуса судит последний
+        # запрос к operation_queue). Типов у продукта больше восьмидесяти, а у человека — свои
+        # пять-десять; список «все восемьдесят» был бы стеной.
+        types: list = []
+        try:
+            for r in await pool.fetch(
+                    "SELECT op_type, COUNT(*) AS n FROM operation_queue "
+                    "WHERE owner_id=$1 GROUP BY op_type ORDER BY 2 DESC, 1 LIMIT 60", uid):
+                types.append({"op_type": r["op_type"], "n": int(r["n"] or 0)})
+        except Exception:
+            log.debug("operations: список типов недоступен uid=%s", uid)
         counts: dict = {}
         _cwhere = "owner_id=$1"
         _cargs: list = [uid]
+        if days:
+            _cargs.append(days)
+            _cwhere += f" AND created_at >= now() - make_interval(days => ${len(_cargs)})"
         if op_type_filter:
             _cargs.append(op_type_filter)
             _cwhere += f" AND op_type = ANY(${len(_cargs)}::text[])"
@@ -120,6 +144,9 @@ def setup_routes(app: web.Application, pool) -> None:
                           oq.scheduled_for, {_err_sub}"""
         _where = "oq.owner_id=$1"
         _wargs: list = [uid]
+        if days:
+            _wargs.append(days)
+            _where += f" AND oq.created_at >= now() - make_interval(days => ${len(_wargs)})"
         if status_filter:
             _wargs.append(status_filter)
             _where += f" AND oq.status=${len(_wargs)}"
@@ -142,6 +169,8 @@ def setup_routes(app: web.Application, pool) -> None:
             "operations": rows,
             "total": int(total or 0),
             "counts": counts,
+            "types": types,
+            "days": days,
             "op_type": (",".join(op_type_filter) if op_type_filter else None),
             "q": (_q or None),
             "page": {"offset": offset, "limit": limit,
