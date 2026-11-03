@@ -118,7 +118,7 @@ jobs:
           pip install \
             "aiogram==3.30.0" "asyncpg==0.29.0" "aiohttp==3.14.5" openai anthropic python-dotenv \
             openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks "qrcode[pil]" \
-            pytest pytest-asyncio ruff
+            -r requirements-dev.txt
 
       # ЗАЧЕМ ОТДЕЛЬНЫМ ШАГОМ. Восемь тестов
       # tests/test_startup_survives_telegram_outage.py поднимают НАСТОЯЩИЙ
