@@ -2948,7 +2948,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(var(--fg-rgb),.12);background:rgba(var(--fg-rgb),.06);color:var(--text);font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Режим работы</div>
     <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
-      <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">🔀 Смешанный</button>
+      <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--btn-solid);color:var(--btn-text);cursor:pointer">🔀 Смешанный</button>
       <button class="cw-mode" data-m="engage" onclick="cwPickMode('engage')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(var(--fg-rgb),.06);color:var(--text);cursor:pointer">🗣 Вовлечение</button>
       <button class="cw-mode" data-m="seed" onclick="cwPickMode('seed')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(var(--fg-rgb),.06);color:var(--text);cursor:pointer">🌱 Оживление</button>
     </div>
@@ -2957,7 +2957,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Интенсивность</div>
     <div id="cwInt" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
       <button class="cw-int" data-i="calm" onclick="cwPickInt('calm')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(var(--fg-rgb),.06);color:var(--text);cursor:pointer">🐢 Спокойно</button>
-      <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">⚖️ Обычно</button>
+      <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--btn-solid);color:var(--btn-text);cursor:pointer">⚖️ Обычно</button>
       <button class="cw-int" data-i="active" onclick="cwPickInt('active')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(var(--fg-rgb),.06);color:var(--text);cursor:pointer">⚡ Активно</button>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0">
@@ -8085,6 +8085,17 @@ try { tg.ready(); tg.expand(); } catch (_) {}
 // в <head> (window.__applyTheme): он же следит за themeChanged. Здесь только
 // повторяем вызов после ready(): часть клиентов принимает цвета лишь после него.
 try { if (window.__applyTheme) window.__applyTheme(); } catch (_) {}
+// Лёгкий виброотклик Telegram на выбор: флажок, переключатель-радио, список.
+// Так ведут себя нативные экраны Telegram; кнопки и плитки уже дают свой
+// отклик в обработчиках, а у полей выбора его не было вовсе. Один делегат на
+// документ, без правки каждого поля.
+try {
+  document.addEventListener('change', (ev) => {
+    const t = ev.target;
+    if (!t || !t.matches || !t.matches('input[type=checkbox],input[type=radio],select')) return;
+    try { tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (_) {}
+  }, true);
+} catch (_) {}
 // Нативная кнопка «Назад» Telegram управляет навигацией по STACK
 try { tg.BackButton?.onClick(() => back()); } catch(_) {}
 
@@ -9834,10 +9845,10 @@ const CW_MODE_HINT={
   engage:'Вовлечение: флот только реагирует на сообщения реальных участников (сам с собой не болтает).',
   seed:'Оживление: флот общается между собой по заданным темам — чтобы наполнить тихий чат активностью.'};
 function cwPickMode(m){CW_MODE=m;
-  document.querySelectorAll('#cwMode .cw-mode').forEach(b=>{b.style.background=b.dataset.m===m?'var(--accent-soft-2)':'rgba(var(--fg-rgb),.06)';});
+  document.querySelectorAll('#cwMode .cw-mode').forEach(b=>{const on=b.dataset.m===m;b.style.background=on?'var(--btn-solid)':'rgba(var(--fg-rgb),.06)';b.style.color=on?'var(--btn-text)':'var(--text)';});
   const h=document.getElementById('cwModeHint'); if(h) h.textContent=CW_MODE_HINT[m]||'';}
 function cwPickInt(i){CW_INT=i;
-  document.querySelectorAll('#cwInt .cw-int').forEach(b=>{b.style.background=b.dataset.i===i?'var(--accent-soft-2)':'rgba(var(--fg-rgb),.06)';});}
+  document.querySelectorAll('#cwInt .cw-int').forEach(b=>{const on=b.dataset.i===i;b.style.background=on?'var(--btn-solid)':'rgba(var(--fg-rgb),.06)';b.style.color=on?'var(--btn-text)':'var(--text)';});}
 let CW_ACCS=new Set(), CW_ACC_ALL=[];
 function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad(); cwAiStatus();}
 async function cwAiStatus(){
