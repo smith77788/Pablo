@@ -13014,7 +13014,11 @@ async function openOpDetail(opId) {
       </div>
       <div style="padding:6px 16px 0;font-size:12px;color:var(--hint)">Запущенную операцию можно только отменить: приостановка без точки возврата привела бы к повтору уже сделанных действий.</div>`;
     }
-    if (o.status==='failed') {
+    // Повтор — по тому же правилу, что у строки списка (opCanRetry): кроме
+    // проваленных это отменённые, недоведённые и завершённые с ошибками.
+    // Раньше здесь стояло только status==='failed', и у недоведённой
+    // операции карточка кнопки не показывала, а строка списка — показывала.
+    if (opCanRetry(o)) {
       html += `<div style="padding:0 16px"><button class="btn btn-p" onclick="retryOp(${o.id});back()" style="width:100%">↺ Повторить</button></div>`;
     }
     // Быстрые действия по итогу — с объяснением, ПОЧЕМУ это предложено.
@@ -13241,8 +13245,13 @@ function _opProgressMarkCancelled(id) {
   const stop = row.querySelector('.op-progress-stop');
   if (stop) { stop.removeAttribute('onclick'); stop.style.color = 'var(--hint)'; stop.textContent = 'Отменена'; }
 }
-async function cancelOp(id, confirm) {
-  if (confirm && !(await askConfirm('Отменить операцию? Вернуть её в очередь будет нельзя — только повторить заново.'))) return;
+async function cancelOp(id, confirm = true) {
+  // Отмена необратима, поэтому спрашиваем ВСЕГДА, если вызывающий не сказал
+  // явно обратного. Раньше подтверждение было по флагу, и два входа его не
+  // передавали: мелкая ссылка «Отмена» в строке списка операций (рядом с
+  // «▶ Возобновить» — промах пальцем) и «отменить» у запланированной
+  // публикации. Оба отменяли операцию с одного касания.
+  if (confirm !== false && !(await askConfirm('Отменить операцию? Вернуть её в очередь будет нельзя — только повторить заново.'))) return;
   try {
     await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'});
     toast('⚠️ Операция отменена');

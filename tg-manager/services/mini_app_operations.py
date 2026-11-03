@@ -157,6 +157,14 @@ def setup_routes(app: web.Application, pool) -> None:
             op_id = int(request.match_info["op_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор операции", 400)
+        # err_cnt — тот же счётчик упавших целей, что у списка: по нему экран
+        # решает, предлагать ли «↺ Повторить» (opCanRetry). Без него карточка
+        # операции, завершённой с ошибками, кнопки не показывала, а строка
+        # той же операции в списке — показывала. Подзапрос — отдельной
+        # переменной, основной запрос — одним литералом (храповик скоупа).
+        _err_cnt = ("(SELECT COUNT(*) FROM operation_log ol "
+                    "WHERE ol.op_id=operation_queue.id AND ol.status='error'"
+                    + _obus.REAL_TARGET_SQL + ") AS err_cnt")
         row = await _safe_fetchrow(pool,
             "SELECT id, op_type, status, label, total_items, done_items, "
             # Причина честно по ОБЕИМ колонкам: error_msg — терминальный
@@ -166,7 +174,7 @@ def setup_routes(app: web.Application, pool) -> None:
             f"{op_status.sql_error_reason()} AS error_msg, "
             "created_at, finished_at, scheduled_for, "
             "COALESCE(result->>'summary', result->>'reason') AS summary, "
-            "result AS _result, params AS _params "
+            f"result AS _result, params AS _params, {_err_cnt} "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return _err("Операция не найдена", 404)

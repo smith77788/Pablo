@@ -323,7 +323,9 @@ def test_pause_resume_helpers_call_right_endpoints():
 
 def test_cancel_asks_confirmation_when_requested():
     html = _index_html()
-    m = re.search(r"async function cancelOp\(id, confirm\) \{(.*?)\n\}", html, re.S)
+    # Подтверждение теперь по умолчанию (confirm = true): входы без флага тоже
+    # спрашивают — см. tests/test_cancelling_an_operation_always_asks.py.
+    m = re.search(r"async function cancelOp\(id, confirm(?: = true)?\) \{(.*?)\n\}", html, re.S)
     assert m, "cancelOp должна принимать флаг подтверждения"
     assert "askConfirm" in m.group(1), "отмена необратима — нужен вопрос пользователю"
 
