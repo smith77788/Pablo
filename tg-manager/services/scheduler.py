@@ -133,6 +133,22 @@ async def recover_stuck_claims(pool: asyncpg.Pool) -> dict[str, int]:
     return stats
 
 
+async def _token_state(http: aiohttp.ClientSession, token: str) -> str:
+    """'ok' | 'revoked' | 'transient' для токена бота по ответу getMe.
+
+    'revoked' — только когда Telegram прямо сказал, что токена нет (401/404).
+    Всё остальное (сеть, 5xx, 429) — 'transient': сбой связи не повод
+    навсегда хоронить отложенную рассылку."""
+    data = await bot_api._call(http, token, "getMe")
+    if data.get("ok") and data.get("result"):
+        return "ok"
+    try:
+        code = int(data.get("error_code") or 0)
+    except (TypeError, ValueError):
+        code = 0
+    return "revoked" if code in (401, 404) else "transient"
+
+
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     # Track scheduled IDs currently being processed to prevent duplicate firing
     # within a single scheduler cycle (in case processing takes longer than sleep interval).
@@ -161,10 +177,15 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 # Если рассылка опоздала больше чем на 1 час — помечаем как 'missed'
                 if execute_at is not None and (now - execute_at) > _MISSED_THRESHOLD:
                     try:
-                        await pool.execute(
-                            "UPDATE scheduled_broadcasts SET status='missed' WHERE id=$1",
+                        res = await pool.execute(
+                            "UPDATE scheduled_broadcasts SET status='missed' "
+                            "WHERE id=$1 AND status='pending'",
                             row["id"],
                         )
+                        if res == "UPDATE 0":
+                            # Владелец отменил расписание после выборки: не
+                            # затирать 'cancelled' и не ставить следующее.
+                            continue
                         # Повторяемое: пропуск одной итерации не должен рвать цепочку.
                         try:
                             await db.reschedule_if_recurring(pool, dict(row))
@@ -203,8 +224,26 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 created_bc = False
                 try:
                     # Pre-flight: verify bot token before creating broadcast records
-                    me = await bot_api.get_me(http, row["token"])
-                    if not me:
+                    token_state = await _token_state(http, row["token"])
+                    if token_state == "transient":
+                        # Telegram недоступен (сеть, 5xx, флуд) — это не
+                        # «токен отозван». Раньше любой неуспех getMe навсегда
+                        # помечал расписание 'failed', и у повторяемого вместе с
+                        # ним обрывалась вся цепочка. Возвращаем в очередь:
+                        # следующий цикл попробует снова, а затянувшийся сбой
+                        # закроет порог «пропущено», который цепочку сохраняет.
+                        log.warning(
+                            "Scheduler: Telegram недоступен для расписания #%d "
+                            "(bot_id=%d) — повторю на следующем цикле",
+                            row["id"], row["bot_id"])
+                        await pool.execute(
+                            "UPDATE scheduled_broadcasts SET status='pending' "
+                            "WHERE id=$1 AND status='processing'",
+                            row["id"],
+                        )
+                        _in_flight.discard(row["id"])
+                        continue
+                    if token_state == "revoked":
                         log.error(
                             "Scheduler: bot token for scheduled #%d (bot_id=%d) is invalid "
                             "or revoked — marking scheduled done to prevent refire",
