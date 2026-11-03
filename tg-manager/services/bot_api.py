@@ -257,6 +257,44 @@ async def get_my_short_description(
     return data.get("result", {}).get("short_description", "") if data.get("ok") else ""
 
 
+async def get_localized_profiles(
+    session: aiohttp.ClientSession, token: str, langs, concurrency: int = 8,
+) -> list[dict]:
+    """Имя, описание и краткое описание бота по каждому языку из `langs`.
+
+    Три чтения на язык. Экран мультигео мини-аппа делал их ПОСЛЕДОВАТЕЛЬНО:
+    11 языков × 3 = 33 запроса к Telegram подряд в одном HTTP-запросе — секунды
+    ожидания на открытие экрана, а при медленном Telegram (потолок `_call` —
+    15 с на запрос) минуты. Здесь — параллельно с потолком одновременности
+    (бот в Telegram, как и раньше, видит те же 33 чтения). Порядок языков
+    сохраняется; язык без единого заполненного поля пропускается; сбой чтения
+    одного поля — пустое поле, а не провал экрана.
+    """
+    sem = asyncio.Semaphore(max(1, int(concurrency)))
+
+    async def _one(fn, lc):
+        async with sem:
+            try:
+                return await fn(session, token, lc)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("get_localized_profiles %s(%s): %s", fn.__name__, lc, e)
+                return ""
+
+    langs = list(langs)
+    vals = await asyncio.gather(*(
+        _one(fn, lc) for lc in langs
+        for fn in (get_my_name, get_my_description, get_my_short_description)))
+    out = []
+    for i, lc in enumerate(langs):
+        name, desc, short = vals[3 * i: 3 * i + 3]
+        if name or desc or short:
+            out.append({"lang": lc or "default", "name": name,
+                        "description": desc, "short_description": short})
+    return out
+
+
 async def set_photo(
     session: aiohttp.ClientSession,
     token: str,

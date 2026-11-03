@@ -1135,18 +1135,10 @@ def setup_routes(app: web.Application, pool) -> None:
         import aiohttp as _aiohttp
         from services import bot_api as _bapi
         langs = ["", "ru", "en", "de", "fr", "es", "it", "uk", "pt", "zh", "ar"]
-        result = []
         try:
             async with _aiohttp.ClientSession() as session:
-                for lc in langs:
-                    try:
-                        name = await _bapi.get_my_name(session, row["token"], lc)
-                        desc = await _bapi.get_my_description(session, row["token"], lc)
-                        short = await _bapi.get_my_short_description(session, row["token"], lc)
-                        if name or desc or short:
-                            result.append({"lang": lc or "default", "name": name, "description": desc, "short_description": short})
-                    except Exception as e:
-                        log.warning("multigeo_get get locale %s: %s", lc, e)
+                # Параллельно: последовательно это 33 запроса к Telegram подряд.
+                result = await _bapi.get_localized_profiles(session, row["token"], langs)
         except Exception:
             log.exception("multigeo_get")
             return _err(_INTERNAL_ERROR, 500)
