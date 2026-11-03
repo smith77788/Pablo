@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 # Ниже этой длины строка заведомо не токен бота (настоящий — около 46 символов:
 # "1234567890:AA...").
 _MIN_SIGNING_SECRET = 16
+# Насколько auth_date может опережать наши часы (рассинхрон, секунды).
+_INIT_DATA_FUTURE_SKEW = 300
 
 
 @functools.lru_cache(maxsize=1)
@@ -69,11 +71,21 @@ def validate_init_data(init_data: str, bot_token: str) -> Optional[dict]:
         if not hmac.compare_digest(computed, hash_value):
             return None
         auth_date = int(parsed.get("auth_date", 0))
-        if time.time() - auth_date > 86400:
+        age = time.time() - auth_date
+        # Дата из будущего — не «очень свежая подпись», а признак подделки или
+        # сбитых часов: такая строка прожила бы сутки сверх положенного.
+        if age > 86400 or age < -_INIT_DATA_FUTURE_SKEW:
             return None
         user = json.loads(parsed.get("user", "{}"))
+        if not isinstance(user, dict):
+            return None
+        uid = int(user.get("id", 0))
+        # Без пользователя (вход из inline-режима/чужого контекста) или с
+        # нелепым id — не вход: токен на id 0 ничей и открывает ничьё.
+        if uid <= 0:
+            return None
         return {
-            "user_id": int(user.get("id", 0)),
+            "user_id": uid,
             "username": user.get("username", ""),
             "first_name": user.get("first_name", ""),
         }
