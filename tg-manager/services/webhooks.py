@@ -484,9 +484,14 @@ async def send_http(http, endpoint: dict, event: str, event_id: int, created_at,
         "X-Infragram-Timestamp": str(ts),
         "X-Infragram-Signature": sign(secret, ts, body),
     }
+    from services.security import guarded_session
     try:
-        async with http.post(url, data=body, headers=headers, allow_redirects=False,
-                             timeout=aiohttp.ClientTimeout(total=_HTTP_TIMEOUT_S)) as resp:
+        # Свой соединитель, а не общий `http`: проверка выше видит адрес до
+        # запроса, а имя с TTL 0 (DNS-rebinding) отдало бы запросу внутренний
+        # адрес. PublicOnlyConnector проверяет само соединение.
+        async with guarded_session(http) as _safe, _safe.post(
+                url, data=body, headers=headers, allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=_HTTP_TIMEOUT_S)) as resp:
             code = resp.status
             if 200 <= code < 300:
                 return True, code, ""

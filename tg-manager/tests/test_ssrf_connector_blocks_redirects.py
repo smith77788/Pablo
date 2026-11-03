@@ -101,3 +101,22 @@ def test_user_url_downloads_use_guarded_session():
                 "services/profile_setter_engine.py", "services/mini_app_bots.py"):
         src = (root / rel).read_text(encoding="utf-8")
         assert "public_http_session()" in src, rel
+
+
+async def test_guarded_session_replaces_unguarded_real_session():
+    import aiohttp
+    async with aiohttp.ClientSession() as plain:
+        async with sec.guarded_session(plain) as s:
+            assert s is not plain
+            assert isinstance(s.connector, sec.PublicOnlyConnector)
+        assert not plain.closed, "чужую сессию не закрываем"
+    fake = object()
+    async with sec.guarded_session(fake) as s:
+        assert s is fake
+
+
+def test_webhook_senders_use_guarded_session():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    for rel in ("services/webhooks.py", "services/workflow_runtime.py"):
+        assert "guarded_session(http)" in (root / rel).read_text(encoding="utf-8"), rel

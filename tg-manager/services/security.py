@@ -826,3 +826,29 @@ async def read_capped(resp, max_bytes: int) -> bytes:
     if len(data) > max_bytes:
         raise ValueError(f"Файл больше {max_bytes // (1024 * 1024)} МБ")
     return data
+
+
+class _Borrowed:
+    """Чужая сессия как контекст, который её НЕ закрывает."""
+
+    def __init__(self, session):
+        self._s = session
+
+    async def __aenter__(self):
+        return self._s
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def guarded_session(http):
+    """Сессия для запроса по адресу пользователя.
+
+    Настоящая aiohttp-сессия без PublicOnlyConnector подменяется своей
+    защищённой (закроется по выходе). Уже защищённая — и подставные объекты
+    тестов — используются как есть.
+    """
+    if isinstance(http, aiohttp.ClientSession) and not isinstance(
+            http.connector, PublicOnlyConnector):
+        return public_http_session()
+    return _Borrowed(http)

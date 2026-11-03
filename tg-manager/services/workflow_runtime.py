@@ -947,10 +947,14 @@ async def _do_webhook(http, run: dict, step: dict, contact: dict,
         "event": _as_dict(run.get("input_data")),
     }
     headers = {"Idempotency-Key": delivery_id} if delivery_id else None
+    from services.security import guarded_session
     try:
-        async with http.post(url, json=body, headers=headers,
-                             timeout=aiohttp.ClientTimeout(total=10),
-                             allow_redirects=False) as resp:
+        # Соединение — только на публичный адрес (DNS-rebinding: проверка
+        # выше видит адрес до запроса, а не тот, куда запрос соединится).
+        async with guarded_session(http) as _safe, _safe.post(
+                url, json=body, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+                allow_redirects=False) as resp:
             payload = None
             if 200 <= resp.status < 300 and step.get("save_as"):
                 try:
