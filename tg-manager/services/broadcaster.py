@@ -19,6 +19,7 @@ Usage:
 
 from __future__ import annotations
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime
@@ -105,7 +106,10 @@ def _render_for_user(text: str, user_info: dict, bot_name: str = "") -> str:
     username = user_info.get("username", "") or ""
     first_name = user_info.get("first_name", "") or ""
     last_name = user_info.get("last_name", "") or ""
-    now = datetime.now()
+    # Время ПОЛУЧАТЕЛЯ, а не сервера (сервер живёт в UTC).
+    from services import recipient_time
+    now = recipient_time.now_for(user_info.get("fields") if isinstance(
+        user_info.get("fields"), dict) else None, user_info.get("language_code"))
     return replace_placeholders(
         text,
         {
@@ -119,6 +123,44 @@ def _render_for_user(text: str, user_info: dict, bot_name: str = "") -> str:
             "TIME": now.strftime("%H:%M"),
         },
     )
+
+
+async def _load_user_map(pool, bot_id: int, user_ids) -> dict[int, dict]:
+    """Имена, язык и поля получателей рассылки для подстановок {{...}}.
+
+    Кэш на бота (две минуты) — между рассылками одного бота подряд."""
+    _um_cache_key = f"um:{bot_id}"
+    _um_cached = _user_map_cache.get(_um_cache_key) or {}
+    # В кэше — те, кого уже загружали для ЭТОГО бота (прошлые рассылки
+    # шли по своим аудиториям). Раньше кэш считался «полным набором»:
+    # если хоть один получатель в нём был, остальных не догружали, и
+    # вторая рассылка по пересекающейся аудитории подставляла пустые
+    # {{FIRST_NAME}} всем, кого первая не задела. Теперь догружаем
+    # недостающих и дописываем их в кэш.
+    user_map = {uid: _um_cached[uid] for uid in user_ids if uid in _um_cached}
+    missing = [uid for uid in user_ids if uid not in _um_cached]
+    if missing:
+        rows = await pool.fetch(
+            "SELECT user_id, username, first_name, last_name, language_code, "
+            "fields FROM bot_users "
+            "WHERE bot_id=$1 AND user_id = ANY($2::bigint[])",
+            bot_id,
+            missing,
+        )
+        fresh = {}
+        for r in rows:
+            d = dict(r)
+            f = d.get("fields")
+            if isinstance(f, str):
+                try:
+                    f = json.loads(f)
+                except (TypeError, ValueError):
+                    f = None
+            d["fields"] = f if isinstance(f, dict) else None
+            fresh[r["user_id"]] = d
+        user_map.update(fresh)
+        _user_map_cache.set(_um_cache_key, {**_um_cached, **fresh})
+    return user_map
 
 
 async def run(
@@ -326,21 +368,7 @@ async def run(
     has_placeholders = "{{" in text
     user_map: dict[int, dict] = {}
     if has_placeholders and user_ids:
-        _um_cache_key = f"um:{bot_id}"
-        _um_cached = _user_map_cache.get(_um_cache_key)
-        if _um_cached is not None:
-            # Фильтруем только нужных user_ids из кэша
-            user_map = {uid: _um_cached[uid] for uid in user_ids if uid in _um_cached}
-        if not user_map:
-            rows = await pool.fetch(
-                "SELECT user_id, username, first_name, last_name FROM bot_users "
-                "WHERE bot_id=$1 AND user_id = ANY($2::bigint[])",
-                bot_id,
-                user_ids,
-            )
-            user_map = {r["user_id"]: dict(r) for r in rows}
-            # Кэшируем полный набор пользователей бота
-            _user_map_cache.set(_um_cache_key, user_map)
+        user_map = await _load_user_map(pool, bot_id, user_ids)
     bot_name = ""
     if has_placeholders:
         _bn_key = f"bn:{bot_id}"

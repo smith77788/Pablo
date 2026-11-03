@@ -187,7 +187,10 @@ def _render_text(text: str, from_user: dict, bot_row: dict | None = None) -> str
     bot_name = (
         (bot_row.get("username") or bot_row.get("first_name") or "") if bot_row else ""
     )
-    now = datetime.now()
+    # Время ПОЛУЧАТЕЛЯ, а не сервера (сервер живёт в UTC): язык клиента
+    # Telegram приходит в самом апдейте.
+    from services import recipient_time
+    now = recipient_time.now_for(None, from_user.get("language_code"))
     return replace_placeholders(
         text,
         {

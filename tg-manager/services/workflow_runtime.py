@@ -49,6 +49,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 from services import automation_events as bus
+from services import recipient_time as _rtime
 
 log = logging.getLogger(__name__)
 
@@ -243,38 +244,20 @@ def goal_matches(goal_type: str | None, goal_value: str | None,
 # Часовой пояс человека Telegram не сообщает. Берём по порядку: поле
 # контакта `timezone` (сценарий может спросить), язык клиента Telegram
 # (ru — Москва, uk — Киев …), часовой пояс шага, Москва.
-_LANG_TZ = {
-    "ru": "Europe/Moscow", "uk": "Europe/Kyiv", "be": "Europe/Minsk",
-    "kk": "Asia/Almaty", "uz": "Asia/Tashkent", "ky": "Asia/Bishkek",
-    "hy": "Asia/Yerevan", "ka": "Asia/Tbilisi", "az": "Asia/Baku",
-    "tg": "Asia/Dushanbe", "pl": "Europe/Warsaw", "de": "Europe/Berlin",
-    "lv": "Europe/Riga", "lt": "Europe/Vilnius", "et": "Europe/Tallinn",
-}
-DEFAULT_TZ = "Europe/Moscow"
+# Правило «какой пояс у человека» — общее с подстановками {{DATE}}/{{TIME}}
+# во всех текстах ботов (services/recipient_time.py).
+_LANG_TZ = _rtime.LANG_TZ
+DEFAULT_TZ = _rtime.DEFAULT_TZ
 _HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
-def _zone(name: str | None):
-    if not name:
-        return None
-    try:
-        return ZoneInfo(str(name).strip())
-    except Exception:
-        return None
+_zone = _rtime.zone
 
 
 def contact_tz(fields: dict | None, language_code: str | None,
                step_tz: str | None = None) -> str:
     """IANA-зона человека для умной задержки. ЧИСТАЯ."""
-    own = (fields or {}).get("timezone")
-    if own and _zone(own):
-        return str(own).strip()
-    lang = (language_code or "").split("-")[0].strip().lower()
-    if lang in _LANG_TZ:
-        return _LANG_TZ[lang]
-    if step_tz and _zone(step_tz):
-        return step_tz
-    return DEFAULT_TZ
+    return _rtime.contact_tz(fields, language_code, step_tz)
 
 
 def next_window(now_utc: datetime, at: str, weekdays_only: bool,
@@ -351,7 +334,8 @@ def render(text: str, contact: dict | None, fields: dict, run_vars: dict) -> str
     first = c.get("first_name") or ""
     last = c.get("last_name") or ""
     uname = c.get("username") or ""
-    now = datetime.now()
+    # Время ПОЛУЧАТЕЛЯ, а не сервера (сервер живёт в UTC).
+    now = _rtime.now_for(fields, c.get("language_code"))
     values: dict[str, str] = {
         "FIRST_NAME": first,
         "LAST_NAME": last,
