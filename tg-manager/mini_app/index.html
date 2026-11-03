@@ -1733,28 +1733,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><div class="hdr-user" id="ch-cnt"></div></div>
   </div>
   <div class="sub-sb">
-    <!-- Массовые действия по каналам -->
+    <!-- Действия по каналам. Было шесть рядов кнопок (десять штук) над
+         списком, и сам список уезжал за экран. На виду — частое: публикация,
+         создание, выбор, администратор каналов. Редкое и служебное (импорт,
+         обновление данных, чистка чужих, удалённые) — в «⋯ Ещё». -->
     <div style="display:flex;gap:8px;padding:4px 0 6px">
-      <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 Публикация / рассылка</button>
+      <button class="btn btn-p" onclick="openMassPub()" style="flex:2 1 auto;font-size:13px;padding:10px 6px">📤 Публикация</button>
       <button class="btn btn-s" onclick="openChannelFactory()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🏭 Создать</button>
+      <button class="btn btn-s" onclick="chMoreActions()" style="flex:0 0 auto;font-size:13px;padding:10px 12px" aria-label="Ещё действия с каналами">⋯ Ещё</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
-      <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать каналы</button>
-      <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Найти каналы, где ваш аккаунт создатель/админ, и завести их сюда">📥 Импорт с аккаунтов</button>
-      <button class="btn btn-s" onclick="importAllResources('groups')" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Найти группы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт групп</button>
-    </div>
-    <div style="display:flex;gap:8px;padding:0 0 8px">
-      <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
-      <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🧹 Только мои (убрать чужие)</button>
-    </div>
-    <div style="display:flex;gap:8px;padding:0 0 8px">
-      <button class="btn btn-s" onclick="openRemovedChannels()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Каналы и чаты, которые вы удалили из системы, и те, что пропали в Telegram (удалены или аккаунт потерял доступ). Их не берёт ни импорт, ни работа">🗑 Удалённые и недоступные</button>
-    </div>
-    <!-- Вход к виртуальному администратору канала. Раньше «Правила редактора»
-         открывались ТОЛЬКО из экрана «Массовая публикация» — владелец, искавший
-         администратора каналов в разделе «Каналы», не находил его вовсе. -->
-    <div style="display:flex;gap:8px;padding:0 0 8px">
-      <button class="btn btn-s" onclick="openVaAdmin()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Свой администратор на каждый канал: сам изучает нишу, строит контент-план, пишет и публикует посты, следит за статистикой">🧠 Виртуальный администратор</button>
+      <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
+      <!-- Вход к виртуальному администратору канала: раньше «Правила редактора»
+           открывались ТОЛЬКО из «Массовой публикации», и в разделе «Каналы» его
+           не находили вовсе. -->
+      <button class="btn btn-s" onclick="openVaAdmin()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Свой администратор на каждый канал: сам изучает нишу, строит контент-план, пишет и публикует посты, следит за статистикой">🧠 Администратор</button>
       <button class="btn btn-s" onclick="openVaPosts()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Что реально опубликовал виртуальный администратор — с переходом к посту в канале">📝 Посты</button>
     </div>
     <!-- Поиск и срезы. Список рисовался целиком и без фильтров: после «Фабрики
@@ -12143,7 +12136,7 @@ function toggleChSelMode() {
   CH_SEL_MODE = !CH_SEL_MODE;
   CH_SEL.clear();
   const btn = document.getElementById('chSelToggle');
-  if (btn) btn.textContent = CH_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать каналы';
+  if (btn) btn.textContent = CH_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
   document.getElementById('chSelBar').style.display = CH_SEL_MODE ? '' : 'none';
   syncSelBarGap('chSelBar');
   renderChannels(CUR_CHANNELS);
@@ -26694,6 +26687,23 @@ async function importAllResources(kind) {
 
 // Переопределить «мою инфраструктуру»: сессии проверяют роль аккаунта в каждом
 // канале, чужие (только участник) удаляются из списка. Операция reclassify_channels.
+// «⋯ Ещё» на экране каналов: редкие и служебные действия. Подпись под каждым
+// объясняет, что именно случится, — раньше это жило во всплывающем title,
+// которого на телефоне не видно.
+async function chMoreActions() {
+  const v = await askChoice('Ещё по каналам', [
+    {value: 'imp_ch', label: '📥 Импорт каналов с аккаунтов', sub: 'Найти каналы, где ваш аккаунт создатель или админ, и завести их сюда'},
+    {value: 'imp_gr', label: '📥 Импорт групп', sub: 'Найти группы, где состоят ваши аккаунты, и завести их сюда'},
+    {value: 'refresh', label: '🔄 Обновить данные из Telegram', sub: 'Имя, ссылка и число участников. Ничего не удаляет'},
+    {value: 'mine', label: '🧹 Только мои (убрать чужие)', sub: 'Проверить роль аккаунта в каждом канале и убрать те, где он только подписчик'},
+    {value: 'removed', label: '🗑 Удалённые и недоступные', sub: 'Что вы удалили и что пропало в Telegram'},
+  ]);
+  if (v === 'imp_ch') return importAllResources('channels');
+  if (v === 'imp_gr') return importAllResources('groups');
+  if (v === 'refresh') return refreshChannelsMeta();
+  if (v === 'mine') return reclassifyChannels();
+  if (v === 'removed') return openRemovedChannels();
+}
 async function reclassifyChannels() {
   if (!await askConfirm('Проверить роль во всех каналах/группах и убрать чужие (где аккаунт только подписчик)?\n\nУдаляются лишь каналы, которые сессия подтвердила как чужие. Ваши (владелец/админ) останутся.')) return;
   try {
@@ -29419,7 +29429,9 @@ function askChoice(title, options) {
     bg.className = 'mbg show';
     bg.style.zIndex = '9999';
     const rows = options.map((o, i) =>
-      '<button class="btn btn-s _acr" data-i="' + i + '" style="width:100%;text-align:left;margin-bottom:6px">'
+      // display:block — у .btn строка-flex, и подпись вставала СБОКУ от
+      // названия, сжимая обе в узкие колонки.
+      '<button class="btn btn-s _acr" data-i="' + i + '" style="display:block;width:100%;text-align:left;margin-bottom:6px">'
       + esc(o.label || String(o.value))
       + (o.sub ? '<div style="font-size:11px;color:var(--hint);margin-top:2px">' + esc(o.sub) + '</div>' : '')
       + '</button>').join('');
