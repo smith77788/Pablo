@@ -18,7 +18,9 @@ def test_stats_tiles_are_clickable():
     body = js_function("openAdminStats")
     # Юзеры/Подписки → список пользователей; операции → экран операций
     assert "openAdminUsers()" in body, "плитки юзеров/подписок не кликабельны"
-    assert "openOps()" in body, "плитки операций не кликабельны"
+    # Плитки операций ведут в ПЛАТФОРМЕННЫЙ экран (openAdminOps): раньше —
+    # в собственную очередь админа, где картины платформы не было.
+    assert "openAdminOps()" in body, "плитки операций не кликабельны"
     assert "cursor:pointer" in body, "нет визуального признака кликабельности"
     # целевые функции реально существуют
     assert "function openAdminUsers(" in html

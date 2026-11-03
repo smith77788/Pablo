@@ -2605,6 +2605,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <div class="mgmt-tile-lbl">Рассылка</div>
           <div class="mgmt-tile-val"></div>
         </div>
+        <div class="mgmt-tile" onclick="openAdminOps()">
+          <div class="mgmt-tile-ico">⚙️</div>
+          <div class="mgmt-tile-lbl">Операции платформы</div>
+          <div class="mgmt-tile-val"></div>
+        </div>
+        <div class="mgmt-tile" onclick="openAdminActions()">
+          <div class="mgmt-tile-ico">📜</div>
+          <div class="mgmt-tile-lbl">Действия админов</div>
+          <div class="mgmt-tile-val"></div>
+        </div>
       </div>
     </div>
 
@@ -2629,6 +2639,20 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ ADMIN STATS ══════════════════════ -->
+<div class="screen" id="s-admin-ops">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">⚙️ Операции платформы</div>
+  </div>
+  <div class="sub-sb" id="adm-ops-body"></div>
+</div>
+<div class="screen" id="s-admin-actions">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">📜 Действия админов</div>
+  </div>
+  <div class="sub-sb" id="adm-actions-body"></div>
+</div>
 <div class="screen" id="s-admin-stats">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
@@ -29802,12 +29826,57 @@ async function openAdminStats() {
     html += tile('🤖', 'Боты', s.total_bots||0, '');
     html += tile('📡', 'Каналы', s.total_channels||0, '');
     html += tile('📱', 'Аккаунты', s.total_accounts||0, '');
-    html += tile('⚙️', 'Операции/день', s.ops_today||0, 'openOps()');
-    html += tile('⏳', 'В очереди', s.ops_pending||0, 'openOps()');
-    html += tile('🔄', 'Выполняется', s.ops_running||0, 'openOps()');
+    html += tile('⚙️', 'Операции/день', s.ops_today||0, 'openAdminOps()');
+    html += tile('⏳', 'В очереди', s.ops_pending||0, 'openAdminOps()');
+    html += tile('🔄', 'Выполняется', s.ops_running||0, 'openAdminOps()');
     html += '</div>';
     txt('adm-stats-body', html);
   } catch(e) { txt('adm-stats-body', errHtml(errRu(e))); }
+}
+
+// Операции ВСЕЙ платформы: что идёт, что валится и сколько длится, по типам
+// за 7 дней, плюс лента целей за сутки. Плитки статистики раньше вели в
+// собственную очередь админа — платформенной картины в мини-аппе не было.
+async function openAdminOps() {
+  push('s-admin-ops');
+  txt('adm-ops-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const [st, au] = await Promise.all([
+      api('/api/miniapp/admin/ops/stats'),
+      api('/api/miniapp/admin/audit').catch(() => ({audit: []})),
+    ]);
+    const rows = st.stats || [];
+    let html = '<div class="sec">По типам за 7 дней</div>';
+    html += rows.length ? '<div class="lst">' + rows.map(r => `<div class="row"><div class="row-body">
+        <div class="row-name">${esc(r.type_ru || opRu(r.op_type))}</div>
+        <div class="row-val">Всего ${num(r.total)} · готово ${num(r.done)} · ошибок ${num(r.failed)}${r.fail_pct?` (${r.fail_pct}%)`:''}${r.avg_duration_s!=null?' · в среднем '+esc(_opDuration(r.avg_duration_s)):''}</div>
+      </div>${r.fail_pct>=20?'<div class="row-right"><span class="badge b-rd">много ошибок</span></div>':''}</div>`).join('') + '</div>'
+      : empty('⚙️', 'За неделю операций не было');
+    const feed = au.audit || [];
+    html += '<div class="sec" style="margin-top:12px">Цели за сутки (последние 100)</div>';
+    html += feed.length ? '<div class="lst">' + feed.map(f => `<div class="row"><div class="row-body">
+        <div class="row-name">${esc(f.label || opRu(f.op_type))} · #${f.op_id} · владелец ${esc(String(f.owner_id))}</div>
+        <div class="row-val" style="white-space:normal">${esc(f.target||'')} ${f.message?'— '+esc(String(f.message).slice(0,140)):''}
+          <span class="badge ${String(f.status).toLowerCase()==='ok'?'b-gr':'b-rd'}">${esc(_opLogStRu(f.status))}</span></div>
+      </div></div>`).join('') + '</div>'
+      : empty('📋', 'За сутки целей не было');
+    txt('adm-ops-body', html);
+  } catch(e) { txt('adm-ops-body', errHtml(errRu(e), 'openAdminOps()')); }
+}
+let ADM_ACT_ROWS = [];
+async function openAdminActions(more) {
+  if (!more) { ADM_ACT_ROWS = []; push('s-admin-actions'); txt('adm-actions-body', '<div class="spin-wrap"><div class="spin"></div></div>'); }
+  try {
+    const d = await api('/api/miniapp/admin/actions?limit=100&offset=' + ADM_ACT_ROWS.length);
+    ADM_ACT_ROWS = ADM_ACT_ROWS.concat(d.actions || []);
+    const who = (id, un) => un ? '@' + esc(un) : esc(String(id || '—'));
+    const html = ADM_ACT_ROWS.length ? '<div class="lst">' + ADM_ACT_ROWS.map(a => `<div class="row"><div class="row-body">
+        <div class="row-name">${esc(a.action_ru || a.action)}</div>
+        <div class="row-val" style="white-space:normal">Кто: ${who(a.admin_id, a.admin_username)}${a.target_user_id?' · над: '+who(a.target_user_id, a.target_username):''} · ${a.created_at?new Date(a.created_at).toLocaleString('ru-RU'):''}</div>
+      </div></div>`).join('') + '</div>' + moreBtn(ADM_ACT_ROWS.length, d.total, 'openAdminActions(true)')
+      : empty('📜', 'Действий админов ещё не было');
+    txt('adm-actions-body', html);
+  } catch(e) { txt('adm-actions-body', errHtml(errRu(e), 'openAdminActions()')); }
 }
 
 async function openAdminUsers() {

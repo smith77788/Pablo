@@ -55,8 +55,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # `accounts/health`, `audience/analyze/{bot_id}`, `audience/segment/{bot_id}`.
 _KNOWN_DOORLESS = frozenset({
     "/api/miniapp/accounts/health",
-    "/api/miniapp/admin/audit",
-    "/api/miniapp/admin/ops/stats",
     "/api/miniapp/analytics/realtime",
     "/api/miniapp/audience/analyze/{bot_id}",
     "/api/miniapp/audience/segment/{bot_id}",

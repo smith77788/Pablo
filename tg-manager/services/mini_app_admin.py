@@ -24,6 +24,27 @@ from __future__ import annotations
 from aiohttp import web
 
 
+_ACTION_RU = {
+    "admin_session_granted": "вход в админку по секретной фразе",
+    "grant": "выдал подписку", "revoke": "отозвал подписку",
+    "ban": "заблокировал пользователя", "unban": "разблокировал пользователя",
+    "broadcast": "рассылка всем пользователям",
+}
+
+
+def _admin_action_ru(action: str | None) -> str:
+    """Действие админа словами: «bot:cmd:/backup» → «Команда бота: /backup»."""
+    a = str(action or "")
+    if a.startswith("bot:cmd:"):
+        return "Команда бота: " + a[len("bot:cmd:"):]
+    if a.startswith("bot:cb:"):
+        return "Кнопка админки в боте: " + a[len("bot:cb:"):]
+    for key, ru in _ACTION_RU.items():
+        if a == key or a.endswith(":" + key) or a.startswith(key + ":"):
+            return ru[:1].upper() + ru[1:]
+    return a or "—"
+
+
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать админские маршруты мини-аппа."""
     from services.mini_app_api import (
@@ -244,14 +265,60 @@ def setup_routes(app: web.Application, pool) -> None:
                    WHERE created_at > NOW() - INTERVAL '7 days'
                    GROUP BY op_type
                    ORDER BY total DESC""")
-            return _json_resp({"stats": [
-                {k: (round(float(v), 2) if k == "avg_duration_s" else int(v) if v is not None else 0) for k, v in dict(r).items()}
-                for r in rows
-            ]})
+            # Раньше здесь КАЖДОЕ поле строки приводилось к int, включая
+            # op_type («mass_invite») — ручка падала с 500 при любом вызове.
+            # Экрана у неё не было, и этого никто не видел.
+            from services.operation_bus import OP_REGISTRY
+            out = []
+            for r in rows:
+                total = int(r["total"] or 0)
+                failed = int(r["failed"] or 0)
+                out.append({
+                    "op_type": r["op_type"],
+                    "type_ru": (OP_REGISTRY.get(r["op_type"], {}) or {}).get("description") or r["op_type"],
+                    "total": total, "done": int(r["done"] or 0), "failed": failed,
+                    "fail_pct": round(100.0 * failed / total, 1) if total else 0.0,
+                    "avg_duration_s": (round(float(r["avg_duration_s"]), 1)
+                                       if r["avg_duration_s"] is not None else None),
+                })
+            return _json_resp({"stats": out})
         except Exception:
             log.exception("admin_ops_stats uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def admin_actions(request: web.Request) -> web.Response:
+        """Журнал действий админов (admin_audit_log): кто, что, над кем, когда.
+
+        В мини-аппе его не было вовсе — только командой бота /admin_log. А
+        именно его открывают, когда доступ мог утечь: что успели сделать.
+        """
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Раздел только для владельца платформы", 403)
+        try:
+            limit = max(1, min(int(request.query.get("limit", "100")), 500))
+            offset = max(0, int(request.query.get("offset", "0")))
+        except (TypeError, ValueError):
+            return _err("Неверные параметры страницы", 400)
+        try:
+            rows = await pool.fetch(
+                """SELECT l.id, l.admin_id, l.action, l.target_user_id, l.source, l.created_at,
+                          pa.username AS admin_username, pt.username AS target_username
+                   FROM admin_audit_log l
+                   LEFT JOIN platform_users pa ON pa.user_id = l.admin_id
+                   LEFT JOIN platform_users pt ON pt.user_id = l.target_user_id
+                   ORDER BY l.created_at DESC, l.id DESC LIMIT $1 OFFSET $2""", limit, offset)
+            total = await pool.fetchval("SELECT COUNT(*) FROM admin_audit_log")
+            return _json_resp({"actions": [
+                {**dict(r), "action_ru": _admin_action_ru(r["action"]),
+                 "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                for r in rows], "total": int(total or 0),
+                "has_more": offset + len(rows) < int(total or 0)})
+        except Exception:
+            log.exception("admin_actions uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    app.router.add_get("/api/miniapp/admin/actions", admin_actions)
     app.router.add_get("/api/miniapp/admin/users", admin_users)
     app.router.add_get("/api/miniapp/admin/stats", admin_stats)
     app.router.add_get("/api/miniapp/admin/user/{user_id}", admin_user_detail)
