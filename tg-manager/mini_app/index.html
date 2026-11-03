@@ -29068,6 +29068,42 @@ const OP_RU = {
   // Записи, которые есть только в журнале соответствия: их пишет не очередь, а
   // запуск жалоб и проверка контента.
   strike_legal_basis:'Правовое основание жалобы',
+  // Названия ниже взяты из серверного реестра (operation_bus.OP_REGISTRY):
+  // без них экран показывал владельцу внутреннее имя типа — «bulk_bot_profile».
+  // Полноту словаря держит tests/test_every_operation_type_has_a_russian_name.py.
+  ai_comment:'ИИ-комментирование',
+  bulk_bot_profile:'Массовое изменение профиля ботов',
+  bulk_bot_profile_rollback:'Откат массового изменения профиля ботов',
+  bulk_chan_exec:'Массовые действия с каналами',
+  channel_add:'Добавление канала под управление',
+  channel_import_all:'Импорт каналов со всех аккаунтов',
+  check_channel_rankings:'Замер позиций каналов/чатов в поиске по ключам',
+  community_add_channel:'Канал ноды-сообщества',
+  community_liven:'Оживление ноды флотом',
+  community_set_staff:'Роли ноды-сообщества',
+  connect_discovered_bots:'Подключение найденных на флоте ботов',
+  contacts_push:'Синхронизация контактов с устройства',
+  contacts_sync:'Синхронизация контактов аккаунтов',
+  create_channel:'Создание канала',
+  create_chatlist_folder:'Сборка общей папки и экспорт chatlist-ссылки',
+  create_group:'Создание группы',
+  deploy_network:'Развернуть связку',
+  enable_bot_to_bot:'Включение режима bot-to-bot у сети ботов',
+  gift_scan:'Сканирование подарков',
+  gift_transfer:'Передача Telegram-подарков',
+  global_presence_bot:'Глобальное присутствие — бот',
+  global_presence_channel:'Глобальное присутствие — каналы',
+  global_presence_full_package:'Глобальное присутствие — полный пакет',
+  global_presence_group:'Глобальное присутствие — группы',
+  global_presence_package:'Глобальное присутствие — пакет',
+  gp_bulk_apply:'Проект — пакетное применение оформления',
+  group_import_all:'Импорт групп со всех аккаунтов',
+  promote_presence_pack:'Назначение бота администратором Presence Pack',
+  read_all_dialogs:'Прочитать все диалоги',
+  reclassify_channels:'Переопределение моей инфраструктуры',
+  scan_owned_bots:'Поиск ботов на аккаунтах флота',
+  scan_owned_resources:'Сканирование собственных каналов/групп',
+  seed_presence_pack:'Посев постов в Presence Pack',
 };
 
 function opRu(v) {
