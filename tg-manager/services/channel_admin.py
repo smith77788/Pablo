@@ -2967,7 +2967,7 @@ async def events(pool, owner_id: int, channel_id: int, limit: int = 30) -> list[
              "at": r["created_at"].isoformat() if r["created_at"] else None} for r in rows or []]
 
 
-def ai_ready() -> tuple[bool, str]:
+def ai_ready(*, admin: bool = False) -> tuple[bool, str]:
     """Готов ли ИИ писать посты. Возвращает (готов, причина-по-русски если нет).
 
     Без ИИ администратор технически «включён», проходит настройку по названию
@@ -2988,16 +2988,13 @@ def ai_ready() -> tuple[bool, str]:
             return True, ""
     except Exception:
         log.debug("ai_ready: проверка провайдеров не удалась", exc_info=True)
-    return False, (
-        "ИИ не подключён — без него администратор не может писать посты. "
-        "Каналы настроятся, но публикаций не будет. Подключите ИИ "
-        "(ключ Anthropic или один из провайдеров: OpenRouter, Groq, Gemini) — "
-        "после этого администратор начнёт вести каналы сам. "
-        "Ключ вводится в боте: команда /admin → «🤖 AI-ключи (провайдеры)»."
-    )
+    from services.ai_providers import ai_missing_hint
+    return False, ai_missing_hint(
+        "без него администратор каналов не может писать посты — каналы "
+        "настроятся, но публикаций не будет", admin=admin)
 
 
-async def network_overview(pool, owner_id: int) -> dict:
+async def network_overview(pool, owner_id: int, *, admin: bool = False) -> dict:
     """Сводка по ВСЕЙ сети каналов под управлением — взгляд руководителя.
 
     Экран администратора показывает каналы по одному; владельцу сотни каналов
@@ -3010,7 +3007,7 @@ async def network_overview(pool, owner_id: int) -> dict:
 
     Fail-soft: любой сбой среза деградирует в ноль/пусто, экран открывается.
     """
-    _ai_ok, _ai_note = ai_ready()
+    _ai_ok, _ai_note = ai_ready(admin=admin)
     out = {
         "channels_total": 0, "admins_installed": 0, "admins_active": 0,
         "review_mode": 0, "posts_7d": 0, "avg_views_7d": 0, "members_total": 0,

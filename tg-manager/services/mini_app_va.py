@@ -24,7 +24,7 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты виртуального администратора канала."""
     from services.mini_app_api import (
-        _err, _get_uid, _json_resp, log, va_post_link,
+        _err, _get_uid, _is_admin, _json_resp, log, va_post_link,
     )
 
     def _va_cid(request: web.Request) -> int | None:
@@ -62,7 +62,7 @@ def setup_routes(app: web.Application, pool) -> None:
             else:
                 items = {"channels": await _ca.list_channels(pool, uid)}
             drafts = await _ca.list_drafts(pool, uid) if include_summary else []
-            network = await _ca.network_overview(pool, uid) if include_summary else None
+            network = await _ca.network_overview(pool, uid, admin=_is_admin(uid)) if include_summary else None
             if network is not None:
                 try:
                     from services import va_control

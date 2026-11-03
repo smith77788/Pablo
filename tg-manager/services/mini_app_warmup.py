@@ -587,9 +587,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 from services.ai_providers import configured_providers
 
                 if not (ai_claude.enabled() or configured_providers()):
-                    hint = ("Не задан ни один ключ ИИ: флот вступает в чат, но "
-                            "писать ему нечем. Задайте ключ (Claude или Groq) в "
-                            "админ-меню «Ключи ИИ».")
+                    from services.ai_providers import ai_missing_hint
+                    from services.mini_app_api import _is_admin
+                    hint = ai_missing_hint("флот вступает в чат, но писать ему нечем",
+                                           admin=_is_admin(uid))
             except Exception:
                 log.debug("chatwarmup_detail: статус ИИ недоступен", exc_info=True)
 

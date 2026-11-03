@@ -65,6 +65,25 @@ def _provider(
     return AiProvider(name=name, api_key=api_key, base_url=base_url, models=models)
 
 
+def ai_missing_hint(what: str, *, admin: bool) -> str:
+    """Что сказать, когда ИИ не подключён, — по роли того, кто читает.
+
+    Ключи ИИ платформенные: их задаёт администратор платформы (/admin в боте).
+    Владельцу совет «введите ключ в /admin» — тупик: такого меню у него нет,
+    и он ищет то, чего не найдёт. Поэтому владелец читает, ЧЬЯ это настройка, а
+    администратор — где именно она лежит. ``what`` — что именно не работает
+    без ИИ, одной фразой («флот вступает в чат, но писать ему нечем»).
+    """
+    what = (what or "").strip().rstrip(".")
+    if admin:
+        return (f"Не задан ни один ключ ИИ: {what}. Задайте ключ Anthropic или "
+                "провайдера (OpenRouter, Groq, Gemini) в боте: /admin → "
+                "«🤖 AI-ключи (провайдеры)».")
+    return (f"ИИ на платформе сейчас не подключён: {what}. Ключи ИИ задаёт "
+            "администратор платформы, с вашей стороны настраивать нечего — "
+            "сообщите ему. Как только ИИ подключат, всё заработает само.")
+
+
 def configured_providers() -> list[AiProvider]:
     """Return providers in configured failover order."""
     providers: dict[str, AiProvider] = {}

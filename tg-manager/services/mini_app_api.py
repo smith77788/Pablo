@@ -3557,8 +3557,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 from services.chat_warmup import GROQ_WARMUP_MODEL
             except Exception:
                 GROQ_WARMUP_MODEL = "llama-3.3-70b-versatile"
+            from services.ai_providers import ai_missing_hint
+            configured = bool(provs) or claude_on
             return _json_resp({
-                "configured": bool(provs) or claude_on,
+                "configured": configured,
+                # Подсказка по роли: владельцу — чья это настройка, админу —
+                # где она лежит. Пустая, когда ИИ подключён.
+                "hint": "" if configured else ai_missing_hint(
+                    "ответы и тексты, которые пишет ИИ, не будут работать",
+                    admin=_is_admin(uid)),
                 "claude": claude_on,
                 "warmup_groq_model": GROQ_WARMUP_MODEL,
                 "providers": [{"name": p.name, "model": (p.models[0] if p.models else None)}

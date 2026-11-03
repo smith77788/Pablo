@@ -38,8 +38,12 @@ def test_ai_banner_says_where_to_enter_key(monkeypatch):
     from services import channel_admin as ca
     monkeypatch.setattr(ai_claude, "enabled", lambda: False)
     monkeypatch.setattr(ai_providers, "configured_providers", list)
-    ok, note = ca.ai_ready()
+    ok, note = ca.ai_ready(admin=True)
     assert not ok and "/admin" in note and "AI-ключи" in note
+    # Владельцу, у которого /admin нет, плашка говорит, ЧЬЯ это настройка, а
+    # не отправляет в меню, которого он не найдёт.
+    ok, note = ca.ai_ready()
+    assert not ok and "/admin" not in note and "администратор платформы" in note
 
 
 def _va():
