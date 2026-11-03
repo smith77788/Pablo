@@ -108,6 +108,33 @@ def _as_dict(raw) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def keyword_hit(keywords: str, text: str) -> bool:
+    """Есть ли в тексте одно из слов триггера (через запятую). ЧИСТАЯ.
+
+    Слово ищется ЦЕЛИКОМ, без учёта регистра и «ё/е»: раньше это был поиск
+    подстроки, и триггер «да» запускал сценарий на «когда», «нет» — на
+    «интернет», «цена» — на «оценка». Фраза из нескольких слов ищется как
+    фраза. Звёздочка в конце — «начинается с»: «скидк*» ловит «скидка»,
+    «скидки», «скидку» (у русских слов окончания меняются).
+    """
+    def _norm(s: str) -> str:
+        return s.lower().replace("ё", "е")
+
+    hay = _norm(text or "")
+    if not hay:
+        return False
+    for raw in (keywords or "").split(","):
+        word = _norm(raw.strip())
+        prefix = word.endswith("*")
+        word = word.rstrip("*").strip()
+        if not word:
+            continue
+        pat = r"(?<!\w)" + re.escape(word) + (r"" if prefix else r"(?!\w)")
+        if re.search(pat, hay):
+            return True
+    return False
+
+
 def trigger_matches(wf: dict, event: dict) -> bool:
     """Подходит ли событие под триггер сценария. ЧИСТАЯ.
 
@@ -131,9 +158,7 @@ def trigger_matches(wf: dict, event: dict) -> bool:
     if ttype == "keyword":
         if etype != "message.received" or not value:
             return False
-        text = (data.get("text") or "").lower()
-        words = [w.strip().lower() for w in value.split(",") if w.strip()]
-        return any(w in text for w in words)
+        return keyword_hit(value, data.get("text") or "")
     if ttype == "tag_added":
         if etype != "contact.tag_added" or not value:
             return False
