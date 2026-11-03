@@ -15908,7 +15908,7 @@ function renderAutoregProList(items) {
         <div class="li-name">${esc(name)}</div>
         <div class="li-sub">${esc(phone)} · ${date}</div>
       </div>
-      <span class="badge ${sc}">${status}</span>
+      <span class="badge ${sc}">${esc(accRu(status))}</span>
     </div>`;
   }).join('');
 }
@@ -15925,7 +15925,7 @@ function renderAutoregProHistory(items) {
         <div class="li-name">${esc(a.phone||a.first_name||'—')}</div>
         <div class="li-sub">${date}</div>
       </div>
-      <span class="badge ${sc}">${status}</span>
+      <span class="badge ${sc}">${esc(accRu(status))}</span>
     </div>`;
   }).join('');
 }
