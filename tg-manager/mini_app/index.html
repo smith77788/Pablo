@@ -143,6 +143,14 @@
     return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   }
   function contrast(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  // Дотягивает цвет до нужного контраста с фоном, подмешивая цвет текста.
+  // Нужно для подписей: у Telegram на iOS подсказка #8e8e93 на сером фоне
+  // экрана даёт 2,9:1 — заголовки разделов и пустые состояния почти исчезали.
+  function ensure(c, bg, min, to) {
+    var out = c;
+    for (var t = 0.05; t <= 0.7 && contrast(out, bg) < min; t += 0.05) out = mix(c, to, t);
+    return out;
+  }
   function rgba(h, a) { var c = rgb(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
 
   function scheme() {
@@ -170,12 +178,14 @@
     st.setProperty('--bg3', card2);
     st.setProperty('--text', txt);
     var hint = hex(tp.hint_color) || hex(tp.subtitle_text_color);
-    if (hint && contrast(hint, card) >= 3) {
+    if (hint) {
+      hint = ensure(hint, page, 3.8, txt);
       st.setProperty('--hint', hint);
       st.setProperty('--hint-strong', mix(hint, txt, 0.35));
     }
     var acc = hex(tp.accent_text_color) || hex(tp.link_color) || hex(tp.button_color);
-    if (acc && contrast(acc, card) >= 2.6) {
+    if (acc) acc = ensure(acc, page, 3, txt);
+    if (acc && contrast(acc, card) >= 3) {
       st.setProperty('--accent', acc);
       st.setProperty('--accent-rgb', rgb(acc).join(','));
       st.setProperty('--accent-2', mix(acc, '#000000', 0.14));
@@ -187,7 +197,8 @@
       st.setProperty('--btn-text', btnTxt);
     }
     var red = hex(tp.destructive_text_color);
-    if (red && contrast(red, card) >= 2.6) st.setProperty('--red', red);
+    // Красный стоит и на красной подложке кнопок удаления — запас нужен больше.
+    if (red) st.setProperty('--red', ensure(red, card, 4.2, txt));
     st.setProperty('--glass', rgba(hex(tp.header_bg_color) || card, 0.88));
     st.setProperty('--bg-select', rgba(card, 0.98));
     st.setProperty('--toast-bg', rgba(sc === 'dark' ? card2 : card, 0.97));
@@ -272,7 +283,7 @@
   --glass:rgba(23,33,43,.88);--glass-border:rgba(var(--fg-rgb),.06);
   --toast-bg:rgba(32,43,54,.97);
   --bubble-in:var(--bg3);--bubble-out:#2b5278;
-  --overlay:rgba(0,0,0,.5);
+  --overlay:rgba(0,0,0,.5);--overlay-modal:rgba(0,0,0,.6);
   /* Псевдонимы: в разметке встречаются имена, которых в палитре не было, и
      побеждало запасное значение — цвет уходил мимо палитры. */
   --card:var(--bg2);--card-2:var(--bg-yellow-16);--line:var(--border);
@@ -313,9 +324,9 @@
   --glass:rgba(var(--fg-rgb),.88);--glass-border:rgba(var(--fg-rgb),.08);
   --toast-bg:rgba(var(--fg-rgb),.98);
   --bubble-in:#f1f1f4;--bubble-out:#e1f4cf;
-  --overlay:rgba(0,0,0,.35);
+  --overlay:rgba(0,0,0,.35);--overlay-modal:rgba(0,0,0,.4);
   --bg-blue-16:rgba(36,129,204,.10);--bg-green-16:rgba(46,158,79,.10);--bg-purple-16:rgba(142,92,217,.10);--bg-yellow-16:rgba(224,138,0,.11);--bg-red-16:rgba(229,57,53,.09);--bg-violet-16:rgba(120,98,214,.10);--bg-red-18:rgba(229,57,53,.12);
-  --green:#2e9e4f;--orange:#c26b00;--purple:#8e5cd9;--red:#e53935;--blue:#2481cc;--teal:#1a9a90;--purple-light:#7862d6;
+  --green:#2e9e4f;--orange:#c26b00;--purple:#8e5cd9;--red:#e53935;--blue:#2481cc;--teal:#12857c;--purple-light:#7862d6;
   --c-teal:#1aa39b;--c-blue:#2481cc;--c-violet:#7862d6;--c-amber:#d38b00;
   --c-rose:#e0577a;--c-emerald:#2e9e4f;--c-cyan:#1592b8;--c-indigo:#5b63d3;--c-pink:#c94f9e;
 }
@@ -412,7 +423,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* То же для коротких текстовых ссылок-действий: высота строки 14–15px мала
    для пальца, поднимаем до 34px, не меняя размер шрифта. */
 .link-tap{display:inline-flex;align-items:center;min-height:34px;cursor:pointer}
-#navOverlay{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;visibility:hidden;transition:opacity .2s;z-index:120}
+#navOverlay{position:fixed;inset:0;background:var(--overlay);opacity:0;visibility:hidden;transition:opacity .2s;z-index:120}
 #navOverlay.on{opacity:1;visibility:visible}
 #navDrawer{position:fixed;top:0;left:0;bottom:0;width:80%;max-width:320px;background:var(--bg);border-right:1px solid var(--sep);transform:translateX(-102%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:121;display:flex;flex-direction:column;box-shadow:2px 0 20px rgba(0,0,0,.35)}
 #navDrawer.on{transform:translateX(0)}
@@ -641,7 +652,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 
 /* ─── Toggle ─────────────────────────────────────────────────── */
 .toggle{width:42px;height:24px;border-radius:12px;cursor:pointer;position:relative;flex-shrink:0;transition:background .25s var(--ease)}
-.toggle.on{background:linear-gradient(135deg,var(--accent),var(--accent-3))}
+.toggle.on{background:var(--btn-solid)}
 .toggle.off{background:rgba(107,125,148,.3)}
 .toggle::after{content:'';position:absolute;top:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .25s var(--spring);box-shadow:0 1px 4px rgba(0,0,0,.3)}
 .toggle.on::after{left:20px}
@@ -700,7 +711,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 #opDone .od-x{position:absolute;top:2px;right:6px;color:var(--hint);font-size:16px;cursor:pointer;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center}
 
 /* ─── Modal ──────────────────────────────────────────────────── */
-.mbg{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;display:none;align-items:flex-end}
+.mbg{position:fixed;inset:0;background:var(--overlay-modal);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;display:none;align-items:flex-end}
 .mbg.show{display:flex;animation:mbin .25s var(--ease)}
 @keyframes mbin{from{opacity:0}to{opacity:1}}
 .modal{background:var(--bg2);border-radius:var(--radius-xl) var(--radius-xl) 0 0;padding:20px 16px calc(var(--safe-b) + 20px);width:100%;max-height:85vh;overflow-y:auto;animation:min .3s var(--spring);position:relative;box-shadow:0 -8px 40px rgba(0,0,0,.4)}
@@ -904,7 +915,7 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .seg:has(> :nth-child(5)) > .seg-opt{flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;line-height:20px;max-width:100%;padding-left:10px;padding-right:10px}
 .seg-opt.on{background:var(--accent-soft-2);color:var(--accent);font-weight:600}
 .seg-btn{flex:1;padding:7px 10px;text-align:center;font-size:13px;font-weight:600;color:var(--hint);cursor:pointer;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg2);transition:all .2s var(--ease)}
-.seg-btn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);border-color:transparent;box-shadow:0 2px 10px rgba(var(--accent-rgb),.25)}
+.seg-btn.on{background:var(--btn-solid);color:var(--btn-text);border-color:transparent;box-shadow:0 2px 10px rgba(var(--accent-rgb),.25)}
 .mini-btn{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:8px 12px;font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:none;border-radius:var(--radius);cursor:pointer;white-space:nowrap;transition:opacity .12s}
 .mini-btn:active{opacity:.7}
 .kpi-mini{flex:1;background:var(--bg2);border-radius:var(--radius);padding:9px;text-align:center;border:1px solid var(--border)}
@@ -1213,7 +1224,7 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .copilot-reason{font-size:12px;color:var(--hint);line-height:1.35;margin-bottom:5px}
 .copilot-cta{font-size:12px;font-weight:600;color:var(--accent)}
 .copilot-actions{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
-.copilot-apply{background:var(--accent);color:var(--btn-text);border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;transition:transform .1s,opacity .12s}
+.copilot-apply{background:var(--btn-solid);color:var(--btn-text);border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;transition:transform .1s,opacity .12s}
 .copilot-apply:active{transform:scale(.95)}
 .copilot-apply:disabled{opacity:.6}
 /* Пресеты в формах ввода (шаблоны в один тап) */
@@ -1243,6 +1254,13 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
    теме выглядел как царапина. */
 :root[data-theme="light"] .btn-p{box-shadow:0 1px 3px rgba(16,24,40,.12)}
 :root[data-theme="light"] .btn-p:active{box-shadow:none}
+/* На светлой теме всплывающие слои отделяются от фона тенью, а не тёмной
+   подложкой: тост, плашка итога операции, нижний лист и боковое меню. */
+:root[data-theme="light"] #toast,:root[data-theme="light"] #opDone{box-shadow:var(--shadow-lg)}
+:root[data-theme="light"] .modal{box-shadow:0 -6px 28px rgba(16,24,40,.14)}
+:root[data-theme="light"] #navDrawer{box-shadow:2px 0 18px rgba(16,24,40,.12)}
+/* Переключатель «выкл» на белом: серый Telegram вместо полупрозрачного. */
+:root[data-theme="light"] .toggle.off{background:#e1e3e8}
 .btn-p{background:var(--btn);color:var(--btn-text);font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.12);border:none}
 .btn-p:active{transform:translateY(1px) scale(.98);box-shadow:0 1px 5px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.08)}
 .btn-s{background:var(--bg3);color:var(--text);border:1px solid var(--border-strong)}
@@ -1815,7 +1833,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ХРАНИЛИЩЕ (Echo Vault) ══════════════════════ -->
 <style>
 .vfilter{flex:0 0 auto;font-size:12px;padding:8px 12px;border-radius:14px;background:var(--bg2);color:var(--hint);border:1px solid var(--sep);cursor:pointer;white-space:nowrap}
-.vfilter.on{background:var(--accent);color:var(--btn-text);border-color:var(--accent)}
+.vfilter.on{background:var(--btn-solid);color:var(--btn-text);border-color:var(--btn-solid)}
 </style>
 <div class="screen" id="s-vault">
   <div class="hdr">
@@ -9850,7 +9868,7 @@ async function cwLoadAccounts(){
     // занят другими делами, и отмечать такие аккаунты вслепую означало сессию,
     // которая молчит. Занятый отмечать можно — он освободится, — но знать об
     // этом владелец должен заранее.
-    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" title="${a.busy?esc(a.reason):'свободен'}" style="font-size:11px;padding:5px 10px;min-height:32px;display:inline-flex;align-items:center;border-radius:14px;background:rgba(var(--fg-rgb),.06);color:${a.busy?'var(--hint)':'#fff'};cursor:pointer;border:1px solid transparent">${a.busy?'⏳ ':''}${esc(a.label)}</span>`).join('');
+    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" title="${a.busy?esc(a.reason):'свободен'}" style="font-size:11px;padding:5px 10px;min-height:32px;display:inline-flex;align-items:center;border-radius:14px;background:rgba(var(--fg-rgb),.06);color:${a.busy?'var(--hint)':'var(--text)'};cursor:pointer;border:1px solid transparent">${a.busy?'⏳ ':''}${esc(a.label)}</span>`).join('');
     const hint=document.getElementById('cwAccsHint');
     if(hint) hint.textContent=(r.free!=null&&r.cap)
       ? `Свободны сейчас: ${r.free} из ${CW_ACC_ALL.length} · в один чат беру не больше ${r.cap}, свободных в первую очередь`
@@ -11666,7 +11684,7 @@ async function reloadAccountChat() {
       const text = m.text ? `<div style="white-space:pre-wrap;word-break:break-word">${esc(m.text)}</div>` : '';
       const time = m.date ? new Date(m.date).toLocaleString('ru-RU') : '';
       return `<div style="display:flex;${out?'justify-content:flex-end':''};margin-bottom:8px">
-        <div style="max-width:82%;padding:8px 12px;border-radius:14px;font-size:14px;${out?'background:var(--accent);color:var(--text);border-bottom-right-radius:4px':'background:var(--sep);color:var(--text);border-bottom-left-radius:4px'}">
+        <div style="max-width:82%;padding:8px 12px;border-radius:14px;font-size:14px;${out?'background:var(--bubble-out);color:var(--text);border-bottom-right-radius:4px':'background:var(--bubble-in);color:var(--text);border-bottom-left-radius:4px'}">
           ${media}${text}<div style="font-size:10px;opacity:.5;margin-top:3px;text-align:right">${time}</div>
         </div></div>`;
     }).join('');
@@ -18160,7 +18178,7 @@ function vaultBubble(m) {
   const marks = [m.edited?'✏️ изменено':'', m.deleted?'🗑 удалено':''].filter(Boolean).join(' · ');
   const markHtml = marks ? `<div style="font-size:10px;color:${m.deleted?'var(--red)':'var(--hint)'};margin-top:2px">${marks}</div>` : '';
   return `<div style="display:flex;${out?'justify-content:flex-end':''}">
-    <div style="max-width:82%;padding:8px 12px;border-radius:14px;font-size:14px;${out?'background:var(--accent);color:var(--text);border-bottom-right-radius:4px':'background:var(--sep);color:var(--text);border-bottom-left-radius:4px'}">
+    <div style="max-width:82%;padding:8px 12px;border-radius:14px;font-size:14px;${out?'background:var(--bubble-out);color:var(--text);border-bottom-right-radius:4px':'background:var(--bubble-in);color:var(--text);border-bottom-left-radius:4px'}">
       ${media}${text||(m.media_label?'':'<i style="opacity:.5">пустое</i>')}${markHtml}
       <div style="font-size:10px;opacity:.5;margin-top:3px;text-align:right">${time}</div>
     </div></div>`;
@@ -19439,7 +19457,7 @@ async function openContactCRM(id) {
     const stageLabels = {'lead':'Лид','contact':'Контакт','proposal':'Предложение','negotiation':'Переговоры','won':'Выиграно','lost':'Проиграно'};
     let html = `<div style="padding:12px 16px">
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-        ${Object.entries(stageLabels).map(([k,v])=>`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;${crm.stage===k?'background:var(--accent);color:var(--text)':''}" onclick="setCrmStage('${id}','${k}')">${v}</button>`).join('')}
+        ${Object.entries(stageLabels).map(([k,v])=>`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;${crm.stage===k?'background:var(--btn-solid);color:var(--btn-text);border-color:var(--btn-solid)':''}" onclick="setCrmStage('${id}','${k}')">${v}</button>`).join('')}
       </div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки ($)</label><input id="crm-value" type="number" value="${crm.deal_value||0}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
@@ -21033,7 +21051,7 @@ function appendAiMsg(role, text) {
   const chat = document.getElementById('aiChat');
   const isUser = role === 'user';
   chat.innerHTML += `<div style="margin-bottom:12px;display:flex;${isUser?'justify-content:flex-end':''}">
-    <div style="max-width:85%;padding:10px 14px;border-radius:14px;font-size:14px;${isUser?'background:var(--accent);color:var(--text);border-bottom-right-radius:4px':'background:var(--sep);color:var(--text);border-bottom-left-radius:4px'}">
+    <div style="max-width:85%;padding:10px 14px;border-radius:14px;font-size:14px;${isUser?'background:var(--bubble-out);color:var(--text);border-bottom-right-radius:4px':'background:var(--bubble-in);color:var(--text);border-bottom-left-radius:4px'}">
       <div style="white-space:pre-wrap">${esc(text)}</div>
     </div>
   </div>`;

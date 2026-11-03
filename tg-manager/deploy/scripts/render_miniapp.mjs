@@ -641,6 +641,30 @@ if (sweepMode) {
     if (process.env.MINIAPP_SHOT_DIR) {
       await page.screenshot({ path: path.join(process.env.MINIAPP_SHOT_DIR, `miniapp_${fn}.png`) });
     }
+    // MINIAPP_CONTRAST=1 — нечитаемый текст: контраст цвета текста с его
+    // настоящим фоном (первый непрозрачный фон вверх по дереву) ниже 3:1.
+    // Нужен, чтобы проверять ОБЕ темы: цвет, прописанный под тёмный фон, на
+    // светлой теме почти исчезает, а снимок уменьшенным этого не покажет.
+    if (process.env.MINIAPP_CONTRAST) {
+      const low = await page.evaluate(() => {
+        const P = (c) => { const m = String(c).match(/rgba?\(([^)]+)\)/); if (!m) return null; const v = m[1].split(',').map(Number); return { r: v[0], g: v[1], b: v[2], a: v.length > 3 ? v[3] : 1 }; };
+        const L = (c) => { const f = (x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+        const over = (top, bot) => ({ r: top.r * top.a + bot.r * (1 - top.a), g: top.g * top.a + bot.g * (1 - top.a), b: top.b * top.a + bot.b * (1 - top.a), a: 1 });
+        const bgOf = (el) => { const st = []; for (let e = el; e; e = e.parentElement) { const cs = getComputedStyle(e); if (cs.backgroundImage && cs.backgroundImage !== 'none' && !cs.backgroundImage.startsWith('radial')) return null; const c = P(cs.backgroundColor); if (c && c.a > 0) { st.push(c); if (c.a >= 0.99) break; } } let base = P(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 }; for (let i = st.length - 1; i >= 0; i--) base = over(st[i], base); return base; };
+        const scr = document.querySelector('.screen.show'); if (!scr) return [];
+        const out = [];
+        for (const el of scr.querySelectorAll('*')) {
+          if (!el.childNodes.length || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim().length > 1)) continue;
+          const r = el.getBoundingClientRect(); if (!r.width || !r.height || r.bottom < 0 || r.top > innerHeight) continue;
+          const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || +cs.opacity < 0.3) continue;
+          const fg = P(cs.color), bg = bgOf(el); if (!fg || !bg) continue;
+          const f = over(fg, bg); const a = L(f), b = L(bg); const k = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+          if (k < 3) out.push(k.toFixed(2) + ' ' + el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : '') + ' «' + el.textContent.trim().slice(0, 30) + '» ' + cs.color + ' на ' + `rgb(${bg.r|0},${bg.g|0},${bg.b|0})`);
+        }
+        return out.slice(0, 6);
+      });
+      if (low.length) console.log('  КОНТРАСТ ' + fn + ' | ' + low.join(' ; '));
+    }
     const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
     // В упоре прокрутки — и только там — имеет смысл спрашивать, не закрыт ли
     // хвост списка полосой, прибитой к низу окна.

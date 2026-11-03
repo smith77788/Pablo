@@ -52,7 +52,7 @@ function _udRenderTabs() {
     const on = t.key === _udTabCur;
     return `<span onclick="_udTab('${t.key}')" style="white-space:nowrap;cursor:pointer;` +
       `padding:7px 13px;border-radius:20px;font-size:13px;font-weight:600;` +
-      (on ? 'background:var(--accent);color:var(--btn-text)'
+      (on ? 'background:var(--btn-solid);color:var(--btn-text)'
           : 'background:rgba(128,128,128,.15);color:var(--hint)') +
       `">${esc(t.label)}</span>`;
   }).join('');

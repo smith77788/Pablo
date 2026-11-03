@@ -1015,7 +1015,7 @@ function _spChatRender() {
     const mine = m.role === 'user';
     return '<div style="display:flex;justify-content:' + (mine ? 'flex-end' : 'flex-start') + ';margin:4px 0">' +
       '<div style="max-width:80%;padding:7px 10px;border-radius:12px;white-space:pre-wrap;' +
-      'background:' + (mine ? 'var(--accent)' : 'var(--bg)') + ';color:' + (mine ? 'var(--btn-text)' : 'var(--fg)') + '">' +
+      'background:' + (mine ? 'var(--btn-solid)' : 'var(--bg)') + ';color:' + (mine ? 'var(--btn-text)' : 'var(--fg)') + '">' +
       esc(m.content) + '</div></div>';
   }).join('');
   log.scrollTop = log.scrollHeight;
