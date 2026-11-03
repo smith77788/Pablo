@@ -62,7 +62,7 @@ async def cb_approval_confirm(
     from bot.callbacks import BmCb
 
     _kb = InlineKeyboardBuilder()
-    _kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    _kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     _kb.adjust(1)
     if op:
         await callback.message.edit_text(
@@ -110,7 +110,7 @@ async def cb_approval_cancel(
     from bot.callbacks import BmCb
 
     _kb = InlineKeyboardBuilder()
-    _kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    _kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     _kb.adjust(1)
     await callback.message.edit_text(
         f"❌ <b>Операция #{op_id} отменена.</b>",

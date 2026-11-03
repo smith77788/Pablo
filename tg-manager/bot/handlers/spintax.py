@@ -72,7 +72,7 @@ def _menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="✍️ Новый спин из текста", callback_data=SpinCb(action="new"))
     kb.button(text="🔀 Раскрыть шаблон", callback_data=SpinCb(action="expand"))
-    kb.button(text="🏠 Меню", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     return kb
 
@@ -81,7 +81,7 @@ def _result_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="🔁 Ещё генерация", callback_data=SpinCb(action="reroll"))
     kb.button(text="✍️ Новый текст", callback_data=SpinCb(action="new"))
-    kb.button(text="🏠 Меню", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1, 2)
     return kb
 

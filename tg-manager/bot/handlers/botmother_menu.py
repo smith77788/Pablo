@@ -234,7 +234,7 @@ def _tools_kb():
     kb.button(text="📊 Аналитика", callback_data=BmCb(action="analytics"))
     kb.button(text="🛡️ Мониторинг & Защита", callback_data=BmCb(action="monitoring"))
     kb.button(text="🚀 Рост & Продвижение", callback_data=BmCb(action="growth"))
-    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
@@ -305,7 +305,7 @@ def _section_kb(key: str, plan: str = "free"):
     for text, cb in btns:
         kb.button(text=text, callback_data=cb)
     rows += [2] * (len(btns) // 2) + ([1] if len(btns) % 2 else [])
-    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     rows.append(1)
     kb.adjust(*rows)
     return kb.as_markup()
@@ -656,7 +656,7 @@ async def cb_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if _app_button(kb, "🌐 Открыть итоги в приложении", "summary"):
         rows.append(1)
     kb.button(text="🔄 Обновить", callback_data=BmCb(action="summary"))
-    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     rows.append(2)
     kb.adjust(*rows)
     await _edit(callback, text, kb.as_markup())

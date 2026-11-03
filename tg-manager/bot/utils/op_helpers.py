@@ -183,10 +183,10 @@ def terminal_kb(*, back: object | None = None, back_text: str = "◀️ Наза
     kb = InlineKeyboardBuilder()
     if back is not None:
         kb.button(text=back_text, callback_data=back)
-        kb.button(text="🏠 В меню", callback_data=BmCb(action="main"))
+        kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
         kb.adjust(2)
     else:
-        kb.button(text="🏠 В меню", callback_data=BmCb(action="main"))
+        kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
         kb.adjust(1)
     return kb.as_markup()
 
@@ -205,6 +205,6 @@ def retry_kb(retry_cb: object, *, retry_text: str = "🔄 Попробовать
     kb.button(text=retry_text, callback_data=retry_cb)
     if back is not None:
         kb.button(text="◀️ Назад", callback_data=back)
-    kb.button(text="🏠 В меню", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     return kb.as_markup()

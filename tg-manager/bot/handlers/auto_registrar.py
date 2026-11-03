@@ -707,7 +707,7 @@ async def _wait_and_confirm(
             parse_mode="HTML",
             reply_markup=InlineKeyboardBuilder()
             .button(text="➕ Ещё один", callback_data=AutoRegCb(action="pick_country", sub="single"))
-            .button(text="◀️ Главное", callback_data=AutoRegCb(action="menu"))
+            .button(text="◀️ Меню авторега", callback_data=AutoRegCb(action="menu"))
             .adjust(1).as_markup(),
         )
     except Exception:
@@ -782,7 +782,7 @@ async def msg_autoreg_enter_2fa(msg: Message, state: FSMContext, pool: asyncpg.P
         parse_mode="HTML",
         reply_markup=InlineKeyboardBuilder()
         .button(text="➕ Ещё один", callback_data=AutoRegCb(action="pick_country", sub="single"))
-        .button(text="◀️ Главное", callback_data=AutoRegCb(action="menu"))
+        .button(text="◀️ Меню авторега", callback_data=AutoRegCb(action="menu"))
         .adjust(1).as_markup(),
     )
 
@@ -941,7 +941,7 @@ async def _do_batch_register(
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardBuilder()
                 .button(text="📦 Ещё батч", callback_data=AutoRegCb(action="batch_ask"))
-                .button(text="◀️ Главное", callback_data=AutoRegCb(action="menu"))
+                .button(text="◀️ Меню авторега", callback_data=AutoRegCb(action="menu"))
                 .adjust(1).as_markup(),
             )
         except Exception:

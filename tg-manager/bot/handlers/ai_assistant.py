@@ -886,7 +886,7 @@ async def _process_ai_turn(
         if "AI-ассистент временно недоступен" in display_reply:
             kb = InlineKeyboardBuilder()
             kb.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
-            kb.button(text="🏠 Меню", callback_data=BmCb(action="main"))
+            kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
             kb.adjust(2)
             await _edit_or_answer_long(
                 thinking, message, display_reply, reply_markup=kb.as_markup()
@@ -1270,7 +1270,7 @@ async def cb_ai_retry(
     kb = InlineKeyboardBuilder()
     if "AI-ассистент временно недоступен" in str_reply:
         kb.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
-        kb.button(text="🏠 Меню", callback_data=BmCb(action="main"))
+        kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
         kb.adjust(2)
     else:
         kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))

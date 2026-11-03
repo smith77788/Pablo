@@ -92,7 +92,7 @@ async def cb_nodes_menu(
         kb.button(text=label, callback_data=NodesCb(action="view", node_id=ws["id"]))
     _cap_note(kb, workspaces, _shown, what="grp")
     kb.button(text="➕ Добавить воркспейс", callback_data=NodesCb(action="add"))
-    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
 
     count = len(workspaces)

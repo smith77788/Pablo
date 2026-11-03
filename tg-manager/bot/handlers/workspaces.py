@@ -27,7 +27,7 @@ def _ws_main_kb() -> ...:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Создать пространство", callback_data=WorkspaceCb(action="create"))
     kb.button(text="🔗 Войти по коду", callback_data=WorkspaceCb(action="join"))
-    kb.button(text="⬅️ Назад", callback_data=BmCb(action="settings"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -54,7 +54,7 @@ def _ws_view_kb(ws_id: int, is_owner: bool) -> ...:
         kb.button(
             text="🚪 Покинуть", callback_data=WorkspaceCb(action="leave", ws_id=ws_id)
         )
-    kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=WorkspaceCb(action="menu"))
     kb.adjust(2, 1)
     return kb.as_markup()
 
@@ -83,7 +83,7 @@ async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
     _cap_note(kb, workspaces, _shown, what="grp")
     kb.button(text="➕ Создать пространство", callback_data=WorkspaceCb(action="create"))
     kb.button(text="🔗 Войти по коду", callback_data=WorkspaceCb(action="join"))
-    kb.button(text="⬅️ Назад", callback_data=BmCb(action="settings"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
     kb.adjust(1)
     text = (
         "🏢 <b>Пространства</b>\n\n"
@@ -109,7 +109,7 @@ async def cb_ws_view(
     ws = await db.get_workspace(pool, callback_data.ws_id, viewer_id=callback.from_user.id)
     if not ws:
         kb = InlineKeyboardBuilder()
-        kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=WorkspaceCb(action="menu"))
         await callback.message.edit_text(
             "❌ Пространство не найдено.", reply_markup=kb.as_markup()
         )
@@ -142,7 +142,7 @@ async def cb_ws_members(
     )
     if not members:
         kb = InlineKeyboardBuilder()
-        kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=WorkspaceCb(action="menu"))
         await callback.message.edit_text(
             "❌ Пространство не найдено.", reply_markup=kb.as_markup()
         )
@@ -159,7 +159,7 @@ async def cb_ws_members(
     )
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⬅️ Назад",
+        text="◀️ Назад",
         callback_data=WorkspaceCb(action="view", ws_id=callback_data.ws_id),
     )
     await callback.message.edit_text(
@@ -177,7 +177,7 @@ async def cb_ws_invite(
     )
     if code is None:
         kb = InlineKeyboardBuilder()
-        kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=WorkspaceCb(action="menu"))
         await callback.message.edit_text(
             "❌ Приглашать в пространство может только его владелец или админ.",
             reply_markup=kb.as_markup(),
@@ -185,7 +185,7 @@ async def cb_ws_invite(
         return
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⬅️ Назад",
+        text="◀️ Назад",
         callback_data=WorkspaceCb(action="view", ws_id=callback_data.ws_id),
     )
     await callback.message.edit_text(
@@ -253,7 +253,7 @@ async def msg_ws_desc(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         text="🏢 Открыть пространство",
         callback_data=WorkspaceCb(action="view", ws_id=ws_id),
     )
-    kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
+    kb.button(text="◀️ К списку", callback_data=WorkspaceCb(action="menu"))
     kb.adjust(1)
     await message.answer(
         f"✅ <b>Пространство создано!</b>\n\n🏢 {_esc(name)}\n\nID: <code>{ws_id}</code>",
@@ -276,7 +276,7 @@ async def cb_ws_skip_desc(
         text="🏢 Открыть пространство",
         callback_data=WorkspaceCb(action="view", ws_id=ws_id),
     )
-    kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
+    kb.button(text="◀️ К списку", callback_data=WorkspaceCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
         f"✅ <b>Пространство создано!</b>\n\n🏢 {_esc(name)}\n\nID: <code>{ws_id}</code>",
@@ -316,7 +316,7 @@ async def msg_ws_invite_code(
     if not ws_id:
         kb = InlineKeyboardBuilder()
         kb.button(text="🔄 Попробовать снова", callback_data=WorkspaceCb(action="join"))
-        kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=WorkspaceCb(action="menu"))
         kb.adjust(1)
         await message.answer(
             "❌ Неверный или истёкший код приглашения.",
@@ -345,7 +345,7 @@ async def cb_ws_leave(
     if ws and ws["owner_id"] == callback.from_user.id:
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="⬅️ Назад",
+            text="◀️ Назад",
             callback_data=WorkspaceCb(action="view", ws_id=callback_data.ws_id),
         )
         await callback.message.edit_text(
@@ -356,7 +356,7 @@ async def cb_ws_leave(
         return
     await db.delete_workspace_member(pool, callback_data.ws_id, callback.from_user.id)
     kb = InlineKeyboardBuilder()
-    kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
+    kb.button(text="◀️ К списку", callback_data=WorkspaceCb(action="menu"))
     await callback.message.edit_text(
         "✅ Вы покинули пространство.", reply_markup=kb.as_markup()
     )

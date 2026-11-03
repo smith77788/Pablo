@@ -169,7 +169,7 @@ async def cb_list_experiments(callback: CallbackQuery, pool: asyncpg.Pool) -> No
                 callback_data=StarsCb(action="detail", experiment_id=r["id"], bot_id=0),
             )
     kb.button(text="➕ Новый тест", callback_data=StarsCb(action="create_start", experiment_id=0, bot_id=0))
-    kb.button(text="◀️ Главное", callback_data=StarsCb(action="dashboard", experiment_id=0, bot_id=0))
+    kb.button(text="◀️ Меню звёзд", callback_data=StarsCb(action="dashboard", experiment_id=0, bot_id=0))
     kb.adjust(1)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -341,7 +341,7 @@ async def cb_recommendations(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     text = "💡 <b>Рекомендации по ценообразованию</b>\n\n" + "\n\n".join(recs)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Главное", callback_data=StarsCb(action="dashboard", experiment_id=0, bot_id=0))
+    kb.button(text="◀️ Меню звёзд", callback_data=StarsCb(action="dashboard", experiment_id=0, bot_id=0))
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -487,7 +487,7 @@ async def fsm_waiting_price_b(message: Message, state: FSMContext, pool: asyncpg
         callback_data=StarsCb(action="detail", experiment_id=exp.id, bot_id=0),
     )
     kb.button(
-        text="◀️ Главное",
+        text="◀️ Меню звёзд",
         callback_data=StarsCb(action="dashboard", experiment_id=0, bot_id=0),
     )
     kb.adjust(1)

@@ -337,7 +337,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
         else:
             kb_pay.button(text="💳 Перейти к оплате", callback_data=SubCb(action="menu"))
             what = "Подписка"
-        kb_pay.button(text="◀️ Главное меню", callback_data="bm:main")
+        kb_pay.button(text="🏠 Главное меню", callback_data="bm:main")
         kb_pay.adjust(1)
         await message.answer(
             f"💳 <b>Оформление подписки</b>\n\n"
