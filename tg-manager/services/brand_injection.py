@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import asyncpg
 from services.account_manager import timeboxed
@@ -54,8 +55,14 @@ _DESCRIPTION_SUFFIX = f"\n🤖 @{PROMO_USERNAME}"
 _DESCRIPTION_MAX = 255
 
 # ── In-memory кэши планов ─────────────────────────────────────────────────────
-_plan_cache: dict[int, bool] = {}       # bot_id → is_free_tier
-_user_plan_cache: dict[int, bool] = {}  # user_id → is_free_tier
+# БЕЗ СРОКА ЖИЗНИ кэш был навсегда: клиент оплачивал тариф, а его боты до
+# следующего перезапуска процесса продолжали вставлять промо-брендинг в
+# рассылки и авто-ответы, и наоборот — истёкшая подписка оставалась без
+# брендинга. Сброс после оплаты (`subscription.invalidate_plan_cache`) сюда
+# не доходил. Теперь у записи срок, и сброс по владельцу снимает и его ботов.
+_PLAN_CACHE_TTL = 120.0
+_plan_cache: dict[int, tuple] = {}       # bot_id → (owner_id, is_free, monotonic)
+_user_plan_cache: dict[int, tuple] = {}  # user_id → (is_free, monotonic)
 
 
 def _pick(variants: list[str], text: str) -> str:
@@ -97,8 +104,9 @@ def add_promo_to_description(text: str) -> str:
 
 async def is_free_tier(pool: asyncpg.Pool, bot_id: int) -> bool:
     """True если владелец бота на free-тарифе (брендинг применяется)."""
-    if bot_id in _plan_cache:
-        return _plan_cache[bot_id]
+    hit = _plan_cache.get(bot_id)
+    if hit is not None and time.monotonic() - hit[2] < _PLAN_CACHE_TTL:
+        return hit[1]
     try:
         owner = await pool.fetchval(
             "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id
@@ -111,7 +119,7 @@ async def is_free_tier(pool: asyncpg.Pool, bot_id: int) -> bool:
         from bot.utils.subscription import get_plan, coerce_plan
         plan = coerce_plan(await get_plan(pool, owner))
         result = plan == "free"
-        _plan_cache[bot_id] = result
+        _plan_cache[bot_id] = (owner, result, time.monotonic())
         return result
     except Exception as e:
         log.debug("brand_injection.is_free_tier bot_id=%d: %s", bot_id, e)
@@ -120,13 +128,14 @@ async def is_free_tier(pool: asyncpg.Pool, bot_id: int) -> bool:
 
 async def is_user_free_tier(pool: asyncpg.Pool, user_id: int) -> bool:
     """True если пользователь на free-тарифе (Telethon-операции по user_id)."""
-    if user_id in _user_plan_cache:
-        return _user_plan_cache[user_id]
+    hit = _user_plan_cache.get(user_id)
+    if hit is not None and time.monotonic() - hit[1] < _PLAN_CACHE_TTL:
+        return hit[0]
     try:
         from bot.utils.subscription import get_plan, coerce_plan
         plan = coerce_plan(await get_plan(pool, user_id))
         result = plan == "free"
-        _user_plan_cache[user_id] = result
+        _user_plan_cache[user_id] = (result, time.monotonic())
         return result
     except Exception as e:
         log.debug("brand_injection.is_user_free_tier user_id=%d: %s", user_id, e)
@@ -143,6 +152,9 @@ def invalidate_cache(bot_id: int | None = None, user_id: int | None = None) -> N
             _plan_cache.pop(bot_id, None)
         if user_id is not None:
             _user_plan_cache.pop(user_id, None)
+            # Боты этого владельца — тоже: тариф бота это тариф владельца.
+            for _bid in [b for b, v in list(_plan_cache.items()) if v[0] == user_id]:
+                _plan_cache.pop(_bid, None)
 
 
 # ── Канальные операции ────────────────────────────────────────────────────────

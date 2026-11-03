@@ -73,6 +73,13 @@ def invalidate_plan_cache(user_id: int) -> None:
         user_id: Telegram user ID whose cache to clear.
     """
     _plan_cache.pop(user_id, None)
+    # Брендинг для free-тарифа держит свой кэш тарифа (по ботам владельца) —
+    # без этого после оплаты промо продолжало вставляться в его рассылки.
+    try:
+        from services import brand_injection
+        brand_injection.invalidate_cache(user_id=user_id)
+    except Exception:
+        pass
 
 
 # Все тарифные значения — из единого источника правды bot/utils/tariffs.py
