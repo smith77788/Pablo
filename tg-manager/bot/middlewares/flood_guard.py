@@ -51,7 +51,6 @@ class FloodGuardMiddleware(BaseMiddleware):
         self.max_users = max_users
         self._hits: dict[int, deque] = {}
         self._warned_at: dict[int, float] = {}
-        self._admins = _admin_ids()
 
     def _sweep(self, now: float) -> None:
         cutoff = now - self.window
@@ -59,8 +58,13 @@ class FloodGuardMiddleware(BaseMiddleware):
             self._hits.pop(uid, None)
             self._warned_at.pop(uid, None)
 
+    @staticmethod
+    def _is_admin(uid: int) -> bool:
+        """Проверка ПРАВ (не оповещение): постоянные админы не ограничиваются."""
+        return uid in _admin_ids()
+
     def allow(self, uid: int, now: float | None = None) -> bool:
-        if uid in self._admins:
+        if self._is_admin(uid):
             return True
         now = time.monotonic() if now is None else now
         q = self._hits.get(uid)
