@@ -55,6 +55,17 @@ import hmac
 import json
 
 
+# Короче этого ключ платформы не принимается: он открывает отправку сообщений
+# от имени аккаунтов и чтение переписки, а вход в админку бота по той же фразе
+# уже требует 12 символов (bot/handlers/admin.ADMIN_SECRET_MIN_LEN). Короткий
+# ключ перебирается даже под лимитом частоты.
+REST_SECRET_MIN_LEN = 12
+
+
+def rest_secret_strong(secret: str | None) -> bool:
+    return bool(secret) and len(secret) >= REST_SECRET_MIN_LEN
+
+
 def _check_auth(request: web.Request) -> bool:
     """Ключ не настроен — доступа нет.
 
@@ -66,6 +77,10 @@ def _check_auth(request: web.Request) -> bool:
     """
     if not ADMIN_SECRET:
         log.warning("rest_api: ADMIN_SECRET не задан — все запросы отклоняются")
+        return False
+    if not rest_secret_strong(ADMIN_SECRET):
+        log.warning("rest_api: ADMIN_SECRET короче %d символов — ключ не принимается",
+                    REST_SECRET_MIN_LEN)
         return False
     key = (
         request.headers.get("X-Api-Key", "")

@@ -131,3 +131,19 @@ def test_user_key_prefers_user_over_address(monkeypatch):
     req = _Req({"X-Forwarded-For": "1.2.3.4, 198.51.100.9"})
     assert s._user_key(req, 42) == "u:42"
     assert s._user_key(req, None) == "ip:198.51.100.9"
+
+
+def test_x_real_ip_is_not_trusted(monkeypatch):
+    """Без прокси X-Real-Ip пишет клиент: новый адрес — новый лимит. Не верим."""
+    s = _sec(monkeypatch, TRUSTED_PROXY_HOPS="1")
+    assert s._client_ip(_Req({"X-Real-Ip": "5.6.7.8"})) == "203.0.113.7"
+
+    async def _go():
+        allowed = 0
+        for i in range(10):
+            req = _Req({"X-Real-Ip": f"5.6.7.{i}"})
+            if await s.check_rate_limit(req, None, max_requests=3, window=60):
+                allowed += 1
+        return allowed
+
+    assert asyncio.run(_go()) == 3

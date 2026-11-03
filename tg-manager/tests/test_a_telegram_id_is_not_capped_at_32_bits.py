@@ -128,7 +128,7 @@ def test_rest_send_message_to_a_group(monkeypatch):
     from services import api_keys, rest_api
     from tests.test_integrations_api_keys import _KeyPool
 
-    monkeypatch.setattr(rest_api, "ADMIN_SECRET", "служебный", raising=False)
+    monkeypatch.setattr(rest_api, "ADMIN_SECRET", "служебный-ключ-платформы", raising=False)
     pool = _KeyPool()
     seen: list[tuple] = []
 

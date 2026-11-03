@@ -87,7 +87,7 @@ async def _call(app, method, path, headers=None, match=None):
 
 @pytest.fixture(autouse=True)
 def _no_admin_secret(monkeypatch):
-    monkeypatch.setattr(rest_api, "ADMIN_SECRET", "служебный", raising=False)
+    monkeypatch.setattr(rest_api, "ADMIN_SECRET", "служебный-ключ-платформы", raising=False)
 
 
 def test_issued_key_is_accepted_and_names_its_owner():
@@ -149,7 +149,7 @@ def test_read_only_key_cannot_send_messages():
 def test_admin_secret_still_works_but_needs_owner():
     pool = _KeyPool()
     app = _app(pool)
-    resp = _run(_call(app, "GET", "/api/v1/accounts", {"X-Api-Key": "служебный"}))
+    resp = _run(_call(app, "GET", "/api/v1/accounts", {"X-Api-Key": "служебный-ключ-платформы"}))
     assert resp.status == 400
 
 

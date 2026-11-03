@@ -142,9 +142,9 @@ def _client_ip(request: web.Request) -> str:
             cand = parts[-_TRUSTED_PROXY_HOPS]
             if _looks_like_ip(cand):
                 return cand
-    real_ip = (request.headers.get("X-Real-Ip", "") or "").strip()
-    if real_ip and _looks_like_ip(real_ip):
-        return real_ip
+    # X-Real-Ip сюда НЕ берём: его ставит только nginx, которого перед нами
+    # нет, а без прокси заголовок пишет сам клиент — новый адрес на каждый
+    # запрос давал чистый лимит (перебор кода связывания, входа, REST-ключа).
     return _peer_ip(request)
 
 
@@ -613,7 +613,8 @@ def require_rest_api_auth(handler: Callable) -> Callable:
         from config import ADMIN_SECRET
         # Ключ не настроен — доступа нет. Ветки «секрет is None — пускаем всех»
         # здесь больше нет: см. services/rest_api._check_auth.
-        if not ADMIN_SECRET:
+        from services.rest_api import rest_secret_strong
+        if not ADMIN_SECRET or not rest_secret_strong(ADMIN_SECRET):
             return web.json_response({"error": "Unauthorized"}, status=401)
         key = (
             request.headers.get("X-Api-Key", "")

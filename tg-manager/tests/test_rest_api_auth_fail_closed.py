@@ -45,10 +45,17 @@ def test_secret_set_to_none_still_means_no_access(monkeypatch):
 
 
 def test_right_key_is_accepted(monkeypatch):
-    monkeypatch.setattr(rest_api, "ADMIN_SECRET", "ключ", raising=False)
-    assert rest_api._check_auth(_Req({"X-Api-Key": "ключ"})) is True
-    assert rest_api._check_auth(_Req({"Authorization": "Bearer ключ"})) is True
+    key = "ключ-платформы-длинный"
+    monkeypatch.setattr(rest_api, "ADMIN_SECRET", key, raising=False)
+    assert rest_api._check_auth(_Req({"X-Api-Key": key})) is True
+    assert rest_api._check_auth(_Req({"Authorization": f"Bearer {key}"})) is True
     assert rest_api._check_auth(_Req({"X-Api-Key": "не тот"})) is False
+
+
+def test_short_platform_key_is_refused(monkeypatch):
+    """Короткий ADMIN_SECRET перебирается: бот его уже не принимает, REST тоже."""
+    monkeypatch.setattr(rest_api, "ADMIN_SECRET", "ключ", raising=False)
+    assert rest_api._check_auth(_Req({"X-Api-Key": "ключ"})) is False
 
 
 def test_decorator_has_no_open_branch_either():
