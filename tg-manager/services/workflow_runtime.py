@@ -602,15 +602,33 @@ async def _take_step(pool, run_id: int, seq: int, **sets) -> bool:
 
 
 async def _finish(pool, run: dict, status: str, note: str | None = None,
-                  vars_: dict | None = None) -> None:
-    await pool.execute(
+                  vars_: dict | None = None, *,
+                  expect_seq: int | None = None,
+                  from_status: tuple[str, ...] = ("running", "waiting")) -> bool:
+    """Закрыть прогон. True — закрыли именно мы.
+
+    Журнал и событие `workflow.completed` пишутся ТОЛЬКО при настоящем
+    переходе. Раньше они писались безусловно: прогон, который уже закрыла
+    цель (`_check_goals`), «стоп» человека или соседний исполнитель, получал
+    вторую строку журнала и второе событие завершения, а на событие
+    `workflow.completed` запускаются другие сценарии, то есть цепочка
+    срабатывала дважды.
+
+    `expect_seq` — закрыть, только если прогон не сдвинулся с того шага, на
+    котором его прочитали: между чтением и закрытием человек мог ответить.
+    """
+    res = await pool.execute(
         """UPDATE workflow_runs
               SET status=$2, finished_at=now(), error_message=$3,
                   wait_kind=NULL, wait_until=NULL, claimed_until=NULL,
                   vars=COALESCE($4::jsonb, vars)
-            WHERE id=$1 AND status IN ('running', 'waiting')""",
+            WHERE id=$1 AND status = ANY($5::text[])
+              AND ($6::bigint IS NULL OR exec_seq = $6::bigint)""",
         run["id"], status, note,
-        json.dumps(vars_, default=str) if vars_ is not None else None)
+        json.dumps(vars_, default=str) if vars_ is not None else None,
+        list(from_status), expect_seq)
+    if not (isinstance(res, str) and res.rsplit(" ", 1)[-1] == "1"):
+        return False
     steps = _as_list(run.get("steps_snapshot"))
     idx = int(run.get("current_step") or 0)
     stype = steps[idx].get("type", "?") if 0 <= idx < len(steps) else "end"
@@ -619,6 +637,20 @@ async def _finish(pool, run: dict, status: str, note: str | None = None,
         await bus.emit(pool, run["owner_id"], "workflow.completed",
                        {"workflow_id": run.get("workflow_id"), "run_id": run["id"]},
                        bot_id=run.get("bot_id"), chat_id=run.get("chat_id"))
+    return True
+
+
+async def _sent_ok(pool, run: dict) -> None:
+    """Сообщение дошло: счётчик неудач прогона — с нуля.
+
+    Предел `_FAIL_LIMIT` — это неудачи ПОДРЯД (так и написано владельцу в
+    итоге прогона). Без сброса сценарий из пяти сообщений, у каждого из
+    которых по одному сетевому сбою, падал на последнем, хотя все пять в
+    итоге дошли."""
+    if int(run.get("fail_count") or 0):
+        await pool.execute(
+            "UPDATE workflow_runs SET fail_count=0 WHERE id=$1", run["id"])
+        run["fail_count"] = 0
 
 
 async def _bot_token(pool, bot_id: int | None) -> str | None:
@@ -766,14 +798,17 @@ async def _send_failed(pool, run: dict, step_idx: int, retry: int | None,
                       f"Сообщение не отправлено {fails} раз подряд ({category or 'ошибка'})")
         return
     delay = retry or min(60 * fails, 900)
-    # Вернуть указатель на этот шаг: он занят, но не выполнен.
+    # Вернуть указатель на этот шаг: он занят, но не выполнен. Только живой
+    # прогон: пока шла отправка, человек мог написать «стоп», а прогон —
+    # достигнуть цели. Без условия на статус UPDATE воскрешал отменённый
+    # прогон в 'running', и сценарий продолжал писать отписавшемуся.
     await pool.execute(
         """UPDATE workflow_runs
               SET current_step=$2, status='running', wait_kind=NULL,
                   wait_until=NULL, fail_count=$3,
                   next_run_at=now() + make_interval(secs => $4),
                   claimed_until=NULL
-            WHERE id=$1""",
+            WHERE id=$1 AND status IN ('running', 'waiting')""",
         run["id"], step_idx, fails if not retry else run.get("fail_count") or 0,
         int(delay))
 
@@ -876,6 +911,7 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                 await _send_failed(pool, run, idx, retry, cat)
                 return
             await _log(pool, run, idx, stype, "sent")
+            await _sent_ok(pool, run)
             if branching:
                 _mark_hot(run.get("bot_id"))
                 return
@@ -893,6 +929,7 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                 await _send_failed(pool, run, idx, retry, cat)
                 return
             await _log(pool, run, idx, stype, "sent")
+            await _sent_ok(pool, run)
             _mark_hot(run.get("bot_id"))
             return
 
@@ -903,6 +940,9 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                                     wait_kind="payment", wait_until=until):
                 return
             ok, cat = await send_invoice(pool, http, token, run, step, seq + 1)
+            if ok is None:
+                # Счёт выставить нельзя, прогон уже закрыт с причиной.
+                return
             if not ok:
                 await _log(pool, run, idx, stype, "send_failed", cat)
                 await _send_failed(pool, run, idx, None, cat)
@@ -910,6 +950,7 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             await _log(pool, run, idx, stype, "sent",
                        amount=int(step.get("amount") or 0) or None,
                        currency=step.get("currency") or "XTR")
+            await _sent_ok(pool, run)
             _mark_hot(run.get("bot_id"))
             return
 
@@ -1022,9 +1063,12 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
 # ── Платёж (счёт в чате) ────────────────────────────────────────────────────
 
 async def send_invoice(pool, http, token, run: dict, step: dict,
-                       seq: int) -> tuple[bool, str]:
+                       seq: int) -> tuple[bool | None, str]:
     """Выставить счёт в чат. Звёзды (XTR) — без провайдера; прочие валюты —
-    с токеном платёжного провайдера бота."""
+    с токеном платёжного провайдера бота.
+
+    (None, "") — счёт выставить нельзя в принципе (нет провайдера), прогон
+    уже закрыт с причиной: это не «отправлено» и не сбой для повтора."""
     from services import bot_api
     currency = step.get("currency") or "XTR"
     params: dict[str, Any] = {
@@ -1045,7 +1089,7 @@ async def send_invoice(pool, http, token, run: dict, step: dict,
                           "У бота не подключён платёжный провайдер (настройки "
                           "ИИ-продавца → Заказы): счёт в "
                           f"{currency} выставить нельзя (Звёзды — можно)")
-            return True, ""
+            return None, ""
         params["provider_token"] = provider
     data = await bot_api._call(http, token, "sendInvoice", **params)
     if data.get("ok"):
@@ -1283,8 +1327,14 @@ async def sweep_timeouts(pool) -> int:
                 run["id"], run["exec_seq"], target)
             if isinstance(res, str) and res.endswith(" 1"):
                 await _log(pool, run, idx, step.get("type", "?"), "timeout")
-        else:
-            await _finish(pool, run, "expired", "Человек не ответил в срок")
+            else:
+                continue
+        elif not await _finish(pool, run, "expired", "Человек не ответил в срок",
+                               expect_seq=run.get("exec_seq"),
+                               from_status=("waiting",)):
+            # Между чтением и закрытием человек ответил (или нажал, или
+            # оплатил): прогон уже идёт дальше, «не ответил в срок» — неправда.
+            continue
         n += 1
     return n
 
@@ -1346,14 +1396,21 @@ async def tick(pool, http, main_bot=None) -> None:
         except Exception:
             log.exception("workflow_runtime: прогон %s", run.get("id"))
             fails = int(run.get("fail_count") or 0) + 1
-            if fails >= _FAIL_LIMIT:
-                await _finish(pool, run, "failed", "Внутренняя ошибка исполнителя")
-            else:
-                await pool.execute(
-                    """UPDATE workflow_runs SET fail_count=$2, claimed_until=NULL,
-                              next_run_at=now() + make_interval(secs => $3)
-                        WHERE id=$1 AND status='running'""",
-                    run["id"], fails, 60 * fails)
+            # Разбор сбоя сам ходит в базу. Если и он упадёт (база моргнула),
+            # остальные прогоны пачки уже забраны арендой — без этой обёртки
+            # они пропустили бы заход и ждали истечения аренды (2 минуты).
+            try:
+                if fails >= _FAIL_LIMIT:
+                    await _finish(pool, run, "failed", "Внутренняя ошибка исполнителя")
+                else:
+                    await pool.execute(
+                        """UPDATE workflow_runs SET fail_count=$2, claimed_until=NULL,
+                                  next_run_at=now() + make_interval(secs => $3)
+                            WHERE id=$1 AND status='running'""",
+                        run["id"], fails, 60 * fails)
+            except Exception:
+                log.exception("workflow_runtime: сбой прогона %s не записан",
+                              run.get("id"))
 
 
 async def run(pool, http: aiohttp.ClientSession, main_bot=None) -> None:
