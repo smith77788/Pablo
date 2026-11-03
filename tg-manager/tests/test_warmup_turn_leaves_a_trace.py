@@ -338,7 +338,12 @@ def test_an_empty_journal_still_answers_the_question():
     body = src[src.index("async def chatwarmup_detail"):src.index("async def chatwarmup_accounts")]
     assert '"hint"' in body, "экран не отвечает ничего, пока не было ни одного хода"
     assert "configured_providers" in body and "ai_claude" in body
-    assert "Ключи ИИ" in body, "подсказка не говорит, где задать ключ"
+    # Текст подсказки — общий и по роли (ai_providers.ai_missing_hint):
+    # администратору — где задать ключ, владельцу — чья это настройка.
+    assert "ai_missing_hint(" in body and "admin=_is_admin(uid)" in body, (
+        "подсказка не говорит, где задать ключ")
+    from services.ai_providers import ai_missing_hint
+    assert "AI-ключи" in ai_missing_hint("флот молчит", admin=True)
     # Подсказка только когда писать действительно нечего: при живых ходах она
     # была бы ложной тревогой.
     assert 'r["status"] == "ok"' in body

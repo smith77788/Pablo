@@ -101,7 +101,8 @@ def test_empty_network_is_zeroes_not_error():
 
 def test_api_returns_network():
     api = api_source()
-    assert "network_overview(pool, uid)" in api
+    # Роль читателя передаётся дальше (подсказка «ИИ не подключён» по роли).
+    assert "network_overview(pool, uid" in api
     assert '"network": network' in api
     assert 'request.query.get("summary") != "0"' in api
     assert "if include_summary else []" in api
