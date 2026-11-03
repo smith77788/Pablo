@@ -2605,6 +2605,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <div class="mgmt-tile-lbl">Действия админов</div>
           <div class="mgmt-tile-val"></div>
         </div>
+        <div class="mgmt-tile" onclick="openAdminPayments()">
+          <div class="mgmt-tile-ico">💳</div>
+          <div class="mgmt-tile-lbl">Платежи</div>
+          <div class="mgmt-tile-val"></div>
+        </div>
+        <div class="mgmt-tile" onclick="openAdminReports()">
+          <div class="mgmt-tile-ico">🐞</div>
+          <div class="mgmt-tile-lbl">Отчёты об ошибках</div>
+          <div class="mgmt-tile-val"></div>
+        </div>
       </div>
     </div>
 
@@ -2635,6 +2645,20 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">⚙️ Операции платформы</div>
   </div>
   <div class="sub-sb" id="adm-ops-body"></div>
+</div>
+<div class="screen" id="s-admin-payments">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">💳 Платежи</div>
+  </div>
+  <div class="sub-sb" id="adm-pay-body"></div>
+</div>
+<div class="screen" id="s-admin-reports">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🐞 Отчёты об ошибках</div>
+  </div>
+  <div class="sub-sb" id="adm-rep-body"></div>
 </div>
 <div class="screen" id="s-admin-actions">
   <div class="hdr">
@@ -29813,6 +29837,75 @@ async function openAdminActions(more) {
       : empty('📜', 'Действий админов ещё не было');
     txt('adm-actions-body', html);
   } catch(e) { txt('adm-actions-body', errHtml(errRu(e), 'openAdminActions()')); }
+}
+
+// ── Платежи платформы ────────────────────────────────────────────────────
+let ADM_PAY_ROWS = [], ADM_PAY_FILTER = '';
+const ADM_PAY_ST = {pending:'⏳ Ждут оплаты', confirming:'🔄 Подтверждаются', confirmed:'✅ Оплачены', expired:'⌛ Истекли', failed:'❌ Ошибки'};
+async function openAdminPayments(more) {
+  if (!more) { ADM_PAY_ROWS = []; if (!document.getElementById('s-admin-payments').classList.contains('show')) push('s-admin-payments');
+    txt('adm-pay-body', '<div class="spin-wrap"><div class="spin"></div></div>'); }
+  try {
+    const d = await api('/api/miniapp/admin/payments?limit=50&offset=' + ADM_PAY_ROWS.length
+      + (ADM_PAY_FILTER ? '&status=' + encodeURIComponent(ADM_PAY_FILTER) : ''));
+    ADM_PAY_ROWS = ADM_PAY_ROWS.concat(d.payments || []);
+    const rv = d.revenue || {}, bs = d.by_status || {};
+    const usd = v => '$' + num(Math.round(Number(v) || 0));
+    const chip = (k, lbl) => `<button class="btn ${ADM_PAY_FILTER===k?'btn-p':'btn-s'}" style="padding:6px 10px;font-size:12px" onclick="admPayFilter('${k}')">${lbl}${k&&bs[k]!=null?' · '+num(bs[k]):''}</button>`;
+    const who = p => p.username ? '@' + esc(p.username) : esc(p.first_name || String(p.user_id));
+    const rows = ADM_PAY_ROWS.map(p => `<div class="row" role="button" tabindex="0" onclick="openAdminUserDetail(${Number(p.user_id)})"><div class="row-body">
+        <div class="row-name">${who(p)} · ${esc(p.tier_name || p.tier || p.plan)}${p.period_months ? ' · ' + num(p.period_months) + ' мес' : ''}</div>
+        <div class="row-val" style="white-space:normal">${usd(p.amount_usd)} · ${esc(String(p.amount_crypto))} ${esc(p.currency)} · ${esc(p.status_ru)} · ${p.created_at ? new Date(p.created_at).toLocaleString('ru-RU') : ''}</div>
+      </div><span class="chev">›</span></div>`).join('');
+    txt('adm-pay-body',
+      `<div class="kpi-row" style="padding:6px 16px 10px">
+         <div class="kpi-card"><div class="kpi-val">${usd(rv.usd_30d)}</div><div class="kpi-lbl">Выручка 30 дн</div></div>
+         <div class="kpi-card"><div class="kpi-val">${usd(rv.usd_all)}</div><div class="kpi-lbl">За всё время</div></div>
+         <div class="kpi-card"><div class="kpi-val">${num(rv.payers || 0)}</div><div class="kpi-lbl">Платили</div></div>
+       </div>
+       <div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 16px 10px">${chip('', 'Все')}${Object.keys(ADM_PAY_ST).map(k => chip(k, ADM_PAY_ST[k])).join('')}</div>`
+      + (ADM_PAY_ROWS.length ? '<div class="lst">' + rows + '</div>' + moreBtn(ADM_PAY_ROWS.length, d.total, 'openAdminPayments(true)')
+        : (ADM_PAY_FILTER ? empty('🔍', 'В этом срезе платежей нет', 'Снимите срез, чтобы увидеть все', {label: 'Показать все', fn: "admPayFilter('')"})
+                          : empty('💳', 'Платежей ещё не было'))));
+  } catch(e) { txt('adm-pay-body', errHtml(errRu(e), 'openAdminPayments()')); }
+}
+function admPayFilter(st) { ADM_PAY_FILTER = st || ''; openAdminPayments(); }
+
+// ── Отчёты об ошибках ────────────────────────────────────────────────────
+let ADM_REP_ROWS = [], ADM_REP_FILTER = 'new';
+const ADM_REP_ST = {new:'🆕 Новые', viewing:'👁 Смотрю', fixing:'🔧 В работе', fixed:'✅ Исправлены', duplicate:'🔄 Дубликаты'};
+async function openAdminReports(more) {
+  if (!more) { ADM_REP_ROWS = []; if (!document.getElementById('s-admin-reports').classList.contains('show')) push('s-admin-reports');
+    txt('adm-rep-body', '<div class="spin-wrap"><div class="spin"></div></div>'); }
+  try {
+    const d = await api('/api/miniapp/admin/reports?limit=50&offset=' + ADM_REP_ROWS.length
+      + (ADM_REP_FILTER ? '&status=' + encodeURIComponent(ADM_REP_FILTER) : ''));
+    ADM_REP_ROWS = ADM_REP_ROWS.concat(d.reports || []);
+    const bs = d.by_status || {}, sts = d.statuses || {};
+    const chip = (k, lbl) => `<button class="btn ${ADM_REP_FILTER===k?'btn-p':'btn-s'}" style="padding:6px 10px;font-size:12px" onclick="admRepFilter('${k}')">${lbl}${k&&bs[k]!=null?' · '+num(bs[k]):''}</button>`;
+    const who = r => r.username ? '@' + esc(r.username) : esc(r.first_name || String(r.user_id));
+    const opts = cur => Object.keys(sts).map(k => `<option value="${esc(k)}"${k===cur?' selected':''}>${esc(sts[k])}</option>`).join('');
+    const rows = ADM_REP_ROWS.map(r => `<div class="row" style="align-items:flex-start"><div class="row-body">
+        <div class="row-name">#${Number(r.id)} · ${who(r)} · ${r.created_at ? new Date(r.created_at).toLocaleString('ru-RU') : ''}</div>
+        <div class="row-val" style="white-space:pre-wrap;color:var(--text)">${esc(r.description)}</div>
+        ${r.has_screenshot ? '<div class="row-val">📸 Есть скриншот — откройте отчёт в боте (/admin)</div>' : ''}
+        ${r.notes ? '<div class="row-val">📝 ' + esc(r.notes) + '</div>' : ''}
+        <select class="inp" style="margin-top:6px;max-width:200px" aria-label="Статус отчёта" onchange="admSetReportStatus(${Number(r.id)}, this.value)">${opts(r.status)}</select>
+      </div></div>`).join('');
+    txt('adm-rep-body',
+      `<div style="display:flex;gap:6px;flex-wrap:wrap;padding:6px 16px 10px">${chip('', 'Все')}${Object.keys(ADM_REP_ST).map(k => chip(k, ADM_REP_ST[k])).join('')}</div>`
+      + (ADM_REP_ROWS.length ? '<div class="lst">' + rows + '</div>' + moreBtn(ADM_REP_ROWS.length, d.total, 'openAdminReports(true)')
+        : (ADM_REP_FILTER ? empty('🔍', 'В этом срезе отчётов нет', 'Снимите срез, чтобы увидеть все', {label: 'Показать все', fn: "admRepFilter('')"})
+                          : empty('🐞', 'Отчётов об ошибках нет'))));
+  } catch(e) { txt('adm-rep-body', errHtml(errRu(e), 'openAdminReports()')); }
+}
+function admRepFilter(st) { ADM_REP_FILTER = st || ''; openAdminReports(); }
+async function admSetReportStatus(id, st) {
+  try {
+    const r = await api('/api/miniapp/admin/report/' + Number(id) + '/status', {method: 'POST', body: JSON.stringify({status: st})});
+    toast('✅ Отчёт #' + Number(id) + ': ' + (r.status_ru || st));
+    const row = ADM_REP_ROWS.find(x => x.id === id); if (row) row.status = st;
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Статус не сохранился')); openAdminReports(); }
 }
 
 async function openAdminUsers() {

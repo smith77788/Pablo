@@ -71,6 +71,8 @@ GET /api/miniapp/ad_intel
 GET /api/miniapp/admin/actions
 GET /api/miniapp/admin/audit
 GET /api/miniapp/admin/ops/stats
+GET /api/miniapp/admin/payments
+GET /api/miniapp/admin/reports
 GET /api/miniapp/admin/stats
 GET /api/miniapp/admin/user/{user_id}
 GET /api/miniapp/admin/users
@@ -389,6 +391,8 @@ HEAD /api/miniapp/ad_intel
 HEAD /api/miniapp/admin/actions
 HEAD /api/miniapp/admin/audit
 HEAD /api/miniapp/admin/ops/stats
+HEAD /api/miniapp/admin/payments
+HEAD /api/miniapp/admin/reports
 HEAD /api/miniapp/admin/stats
 HEAD /api/miniapp/admin/user/{user_id}
 HEAD /api/miniapp/admin/users
@@ -735,6 +739,7 @@ POST /api/miniapp/accounts/mass
 POST /api/miniapp/accounts/revive
 POST /api/miniapp/ad_intel/channel
 POST /api/miniapp/admin/broadcast
+POST /api/miniapp/admin/report/{report_id}/status
 POST /api/miniapp/admin/user/{user_id}/ban
 POST /api/miniapp/admin/user/{user_id}/grant
 POST /api/miniapp/admin/user/{user_id}/revoke
