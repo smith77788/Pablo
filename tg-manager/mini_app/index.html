@@ -30889,6 +30889,7 @@ async function openWorkflowDetail(wfId, wfName) {
     } else html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
       <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
       <button class="btn btn-s" onclick="runWorkflowTest(${wfId}, this)" style="flex:1 1 auto;font-size:13px;padding:8px">🧪 Тестовый запуск</button>
+      <button class="btn btn-s" onclick="copyWorkflow(${wfId}, this)" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Копия">📄</button>
       <button class="btn btn-r" onclick="deleteWorkflow(${wfId}, this)" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Удалить">🗑</button>
     </div>`;
     // Способ запуска: без него включённый сценарий не запустится сам.
@@ -31167,6 +31168,25 @@ async function toggleWorkflow(wfId, active) {
     back();
     loadWorkflows();
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
+}
+
+// Копия рождается выключенной: на другом боте её сначала правят, потом включают.
+async function copyWorkflow(wfId, el) {
+  let bot_id;
+  if (BOTS && BOTS.length > 1) {
+    const pick = await askChoice('Для какого бота копия?', [{ value: 'same', label: 'Тот же бот' }]
+      .concat(BOTS.map(b => ({ value: b.bot_id, label: '@' + (b.username || b.bot_id) }))));
+    if (pick === null) return;
+    if (pick !== 'same') bot_id = pick;
+  }
+  if (el) el.disabled = true;
+  try {
+    const d = await api(`/api/miniapp/workflows/${wfId}/copy`, { method: 'POST', body: JSON.stringify({ bot_id }) });
+    toast('📄 Создана копия «' + d.name + '» — она выключена');
+    back();
+    loadWorkflows();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+  finally { if (el) el.disabled = false; }
 }
 
 async function deleteWorkflow(wfId, _el) {

@@ -258,6 +258,52 @@ async def create_workflow(
         return {"ok": False, "error": str(e)}
 
 
+async def copy_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                        bot_id: int | None = None, name: str | None = None) -> dict:
+    """Копия сценария: шаги, способ запуска, цель и повторный вход.
+
+    Так делают у лидеров (ManyChat, Make): рабочий сценарий размножают на
+    второго бота или переделывают копию, не трогая боевой. Копия рождается
+    ВЫКЛЮЧЕННОЙ — включённая сразу начала бы писать людям второго бота, не
+    дождавшись, пока владелец поправит тексты. Владельца бота `bot_id`
+    проверяет обработчик. Зеркала старых воронок не копируются: их шаги
+    живут в разделе воронок, и копия разошлась бы с ним.
+
+    ValueError — с русским текстом для владельца."""
+    src = await pool.fetchrow(
+        """SELECT name, description, steps, bot_id, trigger_type, trigger_value,
+                  allow_reentry, goal_type, goal_value, legacy_kind
+             FROM workflow_definitions WHERE id=$1 AND owner_id=$2""",
+        workflow_id, owner_id)
+    if not src:
+        raise LookupError("Сценарий не найден")
+    if src["legacy_kind"]:
+        raise ValueError("Это воронка из раздела «Воронки» — копируйте её там")
+    steps = src["steps"]
+    if isinstance(steps, str):
+        steps = json.loads(steps or "[]")
+    steps = validate_steps(steps or [])
+    target_bot = bot_id if bot_id is not None else src["bot_id"]
+    new_name = (name or "").strip()[:120] or f"{src['name']} (копия)"[:120]
+    res = await create_workflow(pool, owner_id, new_name,
+                                description=src["description"] or "",
+                                steps=steps, is_active=False, bot_id=target_bot)
+    if not res.get("ok"):
+        raise RuntimeError(res.get("error") or "копия не создана")
+    ttype = src["trigger_type"]
+    if ttype in ("inactive", "schedule") and target_bot is None:
+        ttype = None
+    await pool.execute(
+        """UPDATE workflow_definitions
+              SET trigger_type=$2, trigger_value=$3, allow_reentry=$4,
+                  goal_type=$5, goal_value=$6
+            WHERE id=$1""",
+        res["id"], ttype, src["trigger_value"] if ttype else None,
+        bool(src["allow_reentry"]), src["goal_type"], src["goal_value"])
+    return {"ok": True, "id": res["id"], "name": new_name, "steps": len(steps),
+            "bot_id": target_bot}
+
+
 async def get_workflows(pool: asyncpg.Pool, owner_id: int) -> list:
     """Get all workflow definitions."""
     try:

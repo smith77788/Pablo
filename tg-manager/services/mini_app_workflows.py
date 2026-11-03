@@ -470,6 +470,44 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Прогон не найден или уже завершён", 404)
         return _json_resp({"ok": True})
 
+    async def workflow_copy(request: web.Request) -> web.Response:
+        """Копия сценария (выключенная): POST /workflows/{wf_id}/copy,
+        тело {bot_id?, name?} — бот для копии, по умолчанию тот же."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError, TypeError):
+            return _err("Неверный идентификатор", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        raw_bot = body.get("bot_id")
+        bot_id = None
+        if raw_bot not in (None, "", 0, "0"):
+            try:
+                bot_id = int(raw_bot)
+            except (TypeError, ValueError):
+                return _err("Неверный идентификатор бота", 400)
+            own = await _safe_fetchrow(pool,
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                bot_id, uid)
+            if not own:
+                return _err("Бот не найден", 404)
+        name = validate_string(body.get("name"), max_len=120, required=False) or None
+        from services import workflow_engine as _wf
+        try:
+            res = await _wf.copy_workflow(pool, uid, wf_id, bot_id=bot_id, name=name)
+        except LookupError:
+            return _err("Воркфлоу не найден", 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+        return _json_resp(res)
+
     async def workflow_retry_run(request: web.Request) -> web.Response:
         """Повторить упавший прогон с шага сбоя: POST /workflow/run/{run_id}/retry."""
         uid = _get_uid(request)
@@ -627,6 +665,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
     app.router.add_get("/api/miniapp/workflow/run/{run_id}/log", workflow_run_log)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/copy", workflow_copy)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/retry", workflow_retry_run)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/retry_failed", workflow_retry_failed)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)

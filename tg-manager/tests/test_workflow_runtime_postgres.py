@@ -857,3 +857,26 @@ def test_the_schedule_window_and_value_are_checked():
     assert rt.schedule_due(t, "10:00", "Europe/Moscow") is None
     assert rt.schedule_due(t.replace(hour=7, minute=0), "10:00", None) == 20261104
     assert rt.schedule_due(t.replace(hour=10, minute=1), "10:00", None) is None
+
+
+def test_a_copy_keeps_the_steps_and_launch_but_is_born_switched_off(pool, tg):
+    """Копия на второго бота: шаги, запуск и цель те же, но выключена — иначе
+    начала бы писать людям второго бота раньше, чем владелец поправит тексты."""
+    from services import workflow_engine as wf
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "Привет"}],
+                                trigger="keyword", value="цена")
+        await wf.set_goal(pool, OWNER, wf_id, "paid", None)
+        res = await wf.copy_workflow(pool, OWNER, wf_id)
+        row = await pool.fetchrow("SELECT * FROM workflow_definitions WHERE id=$1", res["id"])
+        assert row["name"] == "Тест (копия)" and not row["is_active"]
+        assert row["bot_id"] == BOT_ID and row["trigger_type"] == "keyword"
+        assert row["trigger_value"] == "цена" and row["goal_type"] == "paid"
+        steps = json.loads(row["steps"]) if isinstance(row["steps"], str) else row["steps"]
+        assert steps == [{"type": "message", "text": "Привет"}]
+        import pytest as _pt
+        with _pt.raises(LookupError):
+            await wf.copy_workflow(pool, OWNER + 1, wf_id)
+
+    _run(go())
