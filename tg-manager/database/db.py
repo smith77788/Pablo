@@ -3052,25 +3052,39 @@ async def autotag_by_activity(pool, bot_id: int) -> dict:
 
 
 async def record_message_keywords(pool, bot_id: int, text: str) -> None:
+    """Счёт слов входящего сообщения для аналитики ключевых слов.
 
-    words = list(set(re.findall(r"[а-яёА-ЯЁa-zA-Z]{3,}", text.lower())))[:10]
-    for word in words:
-        try:
-            await pool.execute(
-                """INSERT INTO keyword_stats(bot_id, keyword, count, last_seen)
-                   VALUES($1, $2, 1, now())
-                   ON CONFLICT (bot_id, keyword) DO UPDATE
-                   SET count = keyword_stats.count + 1, last_seen = now()""",
-                bot_id,
-                word,
-            )
-        except Exception:
-            log.debug(
-                "record_message_keywords: error recording keyword=%s bot_id=%s",
-                word,
-                bot_id,
-                exc_info=True,
-            )
+    Зовётся на КАЖДОЕ входящее сообщение каждого подключённого бота
+    (auto_responder), то есть это горячий путь. Раньше здесь было до десяти
+    отдельных запросов подряд — по одному на слово, каждый со своим захватом
+    соединения из пула: десять круговых обращений к базе на сообщение, и на
+    потоке сообщений пул занимался счётчиком слов вместо работы. Теперь — один
+    запрос на сообщение.
+
+    Слова берутся первыми по порядку в тексте (раньше — случайные десять из
+    множества), а в запрос идут ОТСОРТИРОВАННЫМИ: два одновременных сообщения
+    одного бота обновляют общие строки, и одинаковый порядок блокировок
+    исключает взаимную блокировку между ними.
+    """
+    found = re.findall(r"[а-яёА-ЯЁa-zA-Z]{3,}", (text or "").lower())
+    words = sorted(list(dict.fromkeys(found))[:10])
+    if not words:
+        return
+    try:
+        await pool.execute(
+            """INSERT INTO keyword_stats(bot_id, keyword, count, last_seen)
+               SELECT $1, w, 1, now() FROM unnest($2::text[]) AS w
+               ON CONFLICT (bot_id, keyword) DO UPDATE
+               SET count = keyword_stats.count + 1, last_seen = now()""",
+            bot_id,
+            words,
+        )
+    except Exception:
+        log.debug(
+            "record_message_keywords: error recording keywords bot_id=%s",
+            bot_id,
+            exc_info=True,
+        )
 
 
 async def get_top_keywords(pool, bot_id: int, limit: int = 20) -> list:
