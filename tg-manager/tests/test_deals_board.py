@@ -45,6 +45,8 @@ class _Pool:
         self.card_rows = card_rows
 
     async def fetch(self, sql, *args):
+        if "FROM crm_deals" in sql:
+            return []                 # простых сделок у этого владельца нет
         if "GROUP BY stage, currency" in sql:
             return self.crm_rows
         if "ROW_NUMBER()" in sql:

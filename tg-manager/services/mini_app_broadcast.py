@@ -337,7 +337,7 @@ def setup_routes(app: web.Application, pool) -> None:
             # Добор по id обязателен: у сделок одного дня `updated_at`
             # совпадает, и без него страницы теряли бы и повторяли строки.
             rows = await pool.fetch(
-                "SELECT id, title, contact, stage, value, notes, created_at, updated_at "
+                "SELECT id, title, contact, stage, value, currency, notes, created_at, updated_at "
                 f"FROM crm_deals WHERE {where} "
                 f"ORDER BY updated_at DESC, id DESC LIMIT {limit} OFFSET ${len(args) + 1}",
                 *args, offset,
@@ -359,17 +359,13 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             summary_rows = []
         summary = {r["stage"]: {"count": int(r["cnt"]), "total": float(r["total"])} for r in summary_rows}
+        # Валюта у каждой сделки своя; пустая — основная валюта владельца.
+        # Карточка та же, что у доски сделок (deal_payload), чтобы «Показать
+        # ещё» в колонке доски дорисовывало такие же карточки.
+        from services.mini_app_deals_board import deal_payload, owner_main_currency
+        main_cur = await owner_main_currency(pool, uid)
         return _json_resp({
-            "deals": [
-                {
-                    "id": r["id"], "title": r["title"] or "",
-                    "contact": r["contact"] or "", "stage": r["stage"] or "lead",
-                    "value": float(r["value"]) if r["value"] else 0,
-                    "notes": (r["notes"] or "")[:100],
-                    "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
-                }
-                for r in rows
-            ],
+            "deals": [{**deal_payload(r, main_cur), "id": r["id"]} for r in rows],
             "summary": summary,
             "total": total,
             "page": {"offset": offset, "limit": limit,
@@ -387,18 +383,27 @@ def setup_routes(app: web.Application, pool) -> None:
             stage = str(body.get("stage", "lead")).strip()
             value = float(body.get("value", 0) or 0)
             notes = str(body.get("notes", "")).strip()
+            currency = str(body.get("currency") or "").strip().upper()
         except Exception:
             return _err("Неверное тело запроса", 400)
         if not title:
             return _err("Укажите название сделки", 400)
+        if value < 0:
+            return _err("Сумма сделки не может быть отрицательной", 400)
+        from services.owner_currency import MAIN_CURRENCIES
+        if currency and currency not in MAIN_CURRENCIES:
+            return _err("Такой валюты нет в списке", 400)
+        if not currency:
+            from services.mini_app_deals_board import owner_main_currency
+            currency = await owner_main_currency(pool, uid)
         valid_stages = ("lead", "contact", "proposal", "negotiation", "won", "lost")
         if stage not in valid_stages:
             stage = "lead"
         try:
             deal_id = await pool.fetchval(
-                """INSERT INTO crm_deals(owner_id, title, contact, stage, value, notes)
-                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
-                uid, title, contact or None, stage, value, notes or None,
+                """INSERT INTO crm_deals(owner_id, title, contact, stage, value, notes, currency)
+                   VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id""",
+                uid, title, contact or None, stage, value, notes or None, currency,
             )
         except Exception:
             log.exception("create_crm_deal uid=%d", uid)

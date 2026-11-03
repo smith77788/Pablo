@@ -143,39 +143,43 @@ def _page_query_of(pool):
 
 
 # ── Экран ────────────────────────────────────────────────────────────────────
+#
+# Своего экрана у простых сделок больше нет: их показывает общая доска сделок
+# (screens/deals_board.js) в колонках этапов вместе с воронкой контактов. Эта
+# ручка — её «Показать ещё» для простых сделок, и правила те же: число в
+# колонке серверное, страница доклеивается по смещению, у каждого этапа своя
+# колонка.
 
-def _deals_js() -> str:
+def _board_js() -> str:
+    return (ROOT / "mini_app" / "screens" / "deals_board.js").read_text(encoding="utf-8")
+
+
+def test_the_board_counts_deals_by_the_server_total_not_the_page_length():
     from tests.miniapp_source import js_function
-    return js_function("loadDeals")
+    more = js_function("dkMore")
+    assert "col.deal_count = dd.total" in more, (
+        "колонка доски считает простые сделки по длине загруженной страницы")
+    assert "_dkCount(col)" in js_function("_dkRender")
 
 
-def test_the_screen_shows_the_server_total_not_the_page_length():
-    js = _deals_js()
-    assert re.search(r"m-deal-cnt'?\s*,\s*dealsTotal", js), (
-        "шапка сделок снова считает длину загруженной страницы")
-    assert "totalOf(" in js, "число в шапке больше не берётся из ответа"
+def test_the_board_asks_this_route_for_the_next_page_of_deals():
+    from tests.miniapp_source import js_function
+    more = js_function("dkMore")
+    assert "/api/miniapp/crm/deals?stage=" in more and "&offset=" in more, (
+        "доска не умеет просить следующую страницу простых сделок")
+    assert "dd.page && dd.page.has_more" in more, (
+        "признак продолжения не читается — кнопка не исчезнет в конце списка")
+    assert "col.deals.push(" in more, (
+        "страница заменяет показанное вместо доклейки: колонка не будет расти")
 
 
-def test_the_screen_can_ask_for_the_next_page():
-    js = _deals_js()
-    assert "offset=" in js, "экран не умеет просить следующую страницу"
-    assert "moreBtn(" in js, "кнопки «Показать ещё» у сделок нет"
-    assert "concat(" in js, (
-        "страница заменяет показанное вместо доклейки: список не будет расти")
+def test_every_stage_has_a_column_on_the_board():
+    """Этап, на котором есть сделки, обязан быть колонкой доски.
 
-
-def test_every_counted_stage_has_a_filter():
-    """Чип считает этап — значит на него можно перейти.
-
-    Сводка называет шесть этапов, а кнопок среза было четыре: «Переговоры» и
-    «Проиграно» показывали число, которое нечем открыть.
+    Доска рисует колонки из ответа сервера; сервер берёт их из общего списка
+    стадий и ДОБАВЛЯЕТ этап простой сделки, которого в списке нет, — иначе
+    такая сделка была бы в итоге и ни в одной колонке.
     """
-    html = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-    screen = html[html.index('<div class="screen" id="s-crmdeals">'):]
-    screen = screen[:screen.index('<div class="screen"', 10)]
-    js = _deals_js()
-    stages = re.search(r"const stages = \[([^\]]+)\]", js)
-    assert stages, "в экране больше не видно списка этапов сводки"
-    for stage in re.findall(r"'(\w+)'", stages.group(1)):
-        assert f"filterDeals('{stage}'" in screen, (
-            f"этап {stage} считается в сводке, но среза по нему нет")
+    src = (ROOT / "services" / "mini_app_deals_board.py").read_text(encoding="utf-8")
+    assert "if st not in known" in src
+    assert "(_DK.columns || [])" in _board_js() or "_DK.columns || []" in _board_js()

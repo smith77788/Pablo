@@ -2321,14 +2321,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Входящие</div>
         <div class="mgmt-tile-val" id="m-inbox-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openCRMDeals()">
+      <div class="mgmt-tile" onclick="openDeals()">
         <div class="mgmt-tile-ico">💼</div>
         <div class="mgmt-tile-lbl">Сделки</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openDeals()">
-        <div class="mgmt-tile-ico">🗂</div>
-        <div class="mgmt-tile-lbl">Канбан сделок</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openMoneyFunnel(30)">
@@ -6454,28 +6449,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
-<!-- ══════════════════════ SCREEN: CRM DEALS ══════════════════════ -->
-<div class="screen" id="s-crmdeals">
-  <div class="hdr">
-    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">💼 CRM — Сделки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openDealModal()">+ Сделка</button></div>
-  </div>
-  <div class="sub-sb">
-    <div id="dealSummary" class="kpi-row" style="padding:6px 16px 10px"></div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 0 8px">
-      <button class="btn btn-p" onclick="filterDeals(null,this)" id="dealFilterAll">Все</button>
-      <button class="btn btn-s" onclick="filterDeals('lead',this)" id="dealFilterLead">Лид</button>
-      <button class="btn btn-s" onclick="filterDeals('contact',this)" id="dealFilterContact">Контакт</button>
-      <button class="btn btn-s" onclick="filterDeals('proposal',this)" id="dealFilterProposal">Предложение</button>
-      <button class="btn btn-s" onclick="filterDeals('negotiation',this)" id="dealFilterNegotiation">Переговоры</button>
-      <button class="btn btn-s" onclick="filterDeals('won',this)" id="dealFilterWon">Выиграно</button>
-      <button class="btn btn-s" onclick="filterDeals('lost',this)" id="dealFilterLost">Проиграно</button>
-    </div>
-    <div class="lst" id="dealList"><div class="spin-wrap"><div class="spin"></div></div></div>
-  </div>
-</div>
-
 <!-- ══════════════════════ SCREEN: WORKSPACES ══════════════════════ -->
 <div class="screen" id="s-wsdetail">
   <div class="hdr">
@@ -7262,7 +7235,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="lost">❌ Проиграно</option>
       </select>
     </div>
-    <div class="field"><label>Сумма ($)</label><input type="number" id="dealValue" min="0" step="0.01" value="0"></div>
+    <div class="field" style="display:flex;gap:8px">
+      <div style="flex:1"><label>Сумма</label><input type="number" id="dealValue" min="0" step="0.01" value="0"></div>
+      <div style="width:110px"><label>Валюта</label>
+        <select id="dealCurrency" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px;color:var(--text);font-size:15px">
+          <option>RUB</option><option>USD</option><option>EUR</option><option>KZT</option><option>UAH</option>
+          <option>BYN</option><option>UZS</option><option>TRY</option><option>GBP</option><option>CNY</option>
+        </select></div>
+    </div>
     <div class="field"><label>Заметки</label><input type="text" id="dealNotes" maxlength="500" placeholder="Необязательно"></div>
     <div class="field-err" id="dealErr"></div>
     <button class="btn btn-p" id="dealSaveBtn" onclick="saveDeal()" style="width:100%">➕ Создать</button>
@@ -9024,7 +9004,7 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
-  'Сделки':'Сделки CRM: этапы, суммы, ответственные',
+  'Сделки':'Все сделки колонками по этапам и сумма на каждом этапе',
   'Семантическая память':'Факты, которые бот запомнил о собеседниках',
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
@@ -9068,7 +9048,6 @@ const MODULE_DESCS = {
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
-  'Канбан сделок':'Сделки колонками по этапам и сумма на каждом этапе',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
   'Воронка денег':'Охват → ответ → покупка по кампаниям, цена лида',
   'Когорты и LTV':'Сколько приносит привлечённый человек и какой источник доходнее',
@@ -25179,79 +25158,17 @@ async function submitParser() {
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
 }
 
-// ── CRM Deals ──────────────────────────────────────────
-let DEALS_DATA = [], DEALS_FILTER = null, DEALS_OFFSET = 0;
-const STAGE_LABELS = {lead:'🎯 Лид',contact:'📞 Контакт',proposal:'📄 Предложение',negotiation:'🤝 Переговоры',won:'✅ Выиграно',lost:'❌ Проиграно'};
-async function openCRMDeals() {
-  DEALS_FILTER = null;
-  push('s-crmdeals');
-  loadDeals();
-}
-// Пятьдесят сделок были потолком, а не страницей: сделка пятьдесят первая не
-// открывалась никак, шапка писала «50 сделок» при сотне, а чипы над списком
-// считают всю воронку и показывали настоящее число над обрезанным списком.
-// Теперь потолок растёт по нажатию, а число в шапке — серверное.
-async function loadDeals(more) {
-  // Страница доклеивается к показанному, а не растит потолок: потолок рано или
-  // поздно упирается в серверный предел, и тогда кнопка обещает продолжение,
-  // которого не будет. Со смещением «Показать ещё» исчезает ровно там, где
-  // список закончился, на любом числе сделок.
-  if (!more) { DEALS_OFFSET = 0; DEALS_DATA = [];
-    txt('dealList','<div class="spin-wrap"><div class="spin"></div></div>'); }
-  try {
-    const d = await api('/api/miniapp/crm/deals?limit=50&offset='+DEALS_OFFSET
-                        +(DEALS_FILTER?'&stage='+DEALS_FILTER:''));
-    const dealsPage = listOf(d,'deals');
-    DEALS_DATA = more ? DEALS_DATA.concat(dealsPage) : dealsPage;
-    DEALS_OFFSET = DEALS_DATA.length;
-    const dealsTotal = totalOf(d, DEALS_DATA);
-    // Summary bar
-    const sum = d.summary||{};
-    const stages = ['lead','contact','proposal','negotiation','won','lost'];
-    txt('dealSummary', stages.map(s=>{
-      const c = sum[s]?.count||0;
-      return c>0?`<div class="kpi-card" style="min-width:70px;text-align:center"><div style="font-size:16px;font-weight:700">${c}</div><div style="font-size:10px;color:var(--hint)">${STAGE_LABELS[s].split(' ')[1]||s}</div></div>`:''
-    }).join(''));
-    txt('m-deal-cnt', dealsTotal+' сделок');
-    if (!DEALS_DATA.length) {
-      // Под выбранным этапом сделок нет — это НЕ «сделок нет вообще». Предлагать
-      // здесь «создайте первую» значит врать человеку, у которого их сорок на
-      // других этапах, и уводить его создавать дубль. Тот же приём, что у
-      // рассылок (renderBcasts): под срезом зовём снять срез, а не создавать.
-      txt('dealList', DEALS_FILTER
-        ? empty('🔍','На этом этапе пусто','Сделки есть на других этапах — снимите срез, чтобы увидеть их',
-                {label:'Показать все', fn:"filterDeals(null,document.getElementById('dealFilterAll'))"})
-        : empty('💼','Нет сделок','Создайте первую сделку',{label:'➕ Создать сделку',fn:'openDealModal()'}));
-      return;
-    }
-    const STAGE_NEXT = {lead:'contact',contact:'proposal',proposal:'negotiation',negotiation:'won'};
-    txt('dealList', DEALS_DATA.map(d2=>{
-      const nextStage = STAGE_NEXT[d2.stage];
-      return `<div class="row">
-        <div class="row-ico" style="background:var(--bg-green-16)">💼</div>
-        <div class="row-body">
-          <div class="row-name">${esc(d2.title||'Сделка без названия')}</div>
-          <div class="row-val">${esc(STAGE_LABELS[d2.stage]||d2.stage||'этап не указан')}${d2.contact?' · '+esc(d2.contact):''}${d2.value?` · $${d2.value.toFixed(0)}`:''}</div>
-          <div class="row-val" style="color:var(--hint)">${ago(d2.updated_at)}</div>
-        </div>
-        <div class="row-right" style="display:flex;gap:5px;flex-direction:column">
-          ${nextStage?`<button class="btn btn-p" style="padding:4px 8px;min-width:0;font-size:11px" onclick="advanceDeal(${d2.id},'${nextStage}')">→ ${(STAGE_LABELS[nextStage]||nextStage).split(' ')[1]||nextStage}</button>`:''}
-          <button class="btn btn-d" style="padding:4px 8px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id}, this)" aria-label="Удалить">✕</button>
-        </div>
-      </div>`;
-    }).join('') + moreBtn(DEALS_DATA.length, dealsTotal, 'loadDeals(1)'));
-  } catch(e) { txt('dealList', errHtml(errRu(e),'loadDeals()')); }
-}
-function filterDeals(stage, btn) {
-  DEALS_FILTER = stage;
-  document.querySelectorAll('[id^="dealFilter"]').forEach(el=>el.className='btn btn-s');
-  if (btn) btn.className='btn btn-p';
-  loadDeals();
-}
+// ── Новая сделка (простая сделка, crm_deals) ────────────────────────────
+// Своего экрана у простых сделок больше нет: их показывает общая доска сделок
+// (screens/deals_board.js) вместе с воронкой контактов. Окно создания осталось
+// здесь, его зовёт кнопка «➕ Сделка» доски.
 function openDealModal() {
   ['dealTitle','dealContact','dealNotes'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
   const dv=document.getElementById('dealValue'); if(dv) dv.value='0';
   const ds=document.getElementById('dealStage'); if(ds) ds.value='lead';
+  // Валюта по умолчанию — основная валюта владельца (её знает доска).
+  const dc=document.getElementById('dealCurrency');
+  if(dc) dc.value=(typeof _DK!=='undefined' && _DK && _DK.currency) || dc.value || 'RUB';
   const de=document.getElementById('dealErr'); if(de) de.textContent='';
   const dm=document.getElementById('dealMbg'); if(dm) dm.classList.add('show');
 }
@@ -25269,31 +25186,15 @@ async function saveDeal() {
       contact: document.getElementById('dealContact').value.trim(),
       stage: document.getElementById('dealStage').value,
       value: parseFloat(document.getElementById('dealValue').value)||0,
+      currency: document.getElementById('dealCurrency').value,
       notes: document.getElementById('dealNotes').value.trim(),
     })});
     closeDealModal();
     toast(`✅ Сделка #${r.deal_id} создана`);
-    loadDeals();
+    if (typeof loadDealsBoard === 'function') loadDealsBoard();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='➕ Создать'; }
 }
-async function deleteDeal(dealId, _el) {
-  if (!await confirmDelete('Удалить сделку', _el)) return;
-  try {
-    await api('/api/miniapp/crm/deal/'+dealId, {method:'DELETE'});
-    toast('✅ Удалено');
-    loadDeals();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
-}
-
-async function advanceDeal(dealId, newStage) {
-  try {
-    await api('/api/miniapp/crm/deal/'+dealId+'/stage', {method:'PUT', body:JSON.stringify({stage:newStage})});
-    toast('✅ Стадия обновлена: '+((STAGE_LABELS||{})[newStage]||newStage));
-    loadDeals();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
-}
-
 // ── Workspaces ──────────────────────────────────────────
 async function openWorkspaces() {
   push('s-workspaces');
@@ -29549,10 +29450,16 @@ async function openSettings() {
     const m = await api('/api/miniapp/money_settings');
     const cs = document.getElementById('set-currency');
     if (cs && m && Array.isArray(m.choices)) {
-      cs.innerHTML = m.choices.map(c => `<option value="${esc(c)}"${c===m.currency?' selected':''}>${esc(c)}</option>`).join('');
+      cs.textContent = '';
+      m.choices.forEach(c => cs.appendChild(new Option(c, c, false, c === m.currency)));
       cs.dataset.loaded = m.currency || '';
     }
-  } catch(_) {}
+  } catch(e) {
+    // Валюта не загрузилась — список не выдаёт пустоту за выбор.
+    const cs = document.getElementById('set-currency');
+    if (cs && !cs.dataset.loaded) cs.innerHTML = '<option value="">Не загрузилось — откройте настройки заново</option>';
+    console.warn('money_settings', e);
+  }
 }
 const SET_TZ_LIST = ['Europe/Kaliningrad','Europe/Moscow','Europe/Samara','Asia/Yekaterinburg',
   'Asia/Omsk','Asia/Novosibirsk','Asia/Krasnoyarsk','Asia/Irkutsk','Asia/Yakutsk','Asia/Vladivostok',
@@ -29567,13 +29474,20 @@ function _fillTzSelect(cur) {
   const list = SET_TZ_LIST.slice();
   [cur, dev].forEach(z => { if (z && !list.includes(z)) list.unshift(z); });
   const pick = cur || dev || 'Europe/Moscow';
-  el.innerHTML = list.map(z => `<option value="${esc(z)}"${z===pick?' selected':''}>${esc(z.replace('_',' '))}${z===dev?' (как на устройстве)':''}</option>`).join('');
+  el.textContent = '';
+  list.forEach(z => {
+    const label = z.replace('_', ' ') + (z === dev ? ' (как на устройстве)' : '');
+    el.appendChild(new Option(label, z, false, z === pick));
+  });
 }
 async function exportMyData() {
   await openTicketLink('/api/miniapp/my_data/export', '✅ Архив открывается для скачивания…');
 }
 async function deleteMyData() {
   const word = 'ПОДТВЕРЖДАЮ';
+  // Два шага, как у лидеров: сначала вопрос, потом слово. Слово защищает от
+  // промаха пальцем по полю, вопрос — от промаха по самой кнопке.
+  if (!await askConfirm('Удалить ВСЕ ваши данные: аккаунты, ботов, контакты, рассылки, ключи API? Вернуть их будет нельзя.')) return;
   const typed = await askPrompt('Удалить все ваши данные? Вернуть их будет нельзя. Чтобы удалить, введите слово ' + word, {placeholder: word});
   if (typed == null) return;
   if (String(typed).trim() !== word) { toast('Слово не совпало — ничего не удалено'); return; }

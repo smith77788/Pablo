@@ -1,6 +1,10 @@
-// ── Канбан сделок (screens/deals_board.js) ─────────────────────────────────────
-// Воронка контактов по стадиям: колонка на стадию, карточка на контакт.
-// Стадии — contact_crm.stage, тот же список, что у чипов хаба контактов.
+// ── Доска сделок (screens/deals_board.js) ──────────────────────────────────────
+// Все сделки по стадиям: колонка на стадию. В колонке два вида карточек —
+// контакт в воронке (contact_crm.stage, тот же список, что у чипов хаба) и
+// простая сделка (crm_deals: её создают кнопка «➕ Сделка», сценарии,
+// автоответчик и коннекторы CRM). Раньше у простых сделок был свой экран
+// «CRM — Сделки» со своими числами и «$» перед любой суммой; теперь доска одна,
+// и сумма колонки складывается по валютам из обеих систем.
 //
 // Зачем экран. Воронку можно было только отфильтровать: шесть чипов в хабе,
 // каждый открывает свой срез. Ответа на главный вопрос продавца «где сейчас мои
@@ -29,7 +33,7 @@ const DK_TONE = {
 const DK_UUID = /^[0-9a-f-]{36}$/i;
 
 let _DK = null;          // ответ доски: {columns, total, reminders_7d, per_stage}
-let _DK_BUSY = {};       // contact_id → идёт смена стадии (двойной тап не шлёт два запроса)
+let _DK_BUSY = {};       // contact_id / 'd'+deal_id → идёт смена стадии (двойной тап не шлёт два запроса)
 
 function _dkStyles() {
   if (document.getElementById('dk-style')) return;
@@ -71,9 +75,11 @@ function _dkScreen() {
   el.innerHTML =
     '<div class="hdr">' +
       '<div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>' +
-      '<div class="hdr-title">🗂 Сделки</div>' +
-      '<div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" ' +
-        'style="margin-left:auto" onclick="loadDealsBoard()">🔄</div>' +
+      '<div class="hdr-title">💼 Сделки</div>' +
+      '<div class="hdr-meta" style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
+        '<button class="btn btn-p" style="padding:7px 12px;font-size:13px" onclick="openDealModal()">➕ Сделка</button>' +
+        '<div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadDealsBoard()">🔄</div>' +
+      '</div>' +
     '</div>' +
     '<div class="sub-sb"><div id="dkTop"></div><div id="dkBody">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
@@ -145,6 +151,26 @@ function _dkCard(c) {
   '</div>';
 }
 
+// Карточка простой сделки. Ключ — 'd'+id: id сделки целое и не пересекается
+// с uuid контакта, но и смешивать их в одном словаре занятости нельзя.
+function _dkDealCard(d) {
+  const id = parseInt(d.deal_id, 10);
+  if (!(id > 0)) return '';
+  const nxt = DK_NEXT[d.stage];
+  const lbl = nxt ? _dkLabel(nxt) : '';
+  return '<div class="dk-card' + (_DK_BUSY['d' + id] ? ' busy' : '') + '" id="dkd-' + id + '" ' +
+      'role="button" tabindex="0" onclick="dkOpenDeal(' + id + ')">' +
+    (nxt ? '<div class="dk-next" style="min-height:32px" role="button" tabindex="0" aria-label="На стадию ' + esc(lbl) + '" ' +
+      'title="→ ' + esc(lbl) + '" onclick="event.stopPropagation();dkMoveDeal(' + id + ',\'' + nxt + '\')">→</div>' : '') +
+    '<div class="dk-name">💼 ' + esc(d.title) + '</div>' +
+    (d.contact ? '<div class="dk-sub">' + esc(d.contact) + '</div>' : '') +
+    (d.value ? '<div class="dk-val">' + num(Math.round(d.value)) + ' ' + esc(d.currency) + '</div>' : '') +
+    (d.updated_at ? '<div class="dk-rem">' + esc(ago(d.updated_at)) + '</div>' : '') +
+  '</div>';
+}
+
+function _dkCount(col) { return (col.count || 0) + (col.deal_count || 0); }
+
 function _dkLabel(stage) {
   const col = (_DK && _DK.columns || []).find(function (c) { return c.stage === stage; });
   return col ? col.label : stage;
@@ -155,50 +181,73 @@ function _dkRender() {
   const top = document.getElementById('dkTop');
   if (!body || !_DK) return;
   const cols = _DK.columns || [];
-  if (!_DK.total) {
+  const all = (_DK.total || 0) + (_DK.deals_total || 0);
+  if (!all) {
     top.innerHTML = '';
-    // Пустая доска — не тупик: сделка появляется, когда контакту задана стадия.
-    body.innerHTML = empty('🗂', 'Сделок пока нет',
-      'Откройте контакт и задайте ему стадию: «Лид», «Предложение» и дальше. Он появится в колонке этой стадии.',
-      {label: '📇 Открыть контакты', fn: 'openContacts()'});
+    // Пустая доска — не тупик: сделку можно завести кнопкой, а контакт
+    // появляется здесь, когда ему задана стадия.
+    body.innerHTML = empty('💼', 'Сделок пока нет',
+      'Заведите сделку кнопкой «➕ Сделка» или откройте контакт и задайте ему стадию — он появится в колонке этой стадии.',
+      {label: '➕ Новая сделка', fn: 'openDealModal()'}) +
+      '<div style="padding:0 16px 16px"><button class="btn btn-s" style="width:100%" onclick="openContacts()">📇 Открыть контакты</button></div>';
     return;
   }
   const open = cols.filter(function (c) { return c.stage !== 'won' && c.stage !== 'lost'; })
-    .reduce(function (s, c) { return s + c.count; }, 0);
+    .reduce(function (s, c) { return s + _dkCount(c); }, 0);
   top.innerHTML =
     '<div class="kpi-row">' +
-      '<div class="kpi-card"><div class="kpi-val">' + num(_DK.total) + '</div><div class="kpi-lbl">Всего</div></div>' +
+      '<div class="kpi-card"><div class="kpi-val">' + num(all) + '</div><div class="kpi-lbl">Всего</div></div>' +
       '<div class="kpi-card"><div class="kpi-val">' + num(open) + '</div><div class="kpi-lbl">В работе</div></div>' +
       '<div class="kpi-card"><div class="kpi-val" style="' + (_DK.reminders_7d ? 'color:var(--orange)' : '') + '">' +
         num(_DK.reminders_7d || 0) + '</div><div class="kpi-lbl">Напоминаний 7 дн</div></div>' +
     '</div>';
   body.innerHTML = '<div class="dk-board">' + cols.map(function (col) {
-    const shown = col.cards.length;
+    col.deals = col.deals || [];
+    const shown = col.cards.length + col.deals.length;
+    const total = _dkCount(col);
     return '<div class="dk-col" data-stage="' + esc(col.stage) + '">' +
       '<div class="dk-colhdr" style="background:' + (DK_TONE[col.stage] || 'transparent') + ';border-radius:var(--radius-lg) var(--radius-lg) 0 0">' +
-        '<div class="dk-colname">' + esc(col.label) + ' <span class="dk-cnt">' + num(col.count) + '</span></div>' +
+        '<div class="dk-colname">' + esc(col.label) + ' <span class="dk-cnt">' + num(total) + '</span></div>' +
         '<div class="dk-sum">' + _dkMoney(col.by_currency) + '</div>' +
       '</div>' +
       '<div class="dk-cards">' +
-        (shown ? col.cards.map(_dkCard).join('') : '<div class="dk-empty">Пусто</div>') +
-        (col.has_more ? '<button class="btn btn-s" style="width:100%" onclick="dkMore(\'' + esc(col.stage) + '\')">' +
-          'Показать ещё · ' + num(shown) + ' из ' + num(col.count) + '</button>' : '') +
+        (shown ? col.cards.map(_dkCard).join('') + col.deals.map(_dkDealCard).join('')
+               : '<div class="dk-empty">Пусто</div>') +
+        ((col.has_more || col.deals_has_more) ? '<button class="btn btn-s" style="width:100%" onclick="dkMore(\'' + esc(col.stage) + '\')">' +
+          'Показать ещё · ' + num(shown) + ' из ' + num(total) + '</button>' : '') +
       '</div>' +
     '</div>';
   }).join('') + '</div>';
 }
 
+// «Показать ещё» в колонке добирает оба вида карточек: у контактов и у
+// простых сделок своё смещение, и каждая половина листается до своего конца.
 async function dkMore(stage) {
   const col = (_DK && _DK.columns || []).find(function (c) { return c.stage === stage; });
   if (!col) return;
+  const per = _DK.per_stage || 30;
   try {
-    const d = await api('/api/miniapp/crm/board?stage=' + encodeURIComponent(stage) +
-      '&offset=' + col.cards.length + '&limit=' + (_DK.per_stage || 30));
-    const seen = {};
-    col.cards.forEach(function (c) { seen[c.contact_id] = 1; });
-    (d.cards || []).forEach(function (c) { if (!seen[c.contact_id]) col.cards.push(c); });
-    col.count = d.total != null ? d.total : col.count;
-    col.has_more = !!d.has_more;
+    const [d, dd] = await Promise.all([
+      col.has_more ? api('/api/miniapp/crm/board?stage=' + encodeURIComponent(stage) +
+        '&offset=' + col.cards.length + '&limit=' + per) : null,
+      col.deals_has_more ? api('/api/miniapp/crm/deals?stage=' + encodeURIComponent(stage) +
+        '&offset=' + (col.deals || []).length + '&limit=' + per) : null,
+    ]);
+    if (d) {
+      const seen = {};
+      col.cards.forEach(function (c) { seen[c.contact_id] = 1; });
+      (d.cards || []).forEach(function (c) { if (!seen[c.contact_id]) col.cards.push(c); });
+      col.count = d.total != null ? d.total : col.count;
+      col.has_more = !!d.has_more;
+    }
+    if (dd) {
+      col.deals = col.deals || [];
+      const seenD = {};
+      col.deals.forEach(function (x) { seenD[x.deal_id] = 1; });
+      (dd.deals || []).forEach(function (x) { if (!seenD[x.deal_id]) col.deals.push(x); });
+      col.deal_count = dd.total != null ? dd.total : col.deal_count;
+      col.deals_has_more = !!(dd.page && dd.page.has_more);
+    }
     _dkRender();
   } catch (e) {
     toast('⚠️ ' + errRu(e, 'Не удалось загрузить').substring(0, 60));
@@ -271,5 +320,98 @@ async function dkMove(cid, stage) {
   } finally {
     delete _DK_BUSY[cid];
     _dkRender();
+  }
+}
+
+// ── Простые сделки на доске ────────────────────────────────────────────────────
+
+function _dkFindDeal(id) {
+  for (const col of (_DK && _DK.columns) || []) {
+    const i = (col.deals || []).findIndex(function (d) { return d.deal_id === id; });
+    if (i >= 0) return {col: col, i: i, deal: col.deals[i]};
+  }
+  return null;
+}
+
+function dkOpenDeal(id) {
+  id = parseInt(id, 10);
+  const f = _dkFindDeal(id);
+  if (!f) return;
+  const d = f.deal;
+  document.getElementById('dkCardTitle').textContent = '💼 ' + d.title;
+  const facts = [
+    d.contact ? '👤 ' + esc(d.contact) : '',
+    d.value ? '💰 ' + num(Math.round(d.value)) + ' ' + esc(d.currency) : '',
+    d.notes ? '📝 ' + esc(d.notes) : '',
+  ].filter(Boolean).map(function (x) { return '<div style="font-size:13px;margin:0 0 4px">' + x + '</div>'; }).join('');
+  const stages = (_DK.columns || []).map(function (col) {
+    const cur = col.stage === d.stage;
+    return '<button class="btn ' + (cur ? 'btn-p' : 'btn-s') + ' dk-stagebtn"' + (cur ? ' disabled' : '') +
+      ' onclick="closeModal(\'mo-dk-card\');dkMoveDeal(' + id + ',\'' + esc(col.stage) + '\')">' +
+      (cur ? '✓ ' : '→ ') + esc(col.label) + '</button>';
+  }).join('');
+  document.getElementById('dkCardBody').innerHTML =
+    (facts ? '<div style="margin:0 0 12px">' + facts + '</div>' : '') +
+    '<div style="font-size:12px;font-weight:600;color:var(--hint);margin:0 0 6px">Перевести на стадию</div>' +
+    stages +
+    '<button class="btn btn-d" style="width:100%;margin-top:6px" onclick="dkDeleteDeal(' + id + ', this)">🗑 Удалить сделку</button>';
+  document.getElementById('mo-dk-card').classList.add('show');
+}
+
+// Перенос простой сделки — та же дверь, что у бота и коннекторов
+// (PUT /crm/deal/{id}/stage → db.move_crm_deal_stage: событие для сценариев).
+async function dkMoveDeal(id, stage) {
+  id = parseInt(id, 10);
+  const key = 'd' + id;
+  if (!(id > 0) || _DK_BUSY[key]) return;
+  const f = _dkFindDeal(id);
+  if (!f || f.deal.stage === stage) return;
+  const to = (_DK.columns || []).find(function (c) { return c.stage === stage; });
+  if (!to) return;
+  const from = f.col, deal = f.deal, prevStage = deal.stage;
+  const amount = Number(deal.value) || 0, cur = deal.currency;
+  const shift = function (src, dst) {
+    src.deals = (src.deals || []).filter(function (x) { return x.deal_id !== id; });
+    src.deal_count = Math.max(0, (src.deal_count || 0) - 1);
+    dst.deals = dst.deals || [];
+    dst.deals.unshift(deal);
+    dst.deal_count = (dst.deal_count || 0) + 1;
+    if (amount) {
+      src.by_currency = src.by_currency || {}; dst.by_currency = dst.by_currency || {};
+      src.by_currency[cur] = Math.max(0, (src.by_currency[cur] || 0) - amount);
+      dst.by_currency[cur] = (dst.by_currency[cur] || 0) + amount;
+    }
+    src.deals_has_more = src.deal_count > src.deals.length;
+  };
+  deal.stage = stage;
+  shift(from, to);
+  _DK_BUSY[key] = 1;
+  _dkRender();
+  try {
+    await api('/api/miniapp/crm/deal/' + id + '/stage', {method: 'PUT', body: JSON.stringify({stage: stage})});
+    try { tg.HapticFeedback?.notificationOccurred(stage === 'lost' ? 'warning' : 'success'); } catch (_) {}
+    toast((stage === 'won' ? '🎉 ' : '✅ ') + deal.title + ' → ' + to.label);
+  } catch (e) {
+    deal.stage = prevStage;
+    shift(to, from);
+    try { tg.HapticFeedback?.notificationOccurred('error'); } catch (_) {}
+    toast('⚠️ ' + errRu(e, 'Стадия не сохранилась').substring(0, 60));
+  } finally {
+    delete _DK_BUSY[key];
+    _dkRender();
+  }
+}
+
+async function dkDeleteDeal(id, el) {
+  id = parseInt(id, 10);
+  if (!(id > 0)) return;
+  if (!await confirmDelete('Удалить сделку', el)) return;
+  try {
+    await api('/api/miniapp/crm/deal/' + id, {method: 'DELETE'});
+    closeModal('mo-dk-card');
+    toast('✅ Сделка удалена');
+    loadDealsBoard();
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось удалить').substring(0, 60));
   }
 }

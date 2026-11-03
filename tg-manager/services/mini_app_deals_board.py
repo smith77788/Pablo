@@ -1,4 +1,4 @@
-"""Канбан сделок: воронка контактов по стадиям, колонка на стадию.
+"""Доска сделок: воронка контактов и простые сделки по стадиям, колонка на стадию.
 
 Стадии сделок живут в ``contact_crm.stage`` (список один на проект —
 ``crm_engine.STAGE_LABELS``). До канбана воронку можно было только
@@ -81,11 +81,87 @@ def card_payload(row) -> dict:
     }
 
 
-async def load_board(pool, owner_id: int, per_stage: int) -> dict:
-    """Доска целиком: все стадии и первая страница карточек в каждой."""
+# ── Простые сделки (crm_deals) на той же доске ─────────────────────────────
+#
+# Сделок было две системы, и обе были видны владельцу: «CRM — Сделки» (список
+# crm_deals, сумма с «$», нарисованным вручную) и «Канбан сделок» (воронка
+# контактов, contact_crm). Числа на этапах расходились, валюта тоже, и куда
+# смотреть, было непонятно. Простые сделки создают не только экран — их пишут
+# сценарии, автоответчик и коннекторы amoCRM/Bitrix24, — поэтому таблица
+# остаётся, а показывается ОДНОЙ доской: в той же колонке этапа, с той же
+# суммой по валютам. Стадии у обеих таблиц одни (schema_v272).
+
+_DEAL_COLUMNS = "d.id, d.title, d.contact, d.stage, d.value, d.currency, d.notes, d.updated_at"
+
+
+def deal_payload(row, main_currency: str) -> dict:
+    """Карточка простой сделки. Валюта NULL — основная валюта владельца."""
+    r = dict(row)
+    return {
+        "deal_id": int(r["id"]),
+        "stage": r["stage"] or "lead",
+        "title": (r.get("title") or "").strip() or "Сделка без названия",
+        "contact": (r.get("contact") or "")[:120],
+        "value": float(r.get("value") or 0),
+        "currency": (r.get("currency") or main_currency or "RUB").upper(),
+        "notes": (r.get("notes") or "")[:200],
+        "updated_at": _iso(r.get("updated_at")),
+    }
+
+
+async def owner_main_currency(pool, owner_id: int) -> str:
+    """Основная валюта владельца; сбой чтения — умолчание, а не отказ доски."""
+    from services import owner_currency
+    try:
+        st = await owner_currency.get_settings(pool, owner_id)
+        return (st.get("currency") or owner_currency.DEFAULT_MAIN).upper()
+    except Exception:
+        log.warning("доска сделок: основная валюта не прочитана uid=%s", owner_id, exc_info=True)
+        return owner_currency.DEFAULT_MAIN
+
+
+async def load_deals(pool, owner_id: int, per_stage: int, main_currency: str) -> dict:
+    """Простые сделки по этапам: счёт, суммы по валютам и первая страница."""
+    sums = await pool.fetch(
+        """SELECT d.stage, UPPER(COALESCE(d.currency, $2)) AS cur, COUNT(*) AS cnt,
+                  COALESCE(SUM(d.value), 0) AS total
+           FROM crm_deals d WHERE d.owner_id = $1
+           GROUP BY d.stage, UPPER(COALESCE(d.currency, $2))""",
+        owner_id, main_currency,
+    )
+    rows = await pool.fetch(
+        f"""SELECT * FROM (
+                SELECT {_DEAL_COLUMNS},
+                       ROW_NUMBER() OVER (PARTITION BY d.stage
+                                          ORDER BY d.updated_at DESC, d.id DESC) AS rn
+                FROM crm_deals d WHERE d.owner_id = $1
+            ) t WHERE rn <= $2""",
+        owner_id, per_stage,
+    )
+    out: dict[str, dict] = {}
+    for r in sums:
+        item = out.setdefault(r["stage"] or "lead", {"count": 0, "by_currency": {}, "cards": []})
+        item["count"] += int(r["cnt"] or 0)
+        val = float(r["total"] or 0)
+        if val:
+            item["by_currency"][r["cur"]] = item["by_currency"].get(r["cur"], 0.0) + val
+    for r in sorted(rows, key=lambda x: int(x["rn"])):
+        item = out.setdefault(r["stage"] or "lead", {"count": 0, "by_currency": {}, "cards": []})
+        item["cards"].append(deal_payload(r, main_currency))
+    return out
+
+
+async def load_board(pool, owner_id: int, per_stage: int, main_currency: str = "RUB") -> dict:
+    """Доска целиком: все стадии и первая страница карточек в каждой.
+
+    В колонке два вида карточек: контакт в воронке и простая сделка. Счёт и
+    листание у них свои (``count``/``has_more`` и ``deal_count``/
+    ``deals_has_more``), а сумма колонки — общая, по валютам.
+    """
     from services.contacts_hub.crm_engine import pipeline
 
     summary = await pipeline(pool, owner_id)
+    deals = await load_deals(pool, owner_id, per_stage, main_currency)
     rows = await pool.fetch(
         f"""SELECT * FROM (
                 SELECT {_CARD_COLUMNS},
@@ -102,22 +178,38 @@ async def load_board(pool, owner_id: int, per_stage: int) -> dict:
     by_stage: dict[str, list] = {}
     for r in rows:
         by_stage.setdefault(r["stage"], []).append(card_payload(r))
+    stages = list(summary.get("stages", []))
+    known = {s["stage"] for s in stages}
+    # Простая сделка на этапе, которого нет в списке (старая строка), не
+    # прячется: иначе в итоге она есть, а ни в одной колонке её нет.
+    for st in deals:
+        if st not in known:
+            stages.append({"stage": st, "label": st, "count": 0, "by_currency": {}})
     columns = []
-    for s in summary.get("stages", []):
+    for s in stages:
         cards = by_stage.get(s["stage"], [])
+        d = deals.get(s["stage"]) or {"count": 0, "by_currency": {}, "cards": []}
+        money = dict(s.get("by_currency") or {})
+        for cur, val in d["by_currency"].items():
+            money[cur] = money.get(cur, 0.0) + val
         columns.append({
             "stage": s["stage"],
             "label": s["label"],
             "count": int(s["count"]),
-            "by_currency": s.get("by_currency") or {},
+            "by_currency": money,
             "cards": cards,
             "has_more": int(s["count"]) > len(cards),
+            "deals": d["cards"],
+            "deal_count": int(d["count"]),
+            "deals_has_more": int(d["count"]) > len(d["cards"]),
         })
     return {
         "columns": columns,
         "total": int(summary.get("total") or 0),
+        "deals_total": sum(int(d["count"]) for d in deals.values()),
         "reminders_7d": int(summary.get("reminders_7d") or 0),
         "per_stage": per_stage,
+        "currency": main_currency,
     }
 
 
@@ -178,12 +270,14 @@ def setup_routes(app: web.Application, pool) -> None:
                 # колонка с потолком, которая молчит о нём, выглядела бы всей.
                 return _json_resp({"stage": col["stage"], "cards": col["cards"],
                                    "total": col["total"], "has_more": col["has_more"]})
-            b = await load_board(pool, uid, limit)
+            b = await load_board(pool, uid, limit, await owner_main_currency(pool, uid))
             # У каждой колонки свой count и has_more (load_board), а у доски —
-            # общий итог.
+            # общий итог: контакты в воронке и простые сделки отдельно.
             return _json_resp({"columns": b["columns"], "total": b["total"],
+                               "deals_total": b["deals_total"],
                                "reminders_7d": b["reminders_7d"],
-                               "per_stage": b["per_stage"]})
+                               "per_stage": b["per_stage"],
+                               "currency": b["currency"]})
         except Exception:
             log.exception("crm_board uid=%s stage=%s", uid, stage or "-")
             return _err(_INTERNAL_ERROR, 500)

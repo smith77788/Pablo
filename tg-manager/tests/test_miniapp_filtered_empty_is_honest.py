@@ -28,7 +28,6 @@ SRC = miniapp_source()
 
 # функция → (переменная среза, функция сброса среза)
 GUARDED = {
-    "loadDeals": ("DEALS_FILTER", "filterDeals"),
     "reloadVaultChat": ("VAULT_FILTER", "setVaultFilter"),
     "renderBcasts": ("BCAST_FILTER", "filterBcasts"),
 }
