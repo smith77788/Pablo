@@ -227,6 +227,7 @@ GET /api/miniapp/mp/catalog
 GET /api/miniapp/mp/mine
 GET /api/miniapp/mp/provider/{pid}
 GET /api/miniapp/my_activity
+GET /api/miniapp/my_data/export
 GET /api/miniapp/narrative
 GET /api/miniapp/narrative/{campaign_id}
 GET /api/miniapp/network
@@ -543,6 +544,7 @@ HEAD /api/miniapp/mp/catalog
 HEAD /api/miniapp/mp/mine
 HEAD /api/miniapp/mp/provider/{pid}
 HEAD /api/miniapp/my_activity
+HEAD /api/miniapp/my_data/export
 HEAD /api/miniapp/narrative
 HEAD /api/miniapp/narrative/{campaign_id}
 HEAD /api/miniapp/network
@@ -895,6 +897,7 @@ POST /api/miniapp/mp/provider/{pid}/apikey/{kid}/revoke
 POST /api/miniapp/mp/provider/{pid}/service
 POST /api/miniapp/mp/register
 POST /api/miniapp/mp/service/{sid}/toggle
+POST /api/miniapp/my_data/delete
 POST /api/miniapp/narrative
 POST /api/miniapp/narrative/{campaign_id}/pause
 POST /api/miniapp/narrative/{campaign_id}/resume

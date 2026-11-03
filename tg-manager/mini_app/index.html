@@ -6567,10 +6567,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div style="font-size:11px;color:var(--hint);margin-top:6px">«Только через прокси» — массовые действия без прокси блокируются (защита от банов). «Можно без прокси» — работают и без прокси, но с риском блокировок. Одиночные чтения (напр. контакты) прокси не требуют в любом режиме.</div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
-        <span style="font-size:14px">🔐 Секрет вебхука</span>
-        <button class="btn btn-s" onclick="openWebhookSecretModal()" style="padding:6px 12px;font-size:12px">✏️ Изменить</button>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">💻 Связанные устройства</span>
         <button class="btn btn-s" onclick="openDevices()" style="padding:6px 12px;font-size:12px">Показать</button>
       </div>
@@ -6594,6 +6590,27 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
     </div>
 
+    <!-- Валюта жила только в «Когортах и LTV», а часовой пояс брался молча у
+         телефона — «Тихие часы» на компьютере в другом поясе работали не в те
+         часы. Выгрузка и удаление своих данных были только командами бота. -->
+    <div class="sec" style="margin-top:16px">Регион и деньги</div>
+    <div class="card" style="padding:12px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--sep)">
+        <span style="font-size:14px">💱 Валюта отчётов</span>
+        <select id="set-currency" class="inp" style="max-width:150px"><option value="">—</option></select>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0">
+        <span style="font-size:14px">🕒 Часовой пояс</span>
+        <select id="set-tz" class="inp" style="max-width:190px"></select>
+      </div>
+      <div style="font-size:11px;color:var(--hint)">Валюта — в чём считаются выручка, LTV и итоги. Пояс — по нему «Тихие часы» и утренняя сводка.</div>
+    </div>
+    <div class="sec" style="margin-top:16px">Мои данные</div>
+    <div class="card" style="padding:12px 16px;display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-s" onclick="exportMyData()">⬇️ Выгрузить мои данные (архив)</button>
+      <button class="btn btn-r" onclick="deleteMyData()">🗑 Удалить все мои данные</button>
+      <div style="font-size:11px;color:var(--hint)">В архив не попадают строки сессий, токены и прокси. Удаление стирает аккаунты, ботов, каналы, контакты и историю; платежи и подписки остаются для учёта.</div>
+    </div>
     <div id="set-save-msg" style="display:none;color:var(--green);font-size:13px;text-align:center;margin:12px 0"></div>
     <div id="set-err" style="color:var(--red);font-size:13px;text-align:center;margin:4px 0"></div>
   </div>
@@ -29449,8 +29466,45 @@ async function openSettings() {
       if (qw && [...qw.options].some(o => o.value === qv)) qw.value = qv;
       if (backend.quiet_held) txt('set-quiet-hint', 'Сейчас в сводке ждут: ' + num(backend.quiet_held) + '. Ограничения и флуд аккаунтов приходят сразу.');
       if (ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
+      _fillTzSelect(backend.tz);
     }
-  } catch(e) {/* ok, settings from local */}
+  } catch(e) {/* ok, settings from local */ _fillTzSelect(null); }
+  try {
+    const m = await api('/api/miniapp/money_settings');
+    const cs = document.getElementById('set-currency');
+    if (cs && m && Array.isArray(m.choices)) {
+      cs.innerHTML = m.choices.map(c => `<option value="${esc(c)}"${c===m.currency?' selected':''}>${esc(c)}</option>`).join('');
+      cs.dataset.loaded = m.currency || '';
+    }
+  } catch(_) {}
+}
+const SET_TZ_LIST = ['Europe/Kaliningrad','Europe/Moscow','Europe/Samara','Asia/Yekaterinburg',
+  'Asia/Omsk','Asia/Novosibirsk','Asia/Krasnoyarsk','Asia/Irkutsk','Asia/Yakutsk','Asia/Vladivostok',
+  'Asia/Magadan','Asia/Kamchatka','Europe/Minsk','Europe/Kyiv','Asia/Almaty','Asia/Tashkent',
+  'Asia/Tbilisi','Asia/Yerevan','Asia/Baku','Europe/Istanbul','Europe/Berlin','Europe/London',
+  'Asia/Dubai','America/New_York'];
+function _fillTzSelect(cur) {
+  const el = document.getElementById('set-tz');
+  if (!el) return;
+  let dev = '';
+  try { dev = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch(_) {}
+  const list = SET_TZ_LIST.slice();
+  [cur, dev].forEach(z => { if (z && !list.includes(z)) list.unshift(z); });
+  const pick = cur || dev || 'Europe/Moscow';
+  el.innerHTML = list.map(z => `<option value="${esc(z)}"${z===pick?' selected':''}>${esc(z.replace('_',' '))}${z===dev?' (как на устройстве)':''}</option>`).join('');
+}
+async function exportMyData() {
+  await openTicketLink('/api/miniapp/my_data/export', '✅ Архив открывается для скачивания…');
+}
+async function deleteMyData() {
+  const word = 'ПОДТВЕРЖДАЮ';
+  const typed = await askPrompt('Удалить все ваши данные? Вернуть их будет нельзя. Чтобы удалить, введите слово ' + word, {placeholder: word});
+  if (typed == null) return;
+  if (String(typed).trim() !== word) { toast('Слово не совпало — ничего не удалено'); return; }
+  try {
+    const r = await api('/api/miniapp/my_data/delete', {method:'POST', body: JSON.stringify({confirm: word})});
+    toast('✅ Удалено записей: ' + num(r.deleted_rows || 0));
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Удалить не получилось, ничего не изменено')); }
 }
 async function saveSettings() {
   const s = {
@@ -29465,9 +29519,16 @@ async function saveSettings() {
   const _qw = (document.getElementById('set-quiet-window')?.value || '23-8').split('-');
   s.quiet_enabled = !!document.getElementById('set-quiet')?.checked;
   s.quiet_start = Number(_qw[0]); s.quiet_end = Number(_qw[1]);
-  try { s.tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch(_) { s.tz = null; }
+  // Пояс — из выбора человека; по умолчанию там стоит пояс устройства.
+  s.tz = document.getElementById('set-tz')?.value || null;
+  if (!s.tz) { try { s.tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch(_) { s.tz = null; } }
   try {
     await api('/api/miniapp/settings', {method:'POST', body: JSON.stringify(s)});
+    const cs = document.getElementById('set-currency');
+    if (cs && cs.value && cs.value !== cs.dataset.loaded) {
+      await api('/api/miniapp/money_settings', {method:'POST', body: JSON.stringify({currency: cs.value})});
+      cs.dataset.loaded = cs.value;
+    }
   } catch(e) {
     // Тумблеры уведомлений и тихие часы живут только на сервере: «сохранено»
     // при отказе было бы неправдой.
@@ -29476,9 +29537,6 @@ async function saveSettings() {
   }
   const msgEl = document.getElementById('set-save-msg');
   if (msgEl) { msgEl.style.display='block'; msgEl.textContent='✅ Настройки сохранены'; setTimeout(()=>msgEl.style.display='none', 2500); }
-}
-function openWebhookSecretModal() {
-  toast('ℹ️ Секрет вебхука настраивается в переменных окружения Railway');
 }
 
 // ── Billing ────────────────────────────────────────────
