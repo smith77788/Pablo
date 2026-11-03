@@ -968,3 +968,18 @@ def test_one_scenario_hands_the_person_to_another_and_stops_the_rest(pool, tg):
         assert _texts(tg) == ["Вот тарифы"]
 
     _run(go())
+
+
+def test_the_chat_summary_counts_the_day_on_a_real_database(pool, tg):
+    from bot.handlers import scenarios
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "Привет"}])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        items = await scenarios.summary(pool, OWNER)
+        it = next(i for i in items if i["id"] == wf_id)
+        assert it["started"] == 1 and it["completed"] == 1 and it["failed"] == 0
+        assert await scenarios.summary(pool, OWNER + 1) == []
+
+    _run(go())

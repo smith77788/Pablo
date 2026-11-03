@@ -105,6 +105,7 @@ from bot.handlers import dm_campaigns as dm_campaigns_handler
 from bot.handlers import strike as strike_handler
 from bot.handlers import host_server as host_server_handler
 from bot.handlers import active_tasks as active_tasks_handler
+from bot.handlers import scenarios as scenarios_handler
 from bot.handlers import topology as topology_handler
 from bot.handlers import presence_pack as presence_pack_handler
 from bot.handlers import approval_flow as approval_flow_handler
@@ -548,6 +549,7 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     dp.include_router(strike_handler.router)
     dp.include_router(host_server_handler.router)
     dp.include_router(active_tasks_handler.router)
+    dp.include_router(scenarios_handler.router)
     dp.include_router(workspaces_handler.router)
     dp.include_router(approval_flow_handler.router)
     dp.include_router(error_report_handler.router)
@@ -1071,6 +1073,7 @@ async def main() -> None:
             BotCommand(command="spin", description="🎲 Spintax — рандомизация текста"),
             BotCommand(command="accounts", description="📱 Мои аккаунты"),
             BotCommand(command="tasks", description="⚡ Активные задачи"),
+            BotCommand(command="scenarios", description="🤖 Сценарии: сводка, повтор упавших"),
             BotCommand(command="promo", description="🚀 Продвижение ботов"),
             BotCommand(command="subscription", description="💳 Подписка & Тариф"),
             BotCommand(command="app", description="📱 Открыть Mini App"),

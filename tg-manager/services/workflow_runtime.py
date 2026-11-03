@@ -1888,9 +1888,9 @@ def failure_alert_text(name: str, reason: str | None, step: int | None,
         lines.append(html.escape(reason or "Причина не записана"))
     if failed_last_hour > 1:
         lines.append(f"За последний час таких сбоев: {failed_last_hour}.")
-    lines.append("Журнал и кнопка «Повторить» — в мини-аппе: Сценарии → этот "
-                 "сценарий. О новых сбоях этого сценария напомню не раньше "
-                 "чем через час.")
+    lines.append("Повторить упавшие: /scenarios или в мини-аппе (Сценарии → "
+                 "этот сценарий, там же журнал). О новых сбоях этого сценария "
+                 "напомню не раньше чем через час.")
     return "\n".join(lines)
 
 

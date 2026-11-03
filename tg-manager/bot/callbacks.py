@@ -434,6 +434,11 @@ class HostCb(CallbackData, prefix="host"):
     val: str = ""   # вспомогательное (kind при выборе типа предложения)
 
 
+class ScenCb(CallbackData, prefix="scen"):
+    action: str  # "list", "retry", "pause", "resume"
+    wf_id: Optional[int] = None
+
+
 class TaskCb(CallbackData, prefix="tsk"):
     action: str  # "list", "cancel", "cancel_all"
     task_id: Optional[str] = None
