@@ -43,3 +43,19 @@ def test_the_names_are_russian():
 def test_the_measure_reads_the_dictionary():
     # Самопроверка: заведомо известный тип мерка обязана найти.
     assert "mass_invite" in _op_ru_keys()
+
+
+def test_no_screen_prints_the_raw_operation_type():
+    # Словарь полон — но он не поможет, если экран печатает тип мимо opRu:
+    # так было у карточки операции («Тип: network_broadcast»), у баннера
+    # итога и у полоски прогресса.
+    src = re.sub(r"//[^\n]*", "", miniapp_source())
+    raw = re.findall(r"\|\|\s*[a-z]+\.op_type\b(?!\s*\))", src)
+    raw += [m for m in re.findall(r"label\s*\|\|\s*[a-z]+\.op_type", src)]
+    assert not raw, f"тип операции уходит на экран без перевода: {raw}"
+
+
+def test_the_raw_type_measure_sees_the_old_form():
+    probe = "esc(o.label || o.op_type || '')"
+    assert re.findall(r"label\s*\|\|\s*[a-z]+\.op_type", probe)
+    assert not re.findall(r"label\s*\|\|\s*[a-z]+\.op_type", "esc(o.label || opRu(o.op_type))")

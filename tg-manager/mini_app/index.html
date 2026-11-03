@@ -8559,7 +8559,7 @@ function showOpComplete(op) {
   const el = document.getElementById('opDone');
   if (!el || !op || !op.id) return;
   const ok = op.status === 'done';
-  const head = `${ok ? '✅' : '⚠️'} ${esc(op.label || op.op_type || 'Операция')}`;
+  const head = `${ok ? '✅' : '⚠️'} ${esc(op.label || opRu(op.op_type) || 'Операция')}`;
   // Честный итог: сначала summary операции, иначе причина ошибки, иначе счётчик.
   // Пустой плашки быть не должно — «завершилась» без результата это тот же
   // тихий успех, только в новом месте.
@@ -8655,7 +8655,7 @@ function renderOpProgress(items) {
       : '';
     return `<div class="op-progress-item${oid?' tap':''}"${oid?` id="op-prog-${oid}" onclick="openOpDetail(${oid})"`:''}>
       <div class="op-progress-header">
-        <span class="op-progress-label">${esc(op.label || op.op_type)}</span>
+        <span class="op-progress-label">${esc(op.label || opRu(op.op_type))}</span>
         <span class="op-progress-pct">${pct}%</span>
         ${stop}
       </div>
@@ -12974,7 +12974,7 @@ async function openOpDetail(opId) {
     }
     let html = `
       <div class="lst" style="margin:12px 16px 0">
-        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.label || o.op_type || '')}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.label || opRu(o.op_type) || '')}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val"><span class="badge ${bc}">${bl}</span></div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val"><span data-op-cnt="${o.id}">${num(dDone)} / ${num(o.total_items||0)}</span> (<span data-op-pct="${o.id}">${pct}</span>%)</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru-RU'):''}</div></div></div>
