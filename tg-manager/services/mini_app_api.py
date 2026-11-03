@@ -65,6 +65,7 @@ from services import mini_app_parser
 from services import mini_app_workspace
 from services import mini_app_crm
 from services import mini_app_my_data
+from services import mini_app_bot_people
 from services.security import (
     check_rate_limit,
     rate_limit_response,
@@ -2992,7 +2993,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         lim = _list_limit(request, 100, 2000)
         rows = await _safe_fetch(pool,
             """SELECT bu.user_id, bu.username, bu.first_name, bu.first_seen,
-                      mb.username AS bot_username
+                      bu.bot_id, mb.username AS bot_username
                FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
                WHERE mb.added_by = $1 AND bu.user_id > 0
@@ -7962,6 +7963,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_sales.setup_routes(app, pool)
     mini_app_crm.setup_routes(app, pool)
     mini_app_my_data.setup_routes(app, pool)
+    mini_app_bot_people.setup_routes(app, pool)
     # ИИ в переписке оператора: черновик ответа и сводка (services/ai_inbox_assist).
     from services import ai_inbox_assist
     ai_inbox_assist.setup_routes(app, pool)

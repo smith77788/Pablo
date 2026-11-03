@@ -17132,6 +17132,13 @@ function nuSwitch(which) {
 let NU_ROWS = [], NU_OFFSET = 0;
 // «Показать ещё» на ленте подписчиков: экран уже открыт, поэтому повторно
 // push() делать нельзя — иначе в стеке появится второй такой же экран.
+async function openSubscriberCard(botId, userId) {
+  try {
+    const r = await api('/api/miniapp/bot_user/contact', {method:'POST',
+      body: JSON.stringify({bot_id: botId, user_id: userId})});
+    if (r && r.contact_id) openContactDetail(r.contact_id);
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось открыть карточку')); }
+}
 async function openNewUsersMore() { NU_OFFSET = NU_ROWS.length; await openNewUsers(true); }
 async function openNewUsers(keep) {
   if (!keep) { NU_ROWS = []; NU_OFFSET = 0; push('s-newusers'); }
@@ -17147,12 +17154,16 @@ async function openNewUsers(keep) {
     if (!us.length) { txt('newUsersList', empty('🆕','Пока нет подписчиков','Появятся, как только кто-то напишет вашим ботам')); }
     else txt('newUsersList', us.map(u=>{
       const nm = u.first_name || (u.username?'@'+u.username:'Пользователь '+u.user_id);
-      return `<div class="row">
+      // Строка — дверь к человеку: карточка контакта (CRM, сделка, история).
+      // Раньше подписчик был тупиком — нажать было нечего.
+      const tap = u.bot_id ? ` style="cursor:pointer" role="button" tabindex="0" onclick="openSubscriberCard(${Number(u.bot_id)},${Number(u.user_id)})"` : '';
+      return `<div class="row"${tap}>
         <div class="row-ico" style="background:var(--bg-green-16)">👤</div>
         <div class="row-body">
           <div class="row-name">${esc(nm)}</div>
           <div class="row-val" style="color:var(--hint)">${u.bot_username?'@'+esc(u.bot_username):''} · ${u.first_seen?ago(u.first_seen):''}</div>
         </div>
+        ${u.bot_id?'<div class="row-right"><span class="chev">›</span></div>':''}
       </div>`;
     }).join('') + moreBtn(us.length, nuTotal, 'openNewUsersMore()'));
   } catch(e) { txt('newUsersList', empty('⚠️','Ошибка',errRu(e))); }
