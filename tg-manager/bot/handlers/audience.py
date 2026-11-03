@@ -1,6 +1,7 @@
 """Audience collection, stats, comparison, CSV export/XLSX export, and user management."""
 
 from __future__ import annotations
+import asyncio
 import csv
 import io
 import asyncpg
@@ -202,23 +203,8 @@ async def cb_export(
     )
 
 
-@router.callback_query(AudCb.filter(F.action == "export_xlsx"))
-async def cb_export_xlsx(
-    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
-) -> None:
-
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
-    if not row:
-        await callback.answer("Бот не найден.", show_alert=True)
-        return
-    await callback.answer("⏳ Генерирую Excel…")
-
-    rows = await db.get_audience_full(pool, row["bot_id"])
-    stats = await db.get_audience_stats(pool, row["bot_id"])
-
-    label = f"@{row['username']}" if row["username"] else row["first_name"]
-    safe_label = row["username"] or str(row["bot_id"])
-
+def _build_audience_xlsx(rows, stats, label: str) -> bytes:
+    """Excel-выгрузка аудитории: синхронно, для `asyncio.to_thread`."""
     wb = Workbook()
     # ── Sheet 1: Аудитория ──────────────────────────────────────────────────
     ws = wb.active
@@ -297,11 +283,35 @@ async def cb_export_xlsx(
 
     buf = io.BytesIO()
     wb.save(buf)
-    buf.seek(0)
+    return buf.getvalue()
+
+
+@router.callback_query(AudCb.filter(F.action == "export_xlsx"))
+async def cb_export_xlsx(
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+) -> None:
+
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await callback.answer("⏳ Генерирую Excel…")
+
+    rows = await db.get_audience_full(pool, row["bot_id"])
+    stats = await db.get_audience_stats(pool, row["bot_id"])
+
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    safe_label = row["username"] or str(row["bot_id"])
+
+    # Сборка книги — чистый CPU (openpyxl, ячейка за ячейкой). На цикле событий
+    # она замораживала ВЕСЬ процесс — бот, мини-апп и исполнитель операций — на
+    # всё время сборки: аудитория в 100 тысяч человек это секунды простоя для
+    # всех клиентов сразу. Поэтому — в отдельном потоке.
+    xlsx_bytes = await asyncio.to_thread(_build_audience_xlsx, rows, stats, label)
     filename = f"audience_{safe_label}.xlsx"
 
     await callback.message.answer_document(
-        BufferedInputFile(buf.read(), filename=filename),
+        BufferedInputFile(xlsx_bytes, filename=filename),
         caption=f"📊 <b>Аудитория {label}</b>\n{len(rows)} пользователей · Excel-файл с форматированием",
         parse_mode="HTML",
     )

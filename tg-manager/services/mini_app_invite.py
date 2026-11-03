@@ -229,11 +229,14 @@ def setup_routes(app: web.Application, pool) -> None:
         if not data:
             return _err("Файл пуст", 400)
         try:
-            text = extract_text(filename, data)
+            # Разбор и нарезка целей — чистый CPU (xlsx до 25 МБ разбирается
+            # десятки секунд). На цикле событий это замораживало ВЕСЬ процесс:
+            # бот, мини-апп и исполнитель операций всех клиентов. В поток.
+            text = await asyncio.to_thread(extract_text, filename, data)
         except Exception:
             return _err("Не удалось прочитать файл (формат не поддержан или повреждён)", 400)
         from services.mass_inviter_engine import split_invite_targets
-        user_refs, phones = split_invite_targets(text)
+        user_refs, phones = await asyncio.to_thread(split_invite_targets, text)
         total = len(user_refs) + len(phones)
         if total == 0:
             return _err("В файле не распознано ни одной цели", 400)

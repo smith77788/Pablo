@@ -412,7 +412,10 @@ async def _read_attached_document(message: Message) -> tuple[str, str]:
             f"Файл слишком большой. Сейчас можно отправлять файлы до {size_mb:.1f} МБ."
         )
 
-    text = _extract_document_text(file_name, document.mime_type, raw)
+    # PDF/DOCX/XLSX разбираются чистым CPU — на цикле событий это замирание
+    # всего процесса (бот, мини-апп, операции) на время разбора. В поток.
+    text = await asyncio.to_thread(
+        _extract_document_text, file_name, document.mime_type, raw)
     text = _truncate_file_text(text)
     if not text:
         raise ValueError("В файле не удалось найти читаемый текст.")

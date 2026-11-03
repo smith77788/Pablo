@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 
@@ -724,7 +725,10 @@ async def _refs_from_document(message: Message, mode: str):
         await message.answer("⚠️ Не удалось скачать файл. Попробуйте ещё раз.")
         return None
     try:
-        return ilp.parse_invite_file(doc.file_name or "list.txt", data, mode=mode)
+        # Разбор — чистый CPU (xlsx до 25 МБ — десятки секунд). На цикле
+        # событий он замораживал весь процесс для всех клиентов — в поток.
+        return await asyncio.to_thread(
+            ilp.parse_invite_file, doc.file_name or "list.txt", data, mode=mode)
     except ValueError as e:
         await message.answer(f"⚠️ {html.escape(str(e))}")
         return None
