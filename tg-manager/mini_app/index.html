@@ -29423,7 +29423,9 @@ async function openBilling() {
     const badge = document.getElementById('billingPlanBadge');
     if (badge) {
       if (plan==='paid') {
-        badge.textContent='ПРО';
+        // Название КУПЛЕННОГО тарифа (Старт/Про/Бизнес). Раньше любому
+        // платному здесь стояло «ПРО» — и подписчику «Старт» тоже.
+        badge.textContent = sub.tier_name ? String(sub.tier_name).toUpperCase() : 'ПОДПИСКА';
         badge.style.cssText='background:var(--bg-violet-16);border:1px solid rgba(167,139,250,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
       } else {
         // Значок повторял бы название тарифа слово в слово. Прячем целиком:
@@ -29447,7 +29449,14 @@ async function openBilling() {
       }
     }
     document.getElementById('m-billing-val').textContent = nameMap[plan]||plan;
-    const feats = _planLines(plan);
+    let feats = _planLines(plan);
+    // Лимит аккаунтов — свойство тарифа, а не уровня доступа: у «paid» в
+    // матрице стоит ∞, а у тарифа «Старт» — 10. Показываем лимит своего тарифа.
+    if (feats && sub.tier) {
+      const capTxt = (sub.account_cap == null) ? '∞' : ('до ' + num(sub.account_cap));
+      feats = feats.map(f => /Telegram-аккаунт/i.test(f) ? ('✅ Telegram-аккаунтов: ' + capTxt) : f);
+      window._tier = sub.tier;   // продление — того же тарифа по умолчанию
+    }
     if (!feats) {
       // Матрица не доехала (сеть). Выдумывать состав тарифа нельзя — про него
       // принимают решение о покупке.

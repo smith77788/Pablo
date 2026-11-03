@@ -6733,14 +6733,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             gp_plan = None
         expires = None
         exp_plan = None
+        sub_tier = None
         try:
             srow = await pool.fetchrow(
-                "SELECT plan, expires_at FROM subscriptions "
+                "SELECT plan, expires_at, tier FROM subscriptions "
                 "WHERE user_id=$1 AND is_active=true AND expires_at > now() "
                 "ORDER BY expires_at DESC LIMIT 1", uid)
             if srow:
                 exp_plan = srow["plan"]
                 expires = str(srow["expires_at"])
+                sub_tier = srow["tier"]
         except Exception as e:
             log.warning("subscription fetch subscriptions: %s", e)
         pu_plan = None
@@ -6759,10 +6761,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Срок: активная подписка приоритетна, иначе — из ручной выдачи.
         if not expires and plan != "free" and pu_expires:
             expires = str(pu_expires)
+        # Тариф по размеру флота (Старт/Про/Бизнес, services/tiers.py). Экран
+        # не знал его вовсе: любому платному писал «ПРО» и «аккаунтов: ∞», то
+        # есть подписчик «Старт» с лимитом 10 видел обещание без лимита.
+        # tier IS NULL — подписка до тарифов, триал или ручная выдача: лимита
+        # у неё нет, так и говорим.
+        from services import tiers as _tiers
+        _t = _tiers.coerce_tier(sub_tier) if plan != "free" else None
+        _cap = _tiers.account_cap(_t) if _t else None
         return _json_resp({
             "plan": plan,
             "expires_at": expires,
             "is_active": plan != "free",
+            "tier": _t,
+            "tier_name": _tiers.name(_t) if _t else None,
+            "account_cap": (None if _cap is None or _cap >= _tiers.tariffs.UNLIMITED
+                            else int(_cap)),
         })
 
     async def user_settings_get(request: web.Request) -> web.Response:
