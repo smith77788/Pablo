@@ -127,11 +127,15 @@ async def set_avatar_from_url(
     except ConnectFailed as _cf:
         return {"ok": False, "error": str(_cf)}
     try:
-        async with aiohttp.ClientSession() as http:
+        from services.security import public_http_session, read_capped
+
+        # Адрес аватара приходит от пользователя: соединение только на
+        # публичные адреса (и после переадресаций), размер — с потолком.
+        async with public_http_session() as http:
             async with http.get(photo_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status != 200:
                     return {"ok": False, "error": f"HTTP {resp.status} downloading photo"}
-                data = await resp.read()
+                data = await read_capped(resp, 10 * 1024 * 1024)
 
         # Уникализация: один и тот же avatar_url на весь флот = байт-в-байт
         # идентичное фото профиля у всех аккаунтов, тривиальная кластеризация

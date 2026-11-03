@@ -26,6 +26,7 @@ from functools import wraps
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
+import aiohttp
 from aiohttp import web
 
 log = logging.getLogger(__name__)
@@ -777,3 +778,51 @@ def outbound_ssl_context():
         return ssl.create_default_context(cafile=certifi.where())
     except Exception:
         return ssl.create_default_context()
+
+
+# ── Скачивание по адресу пользователя (SSRF) ───────────────────────────────────
+#
+# resolve_url_is_public проверяет адрес ДО запроса, но запрос потом резолвит
+# имя ЗАНОВО и ходит по переадресациям сам. Отсюда два обхода, оба рабочие:
+#   * переадресация: публичная страница отвечает 302 на
+#     http://169.254.169.254/… (метаданные облака) или http://127.0.0.1:5432 —
+#     клиент послушно идёт туда;
+#   * DNS-rebinding: имя с TTL 0 отдаёт публичный адрес проверке и внутренний
+#     самому запросу.
+# Поэтому проверка живёт в соединителе: КАЖДОЕ соединение (и после каждой
+# переадресации, и для адреса-литерала) идёт только на публичный IP.
+
+class InternalAddressBlocked(OSError):
+    """Соединение во внутреннюю сеть запрещено."""
+
+
+class PublicOnlyConnector(aiohttp.TCPConnector):
+    async def _resolve_host(self, host, port, traces=None):  # type: ignore[override]
+        hosts = await super()._resolve_host(host, port, traces=traces)
+        if not hosts or any(is_internal_ip(h.get("host", "")) for h in hosts):
+            raise InternalAddressBlocked(f"адрес {host} ведёт во внутреннюю сеть")
+        return hosts
+
+
+def public_http_session(**kwargs):
+    """ClientSession, который физически не соединяется с внутренними адресами.
+
+    Для любых запросов по адресу, пришедшему от пользователя (картинка, медиа,
+    вебхук). trust_env=False: переменные прокси окружения не уводят запрос в
+    обход проверки.
+    """
+    kwargs.setdefault("connector", PublicOnlyConnector(ssl=outbound_ssl_context()))
+    kwargs.setdefault("trust_env", False)
+    return aiohttp.ClientSession(**kwargs)
+
+
+async def read_capped(resp, max_bytes: int) -> bytes:
+    """Прочитать тело не больше max_bytes (+1 байт — признак превышения).
+
+    resp.read() тянет в память всё, что пришлёт сервер: «картинка» на 10 ГБ
+    валила процесс раньше, чем срабатывала проверка размера.
+    """
+    data = await resp.content.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError(f"Файл больше {max_bytes // (1024 * 1024)} МБ")
+    return data

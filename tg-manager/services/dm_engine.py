@@ -82,12 +82,16 @@ async def _download_media(url: str) -> tuple[bytes, str]:
             "URL медиа должен быть публичным https (внутренние адреса запрещены)")
     import aiohttp
 
-    async with aiohttp.ClientSession() as sess:
+    from services.security import public_http_session, read_capped
+
+    # Проверка выше смотрит адрес ДО запроса; соединитель — каждое соединение,
+    # включая переадресации и повторный резолв имени (DNS-rebinding).
+    async with public_http_session() as sess:
         async with sess.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             if resp.status >= 400:
                 raise ValueError(f"URL вернул HTTP {resp.status}")
             ct = resp.headers.get("Content-Type", "")
-            data = await resp.read()
+            data = await read_capped(resp, _MAX_MEDIA_BYTES)
     if not data:
         raise ValueError("Пустой ответ по URL")
     if len(data) > _MAX_MEDIA_BYTES:

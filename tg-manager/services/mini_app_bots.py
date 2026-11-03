@@ -684,7 +684,11 @@ def setup_routes(app: web.Application, pool) -> None:
         if not await resolve_url_is_public(photo_url):
             return _err("Нужен публичный https URL картинки (внутренние адреса запрещены)", 400)
         try:
-            async with _aio.ClientSession() as sess:
+            from services.security import public_http_session
+
+            # Соединитель не пускает во внутреннюю сеть и после переадресации:
+            # проверка адреса выше её не видит (302 на 169.254.169.254).
+            async with public_http_session() as sess:
                 # Скачиваем с потолком размера (5 МБ) и таймаутом.
                 async with sess.get(photo_url, timeout=_aio.ClientTimeout(total=15)) as resp:
                     if resp.status != 200:

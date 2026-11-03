@@ -47,12 +47,16 @@ async def _download(url: str) -> tuple[bytes, str]:
         raise ValueError("URL должен начинаться с http:// или https://")
     import aiohttp
 
-    async with aiohttp.ClientSession() as sess:
+    from services.security import public_http_session, read_capped
+
+    # Соединение только на публичные адреса, включая каждую переадресацию:
+    # иначе «медиа» по ссылке читало метаданные облака и внутренние сервисы.
+    async with public_http_session() as sess:
         async with sess.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             if resp.status >= 400:
                 raise ValueError(f"URL вернул HTTP {resp.status}")
             ct = resp.headers.get("Content-Type", "")
-            data = await resp.read()
+            data = await read_capped(resp, _MAX_MEDIA_BYTES)
     if len(data) > _MAX_MEDIA_BYTES:
         raise ValueError(f"Медиа слишком большое ({len(data)//1024//1024} МБ, лимит 25 МБ)")
     if not data:
