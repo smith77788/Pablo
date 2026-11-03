@@ -705,3 +705,74 @@ def security_middleware() -> Callable:
         return response
 
     return middleware
+
+
+# ── Секрет главного вебхука бота ───────────────────────────────────────────────
+#
+# Главный бот на вебхуке (WEBHOOK_URL) принимал POST /webhook от кого угодно:
+# ни setWebhook, ни обработчик aiogram не получали secret_token. Апдейт
+# Telegram — это просто JSON, и поле from.id в нём пишет отправитель. Значит,
+# любой, кто знал адрес сервера, мог прислать «сообщение от админа» (/admin,
+# правка переменных окружения, бэкап базы) или «нажатие кнопки» от имени
+# любого владельца — бот исполнял его как настоящее.
+#
+# Telegram умеет класть секрет в заголовок X-Telegram-Bot-Api-Secret-Token
+# каждого апдейта. Секрет выводим из токена бота (HMAC с меткой), поэтому
+# хранить и настраивать его не нужно: обе стороны считают одно и то же.
+# Метка отличает его от ключа подписи сессий мини-аппа (sha256(token)) —
+# утечка одного не даёт второго. TELEGRAM_WEBHOOK_SECRET задаёт его явно.
+
+_WEBHOOK_SECRET_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
+
+
+def main_webhook_secret(bot_token: str) -> str:
+    """Секрет заголовка X-Telegram-Bot-Api-Secret-Token для главного бота.
+
+    Пустой/негодный токен — ValueError: вебхук без секрета не ставим вовсе.
+    """
+    explicit = (os.getenv("TELEGRAM_WEBHOOK_SECRET", "") or "").strip()
+    if explicit:
+        if not _WEBHOOK_SECRET_RE.match(explicit) or len(explicit) < 16:
+            raise ValueError(
+                "TELEGRAM_WEBHOOK_SECRET: нужно 16–256 символов A-Z a-z 0-9 _ -")
+        return explicit
+    if not bot_token or len(bot_token.strip()) < 16:
+        raise ValueError("нет токена бота — секрет вебхука не из чего вывести")
+    return hmac.new(bot_token.encode("utf-8"), b"tg-main-webhook-secret",
+                    hashlib.sha256).hexdigest()
+
+
+# ── Проверка TLS у исходящих запросов ──────────────────────────────────────────
+#
+# Сессия бота и общий HTTP-клиент процесса ходили наружу с выключенной
+# проверкой сертификата (ssl=False / CERT_NONE). Токен бота едет в КАЖДОМ
+# адресе Bot API (api.telegram.org/bot<токен>/…), токены подключённых ботов и
+# ключи ИИ-провайдеров — тоже через этот клиент. Без проверки сертификата
+# любой посредник на пути (провайдер, чужой прокси, подменённый DNS)
+# представляется api.telegram.org и забирает токены целиком.
+#
+# Теперь проверка включена всегда, с корневыми сертификатами certifi.
+# OUTBOUND_TLS_VERIFY=0 — аварийный выключатель на случай, если у какого-то
+# окружения сломаны корневые сертификаты: громкая запись в лог, не тихо.
+
+def outbound_tls_verify_enabled() -> bool:
+    return (os.getenv("OUTBOUND_TLS_VERIFY", "1") or "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
+def outbound_ssl_context():
+    """SSL-контекст для исходящих запросов: проверка сертификата и имени."""
+    import ssl
+    if not outbound_tls_verify_enabled():
+        log.error(
+            "OUTBOUND_TLS_VERIFY=0: проверка сертификатов исходящих запросов "
+            "ВЫКЛЮЧЕНА — токены уязвимы для перехвата. Верните 1 как можно скорее.")
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()

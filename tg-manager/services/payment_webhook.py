@@ -198,6 +198,25 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     return app
 
 
+def register_telegram_webhook(app: web.Application, dp, bot: Bot, path: str,
+                              **data) -> None:
+    """Повесить обработчик апдейтов главного бота на общий сервер.
+
+    Апдейт без верного X-Telegram-Bot-Api-Secret-Token отбивается 401: иначе
+    любой присылает «сообщение от админа» с чужим from.id
+    (services.security.main_webhook_secret).
+    """
+    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+    from services.security import main_webhook_secret
+    SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        secret_token=main_webhook_secret(bot.token),
+        **data,
+    ).register(app, path=path)
+    setup_application(app, dp, bot=bot, **data)
+
+
 async def run(
     pool: asyncpg.Pool,
     bot: Bot,
@@ -214,14 +233,7 @@ async def run(
 
     if dp is not None:
         try:
-            from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application as _sa
-            SimpleRequestHandler(
-                dispatcher=dp,
-                bot=bot,
-                pool=pool,
-                http=http,
-            ).register(app, path=webhook_path)
-            _sa(app, dp, bot=bot, pool=pool, http=http)
+            register_telegram_webhook(app, dp, bot, webhook_path, pool=pool, http=http)
             log.info("Telegram webhook registered at %s on the shared server", webhook_path)
         except Exception:
             log.exception("Failed to register aiogram webhook handler — falling back to polling")

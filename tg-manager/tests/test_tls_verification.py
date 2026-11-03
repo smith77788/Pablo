@@ -23,6 +23,8 @@ REAL_API_FILES = [
     "services/smm_panel.py",
     "services/auto_funnel.py",
     "bot/handlers/admin.py",
+    # Сессия бота и общий HTTP-клиент: токены ботов и ключи ИИ.
+    "main.py",
 ]
 
 _TLS_OFF = re.compile(r"ssl\s*=\s*False|CERT_NONE|check_hostname\s*=\s*False")

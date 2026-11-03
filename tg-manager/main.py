@@ -4,7 +4,6 @@
 import asyncio
 import logging
 import os
-import ssl
 import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -141,6 +140,7 @@ from bot.handlers import spintax as spintax_handler
 from bot.handlers import about as about_handler
 from bot.handlers import fleet_pulse as fleet_pulse_handler
 from services import bg_tasks
+from services.security import main_webhook_secret, outbound_ssl_context
 from services import narrative_engine
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
@@ -294,32 +294,22 @@ async def _global_error_handler(event: ErrorEvent) -> None:
             except Exception:
                 log_exc_swallow(log, "Failed to answer callback_query on error handler")
             try:
-                exc_text = (
-                    str(exc)[:200]
-                    .replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;")
-                )
+                # Текст исключения пользователю НЕ показываем: в нём бывают
+                # SQL, пути, id и куски чужих данных. Подробности — в логе и
+                # в отчёте об ошибке (report_error выше), по коду их находит админ.
                 await cb.message.answer(
-                    f"⚠️ <b>Ошибка [{error_code.value}]</b>\n\n"
-                    f"{user_msg}\n\n"
-                    f"<code>{type(exc).__name__}: {exc_text}</code>",
+                    f"⚠️ <b>Ошибка [{error_code.value}]</b>\n\n{user_msg}",
                     parse_mode="HTML",
                 )
             except Exception:
                 log_exc_swallow(log, "Failed to send error message via callback_query")
         elif update.message:
             try:
-                exc_text = (
-                    str(exc)[:200]
-                    .replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;")
-                )
+                # Текст исключения пользователю НЕ показываем: в нём бывают
+                # SQL, пути, id и куски чужих данных. Подробности — в логе и
+                # в отчёте об ошибке (report_error выше), по коду их находит админ.
                 await update.message.answer(
-                    f"⚠️ <b>Ошибка [{error_code.value}]</b>\n\n"
-                    f"{user_msg}\n\n"
-                    f"<code>{type(exc).__name__}: {exc_text}</code>",
+                    f"⚠️ <b>Ошибка [{error_code.value}]</b>\n\n{user_msg}",
                     parse_mode="HTML",
                 )
             except Exception:
@@ -607,7 +597,10 @@ async def main() -> None:
     install_button_style_patch()
 
     bot_session = AiohttpSession()
-    bot_session._connector_init["ssl"] = False
+    # Проверка сертификата Telegram ВКЛЮЧЕНА: токен бота едет в каждом адресе
+    # Bot API, и без проверки его забирает любой посредник на пути
+    # (services/security.outbound_ssl_context).
+    bot_session._connector_init["ssl"] = outbound_ssl_context()
 
     bot = Bot(
         token=BOT_TOKEN,
@@ -1080,9 +1073,10 @@ async def main() -> None:
             exc_info=True,
         )
 
-    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
+    # Общий клиент возит токены подключённых ботов и ключи ИИ — сертификат
+    # проверяется. Запросы к заведомо недоверенным прокси выключают проверку
+    # сами, на своём вызове.
+    ssl_ctx = outbound_ssl_context()
     connector = aiohttp.TCPConnector(ssl=ssl_ctx, limit=200, limit_per_host=50)
     http = aiohttp.ClientSession(connector=connector)
 
@@ -1399,6 +1393,9 @@ async def main() -> None:
             await bot.set_webhook(
                 _webhook_url,
                 allowed_updates=_allowed_updates,
+                # Без секрета POST /webhook принимал поддельные апдейты от
+                # кого угодно — с любым from.id, включая id админа.
+                secret_token=main_webhook_secret(BOT_TOKEN),
                 drop_pending_updates=True,
             )
             log.info("Webhook mode: %s (handler on shared HTTP server)", _webhook_url)
