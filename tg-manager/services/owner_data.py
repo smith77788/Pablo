@@ -129,7 +129,12 @@ def _jsonable(v):
         return [_jsonable(x) for x in v]
     if isinstance(v, dict):
         return {k: _jsonable(x) for k, x in v.items()}
-    return v
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    # uuid (контакты, сделки воронки), inet, interval и прочие типы Postgres:
+    # json их не знает, и ОДНА такая колонка роняла всю выгрузку — владелец с
+    # контактами получал «ошибку» вместо архива и в мини-аппе, и в /my_data.
+    return str(v)
 
 
 async def export_owner_data(pool, owner_id: int) -> tuple[bytes, dict[str, int]]:
