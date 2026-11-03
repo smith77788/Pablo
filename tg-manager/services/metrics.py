@@ -32,6 +32,11 @@ _sums: dict[tuple, list] = {}
 _gauges: dict[tuple, float] = {}
 
 _HELP = {
+    # Сторож цикла событий (services/loop_lag.py): насколько опаздывает любой
+    # ответ процесса — бот, мини-апп и операции делят один цикл.
+    "infragram_event_loop_lag_seconds": "Последняя задержка цикла событий, сек",
+    "infragram_event_loop_lag_max_seconds": "Максимальная задержка цикла событий за минуту, сек",
+    "infragram_event_loop_stalls_total": "Замирания цикла событий дольше порога (весь процесс не отвечал)",
     "infragram_operations_total": "Операции по типу и исходу",
     "infragram_operation_seconds_sum": "Суммарная длительность операций, сек",
     "infragram_operation_seconds_count": "Число завершённых операций",

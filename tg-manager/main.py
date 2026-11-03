@@ -344,6 +344,14 @@ def _bootstrap_response(web_mod, path: str):
     каждом экране, пока шёл деплой. 503 + `starting` — сигнал фронту, что это
     перезапуск: он сам повторит запрос, а не сыплет ошибками.
     """
+    # Готовность во время старта — честное «не готов»: база ещё мигрирует,
+    # обслуживать запросы нечем. Живость (/health и всё прочее) — 200, иначе
+    # платформа убьёт деплой посреди долгой миграции.
+    if path == "/health/ready":
+        return web_mod.json_response(
+            {"ok": False, "starting": True, "phase": _boot_phase},
+            status=503, headers={"Cache-Control": "no-store"},
+        )
     if path.startswith("/api/"):
         return web_mod.json_response(
             {"ok": False, "starting": True, "phase": _boot_phase,
@@ -1177,6 +1185,12 @@ async def main() -> None:
         # Страж «одной реплики» (ось №3): лимиты флуда живут в памяти процесса, и
         # вторая реплика молча разгоняет темп по флоту → риск бана. Guard бьёт
         # хартбит и громко предупреждает, если реплик больше одной. Во всех ролях.
+        # Сторож цикла событий — во ВСЕХ ролях: бот и мини-апп страдают от
+        # замирания цикла ровно так же, как операции. Меряет задержку
+        # (метрики) и, если цикл встал, снимает стек того, кто его держит.
+        from services import loop_lag as _loop_lag
+        _spawn(_web_resilient("loop_lag", _loop_lag.run))
+
         from services import replica_guard as _rguard
         _spawn(_web_resilient(
             "replica_guard", _rguard.run_heartbeat_loop, pool, op_worker._WORKER_ID, _ROLE))

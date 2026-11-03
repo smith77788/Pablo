@@ -64,6 +64,45 @@ def deploy_secret_ok(request) -> bool | None:
     return hmac.compare_digest(got.encode(), secret.encode())
 
 
+# Сколько ждать ответа базы в проверке готовности. Больше — проверка сама
+# зависает вместе с базой и мониторинг узнаёт о сбое по своему таймауту.
+READY_DB_TIMEOUT_SEC = 2.0
+# С какой задержки цикла событий экземпляр считается неготовым: ответ любому
+# клиенту опаздывает на столько же.
+READY_MAX_LOOP_LAG_SEC = 5.0
+
+
+async def readiness_response(pool) -> web.Response:
+    """Ответ проверки готовности: база + цикл событий. Никогда не бросает."""
+    import time
+
+    from services import loop_lag
+
+    t0 = time.monotonic()
+    db_ok = False
+    try:
+        await asyncio.wait_for(pool.fetchval("SELECT 1"), READY_DB_TIMEOUT_SEC)
+        db_ok = True
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        # Тип сбоя — в лог (там его читает инженер), не в ответ.
+        log.warning("health/ready: база не ответила: %s", type(exc).__name__)
+    db_ms = round((time.monotonic() - t0) * 1000, 1)
+
+    loop = loop_lag.snapshot()
+    loop_ok = (not loop["running"]) or loop["max_lag_sec_1m"] < READY_MAX_LOOP_LAG_SEC
+    ok = db_ok and loop_ok
+    body = {
+        "ok": ok,
+        "db": {"ok": db_ok, "ms": db_ms},
+        "loop": {"ok": loop_ok, "lag_sec": loop["lag_sec"],
+                 "max_lag_sec_1m": loop["max_lag_sec_1m"]},
+    }
+    return web.json_response(body, status=200 if ok else 503,
+                             headers={"Cache-Control": "no-store"})
+
+
 def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app = web.Application()
     # Apply security middleware (rate limiting + security headers)
@@ -72,6 +111,19 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
 
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="OK")
+
+    async def health_ready(request: web.Request) -> web.Response:
+        """Готовность, а не просто «процесс жив» (`/health` — живость).
+
+        `/health` отвечает «OK», даже когда база недоступна: процесс жив, а
+        продукт не работает ни на одном экране. Здесь — то, без чего запрос
+        не обслужить: база отвечает за отведённое время и цикл событий не
+        стоит. 503 — сигнал балансировщику и мониторингу, что этот экземпляр
+        сейчас не обслуживает. Подробностей сбоя наружу не отдаём: только
+        признаки и задержки.
+        """
+        return await readiness_response(pool)
+
 
     async def root_redirect(request: web.Request) -> web.Response:
         """Redirect root URL to Mini App so MINI_APP_URL can be set without /miniapp/ suffix."""
@@ -179,6 +231,7 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         return web.Response(status=200, text="deploy-ok")
 
     app.router.add_get("/health", health)
+    app.router.add_get("/health/ready", health_ready)
     app.router.add_get("/", root_redirect)        # root → /miniapp/ redirect
     app.router.add_get("/webhook/deploy", deploy_health)
     app.router.add_post("/webhook/deploy", deploy_webhook)
