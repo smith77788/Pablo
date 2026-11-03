@@ -151,6 +151,9 @@ INVOICE_CURRENCIES = ("XTR", "RUB", "USD", "EUR", "UAH", "KZT")
 _FIELD_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 MAX_BUTTONS = 8
 MAX_BUTTON_TEXT = 64
+# Повторы шага «Вебхук» при сбое сервиса (по умолчанию и предел).
+WEBHOOK_DEFAULT_RETRIES = 3
+WEBHOOK_MAX_RETRIES = 5
 
 
 def workflow_template(name: str) -> dict | None:
@@ -666,6 +669,24 @@ def validate_step(step, index: int = 0) -> dict:
         if len(url) > 500:
             raise ValueError(f"{where}: адрес вебхука длиннее 500 символов")
         out["url"] = url
+        # Повторы при сбое внешнего сервиса (нет ответа, 5xx, 429): раньше
+        # одна неудача — и шаг молча пропускался, заявка в CRM терялась.
+        raw_retries = step.get("retries")
+        try:
+            retries = (WEBHOOK_DEFAULT_RETRIES if raw_retries in (None, "")
+                       else int(raw_retries))
+        except (TypeError, ValueError):
+            raise ValueError(f"{where}: число повторов вебхука — целое число")
+        if not 0 <= retries <= WEBHOOK_MAX_RETRIES:
+            raise ValueError(
+                f"{where}: повторов вебхука от 0 до {WEBHOOK_MAX_RETRIES}")
+        out["retries"] = retries
+        # Ответ сервиса — в переменные прогона: {{<save_as>_<ключ>}}.
+        if str(step.get("save_as") or "").strip():
+            out["save_as"] = _field_name(step.get("save_as"), where)
+        else_goto = _goto(step, "else_goto", where)
+        if else_goto:
+            out["else_goto"] = else_goto
 
     elif stype == "ask":
         out["text"] = _text()
@@ -808,7 +829,7 @@ STEP_OUTCOMES: dict[str, str] = {
     "paid": "оплатил", "timeout": "не ответил в срок", "done": "выполнено",
     "error": "ошибка", "goal": "цель достигнута", "completed": "завершён",
     "failed": "сбой", "expired": "истёк срок", "stopped": "остановлен",
-    "cancelled": "отменён",
+    "cancelled": "отменён", "retry": "повтор позже",
 }
 
 

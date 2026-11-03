@@ -7975,6 +7975,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field" id="wfStepWebhookField" style="display:none">
       <label>Адрес (https)</label>
       <input type="url" id="wfStepUrl" placeholder="https://example.com/hook" class="inp">
+      <input type="text" id="wfStepWhSaveAs" placeholder="Сохранить ответ как (например crm) — потом {{crm_id}}" class="inp" style="margin-top:6px">
+      <input type="number" id="wfStepWhRetries" min="0" max="5" placeholder="Повторов при сбое (по умолчанию 3)" class="inp" style="margin-top:6px">
+      <input type="number" id="wfStepWhElseGoto" min="1" placeholder="Если не удалось — перейти к шагу № (пусто = дальше)" class="inp" style="margin-top:6px">
     </div>
     <div class="field-err" id="wfStepErr"></div>
     <button class="btn btn-p" onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
@@ -30913,7 +30916,8 @@ async function openWorkflowDetail(wfId, wfName) {
         (s.buttons || []).forEach(b => extra.push('🔘 ' + b.text + (b.url ? ' (ссылка)' : (b.goto ? ' → шаг ' + b.goto : ' → дальше'))));
         if (stype === 'ask') extra.push('💾 в поле «' + s.save_as + '»' + (s.validate && s.validate !== 'any' ? ' · проверка: ' + s.validate : ''));
         if (stype === 'invoice') extra.push((s.currency === 'XTR' ? '⭐ ' + s.amount + ' звёзд' : (s.amount / 100) + ' ' + s.currency) + ' · ' + (s.title || ''));
-        if (s.else_goto) extra.push('иначе → шаг ' + s.else_goto);
+        if (stype === 'webhook') extra.push('🔁 повторов при сбое: ' + (s.retries ?? 3) + (s.save_as ? ' · 💾 ответ в {{' + s.save_as + '_…}}' : ''));
+        if (s.else_goto) extra.push((stype === 'webhook' ? 'не удалось' : 'иначе') + ' → шаг ' + s.else_goto);
         if (s.timeout_goto) extra.push('нет ответа → шаг ' + s.timeout_goto);
         if (stype === 'delay' && s.until_time) extra.push('до ' + s.until_time + ' по времени человека' + (s.weekdays_only ? ', только будни' : ''));
         (s.branches || []).forEach(b => extra.push('🎲 ' + b.label + ' · ' + b.weight + '% → шаг ' + b.goto));
@@ -31117,6 +31121,7 @@ function openWfAddStepModal() {
   if (!_currentWfId) return;
   ['wfStepMsg', 'wfStepDelay', 'wfStepConditionVal', 'wfStepButtons', 'wfStepSaveAs',
    'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl',
+   'wfStepWhSaveAs', 'wfStepWhRetries', 'wfStepWhElseGoto',
    'wfStepUntil', 'wfStepBranches']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('wfStepErr').style.display = 'none';
@@ -31204,6 +31209,10 @@ async function submitWfAddStep() {
     Object.assign(payload, { title: val('wfStepInvTitle'), text, amount: parseInt(val('wfStepInvAmount'), 10), currency: val('wfStepInvCurrency') });
   } else if (type === 'webhook') {
     payload.url = val('wfStepUrl');
+    if (val('wfStepWhSaveAs')) payload.save_as = val('wfStepWhSaveAs');
+    if (val('wfStepWhRetries') !== '') payload.retries = parseInt(val('wfStepWhRetries'), 10);
+    const weg = parseInt(val('wfStepWhElseGoto'), 10);
+    if (weg) payload.else_goto = weg;
   }
   try {
     await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });

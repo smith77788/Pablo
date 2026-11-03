@@ -43,6 +43,9 @@ function wfEdges(steps) {
     } else if (t === 'invoice') {
       add(next(i), 'оплатил');
       add(s.timeout_goto ? tgt(s.timeout_goto) : 'end', 'не оплатил');
+    } else if (t === 'webhook' && s.else_goto) {
+      add(next(i), 'ок');
+      add(tgt(s.else_goto), 'сбой');
     } else if (t === 'action' && s.action === 'goto') {
       add(s.goto ? tgt(s.goto) : 'end', 'переход');
     } else if (t === 'action' && s.action === 'stop') {

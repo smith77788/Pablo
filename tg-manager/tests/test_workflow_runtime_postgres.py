@@ -594,3 +594,102 @@ def test_smart_delay_waits_for_the_persons_weekday_morning():
     # Поле контакта timezone сильнее языка.
     assert rt.contact_tz({"timezone": "Asia/Almaty"}, "ru") == "Asia/Almaty"
     assert rt.contact_tz({}, "xx") == rt.DEFAULT_TZ
+
+
+# ── Вебхук: повторы, запасной переход, ответ в переменные ───────────────────
+
+def _fake_webhook(monkeypatch, answers):
+    """Подменить POST шага: ответы по очереди, вызовы — в список."""
+    from services import workflow_runtime as rt
+    calls: list[str | None] = []
+
+    async def _hook(http, run, step, contact, fields, delivery_id=None):
+        calls.append(delivery_id)
+        return answers[min(len(calls), len(answers)) - 1]
+
+    monkeypatch.setattr(rt, "_do_webhook", _hook)
+    return calls
+
+
+async def _due_now(pool, wf_id):
+    await pool.execute("UPDATE workflow_runs SET next_run_at=now() WHERE workflow_id=$1",
+                       wf_id)
+
+
+def test_a_failing_webhook_is_retried_with_one_key_and_its_answer_is_used(
+        pool, tg, monkeypatch):
+    """ЧТО БЫЛО: одна неудача сервиса — шаг молча пропускался, заявка
+    терялась. Теперь сбой повторяется позже с тем же ключом доставки, а
+    ответ сервиса подставляется в следующее сообщение."""
+    calls = _fake_webhook(monkeypatch, [
+        (None, None, "network"), (503, None, ""),
+        (200, {"id": 42, "manager": {"name": "<Олег>"}}, ""),
+    ])
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "webhook", "url": "https://crm.example.com/hook", "save_as": "crm"},
+            {"type": "message", "text": "Заявка {{crm_id}}, менеджер {{crm_manager_name}}"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "running" and run["current_step"] == 0
+        assert run["next_run_at"] > __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc)
+        assert not _texts(tg)
+        await _due_now(pool, wf_id)
+        await _tick(pool)
+        assert not _texts(tg)
+        await _due_now(pool, wf_id)
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "completed", run["error_message"]
+        assert len(calls) == 3 and len(set(calls)) == 1 and calls[0]
+        assert _texts(tg) == ["Заявка 42, менеджер &lt;Олег&gt;"]
+        vars_ = json.loads(run["vars"]) if isinstance(run["vars"], str) else run["vars"]
+        assert "_wh_try" not in vars_ and "_wh_key" not in vars_
+        outcomes = [r["outcome"] for r in await pool.fetch(
+            "SELECT outcome FROM workflow_step_log WHERE run_id=$1 ORDER BY id", run["id"])]
+        assert outcomes[:3] == ["retry", "retry", "done"]
+
+    _run(go())
+
+
+def test_a_webhook_that_keeps_failing_takes_its_fallback_branch(pool, tg, monkeypatch):
+    calls = _fake_webhook(monkeypatch, [(500, None, "")])
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "webhook", "url": "https://crm.example.com/hook", "retries": 1,
+             "else_goto": 3},
+            {"type": "message", "text": "Передали в CRM"},
+            {"type": "message", "text": "Не получилось, менеджер напишет сам"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        await _due_now(pool, wf_id)
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "completed"
+        assert len(calls) == 2
+        assert _texts(tg) == ["Не получилось, менеджер напишет сам"]
+
+    _run(go())
+
+
+def test_a_client_error_is_not_retried(pool, tg, monkeypatch):
+    calls = _fake_webhook(monkeypatch, [(401, None, "")])
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "webhook", "url": "https://crm.example.com/hook"},
+            {"type": "message", "text": "Дальше"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "completed" and len(calls) == 1
+        assert _texts(tg) == ["Дальше"]
+
+    _run(go())

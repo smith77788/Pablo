@@ -769,17 +769,78 @@ async def evaluate(pool, http, token, run: dict, step: dict,
     return False
 
 
+# Пауза перед повтором вебхука: 30 с, 2 мин, 10 мин, 30 мин, 1 ч.
+_WEBHOOK_BACKOFF = (30, 120, 600, 1800, 3600)
+_WEBHOOK_MAX_BODY = 64 * 1024
+_WEBHOOK_MAX_SAVED = 20
+
+
+def webhook_retryable(code: int | None, reason: str) -> bool:
+    """Стоит ли повторить вебхук. ЧИСТАЯ.
+
+    Повторяем то, что бывает временным: нет ответа, 5xx, 429 и 408. 4xx —
+    ошибка запроса (адрес, ключ доступа), её повтор даст то же самое; адрес
+    во внутреннюю сеть — отказ навсегда."""
+    if reason == "blocked":
+        return False
+    if code is None:
+        return True
+    return code >= 500 or code in (408, 429)
+
+
+def webhook_backoff(attempt: int) -> int:
+    """Пауза в секундах перед повтором номер attempt (с нуля). ЧИСТАЯ."""
+    return _WEBHOOK_BACKOFF[min(max(attempt, 0), len(_WEBHOOK_BACKOFF) - 1)]
+
+
+def response_vars(prefix: str, data) -> dict[str, str]:
+    """Ответ сервиса → переменные прогона `<prefix>_<ключ>`. ЧИСТАЯ.
+
+    Берутся простые значения верхнего уровня и одного вложенного уровня
+    (`{"order": {"id": 7}}` → `crm_order_id`). Ключи приводятся к виду
+    имени поля (латиница, цифры, «_»), значения — к строке до 500 символов.
+    Ответ — внешние данные: при подстановке в текст `render` их
+    экранирует, исполнять их не будет никто."""
+    out: dict[str, str] = {}
+
+    def _key(*parts) -> str | None:
+        k = "_".join(re.sub(r"[^a-z0-9_]", "_", str(p).lower()) for p in parts)
+        k = re.sub(r"_+", "_", k).strip("_")[:48]
+        return k if k and k[0].isalpha() else None
+
+    def _put(key, v) -> None:
+        if key and len(out) < _WEBHOOK_MAX_SAVED and key not in out:
+            out[key] = ("да" if v else "нет") if isinstance(v, bool) else str(v)[:500]
+
+    if not isinstance(data, dict):
+        if isinstance(data, (str, int, float)) and str(data).strip():
+            _put(_key(prefix), data)
+        return out
+    for k, v in data.items():
+        if isinstance(v, dict):
+            for k2, v2 in v.items():
+                if isinstance(v2, (str, int, float, bool)):
+                    _put(_key(prefix, k, k2), v2)
+        elif isinstance(v, (str, int, float, bool)):
+            _put(_key(prefix, k), v)
+    return out
+
+
 async def _do_webhook(http, run: dict, step: dict, contact: dict,
-                      fields: dict) -> int | None:
-    """POST на адрес шага. Код ответа или None. Адрес проверяется на
-    внутренние сети при КАЖДОМ вызове: DNS имени могли поменять после
-    сохранения шага."""
+                      fields: dict, delivery_id: str | None = None
+                      ) -> tuple[int | None, Any, str]:
+    """POST на адрес шага: (код ответа | None, JSON ответа | None, причина).
+
+    Адрес проверяется на внутренние сети при КАЖДОМ вызове: DNS имени могли
+    поменять после сохранения шага. Заголовок `Idempotency-Key` одинаков у
+    всех повторов одного шага: сервис, который уже принял заявку, а ответить
+    не успел, по нему отличит повтор от новой заявки."""
     from services.security import resolve_url_is_public
     url = step.get("url") or ""
     if not await resolve_url_is_public(url):
         log.warning("workflow_runtime: вебхук прогона %s на внутренний адрес отклонён",
                     run["id"])
-        return None
+        return None, None, "blocked"
     body = {
         "workflow_id": run.get("workflow_id"), "run_id": run["id"],
         "bot_id": run.get("bot_id"), "chat_id": run.get("chat_id"),
@@ -788,14 +849,22 @@ async def _do_webhook(http, run: dict, step: dict, contact: dict,
                                    if not str(k).startswith("_")},
         "event": _as_dict(run.get("input_data")),
     }
+    headers = {"Idempotency-Key": delivery_id} if delivery_id else None
     try:
-        async with http.post(url, json=body,
+        async with http.post(url, json=body, headers=headers,
                              timeout=aiohttp.ClientTimeout(total=10),
                              allow_redirects=False) as resp:
-            return resp.status
+            payload = None
+            if 200 <= resp.status < 300 and step.get("save_as"):
+                try:
+                    raw = await resp.content.read(_WEBHOOK_MAX_BODY)
+                    payload = json.loads(raw.decode("utf-8", "replace")) if raw else None
+                except Exception:
+                    payload = None
+            return resp.status, payload, ""
     except Exception:
         log.info("workflow_runtime: вебхук прогона %s не доставлен", run["id"])
-        return None
+        return None, None, "network"
 
 
 async def _send(pool, http, token, run, text, markup=None) -> tuple[bool, int | None, str]:
@@ -1000,12 +1069,51 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                 await _log(pool, run, idx, stype, "error", action)
 
         elif stype == "webhook":
+            attempt = int(run_vars.get("_wh_try") or 0)
+            # Ключ доставки — от первой попытки шага: у повторов он тот же.
+            delivery = str(run_vars.get("_wh_key") or f"wf-{run['id']}-{seq}")
             if not await _take_step(pool, run["id"], seq, current_step=nxt):
                 return
-            code = await _do_webhook(http, run, step, contact, fields)
-            await _log(pool, run, idx, stype,
-                       "done" if code and 200 <= code < 300 else "error",
-                       str(code) if code else "не доставлен")
+            code, payload, reason = await _do_webhook(
+                http, run, step, contact, fields, delivery)
+            what = str(code) if code else (
+                "внутренний адрес запрещён" if reason == "blocked" else "нет ответа")
+            if code and 200 <= code < 300:
+                saved = response_vars(step["save_as"], payload) if step.get("save_as") else {}
+                await pool.execute(
+                    "UPDATE workflow_runs SET vars = (vars - '_wh_try' - '_wh_key') "
+                    "|| $2::jsonb WHERE id=$1", run["id"], json.dumps(saved))
+                await _log(pool, run, idx, stype, "done",
+                           what + (f" · сохранено полей: {len(saved)}" if saved else ""))
+            elif (webhook_retryable(code, reason)
+                  and attempt < int(step.get("retries", 3) or 0)):
+                wait = webhook_backoff(attempt)
+                # Шаг занят, но не сделан: вернуть указатель на него и
+                # отложить прогон. Условие по счётчику — прогон не двигал
+                # никто другой за время запроса.
+                await pool.execute(
+                    """UPDATE workflow_runs
+                          SET current_step=$3, claimed_until=NULL,
+                              next_run_at=now() + make_interval(secs => $4),
+                              vars = vars || jsonb_build_object(
+                                  '_wh_try', $5::int, '_wh_key', $6::text)
+                        WHERE id=$1 AND exec_seq=$2 AND status='running'""",
+                    run["id"], seq + 1, idx, wait, attempt + 1, delivery)
+                await _log(pool, run, idx, stype, "retry",
+                           f"{what} · попытка {attempt + 2} через "
+                           + (f"{wait // 60} мин" if wait >= 60 else f"{wait} с"))
+                return
+            else:
+                target = _goto_index(step, "else_goto")
+                await pool.execute(
+                    """UPDATE workflow_runs
+                          SET vars = vars - '_wh_try' - '_wh_key',
+                              current_step = COALESCE($3::int, current_step)
+                        WHERE id=$1 AND exec_seq=$2 AND status='running'""",
+                    run["id"], seq + 1, target)
+                await _log(pool, run, idx, stype, "error",
+                           what + (f" · попыток: {attempt + 1}" if attempt else "")
+                           + (f" · переход к шагу {target + 1}" if target is not None else ""))
 
         else:
             # Неизвестный тип (данные со старых времён) — пропустить, не падать.
