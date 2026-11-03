@@ -30813,12 +30813,14 @@ const WF_TRIGGER_PH = {
   start: 'Параметр ссылки ?start=… (пусто — любой вход)',
   keyword: 'Слова через запятую: цена, купить, скидк* (звёздочка — любое окончание)',
   tag_added: 'Имя тега',
+  field_set: 'Имя поля: phone, email, city…',
+  paid: 'Любая оплата (значение не нужно)',
   event: 'Выберите событие из подсказок к полю',
 };
 function wfTriggerHint(prefix) {
   const t = document.getElementById(prefix + 'Trigger').value;
   const inp = document.getElementById(prefix + 'TriggerVal');
-  inp.style.display = t === 'manual' ? 'none' : 'block';
+  inp.style.display = (t === 'manual' || t === 'paid') ? 'none' : 'block';
   inp.placeholder = WF_TRIGGER_PH[t] || '';
 }
 
@@ -30976,8 +30978,12 @@ async function openWorkflowDetail(wfId, wfName) {
             <div class="li-sub">Шаг ${Math.min((r.current_step || 0) + 1, r.total_steps || 0)}/${r.total_steps || 0} · ${ago(r.started_at)}${r.source ? ' · из «' + esc(r.source) + '»' : ''}${r.error_message ? ' · ' + esc(r.error_message) : ''}</div>
           </div>
           ${['running', 'waiting', 'pending'].includes(st) ? `<div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="event.stopPropagation();cancelWorkflowRun(${r.id})">⏹ Стоп</button></div>` : ''}
+          ${st === 'failed' ? `<div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="event.stopPropagation();retryWorkflowRun(${r.id})">🔁 Повторить</button></div>` : ''}
         </div>`;
       }).join('') + '</div>';
+      if (d.runs.some(r => (r.status || '').toLowerCase() === 'failed')) {
+        html += `<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="retryWorkflowFailed(${wfId}, this)">🔁 Повторить все упавшие за неделю</button>`;
+      }
     }
 
     txt('wfd-body', html);
@@ -31052,6 +31058,10 @@ async function openWorkflowRunLog(runId) {
         </div></div>`;
       }).join('') + '</div>';
     }
+    if (d.status === 'failed') {
+      html += `<div class="hint" style="margin-top:8px">❌ ${esc(d.error_message || 'Сбой')}</div>
+        <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="retryWorkflowRun(${runId})">🔁 Повторить с шага сбоя</button>`;
+    }
     txt('wfRunLogBody', html);
   } catch(e) { txt('wfRunLogBody', errHtml(errRu(e))); }
 }
@@ -31088,6 +31098,27 @@ async function deleteWorkflowStep(wfId, idx, el) {
     toast('🗑 Шаг удалён');
     _wfReopen();
   } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+}
+
+// Упавший прогон продолжается с шага, на котором сломался: уже
+// отправленное человеку второй раз не уходит.
+async function retryWorkflowRun(runId) {
+  try {
+    await api(`/api/miniapp/workflow/run/${runId}/retry`, { method: 'POST', body: '{}' });
+    toast('🔁 Прогон продолжен с шага сбоя');
+    closeModal('mo-wf-runlog');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+}
+
+async function retryWorkflowFailed(wfId, el) {
+  if (el) el.disabled = true;
+  try {
+    const d = await api(`/api/miniapp/workflow/${wfId}/retry_failed`, { method: 'POST', body: '{}' });
+    toast(d.retried ? `🔁 Повторено прогонов: ${d.retried}` + (d.skipped ? ` · пропущено: ${d.skipped}` : '') : 'Упавших прогонов за неделю нет');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+  finally { if (el) el.disabled = false; }
 }
 
 async function cancelWorkflowRun(runId) {

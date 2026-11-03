@@ -693,3 +693,75 @@ def test_a_client_error_is_not_retried(pool, tg, monkeypatch):
         assert _texts(tg) == ["Дальше"]
 
     _run(go())
+
+
+# ── Сбой: оповещение владельцу и «Повторить» ─────────────────────────────────
+
+class _OwnerBot:
+    def __init__(self):
+        self.sent: list[tuple[int, str]] = []
+
+    async def send_message(self, chat_id, text, **kw):
+        self.sent.append((chat_id, text))
+
+
+def test_a_failed_run_alerts_the_owner_once_and_can_be_retried(pool, tg):
+    """ЧТО БЫЛО: прогон, упавший на отключённом боте, видно было только в
+    журнале сценария, а продолжить его было нельзя. Теперь владелец получает
+    одно оповещение на сценарий за час, а «Повторить» доводит прогон с шага
+    сбоя — уже отправленное второй раз не уходит."""
+    import aiohttp
+    from services import workflow_engine as wf
+    from services import workflow_runtime as rt
+
+    async def go():
+        await pool.execute("DELETE FROM automation_cursors WHERE consumer=$1",
+                           rt.ALERT_CONSUMER)
+        await rt.bus.get_cursor(pool, rt.ALERT_CONSUMER)
+        wf_id = await _workflow(pool, [
+            {"type": "action", "action": "add_tag", "value": "лид"},
+            {"type": "message", "text": "Спасибо за заявку"},
+        ], reentry=True)
+        await pool.execute("UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1", BOT_ID)
+        owner_bot = _OwnerBot()
+        from database import db
+        db._notify_cooldown.clear()
+
+        async def _age_and_tick():
+            await pool.execute("UPDATE automation_events SET created_at = now() - "
+                               "interval '5 seconds' WHERE owner_id=$1", OWNER)
+            async with aiohttp.ClientSession() as http:
+                await rt.tick(pool, http, owner_bot)
+
+        # Два сбоя подряд у одного сценария — одно оповещение.
+        for _ in range(2):
+            await _emit_old(pool, "contact.started", {"param": ""})
+            await _age_and_tick()
+            await _age_and_tick()
+        failed = await pool.fetch(
+            "SELECT * FROM workflow_runs WHERE workflow_id=$1 AND status='failed'", wf_id)
+        assert [r["current_step"] for r in failed] == [1, 1], [dict(r) for r in failed]
+        assert len(owner_bot.sent) == 1, owner_bot.sent
+        assert owner_bot.sent[0][0] == OWNER
+        assert "Некому отправить" in owner_bot.sent[0][1] and "Шаг 2" in owner_bot.sent[0][1]
+
+        # Починили бота — «Повторить» доводит прогон с шага 2.
+        await pool.execute("UPDATE managed_bots SET is_active=TRUE WHERE bot_id=$1", BOT_ID)
+        res = await wf.retry_runs(pool, OWNER, workflow_id=wf_id)
+        # Два упавших прогона одного человека: живым может стать только один.
+        assert res["retried"] == 1 and res["skipped"] == 1
+        await _tick(pool)
+        assert _texts(tg) == ["Спасибо за заявку"]
+        done = await pool.fetchval(
+            "SELECT count(*) FROM workflow_runs WHERE workflow_id=$1 AND status='completed'",
+            wf_id)
+        assert done == 1
+        # Чужой сценарий повторить нельзя.
+        assert (await wf.retry_runs(pool, OWNER + 1, workflow_id=wf_id))["retried"] == 0
+        # Первый прогон закончился — теперь можно и второй, а дальше упавших нет.
+        assert (await wf.retry_runs(pool, OWNER, workflow_id=wf_id))["retried"] == 1
+        await _tick(pool)
+        assert (await wf.retry_runs(pool, OWNER, workflow_id=wf_id))["retried"] == 0
+        assert len(_texts(tg)) == 2
+
+    _run(go())

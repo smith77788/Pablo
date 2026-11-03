@@ -79,6 +79,8 @@ TRIGGER_TYPES: dict[str, str] = {
     "start": "Человек открыл бота (/start)",
     "keyword": "Сообщение со словом",
     "tag_added": "Человеку поставили тег",
+    "field_set": "Человек заполнил поле",
+    "paid": "Человек оплатил",
     "event": "Событие",
 }
 
@@ -163,6 +165,20 @@ def trigger_matches(wf: dict, event: dict) -> bool:
         if etype != "contact.tag_added" or not value:
             return False
         return (data.get("tag") or "").strip().lower() == value.lower()
+    if ttype == "field_set":
+        if etype != "contact.field_set" or not value:
+            return False
+        # Поле, записанное этим же сценарием, его не перезапускает: иначе
+        # сценарий «заполнил поле → записать поле» крутился бы без конца.
+        if wf.get("id") and str(data.get("workflow_id") or "") == str(wf["id"]):
+            return False
+        return (data.get("field") or "").strip().lower() == value.lower()
+    if ttype == "paid":
+        if etype != "payment.received":
+            return False
+        if wf.get("id") and str(data.get("workflow_id") or "") == str(wf["id"]):
+            return False
+        return True
     if ttype == "event":
         return bool(value) and etype == _EVENT_ALIASES.get(value, value)
     return False
@@ -174,7 +190,7 @@ def validate_trigger(trigger_type, trigger_value) -> tuple[str | None, str | Non
     if ttype not in TRIGGER_TYPES:
         raise ValueError("Неизвестный способ запуска сценария")
     value = str(trigger_value or "").strip()[:200]
-    if ttype in ("keyword", "tag_added", "event") and not value:
+    if ttype in ("keyword", "tag_added", "field_set", "event") and not value:
         raise ValueError(f"Для запуска «{TRIGGER_TYPES[ttype]}» нужно значение")
     if ttype == "manual":
         return None, None
@@ -662,6 +678,13 @@ async def _finish(pool, run: dict, status: str, note: str | None = None,
         await bus.emit(pool, run["owner_id"], "workflow.completed",
                        {"workflow_id": run.get("workflow_id"), "run_id": run["id"]},
                        bot_id=run.get("bot_id"), chat_id=run.get("chat_id"))
+    elif status == "failed":
+        # Сбой — событие шины: по нему владелец получает оповещение
+        # (`alert_failures`), а интеграции — исходящий вебхук.
+        await bus.emit(pool, run["owner_id"], "workflow.failed",
+                       {"workflow_id": run.get("workflow_id"), "run_id": run["id"],
+                        "step": idx + 1, "reason": note},
+                       bot_id=run.get("bot_id"), chat_id=run.get("chat_id"))
     return True
 
 
@@ -701,7 +724,7 @@ async def _contact(pool, bot_id, chat_id) -> tuple[dict, dict]:
 
 
 async def _set_field(pool, bot_id, chat_id, name: str, value: str,
-                     owner_id: int | None) -> None:
+                     owner_id: int | None, workflow_id: int | None = None) -> None:
     if not bot_id or not chat_id:
         return
     await pool.execute(
@@ -713,7 +736,8 @@ async def _set_field(pool, bot_id, chat_id, name: str, value: str,
             "UPDATE bot_users SET phone=$3 WHERE bot_id=$1 AND user_id=$2",
             bot_id, chat_id, value)
     await bus.emit(pool, owner_id, "contact.field_set",
-                   {"field": name, "value": value}, bot_id=bot_id, chat_id=chat_id)
+                   {"field": name, "value": value, "workflow_id": workflow_id},
+                   bot_id=bot_id, chat_id=chat_id)
 
 
 async def evaluate(pool, http, token, run: dict, step: dict,
@@ -1147,7 +1171,8 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
             await db.remove_user_tag(pool, bot_id, chat_id, value)
     elif action == "set_field":
         name, _, val = value.partition("=")
-        await _set_field(pool, bot_id, chat_id, name.strip(), val.strip(), owner)
+        await _set_field(pool, bot_id, chat_id, name.strip(), val.strip(), owner,
+                         run.get("workflow_id"))
         await pool.execute(
             "UPDATE workflow_runs SET vars = vars || jsonb_build_object($2::text, $3::text) "
             "WHERE id=$1", run["id"], name.strip(), val.strip())
@@ -1347,7 +1372,8 @@ async def on_reply(pool, bot_id: int, chat_id: int, text: str) -> dict:
         run["id"], run["exec_seq"], idx + 1, name, value)
     if isinstance(res, str) and res.endswith(" 1"):
         await _log(pool, run, idx, "ask", "answered", f"{name}: {value}"[:300])
-        await _set_field(pool, bot_id, chat_id, name, value, run["owner_id"])
+        await _set_field(pool, bot_id, chat_id, name, value, run["owner_id"],
+                         run.get("workflow_id"))
         wake()
     return {"consumed": True, "reply": None}
 
@@ -1513,11 +1539,95 @@ def hot_bots() -> set[int]:
 
 # ── Цикл ────────────────────────────────────────────────────────────────────
 
+# ── Оповещение владельца о сбоях ────────────────────────────────────────────
+# Раньше упавший прогон было видно, только если открыть сценарий и его
+# журнал: сломанный вебхук или отключённый бот тихо роняли каждого нового
+# человека неделями. Теперь о сбое владелец узнаёт сам — сообщением в бота,
+# не чаще раза в час на сценарий (поток сбоев не превращается в поток
+# сообщений), с причиной и числом сбоев за час.
+ALERT_CONSUMER = "workflow_alerts"
+ALERT_WINDOW_SECONDS = 3600
+
+
+def failure_alert_text(name: str, reason: str | None, step: int | None,
+                       failed_last_hour: int) -> str:
+    """Текст оповещения о сбое сценария. ЧИСТАЯ."""
+    lines = [f"⚠️ <b>Сценарий «{html.escape(name or 'без названия')}» "
+             "завершился с ошибкой</b>"]
+    if step:
+        lines.append(f"Шаг {int(step)}: {html.escape(reason or 'причина не записана')}")
+    else:
+        lines.append(html.escape(reason or "Причина не записана"))
+    if failed_last_hour > 1:
+        lines.append(f"За последний час таких сбоев: {failed_last_hour}.")
+    lines.append("Журнал и кнопка «Повторить» — в мини-аппе: Сценарии → этот "
+                 "сценарий. О новых сбоях этого сценария напомню не раньше "
+                 "чем через час.")
+    return "\n".join(lines)
+
+
+async def alert_failures(pool, main_bot) -> int:
+    """Разобрать события `workflow.failed` и оповестить владельцев.
+    Возвращает число отправленных оповещений."""
+    last = await bus.get_cursor(pool, ALERT_CONSUMER)
+    events = await bus.read_since(pool, last)
+    sent = 0
+    for ev in events:
+        if ev["event_type"] != "workflow.failed" or main_bot is None:
+            await bus.advance_cursor(pool, ALERT_CONSUMER, ev["id"])
+            continue
+        data = ev.get("data") or {}
+        wf_id = data.get("workflow_id")
+        try:
+            wf_id = int(wf_id)
+        except (TypeError, ValueError):
+            await bus.advance_cursor(pool, ALERT_CONSUMER, ev["id"])
+            continue
+        # Окно тишины: было ли оповещение по этому сценарию за час — то есть
+        # более ранний сбой в окне. Состояние — в шине, а не в памяти
+        # процесса: деплой не сбрасывает окно.
+        earlier = await pool.fetchval(
+            """SELECT 1 FROM automation_events
+                WHERE owner_id=$1 AND event_type='workflow.failed'
+                  AND data->>'workflow_id' = $2 AND id < $3
+                  AND created_at > $4::timestamptz - make_interval(secs => $5)
+                LIMIT 1""",
+            ev["owner_id"], str(wf_id), ev["id"], ev["created_at"],
+            ALERT_WINDOW_SECONDS)
+        if not earlier:
+            wf = await pool.fetchrow(
+                "SELECT name FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
+                wf_id, ev["owner_id"])
+            if wf:
+                count = await pool.fetchval(
+                    """SELECT count(*) FROM workflow_runs
+                        WHERE workflow_id=$1 AND status='failed'
+                          AND finished_at > now() - make_interval(secs => $2)""",
+                    wf_id, ALERT_WINDOW_SECONDS) or 1
+                text = failure_alert_text(wf["name"], data.get("reason"),
+                                          data.get("step"), int(count))
+                from database import db
+                try:
+                    if await db.notify_if_enabled(
+                            pool, main_bot, ev["owner_id"], "op_complete", text,
+                            dedup_key=f"workflow_failed:{wf_id}"):
+                        sent += 1
+                except Exception:
+                    log.warning("workflow_runtime: оповещение о сбое сценария %s",
+                                wf_id, exc_info=True)
+        await bus.advance_cursor(pool, ALERT_CONSUMER, ev["id"])
+    return sent
+
+
 async def tick(pool, http, main_bot=None) -> None:
     try:
         await dispatch_events(pool)
     except Exception:
         log.exception("workflow_runtime: разбор событий")
+    try:
+        await alert_failures(pool, main_bot)
+    except Exception:
+        log.exception("workflow_runtime: оповещения о сбоях")
     try:
         await sweep_timeouts(pool)
     except Exception:

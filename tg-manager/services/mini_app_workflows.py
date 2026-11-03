@@ -461,6 +461,35 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Прогон не найден или уже завершён", 404)
         return _json_resp({"ok": True})
 
+    async def workflow_retry_run(request: web.Request) -> web.Response:
+        """Повторить упавший прогон с шага сбоя: POST /workflow/run/{run_id}/retry."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            run_id = int(request.match_info["run_id"])
+        except (KeyError, ValueError, TypeError):
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        res = await _wf.retry_runs(pool, uid, run_id=run_id)
+        if not res["retried"]:
+            return _err("Повторить нельзя: прогон не найден, не упал или у "
+                        "человека уже идёт этот сценарий", 409)
+        return _json_resp(res)
+
+    async def workflow_retry_failed(request: web.Request) -> web.Response:
+        """Повторить все упавшие прогоны сценария за неделю:
+        POST /workflow/{wf_id}/retry_failed."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError, TypeError):
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        return _json_resp(await _wf.retry_runs(pool, uid, workflow_id=wf_id))
+
     async def workflow_run_log(request: web.Request) -> web.Response:
         """Журнал прогона: GET /workflow/run/{run_id}/log — что сценарий
         сделал с этим человеком, по шагам."""
@@ -589,6 +618,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
     app.router.add_get("/api/miniapp/workflow/run/{run_id}/log", workflow_run_log)
+    app.router.add_post("/api/miniapp/workflow/run/{run_id}/retry", workflow_retry_run)
+    app.router.add_post("/api/miniapp/workflow/{wf_id}/retry_failed", workflow_retry_failed)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/execute", workflow_execute)
     app.router.add_get("/api/miniapp/workflow/{wf_id}/status", workflow_status)

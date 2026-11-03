@@ -461,6 +461,99 @@ async def cancel_workflow(
         return {"ok": False, "error": str(e)}
 
 
+# ── Повтор упавших прогонов ─────────────────────────────────────────────────
+# Упавший прогон раньше был концом: человек, на котором сломался вебхук или
+# отвалился бот, выпадал из сценария навсегда, и владелец, починив причину,
+# мог только ждать новых людей. Теперь прогон продолжается С ТОГО ЖЕ ШАГА:
+# уже отправленное второй раз не уходит.
+RETRY_MAX_AGE_DAYS = 7
+RETRY_BATCH = 500
+
+
+async def retry_runs(pool: asyncpg.Pool, owner_id: int, *,
+                     run_id: int | None = None,
+                     workflow_id: int | None = None) -> dict:
+    """Вернуть упавшие прогоны в работу. {"ok", "retried", "skipped"}.
+
+    Один прогон (`run_id`) или все упавшие сценария за последние
+    RETRY_MAX_AGE_DAYS суток (`workflow_id`) — старее не трогаем, писать
+    человеку через месяц после сбоя хуже, чем не писать.
+
+    Шаги прогона берутся из ТЕКУЩЕЙ версии сценария, если в ней ещё есть
+    шаг, на котором прогон упал: владелец чинит адрес вебхука и жмёт
+    «Повторить» — повтор должен пойти по исправленному шагу. Если сценарий
+    укоротили так, что этого шага больше нет, остаётся снимок со старта.
+
+    Прогон человека, у которого уже идёт другой прогон этого сценария, не
+    возвращается (`skipped`): одна живая цепочка на человека.
+    """
+    if (run_id is None) == (workflow_id is None):
+        raise ValueError("Укажите прогон или сценарий")
+    where = ["r.owner_id = $1", "r.status = 'failed'"]
+    args: list[Any] = [owner_id]
+    if run_id is not None:
+        args.append(int(run_id))
+        where.append(f"r.id = ${len(args)}")
+    else:
+        args.append(int(workflow_id))
+        where.append(f"r.workflow_id = ${len(args)}")
+        args.append(RETRY_MAX_AGE_DAYS)
+        where.append(f"r.finished_at > now() - make_interval(days => ${len(args)})")
+    args.append(RETRY_BATCH)
+    rows = await pool.fetch(
+        f"""SELECT r.id, r.workflow_id, r.current_step, r.bot_id, r.chat_id,
+                   d.steps AS current_steps
+              FROM workflow_runs r
+              LEFT JOIN workflow_definitions d ON d.id = r.workflow_id
+             WHERE {' AND '.join(where)}
+             ORDER BY r.id LIMIT ${len(args)}""", *args)
+    retried = skipped = 0
+    for r in rows:
+        steps = r["current_steps"]
+        if isinstance(steps, str):
+            try:
+                steps = json.loads(steps)
+            except ValueError:
+                steps = None
+        idx = int(r["current_step"] or 0)
+        fresh = json.dumps(steps) if isinstance(steps, list) and idx < len(steps) else None
+        try:
+            res = await pool.execute(
+                """UPDATE workflow_runs r
+                      SET status='running', finished_at=NULL, error_message=NULL,
+                          fail_count=0, wait_kind=NULL, wait_until=NULL,
+                          claimed_until=NULL, next_run_at=now(),
+                          vars = vars - '_wh_try' - '_wh_key',
+                          steps_snapshot = COALESCE($2::jsonb, steps_snapshot),
+                          total_steps = COALESCE(jsonb_array_length($2::jsonb), total_steps)
+                    WHERE r.id=$1 AND r.status='failed'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM workflow_runs o
+                           WHERE o.workflow_id = r.workflow_id
+                             AND o.bot_id IS NOT DISTINCT FROM r.bot_id
+                             AND o.chat_id = r.chat_id AND o.id <> r.id
+                             AND o.status IN ('running', 'waiting'))""",
+                r["id"], fresh)
+        except asyncpg.UniqueViolationError:
+            res = "UPDATE 0"
+        if isinstance(res, str) and res.endswith(" 1"):
+            retried += 1
+            try:
+                await pool.execute(
+                    """INSERT INTO workflow_step_log
+                           (run_id, workflow_id, owner_id, step_idx, step_type, outcome, detail)
+                       VALUES ($1, $2, $3, $4, 'retry', 'retried', 'Повтор владельцем')""",
+                    r["id"], r["workflow_id"] or 0, owner_id, idx)
+            except Exception:
+                log.debug("retry_runs: журнал прогона %s", r["id"], exc_info=True)
+        else:
+            skipped += 1
+    if retried:
+        from services import workflow_runtime as _rt
+        _rt.wake()
+    return {"ok": True, "retried": retried, "skipped": skipped}
+
+
 # ── Проверка шага ────────────────────────────────────────────────────────────
 # Сценарий складывался тремя разными языками шагов. Экран добавления шага и все
 # шаблоны говорят `{"type": ...}` — и экран деталей умеет рисовать только это:
@@ -830,6 +923,7 @@ STEP_OUTCOMES: dict[str, str] = {
     "error": "ошибка", "goal": "цель достигнута", "completed": "завершён",
     "failed": "сбой", "expired": "истёк срок", "stopped": "остановлен",
     "cancelled": "отменён", "retry": "повтор позже",
+    "retried": "повторён владельцем",
 }
 
 
