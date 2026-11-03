@@ -3977,6 +3977,44 @@ _PROTECTIVE_ALERT_REPEAT_S = 3 * 3600
 _SHUTDOWN_ALERT_FLUSH_S = 5.0
 
 
+# Счётчики из списка выше, которые НЕ про запись в базу: здесь сбой —
+# доставка сообщения через Telegram. Общая приписка «запись не легла в базу,
+# скорее всего Postgres» под ними вводила в заблуждение: владелец шёл
+# проверять базу, хотя с ней всё было в порядке, а операция уже выполнена
+# и её итог записан.
+_DELIVERY_FAILURE_COUNTERS = frozenset({
+    "infragram_notifications_undelivered_total",
+})
+
+
+def _protective_alert_text(fresh: list) -> str:
+    """Текст тревоги о сбое защиты. ЧИСТАЯ: на входе (name, what, delta).
+
+    Заголовок и пояснение зависят от того, ЧТО сломалось: запись в базу
+    (риск сделать действие дважды) или доставка сообщения (риск только в том,
+    что владелец не узнал итог).
+    """
+    db_items = [f for f in fresh if f[0] not in _DELIVERY_FAILURE_COUNTERS]
+    delivery_items = [f for f in fresh if f[0] in _DELIVERY_FAILURE_COUNTERS]
+    lines = ["⚠️ <b>Защита не записалась</b>\n" if db_items
+             else "⚠️ <b>Сообщение не доставлено</b>\n"]
+    for _name, what, delta in db_items + delivery_items:
+        lines.append(f"• {what} — {int(delta)} раз(а)")
+    if db_items:
+        lines.append(
+            "\n<i>Запись, которая не даёт сделать действие второй раз, не легла "
+            "в базу (скорее всего, Postgres был недоступен). Повтор таких "
+            "операций может сделать реальное действие дважды — проверьте базу, "
+            "прежде чем повторять.</i>")
+    if delivery_items:
+        lines.append(
+            "\n<i>Telegram не принял сообщение с отчётом и после повторных "
+            "попыток (сеть, перегрузка или лимит Telegram). Сама операция при этом "
+            "выполнена и её итог записан — повторять её не нужно, результат "
+            "виден в карточке операции.</i>")
+    return "\n".join(lines)
+
+
 def _counter_total(counters: dict, name: str) -> float:
     """Сумма счётчика по всем меткам: в срезе имена идут как name{label="..."}."""
     return float(sum(
@@ -4051,14 +4089,7 @@ async def _watchdog_protective_failures(
                 fresh.append((name, what, delta))
         if not fresh:
             continue
-        lines = ["⚠️ <b>Защита не записалась</b>\n"]
-        for _name, what, delta in fresh:
-            lines.append(f"• {what} — {int(delta)} раз(а)")
-        lines.append(
-            "\n<i>Запись, которая не даёт сделать действие второй раз, не легла "
-            "в базу (скорее всего, Postgres был недоступен). Повтор таких "
-            "операций может сделать реальное действие дважды — проверьте базу, "
-            "прежде чем повторять.</i>")
+        lines = [_protective_alert_text(fresh)]
         try:
             await bot.send_message(aid, "\n".join(lines), parse_mode="HTML")
             delivered.update(n for n, _w, _d in fresh)

@@ -86,6 +86,9 @@ _HELP = {
         "отменой и сворачиванием)",
     "infragram_notifications_undelivered_total":
         "Недоставленные уведомления владельцу (отчёт об операции до него не дошёл)",
+    "infragram_notifications_recipient_gone_total":
+        "Уведомления, которые Telegram отклонил навсегда (получатель заблокировал "
+        "бота, не нажимал /start или удалил аккаунт) — не сбой доставки",
     "infragram_budget_write_failures_total":
         "Потерянные записи суточного счёта действий (аккаунт могут взять сверх лимита)",
     "infragram_strike_history_write_failures_total":
