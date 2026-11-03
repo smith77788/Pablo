@@ -63,8 +63,19 @@ const browser = await chromium.launch(CHROME ? { executablePath: CHROME } : {});
 const VW = Number(process.env.MINIAPP_WIDTH) || 390;
 const ctx = await browser.newContext({ viewport: { width: VW, height: 844 }, deviceScaleFactor: sweepMode ? 1 : 2 });
 const page = await ctx.newPage();
+// MINIAPP_THEME=light|dark — какой темой «клиента Telegram» открыть приложение.
+// Приложение красится по WebApp.colorScheme и themeParams, поэтому заглушка
+// отдаёт стандартные цвета Telegram для выбранной схемы. Без переменной —
+// пустые themeParams и тёмная схема, как раньше.
+await page.addInitScript((t) => { window.__RENDER_THEME = t; }, process.env.MINIAPP_THEME || '');
 await page.addInitScript((mode) => {
   const fat = mode === 'fat';
+  const TH = window.__RENDER_THEME;
+  const TP = TH === 'light'
+    ? { bg_color:'#ffffff', secondary_bg_color:'#efeff4', text_color:'#000000', hint_color:'#8e8e93', link_color:'#2481cc', button_color:'#2481cc', button_text_color:'#ffffff', accent_text_color:'#2481cc', destructive_text_color:'#e53935', header_bg_color:'#ffffff', section_bg_color:'#ffffff' }
+    : TH === 'dark'
+    ? { bg_color:'#17212b', secondary_bg_color:'#232e3c', text_color:'#f5f5f5', hint_color:'#708499', link_color:'#6ab3f3', button_color:'#5288c1', button_text_color:'#ffffff', accent_text_color:'#6ab2f2', destructive_text_color:'#ec3942', header_bg_color:'#17212b', section_bg_color:'#17212b' }
+    : {};
   // Заглушку надо ДЕРЖАТЬ, а не просто поставить. Рядом с index.html лежит
   // настоящий telegram-web-app.js, он грузится и делает `window.Telegram = {...}`,
   // затем `window.Telegram.WebApp = ...` — то есть затирает заглушку, и
@@ -74,7 +85,7 @@ await page.addInitScript((mode) => {
   // Поэтому и `Telegram`, и `Telegram.WebApp` отдаются через getter с
   // глотающим setter: присваивание SDK молча проходит и ничего не меняет
   // (бросать нельзя — упадёт сам SDK, а с ним и загрузка страницы).
-  const WA = { ready(){}, expand(){}, initData:'stub-init-data', initDataUnsafe:{ user:{ id:1, first_name:'Test' } }, colorScheme:'dark', themeParams:{}, MainButton:{show(){},hide(){},setText(){},onClick(){}}, BackButton:{show(){},hide(){},onClick(){}}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}}, onEvent(){}, offEvent(){}, openTelegramLink(){}, showAlert(){}, showConfirm(){}, close(){}, setHeaderColor(){}, setBackgroundColor(){} };
+  const WA = { ready(){}, expand(){}, initData:'stub-init-data', initDataUnsafe:{ user:{ id:1, first_name:'Test' } }, colorScheme: TH === 'light' ? 'light' : 'dark', themeParams: TP, MainButton:{show(){},hide(){},setText(){},onClick(){}}, BackButton:{show(){},hide(){},onClick(){}}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}}, onEvent(){}, offEvent(){}, openTelegramLink(){}, showAlert(){}, showConfirm(){}, close(){}, setHeaderColor(){}, setBackgroundColor(){} };
   const TGSTUB = {};
   Object.defineProperty(TGSTUB, 'WebApp', { get: () => WA, set: () => {}, configurable: true });
   Object.defineProperty(window, 'Telegram', { get: () => TGSTUB, set: () => {}, configurable: true });

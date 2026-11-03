@@ -150,12 +150,12 @@ async function openInviteAccount(accId) {
       <div style="font-size:16px;font-weight:600;margin-bottom:8px">${esc(d.label || ('#'+accId))}</div>
       <div style="display:flex;gap:8px;margin-bottom:10px">
         ${kpi(lim, 'Лимит/сутки')}
-        ${kpi(rem, 'Осталось', (d.remaining_today === 0 ? '#f59e0b' : ''))}
+        ${kpi(rem, 'Осталось', (d.remaining_today === 0 ? 'var(--orange)' : ''))}
         ${kpi(pause, 'Пауза')}
       </div>
       <div style="display:flex;gap:8px;margin-bottom:10px">
-        ${kpi(num(w.ok || 0), 'Успешно / 7дн', '#22c55e')}
-        ${kpi(num(w.floods || 0), 'Флудов / 7дн', (w.floods ? '#ef4444' : ''))}
+        ${kpi(num(w.ok || 0), 'Успешно / 7дн', 'var(--green)')}
+        ${kpi(num(w.floods || 0), 'Флудов / 7дн', (w.floods ? 'var(--red)' : ''))}
         ${kpi(age, 'Возраст')}
       </div>
       ${d.limit_basis ? `<div style="background:var(--bg-select);border-radius:8px;padding:9px 10px;margin-bottom:8px">
@@ -203,9 +203,9 @@ async function _invLoadAccs(q) {
     // Проактивный риск-пульс: помечаем аккаунты, которые исполнитель пропустит
     // для защиты от бана (карантин/под риском) — чтобы пользователь видел ДО запуска.
     const riskBadge = a => a.health_status==='quarantine'
-        ? ' <span title="На паузе (риск-пульс) — будет пропущен для защиты" style="color:#ef4444">🛑</span>'
+        ? ' <span title="На паузе (риск-пульс) — будет пропущен для защиты" style="color:var(--red)">🛑</span>'
         : a.health_status==='at_risk'
-        ? ' <span title="Под риском — будет пропущен для защиты" style="color:#f59e0b">⚠️</span>' : '';
+        ? ' <span title="Под риском — будет пропущен для защиты" style="color:var(--orange)">⚠️</span>' : '';
     // «ⓘ» открывает карточку: почему движок даёт этому аккаунту такой лимит и
     // такую паузу. Кнопка вынесена из <label>, иначе тап по ней переключал бы
     // чекбокс вместо перехода.
@@ -550,7 +550,7 @@ async function loadInviteAudienceSize() {
     if (INV_AUDIENCE === null) { el.textContent = ''; return; }
     if (!INV_AUDIENCE) {
       // Пустой источник — не тупик: говорим, откуда взять аудиторию.
-      el.innerHTML = `<span style="color:#f59e0b">⚠️ Источник пуст — приглашать некого.</span> ${esc(d.hint||'')}`;
+      el.innerHTML = `<span style="color:var(--orange)">⚠️ Источник пуст — приглашать некого.</span> ${esc(d.hint||'')}`;
       return;
     }
     const b = d.breakdown;
@@ -568,7 +568,7 @@ async function loadInviteAudienceSize() {
       if (b.repeats) drop.push(`повторы в списке: ${num(b.repeats)}`);
       if (drop.length) html += ` · пойдёт в прогон: <b>${num(fresh)}</b><div style="font-size:12px;color:var(--hint);margin-top:2px">Отсеются — ${drop.join(', ')}</div>`;
       if (!fresh) {
-        html += `<div style="color:#f59e0b;margin-top:4px">⚠️ Новых для этого канала нет — все уже приглашались или стоят в реестре «не приглашать». Соберите свежую аудиторию.</div>`;
+        html += `<div style="color:var(--orange);margin-top:4px">⚠️ Новых для этого канала нет — все уже приглашались или стоят в реестре «не приглашать». Соберите свежую аудиторию.</div>`;
       }
     }
     el.innerHTML = html + capped;
