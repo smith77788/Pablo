@@ -57,6 +57,15 @@ def is_subscription_plan(plan: str | None) -> bool:
     return normalized in tariffs.PLAN_LEVELS and normalized != "free"
 
 
+def _in_transaction(executor) -> bool:
+    """Соединение asyncpg внутри открытой транзакции (у пула такого нет)."""
+    probe = getattr(executor, "is_in_transaction", None)
+    try:
+        return bool(probe()) if callable(probe) else False
+    except Exception:
+        return False
+
+
 async def activate_subscription(executor, user_id: int, plan: str, months: int,
                                 tier: str | None = None) -> datetime | None:
     """Grant/extend a subscription and sync platform_users. Returns expires_at.
@@ -93,8 +102,17 @@ async def activate_subscription(executor, user_id: int, plan: str, months: int,
         expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
     # Keep platform_users in lockstep with the authoritative subscription expiry.
+    # Копия — вторична, её сбой не должен отменять оплату. Но внутри
+    # транзакции (подтверждение платежа зовёт нас с соединением) упавший
+    # запрос ломает ВСЮ транзакцию: «проглоченная» ошибка здесь оборачивалась
+    # InFailedSQLTransaction на следующем же запросе, и откатывалось само
+    # включение подписки за уже списанные звёзды. Поэтому — точка сохранения.
     try:
-        await executor.execute(_PLATFORM_USERS_SYNC, user_id, normalized, expires)
+        if _in_transaction(executor):
+            async with executor.transaction():
+                await executor.execute(_PLATFORM_USERS_SYNC, user_id, normalized, expires)
+        else:
+            await executor.execute(_PLATFORM_USERS_SYNC, user_id, normalized, expires)
     except Exception:
         log.warning(
             "billing.activate_subscription: platform_users sync failed for user=%s",
