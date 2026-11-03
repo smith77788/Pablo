@@ -574,6 +574,63 @@ async def _maybe_handle_mesh(pool, http, token, bot_id: int, msg: dict) -> bool:
     return True
 
 
+# Отложенные авто-ответы (правило с «паузой перед ответом»). Задача держится
+# сильной ссылкой до конца: цикл событий держит задачу лишь слабой, и ответ
+# мог бы быть собран сборщиком мусора посреди паузы.
+_delayed_replies: set[asyncio.Task] = set()
+
+
+async def _send_rule_reply(pool, http, token, bot_id: int, chat_id: int,
+                           rule, rendered: str) -> bool:
+    """Отправить ответ правила авто-ответа и записать срабатывание в журнал."""
+    ok, retry = await bot_api.send_message(
+        http, token, chat_id, rendered, buttons=_rule_buttons(rule)
+    )
+    if ok:
+        # Log the fired rule to auto_reply_log for analytics
+        try:
+            await pool.execute(
+                """INSERT INTO auto_reply_log
+                       (bot_id, chat_id, rule_id, rule_type, trigger_type, keyword)
+                   VALUES ($1, $2, $3, 'auto_reply', $4, $5)""",
+                bot_id,
+                chat_id,
+                rule.get("id"),
+                rule.get("trigger_type"),
+                rule.get("keyword"),
+            )
+        except Exception as _log_err:
+            log.debug(
+                "auto_reply_log insert failed bot=%d: %s", bot_id, _log_err
+            )
+    else:
+        log.warning(
+            "auto_responder: failed to send auto-reply to chat %d bot %d%s",
+            chat_id,
+            bot_id,
+            f" (rate-limited {retry}s)" if retry else "",
+        )
+    return ok
+
+
+async def _delayed_rule_reply(delay: float, *args) -> None:
+    await asyncio.sleep(delay)
+    try:
+        await _send_rule_reply(*args)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log_exc_swallow(log, "auto_responder: отложенный авто-ответ не отправлен")
+
+
+def _schedule_delayed_rule_reply(delay: float, *args) -> asyncio.Task:
+    task = asyncio.create_task(_delayed_rule_reply(delay, *args),
+                               name="auto_reply_delayed")
+    _delayed_replies.add(task)
+    task.add_done_callback(_delayed_replies.discard)
+    return task
+
+
 # Полный проход по всем ботам — раз в столько секунд; между ними секундный
 # опрос «горячих» (см. run).
 _FULL_POLL_EVERY = 10
@@ -1306,38 +1363,22 @@ async def _process_bot(
                     _delay = max(0, min(300, int(_delay)))
                 except (TypeError, ValueError):
                     _delay = 0
-                if _delay:
-                    await asyncio.sleep(_delay)
                 rendered = _render_text(rule["response_text"], from_user, bot_row)
                 if _is_free:
                     rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
-                ok, retry = await bot_api.send_message(
-                    http, token, chat_id, rendered, buttons=_rule_buttons(rule)
-                )
-                if ok:
-                    # Log the fired rule to auto_reply_log for analytics
-                    try:
-                        await pool.execute(
-                            """INSERT INTO auto_reply_log
-                                   (bot_id, chat_id, rule_id, rule_type, trigger_type, keyword)
-                               VALUES ($1, $2, $3, 'auto_reply', $4, $5)""",
-                            bot_id,
-                            chat_id,
-                            rule.get("id"),
-                            rule.get("trigger_type"),
-                            rule.get("keyword"),
-                        )
-                    except Exception as _log_err:
-                        log.debug(
-                            "auto_reply_log insert failed bot=%d: %s", bot_id, _log_err
-                        )
+                if _delay:
+                    # Задержку НЕЛЬЗЯ ждать здесь. Полный проход опроса ждёт
+                    # ВСЕХ ботов разом (gather), а вебхук держит замок бота и
+                    # ответ Telegram: правило с паузой 5 минут у одного бота
+                    # останавливало авто-ответы всех ботов всех клиентов на
+                    # 5 минут на КАЖДОЕ совпавшее сообщение, а Telegram, не
+                    # дождавшись ответа вебхука, слал то же обновление повторно.
+                    # Ответ уходит отдельной задачей; разбор идёт дальше.
+                    _schedule_delayed_rule_reply(
+                        _delay, pool, http, token, bot_id, chat_id, rule, rendered)
                 else:
-                    log.warning(
-                        "auto_responder: failed to send auto-reply to chat %d bot %d%s",
-                        chat_id,
-                        bot_id,
-                        f" (rate-limited {retry}s)" if retry else "",
-                    )
+                    await _send_rule_reply(
+                        pool, http, token, bot_id, chat_id, rule, rendered)
                 break
 
             # Passive inbox relay: forward non-/start messages to operator even when
