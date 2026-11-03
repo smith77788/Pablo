@@ -293,7 +293,12 @@
   /* Палитра иконок модулей: мягкие оттенки, ничего не «кричит». */
   --c-teal:#4fc1b4;--c-blue:#6ab3f3;--c-violet:#9d94de;--c-amber:#d6a865;
   --c-rose:#e298ac;--c-emerald:#5fc39a;--c-cyan:#63b3d2;--c-indigo:#8a91d4;--c-pink:#d68cc0;
-  --tab-h:58px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
+  --tab-h:58px;--safe-b:max(env(safe-area-inset-bottom,0px),calc(var(--tg-safe-area-inset-bottom,0px) + var(--tg-content-safe-area-inset-bottom,0px)));--safe-t:max(env(safe-area-inset-top,0px),calc(var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px)));
+  /* Отступы безопасной зоны: в полноэкранном режиме Telegram (Bot API 8.0)
+     сверху лежат системные кнопки клиента «Закрыть» и «⋯», и SDK отдаёт их
+     высоту в --tg-*-safe-area-inset-*. Без них шапка приложения уезжала под
+     эти кнопки. В обычном окне Telegram и в PWA эти переменные нулевые или не
+     заданы — работает env(), как раньше. */
   --radius:14px;--radius-lg:18px;--radius-xl:24px;
   --spring:cubic-bezier(.34,1.5,.6,1);--ease:cubic-bezier(.4,0,.2,1);
 }
