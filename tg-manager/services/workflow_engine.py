@@ -131,6 +131,10 @@ WORKFLOW_CONDITIONS: dict[str, str] = {
     "has_tag": "Есть тег",
     "tag_not": "Нет тега",
     "field_equals": "Поле равно (поле=значение)",
+    "field_not_equals": "Поле не равно (поле=значение)",
+    "field_contains": "Поле содержит (поле=текст)",
+    "field_gt": "Поле больше числа (поле=число)",
+    "field_lt": "Поле меньше числа (поле=число)",
     "field_set": "Поле заполнено",
     "clicked": "Нажал кнопку (текст кнопки)",
     "inactive_days": "Дней неактивен (≥)",
@@ -138,6 +142,19 @@ WORKFLOW_CONDITIONS: dict[str, str] = {
     "paid": "Оплатил",
     "event": "Сценарий запущен событием",
 }
+
+# Условия «поле=значение»: имя поля проверяется при сохранении.
+_FIELD_COMPARE = frozenset({"field_equals", "field_not_equals", "field_contains",
+                            "field_gt", "field_lt"})
+
+
+def _to_number(raw) -> float | None:
+    """«1 500,5» → 1500.5; не число — None. ЧИСТАЯ."""
+    try:
+        return float(str(raw).replace(" ", "").replace("\u00a0", "").replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
 
 # Проверка ответа на вопрос (шаг `ask`).
 ASK_VALIDATORS = ("any", "phone", "email", "number")
@@ -745,6 +762,13 @@ def validate_step(step, index: int = 0) -> dict:
                 "Допустимые: " + ", ".join(sorted(WORKFLOW_CONDITIONS)))
         out["condition"] = cond
         value = str(step.get("condition_value") or "").strip()
+        if cond in _FIELD_COMPARE:
+            fname, sep, want = value.partition("=")
+            if not sep or not want.strip():
+                raise ValueError(f"{where}: значение условия — «поле=значение»")
+            if cond in ("field_gt", "field_lt") and _to_number(want) is None:
+                raise ValueError(f"{where}: для сравнения нужно число, а не «{want.strip()}»")
+            value = f"{_field_name(fname, where)}={want.strip()}"
         if value:
             out["condition_value"] = value[:200]
         elif cond not in ("paid", "event"):

@@ -724,6 +724,31 @@ async def _set_field(pool, bot_id, chat_id, name: str, value: str,
                    bot_id=bot_id, chat_id=chat_id)
 
 
+def compare_field(cond: str, have, want: str) -> bool:
+    """Сравнить значение поля с условием шага. ЧИСТАЯ.
+
+    Текст — без регистра и «ё/е». Числа — как числа («1 500» > «999»):
+    строковое сравнение сочло бы «999» больше. Пустое поле не больше и не
+    меньше ничего — человек, не ответивший на вопрос о бюджете, не попадёт
+    в ветку «бюджет меньше 1000»."""
+    from services.workflow_engine import _to_number
+
+    def _norm(x) -> str:
+        return str(x if x is not None else "").strip().lower().replace("ё", "е")
+
+    if cond in ("field_gt", "field_lt"):
+        a, b = _to_number(have), _to_number(want)
+        if a is None or b is None or _norm(have) == "":
+            return False
+        return a > b if cond == "field_gt" else a < b
+    h, w = _norm(have), _norm(want)
+    if cond == "field_contains":
+        return bool(w) and w in h
+    if cond == "field_not_equals":
+        return h != w
+    return h == w
+
+
 async def evaluate(pool, http, token, run: dict, step: dict,
                    contact: dict, fields: dict) -> bool:
     """Проверить условие шага для человека из прогона."""
@@ -740,13 +765,14 @@ async def evaluate(pool, http, token, run: dict, step: dict,
     if cond == "clicked":
         return (str(run_vars.get("last_button") or "").strip().lower()
                 == value.lower())
-    if cond in ("field_equals", "field_set"):
+    if cond in ("field_equals", "field_set", "field_not_equals", "field_contains",
+                "field_gt", "field_lt"):
         name, _, want = value.partition("=")
         name = name.strip().lower()
         have = fields.get(name, run_vars.get(name))
         if cond == "field_set":
             return have not in (None, "")
-        return str(have or "").strip().lower() == want.strip().lower()
+        return compare_field(cond, have, want)
     if not bot_id or not chat_id:
         return False
     if cond in ("tag_has", "has_tag", "tag_not"):
