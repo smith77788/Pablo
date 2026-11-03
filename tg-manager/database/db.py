@@ -2032,13 +2032,17 @@ async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) 
                 first_send_at,
             )
             if result == "INSERT 0 1":
+                # Счётчик вторичен, подписка — нет. Точка сохранения: без неё
+                # сбой этого UPDATE ломал транзакцию, и COMMIT молча откатывал
+                # саму подписку человека на воронку.
                 try:
-                    await conn.execute(
-                        "UPDATE funnels SET entered_count = entered_count + 1 WHERE id=$1",
-                        funnel_id,
-                    )
+                    async with conn.transaction():
+                        await conn.execute(
+                            "UPDATE funnels SET entered_count = entered_count + 1 WHERE id=$1",
+                            funnel_id,
+                        )
                 except Exception:
-                    pass  # column may not exist yet — schema migration will add it
+                    log.debug("funnel %s: entered_count не обновлён", funnel_id)
 
 
 async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[dict]:
@@ -2858,19 +2862,22 @@ async def record_deep_link_visit(
             await conn.execute(
                 "UPDATE bot_deep_links SET click_count=click_count+1 WHERE id=$1", link_id
             )
-            try:
-                result = await conn.execute(
-                    "INSERT INTO deep_link_visits(link_id, user_id) VALUES($1, $2)",
+            # Повторный визит — НЕ ошибка, а ON CONFLICT. Раньше здесь ловили
+            # UniqueViolationError, но в Postgres упавший запрос ломает всю
+            # транзакцию, и COMMIT молча превращался в ROLLBACK: у каждого
+            # повторного перехода по ссылке откатывался и `click_count + 1`.
+            # Счётчик переходов на деле считал только новых людей.
+            result = await conn.execute(
+                "INSERT INTO deep_link_visits(link_id, user_id) VALUES($1, $2) "
+                "ON CONFLICT (link_id, user_id) DO NOTHING",
+                link_id,
+                user_id,
+            )
+            if result == "INSERT 0 1":
+                await conn.execute(
+                    "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1",
                     link_id,
-                    user_id,
                 )
-                if result == "INSERT 0 1":
-                    await conn.execute(
-                        "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1",
-                        link_id,
-                    )
-            except asyncpg.UniqueViolationError:
-                pass
     return link_id
 
 

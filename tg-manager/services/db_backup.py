@@ -338,9 +338,13 @@ async def restore_archive(pool, archive: bytes, *, truncate: bool = True) -> dic
                 report["rows"] += int(manifest.get("row_counts", {}).get(tbl, 0))
             # Секвенции — после заливки данных.
             for name, val in (manifest.get("sequences") or {}).items():
+                # Точка сохранения: восстановление идёт одной транзакцией, и
+                # одна отсутствующая секвенция без неё ломала всю транзакцию —
+                # откатывалось восстановление ВСЕХ таблиц.
                 try:
-                    await conn.execute(
-                        f'SELECT setval($1, $2, true)', name, int(val))
+                    async with conn.transaction():
+                        await conn.execute(
+                            'SELECT setval($1, $2, true)', name, int(val))
                 except Exception:
                     log.debug("restore: секвенция %s не выставлена", name)
             await conn.execute("SET session_replication_role = default")
