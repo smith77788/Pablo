@@ -5294,17 +5294,23 @@ async def notify_if_enabled(
             "notify_if_enabled: НЕ ДОСТАВЛЕНО user=%s pref=%s: %s",
             user_id, pref, str(exc)[:200],
         )
-        try:
-            from services import metrics as _m
-
-            _m.inc("infragram_notifications_undelivered_total",
-                   {"pref": str(pref)[:40]})
-        except Exception:
-            pass
         # False означает «стоит попробовать снова», поэтому его возвращает
         # ТОЛЬКО временный сбой. На заблокированном боте повтор каждый круг
         # воркера жёг бы лимиты Telegram, ничего не доставляя, — там True.
         _worth_retrying = not _notify_failure_is_permanent(exc)
+        try:
+            from services import metrics as _m
+
+            # Постоянный отказ (человек заблокировал бота, не нажимал /start,
+            # удалил аккаунт) — не сбой нашей доставки, а выбор получателя.
+            # Раньше он шёл в тот же счётчик, что и сбой сети, и админ получал
+            # тревогу «Защита не записалась» о чужом заблокированном боте.
+            _m.inc("infragram_notifications_undelivered_total"
+                   if _worth_retrying
+                   else "infragram_notifications_recipient_gone_total",
+                   {"pref": str(pref)[:40]})
+        except Exception:
+            pass
         return not _worth_retrying
 
 

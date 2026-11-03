@@ -22,6 +22,15 @@ SNOOZE_PRESETS: tuple[tuple[str, str, int], ...] = (
 _SNOOZE_BY_CODE = {code: (label, secs) for code, label, secs in SNOOZE_PRESETS}
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
 def snooze_seconds(code: str) -> int:
     """Секунды по коду периода; 0 — код неизвестен (глушить не будем)."""
     got = _SNOOZE_BY_CODE.get(str(code or ""))
@@ -71,10 +80,21 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
                     "why": why, "action": action})
 
     vh = vault.get("health")
-    if vh in ("disabled", "never"):
+    # Один id на оба случая — чтобы уже заглушённое/отклонённое «Хранилище»
+    # не всплыло заново под другим именем. Но слова разные: «never» — это
+    # «бизнес-бота не подключали ни разу», и «не пишет… переподключите»
+    # там звучало как поломка, которой не было (жалоба по еженедельному отчёту).
+    if vh == "disabled":
         add("vault_off", "urgent", "Хранилище не пишет",
-            "Входящие ЛС не сохраняются — сенсор намерений и welcome-аналитика "
-            "не работают. Переподключите бизнес-бота.", {"kind": "vault"})
+            "Бизнес-бот отключён (или истёк Telegram Premium) — входящие ЛС не "
+            "сохраняются, сенсор намерений и welcome-аналитика не работают. "
+            "Переподключите бизнес-бота.", {"kind": "vault"})
+    elif vh == "never":
+        add("vault_off", "info", "Хранилище не подключено",
+            "Бизнес-бот ни разу не подключался, поэтому входящие ЛС не "
+            "сохраняются, а сенсор намерений и welcome-аналитика стоят без "
+            "данных. Подключите бота в Telegram для бизнеса → Чат-боты "
+            "(нужен Telegram Premium).", {"kind": "vault"})
     wr = vault.get("waiting_reply", 0)
     if wr > 0 and vh not in ("disabled", "never"):
         add("vault_waiting", "warn", f"{wr} клиентов ждут ответа",
@@ -179,7 +199,8 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
     restricted = fleet.get("restricted", 0)
     if restricted > 0:
         add("accounts_restricted", "warn",
-            f"{restricted} аккаунтов под спам-блоком",
+            f"{restricted} {_plural(restricted, 'аккаунт', 'аккаунта', 'аккаунтов')} "
+            "под спам-блоком",
             "Ограничение снимается не само: снимите их с массовых операций, дайте "
             "тихий прогрев и перепроверьте статус — иначе они копят риск и тянут "
             "флот вниз. Откройте здоровье для реабилитации.",

@@ -12863,22 +12863,23 @@ async function cancelSelectedOps() {
   const ids = OPS_ROWS.filter(o => OPS_SEL.has(o.id) && ['pending','running','paused'].includes(o.status)).map(o => o.id);
   if (!ids.length) return;
   if (!(await askConfirm(`Отменить ${ids.length} ${plural(ids.length,'операцию','операции','операций')}? Вернуть их в очередь будет нельзя — только повторить заново.`))) return;
-  let ok = 0;
+  let ok = 0, lastErr = null;
   for (const id of ids) {
-    try { await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'}); ok++; _opProgressMarkCancelled(id); } catch(_) {}
+    try { await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'}); ok++; _opProgressMarkCancelled(id); } catch(e) { lastErr = e; }
   }
-  toast(ok === ids.length ? `⚠️ Отменено: ${ok}` : `⚠️ Отменено ${ok} из ${ids.length}`);
+  // Недошедшие видны в итоге («N из M») вместе с причиной последнего отказа.
+  toast(ok === ids.length ? `⚠️ Отменено: ${ok}` : `⚠️ Отменено ${ok} из ${ids.length}${lastErr && lastErr.message ? ': ' + lastErr.message : ''}`);
   OPS_SEL.clear(); loadOps();
 }
 async function retrySelectedOps() {
   const ids = OPS_ROWS.filter(o => OPS_SEL.has(o.id) && opCanRetry(o)).map(o => o.id);
   if (!ids.length) return;
   if (!(await askConfirm(`Повторить ${ids.length} ${plural(ids.length,'операцию','операции','операций')}? Уже обработанные цели заново не берутся.`))) return;
-  let ok = 0;
+  let ok = 0, lastErr = null;
   for (const id of ids) {
-    try { await api('/api/miniapp/operation/'+id+'/retry', {method:'POST'}); ok++; } catch(_) {}
+    try { await api('/api/miniapp/operation/'+id+'/retry', {method:'POST'}); ok++; } catch(e) { lastErr = e; }
   }
-  toast(ok === ids.length ? `✅ Поставлено повторно: ${ok}` : `⚠️ Поставлено ${ok} из ${ids.length}`);
+  toast(ok === ids.length ? `✅ Поставлено повторно: ${ok}` : `⚠️ Поставлено ${ok} из ${ids.length}${lastErr && lastErr.message ? ': ' + lastErr.message : ''}`);
   OPS_SEL.clear(); loadOps();
 }
 let _opsSearchT = null;
