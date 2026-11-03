@@ -257,7 +257,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "       COALESCE(wd.is_active,FALSE) AS is_active, "
             "       wd.trigger_type, wd.trigger_value, "
             "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
-            "       wd.goal_type, wd.goal_value, wd.legacy_kind, "
+            "       wd.goal_type, wd.goal_value, wd.legacy_kind, wd.send_window, "
             "       b.username AS bot_username "
             "  FROM workflow_definitions wd "
             "  LEFT JOIN managed_bots b ON b.bot_id = wd.bot_id "
@@ -291,6 +291,7 @@ def setup_routes(app: web.Application, pool) -> None:
                            "allow_reentry": bool(row.get("allow_reentry")),
                            "goal_type": row.get("goal_type") or "",
                            "goal_value": row.get("goal_value") or "",
+                           "send_window": row.get("send_window") or "",
                            "legacy_kind": row.get("legacy_kind") or "",
                            "legacy_note": (_lf.guard_message(row["legacy_kind"])
                                            if row.get("legacy_kind") else ""),
@@ -469,6 +470,31 @@ def setup_routes(app: web.Application, pool) -> None:
         if not res.get("ok"):
             return _err("Прогон не найден или уже завершён", 404)
         return _json_resp({"ok": True})
+
+    async def workflow_send_window(request: web.Request) -> web.Response:
+        """Окно отправки «ЧЧ-ЧЧ» по времени человека:
+        POST /workflows/{wf_id}/send_window, тело {send_window: "09-21" | ""}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        if wid is None:
+            return _err("Неверный идентификатор", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос", 400)
+        from services import workflow_engine as _wf
+        try:
+            stored = await _wf.set_send_window(pool, uid, wid,
+                                               str(body.get("send_window") or "")[:20])
+        except LookupError:
+            return _err("Воркфлоу не найден", 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+        return _json_resp({"ok": True, "send_window": stored or ""})
 
     async def workflow_copy(request: web.Request) -> web.Response:
         """Копия сценария (выключенная): POST /workflows/{wf_id}/copy,
@@ -666,6 +692,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
     app.router.add_get("/api/miniapp/workflow/run/{run_id}/log", workflow_run_log)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/copy", workflow_copy)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/send_window", workflow_send_window)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/retry", workflow_retry_run)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/retry_failed", workflow_retry_failed)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)

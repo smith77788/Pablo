@@ -109,6 +109,8 @@ WORKFLOW_ACTIONS: dict[str, str] = {
     "create_deal": "Создать сделку в CRM",
     "move_deal": "Сменить этап сделки прогона",
     "notify_owner": "Уведомить меня",
+    "start_workflow": "Запустить другой сценарий (номер сценария)",
+    "stop_workflows": "Снять с других сценариев (пусто — со всех, или номер)",
     "goto": "Перейти к шагу",
     "stop": "Завершить сценарий",
 }
@@ -123,7 +125,7 @@ DEAL_STAGES: dict[str, str] = {
 
 # Действия, которым значение обязательно.
 _ACTIONS_NEED_VALUE = frozenset({"add_tag", "remove_tag", "set_field", "goto",
-                                 "move_deal"})
+                                 "move_deal", "start_workflow"})
 
 # Условия шага `condition` — те, что исполнитель умеет проверить.
 WORKFLOW_CONDITIONS: dict[str, str] = {
@@ -272,7 +274,7 @@ async def copy_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     ValueError — с русским текстом для владельца."""
     src = await pool.fetchrow(
         """SELECT name, description, steps, bot_id, trigger_type, trigger_value,
-                  allow_reentry, goal_type, goal_value, legacy_kind
+                  allow_reentry, goal_type, goal_value, legacy_kind, send_window
              FROM workflow_definitions WHERE id=$1 AND owner_id=$2""",
         workflow_id, owner_id)
     if not src:
@@ -296,10 +298,11 @@ async def copy_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     await pool.execute(
         """UPDATE workflow_definitions
               SET trigger_type=$2, trigger_value=$3, allow_reentry=$4,
-                  goal_type=$5, goal_value=$6
+                  goal_type=$5, goal_value=$6, send_window=$7
             WHERE id=$1""",
         res["id"], ttype, src["trigger_value"] if ttype else None,
-        bool(src["allow_reentry"]), src["goal_type"], src["goal_value"])
+        bool(src["allow_reentry"]), src["goal_type"], src["goal_value"],
+        src["send_window"])
     return {"ok": True, "id": res["id"], "name": new_name, "steps": len(steps),
             "bot_id": target_bot}
 
@@ -427,6 +430,22 @@ async def set_trigger(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
             WHERE id=$1 AND owner_id=$2""",
         workflow_id, owner_id, trigger_type, trigger_value, allow_reentry)
     return not (isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0")
+
+
+async def set_send_window(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                          value: str | None) -> str | None:
+    """Окно отправки «ЧЧ-ЧЧ» по времени человека (пусто — в любое время).
+    Возвращает сохранённое значение. ValueError — мусор, LookupError — нет
+    сценария у владельца."""
+    from services import workflow_runtime as _rt
+    win = _rt.parse_send_window(value)
+    stored = f"{win[0]:02d}-{win[1]:02d}" if win else None
+    res = await pool.execute(
+        "UPDATE workflow_definitions SET send_window=$3, updated_at=NOW() "
+        "WHERE id=$1 AND owner_id=$2", workflow_id, owner_id, stored)
+    if isinstance(res, str) and res.endswith(" 0"):
+        raise LookupError("Сценарий не найден")
+    return stored
 
 
 async def set_goal(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
@@ -934,6 +953,15 @@ def validate_step(step, index: int = 0) -> dict:
                 raise ValueError(f"{where}: этап сделки — один из "
                                  + ", ".join(f"{k} ({v})" for k, v in DEAL_STAGES.items()))
             out["value"] = stage
+        elif name in ("start_workflow", "stop_workflows"):
+            if value:
+                try:
+                    n = int(value.lstrip("#"))
+                except ValueError:
+                    raise ValueError(f"{where}: укажите номер сценария, например 12")
+                if n <= 0:
+                    raise ValueError(f"{where}: номер сценария — положительное число")
+                out["value"] = str(n)
         elif name == "set_field":
             fname, sep, fval = value.partition("=")
             if not sep:
@@ -1004,7 +1032,7 @@ STEP_OUTCOMES: dict[str, str] = {
     "error": "ошибка", "goal": "цель достигнута", "completed": "завершён",
     "failed": "сбой", "expired": "истёк срок", "stopped": "остановлен",
     "cancelled": "отменён", "retry": "повтор позже",
-    "retried": "повторён владельцем",
+    "retried": "повторён владельцем", "night_hold": "ждёт утра",
 }
 
 

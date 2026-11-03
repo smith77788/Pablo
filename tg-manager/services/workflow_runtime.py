@@ -302,6 +302,45 @@ def next_window(now_utc: datetime, at: str, weekdays_only: bool,
     return cand.astimezone(timezone.utc)
 
 
+# ── Окно отправки: «не писать ночью» ────────────────────────────────────────
+_WINDOW_RE = re.compile(r"^\s*([01]?\d|2[0-3])\s*-\s*([01]?\d|2[0-4])\s*$")
+# Человек, заходивший в бота за это время, сейчас в чате: ему отвечаем сразу
+# (нажал кнопку в 23:30 — ответ не ждёт утра).
+_AWAKE_SECONDS = 30 * 60
+
+
+def parse_send_window(value: str | None) -> tuple[int, int] | None:
+    """«09-21» → (9, 21); пусто → None. ValueError на мусоре. ЧИСТАЯ."""
+    if value is None or not str(value).strip():
+        return None
+    m = _WINDOW_RE.match(str(value))
+    if not m:
+        raise ValueError("Окно отправки — часы через дефис, например 09-21")
+    start, end = int(m.group(1)), int(m.group(2))
+    if start == end % 24:
+        raise ValueError("Начало и конец окна отправки совпадают")
+    return start, end
+
+
+def window_wait(now_utc: datetime, window: tuple[int, int] | None,
+                tz_name: str | None) -> datetime | None:
+    """Когда можно писать: None — можно сейчас, иначе ближайшее начало окна
+    (UTC). Окно может идти через полночь (22-06). ЧИСТАЯ."""
+    if not window:
+        return None
+    start, end = window
+    zone = _zone(tz_name) or ZoneInfo(DEFAULT_TZ)
+    local = now_utc.astimezone(zone)
+    h = local.hour
+    inside = (start <= h < end) if start < end else (h >= start or h < end % 24)
+    if inside:
+        return None
+    cand = local.replace(hour=start, minute=0, second=0, microsecond=0)
+    if cand <= local:
+        cand += timedelta(days=1)
+    return cand.astimezone(timezone.utc)
+
+
 def pick_split(branches: list[dict], rnd: float | None = None) -> int:
     """Номер ветки A/B-деления по весам. ЧИСТАЯ при заданном rnd."""
     weights = [max(0, int(b.get("weight") or 0)) for b in branches]
@@ -970,6 +1009,13 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
     steps = _as_list(run.get("steps_snapshot"))
     token = await _bot_token(pool, run.get("bot_id"))
     contact, fields = await _contact(pool, run.get("bot_id"), run.get("chat_id"))
+    window = None
+    try:
+        window = parse_send_window(await pool.fetchval(
+            "SELECT send_window FROM workflow_definitions WHERE id=$1",
+            run.get("workflow_id")))
+    except Exception:
+        window = None
     for _ in range(_STEPS_PER_PASS):
         idx = int(run.get("current_step") or 0)
         seq = int(run.get("exec_seq") or 0)
@@ -989,6 +1035,25 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             await _finish(pool, run, "failed",
                           "Некому отправить: у сценария нет бота или получателя")
             return
+        if needs_chat and window:
+            now = datetime.now(timezone.utc)
+            seen = contact.get("last_seen")
+            awake = bool(seen) and seen > now - timedelta(seconds=_AWAKE_SECONDS)
+            tz_name = contact_tz(fields, contact.get("language_code"))
+            when = None if awake else window_wait(now, window, tz_name)
+            if when is not None:
+                # Шаг не исполняется — прогон просто ждёт утра. Условие по
+                # счётчику: прогон за это время никто не сдвинул.
+                res = await pool.execute(
+                    """UPDATE workflow_runs
+                          SET next_run_at=$3, claimed_until=NULL
+                        WHERE id=$1 AND exec_seq=$2 AND status='running'""",
+                    run["id"], seq, when)
+                if isinstance(res, str) and res.endswith(" 1"):
+                    await _log(pool, run, idx, stype, "night_hold",
+                               f"до {when.astimezone(_zone(tz_name) or ZoneInfo(DEFAULT_TZ)):%H:%M} "
+                               f"по времени человека ({tz_name})")
+                return
 
         if stype == "delay":
             now = datetime.now(timezone.utc)
@@ -1237,6 +1302,43 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
         if deal_id:
             await db.move_crm_deal_stage(pool, int(deal_id), owner, value,
                                          source="workflow")
+    elif action == "start_workflow":
+        # «Запустить другой сценарий» — цепочки сценариев, как у лидеров:
+        # квалификация передаёт человека в нужную воронку.
+        try:
+            target_id = int(value)
+        except ValueError:
+            return
+        wf = await pool.fetchrow(
+            """SELECT id, owner_id, bot_id, steps, allow_reentry
+                 FROM workflow_definitions
+                WHERE id=$1 AND owner_id=$2 AND is_active AND legacy_kind IS NULL""",
+            target_id, owner)
+        if not wf or not chat_id:
+            raise RuntimeError("сценарий для запуска не найден или выключен")
+        await start_run(pool, dict(wf), bot_id, chat_id,
+                        input_data={"event_type": "workflow.handoff",
+                                    "event": {"from_workflow": run.get("workflow_id")}},
+                        source=run.get("source"))
+    elif action == "stop_workflows":
+        # Снять человека с остальных сценариев этого бота (или с одного):
+        # купил — дожим из соседних воронок больше не нужен.
+        if not bot_id or not chat_id:
+            return
+        only = None
+        if value.strip():
+            try:
+                only = int(value)
+            except ValueError:
+                return
+        await pool.execute(
+            """UPDATE workflow_runs
+                  SET status='cancelled', finished_at=now(), wait_kind=NULL,
+                      error_message='Снят другим сценарием'
+                WHERE bot_id=$1 AND chat_id=$2 AND id <> $3
+                  AND status IN ('running', 'waiting')
+                  AND ($4::bigint IS NULL OR workflow_id = $4::bigint)""",
+            bot_id, chat_id, run["id"], only)
     elif action == "notify_owner":
         if main_bot is None:
             return

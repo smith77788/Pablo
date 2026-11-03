@@ -880,3 +880,91 @@ def test_a_copy_keeps_the_steps_and_launch_but_is_born_switched_off(pool, tg):
             await wf.copy_workflow(pool, OWNER + 1, wf_id)
 
     _run(go())
+
+
+# ── Окно отправки и цепочки сценариев ────────────────────────────────────────
+
+def test_the_send_window_and_its_math():
+    from datetime import datetime, timezone
+    import pytest as _pt
+    from services import workflow_runtime as rt
+
+    assert rt.parse_send_window("9-21") == (9, 21)
+    assert rt.parse_send_window("") is None
+    for bad in ("9", "25-03", "10-10", "утро"):
+        with _pt.raises(ValueError):
+            rt.parse_send_window(bad)
+    night = datetime(2026, 11, 4, 0, 30, tzinfo=timezone.utc)  # 03:30 МСК
+    assert rt.window_wait(night, (9, 21), "Europe/Moscow") == datetime(
+        2026, 11, 4, 6, 0, tzinfo=timezone.utc)
+    late = datetime(2026, 11, 4, 19, 0, tzinfo=timezone.utc)  # 22:00 МСК
+    assert rt.window_wait(late, (9, 21), "Europe/Moscow") == datetime(
+        2026, 11, 5, 6, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 11, 4, 9, 0, tzinfo=timezone.utc)  # 12:00 МСК
+    assert rt.window_wait(day, (9, 21), "Europe/Moscow") is None
+    # Окно через полночь: 22-06 — ночные смены.
+    assert rt.window_wait(night, (22, 6), "Europe/Moscow") is None
+    assert rt.window_wait(day, (22, 6), "Europe/Moscow") is not None
+
+
+def test_a_message_outside_the_window_waits_unless_the_person_is_in_chat(pool, tg):
+    """ЧТО БЫЛО: сценарий писал в любой час, «через 3 дня» от вечернего
+    /start приходило в три часа ночи. Теперь вне окна шаг ждёт утра, но
+    человеку, который прямо сейчас в чате, ответ уходит сразу."""
+    from services import workflow_engine as wf
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "Доброе утро"}],
+                                trigger="manual")
+        # Окно, в которое «сейчас» точно не попадает: один час, уже прошедший.
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        h = datetime.now(timezone.utc).astimezone(ZoneInfo("Europe/Moscow")).hour
+        await wf.set_send_window(pool, OWNER, wf_id, f"{(h + 2) % 24}-{(h + 3) % 24}")
+        await pool.execute("UPDATE bot_users SET last_seen = now() - interval '2 days' "
+                           "WHERE bot_id=$1 AND user_id=$2", BOT_ID, USER)
+        wfd = dict(await pool.fetchrow("SELECT * FROM workflow_definitions WHERE id=$1", wf_id))
+        from services import workflow_runtime as rt
+        await rt.start_run(pool, wfd, BOT_ID, USER, force=True)
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert not _texts(tg) and run["status"] == "running"
+        assert run["next_run_at"] > datetime.now(timezone.utc)
+        outcomes = [r["outcome"] for r in await pool.fetch(
+            "SELECT outcome FROM workflow_step_log WHERE run_id=$1", run["id"])]
+        assert outcomes == ["night_hold"]
+        # Человек написал боту — он в чате, сообщение уходит сразу.
+        await pool.execute("UPDATE bot_users SET last_seen = now() WHERE bot_id=$1 "
+                           "AND user_id=$2", BOT_ID, USER)
+        await pool.execute("UPDATE workflow_runs SET next_run_at=now() WHERE id=$1", run["id"])
+        await _tick(pool)
+        assert _texts(tg) == ["Доброе утро"]
+
+    _run(go())
+
+
+def test_one_scenario_hands_the_person_to_another_and_stops_the_rest(pool, tg):
+    async def go():
+        sales = await _workflow(pool, [{"type": "message", "text": "Вот тарифы"}],
+                                trigger="manual")
+        nurture = await _workflow(pool, [{"type": "delay", "delay_minutes": 600},
+                                         {"type": "message", "text": "Напоминание"}],
+                                  trigger="manual")
+        from services import workflow_runtime as rt
+        nwf = dict(await pool.fetchrow("SELECT * FROM workflow_definitions WHERE id=$1", nurture))
+        await rt.start_run(pool, nwf, BOT_ID, USER, force=True)
+        await _tick(pool)
+        qual = await _workflow(pool, [
+            {"type": "action", "action": "stop_workflows"},
+            {"type": "action", "action": "start_workflow", "value": str(sales)},
+        ], trigger="start")
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        await _tick(pool)
+        st = {r["workflow_id"]: r["status"] for r in await pool.fetch(
+            "SELECT workflow_id, status FROM workflow_runs WHERE owner_id=$1", OWNER)}
+        assert st[nurture] == "cancelled" and st[qual] == "completed"
+        assert st[sales] == "completed"
+        assert _texts(tg) == ["Вот тарифы"]
+
+    _run(go())

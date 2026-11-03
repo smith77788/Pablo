@@ -30911,6 +30911,11 @@ async function openWorkflowDetail(wfId, wfName) {
         <datalist id="wfdEventList">${evOpts}</datalist>
         <label class="chk-row" style="margin-top:6px"><input type="checkbox" id="wfdReentry" ${d.allow_reentry ? 'checked' : ''}> Можно проходить повторно</label>
         <button class="btn btn-s" style="width:100%;margin-top:6px" onclick="saveWorkflowTrigger(${wfId})">💾 Сохранить способ запуска</button>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="text" id="wfdSendWindow" class="inp" style="flex:1 1 auto" placeholder="Писать только в часы, например 09-21" value="${esc(d.send_window || '')}">
+          <button class="btn btn-s" style="flex:0 0 auto" onclick="saveWorkflowSendWindow(${wfId})">🌙</button>
+        </div>
+        <div class="hint" style="margin-top:4px">По времени человека. Ночью сообщение подождёт утра; ответ на только что нажатую кнопку уходит сразу.</div>
         ${(!d.active && trig !== 'manual') ? '<div class="hint" style="margin-top:6px">Сценарий выключен — сам он не запустится, пока вы его не активируете.</div>' : ''}
       </div>`;
     // Цель: достигнута — прогон завершается сам, дожим больше не идёт.
@@ -31115,6 +31120,14 @@ async function saveWorkflowTrigger(wfId) {
     await api(`/api/miniapp/workflows/${wfId}`, { method: 'PATCH', body: JSON.stringify({ trigger_type, trigger_value, allow_reentry }) });
     toast('✅ Способ запуска сохранён');
     _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+}
+
+async function saveWorkflowSendWindow(wfId) {
+  const send_window = document.getElementById('wfdSendWindow').value.trim();
+  try {
+    const d = await api(`/api/miniapp/workflows/${wfId}/send_window`, { method: 'POST', body: JSON.stringify({ send_window }) });
+    toast(d.send_window ? '🌙 Пишем людям только ' + d.send_window : '🌙 Пишем в любое время');
   } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
 }
 
