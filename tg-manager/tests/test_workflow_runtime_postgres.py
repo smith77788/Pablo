@@ -765,3 +765,95 @@ def test_a_failed_run_alerts_the_owner_once_and_can_be_retried(pool, tg):
         assert len(_texts(tg)) == 2
 
     _run(go())
+
+
+# ── Запуск по аудитории: «не заходил N дней» и расписание ────────────────────
+
+async def _people(pool, n_base=USER):
+    """Ещё трое подписчиков бота: ушедший 3 дня назад, ушедший год назад,
+    заблокировавший бота. USER (Аня) заходил сейчас."""
+    from datetime import timedelta
+    rows = [(n_base + 1, "Боря", timedelta(days=3), False),
+            (n_base + 2, "Вера", timedelta(days=400), False),
+            (n_base + 3, "Гоша", timedelta(days=3), True)]
+    for uid, name, ago, blocked in rows:
+        await pool.execute(
+            "INSERT INTO bot_users(bot_id, user_id, first_name, is_active, is_blocked, last_seen) "
+            "VALUES($1,$2,$3,TRUE,$4, now() - $5::interval)", BOT_ID, uid, name, blocked, ago)
+
+
+def test_inactive_people_are_won_back_once_and_old_ones_are_left_alone(pool, tg):
+    """ЧТО БЫЛО: вернуть ушедших можно было только ручной рассылкой.
+    Теперь сценарий «не заходил 2 дня» пишет тем, кто перешёл порог за
+    последнюю неделю, — один раз на уход, без заблокировавших и без тех,
+    кто ушёл год назад."""
+    from services import workflow_engine as wf
+    from services import workflow_runtime as rt
+
+    async def go():
+        await _people(pool)
+        wf_id = await _workflow(pool, [{"type": "message", "text": "Скучаем, {{FIRST_NAME}}!"}],
+                                trigger="inactive", value="2")
+        assert await rt.scan_audience_triggers(pool, force=True) == 1
+        assert await rt.scan_audience_triggers(pool, force=True) == 0
+        await pool.execute("UPDATE workflow_runs SET next_run_at=now() WHERE workflow_id=$1",
+                           wf_id)
+        await _tick(pool)
+        assert _texts(tg) == ["Скучаем, Боря!"]
+        # Замок захода: второй заход в те же пять минут не делает ничего.
+        assert await rt.scan_audience_triggers(pool) in (0, 1)
+        assert await rt.scan_audience_triggers(pool) == 0
+        # Без бота такой запуск не сохраняется.
+        res = await wf.create_workflow(pool, OWNER, "Без бота", steps=[], is_active=True)
+        import pytest as _pt
+        with _pt.raises(ValueError):
+            await wf.set_trigger(pool, OWNER, res["id"], "inactive", "3")
+
+    _run(go())
+
+
+def test_a_scheduled_scenario_fires_once_a_day_for_tagged_people(pool, tg):
+    from datetime import datetime, timedelta, timezone
+    from database import db
+    from services import workflow_runtime as rt
+
+    async def go():
+        await _people(pool)
+        await db.add_user_tag(pool, BOT_ID, USER + 1, "vip")
+        await db.add_user_tag(pool, BOT_ID, USER + 3, "vip")  # заблокировал бота
+        wf_id = await _workflow(pool, [{"type": "message", "text": "Утренняя подборка"}],
+                                trigger="schedule", value="10:00|VIP", reentry=True)
+        await pool.execute("DELETE FROM automation_cursors WHERE consumer=$1",
+                           f"workflow_schedule:{wf_id}")
+        # 10:30 по Москве = 07:30 UTC.
+        morning = datetime(2026, 11, 4, 7, 30, tzinfo=timezone.utc)
+        assert await rt.scan_audience_triggers(pool, morning, force=True) == 1
+        assert await rt.scan_audience_triggers(pool, morning + timedelta(minutes=30),
+                                               force=True) == 0
+        # Вечером того же дня — вне окна; на следующее утро — снова.
+        assert await rt.scan_audience_triggers(pool, morning + timedelta(hours=10),
+                                               force=True) == 0
+        await pool.execute("UPDATE workflow_runs SET next_run_at=now() WHERE workflow_id=$1",
+                           wf_id)
+        await _tick(pool)
+        assert _texts(tg) == ["Утренняя подборка"]
+        assert await rt.scan_audience_triggers(pool, morning + timedelta(days=1),
+                                               force=True) == 1
+
+    _run(go())
+
+
+def test_the_schedule_window_and_value_are_checked():
+    from datetime import datetime, timezone
+    import pytest as _pt
+    from services import workflow_runtime as rt
+
+    assert rt.validate_trigger("schedule", "9:05 | vip") == ("schedule", "09:05|vip")
+    assert rt.validate_trigger("inactive", "7") == ("inactive", "7")
+    for bad in (("schedule", "25:00"), ("inactive", "0"), ("inactive", "много")):
+        with _pt.raises(ValueError):
+            rt.validate_trigger(*bad)
+    t = datetime(2026, 11, 4, 6, 59, tzinfo=timezone.utc)  # 09:59 МСК
+    assert rt.schedule_due(t, "10:00", "Europe/Moscow") is None
+    assert rt.schedule_due(t.replace(hour=7, minute=0), "10:00", None) == 20261104
+    assert rt.schedule_due(t.replace(hour=10, minute=1), "10:00", None) is None

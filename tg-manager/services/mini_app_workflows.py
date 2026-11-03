@@ -195,7 +195,13 @@ def setup_routes(app: web.Application, pool) -> None:
             log.warning("workflow_create_plural uid=%s: %s", uid, res.get("error"))
             return _err(_INTERNAL_ERROR, 500)
         if trig[0]:
-            await _wf.set_trigger(pool, uid, res["id"], trig[0], trig[1])
+            try:
+                await _wf.set_trigger(pool, uid, res["id"], trig[0], trig[1])
+            except ValueError as e:
+                # Сценарий создан, но без способа запуска — сказать почему.
+                return _json_resp({"ok": True, "id": res["id"], "steps": len(steps),
+                                   "bot_id": bot_id, "trigger_type": "manual",
+                                   "warning": str(e)})
         out = {"ok": True, "id": res["id"], "steps": len(steps),
                "bot_id": bot_id, "trigger_type": trig[0] or "manual"}
         if tpl:
@@ -412,8 +418,11 @@ def setup_routes(app: web.Application, pool) -> None:
             except ValueError as e:
                 return _err(str(e), 400)
             reentry = body.get("allow_reentry")
-            await _wf.set_trigger(pool, uid, wid, ttype, tval,
-                                  None if reentry is None else bool(reentry))
+            try:
+                await _wf.set_trigger(pool, uid, wid, ttype, tval,
+                                      None if reentry is None else bool(reentry))
+            except ValueError as e:
+                return _err(str(e), 400)
             if "active" not in body:
                 return _json_resp({"ok": True, "trigger_type": ttype or "manual",
                                    "trigger_value": tval or ""})

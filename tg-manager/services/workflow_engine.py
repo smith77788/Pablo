@@ -362,7 +362,18 @@ async def delete_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
 async def set_trigger(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
                       trigger_type: str | None, trigger_value: str | None,
                       allow_reentry: bool | None = None) -> bool:
-    """Записать способ запуска. False — сценарий не найден у владельца."""
+    """Записать способ запуска. False — сценарий не найден у владельца.
+
+    Запуск по аудитории («не заходил N дней», расписание) идёт по
+    подписчикам ОДНОГО бота: сценарий без бота так не запустится никогда,
+    и это отказ при сохранении, а не тихое «ничего не происходит»."""
+    if trigger_type in ("inactive", "schedule"):
+        bot_id = await pool.fetchval(
+            "SELECT bot_id FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
+            workflow_id, owner_id)
+        if bot_id is None:
+            raise ValueError("Этот способ запуска работает по подписчикам бота: "
+                             "сначала привяжите сценарий к боту")
     res = await pool.execute(
         """UPDATE workflow_definitions
               SET trigger_type=$3, trigger_value=$4,

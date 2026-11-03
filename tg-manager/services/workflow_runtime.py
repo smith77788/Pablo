@@ -82,6 +82,8 @@ TRIGGER_TYPES: dict[str, str] = {
     "tag_added": "Человеку поставили тег",
     "field_set": "Человек заполнил поле",
     "paid": "Человек оплатил",
+    "inactive": "Человек не заходил N дней",
+    "schedule": "По расписанию (каждый день в ЧЧ:ММ)",
     "event": "Событие",
 }
 
@@ -195,7 +197,29 @@ def validate_trigger(trigger_type, trigger_value) -> tuple[str | None, str | Non
         raise ValueError(f"Для запуска «{TRIGGER_TYPES[ttype]}» нужно значение")
     if ttype == "manual":
         return None, None
+    if ttype == "inactive":
+        try:
+            days = int(value)
+        except ValueError:
+            raise ValueError("Для запуска «не заходил N дней» укажите число дней")
+        if not 1 <= days <= INACTIVE_MAX_DAYS:
+            raise ValueError(f"Дней неактивности — от 1 до {INACTIVE_MAX_DAYS}")
+        value = str(days)
+    if ttype == "schedule":
+        hhmm, tag = parse_schedule(value)
+        value = hhmm + (f"|{tag}" if tag else "")
     return ttype, (value or None)
+
+
+def parse_schedule(value: str | None) -> tuple[str, str | None]:
+    """«10:00» или «10:00|vip» → ("10:00", "vip"|None). ValueError. ЧИСТАЯ."""
+    hhmm, _, tag = str(value or "").partition("|")
+    m = _HHMM_RE.match(hhmm.strip())
+    if not m:
+        raise ValueError("Время запуска по расписанию — ЧЧ:ММ, например 10:00 "
+                         "(можно с тегом: 10:00|vip)")
+    tag = tag.strip()[:64] or None
+    return f"{int(m.group(1)):02d}:{m.group(2)}", tag
 
 
 # ── Цель сценария ───────────────────────────────────────────────────────────
@@ -1549,6 +1573,194 @@ def hot_bots() -> set[int]:
 
 # ── Цикл ────────────────────────────────────────────────────────────────────
 
+# ── Запуск по аудитории: «не заходил N дней» и расписание ───────────────────
+# Эти сценарии запускает не событие одного человека, а время: раз в
+# несколько минут сканер находит людей бота, которым пора. Это рассылка по
+# подписчикам бота, поэтому:
+#   * берутся только живые подписчики (не заблокировал бота, не подозрительный,
+#     не писал «стоп» после последнего /start);
+#   * старты разносятся во времени (_STAGGER_SECONDS между людьми), чтобы
+#     бот не упёрся в предел Telegram в 30 сообщений в секунду;
+#   * за один заход — не больше _MASS_START_LIMIT человек на сценарий,
+#     остаток подхватит следующий заход.
+INACTIVE_MAX_DAYS = 365
+# Окно «не заходил»: только те, кто перешёл порог за последнюю неделю.
+# Иначе новый сценарий «не заходил 3 дня» разом написал бы всем, кто ушёл
+# год назад, — это уже холодная рассылка, а не возврат.
+_INACTIVE_WINDOW_DAYS = 7
+# Расписание срабатывает в окне трёх часов после времени запуска: сценарий,
+# включённый в 23:00 с временем 10:00, не стреляет сразу, а ждёт утра.
+_SCHEDULE_WINDOW_MIN = 180
+_SCAN_SECONDS = 300
+_STAGGER_SECONDS = 0.05
+_MASS_START_LIMIT = 5000
+_SCAN_LOCK = "workflow_audience_scan"
+
+_AUDIENCE_SQL = """
+      u.bot_id = $5 AND u.is_active AND NOT u.is_blocked AND NOT u.suspect
+  AND NOT EXISTS (
+      SELECT 1 FROM automation_events o
+       WHERE o.owner_id = $1 AND o.bot_id = u.bot_id AND o.chat_id = u.user_id
+         AND o.event_type = 'contact.opted_out'
+         AND o.created_at > COALESCE((
+             SELECT max(s.created_at) FROM automation_events s
+              WHERE s.owner_id = $1 AND s.bot_id = u.bot_id
+                AND s.chat_id = u.user_id AND s.event_type = 'contact.started'),
+             '-infinity'::timestamptz))
+"""
+
+
+async def _mass_start(pool, wf: dict, extra_where: str, extra_args: list,
+                      note: dict) -> int:
+    """Завести прогоны сценария для людей бота под условием. Число заведённых."""
+    steps = _as_list(wf.get("steps"))
+    args = [wf["owner_id"], wf["id"], json.dumps(note, default=str), len(steps),
+            wf["bot_id"], json.dumps(steps), _MASS_START_LIMIT, _STAGGER_SECONDS,
+            *extra_args]
+    res = await pool.execute(
+        f"""INSERT INTO workflow_runs
+                (owner_id, workflow_id, status, input_data, current_step,
+                 total_steps, started_at, bot_id, chat_id, steps_snapshot,
+                 vars, next_run_at, source)
+            SELECT $1, $2, 'running', $3::jsonb, 0, $4, now(), $5, x.user_id,
+                   $6::jsonb, '{{}}'::jsonb,
+                   now() + make_interval(secs => (x.rn * $8)::float8), x.source
+              FROM (SELECT u.user_id, u.fields->>'source' AS source,
+                           row_number() OVER (ORDER BY u.user_id) AS rn
+                      FROM bot_users u
+                     WHERE {_AUDIENCE_SQL} AND {extra_where}
+                     ORDER BY u.user_id
+                     LIMIT $7) x
+            ON CONFLICT (workflow_id, bot_id, chat_id)
+               WHERE status IN ('running', 'waiting') AND chat_id IS NOT NULL
+            DO NOTHING""", *args)
+    try:
+        return int(str(res).rsplit(" ", 1)[-1])
+    except ValueError:
+        return 0
+
+
+async def _start_inactive(pool, wf: dict) -> int:
+    try:
+        days = int(wf.get("trigger_value") or 0)
+    except ValueError:
+        return 0
+    if not 1 <= days <= INACTIVE_MAX_DAYS:
+        return 0
+    # Один раз на каждый уход: прогон этого сценария после последнего
+    # захода человека уже был — второй не нужен, пока человек не вернётся.
+    return await _mass_start(
+        pool, wf,
+        """u.last_seen < now() - make_interval(days => $9)
+           AND u.last_seen > now() - make_interval(days => $9 + $10)
+           AND NOT EXISTS (SELECT 1 FROM workflow_runs r
+                            WHERE r.workflow_id = $2 AND r.bot_id = u.bot_id
+                              AND r.chat_id = u.user_id
+                              AND r.started_at > u.last_seen)""",
+        [days, _INACTIVE_WINDOW_DAYS],
+        {"event_type": "contact.inactive", "event": {"days": days}})
+
+
+def schedule_due(now_utc: datetime, hhmm: str, tz_name: str | None) -> int | None:
+    """День запуска (ГГГГММДД по местному времени), если сейчас окно
+    расписания, иначе None. ЧИСТАЯ."""
+    m = _HHMM_RE.match(hhmm or "")
+    if not m:
+        return None
+    zone = _zone(tz_name) or ZoneInfo(DEFAULT_TZ)
+    local = now_utc.astimezone(zone)
+    at = local.replace(hour=int(m.group(1)), minute=int(m.group(2)),
+                       second=0, microsecond=0)
+    if not at <= local < at + timedelta(minutes=_SCHEDULE_WINDOW_MIN):
+        return None
+    return local.year * 10000 + local.month * 100 + local.day
+
+
+async def _start_scheduled(pool, wf: dict, now_utc: datetime) -> int:
+    try:
+        hhmm, tag = parse_schedule(wf.get("trigger_value"))
+    except ValueError:
+        return 0
+    tz_name = None
+    try:
+        tz_name = await pool.fetchval(
+            "SELECT tz FROM notification_settings WHERE user_id=$1", wf["owner_id"])
+    except Exception:
+        tz_name = None
+    day = schedule_due(now_utc, hhmm, tz_name)
+    if day is None:
+        return 0
+    # Отметка «сегодня уже запускали» — условной вставкой: два исполнителя
+    # или два захода в одном окне не запустят рассылку дважды.
+    claimed = await pool.fetchval(
+        """INSERT INTO automation_cursors (consumer, last_id, updated_at)
+           VALUES ($1, $2, now())
+           ON CONFLICT (consumer) DO UPDATE
+              SET last_id = EXCLUDED.last_id, updated_at = now()
+            WHERE automation_cursors.last_id < EXCLUDED.last_id
+           RETURNING last_id""",
+        f"workflow_schedule:{wf['id']}", day)
+    if not claimed:
+        return 0
+    where = ["TRUE"]
+    args: list[Any] = []
+    if tag:
+        args.append(tag)
+        where.append(f"EXISTS (SELECT 1 FROM user_tags t WHERE t.bot_id = u.bot_id "
+                     f"AND t.user_id = u.user_id AND lower(t.tag) = lower(${8 + len(args)}))")
+    if not wf.get("allow_reentry"):
+        where.append("NOT EXISTS (SELECT 1 FROM workflow_runs r WHERE r.workflow_id = $2 "
+                     "AND r.bot_id = u.bot_id AND r.chat_id = u.user_id "
+                     "AND r.status <> 'cancelled')")
+    return await _mass_start(pool, wf, " AND ".join(where), args,
+                             {"event_type": "schedule", "event": {"at": hhmm, "tag": tag}})
+
+
+async def scan_audience_triggers(pool, now_utc: datetime | None = None,
+                                 *, force: bool = False) -> int:
+    """Раз в _SCAN_SECONDS: запустить сценарии «не заходил» и по расписанию.
+
+    Замок — строка в automation_cursors, сдвигаемая условным UPDATE: заход
+    делает один исполнитель из всех реплик, и состояние переживает деплой."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    stamp = int(now_utc.timestamp())
+    if not force:
+        got = await pool.fetchval(
+            """INSERT INTO automation_cursors (consumer, last_id, updated_at)
+               VALUES ($1, $2, now())
+               ON CONFLICT (consumer) DO UPDATE
+                  SET last_id = EXCLUDED.last_id, updated_at = now()
+                WHERE automation_cursors.last_id <= EXCLUDED.last_id - $3
+               RETURNING last_id""",
+            _SCAN_LOCK, stamp, _SCAN_SECONDS)
+        if not got:
+            return 0
+    rows = await pool.fetch(
+        """SELECT id, owner_id, bot_id, steps, trigger_type, trigger_value,
+                  allow_reentry, name
+             FROM workflow_definitions
+            WHERE is_active AND bot_id IS NOT NULL AND legacy_kind IS NULL
+              AND trigger_type IN ('inactive', 'schedule')""")
+    started = 0
+    for r in rows:
+        wf = dict(r)
+        try:
+            if wf["trigger_type"] == "inactive":
+                n = await _start_inactive(pool, wf)
+            else:
+                n = await _start_scheduled(pool, wf, now_utc)
+        except Exception:
+            log.exception("workflow_runtime: запуск по аудитории, сценарий %s", wf["id"])
+            continue
+        if n:
+            log.info("workflow_runtime: сценарий %s запущен для %d человек (%s)",
+                     wf["id"], n, wf["trigger_type"])
+            started += n
+    if started:
+        wake()
+    return started
+
+
 # ── Оповещение владельца о сбоях ────────────────────────────────────────────
 # Раньше упавший прогон было видно, только если открыть сценарий и его
 # журнал: сломанный вебхук или отключённый бот тихо роняли каждого нового
@@ -1638,6 +1850,10 @@ async def tick(pool, http, main_bot=None) -> None:
         await alert_failures(pool, main_bot)
     except Exception:
         log.exception("workflow_runtime: оповещения о сбоях")
+    try:
+        await scan_audience_triggers(pool)
+    except Exception:
+        log.exception("workflow_runtime: запуск по аудитории")
     try:
         await sweep_timeouts(pool)
     except Exception:
