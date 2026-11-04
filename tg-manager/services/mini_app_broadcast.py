@@ -655,7 +655,7 @@ def setup_routes(app: web.Application, pool) -> None:
 
         cols = """b.id, b.bot_id, mb.username AS bot_username,
                   b.message_text, b.status, b.sent_count, b.failed_count,
-                  b.total_users, b.created_at"""
+                  b.total_users, b.created_at, b.status_note"""
         if status:
             rows = await _safe_fetch(pool,
                 f"""SELECT {cols} FROM broadcasts b

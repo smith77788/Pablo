@@ -112,7 +112,7 @@ function buildBotDetail(d) {
     ? `<div class="bc-table">
         <div class="bc-head"><span>Рассылка</span><span style="text-align:center">✓</span><span style="text-align:center">✕</span><span>Статус</span></div>
         ${d.recent_broadcasts.slice(0,4).map(bc=>`<div class="bc-row">
-          <div class="bc-cell">${esc((bc.message_text||'').substring(0,28))}${(bc.message_text||'').length>28?'…':''}</div>
+          <div style="overflow:hidden;min-width:0"><div class="bc-cell">${esc((bc.message_text||'').substring(0,28))}${(bc.message_text||'').length>28?'…':''}</div>${bc.status_note?`<div class="bc-note">${esc(bc.status_note)}</div>`:''}</div>
           <div class="bc-num" style="color:var(--green)">${num(bc.sent_count)}</div>
           <div class="bc-num" style="color:var(--red)">${num(bc.failed_count)}</div>
           <div class="bc-cell"><span class="badge ${stb(bc.status)[0]}">${stb(bc.status)[1]}</span></div>

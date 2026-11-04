@@ -147,7 +147,8 @@ def setup_routes(app: web.Application, pool) -> None:
         autoreplies_count = await _safe_count(pool,
             "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=true", bot_id)
         recent_broadcasts = await _safe_fetch(pool,
-            """SELECT id, message_text, status, sent_count, failed_count, total_users, created_at
+            """SELECT id, message_text, status, sent_count, failed_count, total_users, created_at,
+                      status_note
                FROM broadcasts WHERE bot_id=$1 ORDER BY created_at DESC LIMIT 5""", bot_id)
         recent_users = await _safe_fetch(pool,
             """SELECT user_id, username, first_name, last_seen, is_active

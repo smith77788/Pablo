@@ -31,7 +31,7 @@ function errRu(e) {{ return String(e); }}
 {js_function(fn)}
 (async () => {{ await {fn}(5, {json.dumps(on)}); console.log(JSON.stringify(shown)); }})();
 """
-    out = subprocess.run([NODE, "-e", prog], capture_output=True, text=True, timeout=30)
+    out = subprocess.run([NODE, "-e", prog], capture_output=True, text=True, timeout=30, check=False)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout.strip().splitlines()[-1])
 
