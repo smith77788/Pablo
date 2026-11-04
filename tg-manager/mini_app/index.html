@@ -25576,7 +25576,7 @@ async function leaveWs(wsId, role) {
 
 // ── Promo Platform ─────────────────────────────────────
 let PROMO_DATA = null;
-const ORDER_STATUS = {waiting:'⏳ Ожидает',aging:'🕐 Созревает',boosting:'🚀 Накрутка',checking:'🔍 Проверка',topped:'🏆 В топе',transferred:'✅ Передан',cancelled:'❌ Отменён'};
+const ORDER_STATUS = {waiting:'⏳ Ожидает',aging:'🕐 Созревает',launching:'🚀 Запуск',boosting:'🚀 Накрутка',topup:'💰 Пополнение',checking:'🔍 Проверка',topped:'🏆 В топе',transferred:'✅ Передан',cancelled:'❌ Отменён'};
 const BOT_STATUS = {aging:'⏳ Созревает',ready:'✅ Готов',working:'🚀 Работает',topped:'🏆 В топе',banned:'🚫 Заблокирован',transferred:'📤 Передан'};
 async function openPromo() {
   push('s-promo');
