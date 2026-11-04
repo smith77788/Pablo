@@ -2775,6 +2775,19 @@ async def tick_post(pool, bot, admin: dict, *, complete: Optional[Complete] = No
             op_id = await publish(pool, owner_id, channel_id, d.text, d.pillar)
         except Exception as e:
             reason = str(e) if isinstance(e, ChannelAdminError) else f"Публикация не встала в очередь: {e}"
+            if item:
+                # Пост в канал не ушёл — слот возвращается в план. Раньше он уже
+                # был отмечен 'done', и написанный заранее пост пропадал из-за
+                # временного сбоя (все аккаунты в паузе флуда, нет связи с базой):
+                # через час такт брал следующий слот, а этот так и не выходил.
+                # Просроченный дольше _MISSED_SLOT_H слот снимет общая чистка.
+                try:
+                    await pool.execute(
+                        "UPDATE va_admin_plan SET status='planned' WHERE id=$1 AND status='done'",
+                        item["id"])
+                except Exception:
+                    log.warning("tick_post: слот %s не возвращён в план", item["id"],
+                                exc_info=True)
             await _fail(pool, bot, admin, reason[:300], retry_in=timedelta(hours=1))
             return "error"
         await _after_publish(pool, owner_id, channel_id, op_id, d.is_intro)

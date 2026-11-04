@@ -451,3 +451,51 @@ def test_posts_are_written_ahead_in_batches_and_publish_without_ai(pool, stubs, 
         assert ov["ai_waiting"] == 1 and ov["errors"] == 0 and ov["attention"] == []
 
     _run(go())
+
+
+def test_failed_publish_returns_the_prewritten_slot_to_the_plan(pool, stubs, monkeypatch):
+    """Пост не встал в очередь (все аккаунты в паузе, сбой базы) — слот и его
+    написанный заранее текст остаются в плане. Раньше слот уже был 'done', и
+    пост пропадал из-за временного сбоя."""
+    from services import channel_admin as ca
+
+    ai, bot = _AI(), _Bot()
+    monkeypatch.setattr(ca, "_default_complete", lambda: ai)
+
+    async def go():
+        for t in ("va_admin_plan", "va_admin_drafts", "va_channel_posts", "va_admin_events"):
+            await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWNER)
+        await pool.execute("DELETE FROM va_channel_admin WHERE owner_id=$1", OWNER)
+        await ca.install(pool, OWNER, CID, {"lead_contact": "@mebel_manager"})
+        await ca.setup_channel(pool, OWNER, CID, complete=ai)
+        await pool.execute("UPDATE va_channel_admin SET intro_pending=FALSE, publish_mode='auto' "
+                           "WHERE owner_id=$1", OWNER)
+        await pool.execute("DELETE FROM va_admin_plan WHERE owner_id=$1", OWNER)
+        now = datetime.now(timezone.utc)
+        body = ("Как перевезти шкаф без единой царапины: упаковываем в три слоя плёнки, "
+                "снимаем фасады и крепим ремнями в кузове. Код 424242.")
+        slot = await pool.fetchval(
+            "INSERT INTO va_admin_plan(owner_id, channel_id, slot_at, pillar, topic, body) "
+            "VALUES($1,$2,$3,'Полезные советы','',$4) RETURNING id",
+            OWNER, CID, now + timedelta(minutes=10), body)
+
+        real_publish = ca.publish
+
+        async def _down(*a, **k):
+            raise ca.ChannelAdminError("Нет доступного аккаунта для публикации")
+
+        monkeypatch.setattr(ca, "publish", _down)
+        a = await ca.get_admin(pool, OWNER, CID)
+        assert await ca.tick_post(pool, bot, a, now=now) == "error"
+        row = await pool.fetchrow("SELECT status, body FROM va_admin_plan WHERE id=$1", slot)
+        assert row["status"] == "planned", f"слот потерян после сбоя: {row['status']}"
+        assert row["body"] == body
+
+        monkeypatch.setattr(ca, "publish", real_publish)
+        await pool.execute("UPDATE va_channel_admin SET last_op_id=NULL WHERE owner_id=$1", OWNER)
+        a = await ca.get_admin(pool, OWNER, CID)
+        assert await ca.tick_post(pool, bot, a, now=now + timedelta(hours=1)) == "published"
+        assert await pool.fetchval(
+            "SELECT status FROM va_admin_plan WHERE id=$1", slot) == "done"
+
+    _run(go())
