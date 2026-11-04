@@ -75,16 +75,20 @@ function _dkScreen() {
   el.innerHTML =
     '<div class="hdr">' +
       '<div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>' +
-      '<div class="hdr-title">💼 Сделки</div>' +
+      '<div class="hdr-title">👤 CRM</div>' +
       '<div class="hdr-meta" style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
         '<button class="btn btn-p" style="padding:7px 12px;font-size:13px" onclick="openDealModal()">➕ Сделка</button>' +
         '<div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadDealsBoard()">🔄</div>' +
       '</div>' +
     '</div>' +
+    // Полоска вкладок модуля «CRM» (SCREEN_MODULES.crm в index.html).
+    '<div class="filter-chips mod-tabs" data-module="crm" data-tab="deals" role="tablist" aria-label="Вкладки модуля «CRM»"></div>' +
     '<div class="sub-sb"><div id="dkTop"></div><div id="dkBody">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);
+  // Экран рождается после загрузки страницы: общий рендер вкладок его не видел.
+  if (typeof _renderModuleTabs === 'function') _renderModuleTabs();
   // Окно выбора стадии — одно на экран, наполняется под карточку.
   const mo = document.createElement('div');
   mo.className = 'mbg';

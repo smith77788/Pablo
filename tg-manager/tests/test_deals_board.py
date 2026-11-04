@@ -143,7 +143,8 @@ def test_api_module_wires_the_board():
 def test_screen_is_loaded_has_a_door_and_moves_via_contact_crm():
     html = miniapp_html()
     assert '<script src="screens/deals_board.js"></script>' in html
-    assert 'onclick="openDeals()"' in html
+    # Доска сделок — вкладка модуля «CRM» (SCREEN_MODULES.crm).
+    assert "open: () => openDeals()" in html
     js = (ROOT / "mini_app" / "screens" / "deals_board.js").read_text(encoding="utf-8")
     assert "async function openDeals()" in js
     assert "/api/miniapp/crm/board" in js

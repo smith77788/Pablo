@@ -2438,7 +2438,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec" data-section="sales">💰 Продажи</div>
     <div class="sec-desc" data-section="sales" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Клиенты, сделки, ИИ-менеджер продаж и оплаты.</div>
     <div class="mgmt-grid" data-section="sales">
-      <div class="mgmt-tile" onclick="openCRM()">
+      <!-- Один «CRM»: клиенты, сделки, воронка денег, когорты (SCREEN_MODULES.crm). -->
+      <div class="mgmt-tile" onclick="openCrmHub()">
         <div class="mgmt-tile-ico">👤</div>
         <div class="mgmt-tile-lbl">CRM</div>
         <div class="mgmt-tile-val" id="m-crm-cnt"></div>
@@ -2447,21 +2448,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">📥</div>
         <div class="mgmt-tile-lbl">Входящие</div>
         <div class="mgmt-tile-val" id="m-inbox-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openDeals()">
-        <div class="mgmt-tile-ico">💼</div>
-        <div class="mgmt-tile-lbl">Сделки</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openMoneyFunnel(30)">
-        <div class="mgmt-tile-ico">💰</div>
-        <div class="mgmt-tile-lbl">Воронка денег</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openCohorts('month')">
-        <div class="mgmt-tile-ico">📈</div>
-        <div class="mgmt-tile-lbl">Когорты и LTV</div>
-        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSalesManager()">
         <div class="mgmt-tile-ico">🧑‍💼</div>
@@ -4480,11 +4466,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-crm">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">👤 CRM — Контакты</div>
+    <div class="hdr-title">👤 CRM</div>
     <div class="hdr-meta">
       <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCrmContactModal()">+ Добавить</button>
     </div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="crm" data-tab="clients" role="tablist" aria-label="Вкладки модуля «CRM»"></div>
   <div class="sub-sb">
     <div style="padding:8px 16px 4px">
       <input type="text" id="crmSearch" placeholder="🔍 Поиск по имени, нику, телефону…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px 13px;font-size:15px;color:var(--text);outline:none" oninput="filterCRM(this.value)">
@@ -9027,7 +9014,7 @@ function toggleLab() {
 // модули есть (Дэшборд здоровья, Массовые жалобы, Клонер). Ключ — подпись плитки.
 const MODULE_KEYWORDS = {
   'Сеть ботов':'задачи между ботами связки бот каналы пакет mesh рой кластер',
-  'Сделки':'crm воронка продаж сделка лид этап сумма',
+  
   'Семантическая память':'факты профиль собеседника память диалог',
   'Реферальная программа':'реферал приглашение код партнёрка',
   'Рабочие пространства':'воркспейс команда доступ участники контур',
@@ -9048,7 +9035,7 @@ const MODULE_KEYWORDS = {
   'Фабрика':'создать боты botfather каналы группы чаты массово фабрика ботов фабрика каналов фабрика групп',
   'Комплаенс':'проверка запрещёнка спам скам модерация compliance антиспам',
   'Поиск Telegram':'позиции позиция рейтинг топ поиска выдача ключевые слова seo сео оптимизация глобальный поиск найти канал группу бота человека telegram discover вывод в топ продвижение ranking keyword',
-  'CRM':'контакты база сегменты клиенты воронка сделки',
+  'CRM':'контакты база сегменты клиенты воронка сделки сделка лид этап сумма воронка денег когорты ltv доход источник',
   'Дашборд':'аналитика метрики статистика сводка отчёт по дням',
   'Аналитика аудитории':'аналитика метрики статистика сегменты аудитория+ днк аудитории профиль инсайты активность по часам',
   'Звёзды':'stars монетизация оплата донат',
@@ -9128,7 +9115,7 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
-  'Сделки':'Все сделки колонками по этапам и сумма на каждом этапе',
+  
   'Семантическая память':'Факты, которые бот запомнил о собеседниках',
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
@@ -9159,7 +9146,7 @@ const MODULE_DESCS = {
   'Массовый инвайт':'Приглашение пользователей в каналы/группы','Парсер':'Сбор аудитории из чатов и каналов',
   'Поиск Telegram':'Позиции ботов и каналов, живая выдача, SEO и вывод в топ — в одном месте',
   'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов','Самопиар':'Автопродвижение ваших ресурсов',
-  'CRM':'База контактов: сегменты, объединение','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
+  'CRM':'Клиенты, сделки по этапам, воронка денег и когорты','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
   'Аналитика аудитории':'Сегменты, инсайты, активность и ДНК аудитории','Статистика':'Метрики аудитории и операций',
   'Сценарии':'Сценарии и авто-воронки: бот сам ведёт человека по шагам','Мультигео':'Гео-раскладка присутствия',
   'Гео-сеть: создать':'Новые каналы, группы и боты сразу по многим городам с местными названиями','Массовые жалобы':'Массовые жалобы по целям (снос ресурсов)','Комплаенс':'Проверка ресурсов на запрещёнку',
@@ -9180,8 +9167,8 @@ const MODULE_DESCS = {
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
-  'Воронка денег':'Охват → ответ → покупка по кампаниям, цена лида',
-  'Когорты и LTV':'Сколько приносит привлечённый человек и какой источник доходнее',
+  
+  
 };
 function buildDrawer() {
   const body = document.getElementById('navBody');
@@ -9475,6 +9462,17 @@ const SCREEN_MODULES = {
       {key:'resources', label:'🕶 Каналы, чаты, боты',   sid:'s-shieldcheck', open: () => openShieldCheck()},
     ],
   },
+  // «CRM», «Сделки», «Воронка денег» и «Когорты и LTV» смотрели на одних и
+  // тех же клиентов с разных сторон — четыре плитки одного модуля.
+  crm: {
+    title: '👤 CRM',
+    tabs: [
+      {key:'clients', label:'👤 Клиенты',       sid:'s-crm',         open: () => openCRM()},
+      {key:'deals',   label:'💼 Сделки',        sid:'s-deals',       open: () => openDeals()},
+      {key:'money',   label:'💰 Воронка денег', sid:'s-moneyfunnel', open: () => openMoneyFunnel(30)},
+      {key:'cohorts', label:'📈 Когорты и LTV', sid:'s-cohorts',     open: () => openCohorts('month')},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9505,6 +9503,7 @@ function openSearchHub(tab) { modTab('search', tab || 'bots'); }
 function openFactory(tab) { modTab('factory', tab || 'bots'); }
 function openScenarios(tab) { modTab('scenarios', tab || 'all'); }
 function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
+function openCrmHub(tab) { modTab('crm', tab || 'clients'); }
 function openAudienceHub(tab) { modTab('audience', tab || 'segments'); }
 function openShieldHub(tab) { modTab('shield', tab || 'accounts'); }
 function openBotNet(tab) { modTab('botnet', tab || 'bots'); }

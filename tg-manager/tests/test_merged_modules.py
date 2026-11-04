@@ -136,3 +136,14 @@ def test_shield_is_one_module():
                     "resources": ("s-shieldcheck", "openShieldCheck")},
                    gone=("Проверка ограничений",))
     assert "_renderModuleTabs()" in _fn_body("_shScreen")
+
+
+def test_crm_is_one_module():
+    _assert_module("crm", "👤 CRM", "CRM",
+                   {"clients": ("s-crm", "openCRM"),
+                    "deals": ("s-deals", "openDeals"),
+                    "money": ("s-moneyfunnel", "openMoneyFunnel"),
+                    "cohorts": ("s-cohorts", "openCohorts")},
+                   gone=("Сделки", "Воронка денег", "Когорты и LTV"))
+    for fn in ("_dkScreen", "_mfScreen", "_coScreen"):
+        assert "_renderModuleTabs()" in _fn_body(fn), f"{fn}: полоска вкладок пустая"

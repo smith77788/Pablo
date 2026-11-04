@@ -21,14 +21,18 @@ function _mfScreen() {
   el.innerHTML =
     '<div class="hdr">' +
       '<div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>' +
-      '<div class="hdr-title">💰 Воронка денег</div>' +
+      '<div class="hdr-title">👤 CRM</div>' +
       '<div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" ' +
         'style="margin-left:auto" onclick="openMoneyFunnel(_mfDays)">🔄</div>' +
     '</div>' +
+    // Полоска вкладок модуля «CRM» (SCREEN_MODULES.crm в index.html).
+    '<div class="filter-chips mod-tabs" data-module="crm" data-tab="money" role="tablist" aria-label="Вкладки модуля «CRM»"></div>' +
     '<div class="sb"><div id="' + id + '-body" style="padding:6px 0">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);
+  // Экран рождается после загрузки страницы: общий рендер вкладок его не видел.
+  if (typeof _renderModuleTabs === 'function') _renderModuleTabs();
   return el;
 }
 

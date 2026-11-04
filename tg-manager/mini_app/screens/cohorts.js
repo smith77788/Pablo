@@ -14,7 +14,8 @@ let _coData = null;
 let _msData = null;
 const CO_METRICS = [['ltv', 'LTV'], ['active', 'Активны'], ['buyers', 'Покупали']];
 
-function _coScreen(id, title, refresh) {
+// strip — полоска вкладок модуля (только у экрана когорт: он вкладка «CRM»).
+function _coScreen(id, title, refresh, strip) {
   let el = document.getElementById(id);
   if (el) return el;
   el = document.createElement('div');
@@ -27,10 +28,13 @@ function _coScreen(id, title, refresh) {
       (refresh ? '<div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" ' +
         'style="margin-left:auto" onclick="' + refresh + '">🔄</div>' : '') +
     '</div>' +
+    (strip || '') +
     '<div class="sb"><div id="' + id + '-body" style="padding:6px 0">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);
+  // Экран рождается после загрузки страницы: общий рендер вкладок его не видел.
+  if (typeof _renderModuleTabs === 'function') _renderModuleTabs();
   return el;
 }
 
@@ -164,7 +168,8 @@ function _coRender() {
 
 async function openCohorts(grain) {
   _coGrain = grain === 'week' ? 'week' : (grain === 'month' ? 'month' : _coGrain);
-  const el = _coScreen('s-cohorts', '📈 Когорты и LTV', 'openCohorts(_coGrain)');
+  const el = _coScreen('s-cohorts', '👤 CRM', 'openCohorts(_coGrain)',
+    '<div class="filter-chips mod-tabs" data-module="crm" data-tab="cohorts" role="tablist" aria-label="Вкладки модуля «CRM»"></div>');
   if (!el.querySelector('.co-cur')) {
     const btn = document.createElement('div');
     btn.className = 'icon-btn co-cur';
