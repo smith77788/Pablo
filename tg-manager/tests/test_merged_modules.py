@@ -51,3 +51,24 @@ def test_autoreg_form_promises_only_what_the_server_does():
     assert "count>50" in body
     assert "Списываются средства" in body, "подтверждение молчит о деньгах за номера"
     assert 'id="arp-service"' not in HTML and 'id="arp-proxy"' not in HTML
+
+
+def test_factory_is_one_module():
+    """Три фабрики — одна плитка «Фабрика» с вкладками; каналы и группы —
+    один экран с галочкой, и вкладка «Группы» не стирает набранное."""
+    labels = _catalog_labels()
+    assert labels.count("Фабрика") == 1
+    for old in ("Фабрика ботов", "Фабрика каналов", "Фабрика групп"):
+        assert old not in labels and section_of_tile(old) is None, old
+    reg = re.search(r"const SCREEN_MODULES = \{(.*?)\n\};", SRC, re.S).group(1)
+    for key, sid in (("bots", "s-botfactory"), ("channels", "s-chanfactory"),
+                     ("groups", "s-chanfactory")):
+        assert re.search(r"key:'" + key + r"'[^\n]*sid:'" + sid + "'", reg), key
+    for sid, key in (("s-botfactory", "bots"), ("s-chanfactory", "channels")):
+        head = HTML[HTML.index(f'<div class="screen" id="{sid}">'):][:900]
+        assert '<div class="hdr-title">🏭 Фабрика</div>' in head, sid
+        assert f'data-module="factory" data-tab="{key}"' in head, sid
+    cf = _fn_body("_cfTab")
+    assert "STACK[STACK.length - 1] !== 's-chanfactory'" in cf and "openChannelFactory(asGroup)" in cf
+    assert "_markModTab('factory'" in _fn_body("openChannelFactory"), (
+        "старый вход «создать группы» откроет экран с подсвеченной вкладкой «Каналы»")

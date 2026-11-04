@@ -2396,20 +2396,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Виртуальный администратор</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openBotFactory()">
+      <!-- Одна «Фабрика» с вкладками Боты / Каналы / Группы (SCREEN_MODULES.factory). -->
+      <div class="mgmt-tile" onclick="openFactory()">
         <div class="mgmt-tile-ico">🏭</div>
-        <div class="mgmt-tile-lbl">Фабрика ботов</div>
+        <div class="mgmt-tile-lbl">Фабрика</div>
         <div class="mgmt-tile-val" id="m-botfactory-val-2"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openChannelFactory()">
-        <div class="mgmt-tile-ico">📢</div>
-        <div class="mgmt-tile-lbl">Фабрика каналов</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openChannelFactory(true)">
-        <div class="mgmt-tile-ico">👥</div>
-        <div class="mgmt-tile-lbl">Фабрика групп</div>
-        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openNetwork()">
         <div class="mgmt-tile-ico">🕸</div>
@@ -3262,7 +3253,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ CHANNEL FACTORY ══════════════════════ -->
 <div class="screen" id="s-chanfactory">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📢 Фабрика каналов</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🏭 Фабрика</div></div>
+  <div class="filter-chips mod-tabs" data-module="factory" data-tab="channels" role="tablist" aria-label="Вкладки модуля «Фабрика»"></div>
   <div class="sub-sb">
     <div class="sec">Создать каналы / группы массово</div>
     <!-- Мост к Гео-сети: создание каналов/групп ПО ГОРОДАМ/СТРАНАМ с
@@ -3278,7 +3270,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="cfTitle" placeholder="Название (общее для всех)" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
       <textarea id="cfAbout" placeholder="Описание (необязательно)" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:10px">
-        <input type="checkbox" id="cfIsGroup"> Создавать группы (чаты), а не каналы
+        <input type="checkbox" id="cfIsGroup" onchange="_markModTab('factory', this.checked ? 'groups' : 'channels')"> Создавать группы (чаты), а не каналы
       </label>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input type="number" id="cfCount" value="1" min="1" max="20" title="Сколько на каждый аккаунт" style="flex:0 0 90px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
@@ -5243,8 +5235,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-botfactory">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🏭 Фабрика ботов</div>
+    <div class="hdr-title">🏭 Фабрика</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="factory" data-tab="bots" role="tablist" aria-label="Вкладки модуля «Фабрика»"></div>
   <div class="sub-sb">
     <div id="botFactoryStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="sec">Создание ботов</div>
@@ -9054,9 +9047,7 @@ const MODULE_KEYWORDS = {
   'Клонер контента':'скопировать спарсить посты копия клон',
   'Клон и адаптация':'скопировать клон профиль двойник копия',
   'Авторег':'зарегистрировать создать аккаунты sms номера autoreg',
-  'Фабрика ботов':'создать боты botfather массово',
-  'Фабрика каналов':'создать каналы массово',
-  'Фабрика групп':'создать группы чаты массово',
+  'Фабрика':'создать боты botfather каналы группы чаты массово фабрика ботов фабрика каналов фабрика групп',
   'Комплаенс':'проверка запрещёнка спам скам модерация compliance антиспам',
   'Поиск Telegram':'позиции позиция рейтинг топ поиска выдача ключевые слова seo сео оптимизация глобальный поиск найти канал группу бота человека telegram discover вывод в топ продвижение ranking keyword',
   'CRM':'контакты база сегменты клиенты воронка сделки',
@@ -9164,8 +9155,8 @@ const MODULE_DESCS = {
   'Расписание':'Отложенные и повторяющиеся рассылки','A/B Тесты':'Сравнение вариантов рассылки по отклику',
   'Операции':'Очередь и история массовых операций','Новые подписчики':'Свежие подписчики ваших ботов','Диагностика':'Проверка связности и здоровья',
   'Прокси':'Свои SOCKS5/HTTP-прокси и IP-изоляция',
-  'Фабрика ботов':'Массовое создание ботов по шаблонам','Создать ботов':'Массовое создание ботов','Фабрика каналов':'Массовое создание каналов',
-  'Создать каналы':'Массовое создание каналов','Фабрика групп':'Массовое создание групп',
+  'Фабрика':'Массовое создание ботов, каналов и групп','Создать ботов':'Массовое создание ботов',
+  'Создать каналы':'Массовое создание каналов',
   'Массовая публикация':'Пост во все каналы/аккаунты разом','Массопубликация':'Пост во все каналы/аккаунты разом',
   'Массовый инвайт':'Приглашение пользователей в каналы/группы','Парсер':'Сбор аудитории из чатов и каналов',
   'Поиск Telegram':'Позиции ботов и каналов, живая выдача, SEO и вывод в топ — в одном месте',
@@ -9421,6 +9412,16 @@ const SCREEN_MODULES = {
       {key:'top',      label:'🚀 Вывод в топ',     sid:'s-promo',   open: () => openPromo()},
     ],
   },
+  // «Фабрика ботов», «Фабрика каналов» и «Фабрика групп» были тремя плитками;
+  // каналы и группы — вообще один экран с галочкой «группы».
+  factory: {
+    title: '🏭 Фабрика',
+    tabs: [
+      {key:'bots',     label:'🤖 Боты',   sid:'s-botfactory', open: () => openBotFactory()},
+      {key:'channels', label:'📢 Каналы', sid:'s-chanfactory', open: () => _cfTab(false)},
+      {key:'groups',   label:'👥 Группы', sid:'s-chanfactory', open: () => _cfTab(true)},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9428,15 +9429,27 @@ function modTab(mod, key) {
   const t = m && m.tabs.find(x => x.key === key);
   if (!t) return;
   const top = STACK[STACK.length - 1];
-  if (top === t.sid) return;
-  if (m.tabs.some(x => x.sid === top)) {
+  if (top !== t.sid && m.tabs.some(x => x.sid === top)) {
     STACK.pop();
     document.getElementById(top)?.classList.remove('show');
   }
   t.open();
+  _markModTab(mod, key);
+}
+
+// Подсветить вкладку во всех полосках модуля: две вкладки могут жить на
+// одном экране («Каналы» и «Группы» фабрики), и старые входы (кнопка
+// «Создать группу» где-то в приложении) открывают экран мимо modTab.
+function _markModTab(mod, key) {
+  document.querySelectorAll(`.mod-tabs[data-module="${mod}"] .chip`).forEach(c => {
+    const on = c.dataset.key === key;
+    c.classList.toggle('on', on);
+    c.setAttribute('aria-selected', String(on));
+  });
 }
 
 function openSearchHub(tab) { modTab('search', tab || 'bots'); }
+function openFactory(tab) { modTab('factory', tab || 'bots'); }
 
 function _renderModuleTabs() {
   document.querySelectorAll('.mod-tabs[data-module]').forEach(el => {
@@ -9444,7 +9457,7 @@ function _renderModuleTabs() {
     if (!m) return;
     el.innerHTML = m.tabs.map(t => {
       const on = t.key === el.dataset.tab;
-      return `<div class="chip${on ? ' on' : ''}" role="tab" tabindex="0" aria-selected="${on}"`
+      return `<div class="chip${on ? ' on' : ''}" data-key="${t.key}" role="tab" tabindex="0" aria-selected="${on}"`
         + ` onclick="modTab('${el.dataset.module}','${t.key}')"`
         + ` onkeydown="if(event.key==='Enter')modTab('${el.dataset.module}','${t.key}')">${esc(t.label)}</div>`;
     }).join('');
@@ -27064,8 +27077,15 @@ async function openChannelFactory(asGroup) {
   // Единая фабрика для каналов и чатов: групповой вход открывает её с включённой
   // галочкой «группы» — чтобы у чатов были те же настройки (SEO/посев/первый пост).
   const g = document.getElementById('cfIsGroup'); if (g) g.checked = !!asGroup;
+  _markModTab('factory', asGroup ? 'groups' : 'channels');
   _renderContactAccPicker('cfAccts', []);   // мультивыбор аккаунтов (создаём у каждого)
   loadCfRecent();
+}
+// Вкладки «Каналы» / «Группы» модуля «Фабрика» — один экран: если он уже
+// открыт, переключаем только галочку и не стираем набранное название.
+function _cfTab(asGroup) {
+  if (STACK[STACK.length - 1] !== 's-chanfactory') return openChannelFactory(asGroup);
+  const g = document.getElementById('cfIsGroup'); if (g) g.checked = !!asGroup;
 }
 // Отметить/снять все аккаунты в пикере фабрики каналов.
 function cfAccAll(on) {
