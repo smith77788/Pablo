@@ -84,6 +84,7 @@ TRIGGER_TYPES: dict[str, str] = {
     "paid": "Человек оплатил",
     "inactive": "Человек не заходил N дней",
     "schedule": "По расписанию (каждый день в ЧЧ:ММ)",
+    "webhook": "Входящий вебхук (сайт, CRM, форма)",
     "event": "Событие",
 }
 
@@ -481,7 +482,8 @@ async def start_run(pool, wf: dict, bot_id: int | None, chat_id: int | None, *,
                     input_data: dict | None = None,
                     trigger_event_id: int | None = None,
                     force: bool = False,
-                    source: str | None = None) -> int | None:
+                    source: str | None = None,
+                    run_vars: dict | None = None) -> int | None:
     """Завести прогон сценария для человека. id прогона или None.
 
     None — человек уже проходит этот сценарий (живой прогон есть) или уже
@@ -513,17 +515,93 @@ async def start_run(pool, wf: dict, bot_id: int | None, chat_id: int | None, *,
                 total_steps, started_at, bot_id, chat_id, steps_snapshot,
                 vars, next_run_at, trigger_event_id, source)
            VALUES ($1, $2, 'running', $3::jsonb, 0, $4, now(), $5, $6,
-                   $7::jsonb, '{}'::jsonb, now(), $8, $9)
+                   $7::jsonb, $10::jsonb, now(), $8, $9)
            ON CONFLICT (workflow_id, bot_id, chat_id)
               WHERE status IN ('running', 'waiting') AND chat_id IS NOT NULL
            DO NOTHING
            RETURNING id""",
         wf["owner_id"], wf["id"], json.dumps(input_data or {}, default=str),
         len(steps), bot_id, chat_id, json.dumps(steps), trigger_event_id,
-        (source or None) and str(source)[:64])
+        (source or None) and str(source)[:64],
+        json.dumps(run_vars or {}, default=str))
     if run_id:
         wake()
     return run_id
+
+
+# ── Запуск входящим вебхуком ────────────────────────────────────────────────
+# Сайт, CRM или форма шлют POST /webhook/scenario/{token} с телом
+# {"user_id": 123, "vars": {"order": "A-17"}}. Тело — чужие данные: берём
+# только id человека и плоские короткие значения, они становятся
+# подстановками {{order}} в шагах. Человек должен уже знать бота — писать
+# незнакомым Telegram не даст, и это не повод заводить прогон.
+INBOUND_MAX_VARS = 20
+INBOUND_MAX_VALUE = 500
+_INBOUND_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_INBOUND_TOKEN_RE = re.compile(r"^[A-Za-z0-9_\-]{16,64}$")
+
+
+def inbound_request(body) -> tuple[int | None, dict]:
+    """(id человека, переменные) из тела входящего вебхука. ЧИСТАЯ.
+
+    id — user_id или chat_id (число или строка из цифр). Переменные — из
+    «vars» или, если его нет, из остальных полей верхнего уровня; ключи
+    приводятся к нижнему регистру, лишнее (вложенное, длинное, служебное
+    с «_») отбрасывается."""
+    if not isinstance(body, dict):
+        return None, {}
+    raw_id = body.get("user_id", body.get("chat_id"))
+    uid = None
+    if isinstance(raw_id, int) and not isinstance(raw_id, bool):
+        uid = raw_id
+    elif isinstance(raw_id, str) and raw_id.strip().isdigit():
+        uid = int(raw_id.strip())
+    if uid is not None and not 0 < uid < 10 ** 15:
+        uid = None
+    src = body.get("vars")
+    if not isinstance(src, dict):
+        src = {k: v for k, v in body.items() if k not in ("user_id", "chat_id", "vars")}
+    out: dict[str, str] = {}
+    for k, v in src.items():
+        key = str(k).strip().lower()
+        if not _INBOUND_KEY_RE.match(key) or isinstance(v, (dict, list)) or v is None:
+            continue
+        if key in ("paid", "last_button"):  # служебные переменные исполнителя
+            continue
+        out[key] = (str(v).lower() if isinstance(v, bool) else str(v))[:INBOUND_MAX_VALUE]
+        if len(out) >= INBOUND_MAX_VARS:
+            break
+    return uid, out
+
+
+async def start_from_webhook(pool, token: str, body) -> tuple[int, dict]:
+    """Запустить сценарий по входящему вебхуку. (HTTP-код, ответ).
+
+    404 — адрес не тот (или сценарий выключен, или запуск сменили): по
+    ответу нельзя угадать, какие сценарии есть. 422 — человек не найден
+    у бота. 200 и started=false — человек уже в этом сценарии."""
+    if not token or not _INBOUND_TOKEN_RE.match(token):
+        return 404, {"ok": False, "error": "not found"}
+    wf = await pool.fetchrow(
+        """SELECT * FROM workflow_definitions
+            WHERE inbound_token=$1 AND trigger_type='webhook'
+              AND COALESCE(is_active, FALSE) AND bot_id IS NOT NULL""", token)
+    if not wf:
+        return 404, {"ok": False, "error": "not found"}
+    wf = dict(wf)
+    uid, run_vars = inbound_request(body)
+    if uid is None:
+        return 422, {"ok": False, "error": "user_id is required"}
+    known = await pool.fetchval(
+        """SELECT 1 FROM bot_users
+            WHERE bot_id=$1 AND user_id=$2 AND COALESCE(is_active, TRUE)""",
+        wf["bot_id"], uid)
+    if not known:
+        return 422, {"ok": False, "error": "user has not started the bot"}
+    run_id = await start_run(pool, wf, wf["bot_id"], uid,
+                             input_data={"event_type": "webhook.received"},
+                             run_vars=run_vars)
+    return 200, {"ok": True, "started": bool(run_id), "run_id": run_id}
 
 
 def wait_matches(step: dict, event: dict) -> bool:

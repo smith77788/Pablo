@@ -1226,3 +1226,133 @@ def test_a_file_without_caption_is_sent_as_a_document(pool, tg):
         assert (await _run_row(pool, wf_id))["status"] == "completed"
 
     _run(go())
+
+
+# ── Запуск входящим вебхуком ─────────────────────────────────────────────────
+
+async def _inbound_token(pool, wf_id):
+    return await pool.fetchval(
+        "SELECT inbound_token FROM workflow_definitions WHERE id=$1", wf_id)
+
+
+def test_an_inbound_webhook_starts_the_scenario_with_its_vars(pool, tg):
+    from services import workflow_runtime as rt
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "message", "text": "Заказ {{order}} собран"},
+        ], trigger="webhook")
+        token = await _inbound_token(pool, wf_id)
+        assert token and len(token) >= 16
+        code, out = await rt.start_from_webhook(
+            pool, token, {"user_id": USER, "vars": {"order": "A-17"}})
+        assert code == 200 and out["started"], out
+        await _tick(pool)
+        assert _texts(tg) == ["Заказ A-17 собран"]
+        # Второй запрос — человек уже прошёл, повторный вход выключен.
+        code, out = await rt.start_from_webhook(pool, token, {"user_id": USER})
+        assert code == 200 and not out["started"]
+
+    _run(go())
+
+
+def test_an_inbound_webhook_refuses_strangers_and_wrong_addresses(pool, tg):
+    from services import workflow_runtime as rt
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "x"}], trigger="webhook")
+        token = await _inbound_token(pool, wf_id)
+        assert (await rt.start_from_webhook(pool, token, {"user_id": 999_999_001}))[0] == 422
+        assert (await rt.start_from_webhook(pool, token, {"vars": {}}))[0] == 422
+        assert (await rt.start_from_webhook(pool, "x" * 30, {"user_id": USER}))[0] == 404
+        assert (await rt.start_from_webhook(pool, "", {"user_id": USER}))[0] == 404
+        await pool.execute("UPDATE workflow_definitions SET is_active=FALSE WHERE id=$1", wf_id)
+        assert (await rt.start_from_webhook(pool, token, {"user_id": USER}))[0] == 404
+        assert not await pool.fetchval(
+            "SELECT COUNT(*) FROM workflow_runs WHERE workflow_id=$1", wf_id)
+
+    _run(go())
+
+
+def test_a_new_address_retires_the_old_one_and_copies_get_their_own(pool, tg):
+    from services import workflow_engine as wf
+    from services import workflow_runtime as rt
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "x"}], trigger="webhook")
+        old = await _inbound_token(pool, wf_id)
+        # Повторное сохранение того же запуска адрес не меняет.
+        await wf.set_trigger(pool, OWNER, wf_id, "webhook", None)
+        assert await _inbound_token(pool, wf_id) == old
+        new = await wf.rotate_inbound_token(pool, OWNER, wf_id)
+        assert new and new != old
+        assert (await rt.start_from_webhook(pool, old, {"user_id": USER}))[0] == 404
+        copy = await wf.copy_workflow(pool, OWNER, wf_id)
+        ctoken = await _inbound_token(pool, copy["id"])
+        assert ctoken and ctoken != new
+        # Сменили способ запуска — адрес больше не работает.
+        await wf.set_trigger(pool, OWNER, wf_id, "start", None)
+        assert await _inbound_token(pool, wf_id) is None
+        assert await wf.rotate_inbound_token(pool, OWNER, wf_id) is None
+        assert (await rt.start_from_webhook(pool, new, {"user_id": USER}))[0] == 404
+
+    _run(go())
+
+
+# ── Воронка по шагам с разбивкой по источнику ────────────────────────────────
+
+async def _fake_run(pool, wf_id, chat_id, source, reached, payments=0):
+    run_id = await pool.fetchval(
+        """INSERT INTO workflow_runs (owner_id, workflow_id, status, current_step,
+               total_steps, started_at, bot_id, chat_id, steps_snapshot, vars, source)
+           VALUES ($1, $2, 'completed', 0, 3, now(), $3, $4, '[]'::jsonb,
+                   '{}'::jsonb, $5) RETURNING id""",
+        OWNER, wf_id, BOT_ID, chat_id, source)
+    for idx in range(reached):
+        await pool.execute(
+            "INSERT INTO workflow_step_log (run_id, workflow_id, owner_id, step_idx, "
+            "step_type, outcome) VALUES ($1, $2, $3, $4, 'message', 'sent')",
+            run_id, wf_id, OWNER, idx)
+    for _ in range(payments):
+        await pool.execute(
+            "INSERT INTO workflow_step_log (run_id, workflow_id, owner_id, step_idx, "
+            "step_type, outcome, amount, currency) "
+            "VALUES ($1, $2, $3, 1, 'invoice', 'paid', 70, 'XTR')",
+            run_id, wf_id, OWNER)
+
+
+def test_the_funnel_is_split_by_traffic_source(pool, tg):
+    from services import workflow_engine as wf
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "x"}] * 3, active=False)
+        await _fake_run(pool, wf_id, 9001, "ads", 3)
+        await _fake_run(pool, wf_id, 9002, "ads", 1)
+        await _fake_run(pool, wf_id, 9003, "blog", 2)
+        await _fake_run(pool, wf_id, 9004, None, 1)
+        stats = await wf.workflow_stats(pool, OWNER, wf_id)
+        fun = {f["source"]: f for f in stats["funnel_by_source"]}
+        assert fun["ads"]["runs"] == 2
+        assert fun["ads"]["steps"] == {"0": 2, "1": 1, "2": 1}
+        assert fun["blog"]["steps"] == {"0": 1, "1": 1}
+        assert fun[""]["steps"] == {"0": 1}
+        assert list(fun["ads"]["steps"]) == ["0", "1", "2"]
+
+    _run(go())
+
+
+def test_two_payments_in_one_run_count_one_person_per_source(pool, tg):
+    """Регрессия: соединение с оплатами размножало прогон в разбивке по источникам."""
+    from services import workflow_engine as wf
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "x"}] * 3, active=False)
+        await _fake_run(pool, wf_id, 9101, "ads", 2, payments=2)
+        await pool.execute(
+            "UPDATE workflow_runs SET goal_reached_at=now() WHERE workflow_id=$1", wf_id)
+        stats = await wf.workflow_stats(pool, OWNER, wf_id)
+        src = stats["sources"][0]
+        assert (src["source"], src["runs"], src["paid"], src["goals"]) == ("ads", 1, 1, 1)
+        assert stats["funnel_by_source"][0]["runs"] == 1
+
+    _run(go())

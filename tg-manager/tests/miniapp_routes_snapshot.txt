@@ -1069,12 +1069,14 @@ POST /api/miniapp/workflow/{wf_id}/retry_failed
 POST /api/miniapp/workflows
 POST /api/miniapp/workflows/import
 POST /api/miniapp/workflows/{wf_id}/copy
+POST /api/miniapp/workflows/{wf_id}/inbound_token
 POST /api/miniapp/workflows/{wf_id}/send_window
 POST /api/miniapp/workflows/{wf_id}/steps
 POST /api/miniapp/workspace
 POST /api/miniapp/workspace/join
 POST /api/miniapp/workspace/{ws_id}/invite
 POST /webhook/crm/{token}
+POST /webhook/scenario/{token}
 PUT /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/toggle
 PUT /api/miniapp/auto_reply/{reply_id}/toggle

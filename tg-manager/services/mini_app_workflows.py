@@ -64,6 +64,7 @@ def setup_routes(app: web.Application, pool) -> None:
         _safe_fetchrow, log,
     )
     from services.security import validate_string
+    from services.mini_app_integrations import _public_base
 
     def _wf_id(request: web.Request):
         """id сценария из пути или None."""
@@ -258,7 +259,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "       wd.trigger_type, wd.trigger_value, "
             "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
             "       wd.goal_type, wd.goal_value, wd.legacy_kind, wd.send_window, "
-            "       wd.max_per_day, "
+            "       wd.max_per_day, wd.inbound_token, "
             "       b.username AS bot_username "
             "  FROM workflow_definitions wd "
             "  LEFT JOIN managed_bots b ON b.bot_id = wd.bot_id "
@@ -294,6 +295,9 @@ def setup_routes(app: web.Application, pool) -> None:
                            "goal_value": row.get("goal_value") or "",
                            "send_window": row.get("send_window") or "",
                            "max_per_day": row.get("max_per_day") or 0,
+                           "inbound_url": (_wf.inbound_url(_public_base(request),
+                                                           row["inbound_token"])
+                                           if row.get("inbound_token") else ""),
                            "legacy_kind": row.get("legacy_kind") or "",
                            "legacy_note": (_lf.guard_message(row["legacy_kind"])
                                            if row.get("legacy_kind") else ""),
@@ -501,6 +505,41 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(str(e), 400)
         return _json_resp({"ok": True, "send_window": stored or "",
                            "max_per_day": cap or 0})
+
+    async def workflow_inbound_rotate(request: web.Request) -> web.Response:
+        """Новый адрес входящего вебхука: POST /workflows/{wf_id}/inbound_token.
+        Старый адрес сразу перестаёт запускать сценарий."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        if wid is None:
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        token = await _wf.rotate_inbound_token(pool, uid, wid)
+        if not token:
+            return _err("Сначала выберите запуск «Входящий вебхук»", 404)
+        return _json_resp({"ok": True,
+                           "inbound_url": _wf.inbound_url(_public_base(request), token)})
+
+    async def workflow_inbound(request: web.Request) -> web.Response:
+        """Внешняя система запускает сценарий: POST /webhook/scenario/{token}.
+        Без входа — секрет в адресе. Тело — JSON {user_id, vars}."""
+        if request.content_length and request.content_length > 64 * 1024:
+            return web.json_response({"ok": False, "error": "too large"}, status=413)
+        try:
+            raw = await request.read()
+            body = json.loads(raw[:64 * 1024] or b"{}")
+        except Exception:
+            return web.json_response({"ok": False, "error": "bad json"}, status=400)
+        from services import workflow_runtime as _rt
+        try:
+            code, out = await _rt.start_from_webhook(
+                pool, request.match_info.get("token", ""), body)
+        except Exception:
+            log.exception("workflow_inbound")
+            return web.json_response({"ok": False, "error": "internal"}, status=500)
+        return web.json_response(out, status=code)
 
     async def workflow_export(request: web.Request) -> web.Response:
         """Выгрузка сценария JSON: GET /workflows/{wf_id}/export."""
@@ -748,6 +787,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/workflows/{wf_id}/export", workflow_export)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/copy", workflow_copy)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/send_window", workflow_send_window)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/inbound_token", workflow_inbound_rotate)
+    app.router.add_post("/webhook/scenario/{token}", workflow_inbound)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/retry", workflow_retry_run)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/retry_failed", workflow_retry_failed)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)

@@ -30805,11 +30805,12 @@ const WF_TRIGGER_PH = {
   inactive: 'Сколько дней не заходил: например 7',
   schedule: 'Время ЧЧ:ММ, можно с тегом: 10:00|vip',
   event: 'Выберите событие из подсказок к полю',
+  webhook: 'Значение не нужно: адрес появится после сохранения',
 };
 function wfTriggerHint(prefix) {
   const t = document.getElementById(prefix + 'Trigger').value;
   const inp = document.getElementById(prefix + 'TriggerVal');
-  inp.style.display = (t === 'manual' || t === 'paid') ? 'none' : 'block';
+  inp.style.display = (t === 'manual' || t === 'paid' || t === 'webhook') ? 'none' : 'block';
   inp.placeholder = WF_TRIGGER_PH[t] || '';
 }
 
@@ -30864,6 +30865,12 @@ async function openWorkflowDetail(wfId, wfName) {
         <input type="text" id="wfdTriggerVal" class="inp" style="margin-top:6px" list="wfdEventList" value="${esc(d.trigger_value || '')}">
         <datalist id="wfdEventList">${evOpts}</datalist>
         <label class="chk-row" style="margin-top:6px"><input type="checkbox" id="wfdReentry" ${d.allow_reentry ? 'checked' : ''}> Можно проходить повторно</label>
+        ${trig === 'webhook' && d.inbound_url ? `<div class="hint" style="margin-top:6px">🔗 POST-запрос на этот адрес запускает сценарий. Тело: {"user_id": 123, "vars": {"order": "A-17"}}, переменные — подстановки {{order}} в шагах. Человек должен уже знать бота.</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="text" id="wfdInboundUrl" class="inp" style="flex:1 1 auto" readonly value="${esc(d.inbound_url)}" aria-label="Адрес входящего вебхука">
+          <button class="btn btn-s" style="flex:0 0 auto;padding:8px 12px" onclick="copyToClipboard(document.getElementById('wfdInboundUrl').value)" aria-label="Скопировать адрес">📋</button>
+          <button class="btn btn-s" style="flex:0 0 auto;padding:8px 12px" onclick="rotateWorkflowInbound(${wfId}, this)" aria-label="Новый адрес" title="Выдать новый адрес, старый перестанет работать">🔄</button>
+        </div>` : ''}
         <button class="btn btn-s" style="width:100%;margin-top:6px" onclick="saveWorkflowTrigger(${wfId})">💾 Сохранить способ запуска</button>
         <div style="display:flex;gap:6px;margin-top:6px">
           <input type="text" id="wfdSendWindow" class="inp" style="flex:1 1 auto" placeholder="Писать только в часы, например 09-21" value="${esc(d.send_window || '')}">
@@ -31014,6 +31021,15 @@ function _wfStatsSummary(stats) {
     html += `<div class="hint" style="margin:0 16px 8px">🔗 Источники (параметр ссылки): ` +
       src.map(x => '«' + esc(x.source) + '» ' + x.runs + ' чел.' + (x.paid ? ', оплатили ' + x.paid : '') + (x.goals ? ', цель ' + x.goals : '')).join(' · ') + '</div>';
   }
+  // Воронка по шагам для каждого источника: где отваливается какой трафик.
+  const fun = (stats.funnel_by_source || []).filter(x => Number(x.runs));
+  if (src.length && fun.length) {
+    html += `<div class="sec">🔻 Воронка по источникам</div>` + fun.map(x => {
+      const parts = Object.entries(x.steps || {}).map(([i, n]) =>
+        'шаг ' + (Number(i) + 1) + ': ' + n + ' (' + Math.round(n * 100 / x.runs) + '%)');
+      return `<div class="hint" style="margin:0 16px 4px"><b>${x.source ? '«' + esc(x.source) + '»' : 'без источника'}</b> · ${num(x.runs)} чел. — ${parts.join(' → ') || 'ещё никто не дошёл до шагов'}</div>`;
+    }).join('');
+  }
   return html;
 }
 
@@ -31079,6 +31095,17 @@ async function saveWorkflowTrigger(wfId) {
     toast('✅ Способ запуска сохранён');
     _wfReopen();
   } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+}
+
+async function rotateWorkflowInbound(wfId, btn) {
+  if (!await askConfirm('Выдать новый адрес? Старый сразу перестанет запускать сценарий.')) return;
+  btn.disabled = true;
+  try {
+    const d = await api(`/api/miniapp/workflows/${wfId}/inbound_token`, { method: 'POST', body: '{}' });
+    document.getElementById('wfdInboundUrl').value = d.inbound_url || '';
+    toast('🔗 Новый адрес готов — обновите его во внешней системе');
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+  finally { btn.disabled = false; }
 }
 
 async function saveWorkflowSendWindow(wfId) {

@@ -171,6 +171,8 @@ _FIELD_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 MAX_BUTTONS = 8
 MAX_BUTTON_TEXT = 64
 MAX_AI_PROMPT = 2000
+# Сколько источников показывать в воронке по шагам.
+FUNNEL_SOURCES = 5
 # Вложение шага «Сообщение»: тип → метод Bot API. Подпись — до 1024 символов.
 MEDIA_KINDS: dict[str, str] = {"photo": "фото", "video": "видео", "document": "файл"}
 MAX_CAPTION = 1024
@@ -299,16 +301,19 @@ async def copy_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     if not res.get("ok"):
         raise RuntimeError(res.get("error") or "копия не создана")
     ttype = src["trigger_type"]
-    if ttype in ("inactive", "schedule") and target_bot is None:
+    if ttype in ("inactive", "schedule", "webhook") and target_bot is None:
         ttype = None
+    # У копии свой адрес вебхука: общий запускал бы оба сценария одним
+    # запросом — вернее, только один из них, и неизвестно какой.
     await pool.execute(
         """UPDATE workflow_definitions
               SET trigger_type=$2, trigger_value=$3, allow_reentry=$4,
-                  goal_type=$5, goal_value=$6, send_window=$7, max_per_day=$8
+                  goal_type=$5, goal_value=$6, send_window=$7, max_per_day=$8,
+                  inbound_token=CASE WHEN $2='webhook' THEN $9 END
             WHERE id=$1""",
         res["id"], ttype, src["trigger_value"] if ttype else None,
         bool(src["allow_reentry"]), src["goal_type"], src["goal_value"],
-        src["send_window"], src["max_per_day"])
+        src["send_window"], src["max_per_day"], _new_inbound_token())
     return {"ok": True, "id": res["id"], "name": new_name, "steps": len(steps),
             "bot_id": target_bot}
 
@@ -531,7 +536,7 @@ async def set_trigger(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     Запуск по аудитории («не заходил N дней», расписание) идёт по
     подписчикам ОДНОГО бота: сценарий без бота так не запустится никогда,
     и это отказ при сохранении, а не тихое «ничего не происходит»."""
-    if trigger_type in ("inactive", "schedule"):
+    if trigger_type in ("inactive", "schedule", "webhook"):
         bot_id = await pool.fetchval(
             "SELECT bot_id FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
             workflow_id, owner_id)
@@ -541,10 +546,34 @@ async def set_trigger(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     res = await pool.execute(
         """UPDATE workflow_definitions
               SET trigger_type=$3, trigger_value=$4,
-                  allow_reentry=COALESCE($5, allow_reentry), updated_at=NOW()
+                  allow_reentry=COALESCE($5, allow_reentry), updated_at=NOW(),
+                  inbound_token=CASE WHEN $3='webhook'
+                                     THEN COALESCE(inbound_token, $6) END
             WHERE id=$1 AND owner_id=$2""",
-        workflow_id, owner_id, trigger_type, trigger_value, allow_reentry)
+        workflow_id, owner_id, trigger_type, trigger_value, allow_reentry,
+        _new_inbound_token())
     return not (isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0")
+
+
+def _new_inbound_token() -> str:
+    import secrets
+    return secrets.token_urlsafe(24)
+
+
+async def rotate_inbound_token(pool: asyncpg.Pool, owner_id: int,
+                               workflow_id: int) -> str | None:
+    """Новый адрес входящего вебхука; старый сразу перестаёт работать.
+    None — сценария нет у владельца или он запускается не вебхуком."""
+    return await pool.fetchval(
+        """UPDATE workflow_definitions SET inbound_token=$3, updated_at=NOW()
+            WHERE id=$1 AND owner_id=$2 AND trigger_type='webhook'
+        RETURNING inbound_token""",
+        workflow_id, owner_id, _new_inbound_token())
+
+
+def inbound_url(public_base: str, token: str | None) -> str:
+    """Адрес, на который внешняя система шлёт запуск сценария."""
+    return f"{public_base.rstrip('/')}/webhook/scenario/{token}" if token else ""
 
 
 async def set_send_window(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
@@ -1300,14 +1329,37 @@ async def workflow_stats(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
             WHERE workflow_id=$1 AND owner_id=$2 AND outcome='paid'
               AND amount IS NOT NULL
             GROUP BY currency ORDER BY 2 DESC""", workflow_id, owner_id)]
+    # count(DISTINCT r.id), а не count(*): соединение с журналом оплат
+    # размножает прогон на число его оплат — два счёта в одном сценарии
+    # показывали одного человека как двоих и цель «достигнутой» дважды.
     sources = [dict(r) for r in await pool.fetch(
-        """SELECT COALESCE(NULLIF(r.source, ''), '') AS source, count(*) AS runs,
-                  count(*) FILTER (WHERE r.goal_reached_at IS NOT NULL) AS goals,
+        """SELECT COALESCE(NULLIF(r.source, ''), '') AS source,
+                  count(DISTINCT r.id) AS runs,
+                  count(DISTINCT r.id) FILTER (WHERE r.goal_reached_at IS NOT NULL) AS goals,
                   count(DISTINCT l.run_id) AS paid
              FROM workflow_runs r
              LEFT JOIN workflow_step_log l ON l.run_id = r.id AND l.outcome='paid'
             WHERE r.workflow_id=$1 AND r.owner_id=$2
             GROUP BY 1 ORDER BY 2 DESC LIMIT 10""", workflow_id, owner_id)]
+    # Воронка по шагам для каждого источника: сколько его людей дошло до
+    # шага. Видно, какой трафик отваливается на втором сообщении, а какой
+    # доходит до оплаты. Только верхние источники — экран, а не выгрузка.
+    top = [s["source"] for s in sources[:FUNNEL_SOURCES]]
+    funnel_rows = await pool.fetch(
+        """SELECT COALESCE(NULLIF(r.source, ''), '') AS source, l.step_idx,
+                  count(DISTINCT l.run_id) AS n
+             FROM workflow_step_log l
+             JOIN workflow_runs r ON r.id = l.run_id
+            WHERE l.workflow_id=$1 AND l.owner_id=$2
+              AND COALESCE(NULLIF(r.source, ''), '') = ANY($3::text[])
+            GROUP BY 1, 2""", workflow_id, owner_id, top) if top else []
+    by_src: dict[str, dict[str, int]] = {}
+    for r in funnel_rows:
+        by_src.setdefault(r["source"], {})[str(int(r["step_idx"]))] = int(r["n"])
+    funnel = [{"source": s["source"], "runs": int(s["runs"]),
+               "steps": dict(sorted(by_src.get(s["source"], {}).items(),
+                                    key=lambda kv: int(kv[0])))}
+              for s in sources[:FUNNEL_SOURCES]]
     # A/B: для каждого шага-деления — сколько прогонов ушло в ветку и
     # сколько из них дошло до цели (или до конца, если цели нет).
     conv = _conversion_key(goal_type)
@@ -1340,6 +1392,7 @@ async def workflow_stats(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
         "steps": {str(k): v for k, v in sorted(steps.items())},
         "revenue": revenue,
         "sources": sources,
+        "funnel_by_source": funnel,
         "splits": {str(k): v for k, v in sorted(splits.items())},
         "conversion": conv,
         "outcome_labels": STEP_OUTCOMES,
