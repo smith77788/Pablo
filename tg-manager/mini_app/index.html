@@ -3483,7 +3483,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Аватар бота (публичный https URL картинки)</label>
-      <input type="url" id="bpoAvatar" placeholder="https://example.com/avatar.jpg" class="inp">
+      <input type="url" id="bpoAvatar" placeholder="https://example.com/avatar.jpg" class="inp"><button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="pickMediaInto('bpoAvatar', this, 'image/*')">📎 Загрузить с устройства</button>
       <div style="display:flex;gap:8px;margin-top:6px">
         <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:8px" onclick="setBotAvatar()">🖼 Поставить</button>
         <button class="btn btn-d" style="flex:1 1 auto;font-size:13px;padding:8px" onclick="deleteBotAvatar()">🗑 Удалить фото</button>
@@ -3640,7 +3640,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field"><label>Bio / О себе</label><textarea id="apAbout" rows="2" placeholder="(необязательно)" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
     </div>
     <div id="apF-avatar">
-      <div class="field"><label>Ссылка на изображение *</label><input type="text" id="apAvatar" placeholder="https://…" class="inp"></div>
+      <div class="field"><label>Ссылка на изображение *</label><input type="text" id="apAvatar" placeholder="https://…" class="inp"><button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="pickMediaInto('apAvatar', this, 'image/*')">📎 Загрузить с устройства</button></div>
     </div>
     <div id="apF-2fa">
       <div class="field"><label>Новый пароль 2FA *</label><input type="text" id="apNewPass" class="inp"></div>
@@ -4920,7 +4920,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field"><label>Bio (до 70 симв.)</label><input type="text" id="setterAbout" maxlength="70" placeholder="Предприниматель"></div>
     </div>
     <div id="setterAvatarFields" style="display:none;padding:0 16px">
-      <div class="field"><label>URL изображения</label><input type="url" id="setterAvatarUrl" placeholder="https://example.com/photo.jpg"></div>
+      <div class="field"><label>URL изображения</label><input type="url" id="setterAvatarUrl" placeholder="https://example.com/photo.jpg"><button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="pickMediaInto('setterAvatarUrl', this, 'image/*')">📎 Загрузить с устройства</button></div>
     </div>
     <div id="setter2faFields" style="display:none;padding:0 16px">
       <div class="field"><label>Новый пароль (мин 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
@@ -7446,7 +7446,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Медиа (необязательно)</label>
-      <input type="url" id="cmpMedia" placeholder="https://example.com/photo.jpg">
+      <input type="url" id="cmpMedia" placeholder="https://example.com/photo.jpg"><button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="pickMediaInto('cmpMedia', this, 'image/*,video/*')">📎 Загрузить с устройства</button>
       <div class="field-note">Публичный https URL фото/видео. Текст станет подписью</div>
     </div>
     <div class="field">
@@ -7835,7 +7835,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field" id="wfStepMediaField">
       <label>Фото, видео или файл (необязательно)</label>
-      <input type="text" id="wfStepMedia" placeholder="https://… или file_id" class="inp">
+      <input type="text" id="wfStepMedia" placeholder="https://… или file_id" class="inp"><button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="pickMediaInto('wfStepMedia', this, 'image/*,video/*')">📎 Загрузить с устройства</button>
       <select id="wfStepMediaKind" class="sel" aria-label="Тип вложения">
         <option value="photo">Фото</option>
         <option value="video">Видео</option>
@@ -20601,6 +20601,37 @@ let _CLOUD_MAX_UPLOAD = 0;
 // крупнее ~750 КБ: aiohttp буферизует такое тело целиком и рубит его на 1 МБ, а
 // base64 раздувает файл на треть. Отказ приходил как «внутренняя ошибка», и со
 // стороны это выглядело поломкой облака, а не превышением размера.
+// Поля «ссылка на картинку/видео»: файл с телефона загружается к нам и
+// получает публичную ссылку, она и встаёт в поле. Всё, что берёт медиа по
+// ссылке, работает с ней без изменений.
+const MEDIA_UPLOAD_MAX = 20 * 1024 * 1024;
+function pickMediaInto(inputId, btn, accept) {
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = accept || 'image/*';
+  picker.style.display = 'none';
+  picker.onchange = async () => {
+    const file = picker.files && picker.files[0];
+    picker.remove();
+    if (!file) return;
+    if (file.size > MEDIA_UPLOAD_MAX) { toast('⚠️ Файл больше 20 МБ'); return; }
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ Загружаю…';
+    try {
+      const fd = new FormData();
+      fd.append('file', file, file.name || 'file');
+      const budget = Math.min(10 * 60 * 1000, 60000 + (file.size / 1024 / 50) * 1000);
+      const d = await api('/api/miniapp/media/upload', { method: 'POST', body: fd, timeoutMs: budget });
+      const inp = document.getElementById(inputId);
+      if (inp) { inp.value = d.url || ''; inp.dispatchEvent(new Event('input')); }
+      toast('✅ Файл загружен, ссылка подставлена');
+    } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось загрузить')); }
+    finally { btn.disabled = false; btn.textContent = label; }
+  };
+  document.body.appendChild(picker);
+  picker.click();
+}
+
 async function cloudUpload(input) {
   const file = input && input.files && input.files[0];
   if (!file) return;

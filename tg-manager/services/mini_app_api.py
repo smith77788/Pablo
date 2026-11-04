@@ -41,6 +41,7 @@ from services import mini_app_cf
 from services import mini_app_content
 from services import mini_app_presence
 from services import mini_app_cloud
+from services import mini_app_media
 from services import mini_app_mp
 from services import mini_app_integrations
 from services import mini_app_networks
@@ -7936,6 +7937,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_content.setup_routes(app, pool)
     mini_app_presence.setup_routes(app, pool)
     mini_app_cloud.setup_routes(app, pool)
+    mini_app_media.setup_routes(app, pool)
     mini_app_va.setup_routes(app, pool)
     mini_app_monitor.setup_routes(app, pool)
     # Analytics
