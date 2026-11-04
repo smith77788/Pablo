@@ -8179,6 +8179,51 @@ async def promo_update_order_status(
     )
 
 
+# Заказ уже ушёл в SMM-панель (или уходит прямо сейчас) — второй запуск
+# оплатил бы накрутку второй раз. 'launching' — короткая аренда на время
+# запроса к панели; зависшая (процесс упал посреди запроса) истекает сама.
+PROMO_BOOST_LEASE_SEC = 600
+_PROMO_NOT_BOOSTABLE = ("boosting", "topped", "transferred", "cancelled")
+
+
+async def promo_claim_boost(
+    pool: asyncpg.Pool, order_id: int, owner_id: int,
+    lease_sec: int = PROMO_BOOST_LEASE_SEC,
+) -> str | None:
+    """Занять заказ под запуск накрутки. Возвращает прежний статус или None.
+
+    None — заказ не найден, уже накручивается, закрыт или его прямо сейчас
+    запускает другой запрос (двойной тап, бот и мини-апп одновременно).
+    """
+    return await pool.fetchval(
+        """WITH prev AS (
+               SELECT id, status, updated_at FROM promo_orders
+                WHERE id=$1 AND owner_id=$2 FOR UPDATE)
+           UPDATE promo_orders o
+              SET status='launching', updated_at=NOW()
+             FROM prev
+            WHERE o.id = prev.id
+              AND prev.status <> ALL($3::text[])
+              AND (prev.status <> 'launching'
+                   OR prev.updated_at < NOW() - make_interval(secs => $4))
+        RETURNING prev.status""",
+        order_id, owner_id, list(_PROMO_NOT_BOOSTABLE), float(lease_sec),
+    )
+
+
+async def promo_release_boost(
+    pool: asyncpg.Pool, order_id: int, prev_status: str
+) -> None:
+    """Вернуть заказу статус после отказа панели (только из 'launching')."""
+    if prev_status == "launching":
+        prev_status = "waiting"
+    await pool.execute(
+        "UPDATE promo_orders SET status=$2, updated_at=NOW() "
+        "WHERE id=$1 AND status='launching'",
+        order_id, prev_status,
+    )
+
+
 async def promo_delete_order(pool: asyncpg.Pool, order_id: int, owner_id: int) -> None:
     await pool.execute(
         "DELETE FROM promo_orders WHERE id=$1 AND owner_id=$2", order_id, owner_id

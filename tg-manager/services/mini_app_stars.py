@@ -639,15 +639,32 @@ def setup_routes(app: web.Application, pool) -> None:
         if not bot_rec:
             return _err("Бот не найден в складе", 404)
 
+        # Запуск платный и необратимый: заказ занимается атомарно ДО запроса к
+        # панели. Двойной тап (или бот и мини-апп разом) иначе оплачивал
+        # накрутку дважды.
+        prev_status = await db.promo_claim_boost(pool, order["id"], uid)
+        if prev_status is None:
+            return _err("Заказ уже запущен или закрыт", 409)
+
         link = f"https://t.me/{bot_rec['bot_username']}"
         client = smm_svc.make_client(panel["api_url"], panel["api_key_enc"])
-        result = await client.add_order(
-            service_id=panel["service_id"] or "",
-            link=link,
-            quantity=int(order["target_subs"] or 100),
-        )
+        try:
+            result = await client.add_order(
+                service_id=panel["service_id"] or "",
+                link=link,
+                quantity=int(order["target_subs"] or 100),
+            )
+        except BaseException:
+            await db.promo_release_boost(pool, order["id"], prev_status)
+            raise
         if result.get("error") or "order" not in result:
             err_msg = result.get("error", str(result)[:200])
+            if err_msg == "timeout":
+                # Панель могла принять заказ и не успеть ответить: аренда
+                # остаётся, повтор станет доступен, когда она истечёт.
+                return _err("Панель не ответила вовремя. Проверьте заказ в "
+                            "панели: повторный запуск откроется через 10 минут", 504)
+            await db.promo_release_boost(pool, order["id"], prev_status)
             await db.promo_log(
                 pool, uid, "booster",
                 f"Ошибка запуска накрутки заказ #{order['id']}: {err_msg}",

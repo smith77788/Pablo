@@ -54,6 +54,7 @@ _PRO = "pro"
 _ORDER_STATUS = {
     "waiting":     "⏳ Ожидает",
     "aging":       "🕐 Созревание",
+    "launching":   "🚀 Запуск",
     "boosting":    "🚀 Накрутка",
     "topup":       "💰 Пополнение",
     "checking":    "🔍 Проверка",
@@ -377,16 +378,35 @@ async def cb_order_boost(callback: CallbackQuery, callback_data: PromoCb, pool: 
         await callback.message.answer("⚠️ Бот не найден в складе.")
         return
 
+    # Запуск платный: заказ занимается атомарно ДО запроса к панели, иначе
+    # двойной тап (или бот и мини-апп разом) оплачивал накрутку дважды.
+    prev_status = await db.promo_claim_boost(pool, order["id"], callback.from_user.id)
+    if prev_status is None:
+        await callback.message.answer("⚠️ Заказ уже запущен или закрыт.")
+        return
+
     link = f"https://t.me/{bot_rec['bot_username']}"
     client = smm_svc.make_client(panel["api_url"], panel["api_key_enc"])
-    result = await client.add_order(
-        service_id=panel["service_id"] or "",
-        link=link,
-        quantity=int(order["target_subs"] or 100),
-    )
+    try:
+        result = await client.add_order(
+            service_id=panel["service_id"] or "",
+            link=link,
+            quantity=int(order["target_subs"] or 100),
+        )
+    except BaseException:
+        await db.promo_release_boost(pool, order["id"], prev_status)
+        raise
 
     if result.get("error") or "order" not in result:
         err_msg = result.get("error", str(result)[:200])
+        if err_msg == "timeout":
+            # Панель могла принять заказ и не успеть ответить: аренда
+            # остаётся, повтор откроется, когда она истечёт.
+            await callback.message.answer(
+                "⏳ Панель не ответила вовремя. Проверьте заказ в панели: "
+                "повторный запуск откроется через 10 минут.")
+            return
+        await db.promo_release_boost(pool, order["id"], prev_status)
         await db.promo_log(
             pool, callback.from_user.id, "booster",
             f"Ошибка запуска накрутки заказ #{order['id']}: {err_msg}",
