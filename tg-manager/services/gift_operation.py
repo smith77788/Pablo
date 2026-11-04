@@ -64,15 +64,24 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
 
     await _declare_total_items(pool, op_id, len(plan["items"]))
 
+    # Возобновлённый прогон (рестарт воркера посреди передачи) — та же
+    # операция: вторая строка учёта ей не нужна.
     await pool.execute(
         """
         INSERT INTO gift_transfer_ops (plan_id, operation_id, total_items)
-        VALUES ($1, $2, $3)
+        SELECT $1, $2, $3
+        WHERE NOT EXISTS (SELECT 1 FROM gift_transfer_ops
+                          WHERE plan_id=$1 AND operation_id=$2)
         """,
         plan_id,
         op_id,
         len(plan["items"]),
     )
+    # Итог считается по плану целиком, а не по этому заходу. Возобновлённый
+    # прогон начинал счёт с нуля: «Подарки отправлены: 1 / 5», когда ушли
+    # четыре, а если до рестарта ушли все — «0 / 5».
+    transferred_before = sum(1 for i in plan["items"] if i["status"] == "transferred")
+    failed_before = sum(1 for i in plan["items"] if i["status"] == "failed")
 
     # Filter to transferable pending items
     pending_items = []
@@ -146,11 +155,12 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
                 transferred = $2,
                 failed = $3,
                 updated_at = now()
-            WHERE plan_id=$1
+            WHERE plan_id=$1 AND operation_id=$4
             """,
             plan_id,
-            transferred_count,
-            failed_count,
+            transferred_before + transferred_count,
+            failed_before + failed_count,
+            op_id,
         )
         # Счётчик операции двигается по каждому разобранному подарку: по нему
         # владелец видит прогресс, а сторож застоя — что работа идёт.
@@ -177,6 +187,8 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
     # Раньше этот UPDATE стоял здесь без условия и последним: он затирал отмену,
     # а дверь после него получала ноль строк и об исходе не докладывала вовсе.
 
+    transferred_total = transferred_before + transferred_count
+    failed_total = failed_before + failed_count
     report_id = await GiftTransferReportService.generate_report(pool, plan_id, op_id)
     log.info(
         "_exec_gift_transfer: completed plan_id=%d report_id=%d transferred=%d failed=%d",
@@ -192,14 +204,14 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
         # знают, поэтому две ушедшие передачи из трёх объявлялись провалом.
         "status": "cancelled" if cancelled else "done",
         "summary": (
-            f"🛑 Передача остановлена: {transferred_count} / {len(plan['items'])}"
+            f"🛑 Передача остановлена: {transferred_total} / {len(plan['items'])}"
             if cancelled else
-            f"✅ Подарки отправлены: {transferred_count} / {len(plan['items'])} "
-            f"(не удалось: {failed_count})"
+            f"✅ Подарки отправлены: {transferred_total} / {len(plan['items'])} "
+            f"(не удалось: {failed_total})"
         ),
-        "ok": transferred_count,
-        "transferred": transferred_count,
-        "failed": failed_count,
+        "ok": transferred_total,
+        "transferred": transferred_total,
+        "failed": failed_total,
         "total": len(plan["items"]),
     }
 

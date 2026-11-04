@@ -211,3 +211,35 @@ def test_a_partly_failed_transfer_reports_honest_counters(pool, monkeypatch):
     assert int(row["done_items"]) == 3, (
         f"done_items={row['done_items']} при трёх разобранных подарках: прогресс "
         "операции не виден владельцу, пока она идёт")
+
+
+def test_a_resumed_transfer_counts_the_gifts_sent_before_the_restart(pool, monkeypatch):
+    """Воркер перезапустился посреди передачи: возобновлённый прогон считает
+    итог по плану целиком. Раньше счёт начинался с нуля — «отправлено 1 / 3»,
+    когда ушли все три, — а строка учёта операции заводилась второй раз."""
+    from services import gift_operation, op_status
+
+    plan_id, op_id = _seed(pool, n_items=3)
+    # До рестарта ушли два подарка из трёх.
+    _run(pool.execute(
+        "UPDATE gift_transfer_items SET status='transferred' WHERE id IN ("
+        "SELECT id FROM gift_transfer_items WHERE plan_id=$1 ORDER BY id LIMIT 2)",
+        plan_id))
+    _run(pool.execute(
+        "INSERT INTO gift_transfer_ops(plan_id, operation_id, total_items, transferred) "
+        "VALUES($1,$2,3,2)", plan_id, op_id))
+
+    async def _fake_transfer(p, item, recipient_user_id, recipient_username):
+        return gift_operation.GiftTransferResult(
+            item_id=int(item["id"]), success=True, cost=25)
+
+    monkeypatch.setattr(gift_operation, "_transfer_single_gift", _fake_transfer)
+    res = _run(gift_operation._exec_gift_transfer(pool, op_id, {"plan_id": plan_id}))
+
+    assert res["ok"] == 3 and "3 / 3" in res["summary"], res
+    assert op_status.classify_final(res["status"], res["ok"], res["failed"],
+                                    3, 3) == op_status.DONE
+    rows = _run(pool.fetch(
+        "SELECT transferred FROM gift_transfer_ops WHERE plan_id=$1", plan_id))
+    assert [r["transferred"] for r in rows] == [3], (
+        f"учёт операции после возобновления: {[dict(r) for r in rows]}")
