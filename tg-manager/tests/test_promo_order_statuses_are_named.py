@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 from bot.handlers.promo_platform import _ORDER_STATUS
+
 from tests.miniapp_source import miniapp_source
 
 
