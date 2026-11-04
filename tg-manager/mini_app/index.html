@@ -13375,6 +13375,12 @@ async function openOpDetail(opId) {
     if (opCanRetry(o)) {
       html += `<div style="padding:0 16px"><button class="btn btn-p" onclick="retryOp(${o.id});back()" style="width:100%">↺ Повторить</button></div>`;
     }
+    // «Повторить с правками» — та же операция ЗАНОВО, с поправленным текстом,
+    // паузой или количеством. Есть у любой завершённой: успешный пост тоже
+    // хотят выпустить ещё раз с другим текстом.
+    if (['done','partial','failed','cancelled'].includes(o.status)) {
+      html += `<div style="padding:8px 16px 0"><button class="btn btn-s" onclick="openOpClone(${Number(o.id)})" style="width:100%">✏️ Повторить с правками</button></div>`;
+    }
     // Быстрые действия по итогу — с объяснением, ПОЧЕМУ это предложено.
     // На экране деталей места хватает, поэтому показываем все, а не первые две.
     // «Повторить» уже стоит кнопкой выше — второй раз в «Что сделать дальше» не нужен.
@@ -30112,6 +30118,61 @@ async function admSetReportStatus(id, st) {
     toast('✅ Отчёт #' + Number(id) + ': ' + (r.status_ru || st));
     const row = ADM_REP_ROWS.find(x => x.id === id); if (row) row.status = st;
   } catch(e) { toast('⚠️ ' + errRu(e, 'Статус не сохранился')); openAdminReports(); }
+}
+
+// ── «Повторить с правками» ───────────────────────────────────────────────
+// Окно с полями, которые можно поправить (текст, числа, паузы, флажки), и тем,
+// что копируется как есть (каналы, аккаунты, люди). Копия — ПОЛНЫЙ новый
+// прогон по тем же целям, и окно говорит это до запуска.
+async function openOpClone(opId) {
+  let d;
+  try { d = await api('/api/miniapp/operation/' + Number(opId) + '/editable'); }
+  catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось открыть правку')); return; }
+  if (!d.can_clone) { toast('⚠️ ' + (d.why || 'Копию сейчас запустить нельзя')); return; }
+  const old = document.getElementById('mo-op-clone'); if (old) old.remove();
+  const bg = document.createElement('div');
+  bg.className = 'mbg show'; bg.id = 'mo-op-clone';
+  const field = f => {
+    const id = 'opc-' + f.key;
+    if (f.kind === 'bool') return `<label class="chk-row"><input type="checkbox" id="${esc(id)}"${f.value ? ' checked' : ''}> ${esc(f.label)}</label>`;
+    if (f.kind === 'text') return `<div class="field"><label for="${esc(id)}">${esc(f.label)}</label><textarea id="${esc(id)}" rows="4" maxlength="4096" style="width:100%">${esc(f.value)}</textarea></div>`;
+    return `<div class="field"><label for="${esc(id)}">${esc(f.label)}${f.kind === 'seconds' ? ', секунд' : ''}</label><input type="number" min="0" id="${esc(id)}" value="${esc(String(f.value))}" inputmode="numeric"></div>`;
+  };
+  const ctx = (d.context || []).map(c => `<div style="font-size:12px;margin:0 0 3px"><span style="color:var(--hint)">${esc(c.label)}:</span> ${esc(c.value)}</div>`).join('');
+  bg.innerHTML = '<div class="modal">'
+    + '<div class="modal-x" role="button" tabindex="0" aria-label="Закрыть" onclick="document.getElementById(\'mo-op-clone\').remove()">✕</div>'
+    + '<div class="modal-title">✏️ Повторить с правками</div>'
+    + ((d.fields || []).length ? d.fields.map(field).join('')
+       : '<div style="font-size:13px;color:var(--hint);margin:0 0 10px">Править у этой операции нечего — копия пойдёт с теми же настройками.</div>')
+    + (ctx ? '<div style="margin:6px 0 10px"><div style="font-size:12px;font-weight:600;color:var(--hint);margin-bottom:4px">Копируется как есть</div>' + ctx + '</div>' : '')
+    + '<div style="font-size:12px;color:var(--orange);margin:0 0 10px">Копия — новый полный прогон по тем же целям'
+    + (d.total_items ? ' (' + num(d.total_items) + ')' : '') + '. Уже сделанное в исходной операции она не пропускает.</div>'
+    + '<div class="field-err" id="opc-err"></div>'
+    + `<button class="btn btn-p" id="opc-go" style="width:100%" onclick="submitOpClone(${Number(opId)})">🚀 Запустить копию</button></div>`;
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.appendChild(bg);
+  window._OPC_FIELDS = d.fields || [];
+}
+async function submitOpClone(opId) {
+  const changes = {};
+  (window._OPC_FIELDS || []).forEach(f => {
+    const el = document.getElementById('opc-' + f.key);
+    if (!el) return;
+    const v = f.kind === 'bool' ? el.checked : (f.kind === 'text' ? el.value : Number(el.value));
+    if (f.kind === 'text' ? String(v).trim() !== String(f.value).trim() : v !== f.value) changes[f.key] = v;
+  });
+  const btn = document.getElementById('opc-go'), err = document.getElementById('opc-err');
+  if (btn) { btn.disabled = true; btn.textContent = 'Запускаю…'; }
+  try {
+    const r = await api('/api/miniapp/operation/' + Number(opId) + '/clone', {method: 'POST', body: JSON.stringify({changes})});
+    const m = document.getElementById('mo-op-clone'); if (m) m.remove();
+    toast('✅ Копия запущена · операция #' + r.new_id);
+    if (r.new_id) openOpDetail(r.new_id);
+  } catch (e) {
+    if (err) err.textContent = errRu(e, 'Копия не запустилась');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Запустить копию'; }
+  }
 }
 
 async function openAdminUsers() {

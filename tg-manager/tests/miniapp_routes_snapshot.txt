@@ -250,6 +250,7 @@ GET /api/miniapp/notary
 GET /api/miniapp/notary/{watch_id}
 GET /api/miniapp/onboarding
 GET /api/miniapp/operation/{op_id}
+GET /api/miniapp/operation/{op_id}/editable
 GET /api/miniapp/operation/{op_id}/log
 GET /api/miniapp/operation/{op_id}/log.csv
 GET /api/miniapp/operations
@@ -570,6 +571,7 @@ HEAD /api/miniapp/notary
 HEAD /api/miniapp/notary/{watch_id}
 HEAD /api/miniapp/onboarding
 HEAD /api/miniapp/operation/{op_id}
+HEAD /api/miniapp/operation/{op_id}/editable
 HEAD /api/miniapp/operation/{op_id}/log
 HEAD /api/miniapp/operation/{op_id}/log.csv
 HEAD /api/miniapp/operations
@@ -924,6 +926,7 @@ POST /api/miniapp/notary/{watch_id}/check
 POST /api/miniapp/onboarding/goal
 POST /api/miniapp/op_chain/launch
 POST /api/miniapp/operation/{op_id}/cancel
+POST /api/miniapp/operation/{op_id}/clone
 POST /api/miniapp/operation/{op_id}/pause
 POST /api/miniapp/operation/{op_id}/resume
 POST /api/miniapp/operation/{op_id}/retry

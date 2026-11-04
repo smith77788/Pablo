@@ -24,7 +24,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.mini_app_api import (
         _INTERNAL_ERROR, OPERATION_STATUSES, _csv_resp, _err, _get_uid,
         _json, _json_resp, _obus, _retry_sources, _safe_count, _safe_fetch,
-        _safe_fetchrow, _safe_fetchval, log, op_status,
+        _safe_fetchrow, _safe_fetchval, bad_body_response, log, op_status,
     )
     from services.security import validate_integer
 
@@ -1017,6 +1017,105 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/operation/{op_id}/pause", pause_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/resume", resume_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/run_now", run_now_operation)
+    async def _clone_source(request):
+        """(uid, op_id, row) или готовый отказ — общая калитка двух ручек копии."""
+        uid = _get_uid(request)
+        if not uid:
+            return None, _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return None, _err("Неверный идентификатор операции", 400)
+        row = await pool.fetchrow(
+            "SELECT op_type, params, label, status, total_items "
+            "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
+        if not row:
+            return None, _err("Не найдено", 404)
+        return (uid, op_id, row), None
+
+    def _row_params(row) -> dict:
+        try:
+            p = row["params"] if isinstance(row["params"], dict) else _json.loads(row["params"] or "{}")
+        except (TypeError, ValueError):
+            p = {}
+        return p if isinstance(p, dict) else {}
+
+    async def operation_editable(request: web.Request) -> web.Response:
+        """Что можно поправить перед «Повторить с правками».
+
+        Копия — новый ПОЛНЫЙ прогон той же операции по тем же целям: в отличие
+        от «Повторить», она не доделывает остаток, а делает всё заново. Поэтому
+        вместе с полями отдаётся, по каким целям она пойдёт, — экран называет
+        это до запуска.
+        """
+        try:
+            src, refused = await _clone_source(request)
+            if refused is not None:
+                return refused
+            uid, op_id, row = src
+            from services import op_params_view as _opv
+            params = _row_params(row)
+            fields = _opv.editable(row["op_type"], params)
+            editable_keys = {f["key"] for f in fields}
+            context = [v for v in _opv.describe(row["op_type"], params)
+                       if v["label"] not in {f["label"] for f in fields}]
+            can, why = True, ""
+            if not op_status.is_terminal(row["status"]):
+                can, why = False, "Операция ещё идёт — копию можно запустить, когда она закончится"
+            return _json_resp({"op_id": op_id, "op_type": row["op_type"],
+                               "fields": fields, "context": context,
+                               "editable_keys": sorted(editable_keys),
+                               "total_items": int(row["total_items"] or 0),
+                               "can_clone": can, "why": why})
+        except Exception:
+            log.exception("operation_editable")
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def clone_operation(request: web.Request) -> web.Response:
+        """«Повторить с правками»: та же операция заново, с поправленными полями.
+
+        Ставится общей дверью шины (operation_bus.submit): тариф, окно двойного
+        тапа, предохранитель Ban Weather и реестр типов работают как у любого
+        запуска. Отметки прошлого прогона и расписание не копируются
+        (op_params_view.CLONE_DROP).
+        """
+        try:
+            data = await request.json()
+        except Exception as exc:
+            bad = bad_body_response(request, exc)
+            return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
+        try:
+            src, refused = await _clone_source(request)
+            if refused is not None:
+                return refused
+            uid, op_id, row = src
+            if not op_status.is_terminal(row["status"]):
+                return _err("Операция ещё идёт — копию можно запустить, когда она закончится", 409)
+            from services import op_params_view as _opv
+            try:
+                params = _opv.clone_params(row["op_type"], _row_params(row),
+                                           (data or {}).get("changes"))
+            except ValueError as exc:
+                return _err(str(exc), 400)
+            label = (row["label"] or "").strip()
+            label = (label[:80] + " · " if label else "") + f"копия #{op_id}"
+            try:
+                new_id = await _obus.submit(pool, uid, row["op_type"], params,
+                                            total_items=int(row["total_items"] or 0),
+                                            label=label)
+            except PermissionError as exc:
+                # Отказ по тарифу или предохранителю — не сбой: честный 403.
+                return _err(str(exc) or "Требуется подписка", 403)
+            except ValueError:
+                return _err(f"Тип операции «{row['op_type']}» больше не поддерживается — "
+                            "копию запустить нельзя", 400)
+            return _json_resp({"ok": True, "new_id": new_id})
+        except Exception:
+            log.exception("clone_operation")
+            return _err(_INTERNAL_ERROR, 500)
+
+    app.router.add_get("/api/miniapp/operation/{op_id}/editable", operation_editable)
+    app.router.add_post("/api/miniapp/operation/{op_id}/clone", clone_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
     app.router.add_post("/api/miniapp/operations/clear", clear_operations)
     app.router.add_post("/api/miniapp/operations/pause", pause_operations)

@@ -193,3 +193,98 @@ def describe(op_type: str | None, params: Any) -> list[dict]:
         seen_labels.add(label)
         out.append({"label": label, "value": val})
     return out
+
+
+# ── «Повторить с правками» ─────────────────────────────────────────────────
+#
+# Карточка операции умела «Повторить» — доделать остаток той же работы. Но
+# самое частое желание после прогона другое: запустить ТО ЖЕ САМОЕ ещё раз,
+# поправив текст, паузу или количество. Раньше для этого надо было найти экран
+# запуска и заново выбрать каналы, аккаунты и всё остальное.
+#
+# Править можно только то, что человек понимает и может проверить глазами:
+# текст, числа, паузы, флажки. Списки целей (каналы, аккаунты, люди) копируются
+# как есть — их меняют на экране запуска, где есть выбор и проверка.
+
+EDITABLE_KINDS = frozenset({"text", "num", "seconds", "bool"})
+
+# Отметки ПРОГОНА, которые исполнитель дописывает в params по ходу работы. В
+# копию они не переходят: по ним исполнитель решил бы, что работа уже сделана
+# (launched_bot_ids — «рассылки по этим ботам заведены», broadcast_id — «эта
+# рассылка уже идёт», retry_of_op — «смотри журнал предка, там всё отмечено»),
+# и копия не сделала бы ничего. Расписание тоже не копируется: копия — один
+# запуск, а не вторая цепочка.
+CLONE_DROP = frozenset({
+    "retry_of_op", "journal_op_ids", "launched_bot_ids", "launched_bc_ids",
+    "broadcast_id", "recurring_next_op", "approval_token",
+    "repeat_interval_min", "repeat_count",
+})
+
+_TEXT_LIMIT = 4096
+_NUM_MAX = 1_000_000
+_SECONDS_MAX = 86_400
+
+
+def editable(op_type: str | None, params: Any) -> list[dict]:
+    """Поля, которые можно поправить перед копией: [{key,label,kind,value}]."""
+    if not isinstance(params, dict):
+        return []
+    out: list[dict] = []
+    for key, label, kind in _FIELDS:
+        if kind not in EDITABLE_KINDS or key not in params:
+            continue
+        if key in _INTERNAL or key in CLONE_DROP or _secret(key):
+            continue
+        v = params.get(key)
+        if kind == "text":
+            if not isinstance(v, str):
+                continue
+        elif kind in ("num", "seconds"):
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                continue
+        else:
+            v = v is True or str(v).lower() in ("1", "true", "yes")
+        out.append({"key": key, "label": label, "kind": kind, "value": v})
+    return out
+
+
+def clone_params(op_type: str | None, params: Any, changes: Any) -> dict:
+    """params копии: исходные минус отметки прогона, плюс проверенные правки.
+
+    ValueError с русским текстом — правка не принята (чужой ключ, пустой
+    текст, число вне границ). Исходный словарь не меняется.
+    """
+    base = dict(params) if isinstance(params, dict) else {}
+    allowed = {f["key"]: f for f in editable(op_type, base)}
+    if changes is None:
+        changes = {}
+    if not isinstance(changes, dict):
+        raise ValueError("Правки не разобраны")
+    out = {k: v for k, v in base.items()
+           if k not in CLONE_DROP and not str(k).startswith("_")}
+    for key, val in changes.items():
+        f = allowed.get(key)
+        if f is None:
+            raise ValueError("Это поле у операции не правится")
+        kind, label = f["kind"], f["label"]
+        if kind == "text":
+            text = str(val if val is not None else "").strip()
+            if not text:
+                raise ValueError(f"«{label}»: не может быть пустым")
+            if len(text) > _TEXT_LIMIT:
+                raise ValueError(f"«{label}»: длиннее {_TEXT_LIMIT} знаков")
+            out[key] = text
+        elif kind in ("num", "seconds"):
+            try:
+                n = int(val)
+            except (TypeError, ValueError):
+                raise ValueError(f"«{label}»: нужно целое число") from None
+            top = _SECONDS_MAX if kind == "seconds" else _NUM_MAX
+            if n < 0 or n > top:
+                raise ValueError(f"«{label}»: от 0 до {top}")
+            out[key] = n
+        else:
+            out[key] = bool(val is True or str(val).lower() in ("1", "true", "yes"))
+    return out
