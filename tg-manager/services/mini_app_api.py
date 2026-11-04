@@ -1213,6 +1213,11 @@ def _get_uid(request: web.Request) -> int | None:
     файла, EventSource), выдаётся `?ticket=` — пропуск на GET одного пути с
     коротким сроком (`/api/miniapp/url_ticket`, mini_app_auth.make_url_ticket).
     """
+    return _uid_from_credentials(request)
+
+
+def _uid_from_credentials(request: web.Request) -> int | None:
+    """Разбор заголовка/пропуска без кэша и подмен — для слоёв перед ручками."""
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return parse_token(auth[7:], _bot_token())
@@ -2435,7 +2440,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def platform_ban_middleware(request: web.Request, handler):
         if request.path.startswith("/api/miniapp/") and request.method != "OPTIONS":
             from services import platform_ban
-            uid = _get_uid(request)
+            uid = _uid_from_credentials(request)
             if uid and await platform_ban.is_banned(pool, uid):
                 return _err(platform_ban.BANNED_TEXT, 403)
         return await handler(request)

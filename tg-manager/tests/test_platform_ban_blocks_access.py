@@ -108,13 +108,18 @@ def test_main_registers_ban_guard():
 def test_miniapp_rejects_banned_session(monkeypatch):
     from services import mini_app_api as M
 
-    monkeypatch.setattr(M, "_get_uid", lambda r: BANNED)
+    from services.mini_app_auth import make_token
+
+    bot_token = "123456789:AAEhBP0av28bGtUcLzZ2Dz5UudzRo7PkLg0"
+    monkeypatch.setenv("BOT_TOKEN", bot_token)
+    monkeypatch.setattr(M, "_bot_token", lambda: bot_token)
     app = web.Application()
     M.setup_routes(app, _Pool({BANNED}))
+    hdr = {"Authorization": f"Bearer {make_token(BANNED, bot_token)}"}
 
     async def go():
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/miniapp/accounts")
+            resp = await client.get("/api/miniapp/accounts", headers=hdr)
             return resp.status, await resp.text()
 
     status, text = asyncio.run(go())
