@@ -637,14 +637,20 @@ async def deliver_due(pool, http) -> int:
     async def _crm(group):
         from services import crm_connectors as _crm_mod
         async with sem:
-            done, left = await _crm_mod.deliver_group(pool, http, group)
+            done, left, pause = await _crm_mod.deliver_group(pool, http, group)
             for it, (ok, code, err) in done:
                 await _record(pool, it, ok, code, err)
-            if left:  # не успели в бюджет — обратно в очередь, попытка не потрачена
+            if left:
+                # Не успели в бюджет или CRM попросила реже — обратно в очередь,
+                # попытка не потрачена; при лимите CRM — после паузы.
                 await pool.execute(
                     """UPDATE webhook_deliveries SET attempts = GREATEST(attempts - 1, 0),
-                           next_attempt_at = now() WHERE id = ANY($1::bigint[])""",
-                    [it["id"] for it in left])
+                           next_attempt_at = now() + make_interval(secs => $2),
+                           last_error = CASE WHEN $2 > 0
+                               THEN 'CRM просит реже — продолжим через минуту'
+                               ELSE last_error END
+                       WHERE id = ANY($1::bigint[])""",
+                    [it["id"] for it in left], float(pause))
 
     await asyncio.gather(*(_one(it) for it in live), *(_crm(g) for g in crm.values()))
     if sheets:

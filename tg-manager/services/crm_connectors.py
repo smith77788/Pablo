@@ -75,11 +75,14 @@ _BITRIX_PATH_RE = re.compile(r"^/rest/\d+/[A-Za-z0-9_]+/?$")
 class CrmError(Exception):
     """Отказ CRM. `message` — по-русски, его видит владелец в журнале."""
 
-    def __init__(self, message: str, code: int | None = None, *, not_found: bool = False):
+    def __init__(self, message: str, code: int | None = None, *, not_found: bool = False,
+                 rate_limited: bool = False):
         super().__init__(message)
         self.message = message
         self.code = code
         self.not_found = not_found
+        # CRM просит реже: это не неудача доставки, а «подождать» (см. deliver_group).
+        self.rate_limited = rate_limited
 
 
 # ── Разбор ввода владельца ───────────────────────────────────────────────────
@@ -248,7 +251,8 @@ class AmoClient:
         if code == 404:
             raise CrmError("запись в amoCRM не найдена (удалена?)", code, not_found=True)
         if code == 429:
-            raise CrmError("amoCRM просит реже (лимит запросов) — повторим", code)
+            raise CrmError("amoCRM просит реже (лимит запросов) — повторим", code,
+                           rate_limited=True)
         detail = ""
         if isinstance(data, dict):
             detail = data.get("detail") or data.get("title") or ""
@@ -377,7 +381,8 @@ class BitrixClient:
         if err == "insufficient_scope":
             raise CrmError("у вебхука Bitrix24 нет права «CRM» — включите его в настройках вебхука", code)
         if code == 503 or err == "QUERY_LIMIT_EXCEEDED":
-            raise CrmError("Bitrix24 просит реже (лимит запросов) — повторим", code)
+            raise CrmError("Bitrix24 просит реже (лимит запросов) — повторим", code,
+                           rate_limited=True)
         nf = "not found" in str(desc).lower() or "не найден" in str(desc).lower()
         raise CrmError(f"Bitrix24: {desc or ('ответ ' + str(code))}"[:300], code, not_found=nf)
 
@@ -868,6 +873,8 @@ async def deliver(pool, http, ep: dict, event: str, data: dict) -> tuple[bool, i
         note = await handler(_Sync(pool, ep, crm_api), data or {})
         return True, 200, note
     except CrmError as e:
+        if e.rate_limited:
+            return False, RATE_LIMITED, e.message
         return False, e.code, e.message
     except (KeyError, IndexError, TypeError, ValueError) as e:
         return False, None, f"CRM ответила неожиданно: {type(e).__name__}"
@@ -877,17 +884,27 @@ async def deliver(pool, http, ep: dict, event: str, data: dict) -> tuple[bool, i
 # webhooks._LEASE_S (120 с), а запросов к CRM на событие бывает до четырёх.
 # Что не успели — возвращается в очередь без траты попытки.
 _GROUP_BUDGET_S = 80
+# Код результата deliver, когда CRM попросила реже (amoCRM 429, Bitrix24
+# QUERY_LIMIT_EXCEEDED / 503), и пауза подключения после такого ответа.
+RATE_LIMITED = 429
+RATE_LIMIT_PAUSE_S = 60
 
 
-async def deliver_group(pool, http, items: list[dict]) -> tuple[list, list[dict]]:
+async def deliver_group(pool, http, items: list[dict]) -> tuple[list, list[dict], int]:
     """Доставки одного подключения — строго по порядку событий: «создан» и
     «сменил этап» об одном человеке, отправленные параллельно, завели бы в
-    CRM две сделки. → ([(строка, результат)], [не начатые строки])."""
+    CRM две сделки. → ([(строка, результат)], [не начатые строки], пауза с).
+
+    CRM попросила реже — пачка останавливается: это событие и остальные
+    возвращаются в очередь без траты попытки через `пауза` секунд. Раньше
+    каждое следующее событие пачки било в тот же лимит, тратило попытку и
+    удлиняло серию неудач, а лимит у CRM от этого только продлевался."""
     import time as _time
     started = _time.monotonic()
     done, left = [], []
+    pause = 0
     for it in sorted(items, key=lambda x: x["event_id"]):
-        if _time.monotonic() - started > _GROUP_BUDGET_S:
+        if pause or _time.monotonic() - started > _GROUP_BUDGET_S:
             left.append(it)
             continue
         try:
@@ -899,8 +916,12 @@ async def deliver_group(pool, http, items: list[dict]) -> tuple[list, list[dict]
             log.warning("crm deliver: событие %s подключения %s упало", it.get("event_id"),
                         it.get("endpoint_id"), exc_info=True)
             res = (False, None, f"внутренняя ошибка: {type(e).__name__}")
+        if not res[0] and res[1] == RATE_LIMITED:
+            pause = RATE_LIMIT_PAUSE_S
+            left.append(it)
+            continue
         done.append((it, res))
-    return done, left
+    return done, left, pause
 
 
 # ── Подключение и настройка ──────────────────────────────────────────────────
