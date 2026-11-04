@@ -32,6 +32,11 @@ _sums: dict[tuple, list] = {}
 _gauges: dict[tuple, float] = {}
 
 _HELP = {
+    # HTTP мини-аппа (services/http_metrics.py): route — шаблон пути.
+    "infragram_http_requests_total": "HTTP-запросы к мини-аппу по шаблону пути, методу и классу статуса",
+    "infragram_http_request_seconds_sum": "Суммарное время ответа HTTP-ручек, сек",
+    "infragram_http_request_seconds_count": "Число ответов HTTP-ручек",
+    "infragram_http_request_max_seconds": "Самый долгий ответ ручки за минуту, сек",
     # Сторож цикла событий (services/loop_lag.py): насколько опаздывает любой
     # ответ процесса — бот, мини-апп и операции делят один цикл.
     "infragram_event_loop_lag_seconds": "Последняя задержка цикла событий, сек",

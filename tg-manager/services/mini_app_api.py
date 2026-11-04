@@ -2406,6 +2406,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Потолок времени — САМЫМ ВНЕШНИМ слоем (aiohttp строит цепочку так, что
     # первый в списке оказывается снаружи): он должен накрывать и остальные
     # middleware, а не только обработчик.
+    # Метрики времени ответа — ещё снаружи потолка времени: 504 по потолку —
+    # тоже ответ, который увидел человек, и он обязан попасть в счёт.
+    from services import http_metrics as _http_metrics
+    app.middlewares.append(_http_metrics.make_middleware())
     app.middlewares.append(make_request_timeout_middleware(request_timeout_seconds()))
     # Сразу под потолком времени: накрывает и остальные middleware, и все ручки.
     app.middlewares.append(unhandled_error_middleware)

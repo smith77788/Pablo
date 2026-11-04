@@ -131,7 +131,12 @@ def test_middleware_is_registered_as_the_outermost():
     app = web.Application()
     M.setup_routes(app, _Pool())
     names = [getattr(m, "__name__", "") for m in app.middlewares]
-    assert names[0] == "request_timeout_middleware", (
+    # Снаружи потолка допустим только наблюдатель — метрики времени ответа
+    # (services/http_metrics): он ничего не ждёт и не меняет, а 504 по потолку
+    # обязан попасть в счёт. Всё, что может зависнуть, — под потолком.
+    outer = [n for n in names if n != "http_metrics_middleware"]
+    assert names.index("request_timeout_middleware") <= 1 and \
+        outer[0] == "request_timeout_middleware", (
         f"потолок времени не самый внешний слой: {names}")
 
 
