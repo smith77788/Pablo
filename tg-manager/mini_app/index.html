@@ -670,8 +670,11 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 /* ─── Empty / Error ──────────────────────────────────────────── */
 .empty{text-align:center;padding:36px 20px;color:var(--hint)}
 .empty-ico{font-size:36px;margin-bottom:8px;opacity:.75}
-.empty-txt{font-size:14px;font-weight:500}
-.empty-sub{font-size:13px;margin-top:4px}
+/* Пустое состояние как в Telegram: заголовок цветом текста, пояснение
+   подсказкой и не шире удобной строки — раньше всё было одного серого цвета,
+   и заголовок не отличался от пояснения. */
+.empty-txt{font-size:15px;font-weight:600;color:var(--text)}
+.empty-sub{font-size:13px;margin:4px auto 0;max-width:320px;line-height:1.45}
 /* Короткое «нечего показать» внутри графика, врезки или колонки — там, где
    полноразмерное пустое состояние с иконкой и отступом в 36px не помещается.
    Было 13 таких строк, размеченных по месту: размер 12 или 13px, отступы
@@ -1146,6 +1149,15 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .filter-chips::-webkit-scrollbar{display:none}
 /* Вкладки модуля из нескольких экранов (SCREEN_MODULES): одной строкой с прокруткой, а не переносом. */
 .mod-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-top:2px;padding-bottom:8px}
+/* Вкладки модуля — как папки в Telegram: текст без плашек, у выбранной —
+   цвет акцента и скруглённая полоса снизу, под рядом тонкий разделитель.
+   Чипы-плашки здесь путались с фильтрами, которые стоят строкой ниже:
+   было не понять, где переключение раздела, а где отбор внутри него. */
+.mod-tabs{gap:0;padding:0 8px;margin:0 0 8px;border-bottom:1px solid var(--sep)}
+.mod-tabs .chip{background:none;border:0;border-radius:0;box-shadow:none;min-height:42px;padding:10px 12px;font-size:14px;font-weight:600;color:var(--hint);position:relative;overflow:visible}
+.mod-tabs .chip.on{background:none;border:0;box-shadow:none;color:var(--accent)}
+.mod-tabs .chip.on::after{content:'';position:absolute;left:10px;right:10px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:var(--accent)}
+.mod-tabs .chip:active{opacity:.6}
 .chip{display:inline-flex;align-items:center;justify-content:center;min-height:34px;gap:4px;padding:7px 12px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
 /* Раскрываемая панель «Действия с аккаунтом»: явная стрелка-индикатор, чтобы
    свёрнутые кнопки не читались как «функции исчезли». */
@@ -14311,7 +14323,7 @@ async function loadCRM(append) {
           <div class="li-sub">${c.phone?esc(c.phone)+' · ':''} ${tags||'без тегов'} ${c.source?`· <span class="badge b-gy" style="font-size:10px">${esc(c.source)}</span>`:''}</div>
         </div>
         <div class="li-right">
-          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteCrmContact(${c.id}, this)" aria-label="Удалить">🗑</button>
+          <button class="icon-btn sm danger" onclick="deleteCrmContact(${c.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>`;
     }).join('');
@@ -20610,7 +20622,7 @@ async function cloudRefreshList(keep) {
         </div>
         ${healBtn}
         <button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudSave(${f.id})" title="Сохранить">⬇️</button>
-        <button class="btn btn-s" style="padding:6px 10px;font-size:12px;color:var(--red)" onclick="cloudDelete(${f.id})" title="Удалить">🗑</button>
+        <button class="icon-btn sm danger" onclick="cloudDelete(${f.id})" aria-label="Удалить" title="Удалить">🗑</button>
       </div>`;
     }).join('')
       + moreBtn(files.length, CLD_TOTAL, 'cloudLoadMore()');   // «Показать ещё · N из M»
@@ -21220,7 +21232,7 @@ async function openPersonas() {
         </div>
         <div class="row-right" style="display:flex;gap:6px">
           <button class="btn ${p.is_active?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="togglePersona(${p.id},${p.is_active})">${p.is_active?'Выкл':'Вкл'}</button>
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deletePersona(${p.id}, this)" aria-label="Удалить">🗑</button>
+          <button class="icon-btn sm danger" onclick="deletePersona(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -21447,7 +21459,7 @@ async function openAiMemory(keep) {
           <div class="row-val">${m.title?esc(m.body.slice(0,60)):''} ${(m.tags||[]).map(t=>'#'+esc(t)).join(' ')}</div>
         </div>
         <div class="row-right">
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteAiMem(${m.id}, this)" aria-label="Удалить">🗑</button>
+          <button class="icon-btn sm danger" onclick="deleteAiMem(${m.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>
     `).join('') + moreBtn(mems.length, memTotal, 'openAiMemoryMore()'));
@@ -21635,7 +21647,7 @@ async function openNodes() {
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
           <span class="chev icon-tap" onclick="openNodeThreads(${n.id},'${escJs(n.name||n.node_type)}')" role="button" tabindex="0" aria-label="Открыть ветки">›</span>
-          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteNode(${n.id}, this)" aria-label="Удалить">🗑</button>
+          <button class="icon-btn sm danger" onclick="deleteNode(${n.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -22497,7 +22509,7 @@ async function openGhost() {
         </div>
         <div class="row-right" style="display:flex;gap:6px">
           <button class="btn ${p.enabled?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="toggleGhost(${p.id},${p.enabled})">${p.enabled?'Выкл':'Вкл'}</button>
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteGhost(${p.id}, this)" aria-label="Удалить">🗑</button>
+          <button class="icon-btn sm danger" onclick="deleteGhost(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -22875,7 +22887,7 @@ async function openDmCampaigns() {
           ${c.status==='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Пауза — можно будет возобновить с места остановки" onclick="pauseDm(${c.id})">⏸</button>`:''}
           ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↺ Повторить</button>`:''}
           ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick="editDm(${c.id})">✏️</button>`:''}
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id},'${c.status}', this)" aria-label="Удалить">🗑</button>
+          <button class="icon-btn sm danger" onclick="deleteDm(${c.id},'${c.status}', this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>`;
     }).join(''));
@@ -23307,7 +23319,7 @@ async function openWarmup() {
           ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})" aria-label="Приостановить прогрев">⏸</button>`:''}
           ${(p.status==='paused'&&h.resumable)?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})" aria-label="Возобновить прогрев">▶</button>`:''}
           ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})" aria-label="Остановить">⏹</button>`:''}
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteWarmupPlan(${p.id}, this)" aria-label="Удалить">🗑</button>
+          <button class="icon-btn sm danger" onclick="deleteWarmupPlan(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>`;
     }).join(''));
@@ -23917,7 +23929,7 @@ async function openFolders(keep) {
           <div class="row-name">${esc(f.title)} · ${f.chat_count||0} ${plural(f.chat_count||0,'чат','чата','чатов')}${f.join_count?' · добавили '+f.join_count:''}</div>
           <div class="row-val" style="word-break:break-all">${esc(String(line).substring(0,90))}</div>
         </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteFolder(${f.id}, this)" aria-label="Удалить">🗑</button></div>
+        <div class="row-right"><button class="icon-btn sm danger" onclick="deleteFolder(${f.id}, this)" aria-label="Удалить" title="Удалить">🗑</button></div>
       </div>`;
     }).join('') + moreBtn(fs.length, foldersTotal, 'openFoldersMore()'));
   } catch(e) { txt('foldersList', empty('⚠️','Ошибка',errRu(e))); }
@@ -28343,7 +28355,7 @@ async function openSelfPromo() {
         <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleSelfPromo(${r.id},this)">${r.is_active?'Выкл':'Вкл'}</button>
           ${r.is_active?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="launchSelfPromo(${r.id},this)">▶ Разослать</button>`:''}
-          ${r.is_mine?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteSelfPromoTemplate(${r.id}, this)" aria-label="Удалить">🗑</button>`:''}
+          ${r.is_mine?`<button class="icon-btn sm danger" onclick="deleteSelfPromoTemplate(${r.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>`:''}
         </div>
       </div>`;
     }).join(''));
