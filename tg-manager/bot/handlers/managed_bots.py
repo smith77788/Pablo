@@ -166,7 +166,10 @@ async def on_managed_bot(event: ManagedBotUpdated, bot: Bot, pool: asyncpg.Pool,
                                      expected_bot_id=int(child.id))
     if not res.get("ok"):
         reason = {"invalid_token": "токен недействителен",
-                  "id_mismatch": "id токена не совпал с созданным ботом"}.get(
+                  "id_mismatch": "id токена не совпал с созданным ботом",
+                  "telegram_unavailable": (
+                      "Telegram сейчас не отвечает. Бот создан — подключите его "
+                      "по токену из @BotFather чуть позже")}.get(
                       res.get("reason"), "неизвестная ошибка")
         try:
             await bot.send_message(

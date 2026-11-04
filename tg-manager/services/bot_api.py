@@ -200,14 +200,20 @@ async def token_state(session: aiohttp.ClientSession, token: str) -> str:
     принимать нельзя: минута недоступности Telegram хоронила отложенные и
     идущие рассылки. 'revoked' — только 401/404, всё остальное — 'transient'.
     """
+    return (await get_me_state(session, token))[0]
+
+
+async def get_me_state(session: aiohttp.ClientSession,
+                       token: str) -> "tuple[str, dict | None]":
+    """(состояние как у `token_state`, данные бота или None) одним getMe."""
     data = await _call(session, token, "getMe")
     if data.get("ok") and data.get("result"):
-        return "ok"
+        return "ok", data["result"]
     try:
         code = int(data.get("error_code") or 0)
     except (TypeError, ValueError):
         code = 0
-    return "revoked" if code in TOKEN_REVOKED_CODES else "transient"
+    return ("revoked" if code in TOKEN_REVOKED_CODES else "transient"), None
 
 
 # ── Profile editing ───────────────────────────────────────────────────────

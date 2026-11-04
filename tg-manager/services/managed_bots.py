@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import quote
 
@@ -27,6 +28,9 @@ import aiohttp
 import asyncpg
 
 log = logging.getLogger(__name__)
+
+# Паузы между попытками getMe только что выданного токена (сбой связи).
+_GETME_PAUSES_S = (2.0, 5.0, 10.0, 0.0)
 
 def validate_bot_username(username: str) -> tuple[bool, str]:
     """Проверить/нормализовать желаемый ОСНОВНОЙ @username создаваемого бота.
@@ -74,9 +78,23 @@ async def store_managed_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 
     if not token:
         return {"ok": False, "reason": "invalid_token"}
-    info = await bot_api.get_me(http, token)
+    # Токен только что выдал сам Telegram, поэтому неуспех getMe почти всегда —
+    # сбой связи, а не плохой токен. Раньше любой неуспех означал
+    # «токен недействителен»: только что созданный бот не подключался, и
+    # владельцу оставалось подключать его вручную. Теперь — несколько попыток,
+    # а «недействителен» только на прямом ответе Telegram (401/404).
+    info = None
+    for attempt, pause in enumerate(_GETME_PAUSES_S):
+        state, info = await bot_api.get_me_state(http, token)
+        if state == "revoked":
+            return {"ok": False, "reason": "invalid_token"}
+        if state == "ok" and info and info.get("id"):
+            break
+        info = None
+        if attempt < len(_GETME_PAUSES_S) - 1:
+            await asyncio.sleep(pause)
     if not info or not info.get("id"):
-        return {"ok": False, "reason": "invalid_token"}
+        return {"ok": False, "reason": "telegram_unavailable"}
     bot_id = int(info["id"])
     # Санити: токен должен принадлежать тому боту, что назвал Telegram в апдейте.
     if expected_bot_id is not None and int(expected_bot_id) != bot_id:
@@ -136,7 +154,6 @@ async def _resolve_username_id(pool: asyncpg.Pool, owner_id: int,
     from telethon.tl.functions.contacts import ResolveUsernameRequest
     from telethon.errors import (FloodWaitError, UsernameInvalidError,
                                  UsernameNotOccupiedError)
-    import asyncio
 
     last_reason = "error"
     for acc in accs:

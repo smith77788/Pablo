@@ -65,13 +65,46 @@ def _clean(pool, *bot_ids):
 
 
 def _stub_get_me(monkeypatch, mapping):
-    """bot_api.get_me(http, token) → info по токену (или None)."""
+    """getMe по токену: info из mapping, иначе Telegram отвечает 401 (токена нет)."""
     from services import bot_api
 
     async def fake_get_me(http, token):
         return mapping.get(token)
 
+    async def fake_get_me_state(http, token):
+        info = mapping.get(token)
+        return ("ok", info) if info else ("revoked", None)
+
     monkeypatch.setattr(bot_api, "get_me", fake_get_me)
+    monkeypatch.setattr(bot_api, "get_me_state", fake_get_me_state)
+
+
+def test_store_survives_a_telegram_outage(pool, monkeypatch):
+    """Сбой связи на getMe только что созданного бота — не «токен
+    недействителен»: попытки повторяются, бот подключается."""
+    from services import bot_api, managed_bots as mb
+    _clean(pool, 5000004)
+    replies = [("transient", None), ("transient", None),
+               ("ok", {"id": 5000004, "username": "late_bot", "first_name": "L"})]
+
+    async def flaky(http, token):
+        return replies.pop(0)
+
+    async def no_sleep(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(bot_api, "get_me_state", flaky)
+    monkeypatch.setattr(mb.asyncio, "sleep", no_sleep)
+    res = _run(mb.store_managed_bot(pool, None, "tokL", OWNER, expected_bot_id=5000004))
+    assert res["ok"] and res["added"] is True, res
+
+    # Telegram так и не ответил — честная причина, а не «токен недействителен».
+    async def down(http, token):
+        return ("transient", None)
+
+    monkeypatch.setattr(bot_api, "get_me_state", down)
+    res = _run(mb.store_managed_bot(pool, None, "tokZ", OWNER))
+    assert res == {"ok": False, "reason": "telegram_unavailable"}, res
 
 
 def test_store_managed_bot_connects(pool, monkeypatch):
