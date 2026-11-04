@@ -39,3 +39,22 @@ async def test_deal_card_is_escaped(monkeypatch):
                          message=SimpleNamespace(edit_text=_edit))
     await crm.cb_deal_view(cb, crm.CrmCb(action="deal_view", deal_id=1), None)
     assert out and "<a href" not in out[0] and "&lt;a href=" in out[0]
+
+
+async def test_pipeline_list_is_escaped(monkeypatch):
+    async def _deals(pool, owner_id, *a, **k):
+        return [{"id": 1, "title": "<b>Иван</b> & <", "stage": "lead"}]
+
+    monkeypatch.setattr(crm.db, "get_crm_deals", _deals)
+    out: list[str] = []
+
+    async def _edit(text, **k):
+        out.append(text)
+
+    async def _ans(*a, **k):
+        return None
+
+    cb = SimpleNamespace(from_user=SimpleNamespace(id=5), answer=_ans,
+                         message=SimpleNamespace(edit_text=_edit))
+    await crm.cb_crm_pipeline(cb, None)
+    assert out and "<b>Иван</b>" not in out[0] and "&lt;b&gt;Иван" in out[0]

@@ -947,7 +947,7 @@ async def cb_crm_pipeline(
         lines.append(f"\n{label} — <b>{len(stage_deals)}</b>")
         for d in stage_deals[:5]:
             title = (d["title"] or "")[:28]
-            lines.append(f"  • {title}")
+            lines.append(f"  • {html.escape(title)}")  # из имени подписчика
             kb.button(
                 text=f"📄 {title[:16]}",
                 callback_data=CrmCb(action="deal_view", deal_id=d["id"]),
