@@ -1377,6 +1377,13 @@ async def update_broadcast(
     )
 
 
+async def set_broadcast_note(pool: asyncpg.Pool, broadcast_id: int,
+                             note: str | None) -> None:
+    """Причина состояния рассылки для владельца (schema_v297). None — снять."""
+    await pool.execute("UPDATE broadcasts SET status_note=$2 WHERE id=$1",
+                       broadcast_id, (note or None) and note[:500])
+
+
 async def get_broadcast(
     pool: asyncpg.Pool, broadcast_id: int, bot_id: int | None = None
 ) -> asyncpg.Record | None:

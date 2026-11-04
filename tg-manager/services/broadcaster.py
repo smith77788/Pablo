@@ -102,6 +102,50 @@ def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
         pass
 
 
+# Категория недоставки (bot_api.classify_send_error) → как её назвать владельцу.
+_CATEGORY_LABELS = {
+    "blocked": "заблокировали бота",
+    "deactivated": "удалили аккаунт",
+    "not_started": "не запускали бота",
+    "unauthorized": "токен бота отозван",
+    "unavailable": "Telegram не ответил",
+    "bad_request": "ошибка в тексте или кнопках",
+    "flood": "лимит Telegram",
+    "other": "другое",
+}
+NOTE_TOKEN_REVOKED = "Токен бота отозван — подключите бота заново"
+NOTE_TELEGRAM_DOWN = ("Telegram не ответил на проверке бота — рассылка продолжится "
+                      "автоматически")
+
+
+def status_note(final_status: str, failed: int, err_cats: dict,
+                aborted_reason: str = "") -> str | None:
+    """Причина исхода рассылки по-русски для владельца. ЧИСТАЯ.
+
+    Раньше «Ошибка» и «0 / 1 000» приходили без объяснения: разбивка причин
+    была только в логе сервера. None — пояснять нечего (всё дошло)."""
+    parts = []
+    if aborted_reason:
+        parts.append(aborted_reason[:1].upper() + aborted_reason[1:]
+                     if aborted_reason.startswith("остановлена")
+                     else f"Остановлена: {aborted_reason}")
+    if failed and err_cats:
+        top = sorted(err_cats.items(), key=lambda kv: (-kv[1], kv[0]))[:4]
+        parts.append("Не доставлено: " + ", ".join(
+            f"{_CATEGORY_LABELS.get(k, k)} — {v}" for k, v in top))
+    if not parts and final_status == "failed":
+        parts.append("Не отправлено ни одного сообщения")
+    return "; ".join(parts) or None
+
+
+async def _set_note(pool, broadcast_id: int, note: str | None) -> None:
+    """Записать причину; сбой записи — не повод ронять рассылку."""
+    try:
+        await db.set_broadcast_note(pool, broadcast_id, note)
+    except Exception:
+        logger.debug("Broadcast %d: причина не записана", broadcast_id, exc_info=True)
+
+
 def _render_for_user(text: str, user_info: dict, bot_name: str = "") -> str:
     """Render {{PLACEHOLDER}} tokens for a specific user."""
     if not text or "{{" not in text:
@@ -305,7 +349,9 @@ async def run(
                 await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
             except Exception as _e:
                 logger.warning("Broadcast %d: failed to mark failed: %s", broadcast_id, _e)
+            await _set_note(pool, broadcast_id, NOTE_TOKEN_REVOKED)
         else:
+            await _set_note(pool, broadcast_id, NOTE_TELEGRAM_DOWN)
             # Статус не трогаем: рассылку подберёт докатка прерванных
             # (resume_interrupted) — так же, как при недоступной базе ниже.
             logger.warning(
@@ -645,6 +691,8 @@ async def run(
 
     try:
         await db.update_broadcast(pool, broadcast_id, sent, failed, final_status)
+        await _set_note(pool, broadcast_id,
+                        status_note(final_status, failed, _err_cats, _aborted_reason))
     except Exception as _e:
         logger.warning(
             "Broadcast %d: failed to mark %s: %s", broadcast_id, final_status, _e
