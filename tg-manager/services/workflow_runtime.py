@@ -1502,7 +1502,8 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             if not await _take_step(pool, run["id"], seq, current_step=nxt):
                 return
             try:
-                await _do_action(pool, run, step, contact, fields, main_bot)
+                await _do_action(pool, run, step, contact, fields, main_bot,
+                                 http=http, token=token)
                 await _log(pool, run, idx, stype, "done", action)
             except Exception:
                 log.warning("workflow_runtime: действие %s прогона %s не выполнено",
@@ -1573,7 +1574,33 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                        run["id"])
 
 
-async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
+def _lead_card(title: str, contact: dict, chat_id, fields: dict) -> str:
+    """Карточка человека для уведомления: кто и что он ответил. Всё
+    экранировано — поля пишет человек, это данные, а не разметка."""
+    who = (contact.get("username") and "@" + contact["username"]) \
+        or contact.get("first_name") or (f"id{chat_id}" if chat_id else "—")
+    lines = [f"🔔 <b>Сценарий</b>: {html.escape(title or 'уведомление')}",
+             f"👤 {html.escape(who)}"]
+    for k, v in list(fields.items())[:10]:
+        lines.append(f"• {html.escape(str(k))}: {html.escape(str(v))[:200]}")
+    return "\n".join(lines)
+
+
+_NOTIFY_CHAT_RE = re.compile(r"^(@[A-Za-z][A-Za-z0-9_]{4,31}|-?\d{5,20})$")
+
+
+def parse_notify_chat(value: str | None) -> tuple[str, str]:
+    """«-1001234 | Новая заявка» → ("-1001234", "Новая заявка"). ValueError. ЧИСТАЯ."""
+    chat, _, title = str(value or "").partition("|")
+    chat = chat.strip()
+    if not _NOTIFY_CHAT_RE.match(chat):
+        raise ValueError("чат — @имя группы или канала либо его id (-100…), "
+                         "после «|» можно заголовок")
+    return chat, title.strip()[:100]
+
+
+async def _do_action(pool, run, step, contact, fields, main_bot, *,
+                     http=None, token=None) -> None:
     from database import db
     action = step.get("action")
     value = step.get("value") or ""
@@ -1593,6 +1620,10 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
         await pool.execute(
             "UPDATE workflow_runs SET vars = vars || jsonb_build_object($2::text, $3::text) "
             "WHERE id=$1", run["id"], name.strip(), val.strip())
+        # Следующие шаги этого же прохода видят новое значение: иначе
+        # «Записать поле» → «Уведомить меня» слал карточку без него.
+        if isinstance(fields, dict):
+            fields[name.strip()] = val.strip()
     elif action == "add_to_field":
         name, _, delta = value.partition("+=")
         name = name.strip()
@@ -1670,16 +1701,23 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
     elif action == "notify_owner":
         if main_bot is None:
             return
-        who = (contact.get("username") and "@" + contact["username"]) \
-            or contact.get("first_name") or (f"id{chat_id}" if chat_id else "—")
-        lines = [f"🔔 <b>Сценарий</b>: {html.escape(value or 'уведомление')}",
-                 f"👤 {html.escape(who)}"]
-        for k, v in list(fields.items())[:10]:
-            lines.append(f"• {html.escape(str(k))}: {html.escape(str(v))[:200]}")
         try:
-            await main_bot.send_message(owner, "\n".join(lines), parse_mode="HTML")
+            await main_bot.send_message(owner, _lead_card(value, contact, chat_id, fields),
+                                        parse_mode="HTML")
         except Exception:
             log.info("workflow_runtime: уведомление владельцу %s не доставлено", owner)
+    elif action == "notify_chat":
+        # Карточка заявки в чат отдела продаж — от бота сценария: он должен
+        # быть в этой группе (или админом канала). Не дошло — шаг «ошибка»
+        # в журнале прогона, а человек идёт по сценарию дальше.
+        from services import bot_api
+        target, title = parse_notify_chat(value)
+        if not (http and token):
+            raise RuntimeError("нет бота сценария")
+        ok, _retry, cat = await bot_api.send_message_classified(
+            http, token, int(target) if target.lstrip("-").isdigit() else target, _lead_card(title or "Новая заявка", contact, chat_id, fields))
+        if not ok:
+            raise RuntimeError(f"чат уведомлений не принял сообщение: {cat}")
 
 
 # ── Платёж (счёт в чате) ────────────────────────────────────────────────────

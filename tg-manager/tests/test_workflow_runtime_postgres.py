@@ -1405,3 +1405,22 @@ def test_work_hours_condition_picks_a_branch(pool, tg, monkeypatch):
         assert _texts(tg) == ["Ответим утром"]
 
     _run(go())
+
+
+def test_a_lead_card_goes_to_the_sales_chat_escaped(pool, tg):
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "action", "action": "set_field", "value": "name=<b>Вася</b>"},
+            {"type": "action", "action": "notify_chat", "value": "-1009876543210 | Заявка"},
+            {"type": "message", "text": "Спасибо!"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        await _tick(pool)
+        card = next(m for m in tg if m["method"] == "sendMessage"
+                    and m["chat_id"] == -1009876543210)
+        assert "Заявка" in card["text"] and "&lt;b&gt;Вася&lt;/b&gt;" in card["text"]
+        assert _texts(tg)[-1] == "Спасибо!"
+        assert (await _run_row(pool, wf_id))["status"] == "completed"
+
+    _run(go())

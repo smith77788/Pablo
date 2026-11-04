@@ -111,6 +111,7 @@ WORKFLOW_ACTIONS: dict[str, str] = {
     "create_deal": "Создать сделку в CRM",
     "move_deal": "Сменить этап сделки прогона",
     "notify_owner": "Уведомить меня",
+    "notify_chat": "Карточка заявки в чат или канал (@чат или -100…, после «|» заголовок)",
     "start_workflow": "Запустить другой сценарий (номер сценария)",
     "stop_workflows": "Снять с других сценариев (пусто — со всех, или номер)",
     "goto": "Перейти к шагу",
@@ -127,7 +128,8 @@ DEAL_STAGES: dict[str, str] = {
 
 # Действия, которым значение обязательно.
 _ACTIONS_NEED_VALUE = frozenset({"add_tag", "remove_tag", "set_field", "goto",
-                                 "move_deal", "start_workflow", "add_to_field"})
+                                 "move_deal", "start_workflow", "add_to_field",
+                                 "notify_chat"})
 
 # Условия шага `condition` — те, что исполнитель умеет проверить.
 WORKFLOW_CONDITIONS: dict[str, str] = {
@@ -1208,6 +1210,13 @@ def validate_step(step, index: int = 0) -> dict:
             if not sep:
                 raise ValueError(f"{where}: значение — «поле=значение»")
             out["value"] = f"{_field_name(fname, where)}={fval.strip()[:500]}"
+        elif name == "notify_chat":
+            from services import workflow_runtime as _rt
+            try:
+                chat, title = _rt.parse_notify_chat(value)
+            except ValueError as e:
+                raise ValueError(f"{where}: {e}")
+            out["value"] = chat + (f" | {title}" if title else "")
         elif name == "add_to_field":
             fname, sep, num = value.partition("+=")
             delta = _to_number(num) if sep else None

@@ -67,3 +67,14 @@ def test_the_add_step_screen_offers_everything_the_engine_runs():
         assert f'value="{key}"' in cond, key
     for key in wf.WORKFLOW_ACTIONS:
         assert f'value="{key}"' in act, key
+
+
+def test_notify_chat_target_is_validated():
+    assert rt.parse_notify_chat("-1001234567 | Новая заявка") == ("-1001234567", "Новая заявка")
+    assert rt.parse_notify_chat("@sales_team") == ("@sales_team", "")
+    for bad in ("", "sales", "@ab", "https://t.me/x", "-12"):
+        with pytest.raises(ValueError):
+            rt.parse_notify_chat(bad)
+    s = wf.validate_step({"type": "action", "action": "notify_chat",
+                          "value": "@sales_team|  Горячий лид "})
+    assert s["value"] == "@sales_team | Горячий лид"
