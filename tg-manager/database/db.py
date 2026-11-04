@@ -1743,7 +1743,11 @@ async def get_update_offset(pool: asyncpg.Pool, bot_id: int) -> int:
 async def set_update_offset(pool: asyncpg.Pool, bot_id: int, offset: int) -> None:
     await pool.execute(
         "INSERT INTO bot_update_offsets(bot_id,last_update_id) VALUES($1,$2) "
-        "ON CONFLICT(bot_id) DO UPDATE SET last_update_id=$2",
+        # Оффсет только растёт: опрос, закончивший пакет позже вебхука (смена
+        # режима), откатил бы его назад, и повтор Telegram разобрался бы
+        # второй раз. 0 — осознанный сброс («начать с новых»), его пускаем.
+        "ON CONFLICT(bot_id) DO UPDATE SET last_update_id = CASE WHEN $2 = 0 THEN 0 "
+        "ELSE GREATEST(bot_update_offsets.last_update_id, $2) END",
         bot_id,
         offset,
     )

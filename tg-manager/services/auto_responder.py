@@ -291,10 +291,18 @@ def _within_active_window(hour: int, from_hour, to_hour) -> bool:
 async def _init_offset(
     pool: asyncpg.Pool, http: aiohttp.ClientSession, bot_id: int, token: str
 ) -> int:
-    """On first run: skip all pending updates, store current max_id as start point."""
+    """Первый запуск: пропустить накопившееся, запомнить последний update_id.
+
+    Telegram не ответил (сеть, 5xx, флуд) — оффсет НЕ ставится, и следующий
+    цикл попробует снова. Раньше неуспех считался «очередь пуста»: ставилась
+    метка 1, и следующий опрос с offset=2 приносил весь накопленный за сутки
+    хвост — бот отвечал на вчерашние сообщения, которые должен был пропустить.
+    """
     data = await bot_api._call(http, token, "getUpdates", offset=-1, limit=1, timeout=0,
                                allowed_updates=_MANAGED_BOT_ALLOWED_UPDATES)
-    updates = data.get("result", []) if data.get("ok") else []
+    if not data.get("ok"):
+        return 0
+    updates = data.get("result", [])
     if updates:
         max_id = updates[-1]["update_id"]
     else:
