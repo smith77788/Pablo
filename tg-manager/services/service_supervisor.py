@@ -80,10 +80,22 @@ async def supervise(
         _task = asyncio.current_task()
         if _task is not None:
             _task.set_name(f"svc:{name}")
+            # Для сторожа зависаний (run_stall_watch ниже).
+            _RUNNING[name] = _task
     except Exception:
         pass
     if start_delay > 0:
         await asyncio.sleep(start_delay)
+    try:
+        await _supervise_loop(name, fn, args, restart_delay,
+                              restart_on_return, alert)
+    finally:
+        if _RUNNING.get(name) is asyncio.current_task():
+            _RUNNING.pop(name, None)
+
+
+async def _supervise_loop(name, fn, args, restart_delay, restart_on_return,
+                          alert) -> None:
     crashes = 0
     while True:
         try:
@@ -126,3 +138,141 @@ async def supervise(
             f"Он должен работать постоянно. Перезапуск через {restart_delay:.0f}с.",
         )
         await asyncio.sleep(restart_delay)
+
+
+# ── Сторож зависших проходов ──────────────────────────────────────────────────
+#
+# ЗАЧЕМ. Присмотр выше лечит ПАДЕНИЕ сервиса: исключение → перезапуск и
+# оповещение. Но сервис может не упасть, а ПОВИСНУТЬ: ожидание без потолка
+# (полуоткрытый сокет, блокировка, ответ, которого не будет). Снаружи это
+# неотличимо от «работает»: задача жива, исключения нет, в логе тишина, а
+# рассылки не уходят и операции не берутся — пока владелец не заметит сам.
+#
+# КАК. Каждый присматриваемый сервис регистрируется по имени. Раз в минуту
+# сторож смотрит, чего ждёт его задача (`_fut_waiter` — объект, на котором она
+# сейчас стоит). Нормальный цикл в простое ждёт `asyncio.sleep`, события или
+# очереди — это не зависание. Проход, который работает, ждёт каждый раз НОВЫЙ
+# объект (следующий запрос, следующая отправка). Зависание — это ОДИН И ТОТ ЖЕ
+# объект ожидания дольше `stall_after`: проход стоит на одном месте. Тогда —
+# метрика, предупреждение в лог со стеком ожидания (только места в коде, без
+# значений) и оповещение админу, один раз на зависание. Поведение сервисов
+# сторож не меняет и ничего не прерывает.
+
+_RUNNING: dict[str, asyncio.Task] = {}
+
+STALLED_SECONDS = "infragram_service_stalled_seconds"
+STALLS_TOTAL = "infragram_service_stalls_total"
+
+# Ожидания простоя: внутри них цикл «спит по плану», а не висит. wait_for —
+# ожидание с потолком: оно закончится само, зависанием не считается.
+_IDLE_AWAITS = {
+    ("tasks.py", "sleep"), ("tasks.py", "wait_for"),
+    ("locks.py", "wait"), ("queues.py", "get"),
+    ("timeouts.py", "__aexit__"),
+}
+
+
+def _await_chain(task: asyncio.Task) -> list[tuple[str, str, int]]:
+    """Цепочка ожидания задачи: (файл, функция, строка) от внешней к внутренней."""
+    out: list[tuple[str, str, int]] = []
+    c = task.get_coro()
+    for _ in range(64):
+        if c is None:
+            break
+        fr = getattr(c, "cr_frame", None) or getattr(c, "gi_frame", None)
+        if fr is None:
+            break
+        out.append((fr.f_code.co_filename, fr.f_code.co_name, fr.f_lineno))
+        c = getattr(c, "cr_await", None) or getattr(c, "gi_yieldfrom", None)
+    return out
+
+
+def _is_idle(task: asyncio.Task, chain) -> bool:
+    import os as _os
+    waiter = getattr(task, "_fut_waiter", None)
+    if waiter is None:
+        return True       # задача выполняется прямо сейчас (CPU — забота loop_lag)
+    if type(waiter).__name__ == "_GatheringFuture":
+        # Сервис, собранный из нескольких вечных циклов через gather, ждёт их
+        # всю жизнь — это его штатное состояние, а не зависание.
+        return True
+    asyncio_dir = _os.path.dirname(asyncio.__file__)
+    for fname, func, _ln in chain:
+        if _os.path.dirname(fname) == asyncio_dir and \
+                (_os.path.basename(fname), func) in _IDLE_AWAITS:
+            return True
+    return False
+
+
+class StallWatch:
+    """Состояние сторожа: что и с какого момента ждёт каждый сервис."""
+
+    def __init__(self, stall_after: float, alert: Alerter | None = None):
+        self.stall_after = stall_after
+        self.alert = alert
+        self._seen: dict[str, tuple[object, float]] = {}
+        self._reported: dict[str, object] = {}
+
+    async def check_once(self, now: float | None = None) -> list[str]:
+        """Один осмотр. Возвращает имена сервисов, о зависании которых сообщено."""
+        import time as _time
+
+        from services import metrics as _m
+
+        now = _time.monotonic() if now is None else now
+        reported: list[str] = []
+        for name, task in list(_RUNNING.items()):
+            if task.done():
+                _RUNNING.pop(name, None)
+                self._seen.pop(name, None)
+                continue
+            chain = _await_chain(task)
+            if _is_idle(task, chain):
+                self._seen.pop(name, None)
+                _m.gauge(STALLED_SECONDS, 0.0, {"service": name})
+                continue
+            waiter = getattr(task, "_fut_waiter", None)
+            prev = self._seen.get(name)
+            if prev is None or prev[0] is not waiter:
+                self._seen[name] = (waiter, now)
+                _m.gauge(STALLED_SECONDS, 0.0, {"service": name})
+                continue
+            age = now - prev[1]
+            _m.gauge(STALLED_SECONDS, age, {"service": name})
+            if age < self.stall_after or self._reported.get(name) is waiter:
+                continue
+            self._reported[name] = waiter
+            _m.inc(STALLS_TOTAL, {"service": name})
+            where = "\n".join(f"  {f}:{ln} в {fn}" for f, fn, ln in chain[-6:])
+            log.warning(
+                "Сервис %s стоит на одном ожидании уже %.0f мин — проход "
+                "повис, сервис жив, но не работает. Ждёт здесь:\n%s",
+                name, age / 60, where)
+            last = chain[-1] if chain else ("?", "?", 0)
+            import os as _os
+            await safe_alert(
+                self.alert, f"svc-stalled:{name}",
+                f"⏸ <b>Фоновый сервис завис:</b> <code>{esc(name)}</code>\n"
+                f"Стоит на одном ожидании {age / 60:.0f} мин: "
+                f"<code>{esc(_os.path.basename(last[0]))}:{last[2]}</code> "
+                f"в <code>{esc(last[1])}</code>.\n"
+                "Процесс жив, но этот сервис не работает. Помогает перезапуск.")
+            reported.append(name)
+        return reported
+
+
+async def run_stall_watch(
+    alert: Alerter | None = None, interval: float = 60.0,
+    stall_after: float = 3600.0,
+) -> None:
+    """Раз в `interval` с осматривать присматриваемые сервисы (см. выше)."""
+    watch = StallWatch(stall_after=stall_after, alert=alert)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await watch.check_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("service_supervisor: осмотр зависаний не выполнен",
+                        exc_info=True)

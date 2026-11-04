@@ -1204,6 +1204,11 @@ async def main() -> None:
         # (метрики) и, если цикл встал, снимает стек того, кто его держит.
         from services import loop_lag as _loop_lag
         _spawn(_web_resilient("loop_lag", _loop_lag.run))
+        # Сторож ЗАВИСШИХ сервисов: присмотр лечит падение, а повисший проход
+        # (ожидание без потолка) снаружи неотличим от работающего. Раз в минуту
+        # смотрит, на чём стоит каждый сервис; час на одном ожидании — админу.
+        _spawn(_web_resilient(
+            "service_stall_watch", service_supervisor.run_stall_watch, _svc_alert))
 
         from services import replica_guard as _rguard
         _spawn(_web_resilient(
