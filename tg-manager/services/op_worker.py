@@ -4938,6 +4938,11 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
                  -- Заказанную паузу применяет запрос выше; это условие
                  -- закрывает гонку между ним и отбором.
                  AND (oq.pause_requested IS NOT TRUE)
+                 -- Забаненный владелец ничего нового не запускает: операции
+                 -- ждут в очереди и пойдут после разбана (services/platform_ban).
+                 AND NOT EXISTS (SELECT 1 FROM platform_users pu
+                                  WHERE pu.user_id = oq.owner_id
+                                    AND pu.is_banned IS TRUE)
                  -- Операция, которую ЭТОТ процесс ещё доигрывает, не кандидат,
                  -- даже если в БД она уже 'pending'. См. комментарий ниже: без
                  -- этого условия поллер запускал её второй раз, пока первая
