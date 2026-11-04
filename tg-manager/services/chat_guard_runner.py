@@ -19,6 +19,8 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 15.0
+# Паузы перед попытками разбана после исключения (первая — как раньше).
+_UNBAN_PAUSES_S = (0.4, 2.0, 5.0)
 
 
 async def _punish_expired(pool: asyncpg.Pool, bot, row: dict) -> None:
@@ -34,16 +36,28 @@ async def _punish_expired(pool: asyncpg.Pool, bot, row: dict) -> None:
         log_exc_swallow(log, "guard_runner: delete captcha msg")
     # Наказание.
     try:
-        if action == "ban":
-            await bot.ban_chat_member(chat_id, uid)
-        else:  # kick — бан+разбан, чтобы мог вернуться и пройти капчу заново
-            await bot.ban_chat_member(chat_id, uid)
-            await asyncio.sleep(0.4)
-            await bot.unban_chat_member(chat_id, uid, only_if_banned=True)
-        log.info("chat_guard_runner: капча не пройдена chat=%s user=%s → %s",
-                 chat_id, uid, action)
+        await bot.ban_chat_member(chat_id, uid)
     except Exception:
         log_exc_swallow(log, "guard_runner: punish")
+        return
+    if action != "ban":
+        # kick — бан+разбан, чтобы человек мог вернуться и пройти капчу заново.
+        # Разбан повторяем: раньше он шёл в одном try с баном, и сбой связи
+        # ровно на разбане молча превращал «исключить» в вечный бан —
+        # человек, просто не успевший нажать кнопку, больше не мог войти.
+        for attempt, pause in enumerate(_UNBAN_PAUSES_S):
+            await asyncio.sleep(pause)
+            try:
+                await bot.unban_chat_member(chat_id, uid, only_if_banned=True)
+                break
+            except Exception:
+                if attempt == len(_UNBAN_PAUSES_S) - 1:
+                    log.error(
+                        "chat_guard_runner: не снят бан после исключения chat=%s "
+                        "user=%s — человек не сможет вернуться, пока его не "
+                        "разбанят вручную", chat_id, uid, exc_info=True)
+    log.info("chat_guard_runner: капча не пройдена chat=%s user=%s → %s",
+             chat_id, uid, action)
 
 
 async def sweep_once(pool: asyncpg.Pool, bot, limit: int = 50) -> int:
