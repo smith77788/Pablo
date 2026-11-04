@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html as _html
+
 import logging
 from aiogram import Router, F
 from aiogram.filters import StateFilter
@@ -248,8 +250,18 @@ async def cb_detail(callback: CallbackQuery, callback_data: StarsCb, pool: async
 
 # ── Evaluate (manual re-check) ────────────────────────────────────────────────
 
+async def _owns_experiment(pool: asyncpg.Pool, exp_id: int, uid: int) -> bool:
+    return bool(await pool.fetchval(
+        "SELECT 1 FROM stars_experiments WHERE id = $1 AND owner_id = $2", exp_id, uid))
+
+
 @router.callback_query(StarsCb.filter(F.action == "evaluate"))
 async def cb_evaluate(callback: CallbackQuery, callback_data: StarsCb, pool: asyncpg.Pool) -> None:
+    # experiment_id приходит из callback_data — его пишет клиент. Без проверки
+    # владельца любой считал (и завершал) чужой эксперимент по подобранному id.
+    if not await _owns_experiment(pool, callback_data.experiment_id, callback.from_user.id):
+        await callback.answer("Эксперимент не найден.", show_alert=True)
+        return
     # Answer immediately to avoid Telegram timeout; show result via alert
     result = await stars_optimizer.evaluate_experiment(pool, callback_data.experiment_id)
     p = round(result.get("p_value", 1.0), 4)
@@ -272,8 +284,8 @@ async def cb_evaluate(callback: CallbackQuery, callback_data: StarsCb, pool: asy
 @router.callback_query(StarsCb.filter(F.action == "pause"))
 async def cb_pause(callback: CallbackQuery, callback_data: StarsCb, pool: asyncpg.Pool) -> None:
     await pool.execute(
-        "UPDATE stars_experiments SET status = 'paused' WHERE id = $1",
-        callback_data.experiment_id,
+        "UPDATE stars_experiments SET status = 'paused' WHERE id = $1 AND owner_id = $2",
+        callback_data.experiment_id, callback.from_user.id,
     )
     await callback.answer("Эксперимент приостановлен", show_alert=False)
     from types import SimpleNamespace
@@ -283,8 +295,8 @@ async def cb_pause(callback: CallbackQuery, callback_data: StarsCb, pool: asyncp
 @router.callback_query(StarsCb.filter(F.action == "resume"))
 async def cb_resume(callback: CallbackQuery, callback_data: StarsCb, pool: asyncpg.Pool) -> None:
     await pool.execute(
-        "UPDATE stars_experiments SET status = 'active' WHERE id = $1",
-        callback_data.experiment_id,
+        "UPDATE stars_experiments SET status = 'active' WHERE id = $1 AND owner_id = $2",
+        callback_data.experiment_id, callback.from_user.id,
     )
     await callback.answer("Эксперимент возобновлён", show_alert=False)
     from types import SimpleNamespace
@@ -296,8 +308,13 @@ async def cb_resume(callback: CallbackQuery, callback_data: StarsCb, pool: async
 @router.callback_query(StarsCb.filter(F.action == "delete_confirm"))
 async def cb_delete_confirm(callback: CallbackQuery, callback_data: StarsCb, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
-    row = await pool.fetchrow("SELECT name FROM stars_experiments WHERE id = $1", callback_data.experiment_id)
-    name = row["name"] if row else "?"
+    row = await pool.fetchrow(
+        "SELECT name FROM stars_experiments WHERE id = $1 AND owner_id = $2",
+        callback_data.experiment_id, callback.from_user.id)
+    if not row:
+        await callback.message.edit_text("Эксперимент не найден.")
+        return
+    name = _html.escape(row["name"] or "")
     kb = InlineKeyboardBuilder()
     kb.button(
         text="🗑 Да, удалить",
@@ -317,7 +334,9 @@ async def cb_delete_confirm(callback: CallbackQuery, callback_data: StarsCb, poo
 
 @router.callback_query(StarsCb.filter(F.action == "delete_do"))
 async def cb_delete_do(callback: CallbackQuery, callback_data: StarsCb, pool: asyncpg.Pool) -> None:
-    await pool.execute("DELETE FROM stars_experiments WHERE id = $1", callback_data.experiment_id)
+    # Только свой: id из callback_data подделывается клиентом.
+    await pool.execute("DELETE FROM stars_experiments WHERE id = $1 AND owner_id = $2",
+                       callback_data.experiment_id, callback.from_user.id)
     await callback.answer("Удалено", show_alert=False)
     # go back to list
     from types import SimpleNamespace
