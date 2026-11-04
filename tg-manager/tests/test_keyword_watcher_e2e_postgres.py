@@ -176,3 +176,55 @@ def test_create_watcher_validates_input(pool):
         _run(kw.create_watcher(pool, OWNER, acc, "@chat", []))       # нет ключей
     with pytest.raises(ValueError):
         _run(kw.create_watcher(pool, OWNER, acc, "  ", ["куплю"]))   # нет чата
+
+
+class _FlakyBot(_FakeBot):
+    """Первая пересылка не проходит (Telegram моргнул), дальше — как обычно."""
+
+    def __init__(self, failures=1):
+        super().__init__()
+        self.failures = failures
+
+    async def send_message(self, chat_id, text, **k):
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("Telegram недоступен")
+        return await super().send_message(chat_id, text, **k)
+
+
+def test_undelivered_lead_is_resent_on_the_next_poll(pool):
+    """Раньше неудачная пересылка оставляла лид недоставленным навсегда."""
+    _acc, wid = _seed_watcher(pool)
+    msgs = [{"message_id": 21, "from_user_id": 1, "from_username": "u", "text": "куплю дом"}]
+
+    async def fake_fetch(pool_, watcher, min_id, limit):
+        return [m for m in msgs if m["message_id"] > min_id]
+
+    bot = _FlakyBot(failures=1)
+    _run(kw.poll_watcher(pool, bot, dict(_watcher(pool, wid)), fetch=fake_fetch))
+    assert bot.sent == []
+    _run(kw.poll_watcher(pool, bot, dict(_watcher(pool, wid)), fetch=fake_fetch))
+    assert len(bot.sent) == 1, "недоставленный лид не прислан повторно"
+    assert _run(pool.fetchval(
+        "SELECT delivered FROM keyword_hits WHERE watcher_id=$1", wid)) is True
+    # Доставленный второй раз не шлём.
+    _run(kw.poll_watcher(pool, bot, dict(_watcher(pool, wid)), fetch=fake_fetch))
+    assert len(bot.sent) == 1
+
+
+def test_a_bus_failure_does_not_swallow_the_lead(pool, monkeypatch):
+    from services import automation_events
+
+    async def _broken_emit(*a, **k):
+        raise RuntimeError("шина недоступна")
+
+    monkeypatch.setattr(automation_events, "emit", _broken_emit)
+    _acc, wid = _seed_watcher(pool)
+    msgs = [{"message_id": 31, "from_user_id": 1, "from_username": "u", "text": "ищу юриста"}]
+
+    async def fake_fetch(pool_, watcher, min_id, limit):
+        return [m for m in msgs if m["message_id"] > min_id]
+
+    bot = _FakeBot()
+    res = _run(kw.poll_watcher(pool, bot, dict(_watcher(pool, wid)), fetch=fake_fetch))
+    assert res["hits"] == 1 and len(bot.sent) == 1, (res, bot.sent)

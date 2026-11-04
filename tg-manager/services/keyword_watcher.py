@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 _POLL_INTERVAL_S = 90          # базовый интервал фонового цикла
 _MAX_MSGS_PER_POLL = 100       # сколько новых сообщений тянуть за раз
 _DELIVER_TEXT_LIMIT = 300      # обрезка текста лида в уведомлении
+_REDELIVER_PER_POLL = 10       # недоставленных лидов за опрос — повторно
 
 
 def normalize_keywords(raw) -> list[str]:
@@ -195,6 +196,7 @@ async def poll_watcher(pool: asyncpg.Pool, bot, watcher: dict, *, fetch=None) ->
                 log.debug("keyword_watcher: release failed wid=%s", wid)
 
     new_hits = 0
+    fresh_ids: list[int] = []
     max_id = cursor
     for m in messages:
         mid = int(m.get("message_id") or 0)
@@ -215,22 +217,52 @@ async def poll_watcher(pool: asyncpg.Pool, bot, watcher: dict, *, fetch=None) ->
         if row is None:
             continue  # уже ловили это сообщение — не дубль, не шлём повторно
         new_hits += 1
+        fresh_ids.append(int(row["id"]))
         # Находка — событие шины: сценарий с триггером «Найдено ключевое
         # слово» создаёт сделку, шлёт вебхук или уведомление. Раньше находка
         # только пересылалась владельцу, в CRM и сценарии лид не попадал.
         # chat_id пуст: автор сообщения — не контакт бота, писать ему
         # сценарий не может (только действия без чата).
-        from services import automation_events
-        await automation_events.emit(
-            pool, owner_id, "keyword.hit",
-            {"keyword": kw, "chat_ref": watcher.get("chat_ref"),
-             "message_id": mid, "from_user_id": m.get("from_user_id"),
-             "from_username": m.get("from_username"),
-             "text": (m.get("text") or "")[:1000], "hit_id": row["id"]})
+        # Сбой шины не должен съедать уведомление: лид уже записан, и при
+        # исключении здесь следующий опрос увидел бы его как «уже пойманный»
+        # и не прислал бы владельцу никогда.
+        try:
+            from services import automation_events
+            await automation_events.emit(
+                pool, owner_id, "keyword.hit",
+                {"keyword": kw, "chat_ref": watcher.get("chat_ref"),
+                 "message_id": mid, "from_user_id": m.get("from_user_id"),
+                 "from_username": m.get("from_username"),
+                 "text": (m.get("text") or "")[:1000], "hit_id": row["id"]})
+        except Exception:
+            log.warning("keyword_watcher: событие лида не записано wid=%s msg=%s",
+                        wid, mid, exc_info=True)
         delivered = await _deliver_hit(bot, owner_id, watcher, m, kw)
         if delivered:
             await pool.execute(
                 "UPDATE keyword_hits SET delivered=TRUE WHERE id=$1", row["id"])
+
+    # Недоставленные лиды прошлых опросов — ещё раз. Раньше неудачная
+    # пересылка (Telegram моргнул, бот на паузе флуда) оставляла лид с
+    # delivered=FALSE навсегда: повторно его не слал никто, и владелец узнавал
+    # о нём, только открыв список вручную. Окно — сутки: старый лид уже не
+    # горячий, а слать его спустя неделю — шум.
+    if bot is not None:
+        try:
+            stale = await pool.fetch(
+                "SELECT id, message_id, from_user_id, from_username, "
+                "       matched_keyword, text FROM keyword_hits "
+                " WHERE watcher_id=$1 AND delivered IS NOT TRUE "
+                "   AND caught_at > now() - interval '1 day' "
+                "   AND id <> ALL($3::bigint[]) "
+                " ORDER BY id LIMIT $2", wid, _REDELIVER_PER_POLL, fresh_ids)
+        except Exception:
+            stale = []
+        for h in stale:
+            if await _deliver_hit(bot, owner_id, watcher, dict(h),
+                                  h["matched_keyword"] or ""):
+                await pool.execute(
+                    "UPDATE keyword_hits SET delivered=TRUE WHERE id=$1", h["id"])
 
     # Курсор двигаем всегда (даже без совпадений) — иначе перечитываем те же.
     await pool.execute(
