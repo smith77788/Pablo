@@ -184,6 +184,9 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Внутренние/loopback-адреса недопустимы")
         if _reason == "scheme":
             return _err("Адрес прокси должен начинаться с socks5://, socks4:// или http://")
+        from services.security import proxy_url_is_public
+        if not await proxy_url_is_public(proxy_url):
+            return _err("Адрес прокси не найден или ведёт во внутреннюю сеть")
         proxy_type = parse_proxy_type(proxy_url)
         try:
             # шифруем at-rest; дедуп по детерминированному proxy_fp (шифр недетерминирован)
@@ -496,6 +499,11 @@ def setup_routes(app: web.Application, pool) -> None:
         # по детерминированному proxy_fp — иначе bulk-импорт клал креды прокси в
         # БД ПЛЕЙНТЕКСТОМ и не отсекал дубли, добавленные одиночно.
         purls, skipped, overflow = _collect_valid_proxies(raw)
+        if purls:
+            from services.security import public_proxy_flags
+            _ok = await public_proxy_flags(purls)
+            skipped += _ok.count(False)
+            purls = [p for p, good in zip(purls, _ok) if good]
         encs = [encrypt_token(p) for p in purls]
         ptypes = [parse_proxy_type(p) for p in purls]
         fps = [proxy_fingerprint(p) for p in purls]

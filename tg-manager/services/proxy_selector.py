@@ -118,7 +118,8 @@ def is_safe_proxy_url(proxy_url: str) -> bool:
         return False
     if _PRIVATE_IP_RE.match(host):
         return False
-    return True
+    from services.security import proxy_host_problem
+    return proxy_host_problem(proxy_url) is None
 
 
 def validate_proxy_input(proxy_url: str, max_len: int = 2048) -> Optional[str]:

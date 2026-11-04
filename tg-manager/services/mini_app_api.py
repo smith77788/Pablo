@@ -1076,7 +1076,8 @@ def _reject_proxy_reason(purl: str) -> str | None:
     p = (purl or "").strip()
     if len(p) > 500:
         return "too_long"
-    if any(h in p.lower() for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")):
+    from services.security import proxy_host_problem
+    if proxy_host_problem(p):
         return "internal"
     if not parse_proxy_type(p):
         return "scheme"

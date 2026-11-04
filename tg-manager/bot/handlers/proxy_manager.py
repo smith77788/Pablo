@@ -267,6 +267,13 @@ async def fsm_proxy_url(
             reply_markup=_cancel_kb().as_markup(),
         )
         return
+    from services.security import proxy_url_is_public
+    if not await proxy_url_is_public(url):
+        await message.answer(
+            "⚠️ Адрес прокси не найден или ведёт во внутреннюю сеть.",
+            reply_markup=_cancel_kb().as_markup(),
+        )
+        return
 
     await state.update_data(proxy_url=url)
     await state.set_state(AddProxyFSM.waiting_label)
@@ -413,6 +420,12 @@ async def fsm_proxy_bulk(message: Message, state: FSMContext, pool: asyncpg.Pool
             entries.append((url, label))
         else:
             invalid += 1
+    if entries:
+        # Внутренние адреса (по записи и по DNS) — тоже невалидные строки.
+        from services.security import public_proxy_flags
+        _ok = await public_proxy_flags([u for u, _ in entries])
+        invalid += _ok.count(False)
+        entries = [e for e, good in zip(entries, _ok) if good]
 
     if not entries:
         await message.answer(

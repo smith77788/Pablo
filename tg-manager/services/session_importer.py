@@ -115,6 +115,10 @@ async def ensure_user_proxy(
     proxy_type = _proxy_type(proxy_url)
     if not proxy_type:
         return None
+    from services.security import proxy_url_is_public
+    if not await proxy_url_is_public(proxy_url):
+        log.warning("ensure_user_proxy: прокси владельца %s ведёт во внутреннюю сеть", owner_id)
+        return None
     try:
         from services.token_vault import encrypt_token, proxy_fingerprint
 

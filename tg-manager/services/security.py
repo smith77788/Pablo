@@ -375,6 +375,81 @@ def is_safe_public_url(url: str) -> bool:
     return not is_internal_ip(host)
 
 
+def _legacy_ipv4(host: str) -> str | None:
+    """«2130706433», «0x7f.1», «127.1» → «127.0.0.1» (их понимает inet_aton и
+    резолвер ОС, но не ipaddress). Для обычного имени — None."""
+    import socket
+    if not host or not all(c in "0123456789abcdefx." for c in host.lower()):
+        return None
+    try:
+        return socket.inet_ntoa(socket.inet_aton(host))
+    except OSError:
+        return None
+
+
+def proxy_host_problem(proxy_url: str) -> str | None:
+    """Синтаксическая проверка хоста прокси: "internal" или None.
+
+    Прокси задаёт владелец, а сервер к нему подключается (проверка живости,
+    Telethon, запросы через него). Внутренний адрес превращал «проверку
+    прокси» в сканер портов сети сервера, а внутренний HTTP-прокси — в выход
+    в неё. Раньше проверка искала подстроки «127.0.0.1»/«localhost», и
+    10.0.0.5, 169.254.169.254 или 2130706433 проходили.
+    """
+    raw = (proxy_url or "").strip()
+    if not raw:
+        return None  # пустое — не адрес; отказ даст проверка формата
+    if "://" not in raw:
+        raw = "socks5://" + raw
+    try:
+        p = urlparse(raw)
+        host = (p.hostname or "").lower().rstrip(".")
+    except Exception:
+        return "internal"
+    if not host:
+        return "internal"
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        return "internal"
+    import ipaddress
+    try:
+        ipaddress.ip_address(host)
+        return "internal" if is_internal_ip(host) else None
+    except ValueError:
+        pass
+    legacy = _legacy_ipv4(host)
+    if legacy is not None:
+        return "internal" if is_internal_ip(legacy) else None
+    return None
+
+
+async def proxy_url_is_public(proxy_url: str) -> bool:
+    """Хост прокси не внутренний ни по записи, ни по DNS (все адреса)."""
+    import socket
+    if proxy_host_problem(proxy_url):
+        return False
+    raw = (proxy_url or "").strip()
+    host = urlparse(raw if "://" in raw else "socks5://" + raw).hostname
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(host, None, proto=socket.IPPROTO_TCP), 5)
+    except Exception:
+        return False
+    addrs = {i[4][0] for i in infos}
+    return bool(addrs) and not any(is_internal_ip(a) for a in addrs)
+
+
+async def public_proxy_flags(urls: list[str], concurrency: int = 20) -> list[bool]:
+    """proxy_url_is_public для пачки (импорт до 500 строк) с потолком параллели."""
+    sem = asyncio.Semaphore(concurrency)
+
+    async def one(u: str) -> bool:
+        async with sem:
+            return await proxy_url_is_public(u)
+
+    return list(await asyncio.gather(*(one(u) for u in urls)))
+
+
 async def resolve_url_is_public(url: str) -> bool:
     """Авторитетный SSRF-гард: синтаксическая проверка + РЕЗОЛВ DNS каждого
     адреса. Отвергает, если ХОТЯ БЫ ОДИН резолвнутый IP внутренний. Закрывает
