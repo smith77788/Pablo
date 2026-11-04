@@ -23,6 +23,7 @@ from bot.middlewares.user_activity import UserActivityLogMiddleware
 from bot.middlewares.subscription_gate import SubscriptionGateMiddleware, set_gate_enabled, set_gate_channels
 from bot.middlewares.latency import LatencyMiddleware
 from bot.middlewares.flood_guard import FloodGuardMiddleware
+from bot.middlewares.secret_input import SecretInputMiddleware
 from bot.utils.button_styles import install_button_style_patch
 from bot.utils.outgoing_redaction import install_outgoing_secret_redaction
 
@@ -472,6 +473,8 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     flood_guard = FloodGuardMiddleware()
     dp.message.outer_middleware(flood_guard)
     dp.callback_query.outer_middleware(flood_guard)
+    # Пароли 2FA, коды, строки сессий и токены не остаются в истории чата.
+    dp.message.outer_middleware(SecretInputMiddleware())
     dp.message.outer_middleware(gate_middleware)
     dp.callback_query.outer_middleware(gate_middleware)
     dp.message.outer_middleware(activity_log_middleware)
