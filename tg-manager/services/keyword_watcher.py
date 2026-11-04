@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import json
 import logging
 import random
@@ -132,8 +133,10 @@ async def _deliver_hit(bot, owner_id: int, watcher: dict, msg: dict, kw: str) ->
     try:
         await bot.send_message(
             owner_id,
-            f"🎯 <b>Лид по ключу</b> «{kw}»\n"
-            f"💬 {chat}\n👤 {who_s}\n\n{text}",
+            # Текст и название чата пишут посторонние: экранируем, иначе
+            # «<» ломал доставку лида, а чужая ссылка становилась живой.
+            f"🎯 <b>Лид по ключу</b> «{_html.escape(str(kw))}»\n"
+            f"💬 {_html.escape(str(chat))}\n👤 {_html.escape(who_s)}\n\n{_html.escape(text)}",
             parse_mode="HTML",
         )
         return True

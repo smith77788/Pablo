@@ -468,8 +468,11 @@ async def _notify_operator(http, token, operator: dict, chat_id: int,
         return
     uname = from_user.get("username")
     who = f"@{uname}" if uname else (from_user.get("first_name") or f"id{chat_id}")
-    note = (f"🆘 Клиент {who} (chat_id={chat_id}) просит живого оператора.\n"
-            f"Последнее сообщение: {text[:300]}")
+    # Имя и текст пишет клиент, а sendMessage идёт с parse_mode=HTML: без
+    # экранирования «<» ломал уведомление, а ссылка в тексте становилась живой.
+    import html as _html
+    note = (f"🆘 Клиент {_html.escape(who)} (chat_id={chat_id}) просит живого оператора.\n"
+            f"Последнее сообщение: {_html.escape((text or '')[:300])}")
     try:
         await bot_api.send_message(http, token, int(op_chat), note)
     except Exception:
@@ -487,7 +490,8 @@ async def _notify_operator_order(http, token, operator: dict, chat_id: int,
         return
     uname = from_user.get("username")
     who = f"@{uname}" if uname else (from_user.get("first_name") or f"id{chat_id}")
-    note = (f"🛒 Новый заказ от {who} (chat_id={chat_id}).\n{summary or ''}").strip()
+    import html as _html  # имя и телефон в сводке пишет клиент
+    note = (f"🛒 Новый заказ от {_html.escape(who)} (chat_id={chat_id}).\n{_html.escape(summary or '')}").strip()
     try:
         await bot_api.send_message(http, token, int(op_chat), note)
     except Exception:
