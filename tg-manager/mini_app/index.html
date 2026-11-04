@@ -2134,10 +2134,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ AUTOREG PRO (Auto-Registration Pro) ══════════════════════ -->
-<div class="screen" id="s-autoreg-pro">
+<div class="screen" id="s-autoreg">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">📱 Авторег Pro</div>
+    <div class="hdr-title">📱 Авторег</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAutoregProModal()">+ Пакет</button></div>
   </div>
   <div class="sub-sb">
@@ -2174,7 +2174,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-autoreg-pro')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📱 Пакетная регистрация</div>
-    <div class="field"><label>Количество (1–100)</label><input type="number" id="arp-count" value="10" min="1" max="100" class="inp"></div>
+    <div class="field"><label>Количество (1–50)</label><input type="number" id="arp-count" value="10" min="1" max="50" class="inp"></div>
     <div class="field"><label>Страна</label><select id="arp-country" class="sel">
       <option value="RU">🇷🇺 Россия</option>
       <option value="UA">🇺🇦 Украина</option>
@@ -2183,11 +2183,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <option value="GB">🇬🇧 Великобритания</option>
       <option value="DE">🇩🇪 Германия</option>
     </select></div>
-    <div class="field"><label>SMS-сервис</label><select id="arp-service" class="sel">
-      <option value="smsactivate">SMS-Activate</option>
-      <option value="5sim">5sim.net</option>
-    </select></div>
-    <div class="field"><label>Прокси (необязательно)</label><select id="arp-proxy" class="sel"><option value="">Без прокси</option></select></div>
+    <!-- SMS-сервис выбирает платформа (_get_sms_client), а сервер берёт из
+         запроса только количество и страну: прежние выпадашки «SMS-сервис» и
+         «Прокси» ничего не меняли и обещали несуществующее. -->
+    <div class="field-note">Номера покупаются у SMS-сервиса, подключённого к платформе; за каждый номер списываются его средства.</div>
     <div class="field-err" id="arp-err"></div>
     <button class="btn btn-p" id="arp-btn" onclick="submitAutoregPro()" style="width:100%">📱 Запустить пакет</button>
   </div>
@@ -2557,15 +2556,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Персоны</div>
         <div class="mgmt-tile-val" id="m-persona-val"></div>
       </div>
+      <!-- «Авторег» и «Авторег Pro» были двумя плитками на одну ручку
+           /api/miniapp/autoreg; остался один экран — бывший Pro. -->
       <div class="mgmt-tile" onclick="openAutoreg()">
         <div class="mgmt-tile-ico">📱</div>
         <div class="mgmt-tile-lbl">Авторег</div>
         <div class="mgmt-tile-val" id="m-autoreg-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openAutoregPro()">
-        <div class="mgmt-tile-ico">📱</div>
-        <div class="mgmt-tile-lbl">Авторег Pro</div>
-        <div class="mgmt-tile-val" id="m-autoreg-pro-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openCloud()">
         <div class="mgmt-tile-ico">☁️</div>
@@ -5383,45 +5379,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: AUTO REGISTRAR ══════════════════════ -->
-<div class="screen" id="s-autoreg">
-  <div class="hdr">
-    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">📱 Авторег</div>
-  </div>
-  <div class="sub-sb">
-    <div id="autoregStats" class="kpi-row" style="padding:8px 16px 10px"></div>
-    <div class="sec">Новая регистрация</div>
-    <div style="padding:8px 16px">
-      <div class="field">
-        <label>Количество аккаунтов (1–50)</label>
-        <input type="number" id="autoregCount" value="1" min="1" max="50" class="inp">
-      </div>
-      <div class="field">
-        <label>Страна</label>
-        <select id="autoregCountry" class="sel">
-          <option value="RU">🇷🇺 Россия</option>
-          <option value="UA">🇺🇦 Украина</option>
-          <option value="KZ">🇰🇿 Казахстан</option>
-          <option value="US">🇺🇸 США</option>
-          <option value="GB">🇬🇧 Великобритания</option>
-          <option value="DE">🇩🇪 Германия</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>SMS-сервис</label>
-        <select id="autoregService" class="sel">
-          <option value="smsactivate">SMS-Activate</option>
-          <option value="5sim">5sim.net</option>
-        </select>
-      </div>
-      <div class="field-err" id="autoregErr"></div>
-      <button class="btn btn-p" id="autoregBtn" onclick="submitAutoreg()" style="width:100%">📱 Зарегистрировать</button>
-    </div>
-    <div class="sec" style="margin-top:8px">Последние аккаунты</div>
-    <div class="lst" id="autoregRecent"></div>
-  </div>
-</div>
-
 <!-- ══════════════════════ SCREEN: PHONE CHECKER ══════════════════════ -->
 <div class="screen" id="s-phonechecker">
   <div class="hdr">
@@ -9097,7 +9054,6 @@ const MODULE_KEYWORDS = {
   'Клонер контента':'скопировать спарсить посты копия клон',
   'Клон и адаптация':'скопировать клон профиль двойник копия',
   'Авторег':'зарегистрировать создать аккаунты sms номера autoreg',
-  'Авторег Pro':'зарегистрировать создать аккаунты sms номера autoreg',
   'Фабрика ботов':'создать боты botfather массово',
   'Фабрика каналов':'создать каналы массово',
   'Фабрика групп':'создать группы чаты массово',
@@ -9232,7 +9188,7 @@ const MODULE_DESCS = {
   'Ноды':'Форум-группы Telegram, через которые бот управляет вашими ресурсами',
   'Связки (бот+каналы)':'Бот и его каналы одним пакетом: создать и вести вместе',
   'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и оповещения',
-  'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
+  'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
@@ -16190,11 +16146,13 @@ async function submitBcSchedule() {
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); errEl.style.display='block'; }
 }
 
-// ── Auto-Registration Pro ──────────────────────────────
+// ── Авторегистрация ────────────────────────────────────
+// Раньше было два экрана на одну ручку: «Авторег» (форма + последние) и
+// «Авторег Pro» (то же плюс график, фильтры и история). Оставлен второй.
 let _arpData = [];
 let _arpHistory = [];
-async function openAutoregPro() {
-  push('s-autoreg-pro');
+async function openAutoreg() {
+  push('s-autoreg');
   txt('autoregProList','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('autoregProHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   loadAutoregPro();
@@ -16217,7 +16175,6 @@ async function loadAutoregPro() {
     renderAutoregProBars(accounts);
     renderAutoregProList(accounts);
     renderAutoregProHistory(accounts.slice(0,20));
-    loadAutoregProProxyList();
   } catch(e) {
     txt('autoregProList', errHtml(errRu(e),'loadAutoregPro()'));
     txt('autoregProHistory', empty('📜','Не загрузилось',''));
@@ -16277,20 +16234,6 @@ function renderAutoregProHistory(items) {
     </div>`;
   }).join('');
 }
-async function loadAutoregProProxyList() {
-  try {
-    const d = await api('/api/miniapp/proxies?limit='+PROXY_PICK_LIMIT+'&offset=0');
-    const sel = document.getElementById('arp-proxy');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">Без прокси</option>' + (d.proxies||[]).map(p=>{
-      const host = (p.proxy_url||'').split('@').pop();
-      return `<option value="${p.id}">${esc(p.label||host)}</option>`;
-    }).join('') + _proxyTruncOption(d, (d.proxies||[]).length);
-  } catch(e) {
-    const sel = document.getElementById('arp-proxy');
-    if (sel) sel.innerHTML = '<option value="">⚠️ Прокси не загрузились — повторите открытие</option>';
-  }
-}
 function openAutoregProModal() {
   document.getElementById('arp-count').value='10';
   document.getElementById('arp-err').style.display='none';
@@ -16303,17 +16246,13 @@ async function submitAutoregPro() {
   errEl.style.display='none';
   const count = parseInt(document.getElementById('arp-count').value)||10;
   const country = document.getElementById('arp-country').value;
-  const service = document.getElementById('arp-service').value;
-  const proxyId = document.getElementById('arp-proxy').value;
-  if (count<1||count>100) { errEl.textContent='Количество: от 1 до 100'; errEl.style.display='block'; return; }
-  if (!await askConfirm(`Зарегистрировать ${count} аккаунтов через ${service}?`)) return;
+  if (count<1||count>50) { errEl.textContent='Количество: от 1 до 50'; errEl.style.display='block'; return; }
+  if (!await askConfirm(`Зарегистрировать ${count} аккаунт(ов) через SMS-сервис? Списываются средства сервиса за номера.`)) return;
   const btn = document.getElementById('arp-btn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const body = {count, country, service};
-    if (proxyId) body.proxy_id = parseInt(proxyId);
-    const r = await api('/api/miniapp/autoreg', {method:'POST', body:JSON.stringify(body)});
-    toast(`📱 Пакет ${r.count} акк. запущен (#${r.op_id})`);
+    const r = await api('/api/miniapp/autoreg', {method:'POST', body:JSON.stringify({count, country})});
+    toast(`📱 Авторегистрация ${r.count} акк. запущена (#${r.op_id}). Прогресс — в разделе Операции.`);
     closeModal('mo-autoreg-pro');
     loadAutoregPro();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); errEl.style.display='block'; }
@@ -21239,51 +21178,6 @@ async function submitPersona() {
   } finally {
     if(btn) { btn.disabled=false; btn.textContent='🎭 Создать персону'; }
   }
-}
-
-// ── Auto Registrar ──────────────────────────────────────
-async function openAutoreg() {
-  push('s-autoreg');
-  txt('autoregStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('autoregRecent','');
-  try {
-    const d = await api('/api/miniapp/autoreg');
-    txt('autoregStats',`
-      <div class="kpi-card"><div class="kpi-val">${d.total_accounts||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.pending_registrations,'orange')}">${d.pending_registrations||0}</div><div class="kpi-lbl">В очереди</div></div>
-    `);
-    txt('m-autoreg-val',`${d.total_accounts||0} аккаунтов`);
-    const recent = d.recent||[];
-    if (!recent.length) { txt('autoregRecent', empty('📱','Нет недавних аккаунтов','')); return; }
-    txt('autoregRecent', recent.map(a=>`
-      <div class="row">
-        <div class="row-ico" style="background:var(--bg-green-16)">📱</div>
-        <div class="row-body">
-          <div class="row-name">${esc(a.first_name||a.phone)}</div>
-          <div class="row-val">${esc(a.phone)} · ${esc(accRu(a.acc_status))} · ${(a.added_at||a.created_at)?new Date(a.added_at||a.created_at).toLocaleDateString('ru-RU'):''}</div>
-        </div>
-      </div>
-    `).join(''));
-  } catch(e) {
-    txt('autoregStats','');
-    txt('autoregRecent', empty('⚠️','Ошибка',errRu(e)));
-  }
-}
-async function submitAutoreg() {
-  const errEl = document.getElementById('autoregErr');
-  errEl.textContent = '';
-  const count = parseInt(document.getElementById('autoregCount').value) || 1;
-  const country = document.getElementById('autoregCountry').value;
-  if (count < 1 || count > 50) { errEl.textContent = 'Количество: от 1 до 50'; return; }
-  if (!await askConfirm(`Зарегистрировать ${count} аккаунт(ов) через SMS-сервис? Списываются средства сервиса за номера.`)) return;
-  const btn = document.getElementById('autoregBtn');
-  btn.disabled = true; btn.textContent = 'Запускаю…';
-  try {
-    const r = await api('/api/miniapp/autoreg', {method:'POST', body:JSON.stringify({count, country})});
-    toast(`📱 Авторегистрация ${r.count} акк. запущена (#${r.op_id}). Прогресс — в разделе Операции.`);
-    openAutoreg();
-  } catch(e) { errEl.textContent = errRu(e,'Ошибка'); }
-  finally { btn.disabled = false; btn.textContent = '📱 Зарегистрировать'; }
 }
 
 // ── Phone Checker ────────────────────────────────────────
