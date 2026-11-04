@@ -1304,8 +1304,9 @@ async def _process_bot(
                             rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
                         await bot_api.send_message(http, token, chat_id, rendered, buttons=_rule_buttons(start_rules[0]))
                     else:
-                        fname = from_user.get("first_name") or "друг"
-                        bot_name = bot_row.get("username") or bot_row.get("first_name") or "бот"
+                        import html as _html  # «<» в имени ломало приветствие
+                        fname = _html.escape(from_user.get("first_name") or "друг")
+                        bot_name = _html.escape(bot_row.get("username") or bot_row.get("first_name") or "бот")
                         welcome = (
                             f"👋 Привет, <b>{fname}</b>!\n\n"
                             f"Добро пожаловать в <b>@{bot_name}</b>.\n\n"
@@ -1456,10 +1457,11 @@ async def _process_bot(
                         or bot_row.get("first_name")
                         or str(bot_id)
                     )
+                    import html as _html  # имя и текст — от постороннего
                     fwd_text = (
-                        f"📨 <b>@{bname}</b>  |  👤 {user_label}\n"
+                        f"📨 <b>@{_html.escape(str(bname))}</b>  |  👤 {_html.escape(user_label)}\n"
                         f"<i>ID: {chat_id}</i>\n\n"
-                        f"{text}\n\n"
+                        f"{_html.escape(text)}\n\n"
                         f"<i>← Reply чтобы ответить пользователю</i>"
                     )
                     session_id = await db.get_or_create_relay_session(
@@ -1764,10 +1766,15 @@ async def _process_bot(
                     session_id = await db.get_or_create_relay_session(
                         pool, bot_id, chat_id, username, first_name_r
                     )
+                    # Имя и текст пишет посторонний человек: без экранирования
+                    # «<a href=…>Подтвердите оплату</a>» становилась ссылкой в
+                    # чате владельца от имени платформы, а обычное «a < b» ломало
+                    # разметку — Telegram отклонял сообщение, и оно терялось.
+                    import html as _html
                     fwd_text = (
-                        f"📨 <b>{bot_label}</b>  |  👤 {user_label}\n"
+                        f"📨 <b>{_html.escape(bot_label)}</b>  |  👤 {_html.escape(user_label)}\n"
                         f"<i>ID: {chat_id}</i>\n\n"
-                        f"{text}\n\n"
+                        f"{_html.escape(text or '')}\n\n"
                         f"<i>← Reply здесь чтобы ответить пользователю</i>"
                     )
                     # «В сделку» у сообщения клиента (bot/handlers/deal_from_message.py).
