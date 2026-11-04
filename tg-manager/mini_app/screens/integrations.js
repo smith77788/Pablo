@@ -323,10 +323,23 @@ async function igTestWebhook(id) {
   }
 }
 
+// Подпись после включения. Если получателя выключила серия сбоев, сервер при
+// включении возвращает в очередь недоставленное за последние дни и отдаёт их
+// число в endpoint.requeued. Владелец должен видеть, что пропущенные заказы и
+// оплаты придут, а не гадать, потерялись ли они. Ручную паузу сервер не
+// догоняет, requeued не приходит, и подпись обычная.
+function igEnabledToast(r, on, word) {
+  if (!on) return word === 'f' ? '🔴 Выключен' : '🔴 Выключено';
+  const base = word === 'f' ? '🟢 Включён' : '🟢 Включено';
+  const n = Math.max(0, Math.trunc(Number(r && r.endpoint && r.endpoint.requeued) || 0));
+  if (!n) return base;
+  return base + ' · догоняем ' + n + ' ' + plural(n, 'событие', 'события', 'событий') + ' за время простоя';
+}
+
 async function igToggleWebhook(id, on) {
   try {
-    await api('/api/miniapp/webhooks/' + id, { method: 'POST', body: JSON.stringify({ is_active: !!on }) });
-    toast(on ? '🟢 Включён' : '🔴 Выключен');
+    const r = await api('/api/miniapp/webhooks/' + id, { method: 'POST', body: JSON.stringify({ is_active: !!on }) });
+    toast(igEnabledToast(r, on, 'f'));
     openWebhook(id);
   } catch (e) { toast('⚠️ ' + errRu(e)); }
 }
@@ -629,8 +642,8 @@ async function igTestCrm(id) {
 
 async function igToggleCrm(id, on) {
   try {
-    await api('/api/miniapp/webhooks/' + id, { method: 'POST', body: JSON.stringify({ is_active: !!on }) });
-    toast(on ? '🟢 Включено' : '🔴 Выключено');
+    const r = await api('/api/miniapp/webhooks/' + id, { method: 'POST', body: JSON.stringify({ is_active: !!on }) });
+    toast(igEnabledToast(r, on, 'n'));
     back();
     openCrm(id);
   } catch (e) { toast('⚠️ ' + errRu(e)); }
