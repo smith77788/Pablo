@@ -85,6 +85,11 @@ _BACKOFF_S = (60, 300, 900, 3600, 3 * 3600, 6 * 3600, 12 * 3600)
 DISABLE_AFTER_FAILURES = 50
 # Неудачи одного получателя в пределах этого окна — одна неудача серии.
 _FAILURE_WINDOW_S = 60
+# Пометка доставки, снятой из-за выключенного получателя, и окно, за которое
+# такие доставки возвращаются в очередь, когда выключенного сбоями получателя
+# включают снова.
+_SKIPPED_DISABLED = "получатель выключен"
+_CATCH_UP_DAYS = 3
 # Аренда строки на время отправки: дольше таймаута запроса с запасом.
 _LEASE_S = 120
 _HTTP_TIMEOUT_S = 10
@@ -315,7 +320,29 @@ async def update_endpoint(pool, owner_id: int, endpoint_id: int, *,
                disabled_reason = CASE WHEN $5 THEN NULL ELSE disabled_reason END
            WHERE id=$1 AND owner_id=$2""",
         endpoint_id, owner_id, new_events, new_name, new_active)
-    return await get_endpoint(pool, owner_id, endpoint_id)
+    requeued = 0
+    if new_active and not cur["is_active"] and cur.get("disabled_reason"):
+        # Получателя выключили сбои (не владелец), и всё, что ждало доставки
+        # в момент выключения, ушло в 'skipped'. Раньше эти события терялись
+        # насовсем: владелец чинил свой сервер, включал получателя, а заказы и
+        # оплаты за время простоя так и не приходили. Теперь включение
+        # догоняет недоставленное за последние дни — тем же порядком доставки
+        # (получатель отличает повтор по X-Infragram-Event-Id).
+        res = await pool.execute(
+            """UPDATE webhook_deliveries
+               SET status='pending', attempts=0, next_attempt_at=now(), last_error=NULL
+               WHERE endpoint_id=$1 AND owner_id=$2 AND status='skipped'
+                 AND last_error=$3
+                 AND created_at > now() - make_interval(days => $4)""",
+            endpoint_id, owner_id, _SKIPPED_DISABLED, _CATCH_UP_DAYS)
+        try:
+            requeued = int(str(res).rsplit(" ", 1)[-1])
+        except ValueError:
+            requeued = 0
+    out = await get_endpoint(pool, owner_id, endpoint_id)
+    if out is not None:
+        out["requeued"] = requeued
+    return out
 
 
 async def rotate_secret(pool, owner_id: int, endpoint_id: int) -> str | None:
@@ -589,7 +616,7 @@ async def deliver_due(pool, http) -> int:
         if not ep or not ep["is_active"]:
             await pool.execute(
                 "UPDATE webhook_deliveries SET status='skipped', last_error=$2 WHERE id=$1",
-                it["id"], "получатель выключен")
+                it["id"], _SKIPPED_DISABLED)
             continue
         if ep["kind"] in CRM_KINDS:
             crm.setdefault(it["endpoint_id"], []).append(it)

@@ -342,3 +342,35 @@ def test_one_minute_outage_with_a_backlog_does_not_disable_the_endpoint(pool):
         "SELECT COUNT(*) FROM webhook_deliveries WHERE endpoint_id=$1 "
         "AND status <> 'delivered'", ep["id"]))
     assert left == 0, f"не доставлено после сбоя: {left}"
+
+
+def test_reenabling_an_endpoint_disabled_by_failures_catches_up(pool):
+    """Получателя выключили сбои — ожидавшее доставки ушло в 'skipped'. Раньше
+    эти события терялись насовсем: владелец чинил сервер, включал получателя,
+    а события за простой так и не приходили. Ручная пауза не догоняет."""
+    from services import webhooks as wh
+    ep = _run(_endpoint(pool))
+    for i in range(3):
+        _run(wh.emit(pool, OWNER, "webhook.test", {"n": i}))
+    _run(wh.fan_out(pool))
+    _run(pool.execute(
+        "UPDATE webhook_endpoints SET is_active=FALSE, disabled_reason='Выключен после 50 "
+        "неудачных доставок подряд' WHERE id=$1", ep["id"]))
+    _run(wh.deliver_due(pool, _Http(200)))
+    assert _run(pool.fetchval(
+        "SELECT COUNT(*) FROM webhook_deliveries WHERE endpoint_id=$1 AND status='skipped'",
+        ep["id"])) == 3
+
+    e = _run(wh.update_endpoint(pool, OWNER, ep["id"], is_active=True))
+    assert e["is_active"] and e["requeued"] == 3
+    http = _Http(200)
+    _run(wh.deliver_due(pool, http))
+    assert len(http.calls) == 3, "недоставленное за простой не догнало получателя"
+
+    # Ручная пауза владельца — его решение: включение ничего не догоняет.
+    _run(wh.emit(pool, OWNER, "webhook.test", {"n": 9}))
+    _run(wh.fan_out(pool))
+    _run(wh.update_endpoint(pool, OWNER, ep["id"], is_active=False))
+    _run(wh.deliver_due(pool, _Http(200)))
+    e = _run(wh.update_endpoint(pool, OWNER, ep["id"], is_active=True))
+    assert e["requeued"] == 0
