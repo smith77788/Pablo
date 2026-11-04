@@ -171,6 +171,10 @@ _FIELD_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 MAX_BUTTONS = 8
 MAX_BUTTON_TEXT = 64
 MAX_AI_PROMPT = 2000
+# Вложение шага «Сообщение»: тип → метод Bot API. Подпись — до 1024 символов.
+MEDIA_KINDS: dict[str, str] = {"photo": "фото", "video": "видео", "document": "файл"}
+MAX_CAPTION = 1024
+_FILE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{20,250}$")
 # Повторы шага «Вебхук» при сбое сервиса (по умолчанию и предел).
 WEBHOOK_DEFAULT_RETRIES = 3
 WEBHOOK_MAX_RETRIES = 5
@@ -907,10 +911,25 @@ def validate_step(step, index: int = 0) -> dict:
         return text
 
     if stype == "message":
-        out["text"] = _text()
+        media = str(step.get("media") or "").strip()
+        # С картинкой или файлом текст — подпись: её можно не писать.
+        out["text"] = _text(required=not media)
         buttons = _buttons(step.get("buttons"), where)
         if buttons:
             out["buttons"] = buttons
+        if media:
+            kind = str(step.get("media_kind") or "photo").strip().lower()
+            if kind not in MEDIA_KINDS:
+                raise ValueError(f"{where}: вложение — одно из: " + ", ".join(MEDIA_KINDS.values()))
+            if not (media.startswith("https://") or _FILE_ID_RE.match(media)):
+                raise ValueError(f"{where}: вложение — ссылка https:// или file_id Telegram")
+            if len(media) > 500:
+                raise ValueError(f"{where}: ссылка на вложение длиннее 500 символов")
+            if len(out["text"]) > MAX_CAPTION:
+                raise ValueError(f"{where}: подпись к вложению длиннее {MAX_CAPTION} символов — "
+                                 "Telegram её не примет; вынесите текст в отдельный шаг")
+            out["media"] = media
+            out["media_kind"] = kind
 
     elif stype == "delay":
         until = str(step.get("until_time") or "").strip()

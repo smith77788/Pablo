@@ -1189,3 +1189,40 @@ def test_the_ai_step_can_classify_into_a_field_and_falls_back(pool, tg, monkeypa
         assert vars_.get("intent") == ""
 
     _run(go())
+
+
+# ── Фото, видео или файл в сообщении ─────────────────────────────────────────
+
+def test_a_message_with_a_photo_goes_out_as_a_photo_with_caption(pool, tg):
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "message", "text": "Каталог для {{FIRST_NAME}}",
+             "media": "https://example.com/catalog.jpg", "media_kind": "photo",
+             "buttons": [{"text": "Дальше"}]},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        photo = [m for m in tg if m["method"] == "sendPhoto"]
+        assert len(photo) == 1, f"фото не отправлено: {tg}"
+        assert photo[0]["photo"] == "https://example.com/catalog.jpg"
+        assert photo[0]["caption"].startswith("Каталог для")
+        assert photo[0]["reply_markup"]["inline_keyboard"]
+        assert not _texts(tg), "текст ушёл отдельным сообщением, а должен быть подписью"
+        assert (await _run_row(pool, wf_id))["status"] == "waiting"
+
+    _run(go())
+
+
+def test_a_file_without_caption_is_sent_as_a_document(pool, tg):
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "message", "media": "BQACAgIAAxkBAAIBc2Zfile_id_example_123",
+             "media_kind": "document"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        doc = [m for m in tg if m["method"] == "sendDocument"]
+        assert len(doc) == 1 and "caption" not in doc[0]
+        assert (await _run_row(pool, wf_id))["status"] == "completed"
+
+    _run(go())

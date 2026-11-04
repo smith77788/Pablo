@@ -1021,15 +1021,35 @@ async def _do_webhook(http, run: dict, step: dict, contact: dict,
         return None, None, "network"
 
 
-async def _send(pool, http, token, run, text, markup=None) -> tuple[bool, int | None, str]:
+_MEDIA_METHODS = {"photo": ("sendPhoto", "photo"), "video": ("sendVideo", "video"),
+                  "document": ("sendDocument", "document")}
+
+
+async def _send(pool, http, token, run, text, markup=None, *,
+                media: str | None = None,
+                media_kind: str | None = None) -> tuple[bool, int | None, str]:
     from services import bot_api, brand_injection
     try:
         if await brand_injection.is_free_tier(pool, run["bot_id"]):
             text = brand_injection.add_promo(text, html=True, context="broadcast")
     except Exception:
         log.debug("workflow_runtime: brand_injection", exc_info=True)
-    return await bot_api.send_message_classified(
-        http, token, run["chat_id"], text, reply_markup=markup)
+    if not media:
+        return await bot_api.send_message_classified(
+            http, token, run["chat_id"], text, reply_markup=markup)
+    method, field = _MEDIA_METHODS.get(media_kind or "photo", _MEDIA_METHODS["photo"])
+    params: dict[str, Any] = {"chat_id": run["chat_id"], field: media}
+    if text:
+        params["caption"] = text[:1024]
+        params["parse_mode"] = "HTML"
+    if markup:
+        params["reply_markup"] = markup
+    data = await bot_api._call(http, token, method, **params)
+    if data.get("ok"):
+        return True, None, ""
+    code = data.get("error_code", 0)
+    cat = bot_api.classify_send_error(code, data.get("description", ""))
+    return False, (bot_api.retry_after_of(data) or 5) if code == 429 else None, cat
 
 
 async def _send_failed(pool, run: dict, step_idx: int, retry: int | None,
@@ -1255,7 +1275,9 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             elif not await _take_step(pool, run["id"], seq, current_step=nxt):
                 return
             ok, retry, cat = await _send(pool, http, token, run, text,
-                                         button_markup(run["id"], seq + 1, buttons))
+                                         button_markup(run["id"], seq + 1, buttons),
+                                         media=step.get("media"),
+                                         media_kind=step.get("media_kind"))
             if not ok:
                 await _log(pool, run, idx, stype, "send_failed", cat)
                 await _send_failed(pool, run, idx, retry, cat)

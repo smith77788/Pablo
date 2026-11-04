@@ -7842,6 +7842,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="wfStepButtons" rows="3" placeholder="Хочу купить -> 3&#10;Подробнее | https://example.com&#10;Дальше" class="input-bc"></textarea>
       <div class="hint">«Текст -> 3» — кнопка ведёт к шагу 3; «Текст | ссылка» — кнопка-ссылка; просто «Текст» — к следующему шагу. Сценарий ждёт нажатия.</div>
     </div>
+    <div class="field" id="wfStepMediaField">
+      <label>Фото, видео или файл (необязательно)</label>
+      <input type="text" id="wfStepMedia" placeholder="https://… или file_id" class="inp">
+      <select id="wfStepMediaKind" class="sel" aria-label="Тип вложения">
+        <option value="photo">Фото</option>
+        <option value="video">Видео</option>
+        <option value="document">Файл</option>
+      </select>
+      <div class="hint">С вложением текст сообщения станет подписью (до 1024 символов) и его можно не писать.</div>
+    </div>
     <div class="field" id="wfStepAskField" style="display:none">
       <label>Сохранить ответ в поле</label>
       <input type="text" id="wfStepSaveAs" placeholder="name, phone, city…" class="inp">
@@ -30897,12 +30907,13 @@ async function openWorkflowDetail(wfId, wfName) {
         const label = typeNames[stype] || (stype ? stype.toUpperCase() : 'ШАГ НЕИЗВЕСТНОГО ТИПА');
         const condName = (d.conditions || {})[s.condition] || s.condition;
         const actName = (d.actions || {})[s.action] || s.action;
-        let body = s.text || (s.condition ? condName + (s.condition_value ? ': ' + s.condition_value : '') : '')
+        let body = s.text || (s.media ? 'Без подписи' : '') || (s.condition ? condName + (s.condition_value ? ': ' + s.condition_value : '') : '')
           || s.url || (s.action ? actName + (s.value ? ': ' + s.value : '') + (s.goto ? ' → шаг ' + s.goto : '') : '')
           || (stype === 'delay' ? 'Пауза перед следующим шагом' : stype === 'wait' ? 'Ждёт, пока с человеком не случится событие' : (stype === 'split' ? 'Случайное деление людей по веткам' : 'Нечего показать: шаг сохранён без параметров'));
         // Детали, без которых шаг не понять: куда ведут кнопки, куда пишется ответ.
         const extra = [];
         (s.buttons || []).forEach(b => extra.push('🔘 ' + b.text + (b.url ? ' (ссылка)' : (b.goto ? ' → шаг ' + b.goto : ' → дальше'))));
+        if (s.media) extra.push({ photo: '🖼 фото', video: '🎬 видео', document: '📎 файл' }[s.media_kind || 'photo'] + ' прикреплено');
         if (stype === 'ask') extra.push('💾 в поле «' + s.save_as + '»' + (s.validate && s.validate !== 'any' ? ' · проверка: ' + s.validate : ''));
         if (stype === 'invoice') extra.push((s.currency === 'XTR' ? '⭐ ' + s.amount + ' звёзд' : (s.amount / 100) + ' ' + s.currency) + ' · ' + (s.title || ''));
         if (stype === 'ai') extra.push(s.save_as ? '💾 ответ ИИ в поле «' + s.save_as + '», не отправляется' : '💬 ответ ИИ уходит человеку' + (s.fallback ? ' · запасной текст есть' : ''));
@@ -31195,7 +31206,7 @@ async function deleteWorkflow(wfId, _el) {
 
 function openWfAddStepModal() {
   if (!_currentWfId) return;
-  ['wfStepMsg', 'wfStepDelay', 'wfStepConditionVal', 'wfStepButtons', 'wfStepSaveAs',
+  ['wfStepMsg', 'wfStepDelay', 'wfStepConditionVal', 'wfStepButtons', 'wfStepSaveAs', 'wfStepMedia',
    'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl',
    'wfStepWhSaveAs', 'wfStepWhRetries', 'wfStepWhElseGoto',
    'wfStepWaitEvent', 'wfStepWaitValue', 'wfStepWaitTimeout', 'wfStepWaitTimeoutGoto',
@@ -31213,6 +31224,7 @@ document.getElementById('wfStepType')?.addEventListener('change', function() {
   show('wfStepMsgField', ['message', 'ask', 'invoice'].includes(v));
   document.getElementById('wfStepMsgLbl').textContent = v === 'ask' ? 'Вопрос' : (v === 'invoice' ? 'Описание счёта' : 'Текст сообщения');
   show('wfStepButtonsField', v === 'message');
+  show('wfStepMediaField', v === 'message');
   show('wfStepAskField', v === 'ask');
   show('wfStepDelayField', v === 'delay');
   show('wfStepConditionField', v === 'condition');
@@ -31257,8 +31269,10 @@ async function submitWfAddStep() {
   const fail = m => { errEl.textContent = m; errEl.style.display = 'block'; };
   const payload = { type };
   if (type === 'message') {
-    if (!text) return fail('Введите текст сообщения');
+    const media = val('wfStepMedia');
+    if (!text && !media) return fail('Введите текст сообщения или добавьте вложение');
     payload.text = text;
+    if (media) { payload.media = media; payload.media_kind = val('wfStepMediaKind'); }
     const buttons = _wfParseButtons(val('wfStepButtons'));
     if (buttons.length) payload.buttons = buttons;
   } else if (type === 'ask') {
