@@ -12,8 +12,8 @@
 // номера шагов с единицы, переход за конец — завершение, у «условия» без
 // «иначе» ветка «нет» заканчивает сценарий, у ожиданий без timeout_goto
 // «нет ответа» — тоже.
-const _WFM_ICON = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲' };
-const _WFM_NAME = { message: 'Сообщение', delay: 'Пауза', condition: 'Условие', action: 'Действие', webhook: 'Вебхук', ask: 'Вопрос', invoice: 'Счёт', split: 'A/B-деление' };
+const _WFM_ICON = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲', wait: '⏸' };
+const _WFM_NAME = { message: 'Сообщение', delay: 'Пауза', condition: 'Условие', action: 'Действие', webhook: 'Вебхук', ask: 'Вопрос', invoice: 'Счёт', split: 'A/B-деление', wait: 'Ждать события' };
 
 // Переходы шага i (с нуля) в виде {from, to, label}; to — индекс шага или
 // 'end'. Чистая функция: её проверяет тест в Node.
@@ -43,6 +43,9 @@ function wfEdges(steps) {
     } else if (t === 'invoice') {
       add(next(i), 'оплатил');
       add(s.timeout_goto ? tgt(s.timeout_goto) : 'end', 'не оплатил');
+    } else if (t === 'wait') {
+      add(next(i), 'дождался');
+      add(s.timeout_goto ? tgt(s.timeout_goto) : 'end', 'не дождался');
     } else if (t === 'webhook' && s.else_goto) {
       add(next(i), 'ок');
       add(tgt(s.else_goto), 'сбой');

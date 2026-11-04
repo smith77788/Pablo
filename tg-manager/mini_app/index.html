@@ -7917,6 +7917,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="invoice">💳 Счёт на оплату</option>
         <option value="split">🎲 A/B-деление</option>
         <option value="webhook">🌐 Вебхук</option>
+        <option value="wait">⏸ Ждать события</option>
       </select>
     </div>
     <div class="field" id="wfStepMsgField">
@@ -7946,6 +7947,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="wfStepUntil" placeholder="10:00" maxlength="5" class="inp">
       <label class="chk-row" style="margin-top:6px"><input type="checkbox" id="wfStepWeekdays"> Только в будни</label>
       <div class="hint">Время берётся по часовому поясу человека: поле контакта timezone, иначе язык Телеграма, иначе Москва. Если время задано, минуты не нужны.</div>
+    </div>
+    <div class="field" id="wfStepWaitField" style="display:none">
+      <label>Какого события ждать</label>
+      <input type="text" id="wfStepWaitEvent" list="wfdEventList" placeholder="Например payment.received" class="inp">
+      <input type="text" id="wfStepWaitValue" placeholder="Уточнение: имя тега или поля (необязательно)" class="inp" style="margin-top:6px">
+      <input type="number" id="wfStepWaitTimeout" min="1" placeholder="Ждать минут (по умолчанию 1440 — сутки)" class="inp" style="margin-top:6px">
+      <input type="number" id="wfStepWaitTimeoutGoto" min="1" placeholder="Не дождались — перейти к шагу № (пусто = завершить)" class="inp" style="margin-top:6px">
+      <div class="hint">Сценарий стоит, пока с этим человеком не случится событие: оплатил, получил тег, ответил. Дождались — идёт дальше.</div>
     </div>
     <div class="field" id="wfStepSplitField" style="display:none">
       <label>Ветки (по одной в строке: название доля -> шаг)</label>
@@ -31023,9 +31032,9 @@ async function openWorkflowDetail(wfId, wfName) {
       html += `<div style="padding:0 16px 8px"><button class="btn btn-s" style="width:100%" onclick="openWorkflowMap(${Number(wfId)})">🗺 Схема сценария</button></div>`;
       html += '<div class="funnel-flow">';
       steps.forEach((s, i) => {
-        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲' };
-        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)', ask: 'var(--blue)', invoice: 'var(--green)', split: 'var(--purple)' };
-        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК', ask: 'ВОПРОС', invoice: 'СЧЁТ', split: 'A/B-ДЕЛЕНИЕ' };
+        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲', wait: '⏸' };
+        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)', ask: 'var(--blue)', invoice: 'var(--green)', split: 'var(--purple)', wait: 'var(--orange)' };
+        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК', ask: 'ВОПРОС', invoice: 'СЧЁТ', split: 'A/B-ДЕЛЕНИЕ', wait: 'ЖДАТЬ СОБЫТИЯ' };
         // Шаг без type ронял ВЕСЬ экран: undefined.toUpperCase() — TypeError,
         // он уходил в общий catch, и вместо сценария показывалась ошибка. Такие
         // шаги писал POST /workflow/create, требовавший ключ action вместо type.
@@ -31039,12 +31048,13 @@ async function openWorkflowDetail(wfId, wfName) {
         const actName = (d.actions || {})[s.action] || s.action;
         let body = s.text || (s.condition ? condName + (s.condition_value ? ': ' + s.condition_value : '') : '')
           || s.url || (s.action ? actName + (s.value ? ': ' + s.value : '') + (s.goto ? ' → шаг ' + s.goto : '') : '')
-          || (stype === 'delay' ? 'Пауза перед следующим шагом' : (stype === 'split' ? 'Случайное деление людей по веткам' : 'Нечего показать: шаг сохранён без параметров'));
+          || (stype === 'delay' ? 'Пауза перед следующим шагом' : stype === 'wait' ? 'Ждёт, пока с человеком не случится событие' : (stype === 'split' ? 'Случайное деление людей по веткам' : 'Нечего показать: шаг сохранён без параметров'));
         // Детали, без которых шаг не понять: куда ведут кнопки, куда пишется ответ.
         const extra = [];
         (s.buttons || []).forEach(b => extra.push('🔘 ' + b.text + (b.url ? ' (ссылка)' : (b.goto ? ' → шаг ' + b.goto : ' → дальше'))));
         if (stype === 'ask') extra.push('💾 в поле «' + s.save_as + '»' + (s.validate && s.validate !== 'any' ? ' · проверка: ' + s.validate : ''));
         if (stype === 'invoice') extra.push((s.currency === 'XTR' ? '⭐ ' + s.amount + ' звёзд' : (s.amount / 100) + ' ' + s.currency) + ' · ' + (s.title || ''));
+        if (stype === 'wait') extra.push('⏸ ждёт «' + ((d.events || {})[s.event] || s.event) + '»' + (s.value ? ': ' + s.value : '') + ' · до ' + Math.round((s.timeout_minutes || 1440) / 60) + ' ч');
         if (stype === 'webhook') extra.push('🔁 повторов при сбое: ' + (s.retries ?? 3) + (s.save_as ? ' · 💾 ответ в {{' + s.save_as + '_…}}' : ''));
         if (s.else_goto) extra.push((stype === 'webhook' ? 'не удалось' : 'иначе') + ' → шаг ' + s.else_goto);
         if (s.timeout_goto) extra.push('нет ответа → шаг ' + s.timeout_goto);
@@ -31307,6 +31317,7 @@ function openWfAddStepModal() {
   ['wfStepMsg', 'wfStepDelay', 'wfStepConditionVal', 'wfStepButtons', 'wfStepSaveAs',
    'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl',
    'wfStepWhSaveAs', 'wfStepWhRetries', 'wfStepWhElseGoto',
+   'wfStepWaitEvent', 'wfStepWaitValue', 'wfStepWaitTimeout', 'wfStepWaitTimeoutGoto',
    'wfStepUntil', 'wfStepBranches']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('wfStepErr').style.display = 'none';
@@ -31327,6 +31338,7 @@ document.getElementById('wfStepType')?.addEventListener('change', function() {
   show('wfStepInvoiceField', v === 'invoice');
   show('wfStepWebhookField', v === 'webhook');
   show('wfStepSplitField', v === 'split');
+  show('wfStepWaitField', v === 'wait');
 });
 
 // «A 50 -> 3» — ветка A-деления: название, доля, шаг перехода.
@@ -31392,6 +31404,14 @@ async function submitWfAddStep() {
     Object.assign(payload, { action: val('wfStepAction'), value: val('wfStepActionVal') });
   } else if (type === 'invoice') {
     Object.assign(payload, { title: val('wfStepInvTitle'), text, amount: parseInt(val('wfStepInvAmount'), 10), currency: val('wfStepInvCurrency') });
+  } else if (type === 'wait') {
+    if (!val('wfStepWaitEvent')) return fail('Выберите событие');
+    payload.event = val('wfStepWaitEvent');
+    if (val('wfStepWaitValue')) payload.value = val('wfStepWaitValue');
+    const wt = parseInt(val('wfStepWaitTimeout'), 10);
+    if (wt) payload.timeout_minutes = wt;
+    const wg = parseInt(val('wfStepWaitTimeoutGoto'), 10);
+    if (wg) payload.timeout_goto = wg;
   } else if (type === 'webhook') {
     payload.url = val('wfStepUrl');
     if (val('wfStepWhSaveAs')) payload.save_as = val('wfStepWhSaveAs');

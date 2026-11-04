@@ -95,7 +95,7 @@ WORKFLOW_TEMPLATES: dict[str, dict] = {
 # Типы шагов, которые экран умеет показать. Шаг неизвестного типа в шаблоне
 # означал бы строку «⚫ undefined» в деталях сценария.
 WORKFLOW_STEP_TYPES = frozenset({"message", "delay", "condition", "action", "webhook",
-                                 "ask", "invoice", "split"})
+                                 "ask", "invoice", "split", "wait"})
 
 # Действия шага `action` — ровно те, что исполнитель (services/workflow_runtime.py)
 # умеет выполнить. Раньше имя действия было произвольным текстом: шаг
@@ -881,6 +881,30 @@ def validate_step(step, index: int = 0) -> dict:
         if else_goto:
             out["else_goto"] = else_goto
 
+    elif stype == "wait":
+        # «Ждать события»: прогон стоит, пока с ЭТИМ человеком не случится
+        # событие (оплатил, получил тег, ответил на вопрос другого сценария),
+        # или пока не выйдет срок — тогда переход по timeout_goto или конец.
+        event = str(step.get("event") or "").strip()
+        if not event:
+            raise ValueError(f"{where}: выберите, какого события ждать")
+        if len(event) > 64 or not re.match(r"^[a-z][a-z0-9_.]*$", event):
+            raise ValueError(f"{where}: имя события — как в списке, например payment.received")
+        out["event"] = event
+        value = str(step.get("value") or "").strip()
+        if value:
+            out["value"] = value[:200]
+        try:
+            timeout = int(step.get("timeout_minutes") or 1440)
+        except (TypeError, ValueError):
+            raise ValueError(f"{where}: срок ожидания в минутах — число")
+        if not 1 <= timeout <= MAX_STEP_DELAY_MIN:
+            raise ValueError(f"{where}: срок ожидания от 1 до {MAX_STEP_DELAY_MIN} минут")
+        out["timeout_minutes"] = timeout
+        tgo = _goto(step, "timeout_goto", where)
+        if tgo:
+            out["timeout_goto"] = tgo
+
     elif stype == "ask":
         out["text"] = _text()
         out["save_as"] = _field_name(step.get("save_as"), where)
@@ -1032,7 +1056,7 @@ STEP_OUTCOMES: dict[str, str] = {
     "error": "ошибка", "goal": "цель достигнута", "completed": "завершён",
     "failed": "сбой", "expired": "истёк срок", "stopped": "остановлен",
     "cancelled": "отменён", "retry": "повтор позже",
-    "retried": "повторён владельцем", "night_hold": "ждёт утра",
+    "retried": "повторён владельцем", "waiting": "ждёт события", "event": "событие пришло", "night_hold": "ждёт утра",
 }
 
 

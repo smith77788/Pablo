@@ -983,3 +983,70 @@ def test_the_chat_summary_counts_the_day_on_a_real_database(pool, tg):
         assert await scenarios.summary(pool, OWNER + 1) == []
 
     _run(go())
+
+
+# ── «Ждать события» ──────────────────────────────────────────────────────────
+
+def test_a_run_waits_for_the_persons_event_and_ignores_other_people(pool, tg):
+    """ЧТО БЫЛО: дождаться оплаты или тега можно было только паузой «на
+    глазок» и условием после неё. Теперь шаг стоит, пока событие не случится
+    с ЭТИМ человеком, и сразу идёт дальше."""
+    from services import automation_events as bus
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "wait", "event": "contact.tag_added", "value": "Клиент",
+             "timeout_minutes": 60, "timeout_goto": 4},
+            {"type": "message", "text": "Добро пожаловать в клуб"},
+            {"type": "action", "action": "stop"},
+            {"type": "message", "text": "Не дождались"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "waiting" and run["wait_kind"] == "event"
+        # Чужой тег и тег другому человеку не будят прогон.
+        await _emit_old(pool, "contact.tag_added", {"tag": "лид"})
+        eid = await bus.emit(pool, OWNER, "contact.tag_added", {"tag": "клиент"},
+                             bot_id=BOT_ID, chat_id=USER + 50)
+        await pool.execute("UPDATE automation_events SET created_at=now()-interval '5 seconds' "
+                           "WHERE id=$1", eid)
+        await _tick(pool)
+        assert (await _run_row(pool, wf_id))["status"] == "waiting"
+        await _emit_old(pool, "contact.tag_added", {"tag": "клиент"})
+        await _tick(pool)
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "completed"
+        assert _texts(tg) == ["Добро пожаловать в клуб"]
+
+    _run(go())
+
+
+def test_a_wait_that_runs_out_follows_its_timeout_branch(pool, tg):
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "wait", "event": "payment.received", "timeout_minutes": 30,
+             "timeout_goto": 3},
+            {"type": "message", "text": "Спасибо за оплату"},
+            {"type": "message", "text": "Напоминаем про оплату"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        await pool.execute("UPDATE workflow_runs SET wait_until=now()-interval '1 minute' "
+                           "WHERE workflow_id=$1", wf_id)
+        await _tick(pool)
+        await _tick(pool)
+        assert _texts(tg) == ["Напоминаем про оплату"]
+
+    _run(go())
+
+
+def test_wait_matching_is_exact():
+    from services.workflow_runtime import wait_matches
+    step = {"type": "wait", "event": "contact.field_set", "value": "phone"}
+    assert wait_matches(step, {"event_type": "contact.field_set", "data": {"field": "Phone"}})
+    assert not wait_matches(step, {"event_type": "contact.field_set", "data": {"field": "email"}})
+    assert not wait_matches(step, {"event_type": "payment.received", "data": {}})
+    assert wait_matches({"event": "payment.received"},
+                        {"event_type": "payment.received", "data": {"amount": 5}})

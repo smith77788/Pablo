@@ -526,6 +526,58 @@ async def start_run(pool, wf: dict, bot_id: int | None, chat_id: int | None, *,
     return run_id
 
 
+def wait_matches(step: dict, event: dict) -> bool:
+    """Подходит ли событие под шаг «Ждать события». ЧИСТАЯ.
+
+    Значение уточняет событие: для тега — какой тег, для поля — какое поле,
+    для остальных — пусто, любое такое событие."""
+    want = _EVENT_ALIASES.get(step.get("event") or "", step.get("event") or "")
+    if not want or event.get("event_type") != want:
+        return False
+    value = (step.get("value") or "").strip().lower()
+    if not value:
+        return True
+    data = event.get("data") or {}
+    have = data.get("tag") if want.startswith("contact.tag") else (
+        data.get("field") if want == "contact.field_set" else
+        data.get("button") if want == "button.clicked" else data.get("stage"))
+    return str(have or "").strip().lower() == value
+
+
+async def _resume_waiting(pool, ev: dict) -> int:
+    """Событие человека будит его прогоны, ждущие именно этого события."""
+    if not ev.get("chat_id"):
+        return 0
+    rows = await pool.fetch(
+        """SELECT * FROM workflow_runs
+            WHERE owner_id=$1 AND chat_id=$2 AND bot_id IS NOT DISTINCT FROM $3::bigint
+              AND status='waiting' AND wait_kind='event'""",
+        ev["owner_id"], ev["chat_id"], ev.get("bot_id"))
+    n = 0
+    for r in rows:
+        run = dict(r)
+        steps = _as_list(run.get("steps_snapshot"))
+        idx = int(run.get("current_step") or 0)
+        if not 0 <= idx < len(steps) or not wait_matches(steps[idx], ev):
+            continue
+        res = await pool.execute(
+            """UPDATE workflow_runs
+                  SET status='running', wait_kind=NULL, wait_until=NULL,
+                      current_step=$3, next_run_at=now(), claimed_until=NULL,
+                      input_data = COALESCE(input_data, '{}'::jsonb)
+                                   || jsonb_build_object('waited_event', $4::jsonb)
+                WHERE id=$1 AND status='waiting' AND wait_kind='event' AND exec_seq=$2""",
+            run["id"], run["exec_seq"], idx + 1,
+            json.dumps({"event_type": ev["event_type"], "data": ev.get("data") or {}},
+                       default=str))
+        if isinstance(res, str) and res.endswith(" 1"):
+            n += 1
+            await _log(pool, run, idx, "wait", "event", ev["event_type"])
+    if n:
+        wake()
+    return n
+
+
 async def _remember_source(pool, ev: dict) -> None:
     """Первое касание: параметр ссылки /start → поле контакта `source`.
 
@@ -623,6 +675,7 @@ async def dispatch_events(pool) -> int:
             if ev["event_type"] == "contact.started":
                 await _remember_source(pool, ev)
             await _check_goals(pool, ev)
+            await _resume_waiting(pool, ev)
         except Exception:
             log.exception("workflow_runtime: цель/источник по событию %s", ev["id"])
         for wf in by_owner.get(ev["owner_id"], []):
@@ -1173,6 +1226,15 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                        currency=step.get("currency") or "XTR")
             await _sent_ok(pool, run)
             _mark_hot(run.get("bot_id"))
+            return
+
+        elif stype == "wait":
+            until = datetime.now(timezone.utc) + timedelta(
+                minutes=int(step.get("timeout_minutes") or 1440))
+            if not await _take_step(pool, run["id"], seq, status="waiting",
+                                    wait_kind="event", wait_until=until):
+                return
+            await _log(pool, run, idx, stype, "waiting", step.get("event"))
             return
 
         elif stype == "action":
