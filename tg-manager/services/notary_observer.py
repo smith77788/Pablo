@@ -253,7 +253,9 @@ async def _maybe_alert(pool: asyncpg.Pool, bot, watch_id: int,
         v = row["verdict"]
         if v == before or v not in (notary.V_EARLY, notary.V_NEVER):
             return
-        name = row["channel_title"] or row["channel_ref"]
+        # Название чужого канала задаёт его админ — в HTML только экранированным.
+        import html as _html
+        name = _html.escape(str(row["channel_title"] or row["channel_ref"] or ""))
         await bot.send_message(
             int(row["owner_id"]),
             f"⚖️ <b>Нотариус</b>: {notary.VERDICT_LABEL.get(v, v)}\n"

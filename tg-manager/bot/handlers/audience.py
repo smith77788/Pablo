@@ -578,8 +578,11 @@ async def cb_block_user(
     _uname = user.get("username")
     _fname = (user.get("first_name") or "").strip()
     _lname = (user.get("last_name") or "").strip()
-    _full_name = f"{_fname} {_lname}".strip() or None
-    u_label = f"@{_uname}" if _uname else (_full_name or str(user["user_id"]))
+    # Имя пишет сам подписчик: «<» или «&» в нём ломали экран (Telegram
+    # отклонял разметку), а тег становился разметкой в чате владельца.
+    import html as _html
+    _full_name = _html.escape(f"{_fname} {_lname}".strip()) or None
+    u_label = f"@{_html.escape(_uname)}" if _uname else (_full_name or str(user["user_id"]))
     action_text = "заблокирован" if blocked else "разблокирован"
     lang = user.get("language_code") or "—"
     phone_line = (

@@ -3398,7 +3398,9 @@ async def notify_new_platform_user(
         except Exception as e:
             log.warning('handler error in notify_new_platform_user: %s', e)
             total = 0
-    label = f"@{username}" if username else first_name
+    # Имя пишет сам новый пользователь: «<a href=…>» в нём становилась ссылкой
+    # в чате админа, а «<» ломал уведомление.
+    label = _html.escape(f"@{username}" if username else (first_name or ""))
     for admin_id in admin_ids:
         try:
             await bot.send_message(

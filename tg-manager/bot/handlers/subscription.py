@@ -1400,6 +1400,9 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
         if callback.from_user.username
         else callback.from_user.first_name or str(uid)
     )
+    # Уходит админам с parse_mode=HTML, а имя пишет сам пользователь.
+    import html as _html
+    user_label = _html.escape(user_label)
 
     admin_ids = [
         int(x.strip())
