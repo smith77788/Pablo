@@ -473,23 +473,35 @@ async def get_state(pool, owner_id: int, entity_type: str, entity_id,
 
 async def _write(pool, owner_id: int, entity_type: str, entity_id: str,
                  state_key: str, new: dict, source: str | None,
-                 from_value: str | None, *, history: bool = True) -> None:
+                 from_value: str | None, *, history: bool = True,
+                 if_unchanged: bool = False) -> bool:
     """history=False — записать только состояние. Нужно там, где значение не
     меняется, а поправить надо срок: строка «перехода из X в X» в истории
-    испортила бы `temporal_pattern` (он считает рисунок по переходам)."""
-    await pool.execute(
-        """INSERT INTO virtual_states
+    испортила бы `temporal_pattern` (он считает рисунок по переходам).
+
+    if_unchanged=True — записать, только если в базе всё ещё `from_value`
+    (строки нет, когда from_value None). False на возврате — состояние за это
+    время сменил кто-то другой, и ничего не записано."""
+    cond = ("WHERE virtual_states.value IS NOT DISTINCT FROM $9" if if_unchanged
+            else "")
+    args = [owner_id, entity_type, entity_id, state_key, new["value"],
+            float(new["confidence"]), source, new.get("expires_at")]
+    if if_unchanged:
+        args.append(from_value)
+    res = await pool.execute(
+        f"""INSERT INTO virtual_states
              (owner_id, entity_type, entity_id, state_key, value, confidence,
               source, expires_at, updated_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
            ON CONFLICT (owner_id, entity_type, entity_id, state_key)
            DO UPDATE SET value=EXCLUDED.value, confidence=EXCLUDED.confidence,
              source=EXCLUDED.source, expires_at=EXCLUDED.expires_at,
-             updated_at=now()""",
-        owner_id, entity_type, entity_id, state_key, new["value"],
-        float(new["confidence"]), source, new.get("expires_at"))
+             updated_at=now() {cond}""",
+        *args)
+    if isinstance(res, str) and res.endswith(" 0"):
+        return False
     if not history:
-        return
+        return True
     await pool.execute(
         """INSERT INTO virtual_state_history
              (owner_id, entity_type, entity_id, state_key, from_value, to_value,
@@ -497,6 +509,12 @@ async def _write(pool, owner_id: int, entity_type: str, entity_id: str,
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
         owner_id, entity_type, entity_id, state_key, from_value, new["value"],
         new.get("reason"), float(new["confidence"]))
+    return True
+
+
+# Сколько раз сигнал пересчитывается, если состояние сменили между чтением и
+# записью (два источника об одном человеке разом: оплата и ответ в боте).
+_SIGNAL_RETRIES = 3
 
 
 async def signal(pool, owner_id: int, entity_type: str, entity_id,
@@ -510,12 +528,25 @@ async def signal(pool, owner_id: int, entity_type: str, entity_id,
     Fail-open: сбой шины не откатывает состояние.
     """
     eid = str(entity_id)
-    current = await get_state(pool, owner_id, entity_type, eid, state_key)
-    change = apply_signal(current, signal_name, confidence=confidence, now=now)
-    if change is None:
+    # Чтение → решение → запись, и между ними другой источник мог сменить
+    # состояние. Раньше запись была безусловной: «Заплатил» из платёжки и
+    # «ответил» из бота, пришедшие разом, давали «Готов» поверх «Купил» —
+    # терминальное состояние стиралось, и купившего снова дожимали. Теперь
+    # запись — только поверх того, что прочитано; иначе сигнал пересчитывается
+    # от свежего состояния.
+    for _attempt in range(_SIGNAL_RETRIES):
+        current = await get_state(pool, owner_id, entity_type, eid, state_key)
+        change = apply_signal(current, signal_name, confidence=confidence, now=now)
+        if change is None:
+            return None
+        from_value = (current or {}).get("value")
+        if await _write(pool, owner_id, entity_type, eid, state_key, change, source,
+                        from_value, if_unchanged=True):
+            break
+    else:
+        log.warning("virtual_layer: сигнал %s для %s/%s не записан — состояние "
+                    "меняется непрерывно", signal_name, entity_type, eid)
         return None
-    from_value = (current or {}).get("value")
-    await _write(pool, owner_id, entity_type, eid, state_key, change, source, from_value)
 
     if change.get("value_changed") is False:
         return change                        # только уверенность/срок — событие не рождаем
