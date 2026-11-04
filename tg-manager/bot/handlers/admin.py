@@ -2197,6 +2197,28 @@ async def _do_broadcast_channels(msg: Message, pool: asyncpg.Pool, text: str) ->
 # ── Message handler for admin FSM states ─────────────────────────────────────
 
 
+def mask_env_value(value: str) -> str:
+    """Значение переменной для показа в чате: начало и конец, середина скрыта.
+
+    Ответ «переменная обновлена» раньше печатал первые 80 символов значения —
+    то есть токен бота, ключ ИИ или пароль базы целиком. История чата Telegram
+    хранится вечно и синхронизируется на все устройства админа.
+    """
+    v = value or ""
+    if len(v) > 12:
+        return v[:4] + "****" + v[-4:]
+    return "****" if v else ""
+
+
+async def _delete_secret_message(message: Message) -> None:
+    """Убрать из чата сообщение, в котором админ прислал значение переменной."""
+    try:
+        await message.delete()
+    except Exception:
+        log_exc_swallow(log, "env: не удалось удалить сообщение со значением",
+                        user_id=message.from_user.id)
+
+
 @router.message(F.text, StateFilter(None))
 async def handle_admin_message(
     message: Message, pool: asyncpg.Pool, http: aiohttp.ClientSession
@@ -2752,13 +2774,14 @@ async def handle_admin_message(
 
     elif state.startswith("env_edit:"):
         key = state.split(":", 1)[1]
+        await _delete_secret_message(message)
         # Bootstrap fix: update in-process FIRST so API call uses the new token
         old_val = os.environ.get(key)
         os.environ[key] = text
         async with aiohttp.ClientSession() as tmp_http:
             try:
                 await railway_api.set_variable(tmp_http, key, text)
-                _safe_val = _html.escape(text[:80]) + ("..." if len(text) > 80 else "")
+                _safe_val = _html.escape(mask_env_value(text))
                 await message.answer(
                     f"✅ <b>Переменная обновлена</b>\n\n"
                     f"<code>{_html.escape(key)}</code> = <code>{_safe_val}</code>\n\n"
@@ -2807,12 +2830,13 @@ async def handle_admin_message(
             )
             return
         key, val = parts[0].upper(), parts[1]
+        await _delete_secret_message(message)
         old_env_val = os.environ.get(key)
         os.environ[key] = val
         async with aiohttp.ClientSession() as tmp_http:
             try:
                 await railway_api.set_variable(tmp_http, key, val)
-                _safe_val = _html.escape(val[:80]) + ("..." if len(val) > 80 else "")
+                _safe_val = _html.escape(mask_env_value(val))
                 await message.answer(
                     f"✅ <b>Переменная добавлена</b>\n\n"
                     f"<code>{_html.escape(key)}</code> = <code>{_safe_val}</code>\n\n"
