@@ -2021,10 +2021,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
       <div class="copilot-list"></div>
     </div>
-    <div style="display:flex;gap:8px;padding:6px 0 2px">
-      <button class="btn btn-s" onclick="openSpintax()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🎲 Спинтакс</button>
+    <!-- Куда отправить: «+ Создать» в шапке — подписчикам одного бота. -->
+    <div class="sec" style="margin:6px 0 4px">Новая рассылка</div>
+    <div style="display:flex;gap:8px;padding:0 0 6px;flex-wrap:wrap">
+      <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 30%;font-size:13px;padding:9px 6px" title="В каналы (все или выбранные), подписчикам бота или в ЛС">📤 Публикация</button>
+      <button class="btn btn-s" onclick="openUniCampaign()" style="flex:1 1 30%;font-size:13px;padding:9px 6px" title="Одно сообщение в каналы, чаты, ботам и в ЛС одним запуском">🚀 Всё сразу</button>
+      <button class="btn btn-s" onclick="openNetBcModal()" style="flex:1 1 30%;font-size:13px;padding:9px 6px" title="Один текст подписчикам всех ваших ботов">🕸 Всем ботам</button>
+    </div>
+    <div style="display:flex;gap:8px;padding:0 0 2px">
       <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📅 Расписание</button>
       <button class="btn btn-s" onclick="openExperiments()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🧪 A/B Тесты</button>
+      <button class="btn btn-s" onclick="openTemplates()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📝 Шаблоны</button>
     </div>
     <div class="sec-row"><div class="sec" id="bcastSec">Рассылки по ботам</div></div>
     <div id="bcastChips" class="lf-chips"></div>
@@ -2300,35 +2307,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec" data-section="messages">✉️ Сообщения</div>
     <div class="sec-desc" data-section="messages" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Рассылки, публикации, расписание, воронки и шаблоны текста.</div>
     <div class="mgmt-grid" data-section="messages">
+      <!-- «Рассылки» — один модуль. «Публикация / рассылка», «Единая кампания»,
+           «Рассылка по сети ботов», «Расписание» и «A/B Тесты» были отдельными
+           плитками, хотя все они — способы отправить одно сообщение и его
+           история. Теперь все входы — на экране «Рассылки» (s-broadcasts):
+           ряд «куда отправить» и ряд инструментов. Сами конструкторы и их
+           подтверждения масштаба не тронуты. -->
       <div class="mgmt-tile" onclick="goTab('broadcasts')">
         <div class="mgmt-tile-ico">📨</div>
         <div class="mgmt-tile-lbl">Рассылки</div>
         <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openMassPub()">
-        <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Публикация / рассылка</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUniCampaign()">
-        <div class="mgmt-tile-ico">🚀</div>
-        <div class="mgmt-tile-lbl">Единая кампания</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openNetBcModal()">
-        <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Рассылка по сети ботов</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openBroadcastSchedule()">
-        <div class="mgmt-tile-ico">📅</div>
-        <div class="mgmt-tile-lbl">Расписание</div>
-        <div class="mgmt-tile-val" id="m-bcsched-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openExperiments()">
-        <div class="mgmt-tile-ico">🧪</div>
-        <div class="mgmt-tile-lbl">A/B Тесты</div>
-        <div class="mgmt-tile-val" id="m-exp-val"></div>
       </div>
       <!-- Одни «Сценарии» с вкладками Сценарии / Авто-воронки (SCREEN_MODULES.scenarios):
            авто-воронки и так исполняются движком сценариев (schema_v283). -->
@@ -2341,11 +2329,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">📝</div>
         <div class="mgmt-tile-lbl">Шаблоны</div>
         <div class="mgmt-tile-val" id="m-tpl-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openSpintax()">
-        <div class="mgmt-tile-ico">🎲</div>
-        <div class="mgmt-tile-lbl">Спинтакс</div>
-        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openContentCloner()">
         <div class="mgmt-tile-ico">📋</div>
@@ -4512,6 +4495,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">📝 Шаблоны</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openTplModal()">+ Создать</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="templates" data-tab="texts" role="tablist" aria-label="Вкладки модуля «Шаблоны»"></div>
   <div class="sub-sb">
     <div class="lst" id="tplList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -5149,8 +5133,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-spintax">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🎲 Спинтакс</div>
+    <div class="hdr-title">📝 Шаблоны</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="templates" data-tab="spintax" role="tablist" aria-label="Вкладки модуля «Шаблоны»"></div>
   <div class="sub-sb">
     <div class="sec">Текст сценария</div>
     <div style="padding:8px 16px">
@@ -9019,14 +9004,14 @@ const MODULE_KEYWORDS = {
   'Реферальная программа':'реферал приглашение код партнёрка',
   'Рабочие пространства':'воркспейс команда доступ участники контур',
   'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
-  'Единая кампания': 'кампания единая всё сразу каналы чаты боты лс рассылка одним запуском campaign',
-  'Рассылка по сети ботов':'рассылка всем подписчикам сеть ботов broadcast',
+  
+  
   'Здоровье':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс дэшборд здоровья здоровье инфры инфраструктура диагностика связность оповещения',
   'Аккаунты':'сессия вход логин прокси ip номер телефон',
   'Массовые жалобы':'strike страйк жалоба репорт снос бан заблокировать report abuse удалить конкурента',
   'Массовый инвайт':'пригласить добавить участников инвайтинг invite',
   'Парсер':'собрать спарсить аудиторию участников подписчиков выгрузить парсинг',
-  'Рассылки':'спам рассылка сообщения дм dm broadcast массовая отправка',
+  'Рассылки':'спам рассылка сообщения дм dm broadcast массовая отправка публикация в каналы единая кампания всё сразу campaign сеть ботов всем подписчикам расписание отложенная a/b тест эксперимент',
   'Прогрев':'разогреть отлежать нагулять антибан антидетект warmup',
   'Прокси':'ip адрес socks5 http изоляция подсеть',
   'Клонер контента':'скопировать спарсить посты копия клон',
@@ -9039,7 +9024,7 @@ const MODULE_KEYWORDS = {
   'Дашборд':'аналитика метрики статистика сводка отчёт по дням',
   'Аналитика аудитории':'аналитика метрики статистика сегменты аудитория+ днк аудитории профиль инсайты активность по часам',
   'Звёзды':'stars монетизация оплата донат',
-  'Спинтакс':'spintax синонимы варианты уникализация текста рандом',
+  'Шаблоны':'spintax спинтакс синонимы варианты уникализация текста рандом',
   'Тариф':'подписка оплата биллинг лимиты платёж',
   'Настройки':'уведомления прокси политика вебхук язык настройка',
 };
@@ -9120,8 +9105,8 @@ const MODULE_DESCS = {
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
   'Шаблоны ассетов':'Заготовки аватара, описания и первого поста',
-  'Единая кампания': 'Одно сообщение в каналы, чаты, ботам и в ЛС одним запуском: по каждому ресурсу встанет своя операция',
-  'Рассылка по сети ботов':'Один текст подписчикам всех ваших ботов',
+  
+  
   'Хранилище':'История переписки: удалённые и изменённые сообщения',
   'Менеджер продаж':'Бот-продавец: товары, ответы на вопросы, заказы',
   'Мотор роста':'Цель роста и подобранные под неё шаги',
@@ -9136,8 +9121,8 @@ const MODULE_DESCS = {
   'Приветствие':'Сценарий: первое сообщение новому подписчику',
   'Дашборд':'Сводка: аккаунты, аудитория, операции, здоровье','Дашборд метрик':'Реалтайм-метрики: аудитория, рост, посты','Здоровье':'Аккаунты и риски бана, инфраструктура, диагностика',
   'Боты':'Ваши Telegram-боты: настройка, рассылки, статистика','Аккаунты':'Telegram-аккаунты (сессии): вход, статус, прокси/IP',
-  'Каналы':'Ваши каналы и массовые действия по ним','Рассылки':'Массовые сообщения аудитории ботов','Рассылка':'Массовое сообщение аудитории бота',
-  'Расписание':'Отложенные и повторяющиеся рассылки','A/B Тесты':'Сравнение вариантов рассылки по отклику',
+  'Каналы':'Ваши каналы и массовые действия по ним','Рассылки':'Публикация в каналы, всё сразу, всем ботам, расписание и A/B тесты','Рассылка':'Массовое сообщение аудитории бота',
+  
   'Операции':'Очередь и история массовых операций','Новые подписчики':'Свежие подписчики ваших ботов',
   'Прокси':'Свои SOCKS5/HTTP-прокси и IP-изоляция',
   'Фабрика':'Массовое создание ботов, каналов и групп','Создать ботов':'Массовое создание ботов',
@@ -9164,7 +9149,7 @@ const MODULE_DESCS = {
   'Ноды':'Форум-группы Telegram, через которые бот управляет вашими ресурсами',
   'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов',
-  'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
+  'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента и варианты текста (спинтакс)',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
   
@@ -9473,6 +9458,15 @@ const SCREEN_MODULES = {
       {key:'cohorts', label:'📈 Когорты и LTV', sid:'s-cohorts',     open: () => openCohorts('month')},
     ],
   },
+  // «Спинтакс» — генератор вариантов текста для шаблонов, а был отдельной
+  // плиткой рядом с «Шаблонами».
+  templates: {
+    title: '📝 Шаблоны',
+    tabs: [
+      {key:'texts',   label:'📝 Шаблоны', sid:'s-templates', open: () => openTemplates(TPL_TARGET)},  // вкладка не теряет, в какой композер вставлять
+      {key:'spintax', label:'🎲 Спинтакс', sid:'s-spintax',   open: () => openSpintax()},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9503,6 +9497,7 @@ function openSearchHub(tab) { modTab('search', tab || 'bots'); }
 function openFactory(tab) { modTab('factory', tab || 'bots'); }
 function openScenarios(tab) { modTab('scenarios', tab || 'all'); }
 function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
+
 function openCrmHub(tab) { modTab('crm', tab || 'clients'); }
 function openAudienceHub(tab) { modTab('audience', tab || 'segments'); }
 function openShieldHub(tab) { modTab('shield', tab || 'accounts'); }

@@ -147,3 +147,25 @@ def test_crm_is_one_module():
                    gone=("Сделки", "Воронка денег", "Когорты и LTV"))
     for fn in ("_dkScreen", "_mfScreen", "_coScreen"):
         assert "_renderModuleTabs()" in _fn_body(fn), f"{fn}: полоска вкладок пустая"
+
+
+def test_mailing_is_one_module():
+    """Пять плиток способов отправки сведены на экран «Рассылки»: каждый
+    конструктор открывается оттуда, а в каталоге остался один вход."""
+    labels = _catalog_labels()
+    assert labels.count("Рассылки") == 1
+    for old in ("Публикация / рассылка", "Единая кампания", "Рассылка по сети ботов",
+                "Расписание", "A/B Тесты"):
+        assert old not in labels and section_of_tile(old) is None, f"«{old}» вернулась"
+    s = HTML.index('<div class="screen" id="s-broadcasts">')
+    hub = HTML[s:s + 4000]
+    for fn in ("openMassPub()", "openUniCampaign()", "openNetBcModal()",
+               "openBroadcastSchedule()", "openExperiments()", "openTemplates()"):
+        assert f'onclick="{fn}"' in hub, f"на экране «Рассылки» нет входа {fn}"
+
+
+def test_spintax_is_a_tab_of_templates():
+    _assert_module("templates", "📝 Шаблоны", "Шаблоны",
+                   {"texts": ("s-templates", "openTemplates"),
+                    "spintax": ("s-spintax", "openSpintax")},
+                   gone=("Спинтакс",))
