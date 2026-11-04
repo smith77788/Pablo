@@ -1582,7 +1582,7 @@ def _lead_card(title: str, contact: dict, chat_id, fields: dict) -> str:
     lines = [f"🔔 <b>Сценарий</b>: {html.escape(title or 'уведомление')}",
              f"👤 {html.escape(who)}"]
     for k, v in list(fields.items())[:10]:
-        lines.append(f"• {html.escape(str(k))}: {html.escape(str(v))[:200]}")
+        lines.append(f"• {html.escape(str(k))}: {html.escape(str(v)[:200])}")
     return "\n".join(lines)
 
 

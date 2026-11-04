@@ -2299,7 +2299,7 @@ async def cb_seo_momentum(
         if not history or len(history) < 2:
             pos_now = history[0]["position"] if history else "—"
             lines.append(
-                f"  ⚪→ <code>{html.escape(kw['keyword'])[:18]:<18}</code> #{pos_now} (мало данных)"
+                f"  ⚪→ <code>{html.escape(kw['keyword'][:18].ljust(18))}</code> #{pos_now} (мало данных)"
             )
             continue
         pos_now = history[0]["position"]
@@ -2318,7 +2318,7 @@ async def cb_seo_momentum(
             arrow, diff_str = "⚪→", f"#{pos_now}"
             total_same += 1
         lines.append(
-            f"  {arrow} <code>{html.escape(kw['keyword'])[:18]:<18}</code> {diff_str}"
+            f"  {arrow} <code>{html.escape(kw['keyword'][:18].ljust(18))}</code> {diff_str}"
         )
 
     if total_up or total_down or total_same:

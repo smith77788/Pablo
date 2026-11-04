@@ -846,7 +846,7 @@ async def cb_warmup_plan_log(
             lines.append(f"<b>📅 {day_key}</b>  ✅{ok_cnt} ❌{fail_cnt}")
             for a in actions[:8]:
                 act_label = _action_label(a["action_type"])
-                target = html.escape(a.get("target") or "")[:40]
+                target = html.escape((a.get("target") or "")[:40])
                 if a["success"]:
                     status = "✅"
                 else:
