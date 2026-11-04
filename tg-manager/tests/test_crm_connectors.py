@@ -136,8 +136,12 @@ class _Resp:
         self.status = status
         self._body = body
 
-    async def read(self):
+    async def read(self, n: int = -1):
         return json.dumps(self._body).encode() if self._body is not None else b""
+
+    @property
+    def content(self):  # тело читается через resp.content.read(лимит)
+        return self
 
     async def __aenter__(self):
         return self
@@ -291,3 +295,47 @@ def test_migration_allows_crm_kinds():
     sql = open(os.path.join(root, "schema_v275_crm_connectors.sql"), encoding="utf-8").read()
     for k in crm.CRM_KINDS:
         assert f"'{k}'" in sql
+
+
+
+async def test_crm_request_uses_guarded_connector_and_caps_body(monkeypatch):
+    """Адрес Bitrix24 задаёт владелец; проверка до запроса не спасает от DNS
+    rebinding, а resp.read() тянул в память ответ любого размера."""
+    import aiohttp
+    import services.security as sec
+
+    used = []
+
+    class _Big:
+        status = 200
+
+        class content:  # noqa: N801
+            @staticmethod
+            async def read(n=-1):
+                return b"x" * (n if n > 0 else 10)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Guarded:
+        def request(self, *a, **kw):
+            used.append(a[1])
+            return _Big()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(sec, "public_http_session", lambda **kw: _Guarded())
+    real = aiohttp.ClientSession()
+    try:
+        with pytest.raises(crm.CrmError, match="большой"):
+            await crm._request(real, "GET", "https://portal.example/rest/1/x/")
+    finally:
+        await real.close()
+    assert used == ["https://portal.example/rest/1/x/"]

@@ -191,15 +191,25 @@ def stage_for_status(cfg: dict, status_id) -> str | None:
 
 # ── Клиенты CRM ──────────────────────────────────────────────────────────────
 
+_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
 async def _request(http, method: str, url: str, *, headers=None, json_body=None):
     """Один запрос → (код, разобранный JSON или {}). Сеть — CrmError."""
     import aiohttp
+    from services.security import guarded_session, read_capped
     try:
-        async with http.request(method, url, json=json_body, headers=headers or {},
-                                allow_redirects=False,
-                                timeout=aiohttp.ClientTimeout(total=_TIMEOUT_S)) as resp:
+        # Адрес Bitrix24 задаёт владелец: проверка resolve_url_is_public была до
+        # запроса, а соединение — заново по DNS (rebinding). Защищённый коннектор
+        # проверяет каждый адрес при соединении; ответ читаем не больше лимита.
+        async with guarded_session(http) as _safe, _safe.request(
+                method, url, json=json_body, headers=headers or {},
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=_TIMEOUT_S)) as resp:
             code = resp.status
-            raw = await resp.read()
+            raw = await read_capped(resp, _MAX_RESPONSE_BYTES)
+    except ValueError:
+        raise CrmError("CRM прислала слишком большой ответ")
     except asyncio.TimeoutError:
         raise CrmError(f"CRM не ответила за {_TIMEOUT_S} с")
     except aiohttp.ClientError as e:

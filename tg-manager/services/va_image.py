@@ -150,13 +150,23 @@ async def _gemini_image(provider, prompt: str) -> bytes | None:
     return None
 
 
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+
 async def _download(img_url: str) -> bytes | None:
+    """Адрес картинки пришёл в ответе провайдера — это внешние данные: только
+    публичные адреса (картинка уходит в чат, внутренний ответ утёк бы туда же)
+    и не больше лимита."""
     import aiohttp
+    from services.security import public_http_session, read_capped
+    if not str(img_url).startswith("https://"):
+        return None
     try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(img_url, timeout=aiohttp.ClientTimeout(total=90)) as r:
+        async with public_http_session() as s:
+            async with s.get(img_url, allow_redirects=False,
+                             timeout=aiohttp.ClientTimeout(total=90)) as r:
                 if r.status == 200:
-                    return await r.read()
+                    return await read_capped(r, _MAX_IMAGE_BYTES)
     except Exception:
         pass
     return None

@@ -180,3 +180,20 @@ def test_op_worker_tries_reference_before_ai():
     i_ref = src.index("media_ref_from")
     i_ai = src.index("media_prompt")
     assert i_ref < i_ai, "в op_worker ИИ-генерация должна быть ПОСЛЕ попытки референса"
+
+
+async def test_provider_image_url_cannot_reach_internal_network():
+    """Адрес картинки из ответа провайдера — внешние данные. Обычный
+    ClientSession скачивал http://127.0.0.1/… и отдавал байты в чат."""
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    app = web.Application()
+    app.router.add_get("/{t:.*}", lambda _r: web.Response(body=b"internal"))
+    srv = TestServer(app, host="127.0.0.1")
+    await srv.start_server()
+    try:
+        assert await va_image._download(f"http://127.0.0.1:{srv.port}/x") is None
+        assert await va_image._download(f"https://127.0.0.1:{srv.port}/x") is None
+    finally:
+        await srv.close()

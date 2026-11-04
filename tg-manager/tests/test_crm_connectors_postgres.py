@@ -87,8 +87,12 @@ class _Resp:
         self.status = status
         self._b = body
 
-    async def read(self):
+    async def read(self, n: int = -1):
         return json.dumps(self._b).encode() if self._b is not None else b""
+
+    @property
+    def content(self):  # тело читается через resp.content.read(лимит)
+        return self
 
     async def __aenter__(self):
         return self
