@@ -323,6 +323,50 @@ def parse_send_window(value: str | None) -> tuple[int, int] | None:
     return start, end
 
 
+_WORK_DAYS_WORDS = ("будни", "пн-пт", "weekdays")
+
+
+def parse_work_hours(value: str | None) -> tuple[tuple[int, int], bool]:
+    """«09-18» → ((9, 18), False); «09-18 будни» → ((9, 18), True). ValueError. ЧИСТАЯ."""
+    raw = str(value or "").strip().lower()
+    weekdays = False
+    for w in _WORK_DAYS_WORDS:
+        if raw.endswith(w):
+            raw, weekdays = raw[: -len(w)].strip(" ,"), True
+            break
+    if not raw:
+        raise ValueError("рабочие часы — через дефис, например 09-18 или «09-18 будни»")
+    try:
+        window = parse_send_window(raw)
+    except ValueError:
+        raise ValueError("рабочие часы — через дефис, например 09-18 или «09-18 будни»")
+    return window, weekdays
+
+
+def format_work_hours(window: tuple[int, int], weekdays: bool) -> str:
+    return f"{window[0]:02d}-{window[1]:02d}" + (" будни" if weekdays else "")
+
+
+def in_work_hours(now_utc: datetime, value: str | None, tz_name: str | None) -> bool:
+    """Сейчас рабочее время по часам человека (условие шага). ЧИСТАЯ."""
+    try:
+        window, weekdays = parse_work_hours(value)
+    except ValueError:
+        return False
+    zone = _zone(tz_name) or ZoneInfo(DEFAULT_TZ)
+    if weekdays and now_utc.astimezone(zone).weekday() >= 5:
+        return False
+    return window_wait(now_utc, window, tz_name) is None
+
+
+def add_to_number(have, delta_raw: str) -> str:
+    """Новое значение поля после «+=». Пусто или не число — считаем с нуля. ЧИСТАЯ."""
+    from services.workflow_engine import _fmt_number, _to_number
+    base = _to_number(have) if have not in (None, "") else 0.0
+    delta = _to_number(delta_raw) or 0.0
+    return _fmt_number((base or 0.0) + delta)
+
+
 def window_wait(now_utc: datetime, window: tuple[int, int] | None,
                 tz_name: str | None) -> datetime | None:
     """Когда можно писать: None — можно сейчас, иначе ближайшее начало окна
@@ -967,6 +1011,9 @@ async def evaluate(pool, http, token, run: dict, step: dict,
         if cond == "field_set":
             return have not in (None, "")
         return compare_field(cond, have, want)
+    if cond == "work_hours":
+        return in_work_hours(datetime.now(timezone.utc), value,
+                             contact_tz(fields, contact.get("language_code")))
     if not bot_id or not chat_id:
         return False
     if cond in ("tag_has", "has_tag", "tag_not"):
@@ -1546,6 +1593,16 @@ async def _do_action(pool, run, step, contact, fields, main_bot) -> None:
         await pool.execute(
             "UPDATE workflow_runs SET vars = vars || jsonb_build_object($2::text, $3::text) "
             "WHERE id=$1", run["id"], name.strip(), val.strip())
+    elif action == "add_to_field":
+        name, _, delta = value.partition("+=")
+        name = name.strip()
+        have = fields.get(name, _as_dict(run.get("vars")).get(name))
+        new = add_to_number(have, delta)
+        await _set_field(pool, bot_id, chat_id, name, new, owner, run.get("workflow_id"))
+        await pool.execute(
+            "UPDATE workflow_runs SET vars = vars || jsonb_build_object($2::text, $3::text) "
+            "WHERE id=$1", run["id"], name, new)
+        fields[name] = new
     elif action == "create_deal":
         label = (contact.get("username") and "@" + contact["username"]) \
             or contact.get("first_name") or (str(chat_id) if chat_id else "без контакта")

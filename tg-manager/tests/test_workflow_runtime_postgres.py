@@ -1356,3 +1356,52 @@ def test_two_payments_in_one_run_count_one_person_per_source(pool, tg):
         assert stats["funnel_by_source"][0]["runs"] == 1
 
     _run(go())
+
+
+# ── Баллы лида: «прибавить к полю» и сравнение ───────────────────────────────
+
+def test_scoring_adds_up_and_routes_by_the_total(pool, tg):
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "action", "action": "add_to_field", "value": "score+=10"},
+            {"type": "action", "action": "add_to_field", "value": "score+=15"},
+            {"type": "condition", "condition": "field_gt", "condition_value": "score=20",
+             "else_goto": 6},
+            {"type": "message", "text": "Горячий лид: {{score}}"},
+            {"type": "action", "action": "stop"},
+            {"type": "message", "text": "Холодный"},
+        ])
+        await pool.execute(
+            "UPDATE bot_users SET fields = '{\"score\": \"5\"}'::jsonb "
+            "WHERE bot_id=$1 AND user_id=$2", BOT_ID, USER)
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        await _tick(pool)
+        assert _texts(tg) == ["Горячий лид: 30"]
+        score = await pool.fetchval(
+            "SELECT fields->>'score' FROM bot_users WHERE bot_id=$1 AND user_id=$2",
+            BOT_ID, USER)
+        assert score == "30"
+        assert (await _run_row(pool, wf_id))["status"] == "completed"
+
+    _run(go())
+
+
+def test_work_hours_condition_picks_a_branch(pool, tg, monkeypatch):
+    from services import workflow_runtime as rt
+    monkeypatch.setattr(rt, "in_work_hours", lambda now, value, tz: value == "00-24")
+
+    async def go():
+        await _workflow(pool, [
+            {"type": "condition", "condition": "work_hours", "condition_value": "09-18",
+             "else_goto": 4},
+            {"type": "message", "text": "Менеджер ответит сейчас"},
+            {"type": "action", "action": "stop"},
+            {"type": "message", "text": "Ответим утром"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        await _tick(pool)
+        assert _texts(tg) == ["Ответим утром"]
+
+    _run(go())

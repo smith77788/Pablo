@@ -106,6 +106,7 @@ WORKFLOW_ACTIONS: dict[str, str] = {
     "add_tag": "Поставить тег",
     "remove_tag": "Снять тег",
     "set_field": "Записать поле (поле=значение)",
+    "add_to_field": "Прибавить к полю (поле+=число): баллы, счётчики",
     "create_deal": "Создать сделку в CRM",
     "move_deal": "Сменить этап сделки прогона",
     "notify_owner": "Уведомить меня",
@@ -125,7 +126,7 @@ DEAL_STAGES: dict[str, str] = {
 
 # Действия, которым значение обязательно.
 _ACTIONS_NEED_VALUE = frozenset({"add_tag", "remove_tag", "set_field", "goto",
-                                 "move_deal", "start_workflow"})
+                                 "move_deal", "start_workflow", "add_to_field"})
 
 # Условия шага `condition` — те, что исполнитель умеет проверить.
 WORKFLOW_CONDITIONS: dict[str, str] = {
@@ -143,11 +144,17 @@ WORKFLOW_CONDITIONS: dict[str, str] = {
     "subscribed": "Подписан на канал (@канал)",
     "paid": "Оплатил",
     "event": "Сценарий запущен событием",
+    "work_hours": "Сейчас рабочее время (09-18, можно «09-18 будни»)",
 }
 
 # Условия «поле=значение»: имя поля проверяется при сохранении.
 _FIELD_COMPARE = frozenset({"field_equals", "field_not_equals", "field_contains",
                             "field_gt", "field_lt"})
+
+
+def _fmt_number(x: float) -> str:
+    """10.0 → «10», 2.5 → «2.5»: в поле человека не «10.0». ЧИСТАЯ."""
+    return str(int(x)) if float(x).is_integer() else f"{x:.6g}"
 
 
 def _to_number(raw) -> float | None:
@@ -1026,6 +1033,12 @@ def validate_step(step, index: int = 0) -> dict:
             if cond in ("field_gt", "field_lt") and _to_number(want) is None:
                 raise ValueError(f"{where}: для сравнения нужно число, а не «{want.strip()}»")
             value = f"{_field_name(fname, where)}={want.strip()}"
+        if cond == "work_hours":
+            from services import workflow_runtime as _rt
+            try:
+                value = _rt.format_work_hours(*_rt.parse_work_hours(value))
+            except ValueError as e:
+                raise ValueError(f"{where}: {e}")
         if value:
             out["condition_value"] = value[:200]
         elif cond not in ("paid", "event"):
@@ -1188,6 +1201,13 @@ def validate_step(step, index: int = 0) -> dict:
             if not sep:
                 raise ValueError(f"{where}: значение — «поле=значение»")
             out["value"] = f"{_field_name(fname, where)}={fval.strip()[:500]}"
+        elif name == "add_to_field":
+            fname, sep, num = value.partition("+=")
+            delta = _to_number(num) if sep else None
+            if delta is None or abs(delta) > 1_000_000:
+                raise ValueError(f"{where}: значение — «поле+=число», например score+=10 "
+                                 "(или score+=-5, чтобы отнять)")
+            out["value"] = f"{_field_name(fname, where)}+={_fmt_number(delta)}"
         elif value:
             out["value"] = value[:200]
 
