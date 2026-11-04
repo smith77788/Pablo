@@ -4443,6 +4443,10 @@ async def _show_validation_report(message, state: FSMContext, report: dict) -> N
     )
 
 
+# Один .session в архиве пакетного импорта — не больше (SQLite сессии ~30 КБ).
+_ZIP_SESSION_MAX_BYTES = 5 * 1024 * 1024
+
+
 @router.message(SessionImport.waiting_batch_sessions, F.document)
 async def fsm_batch_import_file(
     message: Message, state: FSMContext, pool: asyncpg.Pool
@@ -4484,10 +4488,15 @@ async def fsm_batch_import_file(
 
         try:
             with zipfile.ZipFile(_io.BytesIO(raw_bytes)) as zf:
+                # Размер в распакованном виде берём из заголовка: zf.read() не
+                # отдаёт больше заявленного, а «.session» на гигабайты из 20 МБ
+                # архива (zip-бомба) клал процесс. Файл сессии — десятки КБ.
                 session_names = [
-                    n
-                    for n in zf.namelist()
-                    if n.lower().endswith(".session") and not n.startswith("__")
+                    i.filename
+                    for i in zf.infolist()
+                    if i.filename.lower().endswith(".session")
+                    and not i.filename.startswith("__")
+                    and i.file_size <= _ZIP_SESSION_MAX_BYTES
                 ]
         except zipfile.BadZipFile:
             await message.answer("❌ Повреждённый ZIP-файл.")
