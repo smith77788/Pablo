@@ -51,7 +51,7 @@ def _menu_kb() -> "InlineKeyboardBuilder":
                   callback_data=AboutCb(action="sec", key=sec.key))
     kb.button(text="📤 Переслать знакомому",
               callback_data=AboutCb(action="share"))
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
     # Разделы по два в ряд, две последние кнопки — на всю ширину.
     kb.adjust(*([2] * ((len(catalog.SECTIONS) + 1) // 2)), 1, 1)
     return kb
@@ -164,7 +164,7 @@ async def cb_about_share(callback: CallbackQuery) -> None:
     # И сразу возвращаем управление: после пересылки человек остаётся в боте.
     kb = InlineKeyboardBuilder()
     kb.button(text="🗂 Все разделы", callback_data=AboutCb(action="menu"))
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(1, 1)
     await callback.message.answer(
         "⬆️ Перешлите сообщение выше — в нём есть ссылка, "

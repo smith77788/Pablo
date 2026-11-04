@@ -67,7 +67,7 @@ def _render(states: list[dict]) -> str:
 def _kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=BotCb(action="pulse"))
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(2)
     return kb.as_markup()
 

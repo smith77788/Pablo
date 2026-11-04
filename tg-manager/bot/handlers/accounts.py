@@ -588,7 +588,7 @@ async def _show_accounts_menu(
     )
     kb.row(
         InlineKeyboardButton(
-            text="◀️ Главное меню", callback_data=BotCb(action="main").pack()
+            text="🏠 Главное меню", callback_data=BotCb(action="main").pack()
         )
     )
 

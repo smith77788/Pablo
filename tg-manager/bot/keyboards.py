@@ -127,7 +127,7 @@ def network_ops_menu() -> InlineKeyboardMarkup:
     )
     kb.button(text="🔍 Проверить токены", callback_data=NetworkCb(action="bulk_check"))
     kb.button(text="📥 Импорт ботов", callback_data=NetworkCb(action="bulk_import"))
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
@@ -206,7 +206,7 @@ def bulk_menu() -> InlineKeyboardMarkup:
     kb.button(text="🤖 Команды всем", callback_data=BulkCb(action="commands"))
     kb.button(text="🌍 Команды по гео", callback_data=BulkCb(action="commands_lang"))
     kb.button(text="🔍 Проверить токены", callback_data=BulkCb(action="check"))
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
@@ -1335,7 +1335,7 @@ def network_menu() -> InlineKeyboardMarkup:
     kb.button(
         text="👥 Пересечение аудиторий", callback_data=NetworkCb(action="overlap")
     )
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 

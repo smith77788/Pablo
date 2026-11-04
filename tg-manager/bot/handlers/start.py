@@ -380,24 +380,17 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
             await message.answer(text, parse_mode="HTML", reply_markup=kb)
             return
         await message.answer(
-            "👋 <b>Добро пожаловать в Infragram!</b>\n\n"
-            "Это система управления Telegram-активами:\n"
-            "боты, каналы, группы, аккаунты — всё в одном месте.\n\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "🚀 <b>Быстрый старт — выберите сценарий:</b>\n\n"
-            "🤖 <b>Хочу управлять ботом</b>\n"
-            "→ ➕ Добавить бота → вставить токен от @BotFather\n"
-            "→ Рассылки, аудитория, авто-ответы, CRM\n\n"
-            "📡 <b>Хочу управлять каналами</b>\n"
-            "→ /menu → 📡 Каналы и боты\n"
-            "→ Импорт, создание, публикация во все каналы\n\n"
-            "📱 <b>Хочу операции через аккаунт</b>\n"
-            "→ /menu → 📱 Аккаунты\n"
-            "→ Создание каналов/групп, вступление, публикация\n\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "💡 <b>Разделы по задачам:</b> /menu\n"
-            "❓ <b>Помощь:</b> /help\n\n"
-            f"<i>ID: <code>{uid}</code></i>",
+            "👋 <b>Добро пожаловать в Infragram!</b>\n"
+            "Боты, каналы, группы и аккаунты Telegram — в одном месте.\n\n"
+            "<b>С чего начать</b>\n"
+            "🤖 <b>Бот</b> — нажмите «➕ Добавить бота» и вставьте токен от @BotFather. "
+            "Дальше рассылки, аудитория, автоответы и CRM.\n"
+            "📡 <b>Каналы</b> — /menu → 📡 Каналы и боты: импорт, создание, "
+            "публикация во все каналы сразу.\n"
+            "📱 <b>Аккаунты</b> — /menu → 📱 Аккаунты: создание каналов и групп, "
+            "вступление, публикация.\n\n"
+            "Все разделы — /menu, справка — /help\n"
+            f"<i>Ваш ID: <code>{uid}</code></i>",
             parse_mode="HTML",
             reply_markup=main_menu(is_admin=admin),
         )
@@ -444,8 +437,8 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     await message.answer(
         f"👋 <b>Infragram OS</b>  <code>v{BUILD_VERSION}</code>\n\n"
         f"{summary}{extra}{result_line}\n\n"
-        f"ID: <code>{uid}</code>\n\n"
-        f"💡 Нажмите на бота из списка → откроется меню управления",
+        f"<i>Ваш ID: <code>{uid}</code></i>\n\n"
+        "Нажмите на бота в списке — откроется его меню.",
         parse_mode="HTML",
         reply_markup=main_menu(is_admin=admin),
     )
@@ -465,7 +458,7 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
 
     text = (
         f"❓ <b>Справка Infragram OS</b>\n\n"

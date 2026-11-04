@@ -87,7 +87,7 @@ def _kb(rep: dict):
     # Если есть подтверждённо-мёртвые НЕназначенные прокси — даём быстрый вычист.
     kb.button(text="🧹 Удалить мёртвые прокси", callback_data=ProxyCb(action="cleanup_dead"))
     kb.button(text="🔄 Обновить", callback_data=BotCb(action="budget"))
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(1, 2)
     return kb.as_markup()
 

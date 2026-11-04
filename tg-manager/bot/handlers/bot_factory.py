@@ -77,7 +77,7 @@ def _factory_menu_kb() -> object:
     kb.button(text="✅ Валидация токенов", callback_data=BotFactCb(action="validate"))
     kb.button(text="🔄 Клонировать настройки", callback_data=BotFactCb(action="clone"))
     kb.button(text="📊 Статистика ботов", callback_data=BotFactCb(action="stats"))
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(1, 2, 2, 2)
     return kb.as_markup()
 

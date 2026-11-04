@@ -77,7 +77,7 @@ async def cb_list(
         empty_kb.button(
             text="🏭 Создать через BotFather", callback_data=BotFactCb(action="menu")
         )
-        empty_kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+        empty_kb.button(text="🏠 Главное меню", callback_data=BotCb(action="main"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
             "🤖 <b>Мои боты</b>\n\n"
