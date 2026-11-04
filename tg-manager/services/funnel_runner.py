@@ -90,7 +90,7 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 except Exception:
                     pass
                 for attempt in range(3):
-                    ok, retry_after = await bot_api.send_message(
+                    ok, retry_after, _cat = await bot_api.send_message_classified(
                         http, row["token"], row["user_id"], _msg_text
                     )
                     if ok:
@@ -114,13 +114,25 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         ):
                             break
                         continue
-                    # Non-429 failure (403 blocked, user deactivated, etc.) — don't retry
-                    permanently_failed = True
-                    log.warning(
-                        "Funnel step %d for sub %d failed: non-retryable (bot blocked or user deactivated)",
-                        row["current_step"] + 1,
-                        row["sub_id"],
-                    )
+                    # Выбывает из воронки только тот, кто ушёл сам (заблокировал
+                    # бота, удалил аккаунт) — правило общее с рассылкой и
+                    # автоворонкой (`bot_api.recipient_is_gone`). Раньше выбывал
+                    # любой неуспех: сбой сети или 5xx Telegram навсегда выкидывал
+                    # подписчика из воронки, хотя ему просто не дошло сообщение.
+                    # Ломаная разметка шага (bad_request) не починится сама —
+                    # без выбывания такой шаг повторялся бы каждую минуту вечно.
+                    if bot_api.recipient_is_gone(_cat) or _cat == "bad_request":
+                        permanently_failed = True
+                        log.warning(
+                            "Funnel step %d for sub %d failed: recipient gone (%s)",
+                            row["current_step"] + 1, row["sub_id"], _cat,
+                        )
+                    else:
+                        log.info(
+                            "Funnel step %d for sub %d: временный сбой (%s), повтор "
+                            "на следующем круге", row["current_step"] + 1,
+                            row["sub_id"], _cat,
+                        )
                     break
 
                 if not sent_ok:
@@ -145,9 +157,10 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         except Exception as _drop_err:
                             log.debug("funnel drop mark failed: %s", _drop_err)
                     else:
-                        # Rate-limited after all retries — will retry next loop cycle
+                        # Флуд или временный сбой — подписчик остаётся должным,
+                        # его заберёт следующий круг.
                         log.info(
-                            "Funnel step %d for sub %d skipped (rate-limited), will retry",
+                            "Funnel step %d for sub %d skipped (rate-limited/transient), will retry",
                             row["current_step"] + 1,
                             row["sub_id"],
                         )

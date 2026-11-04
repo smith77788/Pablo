@@ -118,8 +118,13 @@ def tg(pool, monkeypatch):
 
     async def _send(http, token, chat_id, text, buttons=None, reply_markup=None,
                     disable_notification=False):
+        # Старый исполнитель воронок тоже шлёт через send_message_classified
+        # (ему нужна категория ошибки) — его отправки помечаем по вызывающему.
+        import sys
+        caller = sys._getframe(1).f_globals.get("__name__", "")
         sent.append({"chat_id": chat_id, "text": text, "reply_markup": reply_markup,
-                     "buttons": buttons})
+                     "buttons": buttons,
+                     **({"legacy": True} if caller == "services.funnel_runner" else {})})
         return True, None, ""
 
     async def _send_plain(http, token, chat_id, text, *a, **kw):
