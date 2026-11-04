@@ -564,15 +564,18 @@ async def cb_chanf_pick_cluster(
 ) -> None:
     await safe_answer(callback)
     try:
+        # id кластера — из callback_data (пишет клиент): только свой кластер.
         cl = await pool.fetchrow(
-            "SELECT id, name FROM clusters WHERE id=$1", callback_data.channel_id
+            "SELECT id, name FROM clusters WHERE id=$1 AND owner_id=$2",
+            callback_data.channel_id, callback.from_user.id,
         )
     except Exception:
         log_exc_swallow(log, "pick_cluster fetchrow failed")
         cl = None
     cluster_name = (cl["name"] or "") if cl else ""
+    # Чужой или исчезнувший кластер в план не берём: создание пошло бы в него.
     await state.update_data(
-        cluster_id=callback_data.channel_id, cluster_name=cluster_name
+        cluster_id=callback_data.channel_id if cl else None, cluster_name=cluster_name
     )
     await state.set_state(ChannelFactoryFSM.confirming)
     await _show_chanf_confirm(callback, state)

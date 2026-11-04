@@ -113,3 +113,16 @@ def test_no_new_callback_handlers_write_without_owner():
             if writes and not _OWN.search(body):
                 bad.append(f"{rel}:{n.lineno} {n.name}")
     assert not bad, "запись по id из кнопки без проверки владельца: " + ", ".join(bad)
+
+
+def test_node_thread_and_cluster_picks_are_owner_scoped():
+    """Топик узла и кластер фабрики каналов по id из кнопки — только свои."""
+    src_nodes = open(os.path.join(ROOT, "bot", "handlers", "nodes_hub.py"), encoding="utf-8").read()
+    i = src_nodes.index("async def cb_thread_view(")
+    body = src_nodes[i:src_nodes.index("\nasync def ", i + 10)]
+    assert "n.owner_id=$3" in body
+    src_cf = open(os.path.join(ROOT, "bot", "handlers", "channel_factory.py"), encoding="utf-8").read()
+    i = src_cf.index("async def cb_chanf_pick_cluster(")
+    body = src_cf[i:src_cf.index("\nasync def ", i + 10)]
+    assert "FROM clusters WHERE id=$1 AND owner_id=$2" in body
+    assert "if cl else None" in body

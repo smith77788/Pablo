@@ -392,9 +392,13 @@ async def cb_thread_view(
     pool: asyncpg.Pool,
 ) -> None:
     await safe_answer(callback)
+    # thread_id и node_id — из callback_data, их пишет клиент: без владельца
+    # по подобранным id открывался чужой топик (и кнопки управления им).
     thread = await pool.fetchrow(
-        "SELECT * FROM bm_node_threads WHERE id=$1 AND node_id=$2",
-        callback_data.thread_id, callback_data.node_id,
+        "SELECT t.* FROM bm_node_threads t "
+        "JOIN bm_telegram_nodes n ON n.id = t.node_id "
+        "WHERE t.id=$1 AND t.node_id=$2 AND n.owner_id=$3",
+        callback_data.thread_id, callback_data.node_id, callback.from_user.id,
     )
     if not thread:
         await callback.message.edit_text("❌ Топик не найден.", reply_markup=_back_menu_kb())
