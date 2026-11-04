@@ -95,7 +95,7 @@ WORKFLOW_TEMPLATES: dict[str, dict] = {
 # Типы шагов, которые экран умеет показать. Шаг неизвестного типа в шаблоне
 # означал бы строку «⚫ undefined» в деталях сценария.
 WORKFLOW_STEP_TYPES = frozenset({"message", "delay", "condition", "action", "webhook",
-                                 "ask", "invoice", "split", "wait"})
+                                 "ask", "invoice", "split", "wait", "ai"})
 
 # Действия шага `action` — ровно те, что исполнитель (services/workflow_runtime.py)
 # умеет выполнить. Раньше имя действия было произвольным текстом: шаг
@@ -170,6 +170,7 @@ INVOICE_CURRENCIES = ("XTR", "RUB", "USD", "EUR", "UAH", "KZT")
 _FIELD_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 MAX_BUTTONS = 8
 MAX_BUTTON_TEXT = 64
+MAX_AI_PROMPT = 2000
 # Повторы шага «Вебхук» при сбое сервиса (по умолчанию и предел).
 WEBHOOK_DEFAULT_RETRIES = 3
 WEBHOOK_MAX_RETRIES = 5
@@ -1012,6 +1013,22 @@ def validate_step(step, index: int = 0) -> dict:
         else_goto = _goto(step, "else_goto", where)
         if else_goto:
             out["else_goto"] = else_goto
+
+    elif stype == "ai":
+        # «Ответ ИИ»: инструкция владельца + данные человека → ответ модели.
+        # С save_as ответ не отправляется, а пишется в переменную (например,
+        # ИИ определяет намерение, а условие дальше ведёт по ветке).
+        prompt = str(step.get("text") or step.get("prompt") or "").strip()
+        if not prompt:
+            raise ValueError(f"{where}: напишите, что должен сделать ИИ")
+        if len(prompt) > MAX_AI_PROMPT:
+            raise ValueError(f"{where}: инструкция длиннее {MAX_AI_PROMPT} символов")
+        out["text"] = prompt
+        if str(step.get("save_as") or "").strip():
+            out["save_as"] = _field_name(step.get("save_as"), where)
+        fallback = str(step.get("fallback") or "").strip()
+        if fallback:
+            out["fallback"] = fallback[:MAX_STEP_TEXT]
 
     elif stype == "wait":
         # «Ждать события»: прогон стоит, пока с ЭТИМ человеком не случится

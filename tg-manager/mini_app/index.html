@@ -7830,6 +7830,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="split">🎲 A/B-деление</option>
         <option value="webhook">🌐 Вебхук</option>
         <option value="wait">⏸ Ждать события</option>
+        <option value="ai">🤖 Ответ ИИ</option>
       </select>
     </div>
     <div class="field" id="wfStepMsgField">
@@ -7859,6 +7860,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="wfStepUntil" placeholder="10:00" maxlength="5" class="inp">
       <label class="chk-row" style="margin-top:6px"><input type="checkbox" id="wfStepWeekdays"> Только в будни</label>
       <div class="hint">Время берётся по часовому поясу человека: поле контакта timezone, иначе язык Телеграма, иначе Москва. Если время задано, минуты не нужны.</div>
+    </div>
+    <div class="field" id="wfStepAiField" style="display:none">
+      <label>Что должен сделать ИИ</label>
+      <textarea id="wfStepAiPrompt" rows="3" placeholder="Например: ответь на вопрос клиента о доставке, коротко и дружелюбно" class="input-bc"></textarea>
+      <input type="text" id="wfStepAiSaveAs" placeholder="Не отправлять, а сохранить в поле (например intent)" class="inp" style="margin-top:6px">
+      <input type="text" id="wfStepAiFallback" placeholder="Если ИИ не ответил — отправить этот текст" class="inp" style="margin-top:6px">
+      <div class="hint">ИИ видит имя человека, его ответы и поля. Ответ ИИ расходует дневной лимит ИИ по тарифу.</div>
     </div>
     <div class="field" id="wfStepWaitField" style="display:none">
       <label>Какого события ждать</label>
@@ -30875,9 +30883,9 @@ async function openWorkflowDetail(wfId, wfName) {
       html += `<div style="padding:0 16px 8px"><button class="btn btn-s" style="width:100%" onclick="openWorkflowMap(${Number(wfId)})">🗺 Схема сценария</button></div>`;
       html += '<div class="funnel-flow">';
       steps.forEach((s, i) => {
-        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲', wait: '⏸' };
-        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)', ask: 'var(--blue)', invoice: 'var(--green)', split: 'var(--purple)', wait: 'var(--orange)' };
-        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК', ask: 'ВОПРОС', invoice: 'СЧЁТ', split: 'A/B-ДЕЛЕНИЕ', wait: 'ЖДАТЬ СОБЫТИЯ' };
+        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲', wait: '⏸', ai: '🤖' };
+        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)', ask: 'var(--blue)', invoice: 'var(--green)', split: 'var(--purple)', wait: 'var(--orange)', ai: 'var(--purple)' };
+        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК', ask: 'ВОПРОС', invoice: 'СЧЁТ', split: 'A/B-ДЕЛЕНИЕ', wait: 'ЖДАТЬ СОБЫТИЯ', ai: 'ОТВЕТ ИИ' };
         // Шаг без type ронял ВЕСЬ экран: undefined.toUpperCase() — TypeError,
         // он уходил в общий catch, и вместо сценария показывалась ошибка. Такие
         // шаги писал POST /workflow/create, требовавший ключ action вместо type.
@@ -30897,6 +30905,7 @@ async function openWorkflowDetail(wfId, wfName) {
         (s.buttons || []).forEach(b => extra.push('🔘 ' + b.text + (b.url ? ' (ссылка)' : (b.goto ? ' → шаг ' + b.goto : ' → дальше'))));
         if (stype === 'ask') extra.push('💾 в поле «' + s.save_as + '»' + (s.validate && s.validate !== 'any' ? ' · проверка: ' + s.validate : ''));
         if (stype === 'invoice') extra.push((s.currency === 'XTR' ? '⭐ ' + s.amount + ' звёзд' : (s.amount / 100) + ' ' + s.currency) + ' · ' + (s.title || ''));
+        if (stype === 'ai') extra.push(s.save_as ? '💾 ответ ИИ в поле «' + s.save_as + '», не отправляется' : '💬 ответ ИИ уходит человеку' + (s.fallback ? ' · запасной текст есть' : ''));
         if (stype === 'wait') extra.push('⏸ ждёт «' + ((d.events || {})[s.event] || s.event) + '»' + (s.value ? ': ' + s.value : '') + ' · до ' + Math.round((s.timeout_minutes || 1440) / 60) + ' ч');
         if (stype === 'webhook') extra.push('🔁 повторов при сбое: ' + (s.retries ?? 3) + (s.save_as ? ' · 💾 ответ в {{' + s.save_as + '_…}}' : ''));
         if (s.else_goto) extra.push((stype === 'webhook' ? 'не удалось' : 'иначе') + ' → шаг ' + s.else_goto);
@@ -31190,6 +31199,7 @@ function openWfAddStepModal() {
    'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl',
    'wfStepWhSaveAs', 'wfStepWhRetries', 'wfStepWhElseGoto',
    'wfStepWaitEvent', 'wfStepWaitValue', 'wfStepWaitTimeout', 'wfStepWaitTimeoutGoto',
+   'wfStepAiPrompt', 'wfStepAiSaveAs', 'wfStepAiFallback',
    'wfStepUntil', 'wfStepBranches']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('wfStepErr').style.display = 'none';
@@ -31211,6 +31221,7 @@ document.getElementById('wfStepType')?.addEventListener('change', function() {
   show('wfStepWebhookField', v === 'webhook');
   show('wfStepSplitField', v === 'split');
   show('wfStepWaitField', v === 'wait');
+  show('wfStepAiField', v === 'ai');
 });
 
 // «A 50 -> 3» — ветка A-деления: название, доля, шаг перехода.
@@ -31276,6 +31287,11 @@ async function submitWfAddStep() {
     Object.assign(payload, { action: val('wfStepAction'), value: val('wfStepActionVal') });
   } else if (type === 'invoice') {
     Object.assign(payload, { title: val('wfStepInvTitle'), text, amount: parseInt(val('wfStepInvAmount'), 10), currency: val('wfStepInvCurrency') });
+  } else if (type === 'ai') {
+    if (!val('wfStepAiPrompt')) return fail('Напишите, что должен сделать ИИ');
+    payload.text = val('wfStepAiPrompt');
+    if (val('wfStepAiSaveAs')) payload.save_as = val('wfStepAiSaveAs');
+    if (val('wfStepAiFallback')) payload.fallback = val('wfStepAiFallback');
   } else if (type === 'wait') {
     if (!val('wfStepWaitEvent')) return fail('Выберите событие');
     payload.event = val('wfStepWaitEvent');

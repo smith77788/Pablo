@@ -12,8 +12,8 @@
 // номера шагов с единицы, переход за конец — завершение, у «условия» без
 // «иначе» ветка «нет» заканчивает сценарий, у ожиданий без timeout_goto
 // «нет ответа» — тоже.
-const _WFM_ICON = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲', wait: '⏸' };
-const _WFM_NAME = { message: 'Сообщение', delay: 'Пауза', condition: 'Условие', action: 'Действие', webhook: 'Вебхук', ask: 'Вопрос', invoice: 'Счёт', split: 'A/B-деление', wait: 'Ждать события' };
+const _WFM_ICON = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐', ask: '❓', invoice: '💳', split: '🎲', wait: '⏸', ai: '🤖' };
+const _WFM_NAME = { message: 'Сообщение', delay: 'Пауза', condition: 'Условие', action: 'Действие', webhook: 'Вебхук', ask: 'Вопрос', invoice: 'Счёт', split: 'A/B-деление', wait: 'Ждать события', ai: 'Ответ ИИ' };
 
 // Переходы шага i (с нуля) в виде {from, to, label}; to — индекс шага или
 // 'end'. Чистая функция: её проверяет тест в Node.
