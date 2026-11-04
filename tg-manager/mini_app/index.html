@@ -2224,25 +2224,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec" data-section="overview">📊 Итоги</div>
     <div class="sec-desc" data-section="overview" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Результат за неделю, операции, аудитория и конкуренты.</div>
     <div class="mgmt-grid" data-section="overview">
-      <div class="mgmt-tile" onclick="openUnifiedDashboard()">
+      <!-- «Дашборд» и «Сводка» — вкладки одного модуля (SCREEN_MODULES.overview). -->
+      <div class="mgmt-tile" onclick="openOverview()">
         <div class="mgmt-tile-ico">📊</div>
         <div class="mgmt-tile-lbl">Дашборд</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openDashboard()">
-        <div class="mgmt-tile-ico">📊</div>
-        <div class="mgmt-tile-lbl">Сводка</div>
         <div class="mgmt-tile-val" id="m-dash-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openOps()">
         <div class="mgmt-tile-ico">⚙️</div>
         <div class="mgmt-tile-lbl">Операции</div>
         <div class="mgmt-tile-val" id="m-ops-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openDiag()">
-        <div class="mgmt-tile-ico">🩺</div>
-        <div class="mgmt-tile-lbl">Диагностика</div>
-        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openAudienceAnalytics()">
         <div class="mgmt-tile-ico">👥</div>
@@ -2574,15 +2565,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Проверка ограничений</div>
         <div class="mgmt-tile-val">каналы, чаты, боты</div>
       </div>
-      <div class="mgmt-tile" onclick="openHealth()">
+      <!-- Одно «Здоровье»: аккаунты, инфраструктура, диагностика (SCREEN_MODULES.health). -->
+      <div class="mgmt-tile" onclick="openHealthHub()">
         <div class="mgmt-tile-ico">❤️</div>
-        <div class="mgmt-tile-lbl">Дэшборд здоровья</div>
+        <div class="mgmt-tile-lbl">Здоровье</div>
         <div class="mgmt-tile-val" id="m-health-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openInfraHealth()">
-        <div class="mgmt-tile-ico">🏥</div>
-        <div class="mgmt-tile-lbl">Здоровье инфры</div>
-        <div class="mgmt-tile-val" id="m-ih-val"></div>
       </div>
     </div>
 
@@ -2876,7 +2863,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ INFRA HEALTH CENTER ══════════════════════ -->
 <div class="screen" id="s-infrahealth">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🏥 Здоровье инфры</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">❤️ Здоровье</div></div>
+  <div class="filter-chips mod-tabs" data-module="health" data-tab="infra" role="tablist" aria-label="Вкладки модуля «Здоровье»"></div>
   <div class="sub-sb">
     <div class="sec">Активные оповещения</div>
     <div class="lst" id="ihAlerts"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4434,9 +4422,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-dashboard">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">📊 Сводка</div>
+    <div class="hdr-title">📊 Дашборд</div>
     <div class="hdr-meta"><button class="btn btn-s" style="padding:7px 12px;font-size:13px" onclick="loadDashboard()">⟳ Обновить</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="overview" data-tab="days" role="tablist" aria-label="Вкладки модуля «Дашборд»"></div>
   <div class="sub-sb">
     <div id="dashKpi" class="kpi-row"></div>
     <div class="sec" style="margin-top:8px">По дням</div>
@@ -5080,8 +5069,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-diag">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🩺 Диагностика</div>
+    <div class="hdr-title">❤️ Здоровье</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="health" data-tab="diag" role="tablist" aria-label="Вкладки модуля «Здоровье»"></div>
   <div class="sub-sb">
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Проверка всей цепочки исполнения: доступы, аккаунты, очередь и живое подключение одного аккаунта (тот же путь, что у операций).</div>
     <button class="btn btn-p" id="diagBtn" onclick="runDiag()" style="width:100%;margin-bottom:10px">▶️ Запустить диагностику</button>
@@ -6325,8 +6315,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-health">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">❤️ Дэшборд здоровья</div>
+    <div class="hdr-title">❤️ Здоровье</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="health" data-tab="accounts" role="tablist" aria-label="Вкладки модуля «Здоровье»"></div>
   <div class="sub-sb">
     <div id="healthStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <!-- «(7 дней)» здесь было неправдой: за неделю считается только число в
@@ -9054,7 +9045,7 @@ const MODULE_KEYWORDS = {
   'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
   'Единая кампания': 'кампания единая всё сразу каналы чаты боты лс рассылка одним запуском campaign',
   'Рассылка по сети ботов':'рассылка всем подписчикам сеть ботов broadcast',
-  'Дэшборд здоровья':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс',
+  'Здоровье':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс дэшборд здоровья здоровье инфры инфраструктура диагностика связность оповещения',
   'Аккаунты':'сессия вход логин прокси ip номер телефон',
   'Массовые жалобы':'strike страйк жалоба репорт снос бан заблокировать report abuse удалить конкурента',
   'Массовый инвайт':'пригласить добавить участников инвайтинг invite',
@@ -9069,7 +9060,7 @@ const MODULE_KEYWORDS = {
   'Комплаенс':'проверка запрещёнка спам скам модерация compliance антиспам',
   'Поиск Telegram':'позиции позиция рейтинг топ поиска выдача ключевые слова seo сео оптимизация глобальный поиск найти канал группу бота человека telegram discover вывод в топ продвижение ranking keyword',
   'CRM':'контакты база сегменты клиенты воронка сделки',
-  'Дашборд':'аналитика метрики статистика сводка отчёт',
+  'Дашборд':'аналитика метрики статистика сводка отчёт по дням',
   'Аудитория+':'аналитика метрики статистика сегменты',
   'Звёзды':'stars монетизация оплата донат',
   'Спинтакс':'spintax синонимы варианты уникализация текста рандом',
@@ -9167,11 +9158,11 @@ const MODULE_DESCS = {
   'Общие папки':'Папки чатов Telegram со ссылкой-приглашением',
   'Комьюнити':'Ноды-сообщества: каналы и топики',
   'Приветствие':'Сценарий: первое сообщение новому подписчику',
-  'Дашборд':'Сводка: аккаунты, аудитория, операции, здоровье','Дашборд метрик':'Реалтайм-метрики: аудитория, рост, посты','Дэшборд здоровья':'Здоровье аккаунтов и риски бана',
+  'Дашборд':'Сводка: аккаунты, аудитория, операции, здоровье','Дашборд метрик':'Реалтайм-метрики: аудитория, рост, посты','Здоровье':'Аккаунты и риски бана, инфраструктура, диагностика',
   'Боты':'Ваши Telegram-боты: настройка, рассылки, статистика','Аккаунты':'Telegram-аккаунты (сессии): вход, статус, прокси/IP',
   'Каналы':'Ваши каналы и массовые действия по ним','Рассылки':'Массовые сообщения аудитории ботов','Рассылка':'Массовое сообщение аудитории бота',
   'Расписание':'Отложенные и повторяющиеся рассылки','A/B Тесты':'Сравнение вариантов рассылки по отклику',
-  'Операции':'Очередь и история массовых операций','Новые подписчики':'Свежие подписчики ваших ботов','Диагностика':'Проверка связности и здоровья',
+  'Операции':'Очередь и история массовых операций','Новые подписчики':'Свежие подписчики ваших ботов',
   'Прокси':'Свои SOCKS5/HTTP-прокси и IP-изоляция',
   'Фабрика':'Массовое создание ботов, каналов и групп','Создать ботов':'Массовое создание ботов',
   'Создать каналы':'Массовое создание каналов',
@@ -9196,7 +9187,7 @@ const MODULE_DESCS = {
   'Граф-хаб':'Пересечения аудиторий ваших каналов и ботов',
   'Ноды':'Форум-группы Telegram, через которые бот управляет вашими ресурсами',
   'Связки (бот+каналы)':'Бот и его каналы одним пакетом: создать и вести вместе',
-  'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и оповещения',
+  'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
@@ -9440,6 +9431,24 @@ const SCREEN_MODULES = {
       {key:'groups',   label:'👥 Группы', sid:'s-chanfactory', open: () => _cfTab(true)},
     ],
   },
+  // «Дашборд» и «Сводка» — оба «как дела»: живой срез и цифры по дням.
+  overview: {
+    title: '📊 Дашборд',
+    tabs: [
+      {key:'now',  label:'📊 Сейчас',  sid:'s-uni-dash',  open: () => openUnifiedDashboard()},
+      {key:'days', label:'📅 По дням', sid:'s-dashboard', open: () => openDashboard()},
+    ],
+  },
+  // «Дэшборд здоровья», «Здоровье инфры» и «Диагностика» лежали в двух
+  // разделах и отвечали на один вопрос: всё ли в порядке.
+  health: {
+    title: '❤️ Здоровье',
+    tabs: [
+      {key:'accounts', label:'📱 Аккаунты',       sid:'s-health',      open: () => openHealth()},
+      {key:'infra',    label:'🏥 Инфраструктура', sid:'s-infrahealth', open: () => openInfraHealth()},
+      {key:'diag',     label:'🩺 Диагностика',    sid:'s-diag',        open: () => openDiag()},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9468,6 +9477,8 @@ function _markModTab(mod, key) {
 
 function openSearchHub(tab) { modTab('search', tab || 'bots'); }
 function openFactory(tab) { modTab('factory', tab || 'bots'); }
+function openOverview(tab) { modTab('overview', tab || 'now'); }
+function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
 
 function _renderModuleTabs() {
   document.querySelectorAll('.mod-tabs[data-module]').forEach(el => {
@@ -25854,7 +25865,9 @@ async function openInfraHealth() {
         </div>`;
       }).join(''));
     }
-    document.getElementById('m-ih-val').textContent = alerts.length?`${alerts.length} ${plural(alerts.length,'оповещение','оповещения','оповещений')}`:'Всё в норме';
+    // Своей плитки у инфраструктуры больше нет (вкладка модуля «Здоровье»), а
+    // голый getElementById на снятой плитке ронял экран.
+    txt('m-ih-val', alerts.length?`${alerts.length} ${plural(alerts.length,'оповещение','оповещения','оповещений')}`:'Всё в норме');
     if (!recovery.length) {
       txt('ihRecovery', empty('🔄','Система ничего не чинила','Здесь появятся аккаунты и прокси, которые она починила сама'));
     } else {

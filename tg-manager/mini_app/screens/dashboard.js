@@ -28,6 +28,8 @@ function _udEnsureScreen() {
       '<div class="hdr-title">📊 Дашборд</div>' +
       '<div class="hdr-burger" onclick="_udReload()" title="Обновить">⟳</div>' +
     '</div>' +
+    // Полоска вкладок модуля «Дашборд» (SCREEN_MODULES.overview в index.html).
+    '<div class="filter-chips mod-tabs" data-module="overview" data-tab="now" role="tablist" aria-label="Вкладки модуля «Дашборд»"></div>' +
     '<div class="sb">' +
       '<div id="udTabs" style="display:flex;gap:6px;overflow-x:auto;padding:4px 0 10px;' +
         '-ms-overflow-style:none;scrollbar-width:none"></div>' +
@@ -35,6 +37,8 @@ function _udEnsureScreen() {
     '</div>';
   const anchor = document.getElementById('s-more') || document.body;
   anchor.parentNode.appendChild(el);
+  // Экран рождается после загрузки страницы: общий рендер вкладок его не видел.
+  if (typeof _renderModuleTabs === 'function') _renderModuleTabs();
   return el;
 }
 

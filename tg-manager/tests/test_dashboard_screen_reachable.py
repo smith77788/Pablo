@@ -48,7 +48,8 @@ def _js_func(name: str) -> str:
 
 def test_there_is_a_way_in():
     h = _html()
-    assert 'onclick="openDashboard()"' in h, "на сводку нельзя попасть ни с одного экрана"
+    # Сводка — вкладка «По дням» модуля «Дашборд» (SCREEN_MODULES.overview).
+    assert "open: () => openDashboard()" in h, "на сводку нельзя попасть ни с одного экрана"
     assert 'id="s-dashboard"' in h, "экрана сводки нет"
 
 

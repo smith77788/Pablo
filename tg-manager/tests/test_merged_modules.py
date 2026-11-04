@@ -72,3 +72,44 @@ def test_factory_is_one_module():
     assert "STACK[STACK.length - 1] !== 's-chanfactory'" in cf and "openChannelFactory(asGroup)" in cf
     assert "_markModTab('factory'" in _fn_body("openChannelFactory"), (
         "старый вход «создать группы» откроет экран с подсвеченной вкладкой «Каналы»")
+
+
+def _assert_module(mod: str, title: str, tile: str, tabs: dict[str, tuple[str, str]],
+                   gone: tuple[str, ...]) -> None:
+    """Одна плитка модуля, старые плитки сняты, каждая вкладка — живой экран
+    со своей open-функцией, общей шапкой и полоской вкладок."""
+    labels = _catalog_labels()
+    assert labels.count(tile) == 1, tile
+    for old in gone:
+        assert old not in labels and section_of_tile(old) is None, f"«{old}» вернулась"
+    reg = re.search(r"const SCREEN_MODULES = \{(.*?)\n\};", SRC, re.S).group(1)
+    block = reg[reg.index(f"  {mod}: {{"):]
+    block = block[:block.index("\n  },")]
+    assert f"title: '{title}'" in block
+    for key, (sid, fn) in tabs.items():
+        assert re.search(r"key:'" + key + r"'[^\n]*sid:'" + sid + r"'[^\n]*" + fn + r"\(", block), key
+        assert f"push('{sid}')" in _fn_body(fn), f"{fn}() больше не открывает {sid}"
+        if f'<div class="screen" id="{sid}">' in HTML:
+            head = HTML[HTML.index(f'<div class="screen" id="{sid}">'):][:1200]
+            assert f'<div class="hdr-title">{title}</div>' in head, sid
+            assert f'data-module="{mod}" data-tab="{key}"' in head, sid
+        else:  # экран, который собирает JS (s-uni-dash)
+            assert f'data-module="{mod}" data-tab="{key}"' in SRC, sid
+
+
+def test_dashboard_and_summary_are_one_module():
+    _assert_module("overview", "📊 Дашборд", "Дашборд",
+                   {"now": ("s-uni-dash", "openUnifiedDashboard"),
+                    "days": ("s-dashboard", "openDashboard")},
+                   gone=("Сводка",))
+    # Экран дашборда рождается после загрузки: без повторного рендера у него
+    # была бы пустая полоска вкладок.
+    assert "_renderModuleTabs()" in _fn_body("_udEnsureScreen")
+
+
+def test_health_is_one_module():
+    _assert_module("health", "❤️ Здоровье", "Здоровье",
+                   {"accounts": ("s-health", "openHealth"),
+                    "infra": ("s-infrahealth", "openInfraHealth"),
+                    "diag": ("s-diag", "openDiag")},
+                   gone=("Дэшборд здоровья", "Здоровье инфры", "Диагностика"))
