@@ -1033,6 +1033,24 @@ def setup_routes(app: web.Application, pool) -> None:
             return None, _err("Не найдено", 404)
         return (uid, op_id, row), None
 
+    async def _live_copy(op_id: int, uid: int) -> int | None:
+        """Идёт ли уже копия или повтор этой работы — тогда вторая копия ждёт.
+
+        Та же причина, что у повтора (operation_bus.retry_blocker): вторая
+        операция пошла бы ПАРАЛЛЕЛЬНО первой по тем же целям — два поста в
+        канал подряд, два одинаковых сообщения человеку. Типичный путь —
+        повторное нажатие «Запустить копию»: исходная операция от копии не
+        меняется, и кнопка остаётся на месте. Семья — повторы (retry_of_op)
+        плюс копии (cloned_from_op) этой операции.
+        """
+        family = await _obus.retry_family_ids(pool, op_id)
+        return await pool.fetchval(
+            "SELECT id FROM operation_queue "
+            " WHERE owner_id = $1 AND id <> $2 AND status = ANY($3::text[]) "
+            "   AND (id = ANY($4::bigint[]) OR params->>'cloned_from_op' = $5) "
+            " ORDER BY id DESC LIMIT 1",
+            uid, op_id, sorted(op_status.IN_FLIGHT), family, str(op_id))
+
     def _row_params(row) -> dict:
         try:
             p = row["params"] if isinstance(row["params"], dict) else _json.loads(row["params"] or "{}")
@@ -1062,6 +1080,11 @@ def setup_routes(app: web.Application, pool) -> None:
             can, why = True, ""
             if not op_status.is_terminal(row["status"]):
                 can, why = False, "Операция ещё идёт — копию можно запустить, когда она закончится"
+            else:
+                live = await _live_copy(op_id, uid)
+                if live:
+                    can, why = False, (f"Копия или повтор этой операции уже идёт (#{int(live)}) — "
+                                       "дождитесь итога, иначе вторая прошла бы те же цели параллельно")
             return _json_resp({"op_id": op_id, "op_type": row["op_type"],
                                "fields": fields, "context": context,
                                "editable_keys": sorted(editable_keys),
@@ -1091,12 +1114,19 @@ def setup_routes(app: web.Application, pool) -> None:
             uid, op_id, row = src
             if not op_status.is_terminal(row["status"]):
                 return _err("Операция ещё идёт — копию можно запустить, когда она закончится", 409)
+            live = await _live_copy(op_id, uid)
+            if live:
+                return _err(f"Копия или повтор этой операции уже идёт (#{int(live)}) — "
+                            "дождитесь итога, иначе вторая прошла бы те же цели параллельно", 409)
             from services import op_params_view as _opv
             try:
                 params = _opv.clone_params(row["op_type"], _row_params(row),
                                            (data or {}).get("changes"))
             except ValueError as exc:
                 return _err(str(exc), 400)
+            # Ссылка на источник — чтобы вторая копия видела, что первая ещё идёт.
+            # Журнал она НЕ связывает (это не retry_of_op): копия — полный прогон.
+            params["cloned_from_op"] = op_id
             label = (row["label"] or "").strip()
             label = (label[:80] + " · " if label else "") + f"копия #{op_id}"
             try:

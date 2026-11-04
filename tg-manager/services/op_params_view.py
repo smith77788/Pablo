@@ -25,7 +25,7 @@ _SECRET_PARTS = ("token", "session", "proxy", "password", "secret", "api_key", "
 _INTERNAL = frozenset({
     "owner_id", "source_op_id", "launched_bot_ids", "launched_bc_ids",
     "journal_op_ids", "approval_token", "channel_acc_pairs", "run_now",
-    "strike_chain", "retry_of", "scheduled_for",
+    "strike_chain", "retry_of", "scheduled_for", "cloned_from_op",
 })
 
 _TARGET_RU = {"all": "каналы и группы", "channels": "только каналы", "groups": "только группы"}
@@ -217,7 +217,7 @@ EDITABLE_KINDS = frozenset({"text", "num", "seconds", "bool"})
 CLONE_DROP = frozenset({
     "retry_of_op", "journal_op_ids", "launched_bot_ids", "launched_bc_ids",
     "broadcast_id", "recurring_next_op", "approval_token",
-    "repeat_interval_min", "repeat_count",
+    "repeat_interval_min", "repeat_count", "cloned_from_op",
 })
 
 _TEXT_LIMIT = 4096

@@ -90,11 +90,14 @@ def _run(body):
             await pool.execute("DELETE FROM operation_queue WHERE owner_id = ANY($1::bigint[])",
                                [OWNER, STRANGER])
             ids = {}
-            for name, st in (("done", "done"), ("running", "running")):
+            # Идущая операция — ПОСТОРОННЯЯ работа: без ссылки на предка,
+            # иначе она числилась бы повтором той же работы, что и «done».
+            _other = {k: v for k, v in _PARAMS.items() if k != "retry_of_op"}
+            for name, st, prm in (("done", "done", _PARAMS), ("running", "running", _other)):
                 ids[name] = await pool.fetchval(
                     "INSERT INTO operation_queue(owner_id, op_type, params, status, total_items, label)"
                     " VALUES($1,'mass_publish',$2::jsonb,$3,3,'Пост в каналы') RETURNING id",
-                    OWNER, json.dumps(_PARAMS), st)
+                    OWNER, json.dumps(prm), st)
             app = web.Application()
             M.setup_routes(app, pool)
             client = TestClient(TestServer(app))
@@ -162,6 +165,40 @@ def test_a_running_or_foreign_operation_is_not_cloned():
     assert foreign == 404 and foreign_ed == 404, "чужую операцию видно или можно скопировать"
     assert bad == 400
     assert n == 2, "что-то поставилось в очередь вопреки отказу"
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_a_second_copy_waits_for_the_first():
+    """Двойное нажатие «Запустить копию» не ставит две копии параллельно.
+
+    Та же защита, что у повтора (operation_bus.retry_blocker, коммит
+    «Повтор операции не запускает ту же работу дважды параллельно»): исходная
+    операция от копии не меняется, кнопка остаётся на месте, и вторая копия
+    пошла бы по тем же целям одновременно с первой.
+    """
+    async def body(client, pool, ids):
+        src = ids["done"]
+        first = await client.post(f"/api/miniapp/operation/{src}/clone",
+                                  json={"changes": {"text": "Первая копия"}})
+        first_id = (await first.json())["new_id"]
+        second = await client.post(f"/api/miniapp/operation/{src}/clone",
+                                   json={"changes": {"text": "Вторая копия"}})
+        ed = await (await client.get(f"/api/miniapp/operation/{src}/editable")).json()
+        link = await pool.fetchval(
+            "SELECT params->>'cloned_from_op' FROM operation_queue WHERE id=$1", first_id)
+        # Первая закончилась — копировать снова можно.
+        await pool.execute("UPDATE operation_queue SET status='done' WHERE id=$1", first_id)
+        third = await client.post(f"/api/miniapp/operation/{src}/clone",
+                                  json={"changes": {"text": "Третья копия"}})
+        return first.status, second.status, (await second.json()), ed, link, third.status, src
+
+    first, second, second_body, ed, link, third, src = _run(body)
+    assert first == 200
+    assert second == 409, "вторая копия пошла параллельно первой"
+    assert "уже идёт" in second_body.get("error", "") + second_body.get("message", "")
+    assert ed["can_clone"] is False and "уже идёт" in ed["why"]
+    assert link == str(src), "у копии нет ссылки на источник"
+    assert third == 200, "после итога первой копию снова запустить нельзя"
 
 
 def test_the_card_offers_it():
