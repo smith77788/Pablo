@@ -113,3 +113,26 @@ def test_health_is_one_module():
                     "infra": ("s-infrahealth", "openInfraHealth"),
                     "diag": ("s-diag", "openDiag")},
                    gone=("Дэшборд здоровья", "Здоровье инфры", "Диагностика"))
+
+
+def test_bot_network_is_one_module():
+    _assert_module("botnet", "🕸 Сеть ботов", "Сеть ботов",
+                   {"bots": ("s-network", "openNetwork"),
+                    "tasks": ("s-botmesh", "openBotMesh"),
+                    "packs": ("s-presencepacks", "openPresencePacks")},
+                   gone=("Задачи между ботами", "Связки (бот+каналы)"))
+
+
+def test_audience_analytics_is_one_module():
+    _assert_module("audience", "👥 Аналитика аудитории", "Аналитика аудитории",
+                   {"segments": ("s-audience-analytics", "openAudienceAnalytics"),
+                    "dna": ("s-dna", "openAudienceDna")},
+                   gone=("Аудитория+", "ДНК аудитории"))
+
+
+def test_shield_is_one_module():
+    _assert_module("shield", "🛡 Щит", "Щит",
+                   {"accounts": ("s-shield", "openShield"),
+                    "resources": ("s-shieldcheck", "openShieldCheck")},
+                   gone=("Проверка ограничений",))
+    assert "_renderModuleTabs()" in _fn_body("_shScreen")

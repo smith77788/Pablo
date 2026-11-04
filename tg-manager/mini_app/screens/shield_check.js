@@ -13,12 +13,16 @@ function _shScreen() {
   el.innerHTML =
     '<div class="hdr">' +
       '<div class="back" onclick="back()">←</div>' +
-      '<div class="hdr-title">🛡 Проверка ограничений</div>' +
+      '<div class="hdr-title">🛡 Щит</div>' +
     '</div>' +
+    // Полоска вкладок модуля «Щит» (SCREEN_MODULES.shield в index.html).
+    '<div class="filter-chips mod-tabs" data-module="shield" data-tab="resources" role="tablist" aria-label="Вкладки модуля «Щит»"></div>' +
     '<div class="sub-sb"><div id="s-shieldcheck-body">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);
+  // Экран рождается после загрузки страницы: общий рендер вкладок его не видел.
+  if (typeof _renderModuleTabs === 'function') _renderModuleTabs();
   return el;
 }
 

@@ -119,4 +119,5 @@ def test_both_screens_have_a_way_out():
 def test_entry_point_exists():
     """Экран, до которого нельзя дойти, — то же самое, что его нет."""
     h = _html()
-    assert 'onclick="openBotMesh()"' in h, "плитки, ведущей на экран задач, нет"
+    # Экран задач — вкладка модуля «Сеть ботов» (SCREEN_MODULES.botnet).
+    assert "open: () => openBotMesh()" in h, "вкладки, ведущей на экран задач, нет"

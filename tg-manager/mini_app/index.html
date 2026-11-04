@@ -2235,9 +2235,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Операции</div>
         <div class="mgmt-tile-val" id="m-ops-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openAudienceAnalytics()">
+      <!-- «Аудитория+» и «ДНК аудитории» — вкладки одного модуля (SCREEN_MODULES.audience). -->
+      <div class="mgmt-tile" onclick="openAudienceHub()">
         <div class="mgmt-tile-ico">👥</div>
-        <div class="mgmt-tile-lbl">Аудитория+</div>
+        <div class="mgmt-tile-lbl">Аналитика аудитории</div>
         <div class="mgmt-tile-val" id="m-audana-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openCompetitors()">
@@ -2270,11 +2271,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">📇</div>
         <div class="mgmt-tile-lbl">Контакты</div>
         <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openAudienceDna()">
-        <div class="mgmt-tile-ico">🔬</div>
-        <div class="mgmt-tile-lbl">ДНК аудитории</div>
-        <div class="mgmt-tile-val" id="m-dna-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openMassInvite()">
         <div class="mgmt-tile-ico">📨</div>
@@ -2390,20 +2386,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Фабрика</div>
         <div class="mgmt-tile-val" id="m-botfactory-val-2"></div>
       </div>
-      <div class="mgmt-tile" onclick="openNetwork()">
+      <!-- Одна «Сеть ботов»: боты, задачи между ними, связки с каналами (SCREEN_MODULES.botnet). -->
+      <div class="mgmt-tile" onclick="openBotNet()">
         <div class="mgmt-tile-ico">🕸</div>
         <div class="mgmt-tile-lbl">Сеть ботов</div>
         <div class="mgmt-tile-val" id="m-net-cnt"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openBotMesh()">
-        <div class="mgmt-tile-ico">🔗</div>
-        <div class="mgmt-tile-lbl">Задачи между ботами</div>
-        <div class="mgmt-tile-val" id="m-botmesh-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openPresencePacks()">
-        <div class="mgmt-tile-ico">🔗</div>
-        <div class="mgmt-tile-lbl">Связки (бот+каналы)</div>
-        <div class="mgmt-tile-val" id="m-pp-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openAssetTemplates()">
         <div class="mgmt-tile-ico">📐</div>
@@ -2552,15 +2539,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Прокси</div>
         <div class="mgmt-tile-val" id="m-proxy-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openShield()">
+      <!-- «Щит» и «Проверка ограничений» — вкладки одного модуля (SCREEN_MODULES.shield). -->
+      <div class="mgmt-tile" onclick="openShieldHub()">
         <div class="mgmt-tile-ico">🛡</div>
         <div class="mgmt-tile-lbl">Щит</div>
         <div class="mgmt-tile-val" id="m-shield-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openShieldCheck()">
-        <div class="mgmt-tile-ico">🕶</div>
-        <div class="mgmt-tile-lbl">Проверка ограничений</div>
-        <div class="mgmt-tile-val">каналы, чаты, боты</div>
       </div>
       <!-- Одно «Здоровье»: аккаунты, инфраструктура, диагностика (SCREEN_MODULES.health). -->
       <div class="mgmt-tile" onclick="openHealthHub()">
@@ -2953,9 +2936,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-presencepacks">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🔗 Связки (бот+каналы)</div>
+    <div class="hdr-title">🕸 Сеть ботов</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openPresencePackModal()">+ Создать</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="botnet" data-tab="packs" role="tablist" aria-label="Вкладки модуля «Сеть ботов»"></div>
   <div class="sub-sb">
     <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Объединяет ВАШИ существующие бота + каналы + группы в одну воронку: бот-админ, посевные посты, синхронная работа. Это <b>не</b> создание новых каналов.</div>
     <div style="display:flex;gap:8px;padding:0 0 10px">
@@ -4031,7 +4015,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ AUDIENCE DNA ══════════════════════ -->
 <div class="screen" id="s-dna">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🧬 ДНК аудитории</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">👥 Аналитика аудитории</div></div>
+  <div class="filter-chips mod-tabs" data-module="audience" data-tab="dna" role="tablist" aria-label="Вкладки модуля «Аналитика аудитории»"></div>
   <div class="sub-sb">
     <div class="sec">ДНК аудитории по ботам</div>
     <div class="lst" id="dnaList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -6124,12 +6109,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-botmesh">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🔗 Задачи между ботами</div>
+    <div class="hdr-title">🕸 Сеть ботов</div>
     <div class="hdr-meta">
       <span id="botmeshCount" style="font-size:12px;color:var(--hint)"></span>
       <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="meshNewTask()">+ Цепочка</button>
     </div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="botnet" data-tab="tasks" role="tablist" aria-label="Вкладки модуля «Сеть ботов»"></div>
   <div class="sub-sb">
     <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
       Цепочка вида «Продажи → Квалификация → CRM» — это одна задача, которую
@@ -6329,8 +6315,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-shield">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🛡 Щит аккаунтов</div>
+    <div class="hdr-title">🛡 Щит</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="shield" data-tab="accounts" role="tablist" aria-label="Вкладки модуля «Щит»"></div>
   <div class="sub-sb">
     <div id="shieldStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Конфигурация</div>
@@ -6362,6 +6349,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🕸 Сеть ботов</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="botnet" data-tab="bots" role="tablist" aria-label="Вкладки модуля «Сеть ботов»"></div>
   <div class="sub-sb">
     <div id="networkStats" class="kpi-row" style="padding:8px 16px 12px"></div>
     <div id="networkClusters"></div>
@@ -7959,8 +7947,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-audience-analytics">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">👥 Аудитория+ — анализ</div>
+    <div class="hdr-title">👥 Аналитика аудитории</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="audience" data-tab="segments" role="tablist" aria-label="Вкладки модуля «Аналитика аудитории»"></div>
   <div class="sub-sb">
     <div class="acc-kpi" id="audAnaKpi">
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-total">—</div><div class="acc-kpi-lbl">Всего</div></div>
@@ -9037,6 +9026,7 @@ function toggleLab() {
 // запросы «бан», «спам», «жалоба», «клон» не находили НИЧЕГО — при том что
 // модули есть (Дэшборд здоровья, Массовые жалобы, Клонер). Ключ — подпись плитки.
 const MODULE_KEYWORDS = {
+  'Сеть ботов':'задачи между ботами связки бот каналы пакет mesh рой кластер',
   'Сделки':'crm воронка продаж сделка лид этап сумма',
   'Семантическая память':'факты профиль собеседника память диалог',
   'Реферальная программа':'реферал приглашение код партнёрка',
@@ -9060,7 +9050,7 @@ const MODULE_KEYWORDS = {
   'Поиск Telegram':'позиции позиция рейтинг топ поиска выдача ключевые слова seo сео оптимизация глобальный поиск найти канал группу бота человека telegram discover вывод в топ продвижение ranking keyword',
   'CRM':'контакты база сегменты клиенты воронка сделки',
   'Дашборд':'аналитика метрики статистика сводка отчёт по дням',
-  'Аудитория+':'аналитика метрики статистика сегменты',
+  'Аналитика аудитории':'аналитика метрики статистика сегменты аудитория+ днк аудитории профиль инсайты активность по часам',
   'Звёзды':'stars монетизация оплата донат',
   'Спинтакс':'spintax синонимы варианты уникализация текста рандом',
   'Тариф':'подписка оплата биллинг лимиты платёж',
@@ -9151,7 +9141,7 @@ const MODULE_DESCS = {
   'Накрутка':'Просмотры, реакции, сторис, подписчики',
   'Восстановление':'Возврат аккаунтов после ограничений',
   'Облако':'Файлы кусками в приватных каналах аккаунтов',
-  'Щит':'Защита аккаунтов от типовых ошибок',
+  'Щит':'Защита аккаунтов от типовых ошибок и проверка ограничений каналов, чатов, ботов',
   'Нотариус':'Независимое заверение рекламных размещений',
   'Модель поведения':'Сводит переписку в стадии готовности к покупке',
   'Общие папки':'Папки чатов Telegram со ссылкой-приглашением',
@@ -9170,7 +9160,7 @@ const MODULE_DESCS = {
   'Поиск Telegram':'Позиции ботов и каналов, живая выдача, SEO и вывод в топ — в одном месте',
   'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов','Самопиар':'Автопродвижение ваших ресурсов',
   'CRM':'База контактов: сегменты, объединение','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
-  'Аудитория+':'Углублённая аналитика аудитории','ДНК аудитории':'Профиль/сегменты аудитории','Статистика':'Метрики аудитории и операций',
+  'Аналитика аудитории':'Сегменты, инсайты, активность и ДНК аудитории','Статистика':'Метрики аудитории и операций',
   'Сценарии':'Сценарии и авто-воронки: бот сам ведёт человека по шагам','Мультигео':'Гео-раскладка присутствия',
   'Гео-сеть: создать':'Новые каналы, группы и боты сразу по многим городам с местными названиями','Массовые жалобы':'Массовые жалобы по целям (снос ресурсов)','Комплаенс':'Проверка ресурсов на запрещёнку',
   'Прогрев':'Разогрев новых аккаунтов под живое поведение','Очистка':'Чистка аккаунтов: контакты, диалоги','Дубликаты':'Поиск дублей контактов','Конфликты':'Поиск конфликтов данных',
@@ -9180,12 +9170,11 @@ const MODULE_DESCS = {
   // Это разные вещи с разными данными; подпись говорит, что ИМЕННО внутри.
   'Экосистемы':'Свои группы аккаунтов, каналов и ботов с оценкой здоровья каждой группы',
   'Сетки':'Конструктор сети каналов и групп по шаблону: узлы, связи, развёртывание одной операцией',
-  'Сеть ботов':'Все ваши боты разом: роли, кластеры, рой',
+  'Сеть ботов':'Все ваши боты разом: роли, кластеры, рой, задачи между ботами, связки с каналами',
   'Топология':'Сводка: сколько аккаунтов, каналов и ботов и как они привязаны друг к другу',
   'Граф связей':'Кто с кем связан: аккаунты, каналы, боты',
   'Граф-хаб':'Пересечения аудиторий ваших каналов и ботов',
   'Ноды':'Форум-группы Telegram, через которые бот управляет вашими ресурсами',
-  'Связки (бот+каналы)':'Бот и его каналы одним пакетом: создать и вести вместе',
   'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
@@ -9457,6 +9446,35 @@ const SCREEN_MODULES = {
       {key:'funnels', label:'🔀 Авто-воронки', sid:'s-autofunnels', open: () => openAutoFunnels()},
     ],
   },
+  // «Сеть ботов», «Задачи между ботами» и «Связки (бот+каналы)» — всё про
+  // группу ботов как целое: кто в сети, что они делают друг для друга, с
+  // какими каналами связаны.
+  botnet: {
+    title: '🕸 Сеть ботов',
+    tabs: [
+      {key:'bots',  label:'🕸 Боты',   sid:'s-network',       open: () => openNetwork()},
+      {key:'tasks', label:'🔗 Задачи', sid:'s-botmesh',       open: () => openBotMesh()},
+      {key:'packs', label:'📦 Связки', sid:'s-presencepacks', open: () => openPresencePacks()},
+    ],
+  },
+  // «Аудитория+» (сегменты, инсайты, активность) и «ДНК аудитории» (профиль
+  // аудитории по ботам) — один отчёт об аудитории, лежали в двух разделах.
+  audience: {
+    title: '👥 Аналитика аудитории',
+    tabs: [
+      {key:'segments', label:'👥 Сегменты и активность', sid:'s-audience-analytics', open: () => openAudienceAnalytics()},
+      {key:'dna',      label:'🧬 ДНК аудитории',        sid:'s-dna',                open: () => openAudienceDna()},
+    ],
+  },
+  // «Щит» бережёт аккаунты, «Проверка ограничений» — свои каналы, чаты и
+  // ботов: одна защита от бана, две плитки.
+  shield: {
+    title: '🛡 Щит',
+    tabs: [
+      {key:'accounts',  label:'📱 Аккаунты',             sid:'s-shield',      open: () => openShield()},
+      {key:'resources', label:'🕶 Каналы, чаты, боты',   sid:'s-shieldcheck', open: () => openShieldCheck()},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9488,6 +9506,9 @@ function openFactory(tab) { modTab('factory', tab || 'bots'); }
 function openScenarios(tab) { modTab('scenarios', tab || 'all'); }
 function openOverview(tab) { modTab('overview', tab || 'now'); }
 function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
+function openAudienceHub(tab) { modTab('audience', tab || 'segments'); }
+function openShieldHub(tab) { modTab('shield', tab || 'accounts'); }
+function openBotNet(tab) { modTab('botnet', tab || 'bots'); }
 
 function _renderModuleTabs() {
   document.querySelectorAll('.mod-tabs[data-module]').forEach(el => {
@@ -26023,7 +26044,8 @@ async function openPresencePacks(keep) {
       </div>
     `).join('') + moreBtn(rows.length, ppTotal, 'openPresencePacksMore()'));
     // Плитка называет ВСЁ число пакетов, а не длину показанной страницы.
-    document.getElementById('m-pp-val').textContent = num(ppTotal)+' пакетов';
+    // Плитки «Связки» больше нет (вкладка «Сети ботов»): txt() не падает на снятой.
+    txt('m-pp-val', num(ppTotal)+' пакетов');
   } catch(e) { txt('ppList', empty('⚠️','Ошибка',errRu(e))); }
 }
 

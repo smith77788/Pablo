@@ -347,7 +347,8 @@ def test_ui_screen_wired():
     html = (root / "mini_app" / "index.html").read_text(encoding="utf-8")
     js = (root / "mini_app" / "screens" / "shield_check.js").read_text(encoding="utf-8")
     # точка входа (плитка «Безопасность») и подключение экрана
-    assert 'onclick="openShieldCheck()"' in html
+    # вкладка «Каналы, чаты, боты» модуля «Щит» (SCREEN_MODULES.shield)
+    assert "open: () => openShieldCheck()" in html
     assert 'src="screens/shield_check.js"' in html
     # экран зовёт наш API и переходит в детали операции
     assert "/api/miniapp/check_owned_restrictions" in js
