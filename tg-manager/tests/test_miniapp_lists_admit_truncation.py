@@ -34,7 +34,7 @@ HTML = os.path.join(ROOT, "mini_app", "index.html")
 # Списки, которые владелец наполняет сам: их легко перерасти, и обрыв на
 # первой странице читается как «больше ничего нет».
 OWNER_BUILT_LISTS = [
-    "new_users", "notary_list", "keywords", "chatlist_folders_list",
+    "new_users", "notary_list", "chatlist_folders_list",
     "competitors_list", "ai_memory_list", "asset_templates_list",
     "presence_packs_list", "narrative_campaigns_list",
     # История — тот же случай: «последние 30» выдавались за всю историю.
@@ -47,7 +47,7 @@ OWNER_BUILT_LISTS = [
 
 # Экранные функции, где кнопка «Показать ещё» обязана быть.
 SCREENS_WITH_MORE = [
-    "loadCompetitors", "loadKeywords", "openNewUsers", "openNotary",
+    "loadCompetitors", "openNewUsers", "openNotary",
     "openFolders", "openAiMemory", "loadAssetTpl", "openPresencePacks",
     "openNarrative",
     "loadParserRuns", "openRegCheck", "openCloneAdapt", "loadCfRecent",

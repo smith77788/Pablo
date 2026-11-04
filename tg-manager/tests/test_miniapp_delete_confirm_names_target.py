@@ -180,7 +180,7 @@ def test_consequence_notes_survive():
     expected = {
         "deleteTpl": "Его текст не восстановить.",
         "deleteComp": "Собранная по нему история пропадёт.",
-        "deleteKw": "История позиций по нему больше не собирается.",
+        "untrackRankingKeyword": "История замеров по нему удалится.",
         "deleteFolder": "Сама папка в Telegram останется.",
     }
     for name, note in expected.items():

@@ -1144,6 +1144,8 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
    14px и выглядел сломанным, а не «есть ещё, листайте». */
 .filter-chips{display:flex;flex-wrap:wrap;gap:6px;padding:4px 16px 6px}
 .filter-chips::-webkit-scrollbar{display:none}
+/* Вкладки модуля из нескольких экранов (SCREEN_MODULES): одной строкой с прокруткой, а не переносом. */
+.mod-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-top:2px;padding-bottom:8px}
 .chip{display:inline-flex;align-items:center;justify-content:center;min-height:34px;gap:4px;padding:7px 12px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
 /* Раскрываемая панель «Действия с аккаунтом»: явная стрелка-индикатор, чтобы
    свёрнутые кнопки не читались как «функции исчезли». */
@@ -2221,7 +2223,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 📊 Итоги — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="overview">📊 Итоги</div>
-    <div class="sec-desc" data-section="overview" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Результат за неделю, операции и позиции в поиске.</div>
+    <div class="sec-desc" data-section="overview" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Результат за неделю, операции, аудитория и конкуренты.</div>
     <div class="mgmt-grid" data-section="overview">
       <div class="mgmt-tile" onclick="openUnifiedDashboard()">
         <div class="mgmt-tile-ico">📊</div>
@@ -2247,21 +2249,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">👥</div>
         <div class="mgmt-tile-lbl">Аудитория+</div>
         <div class="mgmt-tile-val" id="m-audana-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openKeywordsScreen()">
-        <div class="mgmt-tile-ico">🔍</div>
-        <div class="mgmt-tile-lbl">Позиции</div>
-        <div class="mgmt-tile-val" id="kw-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openChannelRanks()">
-        <div class="mgmt-tile-ico">📈</div>
-        <div class="mgmt-tile-lbl">Позиции в поиске</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openRanking()">
-        <div class="mgmt-tile-ico">🏆</div>
-        <div class="mgmt-tile-lbl">Рейтинг</div>
-        <div class="mgmt-tile-val" id="m-ranking-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openCompetitors()">
         <div class="mgmt-tile-ico">📈</div>
@@ -2302,11 +2289,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="openMassInvite()">
         <div class="mgmt-tile-ico">📨</div>
         <div class="mgmt-tile-lbl">Массовый инвайт</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openGlobalSearch()">
-        <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Глобальный поиск</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openFolders()">
@@ -2396,7 +2378,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 📡 Каналы и боты — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="channels">📡 Каналы и боты</div>
-    <div class="sec-desc" data-section="channels" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Свои каналы, группы и боты: создать, оформить, продвинуть.</div>
+    <div class="sec-desc" data-section="channels" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Свои каналы, группы и боты: создать, оформить, продвинуть в поиске.</div>
     <div class="mgmt-grid" data-section="channels">
       <div class="mgmt-tile" onclick="goTab('bots')">
         <div class="mgmt-tile-ico">🤖</div>
@@ -2450,15 +2432,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Шаблоны ассетов</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openSeo()">
-        <div class="mgmt-tile-ico">🔍</div>
-        <div class="mgmt-tile-lbl">SEO</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openPromo()">
-        <div class="mgmt-tile-ico">🚀</div>
-        <div class="mgmt-tile-lbl">Топ поиска</div>
-        <div class="mgmt-tile-val" id="m-promo-val"></div>
+      <!-- Поиск Telegram — ОДИН модуль. Раньше это были шесть плиток в трёх
+           разделах: «Позиции» и «Рейтинг» читали одни и те же tracked_keywords,
+           «Позиции в поиске» — то же для каналов, плюс «Глобальный поиск»,
+           «SEO» и «Топ поиска». Теперь это вкладки одного экрана
+           (SCREEN_MODULES.search), а старые open-функции открывают свою вкладку. -->
+      <div class="mgmt-tile" onclick="openSearchHub()">
+        <div class="mgmt-tile-ico">🔎</div>
+        <div class="mgmt-tile-lbl">Поиск Telegram</div>
+        <div class="mgmt-tile-val" id="kw-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSelfPromo()">
         <div class="mgmt-tile-ico">📣</div>
@@ -3349,7 +3331,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ ПОЗИЦИИ В ПОИСКЕ ══════════════════════ -->
 <div class="screen" id="s-chranks">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📈 Позиции в поиске</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔎 Поиск Telegram</div></div>
+  <div class="filter-chips mod-tabs" data-module="search" data-tab="channels" role="tablist" aria-label="Вкладки модуля «Поиск Telegram»"></div>
   <div class="sub-sb">
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <div style="font-size:12px;color:var(--hint);line-height:1.45;margin-bottom:8px">
@@ -4036,7 +4019,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ GLOBAL SEARCH ══════════════════════ -->
 <div class="screen" id="s-gsearch">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🌐 Глобальный поиск</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔎 Поиск Telegram</div></div>
+  <div class="filter-chips mod-tabs" data-module="search" data-tab="serp" role="tablist" aria-label="Вкладки модуля «Поиск Telegram»"></div>
   <div class="sub-sb">
     <div class="sec">Поиск публичных каналов, групп, ботов и пользователей</div>
     <div style="display:flex;gap:8px;margin:8px 0">
@@ -4560,18 +4544,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title" id="aud-name">Аудитория</div>
   </div>
   <div class="sub-sb" id="aud-body"><div class="spin-wrap"><div class="spin"></div></div></div>
-</div>
-
-<!-- ══════════════════════ KEYWORDS ══════════════════════ -->
-<div class="screen" id="s-keywords">
-  <div class="hdr">
-    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🔍 Позиции в поиске</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openKwModal()">+ Добавить</button></div>
-  </div>
-  <div class="sub-sb">
-    <div class="lst" id="kwTrackList"><div class="spin-wrap"><div class="spin"></div></div></div>
-  </div>
 </div>
 
 <!-- ══════════════════════ BOT SCHEDULE ══════════════════════ -->
@@ -5248,8 +5220,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-seo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🔍 SEO-оптимизация</div>
+    <div class="hdr-title">🔎 Поиск Telegram</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="search" data-tab="seo" role="tablist" aria-label="Вкладки модуля «Поиск Telegram»"></div>
   <div class="sub-sb">
     <div class="row" onclick="openSeoObj()" style="cursor:pointer;background:var(--bg2);border-radius:12px;margin-bottom:8px">
       <div class="row-ico" style="background:var(--bg-purple-16)">🔎</div>
@@ -6679,8 +6652,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-promo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🚀 Продвижение в топ</div>
+    <div class="hdr-title">🔎 Поиск Telegram</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="search" data-tab="top" role="tablist" aria-label="Вкладки модуля «Поиск Telegram»"></div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
       Полный цикл вывода бота в топ Telegram Search: склад → созревание → накрутка → топ.
@@ -7068,23 +7042,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ MODAL: KEYWORD ══════════════════════ -->
-<div class="mbg" id="kwMbg" onclick="if(event.target===this)closeKwModal()">
-  <div class="modal">
-    <div class="modal-x" onclick="closeKwModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🔍 Добавить ключевое слово</div>
-    <div class="field">
-      <label>Бот</label>
-      <select id="kwBot"></select>
-    </div>
-    <div class="field">
-      <label>Ключевое слово</label>
-      <input type="text" id="kwText" maxlength="100" placeholder="Напр: telegram bot, автоответчик…">
-      <div class="field-note">По этому слову бот будет отслеживаться в поиске Telegram</div>
-    </div>
-    <div class="field-err" id="kwErr"></div>
-    <button class="btn btn-p" id="kwBtn" onclick="saveKw()" style="width:100%">🔍 Добавить</button>
-  </div>
-</div>
 
 <!-- ══════════════════════ MODAL: SCHEDULE ══════════════════════ -->
 <div class="mbg" id="schMbg" onclick="if(event.target===this)closeSchModal()">
@@ -7621,9 +7578,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-ranking">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🏆 Рейтинг — позиции</div>
+    <div class="hdr-title">🔎 Поиск Telegram</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openRankingAddModal()">+ Ключевое слово</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="search" data-tab="bots" role="tablist" aria-label="Вкладки модуля «Поиск Telegram»"></div>
   <div class="sub-sb">
     <div class="acc-kpi" id="rankingKpi">
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-total">—</div><div class="acc-kpi-lbl">Слов</div></div>
@@ -9144,9 +9102,8 @@ const MODULE_KEYWORDS = {
   'Фабрика каналов':'создать каналы массово',
   'Фабрика групп':'создать группы чаты массово',
   'Комплаенс':'проверка запрещёнка спам скам модерация compliance антиспам',
-  'SEO':'оптимизация поиск позиции топ выдача ключевые слова',
+  'Поиск Telegram':'позиции позиция рейтинг топ поиска выдача ключевые слова seo сео оптимизация глобальный поиск найти канал группу бота человека telegram discover вывод в топ продвижение ranking keyword',
   'CRM':'контакты база сегменты клиенты воронка сделки',
-  'Глобальный поиск':'найти канал группу бота человека поиск telegram discover',
   'Дашборд':'аналитика метрики статистика сводка отчёт',
   'Аудитория+':'аналитика метрики статистика сегменты',
   'Звёзды':'stars монетизация оплата донат',
@@ -9243,7 +9200,6 @@ const MODULE_DESCS = {
   'Нотариус':'Независимое заверение рекламных размещений',
   'Модель поведения':'Сводит переписку в стадии готовности к покупке',
   'Общие папки':'Папки чатов Telegram со ссылкой-приглашением',
-  'Позиции в поиске':'Отслеживание позиций по ключевым словам',
   'Комьюнити':'Ноды-сообщества: каналы и топики',
   'Приветствие':'Сценарий: первое сообщение новому подписчику',
   'Дашборд':'Сводка: аккаунты, аудитория, операции, здоровье','Дашборд метрик':'Реалтайм-метрики: аудитория, рост, посты','Дэшборд здоровья':'Здоровье аккаунтов и риски бана',
@@ -9256,7 +9212,7 @@ const MODULE_DESCS = {
   'Создать каналы':'Массовое создание каналов','Фабрика групп':'Массовое создание групп',
   'Массовая публикация':'Пост во все каналы/аккаунты разом','Массопубликация':'Пост во все каналы/аккаунты разом',
   'Массовый инвайт':'Приглашение пользователей в каналы/группы','Парсер':'Сбор аудитории из чатов и каналов',
-  'SEO':'Оптимизация под поиск Telegram','Позиции':'Отслеживание позиций в поиске','Топ поиска':'Позиции и вывод в топ поиска','Рейтинг':'Рейтинг ресурсов в поиске',
+  'Поиск Telegram':'Позиции ботов и каналов, живая выдача, SEO и вывод в топ — в одном месте',
   'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов','Самопиар':'Автопродвижение ваших ресурсов',
   'CRM':'База контактов: сегменты, объединение','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
   'Аудитория+':'Углублённая аналитика аудитории','ДНК аудитории':'Профиль/сегменты аудитории','Статистика':'Метрики аудитории и операций',
@@ -9279,7 +9235,6 @@ const MODULE_DESCS = {
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
-  'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
   'Воронка денег':'Охват → ответ → покупка по кампаниям, цена лида',
   'Когорты и LTV':'Сколько приносит привлечённый человек и какой источник доходнее',
@@ -9489,6 +9444,58 @@ function back() {
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
 }
+
+// ── Модули из нескольких экранов ───────────────────────────
+// Одна задача — один модуль. «Поиск Telegram» был шестью плитками в трёх
+// разделах («Позиции», «Рейтинг», «Позиции в поиске», «Глобальный поиск»,
+// «SEO», «Топ поиска»), причём «Позиции» и «Рейтинг» показывали одни и те же
+// tracked_keywords. Теперь экраны — вкладки одного модуля: у каждого сверху
+// одна и та же полоска вкладок, а переключение ЗАМЕНЯЕТ вкладку в стеке, а не
+// кладёт поверх, — «назад» выводит из модуля целиком, а не перебирает вкладки.
+// Старые open-функции живы и открывают свою вкладку: диплинки, кнопки карточки
+// бота и подсказки «что дальше» ведут туда же, куда вели.
+const SCREEN_MODULES = {
+  search: {
+    title: '🔎 Поиск Telegram',
+    tabs: [
+      {key:'bots',     label:'🤖 Позиции ботов',   sid:'s-ranking', open: () => openRanking()},
+      {key:'channels', label:'📡 Позиции каналов', sid:'s-chranks', open: () => openChannelRanks()},
+      {key:'serp',     label:'🌐 Выдача',          sid:'s-gsearch', open: () => openGlobalSearch()},
+      {key:'seo',      label:'✨ SEO',             sid:'s-seo',     open: () => openSeo()},
+      {key:'top',      label:'🚀 Вывод в топ',     sid:'s-promo',   open: () => openPromo()},
+    ],
+  },
+};
+
+function modTab(mod, key) {
+  const m = SCREEN_MODULES[mod];
+  const t = m && m.tabs.find(x => x.key === key);
+  if (!t) return;
+  const top = STACK[STACK.length - 1];
+  if (top === t.sid) return;
+  if (m.tabs.some(x => x.sid === top)) {
+    STACK.pop();
+    document.getElementById(top)?.classList.remove('show');
+  }
+  t.open();
+}
+
+function openSearchHub(tab) { modTab('search', tab || 'bots'); }
+
+function _renderModuleTabs() {
+  document.querySelectorAll('.mod-tabs[data-module]').forEach(el => {
+    const m = SCREEN_MODULES[el.dataset.module];
+    if (!m) return;
+    el.innerHTML = m.tabs.map(t => {
+      const on = t.key === el.dataset.tab;
+      return `<div class="chip${on ? ' on' : ''}" role="tab" tabindex="0" aria-selected="${on}"`
+        + ` onclick="modTab('${el.dataset.module}','${t.key}')"`
+        + ` onkeydown="if(event.key==='Enter')modTab('${el.dataset.module}','${t.key}')">${esc(t.label)}</div>`;
+    }).join('');
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _renderModuleTabs);
+else _renderModuleTabs();
 
 function showTabbar(v) { document.getElementById('tabbar').style.display = v?'flex':'none'; }
 
@@ -14364,90 +14371,6 @@ function buildAudience(d, botId, botName) {
     ${chartHtml}
     ${tagsHtml}
     <div style="height:16px"></div>`;
-}
-
-// ── Keywords ───────────────────────────────────────────
-function openKeywordsScreen() {
-  push('s-keywords');
-  txt('kwTrackList','<div class="spin-wrap"><div class="spin"></div></div>');
-  loadKeywords();
-}
-
-// Страницы по смещению — см. комментарий у loadCompetitors.
-let KWT_ROWS = [], KWT_OFFSET = 0;
-async function loadKeywords(more) {
-  KWT_OFFSET = more ? KWT_ROWS.length : 0;
-  try {
-    const d = await api('/api/miniapp/keywords?limit=50&offset='+KWT_OFFSET);
-    const page = listOf(d,'keywords');
-    KWT_ROWS = KWT_OFFSET ? KWT_ROWS.concat(page) : page;
-    const items = KWT_ROWS;
-    const total = totalOf(d, items);
-    if (!items.length) { txt('kwTrackList', empty('🔍','Нет отслеживаемых слов','Нажмите + Добавить')); return; }
-    txt('kwTrackList', items.map(k=>{
-      const pos = k.last_position;
-      const posStr = pos!=null?'#'+pos:'—';
-      const pc = pos!=null?(pos<=3?'b-gr':pos<=10?'b-bl':pos<=30?'b-or':'b-gy'):'b-gy';
-      const bot = k.bot_username?'@'+k.bot_username:'бот #'+k.bot_id;
-      const checked = k.last_checked ? ago(k.last_checked) : 'не проверено';
-      return `<div class="li">
-        <div class="ava ava-green">🔍</div>
-        <div class="li-body">
-          <div class="li-name">${esc(k.keyword)}</div>
-          <div class="li-sub">${esc(bot)} · ${checked}</div>
-        </div>
-        <div class="li-right">
-          <span class="badge ${pc}">${posStr}</span>
-          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить ключевое слово" onclick="deleteKw(${k.id}, this)">🗑</span>
-        </div>
-      </div>`;
-    }).join('') + moreBtn(items.length, total, 'loadKeywords(1)'));
-  } catch(e) {
-    txt('kwTrackList', errHtml(errRu(e),'loadKeywords()'));
-  }
-}
-
-async function deleteKw(id, _el) {
-  if (!await confirmDelete('Снять слово с отслеживания', _el, 'История позиций по нему больше не собирается.')) return;
-  try {
-    await api('/api/miniapp/keyword/'+id, {method:'DELETE'});
-    toast('✅ Удалено'); loadKeywords();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
-}
-
-function openKwModal() {
-  if (!BOTS.length) { toast('❗ Сначала загрузите боты'); return; }
-  document.getElementById('kwBot').innerHTML = BOTS.map(b=>{
-    const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-    return `<option value="${b.bot_id}">${esc(name)}</option>`;
-  }).join('');
-  document.getElementById('kwText').value='';
-  document.getElementById('kwErr').style.display='none';
-  document.getElementById('kwBtn').disabled=false;
-  document.getElementById('kwBtn').textContent='🔍 Добавить';
-  document.getElementById('kwMbg').classList.add('show');
-  tg.HapticFeedback?.impactOccurred('medium');
-}
-function closeKwModal() { document.getElementById('kwMbg').classList.remove('show'); }
-
-async function saveKw() {
-  const bot_id = document.getElementById('kwBot').value;
-  const keyword = document.getElementById('kwText').value.trim().toLowerCase();
-  const errEl = document.getElementById('kwErr');
-  errEl.style.display='none';
-  if (!keyword) { errEl.textContent='Введите ключевое слово'; errEl.style.display='block'; return; }
-  const btn = document.getElementById('kwBtn');
-  btn.disabled=true; btn.textContent='⏳ Добавление...';
-  try {
-    await api('/api/miniapp/keyword', {method:'POST', body: JSON.stringify({bot_id, keyword})});
-    closeKwModal();
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Ключевое слово добавлено');
-    loadKeywords();
-  } catch(e) {
-    errEl.textContent='Ошибка: '+errRu(e); errEl.style.display='block';
-    tg.HapticFeedback?.notificationOccurred('error');
-  } finally { btn.disabled=false; btn.textContent='🔍 Добавить'; }
 }
 
 // ── Account Warmup control ─────────────────────────────

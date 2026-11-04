@@ -22,7 +22,6 @@ DELETE /api/miniapp/ecosystem/{eco_id}
 DELETE /api/miniapp/experiment/{exp_id}
 DELETE /api/miniapp/funnel/step/{step_id}
 DELETE /api/miniapp/ghost/{profile_id}
-DELETE /api/miniapp/keyword/{kw_id}
 DELETE /api/miniapp/network/template/{template_id}
 DELETE /api/miniapp/networks/edges/{edge_id}
 DELETE /api/miniapp/networks/nodes/{node_id}
@@ -215,7 +214,6 @@ GET /api/miniapp/invite/reserve_options
 GET /api/miniapp/invite/retention
 GET /api/miniapp/invite/rights_check
 GET /api/miniapp/invite/segment_options
-GET /api/miniapp/keywords
 GET /api/miniapp/links
 GET /api/miniapp/mass_ops
 GET /api/miniapp/mass_publish/targets
@@ -537,7 +535,6 @@ HEAD /api/miniapp/invite/reserve_options
 HEAD /api/miniapp/invite/retention
 HEAD /api/miniapp/invite/rights_check
 HEAD /api/miniapp/invite/segment_options
-HEAD /api/miniapp/keywords
 HEAD /api/miniapp/links
 HEAD /api/miniapp/mass_ops
 HEAD /api/miniapp/mass_publish/targets
@@ -890,7 +887,6 @@ POST /api/miniapp/invite/grant_admin
 POST /api/miniapp/invite/join_all
 POST /api/miniapp/invite/parse_file
 POST /api/miniapp/invite/parse_list
-POST /api/miniapp/keyword
 POST /api/miniapp/links/create
 POST /api/miniapp/links/delete
 POST /api/miniapp/links/qr

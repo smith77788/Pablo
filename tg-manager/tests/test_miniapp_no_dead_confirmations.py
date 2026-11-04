@@ -93,7 +93,7 @@ def test_push_refuses_to_stack_the_same_screen_twice():
 def test_row_deletes_ask_first():
     """🗑 в строке списка не должен стирать объект с одного промаха пальцем."""
     src = miniapp_source()
-    for fn in ("deleteComp", "deleteKw", "deleteTpl", "deleteMeshTarget",
+    for fn in ("deleteComp", "untrackRankingKeyword", "deleteTpl", "deleteMeshTarget",
                "spDelProduct", "spDelFaq", "spDelExample", "spDelPromo",
                "spDelDelivery", "spDelete", "deleteAr"):
         m = re.search(r"(?:async )?function " + fn + r"\s*\([^)]*\)\s*\{", src)

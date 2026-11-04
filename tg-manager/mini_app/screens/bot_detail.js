@@ -92,7 +92,7 @@ function buildBotDetail(d) {
       {ico:'📊',lbl:'Статистика',     fn:`openBotStats(${bid},'${bnJs}')`},
       {ico:'👥',lbl:'Подписчики',     fn:`openBotSubs(${bid},'${bnJs}')`},
       {ico:'🔥',lbl:'Активность',     fn:`openEngagement(${bid})`},
-      {ico:'🔍',lbl:'Позиции',        fn:`openKeywordsScreen()`},
+      {ico:'🔍',lbl:'Позиции',        fn:`openRanking()`},
       {ico:'🧬',lbl:'ДНК аудит.',     fn:`openAudienceDna()`},
       {ico:'🧠',lbl:'ИИ Память',      fn:`openAiMemory()`},
     ]},

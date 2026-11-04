@@ -6206,77 +6206,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
 
-    # ── Keywords / Search Rankings ────────────────────────────────────────────
-
-    async def keywords(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        rows = await _safe_fetch(pool,
-            """SELECT tk.id, tk.keyword, mb.username AS bot_username, mb.bot_id,
-                      tk.is_active, tk.created_at,
-                      (SELECT sr.position FROM search_rankings sr
-                       WHERE sr.keyword_id=tk.id ORDER BY sr.checked_at DESC LIMIT 1) AS last_position,
-                      (SELECT sr.checked_at FROM search_rankings sr
-                       WHERE sr.keyword_id=tk.id ORDER BY sr.checked_at DESC LIMIT 1) AS last_checked
-               FROM tracked_keywords tk
-               JOIN managed_bots mb ON mb.bot_id=tk.bot_id
-               WHERE tk.owner_id=$1
-               ORDER BY tk.created_at DESC, tk.id DESC LIMIT $2 OFFSET $3""",
-            uid, _list_limit(request, 50, 1000), _list_offset(request))
-        total = await _safe_count(pool,
-            "SELECT COUNT(*) FROM tracked_keywords tk JOIN managed_bots mb "
-            "ON mb.bot_id=tk.bot_id WHERE tk.owner_id=$1", uid)
-        return _json_resp({"keywords": rows, "total": total})
-
-    async def add_keyword(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        bot_id = body.get("bot_id")
-        keyword = (body.get("keyword") or "").strip().lower()
-        if not bot_id or not keyword:
-            return _err("Нужны идентификатор бота и ключевое слово")
-        if len(keyword) > 100:
-            return _err("Ключевое слово слишком длинное")
-        try:
-            bot_id_int = int(bot_id)
-        except (TypeError, ValueError):
-            return _err("Неверный идентификатор бота")
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id_int, uid)
-        if not owns:
-            return _err("Бот не найден", 404)
-        try:
-            row = await pool.fetchrow(
-                """INSERT INTO tracked_keywords(bot_id, owner_id, keyword)
-                   VALUES($1,$2,$3) ON CONFLICT(bot_id, keyword) DO UPDATE SET is_active=true
-                   RETURNING id""",
-                bot_id_int, uid, keyword)
-            return _json_resp({"ok": True, "id": row["id"]})
-        except Exception:
-            log.exception("add_keyword uid=%d", uid)
-            return _err("Не удалось добавить ключевое слово", 500)
-
-    async def delete_keyword(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            kw_id = int(request.match_info["kw_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор ключевого слова", 400)
-        try:
-            await pool.execute(
-                "DELETE FROM tracked_keywords WHERE id=$1 AND owner_id=$2", kw_id, uid)
-            return _json_resp({"ok": True})
-        except Exception:
-            log.exception("delete_keyword")
-            return _err("Не удалось удалить", 500)
+    # «Позиции» (/keywords, /keyword) были вторым входом в те же
+    # tracked_keywords, что и «Рейтинг» (/ranking/*): экраны слиты в модуль
+    # «Поиск Telegram», и дубль-ручки сняты — слова ставит, показывает и снимает
+    # services/mini_app_ranking.py.
 
     # ── Account Warmup control ────────────────────────────────────────────────
 
@@ -7933,9 +7866,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # CRM
     # Audience
     # Keywords / Search Rankings
-    app.router.add_get("/api/miniapp/keywords", keywords)
-    app.router.add_post("/api/miniapp/keyword", add_keyword)
-    app.router.add_delete("/api/miniapp/keyword/{kw_id}", delete_keyword)
     # Account Warmup control
     # Schedules
     app.router.add_post("/api/miniapp/schedule/{sch_id}/cancel", cancel_schedule)

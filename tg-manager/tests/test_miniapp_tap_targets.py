@@ -82,8 +82,7 @@ def test_destructive_row_actions_say_what_they_do():
     html = miniapp_html()
     for fn, label in (("deleteProxy", "Удалить прокси"),
                       ("deleteAr", "Удалить авто-ответ"),
-                      ("deleteTpl", "Удалить шаблон"),
-                      ("deleteKw", "Удалить ключевое слово")):
+                      ("deleteTpl", "Удалить шаблон")):
         m = re.search(r'<span class="icon-btn sm danger"[^>]*onclick="' + fn + r'\(', html)
         assert m, f"{fn}: действие не переведено на .icon-btn sm danger"
         tag = html[m.start():m.start() + 260]
