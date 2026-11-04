@@ -2334,14 +2334,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">A/B Тесты</div>
         <div class="mgmt-tile-val" id="m-exp-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openAutoFunnels()">
-        <div class="mgmt-tile-ico">🔀</div>
-        <div class="mgmt-tile-lbl">Авто-воронки</div>
-        <div class="mgmt-tile-val" id="m-af-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openWorkflows()">
+      <!-- Одни «Сценарии» с вкладками Сценарии / Авто-воронки (SCREEN_MODULES.scenarios):
+           авто-воронки и так исполняются движком сценариев (schema_v283). -->
+      <div class="mgmt-tile" onclick="openScenarios()">
         <div class="mgmt-tile-ico">🔄</div>
-        <div class="mgmt-tile-lbl">Воркфлоу</div>
+        <div class="mgmt-tile-lbl">Сценарии</div>
         <div class="mgmt-tile-val" id="m-workflow-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openTemplates()">
@@ -4059,9 +4056,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-autofunnels">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🔀 Авто-воронки</div>
+    <div class="hdr-title">🔄 Сценарии</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAutofunnelModal()">+ Создать</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="scenarios" data-tab="funnels" role="tablist" aria-label="Вкладки модуля «Сценарии»"></div>
   <div class="sub-sb">
     <div class="sec">Цепочки сообщений</div>
     <div class="lst" id="afList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -7718,9 +7716,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-workflows">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🔄 Воркфлоу</div>
+    <div class="hdr-title">🔄 Сценарии</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWorkflowCreateModal()">+ Создать</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="scenarios" data-tab="all" role="tablist" aria-label="Вкладки модуля «Сценарии»"></div>
   <div class="sub-sb">
     <div class="acc-kpi" id="wfKpi">
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-total">—</div><div class="acc-kpi-lbl">Всего</div></div>
@@ -9172,7 +9171,7 @@ const MODULE_DESCS = {
   'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов','Самопиар':'Автопродвижение ваших ресурсов',
   'CRM':'База контактов: сегменты, объединение','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
   'Аудитория+':'Углублённая аналитика аудитории','ДНК аудитории':'Профиль/сегменты аудитории','Статистика':'Метрики аудитории и операций',
-  'Авто-воронки':'Автоматические сценарии-воронки','Воркфлоу':'Конструктор сценариев автоматизации','Мультигео':'Гео-раскладка присутствия',
+  'Сценарии':'Сценарии и авто-воронки: бот сам ведёт человека по шагам','Мультигео':'Гео-раскладка присутствия',
   'Гео-сеть: создать':'Новые каналы, группы и боты сразу по многим городам с местными названиями','Массовые жалобы':'Массовые жалобы по целям (снос ресурсов)','Комплаенс':'Проверка ресурсов на запрещёнку',
   'Прогрев':'Разогрев новых аккаунтов под живое поведение','Очистка':'Чистка аккаунтов: контакты, диалоги','Дубликаты':'Поиск дублей контактов','Конфликты':'Поиск конфликтов данных',
   'Синхронизация':'Синхронизация контактов и данных','Клонер контента':'Копирование постов из источника','Клон и адаптация':'Клон профиля/контента с адаптацией','Сеть контента':'Автоматический репост постов между вашими каналами',
@@ -9449,6 +9448,15 @@ const SCREEN_MODULES = {
       {key:'diag',     label:'🩺 Диагностика',    sid:'s-diag',        open: () => openDiag()},
     ],
   },
+  // «Авто-воронки» и «Воркфлоу» были двумя плитками, а воронка — тот же
+  // сценарий движка (schema_v283, legacy_funnels): один модуль, две вкладки.
+  scenarios: {
+    title: '🔄 Сценарии',
+    tabs: [
+      {key:'all',     label:'🔄 Сценарии',     sid:'s-workflows',   open: () => openWorkflows()},
+      {key:'funnels', label:'🔀 Авто-воронки', sid:'s-autofunnels', open: () => openAutoFunnels()},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9477,6 +9485,7 @@ function _markModTab(mod, key) {
 
 function openSearchHub(tab) { modTab('search', tab || 'bots'); }
 function openFactory(tab) { modTab('factory', tab || 'bots'); }
+function openScenarios(tab) { modTab('scenarios', tab || 'all'); }
 function openOverview(tab) { modTab('overview', tab || 'now'); }
 function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
 
@@ -28790,6 +28799,7 @@ async function submitFindContact(){
 // ── Auto Funnels ───────────────────────────────────────
 async function openAutoFunnels() {
   push('s-autofunnels');
+  _markModTab('scenarios', 'funnels');
   txt('afList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/auto_funnels');
@@ -30754,6 +30764,7 @@ let _currentWfId = null;
 
 async function openWorkflows() {
   push('s-workflows');
+  _markModTab('scenarios', 'all');
   loadWorkflows();
 }
 

@@ -173,7 +173,7 @@ def test_the_screen_says_how_a_workflow_starts():
     говорить обратное — что сценарий запускается по событию и его можно
     проверить тестовым запуском."""
     html = INDEX.read_text("utf-8")
-    i = html.index('<div class="hdr-title">🔄 Воркфлоу</div>')
+    i = html.index('<div class="hdr-title">🔄 Сценарии</div>', html.index('id="s-workflows"'))
     head = html[i:html.index('<div class="sec">Шаблоны воркфлоу</div>', i)]
     assert "пока не выполняется" not in head, "экран снова отрицает исполнение"
     assert "Тестовый запуск" in head and "запускается" in head

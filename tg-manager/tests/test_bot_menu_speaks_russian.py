@@ -124,7 +124,11 @@ def test_bot_and_miniapp_call_modules_the_same():
     bot_text = "\n".join(
         p.read_text(encoding="utf-8") for p in sorted(BOT.rglob("*.py"))
     )
-    missing_miniapp = [n for n in SAME_NAME if f">{n}</div>" not in MINIAPP]
+    # Плитка каталога или вкладка модуля (SCREEN_MODULES): «Авто-воронки»
+    # теперь вкладка модуля «Сценарии», а не отдельная плитка.
+    missing_miniapp = [n for n in SAME_NAME
+                       if f">{n}</div>" not in MINIAPP
+                       and not re.search(r"label:'[^']*" + re.escape(n) + "'", MINIAPP)]
     assert not missing_miniapp, (
         "нет такой плитки в каталоге мини-аппа (переименовали?): "
         + ", ".join(missing_miniapp)
