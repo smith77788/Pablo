@@ -15,7 +15,8 @@
      посреди отправки, повторит её после аренды. Получатель отличает повтор
      по заголовку X-Infragram-Event-Id — он одинаков у всех попыток.
   4. Неудача — повтор с растущей паузой (1 мин … 12 ч), восемь попыток. Подряд
-     50 неудач или ответ 410 Gone — получатель выключается с причиной, которую
+     50 неудач (не чаще одной в минуту: пачка доставок, упавших в одну минуту
+     сбоя, — одна неудача) или ответ 410 Gone — получатель выключается с причиной, которую
      владелец видит на экране «Интеграции».
 
 ПОДПИСЬ. `X-Infragram-Signature: t=<unix>,v1=<hex>` где
@@ -82,6 +83,8 @@ MAX_ATTEMPTS = 8
 # Пауза перед попыткой N+1 после неудачной попытки N (секунды).
 _BACKOFF_S = (60, 300, 900, 3600, 3 * 3600, 6 * 3600, 12 * 3600)
 DISABLE_AFTER_FAILURES = 50
+# Неудачи одного получателя в пределах этого окна — одна неудача серии.
+_FAILURE_WINDOW_S = 60
 # Аренда строки на время отправки: дольше таймаута запроса с запасом.
 _LEASE_S = 120
 _HTTP_TIMEOUT_S = 10
@@ -531,18 +534,31 @@ async def _record(pool, item: dict, ok: bool, code: int | None, err: str) -> Non
         did, "failed" if final else "pending", code, (err or "")[:500],
         float(backoff_seconds(attempts)))
     gone = code == 410
+    # Серия считается не по строкам, а по минутам: в очереди бывает полсотни
+    # событий, и одна минута недоступности получателя (деплой, перезапуск)
+    # роняла их все разом — 50 «неудач подряд», получатель выключен навсегда,
+    # а все его ожидающие доставки уходят в 'skipped'. Неудача в ту же минуту,
+    # что и предыдущая (без успеха между ними), серию не удлиняет.
     await pool.execute(
-        """UPDATE webhook_endpoints
-           SET consecutive_failures = consecutive_failures + 1,
-               last_failure_at = now(), last_error = $2,
-               is_active = CASE WHEN $3 OR consecutive_failures + 1 >= $4
-                                THEN FALSE ELSE is_active END,
-               disabled_reason = CASE
-                   WHEN $3 THEN 'Получатель ответил 410 Gone — адрес больше не принимает события'
-                   WHEN consecutive_failures + 1 >= $4
-                       THEN 'Выключен после ' || $4::text || ' неудачных доставок подряд'
-                   ELSE disabled_reason END
-           WHERE id=$1""",
+        f"""WITH e AS (
+                SELECT id, consecutive_failures + CASE
+                         WHEN last_failure_at IS NULL
+                           OR last_failure_at < now() - make_interval(secs => {_FAILURE_WINDOW_S})
+                           OR (last_success_at IS NOT NULL AND last_success_at >= last_failure_at)
+                         THEN 1 ELSE 0 END AS streak
+                FROM webhook_endpoints WHERE id=$1 FOR UPDATE
+            )
+            UPDATE webhook_endpoints w
+            SET consecutive_failures = e.streak,
+                last_failure_at = now(), last_error = $2,
+                is_active = CASE WHEN $3 OR e.streak >= $4
+                                 THEN FALSE ELSE w.is_active END,
+                disabled_reason = CASE
+                    WHEN $3 THEN 'Получатель ответил 410 Gone — адрес больше не принимает события'
+                    WHEN e.streak >= $4
+                        THEN 'Выключен после ' || $4::text || ' неудачных доставок подряд'
+                    ELSE w.disabled_reason END
+            FROM e WHERE w.id = e.id""",
         ep_id, (err or "")[:500], gone, DISABLE_AFTER_FAILURES)
 
 

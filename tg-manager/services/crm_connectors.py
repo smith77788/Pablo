@@ -880,7 +880,15 @@ async def deliver_group(pool, http, items: list[dict]) -> tuple[list, list[dict]
         if _time.monotonic() - started > _GROUP_BUDGET_S:
             left.append(it)
             continue
-        res = await deliver(pool, http, it["endpoint"], it["event"], it["payload"])
+        try:
+            res = await deliver(pool, http, it["endpoint"], it["event"], it["payload"])
+        except Exception as e:
+            # Сбой одной доставки (база, неожиданный ответ) не роняет пачку:
+            # иначе уже доставленные в этой пачке строки остаются без итога,
+            # после аренды уходят в CRM повторно — вторые заметки и сделки.
+            log.warning("crm deliver: событие %s подключения %s упало", it.get("event_id"),
+                        it.get("endpoint_id"), exc_info=True)
+            res = (False, None, f"внутренняя ошибка: {type(e).__name__}")
         done.append((it, res))
     return done, left
 

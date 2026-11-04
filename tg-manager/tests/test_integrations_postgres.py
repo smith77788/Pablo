@@ -199,7 +199,8 @@ def test_failure_backs_off_then_endpoint_is_disabled(pool):
     assert e["consecutive_failures"] == 1 and e["is_active"] and "500" in e["last_error"]
 
     # серия неудач выключает получателя с понятной причиной
-    _run(pool.execute("UPDATE webhook_endpoints SET consecutive_failures=$2 WHERE id=$1",
+    _run(pool.execute("UPDATE webhook_endpoints SET consecutive_failures=$2, "
+                      "last_failure_at=now()-interval '2 minutes' WHERE id=$1",
                       ep["id"], wh.DISABLE_AFTER_FAILURES - 1))
     _run(pool.execute("UPDATE webhook_deliveries SET next_attempt_at=now() WHERE endpoint_id=$1", ep["id"]))
     _run(wh.deliver_due(pool, _Http(502)))
@@ -315,3 +316,29 @@ def test_automation_events_reach_subscribed_endpoints_only(pool):
     _run(wh.fan_out(pool))
     assert _run(pool.fetchval(
         "SELECT COUNT(*) FROM webhook_deliveries WHERE endpoint_id=$1", ep["id"])) == 1
+
+
+def test_one_minute_outage_with_a_backlog_does_not_disable_the_endpoint(pool):
+    """В очереди больше событий, чем DISABLE_AFTER_FAILURES, и получатель
+    минуту недоступен: раньше каждая упавшая строка удлиняла серию, получатель
+    выключался навсегда, а все его доставки уходили в 'skipped'."""
+    from services import webhooks as wh
+    ep = _run(_endpoint(pool))
+    n = wh.DISABLE_AFTER_FAILURES + 5
+    for i in range(n):
+        _run(wh.emit(pool, OWNER, "webhook.test", {"n": i}))
+    _run(wh.fan_out(pool))
+    while _run(wh.deliver_due(pool, _Http(503))):
+        pass
+    e = _run(wh.get_endpoint(pool, OWNER, ep["id"]))
+    assert e["is_active"], f"минута сбоя выключила получателя: {e['disabled_reason']}"
+    assert e["consecutive_failures"] == 1
+    # Сбой прошёл — очередь доходит целиком.
+    _run(pool.execute("UPDATE webhook_deliveries SET next_attempt_at=now() "
+                      "WHERE endpoint_id=$1", ep["id"]))
+    while _run(wh.deliver_due(pool, _Http(200))):
+        pass
+    left = _run(pool.fetchval(
+        "SELECT COUNT(*) FROM webhook_deliveries WHERE endpoint_id=$1 "
+        "AND status <> 'delivered'", ep["id"]))
+    assert left == 0, f"не доставлено после сбоя: {left}"
