@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 
 from aiohttp import web
@@ -79,8 +78,10 @@ def test_window_max_resets_each_minute():
 
 
 def test_middleware_is_outermost_in_miniapp_and_metrics_described():
-    from services import mini_app_api
-    src = inspect.getsource(mini_app_api.setup_routes)
+    # Источник — общий для API-слоя (tests.miniapp_source), а не путь
+    # монолита: регистрация middleware переживёт вынос в другой модуль.
+    from tests.miniapp_source import api_source
+    src = api_source()
     i_metrics = src.index("_http_metrics.make_middleware()")
     i_timeout = src.index("make_request_timeout_middleware(request_timeout_seconds())")
     assert i_metrics < i_timeout, "метрики должны видеть и 504 по потолку времени"
