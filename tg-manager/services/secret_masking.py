@@ -178,8 +178,19 @@ _SECRET_QUERY_KEYS = frozenset({
 })
 
 
+# Адреса, где секрет — сам кусок пути: входящие вебхуки сценариев и CRM.
+# Токен в адресе — единственная защита этих точек, в журнале его быть не должно.
+_SECRET_PATH_RE = re.compile(r"^(/webhook/(?:scenario|crm)/)[^/?]+")
+
+
+def redact_path(path: str) -> str:
+    """`/webhook/scenario/abc` → `/webhook/scenario/***`."""
+    return _SECRET_PATH_RE.sub(lambda m: m.group(1) + _MASK, path)
+
+
 def redact_query(path_qs: str) -> str:
-    """`/a?token=x&page=2` → `/a?token=***&page=2`."""
+    """`/a?token=x&page=2` → `/a?token=***&page=2`; секрет в пути — тоже «***»."""
+    path_qs = redact_path(path_qs)
     if "?" not in path_qs:
         return path_qs
     path, _, qs = path_qs.partition("?")

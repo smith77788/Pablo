@@ -61,3 +61,30 @@ def test_no_url_gets_the_session_token_as_a_param():
                       for p in (ROOT / "mini_app" / "screens").glob("*.js"))
     hits = re.findall(r"""\.set\(\s*['"]token['"]\s*,\s*TK\s*\)""", ui + screens)
     assert not hits, f"токен сессии снова уходит в адрес: {hits[:3]}"
+
+
+def test_inbound_webhook_token_in_path_is_masked():
+    """Входящие вебхуки сценариев и CRM: токен — часть пути, а не параметр.
+
+    Он единственный пропуск в эти точки, но aiohttp писал путь целиком, так
+    что любой, кто читает журнал сервера, запускал сценарии чужого владельца.
+    """
+    lines: list[str] = []
+
+    class _L:
+        def info(self, fmt, *args):
+            lines.append(fmt % args)
+
+    class _Resp:
+        status = 200
+        body_length = 2
+
+    for prefix in ("/webhook/scenario/", "/webhook/crm/"):
+        lines.clear()
+        secret = "Zx9_secretTokenValue-0123456789abcd"
+        RedactingAccessLogger(_L(), "").log(
+            make_mocked_request("POST", f"{prefix}{secret}?src=site"),
+            _Resp(), 0.01)
+        assert lines and secret not in lines[0], lines
+        assert prefix in lines[0] and "src=site" in lines[0]
+    assert redact_query("/webhook/deploy") == "/webhook/deploy"
