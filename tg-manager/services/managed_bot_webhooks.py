@@ -31,6 +31,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
@@ -48,6 +49,10 @@ _RETRY_AFTER = timedelta(hours=6)
 # Ошибка доставки свежее этого и непустая очередь — вебхук не работает.
 _ERROR_FRESH = timedelta(minutes=10)
 _SYNC_BATCH = 200
+# Секрет вебхука — sha256 hex (_make_secret): другой формы он не бывает.
+_SECRET_SHAPE = re.compile(r"^[0-9a-f]{64}$")
+# Промахов секрета с одного адреса за минуту, после которых — 429 без базы.
+_HOOK_FAIL_MAX = 20
 
 # Обновления одного бота разбираются строго по одному: опрос делал так же,
 # а оффсет — один на бота. Живёт в процессе, который принимает HTTP.
@@ -242,17 +247,27 @@ def make_webhook_route(pool: asyncpg.Pool, http_getter=None, main_bot=None):
             bot_id = int(request.match_info.get("bot_id", ""))
         except (TypeError, ValueError):
             return _web.Response(status=404, text="not found")
+        # Адрес открыт всему интернету, а проверка секрета стоит запроса в базу
+        # и расшифровки токена. Без заголовка нужного вида (наш секрет — 64
+        # hex) отказываем сразу; частые промахи с одного адреса — 429 без базы.
+        got = request.headers.get(_SECRET_HEADER, "")
+        if not _SECRET_SHAPE.match(got):
+            return _web.Response(status=401, text="unauthorized")
+        from services.security import _client_ip, _rate_limiter
+        fail_key = f"tghook-fail:{_client_ip(request)}"
+        if _rate_limiter.get_count(fail_key, 60) >= _HOOK_FAIL_MAX:
+            return _web.Response(status=429, text="too many requests")
         from services.token_vault import decrypt_token
         row = await pool.fetchrow(
             "SELECT token FROM managed_bots WHERE bot_id=$1 AND is_active", bot_id)
         if not row:
             return _web.Response(status=404, text="not found")
         token = decrypt_token(row["token"] or "")
-        got = request.headers.get(_SECRET_HEADER, "")
         # Сравнение байтами: compare_digest на строке с не-ASCII символами
         # бросает TypeError, и чужой заголовок давал бы 500 вместо 401.
         if not got or not hmac.compare_digest(
                 got.encode("utf-8", "replace"), _make_secret(token).encode()):
+            await _rate_limiter.check(fail_key, 10 ** 9, 60)   # учёт промаха
             return _web.Response(status=401, text="unauthorized")
         try:
             update = _json.loads(await request.read())

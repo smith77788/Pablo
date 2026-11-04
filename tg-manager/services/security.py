@@ -97,6 +97,11 @@ class _RateLimiter:
             self._requests[key] = kept
             return True
 
+    def get_count(self, key: str, window: int) -> int:
+        """Сколько отметок у ключа в окне (без записи новой)."""
+        cutoff = time.time() - window
+        return sum(1 for t in self._requests.get(key, ()) if t > cutoff)
+
     def get_retry_after(self, key: str, window: int) -> int:
         """Return seconds until the oldest request in window expires."""
         reqs = self._requests.get(key, [])
