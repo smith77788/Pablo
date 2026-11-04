@@ -258,6 +258,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "       wd.trigger_type, wd.trigger_value, "
             "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
             "       wd.goal_type, wd.goal_value, wd.legacy_kind, wd.send_window, "
+            "       wd.max_per_day, "
             "       b.username AS bot_username "
             "  FROM workflow_definitions wd "
             "  LEFT JOIN managed_bots b ON b.bot_id = wd.bot_id "
@@ -292,6 +293,7 @@ def setup_routes(app: web.Application, pool) -> None:
                            "goal_type": row.get("goal_type") or "",
                            "goal_value": row.get("goal_value") or "",
                            "send_window": row.get("send_window") or "",
+                           "max_per_day": row.get("max_per_day") or 0,
                            "legacy_kind": row.get("legacy_kind") or "",
                            "legacy_note": (_lf.guard_message(row["legacy_kind"])
                                            if row.get("legacy_kind") else ""),
@@ -490,11 +492,15 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             stored = await _wf.set_send_window(pool, uid, wid,
                                                str(body.get("send_window") or "")[:20])
+            cap = None
+            if "max_per_day" in body:
+                cap = await _wf.set_max_per_day(pool, uid, wid, body.get("max_per_day"))
         except LookupError:
             return _err("Воркфлоу не найден", 404)
         except ValueError as e:
             return _err(str(e), 400)
-        return _json_resp({"ok": True, "send_window": stored or ""})
+        return _json_resp({"ok": True, "send_window": stored or "",
+                           "max_per_day": cap or 0})
 
     async def workflow_export(request: web.Request) -> web.Response:
         """Выгрузка сценария JSON: GET /workflows/{wf_id}/export."""

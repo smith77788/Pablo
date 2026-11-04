@@ -274,7 +274,8 @@ async def copy_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     ValueError — с русским текстом для владельца."""
     src = await pool.fetchrow(
         """SELECT name, description, steps, bot_id, trigger_type, trigger_value,
-                  allow_reentry, goal_type, goal_value, legacy_kind, send_window
+                  allow_reentry, goal_type, goal_value, legacy_kind, send_window,
+                  max_per_day
              FROM workflow_definitions WHERE id=$1 AND owner_id=$2""",
         workflow_id, owner_id)
     if not src:
@@ -298,11 +299,11 @@ async def copy_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     await pool.execute(
         """UPDATE workflow_definitions
               SET trigger_type=$2, trigger_value=$3, allow_reentry=$4,
-                  goal_type=$5, goal_value=$6, send_window=$7
+                  goal_type=$5, goal_value=$6, send_window=$7, max_per_day=$8
             WHERE id=$1""",
         res["id"], ttype, src["trigger_value"] if ttype else None,
         bool(src["allow_reentry"]), src["goal_type"], src["goal_value"],
-        src["send_window"])
+        src["send_window"], src["max_per_day"])
     return {"ok": True, "id": res["id"], "name": new_name, "steps": len(steps),
             "bot_id": target_bot}
 
@@ -321,7 +322,8 @@ async def export_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int) -
     """Сценарий владельца как переносимый JSON. LookupError — нет такого."""
     src = await pool.fetchrow(
         """SELECT name, description, steps, trigger_type, trigger_value,
-                  allow_reentry, goal_type, goal_value, send_window, legacy_kind
+                  allow_reentry, goal_type, goal_value, send_window, legacy_kind,
+                  max_per_day
              FROM workflow_definitions WHERE id=$1 AND owner_id=$2""",
         workflow_id, owner_id)
     if not src:
@@ -340,6 +342,7 @@ async def export_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int) -
         "allow_reentry": bool(src["allow_reentry"]),
         "goal_type": src["goal_type"] or "", "goal_value": src["goal_value"] or "",
         "send_window": src["send_window"] or "",
+        "max_per_day": src["max_per_day"] or 0,
     }
 
 
@@ -392,6 +395,12 @@ async def import_workflow(pool: asyncpg.Pool, owner_id: int, data,
         ttype, tval = None, None
     gtype, gval = _rt.validate_goal(data.get("goal_type"), data.get("goal_value"))
     win = _rt.parse_send_window(data.get("send_window") or None)
+    try:
+        cap = int(data.get("max_per_day") or 0) or None
+    except (TypeError, ValueError):
+        raise ValueError("Предел сообщений в сутки — целое число")
+    if cap is not None and not 1 <= cap <= _rt.MAX_PER_DAY_LIMIT:
+        raise ValueError(f"Предел сообщений в сутки — от 1 до {_rt.MAX_PER_DAY_LIMIT}")
     res = await create_workflow(pool, owner_id, f"{name} (загружен)"[:120],
                                 description=str(data.get("description") or "")[:500],
                                 steps=steps, is_active=False, bot_id=bot_id)
@@ -400,10 +409,10 @@ async def import_workflow(pool: asyncpg.Pool, owner_id: int, data,
     await pool.execute(
         """UPDATE workflow_definitions
               SET trigger_type=$2, trigger_value=$3, allow_reentry=$4,
-                  goal_type=$5, goal_value=$6, send_window=$7
+                  goal_type=$5, goal_value=$6, send_window=$7, max_per_day=$8
             WHERE id=$1""",
         res["id"], ttype, tval, bool(data.get("allow_reentry")), gtype, gval,
-        f"{win[0]:02d}-{win[1]:02d}" if win else None)
+        f"{win[0]:02d}-{win[1]:02d}" if win else None, cap)
     return {"ok": True, "id": res["id"], "steps": len(steps), "adapted_steps": changed,
             "trigger_type": ttype or "manual"}
 
@@ -547,6 +556,28 @@ async def set_send_window(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     if isinstance(res, str) and res.endswith(" 0"):
         raise LookupError("Сценарий не найден")
     return stored
+
+
+async def set_max_per_day(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                          value) -> int | None:
+    """Предел сообщений человеку за сутки от всех сценариев бота (пусто или
+    0 — без предела). ValueError — мусор, LookupError — нет сценария."""
+    from services import workflow_runtime as _rt
+    raw = str(value if value is not None else "").strip()
+    cap = None
+    if raw and raw != "0":
+        try:
+            cap = int(raw)
+        except ValueError:
+            raise ValueError("Предел сообщений в сутки — целое число")
+        if not 1 <= cap <= _rt.MAX_PER_DAY_LIMIT:
+            raise ValueError(f"Предел сообщений в сутки — от 1 до {_rt.MAX_PER_DAY_LIMIT}")
+    res = await pool.execute(
+        "UPDATE workflow_definitions SET max_per_day=$3, updated_at=NOW() "
+        "WHERE id=$1 AND owner_id=$2", workflow_id, owner_id, cap)
+    if isinstance(res, str) and res.endswith(" 0"):
+        raise LookupError("Сценарий не найден")
+    return cap
 
 
 async def set_goal(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
@@ -1157,7 +1188,7 @@ STEP_OUTCOMES: dict[str, str] = {
     "error": "ошибка", "goal": "цель достигнута", "completed": "завершён",
     "failed": "сбой", "expired": "истёк срок", "stopped": "остановлен",
     "cancelled": "отменён", "retry": "повтор позже",
-    "retried": "повторён владельцем", "waiting": "ждёт события", "event": "событие пришло", "night_hold": "ждёт утра",
+    "retried": "повторён владельцем", "waiting": "ждёт события", "event": "событие пришло", "night_hold": "ждёт утра", "cap_hold": "ждёт: предел сообщений за сутки",
 }
 
 

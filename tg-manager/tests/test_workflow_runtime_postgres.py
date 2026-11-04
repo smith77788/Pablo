@@ -1091,3 +1091,45 @@ def test_an_exported_scenario_loads_back_switched_off_and_portable(pool, tg):
             await pool.execute("DELETE FROM workflow_definitions WHERE owner_id=$1", other)
 
     _run(go())
+
+
+# ── Предел сообщений в сутки от всех сценариев ───────────────────────────────
+
+def test_the_daily_cap_counts_all_scenarios_of_the_bot(pool, tg):
+    """ЧТО БЫЛО: каждый сценарий считал только себя, и человек за день
+    получал приветствие, дожим, рассылку и возврат подряд. Теперь сценарий с
+    пределом «2 в сутки» ждёт, если человеку уже написали два раза — неважно
+    каким сценарием; человеку, который сейчас в чате, ответ уходит сразу."""
+    import pytest as _pt
+    from services import workflow_engine as wf
+    from services import workflow_runtime as rt
+
+    async def go():
+        a = await _workflow(pool, [{"type": "message", "text": "Раз"},
+                                   {"type": "message", "text": "Два"}], trigger="manual")
+        b = await _workflow(pool, [{"type": "message", "text": "Три"}], trigger="manual")
+        await wf.set_max_per_day(pool, OWNER, b, "2")
+        await pool.execute("UPDATE bot_users SET last_seen = now() - interval '2 days' "
+                           "WHERE bot_id=$1 AND user_id=$2", BOT_ID, USER)
+        for wid in (a, b):
+            d = dict(await pool.fetchrow("SELECT * FROM workflow_definitions WHERE id=$1", wid))
+            await rt.start_run(pool, d, BOT_ID, USER, force=True)
+            await _tick(pool)
+        assert _texts(tg) == ["Раз", "Два"]
+        run = await _run_row(pool, b)
+        assert run["status"] == "running"
+        log = [r["outcome"] for r in await pool.fetch(
+            "SELECT outcome FROM workflow_step_log WHERE run_id=$1", run["id"])]
+        assert log == ["cap_hold"]
+        # Человек написал — он в чате, предел не держит.
+        await pool.execute("UPDATE bot_users SET last_seen = now() WHERE bot_id=$1 "
+                           "AND user_id=$2", BOT_ID, USER)
+        await pool.execute("UPDATE workflow_runs SET next_run_at=now() WHERE id=$1", run["id"])
+        await _tick(pool)
+        assert _texts(tg) == ["Раз", "Два", "Три"]
+        for bad in ("51", "много"):
+            with _pt.raises(ValueError):
+                await wf.set_max_per_day(pool, OWNER, b, bad)
+        assert await wf.set_max_per_day(pool, OWNER, b, "") is None
+
+    _run(go())

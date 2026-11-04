@@ -1061,18 +1061,37 @@ async def _send_failed(pool, run: dict, step_idx: int, retry: int | None,
         int(delay))
 
 
+MAX_PER_DAY_LIMIT = 50
+
+
+async def _sent_today(pool, bot_id: int, chat_id: int) -> tuple[int, datetime | None]:
+    """Сколько сообщений человек получил от всех сценариев бота за сутки и
+    когда первое из них (от него отсчитывается освобождение предела)."""
+    row = await pool.fetchrow(
+        """SELECT count(*) AS n, min(l.created_at) AS oldest
+             FROM workflow_runs r
+             JOIN workflow_step_log l ON l.run_id = r.id
+            WHERE r.bot_id=$1 AND r.chat_id=$2 AND l.outcome='sent'
+              AND l.created_at > now() - interval '1 day'""", bot_id, chat_id)
+    return int(row["n"] or 0), row["oldest"]
+
+
 async def advance(pool, http, run: dict, main_bot=None) -> None:
     """Пройти шаги прогона до паузы, ожидания или конца."""
     steps = _as_list(run.get("steps_snapshot"))
     token = await _bot_token(pool, run.get("bot_id"))
     contact, fields = await _contact(pool, run.get("bot_id"), run.get("chat_id"))
     window = None
+    cap = None
     try:
-        window = parse_send_window(await pool.fetchval(
-            "SELECT send_window FROM workflow_definitions WHERE id=$1",
-            run.get("workflow_id")))
+        wrow = await pool.fetchrow(
+            "SELECT send_window, max_per_day FROM workflow_definitions WHERE id=$1",
+            run.get("workflow_id"))
+        if wrow:
+            window = parse_send_window(wrow["send_window"])
+            cap = int(wrow["max_per_day"]) if wrow["max_per_day"] else None
     except Exception:
-        window = None
+        window, cap = None, None
     for _ in range(_STEPS_PER_PASS):
         idx = int(run.get("current_step") or 0)
         seq = int(run.get("exec_seq") or 0)
@@ -1092,6 +1111,23 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             await _finish(pool, run, "failed",
                           "Некому отправить: у сценария нет бота или получателя")
             return
+        if needs_chat and cap and run.get("bot_id"):
+            now = datetime.now(timezone.utc)
+            seen = contact.get("last_seen")
+            awake = bool(seen) and seen > now - timedelta(seconds=_AWAKE_SECONDS)
+            if not awake:
+                sent, oldest = await _sent_today(pool, run["bot_id"], run["chat_id"])
+                if sent >= cap and oldest is not None:
+                    when = oldest + timedelta(days=1, minutes=1)
+                    res = await pool.execute(
+                        """UPDATE workflow_runs
+                              SET next_run_at=$3, claimed_until=NULL
+                            WHERE id=$1 AND exec_seq=$2 AND status='running'""",
+                        run["id"], seq, when)
+                    if isinstance(res, str) and res.endswith(" 1"):
+                        await _log(pool, run, idx, stype, "cap_hold",
+                                   f"уже {sent} из {cap} сообщений за сутки")
+                    return
         if needs_chat and window:
             now = datetime.now(timezone.utc)
             seen = contact.get("last_seen")

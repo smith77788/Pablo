@@ -30829,9 +30829,10 @@ async function openWorkflowDetail(wfId, wfName) {
         <button class="btn btn-s" style="width:100%;margin-top:6px" onclick="saveWorkflowTrigger(${wfId})">💾 Сохранить способ запуска</button>
         <div style="display:flex;gap:6px;margin-top:6px">
           <input type="text" id="wfdSendWindow" class="inp" style="flex:1 1 auto" placeholder="Писать только в часы, например 09-21" value="${esc(d.send_window || '')}">
+          <input type="number" id="wfdMaxPerDay" class="inp" style="flex:0 0 110px" min="0" max="50" placeholder="≤ в сутки" aria-label="Не больше сообщений человеку в сутки" value="${d.max_per_day || ''}">
           <button class="btn btn-s" style="flex:0 0 auto" onclick="saveWorkflowSendWindow(${wfId})" aria-label="Сохранить часы отправки" title="Сохранить часы отправки">🌙</button>
         </div>
-        <div class="hint" style="margin-top:4px">По времени человека. Ночью сообщение подождёт утра; ответ на только что нажатую кнопку уходит сразу.</div>
+        <div class="hint" style="margin-top:4px">Второе поле — сколько сообщений за сутки человек может получить от всех сценариев бота, прежде чем этот подождёт. Часы — по времени человека. Ночью сообщение подождёт утра; ответ на только что нажатую кнопку уходит сразу.</div>
         ${(!d.active && trig !== 'manual') ? '<div class="hint" style="margin-top:6px">Сценарий выключен — сам он не запустится, пока вы его не активируете.</div>' : ''}
       </div>`;
     // Цель: достигнута — прогон завершается сам, дожим больше не идёт.
@@ -31042,9 +31043,11 @@ async function saveWorkflowTrigger(wfId) {
 
 async function saveWorkflowSendWindow(wfId) {
   const send_window = document.getElementById('wfdSendWindow').value.trim();
+  const max_per_day = document.getElementById('wfdMaxPerDay').value.trim();
   try {
-    const d = await api(`/api/miniapp/workflows/${wfId}/send_window`, { method: 'POST', body: JSON.stringify({ send_window }) });
-    toast(d.send_window ? '🌙 Пишем людям только ' + d.send_window : '🌙 Пишем в любое время');
+    const d = await api(`/api/miniapp/workflows/${wfId}/send_window`, { method: 'POST', body: JSON.stringify({ send_window, max_per_day }) });
+    toast((d.send_window ? '🌙 Пишем людям только ' + d.send_window : '🌙 Пишем в любое время')
+      + (d.max_per_day ? ' · не больше ' + d.max_per_day + ' в сутки от всех сценариев' : ''));
   } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
 }
 
