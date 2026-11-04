@@ -192,6 +192,25 @@ async def get_me(session: aiohttp.ClientSession, token: str) -> dict | None:
 TOKEN_REVOKED_CODES = (401, 404)
 
 
+def token_rejected(error_code, description: str = "") -> bool:
+    """Telegram отказал по самому токену бота — одно правило для всех мест.
+
+    401 — токен отозван, 404 — Telegram не знает такого бота (удалён или
+    токен перепечатан с ошибкой): на любом методе это «бот недоступен», а не
+    сбой сети или ошибка получателя. Раньше опрос бота и рассылка понимали
+    только 401: на 404 опрос долбил Telegram каждые 10 секунд без отступа, а
+    рассылка добивала всю аудиторию одной и той же ошибкой.
+
+    НЕ для решения удалить бота: там `check_alive` остаётся на одном 401 —
+    404 на всех ботах разом даёт и неверный адрес API, а удаление необратимо.
+    """
+    try:
+        code = int(error_code or 0)
+    except (TypeError, ValueError):
+        code = 0
+    return code in TOKEN_REVOKED_CODES or "unauthorized" in (description or "").lower()
+
+
 async def token_state(session: aiohttp.ClientSession, token: str) -> str:
     """'ok' | 'revoked' | 'transient' — что getMe говорит о токене бота.
 
@@ -632,7 +651,7 @@ def classify_send_error(error_code: int, description: str) -> str:
     if "chat not found" in d or "user not found" in d or "can't initiate" in d or "bot can't initiate" in d:
         return "not_started"
     # Токен отозван/подменён: дальше бессмысленно бить по всей аудитории.
-    if error_code == 401 or "unauthorized" in d:
+    if token_rejected(error_code, d):
         return "unauthorized"
     # Сеть/шлюз/Telegram лежит. error_code == 0 ставит _call, когда до Telegram
     # вообще не достучались.
@@ -777,6 +796,8 @@ async def check_alive(session: aiohttp.ClientSession, token: str) -> str:
         return BOT_ALIVE
     code = data.get("error_code", 0)
     desc = str(data.get("description") or "").lower()
+    # Только 401, а не token_rejected: 'dead' ведёт к удалению, а 404 на всех
+    # ботах разом даёт и неверный адрес API (см. token_rejected).
     if code == 401 or "unauthorized" in desc:
         return BOT_DEAD
     return BOT_UNKNOWN

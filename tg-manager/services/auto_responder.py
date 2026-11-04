@@ -855,7 +855,7 @@ async def _process_bot(
                     )
                 except Exception:
                     log.warning("auto_responder: bot=%d webhook-конфликт, deleteWebhook не удался", bot_id)
-            elif "unauthorized" in err_desc.lower() or data.get("error_code") == 401:
+            elif bot_api.token_rejected(data.get("error_code"), err_desc):
                 # Токен отозван/невалиден — getUpdates будет проваливаться на
                 # каждом цикле бесконечно. Ставим cooldown с экспоненциальным
                 # отступом вместо ретрая каждые 10с (было: бесконечный спам
