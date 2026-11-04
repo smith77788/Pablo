@@ -49,9 +49,10 @@ async def is_banned(pool, uid: int | None) -> bool:
     if hit and now - hit[1] < _TTL:
         return hit[0]
     try:
-        val = bool(await pool.fetchval(
+        # Только настоящий true: число или строка из чужого ответа — не бан.
+        val = (await pool.fetchval(
             "SELECT COALESCE(is_banned, false) FROM platform_users WHERE user_id=$1",
-            uid))
+            uid)) is True
     except Exception:
         log.debug("platform_ban: проверка не удалась uid=%s", uid, exc_info=True)
         return False
