@@ -188,3 +188,49 @@ async def test_news_scan_processes_bounded_batch_and_enqueues_events(monkeypatch
     assert refresh.await_count == 2
     assert all(call.kwargs == {"force": True, "enqueue_events": True}
                for call in refresh.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_next_news_waits_while_the_last_post_is_still_queued(monkeypatch):
+    """Один сюжет из двух источников за минуты: пока первый пост в очереди
+    публикации, антидубль его не видит (он смотрит на вышедшие). Раньше второй
+    источник проходил проверки, и новость выходила дважды."""
+    now = datetime.now(UTC)
+    pool = _Pool([{"id": 13, "source_username": "other", "source_message_id": 93,
+                   "published_at": now, "source_text": "Та же новость"}])
+    pool.fetchvals = [0, 1]  # черновиков нет; прошлый пост ещё в очереди
+    write = AsyncMock(side_effect=RuntimeError("не должен вызываться"))
+    monkeypatch.setattr(ca, "write_post", write)
+    assert await runner._draft_live_news(
+        pool, None, {"owner_id": 7, "channel_id": 8, "posts_per_day": 3,
+                     "publish_mode": "auto", "last_op_id": 501},
+    ) is False
+    assert not write.called, "новость пишется, пока прошлый пост ещё не вышел"
+    assert not pool.executed, "сигнал занят, хотя канал ждёт прошлую публикацию"
+
+
+@pytest.mark.asyncio
+async def test_autonomous_news_post_is_tracked_like_a_scheduled_one(monkeypatch):
+    now = datetime.now(UTC)
+    pool = _Pool([{"id": 14, "source_username": "src", "source_message_id": 94,
+                   "published_at": now, "source_text": "Новость"}])
+    draft = ca.Draft("Срочные новости", "Текст новости достаточной длины", [], False, True)
+    tracked = {}
+
+    async def noop(*a, **k):
+        return None
+
+    async def after(pool_, owner_id, channel_id, op_id, is_intro):
+        tracked.update(owner=owner_id, channel=channel_id, op=op_id)
+
+    monkeypatch.setattr(ca, "write_post", AsyncMock(return_value=draft))
+    monkeypatch.setattr(ca, "is_duplicate_of_recent", AsyncMock(return_value=False))
+    monkeypatch.setattr(ca, "publish", AsyncMock(return_value=777))
+    monkeypatch.setattr(ca, "_after_publish", after)
+    monkeypatch.setattr(ca, "log_event", noop)
+    assert await runner._draft_live_news(
+        pool, None, {"owner_id": 7, "channel_id": 8, "posts_per_day": 3,
+                     "publish_mode": "auto"},
+    ) is True
+    assert tracked == {"owner": 7, "channel": 8, "op": 777}, (
+        "автономная новость не отмечена как последняя публикация канала")

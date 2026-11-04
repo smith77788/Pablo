@@ -57,6 +57,18 @@ async def _draft_live_news(pool, bot, admin: dict) -> bool:
     )
     if pending:
         return False
+    # Прошлый пост канала ещё в очереди публикации. Антидубль и дневной
+    # предел смотрят только на ВЫШЕДШИЕ посты, а один сюжет приходит из
+    # нескольких источников за минуты: пока первый пост ждал исполнителя,
+    # второй источник проходил обе проверки, и новость выходила дважды.
+    # Ждём, пока пост выйдет (или не выйдет) — тогда проверки его увидят.
+    last_op = admin.get("last_op_id")
+    if last_op:
+        from services import op_status as _ost
+        if await pool.fetchval(
+                "SELECT 1 FROM operation_queue WHERE id=$1 AND owner_id=$2 "
+                f"AND status IN {_ost.sql_in_flight_list()}", int(last_op), owner_id):
+            return False
     published = await pool.fetchval(
         "SELECT count(*) FROM va_channel_posts WHERE owner_id=$1 AND channel_key=$2 "
         "AND published_at > now() - interval '24 hours'", owner_id, str(channel_id),
@@ -107,6 +119,9 @@ async def _draft_live_news(pool, bot, admin: dict) -> bool:
         # автономный режим на новостных каналах «лишь присылал на проверку».
         if is_auto and draft.ok:
             op_id = await ca.publish(pool, owner_id, channel_id, draft.text, draft.pillar)
+            # Как у поста по расписанию: исход публикации проверит
+            # check_last_publish, а следующая новость подождёт её (см. выше).
+            await ca._after_publish(pool, owner_id, channel_id, op_id, False)
             await pool.execute(
                 "UPDATE va_news_inbox SET status='published', claimed_at=NULL, "
                 "updated_at=now() WHERE id=ANY($1::bigint[]) AND owner_id=$2 AND channel_id=$3",
