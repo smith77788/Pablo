@@ -1,8 +1,8 @@
 """Audience collection, stats, comparison, CSV export/XLSX export, and user management."""
 
 from __future__ import annotations
+from services.security import safe_csv_writer  # выгрузка без формул
 import asyncio
-import csv
 import io
 import asyncpg
 import aiohttp
@@ -164,7 +164,7 @@ async def cb_export(
     await callback.answer("⏳ Генерирую CSV…")
 
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
     writer.writerow(
         [
             "user_id",
@@ -520,7 +520,7 @@ async def cb_bot_export_audience(
     await callback.answer("⏳ Генерирую CSV…")
 
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
     writer.writerow(
         [
             "user_id",

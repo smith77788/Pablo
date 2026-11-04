@@ -1,5 +1,5 @@
 from __future__ import annotations
-import csv
+from services.security import safe_csv_writer  # выгрузка без формул
 import io
 import json
 import logging
@@ -22,7 +22,7 @@ async def export_csv(pool, owner_id: int, contact_ids: list = None) -> str:
             'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name', owner_id)
 
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = safe_csv_writer(output)
     writer.writerow(['ID', 'Telegram User ID', 'Username', 'First Name', 'Last Name',
                      'Display Name', 'Phones', 'Emails', 'Company', 'Position',
                      'Websites', 'Birthday', 'Notes', 'Tags', 'Color Label',

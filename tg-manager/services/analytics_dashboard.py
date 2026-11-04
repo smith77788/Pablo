@@ -13,8 +13,8 @@
 """
 
 from __future__ import annotations
+from services.security import safe_csv_dict_writer, safe_csv_writer  # выгрузка без формул
 
-import csv
 import io
 import json
 import logging
@@ -483,7 +483,7 @@ def _to_csv(data: dict[str, Any]) -> str:
 
     # Dashboard summary
     output.write("=== Dashboard Summary ===\n")
-    writer = csv.writer(output)
+    writer = safe_csv_writer(output)
     writer.writerow(["Metric", "Value"])
     dash = data.get("dashboard", {})
     for section, values in dash.items():
@@ -497,7 +497,7 @@ def _to_csv(data: dict[str, Any]) -> str:
     output.write("\n=== Operations History (30d) ===\n")
     history = data.get("operations_history_30d", [])
     if history:
-        writer = csv.DictWriter(output, fieldnames=history[0].keys())
+        writer = safe_csv_dict_writer(output, fieldnames=history[0].keys())
         writer.writeheader()
         writer.writerows(history)
 

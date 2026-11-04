@@ -681,14 +681,26 @@ def security_middleware() -> Callable:
             raise
 
         # Add security headers
+        ct = response.headers.get("Content-Type", "")
+        is_html = "text/html" in ct
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "DENY")
+        # Страницу мини-аппа Telegram Web (web.telegram.org) открывает во
+        # фрейме, и X-Frame-Options: DENY её там просто не показывал. Для HTML
+        # от кликджекинга защищает frame-ancestors ниже — со списком Telegram;
+        # остальным ответам фрейм не нужен вовсе.
+        if not is_html:
+            response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-XSS-Protection", "1; mode=block")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        # Только HTTPS на год: без него первый заход по http:// (ссылка,
+        # набранный адрес) перехватывается и уводится посредником.
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
 
         # CSP for HTML responses
-        ct = response.headers.get("Content-Type", "")
-        if "text/html" in ct:
+        if is_html:
             response.headers.setdefault(
                 "Content-Security-Policy",
                 # img-src ОБЯЗАТЕЛЬНО перечисляет data: и blob: — без них QR-код
@@ -701,7 +713,13 @@ def security_middleware() -> Callable:
                 "script-src 'self' 'unsafe-inline'; "
                 "style-src 'self' 'unsafe-inline'; "
                 "img-src 'self' data: blob:; "
-                "connect-src 'self'"
+                "connect-src 'self'; "
+                # Без плагинов, без подмены базового адреса ссылок через
+                # внедрённый <base>, формы — только к себе.
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'; "
+                "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org"
             )
 
         return response
@@ -852,3 +870,54 @@ def guarded_session(http):
             http.connector, PublicOnlyConnector):
         return public_http_session()
     return _Borrowed(http)
+
+
+# ── Выгрузки CSV без формул (CSV/formula injection) ───────────────────────────
+#
+# В выгрузки попадают имена, био, юзернеймы и тексты из Telegram — то, что
+# пишет посторонний человек. Ячейка «=HYPERLINK("https://…?"&A2;"Открыть")»
+# или «=cmd|' /C calc'!A0» в имени участника становится в Excel/Google
+# Таблицах формулой: утекают соседние ячейки (телефоны), запускаются команды.
+# Ячейку, начинающуюся с = + - @ (а также таб/CR), экранируем апострофом —
+# так её показывают как текст. Номер телефона «+7 999 …» и число «-5» формулой
+# не являются и остаются как есть.
+
+_CSV_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+_CSV_PLAIN_NUMBER = re.compile(r"^[+-]?[\d\s().,-]+$")
+
+
+def csv_safe_cell(value: Any) -> Any:
+    if not isinstance(value, str) or not value.startswith(_CSV_FORMULA_START):
+        return value
+    if _CSV_PLAIN_NUMBER.match(value):
+        return value
+    return "'" + value
+
+
+class _SafeCsvWriter:
+    def __init__(self, inner):
+        self._w = inner
+
+    def writerow(self, row):
+        if isinstance(row, dict):
+            return self._w.writerow({k: csv_safe_cell(v) for k, v in row.items()})
+        return self._w.writerow([csv_safe_cell(c) for c in row])
+
+    def writerows(self, rows):
+        for r in rows:
+            self.writerow(r)
+
+    def __getattr__(self, name):
+        return getattr(self._w, name)
+
+
+def safe_csv_writer(f, *args, **kwargs):
+    """csv.writer, который не пропускает формулы из чужого текста."""
+    import csv
+    return _SafeCsvWriter(csv.writer(f, *args, **kwargs))
+
+
+def safe_csv_dict_writer(f, *args, **kwargs):
+    """csv.DictWriter с той же защитой (writeheader — как у DictWriter)."""
+    import csv
+    return _SafeCsvWriter(csv.DictWriter(f, *args, **kwargs))

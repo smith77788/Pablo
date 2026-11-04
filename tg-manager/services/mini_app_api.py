@@ -1,5 +1,6 @@
 """Mini App API — aiohttp routes for the Telegram Mini App + SSE real-time updates."""
 from __future__ import annotations
+from services.security import safe_csv_writer  # выгрузка без формул
 
 import asyncio
 import functools
@@ -1497,11 +1498,10 @@ def _vault_export_html(data: dict) -> str:
 
 
 def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Response:
-    import csv as _csv
     import io as _io
     buf = _io.StringIO()
     buf.write("﻿")  # BOM для корректного Excel UTF-8
-    w = _csv.writer(buf)
+    w = safe_csv_writer(buf)
     w.writerow(header)
     for r in rows:
         w.writerow(["" if c is None else c for c in r])

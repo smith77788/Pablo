@@ -8,6 +8,7 @@
 """
 
 from __future__ import annotations
+from services.security import safe_csv_dict_writer  # выгрузка без формул
 
 import asyncio
 import logging
@@ -131,10 +132,9 @@ async def check_phones_batch(
 def results_to_csv(results: list[dict]) -> bytes:
     """Конвертировать результаты в CSV bytes."""
     import io
-    import csv
 
     buf = io.StringIO()
-    writer = csv.DictWriter(
+    writer = safe_csv_dict_writer(
         buf,
         fieldnames=["phone", "registered", "user_id", "username", "first_name", "last_name", "premium"],
         extrasaction="ignore",

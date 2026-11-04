@@ -17,9 +17,9 @@ Flows:
 """
 
 from __future__ import annotations
+from services.security import safe_csv_writer  # выгрузка без формул
 
 import asyncio
-import csv
 import html
 import io
 import logging
@@ -662,7 +662,7 @@ async def cb_parser_gender_export(
         return
     await callback.answer("⏳ Готовлю файл...")
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
     writer.writerow(["tg_user_id", "username", "first_name", "last_name",
                      "is_premium", "source_title", "parsed_at"])
     for u in rows:
@@ -788,7 +788,7 @@ async def cb_parser_export(
     await callback.answer("⏳ Готовлю файл...")
 
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
     writer.writerow(
         [
             "tg_user_id",

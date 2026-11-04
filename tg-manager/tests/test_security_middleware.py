@@ -107,3 +107,27 @@ async def test_csp_still_restricts_default_src():
     # data: не должен утечь в script-src — иначе это дыра исполнения кода.
     assert "data:" not in directives.get("script-src", []), (
         "data: в script-src — это исполнение произвольного кода, не картинка")
+
+
+@pytest.mark.asyncio
+async def test_miniapp_page_can_be_framed_by_telegram_web_only():
+    """Telegram Web открывает мини-апп во фрейме: X-Frame-Options: DENY на
+    HTML его там не показывал. Кликджекинг закрывает frame-ancestors со
+    списком Telegram; чужой сайт страницу во фрейм не возьмёт."""
+    mw = security_middleware()
+    resp = await mw(make_mocked_request("GET", "/miniapp/"), _html)
+    assert "X-Frame-Options" not in resp.headers
+    d = _csp_directives(resp.headers["Content-Security-Policy"])
+    assert "https://web.telegram.org" in d["frame-ancestors"]
+    assert "*" not in d["frame-ancestors"]
+    assert d["object-src"] == ["'none'"]
+    assert d["base-uri"] == ["'self'"]
+
+
+@pytest.mark.asyncio
+async def test_non_html_keeps_deny_and_every_response_has_hsts():
+    mw = security_middleware()
+    resp = await mw(make_mocked_request("GET", "/api/miniapp/ok"), _ok)
+    assert resp.headers["X-Frame-Options"] == "DENY"
+    assert resp.headers["Strict-Transport-Security"].startswith("max-age=31536000")
+    assert "camera=()" in resp.headers["Permissions-Policy"]

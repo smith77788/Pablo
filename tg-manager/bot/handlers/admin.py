@@ -1,8 +1,8 @@
 """Super-admin panel — platform management, monitoring, token vault, user control."""
 
 from __future__ import annotations
+from services.security import safe_csv_writer  # выгрузка без формул
 import asyncio
-import csv
 import functools
 import hmac as _hmac
 import html as _html
@@ -1748,7 +1748,7 @@ async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         )
         return
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
     writer.writerow(["user_id", "bots_count", "plan", "expires_at"])
     for r in rows:
         writer.writerow(
@@ -1778,7 +1778,7 @@ async def _adm_logs_csv(
     await callback.answer("⏳ Формирую CSV…")
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
 
     try:
         if source == "ui":

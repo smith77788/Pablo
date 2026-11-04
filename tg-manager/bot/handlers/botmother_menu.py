@@ -12,6 +12,7 @@
 """
 
 from __future__ import annotations
+from services.security import safe_csv_writer  # выгрузка без формул
 
 import asyncio
 import html
@@ -1644,7 +1645,6 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         await _edit(callback, locked_text("Экспорт отчётов", "starter"),
                     subscription_locked_markup("starter", back_callback=BmCb(action="vis_reports")))
         return
-    import csv
     import io
     from aiogram.types import BufferedInputFile
 
@@ -1668,7 +1668,7 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     await callback.answer("⏳ Генерирую CSV…")
 
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
     writer.writerow(["keyword", "bot", "position", "checked_at"])
     for r in rows:
         writer.writerow(
@@ -2802,12 +2802,11 @@ async def cb_op_csv(
     except Exception:
         steps = []
 
-    import csv
     import io
     from aiogram.types import BufferedInputFile
 
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
     writer.writerow(["step_num", "target", "status", "message"])
     for s in steps:
         writer.writerow(

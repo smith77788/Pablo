@@ -1,6 +1,7 @@
 """Global Presence Factory — guided FSM wizard for worldwide Telegram channel creation."""
 
 from __future__ import annotations
+from services.security import safe_csv_writer  # выгрузка без формул
 
 import asyncio
 import html
@@ -2783,7 +2784,7 @@ async def cb_gp_export(
     import io as _io
 
     buf = _io.StringIO()
-    writer = csv.writer(buf, delimiter=";")
+    writer = safe_csv_writer(buf, delimiter=";")
     writer.writerow(
         ["Страна", "Регион", "Город", "Тематика", "Уровень", "Тип", "Название",
          "Username", "Ссылка", "ID", "Аватар", "Статус", "Аккаунт", "Ошибка"]

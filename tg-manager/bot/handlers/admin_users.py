@@ -1,5 +1,6 @@
 """Admin user management: list, grant/revoke plans, ban/unban."""
 
+from services.security import safe_csv_writer  # выгрузка без формул
 import html
 import logging
 
@@ -843,12 +844,11 @@ async def cb_export_csv_users(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         await callback.message.answer(f"❌ Ошибка: {e}")
         return
 
-    import csv
     import io
     from aiogram.types import BufferedInputFile
 
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = safe_csv_writer(buf)
     writer.writerow(
         [
             "user_id",
