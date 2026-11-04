@@ -83,3 +83,40 @@ def test_token_state_classifies_replies(monkeypatch):
     assert asyncio.run(go({"ok": False, "error_code": 404})) == "revoked"
     assert asyncio.run(go(NET)) == "transient"
     assert asyncio.run(go({"ok": False, "error_code": 429})) == "transient"
+
+
+def test_own_session_is_closed_when_the_dedup_read_fails(monkeypatch):
+    """Рассылка, отложенная из-за недоступной базы, не оставляет открытую
+    HTTP-сессию (раньше этот выход её не закрывал)."""
+    import aiohttp
+
+    from database import db
+    from services import bot_api, broadcaster
+
+    sessions: list = []
+    real = aiohttp.ClientSession
+
+    def _tracked(*a, **k):
+        s = real(*a, **k)
+        sessions.append(s)
+        return s
+
+    async def _me(session, token):
+        return {"id": 1}
+
+    async def _no_dedup(pool, bid):
+        raise RuntimeError("база недоступна")
+
+    async def _audience(pool, bot_id):
+        return [1, 2]
+
+    async def _no_sleep(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(broadcaster.aiohttp, "ClientSession", _tracked)
+    monkeypatch.setattr(bot_api, "get_me", _me)
+    monkeypatch.setattr(db, "get_broadcast_delivered_ids", _no_dedup)
+    monkeypatch.setattr(db, "get_audience_user_ids", _audience)
+    monkeypatch.setattr(broadcaster.asyncio, "sleep", _no_sleep)
+    asyncio.run(broadcaster.run(_Pool(), None, 1, "123456:" + "A" * 35, 5, "Привет"))
+    assert sessions and all(s.closed for s in sessions), "своя сессия рассылки не закрыта"

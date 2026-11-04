@@ -241,7 +241,12 @@ async def run(
         session = aiohttp.ClientSession()
 
     if user_ids is None:
-        user_ids = await db.get_audience_user_ids(pool, bot_id)
+        try:
+            user_ids = await db.get_audience_user_ids(pool, bot_id)
+        except BaseException:
+            if _own_session and session is not None:
+                await session.close()
+            raise
 
     # Content safety backstop: ни одна рассылка с запрещённым контентом
     # (CSAM / терроризм) не уходит подписчикам, даже если её создали в обход UI.
@@ -342,6 +347,11 @@ async def run(
             )
     if not _dedup_read_ok:
         _reliability_metric("infragram_broadcast_dedup_read_failures_total")
+        # Своя сессия закрывается на ЭТОМ выходе тоже: раньше каждая рассылка,
+        # отложенная из-за недоступной базы, оставляла открытую HTTP-сессию с
+        # её пулом соединений — как раз тогда, когда процессу и так плохо.
+        if _own_session and session is not None:
+            await session.close()
         return
 
     sent = len(already_sent)
