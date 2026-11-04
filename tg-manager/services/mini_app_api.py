@@ -2425,7 +2425,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # бесследно. Тело запроса не пишется: в нём бывают тексты и ключи.
     @web.middleware
     async def admin_audit_middleware(request: web.Request, handler):
-        response = await handler(request)
+        # Запись — и когда ручка упала: попытка бана или выдачи тарифа,
+        # оборвавшаяся исключением, могла сделать часть дела, а след в журнале
+        # не оставляла вовсе (исключение пролетало мимо записи наружу).
+        response = None
+        try:
+            response = await handler(request)
+        finally:
+            await _audit_admin_request(request, response)
+        return response
+
+    async def _audit_admin_request(request: web.Request, response) -> None:
         if is_audited_admin_request(request.method, request.path):
             uid = _get_uid(request)
             if uid and _is_admin(uid):
@@ -2434,9 +2444,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 await log_admin_action(
                     pool, uid, f"miniapp:{request.method} {request.path}",
                     int(target) if target and target.isdigit() else None,
-                    {"status": getattr(response, "status", None)},
+                    {"status": getattr(response, "status", None) if response is not None
+                     else "error"},
                     source="miniapp")
-        return response
 
     app.middlewares.append(admin_audit_middleware)
 
