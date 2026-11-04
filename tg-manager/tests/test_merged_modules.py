@@ -169,3 +169,34 @@ def test_spintax_is_a_tab_of_templates():
                    {"texts": ("s-templates", "openTemplates"),
                     "spintax": ("s-spintax", "openSpintax")},
                    gone=("Спинтакс",))
+
+
+def test_self_promo_is_a_tab_of_growth_engine():
+    _assert_module("growth", "📈 Мотор роста", "Мотор роста",
+                   {"plan": ("s-growthhub", "openGrowthHub"),
+                    "self": ("s-selfpromo", "openSelfPromo")},
+                   gone=("Самопиар",))
+    # «Накрутка» нарочно осталась своей плиткой (решение владельца 01.11.2026).
+    assert "Накрутка" in _catalog_labels()
+
+
+def test_api_keys_are_a_tab_of_integrations():
+    _assert_module("integrations", "🔌 Интеграции", "Интеграции",
+                   {"connect": ("s-integrations", "openIntegrations"),
+                    "keys": ("s-apikeys", "openApiKeys")},
+                   gone=("API Ключи",))
+    assert "_renderModuleTabs()" in _fn_body("_igScreen")
+
+
+def test_personas_are_a_tab_of_profiles():
+    _assert_module("profiles", "🎨 Профили", "Профили",
+                   {"set": ("s-profilesetter", "openProfileSetter"),
+                    "personas": ("s-personas", "openPersonas")},
+                   gone=("Персоны",))
+
+
+def test_texts_do_not_send_people_to_removed_tiles():
+    """Пустые состояния и шапки не должны звать в плитки, которых больше нет."""
+    for stale in ("Добавьте в разделе Позиции", "A/B тесты — в разделе Эксперименты",
+                  '<div class="hdr-title">🚀 Единая кампания</div>'):
+        assert stale not in HTML, stale

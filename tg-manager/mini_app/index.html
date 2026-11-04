@@ -2402,12 +2402,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Поиск Telegram</div>
         <div class="mgmt-tile-val" id="kw-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openSelfPromo()">
-        <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Самопиар</div>
-        <div class="mgmt-tile-val" id="m-selfpromo-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openGrowthHub()">
+      <!-- «Мотор роста» и «Самопиар» — вкладки одного модуля (SCREEN_MODULES.growth). -->
+      <div class="mgmt-tile" onclick="openGrowthModule()">
         <div class="mgmt-tile-ico">📈</div>
         <div class="mgmt-tile-lbl">Мотор роста</div>
         <div class="mgmt-tile-val" id="m-growthhub-val"></div>
@@ -2488,7 +2484,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Восстановление</div>
         <div class="mgmt-tile-val" id="m-rehab-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openProfileSetter()">
+      <!-- «Профили» и «Персоны» — вкладки одного модуля (SCREEN_MODULES.profiles). -->
+      <div class="mgmt-tile" onclick="openProfilesHub()">
         <div class="mgmt-tile-ico">🎨</div>
         <div class="mgmt-tile-lbl">Профили</div>
         <div class="mgmt-tile-val"></div>
@@ -2497,11 +2494,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">🧹</div>
         <div class="mgmt-tile-lbl">Очистка</div>
         <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openPersonas()">
-        <div class="mgmt-tile-ico">🎭</div>
-        <div class="mgmt-tile-lbl">Персоны</div>
-        <div class="mgmt-tile-val" id="m-persona-val"></div>
       </div>
       <!-- «Авторег» и «Авторег Pro» были двумя плитками на одну ручку
            /api/miniapp/autoreg; остался один экран — бывший Pro. -->
@@ -2548,15 +2540,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Тариф</div>
         <div class="mgmt-tile-val" id="m-billing-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openIntegrations()">
+      <!-- «Интеграции» и «API Ключи» — вкладки одного модуля (SCREEN_MODULES.integrations). -->
+      <div class="mgmt-tile" onclick="openIntegrationsHub()">
         <div class="mgmt-tile-ico">🔌</div>
         <div class="mgmt-tile-lbl">Интеграции</div>
         <div class="mgmt-tile-val">API · вебхуки · Sheets</div>
-      </div>
-      <div class="mgmt-tile" onclick="openApiKeys()">
-        <div class="mgmt-tile-ico">🔑</div>
-        <div class="mgmt-tile-lbl">API Ключи</div>
-        <div class="mgmt-tile-val" id="m-apikey-cnt"></div>
       </div>
       <div class="mgmt-tile" onclick="openWorkspaces()">
         <div class="mgmt-tile-ico">🏢</div>
@@ -3918,11 +3906,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-selfpromo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">📣 Самопиар</div>
+    <div class="hdr-title">📈 Мотор роста</div>
     <div class="hdr-meta">
       <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openSelfPromoCreateModal()">+ Создать</button>
     </div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="growth" data-tab="self" role="tablist" aria-label="Вкладки модуля «Мотор роста»"></div>
   <div class="sub-sb">
     <!-- Настройки/инфо: куда ведёт реклама -->
     <div id="spInfo" style="background:var(--bg2);border-radius:var(--radius-lg);padding:12px;margin:4px 16px 10px">
@@ -4428,7 +4417,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="lst" id="topBots"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px;display:flex;justify-content:space-between;align-items:baseline">
-      <span>Позиции в поиске</span>
+      <span>Позиции ботов в поиске</span>
       <span class="icon-tap" style="font-size:12px;font-weight:500" onclick="openRanking()" role="button" tabindex="0">все слова ›</span>
     </div>
     <div class="lst" id="kwList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4867,8 +4856,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-profilesetter">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🎨 Сеттер профилей</div>
+    <div class="hdr-title">🎨 Профили</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="profiles" data-tab="set" role="tablist" aria-label="Вкладки модуля «Профили»"></div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
       Массовое оформление аккаунтов: имя, фото, 2FA.<br>
@@ -5083,6 +5073,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════ МОТОР РОСТА (единый хаб) ══════════ -->
 <div class="screen" id="s-growthhub">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📈 Мотор роста</div></div>
+  <div class="filter-chips mod-tabs" data-module="growth" data-tab="plan" role="tablist" aria-label="Вкладки модуля «Мотор роста»"></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 4px">
       Единый взгляд на продвижение: активность инструментов и прирост каналов за период.
@@ -5285,8 +5276,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-personas">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🎭 Персоны</div>
+    <div class="hdr-title">🎨 Профили</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="profiles" data-tab="personas" role="tablist" aria-label="Вкладки модуля «Профили»"></div>
   <div class="sub-sb">
     <div id="personaStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -5526,7 +5518,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════ ПЛАНИРОВЩИК КАМПАНИИ (цель → план) ══════════ -->
 <div class="screen" id="s-unicampaign">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🚀 Единая кампания</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🚀 Всё сразу</div></div>
   <div class="sub-sb">
     <div class="sec">Сообщение</div>
     <div class="lst" style="padding:14px">
@@ -6378,9 +6370,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-apikeys">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🔑 API Ключи</div>
+    <div class="hdr-title">🔌 Интеграции</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openApiKeyModal()">+ Создать</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="integrations" data-tab="keys" role="tablist" aria-label="Вкладки модуля «Интеграции»"></div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
       API ключи для интеграции Infragram с вашими сервисами.<br>
@@ -9010,6 +9003,9 @@ function toggleLab() {
 // запросы «бан», «спам», «жалоба», «клон» не находили НИЧЕГО — при том что
 // модули есть (Дэшборд здоровья, Массовые жалобы, Клонер). Ключ — подпись плитки.
 const MODULE_KEYWORDS = {
+  'Мотор роста':'самопиар продвижение по своей аудитории рост агент роста',
+  'Профили':'персоны персона личность аватар имя описание оформление аккаунтов',
+  'Интеграции':'api ключи ключ api-ключ токен вебхук webhook sheets amocrm bitrix',
   'Сеть ботов':'задачи между ботами связки бот каналы пакет mesh рой кластер',
   
   'Семантическая память':'факты профиль собеседника память диалог',
@@ -9121,7 +9117,7 @@ const MODULE_DESCS = {
   
   'Хранилище':'История переписки: удалённые и изменённые сообщения',
   'Менеджер продаж':'Бот-продавец: товары, ответы на вопросы, заказы',
-  'Мотор роста':'Цель роста и подобранные под неё шаги',
+  'Мотор роста':'Цель роста, подобранные под неё шаги и самопиар по своей аудитории',
   'Накрутка':'Просмотры, реакции, сторис, подписчики',
   'Восстановление':'Возврат аккаунтов после ограничений',
   'Облако':'Файлы кусками в приватных каналах аккаунтов',
@@ -9142,7 +9138,7 @@ const MODULE_DESCS = {
   'Массовая публикация':'Пост во все каналы/аккаунты разом','Массопубликация':'Пост во все каналы/аккаунты разом',
   'Массовый инвайт':'Приглашение пользователей в каналы/группы','Парсер':'Сбор аудитории из чатов и каналов',
   'Поиск Telegram':'Позиции ботов и каналов, живая выдача, SEO и вывод в топ — в одном месте',
-  'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов','Самопиар':'Автопродвижение ваших ресурсов',
+  'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов',
   'CRM':'Клиенты, сделки по этапам, воронка денег и когорты','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
   'Аналитика аудитории':'Сегменты, инсайты, активность и ДНК аудитории','Статистика':'Метрики аудитории и операций',
   'Сценарии':'Сценарии и авто-воронки: бот сам ведёт человека по шагам','Мультигео':'Гео-раскладка присутствия',
@@ -9159,10 +9155,10 @@ const MODULE_DESCS = {
   'Граф связей':'Кто с кем связан: аккаунты, каналы, боты',
   'Граф-хаб':'Пересечения аудиторий ваших каналов и ботов',
   'Ноды':'Форум-группы Telegram, через которые бот управляет вашими ресурсами',
-  'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье',
+  'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов',
-  'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента и варианты текста (спинтакс)',
-  'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API и Google Sheets','API Ключи':'Ключи доступа к публичному API','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
+  'Профили':'Массовая установка профилей аккаунтов и персоны','Шаблоны':'Шаблоны имён/описаний/контента и варианты текста (спинтакс)',
+  'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API, API-ключи и Google Sheets','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
   
   
@@ -9479,6 +9475,34 @@ const SCREEN_MODULES = {
       {key:'spintax', label:'🎲 Спинтакс', sid:'s-spintax',   open: () => openSpintax()},
     ],
   },
+  // «Мотор роста» сам подбирает шаги и среди них — самопиар; отдельная
+  // плитка «Самопиар» была вторым входом в тот же путь. «Накрутка» остаётся
+  // своей плиткой: владелец решил держать её на виду (01.11.2026).
+  growth: {
+    title: '📈 Мотор роста',
+    tabs: [
+      {key:'plan', label:'🎯 План роста', sid:'s-growthhub', open: () => openGrowthHub()},
+      {key:'self', label:'📣 Самопиар',   sid:'s-selfpromo', open: () => openSelfPromo()},
+    ],
+  },
+  // У «Интеграций» уже был блок API-ключей с кнопкой «Все ключи», а рядом —
+  // отдельная плитка «API Ключи».
+  integrations: {
+    title: '🔌 Интеграции',
+    tabs: [
+      {key:'connect', label:'🔌 Подключения', sid:'s-integrations', open: () => openIntegrations()},
+      {key:'keys',    label:'🔑 API-ключи',   sid:'s-apikeys',      open: () => openApiKeys()},
+    ],
+  },
+  // «Профили» (массовая установка имени, фото, описания) и «Персоны»
+  // (заготовки личностей для тех же аккаунтов) — одно оформление аккаунтов.
+  profiles: {
+    title: '🎨 Профили',
+    tabs: [
+      {key:'set',      label:'🎨 Оформление', sid:'s-profilesetter', open: () => openProfileSetter()},
+      {key:'personas', label:'🎭 Персоны',    sid:'s-personas',      open: () => openPersonas()},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9509,6 +9533,9 @@ function openSearchHub(tab) { modTab('search', tab || 'bots'); }
 function openFactory(tab) { modTab('factory', tab || 'bots'); }
 function openScenarios(tab) { modTab('scenarios', tab || 'all'); }
 function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
+function openGrowthModule(tab) { modTab('growth', tab || 'plan'); }
+function openIntegrationsHub(tab) { modTab('integrations', tab || 'connect'); }
+function openProfilesHub(tab) { modTab('profiles', tab || 'set'); }
 
 function openCrmHub(tab) { modTab('crm', tab || 'clients'); }
 function openAudienceHub(tab) { modTab('audience', tab || 'segments'); }
@@ -16117,7 +16144,7 @@ function renderBcScheduleList(items) {
 }
 function renderBcAbList(items) {
   const el = document.getElementById('bcAbList');
-  if (!items.length) { el.innerHTML=empty('🧪','A/B тесты — в разделе Эксперименты','Создавайте варианты и сравнивайте отклик там',{label:'🧪 Открыть A/B тесты',fn:'openExperiments()'}); return; }
+  if (!items.length) { el.innerHTML=empty('🧪','A/B тестов пока нет','Создайте варианты текста и сравните отклик',{label:'🧪 Открыть A/B тесты',fn:'openExperiments()'}); return; }
   el.innerHTML = items.map(b=>{
     const winsA = b.ab_wins_a||0, winsB = b.ab_wins_b||0;
     const total = winsA+winsB;
@@ -17637,7 +17664,7 @@ async function openSeo() {
         <div class="row-body"><div class="row-name">${esc(k.keyword)}</div></div>
         <div class="row-right" style="color:var(--hint)">${k.search_count||0} ${plural(k.search_count||0,'поиск','поиска','поисков')}</div>
       </div>
-    `).join('') : empty('🔍','Нет ключевых слов','Добавьте в разделе Позиции'));
+    `).join('') : empty('🔍','Нет ключевых слов','Добавьте слово во вкладке «Позиции ботов»',{label:'🤖 К позициям ботов', fn:'openRanking()'}));
     const sug = d.suggestions||[];
     txt('seoSuggestions', sug.length ? sug.map(s=>`
       <div class="row">

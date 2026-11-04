@@ -21,10 +21,14 @@ function _igScreen(id, title, reloadFn) {
       '<div class="hdr-title">' + esc(title) + '</div>' +
       '<div class="hdr-burger" onclick="' + reloadFn + '" title="Обновить">⟳</div>' +
     '</div>' +
+    // Экран «Интеграций» — вкладка модуля (SCREEN_MODULES.integrations).
+    (id === 's-integrations' ? '<div class="filter-chips mod-tabs" data-module="integrations" data-tab="connect" role="tablist" aria-label="Вкладки модуля «Интеграции»"></div>' : '') +
     '<div class="sb"><div id="' + id + '-body" style="padding:6px 0">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);
+  // Экран рождается после загрузки страницы: общий рендер вкладок его не видел.
+  if (typeof _renderModuleTabs === 'function') _renderModuleTabs();
   return el;
 }
 
