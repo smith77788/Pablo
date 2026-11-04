@@ -2225,7 +2225,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec-desc" data-section="overview" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Результат за неделю, операции, аудитория и конкуренты.</div>
     <div class="mgmt-grid" data-section="overview">
       <!-- «Дашборд» и «Сводка» — вкладки одного модуля (SCREEN_MODULES.overview). -->
-      <div class="mgmt-tile" onclick="openOverview()">
+      <div class="mgmt-tile" onclick="openUnifiedDashboard()">
         <div class="mgmt-tile-ico">📊</div>
         <div class="mgmt-tile-lbl">Дашборд</div>
         <div class="mgmt-tile-val" id="m-dash-val"></div>
@@ -9504,7 +9504,6 @@ function _markModTab(mod, key) {
 function openSearchHub(tab) { modTab('search', tab || 'bots'); }
 function openFactory(tab) { modTab('factory', tab || 'bots'); }
 function openScenarios(tab) { modTab('scenarios', tab || 'all'); }
-function openOverview(tab) { modTab('overview', tab || 'now'); }
 function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
 function openAudienceHub(tab) { modTab('audience', tab || 'segments'); }
 function openShieldHub(tab) { modTab('shield', tab || 'accounts'); }
