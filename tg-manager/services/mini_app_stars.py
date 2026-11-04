@@ -32,6 +32,7 @@ import re
 
 from aiohttp import web
 
+from services import op_status as _ost
 from services import operation_bus as _obus
 from services.stars_optimizer import MIN_IMPRESSIONS_FOR_WINNER as _STARS_MIN_IMPRESSIONS
 
@@ -45,6 +46,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.security import validate_string
 
     _GIFT_PAY = ("stars", "wallet", "auto")
+    _IN_FLIGHT_SQL = "('" + "','".join(sorted(_ost.IN_FLIGHT)) + "')"
 
     async def gift_inventory(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -134,7 +136,34 @@ def setup_routes(app: web.Application, pool) -> None:
         can = [g for g in mine if g.get("is_transferable")]
         if not can:
             return [], "Ни один из выбранных подарков нельзя передать"
-        return can, ""
+        # Подарок, который уже едет получателю или уже ушёл после последнего
+        # скана, второй раз в план не берём. План каждый раз новый, а значит и
+        # params операции ({"plan_id": …}) новые — дедуп шины двойной тап по
+        # «Передать» не узнаёт, и ушли бы две операции на одни подарки.
+        busy = await _gift_busy_ids(uid, [g["id"] for g in can])
+        free = [g for g in can if g["id"] not in busy]
+        if not free:
+            return [], "Эти подарки уже передаются или уже переданы"
+        return free, ""
+
+    async def _gift_busy_ids(uid: int, ids: list[int]) -> set[int]:
+        """Позиции инвентаря в живой передаче или переданные после скана."""
+        rows = await pool.fetch(
+            f"""SELECT DISTINCT it.inventory_id
+                  FROM gift_transfer_items it
+                  JOIN gift_transfer_plans p ON p.id = it.plan_id
+                  JOIN gift_inventory g ON g.id = it.inventory_id
+                 WHERE p.owner_id = $1 AND it.inventory_id = ANY($2::bigint[])
+                   AND ((it.status = 'transferred'
+                         AND it.transferred_at >= g.last_seen_at)
+                     OR (it.status IN ('pending', 'queued')
+                         AND EXISTS (
+                             SELECT 1 FROM operation_queue q
+                              WHERE q.owner_id = $1 AND q.op_type = 'gift_transfer'
+                                AND q.status IN {_IN_FLIGHT_SQL}
+                                AND q.params->>'plan_id' = p.id::text)))""",
+            uid, ids)
+        return {int(r["inventory_id"]) for r in rows}
 
     async def gift_transfer_preview(request: web.Request) -> web.Response:
         """Что именно уйдёт и во сколько обойдётся — ДО нажатия.
@@ -182,34 +211,41 @@ def setup_routes(app: web.Application, pool) -> None:
             uname, uerr = _gift_recipient(body)
             if uerr:
                 return _err(uerr, 400)
-            gifts, err = await _gift_selection(uid, body)
-            if err:
-                return _err(err, 400)
             pay = (body.get("payment_source") or "auto").strip().lower()
             if pay not in _GIFT_PAY:
                 pay = "auto"
-            from services.gift_transfer import GiftTransferService as _gts
-            plan_id = await _gts.create_plan(
-                pool, uid, uname, 0, f"@{uname}", pay)
-            await _gts.add_items_to_plan(pool, plan_id, [
-                {"inventory_id": g["id"], "account_id": g["account_id"],
-                 "gift_id": g["gift_id"], "gift_type": g["gift_type"],
-                 "stars_cost": int(g.get("stars_cost") or 0)}
-                for g in gifts])
-            check = await _gts.validate_plan(pool, plan_id)
-            if not check.get("valid"):
-                return _err("; ".join(check.get("errors") or []) or
-                            "План передачи не прошёл проверку", 400)
-            label = f"Передача подарков @{uname}: {len(gifts)}"
-            op_id = await _obus.submit(
-                pool, uid, "gift_transfer", {"plan_id": plan_id},
-                total_items=len(gifts), label=label)
-            await pool.execute(
-                "UPDATE gift_transfer_plans SET status='queued' WHERE id=$1 AND owner_id=$2",
-                plan_id, uid)
-            return _json_resp({"ok": True, "op_id": op_id, "plan_id": plan_id,
-                               "count": len(gifts), "label": label,
-                               "warnings": check.get("warnings") or []})
+            # Выбор и постановка — под замком владельца: второй одновременный
+            # запрос ждёт, пока первый поставит операцию, и уже видит подарки
+            # занятыми (см. _gift_busy_ids).
+            async with pool.acquire() as lock_conn, lock_conn.transaction():
+                await lock_conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"gift_transfer_submit|{uid}")
+                gifts, err = await _gift_selection(uid, body)
+                if err:
+                    return _err(err, 400)
+                from services.gift_transfer import GiftTransferService as _gts
+                plan_id = await _gts.create_plan(
+                    pool, uid, uname, 0, f"@{uname}", pay)
+                await _gts.add_items_to_plan(pool, plan_id, [
+                    {"inventory_id": g["id"], "account_id": g["account_id"],
+                     "gift_id": g["gift_id"], "gift_type": g["gift_type"],
+                     "stars_cost": int(g.get("stars_cost") or 0)}
+                    for g in gifts])
+                check = await _gts.validate_plan(pool, plan_id)
+                if not check.get("valid"):
+                    return _err("; ".join(check.get("errors") or []) or
+                                "План передачи не прошёл проверку", 400)
+                label = f"Передача подарков @{uname}: {len(gifts)}"
+                op_id = await _obus.submit(
+                    pool, uid, "gift_transfer", {"plan_id": plan_id},
+                    total_items=len(gifts), label=label)
+                await pool.execute(
+                    "UPDATE gift_transfer_plans SET status='queued' WHERE id=$1 AND owner_id=$2",
+                    plan_id, uid)
+                return _json_resp({"ok": True, "op_id": op_id, "plan_id": plan_id,
+                                   "count": len(gifts), "label": label,
+                                   "warnings": check.get("warnings") or []})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
