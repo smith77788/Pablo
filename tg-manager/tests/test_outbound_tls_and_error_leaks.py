@@ -58,3 +58,11 @@ def test_error_handler_does_not_echo_exception_text():
         call = src[m.start(): src.index(")\n", m.start())]
         assert "exc_text" not in call and "__name__" not in call and "str(exc)" not in call, call
     assert "exc_text" not in src
+
+
+def test_error_handler_does_not_log_the_whole_update():
+    """Текст сообщения (пароль 2FA, код входа) не уходит в лог целиком."""
+    src = _handler_src()
+    for m in re.finditer(r"log\.(exception|error|warning|info)\(", src):
+        call = src[m.start(): src.index(")\n", m.start()) + 1]
+        assert not re.search(r",\s*event\.update\s*[,)]", call), call

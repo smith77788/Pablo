@@ -286,7 +286,12 @@ async def _global_error_handler(event: ErrorEvent) -> None:
         extra={"source": "global_error_handler"},
     )
     
-    log.exception("Unhandled error in update %s (code=%s)", event.update, error_code.value, exc_info=exc)
+    # Апдейт целиком в лог НЕ пишем: в нём текст сообщения, а пользователи шлют
+    # боту пароли 2FA, коды входа и строки сессий — маска лога ловит только
+    # токены и сессии по форме, пароль и код она не узнает. Достаточно id и типа.
+    log.exception("Unhandled error in update id=%s type=%s user=%s (code=%s)",
+                  getattr(update, "update_id", None), getattr(update, "event_type", "?"),
+                  user_id, error_code.value, exc_info=exc)
     
     try:
         if update.callback_query:
