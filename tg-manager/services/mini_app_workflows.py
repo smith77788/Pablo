@@ -496,6 +496,53 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(str(e), 400)
         return _json_resp({"ok": True, "send_window": stored or ""})
 
+    async def workflow_export(request: web.Request) -> web.Response:
+        """Выгрузка сценария JSON: GET /workflows/{wf_id}/export."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        if wid is None:
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        try:
+            return _json_resp(await _wf.export_workflow(pool, uid, wid))
+        except LookupError:
+            return _err("Воркфлоу не найден", 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+
+    async def workflow_import(request: web.Request) -> web.Response:
+        """Загрузка сценария из выгрузки: POST /workflows/import,
+        тело {data: <выгрузка или её текст>, bot_id?}. Создаётся выключенным."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос", 400)
+        raw_bot = body.get("bot_id")
+        bot_id = None
+        if raw_bot not in (None, "", 0, "0"):
+            try:
+                bot_id = int(raw_bot)
+            except (TypeError, ValueError):
+                return _err("Неверный идентификатор бота", 400)
+            own = await _safe_fetchrow(pool,
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                bot_id, uid)
+            if not own:
+                return _err("Бот не найден", 404)
+        from services import workflow_engine as _wf
+        try:
+            res = await _wf.import_workflow(pool, uid, body.get("data"), bot_id=bot_id)
+        except ValueError as e:
+            return _err(str(e), 400)
+        return _json_resp(res)
+
     async def workflow_copy(request: web.Request) -> web.Response:
         """Копия сценария (выключенная): POST /workflows/{wf_id}/copy,
         тело {bot_id?, name?} — бот для копии, по умолчанию тот же."""
@@ -691,6 +738,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
     app.router.add_get("/api/miniapp/workflow/run/{run_id}/log", workflow_run_log)
+    app.router.add_post("/api/miniapp/workflows/import", workflow_import)
+    app.router.add_get("/api/miniapp/workflows/{wf_id}/export", workflow_export)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/copy", workflow_copy)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/send_window", workflow_send_window)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/retry", workflow_retry_run)

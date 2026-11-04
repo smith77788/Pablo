@@ -307,6 +307,107 @@ async def copy_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
             "bot_id": target_bot}
 
 
+# ── Выгрузка и загрузка сценария ────────────────────────────────────────────
+# Сценарий — текст JSON: им делятся между аккаунтами, хранят как резервную
+# копию, переносят на новый проект. Загрузка проверяет ВСЁ тем же языком,
+# что экран (validate_steps / validate_trigger / validate_goal): JSON пришёл
+# снаружи, и сценарий, которого экран не умеет показать, не пишется.
+EXPORT_FORMAT = "infragram.workflow"
+EXPORT_VERSION = 1
+MAX_IMPORT_BYTES = 256 * 1024
+
+
+async def export_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int) -> dict:
+    """Сценарий владельца как переносимый JSON. LookupError — нет такого."""
+    src = await pool.fetchrow(
+        """SELECT name, description, steps, trigger_type, trigger_value,
+                  allow_reentry, goal_type, goal_value, send_window, legacy_kind
+             FROM workflow_definitions WHERE id=$1 AND owner_id=$2""",
+        workflow_id, owner_id)
+    if not src:
+        raise LookupError("Сценарий не найден")
+    if src["legacy_kind"]:
+        raise ValueError("Это воронка из раздела «Воронки» — выгружать её там")
+    steps = src["steps"]
+    if isinstance(steps, str):
+        steps = json.loads(steps or "[]")
+    return {
+        "format": EXPORT_FORMAT, "version": EXPORT_VERSION,
+        "name": src["name"], "description": src["description"] or "",
+        "steps": steps or [],
+        "trigger_type": src["trigger_type"] or "manual",
+        "trigger_value": src["trigger_value"] or "",
+        "allow_reentry": bool(src["allow_reentry"]),
+        "goal_type": src["goal_type"] or "", "goal_value": src["goal_value"] or "",
+        "send_window": src["send_window"] or "",
+    }
+
+
+def _portable_steps(steps: list) -> tuple[list, int]:
+    """Шаги, ссылающиеся на сценарии ДРУГОГО аккаунта по номеру, смысла в
+    этом аккаунте не имеют: «Запустить сценарий #12» запустил бы чужой по
+    номеру или ничего. Такой шаг становится уведомлением владельцу «укажите
+    номер», а «снять со сценария #12» — «снять со всех»: число шагов не
+    меняется, переходы по номерам остаются верными. ЧИСТАЯ."""
+    out, changed = [], 0
+    for st in steps:
+        st = dict(st) if isinstance(st, dict) else st
+        if isinstance(st, dict) and st.get("type") == "action":
+            if st.get("action") == "start_workflow":
+                st = {"type": "action", "action": "notify_owner",
+                      "value": f"Здесь сценарий запускал сценарий #{st.get('value')} "
+                               "из другого аккаунта — замените шаг на свой"}
+                changed += 1
+            elif st.get("action") == "stop_workflows" and st.get("value"):
+                st = {"type": "action", "action": "stop_workflows"}
+                changed += 1
+        out.append(st)
+    return out, changed
+
+
+async def import_workflow(pool: asyncpg.Pool, owner_id: int, data,
+                          bot_id: int | None = None) -> dict:
+    """Создать (выключенный) сценарий из выгрузки. ValueError — по-русски.
+    Владельца `bot_id` проверяет обработчик."""
+    from services import workflow_runtime as _rt
+    if isinstance(data, str):
+        if len(data.encode("utf-8")) > MAX_IMPORT_BYTES:
+            raise ValueError("Выгрузка слишком большая")
+        try:
+            data = json.loads(data)
+        except ValueError:
+            raise ValueError("Это не выгрузка сценария: текст не разбирается как JSON")
+    if not isinstance(data, dict) or data.get("format") != EXPORT_FORMAT:
+        raise ValueError("Это не выгрузка сценария Infragram")
+    if int(data.get("version") or 0) > EXPORT_VERSION:
+        raise ValueError("Выгрузка из более новой версии — обновите приложение")
+    name = str(data.get("name") or "").strip()[:110] or "Сценарий"
+    raw_steps = data.get("steps")
+    if not isinstance(raw_steps, list):
+        raise ValueError("В выгрузке нет шагов")
+    portable, changed = _portable_steps(raw_steps)
+    steps = validate_steps(portable)
+    ttype, tval = _rt.validate_trigger(data.get("trigger_type"), data.get("trigger_value"))
+    if ttype in ("inactive", "schedule") and bot_id is None:
+        ttype, tval = None, None
+    gtype, gval = _rt.validate_goal(data.get("goal_type"), data.get("goal_value"))
+    win = _rt.parse_send_window(data.get("send_window") or None)
+    res = await create_workflow(pool, owner_id, f"{name} (загружен)"[:120],
+                                description=str(data.get("description") or "")[:500],
+                                steps=steps, is_active=False, bot_id=bot_id)
+    if not res.get("ok"):
+        raise RuntimeError(res.get("error") or "сценарий не создан")
+    await pool.execute(
+        """UPDATE workflow_definitions
+              SET trigger_type=$2, trigger_value=$3, allow_reentry=$4,
+                  goal_type=$5, goal_value=$6, send_window=$7
+            WHERE id=$1""",
+        res["id"], ttype, tval, bool(data.get("allow_reentry")), gtype, gval,
+        f"{win[0]:02d}-{win[1]:02d}" if win else None)
+    return {"ok": True, "id": res["id"], "steps": len(steps), "adapted_steps": changed,
+            "trigger_type": ttype or "manual"}
+
+
 async def get_workflows(pool: asyncpg.Pool, owner_id: int) -> list:
     """Get all workflow definitions."""
     try:

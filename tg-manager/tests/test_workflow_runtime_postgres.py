@@ -1050,3 +1050,44 @@ def test_wait_matching_is_exact():
     assert not wait_matches(step, {"event_type": "payment.received", "data": {}})
     assert wait_matches({"event": "payment.received"},
                         {"event_type": "payment.received", "data": {"amount": 5}})
+
+
+# ── Выгрузка и загрузка ──────────────────────────────────────────────────────
+
+def test_an_exported_scenario_loads_back_switched_off_and_portable(pool, tg):
+    """Выгрузка → загрузка в другой аккаунт: шаги, запуск, цель и часы те
+    же; ссылка на сценарий чужого аккаунта по номеру не переносится как
+    есть; сценарий рождается выключенным; мусор и чужой формат — отказ."""
+    import pytest as _pt
+    from services import workflow_engine as wf
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "message", "text": "Привет"},
+            {"type": "action", "action": "start_workflow", "value": "12"},
+            {"type": "action", "action": "stop_workflows", "value": "9"},
+        ], trigger="keyword", value="цена")
+        await wf.set_goal(pool, OWNER, wf_id, "paid", None)
+        await wf.set_send_window(pool, OWNER, wf_id, "9-21")
+        dump = await wf.export_workflow(pool, OWNER, wf_id)
+        text = json.dumps(dump, ensure_ascii=False)
+        other = OWNER + 7
+        try:
+            res = await wf.import_workflow(pool, other, text)
+            row = await pool.fetchrow("SELECT * FROM workflow_definitions WHERE id=$1", res["id"])
+            assert row["owner_id"] == other and not row["is_active"]
+            assert row["trigger_type"] == "keyword" and row["goal_type"] == "paid"
+            assert row["send_window"] == "09-21" and res["adapted_steps"] == 2
+            steps = json.loads(row["steps"]) if isinstance(row["steps"], str) else row["steps"]
+            assert [s.get("action") for s in steps] == [None, "notify_owner", "stop_workflows"]
+            assert "value" not in steps[2]
+            for bad in ("не json", json.dumps({"format": "x"}),
+                        json.dumps({**dump, "steps": [{"type": "rm -rf"}]})):
+                with _pt.raises(ValueError):
+                    await wf.import_workflow(pool, other, bad)
+            with _pt.raises(LookupError):
+                await wf.export_workflow(pool, other + 1, wf_id)
+        finally:
+            await pool.execute("DELETE FROM workflow_definitions WHERE owner_id=$1", other)
+
+    _run(go())
