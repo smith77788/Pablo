@@ -185,6 +185,27 @@ def test_metrics_are_scrapeable(running_app):
     assert code == 200 and size > 0
 
 
+def test_readiness_turns_green_in_a_real_process(running_app):
+    """`/health/ready` в настоящем процессе становится 200: база ответила,
+    цикл событий не стоит. Без этого проверке готовности нельзя доверить
+    решение платформы «можно ли переключать трафик на новый экземпляр»."""
+    import json as _json
+    base, _proc = running_app
+    deadline = time.time() + 90
+    body = None
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(base + "/health/ready", timeout=5) as r:
+                body = _json.loads(r.read())
+                if r.status == 200:
+                    break
+        except urllib.error.HTTPError as e:
+            body = _json.loads(e.read() or b"{}")
+        time.sleep(2)
+    assert body and body.get("ok") is True, f"готовность так и не наступила: {body}"
+    assert body["db"]["ok"] is True
+
+
 def test_process_stays_alive_through_repeated_polling_failures(running_app):
     """Процесс не должен умирать от того, что Telegram недоступен.
 
