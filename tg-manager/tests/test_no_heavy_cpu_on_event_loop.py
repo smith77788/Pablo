@@ -43,6 +43,9 @@ HEAVY = {
     "extract_text_from_file",
     "_extract_document_text",  # bot.handlers.ai_assistant
     "_build_audience_xlsx",    # bot.handlers.audience
+    "extractall",              # zipfile: распаковка архива целиком
+    "_extract_tdata_sessions_opentele",  # расшифровка tdata (account_manager)
+    "convert_tdata",           # services.tdata_converter
 }
 
 # `extract_text` слишком общее имя (так же зовётся метод страницы pypdf),

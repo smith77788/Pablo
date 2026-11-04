@@ -3748,7 +3748,9 @@ async def handle_import_tdata(
                         await state.clear()
                         await msg.edit_text("❌ Архив содержит подозрительные пути (path traversal). Отклонено.")
                         return
-                zf.extractall(extract_dir)
+                # Распаковка до 200 МБ — в поток: на цикле событий это секунды
+                # простоя всего процесса.
+                await asyncio.to_thread(zf.extractall, extract_dir)
         except zipfile.BadZipFile:
             await state.clear()
             _err_kb = InlineKeyboardBuilder()

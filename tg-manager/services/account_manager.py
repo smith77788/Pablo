@@ -2515,7 +2515,11 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     # расшифровку локального хранилища и готовый authKey + номер DC по каждому
     # аккаунту. StringSession собираем сами, а подключаемся своим клиентом (с
     # прокси и device-fingerprint) — как во всех остальных способах импорта.
-    opentele_sessions = _extract_tdata_sessions_opentele(tdata_path)
+    # Разбор и расшифровка tdata — синхронный CPU и файловый ввод. На цикле
+    # событий он останавливал весь процесс (бот, мини-апп, операции) на время
+    # разбора каждой папки — в архиве их десятки. В поток.
+    opentele_sessions = await asyncio.to_thread(
+        _extract_tdata_sessions_opentele, tdata_path)
     if opentele_sessions:
         last_err = ""
         for session_str in opentele_sessions:
@@ -2538,7 +2542,7 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
         )
 
     try:
-        sessions = convert_tdata(tdata_path)
+        sessions = await asyncio.to_thread(convert_tdata, tdata_path)
     except Exception as e:
         raise ValueError(f"Ошибка конвертации tdata: {e}")
 
@@ -2689,7 +2693,9 @@ async def import_tdata_accounts_from_zip_bytes(zip_bytes: bytes) -> dict:
     zip_path = _os.path.join(tmp_dir, "tdata.zip")
     extract_dir = _os.path.join(tmp_dir, "extracted")
     _os.makedirs(extract_dir, exist_ok=True)
-    try:
+    def _unpack() -> list[str]:
+        # Запись, проверка и распаковка архива до 400 МБ — синхронный ввод-вывод
+        # и CPU. На цикле событий это секунды простоя всего процесса — в поток.
         with open(zip_path, "wb") as f:
             f.write(zip_bytes)
         try:
@@ -2706,8 +2712,10 @@ async def import_tdata_accounts_from_zip_bytes(zip_bytes: bytes) -> dict:
                 zf.extractall(extract_dir)
         except zipfile.BadZipFile:
             raise ValueError("Файл повреждён или не является ZIP-архивом.")
+        return _find_all_tdata_roots(extract_dir)
 
-        roots = _find_all_tdata_roots(extract_dir)
+    try:
+        roots = await asyncio.to_thread(_unpack)
         if not roots:
             raise ValueError("Папка tdata (с файлом key_datas) не найдена в архиве.")
 
@@ -2731,7 +2739,7 @@ async def import_tdata_accounts_from_zip_bytes(zip_bytes: bytes) -> dict:
         return {"accounts": accounts, "errors": errors, "found": len(roots)}
     finally:
         try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, tmp_dir, True)
         except Exception:
             log_exc_swallow(log, "import_tdata_accounts_from_zip_bytes cleanup")
 
