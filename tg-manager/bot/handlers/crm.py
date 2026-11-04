@@ -1004,12 +1004,14 @@ async def cb_deal_view(
 
     activities = await db.get_crm_activity(pool, deal["id"], limit=5)
     stage_label = _STAGE_LABELS.get(deal["stage"], deal["stage"])
-    contact = deal["contact"] or "—"
+    # Название, контакт и заметки сделки собираются из имени и полей,
+    # которые прислал подписчик (сценарии, авто-сделки): только экранированными.
+    contact = html.escape(deal["contact"] or "—")
     val = f"{deal['value']:,.0f}" if deal["value"] else "—"
-    notes = (deal["notes"] or "—")[:200]
+    notes = html.escape((deal["notes"] or "—")[:200])
 
     lines = [
-        f"📄 <b>{deal['title']}</b>\n",
+        f"📄 <b>{html.escape(deal['title'] or '')}</b>\n",
         f"Стадия: {stage_label}",
         f"Контакт: {contact}",
         f"Сумма: {val}",
@@ -1019,7 +1021,7 @@ async def cb_deal_view(
         lines.append("\n<b>Активность:</b>")
         for act in activities:
             ts = act["created_at"].strftime("%d.%m %H:%M")
-            lines.append(f"  [{ts}] {act['note'][:80]}")
+            lines.append(f"  [{ts}] {html.escape((act['note'] or '')[:80])}")
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -1060,16 +1062,16 @@ async def cb_deal_move(
     stage_label = _STAGE_LABELS.get(deal["stage"], deal["stage"])
 
     lines = [
-        f"📄 <b>{deal['title']}</b>\n",
+        f"📄 <b>{html.escape(deal['title'] or '')}</b>\n",
         f"Стадия: {stage_label}",
-        f"Контакт: {deal['contact'] or '—'}",
+        f"Контакт: {html.escape(deal['contact'] or '—')}",
         f"Сумма: {deal['value']:,.0f}" if deal["value"] else "Сумма: —",
     ]
     if activities:
         lines.append("\n<b>Активность:</b>")
         for act in activities:
             ts = act["created_at"].strftime("%d.%m %H:%M")
-            lines.append(f"  [{ts}] {act['note'][:80]}")
+            lines.append(f"  [{ts}] {html.escape((act['note'] or '')[:80])}")
 
     await callback.message.edit_text(
         "\n".join(lines),
