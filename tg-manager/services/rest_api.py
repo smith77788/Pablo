@@ -118,6 +118,9 @@ async def _authorize(request: web.Request, pool, scope: str = "read") -> dict | 
     info = await _keys.authenticate(pool, _presented_key(request))
     if not info:
         return None
+    from services import platform_ban
+    if await platform_ban.is_banned(pool, info["owner_id"]):
+        return None  # ключ забаненного владельца — как отозванный
     return {"admin": False, "owner_id": info["owner_id"],
             "scopes": info["scopes"], "key_id": info["key_id"]}
 

@@ -2429,6 +2429,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     app.middlewares.append(admin_audit_middleware)
 
+    # Бан владельца закрывает и мини-апп (services/platform_ban.py): токен
+    # сессии, выданный до бана, больше ничего не открывает.
+    @web.middleware
+    async def platform_ban_middleware(request: web.Request, handler):
+        if request.path.startswith("/api/miniapp/") and request.method != "OPTIONS":
+            from services import platform_ban
+            uid = _get_uid(request)
+            if uid and await platform_ban.is_banned(pool, uid):
+                return _err(platform_ban.BANNED_TEXT, 403)
+        return await handler(request)
+
+    app.middlewares.append(platform_ban_middleware)
+
     async def _apply_inline_migrations(application: web.Application) -> None:
         await apply_inline_migrations(pool)
 

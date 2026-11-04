@@ -6239,6 +6239,8 @@ async def ban_user(
         user_id,
     )
 
+    from services.platform_ban import forget
+    forget(user_id)
     await log_admin_action(pool, admin_id, "ban_user", user_id,
                            {"reason": reason or ""})
 
@@ -6252,6 +6254,8 @@ async def unban_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
         user_id,
     )
 
+    from services.platform_ban import forget
+    forget(user_id)
     await log_admin_action(pool, admin_id, "unban_user", user_id)
 
 
