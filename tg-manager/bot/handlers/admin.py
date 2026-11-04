@@ -150,6 +150,22 @@ def _is_admin(uid: int) -> bool:
     return bool(ids) and uid in ids
 
 
+def _is_permanent_admin(uid: int) -> bool:
+    """Только ADMIN_IDS — без входа по секретной фразе.
+
+    Выгрузка токенов ВСЕХ ботов платформы — это ключи от ботов всех клиентов
+    сразу. Сессионный админ — тот, кто знает фразу; утечка фразы не должна
+    одним нажатием отдавать всю платформу.
+    """
+    raw = os.getenv("ADMIN_IDS", "")
+    ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+    return bool(ids) and uid in ids
+
+
+def _is_env_action(action: str) -> bool:
+    return action in ("env_list", "env_add") or action.startswith("env_edit:")
+
+
 def is_admin(uid: int) -> bool:
     """Public alias for _is_admin — checks both env ADMIN_IDS and session admins."""
     return _is_admin(uid)
@@ -630,6 +646,17 @@ async def cb_admin(
         return
     await safe_answer(callback)
     action = callback.data.removeprefix("adm:")
+
+    # Переменные окружения — это ADMIN_IDS, ADMIN_SECRET, токен бота и строка
+    # базы. Вошедший по секретной фразе дописывал себя в ADMIN_IDS и забирал
+    # платформу целиком. Только постоянные админы (ADMIN_IDS).
+    if _is_env_action(action) and not _is_permanent_admin(callback.from_user.id):
+        await callback.message.answer(
+            "⛔️ Переменные окружения доступны только постоянным "
+            "администраторам (ADMIN_IDS), не по секретной фразе.",
+            reply_markup=_back_kb(),
+        )
+        return
 
     if action == "main":
         # Возврат в главное меню админки отменяет любой незавершённый флоу
@@ -1696,6 +1723,19 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 
 async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_permanent_admin(callback.from_user.id):
+        await callback.message.answer(
+            "⛔️ Выгрузка токенов доступна только постоянным администраторам "
+            "(ADMIN_IDS), не по секретной фразе.",
+            reply_markup=terminal_kb(),
+        )
+        return
+    try:
+        await db.log_admin_action(pool, callback.from_user.id,
+                                  "export_all_bot_tokens", None, {})
+    except Exception:
+        log_exc_swallow(log, "_adm_send_tokens_file: журнал не записан")
+    log.warning("AUDIT export_all_bot_tokens admin_id=%s", callback.from_user.id)
     try:
         from database.db import fetch_bots as _fetch_bots_adm
         bots = await _fetch_bots_adm(
@@ -2237,6 +2277,11 @@ async def handle_admin_message(
 
     state = state_row["state"]
     text = message.text.strip()
+    if _is_env_action(state) and not _is_permanent_admin(message.from_user.id):
+        await message.answer(
+            "⛔️ Переменные окружения доступны только постоянным "
+            "администраторам (ADMIN_IDS).")
+        return
 
     try:
         await pool.execute(
