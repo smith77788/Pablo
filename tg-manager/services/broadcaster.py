@@ -81,6 +81,9 @@ _broadcast_result_cache = TTLCache(default_ttl=300.0, max_size=500)
 _bot_tier_cache: dict[int, tuple[bool, float]] = {}
 _BOT_TIER_TTL = 600.0
 # Кэш user_map для placeholder-рендеринга по bot_id (TTL 2 мин)
+# Паузы между попытками проверки токена перед рассылкой: сбой связи с
+# Telegram на старте рассылки обычно короче минуты.
+_PREFLIGHT_PAUSES_S = (5.0, 20.0, 0.0)
 _user_map_cache = TTLCache(default_ttl=120.0, max_size=2000)
 
 
@@ -273,17 +276,40 @@ async def run(
             await session.close()
         return
 
-    # Pre-flight: verify token is valid before burning through 10k send attempts
-    me = await bot_api.get_me(session, token)
-    if not me:
-        logger.error(
-            "Broadcast %d: pre-flight getMe failed — token invalid or revoked; aborting",
-            broadcast_id,
-        )
-        try:
-            await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
-        except Exception as _e:
-            logger.warning("Broadcast %d: failed to mark failed: %s", broadcast_id, _e)
+    # Pre-flight: verify token is valid before burning through 10k send attempts.
+    # Провал — ТОЛЬКО если Telegram прямо сказал, что токена нет. Раньше любой
+    # неуспех getMe (сеть, 5xx, флуд) навсегда помечал рассылку 'failed', хотя
+    # не отправлено было ничего, — минута недоступности Telegram хоронила её.
+    _state = "transient"
+    for _attempt, _pause in enumerate(_PREFLIGHT_PAUSES_S):
+        # Удачный getMe — обычный путь; разбор причины неудачи — только когда
+        # он не прошёл (второй запрос дешевле ложного провала рассылки).
+        _state = ("ok" if await bot_api.get_me(session, token)
+                  else await bot_api.token_state(session, token))
+        if _state != "transient":
+            break
+        if _attempt < len(_PREFLIGHT_PAUSES_S) - 1:
+            await asyncio.sleep(_pause)
+    if _state != "ok":
+        if _state == "revoked":
+            logger.error(
+                "Broadcast %d: токен бота отозван (getMe 401/404) — рассылка не идёт",
+                broadcast_id,
+            )
+            try:
+                await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
+            except Exception as _e:
+                logger.warning("Broadcast %d: failed to mark failed: %s", broadcast_id, _e)
+        else:
+            # Статус не трогаем: рассылку подберёт докатка прерванных
+            # (resume_interrupted) — так же, как при недоступной базе ниже.
+            logger.warning(
+                "Broadcast %d: Telegram недоступен на проверке токена — рассылка "
+                "отложена до докатки, а не помечена провалом",
+                broadcast_id,
+            )
+        if _own_session and session is not None:
+            await session.close()
         return
 
     # Skip users already delivered (supports crash-resume without duplicate sends)

@@ -134,19 +134,8 @@ async def recover_stuck_claims(pool: asyncpg.Pool) -> dict[str, int]:
 
 
 async def _token_state(http: aiohttp.ClientSession, token: str) -> str:
-    """'ok' | 'revoked' | 'transient' для токена бота по ответу getMe.
-
-    'revoked' — только когда Telegram прямо сказал, что токена нет (401/404).
-    Всё остальное (сеть, 5xx, 429) — 'transient': сбой связи не повод
-    навсегда хоронить отложенную рассылку."""
-    data = await bot_api._call(http, token, "getMe")
-    if data.get("ok") and data.get("result"):
-        return "ok"
-    try:
-        code = int(data.get("error_code") or 0)
-    except (TypeError, ValueError):
-        code = 0
-    return "revoked" if code in (401, 404) else "transient"
+    """См. `bot_api.token_state` — одно правило для всех проверок токена."""
+    return await bot_api.token_state(http, token)
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:

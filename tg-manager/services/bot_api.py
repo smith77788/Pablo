@@ -188,6 +188,28 @@ async def get_me(session: aiohttp.ClientSession, token: str) -> dict | None:
     return data.get("result") if data.get("ok") else None
 
 
+# Ответы getMe, которыми Telegram прямо говорит «такого токена нет».
+TOKEN_REVOKED_CODES = (401, 404)
+
+
+async def token_state(session: aiohttp.ClientSession, token: str) -> str:
+    """'ok' | 'revoked' | 'transient' — что getMe говорит о токене бота.
+
+    `get_me` отдаёт None и на отозванном токене, и на сетевой ошибке, 5xx,
+    флуде. Решения вида «токен мёртв — пометить провалом навсегда» по нему
+    принимать нельзя: минута недоступности Telegram хоронила отложенные и
+    идущие рассылки. 'revoked' — только 401/404, всё остальное — 'transient'.
+    """
+    data = await _call(session, token, "getMe")
+    if data.get("ok") and data.get("result"):
+        return "ok"
+    try:
+        code = int(data.get("error_code") or 0)
+    except (TypeError, ValueError):
+        code = 0
+    return "revoked" if code in TOKEN_REVOKED_CODES else "transient"
+
+
 # ── Profile editing ───────────────────────────────────────────────────────
 
 
