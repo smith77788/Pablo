@@ -60,6 +60,8 @@ function buildBotDetail(d) {
   const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
   const bid = b.bot_id;
   const bn = esc(CUR_BOT.name);
+  // В обработчики имя идёт JS-экраном: esc() там раскодируется обратно (см. escJs).
+  const bnJs = escJs(CUR_BOT.name);
 
   // Почему бот молчит — и что с этим делать. Раньше карточка молчащего бота
   // выглядела как карточка рабочего: «🟢 Активен», подписчики пишут, ответа
@@ -77,18 +79,18 @@ function buildBotDetail(d) {
   // Management sections as tile grids
   const mgmtSections = [
     { title:'Рассылки и воронки', tiles:[
-      {ico:'📢',lbl:'Рассылка',       fn:`openBcastForBot(${bid},'${bn}',${d.active_subscribers})`},
-      {ico:'🔄',lbl:'Воронки',        fn:`openBotFunnels(${bid},'${bn}')`},
+      {ico:'📢',lbl:'Рассылка',       fn:`openBcastForBot(${bid},'${bnJs}',${d.active_subscribers})`},
+      {ico:'🔄',lbl:'Воронки',        fn:`openBotFunnels(${bid},'${bnJs}')`},
       {ico:'💬',lbl:'Авто-ответы',    fn:`openArScreen()`},
       {ico:'🧑‍💼',lbl:'Менеджер',      fn:`openSalesManager(${bid})`},
-      {ico:'⏰',lbl:'Расписание',     fn:`openSchedule(${bid},'${bn}')`},
+      {ico:'⏰',lbl:'Расписание',     fn:`openSchedule(${bid},'${bnJs}')`},
       {ico:'🔀',lbl:'Авто-воронки',  fn:`openAutoFunnels()`},
-      {ico:'🎯',lbl:'Аудитория',      fn:`openAudience(${bid},'${bn}')`},
+      {ico:'🎯',lbl:'Аудитория',      fn:`openAudience(${bid},'${bnJs}')`},
       {ico:'🛡',lbl:'Защита от накрутки', fn:`openFloodGuard(${bid})`},
     ]},
     { title:'Аналитика', tiles:[
-      {ico:'📊',lbl:'Статистика',     fn:`openBotStats(${bid},'${bn}')`},
-      {ico:'👥',lbl:'Подписчики',     fn:`openBotSubs(${bid},'${bn}')`},
+      {ico:'📊',lbl:'Статистика',     fn:`openBotStats(${bid},'${bnJs}')`},
+      {ico:'👥',lbl:'Подписчики',     fn:`openBotSubs(${bid},'${bnJs}')`},
       {ico:'🔥',lbl:'Активность',     fn:`openEngagement(${bid})`},
       {ico:'🔍',lbl:'Позиции',        fn:`openKeywordsScreen()`},
       {ico:'🧬',lbl:'ДНК аудит.',     fn:`openAudienceDna()`},
@@ -96,10 +98,10 @@ function buildBotDetail(d) {
     ]},
     { title:'Инструменты', tiles:[
       {ico:'🌐',lbl:'Глобал. поиск',  fn:`openGlobalSearch()`},
-      {ico:'💬',lbl:'Входящие',       fn:`openRelay(${bid},'${bn}')`},
+      {ico:'💬',lbl:'Входящие',       fn:`openRelay(${bid},'${bnJs}')`},
       {ico:'🔗',lbl:'Диплинки',       fn:`openDeeplinks(${bid})`},
       {ico:'⌨️',lbl:'Команды',        fn:`openBotCommands(${bid})`},
-      {ico:'🔗',lbl:'Вебхук',        fn:`openBotWebhook(${bid},'${bn}')`},
+      {ico:'🔗',lbl:'Вебхук',        fn:`openBotWebhook(${bid},'${bnJs}')`},
       {ico:'🌍',lbl:'Мультигео',      fn:`openMultigeo()`},
       {ico:'📝',lbl:'Заметка',        fn:`openBotNote(${bid})`},
       {ico:'🏷',lbl:'Доп. username',  fn:`openBotExtraUsername(${bid})`},
@@ -147,9 +149,9 @@ function buildBotDetail(d) {
       <div class="kpi-col"><div class="kpi-val" style="color:var(--blue)">${num(d.auto_replies)}</div><div class="kpi-lbl">Авто-отв.</div></div>
     </div>
     <div style="display:flex;gap:8px;padding:4px 0 4px">
-      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="botPowerConfirm(${bid},'${bn}',${!!b.is_active})">${b.is_active?'⏸ На паузу':'▶️ Вернуть в работу'}</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="botPowerConfirm(${bid},'${bnJs}',${!!b.is_active})">${b.is_active?'⏸ На паузу':'▶️ Вернуть в работу'}</button>
       <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
-      <button class="btn btn-s" style="flex:0 0 auto;font-size:13px;padding:10px 10px;color:var(--red)" onclick="botDeleteConfirm(${bid},'${bn}')" aria-label="Удалить бота">🗑 Удалить</button>
+      <button class="btn btn-s" style="flex:0 0 auto;font-size:13px;padding:10px 10px;color:var(--red)" onclick="botDeleteConfirm(${bid},'${bnJs}')" aria-label="Удалить бота">🗑 Удалить</button>
     </div>
     ${mgmtSections.map(s=>`
       <div class="sec">${s.title}</div>
@@ -176,7 +178,7 @@ async function openBotFunnels(botId, botName) {
     const fns = d.funnels||[];
     if (!fns.length) { txt('bfList', empty('🔄','Нет воронок','Воронка ведёт подписчика по шагам автоматически',
       {label:'➕ Создать воронку', fn:'openFunnelModal()'})); return; }
-    txt('bfList', fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc(f.name||'Воронка')}')">
+    txt('bfList', fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${escJs(f.name||'Воронка')}')">
       <div class="ava ava-orange">🔄</div>
       <div class="li-body">
         <div class="li-name">${esc(f.name||'Воронка')}</div>
@@ -370,7 +372,7 @@ function _beuBase(v) {
 function _beuChips() {
   const base = _beuBase(document.getElementById('beuInput').value) || (CUR_BOT && CUR_BOT.name || '').replace('@','').replace(/_?bot$/i,'');
   document.getElementById('beuChips').innerHTML = BOT_EXTRA_SUFFIXES.map(s=>
-    `<button class="btn" style="padding:5px 10px;font-size:12px" onclick="document.getElementById('beuInput').value='${esc(base)}'+'${s}';_beuChips()">…${s}</button>`).join('');
+    `<button class="btn" style="padding:5px 10px;font-size:12px" onclick="document.getElementById('beuInput').value='${escJs(base)}'+'${s}';_beuChips()">…${s}</button>`).join('');
 }
 function openBotExtraUsername(botId) {
   BEU_BOT_ID = botId;

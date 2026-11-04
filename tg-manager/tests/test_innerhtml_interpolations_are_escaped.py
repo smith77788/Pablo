@@ -23,7 +23,7 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASELINE = 51
-_SAFE = re.compile(r"(esc|escBadge)\s*\(")
+_SAFE = re.compile(r"(esc|escBadge|escJs)\s*\(")
 
 
 def _count() -> tuple[int, list[str]]:

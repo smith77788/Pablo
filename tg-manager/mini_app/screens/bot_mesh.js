@@ -46,7 +46,7 @@ async function openBotMesh(keep) {
         .map(r=>esc(r.bot_name || ('бот #'+r.bot)))
         .join(' → ');
       const drop = t.drop_reason ? ' · '+esc(meshDropText(t.drop_reason)) : '';
-      return `<div class="li tap" onclick="openBotMeshTask('${esc(t.task_id)}')">
+      return `<div class="li tap" onclick="openBotMeshTask('${escJs(t.task_id)}')">
         <div class="ava ava-blue">🔗</div>
         <div class="li-body">
           <div class="li-name">${path || 'Задача без маршрута'}</div>

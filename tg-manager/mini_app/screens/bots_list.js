@@ -189,8 +189,8 @@ async function showDiscoveredBots() {
         </div>
         <div class="row-right">
           ${b.connected
-            ? `<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openBotByUsername('${esc(b.username)}')">⚙️ Управление</button>`
-            : `<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="connectOneBot('${esc(b.username)}')">🔌 Подключить</button>`}
+            ? `<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openBotByUsername('${escJs(b.username)}')">⚙️ Управление</button>`
+            : `<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="connectOneBot('${escJs(b.username)}')">🔌 Подключить</button>`}
         </div>
       </div>`).join(''));
   } catch(e) {
@@ -289,7 +289,7 @@ function renderBots() {
     // На карточке — только пауза (⏻/▶️). Удаление из системы — на экране
     // бота, кнопкой «🗑 Удалить», с подтверждением.
     return `<div class="bot-card" ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
-      <div class="bot-card-del" title="${active?'Поставить на паузу':'Вернуть в работу'}" onclick="event.stopPropagation();botPowerConfirm(${b.bot_id},'${esc(name)}',${!!active})">${active?'⏻':'▶️'}</div>
+      <div class="bot-card-del" title="${active?'Поставить на паузу':'Вернуть в работу'}" onclick="event.stopPropagation();botPowerConfirm(${b.bot_id},'${escJs(name)}',${!!active})">${active?'⏻':'▶️'}</div>
       <div class="bot-card-ava" style="background:${grad}">${initials}</div>
       <div class="bot-card-name">${esc(name)}</div>
       ${handleHtml}
