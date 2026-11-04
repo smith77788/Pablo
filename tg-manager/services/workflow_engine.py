@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import datetime
 from typing import Any, Optional
@@ -158,11 +159,17 @@ def _fmt_number(x: float) -> str:
 
 
 def _to_number(raw) -> float | None:
-    """«1 500,5» → 1500.5; не число — None. ЧИСТАЯ."""
+    """«1 500,5» → 1500.5; не число — None. ЧИСТАЯ.
+
+    «nan», «inf», «1e309» — тоже не число: float() их принимает, а дальше NaN
+    проходит любой потолок (`abs(nan) > 1e6` ложно), и шаг «score+=nan» или
+    ответ подписчика «inf» навсегда портил поле и сравнения «больше/меньше».
+    """
     try:
-        return float(str(raw).replace(" ", "").replace("\u00a0", "").replace(",", "."))
+        x = float(str(raw).replace(" ", "").replace("\u00a0", "").replace(",", "."))
     except (TypeError, ValueError):
         return None
+    return x if math.isfinite(x) else None
 
 
 # Проверка ответа на вопрос (шаг `ask`).
