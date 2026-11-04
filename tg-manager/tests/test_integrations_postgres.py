@@ -77,8 +77,9 @@ def _public_dns(monkeypatch):
 
 
 class _Resp:
-    def __init__(self, status):
+    def __init__(self, status, headers=None):
         self.status = status
+        self.headers = headers or {}
 
         class _C:
             async def read(self, n):
@@ -93,13 +94,14 @@ class _Resp:
 
 
 class _Http:
-    def __init__(self, status=200):
+    def __init__(self, status=200, resp_headers=None):
         self.status = status
+        self.resp_headers = resp_headers
         self.calls = []
 
     def post(self, url, data=None, headers=None, **kw):
         self.calls.append({"url": url, "body": data, "headers": headers, **kw})
-        return _Resp(self.status)
+        return _Resp(self.status, self.resp_headers)
 
 
 async def _endpoint(pool, owner=OWNER, events=None):
@@ -374,3 +376,55 @@ def test_reenabling_an_endpoint_disabled_by_failures_catches_up(pool):
     _run(wh.deliver_due(pool, _Http(200)))
     e = _run(wh.update_endpoint(pool, OWNER, ep["id"], is_active=True))
     assert e["requeued"] == 0
+
+
+def test_a_receiver_asking_to_wait_is_not_hammered_or_disabled(pool):
+    """429 с Retry-After: следующая попытка — не раньше, чем просит получатель,
+    и серию неудач, которая его выключает, «подождите» не удлиняет. Раньше
+    повтор шёл через минуту, снова попадал в лимит, и вежливый отказ за час
+    выключал получателя навсегда."""
+    from services import webhooks as wh
+    ep = _run(_endpoint(pool))
+    _run(wh.emit(pool, OWNER, "webhook.test", {}))
+    _run(wh.fan_out(pool))
+    _run(wh.deliver_due(pool, _Http(429, {"Retry-After": "600"})))
+    row = _run(pool.fetchrow(
+        "SELECT status, next_attempt_at > now() + interval '590 seconds' AS waits "
+        "FROM webhook_deliveries WHERE endpoint_id=$1", ep["id"]))
+    assert row["status"] == "pending" and row["waits"], "Retry-After не соблюдён"
+    e = _run(wh.get_endpoint(pool, OWNER, ep["id"]))
+    assert e["consecutive_failures"] == 0 and e["is_active"]
+
+
+def test_retry_after_parsing():
+    from services import webhooks as wh
+    assert wh.retry_after_seconds("120") == 120
+    assert wh.retry_after_seconds("-5") == 0
+    assert wh.retry_after_seconds(None) is None
+    assert wh.retry_after_seconds("скоро") is None
+    assert wh.retry_after_seconds("Wed, 21 Oct 2015 07:28:00 GMT") == 0
+
+
+def test_google_sheets_quota_waits_instead_of_counting_failures(pool, monkeypatch):
+    """Квота Google Таблиц (429) — «подождите», а не неудача получателя."""
+    from services import google_sheets as gs
+    from services import webhooks as wh
+
+    ep_id = _run(pool.fetchval(
+        "INSERT INTO webhook_endpoints (owner_id, kind, name, spreadsheet_id, sheet_name, events) "
+        "VALUES ($1, 'sheets', 'лист', 'sheet-id-1', 'События', '{}'::text[]) RETURNING id",
+        OWNER))
+
+    async def _quota(pool_, owner_id, sid, sheet, rows):
+        return False, 429, "Google ограничил частоту запросов — повторим позже"
+
+    monkeypatch.setattr(gs, "append_event_rows", _quota)
+    _run(wh.emit(pool, OWNER, "webhook.test", {}))
+    _run(wh.fan_out(pool))
+    _run(wh.deliver_due(pool, _Http(200)))
+    row = _run(pool.fetchrow(
+        "SELECT status, next_attempt_at > now() + interval '50 seconds' AS waits "
+        "FROM webhook_deliveries WHERE endpoint_id=$1", ep_id))
+    assert row["status"] == "pending" and row["waits"]
+    assert _run(pool.fetchval(
+        "SELECT consecutive_failures FROM webhook_endpoints WHERE id=$1", ep_id)) == 0

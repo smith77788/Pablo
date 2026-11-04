@@ -494,9 +494,45 @@ async def _claim_due(pool) -> list[dict]:
     return out
 
 
+def retry_after_seconds(value) -> float | None:
+    """Заголовок Retry-After (секунды или HTTP-дата) → секунды. ЧИСТАЯ.
+
+    None — заголовка нет или он не разбирается. Отрицательное — ноль."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=_dt.timezone.utc)
+    return max(0.0, (when - _dt.datetime.now(_dt.timezone.utc)).total_seconds())
+
+
+# Получатель попросил подождать (429, 503 с Retry-After): ждём сколько просит,
+# но не дольше этого.
+_MAX_RETRY_AFTER_S = 6 * 3600
+# Сколько ждать, если «реже» сказали без Retry-After (429 без заголовка, квота
+# Google Таблиц).
+_DEFAULT_RATE_LIMIT_S = 60.0
+
+
 async def send_http(http, endpoint: dict, event: str, event_id: int, created_at,
-                    data: dict) -> tuple[bool, int | None, str]:
-    """Одна попытка POST. (успех, код ответа, текст ошибки по-русски)."""
+                    data: dict, meta: dict | None = None) -> tuple[bool, int | None, str]:
+    """Одна попытка POST. (успех, код ответа, текст ошибки по-русски).
+
+    `meta`, если передан, получает `retry_after` (секунды) — когда получатель
+    ответил 429/503 и сказал, сколько ждать."""
     from services.security import resolve_url_is_public
     from services.token_vault import decrypt_token
     import aiohttp
@@ -532,6 +568,11 @@ async def send_http(http, endpoint: dict, event: str, event_id: int, created_at,
                 snippet = ""
             if 300 <= code < 400:
                 return False, code, "получатель ответил переадресацией — укажите конечный адрес"
+            if code in (429, 503) and meta is not None:
+                ra = retry_after_seconds(
+                    (getattr(resp, "headers", None) or {}).get("Retry-After"))
+                if ra is not None or code == 429:
+                    meta["retry_after"] = ra if ra is not None else _DEFAULT_RATE_LIMIT_S
             return False, code, f"ответ {code}" + (f": {snippet[:200]}" if snippet else "")
     except asyncio.TimeoutError:
         return False, None, f"нет ответа за {_HTTP_TIMEOUT_S} с"
@@ -539,7 +580,15 @@ async def send_http(http, endpoint: dict, event: str, event_id: int, created_at,
         return False, None, f"сетевая ошибка: {type(e).__name__}"
 
 
-async def _record(pool, item: dict, ok: bool, code: int | None, err: str) -> None:
+async def _record(pool, item: dict, ok: bool, code: int | None, err: str,
+                  retry_after: float | None = None) -> None:
+    """Итог одной попытки доставки.
+
+    `retry_after` — получатель попросил подождать (429, 503 с Retry-After,
+    квота Google Таблиц). Попытка тратится как обычно, но следующая — не
+    раньше, чем он просит, и серию неудач, которая выключает получателя, это
+    не удлиняет: раньше повтор шёл через минуту, снова попадал в тот же
+    лимит, и вежливое «подождите» за час выключало получателя навсегда."""
     did, ep_id = item["id"], item["endpoint_id"]
     if ok:
         # На успехе err — пометка («пропущено: событие не для CRM»), не ошибка.
@@ -559,7 +608,13 @@ async def _record(pool, item: dict, ok: bool, code: int | None, err: str) -> Non
                next_attempt_at = now() + make_interval(secs => $5)
            WHERE id=$1""",
         did, "failed" if final else "pending", code, (err or "")[:500],
-        float(backoff_seconds(attempts)))
+        float(max(backoff_seconds(attempts),
+                  min(retry_after or 0.0, _MAX_RETRY_AFTER_S))))
+    if retry_after is not None:
+        await pool.execute(
+            "UPDATE webhook_endpoints SET last_failure_at=now(), last_error=$2 WHERE id=$1",
+            ep_id, (err or "")[:500])
+        return
     gone = code == 410
     # Серия считается не по строкам, а по минутам: в очереди бывает полсотни
     # событий, и одна минута недоступности получателя (деплой, перезапуск)
@@ -603,7 +658,8 @@ async def _deliver_sheets(pool, items: list[dict]) -> None:
         ok, code, err = await _gs.append_event_rows(
             pool, int(ep["owner_id"]), ep["spreadsheet_id"], ep["sheet_name"], rows)
         for it in group:
-            await _record(pool, it, ok, code, err)
+            await _record(pool, it, ok, code, err,
+                          _DEFAULT_RATE_LIMIT_S if (not ok and code == 429) else None)
 
 
 async def deliver_due(pool, http) -> int:
@@ -626,13 +682,14 @@ async def deliver_due(pool, http) -> int:
 
     async def _one(it):
         async with sem:
+            meta: dict = {}
             try:
                 ok, code, err = await send_http(http, it["endpoint"], it["event"],
                                                 it["event_id"], it["created_at"],
-                                                it["payload"])
+                                                it["payload"], meta=meta)
             except Exception as e:  # доставка одной строки не валит пачку
                 ok, code, err = False, None, f"внутренняя ошибка: {type(e).__name__}"
-            await _record(pool, it, ok, code, err)
+            await _record(pool, it, ok, code, err, meta.get("retry_after"))
 
     async def _crm(group):
         from services import crm_connectors as _crm_mod
