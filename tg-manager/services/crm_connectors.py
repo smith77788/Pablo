@@ -1236,8 +1236,17 @@ async def apply_inbound(pool, owner_id: int, endpoint_id: int, link: dict, stage
         return False
     key = link["local_key"]
     # Сначала связь: тогда pipeline.updated от нашей же записи увидит, что
-    # CRM это состояние уже знает, и не поедет обратно.
-    await _save_link(pool, endpoint_id, owner_id, key, last_stage=stage, last_price=price)
+    # CRM это состояние уже знает, и не поедет обратно. Запись — «кто
+    # первый»: CRM шлёт повтор, не дождавшись ответа, и два одновременных
+    # запроса оба видели старую связь; применяет тот, чья запись сменила
+    # согласованное состояние, второй уходит без второй записи в журнал.
+    won = await pool.fetchval(
+        """UPDATE crm_links SET last_stage=$3, last_price=$4, updated_at=now()
+            WHERE endpoint_id=$1 AND local_key=$2
+              AND (last_stage IS DISTINCT FROM $3 OR last_price IS DISTINCT FROM $4)
+        RETURNING 1""", endpoint_id, key, stage, price)
+    if not won:
+        return False
     if key.startswith("contact:"):
         from services.contacts_hub import crm_engine
         cid = key.split(":", 1)[1]

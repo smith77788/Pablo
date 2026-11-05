@@ -279,6 +279,50 @@ def test_crm_stage_change_comes_back_without_echo(pool):
                               OWNER)) == len(acts)
 
 
+def test_two_simultaneous_crm_repeats_apply_once(pool):
+    """ЧТО БЫЛО: CRM, не дождавшись ответа, шлёт тот же вебхук ещё раз —
+    оба запроса читали старую связь до записи друг друга, и смена этапа
+    ложилась в историю контакта дважды. Теперь применяет только первый."""
+    import asyncio
+
+    from services import crm_connectors as crm
+    from services.contacts_hub import crm_engine
+    amo = FakeAmo()
+    c = _run(_connect(pool, amo))
+    cid = _run(_contact(pool))
+    _run(crm_engine.upsert_crm(pool, OWNER, cid, {"stage": "lead", "deal_value": 1000}))
+    _run(_drain(pool, amo))
+    lead_id = next(iter(amo.leads))
+    amo.leads[lead_id]["status_id"] = 142
+    token = c["inbound_url"].rsplit("/", 1)[1]
+    form = {"leads[status][0][id]": str(lead_id), "account[subdomain]": "acme"}
+    before = _run(pool.fetchval(
+        "SELECT COUNT(*) FROM contact_crm_activity WHERE owner_id=$1", OWNER))
+
+    class _Slow(_Resp):  # чтение сделки у CRM — с настоящей паузой сети
+        async def __aenter__(self):
+            await asyncio.sleep(0.02)
+            return self
+
+    plain = amo.request
+
+    def slow(*a, **kw):
+        r = plain(*a, **kw)
+        return _Slow(r.status, r._b)
+
+    amo.request = slow
+
+    async def both():
+        return await asyncio.gather(crm.handle_inbound(pool, amo, token, form),
+                                    crm.handle_inbound(pool, amo, token, form))
+
+    answers = _run(both())
+    assert sorted(a[1] for a in answers) == ["ok 0", "ok 1"]
+    assert _run(pool.fetchval("SELECT stage FROM contact_crm WHERE owner_id=$1", OWNER)) == "won"
+    assert _run(pool.fetchval(
+        "SELECT COUNT(*) FROM contact_crm_activity WHERE owner_id=$1", OWNER)) == before + 1
+
+
 def test_inbound_does_not_trust_the_body(pool):
     """Этап берётся из CRM по API, а не из тела: подделанный запрос с чужим
     status_id ничего не меняет."""
