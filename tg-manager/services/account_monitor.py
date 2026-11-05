@@ -241,8 +241,29 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
     import datetime as _dt
 
     from services import op_worker as _ow
+    from services import replica_guard as _rguard
 
     try:
+        # ОЧЕРЕДЬ ЗАКРЫВАЕТ ТОЛЬКО ДЕРЖАТЕЛЬ АРЕНДЫ. Защита ниже
+        # (`active_op_ids`) — память ЭТОГО процесса, а `account_monitor.run`
+        # под арендой исполнителя не стоит. В процессе, который операций не
+        # берёт, список активных пуст по определению, и живые операции
+        # держателя выглядят осиротевшими: владелец получил бы «провалилась»
+        # по работе, которая идёт прямо сейчас. Ровно то, от чего аренда и
+        # защищает (докстринг replica_guard: сторожа «не отличают свои
+        # операции от чужих»).
+        #
+        # Читаем, а не берём: `acquire_executor_lease` продлевает аренду и в
+        # чужом процессе мог бы отобрать её у держателя.
+        try:
+            _holder = await _rguard.executor_lease_holder(pool)
+        except Exception:
+            log_exc_swallow(log, "account_monitor: держатель аренды не прочитался")
+            return
+        if _holder != _ow._WORKER_ID:
+            # Не наша очередь — её закроет тот, кто её разбирает.
+            return
+
         try:
             active = await _ow.active_op_ids()
         except Exception:

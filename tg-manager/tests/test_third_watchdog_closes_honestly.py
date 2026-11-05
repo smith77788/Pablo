@@ -80,6 +80,17 @@ def spies(monkeypatch):
         return set()
     monkeypatch.setattr(op_worker, "active_op_ids", _active)
 
+    # Обход осиротевших строк идёт ТОЛЬКО у держателя аренды исполнителя:
+    # список активных операций — память одного процесса, и процесс без аренды
+    # принял бы живые операции держателя за осиротевшие (см.
+    # tests/test_only_the_lease_holder_closes_orphan_operations.py). Здесь
+    # проверяется, КАК закрывается настоящая сирота, поэтому стенд — держатель.
+    from services import replica_guard as _rguard
+
+    async def _holder(pool):
+        return op_worker._WORKER_ID
+    monkeypatch.setattr(_rguard, "executor_lease_holder", _holder)
+
     def _inc(name, labels=None, value=1.0):
         seen["metric"].append((name, dict(labels or {})))
     monkeypatch.setattr(_m, "inc", _inc)

@@ -28,6 +28,25 @@ import datetime as dt
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _we_hold_the_lease(monkeypatch):
+    """Стенд — держатель аренды исполнителя.
+
+    Обход осиротевших строк идёт только у держателя: список активных операций
+    это память одного процесса, и процесс без аренды принял бы живые операции
+    держателя за осиротевшие (tests/test_only_the_lease_holder_closes_orphan_operations.py).
+    Без этой подмены проверки «сторож не оборвал живую работу» проходили бы
+    ВПУСТУЮ — просто потому, что обход вышел на первом же условии.
+    """
+    from services import op_worker as _ow
+    from services import replica_guard as _rguard
+
+    async def _holder(pool):
+        return _ow._WORKER_ID
+
+    monkeypatch.setattr(_rguard, "executor_lease_holder", _holder)
+
+
 class _Pool:
     def __init__(self, rows):
         self.rows = rows
