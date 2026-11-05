@@ -864,6 +864,60 @@ def _brief_lines(profile: dict) -> list[str]:
     return out
 
 
+# Приёмы начала и концовки. Модель, предоставленная самой себе, выбирает один
+# и тот же: «<Город>, схоже, …» в начале и «Чекаємо на подальші…» в конце —
+# канал читался как штамповка (жалоба владельца 05.11.2026). Поэтому приём
+# назначается каждому посту случайно, а в пакете — разный каждому посту.
+_OPENING_MOVES = (
+    "начни с самого факта: что произошло, где и когда — одной фразой, без оценки",
+    "начни с числа, времени или даты",
+    "начни с короткого вопроса читателю, на который пост отвечает",
+    "начни с того, что это меняет для людей: кого касается и как",
+    "начни с короткой реплики в несколько слов, а подробности — следующей фразой",
+    "начни с детали, которую легко пропустить, и разверни её",
+    "начни с контраста: что ожидали и что вышло на деле",
+    "начни с прямой речи или формулировки из источника, если она там есть; иначе — с факта",
+)
+_CLOSING_MOVES = (
+    "закончи конкретным фактом, без вывода и без обращения к читателю",
+    "закончи практическим советом в одну фразу",
+    "закончи открытым вопросом к читателю",
+    "закончи тем, что известно на этот момент и чего пока нет",
+    "закончи короткой фразой из трёх–пяти слов",
+    "закончи следующим шагом: что будет дальше и когда",
+)
+
+
+def _variety_lines(recent_texts, n_posts: int = 1) -> list[str]:
+    """Указания против однотипности: свой приём каждому посту и чего избегать."""
+    rng = random.Random()
+    openings = rng.sample(_OPENING_MOVES, k=min(len(_OPENING_MOVES), max(1, n_posts)))
+    closings = rng.sample(_CLOSING_MOVES, k=min(len(_CLOSING_MOVES), max(1, n_posts)))
+    lines = ["", "РАЗНООБРАЗИЕ (обязательно): посты канала не должны быть похожи друг на "
+             "друга ни началом, ни концовкой, ни оборотами — даже частично."]
+    if n_posts <= 1:
+        lines.append(f"Приём начала: {openings[0]}. Приём концовки: {closings[0]}.")
+    else:
+        for i in range(n_posts):
+            lines.append(f"Пост {i + 1}: {openings[i % len(openings)]}; "
+                         f"{closings[i % len(closings)]}.")
+    used_open = cb.used_openings(recent_texts)
+    used_close = cb.used_closings(recent_texts)
+    worn = cb.worn_phrases(recent_texts)
+    if used_open:
+        lines.append("Этими словами уже начинались недавние посты — не используй их в "
+                     "первой фразе: " + ", ".join(used_open[:40]) + ".")
+    if used_close:
+        lines.append("Так уже заканчивались недавние посты — не используй эти слова в "
+                     "последней фразе: " + ", ".join(used_close[:30]) + ".")
+    if worn:
+        lines.append("Затёртые обороты канала — не используй ни одного: "
+                     + "; ".join(worn[:30]) + ".")
+    lines.append("Не используй шаблон «<место>, схоже/похоже, …» и не строй пост по "
+                 "схеме недавних: другая подача, другой ритм, другая длина абзацев.")
+    return lines
+
+
 def build_post_prompt(
     profile: dict,
     *,
@@ -999,6 +1053,8 @@ def build_post_prompt(
         lines.append("")
         lines.append("Недавние посты канала — НЕ повторяй их темы, вступления и формулировки:")
         lines.append(_fence(list(recent_texts)[:_RECENT_FOR_PROMPT], cap=400))
+    if not is_intro:
+        lines.extend(_variety_lines(list(recent_texts or []), len(tasks) if tasks else 1))
     if lessons:
         lines.append("")
         lines.append("Владелец отклонял прошлые посты по причинам: " + "; ".join(lessons[:5])
@@ -2139,6 +2195,16 @@ async def _post_context(pool, owner_id: int, channel_id: int, *,
     }
 
 
+def _source_text(profile: dict) -> str:
+    """Тексты источников, на которых пишется пост: их слова — факты, не стиль."""
+    parts = []
+    for ref in (profile or {}).get("references") or []:
+        for t in ((ref or {}).get("stats") or {}).get("latest_topics") or []:
+            if isinstance(t, dict) and t.get("text"):
+                parts.append(str(t["text"]))
+    return "\n".join(parts)[:20000]
+
+
 async def review_text(pool, owner_id: int, channel_id: int, ctx: dict, text: str) -> list[str]:
     """Замечания к готовому тексту (пусто — можно публиковать без человека).
 
@@ -2154,6 +2220,10 @@ async def review_text(pool, owner_id: int, channel_id: int, ctx: dict, text: str
                                                   channel_key=str(channel_id))
     reasons = list(verdict.reasons)
     reasons.extend(va_strategy.review_reasons(ctx["profile"], text, ctx["recent"]))
+    # Одинаковые начала, концовки и кочующие обороты (см. channel_brain.style_repeats).
+    # Факты из новостей-источников повтором не считаются.
+    reasons.extend(cb.style_repeat_reasons(text, ctx["recent"],
+                                           allow_text=_source_text(ctx["profile"])))
     rivals = mentioned_competitors(text, ctx["rival_names"])
     if rivals:
         reasons.append("упомянут конкурент: " + ", ".join(rivals[:3]))
