@@ -27,6 +27,16 @@ class _Pool:
         if "GROUP BY op_type" in sql:
             return [{"op_type": "mass_invite", "total": 10, "done": 7, "failed": 3,
                      "avg_duration_s": 125.4}]
+        if "FROM platform_users" in sql:
+            return [{"user_id": 1001, "username": "boss", "first_name": "Босс",
+                     "current_plan": "pro", "plan_expires_at": None,
+                     "created_at": _NOW, "last_active_at": _NOW},
+                    {"user_id": 1002, "username": None, "first_name": "Гость",
+                     "current_plan": None, "plan_expires_at": None,
+                     "created_at": _NOW, "last_active_at": _NOW},
+                    {"user_id": 1003, "username": None, "first_name": "Чужой",
+                     "current_plan": "legacy_gold", "plan_expires_at": None,
+                     "created_at": _NOW, "last_active_at": _NOW}]
         if "FROM admin_audit_log" in sql:
             return [{"id": 1, "admin_id": 1, "action": "bot:cmd:/backup", "target_user_id": None,
                      "source": "bot", "created_at": _NOW, "admin_username": "boss",
@@ -34,7 +44,13 @@ class _Pool:
         return []
 
     async def fetchval(self, *a, **k): return 1
-    async def fetchrow(self, *a, **k): return None
+    async def fetchrow(self, sql, *a, **k):
+        self.calls.append((sql, a))
+        if "FROM platform_users" in sql:
+            return {"user_id": 1001, "username": "boss", "first_name": "Босс",
+                    "current_plan": "business", "plan_expires_at": None,
+                    "is_banned": False, "created_at": _NOW, "last_active_at": _NOW}
+        return None
     async def execute(self, *a, **k): return "OK"
 
 
@@ -127,3 +143,40 @@ def test_the_summary_screen_is_not_a_wall_of_numbers():
     assert "seg-opt" in body, "переключатель окна рисуется не переключателем"
     feed = js_function("admOpsFeed")
     assert "Сбросить" in feed, "фильтр по типу нечем снять"
+
+
+def test_the_plan_is_named_in_russian_on_both_admin_screens(monkeypatch):
+    """Админ платформы читал «💳 Подписка: pro» — сырой код из колонки.
+
+    Экран был невидим для обхода: без вложенного `user` он падал на TypeError
+    и показывал «Что-то пошло не так», поэтому сырое значение прожило долго.
+    Русские названия лежат в services/tiers.py и рядом, в сводке платежей,
+    уже берутся оттуда.
+    """
+    status, d, _pool = _get(monkeypatch, "/api/miniapp/admin/user/1001")
+    assert status == 200, d
+    assert d["user"]["plan_ru"] == "Бизнес", d["user"]
+    # Сырое значение остаётся в ответе: экран выбирает, а API не обедняется.
+    assert d["user"]["current_plan"] == "business"
+
+    status, d, _pool = _get(monkeypatch, "/api/miniapp/admin/users")
+    assert status == 200, d
+    plans = [u["plan_ru"] for u in d["users"]]
+    assert plans == ["Про", "Бесплатный", "legacy_gold"], plans
+
+
+def test_no_admin_screen_prints_the_raw_plan_code():
+    """Храповик: оба места печатают русское название и экранируют его.
+
+    Второе не придирка: значение шло в innerHTML без esc(), а соседняя плитка
+    того же экрана экранирует всё, что приходит с сервера.
+    """
+    from tests.miniapp_source import miniapp_source
+
+    ui = miniapp_source()
+    for bad in ("${u.current_plan||'free'}", "${u.current_plan || 'free'}"):
+        assert bad not in ui, (
+            f"экран снова печатает сырой код тарифа: {bad}")
+    assert ui.count("esc(u.plan_ru || u.current_plan || 'Бесплатный')") == 2, (
+        "русское название тарифа печатают не оба места (карточка и список) "
+        "или оно идёт в разметку без esc()")

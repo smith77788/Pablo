@@ -99,6 +99,23 @@ def setup_routes(app: web.Application, pool) -> None:
     )
 
 
+    def _plan_ru(plan) -> str:
+        """Название тарифа по-русски: владелец платформы не читает по-английски.
+
+        Карточка пользователя и список печатали сырой код из колонки
+        `platform_users.current_plan` — «💳 Подписка: pro». Русские названия
+        лежат в services/tiers.py и рядом, в сводке платежей, уже берутся
+        оттуда же. Незнакомое значение показываем КАК ЕСТЬ: прятать его за
+        словом «Подписка» значит скрывать от админа, что в базе лежит что-то
+        неожиданное.
+        """
+        from services import tiers as _tiers
+        raw = (plan or "").strip()
+        if not raw or raw.lower() == "free":
+            return "Бесплатный"
+        t = _tiers.coerce_tier(raw)
+        return _tiers.name(t) if t else raw
+
     async def admin_users(request: web.Request) -> web.Response:
         """Список пользователей платформы (только для админов)."""
         uid = _get_uid(request)
@@ -109,7 +126,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 """SELECT user_id, username, first_name, current_plan, plan_expires_at,
                           registered_at AS created_at, last_seen AS last_active_at
                    FROM platform_users ORDER BY registered_at DESC LIMIT 100""")
-            return _json_resp({"users": [dict(r) for r in rows]})
+            return _json_resp({"users": [
+                {**dict(r), "plan_ru": _plan_ru(r["current_plan"])} for r in rows]})
         except Exception:
             log.exception("admin_users uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -160,7 +178,7 @@ def setup_routes(app: web.Application, pool) -> None:
             accounts = await pool.fetchval(
                 "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=true", target_id) or 0
             return _json_resp({
-                "user": dict(user),
+                "user": {**dict(user), "plan_ru": _plan_ru(user["current_plan"])},
                 "bots": int(bots),
                 "channels": int(channels),
                 "accounts": int(accounts),

@@ -364,6 +364,16 @@ await page.addInitScript((mode) => {
       o.dressing = { done: 3, total: 5 };
       o.virtual_admin_coverage = { covered: 4, total: 6 };
     }
+    // Ответ выбирает ВЕТКУ экрана. У облака первая же строка — калитка
+    // `if (!st.access)`: без доступа экран рисует платный барьер (текст и
+    // «Посмотреть подписку»), и обход мерил ровно барьер, а сам экран —
+    // квота, загрузка файла, список — не мерился ни разу. Числа «1 действие,
+    // 246 знаков» были правдой про барьер и ничего не говорили про экран.
+    // Поля — у services/mini_app_cloud.py: cloud_status.
+    if (url.indexOf('/cloud/status') >= 0) {
+      o.access = true; o.admin = false; o.used_bytes = 1234567890;
+      o.limit_bytes = 5368709120; o.max_upload_bytes = 2147483648;
+    }
     // Сводка операций платформы отдаёт `stats` СПИСКОМ по типам
     // (services/mini_app_admin.py: admin_ops_stats), а общий ответ держит в
     // этом ключе объект — экран падал на `rows.map`.

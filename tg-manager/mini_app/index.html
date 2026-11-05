@@ -30401,7 +30401,7 @@ async function openAdminUsers() {
         <div class="mgmt-tile-ico">👤</div>
         <div class="mgmt-tile-body">
           <div class="mgmt-tile-lbl">${esc(u.first_name||u.username||u.user_id)}</div>
-          <div class="mgmt-tile-val">${u.current_plan||'free'} · ${u.created_at?new Date(u.created_at).toLocaleDateString('ru-RU'):''}</div>
+          <div class="mgmt-tile-val">${esc(u.plan_ru || u.current_plan || 'Бесплатный')} · ${u.created_at?new Date(u.created_at).toLocaleDateString('ru-RU'):''}</div>
         </div>
       </div>`;
     }
@@ -30423,7 +30423,7 @@ async function openAdminUserDetail(userId) {
     let html = `<div class="sec">Пользователь ${u.user_id}</div>`;
     html += `<div style="padding:12px 16px;background:var(--bg);border-radius:14px">`;
     html += `<div>👤 ${esc(u.first_name||'')} ${esc(u.username?'@'+u.username:'')}</div>`;
-    html += `<div>💳 Подписка: <b>${u.current_plan||'free'}</b>${u.plan_expires_at?' до '+new Date(u.plan_expires_at).toLocaleDateString('ru-RU'):''}</div>`;
+    html += `<div>💳 Подписка: <b>${esc(u.plan_ru || u.current_plan || 'Бесплатный')}</b>${u.plan_expires_at?' до '+new Date(u.plan_expires_at).toLocaleDateString('ru-RU'):''}</div>`;
     html += `<div>${banned?'🚫 <b style="color:var(--red)">Забанен</b>':'✅ Активен'}</div>`;
     html += `<div>🤖 Ботов: <b>${d.bots}</b></div>`;
     html += `<div>📡 Каналов: <b>${d.channels}</b></div>`;
