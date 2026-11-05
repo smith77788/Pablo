@@ -780,6 +780,27 @@ async def send_shared(session, token: str, chat_id, widget_id: str) -> dict:
     return _sent(data, chat_id)
 
 
+async def send_shared_classified(session, token: str, chat_id, widget_id: str, *,
+                                 disable_notification: bool = False
+                                 ) -> tuple[bool, int | None, str]:
+    """sendSharedWidget для рассылки: (ok, retry_after, категория ошибки).
+
+    Та же форма, что у bot_api.send_message_classified: рассылка различает
+    заблокировавшего бота, лимит Telegram и собственную ошибку одинаково для
+    текста, фото и виджета.
+    """
+    data = await call(session, token, "sendSharedWidget", chat_id=chat_id,
+                      widget_id=str(widget_id),
+                      disable_notification=True if disable_notification else None)
+    if data.get("ok"):
+        return True, None, ""
+    code = int(data.get("error_code") or 0)
+    cat = bot_api.classify_send_error(code, _desc(data))
+    if code == 429:
+        return False, bot_api.retry_after_of(data) or 5, cat
+    return False, None, cat
+
+
 async def edit_data(session, token: str, *, chat_id=None, message_id: int | None = None,
                     widget_id: str | None = None, public_data: str | None = None,
                     chat_data: str | None = None) -> dict:

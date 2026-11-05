@@ -1069,6 +1069,7 @@ POST /api/miniapp/webhooks/{wh_id}/rotate
 POST /api/miniapp/webhooks/{wh_id}/test
 POST /api/miniapp/widgets/check
 POST /api/miniapp/widgets/send
+POST /api/miniapp/widgets/{wid}/broadcast
 POST /api/miniapp/widgets/{wid}/delete
 POST /api/miniapp/widgets/{wid}/edit
 POST /api/miniapp/workflow/create

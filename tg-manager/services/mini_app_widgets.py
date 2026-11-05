@@ -16,6 +16,13 @@ import re
 from aiohttp import web
 
 LIST_MAX = 100
+# Аудитории рассылки — те же, что у рассылки текста (mini_app_broadcast).
+BROADCAST_SEGMENTS = {
+    "all": "",
+    "active_7d": " AND last_seen >= now() - interval '7 days'",
+    "active_30d": " AND last_seen >= now() - interval '30 days'",
+    "inactive_14d": " AND (last_seen IS NULL OR last_seen < now() - interval '14 days')",
+}
 _CHAT_USERNAME = re.compile(r"^@[A-Za-z][A-Za-z0-9_]{3,31}$")
 _CHAT_ID = re.compile(r"^-?\d{1,20}$")
 
@@ -45,8 +52,9 @@ def _size(v) -> int:
 def setup_routes(app: web.Application, pool) -> None:
     import aiohttp
 
-    from services import bot_api
+    from services import bot_api, broadcaster
     from services import bot_widget_runtime as rt
+    from services import operation_bus as _obus
     from services import bot_widgets as bw
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, bad_body_response, log,
@@ -274,6 +282,69 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(res.get("error") or "Telegram не принял правку", 400)
         return _json_resp({"ok": True})
 
+    async def widget_broadcast(request: web.Request) -> web.Response:
+        """Разослать общий виджет подписчикам его бота — обычной рассылкой бота.
+
+        Рассылка та же, что у текста (run_broadcast: журнал доставок, стоп,
+        докатка после рестарта, лимиты Telegram), только каждому уходит
+        sendSharedWidget: у всех получателей один счёт голосов. Признак
+        виджета пишется тем же INSERT, что и строка рассылки.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        data, bad = await _widget_body(request)
+        if bad is not None:
+            return bad
+        row = await _own_widget(uid, request.match_info.get("wid"))
+        if not row:
+            return _err("Виджет не найден", 404)
+        if not row["bot_active"]:
+            return _err("Бот выключен — включите его, чтобы разослать виджет", 409)
+        if not row.get("widget_id"):
+            return _err("Этот виджет отправлен не общим — разослать можно только общий. "
+                        "Отправьте его заново.", 400)
+        segment = str(data.get("segment") or "all")
+        seg_sql = BROADCAST_SEGMENTS.get(segment)
+        if seg_sql is None:
+            return _err("Неизвестная аудитория рассылки", 400)
+        try:
+            total = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true "
+                "AND is_blocked=false AND suspect=false" + seg_sql, row["bot_id"]) or 0)
+        except Exception:
+            log.exception("widget_broadcast count uid=%s wid=%s", uid, row["id"])
+            return _err(_INTERNAL_ERROR, 500)
+        if not total:
+            return _err("Некому отправлять: у бота нет активных подписчиков в этой аудитории", 400)
+        text = f"🧩 Виджет: {row['title']}"[:200]
+        try:
+            bc_id = await pool.fetchval(
+                "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, widget_id) "
+                "VALUES($1,$2,$3,'pending',$4,$5) RETURNING id",
+                row["bot_id"], text, total, uid, row["widget_id"])
+        except Exception:
+            log.exception("widget_broadcast insert uid=%s wid=%s", uid, row["id"])
+            return _err("Не удалось создать рассылку", 500)
+        params = {"bot_id": row["bot_id"], "text": text, "broadcast_id": int(bc_id),
+                  "widget_id": row["widget_id"]}
+        if seg_sql:
+            params["segment"] = segment
+        label = f"Рассылка виджета @{row.get('bot_username') or row['bot_id']}: {row['title'][:40]}"
+        try:
+            op_id = await _obus.submit(pool, uid, "run_broadcast", params,
+                                       total_items=total, label=label)
+        except PermissionError as exc:
+            await broadcaster.abandon_unstarted(pool, bc_id)
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            # Строка рассылки уже в 'pending' — без снятия её подняла бы
+            # докатка на старте процесса мимо отказа постановки.
+            await broadcaster.abandon_unstarted(pool, bc_id)
+            log.exception("widget_broadcast submit uid=%s wid=%s", uid, row["id"])
+            return _err("Не удалось поставить рассылку в очередь", 500)
+        return _json_resp({"ok": True, "op_id": op_id, "broadcast_id": bc_id, "total": total})
+
     async def widget_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -306,4 +377,5 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/widgets", widget_list)
     app.router.add_post("/api/miniapp/widgets/send", widget_send)
     app.router.add_post("/api/miniapp/widgets/{wid}/edit", widget_edit)
+    app.router.add_post("/api/miniapp/widgets/{wid}/broadcast", widget_broadcast)
     app.router.add_post("/api/miniapp/widgets/{wid}/delete", widget_delete)

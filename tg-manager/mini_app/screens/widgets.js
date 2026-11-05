@@ -322,6 +322,7 @@ function _wgRow(w) {
     </div>
     <div style="display:flex;gap:6px;width:100%;margin-top:8px">
       ${w.editable ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="wgOpenEdit(${Number(w.id)})">✏️ Изменить</button>` : ''}
+      ${w.shared ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="wgBroadcast(${Number(w.id)})">📣 Подписчикам</button>` : ''}
       <button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="wgDelete(${Number(w.id)}, this)">🗑 Удалить</button>
     </div>
   </div>`;
@@ -377,4 +378,37 @@ async function wgDelete(id, el) {
   }
   if (WG.edit && Number(WG.edit.id) === Number(id)) wgCancelEdit();
   wgLoadList(false);
+}
+
+// Разослать общий виджет подписчикам бота: та же рассылка, что у текста
+// (журнал доставок, стоп, докатка), но у всех получателей один счёт голосов.
+// Число адресатов — ДО подтверждения.
+async function wgBroadcast(id) {
+  const w = (WG.items || []).find(x => Number(x.id) === Number(id));
+  if (!w) return;
+  const segment = await askChoice('Кому разослать виджет', [
+    {value: 'all', label: 'Всем активным подписчикам'},
+    {value: 'active_7d', label: 'Заходившим за 7 дней'},
+    {value: 'active_30d', label: 'Заходившим за 30 дней'},
+    {value: 'inactive_14d', label: 'Спящим — не заходили 14+ дней'},
+  ]);
+  if (!segment) return;
+  let count = 0;
+  try {
+    const r = await api(`/api/miniapp/broadcast/recipients?bot_id=${Number(w.bot_id)}&segment=${encodeURIComponent(segment)}`);
+    count = Number(r.count) || 0;
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось посчитать получателей'));
+    return;
+  }
+  if (!count) { toast('Некому отправлять: в этой аудитории нет активных подписчиков'); return; }
+  if (!await askConfirm(`Виджет «${w.title}» получат ${num(count)} подписчиков бота @${w.bot_username}. `
+      + 'Рассылку видно и можно остановить в «Операциях». Запустить?')) return;
+  try {
+    const d = await api(`/api/miniapp/widgets/${Number(id)}/broadcast`, {method: 'POST', body: JSON.stringify({segment})});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast(`✅ Рассылка виджета запущена · ${num(d.total)} получателей`);
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось запустить рассылку'));
+  }
 }
