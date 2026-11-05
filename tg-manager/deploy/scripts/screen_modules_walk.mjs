@@ -4,13 +4,10 @@
 // Chromium — как у screens_smoke.mjs (PLAYWRIGHT_JS, CHROME_BIN).
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const PW = process.env.PLAYWRIGHT_JS
-  || ['playwright', '/opt/node22/lib/node_modules/playwright/index.mjs'].find(p => {
-       try { require.resolve(p); return true; } catch { return p.startsWith('/'); } });
-const { chromium } = await import(PW);
 const path = require('path');
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
-const { LAUNCH } = await import('./_chrome.mjs');
+const { LAUNCH, chromiumOf } = await import('./_chrome.mjs');
+const chromium = await chromiumOf();
 const b = await chromium.launch(LAUNCH); const p = await b.newPage({viewport:{width:390,height:800}});
 const errs=[]; p.on('pageerror',e=>errs.push(e.message));
 await p.goto('file://'+ROOT+'/mini_app/index.html'); await p.waitForTimeout(1500);

@@ -1,4 +1,4 @@
-// Где лежит Chromium для проверок мини-аппа.
+// Где лежат Chromium И PLAYWRIGHT для проверок мини-аппа.
 //
 // Список путей жил в ЧЕТЫРЁХ копиях, а две проверки — обход вкладок модулей и
 // рабочее место виртуального админа — его не имели вовсе и полагались только
@@ -11,6 +11,23 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 const fs = require('fs');
+
+// Путь к Playwright жил в ЧЕТЫРЁХ копиях — тем же способом, каким до этого
+// файла жил список путей к Chromium, — и в пятом месте
+// (`check_va_workspace.mjs`) его не было вовсе: там стояло
+// `await import('playwright')`, то есть проверка рабочего места виртуального
+// админа локально не запускалась НИКОГДА без заданной переменной. Теперь
+// список один.
+export const PLAYWRIGHT = process.env.PLAYWRIGHT_JS
+  || ['playwright', '/opt/node22/lib/node_modules/playwright/index.mjs'].find(p => {
+       try { require.resolve(p); return true; } catch { return p.startsWith('/'); } });
+
+// Готовый chromium: Playwright отдаёт его то из `chromium`, то из
+// `default.chromium` — в зависимости от того, как разрешился путь.
+export async function chromiumOf() {
+  const m = await import(PLAYWRIGHT);
+  return m.chromium || (m.default && m.default.chromium);
+}
 
 export const CHROME = process.env.CHROME_BIN || [
   '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',

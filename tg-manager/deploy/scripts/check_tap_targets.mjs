@@ -21,9 +21,9 @@
  */
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { chromium } = await import(process.env.PLAYWRIGHT_JS || '/opt/node22/lib/node_modules/playwright/index.mjs');
 const path = require('path');
-const { LAUNCH } = await import('./_chrome.mjs');
+const { LAUNCH, chromiumOf } = await import('./_chrome.mjs');
+const chromium = await chromiumOf();
 const browser = await chromium.launch(LAUNCH);
 const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, deviceScaleFactor: 2 });
 const page = await ctx.newPage();

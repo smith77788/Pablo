@@ -40,10 +40,8 @@ const require = createRequire(import.meta.url);
 const path = require('path');
 const fs = require('fs');
 
-const PW = process.env.PLAYWRIGHT_JS
-  || ['playwright', '/opt/node22/lib/node_modules/playwright/index.mjs'].find(p => { try { require.resolve(p); return true; } catch { return p.startsWith('/'); } });
-const _pw = await import(PW);
-const chromium = _pw.chromium || (_pw.default && _pw.default.chromium);
+const { LAUNCH: _LAUNCH, chromiumOf } = await import('./_chrome.mjs');
+const chromium = await chromiumOf();
 
 const arg1 = process.argv[2] || 'home';
 const sweepMode = arg1 === 'sweep';
@@ -51,12 +49,9 @@ const tab = sweepMode ? 'home' : arg1;
 const outDir = sweepMode ? '.' : (process.argv[3] || '.');
 const sweepList = sweepMode ? (process.argv[3] || '') : '';
 
-const CHROME = process.env.CHROME_BIN || [
-  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-  '/opt/pw-browsers/chromium/chrome-linux/chrome',
-].find(p => { try { fs.accessSync(p); return true; } catch { return false; } });
-
-const browser = await chromium.launch(CHROME ? { executablePath: CHROME } : {});
+// Путь к Chromium и к Playwright — из общего ./_chrome.mjs: пятая копия
+// списка путей жила здесь.
+const browser = await chromium.launch(_LAUNCH);
 // Ширина окна — главный множитель обрезки, и 390 (iPhone 14) её почти не
 // вызывает. Узкие телефоны в ходу: 320 — iPhone SE первого поколения и
 // недорогие Android. MINIAPP_WIDTH позволяет прогнать обход по обеим.

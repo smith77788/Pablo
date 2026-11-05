@@ -2,11 +2,10 @@
 // Set PLAYWRIGHT_JS and CHROME_BIN when Playwright or Chromium isn't on the PATH.
 import {createRequire} from 'node:module';
 const require = createRequire(import.meta.url);
-const {chromium} = process.env.PLAYWRIGHT_JS
-  ? require(process.env.PLAYWRIGHT_JS) : await import('playwright');
 const path = require('node:path');
 const root = path.resolve('mini_app/index.html');
-const { LAUNCH } = await import('./_chrome.mjs');
+const { LAUNCH, chromiumOf } = await import('./_chrome.mjs');
+const chromium = await chromiumOf();
 const browser = await chromium.launch(LAUNCH);
 const page = await browser.newPage({viewport: {width: 390, height: 844}});
 const errors = [];
