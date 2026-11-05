@@ -84,7 +84,7 @@ def _patch_recipients(monkeypatch, ow, *, permanent: set, session: set):
         return set(session)
 
     monkeypatch.setattr(_sub, "platform_alert_recipients", _recips)
-    monkeypatch.setattr(_sub, "_admin_ids", lambda: set(permanent))
+    monkeypatch.setattr(_sub, "permanent_alert_recipients", lambda: set(permanent))
     # Подменяем и сессионную дверь: без этого проверка «постоянный получатель
     # совпал с сессионным» прошла бы просто потому, что поддельный пул не
     # отдаёт сессий, а не потому, что код считает постоянных правильно.
@@ -207,3 +207,40 @@ def test_a_permanent_recipient_who_also_logged_in_is_still_permanent(ow, monkeyp
         "ADMIN_IDS задан, канал не истекает — но сторож решил иначе, потому что "
         "постоянный получатель совпал с сессионным"
     )
+
+
+def test_the_permanent_door_is_not_used_as_a_recipient_list():
+    """Новая дверь не должна стать лазейкой вокруг общего списка получателей.
+
+    `permanent_alert_recipients()` отвечает на вопрос «кто не истекает», и в
+    ней НЕТ вошедших в админку по секрету. Если ею начнут резолвить, КОМУ
+    отправлять, вернётся ровно та поломка, от которой стоит храповик
+    `tests/test_a_protective_alert_reaches_someone.py`: при незаполненном
+    ADMIN_IDS сообщать будет некому. Поэтому пользователь у неё ровно один — и
+    это сторож немоты, который получателей берёт у общей двери.
+    """
+    import re
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    users = []
+    for sub, _dirs, files in os.walk(root):
+        if any(part in sub for part in (".git", "__pycache__", "tests", "node_modules")):
+            continue
+        for fn in files:
+            if not fn.endswith(".py"):
+                continue
+            path = os.path.join(sub, fn)
+            with open(path, encoding="utf-8") as fh:
+                for i, line in enumerate(fh, 1):
+                    if re.search(r"\bpermanent_alert_recipients\b", line):
+                        users.append(f"{os.path.relpath(path, root)}:{i}")
+    # Дом самой функции (определение + докстринг) и один вызов в стороже:
+    # импорт стоит отдельной строкой, поэтому вхождений у сторожа два.
+    outside = [u for u in users
+               if not u.startswith("bot/utils/subscription.py")
+               and not u.startswith("services/op_worker.py")]
+    assert outside == [], (
+        "permanent_alert_recipients() используют вне сторожа немоты: "
+        f"{outside}. Получателей оповещений резолвят только "
+        "platform_alert_recipients(pool) — в этой двери нет вошедших по "
+        "секрету.")

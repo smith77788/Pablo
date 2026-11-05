@@ -4068,17 +4068,22 @@ async def _watchdog_alert_channel_expiry(pool: asyncpg.Pool, bot) -> None:
     if bot is None:
         return
     try:
-        from bot.utils.subscription import _admin_ids, platform_alert_recipients
+        from bot.utils.subscription import (
+            permanent_alert_recipients,
+            platform_alert_recipients,
+        )
 
+        # Получателей берём ТОЛЬКО у общей двери — узкий список не включает
+        # вошедших в админку по секрету (храповик
+        # tests/test_a_protective_alert_reaches_someone.py).
         recipients = set(await platform_alert_recipients(pool) or ())
-        # Постоянных спрашиваем у переменной окружения НАПРЯМУЮ. Соблазн
-        # вычесть сессионных из всех получателей тут обманчив: у аккуратного
-        # владельца id в ADMIN_IDS и вход в админку — один и тот же человек,
-        # разница множеств пуста, и сторож решил бы, что постоянного
-        # получателя нет. Владелец получал бы предупреждение о немоте каждую
-        # неделю на канале, который не замолкает вообще, а ложная тревога
-        # здесь дороже молчания.
-        permanent = set(_admin_ids() or ())
+        # А «кто из них не истекает» — у своей двери. Соблазн вычесть
+        # сессионных из всех получателей обманчив: у аккуратного владельца id
+        # в ADMIN_IDS и вход в админку — один и тот же человек, разница
+        # множеств пуста, и сторож решил бы, что постоянного получателя нет.
+        # Владелец получал бы предупреждение о немоте канала, который не
+        # замолкает вообще, а ложная тревога здесь дороже молчания.
+        permanent = set(permanent_alert_recipients() or ())
     except Exception as e:
         log_exc_swallow(log, f"op_worker: получатели защитных тревог не прочитались: {e}")
         return
