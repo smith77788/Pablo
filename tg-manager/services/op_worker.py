@@ -499,6 +499,15 @@ _MAX_REVIVES = _int_env("OP_MAX_REVIVES", 3, 1, 20)
 # считает все воскрешения и ограничивает сверху операцию, которая делает одну
 # цель и снова роняет воркер: подряд идущие она обнуляет, значит жила бы
 # вечно, а каждый её круг забирает слот владельца и роняет работу соседей.
+# Предел применяется НЕ ко всякой операции, дошедшей до этого числа
+# воскрешений, а только к той, которая за все эти разы сделала не больше одной
+# новой цели на воскрешение (`revive_mark <= revive_total`). Иначе предел сам
+# стал бы той бедой, которую чинит эта правка: здоровая длинная операция живёт
+# по `_OP_CEILING_MAX_LIFETIME_S` до 30 суток, возобновляясь после каждого
+# потолка прогона, и за 30 суток деплоев набрала бы любое число воскрешений.
+# «Едва двигается» — это и есть описание операции, которая роняет воркер,
+# успев сделать одну цель: подряд идущие она обнуляет, но средняя скорость её
+# выдаёт.
 _MAX_REVIVES_TOTAL = _int_env("OP_MAX_REVIVES_TOTAL", 20, 2, 200)
 if _MAX_REVIVES_TOTAL < _MAX_REVIVES:
     # Настройка, в которой абсолютный предел ниже предела подряд идущих,
@@ -568,9 +577,9 @@ _POISON_ERROR = (
 # продвигавшейся операции «не продвигалась» — то же вранье, из-за которого
 # предел и переписан.
 _POISON_ERROR_TOTAL = (
-    "Операцию воскрешали {n} раз(а) — это предел. Она продвигалась, но её "
-    "всё время прерывало; остановлена, чтобы не занимать флот бесконечно. "
-    "Запустите её заново — уже отработанные цели повтор пропустит."
+    "Операцию воскрешали {n} раз(а), и за все эти разы она почти не сдвинулась "
+    "— остановлена, чтобы не занимать флот бесконечно. Запустите её заново: "
+    "уже отработанные цели повтор пропустит."
 )
 
 # Почему операция вдруг снова «ожидает». Оба сторожа возвращали её в очередь
@@ -3216,7 +3225,7 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
     if _by_total:
         summary = (
             f"⚠️ Успело {ok_n}, операцию воскрешали {_MAX_REVIVES_TOTAL} раз(а) "
-            f"— предел, остановлена"
+            f"почти без движения — предел, остановлена"
         )
     else:
         summary = (
@@ -3263,9 +3272,9 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
     await _notify_owner_about_op(
         pool, bot, owner_id,
         (f"⚠️ <b>Операция #{op_id}</b> остановлена: её воскрешали "
-         f"{_MAX_REVIVES_TOTAL} раз(а) — это предел. Она продвигалась "
-         f"({ok_n} целей), но её всё время прерывало.\n\nЗапустите её "
-         f"заново — уже отработанные цели повтор пропустит."
+         f"{_MAX_REVIVES_TOTAL} раз(а), и за все эти разы она почти не "
+         f"сдвинулась ({ok_n} целей).\n\nЗапустите её заново — уже "
+         f"отработанные цели повтор пропустит."
          if _by_total else
          f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей успело "
          f"отработать, дальше она {_MAX_REVIVES} раз(а) прерывалась и не "
@@ -3307,7 +3316,9 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
                    CASE WHEN COALESCE(revive_count, 0) >= $1 THEN $2 ELSE $4 END)
            WHERE status = 'running'
              AND (COALESCE(revive_count, 0) >= $1
-                  OR COALESCE(revive_total, 0) >= $3)
+                  OR (COALESCE(revive_total, 0) >= $3
+                      AND COALESCE(revive_mark, 0)
+                          <= COALESCE(revive_total, 0)))
         RETURNING id, owner_id, op_type, params, done_items, total_items,
                   revive_count, revive_total""",
         _MAX_REVIVES,
@@ -3445,7 +3456,9 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
                   AND (COALESCE(revive_count, 0) >= $3
-                       OR COALESCE(revive_total, 0) >= $5)
+                       OR (COALESCE(revive_total, 0) >= $5
+                           AND COALESCE(revive_mark, 0)
+                               <= COALESCE(revive_total, 0)))
              RETURNING id, owner_id, op_type, params, done_items, total_items,
                        revive_count, revive_total""",
             _STALE_RUNNING_TIMEOUT_MIN,

@@ -175,6 +175,8 @@ def test_a_progressing_operation_still_has_an_absolute_limit(pool, only_our_rows
     """
     from services import op_worker as ow
 
+    # mark <= total — та самая «едва двигалась»: за все воскрешения не больше
+    # одной новой цели на каждое.
     op_id = _run(_op(pool, done=90, mark=5, count=0,
                      total=ow._MAX_REVIVES_TOTAL))
     _run(ow._reset_stale_running(pool, bot=None))
@@ -184,10 +186,34 @@ def test_a_progressing_operation_still_has_an_absolute_limit(pool, only_our_rows
         f"абсолютный предел не сработал ({dict(row)})")
     msg = row["error_msg"] or ""
     assert "воскрешали" in msg, msg
-    assert "не продвигалась" not in msg, (
-        "продвигавшейся операции написали, что она не продвигалась — ровно то "
-        "вранье, из-за которого предел и переписан")
+    assert "прерывалась вместе с воркером" not in msg, (
+        "второму пределу подставили текст первого: «N раз прерывалась и не "
+        "дошла» — это про другую беду, и владелец пойдёт искать не там")
     assert [r["id"] for r in only_our_rows] == [op_id]
+
+
+def test_a_long_lived_productive_operation_is_not_poisoned_by_the_limit(pool):
+    """Много воскрешений + настоящая работа = операция живёт.
+
+    Здоровая длинная операция возобновляется после каждого потолка прогона и
+    живёт по `_OP_CEILING_MAX_LIFETIME_S` до 30 суток. За 30 суток деплоев она
+    наберёт любое число воскрешений, поэтому абсолютный предел смотрит не
+    только на их счёт, но и на скорость: гасится лишь та, что за все
+    воскрешения сделала не больше одной новой цели на воскрешение. Иначе
+    предел сам стал бы той бедой, которую чинит эта правка.
+    """
+    from services import op_worker as ow
+
+    op_id = _run(_op(pool, done=5000, mark=4000, count=0,
+                     total=ow._MAX_REVIVES_TOTAL * 3))
+    _run(ow._reset_stale_running(pool, bot=None))
+    row = _row(pool, op_id)
+
+    assert row["status"] == "pending", (
+        "здоровая длинная операция погашена абсолютным пределом — это та же "
+        f"беда, что и прежде, только дальше по счётчику ({dict(row)})")
+    assert row["revive_count"] == 0
+    assert row["revive_mark"] == 5000
 
 
 def test_the_owner_text_of_the_second_limit_does_not_claim_a_stall():
