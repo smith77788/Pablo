@@ -24,8 +24,20 @@ import pytest
 
 
 class _Pool:
-    def __init__(self, rows):
+    """Поддельный пул. `linked_bc` — ответ на вопрос «есть ли у расписания рассылка».
+
+    Вопрос этот появился не от вкуса: `broadcast_id` пишется ОТДЕЛЬНЫМ запросом
+    после создания рассылки, и в зазоре между ними пусто значит не «работы не
+    было», а «рассылка создана, но мы об этом не записали». Поэтому
+    восстановление спрашивает саму рассылку по `broadcasts.scheduled_id`, и
+    подделка обязана отвечать на этот вопрос ОТДЕЛЬНО от вставки продления:
+    один ответ 999 на любой fetchval закрывал бы расписание всегда, то есть
+    тест «вернулось в очередь» проходил бы по неверной причине.
+    """
+
+    def __init__(self, rows, linked_bc=None):
         self.rows = rows
+        self.linked_bc = linked_bc
         self.executed: list[tuple[str, tuple]] = []
         self.inserted: list[tuple[str, tuple]] = []
 
@@ -37,6 +49,8 @@ class _Pool:
         return "UPDATE 1"
 
     async def fetchval(self, query, *args):
+        if "FROM broadcasts" in query:
+            return self.linked_bc
         self.inserted.append((query, args))
         return 999
 
@@ -138,3 +152,74 @@ def test_recovery_runs_at_startup():
         "сторож не отрабатывает на старте — а именно старт и следует за "
         "рестартом, оборвавшим занятия"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_broadcast_without_its_link_is_not_fired_again():
+    """Связь не записалась, а рассылка создана — расписание закрывается.
+
+    Самый опасный зазор планировщика: `create_broadcast` прошёл, а
+    `UPDATE scheduled_broadcasts SET broadcast_id` — нет (процесс умер на
+    деплое, база не приняла запрос). Рассылка при этом уже стоит в 'pending', и
+    на следующем старте процесса её поднимает `broadcaster.resume_interrupted`,
+    то есть сообщение УЙДЁТ. Если восстановление поверит пустому
+    `broadcast_id`, расписание вернётся в очередь и заведёт ВТОРУЮ рассылку —
+    вся аудитория получит сообщение дважды.
+    """
+    from services import scheduler
+
+    pool = _Pool([_row(broadcast_id=None)], linked_bc=321)
+    stats = await scheduler.recover_stuck_claims(pool)
+
+    assert stats == {"closed": 1, "requeued": 0}, (
+        "расписание с уже созданной рассылкой вернулось в очередь — это второй "
+        "залп на всю аудиторию")
+    queries = [q for q, _ in pool.executed]
+    assert any("status='done'" in q for q in queries)
+    assert not any("status='pending'" in q for q in queries)
+    assert any("broadcast_id=$2" in q for q in queries), (
+        "связь не дописана: следующий сторож будет задавать тот же вопрос снова")
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_link_leaves_the_claim_alone():
+    """Сбой чтения связи — не ответ «рассылки нет».
+
+    fail-open здесь означал бы второй залп на всю аудиторию, поэтому занятие
+    остаётся как есть: следующий проход сторожа спросит снова.
+    """
+    from services import scheduler
+
+    class _BrokenLink(_Pool):
+        async def fetchval(self, query, *args):
+            if "FROM broadcasts" in query:
+                raise RuntimeError("БД недоступна")
+            return await super().fetchval(query, *args)
+
+    pool = _BrokenLink([_row(broadcast_id=None)])
+    stats = await scheduler.recover_stuck_claims(pool)
+
+    assert stats == {"closed": 0, "requeued": 0}
+    assert not pool.executed, (
+        "на сбое чтения связи расписание всё равно тронули — решение принято "
+        "без ответа на вопрос, была ли рассылка")
+
+
+@pytest.mark.asyncio
+async def test_the_link_is_written_by_the_same_insert_as_the_broadcast():
+    """Обратная ссылка не имеет собственного зазора: её пишет тот же INSERT."""
+    import inspect
+
+    from database import db
+
+    src = inspect.getsource(db.create_broadcast)
+    assert "scheduled_id" in src, (
+        "create_broadcast больше не принимает ссылку на расписание — "
+        "восстановлению снова нечего спросить у самой рассылки")
+    assert "scheduled_id)" in src and "INSERT INTO broadcasts" in src, (
+        "ссылка на расписание пишется не тем же INSERT, что сама рассылка — "
+        "значит у неё снова есть зазор, в котором рассылка есть, а связи нет")
+
+    sched = inspect.getsource(__import__("services.scheduler", fromlist=["run"]).run)
+    assert "scheduled_id=int(row[\"id\"])" in sched, (
+        "планировщик не передаёт ссылку на расписание при создании рассылки")

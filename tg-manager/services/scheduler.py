@@ -74,8 +74,15 @@ async def recover_stuck_claims(pool: asyncpg.Pool) -> dict[str, int]:
       • есть → рассылка создана, её докатит broadcaster.resume_interrupted
         (он пропускает уже доставленных по журналу, без дублей); расписание
         закрываем как выполненное и продлеваем, если оно повторяемое;
-      • нет → работа не начиналась, честно возвращаем в очередь, а дальше
-        обычная логика решит: запускать или пометить 'missed'.
+      • нет → спрашиваем саму рассылку по обратной ссылке
+        `broadcasts.scheduled_id` (schema_v298). `broadcast_id` пишется
+        ОТДЕЛЬНЫМ запросом после создания рассылки, и в зазоре между ними
+        пусто значит не «работы не было», а «рассылка создана, но мы об этом
+        не записали»: она уйдёт сама, а расписание завело бы вторую на ту же
+        аудиторию. Нашлась — закрываем и дописываем связь;
+      • ни того, ни другого → работа правда не начиналась, честно возвращаем
+        в очередь, а дальше обычная логика решит: запускать или пометить
+        'missed'.
 
     Возвращает {"closed": N, "requeued": M}. Никогда не бросает: это уборка, а
     не критический путь.
@@ -100,7 +107,37 @@ async def recover_stuck_claims(pool: asyncpg.Pool) -> dict[str, int]:
 
     for row in rows or []:
         try:
-            if row["broadcast_id"]:
+            _bc = row["broadcast_id"]
+            if not _bc:
+                # Вторая запись могла не состояться (процесс умер в зазоре,
+                # база не приняла UPDATE), а рассылка при этом уже создана и
+                # уйдёт сама. Поэтому спрашиваем саму рассылку по обратной
+                # ссылке (schema_v298), прежде чем сказать «работа не
+                # начиналась». СБОЙ ЭТОГО ЧТЕНИЯ ЗАКРЫТ: пустой ответ означал
+                # бы ровно то, чего мы боимся, — второй залп на всю аудиторию.
+                try:
+                    _bc = await pool.fetchval(
+                        "SELECT id FROM broadcasts WHERE scheduled_id = $1 "
+                        "ORDER BY id LIMIT 1",
+                        row["id"],
+                    )
+                except Exception:
+                    log.warning(
+                        "Scheduler: не прочитать рассылку расписания #%d — "
+                        "занятие оставлено как есть, иначе рассылка могла бы "
+                        "уйти второй раз", row["id"], exc_info=True)
+                    continue
+                if _bc:
+                    log.warning(
+                        "Scheduler: у расписания #%d рассылка #%s создана, но "
+                        "связь не записалась — закрываем по обратной ссылке",
+                        row["id"], _bc)
+                    await pool.execute(
+                        "UPDATE scheduled_broadcasts SET broadcast_id=$2 "
+                        "WHERE id=$1 AND broadcast_id IS NULL",
+                        row["id"], int(_bc),
+                    )
+            if _bc:
                 await pool.execute(
                     "UPDATE scheduled_broadcasts SET status='done' "
                     "WHERE id=$1 AND status='processing'",
@@ -259,6 +296,13 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         row["message_text"],
                         total,
                         row["created_by"],
+                        # Обратная ссылка пишется ТЕМ ЖЕ INSERT (schema_v298):
+                        # по ней восстановление узнаёт о созданной рассылке,
+                        # даже если процесс умрёт прямо здесь, до записи
+                        # broadcast_id ниже. Без неё рассылка ушла бы сама
+                        # (resume_interrupted поднимает 'pending'), а
+                        # расписание вернулось бы в очередь и завело вторую.
+                        scheduled_id=int(row["id"]),
                     )
                     created_bc = True
                     # Записываем id рассылки ДО запуска задачи: если процесс

@@ -1326,6 +1326,8 @@ async def create_broadcast(
     target_user_ids: list[int] | None = None,
     buttons: list[dict] | None = None,
     silent: bool = False,
+    *,
+    scheduled_id: int | None = None,
 ) -> int:
     # target_user_ids сохраняем только для сегментных рассылок (подмножество
     # аудитории); NULL = полная аудитория бота. Используется resume после
@@ -1340,6 +1342,23 @@ async def create_broadcast(
 
     target_json = _json.dumps(target_user_ids) if target_user_ids else None
     buttons_json = _json.dumps(buttons) if buttons else None
+    # ССЫЛКА НА РАСПИСАНИЕ ПИШЕТСЯ ТЕМ ЖЕ INSERT, что и сама рассылка
+    # (schema_v298). Отдельным запросом её писать нельзя: в зазоре между
+    # созданием рассылки и записью связи рассылка уже существует в 'pending' и
+    # уйдёт сама (`broadcaster.resume_interrupted`), а восстановление
+    # расписаний решает по связи — и без неё завело бы ВТОРУЮ рассылку на ту
+    # же аудиторию. База без миграции (ещё не приехала) обслуживается нижней
+    # лестницей: связи не будет, то есть поведение такое же, как до неё.
+    if scheduled_id is not None:
+        try:
+            return await pool.fetchval(
+                """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids, buttons, silent, scheduled_id)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb, $8, $9) RETURNING id""",
+                bot_id, message_text, total, created_by, photo_file_id, target_json,
+                buttons_json, bool(silent), int(scheduled_id),
+            )
+        except asyncpg.UndefinedColumnError:
+            pass
     try:
         return await pool.fetchval(
             """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids, buttons, silent)
