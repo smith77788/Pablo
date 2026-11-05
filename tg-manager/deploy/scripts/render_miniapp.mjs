@@ -223,10 +223,16 @@ await page.addInitScript((mode) => {
     if (url.indexOf('/ecosystem/') >= 0) o.eco = ent({ health_score: 0.82 });
     if (url.indexOf('/auto_funnel/') >= 0) {
       o.funnel = ent({ is_active: true });
+      o.steps = ROWS.slice(0, 6).map((r, i) => ({ ...r, step_num: i + 1, delay_hours: 3 * (i + 1) }));
       o.runs = { by_status: { running: 7, done: 12, failed: 1 },
                  waiting_on_step: { 1: 3, 2: 4 } };
     }
-    if (url.indexOf('/admin/user/') >= 0) o.user = ent({ current_plan: 'pro', is_banned: false });
+    if (url.indexOf('/admin/user/') >= 0) {
+      o.user = ent({ current_plan: 'pro', is_banned: false });
+      // `bots` тут ЧИСЛО (index.html: «🤖 Ботов: ${d.bots}»), а не список —
+      // та же разводка по адресам, что у `proxies` и `accounts`.
+      o.bots = 7; o.accounts = 25; o.channels = 14;
+    }
     if (url.indexOf('/narrative/') >= 0) o.campaign = ent({ kind: 'trend', campaign_type: 'trend' });
     if (url.indexOf('/miniapp/bot/') >= 0) {
       o.bot = ent({ health: { silent: true, reason: 'webhook_conflict', since: '2026-10-30T04:00:00Z' } });
@@ -239,7 +245,8 @@ await page.addInitScript((mode) => {
     if (url.indexOf('/deliveries') >= 0) {
       o.endpoint = ent({ kind: 'sheets', target: 'https://docs.google.com/spreadsheets/d/abc' });
       o.deliveries = ROWS.slice(0, 10).map((r, i) => ({
-        ...r, status: ['delivered', 'pending', 'failed', 'skipped'][i % 4] }));
+        ...r, status: ['delivered', 'pending', 'failed', 'skipped'][i % 4],
+        attempts: 1 + (i % 3), status_code: 200 }));
     }
     // Пара дублей — это ДВЕ вложенные карточки
     // (services/contacts_hub/trust_engine.py), и экран читает
@@ -262,6 +269,100 @@ await page.addInitScript((mode) => {
         ...r, body: LONG + ' ' + LONG, kind: ['note', 'fact', 'person'][i % 3],
         pinned: i === 0, tags: ['клиенты', 'продажи'],
       }));
+    }
+    // Тринадцать экранов обход видел, но без данных: действия в их коде есть, а
+    // на экране ни одного — рисовать нечего. Приговор по ним невозможен, и
+    // прежний вывод «ожидаемой пользы мало» был догадкой: ровно такую догадку
+    // уже опровергли одиннадцать упавших экранов, среди которых нашёлся
+    // s-aimemory, невидимый по числам в принципе.
+    if (url.indexOf('/channel/') >= 0) {
+      o.channel = ent({ members: 123456, linked_account_id: 1, invite_link: 'https://t.me/+кодприглашения' });
+      o.linked_account = ent({});
+      o.member_growth = ROWS.slice(0, 7).map((r, i) => ({ ...r, day: `2026-10-2${i}`, members: 1000 + i * 37 }));
+      o.posts_published = 42;
+      o.recent_ops = ROWS.slice(0, 5);
+    }
+    // Детали операции отдают саму операцию ВЕРХНИМ уровнем, и экран
+    // проверяет `!o.id` — у общего ответа этого поля не было вовсе, экран
+    // писал «не найдена». Формы `params_view` и `quick_actions` взяты у
+    // services/op_params_view.py и services/op_quick_actions.py.
+    if (url.indexOf('/operation/') >= 0) {
+      Object.assign(o, ent({ op_type: 'invite_users', status: 'running',
+        total_items: 1000, done_items: 250, duration_s: 3600,
+        summary: LONG,
+        accounts_impact: ROWS.slice(0, 4).map((r, i) => ({
+          ...r, floods: i, max_wait: 60 * (i + 1) })),
+        params_view: [{ label: 'Канал', value: LONG }, { label: 'Пауза', value: '45 с' }],
+        quick_actions: [{ id: 'repeat', label: 'Повторить на остатке',
+                          fn: 'opRepeat(1)', reason: 'часть целей не дошла' }] }));
+    }
+    if (url.indexOf('/audience') >= 0) {
+      o.growth = ROWS.slice(0, 7).map((r, i) => ({ ...r, day: `2026-10-2${i}`, count: 10 + i }));
+      o.new_today = 12; o.new_7d = 84; o.new_30d = 310; o.active = 1200;
+      o.tags = ['клиенты', 'вебинар', 'оплатившие'];
+    }
+    if (url.indexOf('/engagement') >= 0) {
+      o.hot = 142; o.warm = 310; o.cold = 540; o.lost = 1204; o.cohort_ready = true;
+    }
+    if (url.indexOf('/threads') >= 0) {
+      o.threads = ROWS.slice(0, 8).map((r, i) => ({
+        ...r, entity_type: ['channel', 'bot', 'account'][i % 3], entity_id: r.id,
+        tg_thread_id: 100 + i, topic_name: LONG, status: i % 2 ? 'open' : 'closed' }));
+    }
+    if (url.indexOf('/ghost/') >= 0) {
+      // Имена полей взяты у экрана (index.html: openGhostDetail), иначе он
+      // печатает «Окно активности undefined:00–undefined:00» — подсказку о
+      // беде, которой в приложении нет.
+      o.profile = ent({ is_running: true, mode: 'reader', active_hours_start: 9,
+                        active_hours_end: 21, cooldown_minutes: 45 });
+      o.log = ROWS.slice(0, 10).map((r, i) => ({ ...r, action: 'прочитал диалог', at: '2026-10-30T04:0' + i + ':00Z' }));
+      o.log_total = 120; o.today_actions = 7;
+    }
+    if (url.indexOf('/webhook') >= 0) {
+      o.url = 'https://пример.рф/telegram/вебхук';
+      o.allowed_updates = ['message', 'callback_query', 'my_chat_member'];
+      o.pending_update_count = 3; o.max_connections = 40;
+      o.last_error_message = 'Connection timed out';
+    }
+    if (url.indexOf('/warmup/') >= 0) {
+      o.plan = ent({ phase: 'warming', day: 4 });
+      o.week = { '2026-10-26': 5, '2026-10-27': 7 };
+      o.circle = { joined: 3, read: 12, reacted: 4 };
+      o.actions = ROWS.slice(0, 10).map((r, i) => ({ ...r, kind: 'join_channel', at: '2026-10-30T04:0' + i + ':00Z' }));
+    }
+    if (url.indexOf('/content_mesh/') >= 0) {
+      o.mesh = ent({ delay_minutes: 15, source_channel: LONG, is_active: true,
+                     append_text: LONG });
+      o.targets = ROWS.slice(0, 6).map((r) => ({ ...r, source_channel: LONG, delay_minutes: 15 }));
+      // Срез очереди репостов: экран печатает «Пост №${r.source_msg_id}».
+      o.recent = ROWS.slice(0, 8).map((r, i) => ({
+        ...r, source_msg_id: 1000 + i, error_msg: i === 2 ? LONG : null,
+        status: ['pending', 'sent', 'error'][i % 3],
+        scheduled_at: '2026-10-30T04:00:00Z', sent_at: '2026-10-30T04:05:00Z' }));
+      o.recent_total = 400;
+      o.queue = { pending: 12, sent: 340, error: 48 };
+    }
+    if (url.indexOf('/admin/actions') >= 0) {
+      o.actions = ROWS.slice(0, 20).map((r, i) => ({
+        ...r, action: 'ban_user', action_ru: 'Заблокировал пользователя',
+        admin_id: 1000 + i, admin_username: 'админ_' + i,
+        target_user_id: 2000 + i, target_username: 'клиент_' + i }));
+    }
+    if (url.indexOf('/mesh/task/') >= 0) {
+      Object.assign(o, ent({ status: 'sent', depth: 2, origin_name: LONG,
+        drop_reason: null,
+        hops: ROWS.slice(0, 5).map((r, i) => ({ ...r, hop: i + 1, bot_name: LONG })) }));
+    }
+    if (url.indexOf('/invite/account/') >= 0) {
+      Object.assign(o, ent({ label: LONG, age_days: 120, recommended_limit: 35,
+        recommended_pause_s: 45, remaining_today: 12, limit_basis: 'возраст и прогрев',
+        limit_factors: [{ label: 'Возраст аккаунта', value: '120 дней' },
+                        { label: 'Прогрев', value: 'пройден' }],
+        week: { '2026-10-26': 20, '2026-10-27': 25 } }));
+    }
+    if (url.indexOf('/global_presence/') >= 0) {
+      o.dressing = { done: 3, total: 5 };
+      o.virtual_admin_coverage = { covered: 4, total: 6 };
     }
     // Сводка операций платформы отдаёт `stats` СПИСКОМ по типам
     // (services/mini_app_admin.py: admin_ops_stats), а общий ответ держит в
@@ -503,10 +604,16 @@ const ACTIONS = () => {
   const erred = !!scr.querySelector('.err-msg')
     || [...scr.querySelectorAll('.empty-ico')]
          .some((e) => (e.textContent || '').indexOf('⚠️') >= 0);
+  // СПОКОЙНОЕ пустое состояние — тоже не приговор экрану: `empty()` без значка
+  // ошибки значит «показывать нечего», и действий на таком экране мало
+  // законно. Из тридцати четырёх «почти мёртвых» такими оказались почти все:
+  // заглушка не дала списка, экран честно сказал «Нет диалогов», а отчёт
+  // позвал разбираться с его вёрсткой.
   // Начало текста экрана. Без него «1 действие, 54 знака» одинаково выглядит у
   // экрана, которому правда нечего показать, и у экрана, который заглушка
   // оставила пустым: приговор по одним числам вынести нельзя.
-  return { acts, chars, id: scr.id, erred,
+  const blank = !erred && !!scr.querySelector('.empty');
+  return { acts, chars, id: scr.id, erred, blank,
            sample: sample.replace(/\s+/g, ' ').slice(0, 220) };
 };
 
@@ -829,6 +936,7 @@ if (sweepMode) {
     const scr = document.querySelector('.screen.show');
     if (!scr) return { ran: false };
     const base = act().erred;
+    const baseBlank = act().blank;
     const box = document.createElement('div');
     box.className = 'err-msg';
     box.innerHTML = '<div class="err-msg-ico">⚠️</div><div class="err-msg-txt">проверка</div>';
@@ -843,12 +951,24 @@ if (sweepMode) {
     scr.appendChild(emp);
     const caughtEmpty = act().erred;
     emp.remove();
-    return { ran: true, base, caught, caughtEmpty, restored: act().erred === base };
+    // Третий корень — СПОКОЙНОЕ пустое состояние: та же разметка, но значок не
+    // ошибки. Признак обязан назвать её пустотой и НЕ назвать ошибкой, иначе
+    // «пустых экранов нет» и «ошибок нет» оба ничего не значат.
+    const calm = document.createElement('div');
+    calm.className = 'empty';
+    calm.innerHTML = '<div class="empty-ico">💬</div><div class="empty-txt">проверка</div>';
+    scr.appendChild(calm);
+    const r3 = act();
+    const caughtBlank = r3.blank && !r3.erred;
+    calm.remove();
+    return { ran: true, base, caught, caughtEmpty, caughtBlank,
+             restored: act().erred === base && act().blank === baseBlank };
   }, ACTIONS.toString());
   console.log(`самопроверка признака ошибки: разметка ошибки найдена=${es_.caught}`
     + ` | пустое состояние со значком найдено=${es_.caughtEmpty}`
+    + ` | спокойная пустота отличена от ошибки=${es_.caughtBlank}`
     + ` | после снятия столько же=${es_.restored} (своё состояние ${es_.base})`);
-  if (!es_.ran || !es_.caught || !es_.caughtEmpty || !es_.restored) {
+  if (!es_.ran || !es_.caught || !es_.caughtEmpty || !es_.caughtBlank || !es_.restored) {
     console.log('ПРИЗНАК ОШИБКИ СЛЕП — «экранов с ошибкой нет» ничего не означает');
     process.exitCode = 2;
   }
@@ -1044,7 +1164,7 @@ if (sweepMode) {
         }, fn);
         const canAct = /onclick|<button|class="btn|class="row tap|\bchip\b|<input|<select|<textarea/.test(src);
         acts.set(shownId, { fn, acts: ac.acts, chars: ac.chars, canAct,
-                            erred: ac.erred, sample: ac.sample });
+                            erred: ac.erred, blank: ac.blank, sample: ac.sample });
       }
     }
     const problems = [];
@@ -1242,7 +1362,9 @@ if (sweepMode) {
     const rows = all.filter(r => !r.erred);
     const dead = rows.filter(r => r.acts === 0 && !r.canAct).sort((a, b) => a.chars - b.chars);
     const unfed = rows.filter(r => r.acts === 0 && r.canAct);
-    const thin = rows.filter(r => r.acts > 0 && r.acts <= 2 && r.chars < 400);
+    const blank = rows.filter(r => r.blank && r.acts <= 2);
+    const thin = rows.filter(r => r.acts > 0 && r.acts <= 2 && r.chars < 400
+                                  && !r.blank);
     console.log(`экранов с замером действий: ${rows.length} из ${total.length}`);
     console.log(`ОТВЕТИЛИ ОШИБКОЙ (замер по ним ничего не значит): ${erred.length}`
       + (erred.length ? '\n  ' + erred.map(r => `${r.id} (${r.fn}) «${r.sample}»`).join('\n  ') : ''));
@@ -1250,7 +1372,9 @@ if (sweepMode) {
       + (dead.length ? ' — ' + dead.map(r => `${r.id} (${r.fn}, знаков ${r.chars})`).join(' ; ') : ''));
     console.log(`НЕ НАКОРМЛЕНЫ ЗАГЛУШКОЙ (действия в коде есть, на экране нет): ${unfed.length}`
       + (unfed.length ? ' — ' + unfed.map(r => `${r.id} (${r.fn})`).join(' ; ') : ''));
-    console.log(`ПОЧТИ МЁРТВЫЕ (1-2 действия, меньше 400 знаков): ${thin.length}`
+    console.log(`ПУСТОЕ СОСТОЯНИЕ (показывать нечего — действий мало законно): ${blank.length}`
+      + (blank.length ? ' — ' + blank.map(r => `${r.id} (${r.fn})`).join(' ; ') : ''));
+    console.log(`ПОЧТИ МЁРТВЫЕ (1-2 действия, меньше 400 знаков, и не пусто): ${thin.length}`
       + (thin.length ? '\n  ' + thin.map(r => `${r.id} (${r.fn}, действий ${r.acts}, знаков ${r.chars}) «${r.sample}»`).join('\n  ') : ''));
   }
   if (missed.length) {
