@@ -364,6 +364,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .hdr{padding:calc(var(--safe-t) + 8px) 14px 10px;background:var(--glass);backdrop-filter:saturate(150%) blur(16px);-webkit-backdrop-filter:saturate(150%) blur(16px);border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
 .back{width:40px;height:40px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text);flex-shrink:0;border:1px solid var(--border);transition:transform .15s var(--spring),opacity .12s}
 .back:active{opacity:.6;transform:scale(.88)}
+/* Кнопка «назад» Telegram показана — своя стрелка в шапке не нужна (см. _syncBackButton). */
+html.tg-back .hdr > .back{display:none}
 /* flex:1 означает основу 0: заголовок не претендовал на место вообще и первым
    отдавал его соседям. Стоило в шапке аккаунтов появиться счётчику «6
    аккаунтов» рядом с кнопкой «Добавить», как «📱 Аккаунты» схлопывалось в
@@ -9296,12 +9298,28 @@ function navGo(tab, fn) {
   } catch(e) { try { toast('⚠️ Не удалось открыть раздел'); } catch(_) {} }
 }
 
+// Внутри Telegram «назад» — его собственная кнопка в шапке клиента, как у
+// нативных экранов. Своя стрелка «←» в шапке экрана тогда дублирует её и
+// отнимает у заголовка 50px, поэтому, пока кнопка Telegram показана, наша
+// прячется (класс tg-back на <html>). Вне Telegram (PWA, браузер), на старом
+// клиенте без BackButton (до Bot API 6.1) и на экране, открытом мимо стека,
+// своя стрелка остаётся: без неё оттуда не выйти.
+function _nativeBackAvailable() {
+  try {
+    return !!(tg && tg.BackButton && tg.initData &&
+      (!tg.isVersionAtLeast || tg.isVersionAtLeast('6.1')));
+  } catch (_) { return false; }
+}
 function _syncBackButton() {
+  let shown = false;
   try {
     const bb = tg && tg.BackButton;
-    if (!bb) return;
-    if (STACK.length) bb.show(); else bb.hide();
-  } catch(_) {}
+    if (bb) {
+      if (STACK.length) bb.show(); else bb.hide();
+      shown = STACK.length > 0 && _nativeBackAvailable();
+    }
+  } catch(_) { shown = false; }
+  try { document.documentElement.classList.toggle('tg-back', shown); } catch (_) {}
 }
 
 // Полоса действий над выделением (`.sel-bar`) прибита к низу окна и лежит
