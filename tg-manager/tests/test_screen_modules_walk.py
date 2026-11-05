@@ -37,8 +37,16 @@ def _missing() -> str | None:
 pytestmark = pytest.mark.skipif(_missing() is not None, reason=str(_missing()))
 
 
+def _first(paths: tuple[str, ...]) -> str:
+    return next(p for p in paths if p and pathlib.Path(p).exists())
+
+
 def test_every_module_tab_opens_its_screen_and_does_not_stack():
-    proc = subprocess.run(["node", str(SCRIPT)], cwd=str(ROOT),
+    # Скрипту передаём найденные пути: иначе без экспортированных
+    # PLAYWRIGHT_JS/CHROME_BIN проверка «не пропускать» прошла бы, а сам
+    # обход упал бы на импорте playwright.
+    env = {**os.environ, "PLAYWRIGHT_JS": _first(_PW), "CHROME_BIN": _first(_CHROME)}
+    proc = subprocess.run(["node", str(SCRIPT)], cwd=str(ROOT), env=env,
                           capture_output=True, text=True, timeout=300)
     out = proc.stdout.strip()
     assert out, f"обход ничего не вернул: {proc.stderr[-800:]}"
