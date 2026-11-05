@@ -39,6 +39,7 @@ import asyncio
 import html
 import json
 import logging
+import math
 import random
 import re
 import time
@@ -1068,6 +1069,19 @@ def webhook_backoff(attempt: int) -> int:
     return _WEBHOOK_BACKOFF[min(max(attempt, 0), len(_WEBHOOK_BACKOFF) - 1)]
 
 
+def webhook_wait(attempt: int, retry_after: float | None) -> int:
+    """Пауза перед повтором с учётом «подождите» сервиса. ЧИСТАЯ.
+
+    Сервис ответил 429/503 с Retry-After — ждём не меньше, чем он просит
+    (не дольше 6 ч, как у вебхуков интеграций): повтор по нашему графику
+    снова упёрся бы в тот же лимит и сжёг бы попытку зря."""
+    from services.webhooks import _MAX_RETRY_AFTER_S
+    wait = webhook_backoff(attempt)
+    if retry_after:
+        wait = max(wait, math.ceil(min(float(retry_after), _MAX_RETRY_AFTER_S)))
+    return int(wait)
+
+
 def response_vars(prefix: str, data) -> dict[str, str]:
     """Ответ сервиса → переменные прогона `<prefix>_<ключ>`. ЧИСТАЯ.
 
@@ -1102,9 +1116,14 @@ def response_vars(prefix: str, data) -> dict[str, str]:
 
 
 async def _do_webhook(http, run: dict, step: dict, contact: dict,
-                      fields: dict, delivery_id: str | None = None
+                      fields: dict, delivery_id: str | None = None,
+                      meta: dict | None = None
                       ) -> tuple[int | None, Any, str]:
     """POST на адрес шага: (код ответа | None, JSON ответа | None, причина).
+
+    meta (если передан) получает "retry_after" — сколько секунд сервис
+    попросил подождать в ответе 429/503 (разбор общий с вебхуками
+    интеграций: webhooks.retry_after_seconds).
 
     Адрес проверяется на внутренние сети при КАЖДОМ вызове: DNS имени могли
     поменять после сохранения шага. Заголовок `Idempotency-Key` одинаков у
@@ -1134,6 +1153,10 @@ async def _do_webhook(http, run: dict, step: dict, contact: dict,
                 timeout=aiohttp.ClientTimeout(total=10),
                 allow_redirects=False) as resp:
             payload = None
+            if meta is not None and resp.status in (429, 503):
+                from services.webhooks import retry_after_seconds
+                hdrs = getattr(resp, "headers", None) or {}
+                meta["retry_after"] = retry_after_seconds(hdrs.get("Retry-After"))
             if 200 <= resp.status < 300 and step.get("save_as"):
                 try:
                     raw = await resp.content.read(_WEBHOOK_MAX_BODY)
@@ -1516,8 +1539,9 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
             delivery = str(run_vars.get("_wh_key") or f"wf-{run['id']}-{seq}")
             if not await _take_step(pool, run["id"], seq, current_step=nxt):
                 return
+            meta: dict = {}
             code, payload, reason = await _do_webhook(
-                http, run, step, contact, fields, delivery)
+                http, run, step, contact, fields, delivery, meta=meta)
             what = str(code) if code else (
                 "внутренний адрес запрещён" if reason == "blocked" else "нет ответа")
             if code and 200 <= code < 300:
@@ -1529,7 +1553,7 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
                            what + (f" · сохранено полей: {len(saved)}" if saved else ""))
             elif (webhook_retryable(code, reason)
                   and attempt < int(step.get("retries", 3) or 0)):
-                wait = webhook_backoff(attempt)
+                wait = webhook_wait(attempt, meta.get("retry_after"))
                 # Шаг занят, но не сделан: вернуть указатель на него и
                 # отложить прогон. Условие по счётчику — прогон не двигал
                 # никто другой за время запроса.

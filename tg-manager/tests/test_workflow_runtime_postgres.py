@@ -603,9 +603,12 @@ def _fake_webhook(monkeypatch, answers):
     from services import workflow_runtime as rt
     calls: list[str | None] = []
 
-    async def _hook(http, run, step, contact, fields, delivery_id=None):
+    async def _hook(http, run, step, contact, fields, delivery_id=None, meta=None):
         calls.append(delivery_id)
-        return answers[min(len(calls), len(answers)) - 1]
+        answer = answers[min(len(calls), len(answers)) - 1]
+        if len(answer) > 3 and meta is not None:
+            meta["retry_after"] = answer[3]
+        return answer[:3]
 
     monkeypatch.setattr(rt, "_do_webhook", _hook)
     return calls
@@ -654,6 +657,35 @@ def test_a_failing_webhook_is_retried_with_one_key_and_its_answer_is_used(
         assert outcomes[:3] == ["retry", "retry", "done"]
 
     _run(go())
+
+
+def test_a_webhook_waits_as_long_as_the_service_asks(pool, tg, monkeypatch):
+    """ЧТО БЫЛО: сервис отвечал 429 «подождите 15 минут», а шаг повторял
+    через 30 с по своему графику — снова 429, и все попытки сгорали за
+    несколько минут, прогон уходил в запасную ветку. Теперь повтор не
+    раньше, чем просит сервис (не дольше 6 ч)."""
+    from datetime import datetime, timezone
+
+    from services import workflow_runtime as rt
+    _fake_webhook(monkeypatch, [(429, None, "", 900.0)])
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "webhook", "url": "https://crm.example.com/hook"},
+            {"type": "message", "text": "Дальше"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "running" and run["current_step"] == 0
+        left = (run["next_run_at"] - datetime.now(timezone.utc)).total_seconds()
+        assert 800 < left <= 900, left
+
+    _run(go())
+    # Без просьбы — свой график; просьба дольше 6 ч — 6 ч.
+    assert rt.webhook_wait(0, None) == 30
+    assert rt.webhook_wait(0, 5) == 30
+    assert rt.webhook_wait(4, 10 ** 9) == 6 * 3600
 
 
 def test_a_webhook_that_keeps_failing_takes_its_fallback_branch(pool, tg, monkeypatch):
