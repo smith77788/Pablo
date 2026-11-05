@@ -10,7 +10,8 @@ const PW = process.env.PLAYWRIGHT_JS
 const { chromium } = await import(PW);
 const path = require('path');
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
-const b = await chromium.launch(process.env.CHROME_BIN ? {executablePath: process.env.CHROME_BIN} : {}); const p = await b.newPage({viewport:{width:390,height:800}});
+const { LAUNCH } = await import('./_chrome.mjs');
+const b = await chromium.launch(LAUNCH); const p = await b.newPage({viewport:{width:390,height:800}});
 const errs=[]; p.on('pageerror',e=>errs.push(e.message));
 await p.goto('file://'+ROOT+'/mini_app/index.html'); await p.waitForTimeout(1500);
 const r = await p.evaluate(async()=>{document.querySelectorAll('body > div').forEach(d=>{if(/Вход в Infragram/.test(d.textContent)&&!d.querySelector('#s-ranking'))d.remove();});

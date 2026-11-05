@@ -407,3 +407,81 @@ def test_the_stub_follows_the_route_not_the_field_name():
         "заглушка снова отдаёт на /transport список вместо числа прокси")
     assert "'/topology'" in src and "o.accounts = " in src, (
         "заглушка снова отдаёт на /topology списки вместо счётчиков")
+
+
+def test_the_english_regime_exists_and_answers_in_english():
+    """Пятый режим: сервер отвечает ошибкой ПО-АНГЛИЙСКИ.
+
+    Разметка мини-аппа по-русски — это держит отдельная проверка. А текст из
+    ТЕЛА ОТВЕТА статический разбор увидеть не может: он приходит в рантайме.
+    Единственное место, где видно, дошла ли английская фраза до экрана, —
+    обход с таким ответом.
+    """
+    src = _src()
+    assert "MINIAPP_FAIL_EN" in src, "режим английской ошибки пропал из обхода"
+    assert "'fail-en'" in src, "режим не выбирается"
+    m = re.search(r"const errBody[\s\S]{0,400}?;", src)
+    assert m, "тело английской ошибки больше не задаётся"
+    assert re.search(r"[A-Za-z]{3,}\s+[A-Za-z]{3,}\s+[A-Za-z]{3,}", m.group(0)), (
+        "тело ошибки в режиме fail-en перестало быть английской фразой"
+    )
+
+
+def test_the_english_measure_reads_the_toast():
+    """Тост лежит ВНЕ `.screen`, а это главное место текста ошибки.
+
+    Первая редакция мерки читала только `.screen.show`, отчитывалась
+    «английского нет» на 207 экранах и была при этом слепа именно к тосту.
+    Вторая редакция тост взяла, но отбирала его по вычисленной прозрачности —
+    а на `#toast` висит `transition:opacity .25s`, и сразу после добавления
+    класса `show` прозрачность ещё ноль. Признак видимости тоста — его
+    собственный класс.
+    """
+    src = _src()
+    m = re.search(r"const ENGLISH = \(\) => \{[\s\S]*?\n\};", src)
+    assert m, "мерка английского пропала"
+    body = m.group(0)
+    assert "getElementById('toast')" in body, (
+        "мерка английского снова читает только экран — тост лежит вне него"
+    )
+    assert "classList.contains('show')" in body, (
+        "видимость тоста снова определяется не его классом: по computed "
+        "opacity он в переходе ещё прозрачный, и мерка слепнет"
+    )
+
+
+def test_the_english_self_check_plants_its_phrase_in_the_toast():
+    """Самопроверка обязана доказывать оба корня, а не только экран."""
+    src = _src()
+    m = re.search(r"const es = await page\.evaluate\([\s\S]*?ENGLISH\.toString\(\)\);", src)
+    assert m, "самопроверка мерки английского пропала"
+    body = m.group(0)
+    assert "getElementById('toast')" in body, (
+        "самопроверка кладёт фразу только в экран — зелёная самопроверка "
+        "тогда ничего не говорит про тост"
+    )
+    assert "inToast" in body, "результат по тосту не возвращается"
+    assert re.search(r"if \(!es\.caught \|\| !es\.inToast", src), (
+        "слепота к тосту больше не делает обход красным"
+    )
+
+
+def test_the_toast_branch_prints_its_denominator():
+    """Тост живёт 5 секунд; «английского нет» без счётчика — про экран."""
+    src = _src()
+    assert "enToastSeen" in src, "счётчик экранов с висящим тостом пропал"
+    assert "висел тост" in src, "знаменатель ветки тоста не печатается"
+    assert re.search(r"if \(!enToastSeen\)[\s\S]{0,200}exitCode = 2", src), (
+        "обход зелёный, даже если тост ни разу не попал в замер"
+    )
+
+
+def test_a_toast_is_not_counted_as_covering():
+    """Тост накрывает по замыслу и уходит сам — это не «не достаётся»."""
+    src = _src()
+    m = re.search(r"const COVERED = \(\) => \{[\s\S]*?\n\};", src)
+    assert m, "мерка закрытого текста пропала"
+    assert "closest('#toast')" in m.group(0), (
+        "тост снова считается накрытием: в режиме английской ошибки он висит "
+        "почти постоянно и даёт находку на каждом экране"
+    )

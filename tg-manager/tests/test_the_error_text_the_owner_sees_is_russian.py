@@ -199,3 +199,34 @@ def test_a_door_past_err_still_speaks_russian():
         "а не код"
     )
     assert not bad, f"текст наружу мимо `_err` и без очистки (дверей {len(doors)}): {bad}"
+
+
+def test_a_protocol_marker_is_not_cleaned():
+    """Мини-апп эти строки разбирает кодом, а не показывает человеку.
+
+    «Not found» очистка как раз портила: ни одного служебного слова там нет,
+    зато есть строчное латинское слово и ни одной кириллической буквы, —
+    правило для текста без кириллицы срабатывало и подменяло маркер на
+    «Операция не выполнена». В `_err` сейчас живёт только `Unauthorized`, но
+    остальные разрешены соседней проверкой, то есть ждут первого автора.
+    """
+    from services.mini_app_api import PROTOCOL_MARKERS
+
+    spoiled = [m for m in sorted(PROTOCOL_MARKERS) if _owner_ru(m) != m]
+    assert not spoiled, f"маркер протокола переписан очисткой: {spoiled}"
+    assert len(PROTOCOL_MARKERS) >= 5, (
+        f"маркеров на проверке всего {len(PROTOCOL_MARKERS)} — список урезали"
+    )
+
+
+def test_the_two_rules_about_one_text_read_one_list():
+    """Проверка маркеров и очистка не должны держать свои копии списка."""
+    src = open(
+        "tests/test_errors_the_owner_reads_are_russian.py", encoding="utf-8"
+    ).read()
+    assert "from services.mini_app_api import PROTOCOL_MARKERS" in src, (
+        "соседняя проверка снова завела свой список маркеров — он разъедется"
+    )
+    assert not re.search(r"^PROTOCOL_MARKERS\s*=", src, re.M), (
+        "в соседней проверке снова свой PROTOCOL_MARKERS"
+    )

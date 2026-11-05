@@ -862,6 +862,15 @@ _OWNER_EN_TAIL = " — подробности в журнале"
 _OWNER_LATIN_WORD = re.compile(r"[A-Za-z]{2,}")
 
 
+# Маркеры протокола: мини-апп их РАЗБИРАЕТ, а не показывает (на 401 ведёт на
+# повторный вход). Очистка их не касается — иначе она молча переписала бы то,
+# на что фронт смотрит кодом: «Not found» она как раз портила, превращая в
+# «Операция не выполнена». В `_err` сейчас живёт один из них, но список здесь
+# полный и общий с tests/test_errors_the_owner_reads_are_russian.py, чтобы два
+# правила про один и тот же текст не разъехались.
+PROTOCOL_MARKERS = frozenset({"Unauthorized", "Forbidden", "Not found", "OK", "ok"})
+
+
 def _looks_english(msg: str) -> bool:
     """Увидит ли владелец в этом тексте английскую фразу.
 
@@ -869,7 +878,7 @@ def _looks_english(msg: str) -> bool:
     from») или английское название канала в кавычках. Фраза — это либо два
     служебных слова, либо одно плюс латинские слова вокруг.
     """
-    if not msg:
+    if not msg or msg in PROTOCOL_MARKERS:
         return False
     marks = len(set(m.group(0).lower() for m in _OWNER_EN.finditer(msg)))
     if marks >= 2 or (marks and len(_OWNER_LATIN_WORD.findall(msg)) >= 3):

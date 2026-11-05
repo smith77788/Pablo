@@ -20,12 +20,13 @@ from __future__ import annotations
 import ast
 import re
 
+# Маркеры протокола, которые мини-апп разбирает, а не показывает. Список один
+# и тот же для двух правил про один текст: эта проверка их разрешает, а
+# `_owner_ru` обязана их не трогать. Своя копия разъехалась бы.
+from services.mini_app_api import PROTOCOL_MARKERS
 from tests.miniapp_source import api_files
 
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
-
-# Маркеры протокола, которые мини-апп разбирает, а не показывает.
-PROTOCOL_MARKERS = {"Unauthorized", "Forbidden", "Not found", "OK", "ok"}
 
 
 def _err_messages() -> list[tuple[str, int, str]]:

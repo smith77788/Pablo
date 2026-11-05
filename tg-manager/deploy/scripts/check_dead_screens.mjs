@@ -23,10 +23,9 @@
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { chromium } = await import(process.env.PLAYWRIGHT_JS || '/opt/node22/lib/node_modules/playwright/index.mjs');
-const fs = require('fs'), path = require('path');
-const CHROME = ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome','/opt/pw-browsers/chromium/chrome-linux/chrome']
-  .find(p => { try { fs.accessSync(p); return true; } catch { return false; } });
-const browser = await chromium.launch(CHROME ? { executablePath: CHROME } : {});
+const path = require('path');
+const { LAUNCH } = await import('./_chrome.mjs');
+const browser = await chromium.launch(LAUNCH);
 const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, deviceScaleFactor: 2 });
 const page = await ctx.newPage();
 await page.addInitScript(() => {

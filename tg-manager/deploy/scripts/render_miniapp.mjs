@@ -91,11 +91,19 @@ await page.addInitScript((mode) => {
   Object.defineProperty(window, 'Telegram', { get: () => TGSTUB, set: () => {}, configurable: true });
   const ok = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'Content-Type': 'application/json' } });
   const EMPTY = { ok:true, token:'stub-token', accounts:[], bots:[], channels:[], keywords:[], alerts:[], suggestions:[], bot_suggestions:[], rows:[], items:[], stats:{}, total:0, count:0, presets:[], recent:[], history:[], top_channels:[], recent_activity:[], by_stage:[] };
-  if (mode === 'fail') {
+  if (mode === 'fail' || mode === 'fail-en') {
     // Третий режим: бэкенд отвечает пятисоткой на всё, кроме входа. Вход
     // оставлен рабочим намеренно — иначе поверх всего встанет окно входа, и
     // проверяться будет оно одно, а не поведение экранов при сбое.
-    const boom = () => new Response(JSON.stringify({ error: 'Внутренняя ошибка' }),
+    // Пятый режим (fail-en): тело ошибки ПО-АНГЛИЙСКИ — ровно то, что отдаёт
+    // Telethon/asyncpg, если текст пройдёт мимо `_owner_ru` на сервере.
+    // Владелец по-английски не читает, и единственное место, где видно, дошла
+    // ли такая фраза до ЭКРАНА, — обход. Статическая проверка разметки этого
+    // не покажет: текст приходит в ответе, а не лежит в вёрстке.
+    const errBody = mode === 'fail-en'
+      ? { error: 'Chat admin privileges are required to do that' }
+      : { error: 'Внутренняя ошибка' };
+    const boom = () => new Response(JSON.stringify(errBody),
       { status: 500, headers: { 'Content-Type': 'application/json' } });
     window.fetch = async (u) => {
       const url = String(u || '');
@@ -172,6 +180,7 @@ await page.addInitScript((mode) => {
     return ok(o);
   };
 }, !sweepMode ? 'empty'
+   : process.env.MINIAPP_FAIL_EN ? 'fail-en'
    : process.env.MINIAPP_FAIL ? 'fail'
    : process.env.MINIAPP_EMPTY ? 'empty' : 'fat');
 
@@ -182,7 +191,10 @@ await page.addInitScript((mode) => {
 // Мерка немоты нужна обоим режимам без данных: и когда показывать нечего, и
 // когда бэкенд отвечает ошибкой. Экран, промолчавший в ответ на сбой, —
 // отдельная беда: человек видит пустоту и не знает, сломалось или просто пусто.
-const emptyMode = !!(process.env.MINIAPP_EMPTY || process.env.MINIAPP_FAIL);
+const emptyMode = !!(process.env.MINIAPP_EMPTY || process.env.MINIAPP_FAIL
+                     || process.env.MINIAPP_FAIL_EN);
+const failEnMode = !!process.env.MINIAPP_FAIL_EN;
+let enToastSeen = 0;
 
 let live = [];
 page.on('pageerror', e => live.push('PAGEERROR: ' + String(e.message).slice(0, 160)));
@@ -280,6 +292,12 @@ const COVERED = () => {
     const top = document.elementFromPoint(x, y);
     if (!top || top === el || el.contains(top) || top.contains(el)) continue;
     if (!pinnedBottom(top)) continue;
+    // Тост накрывает по замыслу и уходит сам через несколько секунд — это не
+    // «не достаётся прокруткой». В режиме английской ошибки он висит почти
+    // постоянно (каждый запрос — пятисотка), и без этого исключения находка
+    // приходит на каждом экране с тостом, то есть сообщает о режиме обхода, а
+    // не о вёрстке. Текст самого тоста читает мерка английского.
+    if (top.closest && top.closest('#toast')) continue;
     out.push(el.tagName.toLowerCase() + '.' + String(el.className || '').split(' ')[0]
              + ' под ' + top.tagName.toLowerCase() + '.'
              + String(top.className || '').split(' ')[0]
@@ -346,6 +364,50 @@ const MUTE = () => {
 // литералы, а не догадка о «латинице»: каждое попадание наверняка беда, а
 // ложных находок такой список не даёт. Пропустить он может, и пусть: ложная
 // находка здесь дороже пропущенной — её закроют списком исключений.
+// Английская ФРАЗА на экране. Признак — служебные слова, а не перечень
+// «плохих»: ни одно новое имя канала, поля или хоста не заставит сюда
+// дописывать исключения. Одного слова мало — им бывает название канала или
+// имя поля; фраза это два служебных слова либо одно плюс латиница вокруг.
+// Тот же признак, что в tests/test_the_visible_text_is_not_in_english.py, но
+// там он читает РАЗМЕТКУ, а здесь — то, что реально нарисовано в ответ на
+// ошибку сервера. Разметку статическая проверка уже держит; этот путь — нет.
+const ENGLISH = () => {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return { hits: [] };
+  // Тост — ГЛАВНОЕ место, где владелец видит текст ошибки, и он лежит ВНЕ
+  // `.screen` (`<div id="toast">` рядом с ним). Первая редакция мерки читала
+  // только экран, отчитывалась «английского нет» на 207 экранах и была при
+  // этом слепа именно к тосту: самопроверка кладёт строку в экран, поэтому
+  // зелёная самопроверка ничего про тост не говорила.
+  // Видимость тоста берём по его СОБСТВЕННОМУ признаку — классу `show`,
+  // которым его показывает `toast()`. По computed opacity нельзя: на #toast
+  // висит `transition:opacity .25s`, и сразу после добавления класса
+  // вычисленная прозрачность ещё 0. Именно на это мерка и попалась: первая
+  // редакция фильтровала по opacity и отчитывалась «английского нет», будучи
+  // слепой к тосту; самопроверка это и показала словом «в тосте=false».
+  const extra = [document.getElementById('toast'), document.querySelector('.mbg.show')]
+    .filter(el => {
+      if (!el) return false;
+      if (el.id === 'toast') return el.classList.contains('show');
+      const st = getComputedStyle(el);
+      return st.display !== 'none' && st.visibility !== 'hidden';
+    });
+  const MARK = /(?<![A-Za-z])(the|and|with|without|for|you|your|are|not|this|that|have|has|was|were|from|must|cannot|could|should|would|will|please|required|require|invalid|allowed|failed|unable|already|does|too|than|while|when|which|there|their|been|being|only|every|wait|seconds|minutes|retry|again|expired|unknown|missing|exists|denied|refused|closed|timeout|connect|connection|privileges|peer)(?![A-Za-z])/gi;
+  const t = [scr, ...extra].map(el => el.innerText || '').join('  ')
+    .replace(/\s+/g, ' ');
+  const hits = [];
+  for (const chunk of t.split(/(?<=[.!?·|])\s+|\s{2,}/)) {
+    const marks = new Set((chunk.match(MARK) || []).map(w => w.toLowerCase()));
+    const words = (chunk.match(/[A-Za-z]{2,}/g) || []).length;
+    if (marks.size >= 2 || (marks.size && words >= 3)) hits.push(chunk.trim().slice(0, 90));
+  }
+  // `toast` в ответе — это ЗНАМЕНАТЕЛЬ ветки тоста. Без него «английского нет»
+  // не отличить от «во время замера тоста ни разу не было»: тост живёт 5
+  // секунд на ошибке, обход меряет через 120–220 мс после открытия, и это
+  // надо показывать числом, а не выводить из таймингов.
+  return { hits, id: scr.id, toast: extra.some(el => el.id === 'toast') };
+};
+
 const GIBBERISH = () => {
   const scr = document.querySelector('.screen.show');
   if (!scr) return { hits: [] };
@@ -576,6 +638,44 @@ if (sweepMode) {
     console.log('МЕРКА МАШИННОГО ТЕКСТА СЛЕПА — «подсказок нет» ничего не означает');
     process.exitCode = 2;
   }
+  if (failEnMode) {
+    // Мерка английского нужна только в режиме английской ошибки, и ровно там
+    // она обязана доказать, что видит: кладём на экран английскую фразу.
+    const es = await page.evaluate((src) => {
+      const en = new Function('return (' + src + ')()');
+      const scr = document.querySelector('.screen.show');
+      const toast = document.getElementById('toast');
+      if (!scr || !toast) return { ran: false };
+      const base = en().hits.length;
+      const PHRASE = 'the account is not allowed to do that';
+      // Корень первый — экран.
+      const bad = document.createElement('div');
+      bad.textContent = PHRASE;
+      scr.appendChild(bad);
+      const onScreen = en().hits.length > base;
+      bad.remove();
+      // Корень второй — ТОСТ, ровно так, как его показывает `toast()`:
+      // своим текстом и классом `show`. Из-за него мерка и была слепа.
+      const hadShow = toast.classList.contains('show');
+      const hadHtml = toast.innerHTML;
+      toast.innerHTML = '<span class="toast-msg"></span>';
+      toast.firstChild.textContent = PHRASE;
+      toast.classList.add('show');
+      const inToast = en().hits.length > base;
+      toast.innerHTML = hadHtml;
+      if (!hadShow) toast.classList.remove('show');
+      return { ran: true, caught: onScreen, inToast,
+               restored: en().hits.length === base, base };
+    }, ENGLISH.toString());
+    console.log(`самопроверка мерки английского: заведомо английская фраза`
+      + ` найдена на экране=${es.caught} | в тосте=${es.inToast}`
+      + ` | после снятия столько же=${es.restored}`
+      + ` | своих находок: ${es.base}`);
+    if (!es.caught || !es.inToast || !es.restored) {
+      console.log('МЕРКА АНГЛИЙСКОГО СЛЕПА — «английского нет» ничего не означает');
+      process.exitCode = 2;
+    }
+  }
   const cs = await coveredSelfCheck();
   console.log(`самопроверка мерки закрытого текста: заведомо закрытая строка`
     + ` найдена=${cs.caught} | после снятия находок столько же=${cs.restored}`
@@ -710,6 +810,16 @@ if (sweepMode) {
     // число, на другом список; отличить тут беду приложения от беды заглушки
     // нельзя. Это подсказка «посмотри сюда», а не приговор.
     if (gb.hits && gb.hits.length) hints.push(fn + ' | ' + gb.hits.slice(0, 2).join(' | '));
+    if (failEnMode) {
+      // Здесь это именно НАХОДКА, а не подсказка: разметка по-русски (её
+      // держит отдельная проверка), значит английская фраза на экране
+      // пришла из тела ответа и её увидел бы владелец.
+      const en = await page.evaluate((src) => new Function('return (' + src + ')()')(), ENGLISH.toString());
+      if (en.toast) enToastSeen++;
+      if (en.hits && en.hits.length) {
+        problems.push(`АНГЛИЙСКИЙ ${en.hits.length}: ` + en.hits.slice(0, 2).join(' ; '));
+      }
+    }
     if (emptyMode) {
       const mu = await page.evaluate((src) => new Function('return (' + src + ')()')(), MUTE.toString());
       // Порог — НОЛЬ, и это намеренно. Пробовали сорок знаков: под них попали
@@ -821,6 +931,13 @@ if (sweepMode) {
     console.log(`прокрутка не дошла до конца: ${scrollStuck.length}`
       + ` — ${scrollStuck.slice(0, 10).join(' ')}`
       + ' (закрытый текст там НЕ мерился)');
+  }
+  if (failEnMode) {
+    console.log(`экранов, где во время замера висел тост: ${enToastSeen}`);
+    if (!enToastSeen) {
+      console.log('ВЕТКА ТОСТА НЕ ПРОВЕРЕНА — «английского нет» сказано только про экран');
+      process.exitCode = 2;
+    }
   }
   console.log(`с находками: ${report.length}`);
   report.forEach(r => console.log('  ' + r));

@@ -6,8 +6,8 @@ const {chromium} = process.env.PLAYWRIGHT_JS
   ? require(process.env.PLAYWRIGHT_JS) : await import('playwright');
 const path = require('node:path');
 const root = path.resolve('mini_app/index.html');
-const browser = await chromium.launch(process.env.CHROME_BIN
-  ? {executablePath: process.env.CHROME_BIN} : {});
+const { LAUNCH } = await import('./_chrome.mjs');
+const browser = await chromium.launch(LAUNCH);
 const page = await browser.newPage({viewport: {width: 390, height: 844}});
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
