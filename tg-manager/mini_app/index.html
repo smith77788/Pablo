@@ -22267,7 +22267,7 @@ const UC_KIND_TITLE = {channels:'📢 В каналы', chats:'💬 В чаты'
 function openUniCampaign(kind) {
   push('s-unicampaign');
   UC_CH_SEL = new Set(); UC_ACC_SEL = new Set(); UC_BOT_SEL = new Set(); UC_CH_TOTAL = 0;
-  const one = UC_KIND_BOX[kind] ? kind : '';
+  const one = Object.prototype.hasOwnProperty.call(UC_KIND_BOX, kind || '') ? kind : '';
   txt('ucTitle', one ? UC_KIND_TITLE[one] : '🚀 Всё сразу');
   txt('ucWhereSec', one ? 'Куда' : 'Куда — отметьте ресурсы');
   for (const row of document.querySelectorAll('#s-unicampaign .uc-kind-row')) {

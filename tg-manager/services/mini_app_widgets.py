@@ -202,7 +202,7 @@ def setup_routes(app: web.Application, pool) -> None:
                                     is_shared=True, public_data=public or None)
         except Exception:
             log.exception("widget_send uid=%s bot=%s", uid, bot["bot_id"])
-            return _err("Не удалось связаться с Telegram — повторите позже", 502)
+            return _err("Не удалось связаться с Telegram — повторите позже", 424)
         if not res.get("ok"):
             return _err(res.get("error") or "Telegram не принял виджет", 400)
         wid = None
@@ -364,7 +364,7 @@ def setup_routes(app: web.Application, pool) -> None:
                                               message_id=row["message_id"])
             except Exception:
                 log.exception("widget_delete uid=%s wid=%s", uid, row["id"])
-                return _err("Не удалось связаться с Telegram — повторите позже", 502)
+                return _err("Не удалось связаться с Telegram — повторите позже", 424)
             desc = str(res.get("description") or "").lower()
             if not res.get("ok") and "not found" not in desc:
                 return _err("Telegram не дал удалить сообщение (в группах бот удаляет только "
