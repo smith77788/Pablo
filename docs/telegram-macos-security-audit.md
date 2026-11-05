@@ -618,6 +618,28 @@ public static func getFileSize(url: String) -> Signal<Int64?, NoError> {
 
 ---
 
+## Раздел B — Квалификация по правилам Telegram Bug Bounty
+
+Оценка каждой находки против правил `core.telegram.org/bug-bounty`. Ключевой критерий eligibility: **дефект на стороне Telegram** (клиент open-source, в скоупе), приводит к изменению кода/конфигурации, воспроизводим, **не** попадает в non-qualifying список (фишинг/спам, hijack токена ВНЕШНИМ malware, root/физдоступ, clickjacking, социнженерия, DoS, SSL-практики).
+
+| # | Квалификация | Tier | Риск дисквалификации / как подавать |
+|---|---|---|---|
+| **4** JS-Bridge Hijacking | **Да** (сильнейшая) | app-level, верх | Это дефект **клиента** (мост доверяет любому origin при `sameOrigin==false`), а не «вредонос на ОС» (п.2) и не clickjacking. Бот-посредник не выводит из скоупа: уязвимость на стороне Telegram. **Подавать как origin-confusion клиента**, слив буфера/токена — следствие бага моста, НЕ «кража внешним malware». |
+| **5** Biometry `accessGranted` | **Да** | app-level | Access-control баг Keychain-записи/чтения в клиенте. **НЕ формулировать как «кража токена»** (иначе п.2) — это «отсутствие проверки разрешения перед Keychain-операцией». |
+| **1** `share_to_story` IP-leak/SSRF | **Да** | app-level | Утечка реального IP (деанон) + SSRF в LAN — security impact, не DoS. Открытие мини-аппа = штатное действие, **не социнженерия** (п.9). |
+| **6** `file_download` size-probe | **Да** | app-level | Тот же класс, что #1, другой обработчик/стек. Отметить ограничение macOS 14+. |
+| **2** `open_tg_link` без клика | **Спорно/низко** | возможно вне скоупа | Открытие произвольных `tg://` без клика граничит с «спам/нуисанс» (п.1). Подавать как вспомогательный к #4, не самостоятельно. |
+| **3** path traversal | **Нет** | — | MITIGATED (`sanitizedTempBoxFileName`). Не подавать. |
+| **A** абьюз по идентификатору | **Нет** | — | Негативный результат (серверный энфорс). Не подавать. |
+
+**Общие требования, которые надо соблюсти при подаче:**
+1. **Только тестовое окружение**: свой бот через @BotFather, test Bot API `…/bot<token>/test/METHOD`, отдельный аккаунт. Не затрагивать других пользователей.
+2. **Не раскрывать публично до фикса** — репозиторий с этим отчётом (`smith77788/Pablo`) держать **приватным**; публичный репо = дисквалификация.
+3. Репорт на **security@telegram.org**, по-английски, по шаблону (Attack surface / Severity CVSS v3 / Description / Steps / Impact / Additional details). Первый по дубликату — единственный зачитываемый, поэтому подавать без лишней задержки.
+4. Токен бота из ранних сообщений **не включать** в репорты и нигде не публиковать.
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**
