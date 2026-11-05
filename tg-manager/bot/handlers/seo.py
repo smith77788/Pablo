@@ -588,7 +588,7 @@ def _generate_seo_fallback(
         "username": keep_uname,
         "reasoning": (
             "Базовая оптимизация по вашим ключевым словам. "
-            "Для полной AI-генерации настройте OPENROUTER_API_KEY в Railway."
+            "Для полной AI-генерации подключите провайдера ИИ."
         ),
     }
 
@@ -602,19 +602,18 @@ async def _ai_generate_seo(
     keywords: list[str],
     user_feedback: str = "",
     preferred_username: str = "",
+    owner_id: int | None = None,
 ) -> dict | None:
-    """Generate SEO-optimized title, description, username via OpenRouter.
+    """SEO-заголовок, описание и username от модели через единый ИИ-шлюз.
+
+    Раньше функция ходила прямо в openrouter.ai: мимо дневного лимита ИИ по
+    тарифу, мимо пауз по лимитам моделей (llm_gate) и мимо учёта расхода на
+    владельца, а без OPENROUTER_API_KEY молчала, даже когда подключены другие
+    провайдеры. `http` оставлен ради совместимости вызовов.
 
     user_feedback — правки от пользователя к предыдущему варианту.
     preferred_username — желаемый username (если пользователь указал).
     """
-    try:
-        from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
-
-        if not OPENROUTER_API_KEY:
-            return None
-    except ImportError:
-        return None
 
     kw_hint = ", ".join(keywords[:10]) if keywords else "—"
 
@@ -655,34 +654,30 @@ async def _ai_generate_seo(
         "Write in the same language as the current profile (or Russian if empty)."
     )
 
-    try:
-        async with http.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": OPENROUTER_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 400,
-                "temperature": 0.7,
-            },
-            timeout=aiohttp.ClientTimeout(total=30),
-        ) as resp:
-            if resp.status != 200:
-                return None
-            data = await resp.json()
-            raw = data["choices"][0]["message"]["content"].strip()
-            # Strip markdown code fences if present
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            return json.loads(raw.strip())
-    except Exception as e:
-        log.warning("AI SEO generate error: %s", e)
+    from services import ai_gateway
+
+    raw = await ai_gateway.complete(
+        prompt, task=ai_gateway.TASK_ASSISTANT, owner_id=owner_id,
+        max_tokens=400, temperature=0.7, timeout=30.0)
+    return _parse_seo_json(raw)
+
+
+def _parse_seo_json(raw: str | None) -> dict | None:
+    """JSON из ответа модели: с обёрткой ```json или без. Мусор — None."""
+    if not raw:
         return None
+    text = raw.strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else ""
+        if text.startswith("json"):
+            text = text[4:]
+    try:
+        data = json.loads(text.strip())
+    except (ValueError, TypeError):
+        log.warning("AI SEO: ответ модели не JSON: %s", text[:120])
+        return None
+    return data if isinstance(data, dict) else None
 
 
 # ── Channel/Group SEO menu ────────────────────────────────────────
@@ -1128,6 +1123,7 @@ async def cb_seo_chan_ai(
         keywords=keywords,
         user_feedback=user_feedback,
         preferred_username=preferred_username,
+        owner_id=user_id,
     )
 
     if not result:
@@ -1326,6 +1322,7 @@ async def fsm_seo_feedback(
         keywords=keywords,
         user_feedback=combined_feedback,
         preferred_username=preferred_username,
+        owner_id=message.from_user.id,
     )
 
     if not result:
@@ -1542,11 +1539,15 @@ async def fsm_seo_username(
         keywords=keywords,
         user_feedback=user_feedback,
         preferred_username=uname,
+        owner_id=message.from_user.id,
     )
 
     if not result:
         await state.clear()
-        await message.answer("⚠️ AI недоступен. Проверьте OPENROUTER_API_KEY.")
+        await message.answer(
+            "⚠️ ИИ сейчас не ответил. Попробуйте позже или подключите провайдера ИИ.",
+            reply_markup=terminal_kb(),
+        )
         return
 
     new_title = result.get("title", "")
