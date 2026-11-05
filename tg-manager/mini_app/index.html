@@ -2040,9 +2040,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Куда отправить: «+ Создать» в шапке — подписчикам одного бота. -->
     <div class="sec" style="margin:6px 0 4px">Новая рассылка</div>
     <div style="display:flex;gap:8px;padding:0 0 6px;flex-wrap:wrap">
-      <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 30%;font-size:13px;padding:9px 6px" title="В каналы (все или выбранные), подписчикам бота или в ЛС">📤 Публикация</button>
-      <button class="btn btn-s" onclick="openUniCampaign()" style="flex:1 1 30%;font-size:13px;padding:9px 6px" title="Одно сообщение в каналы, чаты, ботам и в ЛС одним запуском">🚀 Всё сразу</button>
-      <button class="btn btn-s" onclick="openNetBcModal()" style="flex:1 1 30%;font-size:13px;padding:9px 6px" title="Один текст подписчикам всех ваших ботов">🕸 Всем ботам</button>
+      <!-- «В каналы» и «В чаты» названы прямо: раньше пост в чаты прятался за
+           «🚀 Всё сразу» и галочкой внутри, и владелец не находил рассылку
+           по каналам/чатам вовсе. -->
+      <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Пост во все или выбранные ваши каналы">📡 В каналы</button>
+      <button class="btn btn-p" onclick="openUniCampaign('chats')" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Сообщение в группы и чаты выбранных аккаунтов">💬 В чаты</button>
+      <button class="btn btn-s" onclick="openUniCampaign()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Одно сообщение в каналы, чаты, ботам и в ЛС одним запуском">🚀 Всё сразу</button>
+      <button class="btn btn-s" onclick="openNetBcModal()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Один текст подписчикам всех ваших ботов">🕸 Всем ботам</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 2px">
       <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📅 Расписание</button>
@@ -4582,6 +4586,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Кому рассылаем</div>
     <div class="lst">
       <div class="li tap" onclick="openBcastPick()"><div class="ava ava-purple">📢</div><div class="li-body"><div class="li-name">Подписчики бота</div><div class="li-sub">Сообщение всем, кто запустил вашего бота</div></div><span class="chev">›</span></div>
+      <div class="li tap" onclick="openUniCampaign('chats')"><div class="ava ava-purple">💬</div><div class="li-body"><div class="li-name">Чаты и группы</div><div class="li-sub">Сообщение в группы и чаты выбранных аккаунтов</div></div><span class="chev">›</span></div>
       <div class="li tap" onclick="openDmCampaigns()"><div class="ava ava-purple">✉️</div><div class="li-body"><div class="li-name">Личные сообщения (ЛС)</div><div class="li-sub">Рассылка в личку по выбранной аудитории</div></div><span class="chev">›</span></div>
       <!-- Движок единой кампании (services/campaign_hub.py) собран и покрыт
            тестами с самого начала, но запустить его было нельзя: ручку
@@ -21985,7 +21990,9 @@ let UC_CH_SEL = new Set();
 let UC_CH_TOTAL = 0;
 let UC_ACC_SEL = new Set();
 
-function openUniCampaign() {
+const UC_KIND_BOX = {channels:'ucKChannels', chats:'ucKChats', bots:'ucKBots', dm:'ucKDm'};
+// kind — необязательно: какой ресурс отметить сразу («💬 В чаты» → 'chats').
+function openUniCampaign(kind) {
   push('s-unicampaign');
   UC_CH_SEL = new Set(); UC_ACC_SEL = new Set(); UC_CH_TOTAL = 0;
   document.getElementById('ucName').value = '';
@@ -21994,6 +22001,7 @@ function openUniCampaign() {
   document.getElementById('ucDelay').value = '3';
   document.getElementById('ucSilent').checked = false;
   for (const id of ['ucKChannels','ucKChats','ucKBots','ucKDm']) document.getElementById(id).checked = false;
+  if (UC_KIND_BOX[kind]) document.getElementById(UC_KIND_BOX[kind]).checked = true;
   document.getElementById('ucChScope').value = 'all';
   document.getElementById('ucErr').style.display = 'none';
   ucCount();
