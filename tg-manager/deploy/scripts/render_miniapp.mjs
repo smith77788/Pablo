@@ -383,7 +383,12 @@ const MUTE = () => {
 // там он читает РАЗМЕТКУ, а здесь — то, что реально нарисовано в ответ на
 // ошибку сервера. Разметку статическая проверка уже держит; этот путь — нет.
 const ENGLISH = () => {
-  const scr = document.querySelector('.screen.show');
+  // Корень — окно, если оно открыто, и экран иначе: ровно как у мерки
+  // обрезки, которая этому уже научена. Внутри `.modal`, а не в подложке
+  // `.mbg`: подложка — flex-строка во весь экран.
+  const _mb = document.querySelector('.mbg.show');
+  const scr = _mb ? (_mb.querySelector('.modal') || _mb)
+                  : document.querySelector('.screen.show');
   if (!scr) return { hits: [] };
   // Тост — ГЛАВНОЕ место, где владелец видит текст ошибки, и он лежит ВНЕ
   // `.screen` (`<div id="toast">` рядом с ним). Первая редакция мерки читала
@@ -396,13 +401,8 @@ const ENGLISH = () => {
   // вычисленная прозрачность ещё 0. Именно на это мерка и попалась: первая
   // редакция фильтровала по opacity и отчитывалась «английского нет», будучи
   // слепой к тосту; самопроверка это и показала словом «в тосте=false».
-  const extra = [document.getElementById('toast'), document.querySelector('.mbg.show')]
-    .filter(el => {
-      if (!el) return false;
-      if (el.id === 'toast') return el.classList.contains('show');
-      const st = getComputedStyle(el);
-      return st.display !== 'none' && st.visibility !== 'hidden';
-    });
+  const extra = [document.getElementById('toast')]
+    .filter(el => el && el.classList.contains('show'));
   const MARK = /(?<![A-Za-z])(the|and|with|without|for|you|your|are|not|this|that|have|has|was|were|from|must|cannot|could|should|would|will|please|required|require|invalid|allowed|failed|unable|already|does|too|than|while|when|which|there|their|been|being|only|every|wait|seconds|minutes|retry|again|expired|unknown|missing|exists|denied|refused|closed|timeout|connect|connection|privileges|peer)(?![A-Za-z])/gi;
   const t = [scr, ...extra].map(el => el.innerText || '').join('  ')
     .replace(/\s+/g, ' ');
@@ -420,7 +420,13 @@ const ENGLISH = () => {
 };
 
 const GIBBERISH = () => {
-  const scr = document.querySelector('.screen.show');
+  // Корень — окно, если открыто. Прежняя редакция читала только экран, и все
+  // семьдесят одно окно оставались без мерки машинного текста: проход по
+  // окнам звал одну мерку обрезки. `undefined` в окне владелец видит так же
+  // хорошо, как на экране, а в окнах он вводит данные.
+  const _mb = document.querySelector('.mbg.show');
+  const scr = _mb ? (_mb.querySelector('.modal') || _mb)
+                  : document.querySelector('.screen.show');
   if (!scr) return { hits: [] };
   const bad = ['undefined', 'NaN', '[object Object]', 'TypeError', 'ReferenceError',
                'Failed to fetch', 'Internal Server Error'];
@@ -887,11 +893,34 @@ if (sweepMode) {
     await page.evaluate((i) => document.getElementById(i).classList.add('show'), modalIds[0]);
     await page.waitForTimeout(120);
     const scm = await selfCheck();
+    // Мерки текста в окнах — тоже со своей самопроверкой, и по той же причине,
+    // по которой мерка английского оказалась слепа к тосту: корень не тот.
+    const tcm = await page.evaluate((srcs) => {
+      const gib = new Function('return (' + srcs[0] + ')()');
+      const en = new Function('return (' + srcs[1] + ')()');
+      const mb = document.querySelector('.mbg.show');
+      const root = mb && (mb.querySelector('.modal') || mb);
+      if (!root) return { ran: false };
+      const g0 = gib().hits.length, e0 = en().hits.length;
+      const bad = document.createElement('div');
+      bad.textContent = 'заведомо undefined в окне, the field is not allowed';
+      root.appendChild(bad);
+      const gib1 = gib().hits.length > g0, en1 = en().hits.length > e0;
+      bad.remove();
+      return { ran: true, gib: gib1, en: en1,
+               back: gib().hits.length === g0 && en().hits.length === e0 };
+    }, [GIBBERISH.toString(), ENGLISH.toString()]);
     await page.evaluate((i) => document.getElementById(i).classList.remove('show'), modalIds[0]);
     console.log(`самопроверка мерки в окне (${modalIds[0]}): `
-      + `заведомо обрезанный элемент найден=${scm.caught}`);
+      + `заведомо обрезанный элемент найден=${scm.caught}`
+      + ` | машинный текст найден=${tcm.gib} | английский найден=${tcm.en}`
+      + ` | после снятия столько же=${tcm.back}`);
     if (!scm.caught) {
       console.log('МЕРКА СЛЕПА В ОКНАХ — «обрезки нет» по окнам ничего не означает');
+      process.exitCode = 2;
+    }
+    if (!tcm.gib || !tcm.en || !tcm.back) {
+      console.log('МЕРКИ ТЕКСТА СЛЕПЫ В ОКНАХ — по окнам они ничего не означают');
       process.exitCode = 2;
     }
   }
@@ -904,6 +933,18 @@ if (sweepMode) {
     }
     const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
     if (m.n) report.push('окно ' + id + ' | ' + `ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
+    const mg = await page.evaluate((src) => new Function('return (' + src + ')()')(), GIBBERISH.toString());
+    if (mg.hits && mg.hits.length) hints.push('окно ' + id + ' | ' + mg.hits.slice(0, 2).join(' | '));
+    if (failEnMode) {
+      const me = await page.evaluate((src) => new Function('return (' + src + ')()')(), ENGLISH.toString());
+      if (me.hits && me.hits.length) {
+        report.push('окно ' + id + ' | ' + `АНГЛИЙСКИЙ ${me.hits.length}: ` + me.hits.slice(0, 2).join(' ; '));
+      }
+    }
+    // `live` здесь обнулялся и больше НИКОГДА не читался: ошибка страницы,
+    // поднятая при открытии окна, молча терялась. В проходе по экранам она
+    // в находки идёт, в проходе по окнам — не шла.
+    if (live.length) report.push('окно ' + id + ' | ' + live.slice(0, 2).join(' | '));
     await page.evaluate((i) => document.getElementById(i).classList.remove('show'), id);
   }
 

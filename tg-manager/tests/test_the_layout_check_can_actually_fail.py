@@ -485,3 +485,65 @@ def test_a_toast_is_not_counted_as_covering():
         "тост снова считается накрытием: в режиме английской ошибки он висит "
         "почти постоянно и даёт находку на каждом экране"
     )
+
+
+def _modal_pass() -> str:
+    """Тело прохода по окнам: от `for (const id of modalIds)` до его конца."""
+    src = _src()
+    i = src.index("for (const id of modalIds) {")
+    depth, j = 0, i
+    while j < len(src):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    return src[i : j + 1]
+
+
+def test_the_modal_pass_runs_more_than_the_clipping_measure():
+    """Семьдесят одно окно мерили одной меркой из четырёх.
+
+    Проход по окнам звал только `CLIPPED`. Машинный текст (`undefined`,
+    `[object Object]`) и английская фраза в окне не мерились вовсе — а в окнах
+    владелец вводит данные, и видит он их там ровно так же хорошо.
+    """
+    body = _modal_pass()
+    assert "GIBBERISH.toString()" in body, (
+        "в окнах снова не меряется машинный текст"
+    )
+    assert "ENGLISH.toString()" in body, "в окнах снова не меряется английский"
+
+
+def test_a_page_error_while_opening_a_modal_is_not_dropped():
+    """`live` в проходе по окнам обнулялся и больше никогда не читался."""
+    body = _modal_pass()
+    assert "live = []" in body, "сбор ошибок страницы по окну пропал"
+    assert re.search(r"if \(live\.length\)[\s\S]{0,160}(report|problems)\.push", body), (
+        "ошибка страницы при открытии окна снова теряется молча"
+    )
+
+
+def test_the_text_measures_prove_they_see_inside_a_modal():
+    """Корень не тот — мерка молчит и выглядит зелёной. Проверено дважды."""
+    src = _src()
+    m = re.search(r"const tcm = await page\.evaluate\([\s\S]*?\]\);", src)
+    assert m, "самопроверка мерок текста в окнах пропала"
+    body = m.group(0)
+    assert "GIBBERISH.toString()" in body and "ENGLISH.toString()" in body, (
+        "самопроверка в окнах перестала доказывать обе мерки текста"
+    )
+    assert re.search(r"if \(!tcm\.gib \|\| !tcm\.en", src), (
+        "слепота мерок текста в окнах больше не делает обход красным"
+    )
+
+
+def test_the_machine_text_measure_can_look_into_a_modal():
+    src = _src()
+    m = re.search(r"const GIBBERISH = \(\) => \{[\s\S]*?\n\};", src)
+    assert m, "мерка машинного текста пропала"
+    assert ".mbg.show" in m.group(0), (
+        "мерка машинного текста снова смотрит только на экран — окна мимо"
+    )
