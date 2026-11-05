@@ -2403,6 +2403,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Шаблоны ассетов</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <!-- HTML-виджеты Telegram (Bot API 10.4): опрос, отсчёт, карточка… в пузыре чата. -->
+      <div class="mgmt-tile" onclick="openWidgets()">
+        <div class="mgmt-tile-ico">🧩</div>
+        <div class="mgmt-tile-lbl">Виджеты в чатах</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <!-- Поиск Telegram — ОДИН модуль. Раньше это были шесть плиток в трёх
            разделах: «Позиции» и «Рейтинг» читали одни и те же tracked_keywords,
            «Позиции в поиске» — то же для каналов, плюс «Глобальный поиск»,
@@ -2782,6 +2788,70 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Рассылка всем пользователям</div>
     <textarea id="adm-bc-text" rows="5" placeholder="Введите текст сообщения…" class="input-bc-l"></textarea>
     <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="submitAdminBroadcast()">📢 Отправить</button>
+  </div>
+</div>
+
+<!-- ══════════ ВИДЖЕТЫ В ЧАТАХ (Telegram HTMLBubbles, Bot API 10.4) ══════════ -->
+<div class="screen" id="s-widgets">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🧩 Виджеты в чатах</div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 2px 6px">
+      Живой виджет прямо в сообщении бота: опрос с процентами, отсчёт до события,
+      карточка с кнопкой, викторина. Его можно переслать в любой чат — пересланные
+      копии тоже голосуют и показывают общий счёт.
+    </div>
+    <div class="sec" id="wgFormSec">Новый виджет</div>
+    <div class="lst" style="padding:14px">
+      <div id="wgTplWrap">
+        <div class="field">
+          <label>Шаблон</label>
+          <div id="wgTplGrid" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
+        </div>
+      </div>
+      <div class="field-note" id="wgTplDesc" style="margin:-4px 0 10px"></div>
+      <div id="wgFields"></div>
+      <div class="field" id="wgHtmlWrap" style="display:none">
+        <label>Код виджета (HTML)</label>
+        <textarea id="wgHtml" class="inp" rows="10" spellcheck="false" oninput="wgPreviewSoon()"
+          placeholder="&lt;style&gt;…&lt;/style&gt; &lt;div&gt;…&lt;/div&gt; &lt;script&gt;…&lt;/script&gt;"
+          style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px"></textarea>
+      </div>
+      <div class="field-note" id="wgSize" style="white-space:pre-line;margin-bottom:10px"></div>
+      <label style="display:block;font-size:13px;color:var(--hint);margin-bottom:6px">Предпросмотр — примерный вид; голосование здесь понарошку</label>
+      <iframe id="wgPreview" title="Предпросмотр виджета" sandbox="allow-scripts"
+        style="width:100%;height:300px;border:1px solid var(--border-input);border-radius:14px;background:var(--bg2);margin-bottom:12px"></iframe>
+      <div id="wgSendWrap">
+        <div class="field">
+          <label>От какого бота</label>
+          <select id="wgBot"></select>
+        </div>
+        <div class="field">
+          <label>Куда</label>
+          <select id="wgWhere" onchange="wgWhereToggle()">
+            <option value="me" selected>Себе — в личку с ботом</option>
+            <option value="chat">В группу</option>
+          </select>
+          <div class="field-note" id="wgWhereNote">Виджет придёт вам в личку с ботом — так удобно проверить вид. Если ещё не открывали этого бота, откройте его и нажмите «Старт».</div>
+        </div>
+        <div class="field" id="wgChatWrap" style="display:none">
+          <label>Группа: @username или числовой id</label>
+          <input type="text" id="wgChat" class="inp" placeholder="@my_group или -1001234567890" style="width:100%;box-sizing:border-box">
+        </div>
+        <div class="field">
+          <label>Подпись под виджетом (необязательно)</label>
+          <input type="text" id="wgCaption" class="inp" maxlength="1024" placeholder="Её видно и в списке чатов" style="width:100%;box-sizing:border-box">
+        </div>
+      </div>
+      <div class="field-err" id="wgErr"></div>
+      <button class="btn btn-p" id="wgSendBtn" onclick="wgSend()" style="width:100%">📤 Отправить</button>
+      <button class="btn btn-s" id="wgCancelEdit" onclick="wgCancelEdit()" style="width:100%;margin-top:8px;display:none">Отмена</button>
+    </div>
+    <div class="sec">Отправленные</div>
+    <div class="lst" id="wgList"></div>
+    <div class="lst-more" id="wgMore"></div>
   </div>
 </div>
 
@@ -9042,6 +9112,7 @@ const MODULE_KEYWORDS = {
   'Реферальная программа':'реферал приглашение код партнёрка',
   'Рабочие пространства':'воркспейс команда доступ участники контур',
   'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
+  'Виджеты в чатах':'виджет htmlbubbles html пузырь опрос голосование отсчёт таймер викторина карточка оценка',
   
   
   'Здоровье':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс дэшборд здоровья здоровье инфры инфраструктура диагностика связность оповещения',
@@ -9145,6 +9216,7 @@ const MODULE_DESCS = {
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
   'Шаблоны ассетов':'Заготовки аватара, описания и первого поста',
+  'Виджеты в чатах':'Опрос, отсчёт, карточка и другие живые виджеты прямо в сообщении бота',
   
   
   'Хранилище':'История переписки: удалённые и изменённые сообщения',
@@ -22183,6 +22255,8 @@ let UC_CH_SEL = new Set();
 let UC_CH_TOTAL = 0;
 let UC_ACC_SEL = new Set();
 let UC_BOT_SEL = new Set();
+// Экран «🧩 Виджеты в чатах» (screens/widgets.js).
+let WG = {tpls: [], limits: {}, tpl: '', edit: null, offset: 0, items: []};
 
 const UC_KIND_BOX = {channels:'ucKChannels', chats:'ucKChats', bots:'ucKBots', dm:'ucKDm'};
 // kind — необязательно: какой ресурс отметить сразу («💬 В чаты» → 'chats').
@@ -32020,6 +32094,7 @@ function renderAudSegChart(segments) {
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>
 <script src="screens/deals_board.js"></script>
+<script src="screens/widgets.js"></script>
 <script src="screens/home_screen.js"></script>
 <script src="screens/find_mine.js"></script>
 <script src="screens/workflow_map.js"></script>

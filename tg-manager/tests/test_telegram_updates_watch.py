@@ -51,7 +51,7 @@ def test_the_changelog_is_parsed_newest_first():
 def test_the_alert_is_in_russian_and_says_whether_widgets_arrived():
     text = w.alert_text(w.parse_changelog(NEW)[0])
     assert "Bot API 10.4" in text and "20 ноября 2026" in text
-    assert "HTML-виджеты (HTMLBubbles)" in text and "Можно внедрять" in text
+    assert "HTML-виджеты (HTMLBubbles)" in text and "«🧩 Виджеты в чатах»" in text
     no = w.alert_text(w.parse_changelog(OLD)[0])
     assert "пока нет" in no and "August" not in no
 
