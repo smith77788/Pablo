@@ -99,6 +99,7 @@ from bot.handlers import mass_inviter as mass_inviter_handler
 from bot.handlers import profile_setter as profile_setter_handler
 from bot.handlers import phone_checker as phone_checker_handler
 from bot.handlers import reporter_standalone as reporter_handler
+from bot.handlers import abuse_report as abuse_report_handler
 from bot.handlers import content_cloner as content_cloner_handler
 from bot.handlers import auto_registrar as auto_registrar_handler
 from bot.handlers import growth_hub as growth_hub_handler
@@ -545,6 +546,7 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     dp.include_router(va_admin_handler.router)
     dp.include_router(op_chain_handler.router)
     dp.include_router(mass_pub_handler.router)
+    dp.include_router(abuse_report_handler.router)
     dp.include_router(competitors_handler.router)
     dp.include_router(sub_handler.router)
     dp.include_router(start.router)
