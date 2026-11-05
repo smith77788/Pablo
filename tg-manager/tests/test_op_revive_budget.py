@@ -55,11 +55,30 @@ def test_budget_is_bounded_and_configurable():
 
 
 def test_startup_reset_counts_revives():
-    """Сброс на старте обязан ТРАТИТЬ бюджет, а не поднимать операцию даром."""
+    """Сброс на старте обязан ТРАТИТЬ бюджет, а не поднимать операцию даром.
+
+    Бюджет с schema_v299 считает воскрешения БЕЗ ПРОДВИЖЕНИЯ: прогон, сделавший
+    новую работу, счётчик подряд идущих обнуляет (иначе деплой гасил бы длинную
+    честную операцию третьим перезапуском). Поэтому проверяем обе ветки CASE:
+    без продвижения бюджет по-прежнему тратится, а абсолютный счёт растёт
+    всегда — ядовитой операции спрятаться не за чем.
+    """
     body = _fn(_read("services/op_worker.py"), "_reset_stale_running")
-    assert "revive_count = COALESCE(revive_count, 0) + 1" in body, (
-        "сброс после рестарта не увеличивает счётчик воскрешений — "
-        "ядовитая операция будет подниматься бесконечно"
+    assert "ELSE COALESCE(revive_count, 0) + 1" in body, (
+        "сброс после рестарта не увеличивает счётчик воскрешений без "
+        "продвижения — ядовитая операция будет подниматься бесконечно"
+    )
+    assert "> COALESCE(revive_mark, 0)" in body, (
+        "обнуление счётчика не привязано к отметке продвижения: без неё "
+        "«продвинулась» решается по обнулённому done_items, то есть никогда"
+    )
+    assert "revive_total = COALESCE(revive_total, 0) + 1" in body, (
+        "общий счёт воскрешений не растёт — операция, делающая одну цель и "
+        "снова роняющая воркер, обнуляла бы подряд идущие и жила вечно"
+    )
+    assert "revive_mark = GREATEST(" in body, (
+        "отметка продвижения не поднимается до достигнутого — на следующем "
+        "круге та же работа снова сойдёт за новую"
     )
 
 
@@ -77,10 +96,19 @@ def test_startup_reset_fails_poisoned_ops():
 def test_watchdog_counts_revives_and_fails_poisoned():
     """Зависшая (а не упавшая) операция — тот же класс: сторож её тоже ограничивает."""
     body = _fn(_read("services/op_worker.py"), "_watchdog_stale")
-    assert "revive_count = COALESCE(revive_count, 0) + 1" in body, (
+    assert "ELSE COALESCE(revive_count, 0) + 1" in body, (
         "сторож зависших не тратит бюджет — операция будет забирать флот раз в час вечно"
     )
+    assert "> COALESCE(revive_mark, 0)" in body, (
+        "у сторожа обнуление не привязано к отметке продвижения — правила двух "
+        "путей воскрешения разъехались"
+    )
+    assert "revive_total = COALESCE(revive_total, 0) + 1" in body
     assert "COALESCE(revive_count, 0) >= $3" in body
+    assert "COALESCE(revive_total, 0) >= $5" in body, (
+        "абсолютный предел не проверяется: зависающая раз в час операция, "
+        "делающая по одной цели, не будет остановлена никогда"
+    )
     assert "SET status = 'failed'" in body
     assert body.index("SET status = 'failed'") < body.index("SET status = 'pending'")
 

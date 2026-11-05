@@ -39,6 +39,16 @@ def _source() -> str:
 
 # ── Храповик: ни одна запись статуса не идёт мимо защиты ────────────────────
 
+# Окно, в котором ищется WHERE того же запроса. Запросы здесь — с пояснениями
+# на несколько абзацев, поэтому окно держим с запасом: при тесном окне отбор
+# `status='running'` оказывается ЗА границей, и проверка называет нарушением
+# здоровый запрос, которому всего-то дописали комментарий. Так уже было
+# 09.10.2026 (запрос поллера) и 05.11.2026 (возврат зависших операций после
+# правки бюджета живучести). Запас смысла не размывает: запрос всё равно
+# обрезается по следующему `UPDATE operation_queue`.
+_QUERY_WINDOW = 2200
+
+
 def test_no_status_write_without_terminal_guard():
     """Любой UPDATE, меняющий status очереди, обязан щадить терминальный статус.
 
@@ -57,7 +67,7 @@ def test_no_status_write_without_terminal_guard():
     src = _source()
     offenders = []
     for m in re.finditer(r"UPDATE operation_queue", src):
-        seg = src[m.start():m.start() + 900]
+        seg = src[m.start():m.start() + _QUERY_WINDOW]
         nxt = seg.find("UPDATE operation_queue", 1)
         if nxt > 0:
             seg = seg[:nxt]
@@ -102,12 +112,40 @@ def test_the_guard_detector_actually_sees_status_writes():
     src = _source()
     seen = 0
     for m in re.finditer(r"UPDATE operation_queue", src):
-        seg = src[m.start():m.start() + 900]
+        seg = src[m.start():m.start() + _QUERY_WINDOW]
         where_at = seg.upper().find("WHERE")
         set_part = seg[:where_at] if where_at > 0 else seg
         if re.search(r"\bstatus\s*=", set_part):
             seen += 1
     assert seen >= 5, f"детектор нашёл лишь {seen} записей статуса — он сломан"
+
+
+def test_the_guard_detector_flags_a_bare_status_write():
+    """Второй конец самопроверки: голый запрос обязан попасть в находки.
+
+    Проверка выше доказывает, что детектор что-то ВИДИТ, но не что он умеет
+    сказать «нарушение». Без этого конца достаточно было расширить окно поиска
+    настолько, чтобы любое условие попадало внутрь, и правило тихо умерло бы
+    зелёным.
+    """
+    bare = (
+        'await pool.execute(\n'
+        '    """UPDATE operation_queue\n'
+        "       SET status = 'pending'\n"
+        '       WHERE id = $1""", op_id)\n')
+    offenders = []
+    for m in re.finditer(r"UPDATE operation_queue", bare):
+        seg = bare[m.start():m.start() + _QUERY_WINDOW]
+        where_at = seg.upper().find("WHERE")
+        set_part = seg[:where_at] if where_at > 0 else seg
+        if not re.search(r"\bstatus\s*=", set_part):
+            continue
+        where_part = seg[where_at:where_at + 400] if where_at > 0 else ""
+        if not re.search(r"status\s*=\s*'(running|cancelled|failed)'", where_part):
+            offenders.append(seg.splitlines()[0])
+    assert offenders, (
+        "детектор не считает нарушением запрос, который пишет статус по одному "
+        "id без всякого отбора — то есть он больше ничего не защищает")
 
 
 # ── Поведение: повтор не воскрешает отменённую операцию ─────────────────────

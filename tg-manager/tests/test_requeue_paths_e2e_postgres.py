@@ -237,20 +237,42 @@ def test_the_fleet_path_counts_the_work_it_already_did(pool):
 # регулярно — и он же единственный, кто тратит бюджет живучести операции.
 
 def test_startup_revives_a_stale_running_operation(pool):
+    """Возврат в очередь, и бюджет считается по ПРОДВИЖЕНИЮ (schema_v299).
+
+    Операция в `_op` вставляется с `done_items=5` и нулевой отметкой, то есть
+    прогон успел сделать работу. Такое воскрешение бюджет подряд идущих не
+    тратит: иначе деплой (а он на каждый пуш) гасил бы длинную честную операцию
+    третьим перезапуском. Общий счёт при этом растёт — он и держит предел
+    сверху. Второй случай, без новой работы, проверяется тут же: именно он
+    обязан тратить бюджет, иначе ядовитая операция поднималась бы вечно.
+    """
     async def _go():
         from services import op_worker as w
-        op_id = await _op(pool, status="running",
-                          started_at=await pool.fetchval("SELECT now()"))
+        progressed = await _op(pool, status="running",
+                               started_at=await pool.fetchval("SELECT now()"))
+        # «Прогон не добавил ничего нового»: отметка уже равна достигнутому,
+        # то есть эти пять целей сделал ПРОШЛЫЙ прогон, а этот — ни одной.
+        stalled = await _op(pool, status="running", revive_mark=5,
+                            started_at=await pool.fetchval("SELECT now()"))
         await w._reset_stale_running(pool)
-        return await pool.fetchrow(
-            "SELECT status, done_items, started_at, revive_count "
-            "FROM operation_queue WHERE id=$1", op_id)
+        q = ("SELECT status, done_items, started_at, revive_count, "
+             "       revive_mark, revive_total "
+             "FROM operation_queue WHERE id=$1")
+        return (await pool.fetchrow(q, progressed),
+                await pool.fetchrow(q, stalled))
 
-    row = _run(_go())
+    row, stalled = _run(_go())
     assert row["status"] == "pending", row
     assert row["started_at"] is None and row["done_items"] == 0
-    assert row["revive_count"] == 1, "бюджет живучести не считается — операция, "\
-        "роняющая воркер, будет подниматься вечно"
+    assert row["revive_count"] == 0, (
+        "продвигавшаяся операция потратила бюджет живучести — три деплоя "
+        f"погасят честную работу ({dict(row)})")
+    assert row["revive_mark"] == 5, "отметка продвижения не запомнила достигнутое"
+    assert row["revive_total"] == 1, (
+        "общий счёт воскрешений не вырос — предела сверху не осталось")
+    assert stalled["revive_count"] == 1, (
+        "бюджет живучести не считается — операция, роняющая воркер, не сделав "
+        f"ни одной цели, будет подниматься вечно ({dict(stalled)})")
 
 
 def test_startup_stops_reviving_a_poisonous_operation(pool):

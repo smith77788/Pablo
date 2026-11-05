@@ -121,9 +121,16 @@ async def test_the_revive_still_resets_progress_and_counts_the_budget():
 
     query, _ = pool.revives()[0]
     assert "done_items = 0" in query, "прогресс не сброшен — класс «done > total»"
-    assert "revive_count = COALESCE(revive_count, 0) + 1" in query, (
+    # Бюджет с schema_v299 тратится на воскрешения БЕЗ продвижения: прогон,
+    # сделавший новую работу, счётчик подряд идущих обнуляет, иначе деплой (а он
+    # на каждый пуш) гасил бы длинную честную операцию третьим перезапуском.
+    assert "ELSE COALESCE(revive_count, 0) + 1" in query, (
         "бюджет живучести не расходуется — зависающая операция будет вечно "
         "забирать слот и аккаунты"
+    )
+    assert "revive_total = COALESCE(revive_total, 0) + 1" in query, (
+        "общий счёт воскрешений не растёт — операция, делающая одну цель и "
+        "снова вешающая воркер, обнуляла бы подряд идущие и жила вечно"
     )
 
 

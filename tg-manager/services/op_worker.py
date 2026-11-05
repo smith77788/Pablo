@@ -486,6 +486,27 @@ _MIN_ACCOUNTS_PER_OP = 1     # честный дележ флота: миним�
 # как операция, которая «всегда выполняется».
 _MAX_REVIVES = _int_env("OP_MAX_REVIVES", 3, 1, 20)
 
+# БЮДЖЕТ СЧИТАЕТ ВОСКРЕШЕНИЯ БЕЗ ПРОДВИЖЕНИЯ, а не воскрешения вообще
+# (schema_v299). Причина: воскрешение случается не только от ядовитой
+# операции — рестарт процесса возвращает в очередь ВСЁ, что было в работе, а
+# деплой здесь едет на каждый пуш в рабочую ветку. Длинная честная операция
+# (инвайт идёт часами, потолок прогона 6 часов) переживала три деплоя и
+# гасилась словами «прерывалась и не продвигалась» — слово «не продвигалась»
+# код при этом не проверял ни разу.
+#
+# Отсюда второй предел. `revive_count` стал счётчиком ПОДРЯД идущих
+# воскрешений без новой работы и обнуляется продвижением, а `revive_total`
+# считает все воскрешения и ограничивает сверху операцию, которая делает одну
+# цель и снова роняет воркер: подряд идущие она обнуляет, значит жила бы
+# вечно, а каждый её круг забирает слот владельца и роняет работу соседей.
+_MAX_REVIVES_TOTAL = _int_env("OP_MAX_REVIVES_TOTAL", 20, 2, 200)
+if _MAX_REVIVES_TOTAL < _MAX_REVIVES:
+    # Настройка, в которой абсолютный предел ниже предела подряд идущих,
+    # означает «гасить раньше, чем разрешено молчать»: берём больший, иначе
+    # второй предел подменял бы первый, и обнуление за продвижение не работало
+    # бы вовсе.
+    _MAX_REVIVES_TOTAL = _MAX_REVIVES
+
 # Потолок одного прогона операции. Без него исполнитель, зависший на ответе
 # Telegram (сеть легла, прокси молчит, вызов без своего timeout), держал слот
 # параллельности и арендованные аккаунты БЕСКОНЕЧНО — и был при этом невидим:
@@ -542,6 +563,15 @@ _POISON_ERROR = (
     "Операция {n} раз(а) прерывалась вместе с воркером и не дошла до конца — "
     "остановлена, чтобы не занимать флот бесконечно. Запустите её заново."
 )
+# Второй предел (schema_v299) гасит операцию, которая ПРОДВИГАЕТСЯ, но её
+# воскрешали слишком много раз. Своими словами, а не словами первого: сказать
+# продвигавшейся операции «не продвигалась» — то же вранье, из-за которого
+# предел и переписан.
+_POISON_ERROR_TOTAL = (
+    "Операцию воскрешали {n} раз(а) — это предел. Она продвигалась, но её "
+    "всё время прерывало; остановлена, чтобы не занимать флот бесконечно. "
+    "Запустите её заново — уже отработанные цели повтор пропустит."
+)
 
 # Почему операция вдруг снова «ожидает». Оба сторожа возвращали её в очередь
 # МОЛЧА: в интерфейсе она откатывалась на нулевой прогресс без единого слова, и
@@ -584,6 +614,17 @@ async def _ensure_revive_column(pool: "asyncpg.Pool") -> None:
         await pool.execute(
             "ALTER TABLE operation_queue "
             "ADD COLUMN IF NOT EXISTS revive_count INT NOT NULL DEFAULT 0"
+        )
+        # Отметка продвижения и общий счёт воскрешений (schema_v299) — по той
+        # же причине и той же ценой: без них условие воскрешения не выполнится,
+        # и живучесть исчезнет целиком вместо того, чтобы ограничиться.
+        await pool.execute(
+            "ALTER TABLE operation_queue "
+            "ADD COLUMN IF NOT EXISTS revive_mark INT NOT NULL DEFAULT 0"
+        )
+        await pool.execute(
+            "ALTER TABLE operation_queue "
+            "ADD COLUMN IF NOT EXISTS revive_total INT NOT NULL DEFAULT 0"
         )
     except Exception as e:
         log_exc_swallow(log, f"op_worker: ensure revive_count column failed: {e}")
@@ -3164,15 +3205,31 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
     status = op_status.classify_final(
         op_status.FAILED, ok=ok_n, failed=failed_n,
         done_items=info.get("done_items"), total_items=info.get("total_items"))
-    summary = (
-        f"⚠️ Успело {ok_n}, дальше операция {_MAX_REVIVES} раз(а) прерывалась "
-        f"и была остановлена"
-        if ok_n else
-        f"❌ Остановлена: {_MAX_REVIVES} раз(а) прерывалась, не сделав ни одной цели"
+    # КАКОЙ ИМЕННО БЮДЖЕТ ИСЧЕРПАН (schema_v299). Их два: подряд идущие
+    # воскрешения без продвижения и общий счёт воскрешений. Операция, которая
+    # продвигалась и упёрлась во второй предел, не должна читать про себя «не
+    # продвигалась»: именно это вранье и заставило переписать предел.
+    _by_total = (
+        int(info.get("revive_count") or 0) < _MAX_REVIVES
+        and int(info.get("revive_total") or 0) >= _MAX_REVIVES_TOTAL
     )
+    if _by_total:
+        summary = (
+            f"⚠️ Успело {ok_n}, операцию воскрешали {_MAX_REVIVES_TOTAL} раз(а) "
+            f"— предел, остановлена"
+        )
+    else:
+        summary = (
+            f"⚠️ Успело {ok_n}, дальше операция {_MAX_REVIVES} раз(а) прерывалась "
+            f"и была остановлена"
+            if ok_n else
+            f"❌ Остановлена: {_MAX_REVIVES} раз(а) прерывалась, не сделав ни одной цели"
+        )
     result = _normalize_result(
         {"status": status, "ok": ok_n, "failed": failed_n,
-         "reason": _POISON_ERROR.format(n=_MAX_REVIVES), "summary": summary},
+         "reason": (_POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL) if _by_total
+                    else _POISON_ERROR.format(n=_MAX_REVIVES)),
+         "summary": summary},
         op_type, 0.0)
     # Тот же случай, что у `_finish_cancelled_op`: строка УЖЕ терминальна
     # ('failed' поставил путь бюджета живучести), и эта запись дописывает ей
@@ -3205,7 +3262,12 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
         pool, op_id, owner_id, op_type, params, status, ok_n, failed_n, summary)
     await _notify_owner_about_op(
         pool, bot, owner_id,
-        (f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей успело "
+        (f"⚠️ <b>Операция #{op_id}</b> остановлена: её воскрешали "
+         f"{_MAX_REVIVES_TOTAL} раз(а) — это предел. Она продвигалась "
+         f"({ok_n} целей), но её всё время прерывало.\n\nЗапустите её "
+         f"заново — уже отработанные цели повтор пропустит."
+         if _by_total else
+         f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей успело "
          f"отработать, дальше она {_MAX_REVIVES} раз(а) прерывалась и не "
          f"продвигалась.\n\nЗапустите её заново — уже отработанные цели "
          f"повтор пропустит."
@@ -3239,11 +3301,19 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
         pool,
         """UPDATE operation_queue
            SET status = 'failed', finished_at = now(), started_at = NULL,
-               error_msg = COALESCE(error_msg, $2)
-           WHERE status = 'running' AND COALESCE(revive_count, 0) >= $1
-        RETURNING id, owner_id, op_type, params, done_items, total_items""",
+               -- Причина — по тому пределу, который исчерпан: продвигавшейся
+               -- операции нельзя писать «не продвигалась».
+               error_msg = COALESCE(error_msg,
+                   CASE WHEN COALESCE(revive_count, 0) >= $1 THEN $2 ELSE $4 END)
+           WHERE status = 'running'
+             AND (COALESCE(revive_count, 0) >= $1
+                  OR COALESCE(revive_total, 0) >= $3)
+        RETURNING id, owner_id, op_type, params, done_items, total_items,
+                  revive_count, revive_total""",
         _MAX_REVIVES,
         _POISON_ERROR.format(n=_MAX_REVIVES),
+        _MAX_REVIVES_TOTAL,
+        _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
         log_ctx="[reset_stale_poison]",
     )
     poisoned_n = len(poisoned_rows)
@@ -3268,12 +3338,26 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
         # с нуля — без сброса счётчик копился бы поверх прошлого прогона (класс
         # «done>total»/«34/17», как и в _maybe_requeue).
         """UPDATE operation_queue
-           SET status = 'pending', started_at = NULL, done_items = 0,
+           SET status = 'pending', started_at = NULL,
                -- Новая попытка: накопленное ожидание флота к ней не
                -- относится, иначе первый же занятый флот закроет её словами
                -- «не дождались за N мин», где N — время с прошлого раза.
                acct_wait_since = NULL,
-               revive_count = COALESCE(revive_count, 0) + 1,
+               -- ПРОДВИНУЛАСЬ — ЗНАЧИТ НЕ ЯДОВИТАЯ. Счётчик подряд идущих
+               -- воскрешений без новой работы обнуляется, как только прогон
+               -- сделал хоть одну цель сверх прошлой отметки; иначе деплой
+               -- (а он на каждый пуш) гасил бы длинную честную операцию
+               -- третьим перезапуском. Абсолютный счёт растёт всегда.
+               revive_count = CASE
+                   WHEN COALESCE(done_items, 0) > COALESCE(revive_mark, 0)
+                   THEN 0 ELSE COALESCE(revive_count, 0) + 1 END,
+               revive_total = COALESCE(revive_total, 0) + 1,
+               revive_mark = GREATEST(COALESCE(revive_mark, 0),
+                                      COALESCE(done_items, 0)),
+               -- done_items=0 ПОСЛЕ отметки: исполнитель прогоняет операцию с
+               -- нуля, а отметка помнит, до чего она дошла (иначе счётчик
+               -- копился бы поверх прошлого прогона — класс «34/17»).
+               done_items = 0,
                last_error = $1
            WHERE status = 'running'""",
         _REVIVE_AFTER_RESTART,
@@ -3353,16 +3437,23 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
         poisoned_rows = await pool.fetch(
             """UPDATE operation_queue
                 SET status = 'failed', finished_at = now(), started_at = NULL,
-                    error_msg = COALESCE(error_msg, $4)
+                    -- причина — по исчерпанному пределу, как на старте
+                    error_msg = COALESCE(error_msg,
+                        CASE WHEN COALESCE(revive_count, 0) >= $3
+                             THEN $4 ELSE $6 END)
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
-                  AND COALESCE(revive_count, 0) >= $3
-             RETURNING id, owner_id, op_type, params, done_items, total_items""",
+                  AND (COALESCE(revive_count, 0) >= $3
+                       OR COALESCE(revive_total, 0) >= $5)
+             RETURNING id, owner_id, op_type, params, done_items, total_items,
+                       revive_count, revive_total""",
             _STALE_RUNNING_TIMEOUT_MIN,
             active_ids_list,
             _MAX_REVIVES,
             _POISON_ERROR.format(n=_MAX_REVIVES),
+            _MAX_REVIVES_TOTAL,
+            _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
         )
         poisoned_n = len(poisoned_rows)
         if poisoned_n:
@@ -3384,10 +3475,17 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
             # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с
             # нуля, счётчик не должен копиться поверх прошлого (класс «done>total»).
             """UPDATE operation_queue
-                SET status = 'pending', started_at = NULL, done_items = 0,
+                SET status = 'pending', started_at = NULL,
                     -- та же причина, что в _reset_stale_running
                     acct_wait_since = NULL,
-                    revive_count = COALESCE(revive_count, 0) + 1,
+                    -- продвинулась — счётчик подряд идущих обнулён
+                    revive_count = CASE
+                        WHEN COALESCE(done_items, 0) > COALESCE(revive_mark, 0)
+                        THEN 0 ELSE COALESCE(revive_count, 0) + 1 END,
+                    revive_total = COALESCE(revive_total, 0) + 1,
+                    revive_mark = GREATEST(COALESCE(revive_mark, 0),
+                                           COALESCE(done_items, 0)),
+                    done_items = 0,
                     last_error = $3
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
