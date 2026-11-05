@@ -67,16 +67,44 @@ def test_register_and_list_are_owner_scoped():
     assert lst[0]["channels"] == 3
 
 
+def _function_text(path: str, name: str) -> str:
+    """Текст одной функции, с границами по дереву, а не по счёту символов.
+
+    Окно фиксированной длины от найденного заголовка промахивается от любой
+    правки внутри функции: 05.11.2026 проверка ниже упала на комментариях,
+    добавленных вместе с дверью идемпотентности, хотя сам вызов фабрики
+    остался на месте. «Искомого нет» становилось правдой само собой, то есть
+    проверка так же молча пропустила бы и настоящую потерю вызова.
+    """
+    import ast
+
+    src = open(os.path.join(ROOT, *path.split("/")), encoding="utf-8").read()
+    lines = src.splitlines()
+    fn = next((n for n in ast.walk(ast.parse(src))
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and n.name == name), None)
+    assert fn is not None, f"{path}: не стало функции {name}"
+    return "\n".join(lines[fn.lineno - 1:fn.end_lineno])
+
+
 def test_add_channel_goes_through_op():
-    ow = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
     assert op_worker.handler_for("community_add_channel") is not None
-    assert "async def _exec_community_add_channel" in ow
-    i = ow.index("async def _exec_community_add_channel")
-    assert "create_community_channel" in ow[i:i + 900]
-    api = open(os.path.join(ROOT, "services", "mini_app_community.py"),
-               encoding="utf-8").read()
-    i2 = api.index("async def community_channel_add")
-    assert "operation_bus.submit" in api[i2:i2 + 1400]
+    body = _function_text("services/op_worker.py", "_exec_community_add_channel")
+    assert "create_community_channel" in body
+    api = _function_text("services/mini_app_community.py", "community_channel_add")
+    assert "operation_bus.submit" in api
+
+
+def test_the_measurer_would_notice_a_lost_call():
+    """Самопроверка измерителя: он ищет в ТЕЛЕ функции, а не во всём файле.
+
+    Без этого проверка выше зеленела бы от упоминания фабрики в любом другом
+    месте файла — например, в докстринге соседнего исполнителя.
+    """
+    body = _function_text("services/op_worker.py", "_exec_community_add_channel")
+    assert "async def _exec_community_add_channel" in body
+    assert "def _exec_check_accounts_health" not in body, (
+        "измеритель захватил соседнюю функцию — границы сломаны")
 
 
 def test_endpoints_and_routes():

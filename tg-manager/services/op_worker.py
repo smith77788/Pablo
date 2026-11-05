@@ -17177,14 +17177,42 @@ async def _exec_community_add_channel(
         node_id = int(params.get("node_id"))
     except (TypeError, ValueError):
         return {"status": "failed", "summary": "⚠️ Канал ноды: не указан node_id"}
-    names = params.get("names") or ([params["name"]] if params.get("name") else [])
+    names = (params.get("names") or ([params["name"]] if params.get("name") else []))[:20]
+    await _declare_total_items(pool, op_id, len(names))
+    # Повтор не должен создавать ВТОРОЙ комплект топиков: `create_forum_topic`
+    # каждый раз выдаёт новый thread_id, одноимённые топики Телеграм не
+    # склеивает, и `ON CONFLICT (node_id, tg_topic_id)` в фабрике не спасает.
+    # Ключ — номер шага, а не имя: имена в списке могут повторяться, а позиция
+    # в пакете устойчива (цикл всегда идёт по `names` в одном порядке).
+    # Сбой чтения журнала — отказ (см. `completed_steps`), а не пустое
+    # множество: неизвестность трактуем в пользу «уже сделано».
+    _done_steps = await completed_steps(pool, op_id)
+    if _done_steps:
+        log.info("community_add_channel op=%d: повтор — %d каналов уже созданы",
+                 op_id, len(_done_steps))
     created = 0
-    for nm in names[:20]:
+    for _i, nm in enumerate(names):
+        step = _i + 1
+        if step in _done_steps:
+            created += 1
+            await _mark_progress(pool, op_id, created)
+            continue
         if await _is_cancelled(pool, op_id):
             break
         res = await nodes_engine.create_community_channel(pool, bot, owner_id, node_id, str(nm))
         if res:
             created += 1
+            # Через дверь журнала, а не обычным execute: по ЭТОЙ отметке
+            # `completed_steps` выше решает, какие шаги повтор пропустит, а
+            # создание топика необратимо.
+            await _journal_write(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                " VALUES($1,$2,$3,'ok',$4)",
+                op_id, step, str(nm)[:128], f"topic_id={res.get('tg_topic_id')}",
+                log_ctx=f" [community_add_channel op={op_id}]",
+            )
+            await _mark_progress(pool, op_id, created)
             await asyncio.sleep(random.uniform(1.5, 3.5))
     return {"status": "done" if created else "failed", "created": created,
             "summary": f"🖥 Ноды: создано каналов {created}"}

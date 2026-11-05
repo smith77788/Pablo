@@ -35,6 +35,10 @@ GUARDED: dict[str, tuple[str, tuple[str, ...], str]] = {
     "_exec_mass_invite": (
         "services/op_worker.py", ("_settled", "completed_targets"),
         "инвайт — самая баноопасная операция: цели помечаются ДО попытки"),
+    "_exec_community_add_channel": (
+        "services/op_worker.py", ("completed_steps",),
+        "каналы ноды: топик создаётся навсегда, одноимённые Телеграм не "
+        "склеивает, ключ — номер шага в пакете"),
     "_exec_group_announce": (
         "services/op_worker.py", ("completed_targets",),
         "объявление по группам: второй пост в ту же группу — сигнатура спама"),
