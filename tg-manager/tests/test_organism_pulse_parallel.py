@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import pytest
@@ -31,14 +32,47 @@ def _patch_all(monkeypatch, maker):
 
 @pytest.mark.asyncio
 async def test_sections_run_in_parallel(monkeypatch):
-    """14 секций по 0.05с: последовательно ≈0.7с, параллельно ≈0.05с."""
+    """Параллельность мерим ПЕРЕКРЫТИЕМ, а не настенными часами.
+
+    Прежняя редакция требовала уложиться в 0.3с на 14×0.05с. Это утверждение
+    ложно по построению: в CI рядом идут ещё три части прогона, пробуждение
+    `asyncio.sleep` опаздывает на десятки миллисекунд, и тест падал «0.58с»
+    при полностью исправном `gather` — то есть красил ветку, не называя беды.
+
+    Признак параллельности — сколько секций работало ОДНОВРЕМЕННО: у gather
+    пик равен четырнадцати, у последовательного сбора единице. От загрузки
+    машины это не зависит вовсе.
+
+    Настенное время осталось, но ТОЛЬКО как сторож от зависания, и предел у
+    него соответствующий: он ловит «пульс встал», а не «машина занята».
+    """
+    now = 0
+    peak = 0
+
     def _maker(name):
         async def _f(pool, owner_id):
-            await asyncio.sleep(0.05)
+            nonlocal now, peak
+            now += 1
+            peak = max(peak, now)
+            try:
+                await asyncio.sleep(0.05)
+            finally:
+                now -= 1
             return {"name": name}
         return _f
 
     _patch_all(monkeypatch, _maker)
+
+    # Если тест когда-нибудь снова начнёт вести себя странно, надо знать, ЧТО
+    # держит цикл. Чужая спящая задача объяснить опоздание не может: сны
+    # перекрываются. А вот живой поток, удерживающий GIL, или блокирующий
+    # вызов внутри чужой корутины объясняет опоздание пробуждений точно —
+    # ровно тот класс, про который services/loop_lag.py. Поэтому снимаем и
+    # задачи, и ПОТОКИ, до замера, и печатаем только при неудаче.
+    alien = [t.get_name() for t in asyncio.all_tasks()
+             if t is not asyncio.current_task() and not t.done()]
+    threads = [t.name for t in threading.enumerate()
+               if t is not threading.main_thread() and t.is_alive()]
 
     t0 = time.monotonic()
     snap = await world.snapshot(object(), 1)
@@ -48,9 +82,15 @@ async def test_sections_run_in_parallel(monkeypatch):
         "fleet", "ops", "graph", "vault", "goal", "growth", "seo", "retention",
         "anomalies", "invite_chats", "bots", "chat_warmup", "events_24h", "vlayer",
     }
-    assert elapsed < 0.3, (
-        f"секции собираются не параллельно: {elapsed:.2f}с на 14×0.05с "
-        f"(последовательно было бы ~0.7с) — пульс снова упрётся в таймаут"
+    assert peak == len(_SECTION_NAMES), (
+        f"одновременно работало не больше {peak} секций из "
+        f"{len(_SECTION_NAMES)} — пульс собирается по очереди и снова упрётся "
+        f"в таймаут клиента"
+    )
+    assert elapsed < 5.0, (
+        f"пульс встал: {elapsed:.1f}с на 14×0.05с при полном перекрытии. "
+        f"Посторонние задачи на цикле: {alien[:8] or 'нет'}; "
+        f"живые потоки: {threads[:8] or 'нет'}"
     )
 
 

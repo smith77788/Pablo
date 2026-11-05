@@ -469,6 +469,53 @@ def pytest_configure(config):
         _SHARD_FILES = _sh.files_for(*spec)
 
 
+def _files_word(n: int) -> str:
+    """«1 файл», «373 файла», «375 файлов» — владелец читает по-русски."""
+    if n % 10 == 1 and n % 100 != 11:
+        return "файл"
+    if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        return "файла"
+    return "файлов"
+
+
+def shard_line() -> str | None:
+    """«часть 2/4: 372 файла, отпечаток раскладки abc123…» — или None, если
+    набор идёт целиком.
+
+    Без этой строки красная часть не воспроизводима: номер части зависит от
+    всего списка файлов (см. sharding.layout_id), и у соседнего дерева под тем
+    же номером лежат ДРУГИЕ файлы."""
+    from tests import sharding as _sh
+
+    spec = _sh.parse_shard(os.getenv(_sh.ENV))
+    if spec is None:
+        return None
+    k, n = spec
+    cnt = len(_SHARD_FILES or ())
+    return (f"часть набора {k}/{n}: {cnt} {_files_word(cnt)}, "
+            f"отпечаток раскладки {_sh.layout_id()}")
+
+
+def pytest_report_header(config):
+    return shard_line()
+
+
+def pytest_sessionstart(session):
+    """Печатаем строку САМИ, а не только шапкой.
+
+    В pytest.ini стоит addopts = -q, и CI зовёт pytest тоже с -q: в тихом
+    режиме вывод pytest_report_header не показывается вовсе. Мерка, которой не
+    видно в настоящем прогоне, не мерка — поэтому пишем прямо в отчётчик, и
+    пишем В НАЧАЛЕ: часть, убитую по таймауту, видно только по началу вывода.
+    """
+    line = shard_line()
+    if not line:
+        return
+    tr = session.config.pluginmanager.get_plugin("terminalreporter")
+    if tr is not None:
+        tr.write_line(line)
+
+
 def pytest_ignore_collect(collection_path, config):
     """Файл чужой части не импортируется вовсе — делится и сбор, не только
     прогон. Касается только файлов тестов верхнего уровня tests/."""

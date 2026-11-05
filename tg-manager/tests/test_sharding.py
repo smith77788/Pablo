@@ -73,3 +73,70 @@ def test_empty_spec_means_whole_suite():
     assert sharding.parse_shard("") is None
     assert sharding.parse_shard(None) is None
     assert sharding.parse_shard("2/4") == (2, 4)
+
+
+def test_the_fingerprint_moves_with_the_file_list():
+    """Отпечаток обязан меняться от нового файла и не зависеть от порядка.
+
+    Иначе он бесполезен ровно там, где нужен: два дерева, различающиеся одним
+    файлом тестов, дают РАЗНЫЕ раскладки под одним номером части."""
+    files = sharding.list_test_files()
+    a = sharding.layout_id(files)
+    assert re.fullmatch(r"[0-9a-f]{12}", a), a
+    assert sharding.layout_id(list(reversed(files))) == a, "порядок списка влиять не должен"
+    b = sharding.layout_id(files + ["test_novyy_fayl_testov.py"])
+    assert b != a, ("отпечаток не меняется от нового файла тестов — по нему нельзя "
+                    "понять, что раскладка другая, и чужое «часть 2 красная» "
+                    "опять нечем воспроизвести")
+
+
+def test_the_part_line_is_visible_in_the_quiet_run():
+    """Строку про часть видно в ТОМ прогоне, которым ходит CI.
+
+    В pytest.ini стоит `addopts = -q`, и CI зовёт pytest тоже с `-q`. В тихом
+    режиме вывод pytest_report_header не показывается вовсе, поэтому первая
+    редакция этой строки была не видна нигде, кроме подробного прогона, —
+    мерка, которой не видно, не мерка. Проверяем настоящим подпроцессом.
+    """
+    import subprocess
+    import sys
+
+    env = {**os.environ, sharding.ENV: "2/4"}
+    env.pop("INFRAGRAM_TEST_DSN", None)
+    out = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/test_sharding.py",
+         "--collect-only", "-q", "-p", "no:randomly"],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=300).stdout
+    assert "отпечаток раскладки" in out, (
+        "в тихом прогоне (-q, как в CI) не видно, какая это часть и какова "
+        f"раскладка:\n{out[:600]}")
+    assert "часть набора 2/4" in out, out[:600]
+
+
+def test_the_part_line_counts_files_in_russian():
+    from tests import conftest as cf
+
+    assert (cf._files_word(1), cf._files_word(373), cf._files_word(375),
+            cf._files_word(11), cf._files_word(14)) == (
+        "файл", "файла", "файлов", "файлов", "файлов")
+
+
+def test_the_run_header_names_the_part_and_the_layout(monkeypatch):
+    """Прогон части печатает, какая это часть и какова раскладка."""
+    from tests import conftest as cf
+
+    assert hasattr(cf, "pytest_report_header"), (
+        "шапка прогона не называет часть: красную часть нечем воспроизвести")
+    saved = cf._SHARD_FILES
+    try:
+        monkeypatch.setenv(sharding.ENV, "2/4")
+        cf.pytest_configure(type("Cfg", (), {})())
+        line = cf.pytest_report_header(None)
+        assert line and "2/4" in line, line
+        assert sharding.layout_id() in line, line
+        assert str(len(sharding.files_for(2, 4))) in line, line
+        monkeypatch.delenv(sharding.ENV)
+        cf.pytest_configure(type("Cfg", (), {})())
+        assert cf.pytest_report_header(None) is None, "без переменной шапки быть не должно"
+    finally:
+        cf._SHARD_FILES = saved

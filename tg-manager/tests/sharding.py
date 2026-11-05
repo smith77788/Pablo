@@ -23,6 +23,7 @@ conftest): сбор набора стоит ~50 с, и делить надо е�
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -79,6 +80,23 @@ def assign(files: list[str], n: int, weights: dict[str, float]) -> dict[str, int
 def files_for(k: int, n: int, root: str = ROOT) -> set[str]:
     plan = assign(list_test_files(root), n, load_weights())
     return {f for f, part in plan.items() if part == k}
+
+
+def layout_id(files: list[str] | None = None, root: str = ROOT) -> str:
+    """Отпечаток раскладки — короткая строка, по которой два прогона понимают,
+    одинаково ли у них поделён набор.
+
+    НОМЕР ЧАСТИ НЕ ЕСТЬ АДРЕС ФАЙЛА. Раскладка жадная и зависит от всего
+    списка файлов и от весов, поэтому один новый файл тестов переставляет
+    соседей: в другом дереве тот же файл лежит в другой части. Сообщение
+    «часть 2 красная» без отпечатка невоспроизводимо — у себя гоняешь часть 2,
+    а нужного файла в ней нет. Так и вышло: двадцать пять минут прогона мимо
+    цели, пока не сравнили раскладки.
+    """
+    names = sorted(files if files is not None else list_test_files(root))
+    w = load_weights()
+    blob = "\n".join(f"{n}:{w.get(n, '')}" for n in names)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
 
 def _update(junit_paths: list[str]) -> int:
