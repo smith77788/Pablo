@@ -1008,7 +1008,7 @@ async def _notify_owner_about_op(
 
 async def _requeue_op_no_accounts(
     pool: "asyncpg.Pool", op_id: int, defer_s: int = 90,
-    bot=None, owner_id: int | None = None,
+    bot=None, owner_id: int | None = None, reason: str = "",
 ) -> None:
     """Флот временно занят другими операциями — вернуть op в очередь с задержкой,
     а не проваливать. Ограничено по времени: если операция ждёт свободные
@@ -1031,6 +1031,15 @@ async def _requeue_op_no_accounts(
     Отметка живёт в acct_wait_since (schema_v220): scheduled_for каждое
     откладывание сдвигает вперёд, started_at обнуляется здесь же, а retry_count
     тратится на повторы по ошибке исполнителя — переиспользовать нечего.
+
+    `reason` — ПРИЧИНА, с которой исполнитель попросил повтор, его словами.
+    Сюда приходит не только занятый флот: исполнитель просит повтор и когда
+    BotFather ограничил создание ботов, и когда не прочитался список уже
+    обработанных целей (лучше отложить, чем отправить дважды). Причина
+    запоминается в `last_error`, потому что по истечении предела её сообщают
+    владельцу: раньше ему на любой из этих случаев писали «все аккаунты N мин
+    были заняты другими операциями» — и он шёл разгружать очередь вместо того,
+    чтобы смотреть на настоящую помеху.
     """
     import datetime as __dt
     row = await _safe_fetchrow(
@@ -1055,9 +1064,13 @@ async def _requeue_op_no_accounts(
         # COALESCE: отметку ставит ПЕРВОЕ откладывание и дальше её не сдвигает,
         # иначе предел не наступал бы никогда и вечный цикл вернулся бы.
         "acct_wait_since = COALESCE(acct_wait_since, now()), "
+        # Причина — последняя, а не первая: помеха может смениться, и владельцу
+        # важна та, на которой ожидание закончилось. COALESCE здесь был бы
+        # ошибкой по той же причине, по которой он нужен у отметки времени.
+        "last_error = COALESCE(NULLIF($3, ''), last_error), "
         "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
-        op_id, float(defer_s),
+        op_id, float(defer_s), str(reason or "")[:300],
         log_ctx=f"[requeue_no_acc op={op_id}]",
         where="requeue_no_accounts",
         lost="возврат в очередь по занятому флоту потерян — операция осталась в 'running'",
@@ -1650,8 +1663,8 @@ async def _finish_fleet_starved_op(
     """
     row = await _safe_fetchrow(
         pool,
-        "SELECT op_type, params, done_items, total_items FROM operation_queue "
-        "WHERE id=$1",
+        "SELECT op_type, params, done_items, total_items, last_error "
+        "FROM operation_queue WHERE id=$1",
         op_id, log_ctx=f"[fleet_starved op={op_id}]")
     # Строку разбираем через dict и .get: не прочитали её или не доехала
     # колонка — операция всё равно обязана закрыться. Исключение здесь оставило
@@ -1675,14 +1688,21 @@ async def _finish_fleet_starved_op(
     status = op_status.classify_final(
         op_status.FAILED, ok=ok_n, failed=failed_n,
         done_items=info.get("done_items"), total_items=info.get("total_items"))
-    reason = (f"Флот занят другими операциями — не дождались свободных "
-              f"аккаунтов за {waited_min} мин")
+    # ПРИЧИНУ НЕ ВЫДУМЫВАЕМ. Сюда приходит не только занятый флот: исполнитель
+    # просит повтор и на ограничение BotFather, и когда не прочитался список
+    # уже обработанных целей. Раньше на любой из этих случаев владельцу писали
+    # «все аккаунты N мин были заняты другими операциями», и он шёл разгружать
+    # очередь вместо настоящей помехи. Теперь берём слова исполнителя, которые
+    # запомнил `_requeue_op_no_accounts`, и утверждаем от себя только то, что
+    # знаем точно: сколько ждали и чем кончилось.
+    _last = str(info.get("last_error") or "").strip()
+    _held = _last if _last else "флот был занят другими операциями"
+    reason = f"Не удалось начать работу за {waited_min} мин: {_held}"
     summary = (
-        f"⚠️ Успело {ok_n}, остальные цели не дождались свободных аккаунтов "
-        f"за {waited_min} мин"
+        f"⚠️ Успело {ok_n}, остальные цели не дождались своей очереди "
+        f"за {waited_min} мин: {_held}"
         if ok_n else
-        f"❌ Не запустилась: все аккаунты {waited_min} мин были заняты "
-        f"другими операциями"
+        f"❌ Не запустилась: {waited_min} мин не удавалось начать — {_held}"
     )
     result = _normalize_result(
         {"status": status, "ok": ok_n, "failed": failed_n,
@@ -1714,13 +1734,13 @@ async def _finish_fleet_starved_op(
     await _notify_owner_about_op(
         pool, bot, owner_id,
         (f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей уже "
-         f"отработано, остальные {waited_min} мин ждали свободный аккаунт и "
-         f"не дождались.\n\nПовтор продолжит с того же места — уже "
+         f"отработано, остальные {waited_min} мин не могли начать.\n\n"
+         f"Помеха: {_held}\n\nПовтор продолжит с того же места — уже "
          f"отработанные цели он пропустит."
          if ok_n else
-         f"❌ <b>Операция #{op_id}</b> не запустилась: все аккаунты "
-         f"{waited_min} мин были заняты другими операциями.\n\nЗапустите её "
-         f"снова, когда очередь разгрузится, или добавьте аккаунтов."),
+         f"❌ <b>Операция #{op_id}</b> не запустилась: {waited_min} мин не "
+         f"удавалось начать работу.\n\nПомеха: {_held}\n\nЗапустите её "
+         f"снова, когда помеха уйдёт."),
         dedup_key=f"no-accounts:{op_id}",
     )
 
@@ -6103,7 +6123,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         bot=bot, owner_id=owner_id)
                 else:
                     await _requeue_op_no_accounts(
-                        pool, op_id, bot=bot, owner_id=owner_id)
+                        pool, op_id, bot=bot, owner_id=owner_id,
+                        # Слова исполнителя о помехе: по истечении предела их
+                        # сообщают владельцу вместо выдуманной причины.
+                        reason=str(result.get("reason") or ""))
                 return
 
             # Отмена — такой же терминальный статус, как done/partial/failed, и
