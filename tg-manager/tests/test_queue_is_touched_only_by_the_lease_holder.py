@@ -145,17 +145,41 @@ def test_planned_stop_releases_the_lease(src):
 
 
 def test_lease_failure_does_not_stop_the_queue():
-    """Сбой запроса аренды — fail-open: без БД процесс всё равно ничего не сделает,
-    а пауза исполнителя из-за сетевого блипа останавливает ВСЕ операции продукта."""
+    """Сбой запроса аренды — fail-open ДЛЯ ДЕРЖАТЕЛЯ: без БД процесс всё равно
+    ничего не сделает, а пауза исполнителя из-за сетевого блипа останавливает
+    ВСЕ операции продукта.
+
+    Раньше этот тест требовал fail-open от ЛЮБОГО процесса, в том числе только
+    что запустившегося. Это было неверно и дорого: первое действие держателя —
+    `_reset_stale_running` по всем строкам в 'running', то есть блип на первой
+    попытке нового процесса перезапускал живые операции соседа. Разбор и тесты
+    на обе ветки — tests/test_the_queue_is_not_assumed_by_a_newcomer.py.
+    """
     import asyncio
 
     from services import replica_guard as rg
 
     class _Broken:
+        def __init__(self, first=None):
+            self.first = first
+
         async def fetchrow(self, *a, **k):
+            if self.first is not None:
+                row, self.first = self.first, None
+                return row
             raise RuntimeError("соединение потеряно")
 
-    assert asyncio.run(rg.acquire_executor_lease(_Broken(), "host:1:aaa", "worker")) is True
+    saved = rg._lease_held_by
+    try:
+        rg._lease_held_by = None
+        pool = _Broken(first={"worker_id": "host:1:aaa"})
+        # Сначала аренда досталась нам законно, потом связь пропала.
+        assert asyncio.run(
+            rg.acquire_executor_lease(pool, "host:1:aaa", "worker")) is True
+        assert asyncio.run(
+            rg.acquire_executor_lease(pool, "host:1:aaa", "worker")) is True
+    finally:
+        rg._lease_held_by = saved
 
 
 def test_lease_denied_is_not_a_silent_pause(src):

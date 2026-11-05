@@ -57,6 +57,14 @@ EXECUTOR_ROLES = ("worker", "all")
 # отпускает очередь не дольше чем через этот срок.
 _EXEC_LEASE_TTL_S = 90
 
+# Последняя ДОСТОВЕРНАЯ правда этого процесса о том, у кого аренда исполнителя:
+# свой worker_id, если аренда досталась нам, и None, если она чужая или
+# отпущена. Нужна ровно для одного решения — что делать на сбое запроса (см.
+# fail-open в `acquire_executor_lease`). Блип не меняет держателя, поэтому
+# правильный ответ на сбой — повторить последнюю известную правду, а не
+# выдумать её.
+_lease_held_by: "str | None" = None
+
 
 def _multi_allowed() -> bool:
     return str(os.getenv("INFRAGRAM_ALLOW_MULTI_REPLICA", "")).strip().lower() in (
@@ -118,11 +126,27 @@ async def acquire_executor_lease(pool, worker_id: str, role: str = "all") -> boo
     Одна строка (id=1) на всю установку: держатель разбирает очередь, остальные
     ждут. Берём её, если она свободна, просрочена (держатель умер) или уже наша.
 
-    Сбой запроса — fail-open (True). Причина: без БД процесс всё равно ничего не
-    сделает, а пауза исполнителя из-за сетевого блипа останавливает ВСЕ операции
-    продукта — это дороже, чем маловероятный краткий разъезд лимитов. Отказ при
-    этом не молчит: log.warning и счётчик.
+    Сбой запроса — fail-open, но ТОЛЬКО для держателя. Для него причина прежняя:
+    без БД процесс всё равно ничего не сделает, а пауза исполнителя из-за
+    сетевого блипа останавливает ВСЕ операции продукта. Блип при этом не меняет
+    того, кто держит аренду, поэтому держатель просто продолжает себя считать
+    держателем.
+
+    Процессу, который про свою аренду ничего не знает (только запустился, или
+    ему уже отказали), тот же fail-open стоит совсем другого. Первое действие
+    держателя — `_reset_stale_running`, то есть
+    `UPDATE operation_queue … WHERE status='running'`: ровно то, от чего аренда
+    и защищает (см. докстринг модуля). Значит блип на первой попытке нового
+    процесса — это не «краткий разъезд лимитов», а перезапуск живых операций
+    соседа: те же приглашения тем же людям, второй пост в канал, обнулённый
+    прогресс и потраченная единица бюджета живучести. И случается это на
+    деплое, когда старый процесс ещё работает, то есть именно тогда, когда
+    опаснее всего. Поэтому такой процесс очередь не берёт и ждёт следующего
+    круга (~10 с) — для него это и есть правильная цена.
+
+    Сбой в любом случае не молчит: log.warning и счётчик.
     """
+    global _lease_held_by
     try:
         row = await pool.fetchrow(
             """INSERT INTO executor_lease(id, worker_id, role, expires_at)
@@ -138,11 +162,20 @@ async def acquire_executor_lease(pool, worker_id: str, role: str = "all") -> boo
                    OR executor_lease.expires_at < now()
                RETURNING worker_id""",
             worker_id, role, float(_EXEC_LEASE_TTL_S))
-        return bool(row and row["worker_id"] == worker_id)
+        ours = bool(row and row["worker_id"] == worker_id)
+        _lease_held_by = worker_id if ours else None
+        return ours
     except Exception:
         log_exc_swallow(log, "replica_guard.acquire_executor_lease")
         _metric("infragram_executor_lease_errors_total")
-        return True
+        if _lease_held_by == worker_id:
+            return True
+        log.warning(
+            "replica_guard: аренду исполнителя прочитать не удалось, а этот "
+            "процесс её не держит — очередь не берём до следующего круга. Так "
+            "уборка зависших операций не сбросит живые операции другого "
+            "процесса.")
+        return False
 
 
 async def release_executor_lease(pool, worker_id: str) -> None:
@@ -151,6 +184,11 @@ async def release_executor_lease(pool, worker_id: str) -> None:
     Без этого следующий процесс ждёт истечения срока: деплой Railway означал бы
     паузу очереди до полутора минут на каждом выпуске.
     """
+    global _lease_held_by
+    if _lease_held_by == worker_id:
+        # Отпускаем до запроса: даже если UPDATE не дойдёт, себя держателем мы
+        # больше не считаем, и сбой следующего запроса не вернёт нам очередь.
+        _lease_held_by = None
     try:
         await pool.execute(
             "UPDATE executor_lease SET expires_at = now() - make_interval(secs => 1) "
