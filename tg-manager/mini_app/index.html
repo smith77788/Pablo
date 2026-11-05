@@ -615,6 +615,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .row:last-child{border-bottom:none}
 .row.tap{cursor:pointer}
 .row.tap:active{background:var(--sep)}
+.row.tap.on{background:rgba(var(--accent-rgb),.10)}
 .row-ico{width:32px;height:32px;border-radius:var(--radius);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
 .row-body{flex:1;min-width:0}
 .row-name{font-size:14px;font-weight:500}
@@ -30064,30 +30065,79 @@ async function openAdminStats() {
 // Операции ВСЕЙ платформы: что идёт, что валится и сколько длится, по типам
 // за 7 дней, плюс лента целей за сутки. Плитки статистики раньше вели в
 // собственную очередь админа — платформенной картины в мини-аппе не было.
-async function openAdminOps() {
-  push('s-admin-ops');
-  txt('adm-ops-body', '<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const [st, au] = await Promise.all([
-      api('/api/miniapp/admin/ops/stats'),
-      api('/api/miniapp/admin/audit').catch(() => ({audit: []})),
-    ]);
-    const rows = st.stats || [];
-    let html = '<div class="sec">По типам за 7 дней</div>';
-    html += rows.length ? '<div class="lst">' + rows.map(r => `<div class="row"><div class="row-body">
-        <div class="row-name">${esc(r.type_ru || opRu(r.op_type))}</div>
-        <div class="row-val">Всего ${num(r.total)} · готово ${num(r.done)} · ошибок ${num(r.failed)}${r.fail_pct?` (${r.fail_pct}%)`:''}${r.avg_duration_s!=null?' · в среднем '+esc(_opDuration(r.avg_duration_s)):''}</div>
-      </div>${r.fail_pct>=20?'<div class="row-right"><span class="badge b-rd">много ошибок</span></div>':''}</div>`).join('') + '</div>'
-      : empty('⚙️', 'За неделю операций не было');
-    const feed = au.audit || [];
-    html += '<div class="sec" style="margin-top:12px">Цели за сутки (последние 100)</div>';
-    html += feed.length ? '<div class="lst">' + feed.map(f => `<div class="row"><div class="row-body">
+// Сводка операций платформы. Экран был ЧИСТО СМОТРОВОЙ: обход мерил ноль
+// действий — ни выбора окна (семь дней были вшиты в SQL), ни обновления, ни
+// перехода от «много ошибок» к самим целям. Ровно та жалоба владельца от
+// 28.09.2026: «экраны, которые только отображают числа, и в них всё не
+// кликабельно». Теперь окно выбирается (1/7/30 — список проверяет сервер),
+// строка типа фильтрует журнал целей, и есть обновление.
+let ADM_OPS_DAYS = 7, ADM_OPS_TYPE = '', ADM_OPS_FEED = [], ADM_OPS_TYPES = [];
+const ADM_OPS_WIN = [[1, 'Сутки'], [7, '7 дней'], [30, '30 дней']];
+
+async function admOpsWindow(d) { ADM_OPS_DAYS = d; ADM_OPS_TYPE = ''; await openAdminOps(true); }
+
+// Фильтр журнала — по уже загруженным строкам, без похода на сервер: повторное
+// нажатие снимает его, и это видно по подписи.
+//
+// Строка зовёт себя НОМЕРОМ, а не значением: сырой `op_type` в разметку не
+// попадает вовсе (его английский вид владельцу не показывают — это держит
+// tests/test_miniapp_speaks_russian.py), а тип берётся из своего списка.
+function admOpsType(i) {
+  const t = (typeof i === 'number') ? (ADM_OPS_TYPES[i] || '') : String(i || '');
+  ADM_OPS_TYPE = (ADM_OPS_TYPE === t) ? '' : t;
+  admOpsFeed();
+  for (const el of document.querySelectorAll('#adm-ops-body .row.tap[data-opi]')) {
+    el.classList.toggle('on', !!ADM_OPS_TYPE
+      && ADM_OPS_TYPES[+el.getAttribute('data-opi')] === ADM_OPS_TYPE);
+  }
+}
+
+function admOpsFeed() {
+  const all = ADM_OPS_FEED;
+  const rows = ADM_OPS_TYPE ? all.filter(f => f.op_type === ADM_OPS_TYPE) : all;
+  const head = ADM_OPS_TYPE
+    ? `<div class="sec" style="margin-top:12px">Цели за сутки · только ${esc(opRu(ADM_OPS_TYPE))} (${rows.length} из ${all.length})
+         <span class="chip" onclick="admOpsType(-1)" role="button" tabindex="0" style="margin-left:8px">× Сбросить</span></div>`
+    : `<div class="sec" style="margin-top:12px">Цели за сутки (последние ${all.length})</div>`;
+  const body = rows.length ? '<div class="lst">' + rows.map(f => `<div class="row"><div class="row-body">
         <div class="row-name">${esc(f.label || opRu(f.op_type))} · #${f.op_id} · владелец ${esc(String(f.owner_id))}</div>
         <div class="row-val" style="white-space:normal">${esc(f.target||'')} ${f.message?'— '+esc(String(f.message).slice(0,140)):''}
           <span class="badge ${String(f.status).toLowerCase()==='ok'?'b-gr':'b-rd'}">${esc(_opLogStRu(f.status))}</span></div>
       </div></div>`).join('') + '</div>'
-      : empty('📋', 'За сутки целей не было');
+    : empty('📋', ADM_OPS_TYPE ? 'За сутки целей этого типа не было' : 'За сутки целей не было',
+            ADM_OPS_TYPE ? 'Снимите фильтр, чтобы увидеть остальные' : '');
+  txt('adm-ops-feed', head + body);
+}
+
+async function openAdminOps(keep) {
+  if (!keep) { ADM_OPS_DAYS = 7; ADM_OPS_TYPE = ''; push('s-admin-ops'); }
+  txt('adm-ops-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const [st, au] = await Promise.all([
+      api('/api/miniapp/admin/ops/stats?days=' + ADM_OPS_DAYS),
+      api('/api/miniapp/admin/audit').catch(() => ({audit: []})),
+    ]);
+    const rows = st.stats || [];
+    const win = ADM_OPS_WIN.map(([d, lbl]) => `<div class="seg-opt${d === ADM_OPS_DAYS ? ' on' : ''}"`
+      + ` onclick="admOpsWindow(${d})" role="button" tabindex="0">${lbl}</div>`).join('');
+    let html = `<div style="display:flex;gap:8px;align-items:center;padding:0 0 10px">
+        <div class="seg" style="flex:1">${win}</div>
+        <div class="chip" onclick="openAdminOps(true)" role="button" tabindex="0" title="Обновить">⟳</div>
+      </div>`;
+    html += `<div class="sec">По типам за ${ADM_OPS_DAYS === 1 ? 'сутки' : ADM_OPS_DAYS + ' дней'}</div>`;
+    // Строка типа — действие: ведёт к целям этого типа в журнале ниже.
+    ADM_OPS_TYPES = rows.map(r => r.op_type);
+    html += rows.length ? '<div class="lst">' + rows.map((r, i) => `<div class="row tap" data-opi="${i}"
+        onclick="admOpsType(${i})" role="button" tabindex="0"><div class="row-body">
+        <div class="row-name">${esc(r.type_ru || opRu(r.op_type))}</div>
+        <div class="row-val">Всего ${num(r.total)} · готово ${num(r.done)} · ошибок ${num(r.failed)}${r.fail_pct?` (${r.fail_pct}%)`:''}${r.avg_duration_s!=null?' · в среднем '+esc(_opDuration(r.avg_duration_s)):''}</div>
+      </div>${r.fail_pct>=20?'<div class="row-right"><span class="badge b-rd">много ошибок</span></div>':''}</div>`).join('') + '</div>'
+      : empty('⚙️', ADM_OPS_DAYS === 1 ? 'За сутки операций не было' : `За ${ADM_OPS_DAYS} дней операций не было`,
+              'Переключите окно — за больший срок может быть видно');
+    html += '<div id="adm-ops-feed"></div>';
     txt('adm-ops-body', html);
+    ADM_OPS_FEED = au.audit || [];
+    admOpsFeed();
   } catch(e) { txt('adm-ops-body', errHtml(errRu(e), 'openAdminOps()')); }
 }
 let ADM_ACT_ROWS = [];

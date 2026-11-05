@@ -139,7 +139,8 @@ await page.addInitScript((mode) => {
     'templates','segments','warnings','people','operations','ops','sessions',
     'members','devices','plans','rules','tags','meshes','targets','variants',
     'steps','funnels','subscribers','logs','events','reminders','duplicates',
-    'conflicts','networks','instances','ecosystems','gifts','stars','strikes'];
+    'conflicts','networks','instances','ecosystems','gifts','stars','strikes',
+    'users','posts'];
   window.fetch = async (u) => {
     const url = String(u || '');
     const o = { ok:true, token:'stub-token', total: 1234567, count: 1234567, stats: {}, page: { limit: 25, offset: 0, has_more: true } };
@@ -171,6 +172,29 @@ await page.addInitScript((mode) => {
     if (url.indexOf('/topology') >= 0 && url.indexOf('/topology/') < 0) {
       o.accounts = 25; o.channels = 14; o.bots = 7;
       o.channel_links = 31; o.bot_users_total = 1234567;
+    }
+    // Экран рефералов рисует копирование кода, ссылку и «Поделиться» ТОЛЬКО
+    // при `ref_code` (index.html: openReferral). Без него у экрана не
+    // остаётся ни одного действия — и мерка действий объявила бы мёртвым
+    // экран, который просто не накормлен. Отчёт, зовущий на работу, которой
+    // нет, — та же ложь, что пропущенная беда.
+    // Пост открывается по `link`, а подпись к нему берётся из `body` и
+    // `channel_title` (index.html: openVaPosts). Общая запись этих полей не
+    // знает, и экран оставался без единого действия — «не накормлен», а не
+    // мёртв.
+    if (url.indexOf('/va/posts') >= 0) {
+      o.posts = ROWS.slice(0, 10).map((r, i) => ({
+        ...r, body: LONG + ' ' + LONG, channel_title: LONG, pillar: 'польза',
+        published_at: '2026-10-30T04:00:00Z',
+        link: 'https://t.me/c/1234567890/' + (i + 1), is_private: false,
+      }));
+    }
+    if (url.indexOf('/referral') >= 0) {
+      o.ref_code = 'REF123456';
+      o.ref_link = 'https://t.me/infragram_bot?start=REF123456';
+      o.tier = 'bronze'; o.commission_rate = 20;
+      o.referral_count = 3; o.paid_count = 1; o.total_earned = 12.5;
+      o.referrals = ROWS.slice(0, 5).map((r, i) => ({ ...r, status: ['paid', 'active', 'pending'][i % 3] }));
     }
     // `/ai/forecast` — число, а не список: `expected_buyers` это сумма
     // вероятностей (services/ai_predict.py, forecast). Заглушка его не давала,
@@ -358,6 +382,52 @@ const SCROLL_END = () => {
 // Сколько осмысленного текста показал экран, не считая его шапки и нижней
 // навигации. Ноль означает ровно то, что видит владелец: пустоту без единого
 // слова — ни «пусто», ни «ошибка», ни кнопки.
+// Сколько на экране ДЕЙСТВИЙ: кнопок, полей, ссылок, строк с onclick.
+//
+// Жалоба владельца (28.09.2026): «слишком много экранов, которые только
+// отображают какие-то числа или количество или вообще ничего толком не
+// отображает, и в них всё не кликабельно, ничего не настраивается, не
+// выбирается». Мерка отвечает на неё числом.
+//
+// Считаем САМЫЙ ВНЕШНИЙ кликабельный элемент цепочки: вложенный span внутри
+// кнопки — не отдельное действие. Возврат «назад» и бургер в счёт не идут —
+// они есть у каждого экрана; остальная шапка идёт, там живут «+ Создать» и
+// «⟳».
+const ACTIONS = () => {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return { acts: 0, chars: 0, id: null, none: true };
+  const isAct = (n) => {
+    if (n.closest('.hdr')) {
+      const cls = String(n.className || '');
+      if (/(^|\s)(back|hdr-burger)(\s|$)/.test(cls)) return false;
+      if (n.closest('.back, .hdr-burger')) return false;
+      if (/^(‹|←|◀️?)$/.test((n.textContent || '').trim())) return false;
+    }
+    const t = n.tagName;
+    if (t === 'BUTTON' || t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return true;
+    if (t === 'A' && n.getAttribute('href')) return true;
+    if (n.hasAttribute('onclick')) return true;
+    return /(^|\s)(btn|chip|seg-opt|tap|toggle|switch)(\s|$)/.test(String(n.className || ''));
+  };
+  let acts = 0;
+  for (const n of scr.querySelectorAll('*')) {
+    const cs = getComputedStyle(n);
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    if (!isAct(n)) continue;
+    let outer = true;
+    for (let p = n.parentElement; p && p !== scr; p = p.parentElement) if (isAct(p)) { outer = false; break; }
+    if (outer) acts++;
+  }
+  let chars = 0;
+  for (const el of scr.children) {
+    if (el.classList && (el.classList.contains('hdr') || el.classList.contains('nav'))) continue;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') continue;
+    chars += (el.innerText || el.textContent || '').trim().length;
+  }
+  return { acts, chars, id: scr.id };
+};
+
 const MUTE = () => {
   const scr = document.querySelector('.screen.show');
   if (!scr) return { len: 0, id: null, none: true };
@@ -648,6 +718,28 @@ if (sweepMode) {
       process.exitCode = 2;
     }
   }
+  // Мерка действий тоже обязана показать, что видит: гасим у показанного
+  // экрана все действия и требуем ноль, потом возвращаем и требуем больше
+  // нуля. Без этого «мёртвых экранов нет» не значит ничего.
+  const as_ = await page.evaluate((src) => {
+    const act = new Function('return (' + src + ')()');
+    const scr = document.querySelector('.screen.show');
+    if (!scr) return { ran: false };
+    const before = act().acts;
+    const hid = [];
+    for (const n of scr.querySelectorAll('button, input, select, textarea, a[href], [onclick], .btn, .chip, .seg-opt, .tap, .toggle, .switch')) {
+      hid.push([n, n.style.display]); n.style.display = 'none';
+    }
+    const silent = act().acts === 0;
+    hid.forEach(([n, d]) => { n.style.display = d; });
+    return { ran: true, silent, before, back: act().acts };
+  }, ACTIONS.toString());
+  console.log(`самопроверка мерки действий: экран без действий найден=${as_.silent}`
+    + ` | действия вернулись=${as_.back > 0} (было ${as_.before})`);
+  if (!as_.ran || !as_.silent || !(as_.back > 0)) {
+    console.log('МЕРКА ДЕЙСТВИЙ СЛЕПА — «мёртвых экранов нет» ничего не означает');
+    process.exitCode = 2;
+  }
   const gs = await gibberishSelfCheck();
   console.log(`самопроверка мерки машинного текста: заведомо машинное слово`
     + ` найдено=${gs.caught} | после снятия подсказок столько же=${gs.restored}`);
@@ -702,6 +794,7 @@ if (sweepMode) {
     process.exitCode = 2;
   }
   const report = [];
+  const acts = new Map();      // экран → сколько на нём действий
   const seen = new Set();          // какие экраны обход ДЕЙСТВИТЕЛЬНО показал
   const mute = [];                 // открывашки, не открывшие ничего
   const hints = [];                // машинный текст: подсказка, не находка
@@ -807,6 +900,40 @@ if (sweepMode) {
     // `else` оператор перевешивает `else` на себя, и список немых открывашек
     // начинает собирать как раз те, что отработали. Проверено на себе.
     if (SEED[fn] && !opened) seedDead.push(fn);
+    // Действия считаем только у своего открывшегося экрана и только в
+    // обычном режиме: в пустом и в режиме ошибки экран пуст законно.
+    // Пробные вызовы тоже мерим: 85 экранов детали из 207 оставались без
+    // замера вовсе, и «мёртвый один» считалось по 123 экранам из 207.
+    // Условие здесь — `opened`, то есть на виду оказался ИМЕННО свой экран.
+    if (opened && !emptyMode) {
+      const ac = await page.evaluate((src) => new Function('return (' + src + ')()')(), ACTIONS.toString());
+      const prev = acts.get(shownId);
+      if (!prev || prev.acts < ac.acts) {
+        // Отличаем «делать нечего» от «заглушка не накормила»: если в коде
+        // открывашки действий не видно вовсе — это свойство экрана, а если
+        // видно, а на экране их нет — это непокрытый данными экран, и звать
+        // на работу по нему нельзя.
+        // Исходник открывашки И вызванных ею функций приложения — на один
+        // уровень вглубь. Без этого признак слеп там, где действие рисует
+        // помощник: `openAdminActions` зовёт `moreBtn()`, кнопка приходит
+        // оттуда, и экран попадал в «мёртвые» по ошибке. Отчёт, зовущий на
+        // работу, которой нет, — та же ложь, что пропущенная беда.
+        const src = await page.evaluate((n) => {
+          const own = String(window[n] || '');
+          let all = own;
+          const seen = new Set([n]);
+          for (const m of own.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
+            const k = m[1];
+            if (seen.has(k)) continue;
+            seen.add(k);
+            if (typeof window[k] === 'function') all += '\n' + String(window[k]);
+          }
+          return all;
+        }, fn);
+        const canAct = /onclick|<button|class="btn|class="row tap|\bchip\b|<input|<select|<textarea/.test(src);
+        acts.set(shownId, { fn, acts: ac.acts, chars: ac.chars, canAct });
+      }
+    }
     const problems = [];
     // У пробного вызова падение значит «подставленный id не подошёл», а не
     // поломку: в находки оно не идёт, иначе отчёт утонет в шуме и перестанет
@@ -988,6 +1115,22 @@ if (sweepMode) {
   if (mute.length) {
     console.log(`открывашек без аргументов, НЕ открывших свой экран: ${mute.length}`
       + ` — ${mute.slice(0, 12).join(' ')}` + (mute.length > 12 ? ' …' : ''));
+  }
+  // Мёртвые экраны — ответ на жалобу владельца от 28.09.2026. Две строки, а
+  // не одна: «делать нечего» и «данных не досталось» — разные беды, и вторая
+  // моя, а не приложения.
+  if (acts.size) {
+    const rows = [...acts.entries()].map(([id, v]) => ({ id, ...v }));
+    const dead = rows.filter(r => r.acts === 0 && !r.canAct).sort((a, b) => a.chars - b.chars);
+    const unfed = rows.filter(r => r.acts === 0 && r.canAct);
+    const thin = rows.filter(r => r.acts > 0 && r.acts <= 2 && r.chars < 400);
+    console.log(`экранов с замером действий: ${rows.length} из ${total.length}`);
+    console.log(`МЁРТВЫЕ (ни одного действия, и в коде открывашки их не видно): ${dead.length}`
+      + (dead.length ? ' — ' + dead.map(r => `${r.id} (${r.fn}, знаков ${r.chars})`).join(' ; ') : ''));
+    console.log(`НЕ НАКОРМЛЕНЫ ЗАГЛУШКОЙ (действия в коде есть, на экране нет): ${unfed.length}`
+      + (unfed.length ? ' — ' + unfed.map(r => `${r.id} (${r.fn})`).join(' ; ') : ''));
+    console.log(`ПОЧТИ МЁРТВЫЕ (1-2 действия, меньше 400 знаков): ${thin.length}`
+      + (thin.length ? ' — ' + thin.map(r => `${r.id} (действий ${r.acts}, знаков ${r.chars})`).join(' ; ') : ''));
   }
   if (missed.length) {
     // Список печатается ЦЕЛИКОМ: именно он и говорит, куда смотреть дальше.

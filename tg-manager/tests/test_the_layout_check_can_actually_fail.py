@@ -602,3 +602,53 @@ def test_the_screen_and_the_tab_pass_measure_the_same_things():
         f"у вкладок снова нет мерок, которые есть у экранов: {missing}"
     )
     assert "coveredWithSelection()" in tabs, "полоса выделения на вкладках не мерится"
+
+
+def test_the_actions_measure_lives_in_the_single_walk():
+    """Мерка действий — в общем обходе, а второго обходчика больше нет.
+
+    Отдельный `check_dead_screens.mjs` брал открывашки по признаку
+    `length === 0` и видел 111 экранов из 207; звать его при этом не было ни
+    тестом, ни строчкой в CI. Мерка живёт там, где уже есть заглушка,
+    затравки и самопроверки, — в одном обходе.
+    """
+    src = _src()
+    assert "const ACTIONS = () =>" in src, "мерки действий в обходе нет"
+    assert not (ROOT / "deploy" / "scripts" / "check_dead_screens.mjs").exists(), (
+        "вернулся второй обходчик: он видит половину экранов и его никто не зовёт")
+    body = _pass_body("for (const { name: fn, args, want, probe } of fns)")
+    assert "ACTIONS.toString()" in body, "в проходе по экранам мерку действий не зовут"
+    assert "!emptyMode" in body.split("ACTIONS.toString()")[0][-400:], (
+        "действия мерятся и в пустом режиме, где экран пуст законно")
+
+
+def test_the_actions_measure_proves_it_can_see():
+    """У мерки действий есть самопроверка, и слепота гасит прогон."""
+    src = _src()
+    i = src.index("самопроверка мерки действий")
+    head = src[max(0, i - 1200):i]
+    assert "ACTIONS.toString()" in head, "самопроверка не зовёт саму мерку"
+    tail = src[i:i + 500]
+    assert "МЕРКА ДЕЙСТВИЙ СЛЕПА" in tail and "exitCode = 2" in tail, (
+        "слепая мерка действий не гасит прогон — «мёртвых экранов нет» "
+        "ничего не значит")
+
+
+def test_the_dead_verdict_reads_the_helpers_too():
+    """Признак «в коде действий нет» читает и вызванные функции.
+
+    Читая исходник одной открывашки, он объявил мёртвыми восемь экранов, у
+    которых действие рисует помощник (`moreBtn` у `openAdminActions`). После
+    чтения на уровень вглубь мёртвых оказалось НОЛЬ. Отчёт, зовущий на работу,
+    которой нет, — такая же ложь, как пропущенная беда.
+    """
+    src = _src()
+    i = src.index("const canAct =")
+    head = src[max(0, i - 900):i]
+    assert "typeof window[k] === 'function'" in head, (
+        "признак снова читает только саму открывашку и завысит число мёртвых")
+    assert "matchAll" in head, "вызванные функции не перебираются"
+    assert "МЁРТВЫЕ (ни одного действия, и в коде открывашки их не видно)" in src, (
+        "список мёртвых назван так, будто приговор вынесен без чтения кода")
+    assert "НЕ НАКОРМЛЕНЫ ЗАГЛУШКОЙ" in src, (
+        "«нечего делать» и «данных не досталось» снова в одном списке")

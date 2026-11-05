@@ -59,6 +59,11 @@ REPORT_STATUS_RU = {
 }
 
 
+# Окна сводки операций: только эти три. Проверяем ДО запроса и подставляем
+# уже число — чтобы «окно» из адреса никогда не попадало в SQL текстом.
+_OPS_STATS_DAYS = ("1", "7", "30")
+
+
 def _iso(v):
     return v.isoformat() if v is not None else None
 
@@ -296,6 +301,14 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
             return _err("Раздел только для владельца платформы", 403)
+        # Окно считалось ровно за семь дней, и выбрать его было нечем: экран
+        # сводки не имел НИ ОДНОГО действия — ни переключателя, ни обновления
+        # (обход мерил: действий 0). Разрешаем только три значения, и список
+        # проверяем до запроса: число из адреса в SQL не подставляем.
+        days_raw = (request.query.get("days") or "7").strip()
+        if days_raw not in _OPS_STATS_DAYS:
+            return _err("Окно сводки бывает 1, 7 или 30 дней", 400)
+        days = int(days_raw)
         try:
             rows = await pool.fetch(
                 """SELECT op_type, COUNT(*) as total,
@@ -303,9 +316,9 @@ def setup_routes(app: web.Application, pool) -> None:
                           SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed,
                           AVG(EXTRACT(EPOCH FROM (finished_at - started_at))) as avg_duration_s
                    FROM operation_queue
-                   WHERE created_at > NOW() - INTERVAL '7 days'
+                   WHERE created_at > NOW() - make_interval(days => $1)
                    GROUP BY op_type
-                   ORDER BY total DESC""")
+                   ORDER BY total DESC""", days)
             # Раньше здесь КАЖДОЕ поле строки приводилось к int, включая
             # op_type («mass_invite») — ручка падала с 500 при любом вызове.
             # Экрана у неё не было, и этого никто не видел.
@@ -322,7 +335,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     "avg_duration_s": (round(float(r["avg_duration_s"]), 1)
                                        if r["avg_duration_s"] is not None else None),
                 })
-            return _json_resp({"stats": out})
+            return _json_resp({"stats": out, "days": days})
         except Exception:
             log.exception("admin_ops_stats uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
