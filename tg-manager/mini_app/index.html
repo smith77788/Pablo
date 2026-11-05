@@ -2865,6 +2865,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--btn-solid);color:var(--btn-text);cursor:pointer">⚖️ Обычно</button>
       <button class="cw-int" data-i="active" onclick="cwPickInt('active')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(var(--fg-rgb),.06);color:var(--text);cursor:pointer">⚡ Активно</button>
     </div>
+    <details id="cwMore" style="margin:4px 16px 10px">
+      <summary style="font-size:13px;font-weight:600;cursor:pointer;padding:8px 0">⚙️ Дополнительные настройки</summary>
+      <div id="cwNewSettings"></div>
+    </details>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0">
       <span style="font-size:12px;color:var(--hint)">Аккаунты флота</span>
       <span class="link-tap" onclick="cwToggleAllAccs()" role="button" tabindex="0" style="font-size:11px;color:var(--accent)">выбрать все / сбросить</span>
@@ -2882,7 +2886,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-cwdetail">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">💬 Ход разогрева</div>
-    <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" style="margin-left:auto" onclick="cwDetailLoad()">🔄</div></div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Настройки разогрева" title="Настройки" style="margin-left:auto" onclick="cwOpenEdit()">⚙️</div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="cwDetailLoad()">🔄</div></div>
   <div class="sub-sb"><div id="cwDetailBody" style="padding:0 16px"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
@@ -9997,7 +10002,90 @@ function cwPickMode(m){CW_MODE=m;
 function cwPickInt(i){CW_INT=i;
   document.querySelectorAll('#cwInt .cw-int').forEach(b=>{const on=b.dataset.i===i;b.style.background=on?'var(--btn-solid)':'rgba(var(--fg-rgb),.06)';b.style.color=on?'var(--btn-text)':'var(--text)';});}
 let CW_ACCS=new Set(), CW_ACC_ALL=[];
-function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad(); cwAiStatus();}
+function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad(); cwAiStatus();
+  const box=document.getElementById('cwNewSettings'); if(box && !box.innerHTML) box.innerHTML=_cwSettingsHtml('cwN', {});}
+// ── Настройки разогрева (schema_v300) ─────────────────────────────────────
+// Одна разметка на запуск и на правку запущенной сессии: язык, часы работы,
+// длина реплик, доля реакций, лимиты на сутки и автостоп. Раньше у
+// разогрева было четыре настройки, язык был жёстко русским, а запущенную
+// сессию можно было только остановить.
+const CW_LANGS=[['ru','Русский'],['uk','Украинский'],['en','Английский'],['auto','Как пишут в чате']];
+const CW_LENS=[['short','Коротко — 1–2 фразы'],['medium','Средне — 2–4 фразы']];
+const CW_REACTS=[['0','Никогда'],['15','Редко — 15%'],['28','Иногда — 28%'],['45','Часто — 45%']];
+const CW_DAYS=[['0','Не останавливать'],['1','Через 1 день'],['3','Через 3 дня'],['7','Через неделю'],['14','Через 2 недели'],['30','Через месяц']];
+function _cwOpts(opts, cur){
+  return opts.map(o=>`<option value="${esc(o[0])}"${String(cur)===String(o[0])?' selected':''}>${esc(o[1])}</option>`).join('');
+}
+function _cwSel(id, opts, cur){
+  return `<select id="${esc(id)}" class="inp" style="width:100%">`+_cwOpts(opts, cur)+'</select>';
+}
+function _cwSettingsHtml(p, s){
+  s = s || {};
+  const hours=[['','круглосуточно']].concat([...Array(24).keys()].map(h=>[String(h),String(h).padStart(2,'0')+':00']));
+  const from = s.active_from==null?'':String(s.active_from), to = s.active_to==null?'':String(s.active_to);
+  const days = p==='cwE' ? [['keep', s.ends_at?('Как сейчас — до '+new Date(s.ends_at).toLocaleString('ru-RU')):'Как сейчас — без срока']].concat(CW_DAYS) : CW_DAYS;
+  const row = (lbl, html, hint) => `<div class="field" style="margin-bottom:8px"><label>${esc(lbl)}</label>${html}${hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px">${esc(hint)}</div>`:''}</div>`;
+  return row('Язык реплик', _cwSel(p+'Lang', CW_LANGS, s.lang||'ru'))
+    + `<div class="field" style="margin-bottom:8px"><label>Часы работы (по вашему поясу)</label><div style="display:flex;gap:6px;align-items:center">`
+    + `<div style="flex:1">${_cwSel(p+'From', hours, from)}</div><span>—</span><div style="flex:1">${_cwSel(p+'To', hours, to)}</div></div>`
+    + `<div style="font-size:11px;color:var(--hint);margin-top:3px">Вне этих часов флот молчит. Пояс — в «Настройках».</div></div>`
+    + row('Длина реплик', _cwSel(p+'Len', CW_LENS, s.reply_len||'short'))
+    + row('Реакция вместо ответа участнику', _cwSel(p+'React', CW_REACTS, s.react_pct==null?'28':String(s.react_pct)))
+    + row('Не больше реплик в сутки на весь чат', `<input id="${p}Daily" class="inp" type="number" min="0" inputmode="numeric" value="${esc(String(s.daily_limit||0))}">`, '0 — без лимита')
+    + row('Не больше реплик в сутки на один аккаунт', `<input id="${p}PerAcc" class="inp" type="number" min="0" inputmode="numeric" value="${esc(String(s.per_account_daily||0))}">`, '0 — без лимита')
+    + row('Остановить разогрев', _cwSel(p+'Days', days, p==='cwE'?'keep':'0'))
+    + row('Остановить после реплик', `<input id="${p}Max" class="inp" type="number" min="0" inputmode="numeric" value="${esc(String(s.max_messages||0))}">`, '0 — без потолка');
+}
+function _cwReadSettings(p){
+  const v = id => (document.getElementById(p+id)||{}).value;
+  const from=v('From'), to=v('To');
+  const out = {lang:v('Lang'), reply_len:v('Len'), react_pct:Number(v('React')||0),
+    daily_limit:Number(v('Daily')||0), per_account_daily:Number(v('PerAcc')||0),
+    max_messages:Number(v('Max')||0),
+    active_from: from===''?null:Number(from), active_to: to===''?null:Number(to)};
+  const days=v('Days'); if (days!==undefined && days!=='keep') out.stop_after_days=Number(days||0);
+  return out;
+}
+let CW_EDIT = null;
+async function cwOpenEdit(){
+  if(!CW_DETAIL_ID) return;
+  let s;
+  try { s = (await api(`/api/miniapp/chatwarmup/session/${CW_DETAIL_ID}`)).session || {}; }
+  catch(e){ toast('⚠️ '+errRu(e,'Не удалось открыть настройки')); return; }
+  CW_EDIT = s;
+  const old=document.getElementById('mo-cw-edit'); if(old) old.remove();
+  const bg=document.createElement('div'); bg.className='mbg show'; bg.id='mo-cw-edit';
+  const modeSel='<select id="cwEMode" class="inp" style="width:100%">'
+    + _cwOpts([['mixed','🔀 Смешанный'],['engage','🗣 Вовлечение'],['seed','🌱 Оживление']], s.mode||'mixed') + '</select>';
+  const intSel='<select id="cwEInt" class="inp" style="width:100%">'
+    + _cwOpts([['calm','🐢 Спокойно'],['normal','⚖️ Обычно'],['active','⚡ Активно']], s.intensity||'normal') + '</select>';
+  bg.innerHTML='<div class="modal"><div class="modal-x" role="button" tabindex="0" aria-label="Закрыть" onclick="document.getElementById(\'mo-cw-edit\').remove()">✕</div>'
+    + '<div class="modal-title">⚙️ Настройки разогрева</div>'
+    + `<div style="font-size:12px;color:var(--hint);margin-bottom:8px">${esc(s.chat_ref||'')}</div>`
+    + `<div class="field" style="margin-bottom:8px"><label>Режим</label>${modeSel}</div>`
+    + `<div class="field" style="margin-bottom:8px"><label>Темы через запятую</label><input id="cwETopics" class="inp" type="text" maxlength="500" value="${esc(s.topics||'')}" placeholder="пусто — любые"></div>`
+    + `<div class="field" style="margin-bottom:8px"><label>Интенсивность</label>${intSel}</div>`
+    + _cwSettingsHtml('cwE', s)
+    + '<div class="field-err" id="cwEErr"></div>'
+    + '<button class="btn btn-p" id="cwESave" style="width:100%" onclick="cwSaveEdit()">💾 Сохранить</button></div>';
+  bg.onclick=e=>{ if(e.target===bg) bg.remove(); };
+  document.body.appendChild(bg);
+}
+async function cwSaveEdit(){
+  const body=Object.assign(_cwReadSettings('cwE'), {
+    mode:document.getElementById('cwEMode').value,
+    intensity:document.getElementById('cwEInt').value,
+    topics:document.getElementById('cwETopics').value.trim()});
+  const btn=document.getElementById('cwESave'), err=document.getElementById('cwEErr');
+  if(btn){btn.disabled=true;btn.textContent='Сохраняю…';}
+  try{
+    await api(`/api/miniapp/chatwarmup/session/${CW_DETAIL_ID}/settings`,{method:'POST',body:JSON.stringify(body)});
+    const m=document.getElementById('mo-cw-edit'); if(m) m.remove();
+    toast('✅ Настройки разогрева сохранены');
+    cwDetailLoad();
+  }catch(e){ if(err) err.textContent=errRu(e,'Не сохранилось'); }
+  finally{ if(btn){btn.disabled=false;btn.textContent='💾 Сохранить';} }
+}
 async function cwAiStatus(){
   const el=document.getElementById('cwAiStatus'); if(!el) return;
   try{
@@ -10069,7 +10157,8 @@ async function cwStart(){
   const topics=document.getElementById('cwTopics').value.trim();
   try{
     const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
-      body:JSON.stringify({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT})});
+      body:JSON.stringify(Object.assign({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT},
+        (document.getElementById('cwNewSettings')||{}).innerHTML ? _cwReadSettings('cwN') : {}))});
     // Потолок флота на чат (30) раньше срабатывал молча, а потом называл
     // только число. Теперь видно и причину: «не поместился в потолок» и
     // «нет строки сессии» — это разные новости и разные действия.
@@ -10100,7 +10189,8 @@ async function cwDetailLoad(){
     let html=`<div class="sec">${esc(s.chat_ref||'')}</div>
       <div style="font-size:12px;color:var(--hint);line-height:1.6;margin-bottom:10px">
         ${badge} · ${esc(modeLbl)} · аккаунтов ${s.accounts||0}<br>
-        Отправлено сообщений: <b>${s.messages_sent||0}</b>${s.last_run_at?` · последний ход ${ago(s.last_run_at)}`:''}
+        Отправлено сообщений: <b>${s.messages_sent||0}</b>${s.last_run_at?` · последний ход ${ago(s.last_run_at)}`:''}<br>
+        ${esc(_cwSettingsLine(s))}
       </div>` + html_hint;
     if(stall && (!lg.length || lg[0].id===stall.id)){
       html+=`<div style="font-size:12px;line-height:1.5;padding:10px 12px;margin-bottom:10px;border-radius:var(--radius);background:rgba(var(--fg-rgb),.06)">
@@ -10138,6 +10228,17 @@ async function cwDetailLoad(){
       : '<div style="font-size:12px;color:var(--hint)">Пока пусто. Записи появятся после первого хода флота.</div>';
     el.innerHTML=html;
   }catch(e){el.innerHTML=errHtml(errRu(e),'cwDetailLoad()');}
+}
+// Настройки сессии одной строкой — чтобы видеть их, не открывая окно правки.
+function _cwSettingsLine(s){
+  const parts=[(CW_LANGS.find(x=>x[0]===(s.lang||'ru'))||[0,'Русский'])[1]];
+  if(s.active_from!=null&&s.active_to!=null) parts.push(`${String(s.active_from).padStart(2,'0')}:00–${String(s.active_to).padStart(2,'0')}:00`);
+  else parts.push('круглосуточно');
+  if(s.daily_limit) parts.push(`до ${s.daily_limit} в сутки`);
+  if(s.per_account_daily) parts.push(`до ${s.per_account_daily} на аккаунт`);
+  if(s.ends_at) parts.push('до '+new Date(s.ends_at).toLocaleDateString('ru-RU'));
+  if(s.max_messages) parts.push(`стоп после ${s.max_messages}`);
+  return '⚙️ '+parts.join(' · ');
 }
 async function cwStatus(id,st){
   try{

@@ -82,13 +82,102 @@ def pick_reaction() -> str:
     return random.choice(REACTIONS)
 
 
-def should_react(kind: str, has_target: bool, roll: float | None = None) -> bool:
+def should_react(kind: str, has_target: bool, roll: float | None = None,
+                 chance: float | None = None) -> bool:
     """Ставить реакцию вместо текста на этом ходу? Только когда отвечаем реальному
-    участнику (kind='reply' + есть цель). ЧИСТАЯ функция (roll — для тестов)."""
+    участнику (kind='reply' + есть цель). ЧИСТАЯ функция (roll — для тестов).
+
+    chance — доля реакций из настроек сессии (react_pct / 100); None — прежние 28%.
+    """
     if kind != "reply" or not has_target:
         return False
     r = random.random() if roll is None else roll
-    return r < REACT_CHANCE
+    return r < (REACT_CHANCE if chance is None else max(0.0, min(0.6, float(chance))))
+
+
+# ── Настройки сессии (schema_v300) ────────────────────────────────────────────
+#
+# Чего не хватало владельцу: язык реплик был жёстко русским, у флота не было
+# ни часов работы, ни лимита реплик в сутки, ни срока, а запущенную сессию
+# нельзя было поправить — только остановить и завести заново. Проверка одна на
+# создание и на правку: ValueError с русским текстом — настройка не принята.
+
+LANGS = {"ru": "русском", "uk": "украинском", "en": "английском", "auto": ""}
+REPLY_LENS = {"short": "1–2 фразы", "medium": "2–4 фразы"}
+REPLY_LEN_MAX = {"short": MAX_REPLY_LEN, "medium": 600}
+_DAILY_MAX, _PER_ACC_MAX, _STOP_DAYS_MAX, _MAX_MSG_MAX = 5000, 300, 90, 100_000
+
+
+def _int_in(body: dict, key: str, label: str, lo: int, hi: int):
+    v = body.get(key)
+    if v in (None, ""):
+        return None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label}: нужно целое число") from None
+    if n < lo or n > hi:
+        raise ValueError(f"{label}: от {lo} до {hi}")
+    return n
+
+
+def clean_settings(body: dict | None) -> dict:
+    """Проверенные настройки из запроса: только пришедшие ключи.
+
+    Возвращает словарь колонок chat_warmup_sessions (+ stop_after_days, из
+    которого вызывающий считает ends_at). Пусто — менять нечего.
+    """
+    body = body or {}
+    out: dict = {}
+    if "lang" in body:
+        lang = str(body.get("lang") or "ru").strip().lower()
+        if lang not in LANGS:
+            raise ValueError("Язык реплик: русский, украинский, английский или как в чате")
+        out["lang"] = lang
+    if "reply_len" in body:
+        rl = str(body.get("reply_len") or "short").strip().lower()
+        if rl not in REPLY_LENS:
+            raise ValueError("Длина реплик: коротко или средне")
+        out["reply_len"] = rl
+    if "active_from" in body or "active_to" in body:
+        a = _int_in(body, "active_from", "Начало работы, час", 0, 23)
+        b = _int_in(body, "active_to", "Конец работы, час", 0, 23)
+        if (a is None) != (b is None):
+            raise ValueError("Часы работы: укажите и начало, и конец — или «круглосуточно»")
+        if a is not None and a == b:
+            raise ValueError("Часы работы: начало и конец совпадают — выберите «круглосуточно»")
+        out["active_from"], out["active_to"] = a, b
+    for key, label, hi in (("daily_limit", "Лимит реплик в сутки на чат", _DAILY_MAX),
+                           ("per_account_daily", "Лимит реплик в сутки на аккаунт", _PER_ACC_MAX),
+                           ("max_messages", "Остановить после реплик", _MAX_MSG_MAX)):
+        if key in body:
+            out[key] = _int_in(body, key, label, 0, hi) or 0
+    if "react_pct" in body:
+        out["react_pct"] = _int_in(body, "react_pct", "Реакции вместо ответа, %", 0, 60) or 0
+    if "stop_after_days" in body:
+        out["stop_after_days"] = _int_in(body, "stop_after_days", "Остановить через, дней",
+                                         0, _STOP_DAYS_MAX) or 0
+    return out
+
+
+def in_work_hours(session: dict, now_utc, tz: str | None) -> bool:
+    """Сейчас рабочие часы сессии? Без окна — всегда. ЧИСТАЯ функция."""
+    a, b = session.get("active_from"), session.get("active_to")
+    if a is None or b is None:
+        return True
+    from services import quiet_hours
+    return quiet_hours.in_quiet(now_utc, int(a), int(b), tz)
+
+
+def stop_reason(session: dict, now_utc) -> str | None:
+    """Пора ли остановить сессию по сроку или по числу реплик. ЧИСТАЯ функция."""
+    ends = session.get("ends_at")
+    if ends is not None and now_utc >= ends:
+        return "Срок разогрева истёк — сессия остановлена по настройке «Остановить через»"
+    cap = int(session.get("max_messages") or 0)
+    if cap and int(session.get("messages_sent") or 0) >= cap:
+        return f"Отправлено {cap} реплик — сессия остановлена по настройке «Остановить после»"
+    return None
 
 
 def valid_mode(mode: str | None) -> str:
@@ -169,15 +258,30 @@ _ANTIBOT_RULES = (
 )
 
 
+def _rules(lang: str | None = None, reply_len: str | None = None) -> str:
+    """Правила реплики под язык и длину из настроек сессии."""
+    lang = (lang or "ru").lower()
+    rl = REPLY_LENS.get((reply_len or "short").lower(), REPLY_LENS["short"])
+    if lang == "auto":
+        lang_txt = "Пиши на том языке, на котором пишут в чате (по контексту ниже)"
+    else:
+        lang_txt = f"Пиши ТОЛЬКО на {LANGS.get(lang) or LANGS['ru']}"
+    return _ANTIBOT_RULES.replace(
+        "Пиши ТОЛЬКО на русском, коротко и разговорно — 1–2 фразы,",
+        f"{lang_txt}, коротко и разговорно — {rl},")
+
+
 def build_dialogue_prompt(persona_desc: str, recent: list[dict], target: dict | None,
-                          topics: str, mode: str) -> tuple[str, str]:
+                          topics: str, mode: str, *, lang: str | None = None,
+                          reply_len: str | None = None) -> tuple[str, str]:
     """Собрать (system, user) для LLM. ЧИСТАЯ функция.
 
     persona_desc — характер/стиль говорящего (из persona_engine или дефолт).
+    lang, reply_len — язык и длина реплик из настроек сессии.
     """
     persona = (persona_desc or "").strip() or (
         "Обычный участник чата: дружелюбный, с чувством юмора, пишет просто.")
-    system = f"{persona}\n\n{_ANTIBOT_RULES}"
+    system = f"{persona}\n\n{_rules(lang, reply_len)}"
 
     # Контекст: последние реплики в формате «Имя: текст».
     lines = []
@@ -204,7 +308,7 @@ def build_dialogue_prompt(persona_desc: str, recent: list[dict], target: dict | 
     return system, "\n".join(parts)
 
 
-def sanitize_reply(text: str) -> str:
+def sanitize_reply(text: str, max_len: int = MAX_REPLY_LEN) -> str:
     """Очистить ответ LLM до вида живой реплики. ЧИСТАЯ функция."""
     if not text:
         return ""
@@ -223,11 +327,11 @@ def sanitize_reply(text: str) -> str:
     if any(p in low for p in ("как ии", "как ассистент", "я — ии", "я ии",
                               "языковая модель", "as an ai", "я бот", "как бот")):
         return ""
-    if len(t) > MAX_REPLY_LEN:
+    if len(t) > max_len:
         # Обрезать по границе предложения, не рвать слово.
-        cut = t[:MAX_REPLY_LEN]
+        cut = t[:max_len]
         m = re.search(r"[.!?…]\s", cut[::-1])
-        t = cut[: MAX_REPLY_LEN - m.start()].strip() if m else cut.rsplit(" ", 1)[0].strip()
+        t = cut[: max_len - m.start()].strip() if m else cut.rsplit(" ", 1)[0].strip()
     return t.strip()
 
 
@@ -249,7 +353,8 @@ async def generate_reply(persona_desc: str, recent: list[dict], target: dict | N
 
 async def generate_reply_detailed(persona_desc: str, recent: list[dict],
                                   target: dict | None, topics: str,
-                                  mode: str) -> tuple[str | None, str]:
+                                  mode: str, *, lang: str | None = None,
+                                  reply_len: str | None = None) -> tuple[str | None, str]:
     """То же самое, но вместе с ПРИЧИНОЙ, если реплики нет.
 
     Зачем отдельная функция. Каскад провайдеров глотал ошибки каждого: ключ
@@ -268,7 +373,8 @@ async def generate_reply_detailed(persona_desc: str, recent: list[dict],
         # Нет ни Claude, ни настроенных провайдеров → писать нечем.
         if not (ai_claude.enabled() or configured_providers()):
             return None, _no_text_reason()
-        system, user = build_dialogue_prompt(persona_desc, recent, target, topics, mode)
+        system, user = build_dialogue_prompt(persona_desc, recent, target, topics, mode,
+                                             lang=lang, reply_len=reply_len)
         raw = None
         # 1) Claude Opus — предпочтительный путь.
         if ai_claude.enabled():
@@ -289,7 +395,8 @@ async def generate_reply_detailed(persona_desc: str, recent: list[dict],
             except Exception as e:
                 raw = None
                 errors.append(f"Остальные провайдеры: {e}")
-        clean = sanitize_reply(raw or "") or None
+        clean = sanitize_reply(raw or "", REPLY_LEN_MAX.get(
+            (reply_len or "short").lower(), MAX_REPLY_LEN)) or None
         if clean:
             return clean, ""
         if errors:
@@ -416,7 +523,7 @@ async def _groq_alive_model(client) -> str:
 
 async def create_session(pool, owner_id: int, chat_ref: str, account_ids: list[int],
                          mode: str = "mixed", topics: str = "",
-                         intensity: str = "normal") -> dict:
+                         intensity: str = "normal", settings: dict | None = None) -> dict:
     row = await pool.fetchrow(
         """INSERT INTO chat_warmup_sessions
                (owner_id, chat_ref, account_ids, mode, topics, intensity, status)
@@ -425,7 +532,72 @@ async def create_session(pool, owner_id: int, chat_ref: str, account_ids: list[i
         owner_id, chat_ref.strip(), [int(a) for a in account_ids],
         valid_mode(mode), (topics or "").strip(),
         (intensity or "normal").strip().lower())
-    return dict(row)
+    out = dict(row)
+    if settings:
+        out = await update_settings(pool, owner_id, int(out["id"]), settings) or out
+    return out
+
+
+# Колонки, которые меняет update_settings. Имена — из этого списка, а не из
+# запроса: SQL собирается только из известных имён.
+_SETTING_COLS = ("lang", "active_from", "active_to", "daily_limit", "per_account_daily",
+                 "reply_len", "react_pct", "max_messages", "mode", "topics", "intensity",
+                 "account_ids")
+
+
+async def update_settings(pool, owner_id: int, sid: int, settings: dict) -> dict | None:
+    """Поменять настройки сессии (проверенные clean_settings + режим/темы/флот).
+
+    stop_after_days → ends_at от текущего момента (0 — снять срок). None — сессии
+    нет у владельца.
+    """
+    sets, args = [], [int(sid), int(owner_id)]
+    for col in _SETTING_COLS:
+        if col in settings:
+            args.append(settings[col])
+            cast = "::bigint[]" if col == "account_ids" else ""
+            sets.append(f"{col}=${len(args)}{cast}")
+    if "stop_after_days" in settings:
+        days = int(settings["stop_after_days"] or 0)
+        if days > 0:
+            args.append(days)
+            sets.append(f"ends_at=NOW() + make_interval(days => ${len(args)})")
+        else:
+            sets.append("ends_at=NULL")
+    if not sets:
+        return await get_session(pool, owner_id, sid)
+    row = await pool.fetchrow(
+        f"UPDATE chat_warmup_sessions SET {', '.join(sets)}, updated_at=NOW() "
+        "WHERE id=$1 AND owner_id=$2 RETURNING *", *args)
+    return dict(row) if row else None
+
+
+async def _owner_tz(pool, owner_id: int) -> str | None:
+    """Пояс владельца из настроек (тот же, что у тихих часов уведомлений)."""
+    try:
+        return await pool.fetchval(
+            "SELECT tz FROM notification_settings WHERE user_id=$1", int(owner_id))
+    except Exception:
+        return None
+
+
+async def _sent_today(pool, sid: int) -> tuple[int, dict[int, int]]:
+    """Реплик за последние сутки: всего по сессии и по каждому аккаунту.
+
+    Считаются только отправленные ходы (status='ok'), реакции тоже: для чата и
+    для Telegram это одинаково действие аккаунта. Fail-closed для лимита не
+    нужен: не прочитали — (0, {}), и ход идёт как раньше (лимит — настройка
+    удобства, а не защита от бана; защиту держат губернатор и карантин).
+    """
+    try:
+        rows = await pool.fetch(
+            "SELECT account_id, COUNT(*) AS n FROM chat_warmup_log "
+            "WHERE session_id=$1 AND status='ok' AND created_at > NOW() - INTERVAL '24 hours' "
+            "GROUP BY account_id", int(sid))
+    except Exception:
+        return 0, {}
+    by_acc = {int(r["account_id"]): int(r["n"]) for r in rows if r["account_id"] is not None}
+    return sum(int(r["n"]) for r in rows), by_acc
 
 
 async def list_sessions(pool, owner_id: int) -> list[dict]:
@@ -1062,6 +1234,41 @@ async def _process_session(pool, session: dict) -> None:
     if not account_ids:
         await _skip(pool, session, "В сессии не выбрано ни одного аккаунта флота")
         return
+    # НАСТРОЙКИ ВЛАДЕЛЬЦА — ДО любого обращения к флоту: автостоп, часы работы,
+    # лимиты на сутки. Ход, которому не время, не должен открывать сессию
+    # Telegram и брать аккаунт в аренду.
+    from datetime import datetime as _dt, timezone as _tz
+    _now = _dt.now(_tz.utc)
+    _stop = stop_reason(session, _now)
+    if _stop:
+        await pool.execute(
+            "UPDATE chat_warmup_sessions SET status='stopped', updated_at=NOW() "
+            "WHERE id=$1 AND status='active'", sid)
+        await _skip(pool, session, _stop)
+        return
+    if session.get("active_from") is not None and session.get("active_to") is not None:
+        if not in_work_hours(session, _now, await _owner_tz(pool, owner_id)):
+            await _skip(pool, session,
+                        f"Вне часов работы ({int(session['active_from']):02d}:00–"
+                        f"{int(session['active_to']):02d}:00 по вашему поясу) — ждём")
+            return
+    _daily = int(session.get("daily_limit") or 0)
+    _per_acc = int(session.get("per_account_daily") or 0)
+    _capped: set[int] = set()
+    if _daily or _per_acc:
+        _total, _by_acc = await _sent_today(pool, sid)
+        if _daily and _total >= _daily:
+            await _skip(pool, session,
+                        f"Лимит на сутки исчерпан: {_total} из {_daily} реплик — "
+                        "продолжим, когда сутки сдвинутся")
+            return
+        if _per_acc:
+            _capped = {a for a, n in _by_acc.items() if n >= _per_acc}
+            if all(int(a) in _capped for a in account_ids):
+                await _skip(pool, session,
+                            f"Каждый аккаунт сессии уже написал {_per_acc} реплик за сутки "
+                            "(лимит на аккаунт) — ждём")
+                return
     # ГОТОВНОСТЬ ФЛОТА — ОДНИМ ЗАПРОСОМ, ДО ВЫБОРА ГОВОРЯЩЕГО. Бюджет попыток
     # короткий (_MAX_SPEAKER_TRIES), а флот у владельца бывает в полсотни
     # аккаунтов, почти все из которых заняты операциями. Случайные шесть
@@ -1084,7 +1291,7 @@ async def _process_session(pool, session: dict) -> None:
         _hopeless = await _write_forbidden_ids(pool, sid)
     _queue = [i for i in _speaker_order(account_ids, session.get("last_speaker"),
                                         _avail)
-              if i not in _hopeless]
+              if i not in _hopeless and i not in _capped]
     if not _queue:
         # Причина у каждого своя, и действия у владельца разные: «перезалейте
         # сессию» против «дайте права в чате» против «подождите паузу».
@@ -1206,7 +1413,9 @@ async def _process_session(pool, session: dict) -> None:
                         account_id=speaker)
             return
 
-        if should_react(plan["kind"], bool(plan.get("reply_to_id"))):
+        _react_pct = session.get("react_pct")
+        if should_react(plan["kind"], bool(plan.get("reply_to_id")),
+                        chance=(None if _react_pct is None else int(_react_pct) / 100)):
             # Иногда живой человек просто ставит реакцию, а не пишет — лёгкий след.
             try:
                 from telethon.tl.functions.messages import SendReactionRequest
@@ -1234,7 +1443,8 @@ async def _process_session(pool, session: dict) -> None:
                 target = {"text": plan["reply_to_text"], "sender_name": plan["reply_to_sender"]}
             persona_desc = await _persona_desc(pool, speaker)
             reply, _why = await generate_reply_detailed(
-                persona_desc, recent, target, session.get("topics") or "", mode)
+                persona_desc, recent, target, session.get("topics") or "", mode,
+                lang=session.get("lang"), reply_len=session.get("reply_len"))
             if reply:
                 from services import content_safety
                 if content_safety.scan_text(reply).blocked:

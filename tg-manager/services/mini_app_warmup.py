@@ -28,7 +28,7 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты прогрева на приложении мини-аппа."""
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, _obus, _owner_ru, _safe_fetch,
-        _safe_fetchrow, _warmup_bulk_core, alive_accounts, log,
+        _safe_fetchrow, _warmup_bulk_core, alive_accounts, bad_body_response, log,
     )
     from services import account_status as _acc_status
     from services.security import (
@@ -497,8 +497,13 @@ def setup_routes(app: web.Application, pool) -> None:
         if intensity not in ("calm", "normal", "active"):
             intensity = "normal"
         try:
+            settings = chat_warmup.clean_settings(body)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        try:
             s = await chat_warmup.create_session(pool, uid, chat_ref, acc_ids,
-                                                 mode=mode, topics=topics, intensity=intensity)
+                                                 mode=mode, topics=topics, intensity=intensity,
+                                                 settings=settings)
             return _json_resp({"ok": True, "session": s, "accounts": len(acc_ids),
                                "requested": requested_accs,
                                "omitted": requested_accs - len(acc_ids),
@@ -524,6 +529,58 @@ def setup_routes(app: web.Application, pool) -> None:
         from services import chat_warmup
         ok = await chat_warmup.set_status(pool, uid, sid, status)
         return _json_resp({"ok": ok}) if ok else _err("Сессия не найдена или неверный статус", 404)
+
+    async def chatwarmup_settings(request: web.Request) -> web.Response:
+        """Поправить запущенную сессию: режим, темы, интенсивность, флот и
+        настройки (язык, часы работы, лимиты, длина, реакции, автостоп).
+
+        Раньше запущенную сессию можно было только поставить на паузу или
+        остановить: поправить тему или убрать аккаунт значило завести новую и
+        потерять журнал ходов. Меняется только пришедшее.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sid = int(request.match_info["sid"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        try:
+            body = await request.json()
+        except Exception as exc:
+            bad = bad_body_response(request, exc)
+            return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос", 400)
+        from services import chat_warmup
+        try:
+            settings = chat_warmup.clean_settings(body)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        if "mode" in body:
+            settings["mode"] = chat_warmup.valid_mode(body.get("mode"))
+        if "topics" in body:
+            settings["topics"] = validate_string(body.get("topics"), max_len=500) or ""
+        if "intensity" in body:
+            if body.get("intensity") not in ("calm", "normal", "active"):
+                return _err("Интенсивность: спокойно, обычно или активно", 400)
+            settings["intensity"] = body["intensity"]
+        try:
+            if "account_ids" in body:
+                ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
+                acc_ids = await _alive_accounts(uid, ids or None)
+                acc_ids, _omitted = await chat_warmup.pick_fleet(
+                    pool, acc_ids, _CW_FLEET_CAP, owner_id=uid)
+                if not acc_ids:
+                    return _err("Ни один из выбранных аккаунтов не годится для разогрева", 400)
+                settings["account_ids"] = [int(a) for a in acc_ids]
+            sess = await chat_warmup.update_settings(pool, uid, sid, settings)
+        except Exception:
+            log.exception("chatwarmup_settings uid=%s sid=%s", uid, sid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not sess:
+            return _err("Сессия не найдена", 404)
+        return _json_resp({"ok": True, "accounts": len(sess.get("account_ids") or [])})
 
     async def chatwarmup_detail(request: web.Request) -> web.Response:
         """Ход одной сессии разогрева: сводка, вклад каждого аккаунта и журнал.
@@ -606,10 +663,14 @@ def setup_routes(app: web.Application, pool) -> None:
             "session": {
                 **{k: v for k, v in dict(sess).items()
                    if k in ("id", "chat_ref", "mode", "topics", "intensity",
-                            "status", "messages_sent")},
+                            "status", "messages_sent", "lang", "active_from",
+                            "active_to", "daily_limit", "per_account_daily",
+                            "reply_len", "react_pct", "max_messages")},
                 "accounts": len(sess.get("account_ids") or []),
+                "account_ids": [int(a) for a in (sess.get("account_ids") or [])],
                 "last_run_at": _iso(sess.get("last_run_at")),
                 "created_at": _iso(sess.get("created_at")),
+                "ends_at": _iso(sess.get("ends_at")),
             },
             "by_account": [
                 {"account_id": r["account_id"], "label": r["label"],
@@ -674,5 +735,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/chatwarmup/sessions", chatwarmup_sessions)
     app.router.add_post("/api/miniapp/chatwarmup/session", chatwarmup_create)
     app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
+    app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/settings", chatwarmup_settings)
     app.router.add_get("/api/miniapp/chatwarmup/session/{sid}", chatwarmup_detail)
     app.router.add_get("/api/miniapp/chatwarmup/accounts", chatwarmup_accounts)

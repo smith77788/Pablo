@@ -815,6 +815,7 @@ POST /api/miniapp/channels/mass
 POST /api/miniapp/channels/reclassify
 POST /api/miniapp/chatlist_folders
 POST /api/miniapp/chatwarmup/session
+POST /api/miniapp/chatwarmup/session/{sid}/settings
 POST /api/miniapp/chatwarmup/session/{sid}/status
 POST /api/miniapp/check_bot_geoban
 POST /api/miniapp/check_owned_restrictions
