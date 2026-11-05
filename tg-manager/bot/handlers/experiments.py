@@ -223,6 +223,11 @@ async def cb_exp_create(
             reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="analytics")),
         )
         return
+    # bot_id приходит из кнопки, а кнопку можно подделать: без проверки
+    # эксперимент заводился на чужом боте.
+    if not await db.get_bot(pool, callback_data.bot_id, callback.from_user.id):
+        await callback.answer("Бот не найден", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(CreateExperiment.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -257,6 +262,10 @@ async def cb_exp_type(
 async def msg_exp_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     name = message.text.strip()
+    if not data.get("bot_id") or not await db.get_bot(pool, data["bot_id"], message.from_user.id):
+        await state.clear()
+        await message.answer("❌ Бот не найден.")
+        return
     exp_id = await db.create_experiment(
         pool, data["bot_id"], name, data.get("exp_type", "start_message")
     )
@@ -302,6 +311,11 @@ async def msg_variant_content(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     data = await state.get_data()
+    if not data.get("exp_id") or not await _owns_experiment(
+            pool, data["exp_id"], message.from_user.id):
+        await state.clear()
+        await message.answer("❌ Эксперимент не найден.")
+        return
     await db.add_experiment_variant(
         pool, data["exp_id"], data["variant_name"], message.text
     )
@@ -333,8 +347,14 @@ async def msg_variant_content(
 
 @router.callback_query(ExperimentCb.filter(F.action == "add_variant"))
 async def cb_add_variant(
-    callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext
+    callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
+    # exp_id из кнопки: подделанная кнопка подсовывала свой вариант в чужой
+    # запущенный A/B тест, и бот жертвы рассылал этот текст её подписчикам.
+    if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
+        await callback.answer("Эксперимент не найден", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(CreateExperiment.waiting_variant_name)
     await state.update_data(bot_id=callback_data.bot_id, exp_id=callback_data.exp_id)
