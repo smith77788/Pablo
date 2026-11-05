@@ -175,7 +175,8 @@ def _run_body() -> ast.AST:
 
 
 _MAINTENANCE = ("renew_leases", "_watchdog_stale", "_reconcile_in_operation",
-                "_watchdog_alerts", "mark_poller_alive")
+                "_watchdog_alerts", "mark_poller_alive",
+                "_watchdog_alert_channel_expiry")
 
 
 def test_the_poll_loop_marks_itself_alive():
@@ -364,3 +365,52 @@ def test_the_miniapp_shows_the_frozen_queue():
         "у карточки появилась кнопка: изнутри мини-аппа исполнителя не поднять, "
         "а «поставить очередь на паузу» здесь было бы прямо во вред"
     )
+
+
+def test_every_watchdog_in_the_loop_is_wrapped():
+    """То же требование, но БЕЗ рукописного списка — для сторожей, которых ещё нет.
+
+    `_MAINTENANCE` выше перечисляет шаги руками, то есть новый сторож попадает
+    под проверку только если про него вспомнили. А цена ошибки у нового такая
+    же, как у старого: незащищённый сбой забирает остальные шаги круга, включая
+    тот, которым владелец узнаёт о сбое защитных записей.
+
+    Поэтому требование выводится из кода: каждый вызов `_watchdog_*` внутри
+    `run` обязан стоять аргументом `_maintenance_step`. Проверено на дереве —
+    сегодня обёрнуты все шесть, так что ратчет встаёт на зелёном.
+    """
+    body = _run_body()
+    wrapped: set[int] = set()
+    for node in ast.walk(body):
+        if not isinstance(node, ast.Call):
+            continue
+        fname = (node.func.attr if isinstance(node.func, ast.Attribute)
+                 else getattr(node.func, "id", ""))
+        if fname != "_maintenance_step":
+            continue
+        for arg in node.args[1:]:
+            for sub in ast.walk(arg):
+                if isinstance(sub, ast.Call):
+                    wrapped.add(id(sub))
+
+    seen, bare = set(), []
+    for node in ast.walk(body):
+        if not isinstance(node, ast.Call):
+            continue
+        fname = (node.func.attr if isinstance(node.func, ast.Attribute)
+                 else getattr(node.func, "id", ""))
+        if not fname.startswith("_watchdog"):
+            continue
+        seen.add(fname)
+        if id(node) not in wrapped:
+            bare.append(f"{fname} (строка {node.lineno})")
+
+    # Самопроверка: измеритель, который не видит ни одного сторожа, зелен зря.
+    assert len(seen) >= 5, (
+        f"в цикле воркера нашлось только {len(seen)} сторожей — скорее всего "
+        "сломался разбор, а не исчезли сторожа")
+    assert not bare, (
+        "сторож вызывается в цикле напрямую, а не через _maintenance_step: "
+        + ", ".join(bare)
+        + ". Его сбой заберёт остальные шаги круга — в том числе доклад "
+          "владельцу о сбое защитных записей.")
