@@ -73,9 +73,9 @@ def ow(monkeypatch):
 
 
 def _patch_recipients(monkeypatch, ow, *, permanent: set, session: set):
-    """Подменить обе двери получателей: постоянных и сессионных."""
-    import bot.utils.subscription as _sub
+    """Подменить двери получателей: постоянных (ADMIN_IDS) и общий список."""
     import bot.handlers.admin as _adm
+    import bot.utils.subscription as _sub
 
     async def _recips(pool):
         return set(permanent) | set(session)
@@ -84,6 +84,10 @@ def _patch_recipients(monkeypatch, ow, *, permanent: set, session: set):
         return set(session)
 
     monkeypatch.setattr(_sub, "platform_alert_recipients", _recips)
+    monkeypatch.setattr(_sub, "_admin_ids", lambda: set(permanent))
+    # Подменяем и сессионную дверь: без этого проверка «постоянный получатель
+    # совпал с сессионным» прошла бы просто потому, что поддельный пул не
+    # отдаёт сессий, а не потому, что код считает постоянных правильно.
     monkeypatch.setattr(_adm, "live_session_admins", _live)
 
     async def _dedup_ok(pool, uid, key, ttl):
@@ -182,4 +186,24 @@ def test_the_worker_actually_runs_this_watchdog():
     assert called, (
         "_watchdog_alert_channel_expiry не вызывается из run — предупреждение "
         "о скорой немоте защитных тревог не случится никогда"
+    )
+
+
+def test_a_permanent_recipient_who_also_logged_in_is_still_permanent(ow, monkeypatch):
+    """ADMIN_IDS задан, и тот же человек вошёл в админку — пугать всё равно нечем.
+
+    Это самая вероятная настройка у аккуратного владельца: id в `ADMIN_IDS` и
+    вход в админку тем же аккаунтом. Если считать «постоянных» как разницу
+    множеств (все получатели минус сессионные), в этом случае разница пуста, и
+    сторож решает, что постоянного получателя нет. Владелец получал бы
+    предупреждение о немоте каждую неделю перед продлением — на канале, который
+    не замолкает вообще. Ложная тревога здесь дороже молчания: на неё перестают
+    смотреть, и настоящая проходит незамеченной.
+    """
+    _patch_recipients(monkeypatch, ow, permanent={42}, session={42})
+    bot = _Bot()
+    asyncio.run(ow._watchdog_alert_channel_expiry(_Pool(expires_in_days=1), bot))
+    assert not bot.sent, (
+        "ADMIN_IDS задан, канал не истекает — но сторож решил иначе, потому что "
+        "постоянный получатель совпал с сессионным"
     )

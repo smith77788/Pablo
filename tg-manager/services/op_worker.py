@@ -4068,11 +4068,17 @@ async def _watchdog_alert_channel_expiry(pool: asyncpg.Pool, bot) -> None:
     if bot is None:
         return
     try:
-        from bot.handlers.admin import live_session_admins
-        from bot.utils.subscription import platform_alert_recipients
+        from bot.utils.subscription import _admin_ids, platform_alert_recipients
 
         recipients = set(await platform_alert_recipients(pool) or ())
-        sessions = set(await live_session_admins(pool) or ())
+        # Постоянных спрашиваем у переменной окружения НАПРЯМУЮ. Соблазн
+        # вычесть сессионных из всех получателей тут обманчив: у аккуратного
+        # владельца id в ADMIN_IDS и вход в админку — один и тот же человек,
+        # разница множеств пуста, и сторож решил бы, что постоянного
+        # получателя нет. Владелец получал бы предупреждение о немоте каждую
+        # неделю на канале, который не замолкает вообще, а ложная тревога
+        # здесь дороже молчания.
+        permanent = set(_admin_ids() or ())
     except Exception as e:
         log_exc_swallow(log, f"op_worker: получатели защитных тревог не прочитались: {e}")
         return
@@ -4080,8 +4086,8 @@ async def _watchdog_alert_channel_expiry(pool: asyncpg.Pool, bot) -> None:
         # Сообщать уже некому: об этом говорит
         # infragram_protective_alerts_no_recipient_total, а не этот сторож.
         return
-    if recipients - sessions:
-        # Есть получатель, который не истекает (ADMIN_IDS) — канал надёжен.
+    if permanent:
+        # Есть получатель, который не истекает — канал надёжен.
         return
     row = await _safe_fetchrow(
         pool,
