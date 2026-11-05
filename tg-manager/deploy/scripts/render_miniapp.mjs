@@ -172,6 +172,17 @@ await page.addInitScript((mode) => {
       o.accounts = 25; o.channels = 14; o.bots = 7;
       o.channel_links = 31; o.bot_users_total = 1234567;
     }
+    // `/ai/forecast` — число, а не список: `expected_buyers` это сумма
+    // вероятностей (services/ai_predict.py, forecast). Заглушка его не давала,
+    // и экран прогноза печатал «Ожидаем покупателей за 30 дней: undefined» —
+    // подсказку о беде, которой в приложении нет: сервер это поле отдаёт
+    // всегда, у `forecast` один возврат. Проверено, что все 45 мест
+    // `esc(String(...))` в мини-аппе либо защищены в разметке, либо поле
+    // гарантировано сервером; оставить подсказку значило бы приучить себя её
+    // не читать, а вместе с ней уйдёт и настоящая.
+    if (url.indexOf('/ai/forecast') >= 0) {
+      o.expected_buyers = 7.5; o.buyers = 12; o.horizon_days = 30;
+    }
     if (url.indexOf('/onboarding') >= 0) {
       o.activated = false; o.next_step = 1; o.done = 3; o.total = ROWS.length;
       o.steps = ROWS.map((r, i) => ({ ...r, done: i < 3, optional: i % 4 === 0,
