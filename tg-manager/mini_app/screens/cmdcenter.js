@@ -102,7 +102,11 @@ function _ccDonut(parts, centerTop, centerBot) {
 function _ccBar(label, value, total, color, onclick) {
   const pct = total ? Math.round(value / total * 100) : 0;
   const tap = onclick ? ` onclick="${onclick}" role="button" tabindex="0"` : '';
-  return `<div${tap} style="${onclick ? 'cursor:pointer;' : ''}margin:7px 0">` +
+  // Клик по полоске ведёт на разбор, а высота выходила 28 пикселей. Отступ
+  // снаружи переносим внутрь: шаг между полосками остаётся тем же, а зона
+  // нажатия дорастает до 44.
+  return `<div${tap} style="${onclick ? 'cursor:pointer;' : ''}margin:0;` +
+    `${onclick ? 'padding:8px 0;min-height:44px;box-sizing:border-box' : 'padding:7px 0'}">` +
     '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">' +
     `<span style="color:var(--hint)">${esc(label)}${onclick ? ' \u203a' : ''}</span>` +
     `<span style="font-weight:700;color:var(--fg)">${Number(value) || 0}</span></div>` +
@@ -142,7 +146,12 @@ function _ccRender(d) {
           ? ` onclick="healthGoAccounts('${st.go[0]}','${st.go[1]}')" role="button" tabindex="0"`
           : '';
         const cur = st.go ? 'cursor:pointer;' : '';
-        return `<div${tap} style="${cur}display:flex;align-items:center;gap:6px;font-size:12px;margin:3px 0;padding:3px 0">` +
+        // Зона нажатия, а не только вид: строка легенды открывает срез
+        // списка аккаунтов, а выходила 23 пикселя высотой — на телефоне в
+        // такую не попасть. Отступ снаружи переносим внутрь, чтобы шаг между
+        // строками не изменился, и ставим min-height как у соседнего
+        // композера («Вставить шаблон» в кампании).
+        return `<div${tap} style="${cur}display:flex;align-items:center;gap:6px;font-size:12px;margin:0;padding:9px 0;min-height:34px;box-sizing:border-box">` +
           `<span style="width:10px;height:10px;border-radius:3px;background:${st.c};flex:0 0 auto"></span>` +
           `<span style="color:var(--hint);flex:1">${esc(st.label)}</span>` +
           `<span style="font-weight:700;color:var(--fg)">${a.count}</span>` +

@@ -102,4 +102,12 @@ const agg = {};
 for (const f of res.findings) for (const t of f.taps) { const k = (t.cls||'(без класса)') + ' | h=' + t.h + ' | w=' + t.w + ' | «' + (t.txt||'') + '» | ' + f.label; agg[k] = (agg[k]||0)+1; }
 console.log(Object.entries(agg).sort((a,b)=>b[1]-a[1]).slice(0,30).map(([k,v])=>`  ${v}x  ${k}`).join('\n'));
 console.log('js-ошибок:', errs.length); errs.slice(0,6).forEach(e=>console.log('  '+e));
+// Последняя строка — машинная, чтобы измеритель мог звать тест, а не только
+// глаза. Без теста его не звал НИКТО: ни pytest, ни CI, — и девять мелких зон
+// нажатия (строки командного центра по 23–28 пикселей) прожили незамеченными
+// именно поэтому. Отчёт для человека выше остаётся как был.
+console.log('JSON ' + JSON.stringify({
+  over: o, taps: t, errors: errs.length, opens: res.opens, ran: res.ran,
+  worst: Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => v + 'x ' + k),
+}));
 await browser.close();
