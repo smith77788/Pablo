@@ -652,3 +652,145 @@ def test_the_dead_verdict_reads_the_helpers_too():
         "список мёртвых назван так, будто приговор вынесен без чтения кода")
     assert "НЕ НАКОРМЛЕНЫ ЗАГЛУШКОЙ" in src, (
         "«нечего делать» и «данных не досталось» снова в одном списке")
+
+
+def test_an_erring_screen_is_not_called_nearly_dead():
+    """Экран в состоянии ошибки обход НЕ ВИДЕЛ — и в приговоры не идёт.
+
+    Одиннадцать экранов деталей падали на TypeError (`const c = d.contact;` и
+    сразу `c.name`, а заглушка вложенного ключа не давала) и показывали
+    «Что-то пошло не так». В отчёте они лежали среди «почти мёртвых»: приговор
+    по экранам, о которых ничего не известно, плюс охват «207 из 207», в
+    котором одиннадцать не видели вовсе.
+    """
+    src = _src()
+    i = src.index("const erred = !!scr.querySelector")
+    head = src[i:i + 400]
+    assert ".err-msg" in head and ".empty-ico" in head, (
+        "признак ошибки читает не разметку: текст сообщения приходит с сервера "
+        "и меняется, а `errHtml()`/`empty('⚠️', …)` — нет")
+    assert "ОТВЕТИЛИ ОШИБКОЙ" in src, "список экранов с ошибкой не печатается"
+    j = src.index("const erred = all.filter((r) => r.erred)") if (
+        "const erred = all.filter((r) => r.erred)" in src) else src.index(
+        "const erred = all.filter(r => r.erred)")
+    tail = src[j:j + 500]
+    assert "const rows = all.filter" in tail and "!r.erred" in tail, (
+        "экраны с ошибкой снова идут в мёртвые, не накормленные и тонкие")
+
+
+def test_the_error_mark_proves_it_can_see():
+    """У признака ошибки своя самопроверка, и слепота гасит прогон."""
+    src = _src()
+    i = src.index("самопроверка признака ошибки")
+    head = src[max(0, i - 1500):i]
+    assert "box.className = 'err-msg'" in head, "самопроверка не кладёт разметку ошибки"
+    assert "emp.className = 'empty'" in head, (
+        "вторая форма ошибки (пустое состояние со значком) не проверяется")
+    tail = src[i:i + 500]
+    assert "ПРИЗНАК ОШИБКИ СЛЕП" in tail and "exitCode = 2" in tail, (
+        "слепой признак не гасит прогон — «экранов с ошибкой нет» ничего не значит")
+
+
+def test_the_thin_verdict_shows_the_text_it_judges():
+    """Тонкий экран назван вместе с НАЧАЛОМ своего текста.
+
+    «1 действие, 54 знака» одинаково выглядит у экрана, которому правда нечего
+    показать, у спокойного пустого состояния («Нет диалогов») и у экрана,
+    упавшего с ошибкой. По одним числам приговор вынести нельзя, а ради него
+    гонять обход заново — минуты.
+    """
+    src = _src()
+    i = src.index("ПОЧТИ МЁРТВЫЕ")
+    tail = src[i:i + 400]
+    assert "r.sample" in tail, "список тонких экранов снова печатает одни числа"
+    j = src.index("sample: sample.replace")
+    assert "slice(0, 220)" in src[j:j + 120], "начало текста не ограничено по длине"
+
+
+def _fat_stub_body() -> str:
+    """Тело «толстой» заглушки. В обходе ТРИ подмены `window.fetch` (режим
+    отказа, пустой режим, толстый), и выбирать первую по тексту нельзя: разбор
+    тогда читает чужую и ничего не находит — проверка адресности становится
+    непадающей. Поймано контролем: разбор дал один блок `/auth`.
+    """
+    src = _src()
+    mark = src.index("for (const k of ARRAY_KEYS) o[k] = ROWS;")
+    head = src.rindex("window.fetch = async", 0, mark)
+    close = src.index("{", src.index(")", src.index("(", head)))
+    depth, j = 0, close
+    while j < len(src):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    return src[close:j]
+
+
+def _stub_route_blocks() -> dict[str, str]:
+    """Блоки заглушки по адресам: `if (url.indexOf('…')…)` → тело блока.
+
+    Границы блока считаются по скобкам, а не окном: иначе проверка ниже
+    промахнулась бы от любой правки рядом и стала бы непадающей.
+    """
+    body = _fat_stub_body()
+    out: dict[str, str] = {}
+    for m in re.finditer(r"if \(url\.indexOf\('([^']+)'\)[^)]*\)\s*", body):
+        route, k = m.group(1), m.end()
+        if k < len(body) and body[k] == "{":
+            depth, j = 0, k
+            while j < len(body):
+                if body[j] == "{":
+                    depth += 1
+                elif body[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            out[route] = body[k:j]
+        else:
+            out[route] = body[k:body.index("\n", k)]
+    return out
+
+
+_DETAIL_KEYS = {
+    "contact": "/uch/contacts/", "plan": "/global_presence/", "eco": "/ecosystem/",
+    "funnel": "/auto_funnel/", "user": "/admin/user/", "campaign": "/narrative/",
+    "bot": "/miniapp/bot/", "crm": "/crm_connections/", "endpoint": "/deliveries",
+    "memories": "/ai_memory", "duplicates": "/uch/duplicates",
+}
+
+
+def test_the_detail_screens_are_fed_by_route_not_wholesale():
+    """Вложенная сущность раздаётся ПО АДРЕСУ, а не всем ответам сразу.
+
+    Одно имя поля на разных адресах значит разное: `plan` на `/subscription` —
+    название тарифа СТРОКОЙ (index.html: updatePlan(d.plan, …)), и общая
+    запись нарисовала бы там «[object Object]» — выдуманную находку, которая в
+    следующий раз закрывается списком исключений, и дыра оказывается там, где
+    её не было. Та же причина, по которой разведены `proxies` и `accounts`.
+    """
+    body = _fat_stub_body()
+    blocks = _stub_route_blocks()
+    assert len(blocks) >= 12, f"адресных блоков в заглушке всего {len(blocks)}"
+    scoped = "".join(blocks.values())
+    for key, route in _DETAIL_KEYS.items():
+        assert route in blocks, f"заглушка не знает адреса {route}"
+        assert f"o.{key} =" in blocks[route], (
+            f"ключ {key} не раздаётся на {route} — экран детали упадёт "
+            f"на TypeError и обход его не увидит")
+        outside = body.count(f"o.{key} =") - scoped.count(f"o.{key} =")
+        assert outside == 0, (
+            f"ключ {key} раздаётся ВСЕМ ответам: на другом адресе то же имя "
+            f"значит другое, и заглушка нарисует находку, которой нет")
+    assert "'users','posts'];" in body.replace(" ", "") or "ARRAY_KEYS" in body
+
+
+def test_the_route_block_reader_can_actually_fail():
+    """Разбор блоков обязан падать: пустой разбор сделал бы тест выше вечно зелёным."""
+    blocks = _stub_route_blocks()
+    assert "/transport" in blocks and "o.proxies = 12" in blocks["/transport"]
+    assert "o.plan" not in blocks["/transport"], (
+        "разбор склеивает соседние блоки — проверка адресности ничего не держит")

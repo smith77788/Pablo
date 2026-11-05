@@ -202,6 +202,78 @@ await page.addInitScript((mode) => {
     if (url.indexOf('/ai/forecast') >= 0) {
       o.expected_buyers = 7.5; o.buyers = 12; o.horizon_days = 30;
     }
+    // ЭКРАНЫ ДЕТАЛЕЙ отдают сущность ОТДЕЛЬНЫМ ключом: `d.contact`, `d.plan`,
+    // `d.eco`, `d.funnel`, `d.user`, `d.campaign`, `d.bot`, `d.crm`,
+    // `d.endpoint` — и читают его БЕЗ проверки (`const c = d.contact;` и сразу
+    // `c.name`). Плоская запись такого ключа не даёт, экран падал на TypeError
+    // и показывал «Что-то пошло не так» — одиннадцать экранов обход не видел
+    // вовсе, а в отчёте они лежали среди «почти мёртвых»: приговор по
+    // экранам, о которых ничего не известно.
+    //
+    // Ключи раздаются ПО АДРЕСУ, а не всем сразу: `plan` на `/subscription` —
+    // НАЗВАНИЕ тарифа строкой (index.html: updatePlan(d.plan, …)), и общая
+    // запись нарисовала бы там «[object Object]» — выдуманную находку. Та же
+    // причина, по которой `proxies` и `accounts` разведены по адресам выше.
+    const ent = (extra) => ({ ...row(1), ...(extra || {}) });
+    if (url.indexOf('/uch/contacts/') >= 0) o.contact = ent({ tags: ['клиент'] });
+    if (url.indexOf('/global_presence/') >= 0) {
+      o.plan = ent({ geo_selection: JSON.stringify({ countries: ['RU', 'KZ'], virtual_admin: true }) });
+      o.targets_total = 25;
+    }
+    if (url.indexOf('/ecosystem/') >= 0) o.eco = ent({ health_score: 0.82 });
+    if (url.indexOf('/auto_funnel/') >= 0) {
+      o.funnel = ent({ is_active: true });
+      o.runs = { by_status: { running: 7, done: 12, failed: 1 },
+                 waiting_on_step: { 1: 3, 2: 4 } };
+    }
+    if (url.indexOf('/admin/user/') >= 0) o.user = ent({ current_plan: 'pro', is_banned: false });
+    if (url.indexOf('/narrative/') >= 0) o.campaign = ent({ kind: 'trend', campaign_type: 'trend' });
+    if (url.indexOf('/miniapp/bot/') >= 0) {
+      o.bot = ent({ health: { silent: true, reason: 'webhook_conflict', since: '2026-10-30T04:00:00Z' } });
+    }
+    if (url.indexOf('/crm_connections/') >= 0) {
+      o.crm = ent({ provider: 'bitrix24', account: 'портал.bitrix24.ru',
+                    url: 'https://портал.bitrix24.ru/rest/1/код/', synced_records: 1234 });
+      o.stages = ROWS.slice(0, 4).map((r, i) => ({ ...r, kind: ['new', 'won', 'lost', 'work'][i] }));
+    }
+    if (url.indexOf('/deliveries') >= 0) {
+      o.endpoint = ent({ kind: 'sheets', target: 'https://docs.google.com/spreadsheets/d/abc' });
+      o.deliveries = ROWS.slice(0, 10).map((r, i) => ({
+        ...r, status: ['delivered', 'pending', 'failed', 'skipped'][i % 4] }));
+    }
+    // Пара дублей — это ДВЕ вложенные карточки
+    // (services/contacts_hub/trust_engine.py), и экран читает
+    // `dp.contact_a.name` без проверки.
+    if (url.indexOf('/uch/duplicates') >= 0) {
+      o.duplicates = ROWS.slice(0, 12).map((r, i) => ({
+        contact_a: { id: r.id, name: LONG },
+        contact_b: { id: r.id + 100, name: LONG + ' (второй)' },
+        confidence: 0.95 - i * 0.05,
+        reasons: ['same_phone', 'same_username'],
+        reason_labels: ['один номер телефона', 'одинаковый ник'],
+      }));
+      o.skipped_groups = 3;
+    }
+    // Запись ИИ-памяти обязана иметь `body`: экран режет его
+    // (`m.body.slice(0, 40)`) ещё до всякой проверки. Своего ключа у заглушки
+    // не было, а `listOf` подставлял общий список записей — и экран падал.
+    if (url.indexOf('/ai_memory') >= 0) {
+      o.memories = ROWS.slice(0, 12).map((r, i) => ({
+        ...r, body: LONG + ' ' + LONG, kind: ['note', 'fact', 'person'][i % 3],
+        pinned: i === 0, tags: ['клиенты', 'продажи'],
+      }));
+    }
+    // Сводка операций платформы отдаёт `stats` СПИСКОМ по типам
+    // (services/mini_app_admin.py: admin_ops_stats), а общий ответ держит в
+    // этом ключе объект — экран падал на `rows.map`.
+    if (url.indexOf('/admin/ops/stats') >= 0) {
+      o.stats = ['invite_users', 'mass_dm', 'warmup_accounts', 'parse_audience'].map((t, i) => ({
+        op_type: t, type_ru: ['Инвайт участников', 'Массовая рассылка в личные',
+                              'Прогрев аккаунтов', 'Парсинг аудитории'][i],
+        total: 1234 - i * 100, done: 1000 - i * 100, failed: i * 60,
+        fail_pct: i * 12.5, avg_duration_s: 60 * (i + 1) + 0.5,
+      }));
+    }
     if (url.indexOf('/onboarding') >= 0) {
       o.activated = false; o.next_step = 1; o.done = 3; o.total = ROWS.length;
       o.steps = ROWS.map((r, i) => ({ ...r, done: i < 3, optional: i % 4 === 0,
@@ -414,13 +486,28 @@ const ACTIONS = () => {
     if (outer) acts++;
   }
   let chars = 0;
+  let sample = '';
   for (const el of scr.children) {
     if (el.classList && (el.classList.contains('hdr') || el.classList.contains('nav'))) continue;
     const st = getComputedStyle(el);
     if (st.display === 'none' || st.visibility === 'hidden') continue;
-    chars += (el.innerText || el.textContent || '').trim().length;
+    const t = (el.innerText || el.textContent || '').trim();
+    chars += t.length;
+    if (sample.length < 220) sample += (sample ? ' ' : '') + t;
   }
-  return { acts, chars, id: scr.id };
+  // Экран в состоянии ОШИБКИ обход не видел: что на нём, неизвестно, и ни
+  // «мёртвый», ни «тонкий» про него сказать нельзя. Признак берём у разметки,
+  // а не у текста: `errHtml()` рисует `.err-msg`, а `empty('⚠️', …)` ставит
+  // этот значок в `.empty-ico` — текст сообщения при этом любой, в том числе
+  // пришедший с сервера.
+  const erred = !!scr.querySelector('.err-msg')
+    || [...scr.querySelectorAll('.empty-ico')]
+         .some((e) => (e.textContent || '').indexOf('⚠️') >= 0);
+  // Начало текста экрана. Без него «1 действие, 54 знака» одинаково выглядит у
+  // экрана, которому правда нечего показать, и у экрана, который заглушка
+  // оставила пустым: приговор по одним числам вынести нельзя.
+  return { acts, chars, id: scr.id, erred,
+           sample: sample.replace(/\s+/g, ' ').slice(0, 220) };
 };
 
 const MUTE = () => {
@@ -735,6 +822,36 @@ if (sweepMode) {
     console.log('МЕРКА ДЕЙСТВИЙ СЛЕПА — «мёртвых экранов нет» ничего не означает');
     process.exitCode = 2;
   }
+  // Признак состояния ошибки тоже обязан показать, что видит: кладём на экран
+  // разметку ошибки и требуем признак, снимаем — и требуем его отсутствия.
+  const es_ = await page.evaluate((src) => {
+    const act = new Function('return (' + src + ')()');
+    const scr = document.querySelector('.screen.show');
+    if (!scr) return { ran: false };
+    const base = act().erred;
+    const box = document.createElement('div');
+    box.className = 'err-msg';
+    box.innerHTML = '<div class="err-msg-ico">⚠️</div><div class="err-msg-txt">проверка</div>';
+    scr.appendChild(box);
+    const caught = act().erred;
+    box.remove();
+    // Второй корень — спокойное пустое состояние со значком ошибки: именно так
+    // показывают ошибку детальные экраны.
+    const emp = document.createElement('div');
+    emp.className = 'empty';
+    emp.innerHTML = '<div class="empty-ico">⚠️</div><div class="empty-txt">проверка</div>';
+    scr.appendChild(emp);
+    const caughtEmpty = act().erred;
+    emp.remove();
+    return { ran: true, base, caught, caughtEmpty, restored: act().erred === base };
+  }, ACTIONS.toString());
+  console.log(`самопроверка признака ошибки: разметка ошибки найдена=${es_.caught}`
+    + ` | пустое состояние со значком найдено=${es_.caughtEmpty}`
+    + ` | после снятия столько же=${es_.restored} (своё состояние ${es_.base})`);
+  if (!es_.ran || !es_.caught || !es_.caughtEmpty || !es_.restored) {
+    console.log('ПРИЗНАК ОШИБКИ СЛЕП — «экранов с ошибкой нет» ничего не означает');
+    process.exitCode = 2;
+  }
   const gs = await gibberishSelfCheck();
   console.log(`самопроверка мерки машинного текста: заведомо машинное слово`
     + ` найдено=${gs.caught} | после снятия подсказок столько же=${gs.restored}`);
@@ -926,7 +1043,8 @@ if (sweepMode) {
           return all;
         }, fn);
         const canAct = /onclick|<button|class="btn|class="row tap|\bchip\b|<input|<select|<textarea/.test(src);
-        acts.set(shownId, { fn, acts: ac.acts, chars: ac.chars, canAct });
+        acts.set(shownId, { fn, acts: ac.acts, chars: ac.chars, canAct,
+                            erred: ac.erred, sample: ac.sample });
       }
     }
     const problems = [];
@@ -1115,17 +1233,25 @@ if (sweepMode) {
   // не одна: «делать нечего» и «данных не досталось» — разные беды, и вторая
   // моя, а не приложения.
   if (acts.size) {
-    const rows = [...acts.entries()].map(([id, v]) => ({ id, ...v }));
+    const all = [...acts.entries()].map(([id, v]) => ({ id, ...v }));
+    // Экран, ответивший ошибкой, в приговоры НЕ ИДЁТ: обход его не видел.
+    // Прежде такие одиннадцать лежали в «почти мёртвых» — отчёт звал на
+    // работу по экранам, о которых ничего не знал, и прятал, что охват
+    // неполный.
+    const erred = all.filter(r => r.erred);
+    const rows = all.filter(r => !r.erred);
     const dead = rows.filter(r => r.acts === 0 && !r.canAct).sort((a, b) => a.chars - b.chars);
     const unfed = rows.filter(r => r.acts === 0 && r.canAct);
     const thin = rows.filter(r => r.acts > 0 && r.acts <= 2 && r.chars < 400);
     console.log(`экранов с замером действий: ${rows.length} из ${total.length}`);
+    console.log(`ОТВЕТИЛИ ОШИБКОЙ (замер по ним ничего не значит): ${erred.length}`
+      + (erred.length ? '\n  ' + erred.map(r => `${r.id} (${r.fn}) «${r.sample}»`).join('\n  ') : ''));
     console.log(`МЁРТВЫЕ (ни одного действия, и в коде открывашки их не видно): ${dead.length}`
       + (dead.length ? ' — ' + dead.map(r => `${r.id} (${r.fn}, знаков ${r.chars})`).join(' ; ') : ''));
     console.log(`НЕ НАКОРМЛЕНЫ ЗАГЛУШКОЙ (действия в коде есть, на экране нет): ${unfed.length}`
       + (unfed.length ? ' — ' + unfed.map(r => `${r.id} (${r.fn})`).join(' ; ') : ''));
     console.log(`ПОЧТИ МЁРТВЫЕ (1-2 действия, меньше 400 знаков): ${thin.length}`
-      + (thin.length ? ' — ' + thin.map(r => `${r.id} (действий ${r.acts}, знаков ${r.chars})`).join(' ; ') : ''));
+      + (thin.length ? '\n  ' + thin.map(r => `${r.id} (${r.fn}, действий ${r.acts}, знаков ${r.chars}) «${r.sample}»`).join('\n  ') : ''));
   }
   if (missed.length) {
     // Список печатается ЦЕЛИКОМ: именно он и говорит, куда смотреть дальше.
