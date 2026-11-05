@@ -100,6 +100,48 @@ def test_bot_detail_screen_uses_the_shared_expression():
     pytest.fail("cb_op_detail не найден")
 
 
+# Единственное законное чтение СЫРОЙ колонки ожидания, с объяснением.
+#
+# Правило выше про ПОКАЗ причины: поверхность, читающая одну колонку, слепа на
+# половину случаев. Здесь другое: `_finish_fleet_starved_op` не показывает
+# причину, а СОСТАВЛЯЕТ её. Ему нужна ровно та помеха, которую запомнил
+# последний возврат в очередь (`last_error`), причём в тот момент операция ещё
+# 'running' — а общее выражение для идущей операции отдаёт NULL по построению,
+# то есть именно здесь оно не годится.
+RAW_WAIT_REASON_READERS: dict[str, str] = {
+    "services/op_worker.py:_finish_fleet_starved_op": (
+        "составляет текст исхода из помехи, которую запомнил возврат в очередь; "
+        "общее выражение на 'running' отдаёт NULL, а показом это чтение не "
+        "является — его результат тут же уходит в error_msg и result"),
+}
+
+
+def _enclosing_functions(src: str) -> dict:
+    """Строка → имя функции, в которой она лежит (по AST, не по отступам)."""
+    owner: dict[int, str] = {}
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return owner
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for ln in range(node.lineno, (node.end_lineno or node.lineno) + 1):
+                owner.setdefault(ln, node.name)
+    return owner
+
+
+def test_the_allowed_raw_reader_still_exists():
+    """Разрешение без своего места — мёртвая строка, которая прикрывает что угодно."""
+    for key in RAW_WAIT_REASON_READERS:
+        rel, func = key.rsplit(":", 1)
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        assert f"async def {func}(" in src or f"def {func}(" in src, (
+            f"в реестре разрешённых чтений есть {key}, а функции такой нет — "
+            "разрешение надо снять, иначе оно прикрывает будущие обходы")
+        assert "last_error" in src, (
+            f"{rel} больше не читает сырую колонку ожидания — разрешение лишнее")
+
+
 def test_no_reader_selects_a_single_reason_column():
     """Никто не выбирает одну колонку причины из очереди в обход выражения."""
     offenders = []
@@ -109,6 +151,7 @@ def test_no_reader_selects_a_single_reason_column():
             if rel == "services/op_status.py":
                 continue
             src = path.read_text(encoding="utf-8")
+            _owner = _enclosing_functions(src)
             for i, line in enumerate(src.split("\n"), 1):
                 stripped = line.strip()
                 if stripped.startswith("#"):
@@ -126,6 +169,8 @@ def test_no_reader_selects_a_single_reason_column():
                     continue
                 has_msg = "error_msg" in line and "AS error_msg" not in line
                 has_last = "last_error" in line
+                if f"{rel}:{_owner.get(i, '')}" in RAW_WAIT_REASON_READERS:
+                    continue          # законное чтение сырой помехи, см. реестр
                 if (has_msg or has_last) and "sql_error_reason" not in line:
                     offenders.append(f"{rel}:{i}: {stripped[:90]}")
     assert not offenders, (
