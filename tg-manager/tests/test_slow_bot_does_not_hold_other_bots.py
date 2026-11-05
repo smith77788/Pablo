@@ -12,7 +12,21 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
+import pytest
+
 from services import auto_responder as ar
+from services import replica_guard as rg
+
+
+@pytest.fixture(autouse=True)
+def _holds_the_lease(monkeypatch):
+    """Опрос вправе идти только у держателя аренды исполнителя.
+
+    Этот файл про другое — что медленный бот не держит остальных, — поэтому
+    аренду просто выдаём. Сам гейт проверяется в
+    tests/test_one_updates_poller.py.
+    """
+    monkeypatch.setattr(rg, "holds_executor_lease", lambda: True)
 
 
 async def test_launch_returns_at_once_and_fast_bot_is_not_held():

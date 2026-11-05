@@ -7,9 +7,7 @@ import logging
 import os
 import random
 import re
-import socket
 import time
-import uuid
 from collections.abc import Awaitable, Callable
 
 import aiohttp
@@ -678,7 +676,10 @@ _db_pool: "asyncpg.Pool | None" = None
 #   • освобождать только своё (реплика не должна снимать защиту с чужой сессии);
 #   • продлевать только своё (heartbeat);
 #   • на старте чистить залипшее, не трогая живые аренды соседей.
-_WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+# Имя одно на процесс и живёт в replica_guard: аренду исполнителя спрашивает
+# уже не только этот цикл (опрос ботов в auto_responder — тоже), а два разных
+# имени в одном процессе отбирали бы её друг у друга по кругу.
+_WORKER_ID = _rguard.WORKER_ID
 # Аренда живёт 15 минут и продлевается heartbeat'ом каждый цикл воркера (10 с).
 # Упал процесс — аренда истекает сама, и аккаунты возвращаются в оборот без
 # 60-минутного сторожа.

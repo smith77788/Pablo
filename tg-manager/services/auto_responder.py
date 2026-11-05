@@ -3,6 +3,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime
 
@@ -13,6 +14,8 @@ from services import automation_events
 from services import bot_api
 from services import brand_injection
 from services import workflow_runtime as _wf_rt
+from services import quiet_hours as _quiet
+from services import replica_guard as _rguard
 from services import routing_engine
 from services.logger import log_exc_swallow
 from bot.utils.template_validator import replace_placeholders
@@ -268,8 +271,34 @@ def _is_stop_word(text: str) -> bool:
     return s in _STOP_WORDS
 
 
+async def _owner_hour(pool, owner_id) -> int:
+    """Текущий час в поясе ВЛАДЕЛЬЦА бота.
+
+    Рабочее окно правила («отвечать с 9 до 21») сравнивалось с
+    `datetime.utcnow().hour`. Владелец ставит часы по своему времени — в
+    мини-аппе так и написано, «🕐 9–21h», — а пояс по умолчанию у всего
+    продукта Europe/Moscow (services/quiet_hours.py, services/recipient_time.py).
+    Значит правило молчало всё утро владельца и отвечало ночью: ошибка ровно
+    на разницу поясов, и видел её клиент, а не лог.
+
+    Пояс берём оттуда же, откуда тихие часы — `notification_settings.tz`, —
+    чтобы у продукта была ОДНА договорённость о времени владельца. Нет
+    строки, нет колонки, моргнула база — Europe/Moscow, как и везде.
+    """
+    tz_name = None
+    if owner_id:
+        try:
+            row = await pool.fetchrow(
+                "SELECT tz FROM notification_settings WHERE user_id=$1", int(owner_id))
+            tz_name = row["tz"] if row else None
+        except Exception:
+            log.debug("auto_responder: пояс владельца %s не прочитан", owner_id,
+                      exc_info=True)
+    return datetime.now(_quiet.tz_or_default(tz_name)).hour
+
+
 def _within_active_window(hour: int, from_hour, to_hour) -> bool:
-    """True, если час `hour` (0-23, UTC) попадает в рабочее окно правила.
+    """True, если час `hour` (0-23, по поясу ВЛАДЕЛЬЦА) попадает в окно правила.
 
     NULL с любой стороны → окно не задано → всегда активно. Поддерживает окна
     через полночь (from > to, напр. 22→6 = 22:00..05:59). Чистая функция.
@@ -651,6 +680,46 @@ _FULL_POLL_EVERY = 10
 # дважды (оффсет сдвигается в конце): дважды авто-ответ, дважды шаг.
 _bot_busy: set[int] = set()
 
+# Роль процесса — та же переменная, что читает main.py. Фоновые циклы идут в
+# ролях `all` и `worker`, то есть опрос ботов может идти в ДВУХ процессах.
+_ROLE = (os.getenv("INFRAGRAM_ROLE") or "all").strip().lower()
+# Когда в последний раз сказали в лог, что опрос достался другому процессу.
+_poll_lease_log_at = 0.0
+
+
+def _poll_allowed() -> bool:
+    """Опрашивать ботов имеет право ТОЛЬКО держатель аренды исполнителя.
+
+    `_bot_busy` защищает от двойного опроса одного бота внутри процесса, и
+    этого достаточно было ровно до тех пор, пока процесс один. Два процесса
+    `all`/`worker` (ошибка настройки, про которую `replica_guard` только
+    предупреждает в лог, и деплой, когда старый процесс ещё работает) оба
+    прочитают один и тот же оффсет (`db.get_update_offset`), оба возьмут
+    getUpdates с ним и оба ОТВЕТЯТ КЛИЕНТУ. Оффсет в базе только растёт, и от
+    второго ответа это не спасает: он уже отправлен.
+
+    Поэтому право на опрос — у держателя аренды исполнителя, той же самой, по
+    которой разбирается очередь операций. Решение читается из памяти процесса
+    (`holds_executor_lease`), потому что быстрый опрос «горячих» ботов идёт
+    раз в секунду; саму аренду продлевает полный проход (раз в 10 с) и цикл
+    воркера.
+
+    Вебхуки этим НЕ ограничены: обновление приходит один раз, тому процессу,
+    который принял запрос, и ждать аренды там означало бы потерять апдейт.
+    """
+    if _rguard.holds_executor_lease():
+        return True
+    global _poll_lease_log_at
+    _now = time.monotonic()
+    if _now - _poll_lease_log_at > 60:
+        _poll_lease_log_at = _now
+        log.warning(
+            "auto_responder: ботов опрашивает другой процесс (аренда "
+            "исполнителя не у этого), этот не опрашивает. Так клиент не "
+            "получает два ответа на одно сообщение; если держатель умрёт, "
+            "аренда освободится сама.")
+    return False
+
 
 async def _poll_one(pool, http, bot_id: int, token: str, main_bot=None) -> None:
     if bot_id in _bot_busy:
@@ -689,6 +758,8 @@ def _launch_polls(pool, http, bots, main_bot=None) -> int:
     два getUpdates одного бота разом обработали бы пакет дважды. Медленный
     бот просто пропускает свои следующие проходы, а не держит чужие.
     """
+    if not _poll_allowed():
+        return 0
     n = 0
     for b in bots or ():
         if b["bot_id"] in _bot_busy:
@@ -903,6 +974,9 @@ async def _process_bot(
         # которое реагируют автоматизации. До сих пор слой кормил только сенсор
         # намерений, то есть один источник из всех, какие у продукта есть.
         _vl_owner = bot_row.get("added_by") if bot_row else None
+        # Час владельца на весь пакет: правил с окном у бота обычно нет вовсе,
+        # и тогда запроса не будет ни одного.
+        _owner_hour_box: list[int] = []
 
         async def _vl_signal(tg_user_id, signal_name: str, confidence: float,
                              who: dict | None = None):
@@ -1401,15 +1475,21 @@ async def _process_bot(
 
             # Auto-replies (правила отсортированы по priority DESC; первое
             # совпавшее И попадающее в рабочее окно — выигрывает)
-            _cur_hour = datetime.utcnow().hour
             for rule in rules:
                 if not _match_rule(rule, text):
                     continue
                 # Рабочие часы: вне окна правило молчит (проф. автоответчик).
-                if not _within_active_window(
-                    _cur_hour, rule.get("active_from_hour"), rule.get("active_to_hour")
-                ):
-                    continue
+                # Окно — по часам ВЛАДЕЛЬЦА (см. _owner_hour), а не по UTC.
+                if (rule.get("active_from_hour") is not None
+                        and rule.get("active_to_hour") is not None):
+                    if not _owner_hour_box:
+                        _owner_hour_box.append(await _owner_hour(
+                            pool, (bot_row or {}).get("added_by")))
+                    if not _within_active_window(
+                        _owner_hour_box[0],
+                        rule.get("active_from_hour"), rule.get("active_to_hour")
+                    ):
+                        continue
                 # Человекоподобная задержка перед ответом (анти-детект).
                 _delay = rule.get("reply_delay_sec") or 0
                 try:
@@ -1897,6 +1977,9 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                     await notify_broken_bots(pool, main_bot)
                 except Exception:
                     log.debug("auto_responder: уведомления о сломанных ботах не отправлены")
+            # Аренду берём/продлеваем сами, а не надеемся на цикл воркера:
+            # иначе опрос ботов замолчал бы весь, если тот цикл не идёт.
+            await _rguard.acquire_executor_lease(pool, _rguard.WORKER_ID, _ROLE)
             bots = await db.get_bots_for_polling(pool)
             _last_bots = bots or []
             if bots:

@@ -21,7 +21,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import socket
 import time
+import uuid
 
 from services.logger import log_exc_swallow
 
@@ -72,6 +74,31 @@ _lease_held_by: "str | None" = None
 _lease_confirmed_at: float = 0.0
 # Запас до истечения срока в базе: часы базы и процесса, задержка запроса.
 _EXEC_LEASE_MARGIN_S = 15
+
+
+# Имя этого процесса для аренд — ОДНО на процесс.
+#
+# Аренду исполнителя спрашивал только `op_worker.run`, своим `_WORKER_ID`. Как
+# только её начинает спрашивать второй цикл того же процесса (опрос ботов в
+# `auto_responder`), два разных имени в одном процессе начали бы отбирать
+# аренду друг у друга по кругу. Поэтому имя живёт здесь, а `op_worker` берёт
+# его отсюда же.
+WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+
+
+def holds_executor_lease() -> bool:
+    """Держит ли аренду исполнителя ЭТОТ процесс — без запроса к базе.
+
+    Нужно для циклов, которые идут чаще, чем стоит спрашивать базу: быстрый
+    опрос «горячих» ботов в `auto_responder` идёт раз в секунду. Отвечаем по
+    последней достоверной правде и только пока срок в базе ещё не мог
+    истечь — иначе процесс, потерявший аренду, продолжал бы считать себя
+    держателем и опрашивать ботов вторым.
+    """
+    if not _lease_held_by:
+        return False
+    return (time.monotonic() - _lease_confirmed_at) < (
+        _EXEC_LEASE_TTL_S - _EXEC_LEASE_MARGIN_S)
 
 
 def _multi_allowed() -> bool:

@@ -18,6 +18,16 @@ Telegram забывает и больше не отдаёт НИКОМУ. Поэ
 
 Читать обновления, НЕ подтверждая их, можно откуда угодно: `offset=0` (отдать
 ожидающие) и отрицательный offset (заглянуть в хвост) очередь не трогают.
+
+Третий случай тот же по сути, но проверки на него не было: ОДНО место в коде
+ещё не значит один опрашивающий. Фоновые циклы идут в ролях `all` и `worker`
+(`main.py: _resilient` гасит только `web`), и два таких процесса оба прочитают
+один оффсет из `bot_update_offsets`, оба возьмут getUpdates с ним и оба
+ОТВЕТЯТ КЛИЕНТУ. `_bot_busy` — память одного процесса и от этого не спасает,
+а монотонный оффсет в базе не спасает тем более: второй ответ уже отправлен.
+Бывает это не только при ошибке настройки, но и на деплое, пока старый процесс
+ещё работает. Поэтому право на опрос — у держателя аренды исполнителя (той же,
+по которой разбирается очередь операций), и это проверяется ниже.
 """
 from __future__ import annotations
 
@@ -122,3 +132,160 @@ def test_the_detector_lets_reading_through():
         tree = ast.parse(src)
         call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_get_updates(n))
         assert not _confirms(_offset_arg(call)), src
+
+
+# ── Один опрашивающий НА ВСЮ УСТАНОВКУ, а не на процесс ────────────────────
+import asyncio  # noqa: E402
+
+import pytest  # noqa: E402
+
+from services import auto_responder as ar  # noqa: E402
+from services import replica_guard as rg  # noqa: E402
+
+
+@pytest.fixture
+def lease(monkeypatch):
+    """Управляем «держим ли мы аренду» так, как это видит процесс."""
+    state = {"held": False}
+    monkeypatch.setattr(rg, "holds_executor_lease", lambda: state["held"])
+    monkeypatch.setattr(ar, "_poll_lease_log_at", 0.0, raising=False)
+    return state
+
+
+_BOTS = [{"bot_id": 555, "token": "123456789:AAHrealtokenlooking-value_0123456789ab"}]
+
+
+def test_a_process_without_the_lease_does_not_poll(lease, monkeypatch):
+    """Без аренды опрос не запускается вовсе — ни одной задачи."""
+    started = []
+    monkeypatch.setattr(ar, "_poll_one", lambda *a, **k: started.append(a))
+
+    async def _go():
+        return ar._launch_polls(object(), object(), _BOTS)
+
+    assert asyncio.run(_go()) == 0, "опрос пошёл в процессе без аренды"
+    assert not started, started
+
+
+def test_the_lease_holder_polls(lease, monkeypatch):
+    """С арендой — опрашивает, иначе гейт превратился бы в немоту."""
+    started = []
+
+    async def _fake(pool, http, bot_id, token, main_bot=None):
+        started.append(bot_id)
+
+    monkeypatch.setattr(ar, "_poll_one", _fake)
+    lease["held"] = True
+
+    async def _go():
+        n = ar._launch_polls(object(), object(), _BOTS)
+        await asyncio.sleep(0)
+        return n
+
+    assert asyncio.run(_go()) == 1
+    assert started == [555], started
+
+
+def test_the_webhook_path_is_not_gated(lease, monkeypatch):
+    """Вебхук разбирается и БЕЗ аренды: апдейт приходит один раз.
+
+    Ждать аренды тут означало бы потерять обновление: Telegram отдал его тому
+    процессу, который принял запрос, и повторять не обязан. Поэтому зовём
+    НАСТОЯЩИЙ `_process_bot` с готовым апдейтом (так его зовёт
+    services/managed_bot_webhooks.py) и смотрим, что оффсет сдвинулся.
+    """
+    from unittest.mock import AsyncMock
+
+    saved: list[int] = []
+
+    async def _set_offset(pool, bot_id, value):
+        saved.append(value)
+
+    class _Pool:
+        async def fetchrow(self, query, *args):
+            if "FROM managed_bots" in query:
+                return {"bot_role": None, "swarm_enabled": False, "cluster": None,
+                        "added_by": 1, "username": "b", "first_name": "b",
+                        "relay_enabled": False}
+            return None
+
+        async def fetch(self, query, *args):
+            return []
+
+        async def fetchval(self, query, *args):
+            return None
+
+        async def execute(self, query, *args):
+            return "UPDATE 1"
+
+    for target, repl in (
+        ("database.db.get_update_offset", AsyncMock(return_value=100)),
+        ("database.db.get_active_auto_replies", AsyncMock(return_value=[])),
+        ("database.db.get_active_funnels", AsyncMock(return_value=[])),
+        ("database.db.get_active_automation_rules", AsyncMock(return_value=[])),
+        ("database.db.get_active_experiment", AsyncMock(return_value=None)),
+        ("database.db.upsert_users", AsyncMock(return_value=[])),
+        ("services.brand_injection.is_free_tier", AsyncMock(return_value=False)),
+    ):
+        mod, name = target.rsplit(".", 1)
+        monkeypatch.setattr(__import__(mod, fromlist=[name]), name, repl)
+    monkeypatch.setattr("database.db.set_update_offset", _set_offset)
+    monkeypatch.setattr(ar, "_record_bot_ok", AsyncMock())
+    monkeypatch.setattr(ar, "_record_bot_error", AsyncMock())
+
+    upd = {"update_id": 101, "message": {
+        "message_id": 1, "from": {"id": 7001, "is_bot": False, "first_name": "Артур"},
+        "chat": {"id": 7001, "type": "private"}, "text": "привет"}}
+    assert lease["held"] is False
+    asyncio.run(ar._process_bot(
+        _Pool(), object(), 555,
+        "123456789:AAHrealtokenlooking-value_0123456789ab", None, updates=[upd]))
+    assert saved == [101], (
+        f"вебхук без аренды не разобрал обновление (оффсет {saved}) — "
+        f"обновление потеряно, Telegram его не повторит")
+
+
+def test_the_gate_stands_in_the_single_place_polls_start():
+    """Гейт — в `_launch_polls`: это единственная точка запуска опроса.
+
+    И полный проход, и быстрый опрос «горячих» ботов идут через неё; гейт,
+    поставленный в одном из двух, пропускал бы второй.
+    """
+    src = (ROOT / "services" / "auto_responder.py").read_text(encoding="utf-8")
+    body = src[src.index("def _launch_polls"):src.index("def _launch_polls") + 1800]
+    assert "_poll_allowed()" in body, "опрос снова запускается без спроса аренды"
+    launches = src.count("_launch_polls(")
+    assert launches >= 3, f"точек запуска опроса стало {launches} — проверьте гейт"
+
+
+def test_a_stale_lease_is_not_a_lease(monkeypatch):
+    """Память процесса о своей аренде истекает вместе со сроком в базе.
+
+    Иначе процесс, у которого аренду законно забрали, продолжал бы считать
+    себя держателем и опрашивал ботов вторым — ровно то, от чего гейт.
+    """
+    import time as _t
+
+    monkeypatch.setattr(rg, "_lease_held_by", "мы")
+    monkeypatch.setattr(rg, "_lease_confirmed_at", _t.monotonic())
+    assert rg.holds_executor_lease() is True
+    monkeypatch.setattr(
+        rg, "_lease_confirmed_at",
+        _t.monotonic() - (rg._EXEC_LEASE_TTL_S - rg._EXEC_LEASE_MARGIN_S) - 1)
+    assert rg.holds_executor_lease() is False, "просроченная память считается арендой"
+    monkeypatch.setattr(rg, "_lease_held_by", None)
+    monkeypatch.setattr(rg, "_lease_confirmed_at", _t.monotonic())
+    assert rg.holds_executor_lease() is False, "чужая аренда считается своей"
+
+
+def test_one_worker_name_per_process():
+    """Имя процесса для аренд — одно.
+
+    Два разных имени в одном процессе отбирали бы аренду друг у друга по
+    кругу: опрос ботов и разбор очереди спрашивают одну и ту же аренду.
+    """
+    from services import op_worker as ow
+
+    assert ow._WORKER_ID == rg.WORKER_ID, (
+        "у разбора очереди и у опроса ботов разные имена процесса — аренда "
+        "будет переходить туда-сюда, и опрашивать станут оба")

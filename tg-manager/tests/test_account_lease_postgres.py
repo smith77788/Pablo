@@ -52,11 +52,20 @@ def _run(coro):
 
 
 def _fresh_op_worker(tag: str):
-    """Независимый экземпляр op_worker — своя память, как отдельный процесс."""
+    """Независимый экземпляр op_worker — своя память, как отдельный процесс.
+
+    Имя для аренд одно на ПРОЦЕСС и живёт в `replica_guard.WORKER_ID` (его же
+    спрашивает опрос ботов, иначе два имени в одном процессе отбирали бы
+    аренду исполнителя друг у друга). Этот файл изображает два процесса внутри
+    одного, поэтому имя здесь и подменяем: без этого обе «реплики» назвались бы
+    одинаково, и проверка межпроцессной аренды превратилась бы в проверку
+    одного процесса дважды.
+    """
     path = os.path.join(ROOT, "services", "op_worker.py")
     spec = importlib.util.spec_from_file_location(f"_replica_{tag}", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod._WORKER_ID = f"{mod._WORKER_ID}:{tag}"
     return mod
 
 
