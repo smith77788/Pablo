@@ -2480,6 +2480,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Связки (бот+каналы)</div>
         <div class="mgmt-tile-val" id="m-pp-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openEmailAccounts()">
+        <div class="mgmt-tile-ico">📧</div>
+        <div class="mgmt-tile-lbl">Почта</div>
+        <div class="mgmt-tile-val" id="m-email-cnt"></div>
+      </div>
       <div class="mgmt-tile" onclick="openSettings()">
         <div class="mgmt-tile-ico">⚙️</div>
         <div class="mgmt-tile-lbl">Настройки</div>
@@ -4279,6 +4284,87 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ КОРОТКИЕ ССЫЛКИ ══════════════════════ -->
+<!-- ── Почтовые аккаунты ───────────────────────────────────────────────── -->
+<div class="screen" id="s-email">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">📧 Почтовые аккаунты</div>
+    <div class="hdr-act" onclick="openEmailAdd()">+ Добавить</div>
+  </div>
+  <div class="sb">
+    <div id="emailList" class="card-list"></div>
+    <div id="emailEmpty" class="empty-inline" style="display:none">
+      Нет добавленных почтовых аккаунтов.<br>Добавьте аккаунт для отправки писем.
+    </div>
+  </div>
+</div>
+
+<!-- ── Добавление email-аккаунта ─────────────────────────────────────────── -->
+<div class="screen" id="s-email-add">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">📧 Новый почтовый аккаунт</div>
+  </div>
+  <div class="sb">
+    <div class="card" style="padding:14px">
+      <label class="lbl">Email</label>
+      <input type="email" id="eaEmail" class="input-l" placeholder="user@gmail.com"
+             oninput="emailDetectProvider(this.value)">
+      <div id="eaProviderHint" style="font-size:11px;color:var(--hint);margin:4px 0 0;display:none"></div>
+
+      <label class="lbl" style="margin-top:10px">SMTP-сервер</label>
+      <input type="text" id="eaHost" class="input-l" placeholder="smtp.gmail.com">
+
+      <label class="lbl" style="margin-top:10px">Порт</label>
+      <input type="number" id="eaPort" class="input-l" placeholder="587" value="587">
+
+      <label class="lbl" style="margin-top:10px">Логин (SMTP)</label>
+      <input type="text" id="eaUser" class="input-l" placeholder="user@gmail.com">
+
+      <label class="lbl" style="margin-top:10px">Пароль / пароль приложения</label>
+      <input type="password" id="eaPass" class="input-l" placeholder="••••••••">
+
+      <label class="lbl" style="margin-top:10px">Имя отправителя</label>
+      <input type="text" id="eaName" class="input-l" placeholder="Мой бизнес">
+
+      <label class="lbl" style="margin-top:10px">Дневной лимит писем</label>
+      <input type="number" id="eaLimit" class="input-l" value="50" min="1" max="10000">
+
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn" style="flex:1" onclick="emailTestConn()">🔌 Проверить</button>
+        <button class="btn btn-accent" style="flex:1" onclick="emailSaveAccount()">💾 Сохранить</button>
+      </div>
+      <div id="eaStatus" style="font-size:12px;margin-top:8px;display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Отправка письма ───────────────────────────────────────────────────── -->
+<div class="screen" id="s-email-send">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">✉️ Отправить письмо</div>
+  </div>
+  <div class="sb">
+    <div class="card" style="padding:14px">
+      <label class="lbl">Аккаунт-отправитель</label>
+      <select id="emFrom" class="input-l"></select>
+
+      <label class="lbl" style="margin-top:10px">Кому</label>
+      <input type="email" id="emTo" class="input-l" placeholder="recipient@example.com">
+
+      <label class="lbl" style="margin-top:10px">Тема</label>
+      <input type="text" id="emSubj" class="input-l" placeholder="Тема письма">
+
+      <label class="lbl" style="margin-top:10px">Текст письма</label>
+      <textarea id="emBody" class="input-l" rows="8" placeholder="Введите текст…"></textarea>
+
+      <button class="btn btn-accent" style="width:100%;margin-top:14px" onclick="emailDoSend()">📨 Отправить</button>
+      <div id="emStatus" style="font-size:12px;margin-top:8px;display:none"></div>
+    </div>
+  </div>
+</div>
+
 <div class="screen" id="s-links">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
@@ -29538,5 +29624,6 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_detail.js"></script>
 <script src="screens/bot_factory.js"></script>
 <script src="screens/bot_mesh.js"></script>
+<script src="screens/email_accounts.js"></script>
 </body>
 </html>

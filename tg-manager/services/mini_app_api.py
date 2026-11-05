@@ -429,6 +429,24 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
     "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS tags TEXT",
     "CREATE INDEX IF NOT EXISTS idx_short_links_owner ON short_links(owner_id, created_at DESC)",
+    # v260: Почтовые аккаунты для рассылки email
+    """CREATE TABLE IF NOT EXISTS email_accounts (
+        id              BIGSERIAL PRIMARY KEY,
+        owner_id        BIGINT NOT NULL,
+        email           TEXT NOT NULL,
+        smtp_host       TEXT NOT NULL,
+        smtp_port       INTEGER NOT NULL DEFAULT 587,
+        smtp_user       TEXT NOT NULL,
+        smtp_pass_enc   TEXT NOT NULL,
+        display_name    TEXT DEFAULT '',
+        daily_limit     INTEGER NOT NULL DEFAULT 50,
+        sent_today      INTEGER NOT NULL DEFAULT 0,
+        is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (owner_id, email)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_email_accounts_owner ON email_accounts(owner_id)",
 ]
 
 
@@ -7955,6 +7973,148 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         ok = await _lnk.delete(pool, uid, code or "")
         return _json_resp({"ok": ok}) if ok else _err("Ссылка не найдена", 404)
 
+    # ── Email-аккаунты ─────────────────────────────────────────────────────────
+
+    async def email_accounts_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import email_service
+        rows = await email_service.list_accounts(pool, uid)
+        return _json_resp({"accounts": [
+            {"id": r["id"], "email": r["email"], "smtp_host": r["smtp_host"],
+             "smtp_port": r["smtp_port"], "display_name": r.get("display_name", ""),
+             "daily_limit": r["daily_limit"], "sent_today": r["sent_today"],
+             "is_active": r["is_active"]}
+            for r in rows]})
+
+    async def email_accounts_add(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        from services import email_service
+        addr = validate_string(body.get("email"), max_len=200)
+        if not addr or not email_service.valid_email(addr):
+            return _err("Некорректный email")
+        smtp_host = validate_string(body.get("smtp_host"), max_len=253)
+        if not smtp_host or not email_service.valid_smtp_host(smtp_host):
+            return _err("Некорректный SMTP-сервер")
+        smtp_port = email_service.valid_smtp_port(body.get("smtp_port", 587))
+        if smtp_port is None:
+            return _err("Некорректный порт")
+        smtp_user = validate_string(body.get("smtp_user"), max_len=200)
+        if not smtp_user:
+            return _err("Укажите SMTP-логин")
+        smtp_pass = body.get("smtp_pass", "")
+        if not smtp_pass:
+            return _err("Укажите пароль")
+        display_name = validate_string(body.get("display_name"), max_len=100) or ""
+        daily_limit = min(max(int(body.get("daily_limit", 50)), 1), 10000)
+        r = await email_service.add_account(
+            pool, uid, addr, smtp_host, smtp_port, smtp_user, smtp_pass,
+            display_name=display_name, daily_limit=daily_limit)
+        return _json_resp(r)
+
+    async def email_accounts_remove(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        try:
+            acc_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return _err("Неверный идентификатор")
+        from services import email_service
+        ok = await email_service.remove_account(pool, uid, acc_id)
+        return _json_resp({"ok": ok})
+
+    async def email_accounts_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        try:
+            acc_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return _err("Неверный идентификатор")
+        active = bool(body.get("is_active", True))
+        from services import email_service
+        ok = await email_service.toggle_account(pool, uid, acc_id, active)
+        return _json_resp({"ok": ok})
+
+    async def email_accounts_test(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        from services import email_service
+        acc_id = body.get("id")
+        if acc_id:
+            acc = await email_service.get_account(pool, uid, int(acc_id))
+            if not acc:
+                return _err("Аккаунт не найден")
+            smtp_host = acc["smtp_host"]
+            smtp_port = acc["smtp_port"]
+            smtp_user = acc["smtp_user"]
+            smtp_pass = email_service.decrypt_password(acc["smtp_pass_enc"])
+        else:
+            smtp_host = validate_string(body.get("smtp_host"), max_len=253) or ""
+            smtp_port = email_service.valid_smtp_port(body.get("smtp_port", 587)) or 587
+            smtp_user = validate_string(body.get("smtp_user"), max_len=200) or ""
+            smtp_pass = body.get("smtp_pass", "")
+        result = await email_service.test_connection(
+            smtp_host, smtp_port, smtp_user, smtp_pass)
+        return _json_resp(result)
+
+    async def email_send(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        try:
+            acc_id = int(body.get("account_id"))
+        except (TypeError, ValueError):
+            return _err("Укажите аккаунт-отправитель")
+        from services import email_service
+        to_addr = validate_string(body.get("to"), max_len=200)
+        if not to_addr or not email_service.valid_email(to_addr):
+            return _err("Некорректный адрес получателя")
+        subject = validate_string(body.get("subject"), max_len=500) or "(без темы)"
+        body_html = body.get("body", "")
+        if not body_html:
+            return _err("Пустое письмо")
+        result = await email_service.send_via_account(
+            pool, uid, acc_id, to_addr, subject, body_html)
+        return _json_resp(result)
+
+    async def email_providers(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import email_service
+        addr = request.query.get("email", "")
+        detected = email_service.detect_provider(addr)
+        return _json_resp({
+            "providers": email_service.KNOWN_PROVIDERS,
+            "detected": detected,
+        })
+
     # ── Route registration ────────────────────────────────────────────────────
 
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
@@ -7974,6 +8134,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channel_rankings/add", channel_rankings_add)
     app.router.add_post("/api/miniapp/channel_rankings/remove", channel_rankings_remove)
     app.router.add_post("/api/miniapp/channel_rankings/check", channel_rankings_check)
+    # Email
+    app.router.add_get("/api/miniapp/email_accounts", email_accounts_list)
+    app.router.add_post("/api/miniapp/email_accounts/add", email_accounts_add)
+    app.router.add_post("/api/miniapp/email_accounts/remove", email_accounts_remove)
+    app.router.add_post("/api/miniapp/email_accounts/toggle", email_accounts_toggle)
+    app.router.add_post("/api/miniapp/email_accounts/test", email_accounts_test)
+    app.router.add_post("/api/miniapp/email/send", email_send)
+    app.router.add_get("/api/miniapp/email/providers", email_providers)
     # Bots
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)
     app.router.add_post("/api/miniapp/bot_factory/create_new", bot_factory_create_new)
