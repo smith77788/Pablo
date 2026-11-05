@@ -49,7 +49,8 @@ class _Pool:
         return []
 
 
-def _run(monkeypatch, names, done_steps, fail_read=False, cancel=None):
+def _run(monkeypatch, names, done_steps, fail_read=False, cancel=None,
+         mark_fails=False):
     """Один прогон исполнителя. Возвращает (созданные имена, отметки, итог)."""
     created: list[str] = []
     marks: list[tuple] = []
@@ -65,7 +66,7 @@ def _run(monkeypatch, names, done_steps, fail_read=False, cancel=None):
 
     async def _jw(pool, query, *args, **kw):
         marks.append((query, args))
-        return "INSERT 1"
+        return "ERROR" if mark_fails else "INSERT 1"
 
     async def _no(pool, op_id):
         return False if cancel is None else await cancel(pool, op_id)
@@ -150,3 +151,34 @@ def test_the_handler_still_reads_the_resume_door():
         "повтор снова создаст второй комплект топиков ноды")
     assert "_journal_write" in called, (
         "созданный топик снова не оставляет отметки — дверь нечем закрывать")
+
+
+def test_a_lost_mark_stops_the_batch(monkeypatch):
+    """Отметка не записалась — пачку останавливаем на первом же топике.
+
+    Топик уже создан, отменить его нечем, и повтор создаст его второй раз:
+    это цена одного элемента. Но если журнал отказывает, он откажет и на
+    следующих, поэтому продолжать пачку значит множить дубли. Тот же счёт
+    появился в `_exec_deploy_network` после прогона, который закрывался
+    «готово», а следующий создавал второй такой же канал.
+    """
+    created, marks, res = _run(
+        monkeypatch, ["Новости", "Чат", "Барахолка"], done_steps=set(),
+        mark_fails=True)
+    assert created == ["Новости"], (
+        f"пачка пошла дальше с неработающим журналом: {created}")
+    assert len(marks) == 1, marks
+    assert res["unmarked"] == 1, res
+    assert res["created"] == 1, res
+    assert "без отметки" in res["summary"], res["summary"]
+    assert "запустите заново" in res["summary"], (
+        "владельцу не сказано, что остальные имена остались несделанными")
+
+
+def test_a_working_journal_does_not_stop_the_batch(monkeypatch):
+    """Обратная сторона того же: исправный журнал пачку не прерывает."""
+    created, _, res = _run(
+        monkeypatch, ["Новости", "Чат", "Барахолка"], done_steps=set())
+    assert created == ["Новости", "Чат", "Барахолка"], created
+    assert res["unmarked"] == 0, res
+    assert "без отметки" not in res["summary"], res["summary"]

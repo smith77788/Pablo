@@ -17191,6 +17191,10 @@ async def _exec_community_add_channel(
         log.info("community_add_channel op=%d: повтор — %d каналов уже созданы",
                  op_id, len(_done_steps))
     created = 0
+    # Топик создан, а отметка о нём не записалась. Такой случай нельзя просто
+    # проглотить: повтор создаст этот топик второй раз (см. _exec_deploy_network,
+    # где этот же счёт появился после ровно такого прогона «готово»).
+    unmarked = 0
     for _i, nm in enumerate(names):
         step = _i + 1
         if step in _done_steps:
@@ -17205,7 +17209,7 @@ async def _exec_community_add_channel(
             # Через дверь журнала, а не обычным execute: по ЭТОЙ отметке
             # `completed_steps` выше решает, какие шаги повтор пропустит, а
             # создание топика необратимо.
-            await _journal_write(
+            _marked = await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message)"
                 " VALUES($1,$2,$3,'ok',$4)",
@@ -17213,9 +17217,24 @@ async def _exec_community_add_channel(
                 log_ctx=f" [community_add_channel op={op_id}]",
             )
             await _mark_progress(pool, op_id, created)
+            if _marked == "ERROR":
+                # Дальше не идём. Журнал отказывает прямо сейчас, а каждый
+                # следующий топик без отметки — ещё один дубль на повторе.
+                # Останавливаясь здесь, ограничиваем ущерб одним топиком.
+                unmarked += 1
+                log.error(
+                    "community_add_channel op=%d: отметка о созданном топике "
+                    "«%s» не записалась — пачку останавливаем, иначе повтор "
+                    "создаст второй комплект", op_id, str(nm)[:64])
+                break
             await asyncio.sleep(random.uniform(1.5, 3.5))
+    _summary = f"🖥 Ноды: создано каналов {created}"
+    if unmarked:
+        _summary += (f" (из них {unmarked} без отметки — остановились, чтобы "
+                     f"повтор не создал второй комплект; остальные имена "
+                     f"запустите заново)")
     return {"status": "done" if created else "failed", "created": created,
-            "summary": f"🖥 Ноды: создано каналов {created}"}
+            "unmarked": unmarked, "summary": _summary}
 
 
 async def _node_members_already(pool, node_id: int) -> list[int]:
