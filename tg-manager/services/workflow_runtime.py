@@ -963,6 +963,32 @@ async def _set_field(pool, bot_id, chat_id, name: str, value: str,
                    bot_id=bot_id, chat_id=chat_id)
 
 
+async def _add_to_field(pool, bot_id, chat_id, name: str, delta: str,
+                        fallback=None) -> str | None:
+    """«Прибавить к полю» контакта под замком строки → новое значение.
+
+    None — контакта нет. Значение читается в той же транзакции, что и
+    пишется: два сценария, разом прибавившие баллы одному человеку (или
+    один, прочитавший поля в начале прохода), иначе теряли одно прибавление
+    — «+10» и «+5» давали 5, а не 15. fallback — значение из переменных
+    прогона, если в поле контакта пусто."""
+    if not bot_id or not chat_id:
+        return None
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            "SELECT fields->>$3 AS have FROM bot_users "
+            "WHERE bot_id=$1 AND user_id=$2 FOR UPDATE", bot_id, chat_id, name)
+        if row is None:
+            return None
+        have = row["have"] if row["have"] not in (None, "") else fallback
+        new = add_to_number(have, delta)
+        await conn.execute(
+            """UPDATE bot_users SET fields = COALESCE(fields, '{}'::jsonb)
+                                             || jsonb_build_object($3::text, $4::text)
+                WHERE bot_id=$1 AND user_id=$2""", bot_id, chat_id, name, new)
+    return new
+
+
 def compare_field(cond: str, have, want: str) -> bool:
     """Сравнить значение поля с условием шага. ЧИСТАЯ.
 
@@ -1652,8 +1678,14 @@ async def _do_action(pool, run, step, contact, fields, main_bot, *,
         name, _, delta = value.partition("+=")
         name = name.strip()
         have = fields.get(name, _as_dict(run.get("vars")).get(name))
-        new = add_to_number(have, delta)
-        await _set_field(pool, bot_id, chat_id, name, new, owner, run.get("workflow_id"))
+        new = await _add_to_field(pool, bot_id, chat_id, name, delta, have)
+        if new is None:  # контакта нет — счёт только в переменных прогона
+            new = add_to_number(have, delta)
+        else:
+            await bus.emit(pool, owner, "contact.field_set",
+                           {"field": name, "value": new,
+                            "workflow_id": run.get("workflow_id")},
+                           bot_id=bot_id, chat_id=chat_id)
         await pool.execute(
             "UPDATE workflow_runs SET vars = vars || jsonb_build_object($2::text, $3::text) "
             "WHERE id=$1", run["id"], name, new)

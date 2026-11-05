@@ -1419,6 +1419,33 @@ def test_scoring_adds_up_and_routes_by_the_total(pool, tg):
     _run(go())
 
 
+def test_points_from_two_scenarios_at_once_are_not_lost(pool, tg):
+    """ЧТО БЫЛО: «прибавить к полю» считало от полей, прочитанных в начале
+    прохода. Два сценария, разом прибавившие баллы одному человеку (или
+    сценарий, чьи поля устарели), теряли прибавление: 5 +10 +15 давало 20
+    или 15, а не 30. Теперь значение берётся и пишется под замком строки."""
+    from services import workflow_runtime as rt
+
+    async def go():
+        await pool.execute(
+            "UPDATE bot_users SET fields = '{\"score\": \"5\"}'::jsonb "
+            "WHERE bot_id=$1 AND user_id=$2", BOT_ID, USER)
+        run = {"id": -1, "bot_id": BOT_ID, "chat_id": USER, "owner_id": OWNER,
+               "workflow_id": None, "vars": {}}
+        stale = {"score": "5"}  # оба прохода прочитали поля до записи друг друга
+        await asyncio.gather(
+            rt._do_action(pool, run, {"action": "add_to_field", "value": "score+=10"},
+                          {}, dict(stale), None),
+            rt._do_action(pool, run, {"action": "add_to_field", "value": "score+=15"},
+                          {}, dict(stale), None))
+        score = await pool.fetchval(
+            "SELECT fields->>'score' FROM bot_users WHERE bot_id=$1 AND user_id=$2",
+            BOT_ID, USER)
+        assert score == "30"
+
+    _run(go())
+
+
 def test_work_hours_condition_picks_a_branch(pool, tg, monkeypatch):
     from services import workflow_runtime as rt
     monkeypatch.setattr(rt, "in_work_hours", lambda now, value, tz: value == "00-24")
