@@ -627,6 +627,9 @@ const ACTIONS = () => {
            sample: sample.replace(/\s+/g, ' ').slice(0, 220) };
 };
 
+// Призыв к действию из `empty()` считается действием экрана.
+const cta_ = (r) => !!(r && r.cta);
+
 const MUTE = () => {
   const scr = document.querySelector('.screen.show');
   if (!scr) return { len: 0, id: null, none: true };
@@ -1163,16 +1166,32 @@ if (sweepMode) {
         const src = await page.evaluate((n) => {
           const own = String(window[n] || '');
           let all = own;
+          // Кнопка ОБЩЕГО помощника — не действие экрана. `empty()` и
+          // `errHtml()` сами рисуют «← Назад»/«↺ Повторить», поэтому при
+          // чтении на уровень вглубь признак срабатывал у любого экрана,
+          // который их зовёт, — то есть почти у всех. Экраны-витрины
+          // (`s-audience`, `s-nodethreads`, `s-invacc`: числа, график и
+          // список с `cursor:default`, ни одного своего действия) попадали не
+          // в «мёртвые», а в «не накормлены заглушкой», и жалоба владельца от
+          // 28.09 на них не показывала. Диалоги туда же: `toast`,
+          // `askConfirm`, `confirmDelete` — чужая разметка.
+          const CHROME = new Set(['empty', 'errHtml', 'toast', 'askConfirm',
+                                  'confirmDelete', 'modernizeIcons']);
           const seen = new Set([n]);
           for (const m of own.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
             const k = m[1];
-            if (seen.has(k)) continue;
+            if (seen.has(k) || CHROME.has(k)) continue;
             seen.add(k);
             if (typeof window[k] === 'function') all += '\n' + String(window[k]);
           }
-          return all;
+          // Призыв к действию, переданный в `empty()` четвёртым аргументом
+          // (`{label, fn}`), — действие ИМЕННО экрана, и он виден в своём же
+          // исходнике.
+          const cta = /empty\([^;]*\bfn\s*:/.test(own);
+          return { src: all, cta };
         }, fn);
-        const canAct = /onclick|<button|class="btn|class="row tap|\bchip\b|<input|<select|<textarea/.test(src);
+        const canAct = cta_(src)
+          || /onclick|<button|class="btn|class="row tap|\bchip\b|<input|<select|<textarea/.test(src.src);
         acts.set(shownId, { fn, acts: ac.acts, chars: ac.chars, canAct,
                             erred: ac.erred, blank: ac.blank, sample: ac.sample });
       }

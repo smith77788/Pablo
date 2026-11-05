@@ -996,3 +996,28 @@ def test_the_route_block_reader_can_actually_fail():
     assert "/transport" in blocks and "o.proxies = 12" in blocks["/transport"]
     assert "o.plan" not in blocks["/transport"], (
         "разбор склеивает соседние блоки — проверка адресности ничего не держит")
+
+
+def test_the_chrome_button_is_not_the_screens_action():
+    """Кнопка общего помощника — не действие экрана.
+
+    `empty()` и `errHtml()` сами рисуют «← Назад» и «↺ Повторить», поэтому при
+    чтении вызванных функций на уровень вглубь признак «в коде действия есть»
+    срабатывал у любого экрана, который их зовёт, — то есть почти у всех. Три
+    экрана-витрины (`s-audience`, `s-invacc`, `s-nodethreads`: числа, график и
+    список без единого своего действия) лежали из-за этого в «не накормлены
+    заглушкой» — там, куда владелец по жалобе от 28.09 смотреть не станет.
+
+    Призыв к действию, переданный в `empty()` четвёртым аргументом, —
+    действие ИМЕННО экрана, и он остаётся признаком.
+    """
+    src = _src()
+    i = src.index("const CHROME = new Set(")
+    head = src[i:i + 300]
+    for name in ("empty", "errHtml", "toast", "askConfirm"):
+        assert f"'{name}'" in head, f"{name} снова считается действием экрана"
+    j = src.index("const cta = /empty")
+    assert "fn" in src[j:j + 80], (
+        "призыв к действию из empty() перестал считаться действием экрана")
+    k = src.index("if (seen.has(k) || CHROME.has(k)) continue;")
+    assert k > 0, "список общей обвязки собран, но не применён при обходе вызовов"
