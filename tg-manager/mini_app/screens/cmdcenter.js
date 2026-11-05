@@ -212,7 +212,7 @@ function _ccRender(d) {
     '<div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--hint)">' +
     '<span><span style="color:#3bb6a6">■</span> успешно</span>' +
     '<span><span style="color:#ef4444">■</span> ошибки</span>' +
-    '<span onclick="openOps()" role="button" tabindex="0" style="cursor:pointer;margin-left:auto">' +
+    '<span onclick="openOps()" role="button" tabindex="0" style="cursor:pointer;margin-left:auto;display:inline-flex;align-items:center;min-height:32px">' +
     `▶ выполняется: <b style="color:var(--fg)">${now.running || 0}</b> · ` +
     `⏳ в очереди: <b style="color:var(--fg)">${now.pending || 0}</b> \u203a</span></div>`);
 
