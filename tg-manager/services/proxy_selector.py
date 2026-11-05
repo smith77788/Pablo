@@ -438,8 +438,12 @@ async def failover_dead_proxies(pool, owner_id: int) -> dict:
                 "UPDATE user_proxies SET is_alive=FALSE, last_check=now() WHERE id=$1 AND owner_id=$2",
                 pid, owner_id,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            # Не упало, но и не записалось: мёртвый прокси остался «живым» в
+            # базе и снова попадёт в выдачу. Беда самозаживающая (следующий
+            # цикл проверит его заново), но молча её не видно — как и в
+            # соседней записи ниже, пишем в лог.
+            log.warning("failover: не удалось пометить мёртвый прокси pid=%s: %s", pid, e)
 
         if not healthy_backups:
             result["still_dead_no_backup"].append(acc["account_id"])

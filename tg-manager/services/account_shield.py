@@ -21,6 +21,45 @@ from services import physics_engine
 
 log = logging.getLogger(__name__)
 
+
+def _apply_failed(action: str, account_id: int, exc: BaseException) -> None:
+    """Защита не применилась. Громко и в счётчик, а не `log.debug`.
+
+    `apply_shield_decision` — это и есть защита: «cool» продлевает
+    `cooldown_until`, «pause» снимает `is_active`. Сбой записи оставляет
+    аккаунт, признанный опасным, полностью активным — он пойдёт в следующую
+    массовую операцию в полном темпе. Раньше такой сбой уходил в `log.debug`,
+    которого никто не читает, а владельцу при этом отправлялось «Аккаунт
+    поставлен на паузу».
+    """
+    log.error(
+        "account_shield: решение «%s» НЕ применилось к acc=%d (%s) — аккаунт "
+        "остаётся активным, хотя признан опасным",
+        action, account_id, exc,
+    )
+    try:
+        from services import metrics as _m
+
+        _m.inc("infragram_shield_apply_write_failures_total", {"action": action})
+    except Exception:
+        pass
+
+
+def _note_write_cancelled(where: str, ctx: str, lost: str) -> None:
+    """Отмена съела защитную запись. Разбор и счётчик — у общей двери.
+
+    Писатели защиты ловят `except Exception`, а `asyncio.CancelledError` с
+    Python 3.8 не `Exception`: отмена проходила сквозь них без следа, и слепы
+    они оказывались ровно к нашим собственным остановкам (деплой, передача
+    очереди). Отмену вызывающий обязан пробросить сразу после этого вызова.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.note_write_cancelled(__name__, where, ctx, lost)
+    except Exception:
+        pass
+
 _LOOP_INTERVAL = 1800  # 30 minutes
 
 
@@ -199,13 +238,20 @@ async def apply_shield_decision(
     pool: asyncpg.Pool,
     decision: ShieldDecision,
     owner_id: int,
-) -> None:
+) -> bool:
     """Apply the shield decision to tg_accounts and record the action.
 
     cool  — extend cooldown_until by 2h to lower effective priority
     pause — set is_active=FALSE for cool_duration_hours
     ok/warn — no structural change; just record the action
+
+    ВОЗВРАЩАЕТ, ПРИМЕНИЛОСЬ ЛИ РЕШЕНИЕ, и это не удобство, а защита. Раньше
+    функция возвращала None, сбой записи глотался в `log.debug`, а вызывающий
+    всё равно считал аккаунт поставленным на паузу и говорил об этом
+    владельцу. Для решений без структурной записи («warn») применять нечего,
+    поэтому они честно возвращают True.
     """
+    applied = True
     cfg = await get_shield_config(pool, owner_id)
 
     if decision.action == "cool":
@@ -221,10 +267,15 @@ async def apply_shield_decision(
                 decision.account_id,
                 decision.note or "Account Shield: охлаждение",
             )
+        except asyncio.CancelledError:
+            _note_write_cancelled(
+                "shield_cool", f"[acc={decision.account_id}]",
+                "охлаждение опасного аккаунта не записано — он остаётся в "
+                "полном темпе")
+            raise
         except Exception as exc:
-            log.debug(
-                "account_shield.apply cool acc=%d: %s", decision.account_id, exc
-            )
+            applied = False
+            _apply_failed("cool", decision.account_id, exc)
 
     elif decision.action == "pause" and cfg.auto_pause:
         resume_at = datetime.now(timezone.utc) + timedelta(
@@ -243,12 +294,17 @@ async def apply_shield_decision(
                 resume_at,
                 decision.note or f"Account Shield: пауза на {cfg.cool_duration_hours}ч",
             )
+        except asyncio.CancelledError:
+            _note_write_cancelled(
+                "shield_pause", f"[acc={decision.account_id}]",
+                "пауза опасного аккаунта не записана — он остаётся активным")
+            raise
         except Exception as exc:
-            log.debug(
-                "account_shield.apply pause acc=%d: %s", decision.account_id, exc
-            )
+            applied = False
+            _apply_failed("pause", decision.account_id, exc)
 
     await _save_action(pool, owner_id, decision)
+    return applied
 
 
 # ─── Background worker ────────────────────────────────────────────────────────
@@ -288,6 +344,7 @@ async def _run_cycle(pool: asyncpg.Pool, bot) -> None:
 
     paused_total = 0
     cooled_total = 0
+    failed_total = 0
 
     for owner_row in owners:
         owner_id: int = owner_row["owner_id"]
@@ -310,15 +367,24 @@ async def _run_cycle(pool: asyncpg.Pool, bot) -> None:
             try:
                 decision = await evaluate_account(pool, account_id, owner_id)
                 if decision.action in ("cool", "pause", "warn"):
-                    await apply_shield_decision(pool, decision, owner_id)
+                    # По ФАКТУ, а не по решению: см. apply_shield_decision.
+                    applied = await apply_shield_decision(
+                        pool, decision, owner_id)
                     if decision.action == "pause":
-                        paused_total += 1
+                        if applied:
+                            paused_total += 1
+                        else:
+                            failed_total += 1
                         if cfg.notify_admin and bot is not None:
                             await _notify_pause(
-                                bot, pool, owner_id, decision, cfg
+                                bot, pool, owner_id, decision, cfg,
+                                applied=applied,
                             )
                     elif decision.action == "cool":
-                        cooled_total += 1
+                        if applied:
+                            cooled_total += 1
+                        else:
+                            failed_total += 1
                 # don't record "ok" to avoid bloating shield_actions table
             except Exception as exc:
                 log.debug(
@@ -330,6 +396,13 @@ async def _run_cycle(pool: asyncpg.Pool, bot) -> None:
         log.info(
             "Account Shield cycle: paused=%d cooled=%d", paused_total, cooled_total
         )
+    if failed_total:
+        # Отдельной строкой и громко: это аккаунты, которые Щит признал
+        # опасными и НЕ смог остановить.
+        log.error(
+            "Account Shield cycle: %d решений не применились — эти аккаунты "
+            "остаются активными", failed_total,
+        )
 
 
 async def _notify_pause(
@@ -338,8 +411,15 @@ async def _notify_pause(
     owner_id: int,
     decision: ShieldDecision,
     cfg: ShieldConfig,
+    applied: bool = True,
 ) -> None:
-    """Send a Telegram notification to the owner about a paused account."""
+    """Сообщить владельцу об автопаузе — или о том, что её НЕ удалось поставить.
+
+    Прежний текст («Аккаунт поставлен на паузу») уходил и тогда, когда запись
+    не прошла. Владелец, прочитав его, перестаёт следить за аккаунтом — ровно
+    за тем, который сейчас сгорит. Поэтому текст теперь зависит от факта, а
+    при неудаче прямо просит остановить аккаунт вручную.
+    """
     try:
         acc = await pool.fetchrow(
             "SELECT phone, first_name, username FROM tg_accounts WHERE id=$1",
@@ -354,14 +434,26 @@ async def _notify_pause(
         else:
             name = f"id{decision.account_id}"
 
-        text = (
-            "🛡 <b>Account Shield — автопауза</b>\n\n"
-            f"Аккаунт <b>{name}</b> поставлен на паузу.\n\n"
-            f"📊 Risk score: <b>{decision.risk_score:.0%}</b>\n"
-            f"⚠️ Вероятность бана: <b>{decision.ban_probability:.0%}</b>\n"
-            f"⏸ Пауза на: <b>{cfg.cool_duration_hours}ч</b>\n\n"
-            f"<i>{decision.note}</i>"
-        )
+        if applied:
+            text = (
+                "🛡 <b>Account Shield — автопауза</b>\n\n"
+                f"Аккаунт <b>{name}</b> поставлен на паузу.\n\n"
+                f"📊 Risk score: <b>{decision.risk_score:.0%}</b>\n"
+                f"⚠️ Вероятность бана: <b>{decision.ban_probability:.0%}</b>\n"
+                f"⏸ Пауза на: <b>{cfg.cool_duration_hours}ч</b>\n\n"
+                f"<i>{decision.note}</i>"
+            )
+        else:
+            text = (
+                "🛡 <b>Account Shield: опасный аккаунт НЕ остановлен</b>\n\n"
+                f"Аккаунт <b>{name}</b> признан опасным, но запись паузы не "
+                "прошла — он остаётся активным и может уйти в следующую "
+                "операцию.\n\n"
+                f"📊 Risk score: <b>{decision.risk_score:.0%}</b>\n"
+                f"⚠️ Вероятность бана: <b>{decision.ban_probability:.0%}</b>\n\n"
+                "Отключите аккаунт вручную в списке аккаунтов.\n\n"
+                f"<i>{decision.note}</i>"
+            )
         await bot.send_message(owner_id, text, parse_mode="HTML")
     except Exception as exc:
         log.debug("account_shield._notify_pause owner=%d: %s", owner_id, exc)
