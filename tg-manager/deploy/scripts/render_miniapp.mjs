@@ -871,12 +871,38 @@ if (sweepMode) {
     if (process.env.MINIAPP_SHOT_DIR) {
       await page.screenshot({ path: path.join(process.env.MINIAPP_SHOT_DIR, `tab_${t}.png`) });
     }
+    // Набор мерок здесь был ТРИ из шести, а вкладки — пять самых частых
+    // экранов владельца: главный, аккаунты, боты, рассылки, ещё. Закрытый
+    // текст, упор прокрутки, машинный текст, английский и немота на них не
+    // мерились вовсе. Разъехалось оттого, что код прохода скопирован, а не
+    // общий; равенство наборов теперь держит проверка
+    // tests/test_the_layout_check_can_actually_fail.py.
     const m = await page.evaluate((src) => new Function('return (' + src + ')()')(), CLIPPED.toString());
+    const se = await page.evaluate((src) => new Function('return (' + src + ')()')(), SCROLL_END.toString());
+    await page.waitForTimeout(80);
+    const cv = se.atEnd
+      ? await page.evaluate((src) => new Function('return (' + src + ')()')(), COVERED.toString())
+      : { n: 0, worst: [], stuck: true };
+    if (cv.stuck) scrollStuck.push('вкладка ' + t + ' [' + (se.stuck || []).join(' ; ') + ']');
     const problems = [];
     if (live.length) problems.push(...live.slice(0, 2));
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
+    if (cv.n) problems.push(`ЗАКРЫТО ${cv.n}: ` + cv.worst.join(' ; '));
     const sel = await coveredWithSelection();
     if (sel) problems.push(sel);
+    const gb = await page.evaluate((src) => new Function('return (' + src + ')()')(), GIBBERISH.toString());
+    if (gb.hits && gb.hits.length) hints.push('вкладка ' + t + ' | ' + gb.hits.slice(0, 2).join(' | '));
+    if (failEnMode) {
+      const en = await page.evaluate((src) => new Function('return (' + src + ')()')(), ENGLISH.toString());
+      if (en.toast) enToastSeen++;
+      if (en.hits && en.hits.length) {
+        problems.push(`АНГЛИЙСКИЙ ${en.hits.length}: ` + en.hits.slice(0, 2).join(' ; '));
+      }
+    }
+    if (emptyMode) {
+      const mu = await page.evaluate((src) => new Function('return (' + src + ')()')(), MUTE.toString());
+      if (mu.id && mu.len === 0) problems.push(`НЕМОЙ ЭКРАН ${mu.id}: ни одного знака`);
+    }
     if (problems.length) report.push('вкладка ' + t + ' | ' + problems.join(' | '));
   }
 

@@ -547,3 +547,58 @@ def test_the_machine_text_measure_can_look_into_a_modal():
     assert ".mbg.show" in m.group(0), (
         "мерка машинного текста снова смотрит только на экран — окна мимо"
     )
+
+
+def _pass_body(head: str) -> str:
+    """Тело цикла прохода: от открывающей скобки ТЕЛА до парной закрывающей.
+
+    Счёт скобок нельзя начинать с начала строки `for`: в заголовке
+    `for (const { name: fn, ... } of fns)` своя пара фигурных скобок, и счётчик
+    закрывался на ней. Тело тогда оказывалось пустым, мерок в нём не было
+    видно ни одной — и проверка на равенство наборов становилась
+    непадающей. Поймано контролем: выключил мерку, а тест остался зелёным.
+    Поэтому отсчёт идёт от скобки, которая открывает ТЕЛО, то есть от первой
+    `{` после закрывающей `)` заголовка.
+    """
+    src = _src()
+    i = src.index(head)
+    close = src.index(")", src.index("(", i))
+    while src[close] != "{":
+        close = src.index("{", close)
+    depth, j = 0, close
+    while j < len(src):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    return src[close : j + 1]
+
+
+_MEASURES = ("CLIPPED", "COVERED", "SCROLL_END", "GIBBERISH", "ENGLISH", "MUTE")
+
+
+def test_the_screen_and_the_tab_pass_measure_the_same_things():
+    """Вкладки — пять самых частых экранов, и мерок у них было три из шести.
+
+    Проход по открывашкам мерил обрезку, закрытый текст, упор прокрутки,
+    машинный текст, английский и немоту; проход по вкладкам — обрезку, ошибки
+    страницы и полосу выделения. Разъехалось оттого, что код прохода
+    скопирован. Равенство наборов и держит эту проверку, а не чью-то память.
+    """
+    opener = _pass_body("for (const { name: fn, args, want, probe } of fns) {")
+    tabs = _pass_body("for (const t of ['home', 'accounts', 'bots', 'broadcasts', 'more']) {")
+    # Знаменатель: если в проходе по экранам мерок не видно, значит сломан
+    # разбор, а не код, — и «у вкладок всё есть» ничего не означает.
+    have = [n for n in _MEASURES if f"{n}.toString()" in opener]
+    assert len(have) == len(_MEASURES), (
+        f"в проходе по экранам видно только {have} из {list(_MEASURES)} — "
+        "сломан разбор тела прохода, а не обход"
+    )
+    missing = [n for n in _MEASURES if f"{n}.toString()" not in tabs]
+    assert not missing, (
+        f"у вкладок снова нет мерок, которые есть у экранов: {missing}"
+    )
+    assert "coveredWithSelection()" in tabs, "полоса выделения на вкладках не мерится"
