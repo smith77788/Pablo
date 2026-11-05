@@ -283,8 +283,6 @@ def test_two_simultaneous_crm_repeats_apply_once(pool):
     """ЧТО БЫЛО: CRM, не дождавшись ответа, шлёт тот же вебхук ещё раз —
     оба запроса читали старую связь до записи друг друга, и смена этапа
     ложилась в историю контакта дважды. Теперь применяет только первый."""
-    import asyncio
-
     from services import crm_connectors as crm
     from services.contacts_hub import crm_engine
     amo = FakeAmo()
