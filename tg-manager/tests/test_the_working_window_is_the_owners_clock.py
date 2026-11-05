@@ -167,19 +167,33 @@ def test_the_window_no_longer_reads_the_utc_hour():
 
     `datetime.utcnow()` здесь не просто устаревший вызов — это другой часовой
     пояс, то есть другое поведение продукта.
+
+    Оба утверждения — по дереву. Первое потому, что в докстрингах этот вызов
+    УПОМИНАЕТСЯ (им и объясняется, что было), и проверка по подстроке ловила бы
+    объяснение. Второе потому, что окно фиксированной длины вокруг найденного
+    комментария промахивается от любой правки выше по файлу, и «искомого нет»
+    становится правдой само собой — защита выключается молча. Границы берём у
+    функции.
     """
-    src = (ROOT / "services" / "auto_responder.py").read_text(encoding="utf-8")
-    i = src.index("# Auto-replies (правила отсортированы")
-    body = src[i:i + 1500]
-    assert "utcnow" not in body, "рабочее окно снова считается по UTC"
-    assert "_owner_hour(" in body, "рабочее окно считается не по часам владельца"
-    # По дереву, а не по тексту: в докстрингах этот вызов УПОМИНАЕТСЯ (им и
-    # объясняется, что было), и проверка по подстроке ловила бы объяснение.
     import ast
 
-    bad = [n for n in ast.walk(ast.parse(src))
+    src = (ROOT / "services" / "auto_responder.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    bad = [n for n in ast.walk(tree)
            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
            and n.func.attr == "utcnow"]
     assert not bad, (
         f"в автоответчике снова появилось наивное время, строки: "
         f"{[n.lineno for n in bad]}")
+
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and n.name == "_process_bot"), None)
+    assert fn is not None, "в автоответчике не стало _process_bot"
+    called = {n.func.id for n in ast.walk(fn)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "_owner_hour" in called, (
+        "разбор правил больше не спрашивает час владельца")
+    assert "_within_active_window" in called, (
+        "рабочее окно правила больше не проверяется")
