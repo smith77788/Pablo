@@ -4033,6 +4033,108 @@ def _counter_total(counters: dict, name: str) -> float:
         if k == name or k.startswith(name + "{")))
 
 
+# За сколько дней до истечения последней живой сессии админки предупредить,
+# что защитные тревоги станут немыми. Неделя — чтобы хватило и на отпуск.
+_ALERT_CHANNEL_WARN_DAYS = 7
+# Новость одна и та же, а сторож ходит раз в час: не чаще раза в сутки.
+_ALERT_CHANNEL_REPEAT_S = 24 * 3600
+
+
+async def _watchdog_alert_channel_expiry(pool: asyncpg.Pool, bot) -> None:
+    """Предупредить о скорой немоте защитных тревог, пока это ещё можно доставить.
+
+    ПОЧЕМУ ЭТО ВООБЩЕ НУЖНО. Весь слой защитных отказов кончается одним
+    получателем: `platform_alert_recipients` = `ADMIN_IDS` ∪ живые сессии
+    админки. В обычной установке `ADMIN_IDS` не задан (так и написано в
+    докстринге этой двери), то есть единственный получатель — сессия админки.
+    А она живёт `ADMIN_SESSION_TTL_HOURS` (по умолчанию 30 дней) с последнего
+    входа секретной фразой и истекает САМА.
+
+    В день истечения немыми становятся сразу все защитные тревоги: сбой
+    предзаписи дедупа инвайта, не поставленная пауза опасного аккаунта,
+    отменённая защитная запись. Счётчик
+    `infragram_protective_alerts_no_recipient_total` это зафиксирует, но
+    прочитать его будет некому — ровно потому, что читателя не осталось.
+
+    Значит сказать об этом можно только ЗАРАНЕЕ, пока доступ ещё жив и
+    сообщение ещё доставляется. Это и есть единственное окно, и сторож смотрит
+    в него: постоянного получателя нет, последняя сессия истекает на днях —
+    один раз в сутки говорим об этом и даём оба выхода.
+
+    Молчит, когда предупреждать не о чем: есть постоянный получатель (канал не
+    истекает), до истечения ещё далеко, или получателей уже нет вовсе — это
+    случай счётчика выше, а не этого сторожа.
+    """
+    if bot is None:
+        return
+    try:
+        from bot.handlers.admin import live_session_admins
+        from bot.utils.subscription import platform_alert_recipients
+
+        recipients = set(await platform_alert_recipients(pool) or ())
+        sessions = set(await live_session_admins(pool) or ())
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: получатели защитных тревог не прочитались: {e}")
+        return
+    if not recipients:
+        # Сообщать уже некому: об этом говорит
+        # infragram_protective_alerts_no_recipient_total, а не этот сторож.
+        return
+    if recipients - sessions:
+        # Есть получатель, который не истекает (ADMIN_IDS) — канал надёжен.
+        return
+    row = await _safe_fetchrow(
+        pool,
+        "SELECT MAX(expires_at) AS last FROM platform_admin_sessions "
+        "WHERE expires_at > now()",
+        log_ctx="[alert_channel_expiry]")
+    last = row["last"] if row is not None else None
+    if last is None:
+        return
+    import datetime as _dt_ace
+
+    try:
+        left_s = (last - _dt_ace.datetime.now(last.tzinfo)).total_seconds()
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: срок сессии админки не разобрался: {e}")
+        return
+    if left_s > _ALERT_CHANNEL_WARN_DAYS * 86400:
+        return
+    _days = int(left_s // 86400)
+    _when = f"через {_days} дн." if _days >= 1 else "менее чем через сутки"
+    text = (
+        "⚠️ <b>Защитные тревоги скоро станут немыми</b>\n\n"
+        f"Доступ в админку истекает {_when}, и других получателей нет: "
+        "<code>ADMIN_IDS</code> не задан. После истечения сообщения о сбоях "
+        "защиты — незаписанный дедуп инвайта, не поставленная пауза опасного "
+        "аккаунта и остальные — уйдут в пустоту, и узнать о них будет негде."
+        "\n\nЧто сделать, любое из двух:\n"
+        "• снова войти в админку секретной фразой — доступ продлится;\n"
+        "• задать <code>ADMIN_IDS</code> своим Telegram-id в переменных "
+        "окружения — тогда тревоги будут уходить всегда, независимо от входов."
+    )
+    for aid in sorted(int(a) for a in recipients):
+        try:
+            if not await db.notify_dedup_ok(
+                    pool, int(aid), "alert-channel-expiry", _ALERT_CHANNEL_REPEAT_S):
+                continue
+        except Exception:
+            # Fail-open: сбой анти-повтора не повод молчать о скорой немоте.
+            pass
+        try:
+            await bot.send_message(int(aid), text, parse_mode="HTML")
+            _reliability_metric("infragram_alert_channel_expiry_warnings_total")
+        except Exception:
+            log_exc_swallow(
+                log, f"op_worker: предупреждение о немоте тревог не ушло {aid}")
+            # Окно анти-повтора уже занято — вернуть, иначе следующая попытка
+            # будет только через сутки.
+            try:
+                await db.notify_dedup_forget(pool, int(aid), "alert-channel-expiry")
+            except Exception:
+                pass
+
+
 async def _watchdog_protective_failures(
     pool: asyncpg.Pool, bot: Bot, seen: dict,
 ) -> None:
@@ -4248,6 +4350,12 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             if _watchdog_tick % 30 == 0:
                 await _maintenance_step(
                     "watchdog_alerts", lambda: _watchdog_alerts(pool, bot))
+            # Раз в ~час: предупредить, пока предупреждать ещё есть кому, что
+            # получатель защитных тревог скоро истечёт (см. докстринг сторожа).
+            if _watchdog_tick % 360 == 0:
+                await _maintenance_step(
+                    "watchdog_alert_channel",
+                    lambda: _watchdog_alert_channel_expiry(pool, bot))
                 # Там же — расписания, оборвавшиеся на закрытии круга: круг
                 # закрыт, следующий не поставлен, и закрытую операцию больше
                 # никто не смотрит. Без этого автопостинг умирал от одного
