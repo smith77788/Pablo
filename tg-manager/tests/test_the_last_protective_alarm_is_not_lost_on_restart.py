@@ -167,3 +167,89 @@ def test_the_entry_point_passes_the_bot():
         "main.py зовёт остановку воркера без бота — последние защитные тревоги "
         "отправлять будет нечем"
     )
+
+
+# ── Отмена — ещё не остановка: уборке нужен миг и живой пул ──────────────────
+
+def test_a_cancelled_task_gets_a_moment_to_write_its_marks(ow, monkeypatch):
+    """`cancel()` только СТАВИТ отмену в очередь цикла.
+
+    Без паузы после отмены задача не получала управления ни на миг, то есть её
+    `finally` — отметка в журнале целей, запись исхода, снятие предзаписи
+    инвайта — выполнялся не здесь, а позже: когда `asyncio.run` в самом конце
+    гасит оставшиеся задачи. А `main` к тому моменту уже закрыл пул, то есть
+    уборка упиралась в закрытое соединение. Потерянная отметка «цель сделана»
+    равна повторному РЕАЛЬНОМУ действию на следующем прогоне, и прогон этот
+    гарантирован: остановка сама возвращает операции в очередь.
+
+    СНИМОК БЕРЁМ ВНУТРИ ЦИКЛА, и это не придирка. Проверять список ПОСЛЕ
+    `asyncio.run` бессмысленно: его собственная уборка гасит задачу и
+    `finally` успевает дописать отметку — тест прошёл бы и без фикса. Первая
+    версия этой проверки именно так себя и покрасила.
+    """
+    async def _release(ids):
+        return None
+
+    monkeypatch.setattr(ow, "_db_release", _release)
+    wrote: list = []
+
+    async def _worker():
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            # Уборка исполнителя: ровно то, что терялось.
+            wrote.append("mark")
+
+    async def _go():
+        task = asyncio.create_task(_worker())
+        await asyncio.sleep(0)
+        ow._active_op_tasks.add(task)
+        ow._active_op_ids.add(21)
+        await ow.shutdown(_Pool(), grace_s=0.0, bot=None)
+        # Снимок ДО выхода из цикла — см. докстринг.
+        return list(wrote)
+
+    seen = asyncio.run(_go())
+
+    assert seen == ["mark"], (
+        "отменённая задача не успела дойти до своей уборки — отметки журнала "
+        "теряются на каждом деплое"
+    )
+
+
+def test_the_moment_is_bounded(ow, monkeypatch):
+    """Рамка обязательна: платформа убивает контейнер по своему таймауту."""
+    async def _release(ids):
+        return None
+
+    monkeypatch.setattr(ow, "_db_release", _release)
+    monkeypatch.setattr(ow, "_SHUTDOWN_CANCEL_GRACE_S", 0.2)
+    hold = [True]
+
+    async def _stubborn():
+        while True:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                if not hold[0]:
+                    raise
+
+    async def _go():
+        loop = asyncio.get_running_loop()
+        task = asyncio.create_task(_stubborn())
+        await asyncio.sleep(0)
+        ow._active_op_tasks.add(task)
+        ow._active_op_ids.add(22)
+        started = loop.time()
+        await ow.shutdown(_Pool(), grace_s=0.0, bot=None)
+        spent = loop.time() - started
+        hold[0] = False
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        return spent
+
+    spent = asyncio.run(_go())
+    assert spent < 5.0, f"остановка ждала не сворачивающуюся задачу {spent:.1f}с"
