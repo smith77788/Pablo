@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 
 from services.logger import log_exc_swallow
 
@@ -64,6 +65,13 @@ _EXEC_LEASE_TTL_S = 90
 # правильный ответ на сбой — повторить последнюю известную правду, а не
 # выдумать её.
 _lease_held_by: "str | None" = None
+# Когда (time.monotonic) аренду в последний раз ДОСТОВЕРНО продлили. Сбой
+# запроса держит fail-open держателя только пока срок в базе ещё не мог
+# истечь: дальше аренду законно забирает другой процесс, и держатель, всё ещё
+# считающий себя держателем, работал бы вторым исполнителем.
+_lease_confirmed_at: float = 0.0
+# Запас до истечения срока в базе: часы базы и процесса, задержка запроса.
+_EXEC_LEASE_MARGIN_S = 15
 
 
 def _multi_allowed() -> bool:
@@ -146,7 +154,7 @@ async def acquire_executor_lease(pool, worker_id: str, role: str = "all") -> boo
 
     Сбой в любом случае не молчит: log.warning и счётчик.
     """
-    global _lease_held_by
+    global _lease_held_by, _lease_confirmed_at
     try:
         row = await pool.fetchrow(
             """INSERT INTO executor_lease(id, worker_id, role, expires_at)
@@ -164,12 +172,25 @@ async def acquire_executor_lease(pool, worker_id: str, role: str = "all") -> boo
             worker_id, role, float(_EXEC_LEASE_TTL_S))
         ours = bool(row and row["worker_id"] == worker_id)
         _lease_held_by = worker_id if ours else None
+        if ours:
+            _lease_confirmed_at = time.monotonic()
         return ours
     except Exception:
         log_exc_swallow(log, "replica_guard.acquire_executor_lease")
         _metric("infragram_executor_lease_errors_total")
         if _lease_held_by == worker_id:
-            return True
+            if (time.monotonic() - _lease_confirmed_at
+                    < _EXEC_LEASE_TTL_S - _EXEC_LEASE_MARGIN_S):
+                return True
+            # Продлить не удаётся так долго, что срок в базе мог истечь и
+            # аренду мог взять другой процесс: дальше работать «держателем»
+            # значит быть вторым исполнителем. Отпускаем до следующего
+            # достоверного ответа.
+            _lease_held_by = None
+            log.warning(
+                "replica_guard: аренду исполнителя не продлить дольше её срока — "
+                "очередь отпускаем, пока база не ответит.")
+            return False
         log.warning(
             "replica_guard: аренду исполнителя прочитать не удалось, а этот "
             "процесс её не держит — очередь не берём до следующего круга. Так "

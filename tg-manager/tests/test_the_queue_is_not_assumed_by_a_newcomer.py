@@ -62,9 +62,11 @@ def rg():
     # Вера процесса в свою аренду — состояние модуля; тесты не должны
     # протекать друг в друга.
     saved = getattr(replica_guard, "_lease_held_by", None)
+    saved_at = getattr(replica_guard, "_lease_confirmed_at", 0.0)
     yield replica_guard
     if hasattr(replica_guard, "_lease_held_by"):
         replica_guard._lease_held_by = saved
+    replica_guard._lease_confirmed_at = saved_at
 
 
 def _counter(name: str) -> float:
@@ -164,3 +166,24 @@ def test_the_startup_cleanup_stays_behind_the_gate():
         "уборка зависших операций стоит ПЕРЕД гейтом аренды: процесс сбрасывает "
         "чужие живые операции в очередь, ещё не узнав, его ли это очередь"
     )
+
+
+def test_the_holder_lets_go_once_the_lease_could_have_expired(rg, monkeypatch):
+    """ЧТО БЫЛО: держатель на сбоях запроса считал себя держателем сколько
+    угодно. База недоступна этому процессу дольше срока аренды (90 с) — срок
+    в базе истекает, аренду законно берёт другой процесс, а этот продолжает
+    разбирать очередь: два исполнителя на одни операции. Теперь fail-open
+    держателя живёт, только пока срок в базе ещё не мог истечь."""
+    now = [1000.0]
+    monkeypatch.setattr(rg.time, "monotonic", lambda: now[0])
+    pool = _Pool([_Row(worker_id="w-1"), RuntimeError("блип"),
+                  RuntimeError("всё ещё"), _Row(worker_id="w-1")])
+    assert asyncio.run(rg.acquire_executor_lease(pool, "w-1", "all")) is True
+    now[0] += 20
+    assert asyncio.run(rg.acquire_executor_lease(pool, "w-1", "all")) is True, \
+        "короткий блип не должен останавливать держателя"
+    now[0] += rg._EXEC_LEASE_TTL_S
+    assert asyncio.run(rg.acquire_executor_lease(pool, "w-1", "all")) is False, \
+        "срок аренды в базе уже мог истечь — работать дальше нельзя"
+    # База ответила и аренда снова наша — работа продолжается.
+    assert asyncio.run(rg.acquire_executor_lease(pool, "w-1", "all")) is True
