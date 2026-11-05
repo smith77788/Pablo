@@ -2602,30 +2602,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Экосистемы</div>
         <div class="mgmt-tile-val" id="m-eco-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openTopology()">
-        <div class="mgmt-tile-ico">🗺</div>
-        <div class="mgmt-tile-lbl">Топология</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openInfra()">
+      <!-- «Инфра», «Топология» и «Ноды» — три плитки про устройство флота: модуль, три вкладки -->
+      <div class="mgmt-tile" onclick="openInfraHub()">
         <div class="mgmt-tile-ico">⚡</div>
         <div class="mgmt-tile-lbl">Инфра</div>
         <div class="mgmt-tile-val" id="m-infra-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openNodes()">
-        <div class="mgmt-tile-ico">🖥</div>
-        <div class="mgmt-tile-lbl">Ноды</div>
-        <div class="mgmt-tile-val" id="m-nodes-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openAiMemory()">
+      <!-- «ИИ Память» и «Семантическая память» были двумя плитками одной темы: модуль, две вкладки -->
+      <div class="mgmt-tile" onclick="openMemoryHub()">
         <div class="mgmt-tile-ico">🧠</div>
         <div class="mgmt-tile-lbl">ИИ Память</div>
         <div class="mgmt-tile-val" id="m-aimem-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openSemanticMemory()">
-        <div class="mgmt-tile-ico">🧬</div>
-        <div class="mgmt-tile-lbl">Семантическая память</div>
-        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openNetworkBuilder()">
         <div class="mgmt-tile-ico">🕸️</div>
@@ -2642,15 +2629,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Сеть контента</div>
         <div class="mgmt-tile-val" id="m-mesh-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openGlobalPresence()">
+      <!-- «Гео-сеть: создать» и «Мультигео» — присутствие по странам и языкам: модуль, две вкладки -->
+      <div class="mgmt-tile" onclick="openGeoHub()">
         <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Гео-сеть: создать</div>
+        <div class="mgmt-tile-lbl">Гео-сеть</div>
         <div class="mgmt-tile-val" id="m-gp-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openMultigeo()">
-        <div class="mgmt-tile-ico">🌍</div>
-        <div class="mgmt-tile-lbl">Мультигео</div>
-        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openCloneAdapt()">
         <div class="mgmt-tile-ico">🔄</div>
@@ -2956,9 +2939,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ GLOBAL PRESENCE ══════════════════════ -->
 <div class="screen" id="s-globalpresence">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🌍 Гео-сеть</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openGpCreateModal()">+ Создать</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="geo" data-tab="cities" role="tablist" aria-label="Вкладки модуля «Гео-сеть»"></div>
   <div class="sub-sb">
     <div class="row tap" onclick="openPresenceMap()" style="background:var(--bg2);border-radius:12px;margin-bottom:8px">
       <div class="row-ico" style="background:var(--bg-blue-16)">🗺️</div>
@@ -3330,9 +3314,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-multigeo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🌍 Мультигео</div>
+    <div class="hdr-title">🌍 Гео-сеть</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openMultigeoSetModal()">✏️ Изменить</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="geo" data-tab="langs" role="tablist" aria-label="Вкладки модуля «Гео-сеть»"></div>
   <div class="sub-sb">
     <div class="sec">Выберите бота</div>
     <div class="lst" style="margin:0 16px 8px;padding:8px">
@@ -3939,7 +3924,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ SEMANTIC MEMORY ══════════════════════ -->
 <div class="screen" id="s-semantic">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🧬 Семантическая память</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🧠 ИИ Память</div></div>
+  <div class="filter-chips mod-tabs" data-module="memory" data-tab="facts" role="tablist" aria-label="Вкладки модуля «ИИ Память»"></div>
   <div class="sub-sb">
     <div class="sec">Память по ботам</div>
     <div class="lst" id="semList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4929,8 +4915,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-topology">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🗺 Карта топологии</div>
+    <div class="hdr-title">⚡ Инфраструктура</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="infra" data-tab="topology" role="tablist" aria-label="Вкладки модуля «Инфраструктура»"></div>
   <div class="sub-sb">
     <div id="topoStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div id="topoBody"></div>
@@ -4943,6 +4930,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚡ Инфраструктура</div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="infra" data-tab="pools" role="tablist" aria-label="Вкладки модуля «Инфраструктура»"></div>
   <div class="sub-sb">
     <div id="infraStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Пулы аккаунтов</div>
@@ -5371,6 +5359,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">🧠 ИИ Память</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAiMemoryModal()">+ Запись</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="memory" data-tab="notes" role="tablist" aria-label="Вкладки модуля «ИИ Память»"></div>
   <div class="sub-sb">
     <div class="lst" id="aiMemoryList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -5380,11 +5369,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-nodes">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🖥 Ноды</div>
+    <div class="hdr-title">⚡ Инфраструктура</div>
     <div class="hdr-meta">
       <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNodeModal()">+ Добавить</button>
     </div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="infra" data-tab="nodes" role="tablist" aria-label="Вкладки модуля «Инфраструктура»"></div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
       Ноды — форум-группы Telegram, через которые бот управляет ресурсами.<br>
@@ -9028,7 +9018,6 @@ const MODULE_KEYWORDS = {
   'Интеграции':'api ключи ключ api-ключ токен вебхук webhook sheets amocrm bitrix',
   'Сеть ботов':'задачи между ботами связки бот каналы пакет mesh рой кластер',
   
-  'Семантическая память':'факты профиль собеседника память диалог',
   'Реферальная программа':'реферал приглашение код партнёрка',
   'Рабочие пространства':'воркспейс команда доступ участники контур',
   'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
@@ -9036,6 +9025,9 @@ const MODULE_KEYWORDS = {
   
   'Здоровье':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс дэшборд здоровья здоровье инфры инфраструктура диагностика связность оповещения',
   'Аккаунты':'сессия вход логин прокси ip номер телефон',
+  'ИИ Память':'семантическая память факты профиль собеседника память диалог записи',
+  'Инфра':'топология карта связей ноды узлы форум-группы пулы аудит инфраструктура',
+  'Гео-сеть':'мультигео гео города страны языки локализация присутствие создать',
   'Массовые жалобы':'strike страйк жалоба репорт снос бан заблокировать report abuse удалить конкурента',
   'Массовый инвайт':'пригласить добавить участников инвайтинг invite',
   'Парсер':'собрать спарсить аудиторию участников подписчиков выгрузить парсинг',
@@ -9129,7 +9121,6 @@ function goTab(tab) {
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
   
-  'Семантическая память':'Факты, которые бот запомнил о собеседниках',
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
   'Шаблоны ассетов':'Заготовки аватара, описания и первого поста',
@@ -9161,8 +9152,8 @@ const MODULE_DESCS = {
   'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов',
   'CRM':'Клиенты, сделки по этапам, воронка денег и когорты','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
   'Аналитика аудитории':'Сегменты, инсайты, активность и ДНК аудитории','Статистика':'Метрики аудитории и операций',
-  'Сценарии':'Сценарии и авто-воронки: бот сам ведёт человека по шагам','Мультигео':'Гео-раскладка присутствия',
-  'Гео-сеть: создать':'Новые каналы, группы и боты сразу по многим городам с местными названиями','Массовые жалобы':'Массовые жалобы по целям (снос ресурсов)','Комплаенс':'Проверка ресурсов на запрещёнку',
+  'Сценарии':'Сценарии и авто-воронки: бот сам ведёт человека по шагам',
+  'Гео-сеть':'Новые каналы, группы и боты по многим городам с местными названиями, и профиль бота на разных языках','Массовые жалобы':'Массовые жалобы по целям (снос ресурсов)','Комплаенс':'Проверка ресурсов на запрещёнку',
   'Прогрев':'Разогрев новых аккаунтов под живое поведение','Очистка':'Чистка аккаунтов: контакты, диалоги','Дубликаты':'Поиск дублей контактов','Конфликты':'Поиск конфликтов данных',
   'Синхронизация':'Синхронизация контактов и данных','Клонер контента':'Копирование постов из источника','Клон и адаптация':'Клон профиля/контента с адаптацией','Сеть контента':'Автоматический репост постов между вашими каналами',
   // Семь «сетей» описывались почти одинаково («Управление сетями ресурсов»,
@@ -9171,11 +9162,9 @@ const MODULE_DESCS = {
   'Экосистемы':'Свои группы аккаунтов, каналов и ботов с оценкой здоровья каждой группы',
   'Сетки':'Конструктор сети каналов и групп по шаблону: узлы, связи, развёртывание одной операцией',
   'Сеть ботов':'Все ваши боты разом: роли, кластеры, рой, задачи между ботами, связки с каналами',
-  'Топология':'Сводка: сколько аккаунтов, каналов и ботов и как они привязаны друг к другу',
   'Граф связей':'Кто с кем связан: аккаунты, каналы, боты',
   'Граф-хаб':'Пересечения аудиторий ваших каналов и ботов',
-  'Ноды':'Форум-группы Telegram, через которые бот управляет вашими ресурсами',
-  'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье',
+  'ИИ Память':'Записи ИИ-памяти по проекту и факты, которые бот запомнил о собеседниках','Нарратив':'ИИ-нарративы и легенды','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Пулы аккаунтов и аудит, сводка связей флота и форум-ноды, через которые бот управляет ресурсами',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов',
   'Профили':'Массовая установка профилей аккаунтов и персоны','Шаблоны':'Шаблоны имён/описаний/контента и варианты текста (спинтакс)',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API, API-ключи и Google Sheets','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
@@ -9539,6 +9528,29 @@ const SCREEN_MODULES = {
       {key:'personas', label:'🎭 Персоны',    sid:'s-personas',      open: () => openPersonas()},
     ],
   },
+  // Лаборатория (03–05.11.2026): пары плиток про одно и то же сведены в модули.
+  memory: {
+    title: '🧠 ИИ Память',
+    tabs: [
+      {key:'notes', label:'📝 Записи',          sid:'s-aimemory', open: () => openAiMemory()},
+      {key:'facts', label:'🧬 О собеседниках',  sid:'s-semantic', open: () => openSemanticMemory()},
+    ],
+  },
+  infra: {
+    title: '⚡ Инфраструктура',
+    tabs: [
+      {key:'pools',    label:'⚡ Пулы и аудит', sid:'s-infra',    open: () => openInfra()},
+      {key:'topology', label:'🗺 Топология',    sid:'s-topology', open: () => openTopology()},
+      {key:'nodes',    label:'🖥 Ноды',         sid:'s-nodes',    open: () => openNodes()},
+    ],
+  },
+  geo: {
+    title: '🌍 Гео-сеть',
+    tabs: [
+      {key:'cities', label:'🏙 По городам',  sid:'s-globalpresence', open: () => openGlobalPresence()},
+      {key:'langs',  label:'🗣 Языки бота',  sid:'s-multigeo',       open: () => openMultigeo()},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9569,6 +9581,9 @@ function openSearchHub(tab) { modTab('search', tab || 'bots'); }
 function openFactory(tab) { modTab('factory', tab || 'bots'); }
 function openScenarios(tab) { modTab('scenarios', tab || 'all'); }
 function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
+function openMemoryHub(tab) { modTab('memory', tab || 'notes'); }
+function openInfraHub(tab) { modTab('infra', tab || 'pools'); }
+function openGeoHub(tab) { modTab('geo', tab || 'cities'); }
 function openGrowthModule(tab) { modTab('growth', tab || 'plan'); }
 function openIntegrationsHub(tab) { modTab('integrations', tab || 'connect'); }
 function openProfilesHub(tab) { modTab('profiles', tab || 'set'); }

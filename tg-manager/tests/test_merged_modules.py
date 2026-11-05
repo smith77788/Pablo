@@ -200,3 +200,28 @@ def test_texts_do_not_send_people_to_removed_tiles():
     for stale in ("Добавьте в разделе Позиции", "A/B тесты — в разделе Эксперименты",
                   '<div class="hdr-title">🚀 Единая кампания</div>'):
         assert stale not in HTML, stale
+
+
+def test_lab_memory_is_one_module():
+    """«ИИ Память» и «Семантическая память» — две плитки про память ИИ."""
+    _assert_module("memory", "🧠 ИИ Память", "ИИ Память",
+                   {"notes": ("s-aimemory", "openAiMemory"),
+                    "facts": ("s-semantic", "openSemanticMemory")},
+                   gone=("Семантическая память",))
+
+
+def test_lab_infra_is_one_module():
+    """«Инфра», «Топология» и «Ноды» — про то, как устроен флот."""
+    _assert_module("infra", "⚡ Инфраструктура", "Инфра",
+                   {"pools": ("s-infra", "openInfra"),
+                    "topology": ("s-topology", "openTopology"),
+                    "nodes": ("s-nodes", "openNodes")},
+                   gone=("Топология", "Ноды"))
+
+
+def test_lab_geo_is_one_module():
+    """«Гео-сеть: создать» и «Мультигео» — присутствие по городам и языкам."""
+    _assert_module("geo", "🌍 Гео-сеть", "Гео-сеть",
+                   {"cities": ("s-globalpresence", "openGlobalPresence"),
+                    "langs": ("s-multigeo", "openMultigeo")},
+                   gone=("Гео-сеть: создать", "Мультигео"))
