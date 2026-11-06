@@ -52,7 +52,7 @@ async function openBotFactory() {
     `).join('') : empty('🤖','Нет ботов','Добавьте первый бот'));
   } catch(e) {
     txt('botFactoryStats','');
-    txt('botFactoryRecent', empty('⚠️','Ошибка',errRu(e)));
+    txt('botFactoryRecent', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openBotFactory')}));
   }
 }
 

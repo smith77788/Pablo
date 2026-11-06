@@ -286,7 +286,7 @@ async function openAccount(accId) {
     window._accDetail = d.account || {};
     txt('acd-body', buildAccDetail(d));
   } catch(e) {
-    txt('acd-body', errHtml(errRu(e)));
+    txt('acd-body', errHtml(errRu(e), retryCall('openAccount', accId)));
   }
 }
 

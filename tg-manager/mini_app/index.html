@@ -8398,6 +8398,13 @@ function errHtml(msg, retryFn) {
   // разобрана в empty() чуть ниже; здесь запасной выход выбирается по тому же
   // правилу: на корневой вкладке — перезагрузка вкладки (reloadView), внутри
   // экрана — возврат назад, и только если возвращаться действительно есть куда.
+  //
+  // 06.11.2026: запасного выхода больше никому не хватает — повтор передают
+  // ВСЕ вызовы (сторож: tests/test_an_error_block_can_be_retried.py).
+  // «Назад» выбрасывало экран целиком, хотя человек хотел именно его, просто
+  // ответ не пришёл; аргументы для повтора лежали рядом, в той же функции, и
+  // собираются через retryCall(). Ветки ниже остаются как страховка на случай
+  // нового вызова без повтора — тупика не будет и у него.
   let btn = '';
   if (retryFn) {
     btn = `<button class="err-retry" onclick="${retryFn}">↺ Повторить</button>`;
@@ -11345,7 +11352,7 @@ async function openRemovedChannels() {
       return `<div class="li" style="cursor:default"><div class="li-body"><div class="li-name">${esc(name)}</div>${why}${hint}</div>
         <button class="btn btn-s" style="padding:6px 10px;min-width:0;font-size:12px" onclick="restoreRemovedChannel(${c.channel_id}, this)">↩️ Вернуть</button></div>`;
     }).join('');
-  } catch(e) { box.innerHTML = errHtml(errRu(e)); }
+  } catch(e) { box.innerHTML = errHtml(errRu(e), retryCall('openRemovedChannels')); }
 }
 
 async function restoreRemovedChannel(chId, el) {
@@ -12758,7 +12765,7 @@ async function openChannel(chId) {
     txt('chd-body', buildChDetail(d));
     loadChAutoposts(chId, 'chdAutoposts');  // screens/channel_manage.js
   } catch(e) {
-    txt('chd-body', errHtml(errRu(e)));
+    txt('chd-body', errHtml(errRu(e), retryCall('openChannel', chId)));
   }
 }
 
@@ -13775,7 +13782,7 @@ async function openOpDetail(opId) {
     }
     txt('opdetBody', html);
     if (OPLOG_ROWS.length) renderOpLog();
-  } catch(e) { txt('opdetBody', errHtml(errRu(e))); }
+  } catch(e) { txt('opdetBody', errHtml(errRu(e), retryCall('openOpDetail', opId))); }
 }
 
 // ── Лог операции: кто именно и почему ─────────────────────────────────────
@@ -14203,7 +14210,7 @@ async function openFunnelDetail(funnelId, funnelName) {
     const d = await api('/api/miniapp/funnel/'+funnelId+'/steps');
     txt('fd-body', buildFunnelDetail(d));
   } catch(e) {
-    txt('fd-body', errHtml(errRu(e)));
+    txt('fd-body', errHtml(errRu(e), retryCall('openFunnelDetail', funnelId, funnelName)));
   }
 }
 
@@ -14815,7 +14822,7 @@ async function loadSchedules() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('schList', errHtml(errRu(e)));
+    txt('schList', errHtml(errRu(e), retryCall('loadSchedules')));
   }
 }
 
@@ -17378,7 +17385,7 @@ async function openTopology() {
     `);
   } catch(e) {
     txt('topoStats','');
-    txt('topoBody', empty('⚠️','Ошибка',errRu(e)));
+    txt('topoBody', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openTopology')}));
   }
 }
 
@@ -17709,7 +17716,7 @@ async function openNewUsers(keep) {
         ${u.bot_id?'<div class="row-right"><span class="chev">›</span></div>':''}
       </div>`;
     }).join('') + moreBtn(us.length, nuTotal, 'openNewUsersMore()'));
-  } catch(e) { txt('newUsersList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('newUsersList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openNewUsers', keep)})); }
   // Проверяем доступ к ленте платформы (только админ) — показываем вкладку, если есть
   try {
     const p = await api('/api/miniapp/platform_users');
@@ -17746,7 +17753,7 @@ async function loadPlatformUsers() {
       </div>`;
     }).join('');
   } catch(e) {
-    listEl.innerHTML = empty('⚠️','Ошибка',errRu(e));
+    listEl.innerHTML = empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadPlatformUsers')});
   }
 }
 
@@ -17872,7 +17879,7 @@ async function openGrowthHub() {
       </div>`;
     }).join('') : empty('📡','Нет каналов','Создайте канал в фабрике — прирост появится здесь'));
   } catch(e) {
-    txt('growthHubTools', empty('⚠️','Ошибка',errRu(e)||'Не удалось загрузить'));
+    txt('growthHubTools', empty('⚠️','Ошибка',errRu(e)||'Не удалось загрузить', {label:'↺ Повторить',fn:retryCall('openGrowthHub')}));
   }
 }
 async function runGrowthPlan() {
@@ -17893,7 +17900,7 @@ async function runGrowthPlan() {
     const seo = p.seo?`<div class="row tap" onclick="openSeoObj()"><div class="row-ico" style="background:var(--bg-green-16)">🔎</div><div class="row-body"><div class="row-name">${esc(p.seo.label)}</div><div class="row-val" style="white-space:normal;font-size:12px">${esc(p.seo.why)}</div></div><span class="chev">›</span></div>`:'';
     txt('growthHubPlan', verdict + steps + seo);
   } catch(e) {
-    txt('growthHubPlan', empty('⚠️','Ошибка',errRu(e)||'Не удалось рассчитать план'));
+    txt('growthHubPlan', empty('⚠️','Ошибка',errRu(e)||'Не удалось рассчитать план', {label:'↺ Повторить',fn:retryCall('runGrowthPlan')}));
   }
 }
 // ── Growth Agent ─────────────────────────────────────────
@@ -18000,7 +18007,7 @@ async function openSeo() {
       </div>
     `).join('') : empty('🤖','Нет рекомендаций для ботов','Включите авто-переоптимизацию — рекомендации появятся при падении позиций'));
   } catch(e) {
-    txt('seoKeywords', empty('⚠️','Ошибка',errRu(e)));
+    txt('seoKeywords', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openSeo')}));
   }
 }
 // ── A/B результаты рассылки ──────────────────────────────
@@ -18109,7 +18116,7 @@ async function runSeoAnalyze() {
       <div class="row"><div class="row-ico" style="background:${kh[k]?'var(--bg-green-16)':'var(--bg-red-16)'}">${kh[k]?'✅':'❌'}</div><div class="row-body"><div class="row-name" style="font-size:13px">${esc(k)}</div></div></div>`).join('');
     txt('seoResult', h);
   } catch(e) {
-    txt('seoResult', empty('⚠️','Ошибка',errRu(e)||'Не удалось проанализировать'));
+    txt('seoResult', empty('⚠️','Ошибка',errRu(e)||'Не удалось проанализировать', {label:'↺ Повторить',fn:retryCall('runSeoAnalyze')}));
   }
 }
 
@@ -19000,7 +19007,7 @@ async function openContactDetail(id) {
     if (c.telegram_user_id || c.username || (c.phones && c.phones.length)) {
       renderContactInviteLink(id);  // screens/contact_invite_link.js — своя секция
     }
-  } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+  } catch(e) { txt('cdBody', errHtml(errRu(e), retryCall('openContactDetail', id))); }
 }
 
 // Группы ОДНОГО контакта — из его карточки, а не только через выбор в списке.
@@ -19543,7 +19550,7 @@ async function loadEditForm(id) {
       <div style="margin-top:12px"><button class="btn" style="width:100%;background:rgba(248,113,113,.15);color:var(--red)" onclick="deleteContact('${id}', this)">🗑 Удалить контакт</button></div>
     </div>`;
     txt('ceBody', html);
-  } catch(e) { txt('ceBody', errHtml(errRu(e))); }
+  } catch(e) { txt('ceBody', errHtml(errRu(e), retryCall('loadEditForm', id))); }
 }
 
 async function saveContactEdit(id) {
@@ -19615,7 +19622,7 @@ async function openContactTimeline(id) {
     }
     html += '</div>';
     txt('cdBody', html);
-  } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+  } catch(e) { txt('cdBody', errHtml(errRu(e), retryCall('openContactTimeline', id))); }
 }
 
 // Путь клиента — четыре вопроса карточки одной сводкой над лентой: откуда
@@ -19660,7 +19667,7 @@ async function openContactVersions(id) {
     });
     html += '</div>';
     txt('cdBody', html);
-  } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+  } catch(e) { txt('cdBody', errHtml(errRu(e), retryCall('openContactVersions', id))); }
 }
 
 // Откат перезаписывает карточку и отменяется только ещё одним откатом.
@@ -19778,7 +19785,7 @@ async function openContactIdentity(id) {
     });
     html += '</div>';
     txt('cdBody', html);
-  } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+  } catch(e) { txt('cdBody', errHtml(errRu(e), retryCall('openContactIdentity', id))); }
 }
 
 async function openContactCRM(id) {
@@ -19820,7 +19827,7 @@ async function openContactCRM(id) {
       html += `<div style="padding:0 16px 8px;font-size:13px;color:var(--hint)">Пока ничего не отмечено. Звонок, встреча, сообщение — чтобы через месяц помнить, о чём договорились.</div>`;
     }
     txt('cdBody', html);
-  } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+  } catch(e) { txt('cdBody', errHtml(errRu(e), retryCall('openContactCRM', id))); }
 }
 
 async function addCrmTouch(id) {
@@ -19984,7 +19991,7 @@ async function detectDuplicates() {
         <div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="mergeContacts('${dp.contact_a.id}','${dp.contact_b.id}')">Объединить</button></div></div>`;
     });
     txt('dupBody', html);
-  } catch(e) { txt('dupBody', errHtml(errRu(e))); }
+  } catch(e) { txt('dupBody', errHtml(errRu(e), retryCall('detectDuplicates'))); }
 }
 
 async function mergeContacts(primary, secondary) {
@@ -21589,7 +21596,7 @@ async function openPersonas() {
     `).join(''));
   } catch(e) {
     txt('personaStats','');
-    txt('personaList', empty('⚠️','Ошибка',errRu(e)));
+    txt('personaList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openPersonas')}));
   }
 }
 async function togglePersona(id, active) {
@@ -21815,7 +21822,7 @@ async function openAiMemory(keep) {
       </div>
     `).join('') + moreBtn(mems.length, memTotal, 'openAiMemoryMore()'));
   } catch(e) {
-    txt('aiMemoryList', empty('⚠️','Ошибка',errRu(e)));
+    txt('aiMemoryList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openAiMemory', keep)}));
   }
 }
 async function deleteAiMem(id, _el) {
@@ -21853,7 +21860,7 @@ async function openCommunity() {
       <div class="row-body"><div class="row-name">${esc(n.title||('Нода #'+n.id))}</div><div class="row-val">${num(n.channels||0)} каналов · chat ${n.tg_chat_id??'—'}</div></div>
       <span class="chev">›</span>
     </div>`).join(''));
-  } catch(e) { txt('communityList', errHtml(errRu(e))); }
+  } catch(e) { txt('communityList', errHtml(errRu(e), retryCall('openCommunity'))); }
 }
 function openCommunityCreate() {
   ['ccTitle','ccChatId','ccDesc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
@@ -21896,7 +21903,7 @@ async function openCommunityNode(id, title, chatId) {
       <div class="row-ico" style="background:var(--bg-blue-16)">#</div>
       <div class="row-body"><div class="row-name">${esc(c.name||('топик '+c.tg_topic_id))}</div></div>
     </div>`).join('') : empty('#','Каналов нет','Добавьте канал — создастся форум-топик'));
-  } catch(e) { txt('cnodeChannels', errHtml(errRu(e))); }
+  } catch(e) { txt('cnodeChannels', errHtml(errRu(e), retryCall('openCommunityNode', id, title, chatId))); }
 }
 async function addCommunityChannel() {
   if (!_CUR_CNODE) return;
@@ -21961,7 +21968,7 @@ async function openCommunityMembers(id) {
         <div class="row-body"><div class="row-name">${nm}</div><div class="row-val">${rl}</div></div>
       </label>`;
     }).join(''));
-  } catch(e){ txt('cmembersList', errHtml(errRu(e))); }
+  } catch(e){ txt('cmembersList', errHtml(errRu(e), retryCall('openCommunityMembers', id))); }
 }
 function toggleCMember(aid, el) { if (el.checked) _CMEMBER_SEL.add(aid); else _CMEMBER_SEL.delete(aid); }
 async function setCommunityStaff(role) {
@@ -22004,7 +22011,7 @@ async function openNodes() {
     `).join(''));
   } catch(e) {
     txt('nodesStats','');
-    txt('nodesList', empty('⚠️','Ошибка',errRu(e)));
+    txt('nodesList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openNodes')}));
   }
 }
 const THREAD_ENTITY = {proxy:'🌐',account:'👤',worker:'⚙️'};
@@ -23207,7 +23214,7 @@ async function openBotWebhook(botId, botName) {
     txt('webhookBody',`
       <div class="sec">Статус</div>
       <div class="lst">
-        <div class="row"><div class="row-body"><div class="row-name">URL вебхука</div></div><div class="row-right" style="color:var(--hint);font-size:12px;max-width:60%;text-align:right;word-break:break-all">${urlSet?esc(d.url):'не установлен'}</div></div>
+        <div class="row"${urlSet?` onclick="copyToClipboard('${escJs(d.url)}','\ud83d\udd17 Адрес вебхука скопирован')" role="button" tabindex="0" style="cursor:pointer"`:''}><div class="row-body"><div class="row-name">URL вебхука${urlSet?' <span style="color:var(--hint);font-weight:400;font-size:11px">— нажмите, чтобы скопировать</span>':''}</div></div><div class="row-right" style="color:var(--hint);font-size:12px;max-width:60%;text-align:right;word-break:break-all">${urlSet?esc(d.url):'не установлен'}</div></div>
         <div class="row"><div class="row-body"><div class="row-name">Ожидающих обновлений</div></div><div class="row-right" style="color:${d.pending_update_count>0?'var(--orange)':'var(--green)'}">${d.pending_update_count||0}</div></div>
         ${d.last_error_message?`<div class="row"><div class="row-body"><div class="row-name">Последняя ошибка</div><div class="row-val" style="color:var(--red)">${esc(d.last_error_message)}</div></div></div>`:''}
         ${d.max_connections?`<div class="row"><div class="row-body"><div class="row-name">Макс. соединений</div></div><div class="row-right">${d.max_connections}</div></div>`:''}
@@ -23219,7 +23226,7 @@ async function openBotWebhook(botId, botName) {
       ${urlSet?`<div style="padding:12px 0"><button class="btn btn-d" onclick="deleteWebhook(${botId})" style="width:100%">🗑 Удалить вебхук (сбросить очередь)</button></div>`:'<div style="padding:12px 0;color:var(--hint);font-size:13px;text-align:center">Вебхук не установлен. Бот использует polling.</div>'}
     `);
   } catch(e) {
-    txt('webhookBody', empty('⚠️','Ошибка',errRu(e)));
+    txt('webhookBody', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openBotWebhook', botId, botName)}));
   }
 }
 async function deleteWebhook(botId) {
@@ -23346,7 +23353,7 @@ async function openDmCampaigns() {
     }).join(''));
   } catch(e) {
     txt('dmStats','');
-    txt('dmList', empty('⚠️','Ошибка',errRu(e)));
+    txt('dmList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openDmCampaigns')}));
   }
 }
 // Человеческий срок из секунд: «4 дн 6 ч», «3 ч 20 мин», «12 мин».
@@ -23778,7 +23785,7 @@ async function openWarmup() {
     }).join(''));
   } catch(e) {
     txt('warmupStats','');
-    txt('warmupList', empty('⚠️','Ошибка',errRu(e)));
+    txt('warmupList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openWarmup')}));
   }
 }
 // ── Восстановление аккаунтов ───────────────────────────────────────────
@@ -24332,7 +24339,7 @@ async function openNotaryCert(id) {
       }).join('') || '<div style="padding:10px;color:var(--hint);font-size:13px">Наблюдений пока нет</div>'}</div>
       <div style="height:16px"></div>`);
     NOTARY_CERT_TEXT = d.certificate || '';
-  } catch(e) { txt('notaryCert', errHtml(errRu(e))); }
+  } catch(e) { txt('notaryCert', errHtml(errRu(e), retryCall('openNotaryCert', id))); }
 }
 
 // Текст протокола держим в кэше: данные в атрибуте onclick рвут разметку.
@@ -24385,7 +24392,7 @@ async function openFolders(keep) {
         <div class="row-right"><button class="icon-btn sm danger" onclick="deleteFolder(${f.id}, this)" aria-label="Удалить" title="Удалить">🗑</button></div>
       </div>`;
     }).join('') + moreBtn(fs.length, foldersTotal, 'openFoldersMore()'));
-  } catch(e) { txt('foldersList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('foldersList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openFolders', keep)})); }
 }
 async function deleteFolder(id, _el){
   if(!await confirmDelete('Удалить папку из списка', _el, 'Сама папка в Telegram останется.')) return;
@@ -24411,7 +24418,7 @@ async function openFolderCompose(){
         <div class="row-right"><input type="checkbox" value="${cid}" onchange="fcToggle(${cid},this.checked)"></div>
       </label>`;
     }).join(''));
-  } catch(e){ txt('fcChannels', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e){ txt('fcChannels', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openFolderCompose')})); }
 }
 function fcToggle(cid, on){ if(on) FC_SEL.add(cid); else FC_SEL.delete(cid); }
 async function submitFolder(){
@@ -24602,7 +24609,7 @@ async function openWarmupLog(planId) {
     wlogRender();
   } catch(e) {
     txt('wlogHead',''); txt('wlogSeg','');
-    txt('wlogList', empty('⚠️','Ошибка',errRu(e)));
+    txt('wlogList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openWarmupLog', planId)}));
   }
 }
 let _WL_CIRCLE = [];
@@ -25237,7 +25244,7 @@ async function openRelay(botId, botName) {
         <div class="row-right chev">›</div>
       </div>
     `).join(''));
-  } catch(e) { txt('relayList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('relayList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openRelay', botId, botName)})); }
 }
 async function toggleRelay(botId, enable) {
   try {
@@ -25301,7 +25308,7 @@ async function openApiKeys() {
         ${k.is_active?`<div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="revokeApiKey(${k.id})">Откл</button></div>`:''}
       </div>
     `).join(''));
-  } catch(e) { txt('apiKeyList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('apiKeyList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openApiKeys')})); }
 }
 async function revokeApiKey(keyId) {
   if (!await askConfirm('Отключить API ключ?')) return;
@@ -26002,7 +26009,7 @@ async function loadPromo() {
     const cnt = (PROMO_DATA.orders||[]).filter(o=>!['cancelled','transferred'].includes(o.status)).length;
     txt('m-promo-val', cnt ? `${cnt} активных заказов` : 'Нет активных заказов');
   } catch(e) {
-    txt('promoOrderList', empty('⚠️','Ошибка',errRu(e)));
+    txt('promoOrderList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadPromo')}));
   }
 }
 function showPromoTab(tab) {
@@ -26161,7 +26168,7 @@ async function loadCleanerAccounts() {
         <div class="row-right chev">›</div>
       </div>`;
     }).join(''));
-  } catch(e) { txt('cleanerAccList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('cleanerAccList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadCleanerAccounts')})); }
 }
 function selectCleanerAcc(accId, name) {
   CLEANER_ACC_ID = accId;
@@ -26232,7 +26239,7 @@ async function loadErrReports() {
           <div class="li-sub" style="color:var(--hint)">${esc(ago(r.created_at))}</div>
         </div><span class="chev">›</span></div>
     `).join(''));
-  } catch(e) { txt('errRepList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('errRepList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadErrReports')})); }
 }
 async function submitErrReport() {
   const description = document.getElementById('errRepText').value.trim();
@@ -26292,7 +26299,7 @@ async function loadAssetTpl(type, keep) {
     `).join('') + moreBtn(rows.length, atTotal, 'loadAssetTplMore()'));
     // Плитка называет ВСЁ число шаблонов, а не длину показанной страницы.
     document.getElementById('m-at-val').textContent = num(atTotal)+' шаблонов';
-  } catch(e) { txt('atList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('atList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadAssetTpl', type, keep)})); }
 }
 async function deleteAssetTpl(id, btn) {
   if (!await confirmDelete('Удалить шаблон', btn)) return;
@@ -26504,7 +26511,7 @@ async function openPresencePacks(keep) {
     // Плитка называет ВСЁ число пакетов, а не длину показанной страницы.
     // Плитки «Связки» больше нет (вкладка «Сети ботов»): txt() не падает на снятой.
     txt('m-pp-val', num(ppTotal)+' пакетов');
-  } catch(e) { txt('ppList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('ppList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openPresencePacks', keep)})); }
 }
 
 // ── Presence Pack — detail/edit ─────────────────────────
@@ -26549,7 +26556,7 @@ async function openPpDetail(packId, packName) {
     txt('ppChCount', PP_CH_SEL.size);
     txt('ppGrCount', PP_GR_SEL.size);
   } catch(e) {
-    txt('ppDetailChannels', empty('⚠️','Ошибка',errRu(e)));
+    txt('ppDetailChannels', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openPpDetail', packId, packName)}));
     txt('ppDetailBot', empty('🤖','Не загрузилось',''));
   }
 }
@@ -26981,7 +26988,7 @@ async function openGpDetail(planId, planName, more = false) {
       html += `<div style="padding:12px 16px"><button class="btn btn-p" onclick="launchGpPlan(${p.id})" style="width:100%">🚀 Запустить план</button></div>`;
     }
     txt('gpdetail-body', html);
-  } catch(e) { txt('gpdetail-body', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('gpdetail-body', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openGpDetail', planId, planName, more)})); }
 }
 
 async function gpRetryVa(planId) {
@@ -27438,7 +27445,7 @@ async function openMassOps(focusId) {
         setTimeout(() => { try { _el.style.outline = ''; } catch(_){} }, 2500);
       }
     } catch(_){} }
-  } catch(e) { txt('massopsList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('massopsList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openMassOps', focusId)})); }
 }
 
 // ── Ecosystems ─────────────────────────────────────────
@@ -27497,7 +27504,7 @@ async function openEcosystems() {
       </div>
     `).join(''));
     document.getElementById('m-eco-val').textContent = rows.length+' экосистем';
-  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openEcosystems')})); }
 }
 let CUR_ECO_ID = null;
 // Состав экосистемы приходил типами и номерами строк («account #17»),
@@ -27789,7 +27796,7 @@ async function loadChannelRanks() {
         </div>
       </div>`;
     }).join(''));
-  } catch(e) { txt('crList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('crList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadChannelRanks')})); }
 }
 async function addChannelKeyword() {
   const errEl = document.getElementById('crErr'); errEl.textContent='';
@@ -27908,7 +27915,7 @@ async function openVaPosts() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('vaPostsList', empty('⚠️','Не удалось загрузить посты', errRu(e,'Повторите позже')));
+    txt('vaPostsList', empty('⚠️','Не удалось загрузить посты', errRu(e,'Повторите позже'), {label:'↺ Повторить',fn:retryCall('openVaPosts')}));
   }
 }
 async function openGraph() {
@@ -28118,7 +28125,7 @@ async function openMultigeo() {
     sel.innerHTML=bots.map(b=>`<option value="${b.bot_id}">@${esc(b.username||'')} ${esc(b.first_name||'')}</option>`).join('');
     await loadMultigeo();
   } catch(e) {
-    txt('mgProfiles', empty('⚠️','Ошибка',errRu(e)));
+    txt('mgProfiles', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openMultigeo')}));
   }
 }
 async function loadMultigeo() {
@@ -28145,7 +28152,7 @@ async function loadMultigeo() {
       </div>
     `).join(''));
   } catch(e) {
-    txt('mgProfiles', empty('⚠️','Ошибка загрузки',errRu(e)));
+    txt('mgProfiles', empty('⚠️','Ошибка загрузки',errRu(e), {label:'↺ Повторить',fn:retryCall('loadMultigeo')}));
   }
 }
 function openMultigeoSetModal(lang='', name='', desc='', short='') {
@@ -28656,7 +28663,7 @@ async function openNarrative(keep) {
     `).join('') + moreBtn(rows.length, narrTotal, 'openNarrativeMore()'));
     // Плитка называет ВСЁ число кампаний, а не длину показанной страницы.
     document.getElementById('m-narr-val').textContent = num(narrTotal)+' кампаний';
-  } catch(e) { txt('narrativeList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('narrativeList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openNarrative', keep)})); }
 }
 async function openNarrativeDetail(cid, topic) {
   push('s-narrativedetail');
@@ -28701,7 +28708,7 @@ async function openNarrativeDetail(cid, topic) {
       html += '</div>';
     }
     txt('narr-body', html);
-  } catch(e) { txt('narr-body', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('narr-body', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openNarrativeDetail', cid, topic)})); }
 }
 
 async function pauseNarrative(cid) {
@@ -28739,7 +28746,7 @@ async function openNarrativeModal() {
       </div>
     `).join(''));
   } catch(e) {
-    txt('nc-channels', empty('⚠️','Ошибка',errRu(e)));
+    txt('nc-channels', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openNarrativeModal')}));
   }
 }
 function toggleNcChannel(id) {
@@ -29253,7 +29260,7 @@ async function submitGlobalSearch(){
           <div style="font-size:12px">${un} · ${esc(objRu(r.type))}${cnt}</div>
         </div></div>`;
     }).join('');
-  }catch(e){ el.innerHTML=empty('⚠️','Ошибка',errRu(e)||'Ошибка'); }
+  }catch(e){ el.innerHTML=empty('⚠️','Ошибка',errRu(e)||'Ошибка', {label:'↺ Повторить',fn:retryCall('submitGlobalSearch')}); }
 }
 
 // Поиск потерянного контакта: имя профиля + начало @username → фоновая операция
@@ -29677,6 +29684,22 @@ function esc(s) {
 // строки и исполняется с токеном владельца. escJs кодирует опасные символы
 // JS-экранами (\x27, \x22, \x3c…) — их HTML-разбор не трогает, а JS читает
 // как те же символы. Годится и в '…', и в "…" внутри атрибута.
+// Повтор после ошибки, когда у экрана есть аргументы.
+//
+// Из 77 вызовов errHtml 27 не передавали, чем повторить, и ошибка оставляла
+// только «← Назад» — то есть выбрасывала экран целиком вместо того, чтобы
+// перезапросить данные. Строку вызова нельзя собирать склейкой: аргумент
+// бывает числом (id бота), строкой (uuid контакта, название воронки) и
+// булевым флагом (догрузка страницы), и кавычки каждый раз выбираются
+// заново. Здесь они выбираются один раз: число и булево — как есть, строка —
+// в одинарных кавычках через escJs (он же убирает кавычки, угловые скобки и
+// переводы строк, которые иначе порвали бы атрибут onclick).
+function retryCall(fn, ...args) {
+  const lit = (a) => (a === null || a === undefined) ? 'null'
+    : (typeof a === 'number' || typeof a === 'boolean') ? String(a)
+    : `'${escJs(a)}'`;
+  return fn + '(' + args.map(lit).join(',') + ')';
+}
 function escJs(s) {
   const t = (s === null || s === undefined) ? '' : String(s);
   return t.replace(/[\\'"<>&`\n\r\u2028\u2029]/g, c => {
@@ -29786,6 +29809,13 @@ function empty(ico,txt2,sub,action) {
   // Поэтому выход есть всегда: явный CTA, если его задали; для ошибок на корневом
   // экране — «Повторить» (гарантированно рабочий reload вкладки); иначе «Назад» —
   // и только когда есть куда возвращаться.
+  //
+  // 06.11.2026: у ВСЕХ вызовов со значком ошибки action теперь есть — повтор
+  // того же экрана с его же аргументами (retryCall). «Назад» выбрасывало
+  // экран, хотя человек хотел именно его: не пришёл ответ. Исключение одно и
+  // осознанное — «Сравнение неполное» в поиске дублей: это не сбой загрузки, а
+  // предел сравнения, повторять там нечего. Сторож —
+  // tests/test_an_error_block_can_be_retried.py.
   const atRoot = !(typeof STACK !== 'undefined' && STACK.length);
   const isErr = ico === '⚠️';
   let btn;
@@ -30429,7 +30459,7 @@ async function openAdminStats() {
     html += tile('🔄', 'Выполняется', s.ops_running||0, 'openAdminOps()');
     html += '</div>';
     txt('adm-stats-body', html);
-  } catch(e) { txt('adm-stats-body', errHtml(errRu(e))); }
+  } catch(e) { txt('adm-stats-body', errHtml(errRu(e), retryCall('openAdminStats'))); }
 }
 
 // Операции ВСЕЙ платформы: что идёт, что валится и сколько длится, по типам
@@ -30676,7 +30706,7 @@ async function openAdminUsers() {
     }
     html += '</div>';
     txt('adm-users-body', html);
-  } catch(e) { txt('adm-users-body', errHtml(errRu(e))); }
+  } catch(e) { txt('adm-users-body', errHtml(errRu(e), retryCall('openAdminUsers'))); }
 }
 
 let ADM_UD_ID = null;
@@ -30714,7 +30744,7 @@ async function openAdminUserDetail(userId) {
     }
     html += '</div>';
     txt('adm-ud-body', html);
-  } catch(e) { txt('adm-ud-body', errHtml(errRu(e))); }
+  } catch(e) { txt('adm-ud-body', errHtml(errRu(e), retryCall('openAdminUserDetail', userId))); }
 }
 
 async function admUserGrant(months) {
@@ -31026,7 +31056,7 @@ async function loadNetworkBuilder() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('netBuilderList', errHtml(errRu(e)));
+    txt('netBuilderList', errHtml(errRu(e), retryCall('loadNetworkBuilder')));
   }
 }
 
@@ -31052,7 +31082,7 @@ async function showNetDeployPlan() {
     h += `<button class="btn btn-s" style="width:100%;margin-top:6px" onclick="folderFromNet()">📁 Собрать общую папку из каналов связки</button>`;
     txt('netDeployPlan', h);
   } catch(e) {
-    txt('netDeployPlan', empty('⚠️','Ошибка',errRu(e)||'Не удалось построить план'));
+    txt('netDeployPlan', empty('⚠️','Ошибка',errRu(e)||'Не удалось построить план', {label:'↺ Повторить',fn:retryCall('showNetDeployPlan')}));
   }
 }
 async function deployNet() {
@@ -31332,7 +31362,7 @@ async function loadWorkflows() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('wfList', errHtml(errRu(e)));
+    txt('wfList', errHtml(errRu(e), retryCall('loadWorkflows')));
   }
 }
 
@@ -31580,7 +31610,7 @@ async function openWorkflowDetail(wfId, wfName) {
     txt('wfd-body', html);
     wfTriggerHint('wfd');
     wfGoalHint();
-  } catch(e) { txt('wfd-body', errHtml(errRu(e))); }
+  } catch(e) { txt('wfd-body', errHtml(errRu(e), retryCall('openWorkflowDetail', wfId, wfName))); }
 }
 
 // Сумма оплаты для экрана: звёзды целыми, валюта — из копеек/центов.
@@ -31663,7 +31693,7 @@ async function openWorkflowRunLog(runId) {
         <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="retryWorkflowRun(${runId})">🔁 Повторить с шага сбоя</button>`;
     }
     txt('wfRunLogBody', html);
-  } catch(e) { txt('wfRunLogBody', errHtml(errRu(e))); }
+  } catch(e) { txt('wfRunLogBody', errHtml(errRu(e), retryCall('openWorkflowRunLog', runId))); }
 }
 
 function _wfReopen() {

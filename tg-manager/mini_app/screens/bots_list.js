@@ -194,7 +194,7 @@ async function showDiscoveredBots() {
         </div>
       </div>`).join(''));
   } catch(e) {
-    txt('foundBotsList', empty('⚠️','Ошибка',errRu(e)));
+    txt('foundBotsList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('showDiscoveredBots')}));
     txt('foundBotsStats', '');
   }
 }

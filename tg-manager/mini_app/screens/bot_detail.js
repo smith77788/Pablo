@@ -22,7 +22,7 @@ async function openBot(botId) {
     txt('bd-body', buildBotDetail(d));
     modernizeIcons(document.getElementById('s-botdetail'));
   } catch(e) {
-    txt('bd-body', errHtml(errRu(e)));
+    txt('bd-body', errHtml(errRu(e), retryCall('openBot', botId)));
   }
 }
 
@@ -189,7 +189,7 @@ async function openBotFunnels(botId, botName) {
         <span class="chev">›</span>
       </div>
     </div>`).join(''));
-  } catch(e) { txt('bfList', errHtml(errRu(e))); }
+  } catch(e) { txt('bfList', errHtml(errRu(e), retryCall('openBotFunnels', botId, botName))); }
 }
 
 // Боты, СОЗДАННЫЕ через этот аккаунт (managed_bots.acc_id). Боты, добавленные по
@@ -340,7 +340,7 @@ async function loadBotSubs(append) {
     const moreEl = document.getElementById('bs-more');
     moreEl.style.display = (BS_OFFSET < BS_TOTAL) ? 'block' : 'none';
   } catch(e) {
-    if (!append) txt('bsList', errHtml(errRu(e)));
+    if (!append) txt('bsList', errHtml(errRu(e), retryCall('loadBotSubs', append)));
     else toast('⚠️ '+errRu(e,'Ошибка').substring(0,60));
   }
 }
@@ -466,7 +466,7 @@ async function loadBotCommands() {
         <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteCmd(${i})" aria-label="Удалить">✕</button></div>
       </div>
     `).join(''));
-  } catch(e) { txt('cmdList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('cmdList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadBotCommands')})); }
 }
 
 async function clearBotCommands() {

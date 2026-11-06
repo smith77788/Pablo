@@ -12,7 +12,12 @@ def test_operation_request_error_is_not_reported_as_not_found():
     source = _detail_source()
     assert "api('/api/miniapp/operation/'+opId).catch(()=>null)" not in source
     assert "const o = await api('/api/miniapp/operation/'+opId)" in source
-    assert "catch(e) { txt('opdetBody', errHtml(errRu(e)))" in source
+    # Повтор у блока ошибки появился 06.11.2026 (retryCall с тем же opId),
+    # поэтому сверяем не точную строку целиком, а то, что проверялось: ошибка
+    # доходит до экрана текстом, а не пустым списком.
+    assert "txt('opdetBody', errHtml(errRu(e)" in source
+    assert "retryCall('openOpDetail', opId)" in source, (
+        "повтор без opId перезапросил бы чужую операцию")
 
 
 def test_journal_error_is_visible_and_retryable():

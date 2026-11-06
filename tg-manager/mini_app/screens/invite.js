@@ -296,7 +296,7 @@ async function openMassInvite() {
       </div>`;
     }).join(''));
   } else {
-    txt('massInviteHistory', empty('⚠️','Ошибка',opsD.reason?.message||''));
+    txt('massInviteHistory', empty('⚠️','Ошибка',opsD.reason?.message||'', {label:'↺ Повторить',fn:retryCall('openMassInvite')}));
   }
 }
 
