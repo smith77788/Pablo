@@ -81,6 +81,23 @@ IRREVERSIBLE_DEDUP_WINDOW_SEC = 90
 # опаснее самой болезни: два разных адресата слиплись бы в одну операцию).
 DEDUP_COSMETIC_KEYS = ("_progress_chat_id", "_progress_message_id")
 
+# ТА ЖЕ БОЛЕЗНЬ, ДРУГАЯ ПРИЧИНА: значение, которое вызывающий берёт из
+# `random` на каждый вызов. `seed_shift` пакетного применения оформления
+# (`_submit_bulk`) — ровно такое: без него повтор дал бы те же аватарки и те
+# же кандидаты username, поэтому сдвиг там нужен. Но в личности операции он
+# означает, что params двух тапов не совпадут НИКОГДА, и дедуп по этому типу
+# слеп полностью: два тапа «Аватар» перерисовывают профили всему проекту
+# дважды — удвоенная правка профилей на тех же аккаунтах.
+#
+# Вычёркиваем из личности, но ОСТАВЛЯЕМ в params: исполнителю сдвиг нужен, а
+# намеренный повтор позже окна по-прежнему получит свой новый сдвиг и
+# перерисует честно. Поэтому лечится именно вычёркиванием, а не отказом от
+# случайного значения.
+DEDUP_VOLATILE_KEYS = ("seed_shift",)
+
+# Ключи, которые в сравнение идентичности не входят ни с какой стороны.
+_DEDUP_EXCLUDED_KEYS = DEDUP_COSMETIC_KEYS + DEDUP_VOLATILE_KEYS
+
 
 def quantized_schedule_iso(minutes: float, *, now: object = None) -> str:
     """Время отложенного запуска, одинаковое у двух тапов подряд.
@@ -111,8 +128,9 @@ def quantized_schedule_iso(minutes: float, *, now: object = None) -> str:
 
 
 def _dedup_identity_params(stored: dict[str, Any]) -> dict[str, Any]:
-    """params без косметических ключей — то, по чему сравниваются два сабмита."""
-    return {k: v for k, v in stored.items() if k not in DEDUP_COSMETIC_KEYS}
+    """params без косметических и переменных ключей — то, по чему сравниваются
+    два сабмита."""
+    return {k: v for k, v in stored.items() if k not in _DEDUP_EXCLUDED_KEYS}
 
 # ── Служебные строки журнала целей ───────────────────────────────────────────
 # В operation_log исполнитель инвайта пишет не только цели, но и ШАГИ: выдачу
@@ -320,6 +338,8 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "🔍",
         # op_worker пишет target=f"ch#{chan_id}" — префикс + числовой id.
         "retry_targets": {"param": "channel_ids", "prefix": "ch#", "kind": "int"},
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка оформления видна подписчикам.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "bulk_join": {
         "description": "Массовое вступление в каналы",
@@ -364,6 +384,8 @@ OP_REGISTRY: dict[str, dict] = {
         # идемпотентна (setMy* и замена приветствия приводят к тому же
         # состоянию), а повтор в пределах одного прогона уже пропускает
         # сделанное по operation_log (completed_targets в исполнителе).
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка профиля ботов видна снаружи.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "bulk_bot_profile_rollback": {
         "description": "Откат массового изменения профиля ботов",
@@ -412,6 +434,9 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "pro",
         "max_retries": 2,
         "icon": "🧰",
+        # Правка профилей всему проекту необратима и видна снаружи: два тапа
+        # подряд означают два прохода по тем же каналам.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "global_presence_full_package": {
         "description": "Global Presence — полный пакет",
@@ -424,6 +449,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "pro",
         "max_retries": 1,
         "icon": "⚡",
+        # Повтор после таймаута клиента выполнил бы её второй раз: жалобы уходят эшелонами от флота.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "gift_transfer": {
         "description": "Передача Telegram-подарков",
@@ -450,6 +477,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "🌱",
+        # Повтор после таймаута клиента выполнил бы её второй раз: посев постов уходит в каналы пакета.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "promote_presence_pack": {
         "description": "Назначение бота администратором Presence Pack",
@@ -501,6 +530,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "✏️",
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка профилей аккаунтов видна снаружи.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "bulk_chan_exec": {
         "description": "Массовые действия с каналами",
@@ -648,12 +679,16 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🖼",
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка профилей аккаунтов видна снаружи.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "mass_report": {
         "description": "Массовая жалоба на контент",
         "min_plan": "pro",
         "max_retries": 1,
         "icon": "🚩",
+        # Повтор после таймаута клиента выполнил бы её второй раз: жалоба уходит в Телеграм от всего флота.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "content_clone": {
         "description": "Клонирование контента между каналами",
@@ -664,6 +699,8 @@ OP_REGISTRY: dict[str, dict] = {
         # На цель приходится одно действие (аккаунт выбирается внутри), поэтому
         # успех закрывает её окончательно.
         "retry_targets": {"param": "target_refs", "kind": "str"},
+        # Повтор после таймаута клиента выполнил бы её второй раз: посты копируются в канал.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "niche_growth_post": {
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
@@ -712,6 +749,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "👤",
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка профилей аккаунтов видна снаружи.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "create_channel": {
         "description": "Создание канала",
@@ -738,6 +777,8 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "📝",
         # Тот же исполнитель, что у mass_publish: target = str(channel_id).
         "retry_targets": {"param": "channel_ids", "kind": "int"},
+        # Повтор после таймаута клиента выполнил бы её второй раз: пост публикуется в канале.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "run_broadcast": {
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
@@ -764,6 +805,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "🧬",
+        # Повтор после таймаута клиента выполнил бы её второй раз: посты копируются в канал.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "ad_intel_scan": {
         "description": "Разведка рекламы конкурентов",
@@ -788,6 +831,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "pro",
         "max_retries": 1,
         "icon": "🚩",
+        # Повтор после таймаута клиента выполнил бы её второй раз: жалоба уходит в Телеграм.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "leave_all_chats": {
         "description": "Выход из всех чатов",
@@ -818,12 +863,16 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🔗",
+        # Повтор после таймаута клиента выполнил бы её второй раз: связка разворачивается на живых каналах.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "crosspost_run": {
         "description": "Кросспостинг",
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🔁",
+        # Повтор после таймаута клиента выполнил бы её второй раз: посты уходят в каналы сети.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "community_add_channel": {
         "description": "Канал ноды-сообщества",
@@ -836,6 +885,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🏛",
+        # Повтор после таймаута клиента выполнил бы её второй раз: сообщения и реакции уходят в ноду от флота.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "community_set_staff": {
         "description": "Роли ноды-сообщества",
@@ -911,7 +962,8 @@ async def submit(
                      DEFAULT_DEDUP_WINDOW_SEC; явное значение сильнее обоих.
                      Повторный сабмит идентичной операции
                      (owner+op_type+params+scheduled_for; косметические ключи
-                     params из DEDUP_COSMETIC_KEYS в сравнение не входят),
+                     params из DEDUP_COSMETIC_KEYS и DEDUP_VOLATILE_KEYS
+                     в сравнение не входят),
                      пока прежняя ещё в работе либо только что успешно
                      завершилась, вернёт её op_id вместо создания дубля.
                      Защищает от двойного тапа и retry после таймаута, включая
@@ -963,10 +1015,11 @@ async def submit(
     # Отпечаток чувствительных params считается БЕЗ косметических ключей —
     # иначе указатель на прогресс-бар менял бы отпечаток на каждом тапе, и
     # дедуп по отпечатку был бы так же слеп, как дедуп по целому params.
-    _cosmetic = {k: params[k] for k in DEDUP_COSMETIC_KEYS if k in params}
+    _outside_identity = {k: params[k] for k in _DEDUP_EXCLUDED_KEYS
+                         if k in params}
     stored_params, sensitive_params_fp = seal_operation_params(
         _dedup_identity_params(params))
-    stored_params.update(_cosmetic)
+    stored_params.update(_outside_identity)
     params_json = json.dumps(stored_params, ensure_ascii=False)
     dedup_params_json = json.dumps(
         _dedup_identity_params(stored_params), ensure_ascii=False)
@@ -1013,7 +1066,7 @@ async def submit(
                                  AND created_at > NOW() - make_interval(secs => $5)
                                ORDER BY id DESC LIMIT 1""",
                             owner_id, op_type, dedup_params_json, sched,
-                            dedup_window_sec, list(DEDUP_COSMETIC_KEYS),
+                            dedup_window_sec, list(_DEDUP_EXCLUDED_KEYS),
                         )
                     if existing is not None:
                         op_id = int(existing)

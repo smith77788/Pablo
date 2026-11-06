@@ -272,3 +272,70 @@ def test_metrics_module_accepts_the_value_argument():
         for k, v in snap.get("counters", snap).items()
     ), snap
     metrics.reset()
+
+
+
+# ── Счётчики, которые пишут НЕ через _reliability_metric ──────────────────────
+# Разбор выше смотрит только три файла-исполнителя. Но счётчик можно написать
+# и напрямую (`metrics.inc("infragram_…")`) из любого места — так пишутся
+# слияния повторных нажатий (`database/db.py`, `services/dm_engine.py`,
+# `services/operation_bus.py`), и ни один из них в набор выше не попадал.
+# Счётчик без описания — строка на графике, смысл которой знает только тот,
+# кто полез в исходник.
+_DIRECT_DIRS = ("services", "database", "bot")
+
+
+def _direct_counters() -> dict[str, tuple[str, str]]:
+    """{имя: (где, метод)} для прямых вызовов inc/gauge/observe."""
+    out: dict[str, tuple[str, str]] = {}
+    for sub in _DIRECT_DIRS:
+        base = os.path.join(ROOT, sub)
+        for dirpath, dirs, files in os.walk(base):
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
+            for fname in files:
+                if not fname.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, fname)
+                rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+                try:
+                    with open(path, encoding="utf-8", errors="ignore") as f:
+                        tree = ast.parse(f.read())
+                except SyntaxError:
+                    continue
+                for node in ast.walk(tree):
+                    if not (isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute)
+                            and node.func.attr in ("inc", "gauge", "observe")
+                            and node.args
+                            and isinstance(node.args[0], ast.Constant)
+                            and isinstance(node.args[0].value, str)
+                            and node.args[0].value.startswith("infragram_")):
+                        continue
+                    out[node.args[0].value] = (f"{rel}:{node.lineno}",
+                                               node.func.attr)
+    return out
+
+
+def test_direct_counters_are_documented_in_the_registry():
+    from services.metrics import _HELP
+
+    bad = []
+    for name, (where, method) in sorted(_direct_counters().items()):
+        if name in _HELP:
+            continue
+        # Гистограмма рендерится двумя сериями, и описаны именно они.
+        if method == "observe" and (f"{name}_sum" in _HELP
+                                    and f"{name}_count" in _HELP):
+            continue
+        bad.append(f"{name} ({where})")
+    assert not bad, (
+        "счётчики без описания в реестре метрик: " + ", ".join(bad))
+
+
+def test_the_direct_counter_detector_is_not_blind():
+    """Ноль находок обязан означать «чисто», а не «мерка ничего не видит»."""
+    found = _direct_counters()
+    assert len(found) >= 15, f"найдено всего {len(found)}: {sorted(found)}"
+    assert "infragram_dm_campaign_relaunch_merged_total" in found, (
+        "слияние повторных нажатий по кампании ЛС пишется напрямую — "
+        "если мерка его не видит, она не видит и следующий такой счётчик")

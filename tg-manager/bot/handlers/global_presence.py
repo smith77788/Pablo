@@ -2131,7 +2131,10 @@ async def _submit_plan(
     обязан это показать — «тихий успех» здесь стоил бы пользователю ожидания
     операции, которой не существует.
     """
-    plan_id = await db.create_global_presence_plan(
+    # Личность нажатия — СОДЕРЖИМОЕ плана, а не его свежий id: второй план с
+    # тем же содержимым заставил бы флот создать те же каналы, группы и ботов
+    # по второму разу (защита исполнителя привязана к целям ОДНОГО плана).
+    plan_id, _plan_reused = await db.find_or_create_global_presence_plan(
         pool,
         owner_id=owner_id,
         asset_type=plan_asset_type,
@@ -2153,8 +2156,20 @@ async def _submit_plan(
         else None,
         avatar_style=(sd.get("avatar_style") or avatar_factory.DEFAULT_STYLE),
         plan_seed=sd.get("plan_seed"),
+        targets=targets,
     )
-    await db.create_global_presence_targets(pool, plan_id, targets)
+    if _plan_reused:
+        # За переиспользованным планом операция, скорее всего, уже стоит —
+        # тогда возвращаем её, чтобы владелец не увидел в очереди две. Если
+        # первое нажатие до постановки не дошло, ставим её ниже: план без
+        # операции навсегда остаётся «Ожидает 0/N».
+        _existing_op = await pool.fetchval(
+            "SELECT op_id FROM global_presence_plans WHERE id=$1", plan_id)
+        if _existing_op:
+            log.info(
+                "global_presence: повтор нажатия — план %s и операция %s уже "
+                "созданы, второй раз флот не гоняем", plan_id, int(_existing_op))
+            return plan_id, int(_existing_op)
 
     try:
         op_id = await operation_bus.submit(

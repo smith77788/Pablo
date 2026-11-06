@@ -5386,6 +5386,7 @@ async def create_global_presence_plan(
     about_pool: list[str] | None = None,
     avatar_style: str | None = None,
     plan_seed: int | None = None,
+    status: str = "queued",
 ) -> int:
     """Create a plan and return its id.
 
@@ -5402,7 +5403,7 @@ async def create_global_presence_plan(
                 geo_selection, account_selection, template_id, status,
                 project_name, roles, levels, name_pool, username_pool,
                 about_pool, avatar_style, plan_seed)
-           VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,'queued',
+           VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$16,
                    $8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,
                    $13::jsonb,$14,$15)
            RETURNING id""",
@@ -5421,47 +5422,205 @@ async def create_global_presence_plan(
         _j(about_pool),
         avatar_style,
         plan_seed,
+        # Статус параметром: мини-апп заводит план в 'pending' (его ручка
+        # запуска принимает pending/failed), бот — сразу в 'queued'. Раньше
+        # мини-апп из-за этого вставлял план своим SQL в обход общей функции.
+        str(status or "queued"),
     )
 
 
 async def create_global_presence_targets(
     pool: asyncpg.Pool, plan_id: int, targets: list[dict]
 ) -> int:
-    """Bulk-insert targets for a plan. Returns count inserted."""
+    """Bulk-insert targets for a plan. Returns count inserted.
+
+    Принимает и пул, и УЖЕ ВЗЯТОЕ соединение: план и его цели обязаны
+    появляться одной транзакцией (см. find_or_create_global_presence_plan —
+    план без целей выглядит как план с другим содержимым, и защита от
+    повторного нажатия на нём слепа).
+    """
     if not targets:
         return 0
+    if not hasattr(pool, "acquire"):
+        await _insert_gp_targets(pool, plan_id, targets)
+        return len(targets)
     async with pool.acquire() as conn:
-        await conn.executemany(
-            """INSERT INTO global_presence_targets
-                   (plan_id, country, country_code, region, city, city_slug,
-                    language, timezone, asset_type, planned_name, planned_username,
-                    selected_account_id, role, level, planned_about,
-                    avatar_seed, avatar_style)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
-            [
-                (
-                    plan_id,
-                    t.get("country"),
-                    t.get("country_code"),
-                    t.get("region"),
-                    t.get("city"),
-                    t.get("city_slug"),
-                    t.get("language"),
-                    t.get("timezone"),
-                    t.get("asset_type", "channel"),
-                    t.get("planned_name"),
-                    t.get("planned_username"),
-                    t.get("selected_account_id"),
-                    t.get("role"),
-                    t.get("level"),
-                    t.get("planned_about"),
-                    t.get("avatar_seed"),
-                    t.get("avatar_style"),
-                )
-                for t in targets
-            ],
-        )
+        await _insert_gp_targets(conn, plan_id, targets)
     return len(targets)
+
+
+async def _insert_gp_targets(conn, plan_id: int, targets: list[dict]) -> None:
+    await conn.executemany(
+        """INSERT INTO global_presence_targets
+               (plan_id, country, country_code, region, city, city_slug,
+                language, timezone, asset_type, planned_name, planned_username,
+                selected_account_id, role, level, planned_about,
+                avatar_seed, avatar_style)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
+        [
+            (
+                plan_id,
+                t.get("country"),
+                t.get("country_code"),
+                t.get("region"),
+                t.get("city"),
+                t.get("city_slug"),
+                t.get("language"),
+                t.get("timezone"),
+                t.get("asset_type", "channel"),
+                t.get("planned_name"),
+                t.get("planned_username"),
+                t.get("selected_account_id"),
+                t.get("role"),
+                t.get("level"),
+                t.get("planned_about"),
+                t.get("avatar_seed"),
+                t.get("avatar_style"),
+            )
+            for t in targets
+        ],
+    )
+
+
+GP_PLAN_MERGE_WINDOW_SEC = 180
+
+
+def gp_plan_fingerprint(targets: list[dict]) -> list[str]:
+    """Содержимое плана: куда и что он создаёт.
+
+    Сгенерированные имена и username в отпечаток НЕ входят: генератор даёт их
+    от нажатия к нажатию разными (свой seed на вызов), и отпечаток по ним
+    различал бы два нажатия одного и того же плана. Город, страна и тип актива
+    — ровно то, что владелец выбрал руками.
+
+    Список, а не множество: три канала в одном городе — три цели, и отпечаток
+    обязан это сохранить.
+    """
+    return sorted(
+        "|".join((
+            str(t.get("country_code") or ""),
+            str(t.get("city_slug") or ""),
+            str(t.get("asset_type") or "channel"),
+        ))
+        for t in (targets or [])
+    )
+
+
+async def find_or_create_global_presence_plan(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    asset_type: str,
+    name_pattern: str,
+    username_pattern: str | None,
+    geo_selection: dict,
+    account_selection: dict,
+    template_id: int | None = None,
+    *,
+    targets: list[dict],
+    window_sec: int = GP_PLAN_MERGE_WINDOW_SEC,
+    **plan_kw,
+) -> tuple[int, bool]:
+    """Создать план присутствия с целями — или вернуть свой же, только что
+    созданный с тем же содержимым. → (plan_id, reused).
+
+    ЗАЧЕМ. Запуск плана создаёт строку плана, пишет её цели и ТУТ ЖЕ ставит
+    операцию, кладя свежий `plan_id` в params. Окно идемпотентности
+    `operation_bus.submit` на этот случай не работает в принципе: у двух
+    нажатий разные id, значит разные params, значит две операции. А защита
+    внутри исполнителя привязана к ЦЕЛИ (`UPDATE global_presence_targets SET
+    status='running' WHERE id=$1 AND status='pending'`) — то есть к строкам
+    ОДНОГО плана. У второго плана свои свежие цели, и флот создаёт все каналы,
+    группы и ботов по второму разу: лишние активы на тех же аккаунтах, двойной
+    расход самого баноопасного действия и счёт за него.
+
+    Двойное нажатие здесь не теория: кнопка «Запустить» живёт в состоянии
+    `confirming`, которое чистится ПОСЛЕ всей работы, а сборка целей занимает
+    секунды; сверх того Телеграм сам повторяет callback, если бот не ответил.
+
+    КАК. Личность нажатия — содержимое плана (владелец, тип актива, паттерны,
+    выбранные аккаунты, шаблон и отпечаток целей), а не его id. Ищем свой же
+    план с тем же содержимым, созданный только что, и возвращаем его вместо
+    второй вставки; тогда и `submit` получит те же params и сольёт повтор в
+    одну операцию. `pg_advisory_xact_lock` по той же личности сериализует
+    одновременные нажатия: без него оба запроса ничего не находят и оба
+    вставляют.
+
+    План и его цели создаются ОДНОЙ транзакцией. Иначе второе нажатие видит
+    план, целей у которого ещё нет, — отпечаток не совпадает, и защита
+    пропускает второй план ровно в той гонке, против которой написана.
+
+    ОКНО — 180 секунд, а не 90, как у рассылок: план собирается дольше (цели,
+    аллокатор username, экосистема), и владелец видит ответ позже. Намеренный
+    второй план с тем же содержимым позже окна по-прежнему создаётся.
+    """
+    fp = gp_plan_fingerprint(targets)
+    acct_json = json.dumps(account_selection or {}, ensure_ascii=False)
+    geo_json = json.dumps(geo_selection or {}, ensure_ascii=False)
+    identity = "|".join((
+        "gpplan", str(int(owner_id)), str(asset_type), str(name_pattern),
+        str(username_pattern or ""), str(int(template_id or 0)),
+        json.dumps(account_selection or {}, ensure_ascii=False, sort_keys=True),
+        json.dumps(geo_selection or {}, ensure_ascii=False, sort_keys=True),
+        *fp,
+    ))
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", identity)
+            twin = await conn.fetchval(
+                """SELECT p.id FROM global_presence_plans p
+                    WHERE p.owner_id = $1 AND p.asset_type = $2
+                      AND p.name_pattern = $3
+                      AND COALESCE(p.username_pattern, '') = COALESCE($4, '')
+                      AND COALESCE(p.template_id, 0) = COALESCE($5, 0)
+                      AND p.account_selection = $6::jsonb
+                      -- geo_selection тоже часть личности: мини-апп держит в
+                      -- нём описание и настройки виртуального админа. Без
+                      -- него два плана, различающиеся ОДНИМ описанием, слились
+                      -- бы, и второе описание пропало бы молча.
+                      AND p.geo_selection = $9::jsonb
+                      AND p.status IN ('draft', 'pending', 'queued', 'running')
+                      AND p.created_at > now() - make_interval(secs => $7)
+                      -- ORDER BY повторяет само выражение: ordinal (`ORDER
+                      -- BY 1`) внутри агрегата — это КОНСТАНТА, а не ссылка
+                      -- на столбец, и сортировки не происходит вовсе. Без
+                      -- неё отпечаток зависел бы от порядка вставки целей.
+                      AND (SELECT array_agg(
+                                    concat_ws('|',
+                                              COALESCE(t.country_code, ''),
+                                              COALESCE(t.city_slug, ''),
+                                              t.asset_type)
+                                    ORDER BY concat_ws('|',
+                                              COALESCE(t.country_code, ''),
+                                              COALESCE(t.city_slug, ''),
+                                              t.asset_type))
+                             FROM global_presence_targets t
+                            WHERE t.plan_id = p.id) = $8::text[]
+                    ORDER BY p.id DESC LIMIT 1""",
+                int(owner_id), str(asset_type), str(name_pattern),
+                username_pattern, template_id, acct_json,
+                float(window_sec), fp, geo_json,
+            )
+            if twin is not None:
+                log.warning(
+                    "global_presence: повтор нажатия владельца %s — "
+                    "переиспользую план %s вместо второго создания тех же "
+                    "активов флотом", owner_id, int(twin),
+                )
+                try:
+                    from services import metrics as _m
+
+                    _m.inc("infragram_gp_plan_relaunch_merged_total",
+                           {"asset_type": str(asset_type)})
+                except Exception:
+                    pass
+                return int(twin), True
+            plan_id = await create_global_presence_plan(
+                conn, owner_id, asset_type, name_pattern, username_pattern,
+                geo_selection, account_selection, template_id, **plan_kw,
+            )
+            await create_global_presence_targets(conn, plan_id, targets)
+    return int(plan_id), False
 
 
 async def get_taken_usernames(pool: asyncpg.Pool, owner_id: int, limit: int = 20000) -> set[str]:

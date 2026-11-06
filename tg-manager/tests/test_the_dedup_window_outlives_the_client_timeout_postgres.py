@@ -142,16 +142,52 @@ def test_the_window_is_longer_than_the_client_waits():
 def test_the_irreversible_types_actually_carry_the_window():
     from services import operation_bus as ob
 
-    expected = ("run_broadcast", "network_broadcast", "mass_publish",
-                "bulk_post_to_channel", "bulk_post_chans", "group_announce",
-                "bulk_dm_adhoc", "dm_campaign", "mass_invite",
-                "self_promo_blast", "niche_growth_post")
+    expected = (
+        # Сообщение/пост уходит людям
+        "run_broadcast", "network_broadcast", "mass_publish",
+        "bulk_post_to_channel", "bulk_post_chans", "group_announce",
+        "bulk_dm_adhoc", "dm_campaign", "mass_invite",
+        "self_promo_blast", "niche_growth_post", "quick_post",
+        "seed_presence_pack", "content_clone", "clone_adapt", "crosspost_run",
+        "community_liven",
+        # Жалоба: второй раз — вторая жалоба на то же, уже от флота
+        "mass_report", "report_peer", "strike",
+        # Правка профилей и оформления видна снаружи и делается флотом
+        "gp_bulk_apply", "bulk_seo_apply", "bulk_bot_profile",
+        "bulk_update_profile", "bulk_set_profile", "profile_setter",
+        # Развёртывание связки работает по живым каналам
+        "deploy_network",
+    )
     missing = [t for t in expected
                if ob.OP_REGISTRY.get(t, {}).get("dedup_window_sec")
                != ob.IRREVERSIBLE_DEDUP_WINDOW_SEC]
     assert not missing, (
         "у необратимой операции нет длинного окна: повтор после таймаута "
         "клиента выполнит её второй раз: " + ", ".join(missing)
+    )
+
+
+def test_the_deliberate_repeat_types_keep_the_short_window():
+    """Длинное окно подавляет и НАМЕРЕННЫЙ повтор — поэтому не всем.
+
+    Эти типы владелец запускает ПОВТОРНО по делу, с теми же параметрами:
+    «ещё 100 просмотров», «ещё один такой же канал», «ещё одного бота». Для
+    них длинное окно означало бы молча не выполненное действие — то есть
+    болезнь хуже исходной. Список держится здесь, чтобы следующий заход не
+    расширил окно «на всё подряд».
+    """
+    from services import operation_bus as ob
+
+    deliberate = ("boost_views", "boost_reactions", "boost_stories",
+                  "boost_subscribers", "boost_bot_starts",
+                  "create_channel", "create_group", "bulk_create_channels",
+                  "bot_factory", "gift_transfer", "account_warmup")
+    widened = [t for t in deliberate
+               if ob.OP_REGISTRY.get(t, {}).get("dedup_window_sec")]
+    assert not widened, (
+        "у операции, которую владелец повторяет по делу, окно расширено — "
+        "второй запуск вернёт id первого и молча не выполнится: "
+        + ", ".join(widened)
     )
 
 

@@ -89,17 +89,24 @@ def _payload(count):
 
 
 def test_create_keeps_all_500_targets_and_va_settings():
+    # План создаётся через общую дверь (`find_or_create_global_presence_plan`):
+    # своим INSERT мини-апп заводил второй план с теми же целями на каждое
+    # повторное нажатие «создать». Поэтому стенд смотрит на аргументы двери,
+    # а не на текст запроса.
     pool = _Pool()
     handler = _route(pool, "POST", "/api/miniapp/global_presence")
-    with patch("database.db.create_global_presence_targets", new=AsyncMock(return_value=500)) as insert:
+    door = AsyncMock(return_value=(93, False))
+    with patch("database.db.find_or_create_global_presence_plan", new=door):
         response = asyncio.run(handler(_Request(_payload(500))))
     assert response.status == 200
     assert _data(response)["targets"] == 500
-    assert len(insert.await_args.args[2]) == 500
-    plan_insert = next(args for query, args in pool.calls if "INSERT INTO global_presence_plans" in query)
-    selection = json.loads(plan_insert[4])
-    assert selection["count"] == 500
-    assert selection["virtual_admin"]["lead_contact"] == "@main"
+    kw = door.await_args.kwargs
+    assert len(kw["targets"]) == 500
+    assert kw["geo_selection"]["count"] == 500
+    assert kw["geo_selection"]["virtual_admin"]["lead_contact"] == "@main"
+    assert kw["status"] == "pending", (
+        "ручка запуска принимает только pending/failed — иначе план не "
+        "запустить вовсе")
 
 
 def test_create_rejects_501_instead_of_silent_truncation():

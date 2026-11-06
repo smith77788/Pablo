@@ -48,6 +48,50 @@ class GiftTransferService:
     """Service for creating and managing gift transfer plans."""
 
     @staticmethod
+    async def busy_inventory_ids(pool, owner_id: int,
+                                 ids: list[int]) -> set[int]:
+        """Позиции инвентаря в живой передаче или переданные после скана.
+
+        ОДНА ДВЕРЬ ДЛЯ ВСЕХ ПУТЕЙ. Передача подарка необратима и тратит
+        звёзды, а план на каждое нажатие создаётся новый — значит и params
+        операции (`{"plan_id": …}`) каждый раз новые, и дедуп шины двойного
+        нажатия по «Передать» не узнаёт НИКОГДА. Поэтому подарок, который уже
+        едет получателю или уже ушёл после последнего скана, во второй план не
+        попадает.
+
+        Почему проверка нужна именно здесь, а не только у Телеграма: после
+        успешной передачи строка инвентаря не менялась, поэтому второй проход
+        брал тот же подарок, шёл в Телеграм и получал отказ — то есть делал
+        полный круг обращений с аккаунтов (самое заметное снаружи действие) на
+        работу, которой заведомо нет.
+
+        `it.transferred_at >= g.last_seen_at` — «передан уже ПОСЛЕ того, как
+        инвентарь видел подарок на месте». Если скан позже увидел подарок
+        снова (получатель вернул), позиция опять свободна.
+        """
+        from services import op_status as _ost
+
+        in_flight = "('" + "','".join(sorted(_ost.IN_FLIGHT)) + "')"
+        if not ids:
+            return set()
+        rows = await pool.fetch(
+            f"""SELECT DISTINCT it.inventory_id
+                  FROM gift_transfer_items it
+                  JOIN gift_transfer_plans p ON p.id = it.plan_id
+                  JOIN gift_inventory g ON g.id = it.inventory_id
+                 WHERE p.owner_id = $1 AND it.inventory_id = ANY($2::bigint[])
+                   AND ((it.status = 'transferred'
+                         AND it.transferred_at >= g.last_seen_at)
+                     OR (it.status IN ('pending', 'queued')
+                         AND EXISTS (
+                             SELECT 1 FROM operation_queue q
+                              WHERE q.owner_id = $1 AND q.op_type = 'gift_transfer'
+                                AND q.status IN {in_flight}
+                                AND q.params->>'plan_id' = p.id::text)))""",
+            owner_id, [int(i) for i in ids])
+        return {int(r["inventory_id"]) for r in rows}
+
+    @staticmethod
     async def create_plan(
         pool,
         owner_id: int,
