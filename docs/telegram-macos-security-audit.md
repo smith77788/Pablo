@@ -748,6 +748,53 @@ iOS `web_app_request_file_download` → `downloadFile(url:fileName:)` без п�
 
 ---
 
+## Раздел E — Кросс-платформенная проверка (Telegram Android, Java)
+
+Файл: `TMessagesProj/src/main/java/org/telegram/ui/web/BotWebViewContainer.java` (DrKLO/Telegram).
+
+### E.1 — Finding 4 (JS-Bridge origin confusion) — **ПРИСУТСТВУЕТ на Android** (отдельный репорт)
+Тот же паттерн, флаг `restrictBridgeToOrigin` (= `sameOrigin`), `trustedOrigin = sameOrigin ? host : null`
+(`:368–369`, `:1060–1061`):
+- Входящие сообщения `onBotWebMessage`: origin-проверка выполняется **только** при
+  `restrictBridgeToOrigin` (`:1474–1480`); при `false` (legacy) любой origin принимается.
+- Исходящие события `isTrustedDocumentCurrent`: `return !restrictBridgeToOrigin || …` (`:1251–1252`) —
+  при `false` события уходят на любую загруженную страницу.
+- `shouldOverrideUrlLoading` для бота пропускает обычную кросс-origin https-навигацию в WebView
+  (`:4328–4332` → `return false`), так что редирект на attacker.com остаётся внутри моста.
+
+**Нюанс платформы (в пользу Android):** мост регистрируется через `WebViewCompat.addWebMessageListener`
+с платформенно-доверенным `sourceOrigin` и **fail-closed** на старых WebView (`:1433–1436`), а file-доступ
+отключён (`setAllowFileAccess(false)` и др., `:466–469`). То есть Android *мог бы* энфорсить origin и
+для legacy, но политика та же: при `sameOrigin==false` проверка отключена. Дефект идентичен.
+
+### E.2 — Findings 1 / 5 / 6 на Android — не углублялись в этом проходе
+Приоритет был подтвердить кросс-платформенность F4. Детальная проверка парити по share_to_story/biometry/
+file_download на Android — отдельная задача (ожидается, что, как и на iOS, там есть серверные/URL-гейты).
+
+---
+
+## Раздел F — Итоговая кросс-платформенная сводка
+
+| Finding | macOS | Desktop | iOS | Android |
+|---|---|---|---|---|
+| **4** Bridge origin confusion (`sameOrigin==false`) | ✔ | ✔ | ✔ | ✔ |
+| **1** share_to_story SSRF/IP | ✔ | ✖ (заглушка) | ✖ (`isAllowedBotMediaUrl`) | н/п |
+| **5** biometry `accessGranted` | ✔ | ✖ (нет биометрии) | ✖ (guard+шифрование) | н/п |
+| **6** file_download size-probe | ✔ | ✖ | ✖ | н/п |
+
+**Finding 4 — кросс-платформенный архитектурный дефект WebApp-моста на всех четырёх официальных
+клиентах.** Доверие мосту (и входящее, и исходящее) завязано на серверный флаг `sameOrigin`/
+`useSecuredEventProxy`/`restrictBridgeToOrigin`; при его отсутствии (все legacy-боты) origin не
+проверяется, а навигация в чужой origin разрешена → захват моста и утечка результатов (буфер обмена,
+на macOS/iOS ещё и биометрический токен) на attacker.com. **Четыре отдельных репорта** (по клиенту).
+
+**Findings 1/5/6 — macOS-специфичны**; на iOS для 1 и 5 есть эталонные проверки, что доказывает:
+это упущения клиента macOS, а не замысел.
+
+Остаётся к проверке: **Web (JS, webK/webA)** и протокол **MTProto 2.0**.
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**
