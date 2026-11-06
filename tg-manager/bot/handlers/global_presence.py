@@ -2304,32 +2304,42 @@ async def cb_gp_launch(
     try:
         from services import ecosystem_brain as _eb
 
-        _geo_label = (
-            GEO_PRESETS.get(sd.get("geo_preset", ""), {}).get("label")
-            or f"{len(sd.get('geo_list') or [])} городов"
+        # Повтор нажатия садится на ТОТ ЖЕ план (дверь по содержимому в
+        # find_or_create_global_presence_plan), и экосистему ему заводить
+        # второй раз не нужно: владелец увидел бы в списке две одинаковые
+        # структуры, а событие «план запущен» записалось бы дважды. Признак
+        # того, что первая попытка уже всё сделала, — ecosystem_id на плане.
+        _eco_id = await pool.fetchval(
+            "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
+            primary_plan_id,
         )
-        _eco_id = await _eb.create_ecosystem(
-            pool,
-            owner_id,
-            f"GP: {_structure_line(sd)} — {_geo_label}"[:120],
-            ecosystem_type="global_presence",
-            region=sd.get("geo_preset") or None,
-        )
-        for _, _pid, _ in launched:
-            await pool.execute(
-                "UPDATE global_presence_plans SET ecosystem_id=$1 WHERE id=$2",
-                _eco_id,
-                _pid,
+        if not _eco_id:
+            _geo_label = (
+                GEO_PRESETS.get(sd.get("geo_preset", ""), {}).get("label")
+                or f"{len(sd.get('geo_list') or [])} городов"
             )
-        await _eb.record_event(
-            pool,
-            _eco_id,
-            owner_id,
-            "plan_started",
-            f"GP план #{primary_plan_id} запущен ({len(targets)} объектов)",
-            severity="info",
-            details={"plan_id": primary_plan_id, "asset_type": asset_type},
-        )
+            _eco_id = await _eb.create_ecosystem(
+                pool,
+                owner_id,
+                f"GP: {_structure_line(sd)} — {_geo_label}"[:120],
+                ecosystem_type="global_presence",
+                region=sd.get("geo_preset") or None,
+            )
+            for _, _pid, _ in launched:
+                await pool.execute(
+                    "UPDATE global_presence_plans SET ecosystem_id=$1 WHERE id=$2",
+                    _eco_id,
+                    _pid,
+                )
+            await _eb.record_event(
+                pool,
+                _eco_id,
+                owner_id,
+                "plan_started",
+                f"GP план #{primary_plan_id} запущен ({len(targets)} объектов)",
+                severity="info",
+                details={"plan_id": primary_plan_id, "asset_type": asset_type},
+            )
     except Exception as _eco_err:
         log.debug("global_presence: авто-создание экосистемы не удалось: %s", _eco_err)
 

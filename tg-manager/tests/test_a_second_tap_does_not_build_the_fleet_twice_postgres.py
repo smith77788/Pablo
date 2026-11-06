@@ -52,7 +52,10 @@ def pool():
     async def _mk():
         return await asyncpg.create_pool(DSN, min_size=1, max_size=2)
 
-    p = _run(_mk())
+    try:
+        p = _run(_mk())
+    except Exception as exc:
+        pytest.skip(f"Postgres по INFRAGRAM_TEST_DSN недоступен: {str(exc)[:120]}")
     yield p
     _run(p.execute("DELETE FROM global_presence_plans WHERE owner_id=$1", OWNER))
     _run(p.close())
@@ -254,3 +257,35 @@ def test_every_plan_creator_goes_through_the_door():
                 bad.append(f"{rel}: вставляет план своим SQL")
     assert scanned > 100, f"обойдено всего {scanned} файлов — обход сломан"
     assert not bad, "; ".join(bad)
+
+
+def test_a_repeat_tap_does_not_create_a_second_ecosystem():
+    """Повтор садится на тот же план — значит и структуру заводить не надо.
+
+    Экосистема создаётся ПОСЛЕ плана и в той же кнопке. Повтор нажатия
+    получает тот же plan_id, но прежний код всё равно заводил новую
+    экосистему и писал «план запущен» второй раз: в списке владельца две
+    одинаковые структуры, а активы разошлись бы по ним. Признак того, что
+    первая попытка всё сделала, — `ecosystem_id` на плане.
+    """
+    src = (ROOT / "bot" / "handlers" / "global_presence.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(src)
+    calls = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call)
+             and getattr(n.func, "attr", "") == "create_ecosystem"]
+    assert calls, "создание экосистемы не найдено — мерка смотрит не туда"
+    guarded = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = ast.get_source_segment(src, node.test) or ""
+        body = "\n".join(filter(None, (ast.get_source_segment(src, b)
+                                       for b in node.body)))
+        if "create_ecosystem" in body and "_eco_id" in test:
+            guarded.append(test)
+    assert guarded, (
+        "создание экосистемы не прикрыто проверкой «у плана она уже есть»: "
+        "повтор нажатия заведёт вторую структуру на тот же план")
+    assert re.search(r"SELECT\s+ecosystem_id\s+FROM\s+global_presence_plans",
+                     src), "признак читается не с плана — проверка условна"

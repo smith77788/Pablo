@@ -67,7 +67,10 @@ def pool():
     async def _mk():
         return await asyncpg.create_pool(DSN, min_size=1, max_size=2)
 
-    p = _run(_mk())
+    try:
+        p = _run(_mk())
+    except Exception as exc:
+        pytest.skip(f"Postgres по INFRAGRAM_TEST_DSN недоступен: {str(exc)[:120]}")
     _run(p.execute(
         "INSERT INTO managed_bots(token, bot_id, added_by) VALUES($1,$2,$3) "
         "ON CONFLICT (bot_id) DO NOTHING",
