@@ -30846,14 +30846,24 @@ async function loadAdminUserAssets() {
     const lst = v => Array.isArray(v) ? v : [];
     const d = { bots: lst(d0.bots), channels: lst(d0.channels),
                 accounts: lst(d0.accounts) };
-    const tab = (k, lbl, n) => `<button class="btn ${ADM_UA_KIND===k?'btn-p':'btn-s'}"`
+    // В закладке — ИТОГ, а не длина страницы: у владельца с тремя сотнями
+    // ботов потолок обрезает список, и «Боты · 200» читалось бы как «их 200».
+    const total = k => { const t = d0[k + '_total']; return (t == null ? d[k].length : Number(t)); };
+    const tab = (k, lbl) => `<button class="btn ${ADM_UA_KIND===k?'btn-p':'btn-s'}"`
       + ` style="padding:6px 10px;font-size:12px" onclick="admUaTab('${k}')">`
-      + `${lbl} · ${num(n)}</button>`;
+      + `${lbl} · ${num(total(k))}</button>`;
     let h = '<div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 16px 10px">'
-      + tab('bots', '🤖 Боты', (d.bots||[]).length)
-      + tab('channels', '📡 Каналы', (d.channels||[]).length)
-      + tab('accounts', '📱 Аккаунты', (d.accounts||[]).length)
+      + tab('bots', '🤖 Боты')
+      + tab('channels', '📡 Каналы')
+      + tab('accounts', '📱 Аккаунты')
       + '</div>';
+    // Обрыв называем прямо на экране: список, который выглядит как весь
+    // список, — это ложь в один шаг, а итог рядом с ним — в два.
+    const shown = d[ADM_UA_KIND].length, all = total(ADM_UA_KIND);
+    if (all > shown) {
+      h += `<div class="hint" style="padding:0 16px 10px">Показаны первые `
+        + `${num(shown)} из ${num(all)} — остальные на этом экране не видны.</div>`;
+    }
     const when = v => v ? new Date(v).toLocaleDateString('ru-RU') : '—';
     let rows = '';
     if (ADM_UA_KIND === 'bots') {
@@ -30953,8 +30963,16 @@ async function loadAdminBroadcastLast() {
         + '<div class="row-val" style="white-space:normal">' + tail + '</div></div>'
         + '<span class="chev">›</span></div>';
     }).join('');
+    // Пять последних — потолок, и о нём говорим: «уже рассылали» без числа
+    // читается как «всего было столько».
+    const allBc = (d.total == null ? rows.length : Number(d.total));
+    const note = allBc > rows.length
+      ? `<div class="hint" style="padding:0 16px 8px">Показаны последние `
+        + `${num(rows.length)} из ${num(allBc)}; весь журнал — в «Действиях `
+        + `админов».</div>`
+      : '';
     txt('adm-bc-last', '<div class="sec" style="margin-top:16px">Уже рассылали</div>'
-      + '<div class="lst">' + rowsHtml + '</div>');
+      + note + '<div class="lst">' + rowsHtml + '</div>');
   } catch (e) {
     txt('adm-bc-last', errHtml(errRu(e, 'Прежние рассылки не загрузились'),
                                retryCall('loadAdminBroadcastLast')));

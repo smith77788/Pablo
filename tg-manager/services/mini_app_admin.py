@@ -95,7 +95,7 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать админские маршруты мини-аппа."""
     from services.mini_app_api import (
         _INTERNAL_ERROR, _admin_broadcast_core, _err, _get_uid, _is_admin,
-        _json_resp, bad_body_response, log,
+        _json_resp, _list_limit, bad_body_response, log,
     )
 
 
@@ -218,10 +218,10 @@ def setup_routes(app: web.Application, pool) -> None:
             target_id = int(request.match_info["user_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор пользователя", 400)
-        try:
-            limit = max(1, min(int(request.query.get("limit", "50")), 200))
-        except (TypeError, ValueError):
-            return _err("Неверные параметры страницы", 400)
+        # Потолок — общим помощником слоя, а не руками: мерка молчаливых
+        # потолков (tests/test_a_capped_list_says_it_is_capped.py) узнаёт
+        # именно его, и ручка с потолком «своей сборки» ей не видна.
+        limit = _list_limit(request, 50, 200)
         try:
             exists = await pool.fetchval(
                 "SELECT 1 FROM platform_users WHERE user_id=$1", target_id)
@@ -242,8 +242,19 @@ def setup_routes(app: web.Application, pool) -> None:
                 "ORDER BY is_active DESC, added_at DESC LIMIT $2", target_id, limit)
             def _iso(v):
                 return v.isoformat() if v else None
+            # Итоги — рядом со списками: у владельца с тремя сотнями ботов
+            # потолок обрежет список, и экран обязан сказать это, а не выдать
+            # первые двести за всё, что есть.
+            totals = await pool.fetchrow(
+                "SELECT (SELECT COUNT(*) FROM managed_bots WHERE added_by=$1) AS bots, "
+                "       (SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1) AS channels, "
+                "       (SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1) AS accounts",
+                target_id)
             return _json_resp({
                 "user_id": target_id,
+                "bots_total": int(totals["bots"] or 0),
+                "channels_total": int(totals["channels"] or 0),
+                "accounts_total": int(totals["accounts"] or 0),
                 "bots": [{"bot_id": int(b["bot_id"]),
                           "username": b["username"] or "",
                           "first_name": b["first_name"] or "",
@@ -300,11 +311,10 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
             return _err("Раздел только для владельца платформы", 403)
+        limit = _list_limit(request, 5, 20)
         try:
-            limit = max(1, min(int(request.query.get("limit", "5")), 20))
-        except (TypeError, ValueError):
-            return _err("Неверные параметры страницы", 400)
-        try:
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM admin_audit_log WHERE action = 'admin_broadcast'")
             rows = await pool.fetch(
                 """SELECT id, admin_id, details, created_at FROM admin_audit_log
                    WHERE action = 'admin_broadcast'
@@ -329,7 +339,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     # (передеплой, таймаут шлюза). Это владельцу и важно.
                     "finished": bool(d.get("finished")),
                 })
-            return _json_resp({"broadcasts": out})
+            return _json_resp({"broadcasts": out, "total": int(total or 0)})
         except Exception:
             log.exception("admin_broadcast_recent uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)

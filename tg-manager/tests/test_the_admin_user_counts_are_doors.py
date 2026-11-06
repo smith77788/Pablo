@@ -92,3 +92,34 @@ def test_a_field_that_is_not_a_list_does_not_kill_the_screen():
     assert i < j, (
         "ветка заглушки для списков должна стоять ДО ветки с числами, иначе "
         "экран списков снова получит числа")
+
+
+def test_a_capped_list_says_so_on_the_screen():
+    """Потолок есть у обоих новых списков — значит, он обязан быть назван.
+
+    Правило слоя (tests/test_a_capped_list_says_it_is_capped.py): «потолок сам
+    по себе не порок, порок — потолок, о котором владельцу не говорят». У
+    владельца с тремя сотнями ботов список обрежется на двухстах, и «🤖 Боты ·
+    200» он прочтёт как «их двести».
+    """
+    body = _fn("loadAdminUserAssets")
+    assert "_total" in body, (
+        "закладки снова считают длину страницы вместо итога: обрезанный "
+        "список выглядит как весь")
+    assert "Показаны первые" in body, "обрыв списка не назван на экране"
+
+    src = (ROOT / "services" / "mini_app_admin.py").read_text(encoding="utf-8")
+    i = src.index("async def admin_user_assets")
+    j = src.index("async def admin_broadcast", i)
+    hand = src[i:j]
+    assert "_list_limit(request" in hand, (
+        "потолок собран руками: общую мерку молчаливых потолков такая ручка "
+        "не видит вовсе — зелено не потому, что честно")
+    assert "bots_total" in hand and "accounts_total" in hand, "итогов в ответе нет"
+
+
+def test_the_previous_broadcasts_say_how_many_there_were():
+    body = _fn("loadAdminBroadcastLast")
+    assert "d.total" in body, "итог журнала не читается"
+    assert "Показаны последние" in body, (
+        "«Уже рассылали» без числа читается как «всего было столько»")
