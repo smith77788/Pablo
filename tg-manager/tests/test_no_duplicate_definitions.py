@@ -82,7 +82,15 @@ def test_no_duplicate_js_functions():
 # приходится явно перечислять, а не тащить их в общий список молча.
 _MODULE_DUP_ALLOWLIST: dict[str, set[str]] = {}
 
-_WATCHED_PY_DIRS = ("services", "bot", "database")
+# `tests` здесь не «на всякий случай»: 06.11.2026 в
+# tests/test_the_layout_check_can_actually_fail.py лежали ДВА определения
+# `test_the_error_mark_proves_it_can_see`. Python оставляет последнее, то есть
+# первое было мёртвым текстом, который выглядит как проверка, — и о том, держит
+# ли оно ещё что-нибудь, никто не знал. Для теста это хуже, чем для кода:
+# прогон зелёный, число проверок на глаз то же, а одной проверки нет.
+# Проверка пофайловая, поэтому одинаковые имена помощников в РАЗНЫХ файлах
+# (`_src`, `_body`) законны и сюда не попадают.
+_WATCHED_PY_DIRS = ("services", "bot", "database", "tests")
 
 
 def _iter_python_files():

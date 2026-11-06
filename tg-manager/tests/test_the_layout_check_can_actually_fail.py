@@ -217,7 +217,10 @@ def test_a_probe_call_cannot_invent_a_finding():
     src = _src()
     assert "probe" in src, "пробные вызовы пропали — охват опять упадёт до 111"
     body = src[src.index("const problems = [];"):]
-    assert "if (!probe) {" in body[:400], (
+    # Не байтовым окном: между объявлением и этим `if` уже вставали и комментарии,
+    # и соседний список находок. Важно одно — падение пробного вызова отсечено
+    # РАНЬШЕ, чем в находки попадёт первая запись.
+    assert body.index("if (!probe) {") < body.index("problems.push("), (
         "падение пробного вызова снова идёт в находки: отчёт утонет в шуме "
         "от подставленного id, а шумный отчёт закрывают списком исключений")
 
@@ -661,148 +664,6 @@ def test_an_erring_screen_is_not_called_nearly_dead():
     сразу `c.name`, а заглушка вложенного ключа не давала) и показывали
     «Что-то пошло не так». В отчёте они лежали среди «почти мёртвых»: приговор
     по экранам, о которых ничего не известно, плюс охват «207 из 207», в
-    котором одиннадцать не видели вовсе.
-    """
-    src = _src()
-    i = src.index("const erred = !!scr.querySelector")
-    head = src[i:i + 400]
-    assert ".err-msg" in head and ".empty-ico" in head, (
-        "признак ошибки читает не разметку: текст сообщения приходит с сервера "
-        "и меняется, а `errHtml()`/`empty('⚠️', …)` — нет")
-    assert "ОТВЕТИЛИ ОШИБКОЙ" in src, "список экранов с ошибкой не печатается"
-    j = src.index("const erred = all.filter((r) => r.erred)") if (
-        "const erred = all.filter((r) => r.erred)" in src) else src.index(
-        "const erred = all.filter(r => r.erred)")
-    tail = src[j:j + 500]
-    assert "const rows = all.filter" in tail and "!r.erred" in tail, (
-        "экраны с ошибкой снова идут в мёртвые, не накормленные и тонкие")
-
-
-def test_the_error_mark_proves_it_can_see():
-    """У признака ошибки своя самопроверка, и слепота гасит прогон."""
-    src = _src()
-    i = src.index("самопроверка признака ошибки")
-    head = src[max(0, i - 1500):i]
-    assert "box.className = 'err-msg'" in head, "самопроверка не кладёт разметку ошибки"
-    assert "emp.className = 'empty'" in head, (
-        "вторая форма ошибки (пустое состояние со значком) не проверяется")
-    tail = src[i:i + 500]
-    assert "ПРИЗНАК ОШИБКИ СЛЕП" in tail and "exitCode = 2" in tail, (
-        "слепой признак не гасит прогон — «экранов с ошибкой нет» ничего не значит")
-
-
-def test_the_thin_verdict_shows_the_text_it_judges():
-    """Тонкий экран назван вместе с НАЧАЛОМ своего текста.
-
-    «1 действие, 54 знака» одинаково выглядит у экрана, которому правда нечего
-    показать, у спокойного пустого состояния («Нет диалогов») и у экрана,
-    упавшего с ошибкой. По одним числам приговор вынести нельзя, а ради него
-    гонять обход заново — минуты.
-    """
-    src = _src()
-    i = src.index("ПОЧТИ МЁРТВЫЕ")
-    tail = src[i:i + 400]
-    assert "r.sample" in tail, "список тонких экранов снова печатает одни числа"
-    j = src.index("sample: sample.replace")
-    assert "slice(0, 220)" in src[j:j + 120], "начало текста не ограничено по длине"
-
-
-def _fat_stub_body() -> str:
-    """Тело «толстой» заглушки. В обходе ТРИ подмены `window.fetch` (режим
-    отказа, пустой режим, толстый), и выбирать первую по тексту нельзя: разбор
-    тогда читает чужую и ничего не находит — проверка адресности становится
-    непадающей. Поймано контролем: разбор дал один блок `/auth`.
-    """
-    src = _src()
-    mark = src.index("for (const k of ARRAY_KEYS) o[k] = ROWS;")
-    head = src.rindex("window.fetch = async", 0, mark)
-    close = src.index("{", src.index(")", src.index("(", head)))
-    depth, j = 0, close
-    while j < len(src):
-        if src[j] == "{":
-            depth += 1
-        elif src[j] == "}":
-            depth -= 1
-            if depth == 0:
-                break
-        j += 1
-    return src[close:j]
-
-
-def _stub_route_blocks() -> dict[str, str]:
-    """Блоки заглушки по адресам: `if (url.indexOf('…')…)` → тело блока.
-
-    Границы блока считаются по скобкам, а не окном: иначе проверка ниже
-    промахнулась бы от любой правки рядом и стала бы непадающей.
-    """
-    body = _fat_stub_body()
-    out: dict[str, str] = {}
-    for m in re.finditer(r"if \(url\.indexOf\('([^']+)'\)[^)]*\)\s*", body):
-        route, k = m.group(1), m.end()
-        if k < len(body) and body[k] == "{":
-            depth, j = 0, k
-            while j < len(body):
-                if body[j] == "{":
-                    depth += 1
-                elif body[j] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        break
-                j += 1
-            out[route] = body[k:j]
-        else:
-            out[route] = body[k:body.index("\n", k)]
-    return out
-
-
-_DETAIL_KEYS = {
-    "contact": "/uch/contacts/", "plan": "/global_presence/", "eco": "/ecosystem/",
-    "funnel": "/auto_funnel/", "user": "/admin/user/", "campaign": "/narrative/",
-    "bot": "/miniapp/bot/", "crm": "/crm_connections/", "endpoint": "/deliveries",
-    "memories": "/ai_memory", "duplicates": "/uch/duplicates",
-}
-
-
-def test_the_detail_screens_are_fed_by_route_not_wholesale():
-    """Вложенная сущность раздаётся ПО АДРЕСУ, а не всем ответам сразу.
-
-    Одно имя поля на разных адресах значит разное: `plan` на `/subscription` —
-    название тарифа СТРОКОЙ (index.html: updatePlan(d.plan, …)), и общая
-    запись нарисовала бы там «[object Object]» — выдуманную находку, которая в
-    следующий раз закрывается списком исключений, и дыра оказывается там, где
-    её не было. Та же причина, по которой разведены `proxies` и `accounts`.
-    """
-    body = _fat_stub_body()
-    blocks = _stub_route_blocks()
-    assert len(blocks) >= 12, f"адресных блоков в заглушке всего {len(blocks)}"
-    scoped = "".join(blocks.values())
-    for key, route in _DETAIL_KEYS.items():
-        assert route in blocks, f"заглушка не знает адреса {route}"
-        assert f"o.{key} =" in blocks[route], (
-            f"ключ {key} не раздаётся на {route} — экран детали упадёт "
-            f"на TypeError и обход его не увидит")
-        outside = body.count(f"o.{key} =") - scoped.count(f"o.{key} =")
-        assert outside == 0, (
-            f"ключ {key} раздаётся ВСЕМ ответам: на другом адресе то же имя "
-            f"значит другое, и заглушка нарисует находку, которой нет")
-    assert "'users','posts'];" in body.replace(" ", "") or "ARRAY_KEYS" in body
-
-
-def test_the_route_block_reader_can_actually_fail():
-    """Разбор блоков обязан падать: пустой разбор сделал бы тест выше вечно зелёным."""
-    blocks = _stub_route_blocks()
-    assert "/transport" in blocks and "o.proxies = 12" in blocks["/transport"]
-    assert "o.plan" not in blocks["/transport"], (
-        "разбор склеивает соседние блоки — проверка адресности ничего не держит")
-
-
-def test_an_erring_screen_is_not_called_nearly_dead():
-    """Экран в состоянии ошибки обход НЕ ВИДЕЛ — и в приговоры не идёт.
-
-    Одиннадцать экранов деталей падали на TypeError (`const c = d.contact;` и
-    сразу `c.name`, а заглушка вложенного ключа не давала) и показывали
-    «Что-то пошло не так». В отчёте они лежали среди «почти мёртвых»: приговор
-    по экранам, о которых ничего не известно, плюс охват «207 из 207», в
     котором одиннадцати не видели вовсе.
     """
     src = _src()
@@ -819,15 +680,26 @@ def test_an_erring_screen_is_not_called_nearly_dead():
 
 
 def test_the_error_mark_proves_it_can_see():
-    """У признака ошибки своя самопроверка, и слепота гасит прогон."""
+    """У признака ошибки своя самопроверка, и слепота гасит прогон.
+
+    Эта проверка была в файле ДВАЖДЫ под одним именем, и работала только
+    вторая: Python оставляет последнее определение, первое — мёртвый текст,
+    который выглядит как проверка. Поэтому ищем не байтовым окном «столько-то
+    знаков до строки отчёта» (окно рвётся от любой вставки рядом — так и
+    случилось, когда рядом встала самопроверка слов о сбое), а по границам
+    самого блока самопроверки.
+    """
     src = _src()
-    i = src.index("самопроверка признака ошибки")
-    head = src[max(0, i - 2200):i]
+    i = src.index("const es_ = await page.evaluate(")
+    j = src.index("самопроверка признака ошибки", i)
+    head = src[i:j]
     assert "box.className = 'err-msg'" in head, "самопроверка не кладёт разметку ошибки"
     assert "emp.className = 'empty'" in head, (
         "вторая форма ошибки (пустое состояние со значком) не проверяется")
-    tail = src[i:i + 600]
-    assert "ПРИЗНАК ОШИБКИ СЛЕП" in tail and "exitCode = 2" in tail, (
+    # И здесь не окном: гасит ли прогон — это «exitCode сразу за строкой
+    # отчёта», а не «в пределах шестисот знаков от неё».
+    k = src.index("ПРИЗНАК ОШИБКИ СЛЕП", j)
+    assert "exitCode = 2" in src[k:k + 200], (
         "слепой признак не гасит прогон — «экранов с ошибкой нет» ничего не значит")
 
 
@@ -1142,3 +1014,119 @@ def test_a_nested_field_is_fed_as_the_screen_reads_it():
         "поле без kind/need рисуется не тем вводом, что в приложении")
     assert "packed:" in tpl and "votes:" in tpl, (
         "экран печатает размер и наличие голосов — без них снова «undefined»")
+
+
+def test_the_error_marker_checks_itself_on_a_clean_screen():
+    """В режиме сбоя живой экран САМ в состоянии ошибки.
+
+    Самопроверка признака проверялась на нём — и третий корень («спокойная
+    пустота отличена от ошибки») проваливался всегда: `erred` находит
+    `.err-msg` в любом месте экрана, и чужая разметка перебивала подложенную.
+    Отчёт писал «ПРИЗНАК ОШИБКИ СЛЕП», то есть объявлял негодной мерку, а
+    негодной была площадка — ровно в том режиме, ради которого признак нужен.
+    """
+    src = _src()
+    i = src.index("const es_ = await page.evaluate(")
+    block = src[i:i + 1400]
+    assert "real.classList.remove('show')" in block, (
+        "самопроверка признака ошибки снова судит живой экран")
+    assert "scr.className = 'screen show'" in block, "своей площадки нет"
+    assert "real.classList.add('show')" in block, (
+        "площадку не вернули — дальше обход мерил бы не тот экран")
+    assert "dirty" in block, (
+        "грязная площадка должна называться своим именем, а не «мерка слепа»")
+
+
+def test_the_hidden_failure_verdict_is_judged_before_the_sweep_clicks():
+    """Проход сам включает режим выбора и жмёт «Все» — список перерисовывается.
+
+    `chSelAll()` затирал блок ошибки, и `openChannels` попадал в находки,
+    хотя ошибку показывает правильно. Мерка, судящая экран после собственных
+    нажатий, судит свою работу.
+    """
+    src = _src()
+    verdict = src.index("СБОЙ СКРЫТ")
+    clicks = src.index("const sel = await coveredWithSelection();")
+    assert verdict < clicks, (
+        "приговор о скрытом сбое снова считается после нажатий прохода")
+
+
+def test_the_hidden_failure_verdict_waits_for_the_screen_to_speak():
+    """Опрос — до приговора, и он прерывается, как только экран сказал.
+
+    Привязка — по границам блока, а не по окну в байтах: окно `src[i:i+1600]`
+    уже дважды ломалось от вставки рядом, и проверка падала там, где мерка была
+    цела.
+    """
+    src = _src()
+    start = src.index("if (failMode && opened) {")
+    verdict = src.index("СБОЙ СКРЫТ", start)
+    block = src[start:verdict]
+    assert "for (let i = 0; i < 12; i++)" in block, (
+        "мерка снова судит экран со спиннером: отказ fetch доходит до catch "
+        "через микрозадачи")
+    poll = block.index("for (let i = 0; i < 12; i++)")
+    assert "break;" in block[poll:], "ждём до конца даже когда экран уже сказал"
+
+
+def test_a_screen_that_asked_nothing_is_not_accused():
+    """Приговор требует хотя бы одной пятисотки — форма, не ходившая к серверу,
+    молчит законно.
+
+    Условие приговора ищем регуляркой: к нему уже добавилось `loadsOnOpen`, и
+    поиск точной строки падал на верной мерке.
+    """
+    src = _src()
+    assert "window.__failServed" in src, (
+        "без счётчика пятисоток приговор требовал бы разметки ошибки от формы, "
+        "которая к серверу не обращалась вовсе")
+    verdict = re.search(r"if \([^)]*fs\.served > 0 && !said\) \{\s*\n\s*hidFail\.push", src)
+    assert verdict, (
+        "приговор больше не смотрит на счётчик пятисоток: экран, ничего не "
+        "спросивший, снова можно обвинить в сокрытии")
+
+
+def test_the_words_about_a_failure_count_as_a_signal():
+    """Экран может сказать о сбое своей разметкой — это не беда, а другая форма."""
+    src = _src()
+    assert "FAIL_PHRASE" in src and "indexOf(FAIL_PHRASE)" in src, (
+        "мерка, знающая одну форму записи, объявит бедой чужую: первой "
+        "находкой стал openBotNote со своим #noteErr и своей «↺ Повторить»")
+    assert "самопроверка слов о сбое" in src, (
+        "признак по фразе без самопроверки — «сбой нигде не скрыт» ничего "
+        "не означает")
+    assert "const failMode = !!process.env.MINIAPP_FAIL;" in src, (
+        "в fail-en фраза приходит по-английски, errRu подставляет текст "
+        "самого экрана — признак по фразе там не работает")
+
+def test_the_sweep_cannot_be_torn_by_a_page_reload():
+    """Срыв прохода — не находка приложения, а потерянный замер.
+
+    Приложение, не найдя SDK, тянет его с telegram.org и на `onload` делает
+    `location.reload()`. Одной метки в sessionStorage не хватило: ветка
+    «ретрай уже был» её СНИМАЕТ, и после первой загрузки защиты нет — проход
+    рвался на случайном экране (`openShieldCheck`), причём через раз.
+    """
+    src = _src()
+    assert "route('**://telegram.org/**'" in src, (
+        "запрос к CDN снова не отменяется — перезагрузка страницы вернётся")
+    assert "route.abort()" in src
+    assert "__sdk_cdn_try" in src, "вторая защита (метка попытки) тоже нужна"
+    assert "ОБХОД СОРВАЛСЯ НА ВЫЗОВАХ" in src, (
+        "молча потерянный экран хуже упавшего прохода: отчёт выглядит полным")
+
+
+def test_only_a_screen_that_loads_on_open_is_accused_of_hiding_a_failure():
+    """Счётчик пятисоток общий на страницу — одного его мало.
+
+    Поздний ответ предыдущего экрана или фоновый опрос увеличивают счётчик, а
+    виноватым выходит текущий экран: так в находки попали `openUchAI`
+    (ассистент ждёт вопроса) и `openGlobalSearch` (поиск ждёт нажатия).
+    """
+    src = _src()
+    assert "const loadsOnOpen = await page.evaluate" in src, (
+        "приговор снова судит экран, который при открытии ничего не грузит")
+    assert "if (loadsOnOpen && fs.served > 0 && !said)" in src
+    assert "/\\bapi\\s*\\(/.test(all)" in src, (
+        "признак загрузки ищется не по форме вызова — а именно на имени "
+        "мерки уже трижды врали за день")

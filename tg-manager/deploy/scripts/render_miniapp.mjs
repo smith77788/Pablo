@@ -74,6 +74,16 @@ await page.addInitScript((t) => { window.__RENDER_THEME = t; }, process.env.MINI
 await page.addInitScript(() => {
   try { sessionStorage.setItem('__sdk_cdn_try', '1'); } catch (_) {}
 });
+// Одной метки мало, и это выяснилось обходом: ветка «ретрай уже был» СНИМАЕТ
+// метку (`sessionStorage.removeItem(RK)`), так что после первой загрузки она
+// пропадает — и любая следующая навигация снова тянет скрипт с telegram.org,
+// снова зовёт `location.reload()` и снова рвёт `page.evaluate` на случайном
+// экране (в прогоне 06.11.2026 — `openShieldCheck`). Поэтому запрос к CDN
+// отменяем совсем: `onload` не наступает, перезагрузки нет. Обход проверяет
+// приложение, а не доступность telegram.org, и локальная копия SDK в
+// репозитории есть (mini_app/telegram-web-app.js).
+await page.route('**://telegram.org/**', (route) => route.abort());
+await page.route('**://*.telegram.org/**', (route) => route.abort());
 await page.addInitScript((mode) => {
   const fat = mode === 'fat';
   const TH = window.__RENDER_THEME;
@@ -109,8 +119,16 @@ await page.addInitScript((mode) => {
     const errBody = mode === 'fail-en'
       ? { error: 'Chat admin privileges are required to do that' }
       : { error: 'Внутренняя ошибка' };
-    const boom = () => new Response(JSON.stringify(errBody),
-      { status: 500, headers: { 'Content-Type': 'application/json' } });
+    // Счётчик отданных пятисоток. Нужен, чтобы отличить экран, который СБОЙ
+    // СКРЫЛ, от экрана, который к серверу вовсе не обращался (форма,
+    // инструкция, локальный расчёт): требовать разметку ошибки от второго —
+    // ложная находка, а ложная находка в такой мерке дороже пропущенной.
+    window.__failServed = 0;
+    const boom = () => {
+      window.__failServed = (window.__failServed || 0) + 1;
+      return new Response(JSON.stringify(errBody),
+        { status: 500, headers: { 'Content-Type': 'application/json' } });
+    };
     window.fetch = async (u) => {
       const url = String(u || '');
       if (url.indexOf('/auth') >= 0 || url.indexOf('/config') >= 0) return ok(EMPTY);
@@ -590,6 +608,44 @@ await page.addInitScript((mode) => {
 // отдельная беда: человек видит пустоту и не знает, сломалось или просто пусто.
 const emptyMode = !!(process.env.MINIAPP_EMPTY || process.env.MINIAPP_FAIL
                      || process.env.MINIAPP_FAIL_EN);
+// Режим СБОЯ — не то же, что режим пустоты. На пустых данных спокойное
+// «Нет диалогов» правильно; на пятисотке оно врёт: человек видит пустоту и
+// идёт искать несуществующую причину вместо того, чтобы повторить. Признак
+// ошибки для этого уже есть (ACTIONS.erred), но до сих пор ни один приговор
+// его в этом режиме не читал — то есть обход гонялся, а вопрос, ради которого
+// режим заведён, не задавался.
+const failMode = !!process.env.MINIAPP_FAIL;
+// Фраза, которой заглушка отвечает на всё в режиме сбоя. `errRu` отдаёт
+// сообщение сервера как есть, если в нём есть кириллица, — значит экран,
+// честно сказавший о сбое своими словами (а не разметкой `errHtml`), эту
+// фразу покажет. Поэтому приговор читает ДВА признака, и хватает любого:
+// разметку ошибки или фразу сервера на экране.
+//
+// Проверено на себе: первая версия признака знала только разметку, и первой
+// же находкой стал `openBotNote` — экран, который о сбое говорит, просто
+// своим `#noteErr` и со своей ссылкой «↺ Повторить». Мерка, знающая одну
+// форму записи, объявляет бедой чужую форму — ровно то, за чем здесь следят
+// самопроверки.
+//
+// В режиме fail-en фраза приходит по-английски, `errRu` подставляет
+// СОБСТВЕННЫЙ текст экрана (у каждого свой), и признак по фразе там не
+// работает — поэтому приговор только для MINIAPP_FAIL. Английский в том
+// режиме ловит своя мерка.
+const FAIL_PHRASE = 'Внутренняя ошибка';
+// Текст всего экрана целиком — для поиска фразы. `ACTIONS.sample` обрезан до
+// 220 знаков, и фраза, сказанная ниже, в него не попадает.
+const SCREEN_TEXT = () => {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return { text: '', id: null };
+  let t = '';
+  for (const el of scr.children) {
+    if (el.classList && (el.classList.contains('hdr') || el.classList.contains('nav'))) continue;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') continue;
+    t += ' ' + (el.innerText || el.textContent || '');
+  }
+  return { text: t.replace(/\s+/g, ' ').trim(), id: scr.id };
+};
 const failEnMode = !!process.env.MINIAPP_FAIL_EN;
 let enToastSeen = 0;
 
@@ -1134,12 +1190,39 @@ if (sweepMode) {
   }
   // Признак состояния ошибки тоже обязан показать, что видит: кладём на экран
   // разметку ошибки и требуем признак, снимаем — и требуем его отсутствия.
+  //
+  // Проверяем НЕ на живом экране, а на своей пустой площадке. В режиме сбоя
+  // (MINIAPP_FAIL) живой экран сам в состоянии ошибки — всё отвечает
+  // пятисоткой, — и третий корень («спокойная пустота отличена от ошибки»)
+  // проваливался всегда: `erred` находит `.err-msg` в любом месте экрана, и
+  // чужая разметка ошибки, уже лежавшая там, перебивала подложенную
+  // спокойную пустоту. Отчёт писал «ПРИЗНАК ОШИБКИ СЛЕП», то есть объявлял
+  // негодной мерку — а негодной была площадка. Ровно в том режиме, ради
+  // которого признак и нужен (кто промолчал в ответ на сбой), самопроверка
+  // не значила ничего.
   const es_ = await page.evaluate((src) => {
     const act = new Function('return (' + src + ')()');
-    const scr = document.querySelector('.screen.show');
-    if (!scr) return { ran: false };
+    const real = document.querySelector('.screen.show');
+    if (!real) return { ran: false };
+    // ACTIONS читает `.screen.show`, поэтому площадку надо не просто создать,
+    // а сделать единственной показанной — и вернуть всё как было.
+    real.classList.remove('show');
+    const scr = document.createElement('div');
+    scr.className = 'screen show';
+    scr.id = 's-selfcheck-erred';
+    document.body.appendChild(scr);
+    const finish = (r) => {
+      scr.remove();
+      real.classList.add('show');
+      return r;
+    };
     const base = act().erred;
     const baseBlank = act().blank;
+    if (base || baseBlank) {
+      // Пустая площадка ни ошибкой, ни пустотой быть не может. Если может —
+      // мерка читает что-то вне экрана, и дальше проверять нечего.
+      return finish({ ran: true, base, dirty: true });
+    }
     const box = document.createElement('div');
     box.className = 'err-msg';
     box.innerHTML = '<div class="err-msg-ico">⚠️</div><div class="err-msg-txt">проверка</div>';
@@ -1164,14 +1247,47 @@ if (sweepMode) {
     const r3 = act();
     const caughtBlank = r3.blank && !r3.erred;
     calm.remove();
-    return { ran: true, base, caught, caughtEmpty, caughtBlank,
-             restored: act().erred === base && act().blank === baseBlank };
+    return finish({ ran: true, base, caught, caughtEmpty, caughtBlank,
+                    restored: act().erred === base && act().blank === baseBlank });
   }, ACTIONS.toString());
+  // Признак «сказал о сбое своими словами» тоже обязан показать, что видит:
+  // фраза сервера на чистой площадке должна находиться, а без неё — нет.
+  // Без этого «сбой нигде не скрыт» значило бы ровно столько же, сколько
+  // прежнее «ошибок нет» в режиме, где мерка была слепа.
+  if (failMode) {
+    const ps_ = await page.evaluate(({ tsrc, phrase }) => {
+      const txt = new Function('return (' + tsrc + ')()');
+      const real = document.querySelector('.screen.show');
+      if (!real) return { ran: false };
+      real.classList.remove('show');
+      const scr = document.createElement('div');
+      scr.className = 'screen show';
+      document.body.appendChild(scr);
+      const fin = (r) => { scr.remove(); real.classList.add('show'); return r; };
+      const base = txt().text.indexOf(phrase) >= 0;
+      const d = document.createElement('div');
+      d.textContent = 'что-то ' + phrase + ' и дальше';
+      scr.appendChild(d);
+      const found = txt().text.indexOf(phrase) >= 0;
+      d.remove();
+      return fin({ ran: true, base, found, gone: txt().text.indexOf(phrase) < 0 });
+    }, { tsrc: SCREEN_TEXT.toString(), phrase: FAIL_PHRASE });
+    console.log(`самопроверка слов о сбое: фраза сервера найдена=${ps_.found}`
+      + ` | после снятия её нет=${ps_.gone} (своё состояние ${ps_.base})`);
+    if (!ps_.ran || !ps_.found || !ps_.gone || ps_.base) {
+      console.log('ПРИЗНАК СЛОВ О СБОЕ СЛЕП — «сбой нигде не скрыт» ничего не означает');
+      process.exitCode = 2;
+    }
+  }
   console.log(`самопроверка признака ошибки: разметка ошибки найдена=${es_.caught}`
     + ` | пустое состояние со значком найдено=${es_.caughtEmpty}`
     + ` | спокойная пустота отличена от ошибки=${es_.caughtBlank}`
     + ` | после снятия столько же=${es_.restored} (своё состояние ${es_.base})`);
-  if (!es_.ran || !es_.caught || !es_.caughtEmpty || !es_.caughtBlank || !es_.restored) {
+  if (es_.dirty) {
+    console.log('ПЛОЩАДКА САМОПРОВЕРКИ НЕ ЧИСТА — признак читает что-то вне экрана');
+  }
+  if (!es_.ran || es_.dirty || !es_.caught || !es_.caughtEmpty || !es_.caughtBlank
+      || !es_.restored) {
     console.log('ПРИЗНАК ОШИБКИ СЛЕП — «экранов с ошибкой нет» ничего не означает');
     process.exitCode = 2;
   }
@@ -1257,6 +1373,7 @@ if (sweepMode) {
     // `openOpDetail()` без него тоже «открывает» экран — с заголовком
     // «Операция #undefined» и телом «не найдена». Экран засчитан, а показали
     // мы пустышку. Поэтому сначала id, и только потом — без него.
+    if (failMode) await page.evaluate(() => { window.__failServed = 0; });
     if (SEED[fn]) await page.evaluate(SEED[fn]);
     const attempts = probe ? [args, []] : [[]];
     let r = {};
@@ -1399,6 +1516,9 @@ if (sweepMode) {
       }
     }
     const problems = [];
+    // Скрытый сбой считается раньше остальных находок (ниже, перед нажатиями),
+    // а в отчёт идёт вместе с ними.
+    const hidFail = [];
     // У пробного вызова падение значит «подставленный id не подошёл», а не
     // поломку: в находки оно не идёт, иначе отчёт утонет в шуме и перестанет
     // что-либо значить. Обрезка считается у обоих одинаково — она мерится по
@@ -1410,6 +1530,73 @@ if (sweepMode) {
     }
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
     if (cv.n) problems.push(`ЗАКРЫТО ${cv.n}: ` + cv.worst.join(' ; '));
+    // Приговор о скрытом сбое — ДО нажатий. Ниже проход сам включает режим
+    // выбора и жмёт «Все» (coveredWithSelection), а `chSelAll()` перерисовывает
+    // список и затирает блок ошибки: находкой стал `openChannels`, который
+    // ошибку показывает правильно — проверено в браузере руками. Мерка,
+    // судящая экран после собственных нажатий, судит свою работу.
+    if (failMode && opened) {
+      // Ждём, пока экран ДОСКАЖЕТ. Открывашка асинхронна: отказ `fetch`
+      // доходит до `catch` через пару микрозадач, и первая версия приговора
+      // мерила экран со спиннером — находкой стал `openChannels`, который
+      // ошибку показывает правильно (проверено в браузере руками). Приговор,
+      // срабатывающий на собственной спешке, хуже отсутствующего: он уводит
+      // разбираться с исправным экраном. Поэтому ждём до 1.2 с и выходим
+      // раньше, едва экран сказал о сбое.
+      // Счётчик пятисоток — ОБЩИЙ на страницу, и этого мало: поздний ответ
+      // предыдущего экрана или фоновый опрос увеличивают его, а виноватым
+      // выходит текущий экран. Так в находки попали `openUchAI` и
+      // `openGlobalSearch` — у них в открывашке запроса нет вовсе: ассистент
+      // ждёт вопроса, поиск — нажатия 🔍. Поэтому спрашиваем ещё и код: судим
+      // только экран, который САМ грузит данные при открытии (`api(` в
+      // открывашке или в её помощнике на один уровень вглубь — так же, как
+      // это уже делает приговор о мёртвых экранах).
+      const loadsOnOpen = await page.evaluate((n) => {
+        const CHROME = new Set(['empty', 'errHtml', 'toast', 'askConfirm',
+                                'confirmDelete', 'modernizeIcons', 'push',
+                                'txt', 'esc', 'escJs', 'retryCall']);
+        let all = String(window[n] || '');
+        const seen = new Set([n]);
+        for (const m of all.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
+          const k = m[1];
+          if (seen.has(k) || CHROME.has(k)) continue;
+          seen.add(k);
+          if (typeof window[k] === 'function') all += '\n' + String(window[k]);
+        }
+        return /\bapi\s*\(/.test(all);
+      }, fn);
+      let fs = null;
+      for (let i = 0; i < 12; i++) {
+        fs = await page.evaluate(({ src, tsrc }) => ({
+          served: window.__failServed || 0,
+          ...new Function('return (' + src + ')()')(),
+          text: new Function('return (' + tsrc + ')()')().text,
+        }), { src: ACTIONS.toString(), tsrc: SCREEN_TEXT.toString() });
+        if (fs.erred || String(fs.text || '').indexOf(FAIL_PHRASE) >= 0) break;
+        await page.waitForTimeout(100);
+      }
+      const said = fs.erred || String(fs.text || '').indexOf(FAIL_PHRASE) >= 0;
+      if (process.env.MINIAPP_DUMP && loadsOnOpen && fs.served > 0 && !said) {
+        const dump = await page.evaluate(() => {
+          const scr = document.querySelector('.screen.show');
+          if (!scr) return 'нет экрана';
+          const parts = [];
+          for (const el of scr.children) {
+            if (el.classList && (el.classList.contains('hdr') || el.classList.contains('nav'))) continue;
+            parts.push('[' + (el.id || el.className || el.tagName) + '] '
+              + el.innerHTML.replace(/<!--[\s\S]*?-->/g, '').slice(0, 300));
+          }
+          return parts.join(' ||| ').slice(0, 2000);
+        });
+        console.log('  DUMP ' + fn + ' >>> ' + dump.replace(/\s+/g, ' '));
+      }
+      if (loadsOnOpen && fs.served > 0 && !said) {
+        hidFail.push(`СБОЙ СКРЫТ ${fs.id}: пятисоток ${fs.served}, ни разметки ошибки,`
+          + ` ни слова о сбое`
+          + (fs.blank ? ' (нарисовано спокойное «показывать нечего»)' : '')
+          + ` «${String(fs.sample || '').slice(0, 90)}»`);
+      }
+    }
     const sel = await coveredWithSelection();
     if (sel) problems.push(sel);
     const gb = await page.evaluate((src) => new Function('return (' + src + ')()')(), GIBBERISH.toString());
@@ -1439,6 +1626,7 @@ if (sweepMode) {
       // окажется там, где её не было. Ни одного знака — признак без толкований.
       if (mu.id && mu.len === 0) problems.push(`НЕМОЙ ЭКРАН ${mu.id}: ни одного знака`);
     }
+    if (hidFail.length) problems.unshift(...hidFail);
     if (problems.length) report.push(fn + ' | ' + problems.join(' | '));
     await page.evaluate(() => { try { while (typeof STACK !== 'undefined' && STACK.length) back(); } catch(_) {} });
     await page.waitForTimeout(60);

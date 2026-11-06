@@ -17273,7 +17273,18 @@ async function openProfileSetter() {
   try {
     const d = await api('/api/miniapp/profile_setter/status');
     document.getElementById('setterAvail').textContent = d.available_accounts;
-  } catch(e) { document.getElementById('setterAvail').textContent='?'; }
+  } catch(e) {
+    // «?» вместо числа — не сообщение: экран выглядит рабочим, а дальше
+    // владелец заказывает массовое оформление, не зная, на сколько аккаунтов
+    // оно уйдёт. Нашлось обходом на пятисотках: «СБОЙ СКРЫТ s-profilesetter».
+    document.getElementById('setterAvail').textContent = '?';
+    const box = document.getElementById('setterErr');
+    if (box) {
+      box.innerHTML = esc(errRu(e, 'Не удалось узнать, сколько аккаунтов доступно'))
+        + ' <span style="color:var(--accent);cursor:pointer;text-decoration:underline" '
+        + 'onclick="openProfileSetter()">↺ Повторить</span>';
+    }
+  }
 }
 function selectSetterOp(op) {
   SETTER_OP = op;
@@ -22189,7 +22200,16 @@ async function gtLoadSaved() {
         <div class="row-ico" style="background:var(--bg-blue-16)">${r.is_main_admin?'👑':'👤'}</div>
         <div class="row-body"><div class="row-name">${esc(r.name||('@'+(r.username||'')))}</div>
           <div class="row-val">@${esc(r.username||'')}</div></div></div>`).join(''));
-  } catch(e) { txt('gtSaved',''); }
+  } catch(e) {
+    // Пустота вместо списка здесь особенно дорога: передача подарка
+    // необратима, а без сохранённых получателей владелец вводит ник руками —
+    // и опечатка уходит чужому человеку навсегда. Нашлось обходом на
+    // пятисотках: «СБОЙ СКРЫТ s-gifttransfer».
+    txt('gtSaved', '<div class="sec">Сохранённые получатели</div>'
+      + errHtml(errRu(e, 'Сохранённые получатели не загрузились — '
+                         + 'вводите ник вручную внимательно'),
+                retryCall('gtLoadSaved')));
+  }
 }
 
 function gtPickSaved(n) {
@@ -30159,7 +30179,31 @@ async function openSettings() {
       if (ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
       _fillTzSelect(backend.tz);
     }
-  } catch(e) {/* ok, settings from local */ _fillTzSelect(null); }
+  } catch(e) {
+    // Молчать здесь нельзя, и дело не только в выходе из ошибки. Выше
+    // написано, почему источник правды — сервер: локальный кэш ВРАЛ, когда
+    // настройки меняли через бота. Молчаливый откат к кэшу возвращает ровно
+    // ту беду, от которой этот запрос и завели, — а экран при этом выглядит
+    // как рабочий. Нашлось обходом на пятисотках: «СБОЙ СКРЫТ s-settings».
+    //
+    // Сохранять то, чего не видели, тем более нельзя: кнопка «Сохранить»
+    // отправила бы кэш и значения по умолчанию поверх настроек, которых
+    // владелец не видел. Тот же замок уже стоит на заметке о боте
+    // (`_botNoteLoad`: `ta.dataset.loaded`) и на выборе валюты ниже.
+    _fillTzSelect(null);
+    const box = document.getElementById('set-err');
+    if (box) {
+      box.innerHTML = esc(errRu(e, 'Настройки не загрузились'))
+        + ' <span style="color:var(--accent);cursor:pointer;text-decoration:underline" '
+        + 'onclick="openSettings()">↺ Повторить</span>';
+    }
+    const scr = document.getElementById('s-settings');
+    if (scr) scr.dataset.settingsLoaded = '';
+  }
+  const _scrOk = document.getElementById('s-settings');
+  if (_scrOk && !document.getElementById('set-err').textContent) {
+    _scrOk.dataset.settingsLoaded = '1';
+  }
   try {
     const m = await api('/api/miniapp/money_settings');
     const cs = document.getElementById('set-currency');
@@ -30211,6 +30255,18 @@ async function deleteMyData() {
   } catch(e) { toast('⚠️ ' + errRu(e, 'Удалить не получилось, ничего не изменено')); }
 }
 async function saveSettings() {
+  // Настройки не пришли — сохранять нечего и опасно: на экране кэш и значения
+  // по умолчанию, а на сервере настоящие настройки, которых владелец не видел.
+  const _scr = document.getElementById('s-settings');
+  if (_scr && _scr.dataset.settingsLoaded !== '1') {
+    const box = document.getElementById('set-err');
+    if (box) {
+      box.innerHTML = 'Настройки ещё не загрузились — сохранение затёрло бы те,'
+        + ' что на сервере. <span style="color:var(--accent);cursor:pointer;'
+        + 'text-decoration:underline" onclick="openSettings()">↺ Повторить</span>';
+    }
+    return;
+  }
   const s = {
     notif_ops: document.getElementById('set-notif-ops')?.checked ?? true,
     notif_error: document.getElementById('set-notif-error')?.checked ?? true,
