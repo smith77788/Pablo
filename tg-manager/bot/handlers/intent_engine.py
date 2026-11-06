@@ -469,7 +469,11 @@ async def _execute_gp_intent(
     }.get(asset_type, "global_presence_channel")
 
     try:
-        plan_id = await db.create_global_presence_plan(
+        # Через дверь: личность нажатия — СОДЕРЖИМОЕ плана, а не его свежий
+        # id. Второй план с тем же содержимым заставил бы флот создать те же
+        # каналы по второму разу (защита исполнителя привязана к целям ОДНОГО
+        # плана), а дедуп постановки на свежем id не срабатывает никогда.
+        plan_id, _plan_reused = await db.find_or_create_global_presence_plan(
             pool,
             owner_id=owner_id,
             asset_type=asset_type,
@@ -481,12 +485,22 @@ async def _execute_gp_intent(
                 "via_intent": intent_id,
             },
             account_selection={"account_ids": account_ids},
+            targets=targets,
         )
-        await db.create_global_presence_targets(pool, plan_id, targets)
-        op_id = await operation_bus.submit(
-            pool, owner_id, op_type, {"plan_id": plan_id}, total_items=len(targets)
-        )
-        await db.link_plan_to_operation(pool, plan_id, op_id)
+        _existing_op = None
+        if _plan_reused:
+            _existing_op = await pool.fetchval(
+                "SELECT op_id FROM global_presence_plans WHERE id=$1", plan_id)
+        if _existing_op:
+            op_id = int(_existing_op)
+            log.info("_execute_gp_intent: повтор — план %s и операция %s уже "
+                     "созданы, второй раз флот не гоняем", plan_id, op_id)
+        else:
+            op_id = await operation_bus.submit(
+                pool, owner_id, op_type, {"plan_id": plan_id},
+                total_items=len(targets)
+            )
+            await db.link_plan_to_operation(pool, plan_id, op_id)
         await db.update_intent_status(pool, intent_id, owner_id, "executing")
         await _show_operation_started(callback, op_id, f"Создано целей: {len(targets)}")
     except Exception as exc:

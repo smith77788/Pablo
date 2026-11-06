@@ -216,7 +216,13 @@ def test_schema_columns_are_additive():
 
 
 def test_db_persists_target_generator_fields():
-    src = _func_src(DB, "create_global_presence_targets")
+    # Сама вставка живёт в `_insert_gp_targets`: план и его цели обязаны
+    # писаться одной транзакцией, поэтому запрос вынесен из публичной
+    # функции. Проверка, что мерка смотрит туда, где вставка есть, — первой
+    # строкой: иначе отсутствие полей ничего не доказывает.
+    src = _func_src(DB, "_insert_gp_targets")
+    assert "INSERT INTO global_presence_targets" in src, (
+        "вставка цели переехала — мерка смотрит не туда")
     for field in ("role", "level", "planned_about", "avatar_seed", "avatar_style"):
         assert f't.get("{field}")' in src, f"поле {field} не сохраняется в цель"
 

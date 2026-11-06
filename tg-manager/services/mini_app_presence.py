@@ -14,8 +14,6 @@
 """
 from __future__ import annotations
 
-import json
-
 from aiohttp import web
 
 
@@ -755,20 +753,28 @@ def setup_routes(app: web.Application, pool) -> None:
 
         try:
             # status='pending' — иначе launch (требует pending/failed) отклонял бы 'draft'.
-            plan_id = await pool.fetchval(
-                """INSERT INTO global_presence_plans
-                   (owner_id, asset_type, name_pattern, username_pattern,
-                    geo_selection, account_selection, status)
-                   VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'pending')
-                   RETURNING id""",
-                uid, asset_type, name_pattern, username_pattern,
-                json.dumps({"geo_source": geo_source, "count": len(targets),
-                            "description": description, "short_description": short_desc,
-                            "virtual_admin": va_config}),
-                json.dumps({"account_ids": acc_ids_int}),
+            #
+            # Через общую дверь, а не своим INSERT: личность — СОДЕРЖИМОЕ
+            # плана, а не его свежий id. Два нажатия «создать» (ответ не
+            # вернулся, экран показал ошибку, владелец нажал снова) заводили
+            # два плана с одними и теми же целями, и запуск каждого создавал
+            # те же каналы заново.
+            from database.db import find_or_create_global_presence_plan
+
+            plan_id, _plan_reused = await find_or_create_global_presence_plan(
+                pool,
+                owner_id=uid,
+                asset_type=asset_type,
+                name_pattern=name_pattern,
+                username_pattern=username_pattern,
+                geo_selection={"geo_source": geo_source, "count": len(targets),
+                               "description": description,
+                               "short_description": short_desc,
+                               "virtual_admin": va_config},
+                account_selection={"account_ids": acc_ids_int},
+                targets=targets,
+                status="pending",
             )
-            from database.db import create_global_presence_targets
-            await create_global_presence_targets(pool, plan_id, targets)
             # Привязка к экосистеме — с той же проверкой владения, что и в
             # фабрике ботов: номер экосистемы приходит от клиента, а запись в
             # чужую экосистему означает запись в чужую структуру доступа.

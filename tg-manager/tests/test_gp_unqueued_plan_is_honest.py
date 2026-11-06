@@ -40,12 +40,11 @@ def _patch(monkeypatch, *, submit_raises: bool):
 
     created = {}
 
-    async def _create_plan(pool, **kw):
-        return 4242
-
-    async def _create_targets(pool, plan_id, targets):
-        created["targets"] = len(targets)
-        return len(targets)
+    async def _find_or_create_plan(pool, **kw):
+        # План и его цели создаются ОДНОЙ транзакцией внутри двери, поэтому
+        # стенд подменяет дверь, а не две функции по отдельности.
+        created["targets"] = len(kw.get("targets") or [])
+        return 4242, False
 
     async def _submit(pool, owner_id, op_type, params, **kw):
         if submit_raises:
@@ -55,8 +54,8 @@ def _patch(monkeypatch, *, submit_raises: bool):
     async def _link(pool, plan_id, op_id):
         created["linked"] = (plan_id, op_id)
 
-    monkeypatch.setattr(gp.db, "create_global_presence_plan", _create_plan)
-    monkeypatch.setattr(gp.db, "create_global_presence_targets", _create_targets)
+    monkeypatch.setattr(gp.db, "find_or_create_global_presence_plan",
+                        _find_or_create_plan)
     monkeypatch.setattr(gp.operation_bus, "submit", _submit)
     monkeypatch.setattr(gp.db, "link_plan_to_operation", _link)
     return gp
