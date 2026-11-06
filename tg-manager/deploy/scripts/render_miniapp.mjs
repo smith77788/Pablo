@@ -63,6 +63,17 @@ const page = await ctx.newPage();
 // отдаёт стандартные цвета Telegram для выбранной схемы. Без переменной —
 // пустые themeParams и тёмная схема, как раньше.
 await page.addInitScript((t) => { window.__RENDER_THEME = t; }, process.env.MINIAPP_THEME || '');
+// Приложение, не найдя SDK Телеграма, один раз подтягивает его с telegram.org и
+// на `onload` делает `location.reload()` (mini_app/index.html, ~90). В обходе
+// это срывало весь прогон на случайном экране: страница перезагружалась в
+// середине `page.evaluate`, и Playwright падал с «Resulting promise was garbage
+// collected» — ни отчёта, ни охвата, причём через раз. Метку попытки ставим
+// заранее: приложение видит, что ретрай уже был, и скрипт не подключает.
+// addInitScript выполняется до скриптов страницы на КАЖДОЙ навигации, поэтому
+// метка есть и после любой перезагрузки.
+await page.addInitScript(() => {
+  try { sessionStorage.setItem('__sdk_cdn_try', '1'); } catch (_) {}
+});
 await page.addInitScript((mode) => {
   const fat = mode === 'fat';
   const TH = window.__RENDER_THEME;
@@ -211,6 +222,26 @@ await page.addInitScript((mode) => {
     // `esc(String(...))` в мини-аппе либо защищены в разметке, либо поле
     // гарантировано сервером; оставить подсказку значило бы приучить себя её
     // не читать, а вместе с ней уйдёт и настоящая.
+    // Шаблон виджета — не плоская запись: экран сразу читает `t.fields.map`
+    // (screens/widgets.js: _wgRenderFields), без всякой проверки, потому что
+    // сервер поля отдаёт всегда (services/bot_widgets.py: templates_public —
+    // id, name, desc, fields, votes, packed). Общая запись `fields` не знала,
+    // и экран падал с «Cannot read properties of undefined (reading 'map')» —
+    // находкой, которой в приложении нет, а заодно печатал «undefined» вместо
+    // названий шаблонов.
+    if (url.indexOf('/widgets/templates') >= 0) {
+      o.templates = [
+        { id: 'poll', name: 'Опрос с голосами', desc: LONG, votes: true, packed: 2048,
+          fields: [{ key: 'q', label: 'Вопрос', kind: 'text', max: 140, need: true },
+                   { key: 'o', label: 'Варианты (каждый с новой строки, 2–6)',
+                     kind: 'options', need: true }] },
+        { id: 'countdown', name: 'Отсчёт до события', desc: LONG, votes: false, packed: 1536,
+          fields: [{ key: 't', label: 'Заголовок', kind: 'text', max: 80, need: true,
+                     hint: 'Например: До старта распродажи' },
+                   { key: 'at', label: 'Дата и время события', kind: 'when', need: true }] },
+      ];
+      o.limits = { max_bytes: 10240, per_day: 50, left_today: 37 };
+    }
     if (url.indexOf('/ai/forecast') >= 0) {
       o.expected_buyers = 7.5; o.buyers = 12; o.horizon_days = 30;
     }
@@ -483,8 +514,38 @@ await page.addInitScript((mode) => {
       // вариантов, а не индексы.
       Object.assign(o, { batch: 7, winner: 'Вариант Б', leader: 'Вариант Б',
         confident: true,
-        variants: [{ label: 'Вариант А', sent: 500, delivered: 40, rate: 8.0 },
-                   { label: 'Вариант Б', sent: 500, delivered: 65, rate: 13.0 }] });
+        variants: [{ label: 'Вариант А', sent: 500, delivered: 40, rate: 8.0, ops: [11] },
+                   { label: 'Вариант Б', sent: 500, delivered: 65, rate: 13.0, ops: [12, 13] }] });
+    }
+    // Четыре подсказки «undefined» и «[object Object]» из обхода 06.11.2026 —
+    // все четыре мои: общая запись по имени ключа не знает полей, которые
+    // читает экран, а `dialogs` на аналитике хранилища — вообще ЧИСЛО.
+    if (url.indexOf('/vault/analytics') >= 0) {
+      // services/mini_app_api.py: vault_analytics — диалогов тут СТОЛЬКО, а
+      // не список. Общая запись печатала «[object Object],[object Object]».
+      o.dialogs = 128; o.reply_rate_pct = 76; o.median_response_min = 42;
+      o.busiest_hour = 13; o.unanswered_dialogs = 3;
+      o.top_peers = ROWS.slice(0, 3).map((r, i) => ({ chat_id: -100123456789 - i,
+        name: LONG, count: 120 - i * 10 }));
+    }
+    if (url.indexOf('/miniapp/ghost') >= 0) {
+      // Строка призрака печатает лимит и окно активности числами, без
+      // подстановки: «undefined действий в день · undefined:00».
+      o.profiles = ROWS.slice(0, 8).map((r, i) => ({ ...r, daily_cap: 10 + i,
+        active_hours_start: 9, active_hours_end: 22, cooldown_minutes: 45,
+        personality: 'friendly', enabled: i % 2 === 0, is_active: true }));
+      o.today_actions = 4;
+    }
+    if (url.indexOf('/multigeo') >= 0) {
+      // services/mini_app_bots.py: multigeo_get — профиль на ЯЗЫК.
+      o.profiles = ['', 'ru', 'en', 'de'].map((lang) => ({
+        lang, name: LONG, description: LONG + ' ' + LONG, short_description: LONG }));
+    }
+    if (url.indexOf('/chatwarmup/session/') >= 0) {
+      // Разбивка по аккаунтам тут про ходы: «написал N · пропусков M».
+      o.by_account = ROWS.slice(0, 5).map((r, i) => ({ account_id: 1000 + i,
+        label: LONG, sent: 12 - i, missed: i,
+        last_at: '2026-10-30T04:00:00Z' }));
     }
     // ОТВЕТ-МАССИВ. Пять ручек отдают не объект, а голый список записей
     // (`_json_resp([dict(r) for r in rows])`), и заглушка, всегда отвечавшая
@@ -1173,6 +1234,7 @@ if (sweepMode) {
   const mute = [];                 // открывашки, не открывшие ничего
   const hints = [];                // машинный текст: подсказка, не находка
   const seedDead = [];             // затравка есть, а экран всё равно не открылся
+  const torn = [];                 // вызовы, на которых обход сорвался (перезагрузка страницы)
   let probesShown = 0, probesTotal = 0;
   for (const { name: fn, args, want, probe } of fns) {
     live = [];
@@ -1199,12 +1261,22 @@ if (sweepMode) {
     const attempts = probe ? [args, []] : [[]];
     let r = {};
     for (const a of attempts) {
-      r = await page.evaluate(async ({ name, a }) => {
-        if (typeof window[name] !== 'function') return { missing: true };
-        try { await window[name](...a); }
-        catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
-        return {};
-      }, { name: fn, a });
+      // Вызов открывашки — в try: если страница перезагрузится в середине
+      // (так делал ретрай SDK Телеграма), Playwright рушит ВЕСЬ прогон, и
+      // отчёта нет вообще. Сорванный вызов — это один непокрытый экран, он
+      // виден в строке охвата; терять из-за него остальные двести нельзя.
+      try {
+        r = await page.evaluate(async ({ name, a }) => {
+          if (typeof window[name] !== 'function') return { missing: true };
+          try { await window[name](...a); }
+          catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
+          return {};
+        }, { name: fn, a });
+      } catch (e) {
+        r = { threw: 'обход сорвался: ' + String(e && e.message || e).slice(0, 120) };
+        torn.push(fn);
+        break;
+      }
       await page.waitForTimeout(120);
       const now = await page.evaluate(() => {
         const el = document.querySelector('.screen.show');
@@ -1542,6 +1614,13 @@ if (sweepMode) {
       + (blank.length ? '\n  ' + blank.map(r => `${r.id} (${r.fn}, действий ${r.acts}) «${r.sample}»`).join('\n  ') : ''));
     console.log(`ПОЧТИ МЁРТВЫЕ (1-2 действия, меньше 400 знаков, и не пусто): ${thin.length}`
       + (thin.length ? '\n  ' + thin.map(r => `${r.id} (${r.fn}, действий ${r.acts}, знаков ${r.chars}) «${r.sample}»`).join('\n  ') : ''));
+  }
+  // Сорванные вызовы — не находка приложения, а дыра в охвате, и молчать о
+  // ней нельзя: отчёт без этой строки выглядит полным.
+  if (torn.length) {
+    console.log(`ОБХОД СОРВАЛСЯ НА ВЫЗОВАХ: ${torn.length} — ${torn.join(' ')}`
+      + ' (страница перезагрузилась; эти экраны не мерились)');
+    process.exitCode = 2;
   }
   if (missed.length) {
     // Список печатается ЦЕЛИКОМ: именно он и говорит, куда смотреть дальше.

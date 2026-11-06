@@ -1070,9 +1070,6 @@ def test_a_flag_parameter_is_never_fed_a_value():
     `openGpDetail(1,1,1)`, экран честно не открывался, а в отчёте значился «не
     накормлен заглушкой»: диагноз был не тот.
     """
-    import re
-    import subprocess
-
     src = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
     src += "\n".join(p.read_text(encoding="utf-8")
                      for p in sorted((ROOT / "mini_app" / "screens").glob("*.js")))
@@ -1129,3 +1126,19 @@ def test_the_fed_keys_are_the_ones_the_screens_read():
     assert "status: ['pending', 'sending', 'done', 'failed']" in bc, (
         "статуса 'scheduled' у рассылок не бывает (database/db.py: "
         "update_broadcast) — экран снова останется пустым")
+
+
+def test_a_nested_field_is_fed_as_the_screen_reads_it():
+    """`t.fields.map` без проверки — экран падал, а находка была выдумкой.
+
+    Шаблон виджета сервер отдаёт со списком полей всегда
+    (`services/bot_widgets.py: templates_public`), поэтому экран читает
+    `t.fields.map` сразу. Плоская запись заглушки этого ключа не знала, и
+    обход сообщал о падении, которого в приложении нет.
+    """
+    tpl = _stub_route_blocks().get("/widgets/templates", "")
+    assert "fields: [" in tpl, "шаблон виджета снова без списка полей"
+    assert "kind: 'text'" in tpl and "need: true" in tpl, (
+        "поле без kind/need рисуется не тем вводом, что в приложении")
+    assert "packed:" in tpl and "votes:" in tpl, (
+        "экран печатает размер и наличие голосов — без них снова «undefined»")

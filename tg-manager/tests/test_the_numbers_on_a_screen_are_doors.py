@@ -172,3 +172,75 @@ def test_the_invite_account_card_has_a_door_to_the_account():
 def test_the_invite_account_retry_does_not_stack_the_screen():
     assert "push('s-invacc')" in js_function("openInviteAccount")
     assert "push(" not in js_function("loadInviteAccount")
+
+# ── Результаты A/B-теста ────────────────────────────────────────────────────
+
+
+def test_the_ab_variant_row_opens_its_operation():
+    """Доставка варианта — это отправки, и карточка операции уже написана."""
+    body = js_function("openAbResults")
+    assert "abOpenVariant(" in body, "строка варианта осталась процентами"
+    assert "v.ops" in body, "строка не знает, какие отправки за ней стоят"
+    door = js_function("abOpenVariant")
+    assert "openOpDetail(" in door, "дверь ведёт не в карточку операции"
+    assert "toast(" in door, (
+        "у варианта может быть несколько отправок — молчаливый выбор первой "
+        "читается как потерянные")
+
+
+def test_the_server_names_the_operations_behind_each_variant():
+    body = api_function("ab_results")
+    assert "ARRAY_AGG(id ORDER BY id) AS ops" in body, (
+        "без id отправок дверь пришлось бы искать клиенту по всей очереди")
+    assert '"ops": [int(x) for x in (r["ops"] or [])][:20]' in body, (
+        "список отправок без границы — на экран уедет вся пачка")
+
+class _AbPool:
+    """Один батч A/B с двумя вариантами; у второго отправок больше двадцати."""
+
+    async def fetchval(self, sql, *a):
+        return 7 if "ab_batch" in sql else 0
+
+    async def fetchrow(self, *a, **k):
+        return None
+
+    async def fetch(self, sql, *a):
+        if "ab_variant" in sql:
+            return [{"variant": "Вариант А", "sent": 500, "delivered": 40,
+                     "ops": [11]},
+                    {"variant": "Вариант Б", "sent": 500, "delivered": 65,
+                     "ops": list(range(100, 125))}]
+        return []
+
+    async def execute(self, *a, **k):
+        return "OK"
+
+
+def _ab_results(monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from services import mini_app_api
+
+    monkeypatch.setattr(mini_app_api, "_get_uid", lambda request: 777)
+
+    async def _go():
+        app = web.Application()
+        mini_app_api.setup_routes(app, _AbPool())
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        try:
+            r = await client.get("/api/miniapp/ab/results")
+            return r.status, await r.json()
+        finally:
+            await client.close()
+
+    return asyncio.run(_go())
+
+
+def test_the_ab_variants_carry_their_operations(monkeypatch):
+    status, d = _ab_results(monkeypatch)
+    assert status == 200
+    assert d["variants"][0]["ops"] == [11]
+    assert len(d["variants"][1]["ops"]) == 20, (
+        "двадцать пять отправок уехали на экран целиком")
+    assert d["variants"][1]["ops"][0] == 100

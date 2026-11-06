@@ -8938,10 +8938,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "ORDER BY created_at DESC LIMIT 1", uid)
             if not batch:
                 return _json_resp({"batch": None, "variants": [], "winner": None})
+            # `ops` — сами отправки варианта: число получателей на экране
+            # становится дверью в операцию (openOpDetail показывает цели,
+            # ошибки и повтор), а не только цифрой. Отправок на вариант
+            # может быть несколько, поэтому список, а не один id.
             rows = await pool.fetch(
                 "SELECT params->>'ab_variant' AS variant, "
                 "       COALESCE(SUM(total_items),0) AS sent, "
-                "       COALESCE(SUM(done_items),0) AS delivered "
+                "       COALESCE(SUM(done_items),0) AS delivered, "
+                "       ARRAY_AGG(id ORDER BY id) AS ops "
                 "FROM operation_queue "
                 "WHERE owner_id=$1 AND op_type='bulk_dm_adhoc' "
                 "  AND (params->>'ab_batch')::bigint=$2 "
@@ -8954,6 +8959,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 delivered = int(r["delivered"] or 0)
                 variants.append({"label": r["variant"] or "—", "sent": sent,
                                  "delivered": delivered,
+                                 "ops": [int(x) for x in (r["ops"] or [])][:20],
                                  "rate": round(delivered / sent * 100, 1) if sent else 0.0})
                 stats.append({"variant": idx, "sent": sent, "converted": delivered})
             win = ab_engine.pick_winner(stats)

@@ -18019,10 +18019,18 @@ async function openAbResults() {
     let h = '';
     if (d.winner) h += `<div class="row" style="background:var(--bg-green-16);border-radius:10px;margin-bottom:8px"><div class="row-ico">🏆</div><div class="row-body"><div class="row-name">Победитель: ${esc(d.winner)}</div><div class="row-val">Отрыв статистически значим</div></div></div>`;
     else if (d.leader) h += `<div class="row" style="background:var(--bg2);border-radius:10px;margin-bottom:8px"><div class="row-ico">📈</div><div class="row-body"><div class="row-name">Лидер: ${esc(d.leader)}</div><div class="row-val">Выборки пока мало для уверенного вывода</div></div></div>`;
+    // Доставка варианта — это отправки, а не только проценты: строка ведёт в
+    // карточку операции (цели, ошибки, повтор неудавшихся). Отправок на
+    // вариант может быть несколько — тогда открываем первую и говорим,
+    // сколько их всего, вместо молчаливого выбора.
     h += d.variants.map(v=>{
       const w = Math.round((v.rate/maxRate)*100);
-      return `<div style="padding:8px 0">
-        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>${esc(v.label)}</b><span>${pctRu(v.rate)}% · ${num(v.delivered)}/${num(v.sent)}</span></div>
+      const ops = Array.isArray(v.ops) ? v.ops : [];
+      const door = ops.length
+        ? ` onclick="abOpenVariant(${ops[0]},${ops.length})" role="button" tabindex="0" style="padding:8px 0;cursor:pointer"`
+        : ' style="padding:8px 0"';
+      return `<div${door}>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>${esc(v.label)}${ops.length?' <span style="color:var(--hint);font-weight:400">›</span>':''}</b><span>${pctRu(v.rate)}% · ${num(v.delivered)}/${num(v.sent)}</span></div>
         <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${w}%;background:var(--accent)"></div></div>
       </div>`;
     }).join('');
@@ -18042,6 +18050,10 @@ async function openAbResults() {
     // кнопка «Повторить» — нужно и то и другое.
     txt('abResults', errHtml(errRu(e, 'Не удалось загрузить'), 'openAbResults()'));
   }
+}
+function abOpenVariant(opId, count){
+  if (count > 1) toast(`Отправок у варианта: ${count}. Открываю первую.`);
+  openOpDetail(opId);
 }
 async function runAbFollowup(batch){
   const btn=document.getElementById('abFollowupBtn');

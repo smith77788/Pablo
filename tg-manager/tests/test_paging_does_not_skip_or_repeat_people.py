@@ -250,7 +250,10 @@ def _bare_keys(order: str) -> set[str]:
 # дали то ложную находку, то ложный зачёт. Лучше короткий список прочитанного,
 # чем мерка, которая делает вид, что понимает SQL.
 _JUSTIFIED = (
-    ("FROM bot_users WHERE bot_id=$1",
+    # Перечитано 06.11.2026 при добавлении среза по тегу: условие тега —
+    # EXISTS-подзапрос, он строку не удваивает (JOIN бы удвоил человека с
+    # дважды поставленным тегом), так что довод тот же.
+    ("FROM bot_users bu WHERE bu.bot_id=$1",
      "подписчики одного бота: пара (bot_id, user_id) — ключ, bot_id закреплён"),
     ("GROUP BY mc.channel_id",
      "строка выдачи одна на канал владельца: группировка по channel_id "
@@ -407,8 +410,8 @@ def test_the_detector_knows_a_total_order_from_a_partial_one():
     # прочитанный довод, привязанный к тексту запроса.
     assert not order_is_total("last_seen DESC NULLS LAST, user_id")
     assert _justification(
-        "SELECT user_id FROM bot_users WHERE bot_id=$1 "
-        "ORDER BY last_seen DESC NULLS LAST, user_id")
+        "SELECT bu.user_id FROM bot_users bu WHERE bu.bot_id=$1 "
+        "ORDER BY bu.last_seen DESC NULLS LAST, bu.user_id")
     # `DISTINCT ON` — обещание запроса, его мерка читает сама.
     assert order_is_total(
         "member_count DESC NULLS LAST, channel_id",
