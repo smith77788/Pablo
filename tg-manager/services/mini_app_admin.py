@@ -187,6 +187,88 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("admin_user_detail uid=%d target=%d", uid, target_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    def _phone_masked(phone: str) -> str:
+        """Телефон чужого аккаунта — только хвост.
+
+        Админу для поддержки хватает узнать аккаунт; полный номер — лишнее
+        знание о человеке, которое из этого экрана никуда не ведёт.
+        """
+        digits = re.sub(r"\D", "", str(phone or ""))
+        if len(digits) < 4:
+            return "·" * len(digits)
+        return "+" + digits[:1] + "·" * (len(digits) - 3) + digits[-2:]
+
+    async def admin_user_assets(request: web.Request) -> web.Response:
+        """ЧТО именно у пользователя: боты, каналы, аккаунты — списком.
+
+        На экране пользователя стояли три числа («🤖 Ботов: 7, 📡 Каналов: 14,
+        📱 Аккаунтов: 25») и ни одно не вело никуда: обход числил экран почти
+        мёртвым, а в поддержке («мой бот перестал отвечать») владелец видел
+        только счётчик. Решение о доступе здесь не новое: админ-панель БОТА уже
+        показывает все боты системы с их владельцами и даже умеет «Экспорт
+        токенов» — мини-апп просто отстал, и показывает он строго МЕНЬШЕ.
+
+        Секретов не отдаём: ни токена бота, ни строки сессии аккаунта; телефон
+        — только хвост.
+        """
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Раздел только для владельца платформы", 403)
+        try:
+            target_id = int(request.match_info["user_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор пользователя", 400)
+        try:
+            limit = max(1, min(int(request.query.get("limit", "50")), 200))
+        except (TypeError, ValueError):
+            return _err("Неверные параметры страницы", 400)
+        try:
+            exists = await pool.fetchval(
+                "SELECT 1 FROM platform_users WHERE user_id=$1", target_id)
+            if not exists:
+                return _err("Пользователь не найден", 404)
+            bots = await pool.fetch(
+                "SELECT bot_id, username, first_name, is_active, added_at "
+                "FROM managed_bots WHERE added_by=$1 "
+                "ORDER BY is_active DESC, added_at DESC LIMIT $2", target_id, limit)
+            channels = await pool.fetch(
+                "SELECT id, channel_id, title, username, type, members_count, added_at "
+                "FROM managed_channels WHERE owner_id=$1 "
+                "ORDER BY added_at DESC LIMIT $2", target_id, limit)
+            accounts = await pool.fetch(
+                "SELECT id, phone, username, first_name, tg_user_id, is_active, "
+                "       last_used, added_at "
+                "FROM tg_accounts WHERE owner_id=$1 "
+                "ORDER BY is_active DESC, added_at DESC LIMIT $2", target_id, limit)
+            def _iso(v):
+                return v.isoformat() if v else None
+            return _json_resp({
+                "user_id": target_id,
+                "bots": [{"bot_id": int(b["bot_id"]),
+                          "username": b["username"] or "",
+                          "first_name": b["first_name"] or "",
+                          "is_active": bool(b["is_active"]),
+                          "added_at": _iso(b["added_at"])} for b in bots],
+                "channels": [{"id": int(c["id"]),
+                              "channel_id": int(c["channel_id"] or 0),
+                              "title": c["title"] or "",
+                              "username": c["username"] or "",
+                              "type": c["type"] or "",
+                              "members_count": int(c["members_count"] or 0),
+                              "added_at": _iso(c["added_at"])} for c in channels],
+                "accounts": [{"id": int(a["id"]),
+                              "phone_masked": _phone_masked(a["phone"]),
+                              "username": a["username"] or "",
+                              "first_name": a["first_name"] or "",
+                              "tg_user_id": int(a["tg_user_id"] or 0),
+                              "is_active": bool(a["is_active"]),
+                              "last_used": _iso(a["last_used"]),
+                              "added_at": _iso(a["added_at"])} for a in accounts],
+            })
+        except Exception:
+            log.exception("admin_user_assets uid=%d target=%d", uid, target_id)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def admin_broadcast(request: web.Request) -> web.Response:
         """Рассылка всем пользователям (только для админов)."""
         uid = _get_uid(request)
@@ -604,6 +686,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/admin/users", admin_users)
     app.router.add_get("/api/miniapp/admin/stats", admin_stats)
     app.router.add_get("/api/miniapp/admin/user/{user_id}", admin_user_detail)
+    app.router.add_get("/api/miniapp/admin/user/{user_id}/assets", admin_user_assets)
     app.router.add_post("/api/miniapp/admin/broadcast", admin_broadcast)
     app.router.add_get("/api/miniapp/admin/broadcast/recent", admin_broadcast_recent)
     app.router.add_post("/api/miniapp/admin/user/{user_id}/grant", admin_user_grant)

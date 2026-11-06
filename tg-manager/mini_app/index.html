@@ -2752,6 +2752,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb" id="adm-actions-body"></div>
 </div>
+<div class="screen" id="s-admin-user-assets">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">Что у пользователя</div>
+  </div>
+  <div class="sub-sb" id="adm-ua-body"></div>
+</div>
 <div class="screen" id="s-admin-stats">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
@@ -30782,9 +30789,18 @@ async function openAdminUserDetail(userId) {
     html += `<div>👤 ${esc(u.first_name||'')} ${esc(u.username?'@'+u.username:'')}</div>`;
     html += `<div>💳 Подписка: <b>${esc(u.plan_ru || u.current_plan || 'Бесплатный')}</b>${u.plan_expires_at?' до '+new Date(u.plan_expires_at).toLocaleDateString('ru-RU'):''}</div>`;
     html += `<div>${banned?'🚫 <b style="color:var(--red)">Забанен</b>':'✅ Активен'}</div>`;
-    html += `<div>🤖 Ботов: <b>${d.bots}</b></div>`;
-    html += `<div>📡 Каналов: <b>${d.channels}</b></div>`;
-    html += `<div>📱 Аккаунтов: <b>${d.accounts}</b></div>`;
+    // Три числа были тупиком: в поддержке («мой бот перестал отвечать»)
+    // владелец видел счётчик и шёл в базу руками. Теперь каждое — дверь в
+    // список. Ноль дверью не делаем: открывать пустое незачем.
+    const udCnt = (icon, label, n, kind) => (Number(n) > 0
+      ? `<div role="button" tabindex="0" style="cursor:pointer;display:flex;`
+        + `justify-content:space-between;align-items:center" `
+        + `onclick="openAdminUserAssets('${kind}')">`
+        + `<span>${icon} ${label}: <b>${num(n)}</b></span><span class="chev">›</span></div>`
+      : `<div>${icon} ${label}: <b>0</b></div>`);
+    html += udCnt('🤖', 'Ботов', d.bots, 'bots');
+    html += udCnt('📡', 'Каналов', d.channels, 'channels');
+    html += udCnt('📱', 'Аккаунтов', d.accounts, 'accounts');
     html += `<div>📅 Регистрация: ${u.created_at?new Date(u.created_at).toLocaleDateString('ru-RU'):'—'}</div>`;
     html += '</div>';
     // Действия админа
@@ -30803,6 +30819,60 @@ async function openAdminUserDetail(userId) {
     html += '</div>';
     txt('adm-ud-body', html);
   } catch(e) { txt('adm-ud-body', errHtml(errRu(e), retryCall('openAdminUserDetail', userId))); }
+}
+
+// Список того, что у пользователя есть: боты, каналы, аккаунты. Секретов тут
+// нет — ни токена бота, ни строки сессии; телефон приходит с сервера уже
+// хвостом. Решение о доступе не новое: админ-панель БОТА показывает все боты
+// системы с владельцами и умеет «Экспорт токенов», то есть строго больше.
+let ADM_UA_KIND = 'bots';
+async function openAdminUserAssets(kind) {
+  if (!ADM_UD_ID) return;
+  ADM_UA_KIND = kind || 'bots';
+  push('s-admin-user-assets');
+  txt('adm-ua-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  loadAdminUserAssets();
+}
+
+async function admUaTab(kind) { ADM_UA_KIND = kind; loadAdminUserAssets(); }
+
+async function loadAdminUserAssets() {
+  if (!ADM_UD_ID) return;
+  try {
+    const d = await api('/api/miniapp/admin/user/' + ADM_UD_ID + '/assets?limit=200');
+    const tab = (k, lbl, n) => `<button class="btn ${ADM_UA_KIND===k?'btn-p':'btn-s'}"`
+      + ` style="padding:6px 10px;font-size:12px" onclick="admUaTab('${k}')">`
+      + `${lbl} · ${num(n)}</button>`;
+    let h = '<div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 16px 10px">'
+      + tab('bots', '🤖 Боты', (d.bots||[]).length)
+      + tab('channels', '📡 Каналы', (d.channels||[]).length)
+      + tab('accounts', '📱 Аккаунты', (d.accounts||[]).length)
+      + '</div>';
+    const when = v => v ? new Date(v).toLocaleDateString('ru-RU') : '—';
+    let rows = '';
+    if (ADM_UA_KIND === 'bots') {
+      rows = (d.bots||[]).map(b => `<div class="row"><div class="row-body">
+          <div class="row-name">${esc(b.username ? '@'+b.username : (b.first_name || 'без имени'))}</div>
+          <div class="row-val" style="white-space:normal">${b.is_active?'✅ активен':'⏸ отключён'} · id ${num(b.bot_id)} · с ${when(b.added_at)}</div>
+        </div></div>`).join('');
+    } else if (ADM_UA_KIND === 'channels') {
+      rows = (d.channels||[]).map(c => `<div class="row"><div class="row-body">
+          <div class="row-name">${esc(c.title || (c.username ? '@'+c.username : 'без названия'))}</div>
+          <div class="row-val" style="white-space:normal">${c.username?'@'+esc(c.username)+' · ':''}${num(c.members_count)} ${plural(c.members_count,'участник','участника','участников')} · с ${when(c.added_at)}</div>
+        </div></div>`).join('');
+    } else {
+      rows = (d.accounts||[]).map(a => `<div class="row"><div class="row-body">
+          <div class="row-name">${esc(a.username ? '@'+a.username : (a.first_name || a.phone_masked || 'аккаунт'))}</div>
+          <div class="row-val" style="white-space:normal">${esc(a.phone_masked||'')} · ${a.is_active?'✅ активен':'⏸ отключён'} · последний раз ${when(a.last_used)}</div>
+        </div></div>`).join('');
+    }
+    const KIND_RU = {bots: 'Ботов', channels: 'Каналов', accounts: 'Аккаунтов'};
+    txt('adm-ua-body', h + (rows ? '<div class="lst">' + rows + '</div>'
+      : empty('📭', KIND_RU[ADM_UA_KIND] + ' нет',
+              'У этого пользователя в этом разделе пусто')));
+  } catch (e) {
+    txt('adm-ua-body', errHtml(errRu(e), retryCall('loadAdminUserAssets')));
+  }
 }
 
 async function admUserGrant(months) {

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 
@@ -217,5 +218,67 @@ def test_recent_platform_broadcasts_name_what_happened():
 def test_recent_platform_broadcasts_are_admin_only():
     async def body(client, pool):
         return (await client.get("/api/miniapp/admin/broadcast/recent")).status
+
+    assert _run(body, admin=False) == 403
+
+
+def test_a_users_assets_are_listed_without_secrets():
+    """Три числа на экране пользователя ведут в списки — и без секретов.
+
+    Решение о доступе здесь не новое: админ-панель БОТА показывает все боты
+    системы с их владельцами и умеет «Экспорт токенов», то есть строго больше.
+    Но именно поэтому важно, чего в этой выдаче НЕТ: токена бота, строки сессии
+    аккаунта и полного телефона.
+    """
+    async def body(client, pool):
+        await pool.execute(
+            """CREATE TABLE managed_bots(bot_id bigint PRIMARY KEY, token text NOT NULL,
+                   username text, first_name text, added_by bigint,
+                   is_active boolean DEFAULT true, added_at timestamptz DEFAULT now())""")
+        await pool.execute(
+            """CREATE TABLE managed_channels(id serial PRIMARY KEY, owner_id bigint NOT NULL,
+                   acc_id int NOT NULL DEFAULT 0, channel_id bigint NOT NULL,
+                   title text, username text, type text,
+                   members_count int NOT NULL DEFAULT 0, added_at timestamptz DEFAULT now())""")
+        await pool.execute(
+            """CREATE TABLE tg_accounts(id serial PRIMARY KEY, owner_id bigint NOT NULL,
+                   phone text NOT NULL, session_str text NOT NULL, tg_user_id bigint,
+                   first_name text DEFAULT '', username text DEFAULT '',
+                   added_at timestamptz DEFAULT now(), last_used timestamptz,
+                   is_active boolean DEFAULT true)""")
+        await pool.execute(
+            "INSERT INTO managed_bots(bot_id, token, username, added_by, is_active)"
+            " VALUES(5001,'5001:СЕКРЕТНЫЙ_ТОКЕН','shopbot',$1,true)", U1)
+        await pool.execute(
+            "INSERT INTO managed_channels(owner_id, channel_id, title, username, type,"
+            " members_count) VALUES($1,-100123,'Канал про скидки','sale','channel',4200)", U1)
+        await pool.execute(
+            "INSERT INTO tg_accounts(owner_id, phone, session_str, username, tg_user_id)"
+            " VALUES($1,'+79161234567','СЕКРЕТНАЯ_СЕССИЯ','worker1',4242)", U1)
+
+        got = await (await client.get(f"/api/miniapp/admin/user/{U1}/assets")).json()
+        missing = await client.get("/api/miniapp/admin/user/99099/assets")
+        bad = await client.get("/api/miniapp/admin/user/не-число/assets")
+        return got, missing.status, bad.status
+
+    got, missing, bad = _run(body)
+    raw = json.dumps(got, ensure_ascii=False)
+    assert "СЕКРЕТНЫЙ_ТОКЕН" not in raw, "токен бота уехал в мини-апп"
+    assert "СЕКРЕТНАЯ_СЕССИЯ" not in raw, "строка сессии аккаунта уехала в мини-апп"
+    assert "79161234567" not in raw, "полный телефон отдан целиком"
+
+    assert [b["username"] for b in got["bots"]] == ["shopbot"], got["bots"]
+    assert got["channels"][0]["title"] == "Канал про скидки"
+    assert got["channels"][0]["members_count"] == 4200
+    acc = got["accounts"][0]
+    assert acc["username"] == "worker1" and acc["tg_user_id"] == 4242
+    assert acc["phone_masked"].startswith("+7") and acc["phone_masked"].endswith("67"), acc
+    assert missing == 404, "несуществующий пользователь отдал не 404"
+    assert bad == 400, "мусор в адресе отдал не 400"
+
+
+def test_a_users_assets_are_admin_only():
+    async def body(client, pool):
+        return (await client.get(f"/api/miniapp/admin/user/{U1}/assets")).status
 
     assert _run(body, admin=False) == 403
