@@ -48,6 +48,28 @@ def _dedup_status_sql() -> str:
 # коротко, чтобы подавить намеренный повторный запуск позже.
 DEFAULT_DEDUP_WINDOW_SEC = 20
 
+# Окно для операций, чей дубль НЕЛЬЗЯ отменить: сообщение ушло подписчикам,
+# инвайт отправлен, пост опубликован.
+#
+# 20 секунд не покрывали главный сценарий, ради которого окно и заводилось, —
+# «повтор клиента после таймаута». Мини-апп ждёт ответа 30 секунд
+# (FETCH_TIMEOUT_MS), потом показывает «сервер не отвечает», а владелец жмёт
+# снова. Его второй тап приходит ПОЗЖЕ тридцатой секунды, то есть за пределами
+# двадцатисекундного окна, — хотя первый запрос сервер уже обработал и
+# операцию поставил. Окно, которое короче, чем клиент ждёт ответа, не может
+# поймать повтор после таймаута по построению.
+#
+# 90 = 30 секунд ожидания клиента + минута на то, чтобы владелец увидел ошибку
+# и нажал заново.
+#
+# ПОЧЕМУ НЕ ВСЕМ ТИПАМ. Длинное окно — это и подавление НАМЕРЕННОГО повтора:
+# второй сабмит вернёт id первого, то есть второе действие молча не
+# выполнится. Для рассылки по той же аудитории тем же текстом это именно то,
+# что нужно. Для операции, где повтор — отдельное полезное действие (перевод
+# подарка, заказ накрутки), молчаливое подавление было бы потерей действия,
+# то есть лечением хуже болезни. Поэтому окно расширено точечно.
+IRREVERSIBLE_DEDUP_WINDOW_SEC = 90
+
 # Ключи params, которые НЕ являются частью личности операции: указатель на
 # сообщение владельца с прогресс-баром. Это сообщение создаётся ДО постановки,
 # поэтому у каждого тапа оно СВОЁ, и, попав в дедуп-идентичность, оно её ломает
@@ -250,6 +272,7 @@ async def enforce_gates(pool, owner_id: int, op_type: str) -> None:
 #     целям, а операция отчиталась бы об успехе.
 OP_REGISTRY: dict[str, dict] = {
     "mass_publish": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Массовая публикация",
         "min_plan": "starter",
         "max_retries": 2,
@@ -381,12 +404,14 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "🎁",
     },
     "dm_campaign": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "DM-кампания",
         "min_plan": "enterprise",
         "max_retries": 1,
         "icon": "📨",
     },
     "network_broadcast": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Сетевая рассылка",
         "min_plan": "enterprise",
         "max_retries": 1,
@@ -417,18 +442,21 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "📥",
     },
     "group_announce": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Объявление во все группы аккаунта",
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "📢",
     },
     "bulk_dm_adhoc": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Рассылка личных сообщений",
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "📨",
     },
     "bulk_post_to_channel": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Массовая публикация в канал",
         "min_plan": "starter",
         "max_retries": 2,
@@ -453,6 +481,7 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "✏️",
     },
     "bulk_post_chans": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Публикация поста в каналы аккаунта",
         "min_plan": "starter",
         "max_retries": 2,
@@ -573,6 +602,7 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "🔄",
     },
     "mass_invite": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Массовый инвайт участников в группы",
         "min_plan": "pro",
         "max_retries": 2,
@@ -608,6 +638,7 @@ OP_REGISTRY: dict[str, dict] = {
         "retry_targets": {"param": "target_refs", "kind": "str"},
     },
     "niche_growth_post": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Growth Agent — постинг промо-контента в нишевых группах",
         "min_plan": "starter",
         "max_retries": 1,
@@ -681,6 +712,7 @@ OP_REGISTRY: dict[str, dict] = {
         "retry_targets": {"param": "channel_ids", "kind": "int"},
     },
     "run_broadcast": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Рассылка по аудитории",
         "min_plan": "starter",
         "max_retries": 1,
@@ -693,6 +725,7 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "💬",
     },
     "self_promo_blast": {
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Самопродвижение — рассылка промо",
         "min_plan": "starter",
         "max_retries": 1,
@@ -829,7 +862,7 @@ async def submit(
     max_retries: Optional[int] = None,
     label: Optional[str] = None,
     bypass_plan_check: bool = False,
-    dedup_window_sec: int = DEFAULT_DEDUP_WINDOW_SEC,
+    dedup_window_sec: int | None = None,
 ) -> int:
     """Поставить операцию в очередь. Возвращает op_id.
 
@@ -845,10 +878,12 @@ async def submit(
       label        — человекочитаемая метка операции в очереди (None = описание
                      из OP_REGISTRY). Нужна, чтобы миграция прямых INSERT на шину
                      не теряла label, который они писали (см. Волна S/1A).
-      dedup_window_sec — окно идемпотентности постановки (сек). Повторный сабмит
-                     идентичной операции (owner+op_type+params+scheduled_for;
-                     косметические ключи params из DEDUP_COSMETIC_KEYS в
-                     сравнение не входят),
+      dedup_window_sec — окно идемпотентности постановки (сек). None (по
+                     умолчанию) = окно типа операции из OP_REGISTRY, иначе
+                     DEFAULT_DEDUP_WINDOW_SEC; явное значение сильнее обоих.
+                     Повторный сабмит идентичной операции
+                     (owner+op_type+params+scheduled_for; косметические ключи
+                     params из DEDUP_COSMETIC_KEYS в сравнение не входят),
                      пока прежняя ещё в работе либо только что успешно
                      завершилась, вернёт её op_id вместо создания дубля.
                      Защищает от двойного тапа и retry после таймаута, включая
@@ -865,6 +900,12 @@ async def submit(
         )
 
     meta = OP_REGISTRY[op_type]
+    # Окно идемпотентности: своё у типа операции, если объявлено, иначе общее.
+    # Явное значение от вызывающего сильнее обоих — в том числе 0, которым
+    # намеренные серии идентичных операций отключают дедуп.
+    if dedup_window_sec is None:
+        dedup_window_sec = int(meta.get("dedup_window_sec")
+                               or DEFAULT_DEDUP_WINDOW_SEC)
     # Централизованный тариф-гейт (defense-in-depth поверх гейтов в хендлерах):
     # объявленный min_plan становится авторитетным — free-юзер не поставит
     # платную операцию, даже если какой-то хендлер забыл проверку.
