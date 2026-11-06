@@ -640,6 +640,59 @@ public static func getFileSize(url: String) -> Signal<Int64?, NoError> {
 
 ---
 
+## Раздел C — Кросс-платформенная проверка (Telegram Desktop / tdesktop, C++)
+
+Проверка, присутствуют ли классы находок в другом in-scope open-source клиенте.
+Файл: `Telegram/SourceFiles/ui/chat/attach/attach_bot_webview.cpp` (telegramdesktop/tdesktop).
+
+### C.1 — Finding 4 (JS-Bridge origin confusion) — **ПРИСУТСТВУЕТ** (отдельный репорт, app-level Desktop)
+
+tdesktop имеет тот же флаг `_sameOrigin` и те же три звена:
+
+1. **Навигация разрешена любая** (`:2537–2544`):
+```cpp
+raw->setNavigationPolicyHandler([=](const QString &uri, bool newWindow) {
+    if (_delegate->botHandleLocalUri(uri, false)) return false;
+    else if (newWindow) return true;
+    return true;   // любой переход разрешён
+});
+```
+
+2. **Входящая origin-проверка только при `_sameOrigin==true`** (`:2366–2374`):
+```cpp
+if (_sameOrigin
+    && parsed->source != NativeMessageSource::ExternalShell
+    && !OriginsMatch(parsed->origin, _initialOrigin)) {
+    // reject
+    return;
+}
+// при _sameOrigin==false origin НЕ проверяется — сообщения любого origin доверенные
+```
+
+3. **Исходящий канал (`postEvent`) без origin-проверки при `_sameOrigin==false`** (`:3902–3916`):
+```cpp
+const auto originCheck = _sameOrigin
+    ? OriginCheckScript(_initialOrigin) + " && "
+    : QByteArray();        // ПУСТО при _sameOrigin==false
+_webview->window.eval("if (" + originCheck + "this.TelegramGameProxy) { "
+    "this.TelegramGameProxy.receiveEvent(\"" + event + "\", " + written + "); }");
+// результаты уходят на текущую (подменённую) страницу
+```
+
+Нативный message-binding webview-обёртки доступен всем страницам; C++-сторона фильтрует только по `_sameOrigin`. Итог идентичен macOS Finding 4: legacy-бот (`sameOrigin==false`) → редирект на attacker.com → полный доверенный доступ к мосту, результаты уходят атакующему. Утечка PII на Desktop: **буфер обмена** (`web_app_read_text_from_clipboard`) и ответы `custom_method` (биометрии на Desktop нет). CVSS сопоставим с macOS (~7.x, High). **Репортуется отдельно** как дефект клиента Telegram Desktop.
+
+### C.2 — Findings 1 / 6 (outbound до согласия) — **ОТСУТСТВУЮТ на Desktop**
+- `web_app_share_to_story` → `openShareStory` (`:3070–3080`) — заглушка «не поддерживается», сетевого запроса нет.
+- `web_app_request_file_download` → `processDownloadRequest` (`:3533–3559`) — без size-probe; сразу `botDownloadFile` (подтверждение внутри делегата). Аналога `FileDownload.getFileSize` нет.
+
+### C.3 — Finding 5 (биометрия) — **ОТСУТСТВУЕТ на Desktop**
+`web_app_biometry_get_info` → `{available:false}` (`:2468–2471`); `biometry_update_token`/`request_auth` не реализованы.
+
+### Вывод
+Finding 4 — **кросс-платформенный архитектурный дефект** WebApp-моста (origin-доверие завязано на серверный флаг `_sameOrigin`), подтверждён на macOS и Desktop; каждый клиент репортуется отдельно. Findings 1/5/6 — macOS-специфичны. Остаются к проверке: iOS (Swift), Android (Java/Kotlin), Web (JS) — там же ожидается C.1-паттерн вокруг `sameOrigin`.
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**
