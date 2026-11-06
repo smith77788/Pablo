@@ -24578,14 +24578,36 @@ async def _exec_run_broadcast(
     # подряд. Путь к этому обычный: запрос ушёл, ответ не вернулся (деплой,
     # холодный старт, сеть), мини-апп показал ошибку, владелец нажал снова.
     #
-    # Правило узкое: блокируем только живого двойника на ВСЮ аудиторию с тем
-    # же текстом. Подмножество (догонка недоставленным через
-    # broadcaster.resend_undelivered, варианты A/B) — штатный путь, его
-    # запрещать нельзя.
-    if not _is_subset:
-        _twin = None
-        _twin_unknown = False
-        try:
+    # Правило узкое, и у него две половины. Залп на ВСЮ аудиторию блокирует
+    # живого двойника с тем же текстом. Подмножество (догонка недоставленным
+    # через broadcaster.resend_undelivered, варианты A/B) сперва не
+    # проверялось вовсе — а двойное нажатие по догонке вредит так же: два
+    # нажатия подряд считают ОДИН И ТОТ ЖЕ список недоставленных (первая
+    # отправка ещё никому не успела доставить), и эти люди получают сообщение
+    # дважды. Поэтому для подмножества двойник — рассылка с тем же текстом и
+    # тем же СПИСКОМ получателей.
+    _twin = None
+    _twin_unknown = False
+    try:
+        if _is_subset:
+            # Подмножество: двойник — живая рассылка с тем же текстом и ТЕМ ЖЕ
+            # списком получателей. Сравниваем МНОЖЕСТВА, а не текст столбца:
+            # порядок id внутри списка ничем не обещан. Пересечение вместо
+            # равенства брать нельзя — две честные рассылки по разным сегментам
+            # пересекаются людьми, и правило запретило бы вторую.
+            _twin = await pool.fetchrow(
+                "SELECT id FROM broadcasts "
+                " WHERE bot_id=$1 AND id <> $2 AND status='running' "
+                "   AND message_text = $3 "
+                "   AND jsonb_typeof(target_user_ids) = 'array' "
+                "   AND (SELECT array_agg(v::bigint ORDER BY v::bigint) "
+                "          FROM jsonb_array_elements_text(target_user_ids) v) "
+                "       = $5::bigint[] "
+                "   AND created_at > NOW() - make_interval(secs => $4) "
+                " ORDER BY id DESC LIMIT 1",
+                int(bot_id), int(broadcast_id), text, _TWIN_LOOKBACK_S,
+                sorted({int(u) for u in user_ids}))
+        else:
             _twin = await pool.fetchrow(
                 "SELECT id FROM broadcasts "
                 " WHERE bot_id=$1 AND id <> $2 AND status='running' "
@@ -24593,63 +24615,64 @@ async def _exec_run_broadcast(
                 "   AND created_at > NOW() - make_interval(secs => $4) "
                 " ORDER BY id DESC LIMIT 1",
                 int(bot_id), int(broadcast_id), text, _TWIN_LOOKBACK_S)
-        except asyncpg.UndefinedColumnError:
-            # Старая база без target_user_ids: считаем любого живого двойника
-            # полным. Ошибиться в сторону «не отправить» здесь дешевле.
-            try:
-                _twin = await pool.fetchrow(
-                    "SELECT id FROM broadcasts "
-                    " WHERE bot_id=$1 AND id <> $2 AND status='running' "
-                    "   AND message_text = $3 "
-                    "   AND created_at > NOW() - make_interval(secs => $4) "
-                    " ORDER BY id DESC LIMIT 1",
-                    int(bot_id), int(broadcast_id), text, _TWIN_LOOKBACK_S)
-            except Exception:
-                _twin_unknown = True
-        except Exception as _e:
-            # Нечитаемая проверка — не повод ни отправить вслепую, ни потерять
-            # сообщение: откладываем, решение примет следующий прогон.
-            log.warning("run_broadcast op=%s: проверка живого двойника не "
-                        "прочиталась (%s) — возвращаю в очередь", op_id, _e)
-            _twin_unknown = True
-        if _twin_unknown:
-            return {
-                "status": "requeue",
-                "broadcast_id": broadcast_id,
-                "summary": ("⏳ Не удалось проверить, не идёт ли уже такая же "
-                            "рассылка. Отправка отложена — чтобы подписчики не "
-                            "получили сообщение дважды."),
-                # Причина нужна отдельным ключом: по истечении предела ожидания
-                # владельцу сообщают именно её. Без неё он получил бы готовый
-                # текст про занятый флот и пошёл бы разгружать очередь вместо
-                # того, чтобы смотреть на настоящую помеху — не прочиталась
-                # проверка двойника.
-                "reason": ("не удалось проверить, не идёт ли уже такая же "
-                           "рассылка"),
-            }
-        # Из строки берём id ОСТОРОЖНО: блокировать залп по ответу, в котором
-        # нет даже id двойника, значило бы верить непонятно чему.
+    except asyncpg.UndefinedColumnError:
+        # Старая база без target_user_ids: считаем любого живого двойника
+        # полным. Ошибиться в сторону «не отправить» здесь дешевле.
         try:
-            _twin_id = int((_twin or {})["id"])
-        except (KeyError, TypeError, ValueError, IndexError):
-            _twin_id = 0
-        if _twin_id:
-            log.warning(
-                "run_broadcast op=%s: по боту %s уже идёт рассылка %s с тем же "
-                "текстом — эту не запускаем и снимаем, иначе вся аудитория "
-                "получит сообщение дважды", op_id, bot_id, _twin_id)
-            _reliability_metric("infragram_broadcast_twin_blocked_total",
-                                op_type="run_broadcast")
-            await broadcaster.abandon_unstarted(pool, broadcast_id)
-            return {
-                "status": "failed",
-                "broadcast_id": broadcast_id,
-                "summary": (f"⚠️ Рассылка с этим же текстом по этому боту уже "
-                            f"идёт (#{_twin_id}). Эта не отправлена, "
-                            f"чтобы подписчики не получили сообщение дважды. "
-                            f"Нужно отправить ещё раз — запустите после того, "
-                            f"как первая закончит."),
-            }
+            _twin = await pool.fetchrow(
+                "SELECT id FROM broadcasts "
+                " WHERE bot_id=$1 AND id <> $2 AND status='running' "
+                "   AND message_text = $3 "
+                "   AND created_at > NOW() - make_interval(secs => $4) "
+                " ORDER BY id DESC LIMIT 1",
+                int(bot_id), int(broadcast_id), text, _TWIN_LOOKBACK_S)
+        except Exception:
+            _twin_unknown = True
+    except Exception as _e:
+        # Нечитаемая проверка — не повод ни отправить вслепую, ни потерять
+        # сообщение: откладываем, решение примет следующий прогон.
+        log.warning("run_broadcast op=%s: проверка живого двойника не "
+                    "прочиталась (%s) — возвращаю в очередь", op_id, _e)
+        _twin_unknown = True
+    if _twin_unknown:
+        return {
+            "status": "requeue",
+            "broadcast_id": broadcast_id,
+            "summary": ("⏳ Не удалось проверить, не идёт ли уже такая же "
+                        "рассылка. Отправка отложена — чтобы подписчики не "
+                        "получили сообщение дважды."),
+            # Причина нужна отдельным ключом: по истечении предела ожидания
+            # владельцу сообщают именно её. Без неё он получил бы готовый
+            # текст про занятый флот и пошёл бы разгружать очередь вместо
+            # того, чтобы смотреть на настоящую помеху — не прочиталась
+            # проверка двойника.
+            "reason": ("не удалось проверить, не идёт ли уже такая же "
+                       "рассылка"),
+        }
+    # Из строки берём id ОСТОРОЖНО: блокировать залп по ответу, в котором
+    # нет даже id двойника, значило бы верить непонятно чему.
+    try:
+        _twin_id = int((_twin or {})["id"])
+    except (KeyError, TypeError, ValueError, IndexError):
+        _twin_id = 0
+    if _twin_id:
+        log.warning(
+            "run_broadcast op=%s: по боту %s уже идёт рассылка %s с тем же "
+            "текстом — эту не запускаем и снимаем, иначе вся аудитория "
+            "получит сообщение дважды", op_id, bot_id, _twin_id)
+        _reliability_metric("infragram_broadcast_twin_blocked_total",
+                            op_type="run_broadcast",
+                            scope="subset" if _is_subset else "all")
+        await broadcaster.abandon_unstarted(pool, broadcast_id)
+        return {
+            "status": "failed",
+            "broadcast_id": broadcast_id,
+            "summary": (f"⚠️ Рассылка с этим же текстом по этому боту уже "
+                        f"идёт (#{_twin_id}). Эта не отправлена, "
+                        f"чтобы подписчики не получили сообщение дважды. "
+                        f"Нужно отправить ещё раз — запустите после того, "
+                        f"как первая закончит."),
+        }
 
     # Повторный прогон этой же операции (таймаут, воскрешение после рестарта)
     # НЕ должен запускать вторую задачу на тот же broadcast_id: два цикла

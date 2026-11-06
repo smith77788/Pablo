@@ -55,6 +55,9 @@ _CREATE_VIEW = re.compile(
 # статически неизвестно, поэтому на его месте — этот токен, и он НЕ таблица.
 # Без него `FROM {table} WHERE …` после склейки давал бы «таблицу» WHERE.
 _FMT_SUB = "__fmtsub__"
+# Функции, возвращающие набор строк, отсеиваются общим правилом «за именем
+# стоит круглая скобка» (см. unknown_tables); имена ниже остаются для случаев
+# без скобки (`FROM LATERAL`, `FROM dual`).
 _NOT_TABLES = {"lateral", "dual", "generate_series", "unnest",
                "jsonb_array_elements", "json_array_elements", "jsonb_each",
                "jsonb_to_recordset", "values", "select", "only", _FMT_SUB}
@@ -161,6 +164,14 @@ def unknown_tables() -> dict[str, list[str]]:
         cleaned = _FOR_UPDATE.sub(" ", _EXTRACT.sub(" ", sql))
         for m in _REF.finditer(cleaned):
             name = m.group(1).lower()
+            # `FROM имя(` — вызов функции, возвращающей набор строк
+            # (`jsonb_array_elements_text(target_user_ids)`), а не таблица.
+            # Раньше такие имена отсеивались поимённым списком, и каждая
+            # следующая функция краснела на здоровом коде. Послабление
+            # монотонное: имя таблицы за круглой скобкой не стоит никогда,
+            # поэтому настоящую опечатку правило спрятать не может.
+            if cleaned[m.end():].lstrip()[:1] == "(":
+                continue
             if (name in known or name in ctes or name in _NOT_TABLES
                     or name.startswith(_SYSTEM_PREFIXES)):
                 continue
@@ -281,3 +292,35 @@ def test_runtime_created_list_stays_short():
     )
     assert all(len(v.strip()) > 10 for v in RUNTIME_CREATED.values()), \
         "каждая запись обязана объяснять, кто и когда создаёт таблицу"
+
+
+def test_a_set_returning_function_is_not_a_table():
+    """`FROM jsonb_array_elements_text(col)` — функция, а не забытая таблица.
+
+    На этом измеритель краснел на здоровом коде: запрет второго залпа по
+    списку получателей сравнивает множества через
+    `jsonb_array_elements_text(target_user_ids)`, и имя функции попадало в
+    список «таблиц, которых не создаёт ни одна миграция». Красное на здоровом
+    коде опаснее, чем кажется: именно так проверку начинают обходить.
+    """
+    sql = ("SELECT id FROM broadcasts WHERE bot_id=$1 "
+           " AND (SELECT array_agg(v::bigint ORDER BY v::bigint) "
+           "        FROM jsonb_array_elements_text(target_user_ids) v) "
+           "     = $2::bigint[]")
+    cleaned = _FOR_UPDATE.sub(" ", _EXTRACT.sub(" ", sql))
+    hits = [m.group(1).lower() for m in _REF.finditer(cleaned)]
+    assert "jsonb_array_elements_text" in hits, (
+        "в примере нет вызова функции в FROM — проверка ниже пустая")
+    left = [m.group(1).lower() for m in _REF.finditer(cleaned)
+            if cleaned[m.end():].lstrip()[:1] != "("]
+    assert left == ["broadcasts"], f"осталось лишнее: {left}"
+
+
+def test_the_function_rule_does_not_hide_a_typo():
+    """Послабление обязано остаться узким: опечатка без скобки по-прежнему видна."""
+    sql = ("SELECT 1 FROM operations o "
+           " JOIN jsonb_array_elements_text(o.params) v ON TRUE")
+    left = [m.group(1).lower() for m in _REF.finditer(sql)
+            if sql[m.end():].lstrip()[:1] != "("]
+    assert left == ["operations"], (
+        f"правило «за именем скобка» спрятало настоящую находку: {left}")
