@@ -1057,7 +1057,7 @@ async def cb_dm_launch_or_draft(
         except Exception:
             log_exc_swallow(log, "Ошибка проверки аудитории перед запуском Кампании в ЛС")
 
-    import json as _json
+    from services import dm_engine
 
     params_dict = {}
     if cohort_type:
@@ -1071,16 +1071,20 @@ async def cb_dm_launch_or_draft(
 
     initial_status = "draft"  # всегда создаём как draft, потом меняем
     try:
-        campaign_id = await pool.fetchval(
-            "INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status, params) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id",
+        # НЕ прямая вставка: свежий campaign_id у каждого нажатия делает params
+        # операции уникальными, и окно идемпотентности шины на двойное нажатие
+        # не срабатывает в принципе, а журнал отправок привязан к кампании —
+        # для второй кампании все получатели снова «новые», и человек получает
+        # письмо дважды. Личность нажатия — СОДЕРЖИМОЕ кампании (dm_engine).
+        campaign_id, _campaign_reused = await dm_engine.find_or_create_campaign(
+            pool,
             callback.from_user.id,
-            name,
-            text,
-            target_type,
-            target_id,
-            initial_status,
-            _json.dumps(params_dict, ensure_ascii=False) if params_dict else "{}",
+            name=name,
+            text_template=text,
+            target_type=target_type,
+            target_id=target_id,
+            status=initial_status,
+            params=params_dict,
         )
     except Exception as exc:
         mark_handled_error(f"dm_launch insert: {exc}")

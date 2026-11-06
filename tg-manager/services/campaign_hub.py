@@ -301,12 +301,21 @@ async def _create_dm_row(pool, owner_id: int, dm: dict) -> int:
         if not recipients:
             raise CampaignSpecError("Список получателей ДМ пуст или невалиден")
         params["import_list"] = recipients
-    return await pool.fetchval(
-        """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type,
-                                    target_id, status, total_targets, params)
-           VALUES($1,$2,$3,$4,$5,'draft',0,$6::jsonb) RETURNING id""",
-        owner_id, dm.get("name") or "Кампания", dm["text"], target_type,
-        int(target_id) if target_id else None, json.dumps(params))
+    # Не прямая вставка: двойной запуск кампании создал бы ДВЕ строки ДМ, и
+    # журнал отправок (он привязан к campaign_id) для второй счёл бы всех
+    # получателей новыми — те же люди получили бы то же письмо дважды. Общий
+    # контур с обычной DM-кампанией: личность — содержимое, а не свежий id.
+    from services.dm_engine import find_or_create_campaign
+
+    row_id, _reused = await find_or_create_campaign(
+        pool, owner_id,
+        name=dm.get("name") or "Кампания",
+        text_template=dm["text"],
+        target_type=target_type,
+        target_id=int(target_id) if target_id else None,
+        params=params,
+    )
+    return row_id
 
 
 async def launch_campaign(pool, owner_id: int, spec: dict) -> dict:
