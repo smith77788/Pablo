@@ -19,14 +19,50 @@ import json
 import pytest
 
 
-class _Pool:
-    """Заглушка пула: помнит запросы и умеет ломать запись в журнал."""
+class _Tx:
+    async def __aenter__(self):
+        return self
 
-    def __init__(self, users=(), fail_audit=False):
+    async def __aexit__(self, *a):
+        return False
+
+
+class _Acq:
+    """`async with pool.acquire()` отдаёт сам пул: вызовы у них одинаковы."""
+
+    def __init__(self, pool):
+        self.pool = pool
+
+    async def __aenter__(self):
+        return self.pool
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _Pool:
+    """Заглушка пула: помнит запросы и умеет ломать запись в журнал.
+
+    Умеет `acquire()`/`transaction()`, потому что заявка на длинное
+    админ-действие делается под advisory-блокировкой в транзакции. Заглушка без
+    них молча уводила код в ветку «заявка не удалась» — то есть проверялась
+    не та половина.
+    """
+
+    def __init__(self, users=(), fail_audit=False, twin=None):
         self.users = [{"user_id": u} for u in users]
         self.fail_audit = fail_audit
+        self.twin = twin            # details уже заявленной такой же рассылки
         self.audit: list[tuple] = []
+        self.updates: list[tuple] = []
         self.queries: list[str] = []
+        self._next_id = 100
+
+    def acquire(self):
+        return _Acq(self)
+
+    def transaction(self):
+        return _Tx()
 
     async def fetch(self, q, *a):
         self.queries.append(" ".join(q.split()))
@@ -37,14 +73,25 @@ class _Pool:
     async def execute(self, q, *a):
         one = " ".join(q.split())
         self.queries.append(one)
-        if "admin_audit_log" in q:
+        if "UPDATE admin_audit_log" in q:
             if self.fail_audit:
-                raise RuntimeError("нет такого admin_id в platform_users")
-            self.audit.append(a)
+                raise RuntimeError("журнал недоступен")
+            self.updates.append(a)
+        elif "INSERT INTO admin_audit_log" in q:
+            raise AssertionError("запись в журнал идёт через fetchval")
         return "INSERT 1"
 
     async def fetchval(self, q, *a):
-        self.queries.append(" ".join(q.split()))
+        one = " ".join(q.split())
+        self.queries.append(one)
+        if "INSERT INTO admin_audit_log" in q:
+            if self.fail_audit:
+                raise RuntimeError("нет такого admin_id в platform_users")
+            self.audit.append(a)
+            self._next_id += 1
+            return self._next_id
+        if "SELECT details FROM admin_audit_log" in q:
+            return json.dumps(self.twin) if self.twin is not None else None
         return None
 
     async def fetchrow(self, q, *a):
@@ -89,6 +136,20 @@ def _audited(pool):
     return out
 
 
+def _trace(pool):
+    """Запись журнала вместе с дополнениями — как её прочтёт человек.
+
+    Длинная рассылка пишет след ДО отправки и дополняет итогом после, поэтому
+    «что в журнале» — это запись плюс все её патчи, а не один INSERT.
+    """
+    rec = _audited(pool)
+    assert len(rec) == 1, f"ждём одну запись о рассылке, вышло {len(rec)}"
+    admin_id, action, target, details = rec[0]
+    for _log_id, patch in pool.updates:
+        details = dict(details, **json.loads(patch))
+    return admin_id, action, target, details
+
+
 def test_broadcast_leaves_a_trace_with_counts():
     from services import mini_app_api as M
 
@@ -96,9 +157,7 @@ def test_broadcast_leaves_a_trace_with_counts():
     res = asyncio.run(M._admin_broadcast_core(pool, 777, "Привет всем"))
 
     assert res == {"ok": True, "sent": 3, "failed": 1}
-    rec = _audited(pool)
-    assert len(rec) == 1, f"рассылка без следа в журнале: {pool.queries}"
-    admin_id, action, target, details = rec[0]
+    admin_id, action, target, details = _trace(pool)
     assert admin_id == 777
     assert action == "admin_broadcast"
     assert target is None
@@ -140,10 +199,9 @@ def test_broadcast_records_what_went_out_before_it_broke(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(M._admin_broadcast_core(pool, 777, "текст"))
 
-    rec = _audited(pool)
-    assert len(rec) == 1, "обрыв стёр запись о начатой рассылке"
-    assert rec[0][3]["sent"] == 2, rec[0][3]
-    assert rec[0][3]["recipients"] == 3
+    _a, _act, _t, details = _trace(pool)
+    assert details["sent"] == 2, details
+    assert details["recipients"] == 3
 
 
 def test_audit_failure_does_not_break_the_action():

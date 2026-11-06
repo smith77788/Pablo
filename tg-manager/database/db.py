@@ -6063,6 +6063,94 @@ async def get_all_platform_users(
     return [dict(r) for r in rows]
 
 
+def _ex(pool, conn=None):
+    """Куда писать: в чужое соединение, если дали, иначе в пул.
+
+    Пул и соединение у asyncpg одинаковы по вызовам (`fetchval`, `execute`),
+    поэтому выбор исполнителя — единственное, что здесь нужно.
+    """
+    return conn if conn is not None else pool
+
+
+async def update_admin_action(pool, log_id: int | None, patch: dict) -> None:
+    """Дополнить details уже записанного админ-действия (итогом, счётчиками).
+
+    Длинное действие (рассылка всем пользователям) обязано оставить след ДО
+    начала — иначе повторное нажатие не отличить от первого, пока первое ещё
+    идёт, и люди получают сообщение дважды. Итог приходит сюда.
+
+    Как и сама запись, fail-soft: действие уже случилось, терять его из-за
+    сбоя журнала нельзя. UPDATE, а не INSERT: единственный INSERT в журнал
+    остаётся один — в `log_admin_action` (сторож:
+    tests/test_admin_actions_are_audited.py).
+    """
+    if not log_id:
+        return
+    try:
+        await pool.execute(
+            "UPDATE admin_audit_log "
+            "SET details = COALESCE(details, '{}'::jsonb) || $2::jsonb WHERE id = $1",
+            log_id, json.dumps(patch, ensure_ascii=False, default=str),
+        )
+    except Exception:
+        log_exc_swallow(log, "Сбой дополнения admin_audit_log", action="update")
+
+
+async def claim_admin_action(
+    pool,
+    admin_id: int,
+    action: str,
+    ident: str,
+    details: dict,
+    *,
+    window_sec: int = 90,
+    source: str = "app",
+) -> tuple[int | None, dict | None]:
+    """Заявить длинное админ-действие так, чтобы повтор не стал вторым делом.
+
+    Возвращает `(id записи, None)` — заявка принята, делайте; или
+    `(None, details двойника)` — такое же действие уже заявлено в окне, делать
+    второй раз нельзя.
+
+    Зачем: рассылка всем пользователям шла ВНУТРИ запроса и след оставляла
+    только в конце. Пока она идёт (а это секунды на сотню человек), второе
+    нажатие — штатное: ответа нет, кнопка живая, Телеграм сам повторяет
+    callback. Личности у двух нажатий не было вовсе, и каждый живой человек
+    получал сообщение дважды.
+
+    Личность — переданный `ident` (у рассылки это отпечаток текста), окно —
+    `window_sec`. `pg_advisory_xact_lock` сериализует одновременные заявки:
+    без неё обе проверки видят пустоту и обе проходят.
+    """
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"adminact|{admin_id}|{action}|{ident}",
+                )
+                twin = await conn.fetchval(
+                    "SELECT details FROM admin_audit_log "
+                    "WHERE admin_id = $1 AND action = $2 "
+                    "  AND details->>'ident' = $3 "
+                    "  AND created_at > now() - make_interval(secs => $4) "
+                    "ORDER BY id DESC LIMIT 1",
+                    admin_id, action, ident, float(window_sec),
+                )
+                if twin is not None:
+                    return None, (json.loads(twin) if isinstance(twin, str) else dict(twin))
+                row_id = await log_admin_action(
+                    pool, admin_id, action, None,
+                    dict(details, ident=ident), source=source, conn=conn)
+                return row_id, None
+    except Exception:
+        # Сбой самой заявки не должен отменять действие: журнал fail-soft, и
+        # защита от повтора — не причина не сделать то, что попросил админ.
+        log_exc_swallow(log, "Сбой заявки админ-действия", admin_id=admin_id,
+                        action=action)
+        return None, None
+
+
 async def log_admin_action(
     pool: asyncpg.Pool,
     admin_id: int,
@@ -6071,8 +6159,14 @@ async def log_admin_action(
     details: dict | None = None,
     *,
     source: str = "app",
-) -> None:
+    conn: asyncpg.Connection | None = None,
+) -> int | None:
     """Записать админ-действие в журнал. Один вход для всех таких записей.
+
+    Возвращает id записи (или None, если запись не удалась): длинное действие
+    пишет след ДО начала и дополняет его итогом через `update_admin_action`.
+    `conn` — писать в чужой транзакции (нужно, когда запись делается под
+    advisory-блокировкой вместе с проверкой на повтор).
 
     source — откуда действие: 'bot' (админ-панель бота), 'miniapp' (ручки
     /api/miniapp/admin/*), 'secret' (вход по секретной фразе), 'app' — прочее.
@@ -6087,9 +6181,9 @@ async def log_admin_action(
     нечем, а молчать нельзя — сбой уходит в лог с трейсом.
     """
     try:
-        await pool.execute(
+        return await _ex(pool, conn).fetchval(
             """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details, source)
-               VALUES ($1, $2, $3, $4, $5)""",
+               VALUES ($1, $2, $3, $4, $5) RETURNING id""",
             admin_id, action, target_user_id,
             json.dumps(details or {}, ensure_ascii=False, default=str), source,
         )
@@ -6098,6 +6192,7 @@ async def log_admin_action(
             log, "Сбой записи admin_audit_log", admin_id=admin_id,
             user_id=target_user_id, action=action,
         )
+    return None
 
 
 async def grant_plan_to_user(

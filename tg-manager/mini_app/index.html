@@ -2786,8 +2786,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sb">
     <div class="sec">Рассылка всем пользователям</div>
+    <div id="adm-bc-who" class="hint" style="margin-bottom:8px"></div>
     <textarea id="adm-bc-text" rows="5" placeholder="Введите текст сообщения…" class="input-bc-l"></textarea>
-    <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="submitAdminBroadcast()">📢 Отправить</button>
+    <button id="adm-bc-send" class="btn btn-p" style="width:100%;margin-top:12px" onclick="submitAdminBroadcast()">📢 Отправить</button>
+    <div id="adm-bc-last"></div>
   </div>
 </div>
 
@@ -30840,6 +30842,47 @@ async function admUserUnban() {
 
 async function openAdminBroadcast() {
   push('s-admin-broadcast');
+  // Экран был пустой: поле ввода и кнопка. Самое далеко идущее действие
+  // продукта владелец запускал, не зная НИ скольким людям оно уйдёт (число он
+  // видел впервые в окне подтверждения), НИ что уже рассылали — а повтор того
+  // же текста чаще всего означает «первое нажатие не ответило».
+  txt('adm-bc-who', 'Считаем получателей…');
+  txt('adm-bc-last', '');
+  const t = await massTargets('admin_broadcast');
+  txt('adm-bc-who', t
+    ? ('Получат' + massScale(t, 'человек', 'человека', 'человек')
+       + '. Забаненные не получат.')
+    : 'Число получателей узнать не удалось — оно будет в подтверждении.');
+  loadAdminBroadcastLast();
+}
+
+// Последние рассылки — из журнала админских действий. Числа здесь двери:
+// строка открывает журнал, где видно, кто и что разослал.
+async function loadAdminBroadcastLast() {
+  try {
+    const d = await api('/api/miniapp/admin/broadcast/recent?limit=5');
+    const rows = d.broadcasts || [];
+    if (!rows.length) { txt('adm-bc-last', ''); return; }
+    const rowsHtml = rows.map(r => {
+      const head = esc(String(r.text || '').slice(0, 80))
+        + (String(r.text || '').length > 80 ? '…' : '');
+      const when = r.created_at ? new Date(r.created_at).toLocaleString('ru-RU') : '';
+      // «Не дошло до конца» — это незакрытая запись: рассылку оборвал
+      // передеплой или таймаут шлюза, и часть людей письмо не получила.
+      const tail = when + ' · ушло ' + num(r.sent || 0) + ' из ' + num(r.recipients || 0)
+        + (Number(r.failed || 0) ? ', не дошло ' + num(r.failed) : '')
+        + (r.finished ? '' : ' · ОБОРВАЛАСЬ');
+      return '<div class="row" role="button" tabindex="0" onclick="openAdminActions()">'
+        + '<div class="row-body"><div class="row-name">' + (head || '—') + '</div>'
+        + '<div class="row-val" style="white-space:normal">' + tail + '</div></div>'
+        + '<span class="chev">›</span></div>';
+    }).join('');
+    txt('adm-bc-last', '<div class="sec" style="margin-top:16px">Уже рассылали</div>'
+      + '<div class="lst">' + rowsHtml + '</div>');
+  } catch (e) {
+    txt('adm-bc-last', errHtml(errRu(e, 'Прежние рассылки не загрузились'),
+                               retryCall('loadAdminBroadcastLast')));
+  }
 }
 
 async function submitAdminBroadcast() {
@@ -30850,11 +30893,32 @@ async function submitAdminBroadcast() {
   if (!await askConfirm('Разослать сообщение всем пользователям платформы'
       + massScale(abT, 'человек', 'человека', 'человек') + '?'
       + '\n\nСообщения уйдут живым людям — отменить отправку нельзя.')) return;
+  // Кнопка гаснет на время отправки. Рассылка идёт внутри запроса (0.05 с на
+  // человека), ответа нет секунды — живая кнопка здесь означала второе
+  // нажатие, то есть второе сообщение каждому живому человеку. Сервер такой
+  // повтор тоже отбивает (окно 90 секунд по отпечатку текста), но первым
+  // рубежом должна быть сама кнопка: до сервера запрос может и не дойти.
+  const btn = document.getElementById('adm-bc-send');
+  if (btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '📢 Отправляем…';
+  }
   try {
     const r = await api('/api/miniapp/admin/broadcast', {method:'POST', body:JSON.stringify({text})});
-    toast('✅ Отправлено: ' + (r.sent||0) + ' ' + plural(r.sent||0,'пользователю','пользователям','пользователям'));
+    if (r && r.duplicate) {
+      // Не «отправлено 0»: ноль здесь означал бы «не сработало», и владелец
+      // нажал бы в третий раз.
+      toast('↺ Эта рассылка уже ушла: ' + (r.sent||0) + ' из ' + (r.recipients||0)
+            + '. Второй раз не отправляю.');
+    } else {
+      toast('✅ Отправлено: ' + (r.sent||0) + ' ' + plural(r.sent||0,'пользователю','пользователям','пользователям'));
+    }
     back();
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
+  finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📢 Отправить'; }
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════

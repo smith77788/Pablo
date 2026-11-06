@@ -2151,6 +2151,13 @@ async def _check_all_proxies_core(pool: asyncpg.Pool, uid: int) -> dict:
     return {"ok": True, "checked": len(rows), "alive": alive}
 
 
+# Окно, внутри которого повторное нажатие «Отправить» с ТЕМ ЖЕ текстом — это
+# то же самое нажатие, а не вторая рассылка. Девяносто секунд: рассылка идёт
+# внутри запроса по 0.05 с на человека, то есть сотня получателей — это пять
+# секунд, а шлюз режет запрос раньше, чем админ успевает понять, ушло ли.
+_ADMIN_BC_DEDUP_SEC = 90
+
+
 async def _admin_broadcast_core(pool: asyncpg.Pool, uid: int, text: str) -> dict:
     """Сообщение ВСЕМ пользователям платформы. Пишет след в журнал админа.
 
@@ -2159,8 +2166,17 @@ async def _admin_broadcast_core(pool: asyncpg.Pool, uid: int, text: str) -> dict
     разбан след в admin_audit_log оставляли, а рассылка — нет: кто и что
     разослал, восстановить было неоткуда. Запись идёт и когда рассылка упала на
     середине — тогда в ней видно, сколько успело уйти.
+
+    След теперь пишется ДО отправки, а не только в конце, и у нажатия есть
+    личность (отпечаток текста). Без этого второе нажатие было неотличимо от
+    первого, пока первое ещё идёт, — а идёт оно секунды и ответа не даёт, так
+    что второе нажатие штатно: кнопка живая, клиент повторяет запрос по
+    таймауту, Телеграм повторяет callback. Каждый живой человек получал
+    сообщение дважды. Повтор в окне возвращает итог первой рассылки и НЕ шлёт.
     """
-    from database.db import log_admin_action
+    import hashlib
+
+    from database.db import claim_admin_action, log_admin_action, update_admin_action
 
     # Не шлём забаненным.
     users = await pool.fetch(
@@ -2170,6 +2186,20 @@ async def _admin_broadcast_core(pool: asyncpg.Pool, uid: int, text: str) -> dict
                                {"recipients": 0, "sent": 0, "failed": 0,
                                 "text": text[:500]})
         return {"ok": True, "sent": 0, "failed": 0}
+
+    # Личность нажатия — отпечаток текста: тот же текст в окне считается тем же
+    # нажатием. Другой текст — другая рассылка, она законна и не блокируется.
+    ident = hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+    log_id, twin = await claim_admin_action(
+        pool, uid, "admin_broadcast", ident,
+        {"recipients": len(users), "sent": 0, "failed": 0, "started": True,
+         "text": text[:500]},
+        window_sec=_ADMIN_BC_DEDUP_SEC, source="miniapp")
+    if twin is not None:
+        return {"ok": True, "duplicate": True,
+                "sent": int(twin.get("sent") or 0),
+                "failed": int(twin.get("failed") or 0),
+                "recipients": int(twin.get("recipients") or 0)}
 
     from aiogram import Bot as _Bot
     from aiogram.client.default import DefaultBotProperties
@@ -2189,11 +2219,20 @@ async def _admin_broadcast_core(pool: asyncpg.Pool, uid: int, text: str) -> dict
                 failed += 1
             await asyncio.sleep(0.05)
     finally:
-        # Журнал пишем в finally: обрыв на середине (передеплой, таймаут шлюза)
-        # — это НЕ повод потерять запись о том, что рассылка уже пошла людям.
-        await log_admin_action(pool, uid, "admin_broadcast", None,
-                               {"recipients": len(users), "sent": sent,
-                                "failed": failed, "text": text[:500]})
+        # Итог дополняем в finally: обрыв на середине (передеплой, таймаут
+        # шлюза) — это НЕ повод потерять число уже ушедших. Сама запись о том,
+        # что рассылка пошла людям, стоит в журнале с её начала.
+        if log_id:
+            await update_admin_action(pool, log_id,
+                                      {"sent": sent, "failed": failed,
+                                       "finished": True})
+        else:
+            # Заявка не записалась (сбой журнала) — но рассылка состоялась, и
+            # потерять её из журнала нельзя.
+            await log_admin_action(pool, uid, "admin_broadcast", None,
+                                   {"recipients": len(users), "sent": sent,
+                                    "failed": failed, "ident": ident,
+                                    "finished": True, "text": text[:500]})
         try:
             await _b.session.close()
         except Exception as e:

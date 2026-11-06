@@ -181,3 +181,41 @@ def test_admin_screen_has_doors():
     src = miniapp_source()
     assert 'onclick="openAdminPayments()"' in src and 'onclick="openAdminReports()"' in src
     assert "/api/miniapp/admin/report/" in src and "/status'" in src
+
+
+def test_recent_platform_broadcasts_name_what_happened():
+    """Экран рассылки показывает прошлые попытки — включая оборванную.
+
+    Журнал админских действий `details` не отдаёт (там и причины банов), поэтому
+    у экрана своя ручка ровно с его полями. Оборванная рассылка (запись без
+    `finished`) — то, что владельцу важнее всего: часть людей письмо не
+    получила, и это надо видеть ДО того, как нажать ещё раз.
+    """
+    async def body(client, pool):
+        await pool.executemany(
+            "INSERT INTO admin_audit_log(admin_id, action, details, source, created_at)"
+            " VALUES($1,$2,$3::jsonb,$4, now() - make_interval(mins => $5))",
+            [(ADMIN, "admin_broadcast",
+              '{"recipients": 10, "sent": 10, "failed": 0, "finished": true,'
+              ' "text": "Платформа переезжает", "ident": "aa"}', "miniapp", 1),
+             (ADMIN, "admin_broadcast",
+              '{"recipients": 10, "sent": 3, "failed": 1, "started": true,'
+              ' "text": "Оборванная", "ident": "bb"}', "miniapp", 5),
+             (ADMIN, "ban_user", '{"reason": "спам"}', "miniapp", 2)])
+        ok = await (await client.get("/api/miniapp/admin/broadcast/recent")).json()
+        return ok
+
+    ok = _run(body)
+    rows = ok["broadcasts"]
+    assert len(rows) == 2, f"в выдачу попали не только рассылки: {rows}"
+    assert rows[0]["text"] == "Платформа переезжает", rows[0]
+    assert rows[0]["sent"] == 10 and rows[0]["finished"] is True, rows[0]
+    assert rows[1]["finished"] is False, "оборванная рассылка названа законченной"
+    assert rows[1]["sent"] == 3 and rows[1]["recipients"] == 10, rows[1]
+
+
+def test_recent_platform_broadcasts_are_admin_only():
+    async def body(client, pool):
+        return (await client.get("/api/miniapp/admin/broadcast/recent")).status
+
+    assert _run(body, admin=False) == 403

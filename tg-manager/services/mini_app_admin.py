@@ -205,6 +205,53 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("admin_broadcast uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def admin_broadcast_recent(request: web.Request) -> web.Response:
+        """Последние рассылки всем пользователям: что, скольким, доехало ли.
+
+        Экран рассылки был пуст — поле и кнопка. Владелец не видел ни того, что
+        уже рассылали, ни чем кончилась прошлая попытка; а повтор того же
+        текста почти всегда означает «первое нажатие не ответило». Журнал
+        админских действий details НЕ отдаёт (там и причины банов, и тексты), и
+        расширять его ради одного экрана неправильно — поэтому отдельная ручка
+        ровно с полями этого экрана.
+        """
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Раздел только для владельца платформы", 403)
+        try:
+            limit = max(1, min(int(request.query.get("limit", "5")), 20))
+        except (TypeError, ValueError):
+            return _err("Неверные параметры страницы", 400)
+        try:
+            rows = await pool.fetch(
+                """SELECT id, admin_id, details, created_at FROM admin_audit_log
+                   WHERE action = 'admin_broadcast'
+                   ORDER BY created_at DESC, id DESC LIMIT $1""", limit)
+            out = []
+            for r in rows:
+                d = dict(r).get("details")
+                try:
+                    d = json.loads(d) if isinstance(d, str) else (dict(d) if d else {})
+                except (TypeError, ValueError):
+                    d = {}
+                out.append({
+                    "id": int(r["id"]),
+                    "admin_id": int(r["admin_id"]),
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                    # Текст урезаем: экран показывает начало, а не всё письмо.
+                    "text": str(d.get("text") or "")[:120],
+                    "recipients": int(d.get("recipients") or 0),
+                    "sent": int(d.get("sent") or 0),
+                    "failed": int(d.get("failed") or 0),
+                    # Незакрытая запись — рассылка, оборванная на середине
+                    # (передеплой, таймаут шлюза). Это владельцу и важно.
+                    "finished": bool(d.get("finished")),
+                })
+            return _json_resp({"broadcasts": out})
+        except Exception:
+            log.exception("admin_broadcast_recent uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def _admin_target(request: web.Request):
         """Общая проверка админ-действия: (uid, target_id) или (None, error-resp)."""
         uid = _get_uid(request)
@@ -558,6 +605,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/admin/stats", admin_stats)
     app.router.add_get("/api/miniapp/admin/user/{user_id}", admin_user_detail)
     app.router.add_post("/api/miniapp/admin/broadcast", admin_broadcast)
+    app.router.add_get("/api/miniapp/admin/broadcast/recent", admin_broadcast_recent)
     app.router.add_post("/api/miniapp/admin/user/{user_id}/grant", admin_user_grant)
     app.router.add_post("/api/miniapp/admin/user/{user_id}/revoke", admin_user_revoke)
     app.router.add_post("/api/miniapp/admin/user/{user_id}/ban", admin_user_ban)
