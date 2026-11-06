@@ -2174,8 +2174,6 @@ async def _admin_broadcast_core(pool: asyncpg.Pool, uid: int, text: str) -> dict
     таймауту, Телеграм повторяет callback. Каждый живой человек получал
     сообщение дважды. Повтор в окне возвращает итог первой рассылки и НЕ шлёт.
     """
-    import hashlib
-
     from database.db import claim_admin_action, log_admin_action, update_admin_action
 
     # Не шлём забаненным.

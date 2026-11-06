@@ -76,11 +76,19 @@ def test_a_repeat_is_named_not_reported_as_zero_sent():
 
 
 def test_the_server_is_the_second_line_not_the_only_one():
-    """Кнопка — первый рубеж, окно сервера — второй. Нужны оба."""
-    from services import mini_app_api as M
+    """Кнопка — первый рубеж, окно сервера — второй. Нужны оба.
 
-    src = open(M.__file__, encoding="utf-8").read()
-    assert "_ADMIN_BC_DEDUP_SEC" in src, "окно повтора на сервере снято"
-    assert "claim_admin_action" in src, (
+    Источник берём из `tests.miniapp_source`, а не по `__file__` монолита:
+    проверка, прибитая к пути, ослепнет при первом же выносе ручки (сторож:
+    tests/test_tests_do_not_pin_the_monolith.py).
+    """
+    from tests.miniapp_source import api_function
+
+    body = api_function("_admin_broadcast_core")
+    assert "_ADMIN_BC_DEDUP_SEC" in body, "окно повтора на сервере снято"
+    assert "claim_admin_action" in body, (
         "заявка на рассылку снова не берётся: пока рассылка идёт, второго "
         "нажатия от первого не отличить")
+    assert "hashlib.sha256(text.encode" in body, (
+        "личность нажатия снова считается не от текста: от времени или от id "
+        "она у двух нажатий разная, и дедуп не срабатывает ни разу")

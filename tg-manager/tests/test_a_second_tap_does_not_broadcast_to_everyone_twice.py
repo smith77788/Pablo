@@ -184,21 +184,27 @@ def test_another_admin_is_not_blocked_by_the_first_ones_text():
 
 
 def test_the_identity_is_the_text_not_the_clock():
-    """Отпечаток считается от текста: два нажатия подряд дают один и тот же."""
-    import hashlib
+    """Отпечаток считается от текста: у двух нажатий подряд он один и тот же.
 
-    from services import mini_app_api as M
+    Проверяем поведением, а не чтением исходника окном: окно промахивается от
+    любой вставки рядом, а «искомого нет» тогда становится правдой и защита
+    выключается молча (сторож: tests/test_no_silently_disabled_guards.py).
+    Если личность снова посчитают от времени или от id, два РАЗНЫХ пула с тем
+    же текстом дадут разные отпечатки — и дедуп не сработает ни разу.
+    """
+    first = _Pool(users=(11,))
+    _run(first, 777, "один и тот же текст")
+    second = _Pool(users=(11,))
+    _run(second, 777, "один и тот же текст")
+    assert first.inserts[0]["ident"] == second.inserts[0]["ident"], (
+        "личность нажатия зависит не только от текста — от времени или от id "
+        "она у двух нажатий разная, и запрет повтора не срабатывает")
 
-    src = open(M.__file__, encoding="utf-8").read()
-    i = src.index("async def _admin_broadcast_core")
-    body = src[i:i + 4000]
-    assert "hashlib.sha256(text.encode" in body, (
-        "личность нажатия снова считается не от текста: от времени или от id "
-        "она у двух нажатий разная, и дедуп не срабатывает НИ РАЗУ")
-    assert "now()" not in body.split("claim_admin_action")[0][-600:], (
-        "в личность попало время — см. "
-        "tests/test_two_taps_on_a_timed_broadcast_are_one_send_postgres.py")
-    assert hashlib.sha256("x".encode("utf-8")).hexdigest()[:32]
+    other = _Pool(users=(11,))
+    _run(other, 777, "другой текст")
+    assert other.inserts[0]["ident"] != first.inserts[0]["ident"], (
+        "у разных текстов один отпечаток — вторая, законная рассылка будет "
+        "заблокирована первой")
 
 
 def test_a_duplicate_reports_the_first_run_numbers():

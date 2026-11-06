@@ -247,6 +247,20 @@ await page.addInitScript((mode) => {
     // и экран падал с «Cannot read properties of undefined (reading 'map')» —
     // находкой, которой в приложении нет, а заодно печатал «undefined» вместо
     // названий шаблонов.
+    // Последние рассылки всем пользователям: экран показывает их строками, и
+    // одна из них нарочно ОБОРВАННАЯ (без finished) — это то состояние, ради
+    // которого строки и появились, и его вёрстку обход иначе не увидит.
+    if (url.indexOf('/admin/broadcast/recent') >= 0) {
+      o.broadcasts = [
+        { id: 31, admin_id: 1, created_at: new Date(Date.now() - 36e5).toISOString(),
+          text: 'Платформа переезжает в субботу с 10:00 до 14:00 по Москве, '
+            + 'в это время рассылки и автопостинг будут на паузе',
+          recipients: 1842, sent: 1842, failed: 0, finished: true },
+        { id: 30, admin_id: 1, created_at: new Date(Date.now() - 864e5).toISOString(),
+          text: 'Новые тарифы с первого числа', recipients: 1840, sent: 612,
+          failed: 7, finished: false },
+      ];
+    }
     if (url.indexOf('/widgets/templates') >= 0) {
       o.templates = [
         { id: 'poll', name: 'Опрос с голосами', desc: LONG, votes: true, packed: 2048,
