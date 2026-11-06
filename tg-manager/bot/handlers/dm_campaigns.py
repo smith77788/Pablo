@@ -1105,6 +1105,29 @@ async def cb_dm_launch_or_draft(
             pool, callback.from_user.id
         )
         if not ready:
+            # УДАЛЯТЬ МОЖНО ТОЛЬКО СВОЮ СТРОКУ. Повтор нажатия садится на
+            # кампанию первой попытки (дверь по содержимому в
+            # dm_engine.find_or_create_campaign), а она к этому моменту может
+            # уже рассылать. Вместе со строкой кампании ушёл бы и журнал
+            # отправок (dm_campaign_log, ON DELETE CASCADE) — тот самый, по
+            # которому кампания не пишет людям дважды.
+            if _campaign_reused:
+                _cur = await pool.fetchval(
+                    "SELECT status FROM dm_campaigns WHERE id=$1", campaign_id)
+                _text = (
+                    f"⚠️ {reason}\n\nКампания уже запущена первым нажатием "
+                    f"и идёт в фоне (ID {campaign_id})."
+                    if _cur == "running" else
+                    f"⚠️ {reason}\n\nКампания сохранена (ID {campaign_id}), "
+                    f"но не запущена. Запустите её из меню кампаний."
+                )
+                await _edit(
+                    callback, _text,
+                    InlineKeyboardBuilder()
+                    .button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+                    .as_markup(),
+                )
+                return
             try:
                 await pool.execute("DELETE FROM dm_campaigns WHERE id=$1", campaign_id)
             except Exception as e:
