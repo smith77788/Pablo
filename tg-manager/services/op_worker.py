@@ -472,6 +472,27 @@ _MAX_PARALLEL = _int_env("OP_MAX_PARALLEL", 8, 1, 256)
 _MAX_PARALLEL_PER_OWNER = _int_env("OP_MAX_PARALLEL_PER_OWNER", 3, 1, 64)
 _MIN_ACCOUNTS_PER_OP = 1     # честный дележ флота: минимум аккаунтов на операцию
 
+# Сколько потерянных отметок «цель сделана» терпит ОДИН проход создающей
+# операции, прежде чем остановиться.
+#
+# Отметку пишет `_journal_done` — с одним повтором на месте, а дальше log.error
+# и счётчик. Операцию он сознательно не роняет: цель уже создана, падать
+# поздно. Но для СОЗДАЮЩИХ операций (фабрика ботов, фабрика каналов, каналы
+# ноды) потерянная отметка значит ровно одно: повтор создаст этот объект второй
+# раз. Лишний бот жжёт жёсткий предел BotFather (20 на аккаунт), лишний канал —
+# суточный лимит создания и темп, на который смотрит Telegram; удалять и то и
+# другое владельцу придётся руками.
+#
+# Почему не «останавливаться на первой же потере»: типовая причина потери
+# мгновенная (занятый пул, блокировка, разрыв соединения на деплое), и через
+# секунду запись снова работает. Бросать на третьем элементе пачку из
+# пятидесяти значило бы менять одну возможную копию на сорок семь несделанных
+# целей — а повтор по журналу ничего не продублирует, он просто отложен.
+# Почему не «не останавливаться вовсе»: ДВЕ потери подряд в одном проходе — это
+# уже не блип, а неработающая дверь, и каждый следующий созданный объект
+# добавляет к повтору ещё одну копию.
+_MAX_UNMARKED_PER_PASS = 2
+
 # Сколько раз операцию можно воскресить после падения/зависания ВОРКЕРА, прежде
 # чем признать её ядовитой. Бюджет отдельный от retry_count: тот тратится на
 # повторы по ошибке исполнителя (FloodWait, сеть), и смешивать их нельзя —
@@ -10804,6 +10825,9 @@ async def _exec_bulk_create_channels_multi(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total_ops, op_id)
 
     created_count = 0
+    # Созданные каналы без записанной отметки: повтор создаст их второй
+    # раз (см. _MAX_UNMARKED_PER_PASS).
+    unmarked = 0
     failed_count = 0
     global_idx = 1
     # Создание необратимо, поэтому повтор обязан знать, что уже сделано. Ключ —
@@ -11051,14 +11075,21 @@ async def _exec_bulk_create_channels_multi(
                 # `completed_steps` выше решает, какие шаги повтор пропустит.
                 # Проглоченный сбой записи означал повторное создание уже
                 # созданного ресурса — действие необратимое.
-                await _journal_write(
-                    pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message)"
-                    " VALUES($1,$2,$3,'ok',$4)",
-                    op_id, task_i + 1, title, f"channel_id={ch_id}",
-                    log_ctx=f" [bulk_create_channels_multi op={op_id}]",
-                )
+                _marked = await _journal_done(
+                    pool, op_id, task_i + 1, title, f"channel_id={ch_id}")
                 created_count += 1
+                if not _marked:
+                    unmarked += 1
+                    log.error(
+                        "bulk_create_channels_multi op=%d: отметка о созданном "
+                        "«%s» не записалась — повтор создаст его второй раз "
+                        "(потерь в этом проходе: %d)", op_id, title, unmarked)
+                    if unmarked >= _MAX_UNMARKED_PER_PASS:
+                        log.error(
+                            "bulk_create_channels_multi op=%d: журнал целей не "
+                            "пишет — пакет останавливаем на %d-м шаге",
+                            op_id, task_i + 1)
+                        break
             else:
                 err_msg = str(result.get("error", result) if isinstance(result, dict) else result)[:200]
                 await _journal_write(
@@ -11093,8 +11124,11 @@ async def _exec_bulk_create_channels_multi(
         "ok": created_count,
         "created": created_count,
         "failed": failed_count,
+        "unmarked": unmarked,
         "summary": (f"Создано каналов: {created_count}, ошибок: {failed_count}"
-                    + (f", пропущено занятых аккаунтов: {_busy}" if _busy else "")),
+                    + (f", пропущено занятых аккаунтов: {_busy}" if _busy else "")
+                    + (f". Без отметки {unmarked} — повтор может создать их "
+                       f"второй раз" if unmarked else "")),
     }
 
 
@@ -11239,6 +11273,9 @@ async def _exec_bulk_create_channels(
             }
         created_count = 0
         failed_count = 0
+        # Созданные каналы, отметка о которых не записалась: повтор создаст их
+        # второй раз (см. _MAX_UNMARKED_PER_PASS).
+        unmarked = 0
         # Потолок пакета в очереди: без него прогресс операции рос от нуля к
         # нулю («7/0»), и недобор по прогрессу не распознавался вовсе.
         await _safe_execute(
@@ -11379,13 +11416,25 @@ async def _exec_bulk_create_channels(
                                 "op_worker bulk_channels: all username variants failed, channel created without username"
                             )
 
-                await _journal_done(
+                _marked = await _journal_done(
                     pool,
                     op_id,
                     num,
                     f"{title}",
                     f"channel_id={ch_id}" + (f" @{username}" if username else ""))
                 created_count += 1
+                if not _marked:
+                    unmarked += 1
+                    log.error(
+                        "bulk_create_channels op=%d: отметка о созданном «%s» "
+                        "не записалась — повтор создаст его второй раз "
+                        "(потерь в этом проходе: %d)", op_id, title, unmarked)
+                    if unmarked >= _MAX_UNMARKED_PER_PASS:
+                        log.error(
+                            "bulk_create_channels op=%d: журнал целей не пишет — "
+                            "пакет останавливаем на %d-м из %d",
+                            op_id, num, count)
+                        break
             else:
                 err_msg = result if isinstance(result, str) else str(result)
                 await _journal_write(
@@ -11443,7 +11492,10 @@ async def _exec_bulk_create_channels(
             "ok": created_count,
             "created": created_count,
             "failed": failed_count,
-            "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
+            "unmarked": unmarked,
+            "summary": (f"Создано {_unit}: {created_count}, ошибок: {failed_count}"
+                        + (f". Без отметки {unmarked} — повтор может создать "
+                           f"их второй раз" if unmarked else "")),
             # Связка модулей: новые ресурсы — в папку, к администратору, в инвайт
             # (services/op_chain). По журналу, а не по счётчику этого прогона:
             # каналы, созданные до повтора, тоже свои.
@@ -11493,6 +11545,10 @@ async def _exec_bot_factory_multi(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
 
     created_count = 0
+    # Созданные боты без записанной отметки: повтор создаст их второй
+    # раз и сожжёт ещё одно место из двадцати у BotFather
+    # (см. _MAX_UNMARKED_PER_PASS).
+    unmarked = 0
     failed_count = 0
     created_tokens: list[str] = []
     # Потолок «ботов на аккаунт» = bot_count (владелец задаёт ровно его). Раньше
@@ -11682,13 +11738,19 @@ async def _exec_bot_factory_multi(
                     # для идемпотентности — закрытый шаг: повторить его значит
                     # создать ВТОРОГО бота и сжечь ещё одно место из двадцати.
                     # Сам токен не потерян, он уходит в created_tokens.
-                    await _journal_done(
+                    if not await _journal_done(
                         pool,
                         op_id,
                         _step,
                         display_name,
                         "бот создан, но getMe не ответил — токен не сохранён в списке ботов"
-                        f" · {_BF_ACC_MARK}{int(candidate['id'])}")
+                        f" · {_BF_ACC_MARK}{int(candidate['id'])}",
+                    ):
+                        unmarked += 1
+                        log.error(
+                            "_exec_bot_factory_multi op=%d: отметка о боте без "
+                            "getMe не записалась — повтор создаст второго "
+                            "(потерь в проходе: %d)", op_id, unmarked)
                     await _safe_execute(
                         pool,
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
@@ -11712,12 +11774,25 @@ async def _exec_bot_factory_multi(
                 # строки — владелец видел только «Создано: N» и не мог узнать,
                 # какие именно боты завелись и на чём споткнулись остальные.
                 # На него же опирается пропуск при возобновлении.
-                await _journal_done(
+                if not await _journal_done(
                     pool,
                     op_id,
                     _step,
                     display_name,
-                    f"@{actual_uname} · {_BF_ACC_MARK}{int(candidate['id'])}")
+                    f"@{actual_uname} · {_BF_ACC_MARK}{int(candidate['id'])}",
+                ):
+                    unmarked += 1
+                    log.error(
+                        "_exec_bot_factory_multi op=%d: отметка о созданном боте "
+                        "@%s не записалась — повтор создаст второго и сожжёт "
+                        "ещё одно место из двадцати (потерь в проходе: %d)",
+                        op_id, actual_uname, unmarked)
+                    if unmarked >= _MAX_UNMARKED_PER_PASS:
+                        log.error(
+                            "_exec_bot_factory_multi op=%d: журнал целей не "
+                            "пишет — пакет останавливаем на шаге %d",
+                            op_id, _step)
+                        break
             else:
                 failed_count += 1
                 # Обычная ошибка диалога. «Не нашлось свободного @username» —
@@ -11783,11 +11858,15 @@ async def _exec_bot_factory_multi(
             f"{_r} — {_n}" for _r, _n in sorted(_by.items(), key=lambda kv: -kv[1]))
     if _busy:
         _summary += f", пропущено занятых аккаунтов: {_busy}"
+    if unmarked:
+        _summary += (f". Без отметки {unmarked} — повтор может создать их "
+                     f"второй раз")
     return {
         "status": _status,
         "ok": created_count,
         "failed": failed_count,
         "created_tokens": created_tokens[:10],
+        "unmarked": unmarked,
         "summary": _summary,
     }
 
@@ -11842,6 +11921,10 @@ async def _exec_bot_factory(
     try:
 
         created_count = 0
+        # Созданные боты без записанной отметки: повтор создаст их второй
+        # раз и сожжёт ещё одно место из двадцати у BotFather
+        # (см. _MAX_UNMARKED_PER_PASS).
+        unmarked = 0
         failed_count = 0
         created_tokens: list[str] = []
         _stop_note = ""   # почему остаток не создан (предел/лимит BotFather)
@@ -11971,13 +12054,25 @@ async def _exec_bot_factory(
                 except Exception:
                     log_exc_swallow(log, "_exec_bot_factory: managed_bots upsert failed")
 
-                await _journal_done(
+                _marked = await _journal_done(
                     pool,
                     op_id,
                     num,
                     display_name,
                     f"@{actual_uname}")
                 created_count += 1
+                if not _marked:
+                    unmarked += 1
+                    log.error(
+                        "_exec_bot_factory op=%d: отметка о созданном боте @%s "
+                        "не записалась — повтор создаст второго и сожжёт ещё "
+                        "одно место из двадцати (потерь в проходе: %d)",
+                        op_id, actual_uname, unmarked)
+                    if unmarked >= _MAX_UNMARKED_PER_PASS:
+                        log.error(
+                            "_exec_bot_factory op=%d: журнал целей не пишет — "
+                            "пакет останавливаем на %d-м боте", op_id, num)
+                        break
                 log.info(
                     "_exec_bot_factory op=%d: created @%s (bot_id=%s)",
                     op_id, actual_uname, bot_id,
@@ -12051,12 +12146,19 @@ async def _exec_bot_factory(
                             except Exception as e:
                                 log_exc_swallow(log, f"bot_factory retry managed_bots upsert failed: {e}")
                             created_count += 1
-                            await _journal_done(
+                            if not await _journal_done(
                                 pool,
                                 op_id,
                                 num,
                                 display_name,
-                                f"@{actual_uname} (retry ok)")
+                                f"@{actual_uname} (retry ok)",
+                            ):
+                                unmarked += 1
+                                log.error(
+                                    "_exec_bot_factory op=%d: отметка о боте "
+                                    "@%s (со второй попытки) не записалась — "
+                                    "повтор создаст второго (потерь: %d)",
+                                    op_id, actual_uname, unmarked)
                             await _safe_execute(
                                     pool,
                                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
@@ -12102,8 +12204,11 @@ async def _exec_bot_factory(
             "ok": created_count,
             "failed": failed_count,
             "created_tokens": created_tokens[:10],
+            "unmarked": unmarked,
             "summary": (f"Создано ботов: {created_count} из {count}, ошибок: {failed_count}"
-                        + _stop_note),
+                        + _stop_note
+                        + (f". Без отметки {unmarked} — повтор может создать "
+                           f"их второй раз" if unmarked else "")),
         }
     finally:
         await release_accounts([_claimed_acc])
@@ -17206,33 +17311,31 @@ async def _exec_community_add_channel(
         res = await nodes_engine.create_community_channel(pool, bot, owner_id, node_id, str(nm))
         if res:
             created += 1
-            # Через дверь журнала, а не обычным execute: по ЭТОЙ отметке
+            # Через общую дверь журнала, а не своим execute: по ЭТОЙ отметке
             # `completed_steps` выше решает, какие шаги повтор пропустит, а
             # создание топика необратимо.
-            _marked = await _journal_write(
-                pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message)"
-                " VALUES($1,$2,$3,'ok',$4)",
-                op_id, step, str(nm)[:128], f"topic_id={res.get('tg_topic_id')}",
-                log_ctx=f" [community_add_channel op={op_id}]",
-            )
+            _marked = await _journal_done(
+                pool, op_id, step, str(nm)[:128],
+                f"topic_id={res.get('tg_topic_id')}")
             await _mark_progress(pool, op_id, created)
-            if _marked == "ERROR":
-                # Дальше не идём. Журнал отказывает прямо сейчас, а каждый
-                # следующий топик без отметки — ещё один дубль на повторе.
-                # Останавливаясь здесь, ограничиваем ущерб одним топиком.
+            if not _marked:
                 unmarked += 1
                 log.error(
                     "community_add_channel op=%d: отметка о созданном топике "
-                    "«%s» не записалась — пачку останавливаем, иначе повтор "
-                    "создаст второй комплект", op_id, str(nm)[:64])
-                break
+                    "«%s» не записалась — повтор создаст его второй раз "
+                    "(потерь в этом проходе: %d)", op_id, str(nm)[:64], unmarked)
+                if unmarked >= _MAX_UNMARKED_PER_PASS:
+                    # Две потери в одном проходе — дверь не работает, и каждый
+                    # следующий топик добавит к повтору ещё одну копию.
+                    log.error(
+                        "community_add_channel op=%d: журнал целей не пишет — "
+                        "пачку останавливаем на %d-м имени", op_id, step)
+                    break
             await asyncio.sleep(random.uniform(1.5, 3.5))
     _summary = f"🖥 Ноды: создано каналов {created}"
     if unmarked:
-        _summary += (f" (из них {unmarked} без отметки — остановились, чтобы "
-                     f"повтор не создал второй комплект; остальные имена "
-                     f"запустите заново)")
+        _summary += (f". Без отметки {unmarked} — повтор может создать их "
+                     f"второй раз; остальные имена запустите заново")
     return {"status": "done" if created else "failed", "created": created,
             "unmarked": unmarked, "summary": _summary}
 
