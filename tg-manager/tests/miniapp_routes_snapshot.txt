@@ -75,6 +75,7 @@ GET /api/miniapp/admin/payments
 GET /api/miniapp/admin/reports
 GET /api/miniapp/admin/stats
 GET /api/miniapp/admin/user/{user_id}
+GET /api/miniapp/admin/user/{user_id}/assets
 GET /api/miniapp/admin/users
 GET /api/miniapp/ai/forecast
 GET /api/miniapp/ai/status
@@ -400,6 +401,7 @@ HEAD /api/miniapp/admin/payments
 HEAD /api/miniapp/admin/reports
 HEAD /api/miniapp/admin/stats
 HEAD /api/miniapp/admin/user/{user_id}
+HEAD /api/miniapp/admin/user/{user_id}/assets
 HEAD /api/miniapp/admin/users
 HEAD /api/miniapp/ai/forecast
 HEAD /api/miniapp/ai/status
