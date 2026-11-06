@@ -69,3 +69,26 @@ def test_the_handler_sends_no_secrets():
     assert "session_str" not in body, "в выдачу имущества попала строка сессии"
     assert "_phone_masked(" in body, "телефон отдаётся целиком"
     assert "_is_admin(uid)" in body, "ручка доступна не только владельцу"
+
+
+def test_a_field_that_is_not_a_list_does_not_kill_the_screen():
+    """`/admin/user/{id}` и `/admin/user/{id}/assets` — одни имена, разный смысл.
+
+    У детали `bots` — ЧИСЛО («🤖 Ботов: 7»), у списков — список. Заглушка
+    обхода отвечала числом на оба адреса, экран падал на `7.map` и уходил в
+    отчёт как «ОТВЕТИЛИ ОШИБКОЙ». В приложении такой находки нет, но вывод
+    общий: поле не того вида обязано давать пустой раздел, а не «Что-то пошло
+    не так», по которому не понять ничего.
+    """
+    body = _fn("loadAdminUserAssets")
+    assert "Array.isArray(" in body, (
+        "экран снова зовёт .map на том, что пришло: сменился контракт — и "
+        "вместо данных общая ошибка")
+
+    harness = (ROOT / "deploy" / "scripts" / "render_miniapp.mjs").read_text(encoding="utf-8")
+    i = harness.index("url.indexOf('/admin/user/') >= 0 && url.indexOf('/assets') >= 0")
+    # Именно ветка ЭТОГО адреса: `o.bots = 7` есть и у экрана топологии выше.
+    j = harness.index("o.bots = 7;", harness.index("if (url.indexOf('/admin/user/')"))
+    assert i < j, (
+        "ветка заглушки для списков должна стоять ДО ветки с числами, иначе "
+        "экран списков снова получит числа")

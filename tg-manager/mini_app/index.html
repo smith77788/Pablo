@@ -30839,7 +30839,13 @@ async function admUaTab(kind) { ADM_UA_KIND = kind; loadAdminUserAssets(); }
 async function loadAdminUserAssets() {
   if (!ADM_UD_ID) return;
   try {
-    const d = await api('/api/miniapp/admin/user/' + ADM_UD_ID + '/assets?limit=200');
+    const d0 = await api('/api/miniapp/admin/user/' + ADM_UD_ID + '/assets?limit=200');
+    // Поле, пришедшее не списком (сменился контракт, ответил не тот
+    // адрес), роняло экран на `.map`, и вместо данных вставал общий
+    // «Что-то пошло не так» — ошибка, по которой не понять ничего.
+    const lst = v => Array.isArray(v) ? v : [];
+    const d = { bots: lst(d0.bots), channels: lst(d0.channels),
+                accounts: lst(d0.accounts) };
     const tab = (k, lbl, n) => `<button class="btn ${ADM_UA_KIND===k?'btn-p':'btn-s'}"`
       + ` style="padding:6px 10px;font-size:12px" onclick="admUaTab('${k}')">`
       + `${lbl} · ${num(n)}</button>`;

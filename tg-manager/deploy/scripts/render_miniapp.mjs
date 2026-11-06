@@ -310,7 +310,26 @@ await page.addInitScript((mode) => {
       o.runs = { by_status: { running: 7, done: 12, failed: 1 },
                  waiting_on_step: { 1: 3, 2: 4 } };
     }
-    if (url.indexOf('/admin/user/') >= 0) {
+    // ВАЖЕН ПОРЯДОК: `/admin/user/{id}/assets` — тоже `/admin/user/`, но здесь
+    // те же имена значат СПИСКИ, а не числа. Пока ветка была одна, экран
+    // списков получал `bots: 7`, падал на `7.map` и уходил в отчёт как
+    // «ОТВЕТИЛИ ОШИБКОЙ» — находка заглушки, которой в приложении нет.
+    if (url.indexOf('/admin/user/') >= 0 && url.indexOf('/assets') >= 0) {
+      o.bots = ROWS.slice(0, 7).map((r, i) => ({
+        bot_id: 5000 + i, username: 'shopbot_' + i, first_name: 'Бот ' + i,
+        is_active: i < 5, added_at: '2026-09-1' + (i % 9) + 'T10:00:00Z' }));
+      o.channels = ROWS.slice(0, 14).map((r, i) => ({
+        id: 300 + i, channel_id: -1001000 - i,
+        title: 'Канал про автоматизацию и продвижение №' + i,
+        username: i % 3 ? 'chan_' + i : '', type: 'channel',
+        members_count: 1200 * (i + 1), added_at: '2026-08-0' + (i % 9) + 'T10:00:00Z' }));
+      o.accounts = ROWS.slice(0, 25).map((r, i) => ({
+        id: 700 + i, phone_masked: '+7········' + (10 + (i % 89)),
+        username: i % 4 ? 'worker_' + i : '', first_name: 'Аккаунт ' + i,
+        tg_user_id: 42000 + i, is_active: i < 20,
+        last_used: '2026-11-0' + (1 + (i % 5)) + 'T09:00:00Z',
+        added_at: '2026-07-0' + (i % 9) + 'T10:00:00Z' }));
+    } else if (url.indexOf('/admin/user/') >= 0) {
       // `plan_ru` — НАЗВАНИЕ тарифа по-русски (services/mini_app_admin.py):
       // без него образец текста показывал «💳 Подписка: pro», и читатель отчёта
       // думал, что экран всё ещё печатает код тарифа.
