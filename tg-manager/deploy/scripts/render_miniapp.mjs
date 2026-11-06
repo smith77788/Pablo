@@ -646,14 +646,31 @@ const SCREEN_TEXT = () => {
   }
   return { text: t.replace(/\s+/g, ' ').trim(), id: scr.id };
 };
+// Потолок ожидания одной открывашки. Открывашки честно ждут сеть, поэтому
+// потолок щедрый: он ловит «не вернётся никогда», а не «отвечает медленно».
+const OPENER_MS = Number(process.env.MINIAPP_OPENER_MS) || 15000;
 const failEnMode = !!process.env.MINIAPP_FAIL_EN;
 let enToastSeen = 0;
 
 let live = [];
 page.on('pageerror', e => live.push('PAGEERROR: ' + String(e.message).slice(0, 160)));
+// Свидетель навигаций. Сорванный вызов («Resulting promise was garbage
+// collected») я дважды объяснял перезагрузкой страницы — и дважды лечил не то:
+// ни метка в sessionStorage, ни отмена запросов к telegram.org срыв не убрали.
+// Навигация это или висящая открывашка — видно только отсюда: каждая смена
+// адреса главного кадра ПОСЛЕ первой загрузки записывается и попадает в отчёт.
+// Пустой список при сорванном вызове означает, что страница никуда не уходила,
+// и искать надо в самой открывашке.
+const navs = [];
+let navWatch = false;
+page.on('framenavigated', (fr) => {
+  if (!navWatch || fr !== page.mainFrame()) return;
+  navs.push(String(fr.url()).slice(-80));
+});
 const root = path.resolve(process.cwd(), 'mini_app/index.html');
 await page.goto('file://' + root, { waitUntil: 'load', timeout: 20000 });
 await page.waitForTimeout(1200);
+navWatch = true;   // первая загрузка — не навигация обхода, её не считаем
 
 // Мерка обрезки — одним текстом и для отчёта, и для самопроверки.
 const CLIPPED = () => {
@@ -1383,12 +1400,25 @@ if (sweepMode) {
       // отчёта нет вообще. Сорванный вызов — это один непокрытый экран, он
       // виден в строке охвата; терять из-за него остальные двести нельзя.
       try {
-        r = await page.evaluate(async ({ name, a }) => {
+        // Потолок ждём ВНУТРИ страницы, а не снаружи: открывашка, которая не
+        // возвращается (висящий `await api(...)`), оставляет обещание
+        // неразрешённым, и Playwright рано или поздно сообщает «Resulting
+        // promise was garbage collected» — то есть рушит ВЕСЬ прогон из-за
+        // одного экрана, и выглядит это как перезагрузка страницы, хотя
+        // никакой навигации не было. Такой экран — находка сама по себе:
+        // пользователь остался бы на спиннере навсегда. Поэтому ждём
+        // ограниченно и возвращаем `hung`, а не висим.
+        r = await page.evaluate(async ({ name, a, ms }) => {
           if (typeof window[name] !== 'function') return { missing: true };
-          try { await window[name](...a); }
-          catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
-          return {};
-        }, { name: fn, a });
+          let timer = null;
+          const capped = new Promise((res) => { timer = setTimeout(() => res({ hung: ms }), ms); });
+          const call = (async () => {
+            try { await window[name](...a); return {}; }
+            catch (e) { return { threw: String(e && e.message || e).slice(0, 160) }; }
+          })();
+          try { return await Promise.race([call, capped]); }
+          finally { clearTimeout(timer); }
+        }, { name: fn, a, ms: OPENER_MS });
       } catch (e) {
         r = { threw: 'обход сорвался: ' + String(e && e.message || e).slice(0, 120) };
         torn.push(fn);
@@ -1526,6 +1556,10 @@ if (sweepMode) {
     if (!probe) {
       if (r.missing) problems.push('НЕТ ФУНКЦИИ');
       if (r.threw) problems.push('THREW: ' + r.threw);
+      // Открывашка не вернулась за потолок: экран показан (push прошёл), а
+      // данные не пришли и ошибки нет — для пользователя это вечный спиннер.
+      if (r.hung) problems.push(`НЕ ВЕРНУЛАСЬ за ${Math.round(r.hung / 1000)} с `
+        + '(экран остался бы на спиннере)');
       if (live.length) problems.push(...live.slice(0, 2));
     }
     if (m.n) problems.push(`ОБРЕЗАНО ${m.n}: ` + m.worst.join(' ; '));
@@ -1806,6 +1840,9 @@ if (sweepMode) {
   // Сорванные вызовы — не находка приложения, а дыра в охвате, и молчать о
   // ней нельзя: отчёт без этой строки выглядит полным.
   if (torn.length) {
+    console.log(navs.length
+      ? `СТРАНИЦА УХОДИЛА С АДРЕСА ${navs.length} раз(а): ${navs.join(' ')}`
+      : 'СТРАНИЦА НИКУДА НЕ УХОДИЛА — срыв не в навигации, ищите в открывашке');
     console.log(`ОБХОД СОРВАЛСЯ НА ВЫЗОВАХ: ${torn.length} — ${torn.join(' ')}`
       + ' (страница перезагрузилась; эти экраны не мерились)');
     process.exitCode = 2;
