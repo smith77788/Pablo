@@ -171,8 +171,6 @@ def test_no_admin_screen_prints_the_raw_plan_code():
     Второе не придирка: значение шло в innerHTML без esc(), а соседняя плитка
     того же экрана экранирует всё, что приходит с сервера.
     """
-    from tests.miniapp_source import miniapp_source
-
     ui = miniapp_source()
     for bad in ("${u.current_plan||'free'}", "${u.current_plan || 'free'}"):
         assert bad not in ui, (

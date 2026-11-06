@@ -2049,7 +2049,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Пост во все или выбранные ваши каналы">📡 В каналы</button>
       <button class="btn btn-p" onclick="openUniCampaign('chats')" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Сообщение в группы и чаты выбранных аккаунтов">💬 В чаты</button>
       <button class="btn btn-s" onclick="openUniCampaign()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Одно сообщение в каналы, чаты, ботам и в ЛС одним запуском">🚀 Всё сразу</button>
-      <button class="btn btn-s" onclick="openNetBcModal()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Один текст подписчикам всех ваших ботов">🕸 Всем ботам</button>
+      <button class="btn btn-s" onclick="openNetBcModal()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Один текст подписчикам всех или выбранных ботов">🕸 По ботам</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 2px">
       <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📅 Расписание</button>
@@ -2401,6 +2401,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="openAssetTemplates()">
         <div class="mgmt-tile-ico">📐</div>
         <div class="mgmt-tile-lbl">Шаблоны ассетов</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <!-- HTML-виджеты Telegram (Bot API 10.4): опрос, отсчёт, карточка… в пузыре чата. -->
+      <div class="mgmt-tile" onclick="openWidgets()">
+        <div class="mgmt-tile-ico">🧩</div>
+        <div class="mgmt-tile-lbl">Виджеты в чатах</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <!-- Поиск Telegram — ОДИН модуль. Раньше это были шесть плиток в трёх
@@ -2782,6 +2788,70 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Рассылка всем пользователям</div>
     <textarea id="adm-bc-text" rows="5" placeholder="Введите текст сообщения…" class="input-bc-l"></textarea>
     <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="submitAdminBroadcast()">📢 Отправить</button>
+  </div>
+</div>
+
+<!-- ══════════ ВИДЖЕТЫ В ЧАТАХ (Telegram HTMLBubbles, Bot API 10.4) ══════════ -->
+<div class="screen" id="s-widgets">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🧩 Виджеты в чатах</div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 2px 6px">
+      Живой виджет прямо в сообщении бота: опрос с процентами, отсчёт до события,
+      карточка с кнопкой, викторина. Его можно переслать в любой чат — пересланные
+      копии тоже голосуют и показывают общий счёт.
+    </div>
+    <div class="sec" id="wgFormSec">Новый виджет</div>
+    <div class="lst" style="padding:14px">
+      <div id="wgTplWrap">
+        <div class="field">
+          <label>Шаблон</label>
+          <div id="wgTplGrid" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
+        </div>
+      </div>
+      <div class="field-note" id="wgTplDesc" style="margin:-4px 0 10px"></div>
+      <div id="wgFields"></div>
+      <div class="field" id="wgHtmlWrap" style="display:none">
+        <label>Код виджета (HTML)</label>
+        <textarea id="wgHtml" class="inp" rows="10" spellcheck="false" oninput="wgPreviewSoon()"
+          placeholder="&lt;style&gt;…&lt;/style&gt; &lt;div&gt;…&lt;/div&gt; &lt;script&gt;…&lt;/script&gt;"
+          style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px"></textarea>
+      </div>
+      <div class="field-note" id="wgSize" style="white-space:pre-line;margin-bottom:10px"></div>
+      <label style="display:block;font-size:13px;color:var(--hint);margin-bottom:6px">Предпросмотр — примерный вид; голосование здесь понарошку</label>
+      <iframe id="wgPreview" title="Предпросмотр виджета" sandbox="allow-scripts"
+        style="width:100%;height:300px;border:1px solid var(--border-input);border-radius:14px;background:var(--bg2);margin-bottom:12px"></iframe>
+      <div id="wgSendWrap">
+        <div class="field">
+          <label>От какого бота</label>
+          <select id="wgBot"></select>
+        </div>
+        <div class="field">
+          <label>Куда</label>
+          <select id="wgWhere" onchange="wgWhereToggle()">
+            <option value="me" selected>Себе — в личку с ботом</option>
+            <option value="chat">В группу</option>
+          </select>
+          <div class="field-note" id="wgWhereNote">Виджет придёт вам в личку с ботом — так удобно проверить вид. Если ещё не открывали этого бота, откройте его и нажмите «Старт».</div>
+        </div>
+        <div class="field" id="wgChatWrap" style="display:none">
+          <label>Группа: @username или числовой id</label>
+          <input type="text" id="wgChat" class="inp" placeholder="@my_group или -1001234567890" style="width:100%;box-sizing:border-box">
+        </div>
+        <div class="field">
+          <label>Подпись под виджетом (необязательно)</label>
+          <input type="text" id="wgCaption" class="inp" maxlength="1024" placeholder="Её видно и в списке чатов" style="width:100%;box-sizing:border-box">
+        </div>
+      </div>
+      <div class="field-err" id="wgErr"></div>
+      <button class="btn btn-p" id="wgSendBtn" onclick="wgSend()" style="width:100%">📤 Отправить</button>
+      <button class="btn btn-s" id="wgCancelEdit" onclick="wgCancelEdit()" style="width:100%;margin-top:8px;display:none">Отмена</button>
+    </div>
+    <div class="sec">Отправленные</div>
+    <div class="lst" id="wgList"></div>
+    <div class="lst-more" id="wgMore"></div>
   </div>
 </div>
 
@@ -5527,7 +5597,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════ ПЛАНИРОВЩИК КАМПАНИИ (цель → план) ══════════ -->
 <div class="screen" id="s-unicampaign">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🚀 Всё сразу</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="ucTitle">🚀 Всё сразу</div></div>
   <div class="sub-sb">
     <div class="sec">Сообщение</div>
     <div class="lst" style="padding:14px">
@@ -5555,9 +5625,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
     </div>
 
-    <div class="sec">Куда — отметьте ресурсы</div>
+    <div class="sec" id="ucWhereSec">Куда — отметьте ресурсы</div>
     <div class="lst" style="padding:14px">
-      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+      <label class="chk-row uc-kind-row" data-uc-kind="ucKChannels" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
         <input type="checkbox" id="ucKChannels" onchange="ucKindToggle()"> 📢 Мои каналы
       </label>
       <div id="ucChWrap" style="display:none;margin:0 0 14px 24px">
@@ -5574,7 +5644,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </div>
       </div>
 
-      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+      <label class="chk-row uc-kind-row" data-uc-kind="ucKChats" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
         <input type="checkbox" id="ucKChats" onchange="ucKindToggle()"> 💬 Чаты моих аккаунтов
       </label>
       <div id="ucChatsWrap" style="display:none;margin:0 0 14px 24px">
@@ -5584,22 +5654,27 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </div>
       </div>
 
-      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+      <label class="chk-row uc-kind-row" data-uc-kind="ucKBots" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
         <input type="checkbox" id="ucKBots" onchange="ucKindToggle()"> 🤖 Подписчики моих ботов
       </label>
       <div id="ucBotsWrap" style="display:none;margin:0 0 14px 24px">
         <div class="field">
           <label>Кому из подписчиков</label>
-          <select id="ucBotSeg">
+          <select id="ucBotSeg" onchange="ucKindToggle()">
             <option value="all_each" selected>Все подписчики каждого бота</option>
+            <option value="selected_bots">Только выбранные боты</option>
             <option value="unique">Только уникальные (без повторов между ботами)</option>
             <option value="cold_all">Остывшие — давно не заходили</option>
             <option value="lost_all">Потерянные — ушли совсем</option>
           </select>
         </div>
+        <div class="field" id="ucBotPickWrap" style="display:none">
+          <label>Отметьте ботов (<span id="ucBotCount">0</span>)</label>
+          <div id="ucBots" class="lst" style="max-height:240px;overflow:auto;margin-top:6px;padding:4px 10px"></div>
+        </div>
       </div>
 
-      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+      <label class="chk-row uc-kind-row" data-uc-kind="ucKDm" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
         <input type="checkbox" id="ucKDm" onchange="ucKindToggle()"> ✉️ Личные сообщения
       </label>
       <div id="ucDmWrap" style="display:none;margin:0 0 4px 24px">
@@ -6923,14 +6998,24 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="netbcMbg" onclick="if(event.target===this)closeNetBc()">
   <div class="modal">
     <div class="modal-x" onclick="closeNetBc()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">📣 Рассылка по всем ботам</div>
+    <div class="modal-title">📣 Рассылка по ботам</div>
     <div class="field">
       <label>Текст сообщения</label>
-      <textarea id="netbcText" rows="5" maxlength="4096" placeholder="Сообщение получат подписчики всех ваших ботов…"></textarea>
-      <div class="field-note"><span id="netbcLen">0</span>/4096 · один текст — все боты</div>
+      <textarea id="netbcText" rows="5" maxlength="4096" placeholder="Сообщение получат подписчики выбранных ботов…"></textarea>
+      <div class="field-note"><span id="netbcLen">0</span>/4096 · один текст — всем отмеченным ботам</div>
+    </div>
+    <!-- Выбор ботов: раньше рассылка уходила только ВСЕМ ботам сразу, хотя
+         сервер (bot_ids) выбор умел давно — не было списка на экране. -->
+    <div class="field">
+      <label>Каким ботам: <span id="netbcSelCount">0</span> из <span id="netbcTotal">0</span></label>
+      <div style="display:flex;gap:8px;margin:4px 0 6px">
+        <button type="button" class="btn btn-s" style="min-height:32px;padding:6px 12px;font-size:13px" onclick="netbcPickAll(true)">Отметить все</button>
+        <button type="button" class="btn btn-s" style="min-height:32px;padding:6px 12px;font-size:13px" onclick="netbcPickAll(false)">Снять все</button>
+      </div>
+      <div id="netbcBots" class="lst" style="max-height:220px;overflow:auto;padding:4px 10px"></div>
     </div>
     <div class="field-err" id="netbcErr"></div>
-    <button class="btn btn-p" id="netbcBtn" onclick="sendNetBc()" style="width:100%">📣 Разослать всем</button>
+    <button class="btn btn-p" id="netbcBtn" onclick="sendNetBc()" style="width:100%">📣 Разослать</button>
   </div>
 </div>
 
@@ -9029,6 +9114,7 @@ const MODULE_KEYWORDS = {
   'Реферальная программа':'реферал приглашение код партнёрка',
   'Рабочие пространства':'воркспейс команда доступ участники контур',
   'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
+  'Виджеты в чатах':'виджет htmlbubbles html пузырь опрос голосование отсчёт таймер викторина карточка оценка',
   
   
   'Здоровье':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс дэшборд здоровья здоровье инфры инфраструктура диагностика связность оповещения',
@@ -9132,6 +9218,7 @@ const MODULE_DESCS = {
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
   'Шаблоны ассетов':'Заготовки аватара, описания и первого поста',
+  'Виджеты в чатах':'Опрос, отсчёт, карточка и другие живые виджеты прямо в сообщении бота',
   
   
   'Хранилище':'История переписки: удалённые и изменённые сообщения',
@@ -14429,8 +14516,9 @@ function openNetBcModal() {
   document.getElementById('netbcLen').textContent='0';
   document.getElementById('netbcErr').style.display='none';
   document.getElementById('netbcBtn').disabled=false;
-  document.getElementById('netbcBtn').textContent='📣 Разослать всем';
+  document.getElementById('netbcBtn').textContent='📣 Разослать';
   document.getElementById('netbcMbg').classList.add('show');
+  _netbcLoadBots();
   tg.HapticFeedback?.impactOccurred('medium');
 }
 function closeNetBc() { document.getElementById('netbcMbg').classList.remove('show'); }
@@ -14439,21 +14527,63 @@ document.getElementById('netbcText').addEventListener('input', function(){
   document.getElementById('netbcLen').textContent = this.value.length;
 });
 
+// Активные боты владельца — галочками, по умолчанию отмечены все: как и
+// раньше, одно касание «Разослать» уходит всем, но теперь это видно и
+// любого бота можно снять.
+async function _netbcLoadBots() {
+  const box = document.getElementById('netbcBots');
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  txt('netbcTotal', '0'); txt('netbcSelCount', '0');
+  try {
+    const d = await api('/api/miniapp/bots?limit=500');
+    const bots = (d.bots || []).filter(b => b.is_active);
+    box.innerHTML = bots.length
+      ? bots.map(b => `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="netbc-cb" value="${esc(b.bot_id)}" checked onchange="netbcCount()">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">@${esc(b.username || b.first_name || b.bot_id)}</span>
+          <span style="color:var(--hint);font-size:12px">${esc(num(b.subscriber_count || 0))} подп.</span></label>`).join('')
+      : '<div style="font-size:13px;color:var(--hint);padding:6px 0">Нет активных ботов</div>';
+    txt('netbcTotal', String(bots.length));
+  } catch(e) {
+    box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить ботов'), '_netbcLoadBots()');
+  }
+  netbcCount();
+}
+function _netbcChecked() {
+  return [...document.querySelectorAll('#netbcBots .netbc-cb')];
+}
+function netbcCount() {
+  txt('netbcSelCount', String(_netbcChecked().filter(c => c.checked).length));
+}
+function netbcPickAll(on) {
+  for (const c of _netbcChecked()) c.checked = !!on;
+  netbcCount();
+}
+
 async function sendNetBc() {
   const text = document.getElementById('netbcText').value.trim();
   const errEl = document.getElementById('netbcErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  const boxes = _netbcChecked();
+  const picked = boxes.filter(c => c.checked).map(c => parseInt(c.value, 10));
+  if (!boxes.length) { errEl.textContent='Нет активных ботов для рассылки'; errEl.style.display='block'; return; }
+  if (!picked.length) { errEl.textContent='Отметьте хотя бы одного бота'; errEl.style.display='block'; return; }
+  const all = picked.length === boxes.length;
   // Рассылка по сети — массовая операция, которую не отменить одной кнопкой:
   // она создаёт по рассылке на каждого бота, и останавливать их пришлось бы
   // по одной. Поэтому спрашиваем до запуска, а не после.
-  if (!await askConfirm('Сообщение уйдёт подписчикам ВСЕХ ваших активных ботов. '
+  if (!await askConfirm((all
+        ? `Сообщение уйдёт подписчикам ВСЕХ ваших активных ботов (${picked.length}). `
+        : `Сообщение уйдёт подписчикам выбранных ботов: ${picked.length} из ${boxes.length}. `)
       + 'Запустится по одной рассылке на каждого бота, останавливать их придётся '
       + 'по отдельности. Запустить?')) return;
   const btn = document.getElementById('netbcBtn');
   btn.disabled=true; btn.textContent='⏳ Запуск...';
+  // Все отмечены — без списка: сервер возьмёт всех активных на момент запуска.
+  const body = all ? {text} : {text, bot_ids: picked};
   try {
-    const d = await api('/api/miniapp/network_broadcast', {method:'POST', body:JSON.stringify({text})});
+    const d = await api('/api/miniapp/network_broadcast', {method:'POST', body:JSON.stringify(body)});
     closeNetBc();
     tg.HapticFeedback?.notificationOccurred('success');
     toast(`✅ Запущено ${d.broadcasts_created} рассылок · ${num(d.total_recipients)} получателей`);
@@ -14461,7 +14591,7 @@ async function sendNetBc() {
   } catch(e) {
     errEl.textContent='Ошибка: '+errRu(e); errEl.style.display='block';
     tg.HapticFeedback?.notificationOccurred('error');
-  } finally { btn.disabled=false; btn.textContent='📣 Разослать всем'; }
+  } finally { btn.disabled=false; btn.textContent='📣 Разослать'; }
 }
 
 // ── CRM ────────────────────────────────────────────────
@@ -22196,12 +22326,27 @@ let _invPreviewT = null;
 let UC_CH_SEL = new Set();
 let UC_CH_TOTAL = 0;
 let UC_ACC_SEL = new Set();
+let UC_BOT_SEL = new Set();
+// Экран «🧩 Виджеты в чатах» (screens/widgets.js).
+let WG = {tpls: [], limits: {}, tpl: '', edit: null, offset: 0, items: []};
 
 const UC_KIND_BOX = {channels:'ucKChannels', chats:'ucKChats', bots:'ucKBots', dm:'ucKDm'};
 // kind — необязательно: какой ресурс отметить сразу («💬 В чаты» → 'chats').
+// Подписи экрана на режим: «💬 В чаты» открывал тот же «🚀 Всё сразу» с
+// галочкой внутри — две кнопки вели в одно место, и человек не понимал, куда
+// попал. Теперь у одиночного режима свой заголовок и только свой ресурс.
+const UC_KIND_TITLE = {channels:'📢 В каналы', chats:'💬 В чаты', bots:'🤖 Подписчикам ботов', dm:'✉️ В личные сообщения'};
 function openUniCampaign(kind) {
   push('s-unicampaign');
-  UC_CH_SEL = new Set(); UC_ACC_SEL = new Set(); UC_CH_TOTAL = 0;
+  UC_CH_SEL = new Set(); UC_ACC_SEL = new Set(); UC_BOT_SEL = new Set(); UC_CH_TOTAL = 0;
+  const one = Object.prototype.hasOwnProperty.call(UC_KIND_BOX, kind || '') ? kind : '';
+  txt('ucTitle', one ? UC_KIND_TITLE[one] : '🚀 Всё сразу');
+  txt('ucWhereSec', one ? 'Куда' : 'Куда — отметьте ресурсы');
+  for (const row of document.querySelectorAll('#s-unicampaign .uc-kind-row')) {
+    row.style.display = (!one || row.dataset.ucKind === UC_KIND_BOX[one]) ? 'flex' : 'none';
+  }
+  document.getElementById('ucBotSeg').value = 'all_each';
+  const _bb = document.getElementById('ucBots'); if (_bb) _bb.dataset.loaded = '';
   document.getElementById('ucName').value = '';
   document.getElementById('ucText').value = '';
   document.getElementById('ucWhen').value = '';
@@ -22228,6 +22373,9 @@ function ucKindToggle() {
   show('ucDmWrap', on('ucKDm'));
   const pick = document.getElementById('ucChScope').value === 'pick';
   show('ucChPickWrap', on('ucKChannels') && pick);
+  const botPick = on('ucKBots') && document.getElementById('ucBotSeg').value === 'selected_bots';
+  show('ucBotPickWrap', botPick);
+  if (botPick) _ucLoadBots();
   if (on('ucKChannels')) _ucLoadChannels();
   if (on('ucKChats')) {
     accPickerSearchBox('ucAccounts', _ucLoadAccs);
@@ -22259,6 +22407,30 @@ async function _ucLoadChannels() {
   } catch(e) {
     box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить каналы'), 'openUniCampaign()');
   }
+}
+
+async function _ucLoadBots() {
+  const box = document.getElementById('ucBots');
+  if (!box || box.dataset.loaded === '1') return;
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/bots?limit=500');
+    const bots = (d.bots || []).filter(b => b.is_active);
+    box.innerHTML = bots.length
+      ? bots.map(b => `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="uc-bot-cb" value="${esc(b.bot_id)}" ${UC_BOT_SEL.has(Number(b.bot_id))?'checked':''} onchange="ucToggleBot(Number(this.value), this.checked)">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">@${esc(b.username || b.first_name || b.bot_id)}</span>
+          <span style="color:var(--hint);font-size:12px">${esc(num(b.subscriber_count || 0))} подп.</span></label>`).join('')
+      : '<div style="font-size:13px;color:var(--hint);padding:6px 0">Нет активных ботов</div>';
+    box.dataset.loaded = '1';
+  } catch(e) {
+    box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить ботов'), 'ucKindToggle()');
+  }
+}
+
+function ucToggleBot(id, on) {
+  if (on) UC_BOT_SEL.add(id); else UC_BOT_SEL.delete(id);
+  txt('ucBotCount', String(UC_BOT_SEL.size));
 }
 
 function ucToggleChannel(id) {
@@ -22306,7 +22478,11 @@ function _ucSpec() {
     targets.channels = t;
   }
   if (on('ucKChats')) targets.chats = {enabled: true, acc_ids: [...UC_ACC_SEL]};
-  if (on('ucKBots')) targets.bots = {enabled: true, segment: document.getElementById('ucBotSeg').value};
+  if (on('ucKBots')) {
+    const seg = document.getElementById('ucBotSeg').value;
+    targets.bots = {enabled: true, segment: seg};
+    if (seg === 'selected_bots') targets.bots.selected_bot_ids = [...UC_BOT_SEL];
+  }
   if (on('ucKDm')) targets.dm = {enabled: true, target_type: document.getElementById('ucDmTarget').value};
   const settings = {
     silent: on('ucSilent'),
@@ -22327,7 +22503,9 @@ function _ucSummary(spec) {
       : `каналы: ВСЕ мои${UC_CH_TOTAL?' ('+UC_CH_TOTAL+')':''}`);
   }
   if (t.chats) out.push(`чаты аккаунтов: ${t.chats.acc_ids.length} (по операции на аккаунт)`);
-  if (t.bots) out.push('подписчики ботов: по рассылке на каждого бота');
+  if (t.bots) out.push(t.bots.selected_bot_ids
+    ? `подписчики выбранных ботов: ${t.bots.selected_bot_ids.length}`
+    : 'подписчики ботов: по рассылке на каждого бота');
   if (t.dm) out.push(t.dm.target_type === 'contacts' ? 'ЛС: все контакты' : 'ЛС: подписчики всех ботов');
   return out;
 }
@@ -22343,6 +22521,7 @@ async function launchUniCampaign() {
   if (!kinds.length) return fail('Отметьте хотя бы один ресурс: каналы, чаты, боты или ЛС');
   if (spec.targets.chats && !spec.targets.chats.acc_ids.length) return fail('Для рассылки по чатам выберите хотя бы один аккаунт');
   if (spec.targets.channels && spec.targets.channels.channel_ids && !spec.targets.channels.channel_ids.length) return fail('Отметьте каналы или выберите «Во все мои каналы»');
+  if (spec.targets.bots && spec.targets.bots.selected_bot_ids && !spec.targets.bots.selected_bot_ids.length) return fail('Отметьте ботов или выберите «Все подписчики каждого бота»');
 
   const lines = _ucSummary(spec);
   const later = spec.settings.scheduled_for ? ' Запуск отложен на выбранное время.' : '';
@@ -31993,6 +32172,7 @@ function renderAudSegChart(segments) {
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>
 <script src="screens/deals_board.js"></script>
+<script src="screens/widgets.js"></script>
 <script src="screens/home_screen.js"></script>
 <script src="screens/find_mine.js"></script>
 <script src="screens/workflow_map.js"></script>

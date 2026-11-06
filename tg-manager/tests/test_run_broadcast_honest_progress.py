@@ -39,6 +39,12 @@ class _FakePool:
     async def fetchrow(self, query, *args):
         if "FROM managed_bots" in query:
             return {"token": "1:AA", "bot_id": 555}
+        if "FROM broadcasts" in query and "status='running'" in query:
+            # Вопрос о ЖИВОМ ДВОЙНИКЕ (другая рассылка по тому же боту с тем же
+            # текстом). Здесь его нет: стенд проверяет прогресс одной рассылки,
+            # а раньше на этот запрос отдавалась строка прогресса — исполнитель
+            # принимал её за двойника и отказывался отправлять.
+            return None
         if "FROM broadcasts" in query:
             if len(self.broadcast_states) > 1:
                 return self.broadcast_states.pop(0)

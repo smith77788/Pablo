@@ -400,6 +400,48 @@ async def run(
             await session.close()
         return
 
+    # Рассылка HTML-виджета (schema_v302): вместо текста каждому уходит ОДИН
+    # общий виджет (sendSharedWidget) — у всех получателей один счёт голосов.
+    # Признак читается из строки рассылки здесь, а не передаётся аргументом:
+    # так его не теряет ни один путь запуска (операция, докатка после
+    # рестарта, подъём осиротевшей задачи). И читается строго: не прочитался —
+    # рассылка ждёт докатки. Иначе виджетная рассылка ушла бы аудитории
+    # подписью «🧩 Виджет: …» обычным текстом.
+    widget_id = None
+    _widget_read_ok = False
+    for _attempt in (1, 2, 3):
+        try:
+            widget_id = await pool.fetchval(
+                "SELECT widget_id FROM broadcasts WHERE id=$1", broadcast_id)
+            _widget_read_ok = True
+            break
+        except asyncpg.UndefinedColumnError:
+            # Миграции ещё нет — значит, и виджетных рассылок быть не может.
+            _widget_read_ok = True
+            break
+        except Exception as _e:
+            if _attempt < 3:
+                await asyncio.sleep(0.5 * _attempt)
+                continue
+            logger.error("Рассылка %d: признак виджета не прочитался (%s) — "
+                         "рассылка отложена до докатки", broadcast_id, _e)
+    if not _widget_read_ok:
+        if _own_session and session is not None:
+            await session.close()
+        return
+
+    async def _deliver(uid: int, user_text: str) -> tuple[bool, int | None, str]:
+        if widget_id:
+            from services import bot_widgets
+            return await bot_widgets.send_shared_classified(
+                session, token, uid, widget_id, disable_notification=silent)
+        if photo_file_id:
+            return await bot_api.send_photo_classified(
+                session, token, uid, photo_file_id, user_text, buttons=buttons,
+                disable_notification=silent)
+        return await bot_api.send_message_classified(
+            session, token, uid, user_text, buttons=buttons, disable_notification=silent)
+
     sent = len(already_sent)
     failed = 0
     # How often to flush progress to DB so the UI shows real-time progress.
@@ -579,14 +621,7 @@ async def run(
                 ui = user_map.get(uid, {})
                 user_text = _render_for_user(text, ui, bot_name)
 
-            if photo_file_id:
-                success, retry_after, cat = await bot_api.send_photo_classified(
-                    session, token, uid, photo_file_id, user_text, buttons=buttons, disable_notification=silent
-                )
-            else:
-                success, retry_after, cat = await bot_api.send_message_classified(
-                    session, token, uid, user_text, buttons=buttons, disable_notification=silent
-                )
+            success, retry_after, cat = await _deliver(uid, user_text)
             if success:
                 sent += 1
                 _since_last_flush += 1
@@ -623,14 +658,7 @@ async def run(
                         "Broadcast %d: rate-limited, slept %ds",
                         broadcast_id, retry_after,
                     )
-                    if photo_file_id:
-                        ok, _, cat = await bot_api.send_photo_classified(
-                            session, token, uid, photo_file_id, user_text, buttons=buttons, disable_notification=silent
-                        )
-                    else:
-                        ok, _, cat = await bot_api.send_message_classified(
-                            session, token, uid, user_text, buttons=buttons, disable_notification=silent
-                        )
+                    ok, _, cat = await _deliver(uid, user_text)
                     if ok:
                         sent += 1
                         failed -= 1
@@ -1022,6 +1050,18 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
     text = (src.get("message_text") or "").strip()
     if not text:
         return {"ok": False, "error": "У исходной рассылки нет текста", "code": 400}
+    # Рассылка виджета повторяется виджетом (schema_v302). Читается строго:
+    # без признака повтор ушёл бы недоставленным подписью «🧩 Виджет: …»
+    # обычным текстом.
+    try:
+        widget_id = await pool.fetchval(
+            "SELECT widget_id FROM broadcasts WHERE id=$1", bc_id)
+    except asyncpg.UndefinedColumnError:
+        widget_id = None
+    except Exception as e:
+        logger.warning("resend_undelivered widget_id bc=%s: %s", bc_id, e)
+        return {"ok": False, "error": "Не удалось прочитать рассылку — повторите позже",
+                "code": 503}
     try:
         rows = await pool.fetch(
             """SELECT bu.user_id FROM bot_users bu
@@ -1043,10 +1083,16 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
     import json as _json
     new_bc = None
     try:
-        row = await pool.fetchrow(
-            "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) "
-            "VALUES($1,$2,$3,'pending',$4) RETURNING id",
-            bot_id_int, text, total, owner_id)
+        if widget_id:
+            row = await pool.fetchrow(
+                "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, "
+                "widget_id) VALUES($1,$2,$3,'pending',$4,$5) RETURNING id",
+                bot_id_int, text, total, owner_id, widget_id)
+        else:
+            row = await pool.fetchrow(
+                "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) "
+                "VALUES($1,$2,$3,'pending',$4) RETURNING id",
+                bot_id_int, text, total, owner_id)
         new_bc = row["id"]
         label = (f"Повтор недоставленным: {text[:40]}…"
                  if len(text) > 40 else f"Повтор: {text[:60]}")

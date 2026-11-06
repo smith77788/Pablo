@@ -35,7 +35,9 @@ class _Pool:
         self.statuses = list(statuses)
         self.status_reads = 0
 
-    async def fetchval(self, *a, **k):
+    async def fetchval(self, query="", *a, **k):
+        if "widget_id" in query:
+            return None  # обычная рассылка текстом, не виджет (schema_v302)
         return 777  # owner_check
 
     async def fetchrow(self, query, *args):

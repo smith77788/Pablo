@@ -65,6 +65,9 @@ _MANAGED_BOT_ALLOWED_UPDATES = [
     # и ждёт ответа 10 секунд. Боты со счётом в ожидании опрос берёт каждую
     # секунду (workflow_runtime.hot_bots), поэтому успеваем.
     "pre_checkout_query",
+    # Касания в HTML-виджетах бота (Bot API 10.4): голос в опросе, оценка,
+    # «иду». Ответ ждут 15 секунд — services/bot_widget_runtime.py.
+    "widget_query", "shared_widget_query",
 ]
 
 
@@ -1023,6 +1026,17 @@ async def _process_bot(
             pcq = upd.get("pre_checkout_query")
             if pcq:
                 await _answer_pre_checkout(pool, http, token, bot_id, pcq)
+                continue
+
+            # Касание в HTML-виджете: голос, оценка, «иду». Отвечаем всегда —
+            # без ответа виджет ждёт 15 секунд и пишет «Бот не ответил».
+            wq = upd.get("widget_query") or upd.get("shared_widget_query")
+            if wq:
+                try:
+                    from services import bot_widget_runtime
+                    await bot_widget_runtime.on_query(pool, http, token, bot_id, wq)
+                except Exception:
+                    log_exc_swallow(log, f"auto_responder: виджет bot={bot_id}")
                 continue
 
             # Answer callback_query to dismiss the button spinner in managed bots

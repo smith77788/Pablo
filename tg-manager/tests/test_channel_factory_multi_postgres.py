@@ -101,3 +101,106 @@ def test_bulk_create_channels_multi_per_account_postgres(monkeypatch):
             await pool.close()
 
     asyncio.new_event_loop().run_until_complete(go())
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_a_dead_journal_stops_the_batch_postgres(monkeypatch):
+    """Журнал целей не пишет — пакет останавливается, а не создаёт весь комплект.
+
+    Отметка «шаг сделан» — единственное, по чему повтор узнаёт, что канал уже
+    создан. Если она не записывается, каждый следующий созданный канал
+    добавляет к повтору ещё одну копию: лишние ресурсы в аккаунте, сожжённый
+    суточный лимит создания и темп, на который смотрит Telegram. Одну потерю
+    проход переживает (блип базы), на второй останавливается — порог общий,
+    `_MAX_UNMARKED_PER_PASS`.
+
+    Живой Postgres нужен, потому что проверяется и то, что осталось В СТРОКЕ
+    операции: `done_items` меньше `total_items`, то есть поллер закроет такой
+    прогон как частичный, а не как «готово» (см. op_status.classify_final).
+    """
+    import asyncio
+    import asyncpg
+
+    from services import op_worker as w
+    from services import account_manager, session_simulator
+
+    OWNER = 823001
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+        _orig_pool = w._db_pool
+        w.init_op_worker_pool(pool)
+
+        created_titles = []
+        seq = {"n": 7000}
+
+        async def fake_create(session_string, title, about="", megagroup=False,
+                              _acc=None, brand_promo=True):
+            seq["n"] += 1
+            created_titles.append(title)
+            return {"channel_id": seq["n"], "title": title,
+                    "type": "channel", "access_hash": 0}
+
+        async def _noop(*a, **k):
+            return None
+
+        async def _journal_dead(*a, **k):
+            return False
+
+        monkeypatch.setattr(account_manager, "create_channel", fake_create)
+        monkeypatch.setattr(session_simulator, "typing_delay", _noop)
+        monkeypatch.setattr(session_simulator, "chaos_factor", lambda *a, **k: 0.0)
+        monkeypatch.setattr(w.asyncio, "sleep", _noop)
+        monkeypatch.setattr(w, "_journal_done", _journal_dead)
+
+        async def _cl():
+            await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1", OWNER)
+            await pool.execute(
+                "DELETE FROM operation_log WHERE op_id IN "
+                "(SELECT id FROM operation_queue WHERE owner_id=$1)", OWNER)
+            await pool.execute("DELETE FROM operation_queue WHERE owner_id=$1", OWNER)
+            await pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER)
+
+        try:
+            await _cl()
+            accs = []
+            for i in (1, 2):
+                accs.append(int(await pool.fetchval(
+                    "INSERT INTO tg_accounts(owner_id,phone,session_str,is_active,"
+                    "   acc_status,first_name) "
+                    "VALUES($1,$2,$3,TRUE,'active',$4) RETURNING id",
+                    OWNER, f"+7900000100{i}", f"s{i}", f"Acc{i}")))
+
+            # 2 аккаунта × 2 канала = 4 шага, но журнал мёртв с первого шага.
+            params = {"account_ids": accs, "title": "Dead", "channel_count": 2,
+                      "name_mode": "num", "is_group": False}
+            op_id = int(await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id,op_type,status,params,"
+                "   total_items,label) "
+                "VALUES($1,'bulk_create_channels','running',$2,0,'test') RETURNING id",
+                OWNER, __import__("json").dumps(params)))
+
+            res = await w._exec_bulk_create_channels(pool, None, op_id, OWNER, params)
+
+            assert len(created_titles) == 2, (
+                f"пакет не остановился на второй потерянной отметке: "
+                f"{created_titles}")
+            assert res["created"] == 2, res
+            assert res["unmarked"] == 2, res
+            assert "Без отметки 2" in res["summary"], res["summary"]
+
+            row = await pool.fetchrow(
+                "SELECT done_items, total_items FROM operation_queue WHERE id=$1",
+                op_id)
+            assert int(row["total_items"]) == 4, dict(row)
+            assert int(row["done_items"]) < int(row["total_items"]), (
+                "прогон с брошенным остатком выглядит выполненным: "
+                f"{dict(row)}")
+
+            await _cl()
+        finally:
+            w._db_pool = _orig_pool
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())
+

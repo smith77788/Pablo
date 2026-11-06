@@ -64,9 +64,11 @@ def _run(monkeypatch, names, done_steps, fail_read=False, cancel=None,
             raise RuntimeError("журнал недоступен")
         return set(done_steps)
 
-    async def _jw(pool, query, *args, **kw):
-        marks.append((query, args))
-        return "ERROR" if mark_fails else "INSERT 1"
+    async def _jd(pool, op_id, step_num, target, message=None):
+        marks.append((op_id, step_num, target, message))
+        if callable(mark_fails):
+            return not mark_fails(step_num)
+        return not mark_fails
 
     async def _no(pool, op_id):
         return False if cancel is None else await cancel(pool, op_id)
@@ -77,7 +79,7 @@ def _run(monkeypatch, names, done_steps, fail_read=False, cancel=None,
     from services import nodes_engine
     monkeypatch.setattr(nodes_engine, "create_community_channel", _create)
     monkeypatch.setattr(ow, "completed_steps", _steps)
-    monkeypatch.setattr(ow, "_journal_write", _jw)
+    monkeypatch.setattr(ow, "_journal_done", _jd)
     monkeypatch.setattr(ow, "_is_cancelled", _no)
     monkeypatch.setattr(ow, "_mark_progress", _noop)
     monkeypatch.setattr(ow, "_declare_total_items", _noop)
@@ -102,10 +104,9 @@ def test_every_created_topic_leaves_a_mark(monkeypatch):
     """Без отметки дверь на следующем прогоне закрыта быть не может."""
     created, marks, _ = _run(monkeypatch, ["Новости", "Чат"], done_steps=set())
     assert created == ["Новости", "Чат"]
-    ok = [a for q, a in marks if "'ok'" in q]
-    assert len(ok) == 2, f"отметок об успехе {len(ok)}, а каналов создано 2"
-    assert [a[1] for a in ok] == [1, 2], f"номера шагов: {[a[1] for a in ok]}"
-    assert [a[2] for a in ok] == ["Новости", "Чат"], [a[2] for a in ok]
+    assert len(marks) == 2, f"отметок об успехе {len(marks)}, а каналов создано 2"
+    assert [m[1] for m in marks] == [1, 2], f"номера шагов: {[m[1] for m in marks]}"
+    assert [m[2] for m in marks] == ["Новости", "Чат"], [m[2] for m in marks]
 
 
 def test_an_unreadable_journal_does_not_create_a_second_set(monkeypatch):
@@ -149,30 +150,48 @@ def test_the_handler_still_reads_the_resume_door():
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
     assert "completed_steps" in called, (
         "повтор снова создаст второй комплект топиков ноды")
-    assert "_journal_write" in called, (
+    assert "_journal_done" in called, (
         "созданный топик снова не оставляет отметки — дверь нечем закрывать")
 
 
-def test_a_lost_mark_stops_the_batch(monkeypatch):
-    """Отметка не записалась — пачку останавливаем на первом же топике.
+def test_two_lost_marks_in_one_pass_stop_the_batch(monkeypatch):
+    """Вторая потеря в проходе — дверь не работает, пачку останавливаем.
 
     Топик уже создан, отменить его нечем, и повтор создаст его второй раз:
-    это цена одного элемента. Но если журнал отказывает, он откажет и на
-    следующих, поэтому продолжать пачку значит множить дубли. Тот же счёт
-    появился в `_exec_deploy_network` после прогона, который закрывался
-    «готово», а следующий создавал второй такой же канал.
+    это цена одного элемента, и из-за блипа базы рвать пачку из двадцати имён
+    дороже, чем её доделать. Но ДВЕ потери подряд — это уже не блип, и каждый
+    следующий топик добавит к повтору ещё одну копию. Порог один на все
+    создающие операции — `_MAX_UNMARKED_PER_PASS`.
     """
     created, marks, res = _run(
         monkeypatch, ["Новости", "Чат", "Барахолка"], done_steps=set(),
         mark_fails=True)
-    assert created == ["Новости"], (
-        f"пачка пошла дальше с неработающим журналом: {created}")
-    assert len(marks) == 1, marks
+    assert created == ["Новости", "Чат"], (
+        f"пачка не остановилась на второй потере: {created}")
+    assert len(marks) == 2, marks
+    assert res["unmarked"] == 2, res
+    assert res["created"] == 2, res
+    assert "Без отметки" in res["summary"], res["summary"]
+    assert "второй раз" in res["summary"], (
+        "владельцу не сказано, чем грозит потерянная отметка")
+
+
+def test_one_lost_mark_does_not_stop_the_batch(monkeypatch):
+    """Одна потеря — работаем дальше, но говорим о ней владельцу."""
+    fails = {"n": 0}
+
+    def _once(_):
+        fails["n"] += 1
+        return fails["n"] == 1
+
+    created, marks, res = _run(
+        monkeypatch, ["Новости", "Чат", "Барахолка"], done_steps=set(),
+        mark_fails=_once)
+    assert created == ["Новости", "Чат", "Барахолка"], (
+        f"блип базы оставил пачку недоделанной: {created}")
     assert res["unmarked"] == 1, res
-    assert res["created"] == 1, res
-    assert "без отметки" in res["summary"], res["summary"]
-    assert "запустите заново" in res["summary"], (
-        "владельцу не сказано, что остальные имена остались несделанными")
+    assert res["created"] == 3, res
+    assert "Без отметки 1" in res["summary"], res["summary"]
 
 
 def test_a_working_journal_does_not_stop_the_batch(monkeypatch):
@@ -181,4 +200,4 @@ def test_a_working_journal_does_not_stop_the_batch(monkeypatch):
         monkeypatch, ["Новости", "Чат", "Барахолка"], done_steps=set())
     assert created == ["Новости", "Чат", "Барахолка"], created
     assert res["unmarked"] == 0, res
-    assert "без отметки" not in res["summary"], res["summary"]
+    assert "Без отметки" not in res["summary"], res["summary"]

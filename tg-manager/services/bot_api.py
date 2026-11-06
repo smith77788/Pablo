@@ -12,7 +12,7 @@ TG = "https://api.telegram.org/bot{token}/{method}"
 TG_FILE = "https://api.telegram.org/file/bot{token}/{file_path}"
 
 
-def api_url(token: str, method: str) -> str:
+def api_url(token: str, method: str, base: str | None = None) -> str:
     """Адрес метода Bot API. Единственная дверь: токен расшифровывается ЗДЕСЬ.
 
     `managed_bots.token` хранится зашифрованным (token_vault). Вызывающие
@@ -29,7 +29,12 @@ def api_url(token: str, method: str) -> str:
     """
     from services.token_vault import decrypt_token
 
-    return TG.format(token=decrypt_token(token or ""), method=method)
+    plain = decrypt_token(token or "")
+    if base:
+        # Другой шлюз того же Bot API — бета, где новые методы появляются
+        # раньше (HTML-виджеты Bot API 10.4: services/bot_widgets.py).
+        return f"{base.rstrip('/')}/bot{plain}/{method}"
+    return TG.format(token=plain, method=method)
 
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 3
@@ -80,14 +85,16 @@ def _sem() -> asyncio.Semaphore:
 
 
 async def _call(
-    session: aiohttp.ClientSession, token: str, method: str, **params
+    session: aiohttp.ClientSession, token: str, method: str, *,
+    api_base: str | None = None, **params
 ) -> dict:
     """Call Bot API with automatic retry on network errors and 429/5xx.
 
     Retries up to 3 times with exponential backoff for transient errors.
     Respects Telegram's retry_after header on 429 responses.
+    api_base — другой шлюз Bot API (бета), иначе обычный api.telegram.org.
     """
-    url = api_url(token, method)
+    url = api_url(token, method, api_base)
     payload = {k: v for k, v in params.items() if v is not None}
     last_error = None
 

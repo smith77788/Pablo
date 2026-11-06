@@ -107,7 +107,16 @@ def _patch_common(monkeypatch, create_fn, account_ids):
     monkeypatch.setattr(op_worker, "_safe_execute", _noop)
     monkeypatch.setattr(op_worker, "cancellable_pause", _noop)
     monkeypatch.setattr(op_worker, "_note_flood_penalty", _noop)
-    monkeypatch.setattr(op_worker, "_journal_done", _noop)
+    # Отметка «шаг сделан» подменяется ДВОЙНИКОМ С ТЕМ ЖЕ ОТВЕТОМ: настоящий
+    # `_journal_done` возвращает True при успехе, а `_noop` отдавал None. Пока
+    # результат никто не читал, разницы не было; с тех пор как создающие
+    # исполнители на False останавливают пачку (_MAX_UNMARKED_PER_PASS),
+    # молчаливый None читался бы как «журнал не пишет» и обрывал прогон на
+    # втором боте — тест падал бы на поведении, которого в продукте нет.
+    async def _journal_ok(*a, **k):
+        return True
+
+    monkeypatch.setattr(op_worker, "_journal_done", _journal_ok)
     monkeypatch.setattr(op_worker, "_journal_write", _noop)
     monkeypatch.setattr(op_worker.session_simulator, "typing_delay", _noop)
     monkeypatch.setattr(op_worker.session_simulator, "chaos_factor", lambda: 1.0)
