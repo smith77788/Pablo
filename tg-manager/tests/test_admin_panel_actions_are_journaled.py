@@ -45,13 +45,32 @@ def test_free_text_is_never_journaled():
 
 
 class _Pool:
+    """Стенд пишущего слоя.
+
+    Единственный INSERT в журнал идёт через `db.log_admin_action`, и он
+    спрашивает `fetchval`: ему нужен id записи, чтобы потом дополнить её
+    итогом (`db.update_admin_action`). Запись вдобавок fail-soft — любой сбой
+    уходит в лог и наружу не выходит. Поэтому стенд, который слушает только
+    `execute`, не падает на отсутствующем методе, а молча отдаёт «строк нет»:
+    проверка краснеет, показывая на пустой журнал вместо настоящей причины.
+    Отсюда `fetchval` здесь и отсюда же возврат id.
+
+    `execute` оставлен без записи: UPDATE из `update_admin_action` тоже
+    упоминает admin_audit_log, и запись по обоим методам считала бы одно
+    действие дважды.
+    """
+
     def __init__(self):
         self.rows = []
 
-    async def execute(self, sql, *args):
-        if "admin_audit_log" in sql:
+    async def fetchval(self, sql, *args):
+        if "INSERT INTO admin_audit_log" in sql:
             self.rows.append(args)
-        return "INSERT 1"
+            return len(self.rows)
+        return None
+
+    async def execute(self, sql, *args):
+        return "UPDATE 1"
 
 
 def test_middleware_writes_for_admins_only(monkeypatch):

@@ -16,10 +16,21 @@ TARGET = 4242
 
 
 class _Pool:
+    """Стенд пишущего слоя.
+
+    Запись в журнал идёт одним INSERT через `db.log_admin_action`, а он
+    спрашивает `fetchval` (ему нужен id записи) и глотает любой сбой записи.
+    Стенд, который ждёт запись в `execute`, поэтому не падает на неизвестном
+    методе, а молча показывает пустой журнал — поймать это можно только здесь.
+    """
+
     def __init__(self):
         self.audit = []
 
     async def fetchval(self, q, *a):
+        if "INSERT INTO admin_audit_log" in q:
+            self.audit.append(a)
+            return len(self.audit)
         return None
 
     async def fetch(self, q, *a):
@@ -29,8 +40,6 @@ class _Pool:
         return None
 
     async def execute(self, q, *a):
-        if "admin_audit_log" in q:
-            self.audit.append(a)
         return "OK"
 
 

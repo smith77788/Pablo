@@ -69,6 +69,7 @@ GET /api/miniapp/accounts/health
 GET /api/miniapp/ad_intel
 GET /api/miniapp/admin/actions
 GET /api/miniapp/admin/audit
+GET /api/miniapp/admin/broadcast/recent
 GET /api/miniapp/admin/ops/stats
 GET /api/miniapp/admin/payments
 GET /api/miniapp/admin/reports
@@ -393,6 +394,7 @@ HEAD /api/miniapp/accounts/health
 HEAD /api/miniapp/ad_intel
 HEAD /api/miniapp/admin/actions
 HEAD /api/miniapp/admin/audit
+HEAD /api/miniapp/admin/broadcast/recent
 HEAD /api/miniapp/admin/ops/stats
 HEAD /api/miniapp/admin/payments
 HEAD /api/miniapp/admin/reports
