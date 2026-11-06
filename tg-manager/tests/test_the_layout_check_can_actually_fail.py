@@ -861,7 +861,8 @@ def test_a_calm_empty_state_is_not_a_thin_screen():
         "спокойная пустота снова не отличается от тонкого экрана")
     j = src.index("const blank = rows.filter")
     tail = src[j:j + 420]
-    assert "!r.blank" in tail, "пустые экраны снова идут в «почти мёртвые»"
+    # Делит одно правило: `isBlank` = есть пустое состояние И НИ ОДНОЙ строки.
+    assert "!isBlank(r)" in tail, "пустые экраны снова идут в «почти мёртвые»"
     assert "ПУСТОЕ СОСТОЯНИЕ (показывать нечего" in src, (
         "список пустых экранов не печатается — они снова среди тонких")
     k = src.index("самопроверка признака ошибки")
@@ -1021,3 +1022,110 @@ def test_the_chrome_button_is_not_the_screens_action():
         "призыв к действию из empty() перестал считаться действием экрана")
     k = src.index("if (seen.has(k) || CHROME.has(k)) continue;")
     assert k > 0, "список общей обвязки собран, но не применён при обходе вызовов"
+
+
+def test_the_row_count_reaches_the_verdict():
+    """Мерку сняли и потеряли по дороге — это хуже, чем не снять.
+
+    Экран со НЕСКОЛЬКИМИ списками (расписание рассылок: запланированные, A/B,
+    аналитика) объявлялся «пустым» из-за одного пустого подсписка, то есть не
+    мерился вовсе. Я добавил в мерку число строк — и приговор не изменился:
+    `acts.set` переносил в отчёт поля по именам, а `rows` в этом списке не
+    было, и `!r.rows` было истиной у всех экранов без исключения.
+    """
+    src = _src()
+    i = src.index("const rows = scr.querySelectorAll(")
+    assert "'.li, .row, tr" in src[i:i + 140], "строки экрана больше не считаются"
+    j = src.index("return { acts, chars, id: scr.id, erred, blank")
+    assert "rows" in src[j:j + 140], "мерка строк не возвращается из замера"
+    k = src.index("acts.set(shownId, {")
+    assert "rows: ac.rows" in src[k:k + 260], (
+        "мерка строк не доезжает до отчёта — приговор снова слеп")
+    m = src.index("const isBlank = (r) =>")
+    assert "!r.rows" in src[m:m + 80], "ведро «пусто» снова не смотрит на строки"
+
+
+def test_one_rule_divides_empty_from_thin():
+    """Экран, не попавший ни в одно ведро, исчезает из отчёта совсем."""
+    src = _src()
+    i = src.index("const isBlank = (r) =>")
+    tail = src[i:i + 400]
+    assert "const blank = rows.filter(r => isBlank(r)" in tail
+    assert "!isBlank(r)" in tail, "«тонко» и «пусто» снова делят разные правила"
+
+
+def test_the_empty_bucket_shows_the_text_it_judges():
+    """«Пусто» без образца — такой же приговор без дела, как «1 действие»."""
+    src = _src()
+    i = src.index("blank.map(r =>")
+    assert "r.sample" in src[i:i + 120], "ведро «пусто» снова печатает одни имена"
+
+
+def test_a_flag_parameter_is_never_fed_a_value():
+    """Единица в параметр-флаг — просьба к экрану НЕ открываться.
+
+    Пять открывашек (`openGlobalPresence`, `openGpDetail`, `openAdminActions`,
+    `openAdminPayments`, `openAdminReports`) носят последним параметром `more`
+    — «догрузить страницу, экран не открывать». Обход звал
+    `openGpDetail(1,1,1)`, экран честно не открывался, а в отчёте значился «не
+    накормлен заглушкой»: диагноз был не тот.
+    """
+    import re
+    import subprocess
+
+    src = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    src += "\n".join(p.read_text(encoding="utf-8")
+                     for p in sorted((ROOT / "mini_app" / "screens").glob("*.js")))
+    for fn in ("openGlobalPresence", "openGpDetail", "openAdminActions",
+               "openAdminPayments", "openAdminReports", "openBotSubs"):
+        m = re.search(r"function " + fn + r"\(([^)]*)\)", src)
+        assert m, f"{fn} пропала — проверку надо переписать, а не удалять"
+        last = [p.strip() for p in m.group(1).split(",") if p.strip()][-1]
+        assert "=" in last, (
+            f"у {fn} последний параметр «{last}» без значения по умолчанию: "
+            "обход подставит в него единицу")
+    out = subprocess.run([sys.executable, str(_OPENERS)], capture_output=True,
+                         text=True, check=True).stdout
+    line = next(l for l in out.splitlines() if l.startswith("openGpDetail"))
+    assert line.split()[0] == "openGpDetail|1|1", (
+        f"обход снова зовёт открывашку с флагом: {line}")
+
+
+def test_the_stub_answers_an_array_where_the_route_does():
+    """Пять ручек отдают голый список, а не объект.
+
+    Заглушка, всегда отвечавшая объектом, оставляла эти экраны пустыми — и
+    пустота была её собственной: в отчёте они лежали в «показывать нечего».
+    """
+    src = _src()
+    i = src.index("const ARR = [")
+    block = src[i:src.index("return ok(o);", i)]
+    for route in ("/miniapp/swarm", "/miniapp/ecosystems", "/miniapp/physics",
+                  "/miniapp/graph/overlaps", "/miniapp/content_meshes"):
+        assert f"'{route}'" in block, f"{route} снова отвечает объектом"
+    assert "return ok(ROWS.slice(0, 12).map(make))" in block, (
+        "массивный маршрут собран, но ответ остался объектом")
+
+
+def test_the_fed_keys_are_the_ones_the_screens_read():
+    """Придуманный ключ даёт не «меньше данных», а ДРУГОЙ экран.
+
+    `virtual_admin: true` вместо объекта настроек, `{done,total}` вместо
+    `applicable`, `hop/bot_name` вместо `step/from_name/to_name`, статус
+    `'scheduled'`, которого нет в `database/db.py: update_broadcast`, — каждый
+    такой ключ прятал действия экрана и уводил приговор.
+    """
+    src = _src()
+    blocks = _stub_route_blocks()
+    gp = blocks.get("/global_presence/", "")
+    assert "virtual_admin: { enabled: true" in gp, "настройки администратора снова флагом"
+    assert "applicable:" in gp, "блок пакетных операций снова не включается"
+    assert "eligible:" in gp and "installed:" in gp
+    mesh = blocks.get("/mesh/task/", "")
+    assert "from_name" in mesh and "to_name" in mesh and "step:" in mesh, (
+        "шаг трассы снова кормится чужими именами")
+    i = src.index("if (url.indexOf('/miniapp/broadcasts')")
+    bc = src[i:i + 900]
+    assert "status: ['pending', 'sending', 'done', 'failed']" in bc, (
+        "статуса 'scheduled' у рассылок не бывает (database/db.py: "
+        "update_broadcast) — экран снова останется пустым")

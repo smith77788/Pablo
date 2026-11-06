@@ -77,7 +77,10 @@ async function openBotMeshTask(taskId, keep) {
         <span class="badge ${cls}">${lbl}</span>
         <span style="font-size:12px;color:var(--hint)">${ago(d.created_at)}</span>
       </div>
-      <div style="font-size:13px">Запустил: ${esc(d.origin_name || 'неизвестно')}</div>
+      <div style="font-size:13px">Запустил: ${d.origin_id
+        ? `<span onclick="openBot(${Number(d.origin_id)})" role="button" tabindex="0"
+             style="color:var(--accent);cursor:pointer">${esc(d.origin_name || ('бот #'+d.origin_id))}</span>`
+        : esc(d.origin_name || 'неизвестно')}</div>
       <div style="font-size:13px">Передач: ${num(d.depth||0)}</div>
       ${d.drop_reason?`<div style="font-size:13px;color:var(--orange)">Брошена: ${esc(meshDropText(d.drop_reason))}</div>`:''}
     </div>`;
@@ -90,7 +93,12 @@ async function openBotMeshTask(taskId, keep) {
                  dropped:['b-or','отброшено'], failed:['b-rd','ошибка']};
     txt('botmeshDetail', head + '<div class="lst">' + hops.map(h=>{
       const [oc, ol] = OUT[h.outcome] || ['b-gy', h.outcome||''];
-      return `<div class="li">
+      // Шаг трассы был текстом: бота, который принял работу, открыть нельзя.
+      // Дверь ведёт к исполнителю (to_id), а если его карточки нет — к тому,
+      // кто передал: это единственные два бота, о которых шаг что-то знает.
+      const goId = h.to_id || h.from_id || 0;
+      const go = goId ? ` onclick="openBot(${Number(goId)})" role="button" tabindex="0" style="cursor:pointer"` : '';
+      return `<div class="li"${go}>
         <div class="ava ava-purple">${num((h.step||0)+1)}</div>
         <div class="li-body">
           <div class="li-name">${esc(h.from_name)} → ${esc(h.to_name)}</div>

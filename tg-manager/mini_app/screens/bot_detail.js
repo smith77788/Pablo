@@ -289,10 +289,12 @@ async function submitBotProfile() {
   finally { btn.disabled=false; btn.textContent='Сохранить'; }
 }
 
-async function openBotSubs(botId, botName) {
+async function openBotSubs(botId, botName, tag = '') {
   BS_BOT_ID = botId;
   BS_OFFSET = 0;
-  txt('bs-name', 'Подписчики · '+botName);
+  BS_TAG = (tag || '');
+  BS_NAME = botName || '';
+  txt('bs-name', BS_TAG ? ('#'+BS_TAG+' · '+botName) : ('Подписчики · '+botName));
   txt('bs-cnt', '');
   txt('bsList', '<div class="spin-wrap"><div class="spin"></div></div>');
   document.getElementById('bs-more').style.display='none';
@@ -302,17 +304,25 @@ async function openBotSubs(botId, botName) {
 
 async function loadBotSubs(append) {
   try {
-    const d = await api('/api/miniapp/bot/'+BS_BOT_ID+'/subscribers?offset='+BS_OFFSET);
+    const d = await api('/api/miniapp/bot/'+BS_BOT_ID+'/subscribers?offset='+BS_OFFSET
+                       + (BS_TAG ? '&tag='+encodeURIComponent(BS_TAG) : ''));
     const subs = d.subscribers||[];
     BS_TOTAL = d.total||0;
     txt('bs-cnt', BS_TOTAL+' подп.');
     if (!subs.length && !append) {
-      txt('bsList', empty('👥','Нет подписчиков','Бот ещё не получил подписчиков'));
+      txt('bsList', BS_TAG
+        ? empty('🏷','Никого с этим тегом','Тег #'+esc(BS_TAG)+' сейчас ни на кого не стоит',
+                {label:'Все подписчики',
+                 fn:`openBotSubs(${BS_BOT_ID}, '${escJs(BS_NAME)}')`})
+        : empty('👥','Нет подписчиков','Бот ещё не получил подписчиков'));
       return;
     }
     const html = subs.map(u=>{
       const name = u.first_name||(u.username?'@'+u.username:'Пользователь '+u.user_id);
-      return `<div class="li" style="cursor:default">
+      // Строка была тупиком (cursor:default): список людей, с которыми нельзя
+      // ничего сделать. Дверь уже есть — карточка контакта по Telegram-id.
+      return `<div class="li" onclick="openSubscriberCard(${BS_BOT_ID}, ${u.user_id})"
+           role="button" tabindex="0" style="cursor:pointer">
         <div class="ava ava-teal">👤</div>
         <div class="li-body">
           <div class="li-name">${esc(name)}${u.username?' <span style="color:var(--hint)">@'+esc(u.username)+'</span>':''}</div>

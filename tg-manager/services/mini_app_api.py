@@ -4873,7 +4873,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неверный идентификатор узла", 400)
         try:
             node = await pool.fetchrow(
-                "SELECT id, name FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2",
+                "SELECT id, name, tg_chat_id FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2",
                 node_id, uid,
             )
             if not node:
@@ -4884,10 +4884,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM bm_node_threads WHERE node_id=$1 ORDER BY status, created_at DESC""",
                 node_id,
             )
+            # Топик — это реальная ветка в супергруппе ноды, но экран показывал
+            # только её номер: перейти в саму переписку было нельзя. Ссылку
+            # собираем здесь, а не в клиенте: правило про префикс -100 знает
+            # сервер, в мини-аппе ему делать нечего.
+            base = str(abs(int(node["tg_chat_id"] or 0)))
+            base = base[3:] if base.startswith("100") else ""
+
+            def _link(tid) -> str:
+                return f"https://t.me/c/{base}/{int(tid)}" if base and tid else ""
+
             return _json_resp({
-                "node": dict(node),
+                "node": {"id": node["id"], "name": node["name"]},
                 "threads": [
-                    {**dict(t), "created_at": t["created_at"].isoformat() if t["created_at"] else None}
+                    {**dict(t), "tg_link": _link(t["tg_thread_id"]),
+                     "created_at": t["created_at"].isoformat() if t["created_at"] else None}
                     for t in threads
                 ],
             })

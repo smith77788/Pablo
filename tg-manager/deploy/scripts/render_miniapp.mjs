@@ -135,7 +135,19 @@ await page.addInitScript((mode) => {
     'members','devices','plans','rules','tags','meshes','targets','variants',
     'steps','funnels','subscribers','logs','events','reminders','duplicates',
     'conflicts','networks','instances','ecosystems','gifts','stars','strikes',
-    'users','posts'];
+    'users','posts',
+    // Добавлено 06.11.2026: эти экраны обход считал «спокойно пустыми» — то
+    // есть не мерил вовсе, а пустота была его собственной. Все четыре ключа
+    // на всех своих маршрутах — СПИСКИ записей (services/mini_app_accounts.py:
+    // dialogs; mini_app_bots.py и mini_app_presence.py: profiles;
+    // mini_app_api.py: campaigns; mini_app_networks.py: pairs).
+    'dialogs','campaigns','profiles','pairs',
+    // Та же причина, второй заход: расписания (mini_app_bots.py),
+    // рассылки (mini_app_broadcast.py), жалобы (mini_app_admin.py и
+    // mini_app_api.py), команды бота (mini_app_bots.py), разбивка
+    // кампании по аккаунтам и верхние ошибки (mini_app_dm.py) — везде
+    // списки записей.
+    'schedules','broadcasts','reports','commands','by_account','top_errors'];
   window.fetch = async (u) => {
     const url = String(u || '');
     const o = { ok:true, token:'stub-token', total: 1234567, count: 1234567, stats: {}, page: { limit: 25, offset: 0, has_more: true } };
@@ -216,8 +228,16 @@ await page.addInitScript((mode) => {
     // причина, по которой `proxies` и `accounts` разведены по адресам выше.
     const ent = (extra) => ({ ...row(1), ...(extra || {}) });
     if (url.indexOf('/uch/contacts/') >= 0) o.contact = ent({ tags: ['клиент'] });
+    // `virtual_admin` в плане — ОБЪЕКТ настроек (services/geo_va_link.py:
+    // config_from_plan), и экран читает `va.enabled`, `va.topic`,
+    // `va.publish_mode`. С `true` вместо объекта строка администратора и
+    // кнопка повторного подключения не рисовались вовсе: обход числил экран
+    // «не накормленным», хотя действия в коде есть.
     if (url.indexOf('/global_presence/') >= 0) {
-      o.plan = ent({ geo_selection: JSON.stringify({ countries: ['RU', 'KZ'], virtual_admin: true }) });
+      o.plan = ent({ status: 'pending', asset_type: 'channel',
+        geo_selection: JSON.stringify({ countries: ['RU', 'KZ'],
+          virtual_admin: { enabled: true, topic: 'городские новости',
+                           publish_mode: 'auto', lead_contact: '@менеджер' } }) });
       o.targets_total = 25;
     }
     if (url.indexOf('/ecosystem/') >= 0) o.eco = ent({ health_score: 0.82 });
@@ -228,7 +248,10 @@ await page.addInitScript((mode) => {
                  waiting_on_step: { 1: 3, 2: 4 } };
     }
     if (url.indexOf('/admin/user/') >= 0) {
-      o.user = ent({ current_plan: 'pro', is_banned: false });
+      // `plan_ru` — НАЗВАНИЕ тарифа по-русски (services/mini_app_admin.py):
+      // без него образец текста показывал «💳 Подписка: pro», и читатель отчёта
+      // думал, что экран всё ещё печатает код тарифа.
+      o.user = ent({ current_plan: 'pro', plan_ru: 'Про', is_banned: false });
       // `bots` тут ЧИСЛО (index.html: «🤖 Ботов: ${d.bots}»), а не список —
       // та же разводка по адресам, что у `proxies` и `accounts`.
       o.bots = 7; o.accounts = 25; o.channels = 14;
@@ -348,21 +371,34 @@ await page.addInitScript((mode) => {
         admin_id: 1000 + i, admin_username: 'админ_' + i,
         target_user_id: 2000 + i, target_username: 'клиент_' + i }));
     }
+    // Шаг трассы читается по именам from_name/to_name и по id ботов владельца
+    // (services/mini_app_parser.py: mesh_task_detail), а не по `bot_name`:
+    // с чужими ключами экран рисовал «undefined → undefined» и ни одной
+    // двери, и обход числил его «не накормленным».
     if (url.indexOf('/mesh/task/') >= 0) {
-      Object.assign(o, ent({ status: 'sent', depth: 2, origin_name: LONG,
-        drop_reason: null,
-        hops: ROWS.slice(0, 5).map((r, i) => ({ ...r, hop: i + 1, bot_name: LONG })) }));
+      Object.assign(o, ent({ status: 'running', depth: 2, origin_name: LONG,
+        origin_id: 7012345678, drop_reason: null,
+        hops: ROWS.slice(0, 5).map((r, i) => ({
+          step: i, from_name: LONG, to_name: '@исполнитель_' + i,
+          from_id: 7012345678, to_id: 7012345679,
+          capability: 'написать пост', outcome: ['accepted', 'handled', 'dropped', 'failed'][i % 4],
+          reason: i % 4 === 2 ? 'no_capability' : null,
+          created_at: '2026-10-30T04:00:00Z' })) }));
     }
     if (url.indexOf('/invite/account/') >= 0) {
       Object.assign(o, ent({ label: LONG, age_days: 120, recommended_limit: 35,
         recommended_pause_s: 45, remaining_today: 12, limit_basis: 'возраст и прогрев',
-        limit_factors: [{ label: 'Возраст аккаунта', value: '120 дней' },
-                        { label: 'Прогрев', value: 'пройден' }],
-        week: { '2026-10-26': 20, '2026-10-27': 25 } }));
+        limit_factors: { notes: ['возраст 120 дней', 'прогрев пройден',
+                                 'флудов за неделю нет'] },
+        week: { ok: 120, floods: 0 } }));
     }
+    // Сводка оформления и охват администратора — это ИМЕНА ПОЛЕЙ запроса
+    // (services/mini_app_presence.py): `applicable` включает блок пакетных
+    // операций, а `eligible > installed` — кнопку повторного подключения.
+    // Ключи `total`/`covered` не читает никто.
     if (url.indexOf('/global_presence/') >= 0) {
-      o.dressing = { done: 3, total: 5 };
-      o.virtual_admin_coverage = { covered: 4, total: 6 };
+      o.dressing = { done: 3, applicable: 3, with_avatar: 2, with_username: 3 };
+      o.virtual_admin_coverage = { eligible: 6, installed: 2, enabled: 4 };
     }
     // Ответ выбирает ВЕТКУ экрана. У облака первая же строка — калитка
     // `if (!st.access)`: без доступа экран рисует платный барьер (текст и
@@ -389,6 +425,93 @@ await page.addInitScript((mode) => {
       o.activated = false; o.next_step = 1; o.done = 3; o.total = ROWS.length;
       o.steps = ROWS.map((r, i) => ({ ...r, done: i < 3, optional: i % 4 === 0,
         hint: LONG, cta: 'Подключить аккаунты', action: { kind: 'import_accounts' } }));
+    }
+    // Последние пять экранов из «показывать нечего»: у них ключи по-своему
+    // устроены, и общая запись их не даёт. Формы — у ручек, которые отдают.
+    if (url.indexOf('/miniapp/broadcasts') >= 0) {
+      // services/mini_app_broadcast.py: counts — по статусам, totals — за всю
+      // историю; экран считал доставляемость именно по ним.
+      // Статусы — те, что ставит database/db.py: update_broadcast
+      // (pending/sending/done/failed/partial/cancelled). Экран считает
+      // запланированными `pending` и всё со scheduled_at, выполненными —
+      // `done`: выдуманный 'scheduled' не попадал ни в одну из групп, и
+      // экран оставался пустым по вине заглушки.
+      o.counts = { pending: 3, sending: 1, done: 28, failed: 2 };
+      o.totals = { sent: 12400, failed: 180 };
+      o.broadcasts = ROWS.slice(0, 12).map((r, i) => ({
+        ...r, bot_id: 7012345678, bot_username: 'бот_' + i,
+        status: ['pending', 'sending', 'done', 'failed'][i % 4],
+        text: LONG, sent_count: 400 - i * 10, failed_count: i,
+        total_users: 420, scheduled_at: '2026-11-07T09:00:00Z',
+        created_at: '2026-10-30T04:00:00Z' }));
+    }
+    if (url.indexOf('/dm_campaign/') >= 0) {
+      // services/mini_app_dm.py: отчёт кампании.
+      Object.assign(o, { campaign: ent({ status: 'running', sent_count: 1200,
+          fail_count: 80, total_targets: 1500, target_type: 'contacts' }),
+        by_status: [{ status: 'sent', n: 1200 }, { status: 'failed', n: 80 },
+                    { status: 'skipped', n: 20 }],
+        by_account: ROWS.slice(0, 6).map((r, i) => ({ account_id: 1000 + i,
+          label: 'Аккаунт ' + (1000 + i), sent: 300 - i * 20, failed: i * 3 })),
+        top_errors: [{ reason: 'PEER_FLOOD', n: 42 },
+                     { reason: 'USER_IS_BLOCKED', n: 18 },
+                     { reason: 'без описания', n: 5 }] });
+    }
+    if (url.indexOf('/audience_dna/') >= 0) {
+      // services/mini_app_api.py: _dna_to_dict + recommendations.
+      Object.assign(o, { computed: true, bot_id: 7012345678,
+        peak_hours: [9, 13, 20], peak_days: [1, 3, 5],
+        best_content_types: ['видео', 'опрос'], avg_engagement_rate: 7.4,
+        churn_risk_pct: 12.5, top_topics: ['переезд', 'упаковка', 'склад'],
+        total_users_analyzed: 4210, computed_at: '2026-10-30T04:00:00Z',
+        recommendations: [LONG, 'Публикуйте опросы по средам в 13:00.'] });
+    }
+    if (url.indexOf('/uch/graph/stats') >= 0) {
+      // services/contacts_hub/relationship_engine.py: get_graph_stats.
+      Object.assign(o, { total_relationships: 318,
+        by_type: [{ relationship_type: 'колледж', n: 120 },
+                  { relationship_type: 'работа', n: 98 },
+                  { relationship_type: 'семья', n: 100 }],
+        strongest: ROWS.slice(0, 8).map((r, i) => ({
+          contact_a_id: 'c0ffee00-0000-0000-0000-00000000000' + i,
+          contact_b_id: 'c0ffee00-0000-0000-0000-00000000010',
+          a_name: LONG, b_name: LONG + ' (второй)',
+          relationship_type: 'работа', strength: 0.95 - i * 0.05 })) });
+    }
+    if (url.indexOf('/ab/results') >= 0) {
+      // services/mini_app_api.py: ab_results — победитель и лидер это ПОДПИСИ
+      // вариантов, а не индексы.
+      Object.assign(o, { batch: 7, winner: 'Вариант Б', leader: 'Вариант Б',
+        confident: true,
+        variants: [{ label: 'Вариант А', sent: 500, delivered: 40, rate: 8.0 },
+                   { label: 'Вариант Б', sent: 500, delivered: 65, rate: 13.0 }] });
+    }
+    // ОТВЕТ-МАССИВ. Пять ручек отдают не объект, а голый список записей
+    // (`_json_resp([dict(r) for r in rows])`), и заглушка, всегда отвечавшая
+    // объектом, оставляла эти экраны пустыми — пустоту создавала она сама, а
+    // в отчёте они лежали в «показывать нечего — действий мало законно».
+    // Поля названы по тем, которые читает экран; ручка отдаёт колонки запроса
+    // ровно под этими именами.
+    const ARR = [
+      ['/miniapp/swarm', (r, i) => ({ ...r, bot_id: 7012345678 + i, bot_role: 'хаб',
+        score: 90 - i * 3, ctr: 12.5 - i, conversion_rate: 4.2, retention_d1: 55,
+        retention_d7: 21, swarm_enabled: i % 2 === 0, cluster: 'кластер ' + (i % 3 + 1) })],
+      ['/miniapp/ecosystems', (r, i) => ({ ...r, ecosystem_type: 'сеть каналов',
+        status: 'active', health_score: 0.82, risk_level: ['low', 'mid', 'high'][i % 3],
+        region: 'RU', member_count: 12 - i })],
+      ['/miniapp/physics', (r, i) => ({ ...r, account_id: 1000 + i, risk_score: 90 - i * 4,
+        ban_probability: 0.42, ops_24h: 18, flood_rate_1h: 0.3,
+        last_flood_at: '2026-10-30T04:00:00Z', computed_at: '2026-10-30T04:00:00Z' })],
+      ['/miniapp/graph/overlaps', (r, i) => ({ ...r, title_a: LONG, title_b: LONG + ' (2)',
+        username_a: 'канал_' + i, username_b: 'канал_' + (i + 1),
+        overlap_pct: 45 - i * 2, shared_users: 1200 - i * 50,
+        computed_at: '2026-10-30T04:00:00Z' })],
+      ['/miniapp/content_meshes', (r, i) => ({ ...r, enabled: i % 2 === 0,
+        source_channel: 'источник_' + i, delay_minutes: 30 * (i + 1),
+        targets_count: 4, pending_posts: i })],
+    ];
+    for (const [route, make] of ARR) {
+      if (url.indexOf(route) >= 0) return ok(ROWS.slice(0, 12).map(make));
     }
     return ok(o);
   };
@@ -623,7 +746,13 @@ const ACTIONS = () => {
   // экрана, которому правда нечего показать, и у экрана, который заглушка
   // оставила пустым: приговор по одним числам вынести нельзя.
   const blank = !erred && !!scr.querySelector('.empty');
-  return { acts, chars, id: scr.id, erred, blank,
+  // Строк на экране. «Пустое состояние» у экрана с НЕСКОЛЬКИМИ списками
+  // ничего не значило: расписание рассылок рисует три списка, пустым был
+  // только один (аналитика), и весь экран уходил в «показывать нечего» —
+  // то есть не мерился, хотя расписание и A/B-блок на нём были. Пустым
+  // экран считается, когда ни одной строки на нём нет.
+  const rows = scr.querySelectorAll('.li, .row, tr, .s2col, .kpi-card').length;
+  return { acts, chars, id: scr.id, erred, blank, rows,
            sample: sample.replace(/\s+/g, ' ').slice(0, 220) };
 };
 
@@ -1193,7 +1322,8 @@ if (sweepMode) {
         const canAct = cta_(src)
           || /onclick|<button|class="btn|class="row tap|\bchip\b|<input|<select|<textarea/.test(src.src);
         acts.set(shownId, { fn, acts: ac.acts, chars: ac.chars, canAct,
-                            erred: ac.erred, blank: ac.blank, sample: ac.sample });
+                            erred: ac.erred, blank: ac.blank, rows: ac.rows,
+                            sample: ac.sample });
       }
     }
     const problems = [];
@@ -1391,9 +1521,13 @@ if (sweepMode) {
     const rows = all.filter(r => !r.erred);
     const dead = rows.filter(r => r.acts === 0 && !r.canAct).sort((a, b) => a.chars - b.chars);
     const unfed = rows.filter(r => r.acts === 0 && r.canAct);
-    const blank = rows.filter(r => r.blank && r.acts <= 2);
+    // «Пусто» и «тонко» делит ОДНО правило, иначе экран со строками и одним
+    // пустым подсписком не попадал ни в одно ведро и исчезал из отчёта
+    // совсем — хуже, чем попасть не в то.
+    const isBlank = (r) => r.blank && !r.rows;
+    const blank = rows.filter(r => isBlank(r) && r.acts <= 2);
     const thin = rows.filter(r => r.acts > 0 && r.acts <= 2 && r.chars < 400
-                                  && !r.blank);
+                                  && !isBlank(r));
     console.log(`экранов с замером действий: ${rows.length} из ${total.length}`);
     console.log(`ОТВЕТИЛИ ОШИБКОЙ (замер по ним ничего не значит): ${erred.length}`
       + (erred.length ? '\n  ' + erred.map(r => `${r.id} (${r.fn}) «${r.sample}»`).join('\n  ') : ''));
@@ -1401,8 +1535,11 @@ if (sweepMode) {
       + (dead.length ? ' — ' + dead.map(r => `${r.id} (${r.fn}, знаков ${r.chars})`).join(' ; ') : ''));
     console.log(`НЕ НАКОРМЛЕНЫ ЗАГЛУШКОЙ (действия в коде есть, на экране нет): ${unfed.length}`
       + (unfed.length ? ' — ' + unfed.map(r => `${r.id} (${r.fn})`).join(' ; ') : ''));
+    // Образец текста нужен и здесь: «пусто» без образца — такой же приговор
+    // без дела, как «1 действие, 54 знака». Ровно так я искал, почему
+    // расписание рассылок осталось пустым при накормленной ручке.
     console.log(`ПУСТОЕ СОСТОЯНИЕ (показывать нечего — действий мало законно): ${blank.length}`
-      + (blank.length ? ' — ' + blank.map(r => `${r.id} (${r.fn})`).join(' ; ') : ''));
+      + (blank.length ? '\n  ' + blank.map(r => `${r.id} (${r.fn}, действий ${r.acts}) «${r.sample}»`).join('\n  ') : ''));
     console.log(`ПОЧТИ МЁРТВЫЕ (1-2 действия, меньше 400 знаков, и не пусто): ${thin.length}`
       + (thin.length ? '\n  ' + thin.map(r => `${r.id} (${r.fn}, действий ${r.acts}, знаков ${r.chars}) «${r.sample}»`).join('\n  ') : ''));
   }

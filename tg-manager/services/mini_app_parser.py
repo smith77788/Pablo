@@ -412,6 +412,15 @@ def setup_routes(app: web.Application, pool) -> None:
             task_id)
         names = await _mesh_bot_names(uid)
         d = dict(task)
+
+        # Трасса показывала «@первый → @второй» текстом: открыть бота, который
+        # передал или выполнил шаг, было нельзя — экран задачи оставался
+        # тупиком. Id отдаём ТОЛЬКО для ботов владельца (names — его
+        # managed_bots): по чужому id карточка всё равно не откроется, а
+        # обещать её строкой значило бы обещать пустое.
+        def _own(bot_id) -> int | None:
+            return int(bot_id) if bot_id and bot_id in names else None
+
         return _json_resp({
             "task_id": d["task_id"],
             "status": d.get("status") or "running",
@@ -419,6 +428,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "step": d.get("step") or 0,
             "depth": d.get("depth") or 0,
             "origin_name": names.get(d.get("origin_bot")),
+            "origin_id": _own(d.get("origin_bot")),
             "deadline_at": d["deadline_at"].isoformat() if d.get("deadline_at") else None,
             "created_at": d["created_at"].isoformat() if d.get("created_at") else None,
             "hops": [{
@@ -427,6 +437,8 @@ def setup_routes(app: web.Application, pool) -> None:
                     ("бот #" + str(h["from_bot"])) if h["from_bot"] else "запуск"),
                 "to_name": names.get(h["to_bot"]) or (
                     ("бот #" + str(h["to_bot"])) if h["to_bot"] else "—"),
+                "from_id": _own(h["from_bot"]),
+                "to_id": _own(h["to_bot"]),
                 "capability": h["capability"],
                 "outcome": h["outcome"],
                 "reason": h["reason"],

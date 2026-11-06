@@ -136,6 +136,13 @@ async function loadInviteAdvice() {
 
 async function openInviteAccount(accId) {
   push('s-invacc');
+  await loadInviteAccount(accId);
+}
+// Карточка была разбором без выхода: шесть чисел, объяснение лимита и ни одной
+// двери — ни к самому аккаунту (прогрев, прокси, статус), ни даже к обновлению
+// после сбоя. Повтор зовёт ЗАГРУЗКУ, а не открывашку: та сбрасывает состояние
+// экрана, а повтору нужны только данные.
+async function loadInviteAccount(accId) {
   txt('invAccBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/invite/account/' + accId);
@@ -171,9 +178,14 @@ async function openInviteAccount(accId) {
         вручную: ручное число одно на всю операцию и не знает, что один аккаунт
         год работает чисто, а другой словил флуд вчера.
       </div>
+      <div style="display:flex;gap:8px;margin:12px 0 4px">
+        <button class="btn btn-p" style="flex:1" onclick="openAccount(${Number(accId)})">👤 Карточка аккаунта</button>
+        <button class="btn btn-s" style="flex:1" onclick="loadInviteAccount(${Number(accId)})">↺ Обновить</button>
+      </div>
     `);
   } catch (e) {
-    txt('invAccBody', empty('⚠️','Не удалось загрузить карточку', (e.message||'').substring(0,80)));
+    txt('invAccBody', errHtml(errRu(e, 'Не удалось загрузить карточку'),
+                              `loadInviteAccount(${Number(accId)})`));
   }
 }
 

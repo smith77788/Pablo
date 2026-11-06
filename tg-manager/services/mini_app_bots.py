@@ -297,13 +297,34 @@ def setup_routes(app: web.Application, pool) -> None:
             offset = max(0, int(request.query.get("offset", 0)))
         except (TypeError, ValueError):
             offset = 0
+        # Тег подписчика был числом в таблице «Теги подписчиков» и больше ничем:
+        # кто эти «#vip 48», посмотреть было нельзя. Срез по тегу открывает тот
+        # же список подписчиков, только суженный, — и дальше работает карточка.
+        tag = (request.query.get("tag") or "").strip()[:64]
+        # Срез — условием в ОДНОМ запросе, а не вторым запросом с JOIN: во-первых
+        # тег может стоять на человеке дважды и строка бы удвоилась, во-вторых
+        # ручку с двумя выборками на один ключ перестаёт разбирать сторож
+        # контракта (tests/test_api_contract_row_fields.py) — и ключ молча
+        # выпадает из сверки «что отдаёт сервер против того, что читает экран».
+        # Запрос — ЛИТЕРАЛОМ, без f-строки: сторож контракта выводит форму
+        # элемента из текста выборки, а собранную по частям строку он не
+        # читает, и ключ выпадает из сверки молча.
         rows = await _safe_fetch(pool,
-            """SELECT user_id, username, first_name, last_seen, is_active, first_seen
-               FROM bot_users WHERE bot_id=$1
-               ORDER BY last_seen DESC NULLS LAST, user_id
-               LIMIT 50 OFFSET $2""", bot_id, offset)
-        total = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
-        return _json_resp({"subscribers": rows, "total": total, "offset": offset})
+            """SELECT bu.user_id, bu.username, bu.first_name, bu.last_seen,
+                      bu.is_active, bu.first_seen
+               FROM bot_users bu
+               WHERE bu.bot_id=$1
+                 AND ($2 = '' OR EXISTS (SELECT 1 FROM user_tags ut
+                                          WHERE ut.bot_id=bu.bot_id
+                                            AND ut.user_id=bu.user_id AND ut.tag=$2))
+               ORDER BY bu.last_seen DESC NULLS LAST, bu.user_id
+               LIMIT 50 OFFSET $3""", bot_id, tag, offset)
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM bot_users bu WHERE bu.bot_id=$1 "
+            "AND ($2 = '' OR EXISTS (SELECT 1 FROM user_tags ut "
+            "WHERE ut.bot_id=bu.bot_id AND ut.user_id=bu.user_id AND ut.tag=$2))",
+            bot_id, tag)
+        return _json_resp({"subscribers": rows, "total": total, "offset": offset, "tag": tag})
 
     async def bot_deeplinks(request: web.Request) -> web.Response:
         uid = _get_uid(request)
