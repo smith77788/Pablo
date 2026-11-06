@@ -13,9 +13,16 @@
 не находит. Поэтому лечить нужно постановку, а не только исполнение.
 
 ЧТО ЗАКРЕПЛЕНО. Время отложенного запуска округляется вверх до целой минуты
-(`broadcaster.quantized_schedule_iso`), поэтому у двух тапов подряд оно
-совпадает и дедуп срабатывает. Вверх, а не вниз: вниз сдвинуло бы запуск
-раньше просьбы владельца.
+(`operation_bus.quantized_schedule_iso` — помощник живёт рядом с самой
+идентичностью дедупа, частью которой время и является), поэтому у двух тапов
+подряд оно совпадает и дедуп срабатывает. Вверх, а не вниз: вниз сдвинуло бы
+запуск раньше просьбы владельца.
+
+ПЕРВАЯ ВЕРСИЯ ЭТОГО СТОРОЖА ПРОПУСТИЛА ДВА МЕСТА. Она искала в тексте
+`datetime.now`, а мини-апп зовёт то же самое через псевдоним модуля
+(`_dtm.now(_tzn.utc)`): отложенная рассылка и отложенный пост в свой канал из
+мини-аппа — те же два тапа, те же две операции — сторожу были не видны. Теперь
+ищется любой вызов `.now(`, и самопроверка ниже держит именно псевдоним.
 """
 from __future__ import annotations
 
@@ -78,10 +85,10 @@ def _submit(pool, when) -> int:
 
 
 def test_two_taps_a_moment_apart_are_one_scheduled_broadcast(pool):
-    from services import broadcaster
+    from services import operation_bus
 
-    first = _submit(pool, broadcaster.quantized_schedule_iso(10))
-    second = _submit(pool, broadcaster.quantized_schedule_iso(10))
+    first = _submit(pool, operation_bus.quantized_schedule_iso(10))
+    second = _submit(pool, operation_bus.quantized_schedule_iso(10))
     assert second == first, (
         "второй тап поставил ВТОРУЮ отложенную рассылку — подписчики получат "
         "сообщение дважды"
@@ -102,10 +109,10 @@ def test_the_unrounded_time_is_what_used_to_slip_through(pool):
 
 
 def test_rounding_never_moves_the_send_earlier_than_asked():
-    from services import broadcaster
+    from services import operation_bus
 
     now = datetime(2026, 11, 6, 12, 30, 17, 123456, tzinfo=timezone.utc)
-    got = datetime.fromisoformat(broadcaster.quantized_schedule_iso(10, now=now))
+    got = datetime.fromisoformat(operation_bus.quantized_schedule_iso(10, now=now))
     assert got >= now + timedelta(minutes=10), (
         "округление сдвинуло отложенный запуск раньше просьбы владельца"
     )
@@ -115,7 +122,7 @@ def test_rounding_never_moves_the_send_earlier_than_asked():
     )
     exact = datetime(2026, 11, 6, 12, 30, 0, 0, tzinfo=timezone.utc)
     assert datetime.fromisoformat(
-        broadcaster.quantized_schedule_iso(5, now=exact)) == exact + timedelta(minutes=5), (
+        operation_bus.quantized_schedule_iso(5, now=exact)) == exact + timedelta(minutes=5), (
         "ровное время сдвинуто без нужды"
     )
 
@@ -123,7 +130,9 @@ def test_rounding_never_moves_the_send_earlier_than_asked():
 # ── Сторож: время запуска, посчитанное от «сейчас», в дедуп-ключ не идёт ─────
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VOLATILE_NOW = re.compile(r"datetime\.now|utcnow|time\(\)|monotonic")
+# Любой вызов «сейчас», а НЕ только `datetime.now`: модуль зовут и через
+# псевдоним (`_dtm.now(...)`), и именно так сторож пропустил два места.
+VOLATILE_NOW = re.compile(r"\.now\(|utcnow|\btime\.time\(|monotonic")
 
 # Разрешённое исключение с причиной, а не молчаливый пропуск.
 ALLOWED = {
@@ -135,19 +144,13 @@ ALLOWED = {
 }
 
 
-def _findings() -> list[str]:
-    out = []
-    for path in sorted(ROOT.rglob("*.py")):
-        rel = path.relative_to(ROOT).as_posix()
-        if rel.startswith("tests/") or "/.venv/" in rel:
-            continue
-        src = path.read_text(encoding="utf-8")
-        if "submit(" not in src:
-            continue
+def _findings_in(src: str, rel: str) -> list[str]:
+    out: list[str] = []
+    if "submit(" in src:
         try:
             tree = ast.parse(src)
         except SyntaxError:
-            continue
+            return out
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -179,12 +182,59 @@ def _findings() -> list[str]:
     return out
 
 
+def _findings() -> list[str]:
+    out: list[str] = []
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.startswith("tests/") or "/.venv/" in rel:
+            continue
+        out += _findings_in(path.read_text(encoding="utf-8"), rel)
+    return out
+
+
 def test_no_submit_passes_an_unrounded_now_as_the_launch_time():
     bad = _findings()
     assert not bad, (
         "время запуска посчитано от «сейчас» и уходит в дедуп-ключ как есть — "
         "у двух тапов оно различается микросекундами, и окно идемпотентности "
         "не сработает ни разу:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_the_measurer_sees_a_now_called_through_an_alias():
+    """Ровно та слепота, из-за которой два места прожили лишний день.
+
+    Мини-апп зовёт время через псевдоним модуля, и мерка, искавшая строку
+    `datetime.now`, не видела ни отложенную рассылку, ни отложенный пост.
+    """
+    aliased = (
+        "async def h(pool, uid, p):\n"
+        "    from datetime import datetime as _dtm, timedelta as _tdl, timezone as _tzn\n"
+        "    await _obus.submit(pool, uid, 'run_broadcast', p,\n"
+        "        scheduled_for=_dtm.now(_tzn.utc) + _tdl(minutes=10))\n")
+    rounded = (
+        "async def h(pool, uid, p):\n"
+        "    await _obus.submit(pool, uid, 'run_broadcast', p,\n"
+        "        scheduled_for=_obus.quantized_schedule_iso(10))\n")
+    assert _findings_in(aliased, "services/probe.py"), (
+        "мерка снова не видит «сейчас», вызванное через псевдоним модуля")
+    assert _findings_in(rounded, "services/probe.py") == [], (
+        "мерка ругается на округлённое время")
+
+
+def test_the_rounded_time_is_used_everywhere_it_is_needed():
+    """Все места, считающие время запуска от «сейчас», зовут одного помощника."""
+    users = []
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.startswith("tests/"):
+            continue
+        if "quantized_schedule_iso" in path.read_text(encoding="utf-8"):
+            users.append(rel)
+    assert "services/operation_bus.py" in users, "помощник пропал из шины"
+    assert len(users) >= 4, (
+        f"помощником пользуются только {users} — отложенный запуск где-то "
+        "снова считается от «сейчас» напрямую"
     )
 
 

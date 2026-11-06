@@ -161,11 +161,14 @@ def setup_routes(app: web.Application, pool) -> None:
                 # отправит её сразу при рестарте). Воркер создаст её, когда
                 # наступит scheduled_for. Планировщик воркера уважает scheduled_for.
                 label = f"⏰ {label}"
-                from datetime import datetime as _dtm, timedelta as _tdl, timezone as _tzn
+                # Время запуска округляется до минуты (quantized_schedule_iso):
+                # «сейчас + N минут» у двух тапов различается микросекундами, и
+                # окно идемпотентности, сравнивающее scheduled_for точно, не
+                # срабатывает ни разу — подписчики получают рассылку дважды.
                 op_id = await _obus.submit(
                     pool, uid, "run_broadcast", _op_params,
                     total_items=total, label=label,
-                    scheduled_for=_dtm.now(_tzn.utc) + _tdl(minutes=schedule_minutes))
+                    scheduled_for=_obus.quantized_schedule_iso(schedule_minutes))
             return _json_resp({"ok": True, "broadcast_id": broadcast_id, "op_id": op_id,
                                "total_users": total, "scheduled_minutes": schedule_minutes})
         except PermissionError as exc:

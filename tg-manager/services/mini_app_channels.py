@@ -149,8 +149,12 @@ def setup_routes(app: web.Application, pool) -> None:
             schedule_minutes = 0
         sched = None
         if schedule_minutes > 0:
-            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-            sched = (_dt.now(_tz.utc) + _td(minutes=schedule_minutes)).isoformat()
+            # Округление до минуты обязательно: «сейчас + N минут» у двух тапов
+            # различается микросекундами, окно идемпотентности сравнивает
+            # scheduled_for точно и не срабатывает ни разу — в канал уходит
+            # второй такой же пост.
+            from services.operation_bus import quantized_schedule_iso
+            sched = quantized_schedule_iso(schedule_minutes)
         try:
             from services.operation_bus import submit
             # Пост в свой канал — та же операция, что единая публикация

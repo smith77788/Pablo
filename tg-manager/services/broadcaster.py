@@ -118,31 +118,6 @@ NOTE_TELEGRAM_DOWN = ("Telegram не ответил на проверке бот
                       "автоматически")
 
 
-def quantized_schedule_iso(minutes: float, *,
-                           now: "datetime | None" = None) -> str:
-    """Время отложенного запуска, одинаковое у двух тапов подряд.
-
-    Окно идемпотентности `operation_bus.submit` сравнивает `scheduled_for`
-    ТОЧНО. Время, посчитанное как «сейчас + N минут», у двух тапов различается
-    микросекундами, поэтому дедуп не срабатывает НИ РАЗУ: в очередь встают две
-    отложенные рассылки, и подписчики получают сообщение дважды. Выполняются
-    они с разницей в секунду, то есть и запрет живого двойника в исполнителе
-    может не успеть помочь: первая на маленькой аудитории успеет закончиться
-    раньше, чем начнётся вторая.
-
-    Округляем ВВЕРХ до целой минуты. Вверх, а не вниз: округление вниз сдвинуло
-    бы запуск раньше, чем владелец просил (для «через минуту» — почти на
-    минуту), а отложенная рассылка, ушедшая раньше срока, — отдельная беда.
-    Цена округления — меньше минуты задержки, и она владельцу не видна.
-    """
-    from datetime import timedelta as _td_q, timezone as _tz_q
-
-    base = (now or datetime.now(_tz_q.utc)) + _td_q(minutes=float(minutes))
-    if base.second or base.microsecond:
-        base = base.replace(second=0, microsecond=0) + _td_q(minutes=1)
-    return base.isoformat()
-
-
 def status_note(final_status: str, failed: int, err_cats: dict,
                 aborted_reason: str = "") -> str | None:
     """Причина исхода рассылки по-русски для владельца. ЧИСТАЯ.
@@ -1010,6 +985,7 @@ async def mass_broadcast_with_scheduling(
                 total_items=total, label=label, scheduled_for=scheduled_for_iso,
             )
         else:
+            from services.operation_bus import quantized_schedule_iso
             _sched_iso = quantized_schedule_iso(schedule_minutes)
             op_id = await operation_bus.submit(
                 pool, owner_id, "run_broadcast", _op_params,

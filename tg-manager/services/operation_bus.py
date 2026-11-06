@@ -82,6 +82,34 @@ IRREVERSIBLE_DEDUP_WINDOW_SEC = 90
 DEDUP_COSMETIC_KEYS = ("_progress_chat_id", "_progress_message_id")
 
 
+def quantized_schedule_iso(minutes: float, *, now: object = None) -> str:
+    """Время отложенного запуска, одинаковое у двух тапов подряд.
+
+    Окно идемпотентности `operation_bus.submit` сравнивает `scheduled_for`
+    ТОЧНО. Время, посчитанное как «сейчас + N минут», у двух тапов различается
+    микросекундами, поэтому дедуп не срабатывает НИ РАЗУ: в очередь встают две
+    отложенные операции — две рассылки по той же аудитории, два одинаковых
+    поста в тот же канал. Выполняются они с разницей в секунду, то есть и
+    запрет живого двойника в исполнителе может не успеть помочь: первая на
+    маленькой аудитории успеет закончиться раньше, чем начнётся вторая.
+
+    Этим помощником обязано пользоваться КАЖДОЕ место, считающее время запуска
+    от «сейчас» (сторож:
+    tests/test_two_taps_on_a_timed_broadcast_are_one_send_postgres.py).
+
+    Округляем ВВЕРХ до целой минуты. Вверх, а не вниз: округление вниз сдвинуло
+    бы запуск раньше, чем владелец просил (для «через минуту» — почти на
+    минуту), а отложенная рассылка, ушедшая раньше срока, — отдельная беда.
+    Цена округления — меньше минуты задержки, и она владельцу не видна.
+    """
+    from datetime import datetime as _dt_q, timedelta as _td_q, timezone as _tz_q
+
+    base = (now or _dt_q.now(_tz_q.utc)) + _td_q(minutes=float(minutes))
+    if base.second or base.microsecond:
+        base = base.replace(second=0, microsecond=0) + _td_q(minutes=1)
+    return base.isoformat()
+
+
 def _dedup_identity_params(stored: dict[str, Any]) -> dict[str, Any]:
     """params без косметических ключей — то, по чему сравниваются два сабмита."""
     return {k: v for k, v in stored.items() if k not in DEDUP_COSMETIC_KEYS}
