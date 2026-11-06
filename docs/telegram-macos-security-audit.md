@@ -693,6 +693,61 @@ Finding 4 — **кросс-платформенный архитектурный
 
 ---
 
+## Раздел D — Кросс-платформенная проверка (Telegram iOS, Swift)
+
+Файлы: `submodules/WebUI/Sources/WebAppController.swift`, `WebAppWebView.swift`, `WebAppUtils.swift`
+(TelegramMessenger/Telegram-iOS). iOS — ближайший родственник macOS-кода, и сравнение даёт точный
+вывод: **Findings 1 и 5 на macOS — это parity-gap (упущенные проверки, которые на iOS есть), а не
+by-design**, что усиливает соответствующие репорты.
+
+### D.1 — Finding 4 (JS-Bridge origin confusion) — **ПРИСУТСТВУЕТ на iOS** (отдельный репорт, app-level)
+Тот же механизм, флаг называется `useSecuredEventProxy` (завязан на `sameOrigin`):
+- `setupEventProxySource()` для legacy ставит `useSecuredEventProxy = false` и инжектит небезопасный
+  `eventProxySource()` (`WebAppWebView.swift:232–236`).
+- `isTrustedMainFrameMessage`: `if !self.useSecuredEventProxy { return true }` (`:243–244`) — доверяет
+  любому main-frame сообщению при legacy-режиме.
+- `decidePolicyFor navigationAction`: всё, кроме t.me/telegra.ph, → `decisionHandler(.allow)`
+  (`WebAppController.swift:744–754`) — кросс-origin навигация разрешена.
+Итог идентичен macOS Finding 4. Репортуется отдельно как дефект клиента iOS.
+
+### D.2 — Finding 1 (share_to_story SSRF / IP-leak) — **macOS PARITY-GAP** (на iOS закрыто)
+iOS `web_app_share_to_story` фетчит `media_url` только после гейта `isAllowedBotMediaUrl(mediaUrl)`
+(`WebAppController.swift:1694`). Сам гейт (`WebAppUtils.swift:33–`) жёсткий:
+- только `https`; запрет user/password в URL;
+- **только публичные IP** — блок loopback/LAN/private (анти-SSRF), канонический разбор IPv4 и IPv6;
+- явная защита от octal-bypass `inet_pton` (комментарий в коде про `0177.0.0.1`).
+
+**macOS не применяет эту проверку нигде** (`fetchHttpResource(url: mediaUrl)` напрямую). Значит
+macOS Finding 1 — реальное упущение: эталонная митигация существует на iOS и просто отсутствует на
+macOS. То же относится к Finding 6 (на macOS `getFileSize`/`fetchHttpResource` без валидации схемы/хоста).
+
+### D.3 — Finding 5 (biometry `accessGranted`) — **macOS PARITY-GAP** (на iOS закрыто)
+iOS `requestBiometryAuth` читает/возвращает токен **только** при `state.accessRequested &&
+state.accessGranted` (`WebAppController.swift:2616`), иначе `sendBiometryAuthResult(isAuthorized:false)`.
+Токен хранится **зашифрованным** через `LocalAuth` приватный ключ (`:2626–2659`), не сырым Keychain-
+паролем. macOS `web_app_biometry_request_auth` этот guard **не имеет** и читает сырой Keychain-итем
+напрямую. Это подтверждает: macOS Finding 5 — упущение, а не замысел.
+
+### D.4 — Finding 6 (`getFileSize` pre-consent HEAD-probe) — **macOS-специфичен**
+iOS `web_app_request_file_download` → `downloadFile(url:fileName:)` без паттерна `FileDownload.getFileSize`
+(нет HEAD-зонда до подтверждения).
+
+### Сводка кросс-платформенного статуса
+
+| Finding | macOS | Desktop (tdesktop) | iOS |
+|---|---|---|---|
+| 4 Bridge origin confusion | ✔ есть | ✔ есть (`_sameOrigin`) | ✔ есть (`useSecuredEventProxy`) |
+| 1 share_to_story SSRF/IP | ✔ есть | ✖ заглушка | ✖ закрыто (`isAllowedBotMediaUrl`) → macOS parity-gap |
+| 5 biometry accessGranted | ✔ есть | ✖ нет биометрии | ✖ закрыто (guard + шифрование) → macOS parity-gap |
+| 6 file_download size-probe | ✔ есть | ✖ нет probe | ✖ нет probe |
+
+**Вывод:** Finding 4 — кросс-платформенный архитектурный дефект (macOS + Desktop + iOS; три отдельных
+репорта). Findings 1/5/6 — macOS-специфичны; для 1 и 5 на iOS есть эталонные проверки, что делает их
+очевидными упущениями клиента macOS (сильный аргумент в репорте). Android (Java/Kotlin) и Web (JS)
+остаются к проверке — ожидается тот же D.1-паттерн вокруг `sameOrigin`.
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**
