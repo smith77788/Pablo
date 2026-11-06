@@ -32,7 +32,6 @@ import re
 
 from aiohttp import web
 
-from services import op_status as _ost
 from services import operation_bus as _obus
 from services.stars_optimizer import MIN_IMPRESSIONS_FOR_WINNER as _STARS_MIN_IMPRESSIONS
 
@@ -46,7 +45,6 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.security import validate_string
 
     _GIFT_PAY = ("stars", "wallet", "auto")
-    _IN_FLIGHT_SQL = "('" + "','".join(sorted(_ost.IN_FLIGHT)) + "')"
 
     async def gift_inventory(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -147,23 +145,15 @@ def setup_routes(app: web.Application, pool) -> None:
         return free, ""
 
     async def _gift_busy_ids(uid: int, ids: list[int]) -> set[int]:
-        """Позиции инвентаря в живой передаче или переданные после скана."""
-        rows = await pool.fetch(
-            f"""SELECT DISTINCT it.inventory_id
-                  FROM gift_transfer_items it
-                  JOIN gift_transfer_plans p ON p.id = it.plan_id
-                  JOIN gift_inventory g ON g.id = it.inventory_id
-                 WHERE p.owner_id = $1 AND it.inventory_id = ANY($2::bigint[])
-                   AND ((it.status = 'transferred'
-                         AND it.transferred_at >= g.last_seen_at)
-                     OR (it.status IN ('pending', 'queued')
-                         AND EXISTS (
-                             SELECT 1 FROM operation_queue q
-                              WHERE q.owner_id = $1 AND q.op_type = 'gift_transfer'
-                                AND q.status IN {_IN_FLIGHT_SQL}
-                                AND q.params->>'plan_id' = p.id::text)))""",
-            uid, ids)
-        return {int(r["inventory_id"]) for r in rows}
+        """Позиции инвентаря в живой передаче или переданные после скана.
+
+        Сам запрос живёт в `GiftTransferService.busy_inventory_ids`: эта же
+        проверка нужна кнопке «Передать» в боте, а второй экземпляр правила
+        про необратимую операцию разошёлся бы с первым при первой же правке.
+        """
+        from services.gift_transfer import GiftTransferService as _gts
+
+        return await _gts.busy_inventory_ids(pool, uid, ids)
 
     async def gift_transfer_preview(request: web.Request) -> web.Response:
         """Что именно уйдёт и во сколько обойдётся — ДО нажатия.

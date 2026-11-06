@@ -683,53 +683,88 @@ async def cb_confirm_transfer(callback: CallbackQuery, state: FSMContext, pool):
         await callback.answer("Передаваемых подарков не найдено", show_alert=True)
         return
 
-    # Create plan
-    plan_id = await GiftTransferService.create_plan(
-        pool,
-        user_id,
-        recipient_username=data.get("recipient_username", ""),
-        recipient_user_id=data.get("recipient_user_id", 0),
-        recipient_name=data.get("recipient_name", "Неизвестно"),
-        payment_source=data.get("payment_source", "stars"),
-    )
+    # ВТОРОЕ НАЖАТИЕ «ПЕРЕДАТЬ». План на каждое нажатие создаётся новый, то
+    # есть и params операции ({"plan_id": …}) новые — дедуп шины двойное
+    # нажатие не узнаёт никогда. А после успешной передачи строка инвентаря не
+    # менялась, поэтому второй проход брал те же подарки, шёл с аккаунтов в
+    # Телеграм и получал отказ: полный круг самых заметных снаружи обращений
+    # на работу, которой заведомо нет. Дверь та же, что у мини-аппа
+    # (GiftTransferService.busy_inventory_ids) — одно правило на оба пути.
+    #
+    # Замок владельца держим на выбор И на постановку: без него два
+    # одновременных нажатия оба видят подарки свободными.
+    async with pool.acquire() as _lock_conn, _lock_conn.transaction():
+        await _lock_conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            f"gift_transfer_submit|{user_id}")
+        try:
+            busy = await GiftTransferService.busy_inventory_ids(
+                pool, user_id, [g["id"] for g in gifts])
+        except Exception:
+            # Нечитаемая проверка — не повод отправить необратимое вслепую.
+            log_exc_swallow(log, "confirm_transfer busy check failed")
+            await callback.answer(
+                "Не удалось проверить, не передаются ли эти подарки уже. "
+                "Попробуйте ещё раз через минуту.", show_alert=True)
+            return
+        gifts = [g for g in gifts if g["id"] not in busy]
+        if not gifts:
+            await callback.answer(
+                "Эти подарки уже передаются или уже переданы", show_alert=True)
+            return
 
-    # Add items to plan
-    items = [
-        {
-            "inventory_id": g["id"],
-            "account_id": g["account_id"],
-            "gift_id": g["gift_id"],
-            "gift_type": g["gift_type"],
-            "stars_cost": g.get("stars_cost", 0),
-        }
-        for g in gifts
-    ]
-    await GiftTransferService.add_items_to_plan(pool, plan_id, items)
+        # Create plan
+        plan_id = await GiftTransferService.create_plan(
+            pool,
+            user_id,
+            recipient_username=data.get("recipient_username", ""),
+            recipient_user_id=data.get("recipient_user_id", 0),
+            recipient_name=data.get("recipient_name", "Неизвестно"),
+            payment_source=data.get("payment_source", "stars"),
+        )
+
+        # Add items to plan
+        items = [
+            {
+                "inventory_id": g["id"],
+                "account_id": g["account_id"],
+                "gift_id": g["gift_id"],
+                "gift_type": g["gift_type"],
+                "stars_cost": g.get("stars_cost", 0),
+            }
+            for g in gifts
+        ]
+        await GiftTransferService.add_items_to_plan(pool, plan_id, items)
 
     # Validate plan
-    validation = await GiftTransferService.validate_plan(pool, plan_id)
+        validation = await GiftTransferService.validate_plan(pool, plan_id)
 
-    if not validation["valid"]:
-        await callback.answer(
-            f"Ошибка проверки: {validation['errors']}", show_alert=True
+        if not validation["valid"]:
+            await callback.answer(
+                f"Ошибка проверки: {validation['errors']}", show_alert=True
+            )
+            return
+
+        # Постановка — ПОД ТЕМ ЖЕ замком, что и выбор. Дверь видит занятый
+        # подарок по живой операции на его план, поэтому отпустить замок до
+        # постановки значило бы оставить ровно ту щель, против которой она
+        # написана: второй тап успел бы посмотреть, пока операции ещё нет, и
+        # увидеть подарки свободными.
+        from services import operation_bus as _op_bus
+
+        op_id = await _op_bus.submit(
+            pool, user_id, "gift_transfer", {"plan_id": plan_id},
+            total_items=len(items)
         )
-        return
 
-    # Queue operation
-    from services import operation_bus as _op_bus
-
-    op_id = await _op_bus.submit(
-        pool, user_id, "gift_transfer", {"plan_id": plan_id}, total_items=len(items)
-    )
-
-    # Link plan to operation
-    await db.update_gift_transfer_plan(pool, plan_id, status="queued")
-    try:
-        await pool.execute(
-            "UPDATE gift_transfer_plans SET status='queued' WHERE id=$1", plan_id
-        )
-    except Exception:
-        log_exc_swallow(log, "confirm_transfer execute update plan failed")
+        # Link plan to operation
+        await db.update_gift_transfer_plan(pool, plan_id, status="queued")
+        try:
+            await pool.execute(
+                "UPDATE gift_transfer_plans SET status='queued' WHERE id=$1", plan_id
+            )
+        except Exception:
+            log_exc_swallow(log, "confirm_transfer execute update plan failed")
 
     # Update state
     await state.update_data(plan_id=plan_id, op_id=op_id)
