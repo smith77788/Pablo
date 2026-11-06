@@ -2317,8 +2317,11 @@ async def prewrite(pool, owner_id: int, channel_id: int, *,
     суточный лимит) лишь сдвигает написание внутри запаса _PREWRITE_AHEAD_H.
 
     Каждый текст проверяется теми же правилами, что и поштучный (review_text),
-    плюс на повтор внутри пачки. Не прошедший остаётся без текста и попадёт в
-    следующую пачку. Возвращает число записанных постов; AiBusy — лимит.
+    плюс на повтор внутри пачки. Отклонённые слоты добираются ОДНИМ
+    дополнительным запросом с причинами отклонения: без добора слот оставался
+    пустым до исчерпания попыток и канал молчал в своё время выхода. Больше
+    одного добора за проход не делаем — это запрос к лимитированной модели.
+    Возвращает число записанных постов; AiBusy на первом запросе — лимит.
     """
     now = now or datetime.now(timezone.utc)
     rows = await pool.fetch(
@@ -2360,26 +2363,63 @@ async def prewrite(pool, owner_id: int, channel_id: int, *,
         return 0
     texts = parse_batch(raw, len(rows))
     written: list[str] = []
-    for n, r in enumerate(rows):
-        text = clean_generated(texts[n] if n < len(texts) else "", rules.max_chars)
-        reasons = await review_text(pool, owner_id, channel_id,
-                                    {**ctx, "recent": list(ctx["recent"]) + written}, text)
-        if text and not reasons and written:
-            rep = cb.repetition_check(text, written)
-            if rep["is_duplicate"] or rep["opening_repeat"]:
-                reasons = ["повторяет соседний пост пачки"]
-        if reasons:
+    rejected: list[str] = []
+
+    async def _write_pass(pairs: list[tuple[dict, str]]) -> list[dict]:
+        """Проверить тексты и записать прошедшие; вернуть слоты без текста."""
+        left: list[dict] = []
+        for r, candidate in pairs:
+            text = clean_generated(candidate, rules.max_chars)
+            reasons = await review_text(pool, owner_id, channel_id,
+                                        {**ctx, "recent": list(ctx["recent"]) + written}, text)
+            if text and not reasons and written:
+                rep = cb.repetition_check(text, written)
+                if rep["is_duplicate"] or rep["opening_repeat"]:
+                    reasons = ["повторяет соседний пост пачки"]
+            if reasons:
+                left.append(r)
+                for why in reasons:
+                    if why and why not in rejected:
+                        rejected.append(why)
+                continue
             await pool.execute(
-                "UPDATE va_admin_plan SET write_attempts=write_attempts+1 WHERE id=$1", r["id"])
-            continue
+                "UPDATE va_admin_plan SET body=$2, written_at=now() WHERE id=$1 AND body IS NULL",
+                r["id"], text)
+            written.append(text)
+        return left
+
+    left = await _write_pass([(r, texts[n] if n < len(texts) else "")
+                              for n, r in enumerate(rows)])
+    refilled = False
+    if left:
+        # ДОБОР: один дополнительный запрос за отклонённые слоты, уже с
+        # причинами отклонения и с написанным в этом же проходе. Без него
+        # отклонённый слот оставался без текста до исчерпания попыток — в своё
+        # время выхода канал молчал, а модель даже не узнавала, что не так.
+        left_tasks = [(r["pillar"] or ctx["pillar"], r["topic"] or "") for r in left]
+        system, user = build_post_prompt(
+            ctx["profile"], pillar=left_tasks[0][0],
+            recent_texts=list(ctx["recent"]) + written, best_texts=ctx["best"],
+            rules=rules, lessons=ctx["lessons"], feedback=rejected, tasks=left_tasks)
+        try:
+            raw = await _ask(complete or _default_complete(), system, user)
+        except (AiBusy, ChannelAdminError):
+            # Добор не удался — написанное в первом проходе уже сохранено, а
+            # остаток дождётся следующей пачки.
+            raw = ""
+        if raw:
+            refilled = True
+            texts = parse_batch(raw, len(left))
+            left = await _write_pass([(r, texts[n] if n < len(texts) else "")
+                                      for n, r in enumerate(left)])
+    for r in left:
         await pool.execute(
-            "UPDATE va_admin_plan SET body=$2, written_at=now() WHERE id=$1 AND body IS NULL",
-            r["id"], text)
-        written.append(text)
+            "UPDATE va_admin_plan SET write_attempts=write_attempts+1 WHERE id=$1", r["id"])
     if written:
         await log_event(pool, owner_id, channel_id, "prewrite",
                         f"Заранее написано постов: {len(written)} из {len(rows)} "
-                        "одним обращением к ИИ")
+                        + ("с добором за отклонённые" if refilled
+                           else "одним обращением к ИИ"))
     return len(written)
 
 

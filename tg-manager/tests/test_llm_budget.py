@@ -238,6 +238,144 @@ def test_failed_batch_counts_an_attempt(monkeypatch):
     assert "write_attempts=write_attempts+1" in sql and ids == [7]
 
 
+def _prewrite_stage(monkeypatch, rows):
+    """Окружение prewrite на моках: БД, профиль канала и контекст поста."""
+    from unittest.mock import AsyncMock
+
+    from services import channel_brain as cb
+
+    pool = AsyncMock()
+    pool.fetch.return_value = rows
+    monkeypatch.setattr(ca, "get_admin", AsyncMock(return_value={"topic": "мебель"}))
+    monkeypatch.setattr(ca, "channel_row", AsyncMock(return_value={"title": "Мебель"}))
+    monkeypatch.setattr(ca, "_post_context", AsyncMock(return_value={
+        "news_mode": False, "is_intro": False, "rules": cb.BrandRules(), "pillar": "Советы",
+        "profile": {"topic": "мебель", "title": "Мебель", "audience": "семьи"},
+        "recent": [], "best": [], "lessons": []}))
+    return pool
+
+
+def _bodies(pool):
+    return [a[2] for a in (c.args for c in pool.execute.call_args_list)
+            if "SET body=$2" in a[0]]
+
+
+def _attempt_ids(pool):
+    return [a[1] for a in (c.args for c in pool.execute.call_args_list)
+            if "write_attempts=write_attempts+1" in a[0]]
+
+
+def test_rejected_slots_are_refilled_within_the_same_pass(monkeypatch):
+    """Отклонённый пост раньше оставлял слот пустым до исчерпания попыток, и в
+    своё время выхода канал молчал: «написано 1 из 3» — это два молчания.
+    Теперь за отклонённые слоты идёт ОДИН добор, и причина отклонения модели
+    сообщается — иначе она переписывала бы то же самое."""
+    import json
+    from unittest.mock import AsyncMock
+
+    pool = _prewrite_stage(monkeypatch, [{"id": i, "pillar": "Советы", "topic": ""}
+                                         for i in (11, 12, 13)])
+    prompts = []
+
+    async def ai(system, user):
+        prompts.append(user)
+        if len(prompts) == 1:  # модель проигнорировала распределение: два брака
+            return json.dumps(["Годный первый пост про упаковку дивана и его углы.",
+                               "БРАК второй", "БРАК третий"], ensure_ascii=False)
+        return json.dumps(["Кухонный гарнитур везём частями, столешницу — ребром.",
+                           "Кровать разбираем до каркаса, крепёж клеим к изголовью."],
+                          ensure_ascii=False)
+
+    async def review(pool_, owner, cid, ctx, text):
+        return ["текст короче минимума"] if text.startswith("БРАК") else []
+    monkeypatch.setattr(ca, "review_text", review)
+
+    assert asyncio.run(ca.prewrite(pool, 1, 2, complete=ai)) == 3
+    assert len(prompts) == 2, "добор — ровно одно дополнительное обращение"
+    assert len(_bodies(pool)) == 3, "наполнены все три слота"
+    assert not _attempt_ids(pool), "слот, который наполнен, попытки не тратит"
+    assert "текст короче минимума" in prompts[1], "модель должна узнать причину отказа"
+    assert "напиши 2 РАЗНЫХ поста" in prompts[1], "добор — только за отклонённые слоты"
+    assert "Годный первый пост" in prompts[1], "добор знает, что уже написано в пачке"
+
+
+def test_the_refill_happens_once_and_then_the_attempt_is_counted(monkeypatch):
+    """Добор ограничен одним запросом: лимитированную модель нельзя долбить до
+    успеха. Если и добор забракован — попытка слота засчитана."""
+    import json
+
+    pool = _prewrite_stage(monkeypatch, [{"id": i, "pillar": "Советы", "topic": ""}
+                                         for i in (21, 22)])
+    prompts = []
+
+    async def ai(system, user):
+        prompts.append(user)
+        return json.dumps(["БРАК один", "БРАК два"], ensure_ascii=False)
+
+    async def review(pool_, owner, cid, ctx, text):
+        return ["текст короче минимума"]
+    monkeypatch.setattr(ca, "review_text", review)
+
+    assert asyncio.run(ca.prewrite(pool, 1, 2, complete=ai)) == 0
+    assert len(prompts) == 2, "один добор, не цикл до успеха"
+    assert sorted(_attempt_ids(pool)) == [21, 22]
+
+
+def test_the_refill_keeps_what_the_first_pass_wrote_when_the_limit_hits(monkeypatch):
+    """Лимит ИИ на доборе не должен терять уже написанное в первом проходе."""
+    import json
+
+    pool = _prewrite_stage(monkeypatch, [{"id": i, "pillar": "Советы", "topic": ""}
+                                         for i in (31, 32)])
+    calls = []
+
+    async def ai(system, user):
+        calls.append(user)
+        if len(calls) == 1:
+            return json.dumps(["Годный пост про упаковку дивана и его углы.", "БРАК"],
+                              ensure_ascii=False)
+        raise ca.AiBusy("лимит")
+
+    async def review(pool_, owner, cid, ctx, text):
+        return ["текст короче минимума"] if text.startswith("БРАК") else []
+    monkeypatch.setattr(ca, "review_text", review)
+
+    assert asyncio.run(ca.prewrite(pool, 1, 2, complete=ai)) == 1
+    assert len(calls) == 2, "добор за отклонённый слот был запрошен"
+    assert len(_bodies(pool)) == 1 and _attempt_ids(pool) == [32]
+
+
+def test_the_log_does_not_claim_one_request_after_a_refill(monkeypatch):
+    """Журнал владельца не должен утверждать «одним обращением», когда их было два."""
+    import json
+
+    pool = _prewrite_stage(monkeypatch, [{"id": i, "pillar": "Советы", "topic": ""}
+                                         for i in (41, 42)])
+    seen = []
+
+    async def ai(system, user):
+        seen.append(user)
+        if len(seen) == 1:
+            return json.dumps(["Годный пост про упаковку дивана и его углы.", "БРАК"],
+                              ensure_ascii=False)
+        return json.dumps(["Кровать разбираем до каркаса, крепёж клеим к изголовью."],
+                          ensure_ascii=False)
+
+    async def review(pool_, owner, cid, ctx, text):
+        return ["текст короче минимума"] if text.startswith("БРАК") else []
+    monkeypatch.setattr(ca, "review_text", review)
+
+    logged = []
+
+    async def log_event(pool_, owner, cid, kind, text):
+        logged.append(text)
+    monkeypatch.setattr(ca, "log_event", log_event)
+
+    assert asyncio.run(ca.prewrite(pool, 1, 2, complete=ai)) == 2
+    assert logged and "2 из 2" in logged[0]
+    assert "одним обращением" not in logged[0], "обращений было два — так и напиши"
+
+
 def test_daily_report_does_not_alarm_on_ai_wait():
     """Канал, ждущий сброса лимита ИИ, — не «требует внимания»: это перенос."""
     wait = {"posts_7d": 3, "last_error": "Жду ИИ: лимит запросов у всех моделей, продолжу в 12:00 UTC"}
