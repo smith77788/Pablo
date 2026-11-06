@@ -175,3 +175,42 @@ def test_the_counter_is_described_for_the_owner():
         "а" <= ch.lower() <= "я" for ch in _HELP[name]), (
         "счётчик слияний без русского описания — строка без подписи на графике"
     )
+
+
+def test_a_reused_campaign_is_never_deleted_by_the_second_tap():
+    """Удалять можно только СВОЮ строку, а не ту, что отдала дверь.
+
+    Повтор нажатия садится на кампанию первой попытки, а она к этому моменту
+    может уже рассылать. Кнопка «запустить» при занятой инфраструктуре
+    удаляла кампанию по id — то есть удалила бы ЖИВУЮ, и вместе со строкой
+    ушёл бы журнал отправок (`dm_campaign_log`, ON DELETE CASCADE): тот самый,
+    по которому кампания не пишет людям дважды.
+
+    Мерка по смыслу: каждое удаление кампании в обработчике обязано стоять
+    под проверкой флага переиспользования.
+    """
+    import ast as _ast
+    import pathlib as _pl
+
+    root = _pl.Path(__file__).resolve().parent.parent
+    src = (root / "bot" / "handlers" / "dm_campaigns.py").read_text(encoding="utf-8")
+    tree = _ast.parse(src)
+
+    deletes = [n for n in _ast.walk(tree)
+               if isinstance(n, _ast.Constant) and isinstance(n.value, str)
+               and "DELETE FROM dm_campaigns" in n.value]
+    assert deletes, "удаление кампании не найдено — мерка смотрит не туда"
+
+    guards = []
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.If):
+            continue
+        test = _ast.get_source_segment(src, node.test) or ""
+        body = "\n".join(filter(None, (_ast.get_source_segment(src, b)
+                                       for b in node.body)))
+        if "reused" in test and "DELETE FROM dm_campaigns" not in body:
+            # Ветка повтора: она как раз НЕ должна удалять.
+            guards.append(test)
+    assert guards, (
+        "удаление кампании не прикрыто проверкой «эту строку создало именно "
+        "это нажатие»: повтор удалит живую кампанию вместе с её журналом")
