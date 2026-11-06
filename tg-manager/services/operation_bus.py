@@ -48,6 +48,22 @@ def _dedup_status_sql() -> str:
 # коротко, чтобы подавить намеренный повторный запуск позже.
 DEFAULT_DEDUP_WINDOW_SEC = 20
 
+# Ключи params, которые НЕ являются частью личности операции: указатель на
+# сообщение владельца с прогресс-баром. Это сообщение создаётся ДО постановки,
+# поэтому у каждого тапа оно СВОЁ, и, попав в дедуп-идентичность, оно её ломает
+# навсегда: params двух тапов не совпадут никогда, и окно идемпотентности не
+# сработает ни разу. Цена промаха — вторая массовая публикация в канал от всех
+# аккаунтов (или второй проход по профилям), то есть удвоенный риск бана.
+# Префикс `_progress_` выбран намеренно: ключ с таким именем не может оказаться
+# ЦЕЛЬЮ операции (а `chat_id`/`message_id` — могут, и вычёркивать их было бы
+# опаснее самой болезни: два разных адресата слиплись бы в одну операцию).
+DEDUP_COSMETIC_KEYS = ("_progress_chat_id", "_progress_message_id")
+
+
+def _dedup_identity_params(stored: dict[str, Any]) -> dict[str, Any]:
+    """params без косметических ключей — то, по чему сравниваются два сабмита."""
+    return {k: v for k, v in stored.items() if k not in DEDUP_COSMETIC_KEYS}
+
 # ── Служебные строки журнала целей ───────────────────────────────────────────
 # В operation_log исполнитель инвайта пишет не только цели, но и ШАГИ: выдачу
 # админки ('promote'), промоут-трюк ('promote_trick'), фолбэк ссылкой в ЛС
@@ -830,7 +846,9 @@ async def submit(
                      из OP_REGISTRY). Нужна, чтобы миграция прямых INSERT на шину
                      не теряла label, который они писали (см. Волна S/1A).
       dedup_window_sec — окно идемпотентности постановки (сек). Повторный сабмит
-                     идентичной операции (owner+op_type+params+scheduled_for),
+                     идентичной операции (owner+op_type+params+scheduled_for;
+                     косметические ключи params из DEDUP_COSMETIC_KEYS в
+                     сравнение не входят),
                      пока прежняя ещё в работе либо только что успешно
                      завершилась, вернёт её op_id вместо создания дубля.
                      Защищает от двойного тапа и retry после таймаута, включая
@@ -873,8 +891,16 @@ async def submit(
 
     from services.operation_secrets import seal_operation_params
 
-    stored_params, sensitive_params_fp = seal_operation_params(params)
+    # Отпечаток чувствительных params считается БЕЗ косметических ключей —
+    # иначе указатель на прогресс-бар менял бы отпечаток на каждом тапе, и
+    # дедуп по отпечатку был бы так же слеп, как дедуп по целому params.
+    _cosmetic = {k: params[k] for k in DEDUP_COSMETIC_KEYS if k in params}
+    stored_params, sensitive_params_fp = seal_operation_params(
+        _dedup_identity_params(params))
+    stored_params.update(_cosmetic)
     params_json = json.dumps(stored_params, ensure_ascii=False)
+    dedup_params_json = json.dumps(
+        _dedup_identity_params(stored_params), ensure_ascii=False)
     sched = _coerce_scheduled_for(scheduled_for)
 
     # Идемпотентность постановки. Двойной тап кнопки или retry клиента после
@@ -890,7 +916,7 @@ async def submit(
         async with pool.acquire() as conn:
             async with conn.transaction():
                 if dedup_window_sec and dedup_window_sec > 0:
-                    dedup_identity = sensitive_params_fp or params_json
+                    dedup_identity = sensitive_params_fp or dedup_params_json
                     _dedup_statuses = _dedup_status_sql()
                     await conn.execute(
                         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -913,11 +939,12 @@ async def submit(
                             f"""SELECT id FROM operation_queue
                                WHERE owner_id = $1 AND op_type = $2
                                  AND status IN {_dedup_statuses}
-                                 AND params = $3::jsonb
+                                 AND params - $6::text[] = $3::jsonb
                                  AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
                                  AND created_at > NOW() - make_interval(secs => $5)
                                ORDER BY id DESC LIMIT 1""",
-                            owner_id, op_type, params_json, sched, dedup_window_sec,
+                            owner_id, op_type, dedup_params_json, sched,
+                            dedup_window_sec, list(DEDUP_COSMETIC_KEYS),
                         )
                     if existing is not None:
                         op_id = int(existing)
@@ -952,6 +979,18 @@ async def submit(
             "(окно %dс) → переиспользую op_id=%d",
             op_type, owner_id, dedup_window_sec, op_id,
         )
+        # СЧЁТЧИК, А НЕ ТОЛЬКО ЛОГ. Дедуп, который не срабатывает ни разу,
+        # снаружи выглядит ровно как работающий: защита на месте, тесты
+        # зелёные, логов владелец не читает. Так и жили два места, где в
+        # дедуп-ключ попадало значение, своё у каждого тапа, — ноль
+        # срабатываний на графике был бы виден сразу. Счётчик вспомогателен:
+        # его сбой не повод терять операцию.
+        try:
+            from services import metrics as _m
+
+            _m.inc("infragram_submit_deduped_total", {"op_type": op_type})
+        except Exception:
+            pass
         return op_id
 
     log.info(

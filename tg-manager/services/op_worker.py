@@ -14228,8 +14228,10 @@ async def _exec_bulk_post_to_channel(
     channel_ref = params.get("channel_ref", "")
     text_to_post = params.get("text_to_post", "")
     bulk_access_hash = int(params.get("bulk_access_hash", 0) or 0)
-    chat_id = params.get("chat_id")
-    message_id = params.get("message_id")
+    # Старые имена читаются тоже: операции, поставленные до переименования,
+    # уже лежат в очереди, и прогресс-бар им дописывать всё равно нужно.
+    chat_id = params.get("_progress_chat_id") or params.get("chat_id")
+    message_id = params.get("_progress_message_id") or params.get("message_id")
 
     if not account_ids or not channel_ref or not text_to_post:
         return {"status": "failed", "reason": "Не указан channel_ref, text_to_post или account_ids"}
@@ -14481,8 +14483,10 @@ async def _exec_bulk_update_profile(
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
     field = params.get("field", "")
     value = params.get("value", "")
-    chat_id = params.get("chat_id")
-    message_id = params.get("message_id")
+    # Старые имена читаются тоже: операции, поставленные до переименования,
+    # уже лежат в очереди, и прогресс-бар им дописывать всё равно нужно.
+    chat_id = params.get("_progress_chat_id") or params.get("chat_id")
+    message_id = params.get("_progress_message_id") or params.get("message_id")
 
     if not account_ids or not field or value == "":
         return {"status": "failed", "reason": "Не указано field, value или account_ids"}

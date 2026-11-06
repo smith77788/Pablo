@@ -4706,8 +4706,13 @@ async def fsm_bulk_post_text(
                 "channel_ref": channel_ref,
                 "text_to_post": text_to_post,
                 "bulk_access_hash": bulk_access_hash,
-                "chat_id": message.chat.id,
-                "message_id": msg.message_id,
+                # Косметический указатель: только чтобы дописывать прогресс
+                # в это сообщение. Префикс `_progress_` выводит его из
+                # дедуп-идентичности операции (operation_bus.DEDUP_COSMETIC_KEYS):
+                # иначе у каждого тапа свой message_id, и двойной тап давал бы
+                # ДВЕ массовые операции вместо одной.
+                "_progress_chat_id": message.chat.id,
+                "_progress_message_id": msg.message_id,
             },
             total_items=total,
         )
@@ -4958,8 +4963,13 @@ async def fsm_update_profile(
                 "account_ids": [int(a["id"]) for a in accounts],
                 "field": field,
                 "value": value,
-                "chat_id": message.chat.id,
-                "message_id": msg.message_id,
+                # Косметический указатель: только чтобы дописывать прогресс
+                # в это сообщение. Префикс `_progress_` выводит его из
+                # дедуп-идентичности операции (operation_bus.DEDUP_COSMETIC_KEYS):
+                # иначе у каждого тапа свой message_id, и двойной тап давал бы
+                # ДВЕ массовые операции вместо одной.
+                "_progress_chat_id": message.chat.id,
+                "_progress_message_id": msg.message_id,
             },
             total_items=total,
         )
