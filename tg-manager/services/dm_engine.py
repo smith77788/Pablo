@@ -208,6 +208,103 @@ def template_uses_personalization(template: str) -> bool:
     return bool(template) and bool(_PLACEHOLDER_RE.search(template))
 
 
+async def find_or_create_campaign(
+    pool: "asyncpg.Pool",
+    owner_id: int,
+    *,
+    name: str,
+    text_template: str,
+    target_type: str,
+    target_id: int | None,
+    status: str = "draft",
+    params: dict | None = None,
+    total_targets: int = 0,
+    window_sec: int = 90,
+) -> tuple[int, bool]:
+    """Создать кампанию ЛС или вернуть ту же, если это повтор того же нажатия.
+
+    Возвращает (campaign_id, reused).
+
+    ЗАЧЕМ. Запуск кампании из бота создаёт строку кампании и ТУТ ЖЕ ставит
+    операцию, кладя свежий `campaign_id` в её params. Поэтому окно
+    идемпотентности `operation_bus.submit` на этот случай не работает в
+    принципе: у двух нажатий разные id, значит разные params, значит две
+    операции. А журнал отправок (`dm_campaign_log`) дедуплит по паре
+    (campaign_id, tg_user_id) — он привязан К КАМПАНИИ, и для второй кампании
+    все получатели снова «новые». Итог: человек получает одно и то же письмо
+    дважды, флот делает двойную работу на самой баноопасной стороне продукта.
+
+    Двойное нажатие здесь не теория. FSM-состояние чистится ПОСЛЕ вставки, а
+    два callback-апдейта обрабатываются параллельно; сверх того Телеграм сам
+    повторяет callback, если бот не ответил за ~15 секунд, — и повтор приходит
+    с теми же данными.
+
+    КАК. Личность нажатия — содержимое кампании (владелец, имя, текст,
+    аудитория, params), а не её id. Ищем свою же кампанию с тем же
+    содержимым, созданную только что, и возвращаем её вместо второй вставки;
+    тогда и `submit` получит те же params и сольёт повтор в одну операцию.
+    `pg_advisory_xact_lock` по той же личности сериализует одновременные
+    нажатия (без него оба запроса ничего не находят и оба вставляют).
+
+    ОКНО — 90 секунд, то же, что у необратимых операций в
+    `operation_bus.IRREVERSIBLE_DEDUP_WINDOW_SEC`: 30 секунд клиент ждёт
+    ответа, плюс минута на то, чтобы владелец увидел ошибку и нажал заново.
+    Намеренный повтор кампании позже окна по-прежнему создаёт новую — иначе
+    владелец не смог бы разослать то же письмо второй волной.
+
+    Статусы `draft`/`running` — то, во что превращается кампания в первые
+    секунды после запуска. Законченную (`done`/`failed`) не переиспользуем:
+    повтор по ней означает именно «разослать заново».
+    """
+    import json as _json
+
+    params_json = _json.dumps(params or {}, ensure_ascii=False, sort_keys=True)
+    identity = "|".join((
+        "dmcampaign", str(int(owner_id)), str(name), str(text_template),
+        str(target_type), str(target_id), params_json,
+    ))
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", identity)
+            twin = await conn.fetchval(
+                """SELECT id FROM dm_campaigns
+                    WHERE owner_id = $1 AND name = $2 AND text_template = $3
+                      AND target_type = $4
+                      AND target_id IS NOT DISTINCT FROM $5
+                      AND params = $6::jsonb
+                      AND status IN ('draft', 'running')
+                      AND created_at > now() - make_interval(secs => $7)
+                    ORDER BY id DESC LIMIT 1""",
+                int(owner_id), str(name), str(text_template), str(target_type),
+                int(target_id) if target_id else None, params_json,
+                float(window_sec),
+            )
+            if twin is not None:
+                log.warning(
+                    "dm_campaign: повтор нажатия владельца %s — переиспользую "
+                    "кампанию %s вместо второй рассылки тем же людям",
+                    owner_id, int(twin),
+                )
+                try:
+                    from services import metrics as _m
+
+                    _m.inc("infragram_dm_campaign_relaunch_merged_total", {})
+                except Exception:
+                    pass
+                return int(twin), True
+            new_id = await conn.fetchval(
+                """INSERT INTO dm_campaigns(owner_id, name, text_template,
+                                            target_type, target_id, status,
+                                            total_targets, params)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING id""",
+                int(owner_id), str(name), str(text_template), str(target_type),
+                int(target_id) if target_id else None, str(status),
+                int(total_targets or 0), params_json,
+            )
+    return int(new_id), False
+
+
 def parse_import_list(raw, limit: int = 5000) -> list[dict]:
     """Разбирает пользовательский список получателей → [{user_id, username}].
 
