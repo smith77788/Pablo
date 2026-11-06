@@ -287,8 +287,6 @@ _DIRECT_DIRS = ("services", "database", "bot")
 
 def _direct_counters() -> dict[str, tuple[str, str]]:
     """{имя: (где, метод)} для прямых вызовов inc/gauge/observe."""
-    import ast
-
     out: dict[str, tuple[str, str]] = {}
     for sub in _DIRECT_DIRS:
         base = os.path.join(ROOT, sub)

@@ -338,6 +338,8 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "🔍",
         # op_worker пишет target=f"ch#{chan_id}" — префикс + числовой id.
         "retry_targets": {"param": "channel_ids", "prefix": "ch#", "kind": "int"},
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка оформления видна подписчикам.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "bulk_join": {
         "description": "Массовое вступление в каналы",
@@ -382,6 +384,8 @@ OP_REGISTRY: dict[str, dict] = {
         # идемпотентна (setMy* и замена приветствия приводят к тому же
         # состоянию), а повтор в пределах одного прогона уже пропускает
         # сделанное по operation_log (completed_targets в исполнителе).
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка профиля ботов видна снаружи.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "bulk_bot_profile_rollback": {
         "description": "Откат массового изменения профиля ботов",
@@ -445,6 +449,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "pro",
         "max_retries": 1,
         "icon": "⚡",
+        # Повтор после таймаута клиента выполнил бы её второй раз: жалобы уходят эшелонами от флота.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "gift_transfer": {
         "description": "Передача Telegram-подарков",
@@ -471,6 +477,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "🌱",
+        # Повтор после таймаута клиента выполнил бы её второй раз: посев постов уходит в каналы пакета.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "promote_presence_pack": {
         "description": "Назначение бота администратором Presence Pack",
@@ -522,6 +530,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "✏️",
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка профилей аккаунтов видна снаружи.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "bulk_chan_exec": {
         "description": "Массовые действия с каналами",
@@ -669,12 +679,16 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🖼",
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка профилей аккаунтов видна снаружи.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "mass_report": {
         "description": "Массовая жалоба на контент",
         "min_plan": "pro",
         "max_retries": 1,
         "icon": "🚩",
+        # Повтор после таймаута клиента выполнил бы её второй раз: жалоба уходит в Телеграм от всего флота.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "content_clone": {
         "description": "Клонирование контента между каналами",
@@ -685,6 +699,8 @@ OP_REGISTRY: dict[str, dict] = {
         # На цель приходится одно действие (аккаунт выбирается внутри), поэтому
         # успех закрывает её окончательно.
         "retry_targets": {"param": "target_refs", "kind": "str"},
+        # Повтор после таймаута клиента выполнил бы её второй раз: посты копируются в канал.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "niche_growth_post": {
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
@@ -733,6 +749,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "👤",
+        # Повтор после таймаута клиента выполнил бы её второй раз: правка профилей аккаунтов видна снаружи.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "create_channel": {
         "description": "Создание канала",
@@ -759,6 +777,8 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "📝",
         # Тот же исполнитель, что у mass_publish: target = str(channel_id).
         "retry_targets": {"param": "channel_ids", "kind": "int"},
+        # Повтор после таймаута клиента выполнил бы её второй раз: пост публикуется в канале.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "run_broadcast": {
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
@@ -785,6 +805,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "🧬",
+        # Повтор после таймаута клиента выполнил бы её второй раз: посты копируются в канал.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "ad_intel_scan": {
         "description": "Разведка рекламы конкурентов",
@@ -809,6 +831,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "pro",
         "max_retries": 1,
         "icon": "🚩",
+        # Повтор после таймаута клиента выполнил бы её второй раз: жалоба уходит в Телеграм.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "leave_all_chats": {
         "description": "Выход из всех чатов",
@@ -839,12 +863,16 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🔗",
+        # Повтор после таймаута клиента выполнил бы её второй раз: связка разворачивается на живых каналах.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "crosspost_run": {
         "description": "Кросспостинг",
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🔁",
+        # Повтор после таймаута клиента выполнил бы её второй раз: посты уходят в каналы сети.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "community_add_channel": {
         "description": "Канал ноды-сообщества",
@@ -857,6 +885,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🏛",
+        # Повтор после таймаута клиента выполнил бы её второй раз: сообщения и реакции уходят в ноду от флота.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
     "community_set_staff": {
         "description": "Роли ноды-сообщества",
