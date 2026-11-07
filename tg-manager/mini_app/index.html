@@ -6564,10 +6564,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">Почтовые ящики</div>
+    <button class="btn btn-s" onclick="openMailboxes()">Обновить список</button>
   </div>
   <div class="sub-sb">
     <div class="sec">Мои подключения</div>
     <div id="mailboxList" class="lst"></div>
+    <div class="sec">Быстрый вход</div>
+    <div id="mailboxOAuthButtons"></div>
+    <div class="field-note">Вход открывается на сайте Google. Пароль Infragram не получает. После подключения вернитесь сюда и обновите список. OAuth не снимает сетевые ограничения SMTP на хостинге.</div>
     <div class="sec">Подключить почту</div>
     <form onsubmit="connectMailbox(event)" autocomplete="off">
       <label for="mailboxProvider">Почтовый провайдер</label>

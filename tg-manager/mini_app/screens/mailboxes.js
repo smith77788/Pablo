@@ -5,6 +5,25 @@ async function openMailboxes() {
   list.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const data = await api('/api/miniapp/mailboxes');
+    const oauth = document.getElementById('mailboxOAuthButtons');
+    oauth.replaceChildren();
+    for (const provider of data.oauth || []) {
+      const button = document.createElement('button');
+      button.className = 'btn btn-s';
+      button.textContent = provider.available ? provider.label : provider.label + ' — не настроен';
+      button.disabled = !provider.available;
+      button.onclick = async () => {
+        button.disabled = true;
+        try {
+          const result = await api('/api/miniapp/mailboxes/oauth/' + provider.key, {method:'POST'});
+          if (tg && typeof tg.openLink === 'function') tg.openLink(result.url);
+          else window.open(result.url, '_blank', 'noopener,noreferrer');
+          toast('После входа вернитесь и обновите список почты');
+        } catch(e) { toast(errRu(e, 'Не удалось начать вход')); }
+        finally { button.disabled = false; }
+      };
+      oauth.appendChild(button);
+    }
     const select = document.getElementById('mailboxProvider');
     if (!select.options.length) {
       for (const provider of data.providers) {
