@@ -119,18 +119,35 @@ function renderSummary(d) {
 
 async function loadSummary() {
   const wrap = document.getElementById('summaryWrap');
-  if (!wrap) return;
-  const cached = (typeof getCached === 'function') ? getCached('infragram_cache_summary') : null;
-  if (cached) renderSummary(cached);
-  else wrap.innerHTML = UI.block('📊 Итоги за 7 дней', UI.skeleton(4));
+  if (!wrap || loadSummary.pending) return;
+  loadSummary.pending = true;
+  const cached = loadSummary.lastData || ((typeof getCached === 'function') ? getCached('infragram_cache_summary') : null);
+  if (cached && !loadSummary.lastData) renderSummary(cached);
+  else if (!cached) wrap.innerHTML = UI.block('📊 Итоги за 7 дней', UI.skeleton(4));
+  function summaryState(message, retry) {
+    let status = document.getElementById('summaryDataStatus');
+    if (!status) {
+      status = document.createElement('div');
+      status.id = 'summaryDataStatus';
+      status.className = 'home-data-status';
+      status.setAttribute('role', 'status');
+      status.setAttribute('aria-live', 'polite');
+      wrap.appendChild(status);
+    }
+    homeLoadState('summaryDataStatus', message, retry);
+  }
+  summaryState(cached ? 'Обновляем итоги. Пока показаны предыдущие данные.' : 'Загружаем итоги…');
   try {
     const d = await api('/api/miniapp/summary?days=7');
     if (typeof setCache === 'function') setCache('infragram_cache_summary', d);
+    loadSummary.lastData = d;
     renderSummary(d);
+    summaryState('Итоги обновлены в ' + new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}));
   } catch (e) {
     if (!cached) {
       wrap.innerHTML = UI.block('📊 Итоги за 7 дней',
         (typeof errHtml === 'function') ? errHtml(errRu(e), 'loadSummary()') : UI.empty('Не удалось загрузить итоги'));
     }
-  }
+    summaryState(cached ? 'Не удалось обновить итоги. Показаны предыдущие данные, они могут быть устаревшими.' : 'Итоги недоступны. Это не нулевые значения.', true);
+  } finally { loadSummary.pending = false; }
 }

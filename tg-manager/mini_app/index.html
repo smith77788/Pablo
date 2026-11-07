@@ -1290,6 +1290,9 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .home-fleet-actions{display:flex;gap:8px}
 .home-fleet-actions .btn{flex:1;font-size:12px;padding:9px 5px}
 .home-fold-result{display:none;margin-top:10px;font-size:12px;line-height:1.6}
+.home-data-status{margin:8px 16px;font-size:11px;color:var(--hint);line-height:1.5}
+.home-data-status .btn{margin-left:8px;font-size:12px;min-height:32px}
+#s-health .home-fleet{margin:12px 16px}
 .home-create-fold{margin-bottom:8px}
 .home-create-fold .sec-row{padding-left:0;padding-right:0}
 @media(max-width:340px){#s-home .qa-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -1377,7 +1380,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📊 Итоги</div>
-    <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome()">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
       <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Онлайн</span></div>
@@ -1389,6 +1392,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          экран отвечает на вопрос «что мне это принесло», а состояние флота
          ниже. -->
     <div id="summaryWrap"></div>
+    <div id="homeDataStatus" role="status" aria-live="polite" class="home-data-status"></div>
     <!-- 🚀 Онбординг: чеклист активации новичка (скрывается после активации) -->
     <div id="onboardCard" style="margin:12px 16px 0;display:none"></div>
     <!-- Operation Progress -->
@@ -1443,15 +1447,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           </div>
           <div id="copilotList" class="copilot-list"></div>
         </div>
-        <div class="home-fleet">
-          <div class="home-fleet-title">🧹 Обслуживание флота</div>
-          <div class="home-fleet-copy">Проверка и очистка ботов, аккаунтов и каналов одним запуском.</div>
-          <div class="home-fleet-actions">
-            <button class="btn btn-s" id="fleetCheckBtn" onclick="fleetCheckAll()">🩺 Проверить всё</button>
-            <button class="btn btn-s" id="fleetCleanBtn" onclick="fleetCleanupAll()">🧹 Очистить мёртвое</button>
-          </div>
-          <div id="fleetSweepResult" class="home-fold-result"></div>
-        </div>
+        <button class="btn btn-s" onclick="openHealthHub()">Открыть «Здоровье» и обслуживание</button>
       </div>
     </details>
     <!-- Activity chart -->
@@ -6405,6 +6401,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="health" data-tab="accounts" role="tablist" aria-label="Вкладки модуля «Здоровье»"></div>
   <div class="sub-sb">
+    <div class="home-fleet">
+      <div class="home-fleet-title">Обслуживание флота</div>
+      <div class="home-fleet-copy">Проверка ботов, аккаунтов и каналов. Перед удалением покажем состав и запросим подтверждение.</div>
+      <div class="home-fleet-actions">
+        <button class="btn btn-s" id="fleetCheckBtn" onclick="fleetCheckAll()">🩺 Проверить всё</button>
+        <button class="btn btn-s" id="fleetCleanBtn" onclick="fleetCleanupAll()">🧹 Очистить мёртвое</button>
+      </div>
+      <div id="fleetSweepResult" class="home-fold-result"></div>
+    </div>
     <div id="healthStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <!-- «(7 дней)» здесь было неправдой: за неделю считается только число в
          плитке «Флуд 7д», а список событий сервер отдаёт за всё время. -->
@@ -9812,25 +9817,44 @@ async function fleetCleanupAll() {
   finally { if(btn){btn.disabled=false;btn.textContent='🧹 Очистить мёртвое';} }
 }
 async function loadHome() {
+  if (loadHome.pending) return;
+  loadHome.pending = true;
   modernizeIcons(document.getElementById('s-home'));
-  const cached = getCached('infragram_cache_home');
-  if (cached) { renderCards(cached); renderAct(cached.recent_activity||[]); }
+  const cached = loadHome.lastData || getCached('infragram_cache_home');
+  if (cached && !loadHome.lastData) { renderCards(cached); renderAct(cached.recent_activity||[]); }
+  homeLoadState('homeDataStatus', cached ? 'Обновляем показатели. Пока показаны предыдущие данные.' : 'Загружаем показатели…');
   try {
     const d = await api('/api/miniapp/dashboard');
     setCache('infragram_cache_home', d);
+    loadHome.lastData = d;
     renderCards(d);
     renderAct(d.recent_activity||[]);
+    homeLoadState('homeDataStatus', 'Показатели обновлены в ' + new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}));
   } catch(e) {
+    homeLoadState('homeDataStatus', cached ? 'Не удалось обновить показатели. Показаны предыдущие данные, они могут быть устаревшими.' : 'Показатели недоступны. Это не нулевые значения.', true);
     if (!cached) {
       const errorHtml = errHtml(errRu(e), 'loadHome()');
       document.getElementById('kpiScroll').innerHTML = errorHtml;
       document.getElementById('actList').innerHTML = errorHtml;
     }
-  }
+  } finally { loadHome.pending = false; }
   loadOnboarding();
   loadOrganismPulse();
   renderFrequent();
   if (typeof loadSummary === 'function') loadSummary();
+}
+
+function homeLoadState(id, message, retry) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = message;
+  if (retry) {
+    const button = document.createElement('button');
+    button.className = 'btn btn-s';
+    button.textContent = 'Повторить';
+    button.onclick = id === 'summaryDataStatus' ? loadSummary : loadHome;
+    el.appendChild(button);
+  }
 }
 
 // 🚀 Онбординг: путь новичка от аккаунта до ПЕРВОГО РЕЗУЛЬТАТА
@@ -10975,9 +10999,9 @@ function renderCards(d) {
     {val:d.campaigns_active, lbl:'📨 Кампаний', act:"goTab('broadcasts')", color:'var(--orange)'},
     {val:d.funnels_active,   lbl:'🔄 Воронок',  act:"goTab('broadcasts')", color:'#f472b6'},
     {val:d.ops_running, lbl:'⚙️ В работе',     act:"openOps()",           color:'var(--hint)'},
-    {val:(d.queue_backlog||0), lbl:'⏳ В очереди', act:"openOps()",        color:'var(--orange)'},
+    {val:d.queue_backlog, lbl:'⏳ В очереди', act:"openOps()",        color:'var(--orange)'},
     {raw:(d.acc_health!=null?(d.acc_health+'%'):'—'), lbl:'💚 Здоровье', act:"goTab('accounts')", color:healthColor},
-    {val:(d.ops_failed||0), lbl:'❌ Ошибок 24ч', act:"openOps()",         color:(d.ops_failed>0?'var(--red)':'var(--hint)')},
+    {val:d.ops_failed, lbl:'❌ Ошибок 24ч', act:"openOps()",         color:(d.ops_failed>0?'var(--red)':'var(--hint)')},
   ];
   document.getElementById('kpiScroll').innerHTML = kpis.map(k=>{
     const display = k.raw !== undefined ? k.raw : num(k.val);

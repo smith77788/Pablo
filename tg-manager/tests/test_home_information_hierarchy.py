@@ -41,10 +41,10 @@ def test_secondary_panels_are_collapsed_into_two_disclosures():
     for element_id in (
         "organismPulse",
         "copilotWrap",
-        "fleetCheckBtn",
-        "fleetCleanBtn",
     ):
         assert f'id="{element_id}"' in health
+    assert 'id="fleetCleanBtn"' not in home
+    assert 'onclick="openHealthHub()"' in health
 
     create = home[home.index('class="home-fold home-create-fold"'):]
     for element_id in ("quickBcText", "quickChLink", "quickBotToken"):
