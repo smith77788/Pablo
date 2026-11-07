@@ -109,6 +109,6 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err('Ящик не найден', 404)
         return _json_resp({'ok': True})
 
-    app.router.add_get('/api/miniapp/mailboxes', mailbox_list)
-    app.router.add_post('/api/miniapp/mailboxes', mailbox_connect)
-    app.router.add_delete('/api/miniapp/mailboxes/{mailbox_id}', mailbox_delete)
+    app.router.add_get("/api/miniapp/mailboxes", mailbox_list)
+    app.router.add_post("/api/miniapp/mailboxes", mailbox_connect)
+    app.router.add_delete("/api/miniapp/mailboxes/{mailbox_id}", mailbox_delete)

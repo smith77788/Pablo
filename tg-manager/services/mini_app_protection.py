@@ -52,7 +52,7 @@ def setup_routes(app: web.Application, pool) -> None:
             'channels': list(report_channels.CHANNELS),
         })
 
-    app.router.add_get('/api/miniapp/report_channels', report_channels_catalog)
+    app.router.add_get("/api/miniapp/report_channels", report_channels_catalog)
 
     async def _strike_has_access(uid: int) -> bool:
         """Доступ к модулю «Массовые жалобы» — ПАРИТЕТ с ботом.
