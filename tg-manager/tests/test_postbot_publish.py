@@ -223,3 +223,23 @@ def test_all_publish_inputs_expose_and_validate_postbot_format():
     )
     assert "готовый пост: @PostBot код" in html
     assert "@PostBot код" in bot_handler
+
+
+def test_every_miniapp_channel_post_executor_keeps_postbot_atomic():
+    one_channel = py_function("services/op_worker.py", "_exec_bulk_post_to_channel")
+    one_account = py_function("services/op_worker.py", "_exec_bulk_post_chans")
+
+    assert "postbot_reference = postbot.parse_reference(text_to_post)" in one_channel
+    assert "_body = text_to_post" in one_channel
+    assert "_body = _expand_spintax(text_to_post)" in one_channel
+    assert "postbot_reference = postbot.parse_reference(text)" in one_account
+    assert "False if postbot_reference else _link_vary.contains_channel_link" in one_account
+    assert "_body = text" in one_account
+    assert "_body = _expand_spintax(text)" in one_account
+
+
+def test_every_miniapp_channel_post_route_rejects_a_broken_reference():
+    for function_name in ("post_to_channel", "channels_mass", "channels_bulk_post"):
+        body = py_function("services/mini_app_channels.py", function_name)
+        assert "has_explicit_intent(text)" in body, function_name
+        assert "parse_reference(text)" in body, function_name

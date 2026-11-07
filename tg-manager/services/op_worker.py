@@ -14217,7 +14217,7 @@ async def _exec_bulk_post_to_channel(
 ) -> dict:
     """Публикация текста в канал от нескольких аккаунтов."""
     import html as _html
-    from services import account_manager
+    from services import account_manager, postbot
     from database import db as _db
     from bot.utils.op_helpers import backoff, _progress_text
     # Anti-detection: разные аккаунты в ОДИН канал одинаковым текстом — самая явная
@@ -14227,6 +14227,7 @@ async def _exec_bulk_post_to_channel(
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
     channel_ref = params.get("channel_ref", "")
     text_to_post = params.get("text_to_post", "")
+    postbot_reference = postbot.parse_reference(text_to_post)
     bulk_access_hash = int(params.get("bulk_access_hash", 0) or 0)
     # Старые имена читаются тоже: операции, поставленные до переименования,
     # уже лежат в очереди, и прогресс-бар им дописывать всё равно нужно.
@@ -14235,6 +14236,8 @@ async def _exec_bulk_post_to_channel(
 
     if not account_ids or not channel_ref or not text_to_post:
         return {"status": "failed", "reason": "Не указан channel_ref, text_to_post или account_ids"}
+    if postbot.has_explicit_intent(text_to_post) and not postbot_reference:
+        return {"status": "failed", "reason": "Неверный формат: укажите @PostBot и один код"}
 
     rows = await resource_selector.select_all_active(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
@@ -14333,7 +14336,10 @@ async def _exec_bulk_post_to_channel(
                 await _safe_execute(
                         pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
-            _body = _expand_spintax(text_to_post)  # свой вариант текста от этого аккаунта
+            if postbot_reference:
+                _body = text_to_post
+            else:
+                _body = _expand_spintax(text_to_post)  # свой вариант текста от этого аккаунта
             try:
                 result = await account_manager.post_to_channel(
                     acc["session_str"],
@@ -14950,7 +14956,7 @@ async def _exec_bulk_post_chans(
     правила редактора, которых здесь нет). Исполнитель остаётся, чтобы честно
     доделать уже стоящие в очереди и рекуррентные круги — так же, как у
     `quick_post`. Стережёт `tests/test_channel_publish_one_op.py`."""
-    from services import account_manager
+    from services import account_manager, postbot
     from database import db as _db
     from bot.utils.op_helpers import backoff
     # Anti-detection: свой вариант текста в каждый канал (spintax; no-op без него).
@@ -14959,15 +14965,20 @@ async def _exec_bulk_post_chans(
     acc_id = int(params.get("acc_id", 0))
     channel_ids: list[int] = [int(x) for x in (params.get("channel_ids") or [])]
     text: str = params.get("text", "")
+    postbot_reference = postbot.parse_reference(text)
 
     if not acc_id or not channel_ids or not text:
         return {"status": "failed", "reason": "Не указан аккаунт, каналы или текст"}
+    if postbot.has_explicit_intent(text) and not postbot_reference:
+        return {"status": "failed", "reason": "Неверный формат: укажите @PostBot и один код"}
 
     # Анти-детект ссылок (см. _exec_mass_publish): та же ссылка в десятки каналов
     # залпом = сигнатура накрутки, целевой канал сносят. Форму варьируем на канал,
     # разнос увеличиваем. Без ссылки — no-op.
     from services import link_vary as _link_vary
-    _has_channel_link = _link_vary.contains_channel_link(text)
+    _has_channel_link = (
+        False if postbot_reference else _link_vary.contains_channel_link(text)
+    )
 
     row = await _safe_fetchrow(
             pool,
@@ -15089,7 +15100,10 @@ async def _exec_bulk_post_chans(
                         "fail": err_count,
                     }
                 await asyncio.sleep(_cool_left + random.uniform(2, 8))
-            _body = _expand_spintax(text)  # свой вариант текста в этот канал
+            if postbot_reference:
+                _body = text
+            else:
+                _body = _expand_spintax(text)  # свой вариант текста в этот канал
             if _has_channel_link:
                 _body = _link_vary.vary_channel_links(_body, int(ch_id))
             try:

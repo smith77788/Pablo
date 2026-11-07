@@ -25,6 +25,7 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты каналов и групп на приложении мини-аппа."""
     from services import operation_bus as _obus
+    from services import postbot as _postbot
     from services.mini_app_api import (
         _CHANNEL_IS_GROUP_SQL, _CHANNELS_ONE_ROW_SQL, _INTERNAL_ERROR,
         _cached_user, _channel_filter_sql, _err, _get_uid, _json_resp,
@@ -131,6 +132,8 @@ def setup_routes(app: web.Application, pool) -> None:
         text = validate_string(body.get("text"), max_len=4096)
         if not text:
             return _err("Нужен текст")
+        if _postbot.has_explicit_intent(text) and not _postbot.parse_reference(text):
+            return _err("Неверный формат: укажите @PostBot и один код публикации", 400)
         if check_sql_suspicious(text):
             return _err("Недопустимые символы в тексте поста")
         if len(text) > 4096:
@@ -536,6 +539,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 text = (body.get("text") or "").strip()
                 if not text:
                     return _err("Введите текст поста", 400)
+                if _postbot.has_explicit_intent(text) and not _postbot.parse_reference(text):
+                    return _err("Неверный формат: укажите @PostBot и один код публикации", 400)
                 if len(text) > 4096:
                     return _err("Слишком длинный текст (макс. 4096)", 400)
                 # ОДНА операция на все каналы, а не по одной на канал. Цикл
@@ -934,6 +939,8 @@ def setup_routes(app: web.Application, pool) -> None:
         text = validate_string(data.get("text"), max_len=4096)
         if not text:
             return _err("Введите текст поста", 400)
+        if _postbot.has_explicit_intent(text) and not _postbot.parse_reference(text):
+            return _err("Неверный формат: укажите @PostBot и один код публикации", 400)
         if check_sql_suspicious(text):
             return _err("Недопустимые символы в тексте", 400)
 
