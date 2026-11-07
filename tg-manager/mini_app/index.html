@@ -1269,6 +1269,31 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .freq-chip-ico{font-size:19px;line-height:1;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:11px;background:linear-gradient(145deg,var(--accent-soft),rgba(192,132,252,.08))}
 .freq-chip-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 
+/* Главная: один визуальный ритм вместо очереди конкурирующих карточек. */
+#s-home .qa-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+#s-home .qa-tile{min-height:76px;padding:10px 4px;justify-content:center}
+#s-home .qa-tile-ico{width:40px;height:40px;font-size:20px}
+.home-fold{margin:12px 16px 0;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg2);box-shadow:var(--shadow);overflow:hidden}
+.home-fold>summary{min-height:52px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:10px 42px 10px 14px;cursor:pointer;list-style:none;position:relative}
+.home-fold>summary::-webkit-details-marker{display:none}
+.home-fold>summary::after{content:'›';position:absolute;right:16px;top:50%;font-size:24px;line-height:1;color:var(--hint);transform:translateY(-50%) rotate(90deg);transition:transform .18s var(--ease)}
+.home-fold[open]>summary::after{transform:translateY(-50%) rotate(-90deg)}
+.home-fold-title{font-size:14px;font-weight:700;color:var(--text)}
+.home-fold-hint{font-size:11px;color:var(--hint)}
+.home-fold-body{padding:0 12px 12px;border-top:1px solid transparent}
+.home-fold[open] .home-fold-body{border-top-color:var(--border)}
+.home-fold-body #organismPulse{margin:10px 0 0!important}
+.home-fold-body .copilot-wrap{margin:10px 0 0!important}
+.home-fleet{margin-top:10px;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--sep)}
+.home-fleet-title{font-size:13px;font-weight:700;margin-bottom:2px}
+.home-fleet-copy{font-size:11px;color:var(--hint);line-height:1.4;margin-bottom:9px}
+.home-fleet-actions{display:flex;gap:8px}
+.home-fleet-actions .btn{flex:1;font-size:12px;padding:9px 5px}
+.home-fold-result{display:none;margin-top:10px;font-size:12px;line-height:1.6}
+.home-create-fold{margin-bottom:8px}
+.home-create-fold .sec-row{padding-left:0;padding-right:0}
+@media(max-width:340px){#s-home .qa-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
 /* ═══════════════ Advanced UI polish (Infragram) ═══════════════ */
 /* Мягкое свечение акцента сверху — только в тёмной теме: на светлом фоне оно
    превращалось в грязное пятно. Раньше условие было по теме ОС, а не Telegram. */
@@ -1364,41 +1389,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          экран отвечает на вопрос «что мне это принесло», а состояние флота
          ниже. -->
     <div id="summaryWrap"></div>
-    <!-- KPI scroll row -->
-    <div class="kpi-scroll" id="kpiScroll">
-      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
-      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
-      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
-      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
-      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
-    </div>
-    <!-- 🧹 Сделать всё разом: единое обслуживание флота. Проверить живость и
-         очистить мёртвое СРАЗУ по ботам, аккаунтам и каналам — параллельно,
-         из одного места (ручка /api/miniapp/fleet/sweep). -->
-    <div style="margin:12px 16px 0;background:var(--bg);border-radius:14px;padding:12px 14px;border:1px solid var(--sep)">
-      <div style="font-size:14px;font-weight:700;margin-bottom:2px">🧹 Обслуживание флота — всё разом</div>
-      <div style="font-size:12px;color:var(--hint);margin-bottom:10px">Проверить и очистить мёртвое сразу по ботам, аккаунтам и каналам — параллельно, из одного места.</div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-s" id="fleetCheckBtn" onclick="fleetCheckAll()" style="flex:1;font-size:13px;padding:10px 6px">🩺 Проверить всё</button>
-        <button class="btn btn-s" id="fleetCleanBtn" onclick="fleetCleanupAll()" style="flex:1;font-size:13px;padding:10px 6px">🧹 Очистить мёртвое</button>
-      </div>
-      <div id="fleetSweepResult" style="display:none;margin-top:10px;font-size:12px;line-height:1.6"></div>
-    </div>
     <!-- 🚀 Онбординг: чеклист активации новичка (скрывается после активации) -->
     <div id="onboardCard" style="margin:12px 16px 0;display:none"></div>
-    <!-- 🫀 Пульс организма: живой контекст + цепочки следующих действий -->
-    <div id="organismPulse" style="margin:12px 16px 0"></div>
     <!-- Operation Progress -->
     <div id="opProgress" style="display:none;margin:10px 16px;background:var(--bg);border-radius:14px;padding:12px 16px;border:1px solid var(--sep)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
-    </div>
-    <!-- Copilot: что делать дальше (контекстные подсказки) -->
-    <div id="copilotWrap" class="copilot-wrap" style="display:none;margin:12px 16px 0">
-      <div class="sec-row" style="margin:0 0 8px">
-        <div class="sec" style="margin:0">🧭 Что делать дальше</div>
-        <span class="sec-btn" onclick="loadNextActions(true)">Обновить</span>
-      </div>
-      <div id="copilotList" class="copilot-list"></div>
     </div>
     <!-- Quick actions -->
     <div class="sec">Быстрые действия</div>
@@ -1423,6 +1418,42 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="freq-row" id="freqList"></div>
     </div>
+    <div class="sec-row" style="margin-top:8px">
+      <div class="sec">Ресурсы</div>
+      <span class="sec-btn" onclick="openUnifiedDashboard()">Все показатели →</span>
+    </div>
+    <div class="kpi-scroll" id="kpiScroll">
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+    </div>
+    <details class="home-fold" id="homeHealthFold">
+      <summary>
+        <span class="home-fold-title">🫀 Состояние и рекомендации</span>
+        <span class="home-fold-hint">Пульс системы, следующие шаги и обслуживание</span>
+      </summary>
+      <div class="home-fold-body">
+        <div id="organismPulse"></div>
+        <div id="copilotWrap" class="copilot-wrap" style="display:none">
+          <div class="sec-row" style="margin:0 0 8px">
+            <div class="sec" style="margin:0">🧭 Что делать дальше</div>
+            <span class="sec-btn" onclick="loadNextActions(true)">Обновить</span>
+          </div>
+          <div id="copilotList" class="copilot-list"></div>
+        </div>
+        <div class="home-fleet">
+          <div class="home-fleet-title">🧹 Обслуживание флота</div>
+          <div class="home-fleet-copy">Проверка и очистка ботов, аккаунтов и каналов одним запуском.</div>
+          <div class="home-fleet-actions">
+            <button class="btn btn-s" id="fleetCheckBtn" onclick="fleetCheckAll()">🩺 Проверить всё</button>
+            <button class="btn btn-s" id="fleetCleanBtn" onclick="fleetCleanupAll()">🧹 Очистить мёртвое</button>
+          </div>
+          <div id="fleetSweepResult" class="home-fold-result"></div>
+        </div>
+      </div>
+    </details>
     <!-- Activity chart -->
     <div class="sec-row" style="margin-top:8px">
       <div class="sec">Активность за 7 дней</div>
@@ -1446,42 +1477,39 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="lst" id="actList"><div class="spin-wrap"><div class="spin"></div></div></div>
 
-    <!-- Quick Broadcast -->
-    <div class="sec-row" style="margin-top:12px">
-      <div class="sec">📢 Быстрая рассылка</div>
-    </div>
-    <div style="padding:0 0 8px">
-      <textarea id="quickBcText" rows="3" placeholder="Введите текст рассылки…" class="input-bc"></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn btn-p" id="quickBcBtn" onclick="submitQuickBroadcast()" style="flex:1 1 auto">📢 Отправить всем</button>
-        <button class="btn btn-s" onclick="openBcastPick()" style="flex:0 0 auto;padding:10px 16px">⚙️ Настроить</button>
+    <details class="home-fold home-create-fold">
+      <summary>
+        <span class="home-fold-title">＋ Быстро создать или отправить</span>
+        <span class="home-fold-hint">Рассылка, новый канал или бот</span>
+      </summary>
+      <div class="home-fold-body">
+        <div class="sec-row" style="margin-top:10px"><div class="sec">📢 Быстрая рассылка</div></div>
+        <div style="padding:0 0 8px">
+          <textarea id="quickBcText" rows="3" placeholder="Введите текст рассылки…" class="input-bc"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-p" id="quickBcBtn" onclick="submitQuickBroadcast()" style="flex:1 1 auto">📢 Отправить всем</button>
+            <button class="btn btn-s" onclick="openBcastPick()" style="flex:0 0 auto;padding:10px 16px">⚙️ Настроить</button>
+          </div>
+          <div id="quickBcErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
+        </div>
+        <div class="sec-row" style="margin-top:8px"><div class="sec">📡 Добавить канал</div></div>
+        <div style="padding:0 0 8px">
+          <div style="display:flex;gap:8px">
+            <input type="text" id="quickChLink" placeholder="https://t.me/channel или @username" style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
+            <button class="btn btn-p" onclick="submitQuickChannel()" style="flex:0 0 auto;padding:10px 16px" aria-label="Отправить">➕</button>
+          </div>
+          <div id="quickChErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
+        </div>
+        <div class="sec-row" style="margin-top:8px"><div class="sec">🤖 Добавить бота</div></div>
+        <div style="padding:0 0 8px">
+          <div style="display:flex;gap:8px">
+            <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx…" style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace">
+            <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0 0 auto;padding:10px 16px" aria-label="Отправить">➕</button>
+          </div>
+          <div id="quickBotErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
+        </div>
       </div>
-      <div id="quickBcErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
-    </div>
-
-    <!-- Quick Channel Add -->
-    <div class="sec-row" style="margin-top:12px">
-      <div class="sec">📡 Добавить канал</div>
-    </div>
-    <div style="padding:0 0 8px">
-      <div style="display:flex;gap:8px">
-        <input type="text" id="quickChLink" placeholder="https://t.me/channel или @username" style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
-        <button class="btn btn-p" onclick="submitQuickChannel()" style="flex:0 0 auto;padding:10px 16px" aria-label="Отправить">➕</button>
-      </div>
-      <div id="quickChErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
-    </div>
-
-    <!-- Quick Bot Add -->
-    <div class="sec-row" style="margin-top:12px">
-      <div class="sec">🤖 Добавить бота</div>
-    </div>
-    <div style="padding:0 0 8px">
-      <div style="display:flex;gap:8px">
-        <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx…" style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace">
-        <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0 0 auto;padding:10px 16px" aria-label="Отправить">➕</button>
-      </div>
-      <div id="quickBotErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
-    </div>
+    </details>
   </div>
 </div>
 

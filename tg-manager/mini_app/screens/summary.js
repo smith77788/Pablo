@@ -6,10 +6,6 @@
 // /api/miniapp/summary (services/results_summary.py); тот же расчёт видит
 // бот в кнопке «📊 Итоги», чтобы два интерфейса не расходились.
 //
-// Ниже — шесть разделов по задачам. Их состав не дублируется здесь: плитки
-// собираются из разметки экрана «Разделы» (data-section), а она — из одной
-// карты services/task_sections.py.
-//
 // Первый экран на компонентах дизайн-системы (screens/ui_kit.js, ui_kit.css).
 'use strict';
 
@@ -87,24 +83,6 @@ async function sumAct(idx) {
   }
 }
 
-function _sumSections() {
-  const more = document.getElementById('s-more');
-  if (!more) return [];
-  const out = [];
-  more.querySelectorAll('.sec[data-section]').forEach(sec => {
-    const key = sec.dataset.section;
-    // На главной — шесть рабочих разделов. Настройки и Лаборатория живут в
-    // «Разделах», чтобы не встречать новичка служебным и экспериментальным.
-    if (key === 'settings' || key === 'lab' || key === 'overview') return;
-    const t = (sec.textContent || '').trim();
-    const sp = t.indexOf(' ');
-    const desc = more.querySelector('.sec-desc[data-section="' + key + '"]');
-    out.push({ key, ico: sp > 0 ? t.slice(0, sp) : '•', title: sp > 0 ? t.slice(sp + 1) : t,
-               desc: desc ? (desc.textContent || '').trim() : '' });
-  });
-  return out;
-}
-
 function renderSummary(d) {
   const wrap = document.getElementById('summaryWrap');
   if (!wrap) return;
@@ -133,11 +111,10 @@ function renderSummary(d) {
   }
   const more = (d.attention_total || 0) > _SUM_ATT.length
     ? { label: 'Все ' + d.attention_total + ' →', fn: 'sumOpen', args: ['attention'] } : null;
-  const secs = _sumSections();
+  const attention = UI.group('Требует внимания', att, more);
   wrap.innerHTML =
-    UI.block('📊 Итоги за ' + days + ' дней', statsHtml, { label: 'Подробнее →', fn: 'sumOpen', args: ['attention'] }) +
-    UI.block('Требует внимания', att, more) +
-    (secs.length ? UI.block('Разделы', UI.sections(secs), { label: 'Все разделы →', fn: 'goTab', args: ['more'] }) : '');
+    UI.block('📊 Итоги за ' + days + ' дней', statsHtml + attention,
+      { label: 'Подробнее →', fn: 'sumOpen', args: ['attention'] });
 }
 
 async function loadSummary() {

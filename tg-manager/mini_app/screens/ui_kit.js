@@ -39,6 +39,10 @@ const UI = (() => {
     const l = link ? `<span class="ui-link" onclick="${call(link.fn, ...(link.args || []))}">${uiEsc(link.label)}</span>` : '';
     return `<div class="ui-block"><div class="ui-block-hdr"><div class="ui-block-title">${uiEsc(title)}</div>${l}</div>${bodyHtml}</div>`;
   }
+  function group(title, bodyHtml, link) {
+    const l = link ? `<span class="ui-link" onclick="${call(link.fn, ...(link.args || []))}">${uiEsc(link.label)}</span>` : '';
+    return `<div class="ui-group"><div class="ui-group-hdr"><div class="ui-group-title">${uiEsc(title)}</div>${l}</div><div class="ui-group-body">${bodyHtml}</div></div>`;
+  }
   // value === null → «нет данных»: ноль и отсутствие данных — разные ответы.
   function stat({ ico, label, value, delta, sub, fn, args }) {
     const empty = value === null || value === undefined;
@@ -76,6 +80,6 @@ const UI = (() => {
   function skeleton(n) { return `<div class="ui-stats">${'<div class="ui-skel"></div>'.repeat(n || 4)}</div>`; }
   // Внутренние имена с префиксом ui*: function esc/num уже объявлены в
   // index.html, и одноимённые объявления ловит test_miniapp_no_dup_functions.
-  return { esc: uiEsc, call, num: uiNum, block, stat, stats, alert, button, sectionTile, sections, ok,
+  return { esc: uiEsc, call, num: uiNum, block, group, stat, stats, alert, button, sectionTile, sections, ok,
            empty: uiEmpty, skeleton };
 })();

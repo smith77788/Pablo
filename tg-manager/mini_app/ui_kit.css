@@ -34,6 +34,10 @@
 .ui-block-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:var(--ui-s2);margin:0 0 var(--ui-s2)}
 .ui-block-title{font-size:var(--ui-fs);font-weight:var(--ui-fw-b);color:var(--ui-text)}
 .ui-link{display:inline-flex;align-items:center;min-height:32px;font-size:var(--ui-fs-sm);color:var(--ui-accent);cursor:pointer;white-space:nowrap}
+.ui-group{margin-top:var(--ui-s3);padding-top:var(--ui-s3);border-top:1px solid var(--ui-line)}
+.ui-group-hdr{display:flex;align-items:center;justify-content:space-between;gap:var(--ui-s2);margin-bottom:var(--ui-s2)}
+.ui-group-title{font-size:var(--ui-fs-sm);font-weight:var(--ui-fw-b);color:var(--ui-muted)}
+.ui-group-body>.ui-alert:last-child{margin-bottom:0}
 
 /* Показатель: подпись, крупное число, изменение к прошлому периоду */
 .ui-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--ui-s2)}
