@@ -66,12 +66,14 @@ def setup_routes(app: web.Application, pool) -> None:
         if provider != 'google':
             return _err('Этот провайдер быстрого входа пока не поддерживается', 400)
         if not email_oauth.is_provider_configured(provider):
-            return _err('Вход через Google ещё не настроен администратором приложения', 503)
+            missing = ', '.join(email_oauth.missing_provider_settings(provider))
+            return _err('В работающем сервисе не заданы настройки входа Google: '
+                        + missing + '. Проверьте переменные именно сервиса Infragram и повторите деплой.', 409)
         try:
             url = email_oauth.build_miniapp_auth_url(uid, provider)
         except ValueError:
             log.warning('mailbox oauth configuration invalid owner=%s provider=%s', uid, provider)
-            return _err('Настройки быстрого входа некорректны. Обратитесь к администратору.', 503)
+            return _err('Проверьте HTTPS-адрес возврата и секрет защиты OAuth в настройках сервиса.', 409)
         return _json_resp({'url': url})
 
     async def mailbox_connect(request):
@@ -103,8 +105,8 @@ def setup_routes(app: web.Application, pool) -> None:
         except (OSError, smtplib.SMTPException, TimeoutError) as exc:
             log.warning('mailbox connection failed owner=%s provider=%s kind=%s',
                         uid, body.get('provider'), type(exc).__name__)
-            return _err('Не удалось подключиться к почте. Проверьте доступность SMTP. '
-                        'Railway Free, Trial и Hobby блокируют исходящий SMTP.', 502)
+            return _err('Почтовый сервер недоступен по SMTP. Это не означает неверный пароль. '
+                        'Проверьте исходящую сеть и тариф Railway: Free, Trial и Hobby блокируют SMTP.', 422)
         encrypted = encrypt_token(password)
         await pool.execute(
             """INSERT INTO strike_email_accounts

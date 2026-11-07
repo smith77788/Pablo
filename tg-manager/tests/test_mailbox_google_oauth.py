@@ -1,7 +1,10 @@
 """Быстрый вход в почту: привязка владельца, браузера и шифрование токенов."""
 import hashlib
 import json
+import shutil
+import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlsplit
@@ -95,3 +98,39 @@ async def test_oauth_start_uses_authenticated_owner(configured, monkeypatch):
     response = await handler(SimpleNamespace(match_info={'provider':'google'}))
     state = parse_qs(urlsplit(json.loads(response.text)['url']).query)['state'][0]
     assert oauth.parse_state(state)['owner_id'] == 42
+
+
+@pytest.mark.asyncio
+async def test_missing_config_is_actionable_not_gateway_error(configured, monkeypatch):
+    monkeypatch.delenv('GOOGLE_OAUTH_CLIENT_ID')
+    monkeypatch.setattr(mini_app_api, '_get_uid', lambda request: 42)
+    app = web.Application()
+    mini_app_mailboxes.setup_routes(app, object())
+    handler = next(r.handler for r in app.router.routes()
+                   if r.method == 'POST' and r.resource.get_info().get('formatter')
+                   == '/api/miniapp/mailboxes/oauth/{provider}')
+    response = await handler(SimpleNamespace(match_info={'provider':'google'}))
+    assert response.status == 409
+    assert 'GOOGLE_OAUTH_CLIENT_ID' in response.text
+    assert 'test-client-secret' not in response.text
+
+
+def test_browser_uses_navigation_not_the_telegram_stub():
+    node = shutil.which('node')
+    assert node, 'Для проверки нужен Node.js'
+    source = Path(__file__).resolve().parents[1] / 'mini_app/screens/mailboxes.js'
+    script = r'''
+const fs = require('fs');
+eval(fs.readFileSync(process.argv[1], 'utf8'));
+let navigation = '', external = '';
+global.window = {location:{assign:url => navigation=url}};
+global.tg = {initData:'', openLink:()=>{throw Error('called stub');}};
+openMailboxOAuthUrl('https://example.org/start');
+if(navigation !== 'https://example.org/start') throw Error('no navigation');
+tg = {initData:'signed-data', openLink:url=>external=url};
+openMailboxOAuthUrl('https://example.org/telegram');
+if(external !== 'https://example.org/telegram') throw Error('no external link');
+'''
+    result = subprocess.run([node, '-e', script, str(source)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr

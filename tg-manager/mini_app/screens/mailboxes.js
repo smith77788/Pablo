@@ -5,24 +5,22 @@ async function openMailboxes() {
   list.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const data = await api('/api/miniapp/mailboxes');
-    const oauth = document.getElementById('mailboxOAuthButtons');
-    oauth.replaceChildren();
+    const oauthButtons = document.getElementById('mailboxOAuthButtons');
+    oauthButtons.replaceChildren();
     for (const provider of data.oauth || []) {
       const button = document.createElement('button');
       button.className = 'btn btn-s';
-      button.textContent = provider.available ? provider.label : provider.label + ' — не настроен';
-      button.disabled = !provider.available;
+      button.textContent = provider.available ? provider.label : provider.label + ' — проверить настройки';
       button.onclick = async () => {
         button.disabled = true;
         try {
           const result = await api('/api/miniapp/mailboxes/oauth/' + provider.key, {method:'POST'});
-          if (tg && typeof tg.openLink === 'function') tg.openLink(result.url);
-          else window.open(result.url, '_blank', 'noopener,noreferrer');
+          openMailboxOAuthUrl(result.url);
           toast('После входа вернитесь и обновите список почты');
         } catch(e) { toast(errRu(e, 'Не удалось начать вход')); }
         finally { button.disabled = false; }
       };
-      oauth.appendChild(button);
+      oauthButtons.appendChild(button);
     }
     const select = document.getElementById('mailboxProvider');
     if (!select.options.length) {
@@ -56,6 +54,15 @@ async function openMailboxes() {
       list.appendChild(row);
     }
   } catch(e) { list.innerHTML = errHtml(errRu(e), 'openMailboxes()'); }
+}
+
+function openMailboxOAuthUrl(url) {
+  if (tg && tg.initData && typeof tg.openLink === 'function') {
+    tg.openLink(url);
+  } else {
+    // Переход в той же вкладке не блокируется браузером после await.
+    window.location.assign(url);
+  }
 }
 
 async function connectMailbox(event) {

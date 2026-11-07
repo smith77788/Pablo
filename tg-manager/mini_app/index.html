@@ -6580,7 +6580,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input id="mailboxEmail" type="email" class="inp" maxlength="254" required autocomplete="off">
       <label for="mailboxPassword">Пароль приложения</label>
       <input id="mailboxPassword" type="password" class="inp" minlength="4" maxlength="1024" required autocomplete="new-password">
-      <div class="field-note">Используйте пароль приложения из настроек своей почты. У некоторых провайдеров и организаций SMTP запрещён или требуется OAuth. Произвольные SMTP-серверы пока не поддерживаются.</div>
+      <div class="field-note">Это подключение по SMTP, а не вход в сайт почты. Для Gmail используйте «Войти через Google» или отдельный пароль приложения, не обычный пароль. Outlook.com требует современную авторизацию: парольный вход может быть недоступен. Произвольные SMTP-серверы пока не поддерживаются.</div>
       <button id="mailboxConnectBtn" type="submit" class="btn btn-p" style="width:100%">Проверить и подключить</button>
       <div id="mailboxResult" class="field-note" role="status" aria-live="polite"></div>
     </form>
