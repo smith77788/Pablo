@@ -1865,9 +1865,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🗄 Хранилище</div>
-    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px"><span class="hdr-user" id="vaultCnt"></span><span class="icon-btn" role="button" tabindex="0" onclick="openVaultSettings()" title="Уведомления" aria-label="Уведомления">🔔</span></div>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px"><span class="hdr-user" id="vaultCnt"></span><span class="icon-btn" id="vaultSettingsBtn" role="button" tabindex="0" onclick="openVaultSettings()" title="Уведомления" aria-label="Уведомления">🔔</span></div>
   </div>
   <div class="sub-sb">
+    <div id="vaultOwnerBar" style="display:none;padding:10px 12px;margin:2px 0 8px;background:var(--bg2);border:1px solid var(--sep);border-radius:12px">
+      <label for="vaultOwnerSelect" style="display:block;font-size:11px;font-weight:700;color:var(--hint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Хранилище пользователя</label>
+      <select id="vaultOwnerSelect" class="inp" style="margin:0" onchange="changeVaultOwner(this)"></select>
+      <div id="vaultOwnerMode" style="font-size:11px;color:var(--hint);margin-top:6px"></div>
+    </div>
     <div id="vaultConnect" style="display:none"></div>
     <div style="display:flex;gap:8px;padding:4px 0 6px">
       <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:9px 4px" onclick="openVaultRecent('deleted')">🗑 Удалённые собеседником</button>
@@ -18245,16 +18250,67 @@ function openContacts() { push('s-contacts'); txt('contactsList','<div class="sp
 // Архив бизнес-переписки: список чатов → сообщения (с пометками «изменено»/
 // «удалено») → ответ от имени пользователя. Данные строго свои (owner-scoped на API).
 let VAULT_CHAT = null, VAULT_CAN_REPLY = false, _vaultSearchTimer = null, VAULT_NAMES = {}, VAULT_FILTER = 'all';
+let VAULT_OWNER_ID = null, VAULT_VIEWER_ID = null, VAULT_READ_ONLY = false;
 
-async function openVault() {
-  push('s-vault');
+function vaultPath(path) {
+  const ownerId = Number(VAULT_OWNER_ID || 0);
+  if (!ownerId) return path;
+  return path + (path.includes('?') ? '&' : '?') + 'owner_id=' + encodeURIComponent(ownerId);
+}
+
+async function loadVaultOwners() {
+  const bar = document.getElementById('vaultOwnerBar');
+  const select = document.getElementById('vaultOwnerSelect');
+  if (!bar || !select) return;
+  try {
+    const d = await api('/api/miniapp/vault/owners');
+    const owners = d.owners || [];
+    select.replaceChildren();
+    owners.forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = String(o.owner_id);
+      const identity = o.owner_id === d.viewer_id
+        ? 'Моё хранилище'
+        : ((o.first_name || '') + (o.username ? ' @' + o.username : '')).trim() || ('ID ' + o.owner_id);
+      opt.textContent = identity + ' · ' + num(o.chats || 0) + ' чат. · ' + num(o.messages || 0) + ' сообщ.';
+      select.appendChild(opt);
+    });
+    select.value = String(VAULT_OWNER_ID || d.viewer_id);
+    bar.style.display = 'block';
+  } catch (_) {
+    // Основной архив не должен падать, если административный список недоступен.
+    bar.style.display = 'none';
+  }
+}
+
+async function changeVaultOwner(select) {
+  const ownerId = Number(select && select.value);
+  if (!Number.isSafeInteger(ownerId) || ownerId <= 0 || ownerId === VAULT_OWNER_ID) return;
+  VAULT_OWNER_ID = ownerId;
+  VAULT_CHAT = null;
+  await openVault(true);
+}
+
+async function openVault(refreshOnly) {
+  if (!refreshOnly) push('s-vault');
   _VAULT_INBOX = 'all';
   document.getElementById('vaultConnect').style.display = 'none';
   const s = document.getElementById('vaultSearch'); if (s) s.value = '';
   txt('vaultList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const st = await api('/api/miniapp/vault/status');
+    const st = await api(vaultPath('/api/miniapp/vault/status'));
+    VAULT_VIEWER_ID = Number(st.viewer_id || 0) || null;
+    VAULT_OWNER_ID = Number(st.owner_id || st.viewer_id || 0) || null;
+    VAULT_READ_ONLY = !!st.read_only;
     VAULT_CAN_REPLY = !!st.can_reply;
+    const settingsBtn = document.getElementById('vaultSettingsBtn');
+    if (settingsBtn) settingsBtn.style.display = VAULT_READ_ONLY ? 'none' : '';
+    const mode = document.getElementById('vaultOwnerMode');
+    if (mode) mode.textContent = VAULT_READ_ONLY
+      ? 'Режим администратора: только просмотр, без ответов и изменения настроек.'
+      : 'Просматривается ваше хранилище.';
+    if (st.is_admin) loadVaultOwners();
+    else { const bar = document.getElementById('vaultOwnerBar'); if (bar) bar.style.display = 'none'; }
     const diag = st.diagnostics || {};
     // Диагностика «зависания»: если давно нет свежих сообщений или подключение
     // отвалилось — показываем понятный баннер с причиной и как переподключить.
@@ -18263,7 +18319,7 @@ async function openVault() {
     } else if (diag.health === 'stale') {
       renderVaultStale(st.bot_username, diag);
     }
-    const d = await api('/api/miniapp/vault/chats');
+    const d = await api(vaultPath('/api/miniapp/vault/chats'));
     renderVaultChats(d.chats || []);
   } catch(e) { txt('vaultList', errHtml(errRu(e),'openVault()')); }
   loadVaultAnalytics();
@@ -18274,7 +18330,7 @@ async function loadVaultAnalytics() {
   const el = document.getElementById('vaultAnalytics');
   if (!el) return;
   try {
-    const a = await api('/api/miniapp/vault/analytics');
+    const a = await api(vaultPath('/api/miniapp/vault/analytics'));
     if (!a || !a.total) { el.innerHTML = ''; return; }
     const rr = a.reply_rate_pct != null ? a.reply_rate_pct + '%' : '—';
     const mr = a.median_response_min != null
@@ -18312,6 +18368,13 @@ function renderVaultStale(botUsername, diag) {
   const when = days!=null ? (days===0 ? 'меньше суток' : days+' дн.') : 'давно';
   const el = document.getElementById('vaultConnect');
   el.style.display = 'block';
+  if (VAULT_READ_ONLY) {
+    el.innerHTML = `<div style="padding:12px;background:rgba(251,191,36,.12);border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
+      <b>⚠️ Архив пользователя давно не обновлялся</b><br>
+      Последняя активность: ${esc(when)}. Просмотр доступен, но подключение должен восстановить сам владелец.
+    </div>`;
+    return;
+  }
   el.innerHTML =
     `<div style="padding:12px;background:rgba(251,191,36,.12);border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
       <b>⚠️ Хранилище не получает новые сообщения (${when})</b><br>
@@ -18331,6 +18394,14 @@ function renderVaultConnect(botUsername, diag) {
   const bu = botUsername ? ('@'+esc(botUsername)) : 'этого бота';
   const disabled = diag && diag.health === 'disabled';
   document.getElementById('vaultConnect').style.display = 'block';
+  if (VAULT_READ_ONLY) {
+    document.getElementById('vaultConnect').innerHTML =
+      `<div style="padding:12px;background:rgba(96,165,250,.1);border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
+        <b>У пользователя нет активного хранилища</b><br>
+        Подключение отсутствует или отключено. Администратор находится в режиме только просмотра.
+      </div>`;
+    return;
+  }
   document.getElementById('vaultConnect').innerHTML =
     `<div style="padding:12px;background:${disabled?'rgba(251,191,36,.12)':'rgba(96,165,250,.1)'};border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
       <b>${disabled?'⏸ Хранилище отключено — переподключите':'🔌 Подключите хранилище'}</b><br>
@@ -18417,7 +18488,7 @@ async function reloadVaultChat() {
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const qs = VAULT_FILTER !== 'all' ? ('?'+VAULT_FILTER+'=1') : '';
-    const d = await api('/api/miniapp/vault/chat/'+VAULT_CHAT+'/messages'+qs);
+    const d = await api(vaultPath('/api/miniapp/vault/chat/'+VAULT_CHAT+'/messages'+qs));
     const msgs = d.messages || [];
     if (!msgs.length) {
       // Под срезом «пусто» и «в чате ничего нет» — разные вещи: человек включил
@@ -18444,7 +18515,7 @@ async function loadOlderVaultMessages() {
   if (more) more.innerHTML = '<div style="font-size:12px;color:var(--hint)">Загружаю…</div>';
   try {
     const base = VAULT_FILTER !== 'all' ? ('?'+VAULT_FILTER+'=1&') : '?';
-    const d = await api('/api/miniapp/vault/chat/'+VAULT_CHAT+'/messages'+base+'offset='+VAULT_CHAT_OFFSET);
+    const d = await api(vaultPath('/api/miniapp/vault/chat/'+VAULT_CHAT+'/messages'+base+'offset='+VAULT_CHAT_OFFSET));
     const msgs = d.messages || [];
     VAULT_CHAT_OFFSET += msgs.length;
     // Сохраняем позицию прокрутки: иначе дозагрузка «прыгает» под пальцем.
@@ -18477,7 +18548,7 @@ async function openVaultMedia(msgId) {
   ov.onclick = e => { if (e.target === ov) closeVaultMedia(); };
   ov.innerHTML = '<div style="color:#fff;font-size:14px">⏳ Загружаю вложение…</div>';
   try {
-    const r = await fetchT('/api/miniapp/vault/media/' + VAULT_CHAT + '/' + msgId,
+    const r = await fetchT(vaultPath('/api/miniapp/vault/media/' + VAULT_CHAT + '/' + msgId),
                            { headers: { 'Authorization': 'Bearer ' + TK } });
     if (!r.ok) {
       let msg = 'Не удалось получить файл';
@@ -18552,7 +18623,7 @@ async function sendVaultReply() {
   if (!text) return;
   inp.disabled = true;
   try {
-    await api('/api/miniapp/vault/chat/'+VAULT_CHAT+'/reply', {method:'POST', body: JSON.stringify({text})});
+    await api(vaultPath('/api/miniapp/vault/chat/'+VAULT_CHAT+'/reply'), {method:'POST', body: JSON.stringify({text})});
     inp.value = '';
     await reloadVaultChat();
   } catch(e) { toast('⚠️ '+errRu(e,'Не отправлено')); }
@@ -18566,10 +18637,10 @@ function vaultSearchDebounced() {
 
 async function vaultDoSearch() {
   const q = (document.getElementById('vaultSearch').value||'').trim();
-  if (q.length < 2) { const d = await api('/api/miniapp/vault/chats'); renderVaultChats(d.chats||[]); return; }
+  if (q.length < 2) { const d = await api(vaultPath('/api/miniapp/vault/chats')); renderVaultChats(d.chats||[]); return; }
   txt('vaultList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/vault/search?q='+encodeURIComponent(q));
+    const d = await api(vaultPath('/api/miniapp/vault/search?q='+encodeURIComponent(q)));
     const res = d.results || [];
     // Архив мог быть просмотрен не до конца — тогда «ничего не найдено» неправда.
     const partial = d.complete === false;
@@ -18599,7 +18670,7 @@ async function openVaultRecent(kind) {
   txt('vrecent-title', kind === 'edited' ? '✏️ Изменённые' : '🗑 Удалённые собеседником');
   txt('vaultRecentList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/vault/recent?type='+kind);
+    const d = await api(vaultPath('/api/miniapp/vault/recent?type='+kind));
     const items = d.items || [];
     if (!items.length) { txt('vaultRecentList', empty(kind==='edited'?'✏️':'🗑', 'Пока пусто', kind==='edited'?'Изменённые собеседником сообщения появятся здесь':'Удалённые собеседником сообщения появятся здесь')); return; }
     items.forEach(m => { VAULT_NAMES[m.chat_id] = m.peer_name; });
@@ -18621,6 +18692,7 @@ async function openVaultRecent(kind) {
 }
 
 async function openVaultSettings() {
+  if (VAULT_READ_ONLY) { toast('Чужое хранилище доступно только для просмотра'); return; }
   // Тумблеры остаются ЗАБЛОКИРОВАНЫ, пока не пришло состояние с сервера. Иначе
   // упавший запрос оставлял оба в «выключено», а любое касание вызывало
   // saveVaultSettings(), который пишет ОБА значения разом — то есть выключал на
@@ -18634,7 +18706,7 @@ async function openVaultSettings() {
   if (err) err.innerHTML = '';
   showModal('mo-vault-settings');
   try {
-    const st = await api('/api/miniapp/vault/status');
+    const st = await api(vaultPath('/api/miniapp/vault/status'));
     del.checked = !!st.notify_deleted;
     edit.checked = !!st.notify_edited;
     del.disabled = edit.disabled = false;
@@ -18658,7 +18730,7 @@ async function saveVaultSettings() {
   const notify_deleted = del.checked;
   const notify_edited = edit.checked;
   try {
-    await api('/api/miniapp/vault/settings', {method:'POST', body: JSON.stringify({notify_deleted, notify_edited})});
+    await api(vaultPath('/api/miniapp/vault/settings'), {method:'POST', body: JSON.stringify({notify_deleted, notify_edited})});
     toast('✅ Сохранено');
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
@@ -18666,7 +18738,7 @@ async function saveVaultSettings() {
 // Экспорт: эндпоинт под Bearer-токеном → качаем через fetch+blob (window.open не шлёт заголовок).
 async function downloadVaultExport(fmt, chatId) {
   toast('⬇️ Готовлю экспорт…');
-  const path = '/api/miniapp/vault/export?format='+fmt + (chatId!=null ? '&chat_id='+chatId : '');
+  const path = vaultPath('/api/miniapp/vault/export?format='+fmt + (chatId!=null ? '&chat_id='+chatId : ''));
   try {
     let r = await fetch(path, {headers:{'Authorization':'Bearer '+TK}});
     if (r.status === 401) { await _reAuth(); r = await fetch(path, {headers:{'Authorization':'Bearer '+TK}}); }
