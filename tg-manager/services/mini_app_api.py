@@ -8255,6 +8255,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_broadcast.setup_routes(app, pool)
     mini_app_stars.setup_routes(app, pool)
     mini_app_protection.setup_routes(app, pool)
+    from services import mini_app_mailboxes
+    mini_app_mailboxes.setup_routes(app, pool)
     mini_app_growth.setup_routes(app, pool)
     mini_app_parser.setup_routes(app, pool)
     mini_app_workspace.setup_routes(app, pool)

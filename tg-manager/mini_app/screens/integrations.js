@@ -55,7 +55,9 @@ async function openIntegrations() {
 }
 
 function _igRender(d) {
-  let h = '';
+  let h = '<div class="sec">Почтовые ящики</div>' + _igBox(
+    '<div>Подключите свою почту для одиночных обращений с доказательствами.</div>' +
+    '<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="openMailboxes()">📧 Подключить и управлять почтой</button>');
   // ── API ──
   const keys = (d.keys || []).filter(k => k.is_active);
   h += '<div class="sec">🔑 Публичный API</div>';

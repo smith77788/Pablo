@@ -6544,6 +6544,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div id="strikeAccessBar"></div>
+    <button class="btn btn-s" style="width:100%;margin-bottom:12px" onclick="openMailboxes()">📧 Почта — подключить и управлять ящиками</button>
     <details class="home-fold">
       <summary onclick="loadOfficialReportChannels()">Официальные каналы обращений</summary>
       <div class="home-fold-body">
@@ -6556,6 +6557,29 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="strikeStats" class="kpi-row"></div>
     <div class="sec">Последние операции</div>
     <div class="lst" id="strikeList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-mailboxes">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">Почтовые ящики</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Мои подключения</div>
+    <div id="mailboxList" class="lst"></div>
+    <div class="sec">Подключить почту</div>
+    <form onsubmit="connectMailbox(event)" autocomplete="off">
+      <label for="mailboxProvider">Почтовый провайдер</label>
+      <select id="mailboxProvider" class="inp" required></select>
+      <label for="mailboxEmail">Адрес вашего ящика</label>
+      <input id="mailboxEmail" type="email" class="inp" maxlength="254" required autocomplete="off">
+      <label for="mailboxPassword">Пароль приложения</label>
+      <input id="mailboxPassword" type="password" class="inp" minlength="4" maxlength="1024" required autocomplete="new-password">
+      <div class="field-note">Используйте пароль приложения из настроек своей почты. У некоторых провайдеров и организаций SMTP запрещён или требуется OAuth. Произвольные SMTP-серверы пока не поддерживаются.</div>
+      <button id="mailboxConnectBtn" type="submit" class="btn btn-p" style="width:100%">Проверить и подключить</button>
+      <div id="mailboxResult" class="field-note" role="status" aria-live="polite"></div>
+    </form>
   </div>
 </div>
 
@@ -32588,6 +32612,7 @@ function renderAudSegChart(segments) {
 <script src="screens/shield_check.js"></script>
 <script src="screens/account_login.js"></script>
 <script src="screens/integrations.js"></script>
+<script src="screens/mailboxes.js"></script>
 <script src="screens/accounts_list.js"></script>
 <script src="screens/bots_list.js"></script>
 <script src="screens/bot_detail.js"></script>
