@@ -56,7 +56,7 @@ def test_is_evidence_ref():
 
 def test_recipients_and_escalation():
     assert ar.recipients_for("scam") == ["abuse@telegram.org"]
-    assert "dpo@telegram.org" in ar.recipients_for("csam")
+    assert ar.recipients_for("csam") == ["abuse@telegram.org"]
     esc = ar.escalation_for("csam")
     assert any("NCMEC" in x for x in esc) and any("IWF" in x for x in esc)
     assert ar.escalation_for("scam") == []

@@ -42,6 +42,18 @@ def setup_routes(app: web.Application, pool) -> None:
     )
     from services.security import validate_string
 
+    async def report_channels_catalog(request: web.Request) -> web.Response:
+        if not _get_uid(request):
+            return _err('Unauthorized', 401)
+        from services import abuse_report, report_channels
+        return _json_resp({
+            'checked_on': report_channels.CHECKED_ON,
+            'categories': abuse_report.categories_public(),
+            'channels': list(report_channels.CHANNELS),
+        })
+
+    app.router.add_get('/api/miniapp/report_channels', report_channels_catalog)
+
     async def _strike_has_access(uid: int) -> bool:
         """Доступ к модулю «Массовые жалобы» — ПАРИТЕТ с ботом.
 

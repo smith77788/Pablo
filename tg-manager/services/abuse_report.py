@@ -49,22 +49,26 @@ CATEGORIES: dict[str, dict] = {
         "subject": "Report: sale of illegal substances",
         "escalate": [],
     },
+    "copyright": {
+        "label": "Нарушение авторских прав (правообладатель)",
+        "subject": "Copyright infringement report",
+        "escalate": [],
+    },
+    "privacy": {
+        "label": "Нарушение приватности / персональные данные",
+        "subject": "Privacy violation report",
+        "escalate": [],
+    },
+    "intimate": {
+        "label": "Интимные материалы без согласия",
+        "subject": "Non-consensual intimate imagery report",
+        "escalate": [],
+    },
     "other": {
         "label": "Другое нарушение правил Telegram",
         "subject": "Report: Telegram Terms of Service violation",
         "escalate": [],
     },
-}
-
-# Официальные abuse-адреса Telegram. Для CSAM/терроризма добавляем профильные
-# дески — это ОДНО письмо с нескольких To одного оператора, а не рассылка флотом.
-_ABUSE = "abuse@telegram.org"
-_RECIPIENTS: dict[str, list[str]] = {
-    "csam": [_ABUSE, "dpo@telegram.org", "security@telegram.org"],
-    "terrorism": [_ABUSE, "security@telegram.org"],
-    "scam": [_ABUSE],
-    "drugs": [_ABUSE],
-    "other": [_ABUSE],
 }
 
 _MAX_EVIDENCE = 30
@@ -83,7 +87,8 @@ def categories_public() -> list[dict]:
 
 
 def recipients_for(category: str) -> list[str]:
-    return list(_RECIPIENTS.get(category, [_ABUSE]))
+    from services.report_channels import email_recipient
+    return [email_recipient(category)]
 
 
 def escalation_for(category: str) -> list[str]:
@@ -156,6 +161,12 @@ def validate_report(data: Any) -> tuple[Optional[dict], list[str]]:
     if len(context) < _MIN_CONTEXT:
         errors.append(f"Опишите нарушение словами (не меньше {_MIN_CONTEXT} символов)")
     context = context[:_MAX_CONTEXT]
+    from services.report_channels import email_recipient
+    recipient_key = str(data.get('recipient_key') or '').strip() or None
+    try:
+        email_recipient(category, recipient_key)
+    except ValueError as exc:
+        errors.append(str(exc))
 
     if errors:
         return None, errors
@@ -164,6 +175,7 @@ def validate_report(data: Any) -> tuple[Optional[dict], list[str]]:
         "category": category,
         "evidence": evidence,
         "context": context,
+        "recipient_key": recipient_key,
     }, []
 
 
@@ -173,11 +185,11 @@ def compose_email(report: dict, *, ref_id: str, now: Optional[datetime] = None) 
     cat = CATEGORIES.get(report["category"], CATEGORIES["other"])
     subject = f"{cat['subject']} — {report['target']} [ref {ref_id}]"
     lines = [
-        f"Dear Telegram Moderation,",
+        "Dear Telegram Moderation,",
         "",
-        f"We report the following resource for a suspected Terms of Service / "
-        f"legal violation and ask you to review it. The decision to restrict or "
-        f"remove the resource is yours; this is a report with evidence, not a demand.",
+        "We report the following resource for a suspected Terms of Service / "
+        "legal violation and ask you to review it. The decision to restrict or "
+        "remove the resource is yours; this is a report with evidence, not a demand.",
         "",
         f"Target: {report['target']}",
         f"Category: {cat['subject']}",
@@ -212,7 +224,7 @@ def compose_email(report: dict, *, ref_id: str, now: Optional[datetime] = None) 
 SendFn = Callable[[dict, list[str], str, str], Awaitable[tuple[bool, str]]]
 
 
-async def _primary_mailbox(pool, owner_id: int) -> Optional[dict]:
+async def _primary_mailbox(pool, owner_id: int, mailbox_id: int | None = None) -> Optional[dict]:
     """Первый активный подключённый ящик оператора (наименее недавно использованный)."""
     try:
         row = await pool.fetchrow(
@@ -220,8 +232,9 @@ async def _primary_mailbox(pool, owner_id: int) -> Optional[dict]:
             "COALESCE(auth_type,'password') AS auth_type, oauth_provider, "
             "oauth_refresh_token, oauth_access_token, oauth_expires_at "
             "FROM strike_email_accounts WHERE owner_id=$1 AND is_active=TRUE "
-            "ORDER BY last_used_at ASC NULLS FIRST LIMIT 1",
-            int(owner_id))
+            + ("AND id=$2 " if mailbox_id is not None else "")
+            + "ORDER BY last_used_at ASC NULLS FIRST LIMIT 1",
+            *([int(owner_id), mailbox_id] if mailbox_id is not None else [int(owner_id)]))
     except Exception:
         log.debug("abuse_report._primary_mailbox failed owner=%s", owner_id, exc_info=True)
         return None
@@ -236,7 +249,14 @@ async def _default_send(pool, mailbox: dict, recipients: list[str], subject: str
     существующего примитива — своего кода для отправки не плодим.
     """
     try:
-        from services.strike_engine import _send_email, _email_secret_for_account
+        from services.strike_engine import _email_secret_for_account, _send_email
+        from services.token_vault import decrypt_token
+        mailbox = dict(mailbox)
+        if (mailbox.get('auth_type') or 'password') != 'oauth':
+            secret = decrypt_token(mailbox.get('smtp_pass') or '')
+            if not secret or secret.startswith('ENC:'):
+                return False, 'Не удалось прочитать пароль ящика. Переподключите почту.'
+            mailbox['smtp_pass'] = secret
         secret, auth_type = await _email_secret_for_account(pool, mailbox)
         ok, err = await _send_email(
             mailbox["smtp_host"], mailbox["smtp_port"], mailbox["email"], secret,
@@ -264,8 +284,16 @@ async def send_report(pool, owner_id: int, data: Any, *,
         return {"status": "invalid", "errors": errors}
 
     ref_id = _ref_id()
-    mailbox = await _primary_mailbox(pool, owner_id)
-    recipients = recipients_for(clean["category"])
+    raw_mailbox_id = data.get('mailbox_id')
+    try:
+        mailbox_id = int(raw_mailbox_id) if raw_mailbox_id is not None else None
+        if mailbox_id is not None and not 0 < mailbox_id < 2**63:
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        return {'status': 'invalid', 'errors': ['Неверный почтовый ящик']}
+    mailbox = await _primary_mailbox(pool, owner_id, mailbox_id)
+    from services.report_channels import email_recipient
+    recipients = [email_recipient(clean['category'], clean.get('recipient_key'))]
     escalation = escalation_for(clean["category"])
 
     if not mailbox:

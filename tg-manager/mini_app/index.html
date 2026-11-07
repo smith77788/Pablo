@@ -6544,6 +6544,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div id="strikeAccessBar"></div>
+    <details class="home-fold">
+      <summary onclick="loadOfficialReportChannels()">Официальные каналы обращений</summary>
+      <div class="home-fold-body">
+        <label for="reportChannelCategory">Категория обращения</label>
+        <select id="reportChannelCategory" class="inp" onchange="loadOfficialReportChannels()"></select>
+        <div id="officialReportChannels" role="status"></div>
+        <div class="field-note">Магазины принимают обращения о самом приложении. Ссылки открывают ручную подачу, ничего автоматически не отправляется. Для одного письма со своей почты используйте /report_abuse в боте.</div>
+      </div>
+    </details>
     <div id="strikeStats" class="kpi-row"></div>
     <div class="sec">Последние операции</div>
     <div class="lst" id="strikeList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -25513,6 +25522,42 @@ const STRIKE_MODES = {fast:'быстрый', normal:'обычный', maximum:'�
 let _STRIKE_STATUS = null;
 let _STRIKE_TARGET = '';
 let _STRIKE_CAT = null;
+
+async function loadOfficialReportChannels() {
+  const box = document.getElementById('officialReportChannels');
+  const select = document.getElementById('reportChannelCategory');
+  if (!box || !select) return;
+  try {
+    const data = await api('/api/miniapp/report_channels');
+    if (!select.options.length) {
+      for (const category of data.categories) {
+        const option = document.createElement('option');
+        option.value = category.key;
+        option.textContent = category.label;
+        select.appendChild(option);
+      }
+    }
+    box.replaceChildren();
+    for (const channel of data.channels) {
+      if (channel.categories.length && !channel.categories.includes(select.value)) continue;
+      const row = document.createElement('div');
+      row.className = 'field-note';
+      const link = document.createElement('a');
+      link.textContent = channel.label + (channel.kind === 'email' ? ': ' + channel.address : ' ↗');
+      link.href = channel.kind === 'email' ? 'mailto:' + channel.address : channel.address;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      row.appendChild(link);
+      const source = document.createElement('a');
+      source.textContent = ' · Официальная инструкция';
+      source.href = channel.source;
+      source.target = '_blank';
+      source.rel = 'noopener noreferrer';
+      row.appendChild(source);
+      box.appendChild(row);
+    }
+  } catch(e) { box.textContent = errRu(e, 'Не удалось загрузить получателей. Раскройте раздел повторно.'); }
+}
 
 async function openStrike() {
   push('s-strike');

@@ -286,6 +286,7 @@ GET /api/miniapp/referral/detail
 GET /api/miniapp/reg_check/history
 GET /api/miniapp/rehab
 GET /api/miniapp/relay/session/{session_id}/messages
+GET /api/miniapp/report_channels
 GET /api/miniapp/sales/ai-journal
 GET /api/miniapp/sales/ai-quality
 GET /api/miniapp/sales/ai-usage
@@ -613,6 +614,7 @@ HEAD /api/miniapp/referral/detail
 HEAD /api/miniapp/reg_check/history
 HEAD /api/miniapp/rehab
 HEAD /api/miniapp/relay/session/{session_id}/messages
+HEAD /api/miniapp/report_channels
 HEAD /api/miniapp/sales/ai-journal
 HEAD /api/miniapp/sales/ai-quality
 HEAD /api/miniapp/sales/ai-usage
