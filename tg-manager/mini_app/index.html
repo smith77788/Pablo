@@ -30813,6 +30813,32 @@ async function loadAdminSection() {
   }
 }
 
+// Воронка онбординга (services/onboarding.activation_report): сколько начали
+// за 30 дней, какая доля закрыла каждый шаг, медиана времени до первого
+// результата. Без этого блока «мерить время до первого результата» из плана
+// было обещанием: момент записывался, но нигде не считался.
+function _admOnboardingHtml(o) {
+  if (!o) return '<div class="hint" style="margin:12px 16px">Воронка онбординга не загрузилась.</div>';
+  let h = '<div class="sec" style="margin-top:14px">📈 Онбординг за ' + num(o.days) + ' дней</div>';
+  if (!o.started) return h + '<div class="hint" style="margin:0 16px 12px">Никто ещё не открывал чеклист в этом окне.</div>';
+  const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
+  const dur = sec => sec == null ? '—' : sec < 3600 ? Math.max(1, Math.round(sec / 60)) + ' мин'
+    : sec < 86400 ? Math.floor(sec / 3600) + ' ч ' + Math.round(sec % 3600 / 60) + ' мин'
+    : Math.floor(sec / 86400) + ' дн ' + Math.round(sec % 86400 / 3600) + ' ч';
+  h += '<div class="lst">' +
+    '<div class="row"><div class="row-body"><div class="row-name">Начали</div></div><div class="row-val">' + num(o.started) + '</div></div>' +
+    '<div class="row"><div class="row-body"><div class="row-name">Дошли до первого результата</div></div><div class="row-val">' + num(o.activated) + ' · ' + pct(o.activated, o.started) + '</div></div>' +
+    '<div class="row"><div class="row-body"><div class="row-name">Время до результата, медиана</div></div><div class="row-val">' + esc(dur(o.median_to_result_s)) + '</div></div>';
+  (o.steps || []).forEach(st => {
+    h += '<div class="row"><div class="row-body"><div class="row-name">' + esc(st.title) + '</div></div><div class="row-val">' + num(st.done) + ' · ' + pct(st.done, o.started) + '</div></div>';
+  });
+  h += '</div>';
+  if ((o.goals || []).length) {
+    h += '<div class="hint" style="margin:8px 16px 12px">Цели: ' + o.goals.map(g => esc(g.title) + ' — ' + num(g.started)).join(' · ') + '</div>';
+  }
+  return h;
+}
+
 async function openAdminStats() {
   push('s-admin-stats');
   txt('adm-stats-body', '<div class="spin-wrap"><div class="spin"></div></div>');
@@ -30833,6 +30859,7 @@ async function openAdminStats() {
     html += tile('⏳', 'В очереди', s.ops_pending||0, 'openAdminOps()');
     html += tile('🔄', 'Выполняется', s.ops_running||0, 'openAdminOps()');
     html += '</div>';
+    html += _admOnboardingHtml(s.onboarding);
     txt('adm-stats-body', html);
   } catch(e) { txt('adm-stats-body', errHtml(errRu(e), retryCall('openAdminStats'))); }
 }
