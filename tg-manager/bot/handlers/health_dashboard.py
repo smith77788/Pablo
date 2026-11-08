@@ -368,7 +368,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     text = (
         "❤️ <b>Здоровье инфраструктуры</b>\n\n"
         f"🩺 Состояние: <b>{avg_health:.0f}</b>/100  [{health_bar}]{health_trend}\n"
-        f"🌡 Давление: {p_emoji} <b>{p_score}/100</b> — {p_label}  [{p_bar}]{pressure_tip}\n"
+        f"🌡 Риск бана: {p_emoji} <b>{p_score}/100</b> — {p_label}  [{p_bar}]{pressure_tip}\n"
         f"🏊 Пулов: <b>{pool_count}</b> | 🏷 Тегов: <b>{tag_count}</b>\n"
         f"📱 Аккаунтов: <b>{stats['total']}</b> (активных: <b>{stats['active']}</b>)\n"
         f"⭐ Средняя надёжность: <b>{stats['avg_trust']}</b>\n"
@@ -398,7 +398,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📊 Сравнить все", callback_data=HealthCb(action="compare"))
     kb.button(text="🌊 История блокировок", callback_data=HealthCb(action="flood_log"))
     kb.button(text="💡 Рекомендации", callback_data=HealthCb(action="recommendations"))
-    kb.button(text="🌡 Давление", callback_data=HealthCb(action="pressure"))
+    kb.button(text="🌡 Риск бана", callback_data=HealthCb(action="pressure"))
     kb.button(text="🎯 Советник", callback_data=HealthCb(action="advisor"))
     kb.button(
         text="🔄 Авто-балансировка", callback_data=InfraCb(action="rebalance_preview")
@@ -1681,7 +1681,7 @@ async def cb_infra_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if action_cbs:
         kb.adjust(min(len(action_cbs), 3))
     kb.button(text="🔄 Обновить", callback_data=HealthCb(action="advisor"))
-    kb.button(text="🌡 Давление", callback_data=HealthCb(action="pressure"))
+    kb.button(text="🌡 Риск бана", callback_data=HealthCb(action="pressure"))
     kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
     kb.adjust(*([min(len(action_cbs), 3)] if action_cbs else []), 2, 1)
     await safe_edit(callback, text, reply_markup=kb.as_markup())

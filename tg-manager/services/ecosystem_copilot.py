@@ -160,7 +160,7 @@ async def _analyze_owner(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                     alerts.append(
                         {
                             "name": name,
-                            "issue": f"Критическое давление: {pressure.score}/100",
+                            "issue": f"Критический риск бана: {pressure.score}/100",
                             "suggestion": "Остановите часть операций или добавьте аккаунты",
                         }
                     )

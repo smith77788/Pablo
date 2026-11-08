@@ -470,7 +470,12 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
             else:
                 chat_id = await _notify_chat(pool, owner_id)
                 if chat_id:
-                    await bot.send_message(chat_id, msg, parse_mode="HTML")
+                    # Общий слой: тумблер «Лиды», уровень «нужно действие».
+                    from database import db as _db
+                    if not await _db.notify_if_enabled(
+                            pool, bot, int(chat_id), "leads", msg,
+                            dedup_key=f"intent:{contact_id}"):
+                        raise RuntimeError("не доставлено")
             notified = True
         except Exception:
             log.debug("intent_sensor: notify failed owner=%s", owner_id)

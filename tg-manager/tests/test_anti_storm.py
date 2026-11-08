@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
@@ -18,6 +20,16 @@ T0 = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
 
 
 # ── Чистый классификатор ─────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _fresh_notify_slots():
+    """Уведомления идут через общий слой с анти-спамом на 60 с в памяти
+    процесса: слот, занятый соседним тестом, глушил бы сообщение этого."""
+    from database import db as _db
+    _db._notify_cooldown.clear()
+    yield
+    _db._notify_cooldown.clear()
 
 def test_calm_below_watch_threshold():
     d = A.classify(2, fleet_size=50)

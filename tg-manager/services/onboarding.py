@@ -632,4 +632,111 @@ async def load_checklist(pool, uid: int) -> dict:
         except Exception:
             # Фиксация — аудит и кеш; чеклист и без неё честный.
             log.warning("onboarding: record_activation failed uid=%s", uid, exc_info=True)
-    return build_checklist(**state)
+    checklist = build_checklist(**state)
+    try:
+        await record_steps(pool, uid, checklist)
+    except Exception:
+        # Замер — для нас, не для человека: его сбой не мешает чеклисту.
+        log.warning("onboarding: record_steps failed uid=%s", uid, exc_info=True)
+    return checklist
+
+
+def steps_to_record(checklist: dict) -> list[str]:
+    """Какие шаги отметить в журнале: 'start' (чеклист открыт), каждый закрытый
+    шаг и 'result', когда есть первый результат."""
+    ids = ["start"] + [s["id"] for s in checklist.get("steps") or [] if s.get("done")]
+    if checklist.get("activated"):
+        ids.append("result")
+    return list(dict.fromkeys(ids))
+
+
+async def record_steps(pool, uid: int, checklist: dict) -> None:
+    """Первое время, когда шаг увидели закрытым. Повторная запись ничего не
+    меняет: время — первое, а не последнее."""
+    await pool.execute(
+        "INSERT INTO onboarding_step_log(owner_id, step_id, goal) "
+        "SELECT $1, unnest($2::text[]), $3 ON CONFLICT DO NOTHING",
+        uid, steps_to_record(checklist), checklist.get("goal"))
+
+
+# Подписи шагов для отчёта: id → как шаг называется в чеклисте.
+_STEP_TITLES = {
+    "start": "Открыли чеклист", "accounts": "Подключили аккаунт",
+    "proxy": "Задали прокси", "plan": "Оформили подписку",
+    "first_op": "Запустили первое действие", "bot": "Подключили бота",
+    "persona": "Настроили ИИ-менеджера", "contacts": "Собрали контакты",
+    "first_result": "Шаг «первый результат»", "result": "Первый результат",
+}
+_GOAL_TITLES = {k: t for k, t, _d in GOALS}
+
+
+async def activation_report(pool, days: int = 30) -> dict:
+    """Воронка онбординга за последние ``days`` дней: сколько начали, какая доля
+    закрыла каждый шаг, и сколько времени ушло до первого результата (медиана).
+
+    Когорта — те, кто впервые открыл чеклист в окне. Время до результата — от
+    этого открытия до записи активации."""
+    started = int(await pool.fetchval(
+        "SELECT COUNT(*) FROM onboarding_step_log "
+        "WHERE step_id='start' AND done_at >= now() - make_interval(days => $1)", days) or 0)
+    rows = await pool.fetch(
+        """SELECT l.step_id, COUNT(*) AS n
+             FROM onboarding_step_log s
+             JOIN onboarding_step_log l ON l.owner_id = s.owner_id
+            WHERE s.step_id='start' AND s.done_at >= now() - make_interval(days => $1)
+              AND l.step_id <> 'start'
+            GROUP BY l.step_id ORDER BY n DESC, l.step_id""", days)
+    t = await pool.fetchrow(
+        """SELECT COUNT(*) AS n,
+                  percentile_cont(0.5) WITHIN GROUP (
+                      ORDER BY EXTRACT(EPOCH FROM (r.done_at - s.done_at))) AS median_s
+             FROM onboarding_step_log s
+             JOIN onboarding_step_log r ON r.owner_id = s.owner_id AND r.step_id = 'result'
+            WHERE s.step_id='start' AND s.done_at >= now() - make_interval(days => $1)""", days)
+    goals = await pool.fetch(
+        """SELECT COALESCE(goal, '—') AS goal, COUNT(*) AS n FROM onboarding_step_log
+            WHERE step_id='start' AND done_at >= now() - make_interval(days => $1)
+            GROUP BY 1 ORDER BY 2 DESC""", days)
+    steps = [{"id": r["step_id"], "title": _STEP_TITLES.get(r["step_id"], r["step_id"]),
+              "done": int(r["n"]),
+              "share": round(int(r["n"]) / started, 3) if started else 0.0}
+             for r in rows]
+    med = t["median_s"] if t else None
+    return {"days": days, "started": started,
+            "activated": int(t["n"]) if t else 0,
+            "median_to_result_s": int(med) if med is not None else None,
+            "steps": steps,
+            "goals": [{"goal": r["goal"], "title": _GOAL_TITLES.get(r["goal"], "Цель не выбрана"),
+                       "started": int(r["n"])} for r in goals]}
+
+
+def _human_duration(sec: int | None) -> str:
+    if sec is None:
+        return "—"
+    if sec < 3600:
+        return f"{max(1, sec // 60)} мин"
+    if sec < 86400:
+        return f"{sec // 3600} ч {sec % 3600 // 60} мин"
+    return f"{sec // 86400} дн {sec % 86400 // 3600} ч"
+
+
+def format_activation_report(d: dict) -> str:
+    """Текст отчёта для бота (HTML)."""
+    lines = [f"📈 <b>Онбординг за {d['days']} дней</b>", ""]
+    if not d["started"]:
+        lines.append("Никто ещё не открывал чеклист в этом окне.")
+        return "\n".join(lines)
+    act = d["activated"]
+    lines.append(f"Начали: <b>{d['started']}</b>")
+    lines.append(f"Дошли до первого результата: <b>{act}</b> "
+                 f"({round(100 * act / d['started'])}%)")
+    lines.append(f"Время до первого результата (медиана): <b>{_human_duration(d['median_to_result_s'])}</b>")
+    if d["steps"]:
+        lines += ["", "<b>Доля дошедших по шагам</b>"]
+        for st in d["steps"]:
+            lines.append(f"• {st['title']}: {st['done']} ({round(100 * st['share'])}%)")
+    if d["goals"]:
+        lines += ["", "<b>Цели</b>"]
+        for g in d["goals"]:
+            lines.append(f"• {g['title']}: {g['started']}")
+    return "\n".join(lines)

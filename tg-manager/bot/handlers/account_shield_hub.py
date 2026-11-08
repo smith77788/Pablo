@@ -22,7 +22,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ShieldCb, BmCb
+from bot.callbacks import ShieldCb, BmCb, PhysicsCb
 from services import account_shield
 from services import physics_engine
 from bot.utils.op_helpers import safe_answer
@@ -88,11 +88,11 @@ async def cb_shield_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     cfg = await account_shield.get_shield_config(pool, owner_id)
 
     lines = [
-        "🛡 <b>Account Shield — проактивная защита</b>\n",
+        "🛡 <b>Защита аккаунтов</b>\n",
         f"📱 Активных аккаунтов: <b>{stats['total_active']}</b>",
         f"🔴 Под угрозой (risk ≥ {cfg.risk_threshold:.0%}): <b>{stats['threatened']}</b>",
         f"⚠️ Высокая вероятность бана: <b>{stats['high_ban_prob']}</b>",
-        f"⏸ На паузе (Shield): <b>{stats['paused_by_shield']}</b>",
+        f"⏸ На паузе (защита): <b>{stats['paused_by_shield']}</b>",
         f"✅ В безопасности: <b>{stats['ok_count']}</b>",
         "",
         f"⚙️ Авто-пауза: {'<b>вкл</b>' if cfg.auto_pause else '<b>выкл</b>'}  "
@@ -105,8 +105,9 @@ async def cb_shield_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="⚙️ Настройки", callback_data=ShieldCb(action="settings"))
     kb.button(text="📋 История (7 дней)", callback_data=ShieldCb(action="history"))
     kb.button(text="🩺 Разбор потерь", callback_data=ShieldCb(action="autopsy"))
+    kb.button(text="⚛️ Риск бана по аккаунтам", callback_data=PhysicsCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 1, 1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
