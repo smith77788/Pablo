@@ -1226,6 +1226,23 @@ def setup_routes(app: web.Application, pool) -> None:
                 cid, uid)
             from services.contacts_hub.journey import journey_parts as _jp
             journey_parts = await _jp(pool, uid, tg_id)
+            # Журнал сценариев по этому человеку: что ему отправили, что он
+            # нажал и ответил, где оплатил (workflow_step_log).
+            scen_rows = await _safe_fetch(pool,
+                """SELECT l.step_idx, l.outcome, l.created_at, d.name
+                     FROM workflow_step_log l
+                     JOIN workflow_runs r ON r.id = l.run_id
+                     LEFT JOIN workflow_definitions d ON d.id = l.workflow_id
+                    WHERE l.owner_id=$1 AND r.chat_id=$2
+                    ORDER BY l.id DESC LIMIT 40""", uid, tg_id) if tg_id else []
+            from services.workflow_engine import STEP_OUTCOMES as _outs
+            def _outcome(o):
+                o = o or ""
+                if o.startswith("button:"):
+                    return "нажал кнопку"
+                if o.startswith("branch:"):
+                    return "A/B-ветка " + chr(ord("A") + int(o[7:])) if o[7:].isdigit() else o
+                return _outs.get(o, o)
             from services.contacts_hub import timeline as _tl
             def _payload(p):
                 if isinstance(p, dict):
@@ -1245,7 +1262,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 crm=dict(crm_row) if crm_row else None,
                 received=journey_parts["received"],
                 replies=journey_parts["replies"],
-                orders=journey_parts["orders"])
+                orders=journey_parts["orders"],
+                scenarios=[{"workflow": r["name"], "step_idx": r["step_idx"],
+                            "outcome_label": _outcome(r["outcome"]),
+                            "at": r["created_at"]} for r in (scen_rows or [])])
             journey = _tl.build_journey(
                 sources=[{"label": f"аккаунт #{r['account_id']}", "at": r["first_seen_at"]}
                          for r in (srcs or [])] + journey_parts["bot_sources"],

@@ -30,6 +30,23 @@ def test_merges_and_sorts_desc():
     assert "цена" in intent["detail"] and "proposal" in intent["detail"]
 
 
+def test_scenario_steps_reach_the_contact_card():
+    """Что сценарии делали с человеком, видно в его карточке: раньше журнал
+    шагов был только на экране сценария, а в карточке контакта — ничего."""
+    tl = timeline.build_timeline(
+        scenarios=[{"workflow": "Дожим", "step_idx": 2, "outcome_label": "оплатил",
+                    "at": _t(5)}],
+        crm={"stage": "lead", "updated_at": _t(1)})
+    assert tl[0]["kind"] == "scenario" and tl[0]["icon"] == "🔄"
+    assert "Дожим" in tl[0]["title"]
+    assert tl[0]["detail"] == "шаг 3 · оплатил"
+
+
+def test_the_card_endpoint_reads_the_scenario_journal():
+    src = open(os.path.join(ROOT, "services", "mini_app_uch.py"), encoding="utf-8").read()
+    assert "workflow_step_log" in src and "scenarios=" in src
+
+
 def test_drops_items_without_timestamp():
     tl = timeline.build_timeline(
         history=[{"field": "notes", "old_value": "", "new_value": "x", "created_at": None}],

@@ -161,3 +161,42 @@ async def active_trial(pool, owner_id: int) -> Optional[dict]:
     left = (row["expires_at"] - datetime.now(row["expires_at"].tzinfo)).total_seconds()
     return {"expires_at": row["expires_at"],
             "days_left": max(1, int((left + 86399) // 86400))}
+
+
+_CONVERSION_SQL = """
+    WITH t AS (
+        SELECT owner_id, granted_at, expires_at FROM subscription_trials
+         WHERE granted_at >= now() - make_interval(days => $1)
+    ), paid AS (
+        SELECT t.owner_id, min(p.confirmed_at) AS first_paid, t.granted_at
+          FROM t JOIN payments p
+            ON p.user_id = t.owner_id AND p.status = 'confirmed'
+           AND p.confirmed_at >= t.granted_at
+           AND p.plan NOT IN ('strike', 'host_server')
+         GROUP BY t.owner_id, t.granted_at
+    )
+    SELECT (SELECT count(*) FROM t) AS granted,
+           (SELECT count(*) FROM t WHERE expires_at > now()) AS running,
+           (SELECT count(*) FROM paid) AS converted,
+           (SELECT percentile_cont(0.5) WITHIN GROUP (
+                ORDER BY extract(epoch FROM first_paid - granted_at) / 86400)
+              FROM paid) AS median_days
+"""
+
+
+async def conversion(pool, days: int = 90) -> dict:
+    """Конверсия «пробный период → оплата» за `days` дней: замер для владельца.
+
+    granted — выдано триалов, running — ещё идут, converted — владельцы, у которых
+    после выдачи есть подтверждённая оплата подписки, rate — доля оплативших
+    среди закончившихся триалов (идущий ещё не успел решить), median_days — за
+    сколько дней от выдачи платят.
+    """
+    row = await pool.fetchrow(_CONVERSION_SQL, int(days))
+    granted, running, converted = (int(row["granted"] or 0), int(row["running"] or 0),
+                                   int(row["converted"] or 0))
+    finished = granted - running
+    rate = round(converted * 100 / finished, 1) if finished > 0 else None
+    md = row["median_days"]
+    return {"granted": granted, "running": running, "converted": converted,
+            "rate": rate, "median_days": round(float(md), 1) if md is not None else None}
