@@ -46,8 +46,12 @@ def setup_routes(app: web.Application, pool) -> None:
         except ValueError:
             limit = 100
         try:
-            return _json_resp(await _ui.list_threads(
-                pool, uid, only_waiting=waiting, limit=limit))
+            out = await _ui.list_threads(pool, uid, only_waiting=waiting, limit=limit)
+            # Тип входящего у ждущих: «готов купить», «цена», «жалоба» —
+            # services/ai_inbox_assist.label_threads.
+            from services.ai_inbox_assist import label_threads
+            label_threads(out.get("threads") or [])
+            return _json_resp(out)
         except Exception:
             log.exception("inbox_list uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)

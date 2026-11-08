@@ -44,6 +44,8 @@ function _ibScreen(id, title, refreshFn) {
 }
 
 const IB_SRC_ICON = {fleet: '👤', vault: '🗄', bot: '🤖', relay: '🔁'};
+// Тип ждущего входящего (services/ai_inbox_assist.label_threads).
+const IB_INTENT_ICON = {ready_to_buy: '🔥', price: '💰', complaint: '⚠️', question: '❓'};
 
 function _ibWhen(ts) {
   if (!ts) return '';
@@ -99,6 +101,8 @@ async function openInbox(waiting) {
       return '<div class="row ib-row" data-i="' + i + '" role="button" tabindex="0" onclick="openInboxThread(' + i + ')">' +
         '<div class="row-body">' +
           '<div class="row-name">' + (t.waiting ? '⏳ ' : '') + esc(nm) +
+            (t.intent_label ? ' <span style="font-size:11px;padding:1px 6px;border-radius:8px;background:var(--sec-bg,rgba(127,127,127,.15))">' +
+              (IB_INTENT_ICON[t.intent] || '') + ' ' + esc(t.intent_label) + '</span>' : '') +
             (t.unread ? ' <span style="color:var(--accent);font-size:12px">· ' + num(t.unread) + ' нов.</span>' : '') + '</div>' +
           '<div class="row-val" style="font-size:12px;color:var(--hint)">' + esc(_ibWhen(t.last_at)) + '</div>' +
         '</div>' +

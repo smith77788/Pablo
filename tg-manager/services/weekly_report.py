@@ -41,6 +41,7 @@ _DEDUP_S = 6 * 86400
 DAILY_ID = "daily_report"          # ключ включателя в organism_state
 _DAILY_STATE_KEY = "digest_metrics_daily"
 _DAILY_DEDUP_S = 20 * 3600
+_TG_LIMIT = 4000                    # запас до 4096 символов сообщения Telegram
 
 _SALES_SQL = """
     SELECT currency,
@@ -83,6 +84,41 @@ def in_window(now: datetime) -> bool:
 def in_daily_window(now: datetime) -> bool:
     """Утро любого дня, кроме понедельника (тогда приходит недельный). ЧИСТАЯ."""
     return now.weekday() != 0 and _WINDOW_HOURS[0] <= now.hour < _WINDOW_HOURS[1]
+
+
+def window_end_hour() -> int:
+    return _WINDOW_HOURS[1]
+
+
+async def morning_report_on(pool, owner_id: int, now: datetime) -> bool:
+    """Придёт ли сегодня утренний отчёт: в понедельник — недельный (если не
+    отключён), в остальные дни — за день (если включён)."""
+    if now.weekday() == 0:
+        from services.organism import spine
+        dismissed = await spine.state_get(pool, owner_id, "dismissed", []) or []
+        return REPORT_ID not in dismissed
+    from services.organism import spine
+    return bool(await spine.state_get(pool, owner_id, DAILY_ID, False))
+
+
+async def _with_held(pool, owner_id: int, text: str, now: datetime):
+    """Добавить к отчёту несрочное из сводки за день — одно сообщение утром
+    вместо двух. Возвращает (текст, max_id или None)."""
+    from services import quiet_hours
+    section, max_id = await quiet_hours.take_daily_section(pool, owner_id, now)
+    if not section or len(text) + len(section) > _TG_LIMIT:
+        return text, None   # не влезает в одно сообщение — сводка уйдёт сама
+    return f"{text}\n\n{section}", max_id
+
+
+async def _mark_held(pool, owner_id: int, max_id, now: datetime) -> None:
+    if max_id is None:
+        return
+    from services import quiet_hours
+    try:
+        await quiet_hours.mark_daily_sent(pool, owner_id, max_id, now)
+    except Exception:
+        log.warning("weekly_report: сводка не отмечена owner=%s", owner_id, exc_info=True)
 
 
 def day_key(now: datetime) -> str:
@@ -237,7 +273,7 @@ async def maybe_send_daily(pool, bot, owner_id: int, *, now: datetime | None = N
     if not await db.notify_dedup_ok(pool, owner_id, key, _DAILY_DEDUP_S):
         return False
     try:
-        text = await build_daily(pool, owner_id)
+        text, held_id = await _with_held(pool, owner_id, await build_daily(pool, owner_id), now)
         await bot.send_message(owner_id, text, parse_mode="HTML", reply_markup=_kb(True),
                                disable_web_page_preview=True)
     except Exception:
@@ -248,6 +284,7 @@ async def maybe_send_daily(pool, bot, owner_id: int, *, now: datetime | None = N
         except Exception:
             pass
         return False
+    await _mark_held(pool, owner_id, held_id, now)
     return True
 
 
@@ -273,6 +310,7 @@ async def maybe_send(pool, bot, owner_id: int, *, now: datetime | None = None) -
         report = await digest.build(pool, owner_id, state_key=_STATE_KEY)
         text = format_report(report, await sales_week(pool, owner_id),
                              await scenarios_week(pool, owner_id))
+        text, held_id = await _with_held(pool, owner_id, text, now)
         await bot.send_message(owner_id, text, parse_mode="HTML",
                                reply_markup=_kb(await daily_enabled(pool, owner_id)),
                                disable_web_page_preview=True)
@@ -284,5 +322,6 @@ async def maybe_send(pool, bot, owner_id: int, *, now: datetime | None = None) -
         except Exception:
             pass
         return False
+    await _mark_held(pool, owner_id, held_id, now)
     return True
 

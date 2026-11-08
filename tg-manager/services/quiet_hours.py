@@ -253,6 +253,8 @@ async def flush_once(pool, bot, now_utc: Optional[dt.datetime] = None) -> int:
         if daily and not digest_due(now_utc, _get(o, "digest_hour", 9),
                                     _get(o, "last_digest_at"), o["tz"]):
             continue  # сводка за день — в свой час, раз в сутки
+        if daily and await _morning_report_carries(pool, uid, now_utc):
+            continue  # её принесёт утренний отчёт одним сообщением
         rows = await pool.fetch(
             "SELECT id, pref, text, created_at AT TIME ZONE $2 AS created_at "
             "FROM notification_held WHERE user_id=$1 ORDER BY id",
@@ -279,6 +281,56 @@ async def flush_once(pool, bot, now_utc: Optional[dt.datetime] = None) -> int:
                 uid, now_utc)
         sent += 1
     return sent
+
+
+async def _morning_report_carries(pool, uid: int, now_utc: dt.datetime) -> bool:
+    """Утренний отчёт (services/weekly_report) сегодня ещё впереди и сам
+    принесёт несрочное: тогда отдельную сводку не шлём, иначе утром пришли бы
+    два сообщения подряд. После окна отчёта сводка уходит сама — на случай,
+    если отчёт не дошёл. Сбой чтения — «не принесёт»: сводка уйдёт как обычно."""
+    try:
+        from services import weekly_report
+        return (now_utc.hour < weekly_report.window_end_hour()
+                and await weekly_report.morning_report_on(pool, uid, now_utc))
+    except Exception:
+        return False
+
+
+async def take_daily_section(pool, uid: int, now_utc: Optional[dt.datetime] = None):
+    """Несрочное, накопленное для сводки за день, — блоком для утреннего
+    отчёта. Только если владелец выбрал «несрочное одной сводкой» и час
+    сводки уже наступил. Возвращает (html, max_id) или (None, None)."""
+    now_utc = now_utc or dt.datetime.now(dt.timezone.utc)
+    try:
+        o = await _settings(pool, uid)
+        if not o or _get(o, "digest_only") is not True:
+            return None, None
+        if not digest_due(now_utc, _get(o, "digest_hour", 9),
+                          _get(o, "last_digest_at"), _get(o, "tz")):
+            return None, None
+        rows = await pool.fetch(
+            "SELECT id, pref, text, created_at AT TIME ZONE $2 AS created_at "
+            "FROM notification_held WHERE user_id=$1 ORDER BY id",
+            uid, str(tz_or_default(_get(o, "tz"))))
+    except Exception:
+        log.debug("quiet_hours: блок сводки не прочитан uid=%s", uid, exc_info=True)
+        return None, None
+    if not rows:
+        return None, None
+    body = build_digest(list(rows), "", daily=True).replace(
+        "🗞 <b>Сводка за день</b>", "🔔 <b>Несрочные уведомления</b>", 1)
+    return body, max(r["id"] for r in rows)
+
+
+async def mark_daily_sent(pool, uid: int, max_id: int,
+                          now_utc: Optional[dt.datetime] = None) -> None:
+    """Блок сводки ушёл в составе отчёта: очистить очередь и отметить день."""
+    now_utc = now_utc or dt.datetime.now(dt.timezone.utc)
+    await pool.execute(
+        "DELETE FROM notification_held WHERE user_id=$1 AND id <= $2", uid, max_id)
+    await pool.execute(
+        "UPDATE notification_settings SET last_digest_at=$2 WHERE user_id=$1",
+        uid, now_utc)
 
 
 def digest_due(now_utc: dt.datetime, hour, last_at, tz: Optional[str]) -> bool:

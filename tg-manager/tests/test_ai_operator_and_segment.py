@@ -117,3 +117,29 @@ def test_фильтры_сегмента_понимает_общий_срез():
                          "group_id": 3, "search": "иван"})
     assert (f["tag"], f["crm_stage"], f["gender"], f["premium_only"], f["group_id"],
             f["search"]) == ("vip", "won", "m", True, 3, "иван")
+
+
+def test_сегмент_прогноза_из_фразы_ложится_тегом():
+    out = seg.parse_filters('{"forecast": "hot_leads", "tag": "vip", '
+                            '"unsupported": "за неделю"}', ["vip"], [])
+    assert out["filters"] == {"forecast": "hot_leads", "tag": "vip"}
+    dropped = []
+    q = seg._apply_forecast(out["filters"], dropped)
+    assert q == {"tag": "прогноз_горячие"} and "vip" in dropped[0]
+    assert "прогноз: Горячие без покупки" in seg.explain(out["filters"], [])
+    bad = seg.parse_filters('{"forecast": "богатые"}', [], [])
+    assert bad["filters"] == {} and "богатые" in bad["dropped"][0]
+    assert "hot_leads" in seg._prompt("спрашивали цену и не купили", [], [])
+
+
+def test_метки_типа_у_ждущих_во_входящих():
+    from services.ai_inbox_assist import label_threads
+
+    rows = label_threads([
+        {"waiting": True, "last_text": "Беру две, как оплатить?"},
+        {"waiting": True, "last_text": "Верните деньги"},
+        {"waiting": True, "last_text": "ок"},
+        {"waiting": False, "last_text": "Сколько стоит?"},
+    ])
+    assert [r.get("intent") for r in rows] == ["ready_to_buy", "complaint", None, None]
+    assert rows[0]["intent_label"] == "Готов купить"

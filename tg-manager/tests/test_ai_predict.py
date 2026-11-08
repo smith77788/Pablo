@@ -120,3 +120,25 @@ def test_копайлот_учится_на_реакциях():
     assert out[2]["priority"] == 48 and "откладываете" in out[2]["learned"]
     assert items[0]["priority"] == 50, "исходные подсказки не меняются"
     assert na.rank_with_feedback(items, {}, NOW)[0]["id"] == "hot"
+
+
+def test_отметки_воронки_добавляют_покупки_и_лидов_без_двойного_счёта():
+    by = {}
+
+    def slot(pid):
+        return by.setdefault(pid, {"dates": [], "name": "", "username": "",
+                                   "last_msg_at": None, "last_intent": None})
+    slot(1)["dates"].append(_ago(10))                       # заказ бота
+    ap.merge_marked(slot, purchases=[
+        {"peer_user_id": 1, "at": _ago(9.5)},                # та же покупка
+        {"peer_user_id": 1, "at": _ago(40)},                 # другая
+        {"peer_user_id": 2, "at": _ago(5), "name": "Ира"},   # писала на аккаунт, не боту
+    ], leads=[
+        {"peer_user_id": 3, "value": "ready", "at": _ago(1)},
+        {"peer_user_id": 4, "value": "new", "at": _ago(1)},  # не лид
+    ])
+    assert len(by[1]["dates"]) == 2 and by[2]["name"] == "Ира"
+    assert by[3]["last_intent"] == "ready_to_buy" and 4 not in by
+    rows = {r["peer_user_id"]: r["segment"]
+            for r in ap.score_all([{"peer_user_id": k, **v} for k, v in by.items()], NOW)}
+    assert rows[2] == "new" and rows[3] == "hot_leads"
