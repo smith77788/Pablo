@@ -617,7 +617,7 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
         p_emoji = pressure.get("level_emoji", "🟢")
         p_score = pressure.get("score", 0)
         p_label = pressure.get("level_label", "Норма")
-        pressure_line = f"{p_emoji} Давление: <b>{p_score}/100</b> — {p_label}"
+        pressure_line = f"{p_emoji} Риск бана: <b>{p_score}/100</b> — {p_label}"
     except Exception:
         pressure_line = ""
 

@@ -2560,10 +2560,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Прокси</div>
         <div class="mgmt-tile-val" id="m-proxy-cnt"></div>
       </div>
-      <!-- «Щит» и «Проверка ограничений» — вкладки одного модуля (SCREEN_MODULES.shield). -->
+      <!-- «Защита аккаунтов»: бывшие «Щит», «Проверка ограничений» и «Физика» — вкладки одного модуля (SCREEN_MODULES.shield). -->
       <div class="mgmt-tile" onclick="openShieldHub()">
         <div class="mgmt-tile-ico">🛡</div>
-        <div class="mgmt-tile-lbl">Щит</div>
+        <div class="mgmt-tile-lbl">Защита аккаунтов</div>
         <div class="mgmt-tile-val" id="m-shield-val"></div>
       </div>
       <!-- Одно «Здоровье»: аккаунты, инфраструктура, диагностика (SCREEN_MODULES.health). -->
@@ -2609,11 +2609,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">👻</div>
         <div class="mgmt-tile-lbl">Призрак</div>
         <div class="mgmt-tile-val" id="m-ghost-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openPhysics()">
-        <div class="mgmt-tile-ico">⚛️</div>
-        <div class="mgmt-tile-lbl">Физика</div>
-        <div class="mgmt-tile-val" id="m-physics-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openGraph()">
         <div class="mgmt-tile-ico">🕸</div>
@@ -2684,7 +2679,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          включат. Функции не удалены — у каждого экрана остаётся дверь. -->
     <div class="lab-toggle" role="button" tabindex="0" onclick="toggleLab()">
       <span style="font-size:20px">🧪</span>
-      <span><b id="labToggleLbl">Показать Лабораторию</b><br>Экспериментальные инструменты: Физика, Призрак, Граф-хаб и другие.</span>
+      <span><b id="labToggleLbl">Показать Лабораторию</b><br>Экспериментальные инструменты: Призрак, Граф-хаб и другие.</span>
     </div>
 
     <!-- Админ-панель (только для админов) -->
@@ -3386,7 +3381,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <div class="screen" id="s-physics">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚛️ Физика</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🛡 Защита аккаунтов</div></div>
+  <div class="filter-chips mod-tabs" data-module="shield" data-tab="habits" role="tablist" aria-label="Вкладки модуля «Защита аккаунтов»"></div>
   <div class="sub-sb">
     <div class="sec">Риски аккаунтов</div>
     <div class="lst" id="physicsList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -6436,9 +6432,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-shield">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🛡 Щит</div>
+    <div class="hdr-title">🛡 Защита аккаунтов</div>
   </div>
-  <div class="filter-chips mod-tabs" data-module="shield" data-tab="accounts" role="tablist" aria-label="Вкладки модуля «Щит»"></div>
+  <div class="filter-chips mod-tabs" data-module="shield" data-tab="accounts" role="tablist" aria-label="Вкладки модуля «Защита аккаунтов»"></div>
   <div class="sub-sb">
     <div id="shieldStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Конфигурация</div>
@@ -9335,7 +9331,7 @@ const MODULE_DESCS = {
   'Накрутка':'Просмотры, реакции, сторис, подписчики',
   'Восстановление':'Возврат аккаунтов после ограничений',
   'Облако':'Файлы кусками в приватных каналах аккаунтов',
-  'Щит':'Защита аккаунтов от типовых ошибок и проверка ограничений каналов, чатов, ботов',
+  'Защита аккаунтов':'Защита аккаунтов от типовых ошибок, риск бана по каждому аккаунту и проверка ограничений каналов, чатов, ботов',
   'Нотариус':'Независимое заверение рекламных размещений',
   'Модель поведения':'Сводит переписку в стадии готовности к покупке',
   'Общие папки':'Папки чатов Telegram со ссылкой-приглашением',
@@ -9367,7 +9363,7 @@ const MODULE_DESCS = {
   'Сеть ботов':'Все ваши боты разом: роли, кластеры, рой, задачи между ботами, связки с каналами',
   'Граф связей':'Кто с кем связан: аккаунты, каналы, боты',
   'Граф-хаб':'Пересечения аудиторий ваших каналов и ботов',
-  'ИИ Память':'Записи ИИ-памяти по проекту и факты, которые бот запомнил о собеседниках','Нарратив':'ИИ-нарративы и легенды','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Пулы аккаунтов и аудит, сводка связей флота и форум-ноды, через которые бот управляет ресурсами',
+  'ИИ Память':'Записи ИИ-памяти по проекту и факты, которые бот запомнил о собеседниках','Нарратив':'ИИ-нарративы и легенды','Умные теги':'Авто-теги контактов/контента','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Пулы аккаунтов и аудит, сводка связей флота и форум-ноды, через которые бот управляет ресурсами',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов',
   'Профили':'Массовая установка профилей аккаунтов и персоны','Шаблоны':'Тексты постов, варианты текста (спинтакс) и заготовки ботов, каналов и групп',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API, API-ключи и Google Sheets','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
@@ -9675,12 +9671,14 @@ const SCREEN_MODULES = {
     ],
   },
   // «Щит» бережёт аккаунты, «Проверка ограничений» — свои каналы, чаты и
-  // ботов: одна защита от бана, две плитки.
+  // ботов, «Физика» считала риск бана по аккаунтам: одна защита от бана,
+  // одна плитка «Защита аккаунтов» с тремя вкладками.
   shield: {
-    title: '🛡 Щит',
+    title: '🛡 Защита аккаунтов',
     tabs: [
       {key:'accounts',  label:'📱 Аккаунты',             sid:'s-shield',      open: () => openShield()},
       {key:'resources', label:'🕶 Каналы, чаты, боты',   sid:'s-shieldcheck', open: () => openShieldCheck()},
+      {key:'habits',    label:'⚛️ Риск бана',             sid:'s-physics',     open: () => openPhysics()},
     ],
   },
   // «CRM», «Сделки», «Воронка денег» и «Когорты и LTV» смотрели на одних и
@@ -22937,7 +22935,7 @@ async function loadGovernorBar() {
     if (!gmOk && !gsOk) { el.style.display = 'none'; return; }
     const gm = gmOk ? String(+g.multiplier.toFixed(2)).replace('.', ',') : '—';
     const gs = gsOk ? g.score : '—';
-    el.innerHTML = `<b style="color:${c}">${esc(g.emoji||'')} Губернатор темпа: ×${gm}</b> · давление ${gs}/100<br>`
+    el.innerHTML = `<b style="color:${c}">${esc(g.emoji||'')} Губернатор темпа: ×${gm}</b> · риск бана ${gs}/100<br>`
       + `<span style="color:var(--hint)">${esc(g.explain||'')}</span>`;
   } catch(e) { el.style.display = 'none'; }
 }
@@ -28190,7 +28188,8 @@ async function openPhysics() {
       </div>
     `).join(''));
     const high = rows.filter(r=>(r.risk_score||0)>=0.5).length;
-    document.getElementById('m-physics-val').textContent = high?`${high} проблем`:rows.length+' аккаунтов';
+    const pv = document.getElementById('m-physics-val');   // плитки «Физика» больше нет
+    if (pv) pv.textContent = high?`${high} проблем`:rows.length+' аккаунтов';
   } catch(e) { txt('physicsList', errHtml(errRu(e), 'openPhysics()')); }
 }
 

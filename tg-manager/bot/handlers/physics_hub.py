@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import db
-from bot.callbacks import BmCb, PhysicsCb
+from bot.callbacks import PhysicsCb, ShieldCb
 from services import physics_engine
 from bot.utils.op_helpers import safe_answer
 from services import account_status as _acc_status
@@ -69,7 +69,7 @@ async def _menu_text_kb(
     except Exception:
         global_row = None
 
-    lines = ["⚛️ <b>Physics Engine</b>\n"]
+    lines = ["⚛️ <b>Риск бана по аккаунтам</b>\n"]
     if global_row and global_row["avg_risk"] is not None:
         avg   = round(float(global_row["avg_risk"]), 2)
         crit  = int(global_row["critical"] or 0)
@@ -82,7 +82,7 @@ async def _menu_text_kb(
         lines.append("")
 
     if not accounts:
-        lines.append("<i>Нет данных. Запустите операции — Physics Engine накопит телеметрию.</i>")
+        lines.append("<i>Нет данных. Запустите операции — риск посчитается по их результатам.</i>")
     else:
         for acc in accounts:
             risk  = acc["risk_score"]
@@ -133,7 +133,7 @@ async def _menu_text_kb(
             text=f"📄 {page + 1}/{pages}",
             callback_data=PhysicsCb(action="menu", page=page),
         )
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
+    kb.button(text="◀️ Назад", callback_data=ShieldCb(action="menu"))
     kb.adjust(2, *(1 for _ in range(10)))  # accounts 2-wide, rest 1-wide
 
     return text, kb.as_markup()
@@ -196,12 +196,12 @@ async def cb_physics_detail(
         breakdown = []
 
     lines = [
-        f"⚛️ <b>Physics — {name}</b>\n",
+        f"⚛️ <b>Риск бана — {name}</b>\n",
         f"Риск: {label} (<b>{score:.0%}</b>)",
         f"Вероятность бана 7д: <b>{ban_prob:.0%}</b>",
         f"Операций за 24ч: <b>{ops_24h}</b>",
-        f"Flood rate (1ч): <b>{flood_r:.0%}</b>",
-        f"Последний FloodWait: <b>{last_flood_str}</b>",
+        f"Доля флуд-ошибок (1ч): <b>{flood_r:.0%}</b>",
+        f"Последняя флуд-пауза: <b>{last_flood_str}</b>",
         f"Рекомендуемый темп: <b>≤{safe_ops} оп/ч</b>",
     ]
 
