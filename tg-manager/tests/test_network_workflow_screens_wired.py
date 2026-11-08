@@ -60,8 +60,12 @@ def test_workflow_plural_routes_and_list_fixed():
     lst = api_function("workflow_list")
     assert "list_workflows" not in lst
     assert "jsonb_array_length" in lst and "'active'" in lst
-    # add_step аппендит в inline jsonb steps
+    # add_step отдаёт шаг движку: тот дописывает его в steps (или в черновик
+    # включённого сценария) и проверяет словарём типов — шаг без type ронял
+    # весь экран деталей.
     st = api_function("workflow_add_step")
-    assert "steps = COALESCE(steps,'[]'::jsonb) || $1::jsonb" in st
-    # И проверяет шаг словарём типов: шаг без type ронял весь экран деталей.
-    assert "validate_steps(" in st
+    assert "_wf.append_step(" in st
+    import inspect
+    from services import workflow_engine as _wf
+    eng = inspect.getsource(_wf.append_step)
+    assert "validate_steps(" in eng and "already=len(steps)" in eng

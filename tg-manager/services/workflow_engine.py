@@ -568,9 +568,9 @@ async def _edit_target(conn, owner_id: int, workflow_id: int) -> tuple[str, list
             WHERE id=$1 AND owner_id=$2 FOR UPDATE""", workflow_id, owner_id)
     if row is None:
         return None
-    if row["draft_steps"] is not None:
+    if row.get("draft_steps") is not None:
         return "draft_steps", _steps_list(row["draft_steps"])
-    if row["active"]:
+    if row.get("active"):
         return "draft_steps", _steps_list(row["steps"])
     return "steps", _steps_list(row["steps"])
 
