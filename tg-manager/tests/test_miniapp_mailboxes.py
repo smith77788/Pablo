@@ -19,12 +19,19 @@ def handlers(monkeypatch, pool, uid=42):
 
 @pytest.mark.asyncio
 async def test_list_only_reads_owners_public_metadata(monkeypatch):
+    monkeypatch.setenv('GOOGLE_OAUTH_CLIENT_ID', 'public-client-id')
+    monkeypatch.setenv('GOOGLE_OAUTH_CLIENT_SECRET', 'private-client-secret')
+    monkeypatch.setenv('EMAIL_OAUTH_REDIRECT_URI', 'https://example.org/oauth/email/callback')
     pool = SimpleNamespace(fetch=AsyncMock(return_value=[]))
     response = await handlers(monkeypatch, pool)['GET'](None)
     sql, owner = pool.fetch.call_args.args
     assert owner == 42 and 'WHERE owner_id=$1' in sql
     assert 'smtp_pass' not in sql and 'oauth_access_token' not in sql
     assert response.status == 200
+    data = json.loads(response.text)['oauth'][0]
+    assert data['client_id'] == 'public-client-id'
+    assert data['redirect_uri'] == 'https://example.org/oauth/email/callback'
+    assert 'private-client-secret' not in response.text
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,18 @@ async function openMailboxes() {
       const container = document.createElement('div');
       oauthButtons.appendChild(container);
       prepareMailboxOAuth(provider, container);
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = 'Диагностика входа Google';
+      details.appendChild(summary);
+      const values = document.createElement('pre');
+      values.style.whiteSpace = 'pre-wrap';
+      values.style.overflowWrap = 'anywhere';
+      values.textContent = 'Адрес возврата (redirect_uri):\n' + (provider.redirect_uri || 'Не задан') +
+        '\n\nИдентификатор клиента (client_id):\n' + (provider.client_id || 'Не задан') +
+        '\n\nСравните эти значения с тем же клиентом в Google Cloud. Они получены от работающего сервера, не из кеша браузера. Секрет клиента здесь не отображается.';
+      details.appendChild(values);
+      oauthButtons.appendChild(details);
     }
     const select = document.getElementById('mailboxProvider');
     if (!select.options.length) {

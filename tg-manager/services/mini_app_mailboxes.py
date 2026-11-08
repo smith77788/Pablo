@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import smtplib
 import ssl
@@ -54,6 +55,8 @@ def setup_routes(app: web.Application, pool) -> None:
             'mailboxes': [dict(row) for row in rows],
             'providers': [{'key': key, 'label': value[0]} for key, value in PROVIDERS.items()],
             'oauth': [{'key': 'google', 'label': 'Войти через Google',
+                       'redirect_uri': email_oauth.redirect_uri(),
+                       'client_id': os.getenv('GOOGLE_OAUTH_CLIENT_ID', '').strip(),
                        'available': email_oauth.is_provider_configured('google')}],
         })
 
