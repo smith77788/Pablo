@@ -164,11 +164,17 @@ def test_mailing_is_one_module():
         assert f'onclick="{fn}"' in hub, f"на экране «Рассылки» нет входа {fn}"
 
 
-def test_spintax_is_a_tab_of_templates():
+def test_spintax_and_asset_templates_are_tabs_of_templates():
+    """«Спинтакс» и «Шаблоны ассетов» — вкладки «Шаблонов». Кнопка
+    «+ Создать» в «Ресурсах» шлёт в ту же ручку /template, что и вкладка
+    текстов, поэтому форма называет то, что создаёт: шаблон поста."""
     _assert_module("templates", "📝 Шаблоны", "Шаблоны",
                    {"texts": ("s-templates", "openTemplates"),
-                    "spintax": ("s-spintax", "openSpintax")},
-                   gone=("Спинтакс",))
+                    "spintax": ("s-spintax", "openSpintax"),
+                    "assets": ("s-assettemplates", "openAssetTemplates")},
+                   gone=("Спинтакс", "Шаблоны ассетов"))
+    modal = HTML[HTML.index('id="mo-asset-tpl"'):][:900]
+    assert "Новый шаблон поста" in modal and "Шаблоны ассетов" in modal
 
 
 def test_self_promo_is_a_tab_of_growth_engine():

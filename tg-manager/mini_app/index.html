@@ -2433,11 +2433,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Сеть ботов</div>
         <div class="mgmt-tile-val" id="m-net-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openAssetTemplates()">
-        <div class="mgmt-tile-ico">📐</div>
-        <div class="mgmt-tile-lbl">Шаблоны ассетов</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
       <!-- HTML-виджеты Telegram (Bot API 10.4): опрос, отсчёт, карточка… в пузыре чата. -->
       <div class="mgmt-tile" onclick="openWidgets()">
         <div class="mgmt-tile-ico">🧩</div>
@@ -2903,9 +2898,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-assettemplates">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">📐 Шаблоны ассетов</div>
+    <div class="hdr-title">📝 Шаблоны</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAssetTplModal()">+ Создать</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="templates" data-tab="assets" role="tablist" aria-label="Вкладки модуля «Шаблоны»"></div>
   <div class="sub-sb">
     <div style="padding:8px 16px 4px;display:flex;gap:6px;overflow-x:auto">
       <button class="btn btn-s" onclick="filterAssetTpl('',this)" id="at-all" style="flex:0 0 auto">Все</button>
@@ -3824,7 +3820,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="mo-asset-tpl" onclick="if(event.target===this)closeModal('mo-asset-tpl')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-asset-tpl')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">📐 Новый шаблон</div>
+    <div class="modal-title">📝 Новый шаблон поста</div>
+    <div style="font-size:12px;color:var(--hint);margin:-4px 0 10px">Заготовки ботов, каналов и групп создаются в боте: «Шаблоны ассетов» → «Создать свой».</div>
     <div class="field"><label>Название</label><input id="at-name" type="text" placeholder="Шаблон приветствия" class="inp"></div>
     <div class="field"><label>Текст</label><textarea id="at-text" rows="4" placeholder="Текст шаблона…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="at-err"></div>
@@ -9228,7 +9225,6 @@ const MODULE_KEYWORDS = {
   
   'Реферальная программа':'реферал приглашение код партнёрка',
   'Рабочие пространства':'воркспейс команда доступ участники контур',
-  'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
   'Виджеты в чатах':'виджет htmlbubbles html пузырь опрос голосование отсчёт таймер викторина карточка оценка',
   
   
@@ -9253,7 +9249,7 @@ const MODULE_KEYWORDS = {
   'Дашборд':'аналитика метрики статистика сводка отчёт по дням',
   'Аналитика аудитории':'аналитика метрики статистика сегменты аудитория+ днк аудитории профиль инсайты активность по часам',
   'Звёзды':'stars монетизация оплата донат',
-  'Шаблоны':'spintax спинтакс синонимы варианты уникализация текста рандом',
+  'Шаблоны':'spintax спинтакс синонимы варианты уникализация текста рандом шаблоны ассетов аватар описание оформление ассет заготовка бота канала группы',
   'Тариф':'подписка оплата биллинг лимиты платёж',
   'Настройки':'уведомления прокси политика вебхук язык настройка',
 };
@@ -9332,7 +9328,6 @@ const MODULE_DESCS = {
   
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
-  'Шаблоны ассетов':'Заготовки аватара, описания и первого поста',
   'Виджеты в чатах':'Опрос, отсчёт, карточка и другие живые виджеты прямо в сообщении бота',
   
   
@@ -9376,7 +9371,7 @@ const MODULE_DESCS = {
   'Граф-хаб':'Пересечения аудиторий ваших каналов и ботов',
   'ИИ Память':'Записи ИИ-памяти по проекту и факты, которые бот запомнил о собеседниках','Нарратив':'ИИ-нарративы и легенды','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Пулы аккаунтов и аудит, сводка связей флота и форум-ноды, через которые бот управляет ресурсами',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов',
-  'Профили':'Массовая установка профилей аккаунтов и персоны','Шаблоны':'Шаблоны имён/описаний/контента и варианты текста (спинтакс)',
+  'Профили':'Массовая установка профилей аккаунтов и персоны','Шаблоны':'Тексты постов, варианты текста (спинтакс) и заготовки ботов, каналов и групп',
   'Интеграции':'amoCRM, Bitrix24, вебхуки, публичный API, API-ключи и Google Sheets','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Входящие':'Ответы людей со всех аккаунтов и ботов в одном списке',
   
@@ -9708,6 +9703,9 @@ const SCREEN_MODULES = {
     tabs: [
       {key:'texts',   label:'📝 Шаблоны', sid:'s-templates', open: () => openTemplates(TPL_TARGET)},  // вкладка не теряет, в какой композер вставлять
       {key:'spintax', label:'🎲 Спинтакс', sid:'s-spintax',   open: () => openSpintax()},
+      // «Шаблоны ассетов» были своей плиткой, а «+ Создать» там сохранял тот
+      // же шаблон поста, что и эта вкладка «Шаблоны»: одна таблица, два входа.
+      {key:'assets',  label:'📐 Ресурсы',  sid:'s-assettemplates', open: () => openAssetTemplates()},
     ],
   },
   // «Мотор роста» сам подбирает шаги и среди них — самопиар; отдельная
@@ -26629,7 +26627,7 @@ async function loadAssetTpl(type, keep) {
       </div>
     `).join('') + moreBtn(rows.length, atTotal, 'loadAssetTplMore()'));
     // Плитка называет ВСЁ число шаблонов, а не длину показанной страницы.
-    document.getElementById('m-at-val').textContent = num(atTotal)+' шаблонов';
+    txt('m-at-val', num(atTotal)+' шаблонов');
   } catch(e) { txt('atList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadAssetTpl', type, keep)})); }
 }
 async function deleteAssetTpl(id, btn) {
