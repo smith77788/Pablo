@@ -327,3 +327,53 @@ def test_a_write_is_never_repeated():
 def test_a_lasting_outage_still_reports_honestly():
     o = _api_run("GET", [502])
     assert o["calls"] == 3 and o["err"], o
+
+
+# ── 4. Быстрые переходы по мини-аппу не упираются в 429 ─────────────────────
+
+class _Req:
+    path = "/api/miniapp/operations"
+    headers: dict = {}
+
+    @property
+    def transport(self):
+        class _T:
+            def get_extra_info(self, _name):
+                return ("203.0.113.9", 1)
+        return _T()
+
+
+def _limiter(monkeypatch, **env):
+    import importlib
+    import services.security as sec
+    for k in ("RATE_LIMIT_USER_MAX", "RATE_LIMIT_MAX_REQUESTS"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+    return importlib.reload(sec)
+
+
+def _allowed(sec, n: int, uid) -> int:
+    async def go():
+        return sum([await sec.check_rate_limit_for_path(_Req(), uid) for _ in range(n)])
+    return asyncio.run(go())
+
+
+def test_signed_in_user_can_click_through_screens_quickly(monkeypatch):
+    """Экран открывается пачкой из 5–15 запросов; 30 экранов за минуту — это
+    300 запросов, и ни один не должен получить 429 (раньше потолок был 120)."""
+    sec = _limiter(monkeypatch)
+    assert _allowed(sec, 300, uid=777) == 300
+
+
+def test_anonymous_traffic_keeps_the_strict_limit(monkeypatch):
+    sec = _limiter(monkeypatch)
+    assert _allowed(sec, 200, uid=None) == 120
+
+
+def test_user_limit_is_configurable_but_never_below_the_anonymous_one(monkeypatch):
+    sec = _limiter(monkeypatch, RATE_LIMIT_USER_MAX="10")
+    assert _allowed(sec, 200, uid=5) == 120
+    sec = _limiter(monkeypatch, RATE_LIMIT_USER_MAX="1000")
+    assert _allowed(sec, 1200, uid=6) == 1000
