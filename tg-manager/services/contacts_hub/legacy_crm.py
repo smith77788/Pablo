@@ -50,52 +50,61 @@ async def mirror_crm_contact(
     real_tg = int(tg_user_id) if (tg_is_real and tg_user_id) else None
     try:
         async with pool.acquire() as conn:
-            async with conn.transaction():
-                cid = await _find(conn, int(owner_id), int(legacy_id),
-                                  real_tg, username, phone)
-                if cid:
-                    await conn.execute(
-                        """UPDATE unified_contacts SET
-                             first_name = COALESCE(NULLIF(first_name, ''), $3),
-                             last_name  = COALESCE(NULLIF(last_name, ''), $4),
-                             username   = COALESCE(NULLIF(username, ''), $5),
-                             telegram_user_id = COALESCE(telegram_user_id, $6),
-                             phones = CASE
-                               WHEN $7::text IS NULL OR COALESCE(phones, '[]'::jsonb) ? $7::text
-                                 THEN phones
-                               ELSE COALESCE(phones, '[]'::jsonb) || to_jsonb($7::text) END,
-                             tags = ARRAY(SELECT DISTINCT t FROM unnest(
-                               COALESCE(tags, '{}') || $8::text[]) AS t ORDER BY t),
-                             notes = CASE
-                               WHEN $9::text IS NULL
-                                 OR strpos(COALESCE(notes, ''), $9::text) > 0 THEN notes
-                               ELSE concat_ws(E'\\n', NULLIF(notes, ''), $9::text) END,
-                             custom_fields = COALESCE(custom_fields, '{}'::jsonb)
-                               || jsonb_build_object('legacy_crm_id', $2::bigint),
-                             updated_at = NOW()
-                           WHERE id = $1""",
-                        cid, int(legacy_id), first_name, last_name, username,
-                        real_tg, phone, tags, notes)
-                    return str(cid)
-                extra = {"legacy_crm_id": int(legacy_id), "legacy_crm_created": True}
-                if tg_user_id and not real_tg:
-                    extra["legacy_tg_user_id"] = int(tg_user_id)
-                display = " ".join(p for p in (first_name, last_name) if p) or username
-                new_id = await conn.fetchval(
-                    """INSERT INTO unified_contacts
-                         (owner_id, telegram_user_id, username, first_name, last_name,
-                          display_name, phones, tags, notes, custom_fields, discovered_at)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::text[], $9,
-                               $10::jsonb, NOW())
-                       RETURNING id""",
-                    int(owner_id), real_tg, username, first_name, last_name,
-                    display, json.dumps([phone] if phone else []), tags,
-                    notes or "", json.dumps(extra))
-                return str(new_id)
+            res = await _mirror_on(conn, int(owner_id), int(legacy_id), tg_user_id,
+                                   real_tg, username, first_name, last_name,
+                                   phone, tags, notes)
+            return res[0]
     except Exception:
         log.warning("mirror_crm_contact owner=%s legacy=%s", owner_id, legacy_id,
                     exc_info=True)
         return None
+
+
+async def _mirror_on(conn, owner_id, legacy_id, tg_user_id, real_tg, username,
+                     first_name, last_name, phone, tags, notes) -> tuple[str, bool]:
+    """Тело зеркала на взятом соединении: (id контакта, создан ли новый)."""
+    async with conn.transaction():
+        cid = await _find(conn, int(owner_id), int(legacy_id),
+                          real_tg, username, phone)
+        if cid:
+            await conn.execute(
+                """UPDATE unified_contacts SET
+                     first_name = COALESCE(NULLIF(first_name, ''), $3),
+                     last_name  = COALESCE(NULLIF(last_name, ''), $4),
+                     username   = COALESCE(NULLIF(username, ''), $5),
+                     telegram_user_id = COALESCE(telegram_user_id, $6),
+                     phones = CASE
+                       WHEN $7::text IS NULL OR COALESCE(phones, '[]'::jsonb) ? $7::text
+                         THEN phones
+                       ELSE COALESCE(phones, '[]'::jsonb) || to_jsonb($7::text) END,
+                     tags = ARRAY(SELECT DISTINCT t FROM unnest(
+                       COALESCE(tags, '{}') || $8::text[]) AS t ORDER BY t),
+                     notes = CASE
+                       WHEN $9::text IS NULL
+                         OR strpos(COALESCE(notes, ''), $9::text) > 0 THEN notes
+                       ELSE concat_ws(E'\\n', NULLIF(notes, ''), $9::text) END,
+                     custom_fields = COALESCE(custom_fields, '{}'::jsonb)
+                       || jsonb_build_object('legacy_crm_id', $2::bigint),
+                     updated_at = NOW()
+                   WHERE id = $1""",
+                cid, int(legacy_id), first_name, last_name, username,
+                real_tg, phone, tags, notes)
+            return str(cid), False
+        extra = {"legacy_crm_id": int(legacy_id), "legacy_crm_created": True}
+        if tg_user_id and not real_tg:
+            extra["legacy_tg_user_id"] = int(tg_user_id)
+        display = " ".join(p for p in (first_name, last_name) if p) or username
+        new_id = await conn.fetchval(
+            """INSERT INTO unified_contacts
+                 (owner_id, telegram_user_id, username, first_name, last_name,
+                  display_name, phones, tags, notes, custom_fields, discovered_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::text[], $9,
+                       $10::jsonb, NOW())
+               RETURNING id""",
+            int(owner_id), real_tg, username, first_name, last_name,
+            display, json.dumps([phone] if phone else []), tags,
+            notes or "", json.dumps(extra))
+        return str(new_id), True
 
 
 async def _find(conn, owner_id: int, legacy_id: int, real_tg, username, phone):
@@ -118,3 +127,59 @@ async def _find(conn, owner_id: int, legacy_id: int, real_tg, username, phone):
             "AND COALESCE(phones, '[]'::jsonb) ? $2 ORDER BY created_at LIMIT 1",
             owner_id, phone)
     return row["id"] if row else None
+
+
+async def backfill_legacy_crm(pool, *, dry_run: bool = False) -> dict[str, int]:
+    """Перенести все строки `crm_contacts` в «Контакты» (шаг 2). Идемпотентно.
+
+    Повторный прогон находит каждого по метке `legacy_crm_id` и ничего не
+    плодит. `dry_run=True` делает всё то же в транзакции и откатывает её:
+    счётчики честные (учтены и совпадения внутри самого переноса), а база не
+    меняется. Старая таблица не меняется никогда.
+
+    Telegram ID строки считается настоящим, если строка пришла не ручным
+    вводом (source <> 'manual') или этот ID уже встречается у владельца в
+    «Контактах» или среди подписчиков его ботов. Иначе он мог быть придуман.
+    """
+    out = {"total": 0, "matched": 0, "created": 0, "failed": 0}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT c.id, c.owner_id, c.tg_user_id, c.username, c.first_name,
+                      c.last_name, c.phone, c.tags, c.notes,
+                      (c.source IS DISTINCT FROM 'manual'
+                       OR EXISTS (SELECT 1 FROM unified_contacts u
+                                  WHERE u.owner_id=c.owner_id
+                                    AND u.telegram_user_id=c.tg_user_id)
+                       OR EXISTS (SELECT 1 FROM bot_users b
+                                  JOIN managed_bots m ON m.bot_id=b.bot_id
+                                  WHERE m.added_by=c.owner_id
+                                    AND b.user_id=c.tg_user_id)) AS tg_real
+                 FROM crm_contacts c ORDER BY c.id""")
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            for r in rows:
+                out["total"] += 1
+                real = int(r["tg_user_id"]) if (r["tg_real"] and r["tg_user_id"]) else None
+                try:
+                    _cid, created = await _mirror_on(
+                        conn, int(r["owner_id"]), int(r["id"]), r["tg_user_id"], real,
+                        (_clean(r["username"]) or "").lstrip("@") or None,
+                        _clean(r["first_name"]), _clean(r["last_name"]),
+                        _clean(r["phone"]),
+                        [t for t in (_clean(t) for t in (r["tags"] or [])) if t],
+                        _clean(r["notes"]))
+                    out["created" if created else "matched"] += 1
+                except Exception:
+                    out["failed"] += 1
+                    log.warning("backfill_legacy_crm legacy=%s", r["id"], exc_info=True)
+        except BaseException:
+            await tx.rollback()
+            raise
+        if dry_run:
+            await tx.rollback()
+        else:
+            await tx.commit()
+    log.info("Перенос «Клиентов» в «Контакты»%s: %s",
+             " (пробный, откатан)" if dry_run else "", out)
+    return out

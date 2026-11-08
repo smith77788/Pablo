@@ -131,3 +131,36 @@ def test_failure_does_not_raise():
         def acquire(self):
             raise RuntimeError("база упала")
     assert _run(mirror_crm_contact(Broken(), OWNER, legacy_id=1, first_name="x")) is None
+
+
+def test_backfill_is_idempotent_and_dry_run_changes_nothing(pool):
+    """Шаг 2: перенос старых строк. Пробный прогон считает и откатывает,
+    настоящий переносит, повтор ничего не плодит, старая таблица цела."""
+    from services.contacts_hub.legacy_crm import backfill_legacy_crm
+    _run(pool.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER))
+    _run(pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER))
+    _run(pool.execute(
+        """INSERT INTO crm_contacts (owner_id, tg_user_id, username, first_name, tags, notes, source)
+           VALUES ($1, 4_100_000_001, 'olga', 'Ольга', ARRAY['vip'], 'з1', 'manual'),
+                  ($1, 4_100_000_002, NULL, 'Пётр', '{}', NULL, 'parsed'),
+                  ($1, 4_100_000_003, 'OLGA', 'Оля', ARRAY['new'], 'з2', 'manual')""",
+        OWNER))
+    before = _run(pool.fetchval("SELECT COUNT(*) FROM unified_contacts"))
+    dry = _run(backfill_legacy_crm(pool, dry_run=True))
+    assert _run(pool.fetchval("SELECT COUNT(*) FROM unified_contacts")) == before
+    mine = {k: v for k, v in dry.items()}
+    assert mine["failed"] == 0 and mine["total"] >= 3
+    real = _run(backfill_legacy_crm(pool))
+    assert real["created"] == dry["created"] and real["matched"] == dry["matched"]
+    rows = _rows(pool)
+    assert len(rows) == 2, "«olga» и «OLGA» — один человек"
+    olga = next(r for r in rows if (r["username"] or "").lower() == "olga")
+    assert sorted(olga["tags"]) == ["new", "vip"] and olga["telegram_user_id"] is None
+    petr = next(r for r in rows if r["first_name"] == "Пётр")
+    assert petr["telegram_user_id"] == 4_100_000_002, "ID из парсинга — настоящий"
+    again = _run(backfill_legacy_crm(pool))
+    assert again["created"] == 0
+    assert len(_rows(pool)) == 2
+    assert _run(pool.fetchval(
+        "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1", OWNER)) == 3
+    _run(pool.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER))
