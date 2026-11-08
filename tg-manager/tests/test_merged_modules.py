@@ -231,3 +231,12 @@ def test_lab_geo_is_one_module():
                    {"cities": ("s-globalpresence", "openGlobalPresence"),
                     "langs": ("s-multigeo", "openMultigeo")},
                    gone=("Гео-сеть: создать", "Мультигео"))
+
+
+def test_content_mesh_is_a_tab_of_content_cloner():
+    """«Клонер контента» переносит посты источника разово, «Сеть контента»
+    (была в Лаборатории) — то же самое постоянно. Одна плитка, две вкладки."""
+    _assert_module("content", "📋 Клонер контента", "Клонер контента",
+                   {"once": ("s-contentcloner", "openContentCloner"),
+                    "mesh": ("s-contentmesh", "openContentMesh")},
+                   gone=("Сеть контента",))

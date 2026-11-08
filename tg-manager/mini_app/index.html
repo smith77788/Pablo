@@ -2388,7 +2388,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Шаблоны</div>
         <div class="mgmt-tile-val" id="m-tpl-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openContentCloner()">
+      <!-- «Клонер контента» (разово) и «Сеть контента» (постоянно, была в Лаборатории) — один и тот же перенос постов из источника в ваши каналы: модуль, две вкладки -->
+      <div class="mgmt-tile" onclick="openContentHub()">
         <div class="mgmt-tile-ico">📋</div>
         <div class="mgmt-tile-lbl">Клонер контента</div>
         <div class="mgmt-tile-val"></div>
@@ -2660,11 +2661,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">📖</div>
         <div class="mgmt-tile-lbl">Нарратив</div>
         <div class="mgmt-tile-val" id="m-narr-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openContentMesh()">
-        <div class="mgmt-tile-ico">🕸</div>
-        <div class="mgmt-tile-lbl">Сеть контента</div>
-        <div class="mgmt-tile-val" id="m-mesh-val"></div>
       </div>
       <!-- «Гео-сеть: создать» и «Мультигео» — присутствие по странам и языкам: модуль, две вкладки -->
       <div class="mgmt-tile" onclick="openGeoHub()">
@@ -3477,6 +3473,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ CONTENT CLONER ══════════════════════ -->
 <div class="screen" id="s-contentcloner">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📋 Клонер контента</div></div>
+  <div class="filter-chips mod-tabs" data-module="content" data-tab="once" role="tablist" aria-label="Вкладки модуля «Клонер контента»"></div>
   <div class="sub-sb">
     <div class="sec">Клонирование контента</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
@@ -3922,9 +3919,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-contentmesh">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🕸 Сеть контента</div>
+    <div class="hdr-title">📋 Клонер контента</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openMeshModal()">+ Создать</button></div>
   </div>
+  <div class="filter-chips mod-tabs" data-module="content" data-tab="mesh" role="tablist" aria-label="Вкладки модуля «Клонер контента»"></div>
   <div class="sub-sb">
     <div class="sec">Сети контент-репостинга</div>
     <div class="lst" id="meshList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -9239,7 +9237,7 @@ const MODULE_KEYWORDS = {
   'Рассылки':'спам рассылка сообщения дм dm broadcast массовая отправка публикация в каналы единая кампания всё сразу campaign сеть ботов всем подписчикам расписание отложенная a/b тест эксперимент',
   'Прогрев':'разогреть отлежать нагулять антибан антидетект warmup',
   'Прокси':'ip адрес socks5 http изоляция подсеть',
-  'Клонер контента':'скопировать спарсить посты копия клон',
+  'Клонер контента':'скопировать спарсить посты копия клон сеть контента репост автоматически постоянно меш пересылка',
   'Клон и адаптация':'скопировать клон профиль двойник копия',
   'Авторег':'зарегистрировать создать аккаунты sms номера autoreg',
   'Фабрика':'создать боты botfather каналы группы чаты массово фабрика ботов фабрика каналов фабрика групп',
@@ -9360,7 +9358,7 @@ const MODULE_DESCS = {
   'Сценарии':'Сценарии и авто-воронки: бот сам ведёт человека по шагам',
   'Гео-сеть':'Новые каналы, группы и боты по многим городам с местными названиями, и профиль бота на разных языках','Массовые жалобы':'Массовые жалобы по целям (снос ресурсов)','Комплаенс':'Проверка ресурсов на запрещёнку',
   'Прогрев':'Разогрев новых аккаунтов под живое поведение','Очистка':'Чистка аккаунтов: контакты, диалоги','Дубликаты':'Поиск дублей контактов','Конфликты':'Поиск конфликтов данных',
-  'Синхронизация':'Синхронизация контактов и данных','Клонер контента':'Копирование постов из источника','Клон и адаптация':'Клон профиля/контента с адаптацией','Сеть контента':'Автоматический репост постов между вашими каналами',
+  'Синхронизация':'Синхронизация контактов и данных','Клонер контента':'Посты из канала-источника в ваши каналы: разово или постоянно (сеть контента)','Клон и адаптация':'Клон профиля/контента с адаптацией',
   // Семь «сетей» описывались почти одинаково («Управление сетями ресурсов»,
   // «Сети ресурсов», «Карта связей ресурсов») — и различить их было нельзя.
   // Это разные вещи с разными данными; подпись говорит, что ИМЕННО внутри.
@@ -9759,6 +9757,14 @@ const SCREEN_MODULES = {
       {key:'langs',  label:'🗣 Языки бота',  sid:'s-multigeo',       open: () => openMultigeo()},
     ],
   },
+  // Перенос постов из канала-источника в свои каналы: разово или постоянно.
+  content: {
+    title: '📋 Клонер контента',
+    tabs: [
+      {key:'once', label:'📋 Разово',          sid:'s-contentcloner', open: () => openContentCloner()},
+      {key:'mesh', label:'🕸 Сеть контента',   sid:'s-contentmesh',   open: () => openContentMesh()},
+    ],
+  },
 };
 
 function modTab(mod, key) {
@@ -9789,6 +9795,7 @@ function openSearchHub(tab) { modTab('search', tab || 'bots'); }
 function openFactory(tab) { modTab('factory', tab || 'bots'); }
 function openScenarios(tab) { modTab('scenarios', tab || 'all'); }
 function openHealthHub(tab) { modTab('health', tab || 'accounts'); }
+function openContentHub(tab) { modTab('content', tab || 'once'); }
 function openMemoryHub(tab) { modTab('memory', tab || 'notes'); }
 function openInfraHub(tab) { modTab('infra', tab || 'pools'); }
 function openGeoHub(tab) { modTab('geo', tab || 'cities'); }
@@ -28709,7 +28716,8 @@ async function openContentMesh() {
         </div>
       </div>
     `).join(''));
-    document.getElementById('m-mesh-val').textContent = rows.length+' '+plural(rows.length,'сеть','сети','сетей');
+    // Своей плитки у «Сети контента» больше нет (вкладка «Клонера контента»):
+    // счётчик некуда писать, а голый getElementById уронил бы экран после списка.
   } catch(e) { txt('meshList', errHtml(errRu(e), 'openContentMesh()')); }
 }
 
