@@ -708,14 +708,14 @@ async def _assess_risk_impl(
     # 1. Pressure
     if pressure >= 85:
         risk_score += 40
-        blockers.append(f"Давление инфраструктуры критическое ({pressure}/100)")
+        blockers.append(f"Риск бана критический ({pressure}/100)")
     elif pressure >= 70:
         risk_score += 25
-        reasons.append(f"Высокое давление инфраструктуры ({pressure}/100)")
+        reasons.append(f"Высокий риск бана ({pressure}/100)")
         recommendations.append("Снизьте количество одновременных операций")
     elif pressure >= 50:
         risk_score += 10
-        reasons.append(f"Умеренное давление ({pressure}/100)")
+        reasons.append(f"Умеренный риск бана ({pressure}/100)")
 
     # 2. Доступность аккаунтов
     max_items_per_acc = _MAX_ITEMS_PER_ACCOUNT.get(op_type, 100)
@@ -991,7 +991,7 @@ async def _pre_launch_impl(
         intel.warning_text = "Все доступные аккаунты имеют высокий риск — операция возможна, но нежелательна"
     elif pressure_score >= 70:
         intel.go_decision = True
-        intel.warning_text = f"Повышенное давление ({pressure_score}/100) — операция выполнится, но медленнее обычного"
+        intel.warning_text = f"Повышенный риск бана ({pressure_score}/100) — операция выполнится, но медленнее обычного"
     elif risk.level in ("high", "critical") and risk.safe_to_proceed:
         intel.go_decision = True
         intel.warning_text = (
@@ -1015,7 +1015,7 @@ async def _pre_launch_impl(
                     intel.warning_text = _eco_warn
                 break
             if _p >= 80:
-                _eco_warn = f"Экосистема «{_eco['name']}»: давление {_p}/100"
+                _eco_warn = f"Экосистема «{_eco['name']}»: риск бана {_p}/100"
                 if not intel.warning_text:
                     intel.warning_text = _eco_warn
                 break

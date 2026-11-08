@@ -71,6 +71,7 @@ function _wfmSvg(steps, stats) {
   const width = BX + W + 18 + lanes * LANE + 8;
   const height = yOf(endIdx) + 36;
   const reached = i => (((stats || {}).steps || {})[String(i)] || {}).reached;
+  const dropped = i => (((stats || {}).steps || {})[String(i)] || {}).dropped;
   let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" style="max-width:${width}px;display:block" role="img" aria-label="Схема сценария">
     <defs><marker id="wfmArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--hint)"/></marker></defs>`;
   // Последовательные стрелки (без подписи) — короткие вертикальные.
@@ -97,12 +98,13 @@ function _wfmSvg(steps, stats) {
   });
   steps.forEach((s, i) => {
     const t = (s && typeof s.type === 'string') ? s.type : '';
-    const y = yOf(i), r = reached(i);
-    const body = String(s.text || s.condition || s.action || s.url || (t === 'delay' ? (s.delay_minutes ? s.delay_minutes + ' мин' : (s.until_time ? 'до ' + s.until_time : '')) : '') || '').replace(/\s+/g, ' ').slice(0, 32);
+    const y = yOf(i), r = reached(i), dr = dropped(i);
+    const body = String(s.text || s.condition || s.action || s.url || (t === 'delay' ? (s.delay_minutes ? s.delay_minutes + ' мин' : (s.until_time ? 'до ' + s.until_time : '')) : '') || '').replace(/\s+/g, ' ').slice(0, dr ? 20 : 32);   // справа от текста — «↘ N ушли»
     svg += `<rect x="${BX}" y="${y}" width="${W}" height="${BH}" rx="10" fill="var(--bg2)" stroke="var(--border-strong)"/>
       <text x="${BX + 10}" y="${y + 19}" font-size="12" font-weight="700" fill="var(--text)">${i + 1}. ${_WFM_ICON[t] || '•'} ${esc(_WFM_NAME[t] || t || 'Шаг')}</text>
       <text x="${BX + 10}" y="${y + 37}" font-size="11" fill="var(--hint)">${esc(body)}</text>
-      ${r != null ? `<text x="${BX + W - 10}" y="${y + 19}" font-size="11" text-anchor="end" fill="var(--hint)">👥 ${num(r)}</text>` : ''}`;
+      ${r != null ? `<text x="${BX + W - 10}" y="${y + 19}" font-size="11" text-anchor="end" fill="var(--hint)">👥 ${num(r)}</text>` : ''}
+      ${dr ? `<text x="${BX + W - 10}" y="${y + 37}" font-size="11" text-anchor="end" fill="var(--red)">↘ ${num(dr)} ушли</text>` : ''}`;
   });
   svg += labels;
   const ye = yOf(endIdx);
@@ -142,5 +144,5 @@ async function openWorkflowMap(wfId) {
   const steps = d.steps || [];
   if (!steps.length) { txt('wfMapBody', empty('🗺', 'Шагов пока нет', 'Добавьте шаги — схема появится здесь.')); return; }
   txt('wfMapBody', '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">' + _wfmSvg(steps, d.stats) + '</div>' +
-    '<div class="hint" style="margin-top:8px">Короткая стрелка — следующий шаг. Дуга справа — переход или ветка, подпись — условие перехода. 👥 — сколько людей дошли до шага.</div>');
+    '<div class="hint" style="margin-top:8px">Короткая стрелка — следующий шаг. Дуга справа — переход или ветка, подпись — условие перехода. 👥 — сколько людей дошли до шага, ↘ — сколько ушли после него, не дойдя до конца (ошибка, истёк срок, остановлен).</div>');
 }

@@ -216,7 +216,7 @@ async def is_ready_for_op(
             label = pressure.get("level_label", "Высокая")
             return (
                 False,
-                f"Давление инфраструктуры {label} ({score}/100) — операция заблокирована",
+                f"Риск бана {label} ({score}/100) — операция заблокирована",
             )
     except Exception as e:
         log.debug("infra_orchestrator.is_ready_for_op pressure check failed: %s", e)
@@ -344,7 +344,7 @@ async def get_pressure_warning(
         score = pressure.get("score", 0)
         if warn_threshold <= score < _PRESSURE_HARD_LIMIT:
             label = pressure.get("level_label", "Повышенное")
-            return f"⚠️ Давление инфраструктуры {label} ({score}/100) — операция продолжается"
+            return f"⚠️ Риск бана {label} ({score}/100) — операция продолжается"
     except Exception as e:
         log_exc_swallow(log, "get_pressure_warning")
     return None

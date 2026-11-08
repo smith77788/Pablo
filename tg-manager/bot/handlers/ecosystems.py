@@ -317,7 +317,7 @@ async def cb_eco_view(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📊 Здоровье", callback_data=EcoCb(action="health", eco_id=eco_id))
-    kb.button(text="⚡ Давление", callback_data=EcoCb(action="pressure", eco_id=eco_id))
+    kb.button(text="⚡ Риск бана", callback_data=EcoCb(action="pressure", eco_id=eco_id))
     kb.button(text="⚠️ Риски", callback_data=EcoCb(action="risk", eco_id=eco_id))
     kb.button(text="👥 Участники", callback_data=EcoCb(action="members", eco_id=eco_id))
     kb.button(text="🔀 Дрейф", callback_data=EcoCb(action="drift", eco_id=eco_id))
@@ -492,7 +492,7 @@ async def cb_eco_pressure(
     bar = _eb.format_health_bar(p.score / 100)
 
     text = (
-        f"⚡ <b>Давление: {html.escape(eco['name'])}</b>\n\n"
+        f"⚡ <b>Риск бана: {html.escape(eco['name'])}</b>\n\n"
         f"[{bar}] <b>{p.score}/100</b>  {p.level}\n\n"
         f"📱 Кулдаун-аккаунты: {p.cooldown_ratio:.0%}\n"
         f"📊 Плотность операций: {p.operation_density:.1f} ops/аккаунт\n"
@@ -504,9 +504,9 @@ async def cb_eco_pressure(
         text += f"🌐 Проблемных прокси: {p.overloaded_proxies}\n"
 
     if p.score >= 85:
-        text += "\n🚫 <b>Давление критическое.</b> Операции могут быть заблокированы."
+        text += "\n🚫 <b>Риск бана критический.</b> Операции могут быть заблокированы."
     elif p.score >= 70:
-        text += "\n⚠️ <b>Высокое давление.</b> Рекомендуется снизить нагрузку."
+        text += "\n⚠️ <b>Высокий риск бана.</b> Рекомендуется снизить нагрузку."
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=EcoCb(action="pressure", eco_id=eco_id))
@@ -1007,7 +1007,7 @@ async def cb_eco_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         pressure = e.get("pressure_score", 0)
         lines.append(
             f"{icon} <b>{html.escape(e['name'])}</b>\n"
-            f"   Здоровье: {h}%  Давление: {pressure}  {risk_icon}"
+            f"   Здоровье: {h}%  Риск бана: {pressure}  {risk_icon}"
         )
     avg_health = int(total_health / len(fetched))
     lines.append(
@@ -1554,7 +1554,7 @@ async def cb_eco_sync_exec(
         lines = [
             "✅ <b>Синхронизация выполнена</b>\n",
             f"🏥 Здоровье: <b>{h_pct}%</b>  "
-            f"⚡ Давление: <b>{scores['pressure']}/100</b>  "
+            f"⚡ Риск бана: <b>{scores['pressure']}/100</b>  "
             f"{risk_icon} Риск: <b>{risk}</b>",
             "",
             f"✅ Участников OK: <b>{diff['ok']}</b>",

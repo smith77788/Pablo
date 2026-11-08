@@ -246,8 +246,13 @@ async def _tick_owner(pool, bot, owner_id: int, *, notifier=None, now: float | N
         if notifier:
             await notifier(owner_id, msg)
         else:
-            await bot.send_message(owner_id, msg, parse_mode="HTML",
-                                   reply_markup=_snooze_kb(top["id"], top.get("action")))
+            # Общий слой: тумблер «Советы», уровень «инфо» (тихие часы и
+            # «только сводкой» уважаются).
+            from database import db as _db
+            if not await _db.notify_if_enabled(
+                    pool, bot, owner_id, "advice", msg,
+                    _snooze_kb(top["id"], top.get("action")), dedup_key=top["id"]):
+                return False
     except Exception:
         log.debug("organism.runner: notify failed owner=%s", owner_id)
         return False

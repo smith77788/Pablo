@@ -691,7 +691,7 @@ async def compute_risk(
         p = await compute_pressure(pool, ecosystem_id, owner_id)
         r.infrastructure_risk = round(p.score / 100, 3)
         if p.score >= 70:
-            r.reasons.append(f"Высокое давление инфраструктуры: {p.score}")
+            r.reasons.append(f"Высокий риск бана: {p.score}")
 
         # Proxy risk
         proxy_total = (
@@ -1138,7 +1138,7 @@ def format_snapshot(snap: EcosystemSnapshot) -> str:
         f"  Аккаунтов: {snap.health.healthy_accounts}/{snap.health.account_count} готовы",
         f"  Успешность операций: {snap.health.recent_op_success_rate:.0%}",
         "",
-        f"⚡ <b>Давление</b>  {snap.pressure.emoji} {snap.pressure.score}/100",
+        f"⚡ <b>Риск бана</b>  {snap.pressure.emoji} {snap.pressure.score}/100",
         f"  {snap.pressure.level}",
     ]
     if snap.pressure.active_tasks:
@@ -1806,7 +1806,7 @@ async def generate_recommendations(
                 {
                     "priority": "high",
                     "icon": "⚡",
-                    "title": f"Критическое давление ({pressure.score}/100)",
+                    "title": f"Критический риск бана ({pressure.score}/100)",
                     "action": "Снизьте интенсивность операций или добавьте аккаунты",
                 }
             )
@@ -1815,7 +1815,7 @@ async def generate_recommendations(
                 {
                     "priority": "medium",
                     "icon": "⚡",
-                    "title": f"Повышенное давление ({pressure.score}/100)",
+                    "title": f"Повышенный риск бана ({pressure.score}/100)",
                     "action": "Распределите операции на большее число аккаунтов",
                 }
             )

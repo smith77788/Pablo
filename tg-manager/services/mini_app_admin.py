@@ -151,6 +151,14 @@ def setup_routes(app: web.Application, pool) -> None:
                 "SELECT COUNT(*) FROM operation_queue WHERE status='pending'") or 0)
             stats["ops_running"] = int(await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE status='running'") or 0)
+            # Воронка онбординга за 30 дней: доля дошедших по шагам и время до
+            # первого результата. Сбой отчёта не прячет остальные цифры.
+            try:
+                from services import onboarding as _onb
+                stats["onboarding"] = await _onb.activation_report(pool, 30)
+            except Exception:
+                log.warning("admin_stats: onboarding report failed", exc_info=True)
+                stats["onboarding"] = None
             return _json_resp(stats)
         except Exception:
             log.exception("admin_stats uid=%d", uid)
