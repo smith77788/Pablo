@@ -14618,7 +14618,7 @@ async function loadCompetitors(more) {
     const total = totalOf(d, items);
     // Плитка называет ВСЁ число, а не длину показанной страницы.
     txt('m-comp-cnt', total ? total+' конкурентов' : 'Нет');
-    if (!items.length) { txt('compList', empty('📈','Нет конкурентов','Добавьте канал для мониторинга')); return; }
+    if (!items.length) { txt('compList', empty('📈','Нет конкурентов','Добавьте канал для мониторинга', {label:'➕ Добавить канал', fn:'openCompModal()'})); return; }
     txt('compList', items.map(c=>{
       const members = c.last_members!=null?num(c.last_members)+' участников':'не проверен';
       const checked = c.last_checked ? ago(c.last_checked) : 'никогда';
@@ -14791,7 +14791,7 @@ async function loadCRM(append) {
     }
     const contacts = d.contacts||[];
     if (!contacts.length && !append) {
-      txt('crmList', empty('👤','Нет контактов','Нажмите «+ Добавить», чтобы создать контакт вручную'));
+      txt('crmList', empty('👤','Нет контактов','Нажмите «+ Добавить», чтобы создать контакт вручную', {label:'➕ Добавить контакт', fn:'openCrmContactModal()'}));
       return;
     }
     const html = contacts.map(c=>{
@@ -16604,7 +16604,7 @@ async function loadBroadcastSchedule() {
 }
 function renderBcScheduleList(items) {
   const el = document.getElementById('bcSchedList');
-  if (!items.length) { el.innerHTML=empty('📅','Нет запланированных','Создайте через + '); return; }
+  if (!items.length) { el.innerHTML=empty('📅','Нет запланированных','Создайте через + ', {label:'📅 Запланировать', fn:'openBcScheduleModal()'}); return; }
   el.innerHTML = items.map(b=>{
     const [bc,bl]=stb(b.status);
     const time = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('ru-RU') : '—';
@@ -22047,7 +22047,7 @@ async function openAiMemory(keep) {
     const memTotal = totalOf(d, mems);
     // Плитка называет ВСЁ число записей, а не длину показанной страницы.
     txt('m-aimem-val',`${num(memTotal)} записей`);
-    if (!mems.length) { txt('aiMemoryList', empty('🧠','Нет записей','Добавьте заметки для ИИ-ассистента')); return; }
+    if (!mems.length) { txt('aiMemoryList', empty('🧠','Нет записей','Добавьте заметки для ИИ-ассистента', {label:'➕ Добавить запись', fn:'openAiMemoryModal()'})); return; }
     txt('aiMemoryList', mems.map(m=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-purple-16)">${m.pinned?'📌':(MEM_KIND[m.kind]||'📝')}</div>
@@ -22087,7 +22087,7 @@ async function openCommunity() {
     const d = await api('/api/miniapp/community/nodes');
     const nodes = d.nodes||[];
     const v = document.getElementById('m-community-val'); if (v) v.textContent = nodes.length?`${nodes.length} ${plural(nodes.length,'сообщество','сообщества','сообществ')}`:'';
-    if (!nodes.length) { txt('communityList', empty('🏛','Нет сообществ','Создайте ноду-сообщество из форум-супергруппы')); return; }
+    if (!nodes.length) { txt('communityList', empty('🏛','Нет сообществ','Создайте ноду-сообщество из форум-супергруппы', {label:'🏛 Создать сообщество', fn:'openCommunityCreate()'})); return; }
     // Название и chat_id НЕ подставляем в атрибут: JSON.stringify добавляет
     // свои двойные кавычки, а атрибут тоже в двойных — строка обрывалась на
     // первой же, и список не открывался ВСЕГДА, а не только на странном
@@ -22234,7 +22234,7 @@ async function openNodes() {
       <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${active}</div><div class="kpi-lbl">Активных</div></div>
     `);
     txt('m-nodes-val',`${active} активных нод`);
-    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Нажмите «+ Добавить», чтобы зарегистрировать форум-группу')); return; }
+    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Нажмите «+ Добавить», чтобы зарегистрировать форум-группу', {label:'➕ Добавить ноду', fn:'openNodeModal()'})); return; }
     txt('nodesList', nodes.map(n=>`
       <div class="row">
         <div class="row-ico tap" style="background:var(--bg-green-16)" onclick="openNodeThreads(${n.id},'${escJs(n.name||n.node_type)}')">${n.is_active?'🟢':'⚫'}</div>
@@ -23599,7 +23599,7 @@ async function openRegCheck(keep) {
     REGCHK_ROWS = REGCHK_OFFSET ? REGCHK_ROWS.concat(_page) : _page;
     const checks = REGCHK_ROWS;
     const rcTotal = totalOf(d, checks);
-    if (!checks.length) { txt('regCheckList', empty('📅','История пуста','Нажмите Проверить')); return; }
+    if (!checks.length) { txt('regCheckList', empty('📅','История пуста','Нажмите Проверить', {label:'📅 Проверить', fn:'openRegCheckModal()'})); return; }
     txt('regCheckList', checks.map(c=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-blue-16)">${c.entity_type==='channel'?'📢':'👤'}</div>
@@ -23645,7 +23645,7 @@ async function openDmCampaigns() {
       <div class="kpi-card"><div class="kpi-val">${done}</div><div class="kpi-lbl">Завершено</div></div>
     `);
     txt('m-dm-cnt', cmpTotal+' кампаний');
-    if (!cmp.length) { txt('dmList', empty('✉️','Нет кампаний','Нажмите + Новая')); return; }
+    if (!cmp.length) { txt('dmList', empty('✉️','Нет кампаний','Нажмите + Новая', {label:'✉️ Новая кампания', fn:'openCmpModal()'})); return; }
     txt('dmList', cmp.map(c=>{
       const tot = c.total_targets||0, snt = c.sent_count||0, fl = c.fail_count||0;
       const pct = tot ? Math.min(100, Math.round((snt+fl)*100/tot)) : 0;
@@ -24087,7 +24087,7 @@ async function openWarmup() {
       warnBox.style.display = '';
     }
     const plans = d.plans||[];
-    if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить')); return; }
+    if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить', {label:'🌱 Запустить прогрев', fn:'openWarmupModal()'})); return; }
     txt('warmupList', plans.map(p=>{
       const h = p.health || {state:'running', label:(WARMUP_STATUS[p.status]||p.status), hint:'', resumable:p.status==='paused'};
       const col = WARMUP_STATE_COLOR[h.state] || 'var(--hint)';
@@ -24702,7 +24702,7 @@ async function openFolders(keep) {
     FOLDERS_ROWS = FOLDERS_OFFSET ? FOLDERS_ROWS.concat(_page) : _page;
     const fs = FOLDERS_ROWS;
     const foldersTotal = totalOf(d, fs);
-    if (!fs.length) { txt('foldersList', empty('📁','Пока нет папок','Соберите подборку своих каналов и раздайте одну ссылку')); return; }
+    if (!fs.length) { txt('foldersList', empty('📁','Пока нет папок','Соберите подборку своих каналов и раздайте одну ссылку', {label:'📁 Собрать папку', fn:'openFolderCompose()'})); return; }
     txt('foldersList', fs.map(f=>{
       const st = f.status;
       const color = st==='ready'?'var(--green)':st==='failed'?'var(--red,#ef4444)':'var(--hint)';
@@ -25621,7 +25621,7 @@ async function openApiKeys() {
     const d = await api('/api/miniapp/api_keys');
     const keys = d.keys||[];
     txt('m-apikey-cnt', keys.filter(k=>k.is_active).length+' активных');
-    if (!keys.length) { txt('apiKeyList', empty('🔑','Нет ключей','Нажмите + Создать')); return; }
+    if (!keys.length) { txt('apiKeyList', empty('🔑','Нет ключей','Нажмите + Создать', {label:'🔑 Создать ключ', fn:'openApiKeyModal()'})); return; }
     txt('apiKeyList', keys.map(k=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-yellow-16)">🔑</div>
@@ -25992,7 +25992,7 @@ async function loadParserRuns(keep) {
     PARSER_RUNS = PRUNS_OFFSET ? (PARSER_RUNS||[]).concat(_page) : _page;
     const runs = PARSER_RUNS;
     const prTotal = totalOf(d, runs);
-    if (!runs.length) { txt('parserRunList', empty('⏱','Нет запусков','Запустите первый парсинг')); return; }
+    if (!runs.length) { txt('parserRunList', empty('⏱','Нет запусков','Запустите первый парсинг', {label:'▶ Запустить парсинг', fn:'openParserModal()'})); return; }
     // Причина обрыва и оговорка о полноте — целиком, отдельной строкой: раньше
     // её резало до 60 знаков, и «Список подписчиков канала Telegram…» не
     // доходил до того, что делать дальше.
@@ -26644,7 +26644,7 @@ async function loadAssetTpl(type, keep) {
     AT_ROWS = AT_OFFSET ? AT_ROWS.concat(_page) : _page;
     const rows = AT_ROWS;
     const atTotal = totalOf(d, rows);
-    if (!rows.length) { txt('atList', empty('📐','Шаблонов нет','Нажмите + Создать')); return; }
+    if (!rows.length) { txt('atList', empty('📐','Шаблонов нет','Нажмите + Создать', {label:'➕ Создать шаблон', fn:'openAssetTplModal()'})); return; }
     const typeIco={bot:'🤖',channel:'📢',group:'👥',post:'📝'};
     txt('atList', rows.map(r=>`
       <div class="row">
@@ -26853,7 +26853,7 @@ async function openPresencePacks(keep) {
     PP_ROWS = PP_OFFSET ? PP_ROWS.concat(_page) : _page;
     const rows = PP_ROWS;
     const ppTotal = totalOf(d, rows);
-    if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать')); return; }
+    if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать', {label:'📦 Создать пакет', fn:'openPresencePackModal()'})); return; }
     txt('ppList', rows.map(r=>`
       <div class="row tap" onclick="openPpDetail(${r.id},'${escJs(r.name)}')">
         <div class="row-ico" style="background:var(--bg-purple-16)">📦</div>
@@ -27064,7 +27064,7 @@ async function openGlobalPresence(more = false) {
     GP_ROWS = GP_OFFSET ? GP_ROWS.concat(_page) : _page;
     const rows = GP_ROWS;
     const gpTotal = totalOf(d, rows);
-    if (!rows.length) { txt('gpList', empty('🌍','Планов нет','Нажмите + Создать в шапке экрана')); return; }
+    if (!rows.length) { txt('gpList', empty('🌍','Планов нет','Нажмите + Создать в шапке экрана', {label:'🌍 Создать план', fn:'openGpCreateModal()'})); return; }
     txt('gpList', rows.map(r => {
       const done=r.done_targets||0, total=r.total_targets||0;
       const pct=total>0?Math.round(done/total*100):0;
@@ -29010,7 +29010,7 @@ async function openNarrative(keep) {
     NARR_ROWS = NARR_OFFSET ? NARR_ROWS.concat(_page) : _page;
     const rows = NARR_ROWS;
     const narrTotal = totalOf(d, rows);
-    if (!rows.length) { txt('narrativeList', empty('📖','Кампаний нет','Нажмите + Создать')); return; }
+    if (!rows.length) { txt('narrativeList', empty('📖','Кампаний нет','Нажмите + Создать', {label:'📖 Создать кампанию', fn:'openNarrativeModal()'})); return; }
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
     const statusCls = {draft:'b-gy',active:'b-gr',paused:'b-or',completed:'b-bl',cancelled:'b-gy'};
     txt('narrativeList', rows.map(r => `
@@ -31623,7 +31623,7 @@ async function loadNetworkBuilder() {
     document.getElementById('nb-active').textContent = nets.filter(n => n.status === 'active').length;
 
     if (!nets.length) {
-      txt('netBuilderList', empty('🕸️', 'Нет сеток', 'Создайте первую сеть'));
+      txt('netBuilderList', empty('🕸️', 'Нет сеток', 'Создайте первую сеть', {label:'🕸️ Создать сеть', fn:'openNetBuilderCreateModal()'}));
       return;
     }
     txt('netBuilderList', nets.map(n => {
@@ -31927,7 +31927,7 @@ async function loadWorkflows() {
     wfFailEl.style.color = wfFail ? 'var(--red)' : '';
 
     if (!wfs.length) {
-      txt('wfList', empty('🔄', 'Нет воркфлоу', 'Создайте первый процесс'));
+      txt('wfList', empty('🔄', 'Нет воркфлоу', 'Создайте первый процесс', {label:'🔄 Создать сценарий', fn:'openWorkflowCreateModal()'}));
       return;
     }
     txt('wfList', wfs.map(w => {
@@ -32091,7 +32091,7 @@ async function openWorkflowDetail(wfId, wfName) {
     html += _wfStatsSummary(d.stats);
 
     if (!steps.length) {
-      html += empty('📝', 'Нет шагов', 'Нажмите + Шаг для добавления');
+      html += empty('📝', 'Нет шагов', 'Нажмите + Шаг для добавления', {label:'➕ Добавить шаг', fn:'openWfAddStepModal()'});
     } else {
       // Схема со стрелками — screens/workflow_map.js.
       html += `<div style="padding:0 16px 8px"><button class="btn btn-s" style="width:100%" onclick="openWorkflowMap(${Number(wfId)})">🗺 Схема сценария</button></div>`;
