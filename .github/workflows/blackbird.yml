@@ -1,0 +1,30 @@
+name: blackbird
+
+# Тесты модуля blackbird/ — отдельно от набора tg-manager: свой venv, свои
+# зависимости, без сети (вместо настоящего Blackbird — поддельный upstream).
+on:
+  push:
+    paths:
+      - "blackbird/**"
+      - ".github/workflows/blackbird.yml"
+  pull_request:
+    paths:
+      - "blackbird/**"
+
+jobs:
+  wrapper-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Зависимости
+        working-directory: blackbird
+        run: pip install -r requirements.txt pytest
+      - name: Upstream импортируется
+        working-directory: blackbird/upstream
+        run: python blackbird.py --about
+      - name: Тесты обёртки
+        working-directory: blackbird
+        run: python -m pytest tests -q
