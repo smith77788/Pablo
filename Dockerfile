@@ -42,4 +42,14 @@ COPY assistant/ /app/pablo/assistant/
 COPY start-all.sh /app/start-all.sh
 RUN chmod +x /app/start-all.sh
 
-CMD ["bash", "/app/start-all.sh"]
+# Не-root: процессы работают от app. Код остаётся root-овым и app на запись
+# недоступен; app пишет только в /tmp и в каталоги, которые точка входа отдаёт
+# ему перед сбросом прав (тома Railway монтируются от root — см.
+# deploy-entrypoint.sh). PYTHONDONTWRITEBYTECODE: app не может класть
+# __pycache__ рядом с кодом, и пытаться незачем.
+RUN useradd --system --create-home --uid 10001 --user-group app
+ENV PYTHONDONTWRITEBYTECODE=1
+COPY deploy-entrypoint.sh /app/deploy-entrypoint.sh
+RUN chmod 0755 /app/deploy-entrypoint.sh
+
+CMD ["bash", "/app/deploy-entrypoint.sh"]
