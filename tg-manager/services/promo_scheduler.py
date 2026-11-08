@@ -56,7 +56,7 @@ async def _refresh_aging_bots(pool: asyncpg.Pool, bot) -> None:
                 pool, r["owner_id"], "scheduler",
                 f"Бот @{r['bot_username']} созрел → готов к работе",
             )
-            await _notify(bot, r["owner_id"],
+            await _notify(pool, bot, r["owner_id"],
                           f"✅ <b>Бот @{r['bot_username']} готов!</b>\n\n"
                           f"21 день созревания прошёл. Бот доступен для продвижения.\n"
                           f"Откройте /promo → Склад ботов.")
@@ -147,7 +147,7 @@ async def _process_order_status(
         await db.promo_update_order_status(
             pool, order["id"], new_status, current_subs=current
         )
-        await _notify(bot, order["owner_id"],
+        await _notify(pool, bot, order["owner_id"],
                       f"{'🏁' if raw_status == 'Completed' else '⚠️'} "
                       f"<b>Накрутка {'завершена' if raw_status == 'Completed' else 'частичная'}</b>\n\n"
                       f"Заказ #{order['id']}: <code>{order['keyword']}</code>\n"
@@ -155,7 +155,7 @@ async def _process_order_status(
                       f"→ Теперь нужно проверить позицию в поиске. /promo")
     elif raw_status == "Cancelled":
         await db.promo_update_order_status(pool, order["id"], "waiting", current_subs=current)
-        await _notify(bot, order["owner_id"],
+        await _notify(pool, bot, order["owner_id"],
                       f"❌ <b>Заказ на панели отменён</b>\n\n"
                       f"Заказ #{order['id']}: <code>{order['keyword']}</code>\n"
                       f"Панель: {panel_name} · SMM-заказ #{order['smm_order_id']}\n\n"
@@ -166,8 +166,9 @@ async def _process_order_status(
 
 # ── Notifications ─────────────────────────────────────────────────────────────
 
-async def _notify(bot, user_id: int, text: str) -> None:
+async def _notify(pool, bot, user_id: int, text: str) -> None:
+    # Общий слой: тумблер «Отчёты», уровень «инфо».
     try:
-        await bot.send_message(user_id, text, parse_mode="HTML")
+        await db.notify_if_enabled(pool, bot, user_id, "reports", text)
     except Exception:
         log_exc_swallow(log, "promo_scheduler: notify failed for user %d", user_id)

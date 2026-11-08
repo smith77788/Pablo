@@ -11,6 +11,7 @@ let _fmSeq = 0;
 // кликается (см. _fmOpen), а не молчит при нажатии.
 const _FM_OPEN = {
   contacts:   id => openContactDetail(id),
+  deals:      id => _fmOpenDeal(Number(id)),
   bots:       id => openBot(Number(id)),
   accounts:   id => openAccount(Number(id)),
   channels:   id => openChannel(Number(id)),
@@ -18,9 +19,27 @@ const _FM_OPEN = {
   operations: id => openOpDetail(Number(id)),
 };
 const _FM_MORE = {
-  contacts: 'openContacts()', bots: "goTab('bots')", accounts: "goTab('accounts')",
+  contacts: 'openContacts()', deals: 'openDeals()', bots: "goTab('bots')", accounts: "goTab('accounts')",
   channels: 'openChannels()', personas: 'openSalesManager()', operations: 'openMassOps()',
 };
+// Сделка открывается на доске своей карточкой. Доска показывает первые
+// карточки колонки; если найденная сделка дальше, говорим это прямо, а не
+// открываем молча доску без неё.
+async function _fmOpenDeal(id) {
+  await openDeals();
+  if (typeof _dkFindDeal === 'function' && _dkFindDeal(id)) { dkOpenDeal(id); return; }
+  toast('Сделка на доске ниже первых карточек — нажмите «Ещё» в её колонке');
+}
+// Кнопка объекта из /find в боте открывает мини-апп с #obj:<группа>.<id> —
+// тот же переход, что строка «Найдено у вас» здесь.
+function openFoundObject(ref) {
+  const dot = String(ref || '').indexOf('.');
+  const key = dot > 0 ? ref.slice(0, dot) : '';
+  const id = dot > 0 ? ref.slice(dot + 1) : '';
+  const f = _FM_OPEN[key];
+  if (!f || !id) { toast('⚠️ Ссылка на объект повреждена'); return; }
+  try { return f(id); } catch (_) { toast('⚠️ Не получилось открыть'); }
+}
 function findMine(q) {
   const box = document.getElementById('moreFindMine');
   if (!box) return;

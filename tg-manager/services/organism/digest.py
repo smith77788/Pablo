@@ -38,7 +38,7 @@ _DIGEST_STATE_KEY = "digest_metrics"
 
 # Уровень губернатора по-русски: в отчёт уходило сырое green/orange/red, а
 # владелец читает интерфейс на русском.
-_GOV_RU = {"green": "спокойно", "orange": "умеренно", "red": "под давлением"}
+_GOV_RU = {"green": "спокойно", "orange": "умеренно", "red": "высокий риск бана"}
 
 
 def _dig(snap: dict, block: str, key: str, default=0):
@@ -77,7 +77,7 @@ def _headline(snap: dict) -> str:
     if int(fleet.get("accounts", 0) or 0) == 0:
         return "🚀 Пустой проект — начните с добавления аккаунтов и первого канала."
     if bans > 0 or level == "red":
-        return "🔴 Флот под давлением — снизьте темп и дайте аккаунтам прогреться."
+        return "🔴 Высокий риск бана — снизьте темп и дайте аккаунтам прогреться."
     if level == "orange":
         return "🟠 Умеренный риск — темп умеренный, следите за флудом."
     if int(growth.get("channels", 0) or 0) > 0 and int(growth.get("growth_ops_7d", 0) or 0) == 0:
@@ -115,7 +115,7 @@ def compose_digest(snap: dict, suggestions=None, narrative_text: str = "",
         {"key": "fleet", "title": "🛰 Флот", "stats": [
             stat("Активных аккаунтов", "fleet", "active", "fleet_active"),
             stat("Мёртвых", "fleet", "dead", "fleet_dead"),
-            {"label": "Давление флота", "value": int(fleet.get("pressure", 0) or 0),
+            {"label": "Риск бана", "value": int(fleet.get("pressure", 0) or 0),
              "suffix": f"/100 · ×{fleet.get('governor_mult', 1.0)}",
              "id": "fleet_pressure"},
         ], "note": f"Губернатор: {_GOV_RU.get(gov, gov)}, банов за 24ч: {int(fleet.get('bans_24h', 0) or 0)}"},

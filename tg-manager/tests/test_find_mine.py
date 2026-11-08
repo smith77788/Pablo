@@ -135,3 +135,70 @@ def test_queries_run_on_real_schema_and_stay_owner_scoped():
             await pool.execute("DELETE FROM unified_contacts WHERE owner_id = ANY($1::bigint[])", [me, other])
             await pool.close()
     asyncio.run(_go())
+
+
+def test_deals_are_found_by_title_client_and_note_and_show_the_board_stage():
+    if not DSN:
+        pytest.skip("нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
+    import asyncpg
+    me, other = 88_400_011, 88_400_012
+
+    async def _go():
+        try:
+            pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
+        except Exception as exc:
+            pytest.skip(f"Postgres недоступен: {str(exc)[:120]}")
+        try:
+            await pool.execute("DELETE FROM crm_deals WHERE owner_id = ANY($1::bigint[])", [me, other])
+            await pool.execute(
+                "INSERT INTO crm_deals(owner_id, title, contact, stage, notes) VALUES "
+                "($1,'Оптовый заказ','Иван','proposal',NULL), "
+                "($1,'Подписка','Мария','lead','перезвонить про опт'), "
+                "($2,'Оптовый чужой','Пётр','lead',NULL)", me, other)
+            d = await fm.find(pool, me, "опт")
+            deals = {g["key"]: g for g in d["groups"]}["deals"]
+            # Своё по названию и по заметке; чужое не видно.
+            assert deals["total"] == 2
+            subs = {i["title"]: i["sub"] for i in deals["items"]}
+            assert subs["Оптовый заказ"] == "Иван · Предложение"
+            d = await fm.find(pool, me, "мари")
+            assert {g["key"]: g for g in d["groups"]}["deals"]["items"][0]["title"] == "Подписка"
+        finally:
+            await pool.execute("DELETE FROM crm_deals WHERE owner_id = ANY($1::bigint[])", [me, other])
+            await pool.close()
+    asyncio.run(_go())
+
+
+def test_a_found_deal_opens_its_card_or_says_where_it_is():
+    js = open(os.path.join(ROOT, "mini_app", "screens", "find_mine.js"), encoding="utf-8").read()
+    body = js[js.index("async function _fmOpenDeal"):]
+    body = body[:body.index("\n}\n")]
+    assert "await openDeals()" in body and "dkOpenDeal(id)" in body
+    assert "toast(" in body, "сделка за потолком доски открывается молча — надо сказать, где она"
+
+
+def test_bot_find_searches_own_objects_and_links_into_the_app():
+    src = open(os.path.join(ROOT, "bot", "handlers", "start.py"), encoding="utf-8").read()
+    body = src[src.index("async def cmd_find"):]
+    body = body[:body.index("\n@router")]
+    # /find ищет тот же набор объектов, что и мини-апп, а не только пункты меню.
+    assert "_find_objects(pool" in body
+    assert "mini_app_find" in src and "_fm.find(pool, uid" in src
+    # Кнопка ведёт прямо в объект, и мини-апп эту ссылку понимает.
+    assert "#obj:{g['key']}.{it['id']}" in src
+    html = miniapp_html()
+    assert "if (k==='obj' && prm) return openFoundObject(String(prm));" in html
+    js = open(os.path.join(ROOT, "mini_app", "screens", "find_mine.js"), encoding="utf-8").read()
+    assert "function openFoundObject(ref)" in js
+
+
+def test_found_objects_block_escapes_and_caps_buttons():
+    from bot.handlers.start import _found_objects_block
+    groups = [{"key": "deals", "label": "💼 Сделки", "total": 12, "has_more": True,
+               "items": [{"id": str(i), "title": f"<b>Сделка {i}</b>", "sub": "Иван"} for i in range(10)]}]
+    text, buttons = _found_objects_block(groups, "https://x.example/miniapp/")
+    assert "&lt;b&gt;Сделка 0&lt;/b&gt;" in text and "(ещё 2)" in text
+    assert len(buttons) == 8
+    assert buttons[0][1].url == "https://x.example/miniapp/#obj:deals.0"
+    text, buttons = _found_objects_block(groups, "")
+    assert buttons == [] and "Сделка 9" in text

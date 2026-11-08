@@ -57,6 +57,16 @@ async def client():
     await cli.close()
 
 
+
+def _served(path) -> bytes:
+    """Файл таким, каким его отдаёт сервер: без комментариев и отступов."""
+    from services import miniapp_minify as mm
+    src = open(path, encoding="utf-8").read()
+    p = str(path)
+    fn = mm.minify_html if p.endswith(".html") else mm.strip_js if p.endswith(".js") else mm.strip_css
+    return fn(src).encode("utf-8")
+
+
 async def test_index_is_gzipped_over_the_wire(client):
     raw = os.path.getsize(INDEX)
     r = await client.get("/miniapp", headers={"Accept-Encoding": "gzip"})
@@ -65,8 +75,9 @@ async def test_index_is_gzipped_over_the_wire(client):
     assert r.headers.get("Content-Encoding") == "gzip"
     assert len(body) < raw / 3, (
         f"мини-апп ушёл почти несжатым: {len(body)} из {raw}")
-    # Тело действительно валидный gzip исходного файла, а не просто заголовок.
-    assert gzip.decompress(body) == open(INDEX, "rb").read()
+    # Тело — валидный gzip того, что сервер отдаёт: исходника без комментариев
+    # и отступов (services/miniapp_minify.py), а не просто заголовок.
+    assert gzip.decompress(body) == _served(INDEX)
 
 
 async def test_repeat_open_gets_304_and_no_body(client):
@@ -85,7 +96,7 @@ async def test_client_without_gzip_still_gets_full_file(client):
     body = await r.read()
     assert r.status == 200
     assert r.headers.get("Content-Encoding") != "gzip"
-    assert len(body) == os.path.getsize(INDEX)
+    assert body == _served(INDEX)
 
 
 # ── Скрипты экранов и стили ──────────────────────────────────────────────────
@@ -109,7 +120,7 @@ async def test_screen_scripts_are_gzipped_and_valid(client):
         body = await r.read()
         assert r.status == 200, rel
         assert r.headers.get("Content-Encoding") == "gzip", rel
-        assert gzip.decompress(body) == open(path, "rb").read(), rel
+        assert gzip.decompress(body) == _served(path), rel
         ctype = r.headers.get("Content-Type", "")
         assert ("javascript" in ctype) if rel.endswith(".js") else ("text/css" in ctype), rel
         raw_total += os.path.getsize(path)

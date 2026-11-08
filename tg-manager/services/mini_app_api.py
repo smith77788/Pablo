@@ -6914,6 +6914,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # «новый подписчик» / «позиция изменилась» было неоткуда.
             settings["notif_new_user"] = bool(_ns.get("new_user", True))
             settings["notif_position"] = bool(_ns.get("position_change", True))
+            # Тумблеры фоновых уведомлений (v312) и «несрочное — сводкой».
+            settings["notif_leads"] = bool(_ns.get("leads", True))
+            settings["notif_reports"] = bool(_ns.get("reports", True))
+            settings["notif_advice"] = bool(_ns.get("advice", True))
         except Exception as _e:
             log.debug("user_settings_get notif overlay uid=%d: %s", uid, _e)
         # Тихие часы (services/quiet_hours.py) — тоже из notification_settings.
@@ -6926,6 +6930,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 settings.update({"quiet_enabled": bool(_q["quiet_enabled"]),
                                  "quiet_start": int(_q["quiet_start"]),
                                  "quiet_end": int(_q["quiet_end"]), "tz": _q["tz"]})
+            settings["digest_only"] = bool(await pool.fetchval(
+                "SELECT digest_only FROM notification_settings WHERE user_id=$1", uid))
             settings["quiet_held"] = int(await pool.fetchval(
                 "SELECT COUNT(*) FROM notification_held WHERE user_id=$1", uid) or 0)
         except Exception as _e:
@@ -6985,6 +6991,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     )
             except Exception as _ne:
                 log.warning("settings→notification_settings sync failed uid=%d: %s", uid, _ne)
+            # Фоновые уведомления (v312) — только если фронт их прислал.
+            if "notif_leads" in data or "digest_only" in data:
+                try:
+                    # Строка уже есть: её только что записала ветка выше.
+                    await pool.execute(
+                        "UPDATE notification_settings SET leads=$2, reports=$3, advice=$4, "
+                        "digest_only=$5, updated_at=now() WHERE user_id=$1",
+                        uid, bool(data.get("notif_leads", True)),
+                        bool(data.get("notif_reports", True)),
+                        bool(data.get("notif_advice", True)),
+                        bool(data.get("digest_only", False)))
+                except Exception as _le:
+                    log.warning("settings→notification levels sync failed uid=%d: %s", uid, _le)
             # Тихие часы — только если фронт их прислал (старый клиент не знает
             # этих полей и не должен их сбрасывать). Часы вне 0..23 — 400.
             if "quiet_enabled" in data:
@@ -9539,8 +9558,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not cached:
                 try:
                     import gzip as _gzip
+                    from services import miniapp_minify as _mm
                     with open(_index_path, "rb") as _f:
-                        _MINIAPP_GZ["body"] = _gzip.compress(_f.read(), 6)
+                        _raw = _f.read().decode("utf-8")
+                    # Без комментариев и отступов: −25% сжатого размера на
+                    # холодном старте (services/miniapp_minify.py).
+                    _MINIAPP_GZ["body"] = _gzip.compress(
+                        _mm.safe(_mm.minify_html, _raw, "index.html").encode("utf-8"), 6)
                     _MINIAPP_GZ["key"] = key
                 except OSError:
                     return web.FileResponse(_index_path)
@@ -9555,7 +9579,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 headers["Content-Encoding"] = "gzip"
                 return web.Response(body=_MINIAPP_GZ["body"], headers=headers,
                                     content_type="text/html", charset="utf-8")
-            return web.FileResponse(_index_path, headers=headers)
+            import gzip as _gzip_mod   # клиент без gzip — та же очищенная страница
+            return web.Response(body=_gzip_mod.decompress(_MINIAPP_GZ["body"]),
+                                headers=headers, content_type="text/html", charset="utf-8")
 
         # Скрипты экранов и стили — тем же путём, что index.html: сжатыми один
         # раз в память и с ETag. Замер 2026-11-02: экраны (screens/*.js) и
@@ -9588,8 +9614,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             hit = _ASSET_GZ.get(full)
             if not hit or hit[0] != key:
                 import gzip as _gzip
+                from services import miniapp_minify as _mm
                 with open(full, "rb") as _f:
-                    hit = (key, _gzip.compress(_f.read(), 6))
+                    _src = _f.read().decode("utf-8")
+                _fn = _mm.strip_js if full.endswith(".js") else _mm.strip_css
+                hit = (key, _gzip.compress(
+                    _mm.safe(_fn, _src, os.path.basename(full)).encode("utf-8"), 6))
                 _ASSET_GZ[full] = hit
             headers["Content-Encoding"] = "gzip"
             return web.Response(body=hit[1], headers=headers, content_type=ctype,
