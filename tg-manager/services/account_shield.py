@@ -459,6 +459,6 @@ async def _notify_pause(
         # делят один слот анти-спама.
         from database import db as _db
         await _db.notify_if_enabled(pool, bot, owner_id, "restriction", text,
-                                    dedup_key=f"shield:{decision.account_id}")
+                                    dedup_key=f"shield:{decision.account_id}:{bool(applied)}")
     except Exception as exc:
         log.debug("account_shield._notify_pause owner=%d: %s", owner_id, exc)

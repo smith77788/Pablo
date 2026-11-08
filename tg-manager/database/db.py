@@ -5294,7 +5294,14 @@ async def notify_if_enabled(
         # некому, и отчёт об операции владелец не получал вообще.
         _notify_cooldown[key] = now
 
-        settings = await get_notification_settings(pool, user_id)
+        try:
+            settings = await get_notification_settings(pool, user_id)
+        except Exception:
+            # Настройки не прочитались — шлём как раньше: потерять уведомление
+            # хуже, чем прислать то, что человек мог бы выключить.
+            log.debug("notify_if_enabled: настройки не прочитаны user=%s", user_id,
+                      exc_info=True)
+            settings = {}
         if not settings.get(pref, True):
             return True
         # Тихие часы (services/quiet_hours.py): несрочное ночью — в сводку,

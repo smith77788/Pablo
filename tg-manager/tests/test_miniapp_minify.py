@@ -20,6 +20,7 @@ import subprocess
 import pytest
 
 from services import miniapp_minify as mm
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = os.path.join(ROOT, "mini_app", "index.html")
@@ -54,7 +55,7 @@ def test_broken_input_falls_back_to_source():
 
 
 def test_served_through_the_minifier():
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = api_source()
     assert "miniapp_minify" in src
     assert "_mm.safe(_mm.minify_html" in src and "_mm.strip_js if full.endswith" in src
 

@@ -28212,9 +28212,6 @@ async function openPhysics() {
         ${r.account_id?'<div class="row-right chev">›</div>':''}
       </div>
     `).join(''));
-    const high = rows.filter(r=>(r.risk_score||0)>=0.5).length;
-    const pv = document.getElementById('m-physics-val');   // плитки «Физика» больше нет
-    if (pv) pv.textContent = high?`${high} проблем`:rows.length+' аккаунтов';
   } catch(e) { txt('physicsList', errHtml(errRu(e), 'openPhysics()')); }
 }
 

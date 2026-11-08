@@ -2904,8 +2904,8 @@ def _notif_on(row, field: str, default: bool = True) -> bool:
 
 def _notif_label(field: str) -> str:
     """Подпись с уровнем: ⚡ — «нужно действие», приходит сразу и ночью."""
-    from services.quiet_hours import level_of, ACTION
-    mark = " ⚡" if level_of(field) == ACTION else ""
+    from services.quiet_hours import level_of
+    mark = " ⚡" if level_of(field) == "action" else ""
     return _NOTIF_LABELS[field] + mark
 
 

@@ -6994,11 +6994,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Фоновые уведомления (v312) — только если фронт их прислал.
             if "notif_leads" in data or "digest_only" in data:
                 try:
+                    # Строка уже есть: её только что записала ветка выше.
                     await pool.execute(
-                        "INSERT INTO notification_settings(user_id, leads, reports, advice, "
-                        "digest_only) VALUES($1,$2,$3,$4,$5) "
-                        "ON CONFLICT(user_id) DO UPDATE SET leads=$2, reports=$3, advice=$4, "
-                        "digest_only=$5, updated_at=now()",
+                        "UPDATE notification_settings SET leads=$2, reports=$3, advice=$4, "
+                        "digest_only=$5, updated_at=now() WHERE user_id=$1",
                         uid, bool(data.get("notif_leads", True)),
                         bool(data.get("notif_reports", True)),
                         bool(data.get("notif_advice", True)),

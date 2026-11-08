@@ -285,7 +285,7 @@ async def check_and_arm(pool, owner_id: int, *, bot=None) -> dict:
             from database import db as _db
             # Уровень «нужно действие»: волна банов не ждёт утра.
             if not await _db.notify_if_enabled(pool, bot, owner_id, "restriction",
-                                               _text, dedup_key="anti_storm"):
+                                               _text, dedup_key=f"anti_storm:{bool(armed)}"):
                 raise RuntimeError("не доставлено")
         except Exception:
             log.warning("anti_storm: не удалось предупредить владельца owner=%s",
