@@ -5,6 +5,7 @@ from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
+import html
 import asyncpg
 from bot.keyboards import main_menu
 from bot.utils.subscription import get_plan, PLAN_EMOJIS, is_platform_admin, plan_name_ru
@@ -688,9 +689,45 @@ _NAV_MAP: list[tuple[list[str], str, str]] = [
 ]
 
 
+async def _find_objects(pool, uid: int, query: str) -> list[dict]:
+    """Свои объекты по запросу — тот же поиск, что строка «Ещё» в мини-аппе
+    (services/mini_app_find.py). Сбой поиска не ломает поиск функций."""
+    from services import mini_app_find as _fm
+    q = _fm.clean_query(query)
+    if pool is None or len(q) < _fm.MIN_QUERY:
+        return []
+    try:
+        return (await _fm.find(pool, uid, q, per_group=3))["groups"]
+    except Exception:
+        log.warning("/find: поиск объектов не удался uid=%s", uid, exc_info=True)
+        return []
+
+
+def _found_objects_block(groups: list[dict], url: str):
+    """Текст и кнопки найденных объектов. Кнопка открывает объект в мини-аппе
+    (#obj:группа.id); без адреса мини-аппа остаётся только список."""
+    from aiogram.types import WebAppInfo
+    lines, buttons = [], []
+    for g in groups:
+        more = f" (ещё {g['total'] - len(g['items'])})" if g.get("has_more") else ""
+        lines.append(f"\n<b>{html.escape(g['label'])}</b>{more}")
+        for it in g["items"]:
+            sub = f" · {html.escape(it['sub'])}" if it.get("sub") else ""
+            lines.append(f"• {html.escape(it['title'])}{sub}")
+            if url and len(buttons) < 8:
+                icon = g["label"].split(" ", 1)[0]
+                buttons.append((f"{icon} {it['title']}"[:60],
+                                WebAppInfo(url=f"{url}#obj:{g['key']}.{it['id']}")))
+    return "\n".join(lines), buttons
+
+
 @router.message(Command("find"))
-async def cmd_find(message: Message) -> None:
-    """Поиск функции по ключевому слову."""
+async def cmd_find(message: Message, pool: asyncpg.Pool | None = None) -> None:
+    """Поиск по своим объектам (клиенты, сделки, боты, аккаунты…) и по функциям.
+
+    Раньше /find искал только пункты меню: «/find Иван» отвечал «ничего не
+    найдено», хотя Иван был в контактах и в сделках. Теперь сначала свои
+    объекты — как строка поиска в amoCRM, — потом разделы."""
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from aiogram.types import InlineKeyboardButton
 
@@ -699,9 +736,11 @@ async def cmd_find(message: Message) -> None:
 
     if not query:
         await message.answer(
-            "🔍 <b>Поиск функции</b>\n\n"
-            "Введите: <code>/find [ключевое слово]</code>\n\n"
+            "🔍 <b>Поиск</b>\n\n"
+            "Введите: <code>/find [слово]</code> — найду клиентов, сделки, ботов, "
+            "аккаунты, каналы и разделы бота.\n\n"
             "Примеры:\n"
+            "<code>/find Иван</code>\n"
             "<code>/find рассылка</code>\n"
             "<code>/find аккаунт</code>\n"
             "<code>/find позиции</code>\n"
@@ -715,24 +754,35 @@ async def cmd_find(message: Message) -> None:
         if any(kw in query or query in kw for kw in keywords):
             matches.append((label, cb_str))
 
-    if not matches:
+    raw_query = raw.removeprefix("/find").strip()
+    groups = await _find_objects(pool, message.from_user.id, raw_query) if message.from_user else []
+
+    if not matches and not groups:
         await message.answer(
-            f"🔍 По запросу «{query}» ничего не найдено.\n\n"
+            f"🔍 По запросу «{html.escape(query)}» ничего не найдено: ни среди ваших "
+            "клиентов, сделок, ботов и аккаунтов, ни среди разделов.\n\n"
             "Попробуйте другое слово или откройте меню: /menu",
             parse_mode="HTML",
         )
         return
 
+    from config import MINI_APP_URL as _MINI_APP_URL
+    from bot.handlers.botmother_menu import _valid_mini_app_url
+    text_objs, obj_buttons = _found_objects_block(groups, _valid_mini_app_url(_MINI_APP_URL))
+
     kb = InlineKeyboardBuilder()
+    for label, app in obj_buttons:
+        kb.button(text=label, web_app=app)
     for label, cb_str in matches[:8]:
         kb.button(text=label, callback_data=cb_str)
-        kb.adjust(1)
+    kb.adjust(1)
 
-    await message.answer(
-        f"🔍 <b>Результаты по «{query}»:</b>",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    text = f"🔍 <b>Результаты по «{html.escape(raw_query)}»</b>"
+    if groups:
+        text += "\n" + text_objs
+    if matches:
+        text += "\n\n<b>Разделы</b> — кнопки ниже." if groups else ""
+    await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 

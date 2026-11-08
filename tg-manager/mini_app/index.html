@@ -10668,6 +10668,8 @@ function runPulseAction(a) {
   // «Открыть канбан» у сообщения клиента в боте и «ждут ответа» из уведомлений.
   if (k==='deals') return openDeals();
   if (k==='inbox') return openInbox(true);
+  // Найденный объект из /find в боте: #obj:<группа>.<id> (screens/find_mine.js).
+  if (k==='obj' && prm) return openFoundObject(String(prm));
   // Раздел по задаче из карты services/task_sections.py: кнопки разделов в
   // меню бота открывают мини-апп сразу в нужном месте.
   if (k==='section' && prm) return openSection(String(prm));
