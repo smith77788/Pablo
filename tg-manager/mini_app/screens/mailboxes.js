@@ -4,7 +4,10 @@ async function openMailboxes() {
   const list = document.getElementById('mailboxList');
   list.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const data = await api('/api/miniapp/mailboxes');
+    const data = await api('/api/miniapp/mailboxes') || {};
+    // Ответ без списков (сбой, старый сервер) не роняет экран: пустой список.
+    const providers = Array.isArray(data.providers) ? data.providers : [];
+    const mailboxes = Array.isArray(data.mailboxes) ? data.mailboxes : [];
     const oauthButtons = document.getElementById('mailboxOAuthButtons');
     oauthButtons.replaceChildren();
     for (const provider of data.oauth || []) {
@@ -26,7 +29,7 @@ async function openMailboxes() {
     }
     const select = document.getElementById('mailboxProvider');
     if (!select.options.length) {
-      for (const provider of data.providers) {
+      for (const provider of providers) {
         const option = document.createElement('option');
         option.value = provider.key;
         option.textContent = provider.label;
@@ -34,8 +37,8 @@ async function openMailboxes() {
       }
     }
     list.replaceChildren();
-    if (!data.mailboxes.length) list.textContent = 'Почтовые ящики пока не подключены. Добавьте свой ниже.';
-    for (const mailbox of data.mailboxes) {
+    if (!mailboxes.length) list.textContent = 'Почтовые ящики пока не подключены. Добавьте свой ниже.';
+    for (const mailbox of mailboxes) {
       const row = document.createElement('div');
       row.className = 'li';
       const label = document.createElement('div');
