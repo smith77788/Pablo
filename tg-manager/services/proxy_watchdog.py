@@ -72,6 +72,112 @@ def build_alert(label: str, assigned: int, streak: int) -> str:
     )
 
 
+def plan_auto_failover(stranded: list, free: list) -> dict:
+    """Куда автоматически переселить аккаунты с умершего прокси. Чистая функция.
+
+    stranded — [(account_id, страна прокси, на котором он сидел)], free —
+    [(proxy_id, страна)] по прокси владельца, которые живы В ЭТОМ обходе и на
+    которых нет ни одного аккаунта. Автомат, в отличие от ручного переезда,
+    берёт ТОЛЬКО свободные прокси: человек рядом с кнопкой может решить, что
+    два аккаунта на одном выходе лучше простоя, а фоновый цикл молча ломать
+    изоляцию «один аккаунт — один IP» не вправе. Сначала прокси той же
+    страны: смена страны выхода — заметное для Telegram событие, смена
+    адреса внутри страны — нет.
+
+    Возвращает {"moves": [(account_id, proxy_id)], "stranded": [account_id]}.
+    """
+    pool_by_geo: dict = {}
+    order: list = []
+    for pid, geo in free or []:
+        if pid is None:
+            continue
+        key = (geo or "").strip().upper()
+        pool_by_geo.setdefault(key, []).append(int(pid))
+        order.append(int(pid))
+    taken: set = set()
+    moves, left = [], []
+    for acc_id, geo in stranded or []:
+        key = (geo or "").strip().upper()
+        pick = next((p for p in pool_by_geo.get(key, []) if p not in taken), None) if key else None
+        if pick is None:
+            pick = next((p for p in order if p not in taken), None)
+        if pick is None:
+            left.append(acc_id)
+            continue
+        taken.add(pick)
+        moves.append((acc_id, pick))
+    return {"moves": moves, "stranded": left}
+
+
+def build_failover_note(moved: int, stranded: int) -> str:
+    """Дописка к уведомлению о смерти прокси: что автомат сделал сам."""
+    if moved and not stranded:
+        return (f"\n\n✅ Автопереезд: все {moved} аккаунт(ов) переселены на свободные "
+                "живые прокси, операции идут дальше.")
+    if moved:
+        return (f"\n\n✅ Автопереезд: {moved} аккаунт(ов) переселены на свободные живые "
+                f"прокси. {stranded} остались на мёртвом: свободных живых прокси не "
+                "хватило — добавьте прокси.")
+    return ("\n\n⚠️ Автопереезд включён, но свободных живых прокси нет — "
+            "добавьте прокси, и следующий переезд пройдёт сам.")
+
+
+async def auto_failover_enabled(pool, owner_id: int) -> bool:
+    """Включил ли владелец автопереезд (settings_json.proxy_auto_failover).
+    По умолчанию выключено: переезд меняет IP аккаунта, это решение владельца."""
+    try:
+        raw = await pool.fetchval(
+            "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
+    except Exception:
+        return False
+    if not raw:
+        return False
+    try:
+        import json as _json
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        return bool((data or {}).get("proxy_auto_failover"))
+    except Exception:
+        return False
+
+
+async def _auto_failover(pool, owner_id: int, dead_proxy_id: int,
+                         alive_now: set) -> dict:
+    """Переселить аккаунты с подтверждённо мёртвого прокси на свободные живые."""
+    stranded = await pool.fetch(
+        """SELECT a.id, p.geo_country FROM tg_accounts a
+             JOIN user_proxies p ON p.id = a.proxy_id
+            WHERE a.owner_id=$1 AND a.proxy_id=$2 AND a.is_active
+            ORDER BY a.id""", owner_id, dead_proxy_id)
+    if not stranded:
+        return {"moved": 0, "stranded": 0}
+    free = await pool.fetch(
+        """SELECT p.id, p.geo_country FROM user_proxies p
+            WHERE p.owner_id=$1 AND p.is_active AND p.is_alive IS TRUE
+              AND p.id = ANY($2::bigint[])
+              AND NOT EXISTS (SELECT 1 FROM tg_accounts a WHERE a.proxy_id = p.id)
+            ORDER BY p.latency_avg_ms NULLS LAST, p.id""",
+        owner_id, list(alive_now))
+    plan = plan_auto_failover([(r["id"], r["geo_country"]) for r in stranded],
+                              [(r["id"], r["geo_country"]) for r in free])
+    moved = 0
+    if plan["moves"]:
+        # Повторная проверка «свободен» внутри UPDATE: между выборкой и записью
+        # прокси мог занять ручной переезд, и двое на одном IP — ровно то, чего
+        # автомат обещает не делать.
+        rows = await pool.fetch(
+            """UPDATE tg_accounts a SET proxy_id = m.pid
+                 FROM unnest($1::bigint[], $2::bigint[]) AS m(acc_id, pid)
+                WHERE a.id = m.acc_id AND a.owner_id = $3 AND a.proxy_id = $4
+                  AND NOT EXISTS (SELECT 1 FROM tg_accounts b WHERE b.proxy_id = m.pid)
+             RETURNING a.id""",
+            [int(a) for a, _p in plan["moves"]], [int(p) for _a, p in plan["moves"]],
+            owner_id, dead_proxy_id)
+        moved = len(rows or [])
+    log.info("proxy_watchdog: автопереезд owner=%s proxy=%s переселено %d из %d",
+             owner_id, dead_proxy_id, moved, len(stranded))
+    return {"moved": moved, "stranded": len(stranded) - moved}
+
+
 async def check_proxy_alive(proxy_url: str, timeout_s: float = 10.0) -> dict:
     """Доступен ли прокси. {alive, latency_ms}.
 
@@ -153,6 +259,8 @@ async def check_once(pool, bot) -> dict:
 
     results = await asyncio.gather(*[_one(r) for r in rows], return_exceptions=True)
 
+    alive_now = {r["id"] for r, res in (i for i in results if not isinstance(i, BaseException))
+                 if res.get("alive")}
     checked = dead = alerted = 0
     for item in results:
         if isinstance(item, BaseException):
@@ -188,8 +296,17 @@ async def check_once(pool, bot) -> dict:
             from services.proxy_hygiene import proxy_display
 
             label = proxy_display(r["proxy_url"], r["label"])
-            if await _notify(pool, bot, r["owner_id"], r["id"],
-                             build_alert(label, r["assigned"], d["streak"])):
+            text = build_alert(label, r["assigned"], d["streak"])
+            # Автопереезд — только по включённой владельцем настройке и только в
+            # момент подтверждённой смерти (та же серия, что для уведомления).
+            # Любой сбой здесь не мешает сообщить о смерти прокси.
+            try:
+                if await auto_failover_enabled(pool, r["owner_id"]):
+                    fo = await _auto_failover(pool, r["owner_id"], r["id"], alive_now)
+                    text += build_failover_note(fo["moved"], fo["stranded"])
+            except Exception:
+                log.warning("proxy_watchdog: автопереезд не удался proxy=%s", r["id"])
+            if await _notify(pool, bot, r["owner_id"], r["id"], text):
                 alerted += 1
 
     if dead or alerted:

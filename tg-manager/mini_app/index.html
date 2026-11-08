@@ -6848,6 +6848,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </div>
         <div style="font-size:11px;color:var(--hint);margin-top:6px">«Только через прокси» — массовые действия без прокси блокируются (защита от банов). «Можно без прокси» — работают и без прокси, но с риском блокировок. Одиночные чтения (напр. контакты) прокси не требуют в любом режиме.</div>
       </div>
+      <div style="padding:8px 0;border-bottom:1px solid var(--sep)">
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span style="font-size:14px">🔁 Автопереезд с мёртвого прокси</span>
+          <input type="checkbox" id="set-proxy-autofailover">
+        </label>
+        <div style="font-size:11px;color:var(--hint);margin-top:6px">Когда прокси не отвечает три проверки подряд, аккаунты с него сами переезжают на свободные живые прокси, сначала той же страны. Двух аккаунтов на один прокси автомат не ставит. Если свободных прокси нет, придёт сообщение.</div>
+      </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">💻 Связанные устройства</span>
         <button class="btn btn-s" onclick="openDevices()" style="padding:6px 12px;font-size:12px">Показать</button>
@@ -30523,6 +30530,7 @@ async function openSettings() {
       if (qw && [...qw.options].some(o => o.value === qv)) qw.value = qv;
       if (backend.quiet_held) txt('set-quiet-hint', 'Сейчас в сводке ждут: ' + num(backend.quiet_held) + '. Ограничения и флуд аккаунтов приходят сразу.');
       if (ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
+      setChk('set-proxy-autofailover', backend.proxy_auto_failover, false);
       _fillTzSelect(backend.tz);
     }
   } catch(e) {
@@ -30623,6 +30631,7 @@ async function saveSettings() {
     notif_advice: document.getElementById('set-notif-advice')?.checked ?? true,
     digest_only: !!document.getElementById('set-digest-only')?.checked,
     proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
+    proxy_auto_failover: !!document.getElementById('set-proxy-autofailover')?.checked,
   };
   _saveLocalSettings(s);
   // Тихие часы считаются по местному времени — пояс берём у браузера.
