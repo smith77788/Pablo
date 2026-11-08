@@ -232,8 +232,21 @@ def parse_schedule(value: str | None) -> tuple[str, str | None]:
 GOAL_TYPES: dict[str, str] = {
     "paid": "Человек оплатил",
     "tag_added": "Человеку поставили тег",
+    "deal_stage": "Сделка прогона дошла до этапа",
     "event": "Произошло событие",
 }
+
+
+def _deal_stage_code(value: str) -> str | None:
+    """Этап сделки по коду или русской подписи (как на экране CRM)."""
+    from services.workflow_engine import DEAL_STAGES
+    v = (value or "").strip().lower()
+    if v in DEAL_STAGES:
+        return v
+    for code, label in DEAL_STAGES.items():
+        if v == str(label).strip().lower():
+            return code
+    return None
 
 
 def validate_goal(goal_type, goal_value) -> tuple[str | None, str | None]:
@@ -244,8 +257,14 @@ def validate_goal(goal_type, goal_value) -> tuple[str | None, str | None]:
     if gtype not in GOAL_TYPES:
         raise ValueError("Неизвестная цель сценария")
     value = str(goal_value or "").strip()[:200]
-    if gtype in ("tag_added", "event") and not value:
+    if gtype in ("tag_added", "event", "deal_stage") and not value:
         raise ValueError(f"Для цели «{GOAL_TYPES[gtype]}» нужно значение")
+    if gtype == "deal_stage":
+        code = _deal_stage_code(value)
+        if code is None:
+            raise ValueError("Этап сделки: лид, контакт, предложение, переговоры, "
+                             "выиграна или проиграна")
+        value = code
     return gtype, (value or None)
 
 
@@ -261,6 +280,10 @@ def goal_matches(goal_type: str | None, goal_value: str | None,
     if gtype == "tag_added":
         return (etype == "contact.tag_added" and bool(value)
                 and (data.get("tag") or "").strip().lower() == value.lower())
+    if gtype == "deal_stage":
+        # Какая это сделка — решает вызывающий: сделка прогона (_deal_id).
+        return (etype == "deal.stage_changed" and bool(value)
+                and (data.get("to") or "") == value)
     if gtype == "event":
         return bool(value) and etype == _EVENT_ALIASES.get(value, value)
     return False
@@ -591,9 +614,9 @@ async def start_run(pool, wf: dict, bot_id: int | None, chat_id: int | None, *,
         """INSERT INTO workflow_runs
                (owner_id, workflow_id, status, input_data, current_step,
                 total_steps, started_at, bot_id, chat_id, steps_snapshot,
-                vars, next_run_at, trigger_event_id, source)
+                vars, next_run_at, trigger_event_id, source, steps_version)
            VALUES ($1, $2, 'running', $3::jsonb, 0, $4, now(), $5, $6,
-                   $7::jsonb, $10::jsonb, now(), $8, $9)
+                   $7::jsonb, $10::jsonb, now(), $8, $9, $11)
            ON CONFLICT (workflow_id, bot_id, chat_id)
               WHERE status IN ('running', 'waiting') AND chat_id IS NOT NULL
            DO NOTHING
@@ -601,7 +624,8 @@ async def start_run(pool, wf: dict, bot_id: int | None, chat_id: int | None, *,
         wf["owner_id"], wf["id"], json.dumps(input_data or {}, default=str),
         len(steps), bot_id, chat_id, json.dumps(steps), trigger_event_id,
         (source or None) and str(source)[:64],
-        json.dumps(run_vars or {}, default=str))
+        json.dumps(run_vars or {}, default=str),
+        wf.get("steps_version"))
     if run_id:
         wake()
     return run_id
@@ -792,18 +816,30 @@ async def _check_goals(pool, ev: dict) -> int:
     """Событие достигло цели живых прогонов этого человека — завершить их.
 
     Только прогоны того же бота и человека: оплата одного клиента не
-    закрывает дожим другого."""
-    if not ev.get("chat_id"):
+    закрывает дожим другого. Смена этапа сделки приходит без человека
+    (этап меняет менеджер в CRM) — она касается прогонов, чья это сделка."""
+    data = ev.get("data") or {}
+    if ev.get("event_type") == "deal.stage_changed" and data.get("deal_id"):
+        rows = await pool.fetch(
+            """SELECT r.*, d.goal_type, d.goal_value
+                 FROM workflow_runs r
+                 JOIN workflow_definitions d ON d.id = r.workflow_id
+                WHERE r.owner_id=$1 AND r.vars->>'_deal_id' = $2
+                  AND r.status IN ('running', 'waiting')
+                  AND d.goal_type = 'deal_stage'""",
+            ev["owner_id"], str(data["deal_id"]))
+    elif not ev.get("chat_id"):
         return 0
-    rows = await pool.fetch(
-        """SELECT r.*, d.goal_type, d.goal_value
-             FROM workflow_runs r
-             JOIN workflow_definitions d ON d.id = r.workflow_id
-            WHERE r.owner_id=$1 AND r.chat_id=$2
-              AND r.bot_id IS NOT DISTINCT FROM $3::bigint
-              AND r.status IN ('running', 'waiting')
-              AND d.goal_type IS NOT NULL""",
-        ev["owner_id"], ev["chat_id"], ev.get("bot_id"))
+    else:
+        rows = await pool.fetch(
+            """SELECT r.*, d.goal_type, d.goal_value
+                 FROM workflow_runs r
+                 JOIN workflow_definitions d ON d.id = r.workflow_id
+                WHERE r.owner_id=$1 AND r.chat_id=$2
+                  AND r.bot_id IS NOT DISTINCT FROM $3::bigint
+                  AND r.status IN ('running', 'waiting')
+                  AND d.goal_type IS NOT NULL""",
+            ev["owner_id"], ev["chat_id"], ev.get("bot_id"))
     n = 0
     for r in rows:
         run = dict(r)
@@ -855,7 +891,7 @@ async def dispatch_events(pool) -> int:
     started = 0
     owners = {e["owner_id"] for e in events}
     rows = await pool.fetch(
-        """SELECT id, owner_id, bot_id, steps, trigger_type, trigger_value,
+        """SELECT id, owner_id, bot_id, steps, steps_version, trigger_type, trigger_value,
                   allow_reentry, name
              FROM workflow_definitions
             WHERE owner_id = ANY($1::bigint[]) AND is_active
@@ -1810,7 +1846,7 @@ async def _do_action(pool, run, step, contact, fields, main_bot, *,
         except ValueError:
             return
         wf = await pool.fetchrow(
-            """SELECT id, owner_id, bot_id, steps, allow_reentry
+            """SELECT id, owner_id, bot_id, steps, steps_version, allow_reentry
                  FROM workflow_definitions
                 WHERE id=$1 AND owner_id=$2 AND is_active AND legacy_kind IS NULL""",
             target_id, owner)
@@ -2345,7 +2381,7 @@ async def scan_audience_triggers(pool, now_utc: datetime | None = None,
         if not got:
             return 0
     rows = await pool.fetch(
-        """SELECT id, owner_id, bot_id, steps, trigger_type, trigger_value,
+        """SELECT id, owner_id, bot_id, steps, steps_version, trigger_type, trigger_value,
                   allow_reentry, name
              FROM workflow_definitions
             WHERE is_active AND bot_id IS NOT NULL AND legacy_kind IS NULL

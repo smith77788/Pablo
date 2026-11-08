@@ -7882,6 +7882,23 @@ def normalize_crm_stage(stage, default: str | None = "lead") -> str | None:
     return _CRM_STAGE_ALIASES.get(s, default)
 
 
+async def emit_deal_created(
+    pool: asyncpg.Pool, owner_id: int, deal_id: int, title: str, source: str,
+    *, bot_id: int | None = None, chat_id: int | None = None,
+) -> None:
+    """Событие `deal.created` в шину сценариев. Его писал только сценарий, а
+    сделки, созданные вручную, из бота и правилами, сценарий запустить не
+    могли. Сбой шины сделку не отменяет."""
+    try:
+        from services import automation_events
+        await automation_events.emit(
+            pool, owner_id, "deal.created",
+            {"deal_id": deal_id, "title": title, "source": source},
+            bot_id=bot_id, chat_id=chat_id)
+    except Exception:
+        log.warning("deal.created не записано: deal=%s", deal_id, exc_info=True)
+
+
 async def create_crm_deal(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -7899,6 +7916,7 @@ async def create_crm_deal(
            RETURNING id""",
         owner_id, title, contact or None, stage, value, notes or None,
     )
+    await emit_deal_created(pool, owner_id, row["id"], title, "bot")
     return row["id"]
 
 
