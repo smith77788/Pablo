@@ -72,6 +72,9 @@ _PAY_SETTING_LABELS: dict[str, str] = {
     "TON_API_KEY": "🔑 TON API ключ",
     "TON_RATE": "🛟 Резервный курс TON/USD",
     "STARS_PER_USD": "⭐ Звёзд за $1 (0 — Stars выключены)",
+    "CARD_PROVIDER_TOKEN": "💳 Токен платёжного провайдера (карты)",
+    "CARD_CURRENCY": "💱 Валюта оплаты картой (RUB, USD…)",
+    "CARD_PER_USD": "📈 Единиц этой валюты за $1",
 }
 
 router = Router()
@@ -144,10 +147,15 @@ ALLOWED_CURRENCIES: tuple[str, ...] = ("TON", "USDT_TRC20", "XTR")
 
 # Код валюты Telegram Stars в Bot API.
 STARS_CURRENCY = "XTR"
+# Сколько минут держится цена в TON: курс плывёт, и сутки по одной цифре — это
+# переплата покупателя или недобор платформы. Перевод, пришедший чуть позже,
+# всё равно засчитывается (окно usdt_invoice.GRACE_HOURS у проверки оплат).
+TON_QUOTE_MINUTES = 30
 # Подписка звёздами с автопродлением: Telegram сам списывает звёзды раз в
 # 30 дней (subscription_period — единственное значение, которое он принимает).
 STARS_SUB = "XTR_SUB"
 STARS_SUB_WALLET = "telegram_stars_sub"
+_STARS_WALLET = "telegram_stars"
 STARS_SUB_PERIOD_S = 30 * 86400
 _STARS_MAX_PER_USD = 1000
 # Счёт подписки в Stars: '<user_id>:<plan>:<months>:<reference>'. Первые три
@@ -177,6 +185,44 @@ def stars_amount(usd: float, per_usd: int | None = None) -> int:
     if rate <= 0 or usd <= 0:
         return 0
     return int(math.ceil(round(usd * rate, 6)))
+
+
+# ── оплата картой через провайдера Telegram Payments ─────────────────────────
+#
+# Телеграм принимает карту через платёжного провайдера (ЮKassa, Stripe и др.):
+# владелец платформы получает токен провайдера у @BotFather → Payments и
+# вписывает его в «Настройке оплаты» вместе с валютой и курсом к доллару.
+# Без всех трёх оплата картой не предлагается. Счёт идёт тем же путём, что и
+# Stars: строка payments → answer_invoice → pre_checkout сверяет счёт →
+# successful_payment подтверждает и включает подписку одной транзакцией.
+CARD = "CARD"
+CARD_WALLET = "telegram_card"
+# Настройка → ключ platform_settings (токен там зашифрован, см. main.py).
+_CARD_KEYS = {
+    "CARD_PROVIDER_TOKEN": "pay_card_provider_token",
+    "CARD_CURRENCY": "pay_card_currency",
+    "CARD_PER_USD": "pay_card_per_usd",
+}
+
+
+def card_config() -> tuple[str, str, float] | None:
+    """(токен провайдера, валюта, единиц валюты за $1) или None — карта выключена."""
+    token = _pay_cfg("CARD_PROVIDER_TOKEN")
+    cur = _pay_cfg("CARD_CURRENCY").upper()
+    try:
+        per_usd = float(_pay_cfg("CARD_PER_USD") or 0)
+    except ValueError:
+        per_usd = 0.0
+    if not token or not re.fullmatch(r"[A-Z]{3}", cur) or per_usd <= 0:
+        return None
+    return token, cur, per_usd
+
+
+def card_amount(usd: float, per_usd: float) -> int:
+    """Сумма к оплате картой в копейках/центах, вверх до целой единицы. ЧИСТАЯ."""
+    if usd <= 0 or per_usd <= 0:
+        return 0
+    return int(math.ceil(round(usd * per_usd, 6))) * 100
 
 
 def parse_stars_payload(payload: str) -> tuple[int, str, int, str] | None:
@@ -249,9 +295,11 @@ async def _get_promo(pool: asyncpg.Pool) -> tuple[int, str]:
     return disc, until
 
 
-def _mask(val: str) -> str:
+def _mask(val: str, secret: bool = False) -> str:
     if not val:
         return "❌ не задан"
+    if secret:
+        return "✅ задан"
     if len(val) > 10:
         return f"✅ {val[:5]}...{val[-4:]}"
     return f"✅ {val}"
@@ -288,7 +336,8 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
     emoji = sub_utils.PLAN_EMOJIS.get(plan, "🆓")
     ton_ok = "✅" if _ton_wallet() else "❌"
     tron_ok = "✅" if _tron_wallet() else "❌"
-    pay_status = f"TON {ton_ok}  USDT {tron_ok}"
+    pay_status = (f"TON {ton_ok}  USDT {tron_ok}  Stars {'✅' if _stars_per_usd() > 0 else '❌'}"
+                  f"  Карта {'✅' if card_config() else '❌'}")
 
     # Активность платформы (только операции — не показываем кол-во подписок)
     try:
@@ -688,8 +737,9 @@ async def cb_choose_period(
         log.warning("subscription: кошелёк TON задан, но курса нет — TON скрыт")
         ton = ""
     stars_on = _stars_per_usd() > 0
+    card = card_config()
 
-    if not ton and not tron and not stars_on:
+    if not ton and not tron and not stars_on and not card:
         # No wallets configured
         usd, _ = _calc(plan, months, "USDT_TRC20", promo, tier=tier)
         kb = InlineKeyboardBuilder()
@@ -735,6 +785,13 @@ async def cb_choose_period(
                 tier=tier,
             ),
         )
+    if card:
+        usd_card, _ = _calc(plan, months, "USDT_TRC20", promo, tier=tier)
+        kb.button(
+            text=f"💳 Картой — {card_amount(usd_card, card[2]) // 100} {card[1]}",
+            callback_data=SubCb(action="pay", plan=plan, months=months, currency=CARD,
+                                tier=tier),
+        )
     if stars_on and months == 1:
         usd_sub, _ = _calc(plan, 1, STARS_CURRENCY, 0, tier=tier)
         kb.button(
@@ -779,6 +836,11 @@ async def cb_pay(
         await _reject_bad_period(callback)
         return
     currency = callback_data.currency or ""
+    if currency == CARD:
+        from services import tiers as _t
+        await _pay_card(callback, pool, plan, months,
+                        _t.coerce_tier(callback_data.tier) or _t.DEFAULT_TIER)
+        return
     if currency == STARS_SUB:
         from services import tiers as _t
         await _pay_stars_sub(callback, pool, plan,
@@ -861,7 +923,8 @@ async def cb_pay(
             await pool.execute(
                 """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto, amount_usd,
                                           wallet_address, reference, expires_at, tier)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + INTERVAL '24 hours', $9)""",
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
+                           now() + make_interval(mins => $10), $9)""",
                 callback.from_user.id,
                 plan,
                 months,
@@ -871,6 +934,7 @@ async def cb_pay(
                 wallet,
                 ref,
                 tier,
+                TON_QUOTE_MINUTES,
             )
     except usdt_invoice.NoFreeAmountError as exc:
         await callback.message.edit_text(
@@ -893,7 +957,9 @@ async def cb_pay(
         note = (
             f"⚠️ <b>Укажите комментарий к переводу (обязательно):</b>\n"
             f"<code>{ref}</code>\n\n"
-            "Без комментария подписка не активируется автоматически."
+            "Без комментария подписка не активируется автоматически.\n\n"
+            f"Сумма в TON посчитана по курсу сейчас и действует "
+            f"<b>{TON_QUOTE_MINUTES} минут</b>. Не успели — выставьте новый счёт."
         )
     else:
         crypto_str = f"{crypto:.2f} USDT"
@@ -1171,6 +1237,65 @@ async def cb_stars_cancel(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         parse_mode="HTML", reply_markup=kb.as_markup())
 
 
+async def _pay_card(callback: CallbackQuery, pool: asyncpg.Pool, plan: str, months: int,
+                    tier: str) -> None:
+    """Счёт подписки на оплату картой через провайдера Telegram Payments."""
+    from services import tiers
+
+    cfg = card_config()
+    if not cfg:
+        await callback.answer("Оплата картой сейчас выключена.", show_alert=True)
+        return
+    token, cur, per_usd = cfg
+    await safe_answer(callback)
+    promo, _ = await _get_promo(pool)
+    try:
+        usd, _ = _calc(plan, months, "USDT_TRC20", promo, tier=tier)
+    except ValueError:
+        log.error("_pay_card: неверная цена plan=%s months=%s", plan, months)
+        await callback.message.edit_text(
+            "❌ <b>Не удалось рассчитать цену.</b>\n\nОбратитесь в поддержку.",
+            parse_mode="HTML", reply_markup=terminal_kb())
+        return
+    amount = card_amount(usd, per_usd)
+    uid = callback.from_user.id
+    ref = await _unique_ref(pool)
+    title = f"Infragram «{tiers.name(tier)}» на {months} мес."
+    try:
+        await pool.execute(
+            """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto,
+                                      amount_usd, wallet_address, reference, expires_at, tier)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + INTERVAL '24 hours', $9)""",
+            uid, plan, months, cur, amount, usd, CARD_WALLET, ref, tier,
+        )
+        await callback.message.answer_invoice(
+            title=title,
+            description=(f"Все функции, {tiers.cap_label(tier)}. Подписка включится "
+                         "сразу после оплаты."),
+            payload=f"{uid}:{plan}:{months}:{ref}",
+            provider_token=token,
+            currency=cur,
+            prices=[LabeledPrice(label=title, amount=amount)],
+        )
+    except Exception:
+        log_exc_swallow(log, "_pay_card: счёт не выставлен")
+        await pool.execute(
+            "UPDATE payments SET status='failed' WHERE reference=$1 AND status='pending'", ref)
+        await callback.message.edit_text(
+            "❌ <b>Не удалось выставить счёт на оплату картой.</b>\n\n"
+            "Попробуйте позже или выберите другой способ.",
+            parse_mode="HTML", reply_markup=terminal_kb())
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад к планам", callback_data=SubCb(action="menu"))
+    await callback.message.edit_text(
+        f"💳 <b>Счёт выставлен: {amount // 100} {cur}</b> (≈ ${usd})\n\n"
+        "Нажмите «Оплатить» в сообщении со счётом ниже. Подписка включится "
+        "сразу после оплаты.\n\n"
+        f"<i>ID платежа: {ref}</i>",
+        parse_mode="HTML", reply_markup=kb.as_markup())
+
+
 async def _stars_invoice_row(pool: asyncpg.Pool, payload: str, user_id: int):
     """Строка payments для payload счёта Stars этого пользователя или None."""
     parsed = parse_stars_payload(payload)
@@ -1179,9 +1304,12 @@ async def _stars_invoice_row(pool: asyncpg.Pool, payload: str, user_id: int):
     uid, _plan, _months, ref = parsed
     if uid != user_id:
         return None
+    # Счёт звёздами или картой (провайдер Telegram Payments) — оба выставлены
+    # ботом в чат; крипто-счета сюда не попадают.
     return await pool.fetchrow(
-        "SELECT * FROM payments WHERE reference=$1 AND user_id=$2 AND currency=$3",
-        ref, user_id, STARS_CURRENCY,
+        "SELECT * FROM payments WHERE reference=$1 AND user_id=$2 "
+        "AND wallet_address = ANY($3::text[])",
+        ref, user_id, [_STARS_WALLET, STARS_SUB_WALLET, CARD_WALLET],
     )
 
 
@@ -1190,8 +1318,9 @@ def precheckout_verdict(row, total_amount: int, currency: str, now=None) -> str 
     from datetime import datetime, timezone
     if row is None:
         return "Счёт не найден. Откройте /subscription и выставьте новый."
-    if currency != STARS_CURRENCY:
-        return "Этот счёт оплачивается только звёздами."
+    expected = (row.get("currency") if hasattr(row, "get") else None) or STARS_CURRENCY
+    if currency != expected:
+        return "Этот счёт оплачивается в другой валюте. Откройте /subscription."
     if row["status"] != "pending":
         return "Этот счёт уже закрыт. Откройте /subscription и выставьте новый."
     now = now or datetime.now(timezone.utc)
@@ -1222,7 +1351,8 @@ async def on_stars_pre_checkout(query: PreCheckoutQuery, pool: asyncpg.Pool) -> 
 
 
 async def confirm_stars_payment(
-    pool: asyncpg.Pool, user_id: int, payload: str, charge_id: str, total_amount: int
+    pool: asyncpg.Pool, user_id: int, payload: str, charge_id: str, total_amount: int,
+    currency: str = STARS_CURRENCY,
 ):
     """Подтвердить оплату Stars и включить подписку одной транзакцией.
 
@@ -1241,11 +1371,11 @@ async def confirm_stars_payment(
             row = await conn.fetchrow(
                 """UPDATE payments
                       SET status='confirmed', tx_hash=$3, confirmed_at=now()
-                    WHERE reference=$1 AND user_id=$2 AND currency='XTR'
+                    WHERE reference=$1 AND user_id=$2 AND currency=$4
                       AND status IN ('pending','expired')
                       AND confirmed_at IS NULL
                 RETURNING plan, period_months, amount_crypto, tier""",
-                ref, user_id, charge_id,
+                ref, user_id, charge_id, currency or STARS_CURRENCY,
             )
             if not row:
                 return None
@@ -1293,7 +1423,7 @@ async def on_stars_paid(message: Message, pool: asyncpg.Pool) -> None:
         if not (sp.is_recurring and not sp.is_first_recurring):
             confirmed = await confirm_stars_payment(
                 pool, message.from_user.id, sp.invoice_payload,
-                sp.telegram_payment_charge_id, sp.total_amount,
+                sp.telegram_payment_charge_id, sp.total_amount, sp.currency,
             )
         if confirmed is None and sp.is_recurring:
             # Очередное автосписание подписки Stars: исходный счёт уже закрыт.
@@ -1552,7 +1682,7 @@ def _payment_settings_kb() -> object:
         # который на самом деле активен и принимает платежи.
         val = _pay_cfg(key)
         kb.button(
-            text=f"{label}: {_mask(val)}",
+            text=f"{label}: {_mask(val, key == 'CARD_PROVIDER_TOKEN')}",
             callback_data=SubCb(action="pay_edit", plan=key),
         )
     kb.button(text="🎁 Управление акцией", callback_data=SubCb(action="promo_settings"))
@@ -1628,7 +1758,7 @@ async def cb_pay_edit(
 
     label = _PAY_SETTING_LABELS[key]
     cur = _pay_cfg(key)
-    masked = _mask(cur)
+    masked = _mask(cur, key == "CARD_PROVIDER_TOKEN")
 
     hints = {
         "TON_WALLET": "Пример: <code>UQD...abc</code> (адрес TON-кошелька)",
@@ -1642,6 +1772,16 @@ async def cb_pay_edit(
         "TON_RATE": (
             "Курс берётся с рынка автоматически. Это значение используется, "
             "только когда рынок недоступен больше 6 часов. Пример: <code>5.50</code>"
+        ),
+        "CARD_PROVIDER_TOKEN": (
+            "Токен провайдера из @BotFather → ваш бот → Payments (ЮKassa, Stripe и "
+            "др.). Хранится зашифрованным. Оплата картой включается, когда заданы "
+            "токен, валюта и курс."
+        ),
+        "CARD_CURRENCY": "Код валюты провайдера из трёх букв. Пример: <code>RUB</code>",
+        "CARD_PER_USD": (
+            "Сколько единиц этой валюты брать за $1 цены подписки. Пример для "
+            "рублей: <code>95</code>, для долларов: <code>1</code>."
         ),
     }
 
@@ -1706,6 +1846,33 @@ async def msg_payment_setting_value(
             )
             return
 
+    _card_err = None
+    if key == "CARD_CURRENCY":
+        value = value.upper()
+        if not re.fullmatch(r"[A-Z]{3}", value):
+            _card_err = "❌ Код валюты — три латинские буквы. Пример: <code>RUB</code>"
+    elif key == "CARD_PER_USD":
+        try:
+            _r = float(value.replace(",", "."))
+            if not 0 < _r <= 1_000_000:
+                raise ValueError
+            value = f"{_r:g}"
+        except ValueError:
+            _card_err = "❌ Введите положительное число. Пример: <code>95</code>"
+    elif key == "CARD_PROVIDER_TOKEN" and len(value) < 10:
+        _card_err = "❌ Токен провайдера слишком короткий. Скопируйте его из @BotFather."
+    if _card_err:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=SubCb(action="payment_settings"))
+        await message.answer(_card_err, parse_mode="HTML", reply_markup=kb.as_markup())
+        return
+    if key == "CARD_PROVIDER_TOKEN":
+        # Токен — секрет: сообщение с ним не оставляем в чате.
+        try:
+            await message.delete()
+        except Exception:
+            log.debug("subscription: сообщение с токеном не удалено", exc_info=True)
+
     if key in ("TON_WALLET", "TRON_WALLET") and len(value) < 10:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=SubCb(action="payment_settings"))
@@ -1717,8 +1884,10 @@ async def msg_payment_setting_value(
 
     await state.clear()
 
-    # Apply immediately in process
-    os.environ[key] = value
+    # Apply immediately in process (секреты провайдера — только в памяти
+    # процесса через set_pay_config, не в окружении).
+    if key not in _CARD_KEYS:
+        os.environ[key] = value
 
     # Persist to platform_settings (переживает рестарт без Railway API) + применить
     # override для кошельков, чтобы _tron_wallet/_ton_wallet сразу видели значение.
@@ -1728,11 +1897,16 @@ async def msg_payment_setting_value(
         "TON_API_KEY": "pay_ton_api_key",
         "TON_RATE": "pay_ton_rate",
         "STARS_PER_USD": "pay_stars_per_usd",
+        **_CARD_KEYS,
     }
     try:
         from database.db import set_platform_setting
-        await set_platform_setting(pool, _DB_SETTING_KEYS[key], value)
-        if key in ("TON_WALLET", "TRON_WALLET", "STARS_PER_USD"):
+        stored = value
+        if key == "CARD_PROVIDER_TOKEN":
+            from services.token_vault import encrypt_token
+            stored = encrypt_token(value)
+        await set_platform_setting(pool, _DB_SETTING_KEYS[key], stored)
+        if key in ("TON_WALLET", "TRON_WALLET", "STARS_PER_USD") or key in _CARD_KEYS:
             set_pay_config({key: value})
     except Exception:
         log_exc_swallow(log, "Ошибка сохранения платёжной настройки в БД")
@@ -1742,7 +1916,7 @@ async def msg_payment_setting_value(
     try:
         from services import railway_api
 
-        if railway_api.is_configured():
+        if railway_api.is_configured() and key not in _CARD_KEYS:
             await railway_api.set_variable(http, key, value)
             railway_saved = True
     except Exception:

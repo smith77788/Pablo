@@ -791,6 +791,16 @@ async def main() -> None:
             _val = await _db.get_platform_setting(pool, _skey, "")
             if _val:
                 _pay_map[_env_name] = _val
+        # Оплата картой через провайдера Telegram Payments: токен в базе
+        # зашифрован (token_vault), в окружение не попадает.
+        from bot.handlers.subscription import _CARD_KEYS
+        for _env_name, _skey in _CARD_KEYS.items():
+            _val = await _db.get_platform_setting(pool, _skey, "")
+            if _val and _env_name == "CARD_PROVIDER_TOKEN":
+                from services.token_vault import decrypt_token
+                _val = decrypt_token(_val)
+            if _val:
+                _pay_map[_env_name] = _val
         if _pay_map:
             set_pay_config(_pay_map)
         log.info("Payment wallets on startup: %d configured from DB", len(_pay_map))
@@ -1127,6 +1137,7 @@ async def main() -> None:
             BotCommand(command="about", description="✨ Что умеет Infragram"),
             BotCommand(command="pulse", description="💓 Пульс флота — кто на паузе и почему"),
             BotCommand(command="budget", description="💸 Экономика флота — где утекает бюджет"),
+            BotCommand(command="summary", description="📊 Сводка за день"),
             BotCommand(command="find", description="🔍 Найти функцию"),
             BotCommand(command="post", description="✍️ Быстрый пост в каналы"),
             BotCommand(command="spin", description="🎲 Spintax — рандомизация текста"),
