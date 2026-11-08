@@ -134,3 +134,36 @@ if(external !== 'https://example.org/telegram') throw Error('no external link');
     result = subprocess.run([node, '-e', script, str(source)],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
+
+
+def test_oauth_click_opens_synchronously_and_errors_stay_visible():
+    node = shutil.which('node')
+    assert node, 'Для проверки нужен Node.js'
+    source = Path(__file__).resolve().parents[1] / 'mini_app/screens/mailboxes.js'
+    script = r'''
+const fs = require('fs');
+eval(fs.readFileSync(process.argv[1], 'utf8'));
+function element(tag) {return {tag,style:{},children:[],setAttribute(){},
+  replaceChildren(){this.children=[]},appendChild(x){this.children.push(x)},
+  insertBefore(x,y){this.children.splice(this.children.indexOf(y),0,x)}};}
+global.document={createElement:element};
+let requests=0, opened='', fail=false;
+global.api=async()=>{requests++;if(fail)throw Error('Нет настроек');
+  return {url:'https://example.org/oauth/email/start?state=test'};};
+global.errRu=e=>e.message;
+global.tg={initData:'signed',openLink:url=>opened=url};
+(async()=>{
+  const box=element('div'), provider={key:'google',label:'Войти через Google'};
+  await prepareMailboxOAuth(provider,box);
+  const link=box.children.find(x=>x.tag==='a');
+  if(!link || link.disabled)throw Error('no clickable link');
+  const result=link.onclick({preventDefault(){}});
+  if(result instanceof Promise || !opened || requests!==1)throw Error('async click');
+  fail=true;await prepareMailboxOAuth(provider,box);
+  if(!box.children.some(x=>x.textContent==='Нет настроек'))throw Error('hidden error');
+  if(!box.children.some(x=>x.tag==='button' && x.onclick))throw Error('no retry');
+})().catch(e=>{console.error(e);process.exit(1)});
+'''
+    result = subprocess.run([node, '-e', script, str(source)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr

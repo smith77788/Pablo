@@ -8,19 +8,9 @@ async function openMailboxes() {
     const oauthButtons = document.getElementById('mailboxOAuthButtons');
     oauthButtons.replaceChildren();
     for (const provider of data.oauth || []) {
-      const button = document.createElement('button');
-      button.className = 'btn btn-s';
-      button.textContent = provider.available ? provider.label : provider.label + ' — проверить настройки';
-      button.onclick = async () => {
-        button.disabled = true;
-        try {
-          const result = await api('/api/miniapp/mailboxes/oauth/' + provider.key, {method:'POST'});
-          openMailboxOAuthUrl(result.url);
-          toast('После входа вернитесь и обновите список почты');
-        } catch(e) { toast(errRu(e, 'Не удалось начать вход')); }
-        finally { button.disabled = false; }
-      };
-      oauthButtons.appendChild(button);
+      const container = document.createElement('div');
+      oauthButtons.appendChild(container);
+      prepareMailboxOAuth(provider, container);
     }
     const select = document.getElementById('mailboxProvider');
     if (!select.options.length) {
@@ -54,6 +44,50 @@ async function openMailboxes() {
       list.appendChild(row);
     }
   } catch(e) { list.innerHTML = errHtml(errRu(e), 'openMailboxes()'); }
+}
+
+async function prepareMailboxOAuth(provider, container) {
+  container.replaceChildren();
+  const status = document.createElement('div');
+  status.className = 'field-note';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.textContent = 'Готовим безопасную ссылку входа…';
+  container.appendChild(status);
+  try {
+    const result = await api('/api/miniapp/mailboxes/oauth/' + provider.key, {method:'POST'});
+    const url = new URL(result.url);
+    if (url.protocol !== 'https:' || url.pathname !== '/oauth/email/start') {
+      throw new Error('Сервер вернул некорректную ссылку входа. Проверьте настройки OAuth.');
+    }
+    const preparedAt = Date.now();
+    const link = document.createElement('a');
+    link.className = 'btn btn-s';
+    link.style.width = '100%';
+    link.style.boxSizing = 'border-box';
+    link.href = url.href;
+    link.textContent = provider.label;
+    link.onclick = event => {
+      event.preventDefault();
+      if (Date.now() - preparedAt > 600000) {
+        prepareMailboxOAuth(provider, container);
+        return;
+      }
+      status.textContent = 'Открываем Google. После входа вернитесь и обновите список ящиков.';
+      // Никакого await между касанием и открытием внешней страницы.
+      openMailboxOAuthUrl(url.href);
+    };
+    container.insertBefore(link, status);
+    status.textContent = 'Ссылка готова. Нажмите «' + provider.label + '».';
+  } catch(e) {
+    status.textContent = errRu(e, 'Не удалось подготовить вход');
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn btn-s';
+    retry.textContent = 'Повторить подготовку входа';
+    retry.onclick = () => prepareMailboxOAuth(provider, container);
+    container.appendChild(retry);
+  }
 }
 
 function openMailboxOAuthUrl(url) {
