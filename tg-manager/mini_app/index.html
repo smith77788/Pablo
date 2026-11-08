@@ -331,7 +331,7 @@
   --bubble-in:#f1f1f4;--bubble-out:#e1f4cf;
   --overlay:rgba(0,0,0,.35);--overlay-modal:rgba(0,0,0,.4);
   --bg-blue-16:rgba(36,129,204,.10);--bg-green-16:rgba(46,158,79,.10);--bg-purple-16:rgba(142,92,217,.10);--bg-yellow-16:rgba(224,138,0,.11);--bg-red-16:rgba(229,57,53,.09);--bg-violet-16:rgba(120,98,214,.10);--bg-red-18:rgba(229,57,53,.12);
-  --green:#2e9e4f;--orange:#c26b00;--purple:#8e5cd9;--red:#e53935;--blue:#2481cc;--teal:#12857c;--purple-light:#7862d6;
+  --green:#1f8a40;--orange:#c26b00;--purple:#8e5cd9;--red:#e53935;--blue:#2481cc;--teal:#12857c;--purple-light:#7862d6;
   --c-teal:#1aa39b;--c-blue:#2481cc;--c-violet:#7862d6;--c-amber:#d38b00;
   --c-rose:#e0577a;--c-emerald:#2e9e4f;--c-cyan:#1592b8;--c-indigo:#5b63d3;--c-pink:#c94f9e;
 }
@@ -630,7 +630,10 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 
 /* ─── Action buttons ─────────────────────────────────────────── */
 .actions{display:flex;gap:8px;padding:10px 16px 4px;flex-wrap:wrap}
-.btn{display:inline-flex;min-height:34px;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:normal;line-height:1.25;text-align:center;flex:0 0 auto;min-width:88px;max-width:100%;overflow:hidden}
+/* Кнопка без варианта (просто .btn) раньше брала системный фон браузера:
+   в тёмной теме это серый #6b6b6b, на котором красная «🚫 Забанить» давала
+   1,6:1. Фон и текст по умолчанию — из темы; варианты ниже перекрывают. */
+.btn{background:var(--bg3);color:var(--text);display:inline-flex;min-height:34px;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:normal;line-height:1.25;text-align:center;flex:0 0 auto;min-width:88px;max-width:100%;overflow:hidden}
 .btn:active{opacity:.85;transform:translateY(1px) scale(.97)}
 /* Неактивная кнопка: не вуаль из прозрачности (надпись переставала читаться),
    а честное состояние — приглушённый фон и подсказочный цвет текста. */
@@ -651,12 +654,12 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 
 /* ─── Badge ──────────────────────────────────────────────────── */
 .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:16px;white-space:nowrap;max-width:44vw;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;line-height:1.45}
-.b-gr{background:rgba(52,211,153,.14);color:var(--green)}
-.b-bl{background:rgba(96,165,250,.14);color:var(--blue)}
-.b-or{background:rgba(251,191,36,.14);color:var(--orange)}
+.b-gr{background:var(--bg-green-16);color:var(--green)}
+.b-bl{background:var(--bg-blue-16);color:var(--blue)}
+.b-or{background:var(--bg-yellow-16);color:var(--orange)}
 .b-gy{background:rgba(107,125,148,.14);color:var(--hint)}
-.b-rd{background:rgba(248,113,113,.14);color:var(--red)}
-.b-pu{background:rgba(192,132,252,.14);color:var(--purple)}
+.b-rd{background:var(--bg-red-16);color:var(--red)}
+.b-pu{background:var(--bg-purple-16);color:var(--purple)}
 
 /* ─── Toggle ─────────────────────────────────────────────────── */
 .toggle{width:42px;height:24px;border-radius:12px;cursor:pointer;position:relative;flex-shrink:0;transition:background .25s var(--ease)}
@@ -1276,6 +1279,9 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .home-fold{margin:12px 16px 0;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg2);box-shadow:var(--shadow);overflow:hidden}
 .home-fold>summary{min-height:52px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:10px 42px 10px 14px;cursor:pointer;list-style:none;position:relative}
 .home-fold>summary::-webkit-details-marker{display:none}
+/* У сворачиваемых блоков главного экрана свой маркер — шеврон справа. Общий
+   треугольник «▸» для details вставал над заголовком отдельной строкой. */
+.home-fold>summary::before{content:none;display:none}
 .home-fold>summary::after{content:'›';position:absolute;right:16px;top:50%;font-size:24px;line-height:1;color:var(--hint);transform:translateY(-50%) rotate(90deg);transition:transform .18s var(--ease)}
 .home-fold[open]>summary::after{transform:translateY(-50%) rotate(-90deg)}
 .home-fold-title{font-size:14px;font-weight:700;color:var(--text)}
@@ -11143,8 +11149,12 @@ function renderAct(items) {
       lbl = esc(i.action || 'Операция');
     }
     const detail = i.detail ? i.detail : (i.bot_username ? `@${i.bot_username||''}` : '');
-    const stCls = i.status==='error'?'b-rd':i.status==='warning'?'b-or':i.status==='completed'?'b-gr':'b-bl';
-    const stLbl = {ok:'✓',error:'✕',warning:'!',completed:'✓',running:'▶'}[i.status]||i.status||'';
+    // Статус — значком. Незнакомое слово раньше выводилось как есть («active»,
+    // «pending») — английский на экране владельца, который его не читает.
+    const _bad = ['error','failed'].includes(i.status), _ok = ['ok','completed','done'].includes(i.status);
+    const stCls = _bad?'b-rd':i.status==='warning'?'b-or':_ok?'b-gr':'b-bl';
+    const stLbl = {ok:'✓',done:'✓',completed:'✓',error:'✕',failed:'✕',warning:'!',running:'▶',active:'▶',
+                   pending:'…',queued:'…',paused:'⏸',cancelled:'⊘'}[i.status]||'•';
     return `<div class="act">
       <div class="act-ico">${ico}</div>
       <div class="act-body">
@@ -31106,7 +31116,7 @@ async function openAdminUserDetail(userId) {
     if (banned) {
       html += `<button class="btn" onclick="admUserUnban()">✅ Разбанить</button>`;
     } else {
-      html += `<button class="btn" style="color:var(--red)" onclick="admUserBan()">🚫 Забанить</button>`;
+      html += `<button class="btn btn-d" onclick="admUserBan()">🚫 Забанить</button>`;
     }
     html += '</div>';
     txt('adm-ud-body', html);
