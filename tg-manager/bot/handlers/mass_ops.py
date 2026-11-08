@@ -855,8 +855,8 @@ async def cb_retry_op(
         res = await operation_bus.resubmit_one(
             pool, callback.from_user.id, callback_data.op_id)
     except operation_bus.PlanRequiredError as e:
-        await callback.answer((owner_error(e, html_escape=False) if str(e) else "Операция недоступна на вашем тарифе."),
-                              show_alert=True)
+        _why = owner_error(e, html_escape=False) if e.args else "Операция недоступна на вашем тарифе."
+        await callback.answer(_why, show_alert=True)
         return
     except Exception as e:
         log_exc_swallow(log, f"retry_op #{callback_data.op_id}")
