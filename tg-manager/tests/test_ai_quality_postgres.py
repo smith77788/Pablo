@@ -220,3 +220,50 @@ def test_копайлот_помнит_реакции_и_зовёт_к_ждущ�
                 await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", _OWNER)
             await pool.close()
     _run(body())
+
+
+def test_прогноз_видит_отметки_воронки_и_сегмент_из_фразы_по_прогнозу(monkeypatch):
+    """«Купил» и «Готов купить» на лестнице воронки контакта (virtual_layer) —
+    у людей без заказов бота; сегмент из фразы «спрашивали цену и не купили»
+    ложится тегом прогноза и считается тем же count_segment."""
+    from services import ai_gateway as gw, ai_predict as ap, ai_segment as seg
+
+    async def _chat(messages, **k):
+        return gw.AiReply(text='{"forecast": "hot_leads", "unsupported": "за неделю"}',
+                          providers=["p"])
+    monkeypatch.setattr(gw, "chat", _chat)
+
+    async def body():
+        pool = await _pool()
+        try:
+            for t in ("bot_sales_orders", "bot_sales_dialogs", "unified_contacts",
+                      "virtual_states", "virtual_state_history"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", _OWNER)
+            buyer = await pool.fetchval(
+                "INSERT INTO unified_contacts (owner_id, telegram_user_id, display_name) "
+                "VALUES ($1, 701, 'Ира') RETURNING id::text", _OWNER)
+            lead = await pool.fetchval(
+                "INSERT INTO unified_contacts (owner_id, telegram_user_id) "
+                "VALUES ($1, 702) RETURNING id::text", _OWNER)
+            await pool.execute(
+                "INSERT INTO virtual_state_history (owner_id, entity_type, entity_id, "
+                "state_key, from_value, to_value, created_at) "
+                "VALUES ($1, 'user', $2, 'funnel', 'ready', 'purchased', now() - interval '3 days')",
+                _OWNER, buyer)
+            await pool.execute(
+                "INSERT INTO virtual_states (owner_id, entity_type, entity_id, state_key, value) "
+                "VALUES ($1, 'user', $2, 'funnel', 'ready')", _OWNER, lead)
+            f = await ap.forecast(pool, _OWNER)
+            counts = {s["id"]: s["count"] for s in f["segments"]}
+            assert counts["new"] == 1 and counts["hot_leads"] == 1 and f["buyers"] == 1
+            out = await seg.from_text(pool, _OWNER, "спрашивали цену и не купили за неделю")
+            assert out["filters"] == {"tag": "прогноз_горячие"} and out["total"] == 1
+            assert "прогноз: Горячие без покупки" in out["explained"]
+            assert "неделю" in out["unsupported"]
+            assert await ap.refresh_tags(pool, _OWNER) == ["hot_leads"]
+        finally:
+            for t in ("bot_sales_orders", "bot_sales_dialogs", "unified_contacts",
+                      "virtual_states", "virtual_state_history"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", _OWNER)
+            await pool.close()
+    _run(body())

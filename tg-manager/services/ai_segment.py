@@ -11,7 +11,9 @@ segments.py) — тот же WHERE, что у списка и у рассылк�
 неизвестное отбрасывается и называется в `unsupported`, а размер среза
 считается тем же count_segment, что и превью рассылки. Запускает человек.
 
-Чего фильтры не умеют (дата последнего сообщения, «спрашивал цену»), модель
+«Купили», «спрашивали цену и не купили», «давно не покупали» ложатся на
+сегменты прогноза покупок (services/ai_predict) — тегом на карточках.
+Чего фильтры не умеют (точные сроки: «за неделю», «в октябре»), модель
 обязана вернуть в `unsupported`, а экран — показать: молча выбросить часть
 условия значит разослать не тем.
 """
@@ -39,11 +41,14 @@ def _prompt(text: str, tags: list[str], groups: list[dict]) -> str:
         '{"tag": "...", "group_id": 1, "crm_stage": "...", "gender": "m|f", '
         '"favorite": true, "premium": true, "multi": true, "mutual": true, '
         '"search": "слова поиска по имени, нику, компании", '
+        '"forecast": "сегмент прогноза покупок", '
         '"unsupported": "какая часть описания не выражается этими фильтрами"}. '
         "Пиши только поля, которые следуют из описания. Значения — строго из "
         "списков ниже; если подходящего нет — опиши эту часть в unsupported, а не "
-        "подбирай похожее. Даты, «писал/не писал», «спрашивал цену», «купил» "
-        "этими фильтрами не выражаются — это unsupported.\n"
+        "подбирай похожее. Покупки и интерес выражаются полем forecast: "
+        + "; ".join(f"{k} — {hint}" for k, _, hint in _forecast_segments())
+        + ". Точные сроки («за неделю», «в октябре») фильтрами не выражаются — "
+        "это unsupported.\n"
         f"Стадии crm_stage: {', '.join(f'{k} ({v})' for k, v in STAGES)}.\n"
         f"Теги: {', '.join(tags[:80]) or 'нет'}.\n"
         "Группы: " + (", ".join(f"{g['id']} ({g['name']})" for g in groups[:50]) or "нет")
@@ -98,11 +103,38 @@ def parse_filters(raw: Optional[str], tags: list[str], groups: list[dict]) -> di
     for key, _ in _FLAGS:
         if data.get(key) is True:
             f[key] = 1
+    fc = str(data.get("forecast") or "").strip()
+    if fc:
+        if fc in {k for k, _, _ in _forecast_segments()}:
+            f["forecast"] = fc
+        else:
+            out["dropped"].append(f"сегмента прогноза «{fc}» нет")
     search = str(data.get("search") or "").strip()
     if search:
         f["search"] = search[:80]
     out["unsupported"] = str(data.get("unsupported") or "").strip()[:300]
     return out
+
+
+def _forecast_segments():
+    from services.ai_predict import SEGMENTS
+    return SEGMENTS
+
+
+def _apply_forecast(filters: dict, dropped: list) -> dict:
+    """Фильтры для среза: сегмент прогноза → его тег. ЧИСТАЯ.
+
+    У среза один фильтр по тегу, поэтому тег из фразы и сегмент прогноза
+    вместе не применить: прогноз важнее, тег уходит в dropped."""
+    from services.ai_predict import SEGMENT_TAGS
+
+    query = {k: v for k, v in filters.items() if k != "forecast"}
+    fc = filters.get("forecast")
+    if fc:
+        if query.get("tag"):
+            dropped.append(f"тег #{query['tag']} вместе с прогнозом не применить")
+        query["tag"] = SEGMENT_TAGS[fc]
+    return query
 
 
 def explain(filters: dict, groups: list[dict]) -> list[str]:
@@ -122,6 +154,9 @@ def explain(filters: dict, groups: list[dict]) -> list[str]:
             lines.append(label)
     if filters.get("search"):
         lines.append("поиск: " + filters["search"])
+    if filters.get("forecast"):
+        from services.ai_predict import segment_label
+        lines.append("прогноз: " + segment_label(filters["forecast"]))
     return lines
 
 
@@ -154,12 +189,18 @@ async def from_text(pool, owner_id: int, text: str) -> dict:
         return {"filters": None, "reason": reason}
     parsed = parse_filters(r.text, tags, groups)
     filters = parsed["filters"]
+    query = _apply_forecast(filters, parsed["dropped"])
+    if query.get("tag") and filters.get("forecast"):
+        # Сегмент прогноза ложится на контакты тегом — тот же фильтр по тегу,
+        # что у списка и рассылки. Тег пересчитывается при каждом подборе.
+        from services import ai_predict
+        await ai_predict.tag_segment(pool, owner_id, filters["forecast"])
     if not filters:
         return {"filters": None, "explained": [], "dropped": parsed["dropped"],
                 "unsupported": parsed["unsupported"],
                 "reason": "Ни одно условие не легло на фильтры контактов"}
-    total = await count_segment(pool, owner_id, segment_filters(filters))
-    return {"filters": filters, "explained": explain(filters, groups),
+    total = await count_segment(pool, owner_id, segment_filters(query))
+    return {"filters": query, "explained": explain(filters, groups),
             "dropped": parsed["dropped"], "unsupported": parsed["unsupported"],
             "total": total}
 

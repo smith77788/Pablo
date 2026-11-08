@@ -7,7 +7,9 @@ HubSpot) у каждого клиента есть прогноз и готов�
 
 Как считается (честно: это правила по истории, а не обученная модель):
   • покупка — заказ бота-продавца в статусе confirmed/done или оплаченный
-    (money_funnel.PAID_ORDER_STATUSES, paid_at);
+    (money_funnel.PAID_ORDER_STATUSES, paid_at), а также отметка «Купил» на
+    лестнице воронки контакта (оплата, выигранная сделка, ручная отметка —
+    services/virtual_layer); «Готов купить» и «Интерес» без покупки — лиды;
   • R — дней с последней покупки, F — число покупок, M — сумма в основной
     валюте владельца; «свой ритм» клиента — медиана дней между покупками;
   • вероятность покупки за 30 дней: постоянный клиент в своём ритме — высокая и
@@ -167,7 +169,8 @@ def _as_list(v) -> list:
 
 
 async def load_customers(pool, owner_id: int) -> list[dict]:
-    """Покупатели и собеседники ботов-продавцов владельца."""
+    """Покупатели и собеседники ботов-продавцов владельца плюс контакты с
+    отметками воронки «Купил», «Готов купить», «Интерес» (virtual_layer)."""
     from services.ai_inbox_assist import classify_text
     from services.money_funnel import PAID_ORDER_STATUSES
 
@@ -206,6 +209,7 @@ async def load_customers(pool, owner_id: int) -> list[dict]:
             last_user = next((str(t.get("content") or "") for t in reversed(_as_list(d["history"]))
                               if isinstance(t, dict) and t.get("role") == "user"), "")
             c["last_intent"] = classify_text(last_user)
+    await _merge_marked(pool, uid, _slot)
     if by:
         names = await pool.fetch(
             "SELECT DISTINCT ON (user_id) user_id, first_name, username FROM bot_users "
@@ -217,6 +221,88 @@ async def load_customers(pool, owner_id: int) -> list[dict]:
                 c["name"] = c["name"] or (n["first_name"] or "")
                 c["username"] = c["username"] or (n["username"] or "")
     return list(by.values())
+
+
+_FUNNEL_INTENT = {"ready": "ready_to_buy", "qualified": "ready_to_buy",
+                  "interested": "price"}
+
+
+def merge_marked(slot, purchases: list[dict], leads: list[dict]) -> None:
+    """Отметки воронки контактов (services/virtual_layer) поверх заказов ботов.
+
+    «Купил» ставят оплата, выигранная сделка в CRM и ручная отметка — у
+    людей, которые писали на аккаунты флота, а не боту, заказов бота нет
+    вовсе. Отметка в пределах двух суток от заказа бота — та же покупка, второй
+    раз не считается. Стадия «готов купить» / «интерес» без покупки — лид.
+    ЧИСТАЯ: slot(peer_user_id) отдаёт запись клиента."""
+    for r in purchases:
+        if not r.get("peer_user_id") or not r.get("at"):
+            continue
+        c = slot(r["peer_user_id"])
+        if not any(abs((d - r["at"]).total_seconds()) < 2 * 86400 for d in c["dates"]):
+            c["dates"].append(r["at"])
+        c["name"] = c["name"] or (r.get("name") or "")
+        c["username"] = c["username"] or (r.get("username") or "")
+    for r in leads:
+        intent = _FUNNEL_INTENT.get(r.get("value") or "")
+        if not intent or not r.get("peer_user_id") or not r.get("at"):
+            continue
+        c = slot(r["peer_user_id"])
+        if c["last_msg_at"] is None or r["at"] > c["last_msg_at"]:
+            c["last_msg_at"] = r["at"]
+            c["last_intent"] = intent
+        c["name"] = c["name"] or (r.get("name") or "")
+        c["username"] = c["username"] or (r.get("username") or "")
+
+
+async def _safe_fetch(pool, q: str, *args) -> list[dict]:
+    try:
+        return [dict(r) for r in await pool.fetch(q, *args)]
+    except Exception as exc:  # noqa: BLE001 - нет слоя воронки — прогноз по заказам
+        log.debug("ai_predict: источник недоступен: %s", exc)
+        return []
+
+
+async def _merge_marked(pool, uid: int, slot) -> None:
+    join = ("JOIN unified_contacts uc ON uc.owner_id = {t}.owner_id "
+            "AND uc.id::text = {t}.entity_id AND uc.telegram_user_id IS NOT NULL")
+    purchases = await _safe_fetch(
+        pool,
+        "SELECT uc.telegram_user_id AS peer_user_id, h.created_at AS at, "
+        "uc.display_name AS name, uc.username FROM virtual_state_history h "
+        + join.format(t="h") +
+        " WHERE h.owner_id=$1 AND h.entity_type='user' AND h.state_key='funnel' "
+        "AND h.to_value='purchased'", uid)
+    leads = await _safe_fetch(
+        pool,
+        "SELECT uc.telegram_user_id AS peer_user_id, vs.value, vs.updated_at AS at, "
+        "uc.display_name AS name, uc.username FROM virtual_states vs "
+        + join.format(t="vs") +
+        " WHERE vs.owner_id=$1 AND vs.entity_type='user' AND vs.state_key='funnel' "
+        "AND vs.value = ANY($2::text[]) AND vs.updated_at > now() - interval '120 days'",
+        uid, list(_FUNNEL_INTENT))
+    merge_marked(slot, purchases, leads)
+
+
+async def refresh_tags(pool, owner_id: int) -> list[str]:
+    """Обновить теги прогноза, которые у владельца уже стоят на контактах.
+
+    Тег — снимок: сохранённый сегмент или рассылка по нему видят тех, кто был
+    в сегменте при последнем пересчёте. Пересчитываем при каждом открытии
+    прогноза и сегмента из фразы, чтобы снимок не застаивался."""
+    used = await _safe_fetch(
+        pool,
+        "SELECT DISTINCT tag FROM unified_contacts, unnest(tags) AS tag "
+        "WHERE owner_id=$1 AND tag = ANY($2::text[])", int(owner_id),
+        list(SEGMENT_TAGS.values()))
+    by_tag = {v: k for k, v in SEGMENT_TAGS.items()}
+    done = []
+    for r in used:
+        seg = by_tag.get(r["tag"])
+        if seg:
+            await tag_segment(pool, owner_id, seg)
+            done.append(seg)
+    return done
 
 
 async def forecast(pool, owner_id: int, *, top: int = 30) -> dict:
@@ -270,6 +356,10 @@ def setup_routes(app, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            try:
+                await refresh_tags(pool, uid)
+            except Exception:  # noqa: BLE001 - устаревший тег не мешает показать прогноз
+                _log.warning("ai forecast refresh_tags uid=%s", uid, exc_info=True)
             return _json_resp(await forecast(pool, uid))
         except Exception:
             _log.exception("ai forecast uid=%s", uid)

@@ -106,3 +106,18 @@ def test_процент_без_слова_скидка_тоже_проверяе
     assert g.check_discount("Хорошо, 30% для вас", p, promos) == [30]
     assert g.check_discount("Моцарелла 45% жирности", p, promos) == []
     assert g.check_discount("Скидка двадцать процентов не выйдет, только 10 процентов", p, promos) == []
+
+
+def test_посты_канала_как_знания_продавца():
+    """Новинки и акции владелец пишет постом в канал — продавец их видит, если
+    в посте есть слова вопроса; цены из постов оговорены как справочные."""
+    from services.bot_sales_persona import posts_knowledge
+
+    posts = [{"body": "Открыли доставку в Подольск, по субботам до 22:00"},
+             {"body": "Новинка: пицца с грушей и горгонзолой"},
+             {"body": "Мы в отпуске до понедельника"}]
+    block = posts_knowledge(posts, "Доставляете в Подольск?")
+    assert "Подольск" in block and "грушей" not in block
+    assert "цены и скидки называй только из прайса" in block
+    assert posts_knowledge(posts, "привет") == ""
+    assert posts_knowledge([], "Подольск") == ""
