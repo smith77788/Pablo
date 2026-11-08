@@ -74,7 +74,7 @@ def test_failed_op_surfaces_with_opid():
 
 def test_narrative_mentions_fleet_and_signals():
     n = narrative(_snap(graph={"contacts": 500, "hot_leads": 12, "intents_24h": 3}))
-    assert "Флот" in n and "12 горячих" in n and "давление" in n
+    assert "Флот" in n and "12 горячих" in n and "риск бана" in n
 
 
 def test_severity_order():

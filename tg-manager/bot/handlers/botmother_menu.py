@@ -112,7 +112,6 @@ from bot.callbacks import (
     WarmupCb,
     WorkspaceCb,
     EcoCb,
-    PhysicsCb,
     GraphCb,
     ApiHubCb,
     ComplianceCb,
@@ -290,7 +289,7 @@ def _section_buttons(key: str, plan: str = "free") -> list[tuple[str, object]]:
             ("❤️ Здоровье", HealthCb(action="menu")),
             ("🔥 Прогрев", WarmupCb(action="menu")),
             ("🌐 Прокси", ProxyCb(action="menu")),
-            ("🛡️ Щит", ShieldCb(action="menu")),
+            ("🛡️ Защита аккаунтов", ShieldCb(action="menu")),
             ("💸 Экономика флота", BotCb(action="budget")),
             ("⚡ Активные задачи", TaskCb(action="list")),
         ]
@@ -397,12 +396,12 @@ def _monitoring_kb():
     kb.button(text="🌐 Прокси", callback_data=ProxyCb(action="menu"))
     kb.button(text="📊 Инфра-аналитика", callback_data=InfraCb(action="menu"))
     kb.button(text="👻 Призрак", callback_data=GhostCb(action="menu"))
-    kb.button(text="⚛️ Физика", callback_data=PhysicsCb(action="menu"))
-    kb.button(text="🛡️ Щит аккаунтов", callback_data=ShieldCb(action="menu"))
+    # «Физика» (риск бана по аккаунтам) — раздел «Защиты аккаунтов», как в мини-аппе.
+    kb.button(text="🛡️ Защита аккаунтов", callback_data=ShieldCb(action="menu"))
     kb.button(text="📡 Ноды (форум-пространство)", callback_data=NodesCb(action="menu"))
     kb.button(text="🤖 Авторег (SMS API)", callback_data=AutoRegCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -494,7 +493,7 @@ _TOOLS_MENU_TEXT = (
     "⚡ <b>Операции</b> — жалобы, присутствие, публикация, массовые действия\n"
     "📢 <b>Рассылки и связь</b> — рассылки, личные сообщения, авто-ответы\n"
     "📊 <b>Аналитика</b> — позиции, SEO, конкуренты, поведение аудитории\n"
-    "🛡️ <b>Мониторинг и защита</b> — прогрев, прокси, Призрак, Физика, Щит\n"
+    "🛡️ <b>Мониторинг и защита</b> — прогрев, прокси, Призрак, защита аккаунтов\n"
     "🚀 <b>Рост и продвижение</b> — продвижение, Агент роста, Звёзды, сети контента"
 )
 
@@ -618,7 +617,7 @@ async def cb_main(
                 new_alerts = row["new_alerts"] or 0
                 p_score = pdata.get("score", 0) if isinstance(pdata, dict) else 0
                 p_emoji = pdata.get("level_emoji", "🟢") if isinstance(pdata, dict) else "🟢"
-                pressure_str = f" · Давление: {p_emoji} {p_score}" if p_score else ""
+                pressure_str = f" · Риск бана: {p_emoji} {p_score}" if p_score else ""
                 alert_str = f" · 🔔 {new_alerts} алертов" if new_alerts else ""
                 cooldown_str = f" · ⏳ {in_cooldown} на паузе" if in_cooldown else ""
                 status_line = (
@@ -821,7 +820,7 @@ async def cb_operations(
         p_emoji = state.pressure_emoji
         p_score = state.pressure_score
         if p_score > 0:
-            parts.append(f"Давление: {p_emoji} {p_score}")
+            parts.append(f"Риск бана: {p_emoji} {p_score}")
         if parts:
             infra_line = "\n\n<i>" + " · ".join(parts) + "</i>"
         if state.recommendations:
@@ -1108,8 +1107,7 @@ async def cb_monitoring(callback: CallbackQuery, callback_data: BmCb) -> None:
         "🌐 <b>Прокси</b> — управление прокси для аккаунтов\n"
         "📊 <b>Инфра-аналитика</b> — расширенная статистика инфраструктуры\n"
         "👻 <b>Призрак</b> — невидимые операции без следов активности\n"
-        "⚛️ <b>Физика</b> — живые повадки аккаунтов вместо ровных интервалов\n"
-        "🛡️ <b>Щит аккаунтов</b> — защита от ограничений",
+        "🛡️ <b>Защита аккаунтов</b> — риск бана по каждому аккаунту и авто-пауза до ограничений",
         _monitoring_kb(),
     )
 
@@ -2877,6 +2875,10 @@ _NOTIF_SQL: dict[str, str] = {
     "position_change": "position_change = NOT position_change",
     "op_complete": "op_complete     = NOT op_complete",
     "restriction": "restriction     = NOT restriction",
+    "leads": "leads           = NOT leads",
+    "reports": "reports         = NOT reports",
+    "advice": "advice          = NOT advice",
+    "digest_only": "digest_only     = NOT digest_only",
 }
 
 _NOTIF_LABELS = {
@@ -2885,7 +2887,26 @@ _NOTIF_LABELS = {
     "position_change": "Изменение позиций",
     "op_complete": "Завершение операций",
     "restriction": "Ограничения аккаунтов",
+    "leads": "Лиды и заявки",
+    "reports": "Ежедневные отчёты",
+    "advice": "Советы и напоминания",
 }
+
+
+def _notif_on(row, field: str, default: bool = True) -> bool:
+    """Значение тумблера; колонки нет (миграция не накатилась) — значение по умолчанию."""
+    try:
+        v = row[field]
+    except (KeyError, TypeError):
+        return default
+    return default if v is None else bool(v)
+
+
+def _notif_label(field: str) -> str:
+    """Подпись с уровнем: ⚡ — «нужно действие», приходит сразу и ночью."""
+    from services.quiet_hours import level_of
+    mark = " ⚡" if level_of(field) == "action" else ""
+    return _NOTIF_LABELS[field] + mark
 
 
 async def _get_or_create_notif(
@@ -2905,12 +2926,18 @@ async def _get_or_create_notif(
 
 def _notif_kb(row: asyncpg.Record) -> object:
     kb = InlineKeyboardBuilder()
-    for field, label in _NOTIF_LABELS.items():
-        val = row[field]
-        icon = "✅" if val else "❌"
+    for field in _NOTIF_LABELS:
+        icon = "✅" if _notif_on(row, field) else "❌"
         kb.button(
-            text=f"{icon} {label}", callback_data=BmCb(action="notif_toggle", sub=field)
+            text=f"{icon} {_notif_label(field)}",
+            callback_data=BmCb(action="notif_toggle", sub=field),
         )
+    digest = _notif_on(row, "digest_only", False)
+    kb.button(
+        text=("🗞 Несрочное: одной сводкой в день" if digest
+              else "🗞 Несрочное: сразу"),
+        callback_data=BmCb(action="notif_toggle", sub="digest_only"),
+    )
     q = _quiet_of(row)
     if q:
         from services.quiet_hours import window_label
@@ -2925,7 +2952,7 @@ def _notif_kb(row: asyncpg.Record) -> object:
                 kb.button(text=f"{mark}{a:02d}–{b:02d}",
                           callback_data=BmCb(action="notif_quiet", sub=f"{a}-{b}"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
-    n = len(_NOTIF_LABELS) + (1 if q else 0)
+    n = len(_NOTIF_LABELS) + 1 + (1 if q else 0)
     kb.adjust(*([1] * n), *([3] if q and q["on"] else []), 1)
     return kb.as_markup()
 
@@ -2941,9 +2968,16 @@ def _quiet_of(row) -> dict | None:
 
 def _notif_text(row: asyncpg.Record) -> str:
     lines = ["<b>🔔 Настройки уведомлений</b>\n"]
-    for field, label in _NOTIF_LABELS.items():
-        icon = "✅" if row[field] else "❌"
-        lines.append(f"{icon} {label}")
+    for field in _NOTIF_LABELS:
+        icon = "✅" if _notif_on(row, field) else "❌"
+        lines.append(f"{icon} {_notif_label(field)}")
+    lines.append("\n⚡ — нужно действие: приходит сразу, даже в тихие часы.")
+    if _notif_on(row, "digest_only", False):
+        try:
+            hour = int(row["digest_hour"])
+        except (KeyError, TypeError, ValueError):
+            hour = 9
+        lines.append(f"🗞 Остальное копится и приходит одной сводкой в {hour:02d}:00.")
     q = _quiet_of(row)
     if q and q["on"]:
         from services.quiet_hours import window_label

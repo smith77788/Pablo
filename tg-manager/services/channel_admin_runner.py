@@ -377,7 +377,13 @@ async def _daily_reports(pool, bot) -> int:
             await _stamp_report(pool, owner_id, retry=False)
             continue
         try:
-            await bot.send_message(owner_id, ca.format_daily_report(items), parse_mode="HTML")
+            # Общий слой: тумблер «Отчёты», уровень «инфо» — в тихие часы или
+            # при «только сводкой» отчёт ляжет в сводку, а не разбудит.
+            from database import db as _db
+            if not await _db.notify_if_enabled(pool, bot, owner_id, "reports",
+                                               ca.format_daily_report(items),
+                                               dedup_key="channel_admin_daily"):
+                raise RuntimeError("не доставлено")
             sent += 1
             # Метку ставим ТОЛЬКО после успешной отправки — раньше она
             # обновлялась ДО send_message, и при любом сбое доставки (владелец

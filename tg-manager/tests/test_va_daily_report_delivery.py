@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import os
 import sys
@@ -18,6 +20,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services import channel_admin_runner as runner  # noqa: E402
 
+
+
+@pytest.fixture(autouse=True)
+def _fresh_notify_slots():
+    """Отчёт идёт через общий слой с анти-спамом на 60 с в памяти процесса."""
+    from database import db as _db
+    _db._notify_cooldown.clear()
+    yield
+    _db._notify_cooldown.clear()
 
 class _Pool:
     def __init__(self):
@@ -45,7 +56,9 @@ class _Bot:
 
     async def send_message(self, owner_id, text, **kw):
         if self.fail:
-            raise RuntimeError("bot blocked by user")
+            # Временный сбой сети. Отказ «бот заблокирован» общий слой
+            # уведомлений считает окончательным и не повторяет каждый час.
+            raise TimeoutError("network timeout")
         self.sent.append((owner_id, text))
 
 

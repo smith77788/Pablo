@@ -379,6 +379,27 @@ async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
     # Иначе — молчим (не раскрываем существование команды)
 
 
+@router.message(Command("admin_onboarding"))
+async def cmd_admin_onboarding(message: Message, pool: asyncpg.Pool) -> None:
+    """Воронка онбординга: доля дошедших по шагам и время до первого результата.
+    /admin_onboarding [дней], по умолчанию 30."""
+    if not _is_admin(message.from_user.id):
+        return
+    from services import onboarding as _onb
+    arg = (message.text or "").split(maxsplit=1)
+    try:
+        days = max(1, min(365, int(arg[1]))) if len(arg) > 1 else 30
+    except ValueError:
+        days = 30
+    try:
+        d = await _onb.activation_report(pool, days)
+    except Exception:
+        log.exception("admin_onboarding")
+        await message.answer("⚠️ Отчёт не собрался — подробности в логе.")
+        return
+    await message.answer(_onb.format_activation_report(d), parse_mode="HTML")
+
+
 @router.message(Command("admin_log"))
 async def cmd_admin_log(message: Message, pool: asyncpg.Pool) -> None:
     """Последние 30 записей журнала админ-действий (admin_audit_log)."""

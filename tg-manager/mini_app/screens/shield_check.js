@@ -13,10 +13,10 @@ function _shScreen() {
   el.innerHTML =
     '<div class="hdr">' +
       '<div class="back" onclick="back()">←</div>' +
-      '<div class="hdr-title">🛡 Щит</div>' +
+      '<div class="hdr-title">🛡 Защита аккаунтов</div>' +
     '</div>' +
-    // Полоска вкладок модуля «Щит» (SCREEN_MODULES.shield в index.html).
-    '<div class="filter-chips mod-tabs" data-module="shield" data-tab="resources" role="tablist" aria-label="Вкладки модуля «Щит»"></div>' +
+    // Полоска вкладок модуля «Защита аккаунтов» (SCREEN_MODULES.shield в index.html).
+    '<div class="filter-chips mod-tabs" data-module="shield" data-tab="resources" role="tablist" aria-label="Вкладки модуля «Защита аккаунтов»"></div>' +
     '<div class="sub-sb"><div id="s-shieldcheck-body">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';

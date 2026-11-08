@@ -170,7 +170,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"⚙️ Операций сегодня: <b>{ops_today}</b>\n"
         f"🌡 Разогревается: <b>{warmup_active}</b>\n"
         f"🏊 Пулов: <b>{pool_count}</b>\n\n"
-        f"{p_emoji} Давление инфраструктуры: <b>{p_score}/100</b> — {p_label}\n\n"
+        f"{p_emoji} Риск бана: <b>{p_score}/100</b> — {p_label}\n\n"
         "Выберите раздел для детального просмотра:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1311,7 +1311,7 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"⏭ Пропущено (плохое состояние): <b>{skipped}</b>\n"
         f"❌ Ошибок: <b>{errors}</b>\n\n"
         f"📱 Доступных аккаунтов: <b>{state.account_available}</b>\n"
-        f"{state.pressure_emoji} Давление: <b>{state.pressure_score}/100</b> — {state.pressure_label}",
+        f"{state.pressure_emoji} Риск бана: <b>{state.pressure_score}/100</b> — {state.pressure_label}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
