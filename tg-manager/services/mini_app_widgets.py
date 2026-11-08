@@ -343,6 +343,8 @@ def setup_routes(app: web.Application, pool) -> None:
             await broadcaster.abandon_unstarted(pool, bc_id)
             log.exception("widget_broadcast submit uid=%s wid=%s", uid, row["id"])
             return _err("Не удалось поставить рассылку в очередь", 500)
+        # Двойной тап: шина отдала операцию первого тапа — своя строка снимается.
+        bc_id = await broadcaster.adopt_submitted_broadcast(pool, op_id, bc_id)
         return _json_resp({"ok": True, "op_id": op_id, "broadcast_id": bc_id, "total": total})
 
     async def widget_delete(request: web.Request) -> web.Response:

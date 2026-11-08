@@ -127,10 +127,12 @@ def quantized_schedule_iso(minutes: float, *, now: object = None) -> str:
     return base.isoformat()
 
 
-def _dedup_identity_params(stored: dict[str, Any]) -> dict[str, Any]:
+def _dedup_identity_params(stored: dict[str, Any],
+                           excluded: tuple[str, ...] = _DEDUP_EXCLUDED_KEYS,
+                           ) -> dict[str, Any]:
     """params без косметических и переменных ключей — то, по чему сравниваются
     два сабмита."""
-    return {k: v for k, v in stored.items() if k not in _DEDUP_EXCLUDED_KEYS}
+    return {k: v for k, v in stored.items() if k not in excluded}
 
 # ── Служебные строки журнала целей ───────────────────────────────────────────
 # В operation_log исполнитель инвайта пишет не только цели, но и ШАГИ: выдачу
@@ -782,6 +784,11 @@ OP_REGISTRY: dict[str, dict] = {
     },
     "run_broadcast": {
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
+        # Немедленная рассылка заводит строку `broadcasts` ДО постановки, и её
+        # id у каждого тапа свой: в личности он делал дедуп слепым, и двойной
+        # тап слал всей аудитории дважды. Вызывающий, получив чужую операцию,
+        # снимает свою строку (broadcaster.adopt_submitted_broadcast).
+        "dedup_ignore_keys": ("broadcast_id",),
         "description": "Рассылка по аудитории",
         "min_plan": "starter",
         "max_retries": 1,
@@ -1015,14 +1022,17 @@ async def submit(
     # Отпечаток чувствительных params считается БЕЗ косметических ключей —
     # иначе указатель на прогресс-бар менял бы отпечаток на каждом тапе, и
     # дедуп по отпечатку был бы так же слеп, как дедуп по целому params.
-    _outside_identity = {k: params[k] for k in _DEDUP_EXCLUDED_KEYS
+    # Свои для типа ключи вне личности (`dedup_ignore_keys` в OP_REGISTRY):
+    # id записи, которую вызывающий заводит ДО постановки, у каждого тапа свой.
+    _excluded = _DEDUP_EXCLUDED_KEYS + tuple(meta.get("dedup_ignore_keys") or ())
+    _outside_identity = {k: params[k] for k in _excluded
                          if k in params}
     stored_params, sensitive_params_fp = seal_operation_params(
-        _dedup_identity_params(params))
+        _dedup_identity_params(params, _excluded))
     stored_params.update(_outside_identity)
     params_json = json.dumps(stored_params, ensure_ascii=False)
     dedup_params_json = json.dumps(
-        _dedup_identity_params(stored_params), ensure_ascii=False)
+        _dedup_identity_params(stored_params, _excluded), ensure_ascii=False)
     sched = _coerce_scheduled_for(scheduled_for)
 
     # Идемпотентность постановки. Двойной тап кнопки или retry клиента после
@@ -1066,7 +1076,7 @@ async def submit(
                                  AND created_at > NOW() - make_interval(secs => $5)
                                ORDER BY id DESC LIMIT 1""",
                             owner_id, op_type, dedup_params_json, sched,
-                            dedup_window_sec, list(_DEDUP_EXCLUDED_KEYS),
+                            dedup_window_sec, list(_excluded),
                         )
                     if existing is not None:
                         op_id = int(existing)

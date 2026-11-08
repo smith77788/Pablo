@@ -152,7 +152,11 @@ def test_the_fingerprint_is_built_without_the_cosmetic_keys():
     бы держать секретоподобные данные в тестовых фикстурах.
     """
     body = _submit_src()
-    assert "seal_operation_params(\n        _dedup_identity_params(params))" in body, (
+    # Набор исключаемых ключей — общий плюс свои у типа (`dedup_ignore_keys`),
+    # и общий в него обязан входить.
+    assert "seal_operation_params(\n        _dedup_identity_params(params, _excluded))" in body, (
         "отпечаток считается от целого params — указатель на прогресс-бар "
         "будет менять его на каждом тапе, и дедуп по отпечатку ослепнет"
     )
+    assert "_excluded = _DEDUP_EXCLUDED_KEYS + " in body, (
+        "свои ключи типа заменили общий набор — косметика снова в отпечатке")

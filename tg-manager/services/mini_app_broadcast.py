@@ -156,6 +156,11 @@ def setup_routes(app: web.Application, pool) -> None:
                     from services import broadcaster as _bc
                     await _bc.abandon_unstarted(pool, broadcast_id)
                     raise
+                # Двойной тап: шина отдала уже стоящую операцию первого тапа —
+                # своя строка второго снимается, в ответ идёт рассылка первого.
+                from services import broadcaster as _bc
+                broadcast_id = await _bc.adopt_submitted_broadcast(
+                    pool, op_id, broadcast_id)
             else:
                 # Отложенная: НЕ создаём запись рассылки заранее (иначе resume
                 # отправит её сразу при рестарте). Воркер создаст её, когда

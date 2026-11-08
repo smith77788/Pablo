@@ -868,6 +868,35 @@ async def abandon_unstarted(pool: asyncpg.Pool, broadcast_id) -> None:
         )
 
 
+async def adopt_submitted_broadcast(pool: asyncpg.Pool, op_id, broadcast_id):
+    """Чью рассылку на самом деле везёт операция `op_id`. Возвращает её id.
+
+    Немедленная рассылка заводит строку `broadcasts` ДО постановки. Второй тап
+    (или повтор клиента после таймаута) заводит СВОЮ строку, а шина узнаёт в
+    нём первый и отдаёт уже стоящую операцию (`dedup_ignore_keys` у
+    run_broadcast). Своя строка второго тапа тогда никому не нужна и обязана
+    перестать быть 'pending' — иначе старт процесса (`resume_interrupted`)
+    отправил бы её всей аудитории мимо операции.
+    """
+    if not op_id or not broadcast_id:
+        return broadcast_id
+    try:
+        owned = await pool.fetchval(
+            "SELECT params->>'broadcast_id' FROM operation_queue WHERE id=$1",
+            int(op_id))
+    except Exception as exc:
+        logger.warning("adopt_submitted_broadcast: операция %s не прочиталась "
+                       "(%s)", op_id, exc)
+        return broadcast_id
+    if owned is None or str(owned) == str(broadcast_id):
+        return broadcast_id
+    await abandon_unstarted(pool, broadcast_id)
+    try:
+        return int(owned)
+    except (TypeError, ValueError):
+        return broadcast_id
+
+
 def cancel(broadcast_id: int) -> bool:
     task = _running.get(broadcast_id)
     if task and not task.done():
@@ -970,6 +999,7 @@ async def mass_broadcast_with_scheduling(
                 pool, owner_id, "run_broadcast", _op_params,
                 total_items=total, label=label,
             )
+            broadcast_id = await adopt_submitted_broadcast(pool, op_id, broadcast_id)
         except Exception as exc:
             logger.exception("mass_broadcast_with_scheduling insert uid=%d", owner_id)
             # Отказ постановки (тариф, предохранитель) не должен оставлять
@@ -1101,6 +1131,7 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
             {"bot_id": bot_id_int, "broadcast_id": new_bc,
              "text": text, "user_ids": undelivered},
             total_items=total, label=label)
+        new_bc = await adopt_submitted_broadcast(pool, op_id, new_bc)
         return {"ok": True, "broadcast_id": new_bc, "op_id": op_id, "total_users": total}
     except Exception:
         logger.exception("resend_undelivered bc=%d uid=%d", bc_id, owner_id)
@@ -1181,6 +1212,7 @@ async def ab_test_broadcast(
                 pool, owner_id, "run_broadcast", _op_params,
                 total_items=len(chunk), label=f"A/B вариант {idx + 1}: {text[:30]}",
             )
+            bc_id = await adopt_submitted_broadcast(pool, op_id, bc_id)
             results.append({"variant_index": idx, "broadcast_id": bc_id, "op_id": op_id, "users": len(chunk)})
         except Exception as exc:
             logger.warning("ab_test_broadcast variant %d failed: %s", idx, exc)
