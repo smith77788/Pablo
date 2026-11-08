@@ -375,6 +375,7 @@ GET /api/miniapp/workflow/run/{run_id}/log
 GET /api/miniapp/workflow/{wf_id}/status
 GET /api/miniapp/workflows
 GET /api/miniapp/workflows/{wf_id}
+GET /api/miniapp/workflows/{wf_id}/check
 GET /api/miniapp/workflows/{wf_id}/export
 GET /api/miniapp/workspace/{ws_id}
 GET /api/miniapp/workspaces
@@ -705,6 +706,7 @@ HEAD /api/miniapp/workflow/run/{run_id}/log
 HEAD /api/miniapp/workflow/{wf_id}/status
 HEAD /api/miniapp/workflows
 HEAD /api/miniapp/workflows/{wf_id}
+HEAD /api/miniapp/workflows/{wf_id}/check
 HEAD /api/miniapp/workflows/{wf_id}/export
 HEAD /api/miniapp/workspace/{ws_id}
 HEAD /api/miniapp/workspaces
@@ -1102,6 +1104,7 @@ POST /api/miniapp/workflows/{wf_id}/inbound_token
 POST /api/miniapp/workflows/{wf_id}/publish
 POST /api/miniapp/workflows/{wf_id}/send_window
 POST /api/miniapp/workflows/{wf_id}/steps
+POST /api/miniapp/workflows/{wf_id}/steps/{idx}/move
 POST /api/miniapp/workspace
 POST /api/miniapp/workspace/join
 POST /api/miniapp/workspace/{ws_id}/invite
@@ -1132,3 +1135,4 @@ PUT /api/miniapp/uch/groups/{group_id}
 PUT /api/miniapp/uch/smart-tags/rules/{rule_id}/toggle
 PUT /api/miniapp/va/channel/{cid}
 PUT /api/miniapp/va/strategy
+PUT /api/miniapp/workflows/{wf_id}/steps/{idx}

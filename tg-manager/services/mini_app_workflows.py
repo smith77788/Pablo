@@ -285,7 +285,13 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.exception("workflow_detail stats uid=%s wf=%s", uid, wid)
             stats = None
+        try:
+            problems = await _wf.activation_problems(pool, uid, wid) or []
+        except Exception:
+            log.exception("workflow_detail check uid=%s wf=%s", uid, wid)
+            problems = []
         return _json_resp({"id": row["id"], "name": row["name"],
+                           "problems": problems,
                            "description": row["description"] or "",
                            "active": bool(row["is_active"]),
                            "bot_id": row["bot_id"],
@@ -388,6 +394,15 @@ def setup_routes(app: web.Application, pool) -> None:
         if blocked is not None:
             return blocked
         from services import workflow_engine as _wf
+        if active:
+            # Включить можно только то, что заработает: иначе сценарий
+            # числится «активным» и молчит.
+            problems = await _wf.activation_problems(pool, uid, wid)
+            if problems is None:
+                return _err("Сценарий не найден", 404)
+            refusal = _wf.blocking_text(problems)
+            if refusal:
+                return _err(refusal, 400)
         try:
             res = await (_wf.resume_workflow if active else _wf.pause_workflow)(
                 pool, uid, wid)
@@ -491,6 +506,78 @@ def setup_routes(app: web.Application, pool) -> None:
         if left is None:
             return _err("Шаг не найден", 404)
         return _json_resp({"ok": True, "steps": left})
+
+    def _step_idx(request: web.Request):
+        try:
+            idx = int(request.match_info["idx"])
+        except (KeyError, ValueError, TypeError):
+            return None
+        return idx if idx >= 0 else None
+
+    async def workflow_update_step(request: web.Request) -> web.Response:
+        """Изменить шаг на месте: PUT /workflows/{id}/steps/{idx} {type,...}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        idx = _step_idx(request)
+        if wid is None or idx is None:
+            return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        from services import workflow_engine as _wf
+        try:
+            res = await _wf.update_step(pool, uid, wid, idx, body)
+        except ValueError as e:
+            return _err(str(e), 400)
+        if res is None:
+            return _err("Шаг не найден", 404)
+        step, in_draft = res
+        return _json_resp({"ok": True, "step": step, "draft": in_draft})
+
+    async def workflow_move_step(request: web.Request) -> web.Response:
+        """Переставить шаг: POST /workflows/{id}/steps/{idx}/move {to} (с нуля)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        idx = _step_idx(request)
+        if wid is None or idx is None:
+            return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
+        try:
+            body = await request.json()
+            to = int(body.get("to"))
+        except Exception:
+            return _err("Укажите, куда переставить шаг", 400)
+        from services import workflow_engine as _wf
+        res = await _wf.move_step(pool, uid, wid, idx, to)
+        if res is None:
+            return _err("Шаг не найден", 404)
+        pos, in_draft = res
+        return _json_resp({"ok": True, "to": pos, "draft": in_draft})
+
+    async def workflow_check(request: web.Request) -> web.Response:
+        """GET /workflows/{id}/check — заработает ли сценарий, если включить."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        if wid is None:
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        problems = await _wf.activation_problems(pool, uid, wid)
+        if problems is None:
+            return _err("Сценарий не найден", 404)
+        return _json_resp({"ok": not _wf.blocking_text(problems),
+                           "problems": problems})
 
     async def workflow_cancel_run(request: web.Request) -> web.Response:
         """Остановить прогон: POST /workflow/run/{run_id}/cancel."""
@@ -813,6 +900,9 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_any)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)
     app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
+    app.router.add_put("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_update_step)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/steps/{idx}/move", workflow_move_step)
+    app.router.add_get("/api/miniapp/workflows/{wf_id}/check", workflow_check)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/publish", workflow_publish)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/discard_draft", workflow_discard_draft)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)

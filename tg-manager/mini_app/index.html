@@ -7985,7 +7985,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="mo-wf-step" onclick="if(event.target===this)closeModal('mo-wf-step')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-wf-step')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">➕ Добавить шаг</div>
+    <div class="modal-title" id="wfStepTitle">➕ Добавить шаг</div>
     <div class="field">
       <label>Тип шага *</label>
       <select id="wfStepType" class="sel">
@@ -8124,7 +8124,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="number" id="wfStepWhElseGoto" min="1" placeholder="Если не удалось — перейти к шагу № (пусто = дальше)" class="inp" style="margin-top:6px">
     </div>
     <div class="field-err" id="wfStepErr"></div>
-    <button class="btn btn-p" data-main onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
+    <button class="btn btn-p" data-main id="wfStepSubmitBtn" onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
   </div>
 </div>
 
@@ -32029,10 +32029,19 @@ async function openWorkflowDetail(wfId, wfName) {
   try {
     const d = await api('/api/miniapp/workflows/' + wfId);
     const steps = d.steps || [];
+    _wfSteps = steps;
     // Зеркало воронки или автоворонки: шаги, включение и удаление живут в их
     // разделе, здесь — цель, статистика и журнал по людям.
     const legacy = !!d.legacy_kind;
     let html = '';
+    // Почему сценарий не заработает — до того, как владелец его включит, а
+    // не после жалоб подписчиков.
+    const wfProblems = legacy ? [] : (d.problems || []);
+    if (wfProblems.length) {
+      const blocks = wfProblems.filter(p => p.level === 'block');
+      html += `<div class="hint" style="margin:0 14px 8px;padding:8px 10px;border-radius:8px;background:${blocks.length ? 'var(--bg-red-12, rgba(255,59,48,.12))' : 'var(--bg-orange-12, rgba(255,149,0,.12))'}">
+        <b>${blocks.length ? '⛔ Сценарий не заработает' : '⚠️ Проверьте перед включением'}</b><br>${wfProblems.map(p => (p.level === 'block' ? '⛔ ' : '⚠️ ') + esc(p.text)).join('<br>')}</div>`;
+    }
 
     if (d.bot_id) {
       html += `<div class="hint" style="margin:0 14px 8px">🤖 Бот: ${d.bot_username ? '@' + esc(d.bot_username) : '#' + d.bot_id}</div>`;
@@ -32161,7 +32170,7 @@ async function openWorkflowDetail(wfId, wfName) {
             ${!isLast ? '<div class="ffstep-tail"></div>' : ''}
           </div>
           <div class="ffstep-body" style="border-left:3px solid ${color}">
-            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : (s.until_time ? '· до ' + esc(s.until_time) : '')}</span>${legacy ? '' : `<span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span>`}</div>
+            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : (s.until_time ? '· до ' + esc(s.until_time) : '')}</span>${legacy ? '' : `<span style="display:flex;gap:4px">${i > 0 ? `<span class="icon-btn sm" role="button" tabindex="0" aria-label="Поднять шаг" onclick="moveWorkflowStep(${wfId}, ${i}, ${i - 1}, this)">↑</span>` : ''}${!isLast ? `<span class="icon-btn sm" role="button" tabindex="0" aria-label="Опустить шаг" onclick="moveWorkflowStep(${wfId}, ${i}, ${i + 1}, this)">↓</span>` : ''}<span class="icon-btn sm" role="button" tabindex="0" aria-label="Изменить шаг" onclick="openWfAddStepModal(${i})">✏️</span><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span></span>`}</div>
             <div class="ffstep-text">${esc(body)}</div>
             ${extra.length ? '<div class="hint" style="margin-top:4px">' + extra.map(esc).join('<br>') + '</div>' : ''}
           </div>
@@ -32395,6 +32404,18 @@ async function cancelWorkflowRun(runId) {
 
 async function toggleWorkflow(wfId, active) {
   try {
+    if (active === 'true') {
+      // Проверка до включения: блокирующее — отказ с причиной, остальное —
+      // предупреждение, которое владелец подтверждает осознанно.
+      const chk = await api(`/api/miniapp/workflows/${wfId}/check`);
+      const probs = (chk && chk.problems) || [];
+      const blocks = probs.filter(p => p.level === 'block');
+      if (blocks.length) {
+        await askConfirm('Сценарий не заработает:\n• ' + blocks.map(p => p.text).join('\n• ') + '\n\nИсправьте это и включите снова.');
+        return;
+      }
+      if (probs.length && !await askConfirm('Перед включением:\n• ' + probs.map(p => p.text).join('\n• ') + '\n\nВсё равно включить?')) return;
+    }
     await api(`/api/miniapp/workflows/${wfId}`, { method: 'PATCH', body: JSON.stringify({ active: active === 'true' }) });
     toast(active === 'true' ? '▶️ Активирован' : '⏸ На паузе');
     back();
@@ -32458,8 +32479,57 @@ async function deleteWorkflow(wfId, _el) {
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
 }
 
-function openWfAddStepModal() {
+let _wfSteps = [];
+let _wfEditIdx = null;
+
+async function moveWorkflowStep(wfId, from, to, el) {
+  if (el) el.style.pointerEvents = 'none';
+  try {
+    const r = await api(`/api/miniapp/workflows/${wfId}/steps/${from}/move`, { method: 'POST', body: JSON.stringify({ to }) });
+    toast(r && r.draft ? '↕️ Шаг переставлен в черновике' : '↕️ Шаг переставлен');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); if (el) el.style.pointerEvents = ''; }
+}
+
+// Шаг → поля модалки: та же форма, что при добавлении, только заполненная.
+function _wfFillStepModal(s) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined && v !== null) el.value = v; };
+  const typeEl = document.getElementById('wfStepType');
+  typeEl.value = s.type || 'message';
+  typeEl.dispatchEvent(new Event('change'));
+  set('wfStepMsg', s.text || '');
+  if (s.type === 'message') {
+    set('wfStepMedia', s.media || '');
+    if (s.media_kind) set('wfStepMediaKind', s.media_kind);
+    set('wfStepButtons', (s.buttons || []).map(b => b.url ? b.text + ' | ' + b.url : (b.goto ? b.text + ' -> ' + b.goto : b.text)).join('\n'));
+  } else if (s.type === 'ask') {
+    set('wfStepSaveAs', s.save_as); set('wfStepValidate', s.validate || 'any');
+  } else if (s.type === 'delay') {
+    set('wfStepDelay', s.delay_minutes || ''); set('wfStepUntil', s.until_time || '');
+    set('wfStepUntilField', s.until_field || ''); set('wfStepOffset', s.offset_minutes || '');
+    const wd = document.getElementById('wfStepWeekdays'); if (wd) wd.checked = !!s.weekdays_only;
+  } else if (s.type === 'split') {
+    set('wfStepBranches', (s.branches || []).map(b => b.label + ' ' + b.weight + (b.goto ? ' -> ' + b.goto : '')).join('\n'));
+  } else if (s.type === 'condition') {
+    set('wfStepCondition', s.condition); set('wfStepConditionVal', s.condition_value || ''); set('wfStepElseGoto', s.else_goto || '');
+  } else if (s.type === 'action') {
+    set('wfStepAction', s.action); set('wfStepActionVal', s.action === 'goto' ? (s.goto || s.value || '') : (s.value || ''));
+  } else if (s.type === 'invoice') {
+    set('wfStepInvTitle', s.title || ''); set('wfStepInvAmount', s.amount || ''); if (s.currency) set('wfStepInvCurrency', s.currency);
+  } else if (s.type === 'ai') {
+    set('wfStepAiPrompt', s.text || ''); set('wfStepAiSaveAs', s.save_as || ''); set('wfStepAiFallback', s.fallback || '');
+  } else if (s.type === 'wait') {
+    set('wfStepWaitEvent', s.event || ''); set('wfStepWaitValue', s.value || '');
+    set('wfStepWaitTimeout', s.timeout_minutes || ''); set('wfStepWaitTimeoutGoto', s.timeout_goto || '');
+  } else if (s.type === 'webhook') {
+    set('wfStepUrl', s.url || ''); set('wfStepWhSaveAs', s.save_as || '');
+    set('wfStepWhRetries', s.retries ?? ''); set('wfStepWhElseGoto', s.else_goto || '');
+  }
+}
+
+function openWfAddStepModal(editIdx) {
   if (!_currentWfId) return;
+  _wfEditIdx = (typeof editIdx === 'number' && _wfSteps[editIdx]) ? editIdx : null;
   ['wfStepMsg', 'wfStepDelay', 'wfStepConditionVal', 'wfStepButtons', 'wfStepSaveAs', 'wfStepMedia',
    'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl',
    'wfStepWhSaveAs', 'wfStepWhRetries', 'wfStepWhElseGoto',
@@ -32468,6 +32538,10 @@ function openWfAddStepModal() {
    'wfStepUntil', 'wfStepUntilField', 'wfStepOffset', 'wfStepBranches']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('wfStepErr').style.display = 'none';
+  const editing = _wfEditIdx !== null;
+  document.getElementById('wfStepTitle').textContent = editing ? '✏️ Шаг ' + (_wfEditIdx + 1) : '➕ Добавить шаг';
+  document.getElementById('wfStepSubmitBtn').textContent = editing ? '💾 Сохранить шаг' : '➕ Добавить шаг';
+  if (editing) _wfFillStepModal(_wfSteps[_wfEditIdx]);
   document.getElementById('mo-wf-step').classList.add('show');
   tg.HapticFeedback?.impactOccurred('medium');
 }
@@ -32579,9 +32653,14 @@ async function submitWfAddStep() {
     if (weg) payload.else_goto = weg;
   }
   try {
-    const r = await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });
+    const editing = _wfEditIdx !== null;
+    const r = editing
+      ? await api(`/api/miniapp/workflows/${_currentWfId}/steps/${_wfEditIdx}`, { method: 'PUT', body: JSON.stringify(payload) })
+      : await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });
     closeModal('mo-wf-step');
-    toast(r && r.draft ? '✅ Шаг добавлен в черновик' : '✅ Шаг добавлен');
+    _wfEditIdx = null;
+    toast(editing ? (r && r.draft ? '✅ Шаг изменён в черновике' : '✅ Шаг изменён')
+                  : (r && r.draft ? '✅ Шаг добавлен в черновик' : '✅ Шаг добавлен'));
     _wfReopen();
   } catch(e) { fail('Ошибка: ' + errRu(e)); }
 }
