@@ -120,6 +120,7 @@ GET /api/miniapp/bots/discovered
 GET /api/miniapp/broadcast/recipients
 GET /api/miniapp/broadcast/{bc_id}/analytics
 GET /api/miniapp/broadcasts
+GET /api/miniapp/campaign/chats
 GET /api/miniapp/campaign/{campaign_id}
 GET /api/miniapp/campaigns
 GET /api/miniapp/cf/pool/status
@@ -449,6 +450,7 @@ HEAD /api/miniapp/bots/discovered
 HEAD /api/miniapp/broadcast/recipients
 HEAD /api/miniapp/broadcast/{bc_id}/analytics
 HEAD /api/miniapp/broadcasts
+HEAD /api/miniapp/campaign/chats
 HEAD /api/miniapp/campaign/{campaign_id}
 HEAD /api/miniapp/campaigns
 HEAD /api/miniapp/cf/pool/status
