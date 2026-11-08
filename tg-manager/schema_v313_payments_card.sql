@@ -1,4 +1,4 @@
--- schema_v304: оплата подписки картой через провайдера Telegram Payments.
+-- schema_v313: оплата подписки картой через провайдера Telegram Payments.
 --
 -- Счёт картой — строка payments с wallet_address='telegram_card' и валютой
 -- провайдера (RUB, USD, EUR … — трёхбуквенный код ISO 4217): amount_crypto —
