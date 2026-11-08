@@ -540,6 +540,13 @@ def setup_routes(app: web.Application, pool) -> None:
                 uid, tg_user_id, first_name or None, last_name, username, phone,
                 tags, notes,
             )
+            # Шаг 1 сведения двух баз: клиент сразу появляется и в «Контактах».
+            from services.contacts_hub.legacy_crm import mirror_crm_contact
+            await mirror_crm_contact(
+                pool, uid, legacy_id=cid, tg_user_id=tg_user_id,
+                tg_is_real=bool(tg_user_id_raw), username=username,
+                first_name=first_name, last_name=last_name, phone=phone,
+                tags=tags, notes=notes)
             return _json_resp({"id": cid, "ok": True})
         except Exception:
             log.exception("crm_contact_create uid=%d", uid)
