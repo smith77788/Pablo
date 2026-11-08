@@ -5686,9 +5686,22 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="checkbox" id="ucKChats" onchange="ucKindToggle()"> 💬 Чаты моих аккаунтов
       </label>
       <div id="ucChatsWrap" style="display:none;margin:0 0 14px 24px">
-        <div class="field">
+        <div class="field" style="margin-bottom:10px">
+          <label>В какие чаты</label>
+          <select id="ucChatScope" onchange="ucKindToggle()">
+            <option value="all" selected>Во все группы выбранных аккаунтов</option>
+            <option value="pick">Выбрать группы</option>
+          </select>
+        </div>
+        <div class="field" id="ucAccWrap">
           <label>Аккаунты (по одной операции на аккаунт)</label>
           <div id="ucAccounts" class="lst" style="max-height:240px;overflow:auto;margin-top:6px"></div>
+        </div>
+        <div class="field" id="ucChatPickWrap" style="display:none">
+          <label>Отметьте группы (<span id="ucChatCount">0</span>)</label>
+          <input type="search" id="ucChatQ" placeholder="Поиск по названию" oninput="ucChatSearch()" style="margin-top:6px">
+          <div id="ucChats" class="lst" style="max-height:260px;overflow:auto;margin-top:6px"></div>
+          <div class="field-note" id="ucChatNote">В списке — группы, импортированные в «Каналы». Каждая уйдёт с того аккаунта, через который она добавлена.</div>
         </div>
       </div>
 
@@ -22543,6 +22556,7 @@ let UC_ACC_SEL = new Set();
 let UC_BOT_SEL = new Set();
 // Экран «🧩 Виджеты в чатах» (screens/widgets.js).
 let WG = {tpls: [], limits: {}, tpl: '', edit: null, offset: 0, items: []};
+let UC_CHAT_SEL = new Map();
 
 const UC_KIND_BOX = {channels:'ucKChannels', chats:'ucKChats', bots:'ucKBots', dm:'ucKDm'};
 // kind — необязательно: какой ресурс отметить сразу («💬 В чаты» → 'chats').
@@ -22552,7 +22566,7 @@ const UC_KIND_BOX = {channels:'ucKChannels', chats:'ucKChats', bots:'ucKBots', d
 const UC_KIND_TITLE = {channels:'📢 В каналы', chats:'💬 В чаты', bots:'🤖 Подписчикам ботов', dm:'✉️ В личные сообщения'};
 function openUniCampaign(kind) {
   push('s-unicampaign');
-  UC_CH_SEL = new Set(); UC_ACC_SEL = new Set(); UC_BOT_SEL = new Set(); UC_CH_TOTAL = 0;
+  UC_CH_SEL = new Set(); UC_ACC_SEL = new Set(); UC_BOT_SEL = new Set(); UC_CH_TOTAL = 0; UC_CHAT_SEL = new Map();
   const one = Object.prototype.hasOwnProperty.call(UC_KIND_BOX, kind || '') ? kind : '';
   txt('ucTitle', one ? UC_KIND_TITLE[one] : '🚀 Всё сразу');
   txt('ucWhereSec', one ? 'Куда' : 'Куда — отметьте ресурсы');
@@ -22561,6 +22575,10 @@ function openUniCampaign(kind) {
   }
   document.getElementById('ucBotSeg').value = 'all_each';
   const _bb = document.getElementById('ucBots'); if (_bb) _bb.dataset.loaded = '';
+  { const _b = document.getElementById('ucChats'); if (_b) _b.dataset.loaded = ''; }
+  { const _q = document.getElementById('ucChatQ'); if (_q) _q.value = ''; }
+  txt('ucChatCount', '0');
+  document.getElementById('ucChatScope').value = 'all';
   document.getElementById('ucName').value = '';
   document.getElementById('ucText').value = '';
   document.getElementById('ucWhen').value = '';
@@ -22591,10 +22609,72 @@ function ucKindToggle() {
   show('ucBotPickWrap', botPick);
   if (botPick) _ucLoadBots();
   if (on('ucKChannels')) _ucLoadChannels();
-  if (on('ucKChats')) {
+  const chatPick = document.getElementById('ucChatScope').value === 'pick';
+  show('ucAccWrap', on('ucKChats') && !chatPick);
+  show('ucChatPickWrap', on('ucKChats') && chatPick);
+  if (on('ucKChats') && !chatPick) {
     accPickerSearchBox('ucAccounts', _ucLoadAccs);
     _ucLoadAccs('');
   }
+  if (on('ucKChats') && chatPick) _ucLoadChats();
+}
+
+// Выбор отдельных групп: ключ — «аккаунт:группа», потому что одна и та же
+// группа может быть импортирована через два аккаунта, а писать в неё будет
+// ровно тот, что отмечен.
+let _ucChatQTimer = null;
+function ucChatSearch() {
+  clearTimeout(_ucChatQTimer);
+  _ucChatQTimer = setTimeout(() => {
+    const b = document.getElementById('ucChats'); if (b) b.dataset.loaded = '';
+    _ucLoadChats();
+  }, 350);
+}
+
+async function _ucLoadChats() {
+  const box = document.getElementById('ucChats');
+  if (!box || box.dataset.loaded === '1') return;
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  const q = (document.getElementById('ucChatQ').value || '').trim();
+  try {
+    const d = await api('/api/miniapp/campaign/chats' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    const rows = d.chats || [];
+    if (!rows.length) {
+      box.innerHTML = q
+        ? empty('🔍', 'Ничего не найдено', 'Попробуйте другое название')
+        : empty('💬', 'Нет групп', 'Импортируйте группы аккаунтов в «Каналы» или выберите «Во все группы выбранных аккаунтов»');
+      return;
+    }
+    box.innerHTML = rows.map(c => {
+      const k = c.acc_id + ':' + c.chat_id;
+      return `<div class="row tap" onclick="ucToggleChat(${c.acc_id}, ${c.chat_id})">
+        <div class="row-ico" id="ucg-${c.acc_id}-${c.chat_id}" style="background:var(--bg-blue-16)">${UC_CHAT_SEL.has(k) ? '✅' : '💬'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.title || c.username || String(c.chat_id))}</div>
+          <div class="row-val">${(c.members || 0).toLocaleString('ru-RU')} уч. · с аккаунта ${esc(c.acc_label || ('#' + c.acc_id))}</div>
+        </div>
+      </div>`;
+    }).join('') + (d.total > rows.length
+      ? `<div style="padding:8px;font-size:12px;color:var(--hint)">Показаны ${rows.length} из ${d.total}. Уточните поиском.</div>` : '');
+    box.dataset.loaded = '1';
+  } catch(e) {
+    box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить группы'), '_ucLoadChats()');
+  }
+}
+
+function ucToggleChat(accId, chatId) {
+  const k = accId + ':' + chatId;
+  if (UC_CHAT_SEL.has(k)) UC_CHAT_SEL.delete(k); else UC_CHAT_SEL.set(k, [accId, chatId]);
+  const ico = document.getElementById('ucg-' + accId + '-' + chatId);
+  if (ico) ico.textContent = UC_CHAT_SEL.has(k) ? '✅' : '💬';
+  txt('ucChatCount', String(UC_CHAT_SEL.size));
+}
+
+// {acc_id: [chat_id, …]} — формат targets.chats.chat_ids для campaign_hub.
+function _ucPickedChats() {
+  const out = {};
+  for (const [acc, chat] of UC_CHAT_SEL.values()) (out[acc] = out[acc] || []).push(chat);
+  return out;
 }
 
 async function _ucLoadChannels() {
@@ -22691,7 +22771,14 @@ function _ucSpec() {
     if (document.getElementById('ucChScope').value === 'pick') t.channel_ids = [...UC_CH_SEL];
     targets.channels = t;
   }
-  if (on('ucKChats')) targets.chats = {enabled: true, acc_ids: [...UC_ACC_SEL]};
+  if (on('ucKChats')) {
+    if (document.getElementById('ucChatScope').value === 'pick') {
+      const picked = _ucPickedChats();
+      targets.chats = {enabled: true, acc_ids: Object.keys(picked).map(Number), chat_ids: picked};
+    } else {
+      targets.chats = {enabled: true, acc_ids: [...UC_ACC_SEL]};
+    }
+  }
   if (on('ucKBots')) {
     const seg = document.getElementById('ucBotSeg').value;
     targets.bots = {enabled: true, segment: seg};
@@ -22716,7 +22803,9 @@ function _ucSummary(spec) {
       ? `каналы: ${t.channels.channel_ids.length} выбрано`
       : `каналы: ВСЕ мои${UC_CH_TOTAL?' ('+UC_CH_TOTAL+')':''}`);
   }
-  if (t.chats) out.push(`чаты аккаунтов: ${t.chats.acc_ids.length} (по операции на аккаунт)`);
+  if (t.chats) out.push(t.chats.chat_ids
+    ? `чаты: ${UC_CHAT_SEL.size} выбрано (с ${t.chats.acc_ids.length} акк.)`
+    : `чаты аккаунтов: ${t.chats.acc_ids.length} (по операции на аккаунт)`);
   if (t.bots) out.push(t.bots.selected_bot_ids
     ? `подписчики выбранных ботов: ${t.bots.selected_bot_ids.length}`
     : 'подписчики ботов: по рассылке на каждого бота');
@@ -22733,6 +22822,7 @@ async function launchUniCampaign() {
   if (!spec.content.text) return fail('Введите текст сообщения');
   const kinds = Object.keys(spec.targets);
   if (!kinds.length) return fail('Отметьте хотя бы один ресурс: каналы, чаты, боты или ЛС');
+  if (spec.targets.chats && spec.targets.chats.chat_ids && !spec.targets.chats.acc_ids.length) return fail('Отметьте группы или выберите «Во все группы выбранных аккаунтов»');
   if (spec.targets.chats && !spec.targets.chats.acc_ids.length) return fail('Для рассылки по чатам выберите хотя бы один аккаунт');
   if (spec.targets.channels && spec.targets.channels.channel_ids && !spec.targets.channels.channel_ids.length) return fail('Отметьте каналы или выберите «Во все мои каналы»');
   if (spec.targets.bots && spec.targets.bots.selected_bot_ids && !spec.targets.bots.selected_bot_ids.length) return fail('Отметьте ботов или выберите «Все подписчики каждого бота»');
