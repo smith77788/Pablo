@@ -154,7 +154,9 @@ def test_admin_user_actions_refuse_anonymous(anonymous):
 RESPONSE_FACTORIES = {"_err", "rate_limit_response", "json_response",
                       "_json_resp", "_csv_resp", "Response"}
 # функция → индекс элемента кортежа, который является ответом
-TUPLE_RESPONSE = {"_admin_target": 2}
+# _thread — services/ai_inbox_assist: (uid, thread, err); на aiohttp 3.10
+# `if err:` пропускал 401 и падал 500 на thread.get.
+TUPLE_RESPONSE = {"_admin_target": 2, "_thread": 2}
 
 
 def _python_files():
