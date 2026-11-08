@@ -535,7 +535,9 @@ def setup_routes(app: web.Application, pool) -> None:
         from services import workflow_runtime as _rt
         try:
             code, out = await _rt.start_from_webhook(
-                pool, request.match_info.get("token", ""), body)
+                pool, request.match_info.get("token", ""), body,
+                _rt.inbound_idempotency_key(
+                    request.headers.get("Idempotency-Key"), body))
         except Exception:
             log.exception("workflow_inbound")
             return web.json_response({"ok": False, "error": "internal"}, status=500)

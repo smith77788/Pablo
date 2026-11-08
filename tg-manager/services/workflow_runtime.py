@@ -652,12 +652,38 @@ def inbound_request(body) -> tuple[int | None, dict]:
     return uid, out
 
 
-async def start_from_webhook(pool, token: str, body) -> tuple[int, dict]:
+# Сколько помнить ключ повтора входящего вебхука: отправители повторяют
+# запрос минуты и часы, а не дни.
+INBOUND_DEDUP_HOURS = 24
+_INBOUND_IDEM_RE = re.compile(r"^[\x21-\x7e]{1,128}$")
+
+
+def inbound_idempotency_key(header: str | None, body) -> str | None:
+    """Ключ повтора запроса: заголовок Idempotency-Key или поле тела
+    event_id. None — ключа нет или он негодный. ЧИСТАЯ."""
+    raw = header
+    if not raw and isinstance(body, dict):
+        raw = body.get("event_id")
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        raw = str(raw)
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    return raw if _INBOUND_IDEM_RE.match(raw) else None
+
+
+async def start_from_webhook(pool, token: str, body,
+                             idempotency_key: str | None = None) -> tuple[int, dict]:
     """Запустить сценарий по входящему вебхуку. (HTTP-код, ответ).
 
     404 — адрес не тот (или сценарий выключен, или запуск сменили): по
     ответу нельзя угадать, какие сценарии есть. 422 — человек не найден
-    у бота. 200 и started=false — человек уже в этом сценарии."""
+    у бота. 200 и started=false — человек уже в этом сценарии.
+
+    idempotency_key — повтор того же запроса (сайт или CRM не дождались
+    ответа и прислали ещё раз) не заводит второй прогон, даже если первый
+    уже закончился, а повторный вход в сценарий разрешён: иначе человек
+    получал то же сообщение дважды. Ответ — тот же прогон, duplicate=true."""
     if not token or not _INBOUND_TOKEN_RE.match(token):
         return 404, {"ok": False, "error": "not found"}
     wf = await pool.fetchrow(
@@ -676,9 +702,21 @@ async def start_from_webhook(pool, token: str, body) -> tuple[int, dict]:
         wf["bot_id"], uid)
     if not known:
         return 422, {"ok": False, "error": "user has not started the bot"}
+    input_data: dict = {"event_type": "webhook.received"}
+    if idempotency_key:
+        seen = await pool.fetchval(
+            """SELECT id FROM workflow_runs
+                WHERE bot_id=$1 AND chat_id=$2 AND workflow_id=$3
+                  AND input_data->>'idempotency_key' = $4
+                  AND started_at > now() - make_interval(hours => $5)
+                ORDER BY id DESC LIMIT 1""",
+            wf["bot_id"], uid, wf["id"], idempotency_key, INBOUND_DEDUP_HOURS)
+        if seen:
+            return 200, {"ok": True, "started": False, "run_id": seen,
+                         "duplicate": True}
+        input_data["idempotency_key"] = idempotency_key
     run_id = await start_run(pool, wf, wf["bot_id"], uid,
-                             input_data={"event_type": "webhook.received"},
-                             run_vars=run_vars)
+                             input_data=input_data, run_vars=run_vars)
     return 200, {"ok": True, "started": bool(run_id), "run_id": run_id}
 
 

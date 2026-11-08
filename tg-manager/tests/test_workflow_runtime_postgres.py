@@ -1288,6 +1288,47 @@ def test_an_inbound_webhook_starts_the_scenario_with_its_vars(pool, tg):
     _run(go())
 
 
+def test_a_repeated_inbound_webhook_does_not_write_twice(pool, tg):
+    """ЧТО БЫЛО: сайт или CRM, не дождавшись ответа, присылают тот же
+    запрос ещё раз. В сценарии с повторным входом первый прогон к этому
+    времени уже закончился — заводился второй, и человек получал то же
+    «Заказ собран» дважды. Теперь повтор с тем же ключом (Idempotency-Key
+    или event_id) отвечает тем же прогоном, а новый ключ запускает снова."""
+    from services import workflow_runtime as rt
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "message", "text": "Заказ {{order}} собран"},
+        ], trigger="webhook")
+        await pool.execute(
+            "UPDATE workflow_definitions SET allow_reentry=TRUE WHERE id=$1", wf_id)
+        token = await _inbound_token(pool, wf_id)
+        body = {"user_id": USER, "vars": {"order": "A-17"}, "event_id": "evt-1"}
+        key = rt.inbound_idempotency_key(None, body)
+        code, first = await rt.start_from_webhook(pool, token, body, key)
+        assert code == 200 and first["started"], first
+        await _tick(pool)
+        code, again = await rt.start_from_webhook(pool, token, body, key)
+        assert code == 200 and not again["started"] and again["duplicate"]
+        assert again["run_id"] == first["run_id"]
+        await _tick(pool)
+        assert _texts(tg) == ["Заказ A-17 собран"]
+        # Новое событие — новый прогон.
+        code, other = await rt.start_from_webhook(
+            pool, token, {**body, "vars": {"order": "A-18"}},
+            rt.inbound_idempotency_key("evt-2", body))
+        assert other["started"]
+        await _tick(pool)
+        assert _texts(tg) == ["Заказ A-17 собран", "Заказ A-18 собран"]
+
+    _run(go())
+    # Ключ: заголовок сильнее тела, мусор — не ключ.
+    assert rt.inbound_idempotency_key(" k-1 ", {"event_id": "x"}) == "k-1"
+    assert rt.inbound_idempotency_key(None, {"event_id": 42}) == "42"
+    assert rt.inbound_idempotency_key("с пробелом", {}) is None
+    assert rt.inbound_idempotency_key(None, {"event_id": "x" * 200}) is None
+
+
 def test_an_inbound_webhook_refuses_strangers_and_wrong_addresses(pool, tg):
     from services import workflow_runtime as rt
 
