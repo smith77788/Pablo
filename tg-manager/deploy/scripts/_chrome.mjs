@@ -18,9 +18,14 @@ const fs = require('fs');
 // `await import('playwright')`, то есть проверка рабочего места виртуального
 // админа локально не запускалась НИКОГДА без заданной переменной. Теперь
 // список один.
+// Найденный пакет импортируем по ПОЛНОМУ пути, а не по имени: require.resolve
+// видит пакет через NODE_PATH, а import('playwright') — нет (ESM NODE_PATH не
+// читает). В контейнере с глобальным NODE_PATH проверка падала на
+// ERR_MODULE_NOT_FOUND, хотя Playwright установлен.
 export const PLAYWRIGHT = process.env.PLAYWRIGHT_JS
-  || ['playwright', '/opt/node22/lib/node_modules/playwright/index.mjs'].find(p => {
-       try { require.resolve(p); return true; } catch { return p.startsWith('/'); } });
+  || (p => { try { return require.resolve(p); } catch { return p; } })(
+       ['playwright', '/opt/node22/lib/node_modules/playwright/index.mjs'].find(p => {
+         try { require.resolve(p); return true; } catch { return p.startsWith('/'); } }));
 
 // Готовый chromium: Playwright отдаёт его то из `chromium`, то из
 // `default.chromium` — в зависимости от того, как разрешился путь.

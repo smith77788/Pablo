@@ -4,9 +4,16 @@
  */
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
+// Найденный пакет импортируем по ПОЛНОМУ пути, а не по имени: require.resolve
+// видит пакет через NODE_PATH, а import('playwright') — нет (ESM NODE_PATH не
+// читает). В контейнере с глобальным NODE_PATH проверка падала на
+// ERR_MODULE_NOT_FOUND, хотя Playwright установлен.
 const PW = process.env.PLAYWRIGHT_JS
-  || ['playwright', '/opt/node22/lib/node_modules/playwright/index.mjs'].find(p => { try { require.resolve(p); return true; } catch { return p.startsWith('/'); } });
-const { chromium } = await import(PW);
+  || (p => { try { return require.resolve(p); } catch { return p; } })(
+       ['playwright', '/opt/node22/lib/node_modules/playwright/index.mjs'].find(p => {
+         try { require.resolve(p); return true; } catch { return p.startsWith('/'); } }));
+const _pw = await import(PW);
+const chromium = _pw.chromium || (_pw.default && _pw.default.chromium);
 const path = require('path');
 const fs = require('fs');
 const CHROME = process.env.CHROME_BIN || [
