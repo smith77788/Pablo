@@ -63,6 +63,20 @@ def classify_text(text: str) -> str:
     return "other"
 
 
+def label_threads(threads: list[dict]) -> list[dict]:
+    """Метка типа входящего на каждом ждущем разговоре списка. ЧИСТАЯ.
+
+    В списке — фразами: мгновенно и без расхода лимита ИИ на каждый из сотни
+    разговоров. Модель уточняет тип, когда оператор открывает разговор
+    (черновик, сводка). Ответили — метка не нужна: человек уже не ждёт."""
+    for t in threads or []:
+        if t.get("waiting"):
+            intent = classify_text(t.get("last_text") or "")
+            if intent != "other":
+                t["intent"], t["intent_label"] = intent, intent_label(intent)
+    return threads
+
+
 def _last_incoming(messages: list[dict]) -> str:
     for m in reversed(messages or []):
         if m.get("direction") == "in" and (m.get("text") or "").strip():
