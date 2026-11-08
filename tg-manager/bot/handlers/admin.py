@@ -488,6 +488,35 @@ async def cmd_reconcile_payments(message: Message, pool: asyncpg.Pool, bot) -> N
                          reply_markup=terminal_kb())
 
 
+@router.message(Command("trial_stats"))
+async def cmd_trial_stats(message: Message, pool: asyncpg.Pool) -> None:
+    """Конверсия «пробный период → оплата» и квота бесплатного тарифа (админ)."""
+    if not _is_admin(message.from_user.id):
+        return
+    from services import free_quota, trial
+    try:
+        c = await trial.conversion(pool, 90)
+        q = await pool.fetchrow(
+            "SELECT count(*) AS owners, count(*) FILTER (WHERE used >= $1) AS spent "
+            "FROM free_op_usage WHERE month = $2",
+            free_quota.monthly_limit(), free_quota.month_start())
+    except Exception as e:
+        await message.answer(f"❌ Не удалось посчитать: {e}", reply_markup=terminal_kb())
+        return
+    rate = f"{c['rate']} %" if c["rate"] is not None else "— (ни один триал ещё не закончился)"
+    med = f"{c['median_days']} дн." if c["median_days"] is not None else "—"
+    await message.answer(
+        "📈 <b>Пробный период → оплата</b> (90 дней)\n\n"
+        f"Выдано триалов: <b>{c['granted']}</b>, ещё идут: <b>{c['running']}</b>\n"
+        f"Оплатили после триала: <b>{c['converted']}</b>\n"
+        f"Конверсия закончившихся: <b>{rate}</b>\n"
+        f"Медиана до оплаты: <b>{med}</b>\n\n"
+        "🆓 <b>Бесплатный тариф в этом месяце</b>\n"
+        f"Тратили квоту операций: <b>{int(q['owners'] or 0)}</b>, "
+        f"исчерпали: <b>{int(q['spent'] or 0)}</b>",
+        parse_mode="HTML", reply_markup=terminal_kb())
+
+
 # ── Секретная фраза для входа в админку ────────────────────────────────────────
 
 
