@@ -158,9 +158,49 @@ def _plan_channels(spec: dict, tgt: dict) -> list[PlannedOp]:
     )]
 
 
+def _picked_chats(tgt: dict) -> Optional[dict[int, list[int]]]:
+    """Выбор отдельных чатов: {acc_id: [chat_id, …]} или None («все чаты»).
+
+    Ключ `chat_ids` есть — значит, владелец выбирал группы руками, и пустой
+    или битый выбор НЕ превращается во «все группы аккаунтов» (та же логика,
+    что у channel_ids: ошибка в выборе не должна разослать шире задуманного).
+    """
+    if "chat_ids" not in tgt:
+        return None
+    raw = tgt.get("chat_ids")
+    out: dict[int, list[int]] = {}
+    if isinstance(raw, dict):
+        for acc, ids in raw.items():
+            try:
+                acc_id = int(acc)
+            except (TypeError, ValueError):
+                continue
+            uniq = list(dict.fromkeys(_int_list(ids)))
+            if acc_id > 0 and uniq:
+                out[acc_id] = uniq
+    if not out:
+        raise CampaignSpecError("Отметьте хотя бы один чат или выберите «Во все группы аккаунтов»")
+    return out
+
+
 def _plan_chats(spec: dict, tgt: dict) -> list[PlannedOp]:
     # group_announce работает ОДНИМ аккаунтом за операцию (по его чатам), поэтому
     # на каждый выбранный аккаунт — своя дочерняя операция.
+    picked = _picked_chats(tgt)
+    if picked is not None:
+        ops_p: list[PlannedOp] = []
+        for acc_id, chat_ids in picked.items():
+            params = _common_send_params(spec)
+            params["acc_id"] = acc_id
+            params["chat_ids"] = chat_ids
+            ops_p.append(PlannedOp(
+                kind=KIND_CHATS,
+                op_type=KIND_OP_TYPE[KIND_CHATS],
+                params=params,
+                total_items=len(chat_ids),
+                label=f"Кампания · чаты: {len(chat_ids)} (акк #{acc_id})",
+            ))
+        return ops_p
     acc_ids = _int_list(tgt.get("acc_ids"))
     if not acc_ids:
         raise CampaignSpecError("Для рассылки по чатам выберите хотя бы один аккаунт")

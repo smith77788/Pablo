@@ -571,6 +571,34 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("delete_template")
             return _err("Не удалось удалить", 500)
 
+    # Группы, в которые «💬 В чаты» может написать: импортированные группы
+    # активных аккаунтов владельца. Тот же набор читает исполнитель
+    # group_announce, когда ему передан chat_ids, — список не обещает того,
+    # чего рассылка не найдёт.
+    _CAMPAIGN_CHATS_LIMIT = 500
+
+    async def campaign_chats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        q = (request.rel_url.query.get("q") or "").strip()[:100]
+        where = ("mc.owner_id=$1 AND mc.type IN ('megagroup','supergroup','group','chat','gigagroup') "
+                 "AND a.is_active=TRUE AND a.session_str IS NOT NULL")
+        args: list = [uid]
+        if q:
+            args.append("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+            where += " AND (mc.title ILIKE $2 OR mc.username ILIKE $2)"
+        base = ("FROM managed_channels mc JOIN tg_accounts a "
+                "ON a.id=mc.acc_id AND a.owner_id=mc.owner_id WHERE " + where)
+        rows = await _safe_fetch(pool,
+            "SELECT mc.channel_id AS chat_id, mc.acc_id, mc.title, mc.username, "
+            "mc.member_count AS members, COALESCE(NULLIF(a.first_name,''), a.phone) AS acc_label "
+            + base + f" ORDER BY mc.member_count DESC NULLS LAST, mc.channel_id LIMIT {_CAMPAIGN_CHATS_LIMIT}",
+            *args)
+        total = await _safe_count(pool, "SELECT COUNT(*) " + base, *args)
+        return _json_resp({"chats": [dict(r) for r in rows], "total": int(total or 0),
+                           "limit": _CAMPAIGN_CHATS_LIMIT})
+
     async def campaign_launch(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -821,6 +849,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/crm/deal", create_crm_deal)
     app.router.add_put("/api/miniapp/crm/deal/{deal_id}/stage", update_crm_deal_stage)
     app.router.add_delete("/api/miniapp/crm/deal/{deal_id}", delete_crm_deal)
+    # До /campaign/{campaign_id}: иначе «chats» уйдёт туда как номер кампании.
+    app.router.add_get("/api/miniapp/campaign/chats", campaign_chats)
     app.router.add_post("/api/miniapp/campaign/launch", campaign_launch)
     app.router.add_get("/api/miniapp/campaign/{campaign_id}", campaign_status_get)
     app.router.add_get("/api/miniapp/broadcasts", broadcasts_list)

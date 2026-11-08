@@ -13691,13 +13691,32 @@ async def _exec_group_announce(
         if _parked:
             return _parked
 
-        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-        groups = [
-            d for d in dialogs
-            if d.get("type") in ("megagroup", "supergroup", "group", "chat")
-        ]
+        # Выбранные владельцем группы (кампания «💬 В чаты» → «Выбрать группы»)
+        # берём из managed_channels этого аккаунта: там их id и access_hash.
+        # Живой список диалогов тут не годится — он отдаёт первые 50 диалогов,
+        # и выбранная группа ниже по списку молча выпала бы из рассылки.
+        _picked = [int(x) for x in (params.get("chat_ids") or [])]
+        if _picked:
+            _rows = await _safe_fetch(
+                pool,
+                "SELECT channel_id AS id, title, access_hash FROM managed_channels "
+                "WHERE owner_id=$1 AND acc_id=$2 AND channel_id = ANY($3::bigint[]) "
+                "AND type IN ('megagroup','supergroup','group','chat','gigagroup')",
+                owner_id, int(acc["id"]), _picked,
+            )
+            groups = [dict(r) for r in _rows]
+            _missing = len(set(_picked)) - len(groups)
+        else:
+            dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+            groups = [
+                d for d in dialogs
+                if d.get("type") in ("megagroup", "supergroup", "group", "chat")
+            ]
+            _missing = 0
         if not groups:
-            return {"status": "done", "ok": 0, "fail": 0, "summary": "Нет групп у аккаунта"}
+            return {"status": "done", "ok": 0, "fail": 0,
+                    "summary": ("Выбранных групп у аккаунта больше нет" if _picked
+                                else "Нет групп у аккаунта")}
 
         total = len(groups)
         await _safe_execute(
@@ -13769,7 +13788,8 @@ async def _exec_group_announce(
             "status": "done",
             "ok": ok_count,
             "fail": err_count,
-            "summary": f"📢 Объявление: ✅ {ok_count} ❌ {err_count} из {total} групп",
+            "summary": f"📢 Объявление: ✅ {ok_count} ❌ {err_count} из {total} групп"
+                       + (f" · не найдено у аккаунта: {_missing}" if _missing else ""),
         }
     finally:
         await release_accounts([_claimed_acc])
