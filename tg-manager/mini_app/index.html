@@ -8620,10 +8620,23 @@ async function _apiRaw(path, opts={}) {
   // и общий 30-секундный предел рвал бы её на полпути, показывая «сервер не
   // отвечает» вместо загрузки. Поэтому вызывающий может задать свой.
   const _ms = Number(opts.timeoutMs) || FETCH_TIMEOUT_MS;
-  try {
-    r = await fetchT(path, { ...opts, headers: _hdr() }, _ms);
-  } catch(e) {
-    throw new Error((e && e.message) || 'Нет соединения с сервером');
+  // Чтение (GET) переживает секундный сбой: обрыв сети, 502/503/504 от
+  // платформы, 429 с коротким Retry-After — повторяем молча, и человек не
+  // видит красную ошибку там, где через секунду всё ответило бы. Запись НЕ
+  // повторяем никогда: второй POST мог бы запустить операцию дважды.
+  const _canRetry = String(opts.method || 'GET').toUpperCase() === 'GET' && !_isForm;
+  for (let _try = 0; ; _try++) {
+    let _netErr = null;
+    r = null;
+    try {
+      r = await fetchT(path, { ...opts, headers: _hdr() }, _ms);
+    } catch(e) { _netErr = e; }
+    const _wait = _canRetry ? await _readRetryDelay(r, _netErr, _try) : null;
+    if (_wait == null) {
+      if (_netErr) throw new Error((_netErr && _netErr.message) || 'Нет соединения с сервером');
+      break;
+    }
+    await new Promise(res => setTimeout(res, _wait));
   }
   if (r.status === 401) {
     // Auto re-auth: token may have expired (2h lifetime)
@@ -8666,6 +8679,34 @@ async function _apiRaw(path, opts={}) {
     throw new Error(msg);
   }
   try { return await r.json(); } catch(_) { throw new Error('Сервер прислал неожиданный ответ — обновите экран'); }
+}
+
+// Через сколько мс повторить ЧТЕНИЕ, или null — не повторять.
+// Повторяем то, что лечится само за секунды: обрыв сети, 502/504 и 503 от
+// платформы (кроме нашего стартового сервера — его ждёт свой цикл ниже), 429 с
+// Retry-After до 10 с. Не повторяем тайм-аут: запрос уже ждал 30 с, ещё два
+// таких ожидания хуже честной ошибки. Не больше READ_RETRY_MAX повторов.
+const READ_RETRY_MAX = 2, READ_RETRY_BASE_MS = [800, 2500];
+async function _readRetryDelay(r, err, attempt) {
+  if (attempt >= READ_RETRY_MAX) return null;
+  const jitter = Math.floor(Math.random() * 300);
+  if (err) {
+    const m = String((err && err.message) || '');
+    if (m.indexOf('Сервер не отвечает') === 0) return null;
+    return READ_RETRY_BASE_MS[attempt] + jitter;
+  }
+  if (!r) return null;
+  if (r.status === 429) {
+    const ra = Number(r.headers && r.headers.get && r.headers.get('Retry-After'));
+    if (!(ra > 0) || ra > 10) return null;
+    return ra * 1000 + jitter;
+  }
+  if (r.status === 502 || r.status === 504) return READ_RETRY_BASE_MS[attempt] + jitter;
+  if (r.status === 503) {
+    if (await _serverBooting(r)) return null;
+    return READ_RETRY_BASE_MS[attempt] + jitter;
+  }
+  return null;
 }
 
 // Признак перезапуска сервера. Новый стартовый сервер отвечает на /api 503 с

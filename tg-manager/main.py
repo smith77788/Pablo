@@ -25,6 +25,7 @@ from bot.middlewares.latency import LatencyMiddleware
 from bot.middlewares.flood_guard import FloodGuardMiddleware
 from bot.middlewares.secret_input import SecretInputMiddleware
 from bot.middlewares.ban_guard import BanGuardMiddleware
+from bot.middlewares.stale_update import StaleUpdateMiddleware
 from bot.utils.button_styles import install_button_style_patch
 from bot.utils.outgoing_redaction import install_outgoing_secret_redaction
 
@@ -513,7 +514,11 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     activity_log_middleware = UserActivityLogMiddleware()
     gate_middleware = SubscriptionGateMiddleware()
     latency_middleware = LatencyMiddleware()
-    # Антифлуд — САМЫМ первым: лишний апдейт не должен доходить ни до базы
+    # Сообщение, пролежавшее в очереди Telegram дольше срока (долгий простой),
+    # отсекаем раньше всех: на вчерашнее «/start» не отвечаем. Свежее,
+    # накопленное за минуту деплоя, идёт дальше — см. stale_update.py.
+    dp.message.outer_middleware(StaleUpdateMiddleware())
+    # Антифлуд — сразу следом: лишний апдейт не должен доходить ни до базы
     # (гейт подписки, журнал активности), ни до обработчиков.
     flood_guard = FloodGuardMiddleware()
     dp.message.outer_middleware(flood_guard)
@@ -1498,16 +1503,16 @@ async def main() -> None:
                 # Без секрета POST /webhook принимал поддельные апдейты от
                 # кого угодно — с любым from.id, включая id админа.
                 secret_token=main_webhook_secret(BOT_TOKEN),
-                drop_pending_updates=True,
+                # Накопленное за перезапуск НЕ выбрасываем: это сообщения и
+                # нажатия живых людей (bot/middlewares/stale_update.py).
+                drop_pending_updates=False,
             )
             log.info("Webhook mode: %s (handler on shared HTTP server)", _webhook_url)
-            try:
-                await asyncio.Event().wait()
-            finally:
-                try:
-                    await bot.delete_webhook()
-                except Exception:
-                    pass
+            # Вебхук на остановке НЕ снимаем. Деплой поднимает новый контейнер
+            # раньше, чем гасит старый, и новый уже поставил вебхук на себя.
+            # delete_webhook из старого снимал ЕГО — и бот глох до следующего
+            # деплоя: апдейты копились у Telegram, забирать их было некому.
+            await asyncio.Event().wait()
         elif _ROLE == "worker":
             # Воркер НЕ забирает апдейты: два процесса на одном getUpdates
             # отбирали бы их друг у друга (Telegram отдаёт апдейт ровно одному),
@@ -1536,7 +1541,12 @@ async def main() -> None:
                         bot,
                         pool=pool,
                         http=http,
-                        drop_pending_updates=True,
+                        # drop_pending_updates здесь НЕ передаём: у
+                        # start_polling (aiogram 3) такого параметра нет, лишний
+                        # именованный аргумент молча уходит в данные
+                        # обработчиков и ничего не выбрасывает. Накопленное за
+                        # перезапуск обрабатывается; устаревшее отсекает
+                        # StaleUpdateMiddleware.
                         polling_timeout=30,
                         allowed_updates=_allowed_updates,
                         # ПОЧЕМУ СИГНАЛЫ НЕ ОТДАЁМ aiogram. По умолчанию
