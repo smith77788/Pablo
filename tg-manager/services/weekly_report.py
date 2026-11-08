@@ -45,6 +45,22 @@ _SALES_SQL = """
      GROUP BY currency
 """
 
+# Сценарии за неделю: сколько людей зашло, дошло до цели, сломалось — и
+# какой сценарий самый результативный. Лучший — по целям, затем по
+# завершённым: без цели сценарий тоже может быть полезен.
+_SCENARIOS_SQL = """
+    SELECT d.id, d.name,
+           count(r.id) AS started,
+           count(r.id) FILTER (WHERE r.goal_reached_at IS NOT NULL) AS goals,
+           count(r.id) FILTER (WHERE r.status = 'completed') AS completed,
+           count(r.id) FILTER (WHERE r.status = 'failed') AS failed
+      FROM workflow_runs r
+      JOIN workflow_definitions d ON d.id = r.workflow_id
+     WHERE r.owner_id = $1 AND r.started_at >= now() - INTERVAL '7 days'
+     GROUP BY d.id, d.name
+     ORDER BY goals DESC, completed DESC, started DESC
+"""
+
 _CUR_SIGN = {"USD": "$", "RUB": "₽", "EUR": "€", "UAH": "₴", "KZT": "₸"}
 
 
@@ -72,7 +88,8 @@ def _delta(trend: dict | None) -> str:
     return f" {mark} {'+' if d > 0 else '−'}{abs(d)}"
 
 
-def format_report(digest: dict, sales: list[dict] | None = None) -> str:
+def format_report(digest: dict, sales: list[dict] | None = None,
+                  scenarios: list[dict] | None = None) -> str:
     """Отчёт в HTML для Telegram. ЧИСТАЯ: на входе дайджест и строки продаж."""
     lines = ["📊 <b>Отчёт за неделю</b>", "", escape(digest.get("headline") or "")]
 
@@ -88,6 +105,19 @@ def format_report(digest: dict, sales: list[dict] | None = None) -> str:
             lines.append(
                 f"Заказов: <b>{int(row.get('orders') or 0)}</b>, оплачено: "
                 f"<b>{int(row.get('paid') or 0)}</b>, выручка: <b>{_money(rev, cur)}</b>{trend}")
+
+    if scenarios:
+        tot = {k: sum(int(r.get(k) or 0) for r in scenarios)
+               for k in ("started", "goals", "completed", "failed")}
+        lines += ["", "🔄 <b>Сценарии</b>",
+                  f"Зашли: <b>{tot['started']}</b>, дошли до цели: <b>{tot['goals']}</b>, "
+                  f"прошли до конца: <b>{tot['completed']}</b>"
+                  + (f", с ошибкой: <b>{tot['failed']}</b>" if tot["failed"] else "")]
+        best = scenarios[0]
+        if int(best.get("goals") or 0) or int(best.get("completed") or 0):
+            lines.append(f"Лучший: «{escape(str(best.get('name') or ''))}» — "
+                         f"{int(best.get('goals') or 0)} целей из "
+                         f"{int(best.get('started') or 0)}")
 
     for sec in digest.get("sections") or []:
         stats = [s for s in sec.get("stats") or [] if int(s.get("value") or 0)
@@ -121,6 +151,16 @@ async def sales_week(pool, owner_id: int) -> list[dict]:
     return [dict(r) for r in rows if int(r["orders"] or 0) or int(r["revenue_prev"] or 0)]
 
 
+async def scenarios_week(pool, owner_id: int) -> list[dict]:
+    """Прогоны сценариев за 7 дней по сценариям. Пусто — никто не заходил."""
+    try:
+        rows = await pool.fetch(_SCENARIOS_SQL, owner_id)
+    except Exception:
+        log.debug("weekly_report: сценарии не прочитаны owner=%s", owner_id, exc_info=True)
+        return []
+    return [dict(r) for r in rows]
+
+
 def _kb():
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from bot.callbacks import SnoozeCb
@@ -151,7 +191,8 @@ async def maybe_send(pool, bot, owner_id: int, *, now: datetime | None = None) -
         return False
     try:
         report = await digest.build(pool, owner_id, state_key=_STATE_KEY)
-        text = format_report(report, await sales_week(pool, owner_id))
+        text = format_report(report, await sales_week(pool, owner_id),
+                             await scenarios_week(pool, owner_id))
         await bot.send_message(owner_id, text, parse_mode="HTML", reply_markup=_kb(),
                                disable_web_page_preview=True)
     except Exception:

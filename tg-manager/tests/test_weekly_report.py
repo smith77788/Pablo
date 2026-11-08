@@ -179,3 +179,51 @@ def test_sales_query_runs_on_real_schema():
     rows = asyncio.new_event_loop().run_until_complete(go())
     assert rows == [{"currency": "RUB", "orders": 2, "paid": 1,
                      "revenue": 50000, "revenue_prev": 20000}]
+
+
+def test_report_has_a_scenarios_block_with_the_best_one():
+    from services import weekly_report as wr
+    text = wr.format_report(_digest(), [], [
+        {"name": "Дожим <оплаты>", "started": 40, "goals": 12, "completed": 30, "failed": 2},
+        {"name": "Приветствие", "started": 100, "goals": 0, "completed": 90, "failed": 0},
+    ])
+    assert "🔄 <b>Сценарии</b>" in text
+    assert "Зашли: <b>140</b>, дошли до цели: <b>12</b>, прошли до конца: <b>120</b>, " \
+           "с ошибкой: <b>2</b>" in text
+    assert "Лучший: «Дожим &lt;оплаты&gt;» — 12 целей из 40" in text
+    assert "Сценарии" not in wr.format_report(_digest(), [], [])
+
+
+def test_scenarios_query_runs_on_real_schema():
+    if not DSN:
+        pytest.skip("нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
+    import asyncpg
+    from services import weekly_report as wr
+
+    owner = 99_000_778
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
+        try:
+            await pool.execute("DELETE FROM workflow_runs WHERE owner_id=$1", owner)
+            await pool.execute("DELETE FROM workflow_definitions WHERE owner_id=$1", owner)
+            wf_id = await pool.fetchval(
+                "INSERT INTO workflow_definitions (owner_id, name, steps) "
+                "VALUES ($1, 'Дожим', '[]'::jsonb) RETURNING id", owner)
+            for status, goal, age in (("completed", True, 1), ("failed", False, 2),
+                                      ("completed", False, 9)):
+                await pool.execute(
+                    """INSERT INTO workflow_runs (owner_id, workflow_id, status, started_at,
+                           goal_reached_at, chat_id)
+                       VALUES ($1, $2, $3, now() - make_interval(days => $4),
+                               CASE WHEN $5 THEN now() END, NULL)""",
+                    owner, wf_id, status, age, goal)
+            return await wr.scenarios_week(pool, owner)
+        finally:
+            await pool.execute("DELETE FROM workflow_runs WHERE owner_id=$1", owner)
+            await pool.execute("DELETE FROM workflow_definitions WHERE owner_id=$1", owner)
+            await pool.close()
+
+    rows = asyncio.new_event_loop().run_until_complete(go())
+    assert [(r["name"], r["started"], r["goals"], r["completed"], r["failed"])
+            for r in rows] == [("Дожим", 2, 1, 1, 1)]
