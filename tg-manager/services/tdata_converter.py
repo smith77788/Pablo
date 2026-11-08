@@ -80,12 +80,12 @@ def _prepare_aes_oldmtp(auth_key: bytes, msg_key: bytes):
     это не совпадало с реальным алгоритмом, и даже с верным ключом расшифровка
     не сходилась."""
     x = 8
-    a = hashlib.sha1(msg_key + auth_key[x : x + 32]).digest()
-    b = hashlib.sha1(
+    a = hashlib.sha1(msg_key + auth_key[x : x + 32]).digest()  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
+    b = hashlib.sha1(  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
         auth_key[32 + x : 48 + x] + msg_key + auth_key[48 + x : 64 + x]
     ).digest()
-    c = hashlib.sha1(auth_key[64 + x : 96 + x] + msg_key).digest()
-    d = hashlib.sha1(msg_key + auth_key[96 + x : 128 + x]).digest()
+    c = hashlib.sha1(auth_key[64 + x : 96 + x] + msg_key).digest()  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
+    d = hashlib.sha1(msg_key + auth_key[96 + x : 128 + x]).digest()  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
     aes_key = a[0:8] + b[8:20] + c[4:16]
     aes_iv = a[8:20] + b[0:8] + c[16:20] + d[0:8]
     return aes_key, aes_iv
@@ -130,7 +130,7 @@ def _decrypt_local_blob(passcode_key: bytes, encrypted: bytes) -> Optional[bytes
     except Exception:
         return None
     # Контроль целостности TDesktop: первые 16 байт SHA1(decrypted) == msgKey.
-    if hashlib.sha1(decrypted).digest()[:16] != msg_key:
+    if hashlib.sha1(decrypted).digest()[:16] != msg_key:  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
         return None
     return decrypted
 
@@ -151,10 +151,10 @@ def _parse_encrypted_descriptor(decrypted: bytes) -> Optional[bytes]:
 def _prep_aes_local(auth_key: bytes, msg_key: bytes, decrypt: bool = True):
     """SHA-1 PrepareAES variant for older local TDesktop files."""
     x = 8 if decrypt else 0
-    sha1a = hashlib.sha1(msg_key + auth_key[x : x + 36]).digest()
-    sha1b = hashlib.sha1(auth_key[x + 40 : x + 76] + msg_key).digest()
-    sha1c = hashlib.sha1(auth_key[x + 84 : x + 120] + msg_key).digest()
-    sha1d = hashlib.sha1(msg_key + auth_key[x + 128 : x + 160]).digest()
+    sha1a = hashlib.sha1(msg_key + auth_key[x : x + 36]).digest()  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
+    sha1b = hashlib.sha1(auth_key[x + 40 : x + 76] + msg_key).digest()  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
+    sha1c = hashlib.sha1(auth_key[x + 84 : x + 120] + msg_key).digest()  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
+    sha1d = hashlib.sha1(msg_key + auth_key[x + 128 : x + 160]).digest()  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
     aes_key = sha1a[:8] + sha1b[8:20] + sha1c[4:16]
     aes_iv = sha1a[8:20] + sha1b[:8] + sha1c[16:20] + sha1d[:8]
     return aes_key, aes_iv
@@ -186,7 +186,7 @@ def _read_tdf_raw(path: str) -> bytes:
     # The previous implementation hashed the file prefix instead, rejecting every
     # valid modern key_datas file as corrupt.
     size_bytes = struct.pack("<I", len(content))
-    md5_calc = hashlib.md5(content + size_bytes + ver_bytes + _TDF_MAGIC).digest()
+    md5_calc = hashlib.md5(content + size_bytes + ver_bytes + _TDF_MAGIC).digest()  # nosec B324 — формат tdata (MTProto v1 / TDF) задан Telegram
     if md5_calc != md5_stored:
         # Контрольная сумма — проверка ЦЕЛОСТНОСТИ, а не ключ расшифровки. Порядок
         # полей в MD5 у Telegram Desktop менялся между версиями, и несхождение

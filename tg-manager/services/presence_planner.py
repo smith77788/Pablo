@@ -58,7 +58,7 @@ _RE_DIGITS = re.compile(r"\{(\d+)\}")
 def _seed_int(*parts: object) -> int:
     """Детерминированный int-сид из частей (стабилен между preview и запуском)."""
     raw = "|".join(str(p) for p in parts)
-    return int(hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12], 16)
+    return int(hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:12], 16)
 
 
 def _seeded_rng(*parts: object) -> random.Random:
