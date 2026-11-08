@@ -9539,8 +9539,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not cached:
                 try:
                     import gzip as _gzip
+                    from services import miniapp_minify as _mm
                     with open(_index_path, "rb") as _f:
-                        _MINIAPP_GZ["body"] = _gzip.compress(_f.read(), 6)
+                        _raw = _f.read().decode("utf-8")
+                    # Без комментариев и отступов: −25% сжатого размера на
+                    # холодном старте (services/miniapp_minify.py).
+                    _MINIAPP_GZ["body"] = _gzip.compress(
+                        _mm.safe(_mm.minify_html, _raw, "index.html").encode("utf-8"), 6)
                     _MINIAPP_GZ["key"] = key
                 except OSError:
                     return web.FileResponse(_index_path)
@@ -9555,7 +9560,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 headers["Content-Encoding"] = "gzip"
                 return web.Response(body=_MINIAPP_GZ["body"], headers=headers,
                                     content_type="text/html", charset="utf-8")
-            return web.FileResponse(_index_path, headers=headers)
+            import gzip as _gzip_mod   # клиент без gzip — та же очищенная страница
+            return web.Response(body=_gzip_mod.decompress(_MINIAPP_GZ["body"]),
+                                headers=headers, content_type="text/html", charset="utf-8")
 
         # Скрипты экранов и стили — тем же путём, что index.html: сжатыми один
         # раз в память и с ETag. Замер 2026-11-02: экраны (screens/*.js) и
@@ -9588,8 +9595,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             hit = _ASSET_GZ.get(full)
             if not hit or hit[0] != key:
                 import gzip as _gzip
+                from services import miniapp_minify as _mm
                 with open(full, "rb") as _f:
-                    hit = (key, _gzip.compress(_f.read(), 6))
+                    _src = _f.read().decode("utf-8")
+                _fn = _mm.strip_js if full.endswith(".js") else _mm.strip_css
+                hit = (key, _gzip.compress(
+                    _mm.safe(_fn, _src, os.path.basename(full)).encode("utf-8"), 6))
                 _ASSET_GZ[full] = hit
             headers["Content-Encoding"] = "gzip"
             return web.Response(body=hit[1], headers=headers, content_type=ctype,

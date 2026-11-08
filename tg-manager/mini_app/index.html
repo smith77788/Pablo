@@ -1353,9 +1353,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
      (/miniapp/); запросы к /api/* он не перехватывает. */
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
-      // .catch обязателен: register() отклоняется асинхронно (напр. не-https
-      // origin), иначе — необработанный rejection в консоли.
-      try { navigator.serviceWorker.register('sw.js').catch(function(){}); } catch (e) {}
+      // Не сразу: установка воркера тут же докачивает в кэш оболочку
+      // (index.html ещё раз, ~0,4 МБ), и на мобильной сети это шло ровно
+      // тогда, когда человек делает первые запросы (замер:
+      // deploy/scripts/cold_start.mjs, вдвое больше байт на первом открытии).
+      setTimeout(function () {
+        // .catch обязателен: register() отклоняется асинхронно (напр. не-https
+        // origin), иначе — необработанный rejection в консоли.
+        try { navigator.serviceWorker.register('sw.js').catch(function(){}); } catch (e) {}
+      }, 20000);
     });
   }
 </script>
