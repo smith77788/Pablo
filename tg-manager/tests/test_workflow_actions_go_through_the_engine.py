@@ -65,6 +65,10 @@ class _Conn:
             return f"DELETE {self._deleted}"
         return "UPDATE 1"
 
+    async def fetchrow(self, q, *a):
+        # Правка шагов читает строку под блокировкой внутри транзакции.
+        return await self._pool.fetchrow(q, *a)
+
     def transaction(self):
         return _Null()
 
