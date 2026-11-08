@@ -8076,6 +8076,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_deals_board.setup_routes(app, pool)
     from services import mini_app_find
     mini_app_find.setup_routes(app, pool)
+    from services import mini_app_saved_views
+    mini_app_saved_views.setup_routes(app, pool)
     mini_app_fleet.setup_routes(app, pool)
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)

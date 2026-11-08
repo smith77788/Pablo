@@ -729,6 +729,27 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .mbg.show{display:flex;animation:mbin .25s var(--ease)}
 /* Главное действие, которое дублирует системная MainButton (screens/main_button.js). */
 .mb-mirrored{display:none !important}
+/* Массовое управление ресурсами (screens/fleet_tools.js). */
+.fx-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;padding:0 16px}
+.fx-sort{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--hint);flex:1 1 180px;min-width:0}
+.fx-sort .sel{flex:1 1 auto;min-width:0;min-height:36px}
+.fx-dir,.fx-save{font-size:13px;padding:8px 10px;flex:0 0 auto}
+.fx-views{margin:0 0 8px}
+.fx-view-x{margin-left:6px;opacity:.6;padding:0 2px}
+.fx-tags{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0}
+.fx-tag{font-size:11px;padding:1px 6px;border-radius:8px;background:rgba(var(--fg-rgb),.07);color:var(--hint);white-space:nowrap}
+.fx-table-wrap{overflow-x:auto}
+.fx-table{width:100%;border-collapse:collapse;font-size:13px}
+.fx-table th{position:sticky;top:0;background:var(--bg);text-align:left;font-weight:600;color:var(--hint);padding:6px 8px;border-bottom:1px solid rgba(var(--fg-rgb),.12);white-space:nowrap}
+.fx-th{cursor:pointer;user-select:none}
+.fx-table td{padding:5px 8px;border-bottom:1px solid rgba(var(--fg-rgb),.06);vertical-align:top}
+.fx-tr{cursor:pointer}
+.fx-tr:hover{background:rgba(var(--fg-rgb),.04)}
+.fx-tr.fx-on{background:var(--accent-soft-2)}
+.fx-chk{width:28px}
+.fx-mono{font-variant-numeric:tabular-nums;white-space:nowrap}
+.fx-dim{color:var(--hint);font-size:12px}
+.fx-bad{color:var(--red)}
 @keyframes mbin{from{opacity:0}to{opacity:1}}
 .modal{background:var(--bg2);border-radius:var(--radius-xl) var(--radius-xl) 0 0;padding:20px 16px calc(var(--safe-b) + 20px);width:100%;max-height:85vh;overflow-y:auto;animation:min .3s var(--spring);position:relative;box-shadow:0 -8px 40px rgba(0,0,0,.4)}
 @keyframes min{from{transform:translateY(100%)}to{transform:none}}
@@ -1569,6 +1590,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          (services/bot_health.py) — даём по нему отобрать, а не только увидеть. -->
     <input type="text" id="botSearch" class="inp lst-search" oninput="onBotSearch(this.value)"
            placeholder="🔍 Поиск: имя или @username" autocomplete="off" aria-label="Поиск по ботам">
+    <div id="fx-bots"></div>
     <div class="lf-chips" id="botFilterChips" role="group" aria-label="Срез списка ботов"></div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <!-- Остаток списка: сервер отдаёт срез, а в шапке стоит полное число. Без
@@ -1582,6 +1604,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="sel-bar-top">
         <span id="botSelCount">Выбрано: 0</span>
         <span class="sel-bar-link" onclick="botSelAll()">Все</span>
+        <span class="sel-bar-link" onclick="botSelWholeFilter()" title="Догрузить все страницы и выбрать всё под фильтром">Весь срез</span>
         <span class="sel-bar-link" onclick="botSelClear()">Сброс</span>
       </div>
       <div class="sel-bar-acts">
@@ -1723,6 +1746,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <button class="btn btn-o" onclick="openFleetDoctor()" title="Почему операции не исполняются: воронка отбора аккаунтов, залипшие состояния, последние ошибки" style="width:100%;margin:0 0 8px">🩺 Диагностика флота</button>
     <!-- Поиск по аккаунтам (серверный, снимает 100-лимит) -->
     <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(var(--fg-rgb),.12);background:rgba(var(--fg-rgb),.06);color:var(--text);font-size:13px">
+    <!-- Сортировка и сохранённые виды (screens/fleet_tools.js) -->
+    <div id="fx-accounts"></div>
+    <!-- Теги аккаунтов: чип — фильтр, число — сколько аккаунтов с тегом -->
+    <div class="lf-chips" id="accTagChips" style="display:none" role="group" aria-label="Теги аккаунтов"></div>
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
     <div id="stageChips" style="display:none;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -1747,6 +1774,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="mini-btn" onclick="runAccMass('scan')">🔎 Скан</button>
         <button class="mini-btn" onclick="openMassProfile()">🎨 Профиль</button>
         <button class="mini-btn" onclick="openMassStage()">📂 В статус</button>
+        <button class="mini-btn" onclick="runAccTag('add_tag')">🏷 Поставить тег</button>
+        <button class="mini-btn" onclick="runAccTag('remove_tag')">🏷 Снять тег</button>
         <button class="mini-btn" onclick="runAccMass('detach_proxy')" title="Снять прокси — работать напрямую">🔌 Снять прокси</button>
         <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
         <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.18)" onclick="runAccMass('delete')" title="Удалить выбранные аккаунты безвозвратно">🗑 Удалить</button>
@@ -2006,6 +2035,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          приходит с сервера и решает, что с каналом вообще можно сделать. -->
     <input type="text" id="chSearch" class="inp lst-search" oninput="onChSearch(this.value)"
            placeholder="🔍 Поиск: название или @username" autocomplete="off" aria-label="Поиск по каналам">
+    <div id="fx-channels"></div>
     <div class="lf-chips" id="chFilterChips" role="group" aria-label="Срез списка каналов"></div>
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <!-- Остаток списка. Сервер отдаёт страницу, в шапке стоит полное число:
@@ -2019,6 +2049,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="sel-bar-top">
         <span id="chSelCount">Выбрано: 0</span>
         <span class="sel-bar-link" onclick="chSelAll()">Все</span>
+        <span class="sel-bar-link" onclick="chSelWholeFilter()" title="Догрузить все страницы и выбрать всё под фильтром">Весь срез</span>
         <span class="sel-bar-link" onclick="chSelClear()">Сброс</span>
       </div>
       <div class="sel-bar-acts">
@@ -2201,8 +2232,29 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec">Пул прокси</div>
     <input class="inp lst-search" id="ppSearch" type="search" placeholder="Поиск по названию или адресу" oninput="onPpSearch(this.value)" aria-label="Поиск по пулу прокси">
+    <div id="fx-proxies"></div>
+    <div style="display:flex;gap:8px;padding:0 16px 8px">
+      <button class="btn btn-s" id="ppSelToggle" onclick="togglePpSelMode()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">☑️ Выбрать</button>
+    </div>
     <div class="lst" id="proxyPoolList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="lst-more" id="ppLoadMore"></div>
+  </div>
+  <!-- Плавающая панель массовых действий по прокси -->
+  <div id="ppSelBar" style="display:none">
+    <div class="sel-bar">
+      <div class="sel-bar-top">
+        <span id="ppSelCount">Выбрано: 0</span>
+        <span class="sel-bar-link" onclick="ppSelAll()">Все</span>
+        <span class="sel-bar-link" onclick="ppSelWholeFilter()" title="Догрузить все страницы и выбрать всё под фильтром">Весь срез</span>
+        <span class="sel-bar-link" onclick="ppSelClear()">Сброс</span>
+      </div>
+      <div class="sel-bar-acts">
+        <button class="mini-btn" onclick="runPpMass('label')">🏷 Метка</button>
+        <button class="mini-btn" onclick="runPpMass('backup_on')">🛟 В резерв</button>
+        <button class="mini-btn" onclick="runPpMass('backup_off')">⚪ Из резерва</button>
+        <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.18)" onclick="runPpMass('delete')">🗑 Удалить</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -11948,8 +12000,9 @@ function _accQuery(offset) {
   if (ACC_POOL_FILTER) p.set('pool', ACC_POOL_FILTER);
   if (ACC_GEO_FILTER) p.set('geo', ACC_GEO_FILTER);
   if (ACC_SEARCH) p.set('q', ACC_SEARCH);
+  if (ACC_TAG_FILTER) p.set('tag', ACC_TAG_FILTER);
   p.set('offset', offset); p.set('limit', 100);
-  return '/api/miniapp/accounts?'+p.toString();
+  return '/api/miniapp/accounts?'+p.toString()+fleetSortQS('accounts');
 }
 
 
@@ -12069,8 +12122,11 @@ function _accFiltered() {
   // клиентского дофильтра нет. Функция сохранена: её зовёт режим выбора.
   return CUR_ACCS;
 }
-function toggleAccSel(id) {
-  if (ACC_SEL.has(id)) ACC_SEL.delete(id); else ACC_SEL.add(id);
+function toggleAccSel(id, ev) {
+  // Shift+клик — диапазон от прошлого клика (fleet_tools.js).
+  if (!fleetRangePick('accounts', CUR_ACCS.map(a=>a.id), ACC_SEL, id, ev)) {
+    if (ACC_SEL.has(id)) ACC_SEL.delete(id); else ACC_SEL.add(id);
+  }
   renderAccounts(_accFiltered());
   updateAccSelBar();
 }
@@ -12090,12 +12146,12 @@ function updateAccSelBar() {
 function _massSel() {
   if (ACC_SEL_ALL_FILTERED) {
     return {select_all_filtered: true, filter: ACC_FILTER, stage: ACC_STAGE_FILTER,
-            q: ACC_SEARCH, pool: ACC_POOL_FILTER, geo: ACC_GEO_FILTER};
+            q: ACC_SEARCH, pool: ACC_POOL_FILTER, geo: ACC_GEO_FILTER, tag: ACC_TAG_FILTER};
   }
   return {account_ids: [...ACC_SEL]};
 }
 function _massSelCount() {
-  return ACC_SEL_ALL_FILTERED ? (ACC_FILTERED_TOTAL||0) : ACC_SEL.size;
+  return ACC_SEL_ALL_FILTERED ? Math.min(ACC_FILTERED_TOTAL||0, FLEET_MASS_CAP) : ACC_SEL.size;
 }
 async function runAccMass(op) {
   const n = _massSelCount();
@@ -12106,6 +12162,9 @@ async function runAccMass(op) {
     : op==='check' ? `Проверить ${n} аккаунтов?`
     : op==='delete' ? `🗑 УДАЛИТЬ ${n} аккаунтов безвозвратно? Сессии и все связанные данные будут стёрты. Отменить нельзя.`
     : op==='detach_proxy' ? `Снять прокси с ${n} аккаунтов? Они будут работать напрямую (без прокси). Внимание: сессию, созданную через прокси, нельзя было использовать с двух IP одновременно.` : null;
+  // Срез больше потолка — говорим ДО запуска, сколько не войдёт.
+  const over = ACC_SEL_ALL_FILTERED ? Math.max(0, (ACC_FILTERED_TOTAL||0) - FLEET_MASS_CAP) : 0;
+  if (over && !await askConfirm(`Под фильтром ${num(ACC_FILTERED_TOTAL)} аккаунтов, за раз берём ${num(FLEET_MASS_CAP)}. Не войдут ${num(over)} — запустите для них ещё раз. Продолжить?`)) return;
   if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
     const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, ..._massSel()})});
@@ -12116,6 +12175,7 @@ async function runAccMass(op) {
     if (op==='delete') toast(`🗑 Удалено аккаунтов: ${cnt}`);
     else if (op==='detach_proxy') toast(`✅ Снят прокси с ${cnt} аккаунтов — работают напрямую`);
     else toast(`✅ Поставлено в очередь для ${cnt} аккаунтов. Результат — в боте.`);
+    if (r.capped) toast(`Не вошло сверх ${num(FLEET_MASS_CAP)}: ${num(r.capped)} — запустите ещё раз`);
     toggleAccSelMode();
     if (op==='delete' || op==='detach_proxy') loadAccounts();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
@@ -12655,11 +12715,12 @@ function _chQuery(offset) {
   if (CH_SEARCH) p.set('search', CH_SEARCH);
   if (CH_FILTER === 'channel' || CH_FILTER === 'group') p.set('kind', CH_FILTER);
   if (CH_FILTER === 'mine' || CH_FILTER === 'foreign') p.set('role', CH_FILTER);
-  return '/api/miniapp/channels?' + p.toString();
+  return '/api/miniapp/channels?' + p.toString() + fleetSortQS('channels');
 }
 
 async function openChannels() {
   push('s-channels');
+  fleetToolsInit('channels');
   txt('chList', '<div class="spin-wrap"><div class="spin"></div></div>');
   const box = document.getElementById('chLoadMore'); if (box) box.innerHTML = '';
   CH_OFFSET = 0;
@@ -12807,7 +12868,7 @@ function renderChannels(_ignored) {
     const role = c.role==='owner'?' · 👑 владелец':c.role==='admin'?' · 🛡 админ':c.role==='member'?' · 👤 участник':'';
     const isGroup = (c.type==='supergroup'||c.type==='group'||c.type==='chat');
     const sel = CH_SEL.has(c.channel_id);
-    const onclick = CH_SEL_MODE ? `toggleChSel('${c.channel_id}')` : `openChannel(${c.channel_id})`;
+    const onclick = CH_SEL_MODE ? `toggleChSel('${c.channel_id}',event)` : `openChannel(${c.channel_id})`;
     const checkbox = CH_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
     const right = CH_SEL_MODE ? '' : `<div class="li-right"><span class="badge b-bl">${num(c.member_count||0)}</span><span class="chev">›</span></div>`;
     return `<div class="li tap ${CH_SEL_MODE&&sel?'sel':''}" onclick="${onclick}">
@@ -12836,9 +12897,11 @@ function toggleChSelMode() {
   renderChannels(CUR_CHANNELS);
   updateChSelBar();
 }
-function toggleChSel(id) {
+function toggleChSel(id, ev) {
   id = Number(id);
-  if (CH_SEL.has(id)) CH_SEL.delete(id); else CH_SEL.add(id);
+  if (!fleetRangePick('channels', _chFiltered().map(c=>Number(c.channel_id)), CH_SEL, id, ev)) {
+    if (CH_SEL.has(id)) CH_SEL.delete(id); else CH_SEL.add(id);
+  }
   renderChannels(CUR_CHANNELS);
   updateChSelBar();
 }
@@ -16404,7 +16467,8 @@ async function loadProxyPool() {
     // Перезагрузка после действия в строке не должна схлопывать догруженный
     // список обратно до одной страницы.
     const want = Math.min(Math.max(PP_PAGE, _proxyPoolData.length), 1000);
-    const d = await api('/api/miniapp/proxies?limit='+want+'&offset=0');
+    fleetToolsInit('proxies');
+    const d = await api('/api/miniapp/proxies?limit='+want+'&offset=0'+fleetSortQS('proxies'));
     _proxyPoolData = d.proxies||[];
     _ppApplyCounts(d);
     renderProxyPoolBars(_proxyPoolData);
@@ -16421,7 +16485,7 @@ async function loadMoreProxies() {
   const box = document.getElementById('ppLoadMore');
   if (box) box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/proxies?limit='+PP_PAGE+'&offset='+_proxyPoolData.length);
+    const d = await api('/api/miniapp/proxies?limit='+PP_PAGE+'&offset='+_proxyPoolData.length+fleetSortQS('proxies'));
     const known = new Set(_proxyPoolData.map(p=>String(p.id)));
     (d.proxies||[]).forEach(p => { if (!known.has(String(p.id))) _proxyPoolData.push(p); });
     _ppApplyCounts(d);
@@ -16492,6 +16556,16 @@ function renderProxyPoolList(items) {
   }
   el.innerHTML = items.map(p=>{
     const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
+    // Режим выбора (screens/fleet_tools.js): строка — переключатель, Shift — диапазон.
+    if (PP_SEL_MODE) {
+      const sel = PP_SEL.has(p.id);
+      return `<div class="li tap ${sel?'sel':''}" onclick="togglePpSel(${p.id},event)">
+        <div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>
+        <div class="ava ava-blue">🌐</div>
+        <div class="li-body"><div class="li-name">${esc(p.label||(p.proxy_url||'').split('@').pop()||'Прокси #'+p.id)}${p.is_backup?' 🛟':''}</div>
+        <div class="li-sub">${alive}${p.acc_count?' · 📱'+p.acc_count:''}</div></div>
+      </div>`;
+    }
     const type = (p.proxy_type||'socks5').toUpperCase();
     const host = (p.proxy_url||'').split('@').pop();
     // Задержка у мёртвого прокси — цифра из прошлого и ни о чём не говорит,
@@ -32837,5 +32911,6 @@ function renderAudSegChart(segments) {
 <script src="screens/workflow_map.js"></script>
 <script src="screens/desktop.js"></script>
 <script src="screens/main_button.js"></script>
+<script src="screens/fleet_tools.js"></script>
 </body>
 </html>

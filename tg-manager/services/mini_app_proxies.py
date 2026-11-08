@@ -87,6 +87,9 @@ def setup_routes(app: web.Application, pool) -> None:
                                           min_val=0, max_val=100000) or 0, 0)
         except (ValueError, TypeError):
             offset = 0
+        from services import list_sort
+        _order = list_sort.order_by("proxies", request.query.get("sort"),
+                                    request.query.get("dir"))
         # is_backup может ещё не примениться (лаг миграции) — тогда селект с колонкой
         # упадёт; фолбэк без неё, чтобы список прокси НИКОГДА не ломался.
         # acc_count — сколько аккаунтов сидит на прокси. Без него мёртвый прокси
@@ -104,7 +107,7 @@ def setup_routes(app: web.Application, pool) -> None:
                           (SELECT COUNT(*) FROM tg_accounts a
                             WHERE a.owner_id=$1 AND a.proxy_id=user_proxies.id) AS acc_count
                    FROM user_proxies WHERE owner_id=$1
-                   ORDER BY created_at DESC, id LIMIT $2 OFFSET $3""", uid, limit, offset)
+                   ORDER BY """ + _order + """ LIMIT $2 OFFSET $3""", uid, limit, offset)
         except Exception:
             rows = await _safe_fetch(pool,
                 """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
@@ -288,6 +291,60 @@ def setup_routes(app: web.Application, pool) -> None:
                                "skipped_assigned": int(skipped)})
         except Exception:
             log.exception("proxy_cleanup_dead uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def proxies_bulk(request: web.Request) -> web.Response:
+        """Массовое действие над выбранными прокси.
+
+        body: {op: delete|backup_on|backup_off|label, proxy_ids: [..], value?}
+        Удаляются только не назначенные ни одному аккаунту (та же изоляция,
+        что у одиночного удаления и чистки мёртвых): назначенные пропускаются
+        и честно считаются в ответе."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        op = body.get("op")
+        raw = body.get("proxy_ids")
+        if not isinstance(raw, list) or not raw:
+            return _err("Не выбран ни один прокси", 400)
+        try:
+            ids = list(dict.fromkeys(int(x) for x in raw))[:20000]
+        except (TypeError, ValueError):
+            return _err("Неверный идентификатор прокси", 400)
+        try:
+            if op == "delete":
+                removed = await pool.fetch(
+                    """DELETE FROM user_proxies up
+                       WHERE up.owner_id=$1 AND up.id = ANY($2::bigint[])
+                         AND NOT EXISTS (SELECT 1 FROM tg_accounts a
+                                         WHERE a.owner_id=$1 AND a.proxy_id=up.id)
+                       RETURNING id""", uid, ids)
+                if removed:
+                    from database.db import record_manual_action
+
+                    await record_manual_action(
+                        pool, uid, "proxies_bulk_delete",
+                        target=",".join(str(r["id"]) for r in removed[:50]))
+                return _json_resp({"ok": True, "count": len(removed),
+                                   "skipped_assigned": len(ids) - len(removed)})
+            if op in ("backup_on", "backup_off"):
+                res = await pool.execute(
+                    "UPDATE user_proxies SET is_backup=$1 WHERE owner_id=$2 AND id = ANY($3::bigint[])",
+                    op == "backup_on", uid, ids)
+                return _json_resp({"ok": True, "count": int(str(res).rsplit(" ", 1)[-1] or 0)})
+            if op == "label":
+                label = (validate_string(body.get("value"), max_len=64) or "").strip()
+                res = await pool.execute(
+                    "UPDATE user_proxies SET label=$1 WHERE owner_id=$2 AND id = ANY($3::bigint[])",
+                    label or None, uid, ids)
+                return _json_resp({"ok": True, "count": int(str(res).rsplit(" ", 1)[-1] or 0)})
+            return _err("Неизвестное действие", 400)
+        except Exception:
+            log.exception("proxies_bulk uid=%d op=%s", uid, op)
             return _err(_INTERNAL_ERROR, 500)
 
     async def proxy_export(request: web.Request) -> web.Response:
@@ -597,4 +654,5 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/proxies/check_all", check_all_proxies)
     app.router.add_get("/api/miniapp/proxies/isolation_check", proxies_isolation_check)
     app.router.add_post("/api/miniapp/proxies/import", import_proxies)
+    app.router.add_post("/api/miniapp/proxies/bulk", proxies_bulk)
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
