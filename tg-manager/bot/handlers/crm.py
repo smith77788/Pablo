@@ -124,8 +124,13 @@ async def cb_crm_menu(
 
 @router.callback_query(CrmCb.filter(F.action == "add_tag_global"))
 async def cb_add_tag_global(
-    callback: CallbackQuery, callback_data: CrmCb, state: FSMContext
+    callback: CallbackQuery, callback_data: CrmCb, state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
+    # bot_id из кнопки — без проверки тег заводился в чужом боте.
+    if not await db.get_bot(pool, callback_data.bot_id, callback.from_user.id):
+        await callback.answer("Бот не найден", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(AddGlobalTag.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -161,6 +166,9 @@ async def msg_global_tag_name(
         )
         return
     await state.clear()
+    if not await db.get_bot(pool, data.get("bot_id", 0), message.from_user.id):
+        await message.answer("❌ Бот не найден.")
+        return
     safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     # Use user_id=0 as a sentinel to create a standalone tag definition.
     # This avoids polluting the segment with the owner's Telegram user_id,

@@ -398,8 +398,14 @@ async def msg_fn_keyword(
 
 @router.callback_query(FunnelCb.filter(F.action == "add_step"))
 async def cb_fn_add_step(
-    callback: CallbackQuery, callback_data: FunnelCb, state: FSMContext
+    callback: CallbackQuery, callback_data: FunnelCb, state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
+    # funnel_id из кнопки: подделанная кнопка дописывала свой шаг в чужую
+    # воронку, и бот жертвы рассылал этот текст её подписчикам.
+    if not await _owns_funnel(pool, callback_data.funnel_id, callback.from_user.id):
+        await callback.answer("Воронка не найдена", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(CreateFunnel.waiting_step_text)
     await state.update_data(
@@ -480,6 +486,9 @@ async def msg_fn_step_delay(
     funnel_id = data["funnel_id"]
     bot_id = data["bot_id"]
     step_order = data["current_step"]
+    if not await _owns_funnel(pool, funnel_id, message.from_user.id):
+        await message.answer("❌ Воронка не найдена.")
+        return
 
     await db.add_funnel_step(pool, funnel_id, step_order, data["step_text"], delay)
 

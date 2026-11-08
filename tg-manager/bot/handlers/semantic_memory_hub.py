@@ -172,7 +172,13 @@ async def cb_mem_search(
     callback: CallbackQuery,
     callback_data: MemCb,
     state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
+    # bot_id из кнопки: подделанная кнопка открывала чужую память —
+    # переписку подписчиков чужого бота и извлечённые о них факты.
+    if not await _resolve_bot(pool, callback_data.bot_id, callback.from_user.id):
+        await callback.answer("❌ Бот не найден.", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(MemSearch.waiting_user_id)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -197,6 +203,9 @@ async def msg_mem_search_id(
     data = await state.get_data()
     await state.clear()
     bot_id = data.get("bot_id", 0)
+    if not bot_id or not await _resolve_bot(pool, bot_id, message.from_user.id):
+        await message.answer("❌ Бот не найден.")
+        return
 
     raw = message.text.strip()
     if not raw.lstrip("-").isdigit():
@@ -259,6 +268,11 @@ async def cb_mem_view_user(
     callback_data: MemCb,
     pool: asyncpg.Pool,
 ) -> None:
+    # bot_id из кнопки: подделанная кнопка открывала чужую память —
+    # переписку подписчиков чужого бота и извлечённые о них факты.
+    if not await _resolve_bot(pool, callback_data.bot_id, callback.from_user.id):
+        await callback.answer("❌ Бот не найден.", show_alert=True)
+        return
     await safe_answer(callback)
     bot_id = callback_data.bot_id
     user_id = callback_data.user_id
@@ -465,7 +479,13 @@ async def cb_mem_set_days(
     callback: CallbackQuery,
     callback_data: MemCb,
     state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
+    # bot_id из кнопки: подделанная кнопка открывала чужую память —
+    # переписку подписчиков чужого бота и извлечённые о них факты.
+    if not await _resolve_bot(pool, callback_data.bot_id, callback.from_user.id):
+        await callback.answer("❌ Бот не найден.", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(MemSetDays.waiting_days)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -490,6 +510,9 @@ async def msg_mem_set_days(
     data = await state.get_data()
     await state.clear()
     bot_id = data.get("bot_id", 0)
+    if not bot_id or not await _resolve_bot(pool, bot_id, message.from_user.id):
+        await message.answer("❌ Бот не найден.")
+        return
 
     raw = message.text.strip()
     if not raw.isdigit() or not (7 <= int(raw) <= 365):

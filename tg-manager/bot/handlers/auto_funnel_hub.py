@@ -347,8 +347,14 @@ async def cb_af_steps(
 
 @router.callback_query(AutoFunnelCb.filter(F.action == "add_step"))
 async def cb_af_add_step(
-    callback: CallbackQuery, callback_data: AutoFunnelCb, state: FSMContext
+    callback: CallbackQuery, callback_data: AutoFunnelCb, state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
+    # funnel_id из кнопки: подделанная кнопка дописывала в чужую автоворонку
+    # свой шаг со своей ссылкой, и её рассылал бот жертвы.
+    if not await _get_funnel(pool, callback_data.funnel_id, callback.from_user.id):
+        await callback.answer("Воронка не найдена", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(AutoFunnelFSM.waiting_step_delay)
     await state.update_data(funnel_id=callback_data.funnel_id)
@@ -411,7 +417,8 @@ async def cb_af_step_no_btn(
     await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
-    await _save_step(callback.message, pool, data, btn_text=None, btn_url=None, edit=True)
+    await _save_step(callback.message, pool, data, btn_text=None, btn_url=None, edit=True,
+                     owner_id=callback.from_user.id)
 
 
 @router.message(AutoFunnelFSM.waiting_step_button, F.text)
@@ -432,15 +439,19 @@ async def msg_af_step_button(
                 parse_mode="HTML",
             )
             return
-    await _save_step(message, pool, data, btn_text=btn_text, btn_url=btn_url, edit=False)
+    await _save_step(message, pool, data, btn_text=btn_text, btn_url=btn_url, edit=False,
+                     owner_id=message.from_user.id)
 
 
 async def _save_step(
-    msg_or_cb, pool, data: dict, btn_text, btn_url, edit: bool
+    msg_or_cb, pool, data: dict, btn_text, btn_url, edit: bool, *, owner_id: int
 ) -> None:
     funnel_id = data.get("funnel_id")
     delay     = data.get("step_delay", 0)
     text      = data.get("step_text", "")
+    if not funnel_id or not await _get_funnel(pool, funnel_id, owner_id):
+        await msg_or_cb.answer("❌ Воронка не найдена.")
+        return
 
     max_num = await pool.fetchval(
         "SELECT COALESCE(MAX(step_num), 0) FROM auto_funnel_steps WHERE funnel_id=$1", funnel_id

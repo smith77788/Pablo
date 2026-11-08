@@ -360,8 +360,14 @@ async def cb_mesh_targets(
 
 @router.callback_query(ContentMeshCb.filter(F.action == "add_target"))
 async def cb_mesh_add_target(
-    callback: CallbackQuery, callback_data: ContentMeshCb, state: FSMContext
+    callback: CallbackQuery, callback_data: ContentMeshCb, state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
+    # mesh_id из кнопки: подделанная кнопка дописывала свой канал в чужую
+    # сеть, и посты жертвы копировались туда её же аккаунтом.
+    if not await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id):
+        await callback.answer("Сеть не найдена", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(ContentMeshFSM.waiting_target_channel)
     await state.update_data(mesh_id=callback_data.mesh_id)
@@ -381,8 +387,11 @@ async def msg_mesh_target_channel(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     data = await state.get_data()
-    mesh_id = data["mesh_id"]
+    mesh_id = data.get("mesh_id")
     await state.clear()
+    if not mesh_id or not await _get_mesh(pool, mesh_id, message.from_user.id):
+        await message.answer("❌ Сеть не найдена.")
+        return
     channel = (message.text or "").strip()
     if not channel:
         await message.answer("⚠️ Введите @username или ID канала.", parse_mode="HTML")

@@ -124,8 +124,14 @@ async def cb_dl_view(
 
 @router.callback_query(DeepLinkCb.filter(F.action == "create"))
 async def cb_dl_create(
-    callback: CallbackQuery, callback_data: DeepLinkCb, state: FSMContext
+    callback: CallbackQuery, callback_data: DeepLinkCb, state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
+    # bot_id из кнопки — без проверки диплинк заводился в чужом боте и
+    # занимал его параметры.
+    if not await db.get_bot(pool, callback_data.bot_id, callback.from_user.id):
+        await callback.answer("Бот не найден", show_alert=True)
+        return
     await safe_answer(callback)
     await state.set_state(CreateDeepLink.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -180,6 +186,10 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
             reply_markup=_dl_cancel_kb(data.get("bot_id", 0)),
         )
         return  # keep state active so user can send another value
+    if not await db.get_bot(pool, data.get("bot_id", 0), message.from_user.id):
+        await state.clear()
+        await message.answer("❌ Бот не найден.")
+        return
     try:
         await db.create_deep_link(pool, data["bot_id"], data["link_name"], param)
     except Exception:
