@@ -21,6 +21,7 @@ from aiohttp import web
 
 from services import account_status as _acc_status
 from services import operation_bus as _obus
+from services import osint_search as _osint
 from services import op_status
 from services.mini_app_auth import (validate_init_data, make_token, parse_token,
                                     signing_secret_ok, make_url_ticket,
@@ -4799,6 +4800,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("phone_check_submit uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    # ── Поиск аккаунтов по нику/почте (модуль blackbird) ─────────────────────
+
+    async def osint_search_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        raw = body.get("query") if isinstance(body, dict) else None
+        try:
+            kind, query = _osint.parse_query(raw if isinstance(raw, str) else "")
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        if not _osint.is_available():
+            return _err("Поиск по нику пока не установлен на сервере", 503)
+        try:
+            what = "нику" if kind == "username" else "почте"
+            label = f"Поиск по {what}: {query}"[:120]
+            op_id = await _obus.submit(
+                pool, uid, "osint_search", {"kind": kind, "query": query},
+                total_items=1, label=label)
+            return _json_resp({"ok": True, "op_id": op_id, "label": label,
+                               "kind": kind, "query": query})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("osint_search_submit uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     # ── Referral Dashboard ────────────────────────────────────────────────────
 
     async def referral_overview_detail(request: web.Request) -> web.Response:
@@ -8259,6 +8291,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/autoreg", autoreg_submit)
     # Phone Checker
     app.router.add_post("/api/miniapp/phone_check", phone_check_submit)
+    app.router.add_post("/api/miniapp/osint_search", osint_search_submit)
     # Referral
     app.router.add_get("/api/miniapp/referral/detail", referral_overview_detail)
     # AI Memory

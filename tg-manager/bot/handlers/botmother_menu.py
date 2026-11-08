@@ -85,6 +85,7 @@ from bot.callbacks import (
     MemCb,
     NetBcCb,
     NetworkCb,
+    OsintCb,
     NarrCb,
     ParserCb,
     KwCb,
@@ -254,6 +255,7 @@ def _section_buttons(key: str, plan: str = "free") -> list[tuple[str, object]]:
             ("📨 Инвайтер", InviterCb(action="menu")),
             ("📇 Контакты", ContactsHubCb(action="menu")),
             ("🧬 ДНК аудитории", DnaCb(action="menu")),
+            ("🕵️ Поиск по нику", OsintCb(action="menu")),
         ]
     if key == "messages":
         return [

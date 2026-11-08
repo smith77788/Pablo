@@ -5442,6 +5442,7 @@ def _build_dispatch() -> dict:
         "delete_contacts": _exec_delete_contacts,
         "reg_check": _exec_reg_check,
         "phone_check": _exec_phone_check,
+        "osint_search": _exec_osint_search,
         # bulk_set_profile — единственная реализация; profile_setter её псевдоним.
         "bulk_set_profile": _exec_bulk_set_profile,
         "profile_setter": _exec_bulk_set_profile,
@@ -23844,6 +23845,61 @@ async def _exec_phone_check(
         "not_registered": not_registered,
         "errors": errors,
         "summary": f"📱 Проверено {total} номеров: ✅ {registered} зарегистрированы, ❌ {not_registered} нет" + (f", ⚠️ {errors} ошибок" if errors else ""),
+    }
+
+
+async def _exec_osint_search(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Поиск аккаунтов по нику или почте на ~600 сайтах (модуль blackbird).
+    params: {kind: 'username'|'email', query: str}
+
+    Наружу ничего не пишет: читает публичные страницы сайтов с сервера,
+    аккаунты Telegram не берёт. Найденные профили — строки журнала операции
+    (target = ссылка на профиль), итог — в summary уведомления.
+    """
+    from services import osint_search as _osint
+
+    try:
+        kind, query = _osint.parse_query(str(params.get("query") or ""))
+    except ValueError as exc:
+        return {"status": "failed", "summary": f"⚠️ {exc}"}
+    if params.get("kind") in ("username", "email") and params["kind"] != kind:
+        return {"status": "failed", "summary": "⚠️ Вид поиска не совпадает с запросом"}
+
+    async def _stop() -> bool:
+        return await _is_cancelled(pool, op_id)
+
+    try:
+        data = await _osint.run_search(kind, query, should_stop=_stop)
+    except _osint.SearchUnavailable as exc:
+        return {"status": "failed", "summary": f"⚠️ {exc}"}
+    except _osint.SearchFailed as exc:
+        return {"status": "failed", "summary": f"⚠️ {exc}"}
+    if data is None:
+        return {"status": "cancelled", "summary": "🛑 Поиск остановлен"}
+
+    found = _osint.found_accounts(data)
+    # Журнал целиком переписывается при повторе: поиск — чтение, и прошлый
+    # прогон того же запроса не должен оставлять дублей строк.
+    await _safe_execute(pool, "DELETE FROM operation_log WHERE op_id=$1", op_id)
+    if found:
+        await _journal_writemany(
+            pool,
+            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+            "VALUES($1,$2,$3,'ok',$4)",
+            [(op_id, i, str(a.get("url"))[:1000], _osint.log_message(a)[:300])
+             for i, a in enumerate(found, 1)],
+            log_ctx=f"[osint_search op={op_id}]",
+        )
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET done_items=1 WHERE id=$1", op_id)
+    return {
+        "status": "done",
+        "kind": kind,
+        "query": query,
+        "found": len(found),
+        "summary": _osint.summary_text(kind, query, data),
     }
 
 

@@ -958,6 +958,7 @@ POST /api/miniapp/operations/resume
 POST /api/miniapp/operations/retry_failed
 POST /api/miniapp/organism/dismiss
 POST /api/miniapp/organism/pending_open
+POST /api/miniapp/osint_search
 POST /api/miniapp/pair
 POST /api/miniapp/pair/exchange
 POST /api/miniapp/parser/submit
