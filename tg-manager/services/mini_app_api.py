@@ -630,6 +630,13 @@ def _cache_drop_user(uid) -> int:
     if not uid:
         return 0
     want = str(uid)
+    # Сводка пульса здоровья кэшируется отдельно (infra_memory) — действие
+    # владельца сносит и её, иначе «снял риск» и не увидел этого на главной.
+    try:
+        from services.infra_memory import drop_health_summary
+        drop_health_summary(uid)
+    except Exception:  # pragma: no cover — сброс кэша не должен ронять ответ
+        pass
     dead = [k for k in _cache
             if (parts := k.split(":", 2)) and len(parts) >= 2 and parts[1] == want]
     for k in dead:
@@ -1826,8 +1833,9 @@ async def account_health_summary(pool, uid: int) -> dict:
     монолите, а второй источник правды о пульсе плодить нельзя — CLAUDE.md.
     """
     try:
-        from services.infra_memory import get_account_health
-        return (await get_account_health(pool, uid))["summary"]
+        from services.infra_memory import get_account_health_summary
+        s = await get_account_health_summary(pool, uid)
+        return {k: s.get(k, 0) for k in ("healthy", "at_risk", "quarantine", "total")}
     except Exception:
         return {"healthy": 0, "at_risk": 0, "quarantine": 0, "total": 0}
 

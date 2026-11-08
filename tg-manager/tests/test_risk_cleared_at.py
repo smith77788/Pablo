@@ -58,33 +58,42 @@ def _pulse_sql() -> str:
     return pool.queries[0]
 
 
-def _guarded_subqueries(sql: str) -> dict[str, bool]:
-    """Для каждого подзапроса по иммунной таблице — есть ли фильтр risk_cleared_at.
+def _guarded_journals(sql: str) -> dict[str, bool]:
+    """Для каждого прохода по иммунному журналу — есть ли фильтр risk_cleared_at.
 
-    Режем SQL по началам подзапросов, чтобы проверять КАЖДЫЙ из них, а не факт
-    того, что колонка вообще где-то упомянута.
+    С 08.11.2026 пульс читает каждый журнал ОДИН раз (агрегат с FILTER вместо
+    четырёх вложенных подзапросов на строку флота — это стоило ~120 мс на
+    вызов при 10 000 аккаунтов). Поэтому режем SQL по проходам — от `FROM
+    <журнал>` до его `GROUP BY` — и проверяем КАЖДЫЙ: фильтр в проходе
+    действует на все счётчики, которые из него собраны.
     """
     out: dict[str, bool] = {}
     for m in re.finditer(
-        r"\(SELECT COUNT\(\*\) FROM (restriction_events|account_flood_log)\b"
-        r"(.*?)\)\s+AS\s+(\w+)",
+        r"FROM (restriction_events|account_flood_log) \w+(.*?)GROUP BY",
         sql,
         re.S,
     ):
-        out[m.group(3)] = "risk_cleared_at" in m.group(2)
+        out[m.group(1)] = "risk_cleared_at" in m.group(2)
     return out
 
 
 def test_pulse_subqueries_honour_risk_cleared_at():
     """Каждый счётчик риска в пульсе обязан пропускать историю до ручного сброса."""
-    guarded = _guarded_subqueries(_pulse_sql())
-    assert set(guarded) == {"restrictions", "severe", "severe_gate", "floods"}, (
-        f"состав счётчиков пульса изменился: {sorted(guarded)} — "
-        "проверь, что новый счётчик тоже учитывает risk_cleared_at")
+    sql = _pulse_sql()
+    guarded = _guarded_journals(sql)
+    assert set(guarded) == {"restriction_events", "account_flood_log"}, (
+        f"состав журналов пульса изменился: {sorted(guarded)} — "
+        "проверь, что новый журнал тоже учитывает risk_cleared_at")
     unguarded = sorted(n for n, ok in guarded.items() if not ok)
     assert not unguarded, (
-        f"счётчики {unguarded} считают события старше risk_cleared_at — "
+        f"журналы {unguarded} читаются без risk_cleared_at — "
         "после ручного сброса UI снова будет врать «Карантин»")
+    # Все четыре счётчика собираются из этих проходов, а не отдельным
+    # подзапросом мимо фильтра.
+    for counter in ("restrictions", "severe", "severe_gate", "floods"):
+        assert re.search(rf"AS {counter}\b", sql), f"нет счётчика {counter}"
+    assert not re.search(r"\(SELECT COUNT\(\*\) FROM (restriction_events|account_flood_log)",
+                         sql), "вложенный подзапрос по журналу мимо общего прохода"
 
 
 def test_pulse_guard_compares_event_time_not_now():
@@ -96,12 +105,10 @@ def test_pulse_guard_compares_event_time_not_now():
     n = len(re.findall(
         r"risk_cleared_at IS NULL\s+OR\s+\w+\.created_at > a\.risk_cleared_at",
         _pulse_sql()))
-    # Четыре счётчика: restrictions, severe (окно экрана), severe_gate (окно
-    # гейта — на нём стоит вердикт «Карантин») и floods. Каждому нужен свой
-    # фильтр, иначе ручной сброс риска перестаёт действовать на тот из них,
-    # который его потерял.
-    assert n == 4, (
-        f"ожидалось 4 фильтра вида «created_at > risk_cleared_at», найдено {n}: "
+    # Два прохода — по restriction_events (из него restrictions, severe и
+    # severe_gate) и по account_flood_log (floods). Каждому нужен свой фильтр.
+    assert n == 2, (
+        f"ожидалось 2 фильтра вида «created_at > risk_cleared_at», найдено {n}: "
         "сброс риска не должен ослеплять пульс навсегда")
 
 
