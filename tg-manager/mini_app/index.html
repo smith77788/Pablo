@@ -727,6 +727,8 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 /* ─── Modal ──────────────────────────────────────────────────── */
 .mbg{position:fixed;inset:0;background:var(--overlay-modal);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;display:none;align-items:flex-end}
 .mbg.show{display:flex;animation:mbin .25s var(--ease)}
+/* Главное действие, которое дублирует системная MainButton (screens/main_button.js). */
+.mb-mirrored{display:none !important}
 @keyframes mbin{from{opacity:0}to{opacity:1}}
 .modal{background:var(--bg2);border-radius:var(--radius-xl) var(--radius-xl) 0 0;padding:20px 16px calc(var(--safe-b) + 20px);width:100%;max-height:85vh;overflow-y:auto;animation:min .3s var(--spring);position:relative;box-shadow:0 -8px 40px rgba(0,0,0,.4)}
 @keyframes min{from{transform:translateY(100%)}to{transform:none}}
@@ -1594,7 +1596,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <textarea id="bbText" rows="4" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <textarea id="bbButtons" rows="2" placeholder="Кнопки: Текст | https://ссылка (по одной на строку)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
     <div id="bbErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
-    <button class="btn btn-p" id="bbBtn" onclick="submitBotBroadcast()" style="width:100%;margin-top:8px">Запустить рассылку</button>
+    <button class="btn btn-p" data-main id="bbBtn" onclick="submitBotBroadcast()" style="width:100%;margin-top:8px">Запустить рассылку</button>
   </div>
 </div>
 
@@ -1610,7 +1612,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Короткое описание (в профиле бота)</label><textarea id="bpShort" rows="2" maxlength="120" placeholder="До 120 символов"></textarea></div>
     <div class="field"><label>Приветствие (ответ на /start)</label><textarea id="bpGreet" rows="3" maxlength="4096" placeholder="Сообщение, которое бот пришлёт на /start"></textarea></div>
     <div id="bpErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
-    <button class="btn btn-p" id="bpBtn" onclick="submitBotProfileEdit()" style="width:100%;margin-top:8px">Применить к выбранным</button>
+    <button class="btn btn-p" data-main id="bpBtn" onclick="submitBotProfileEdit()" style="width:100%;margin-top:8px">Применить к выбранным</button>
   </div>
 </div>
 
@@ -1838,7 +1840,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="accContMsgHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
     <textarea id="accContMsgText" rows="4" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="accContMsgErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
-    <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitAccContMsg()">🚀 Отправить</button>
+    <button class="btn btn-p" data-main style="width:100%;margin-top:8px" onclick="submitAccContMsg()">🚀 Отправить</button>
   </div>
 </div>
 
@@ -1863,7 +1865,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <label style="display:block;font-size:12px;color:var(--hint);margin:8px 0 2px">📎 Медиа (необязательно, до 50 МБ)</label>
     <input type="file" id="ccwFile" style="width:100%;box-sizing:border-box;font-size:12px">
     <div id="ccwErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
-    <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitContactWrite()">🚀 Отправить</button>
+    <button class="btn btn-p" data-main style="width:100%;margin-top:8px" onclick="submitContactWrite()">🚀 Отправить</button>
   </div>
 </div>
 
@@ -1882,7 +1884,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="font-size:12px;font-weight:600;margin:6px 0 4px">Какими аккаунтами приглашать:</div>
     <div id="cciAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
     <div id="cciErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
-    <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitContactInvite()">🚀 Пригласить</button>
+    <button class="btn btn-p" data-main style="width:100%;margin-top:8px" onclick="submitContactInvite()">🚀 Пригласить</button>
   </div>
 </div>
 
@@ -2037,7 +2039,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="chmHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
     <textarea id="chmValue" rows="4" placeholder="" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="chmErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
-    <button class="btn btn-p" id="chmBtn" onclick="submitChMass()" style="width:100%;margin-top:8px">Применить</button>
+    <button class="btn btn-p" data-main id="chmBtn" onclick="submitChMass()" style="width:100%;margin-top:8px">Применить</button>
   </div>
 </div>
 
@@ -2158,7 +2160,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field"><label>Доля варианта А (%)</label><input type="number" id="bs-ab-split" value="50" min="10" max="90" class="inp"></div>
     </div>
     <div class="field-err" id="bs-err"></div>
-    <button class="btn btn-p" onclick="submitBcSchedule()" style="width:100%">📅 Запланировать</button>
+    <button class="btn btn-p" data-main onclick="submitBcSchedule()" style="width:100%">📅 Запланировать</button>
   </div>
 </div>
 
@@ -2253,7 +2255,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          «Прокси» ничего не меняли и обещали несуществующее. -->
     <div class="field-note">Номера покупаются у SMS-сервиса, подключённого к платформе; за каждый номер списываются его средства.</div>
     <div class="field-err" id="arp-err"></div>
-    <button class="btn btn-p" id="arp-btn" onclick="submitAutoregPro()" style="width:100%">📱 Запустить пакет</button>
+    <button class="btn btn-p" data-main id="arp-btn" onclick="submitAutoregPro()" style="width:100%">📱 Запустить пакет</button>
   </div>
 </div>
 
@@ -2876,7 +2878,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </div>
       </div>
       <div class="field-err" id="wgErr"></div>
-      <button class="btn btn-p" id="wgSendBtn" onclick="wgSend()" style="width:100%">📤 Отправить</button>
+      <button class="btn btn-p" data-main id="wgSendBtn" onclick="wgSend()" style="width:100%">📤 Отправить</button>
       <button class="btn btn-s" id="wgCancelEdit" onclick="wgCancelEdit()" style="width:100%;margin-top:8px;display:none">Отмена</button>
     </div>
     <div class="sec">Отправленные</div>
@@ -2977,7 +2979,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="cwAccs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;padding-left:16px;padding-right:16px"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div id="cwAccsHint" style="font-size:11px;color:var(--hint);margin:0 0 4px"></div>
     <div style="font-size:11px;color:var(--hint);margin:0 0 10px">Ничего не выбрано = весь живой флот; в один чат беру не больше 30 и начинаю со свободных.</div>
-    <button class="btn btn-p" onclick="cwStart()" style="width:100%;padding:11px;font-size:14px">▶ Запустить разогрев</button>
+    <button class="btn btn-p" data-main onclick="cwStart()" style="width:100%;padding:11px;font-size:14px">▶ Запустить разогрев</button>
     <div class="sec" style="margin-top:14px">Активные разогревы</div>
     <div class="lst" id="cwList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -3220,7 +3222,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <select id="bpAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"><option value="">Выберите аккаунт…</option></select>
       <textarea id="bpText" rows="3" placeholder="{{Новость|Обновление}}: текст поста…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
-      <button class="btn btn-p" style="width:100%" onclick="submitBulkPostChans()">📤 Опубликовать во все</button>
+      <button class="btn btn-p" data-main style="width:100%" onclick="submitBulkPostChans()">📤 Опубликовать во все</button>
       <div id="bpcErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
 
@@ -3252,7 +3254,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <select id="beField" onchange="beSyncHint()" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"></select>
       <input type="text" id="beValue" placeholder="Новое значение" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
       <div id="beHint" style="font-size:12px;color:var(--hint);margin-bottom:8px"></div>
-      <button class="btn btn-p" style="width:100%" onclick="submitBulkEdit()">✏️ Применить ко всем</button>
+      <button class="btn btn-p" data-main style="width:100%" onclick="submitBulkEdit()">✏️ Применить ко всем</button>
       <div id="beErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
     <div class="sec">Объявление во все группы аккаунта</div>
@@ -3262,7 +3264,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
       <textarea id="gaText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст объявления…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Спинтакс {{вариант1|вариант2}} обязателен: одинаковый текст в десятки групп — палевная сигнатура. Вариант подбирается для каждой группы отдельно.</div>
-      <button class="btn btn-p" style="width:100%" onclick="submitGroupAnnounce()">📣 Разослать по группам</button>
+      <button class="btn btn-p" data-main style="width:100%" onclick="submitGroupAnnounce()">📣 Разослать по группам</button>
       <div id="gaErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
     <div class="sec">Массовые операции</div>
@@ -3348,7 +3350,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="cfAccAll(false)">🗑 Очистить</button>
       </div>
       <div id="cfAccts" style="max-height:200px;overflow-y:auto;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px;margin-bottom:10px"></div>
-      <button class="btn btn-p" style="width:100%" onclick="submitChannelFactory()">🏭 Создать</button>
+      <button class="btn btn-p" data-main style="width:100%" onclick="submitChannelFactory()">🏭 Создать</button>
       <div id="cfErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
     <div class="sec" style="margin-top:4px">Последние каналы</div>
@@ -3481,7 +3483,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="sec" style="margin:10px 0 4px;padding:0">Куда клонировать</div>
       <div id="clonerTargets" style="max-height:220px;overflow-y:auto"><div class="spin-wrap"><div class="spin"></div></div></div>
-      <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitCloner()">📋 Клонировать</button>
+      <button class="btn btn-p" data-main style="width:100%;margin-top:8px" onclick="submitCloner()">📋 Клонировать</button>
       <div id="clonerErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
     <div class="sec" style="margin-top:4px">История</div>
@@ -3513,7 +3515,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field" style="font-size:12px;color:var(--hint)">Получите токен у @BotFather в Telegram</div>
     <div class="field-err" id="botAddErr"></div>
-    <button class="btn btn-p" id="botAddBtn" onclick="submitBotAdd()" style="width:100%">➕ Добавить бота</button>
+    <button class="btn btn-p" data-main id="botAddBtn" onclick="submitBotAdd()" style="width:100%">➕ Добавить бота</button>
   </div>
 </div>
 
@@ -3544,7 +3546,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
     </div>
     <div class="field-err" id="bpoErr"></div>
-    <button class="btn btn-p" id="bpoBtn" onclick="submitBotProfile()" style="width:100%">Сохранить</button>
+    <button class="btn btn-p" data-main id="bpoBtn" onclick="submitBotProfile()" style="width:100%">Сохранить</button>
   </div>
 </div>
 
@@ -3572,7 +3574,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field-err" id="nodeErr"></div>
-    <button class="btn btn-p" id="nodeBtn" onclick="submitNodeCreate()" style="width:100%">➕ Добавить ноду</button>
+    <button class="btn btn-p" data-main id="nodeBtn" onclick="submitNodeCreate()" style="width:100%">➕ Добавить ноду</button>
   </div>
 </div>
 
@@ -3606,7 +3608,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="crmTags" placeholder="клиент, горячий, vip" class="inp">
     </div>
     <div class="field-err" id="crmContactErr"></div>
-    <button class="btn btn-p" id="crmContactBtn" onclick="submitCrmContactCreate()" style="width:100%">➕ Добавить контакт</button>
+    <button class="btn btn-p" data-main id="crmContactBtn" onclick="submitCrmContactCreate()" style="width:100%">➕ Добавить контакт</button>
   </div>
 </div>
 
@@ -3639,7 +3641,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="spCtaUrl" placeholder="https://t.me/MyBot" class="inp">
     </div>
     <div class="field-err" id="spCreateErr"></div>
-    <button class="btn btn-p" id="spCreateBtn" onclick="submitSelfPromoCreate()" style="width:100%">📣 Создать шаблон</button>
+    <button class="btn btn-p" data-main id="spCreateBtn" onclick="submitSelfPromoCreate()" style="width:100%">📣 Создать шаблон</button>
   </div>
 </div>
 
@@ -3702,7 +3704,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field"><label>Подсказка</label><input type="text" id="apHint" class="inp"></div>
     </div>
     <div class="field-err" id="apErr"></div>
-    <button class="btn btn-p" id="apBtn" onclick="submitAccProfile()" style="width:100%">Применить</button>
+    <button class="btn btn-p" data-main id="apBtn" onclick="submitAccProfile()" style="width:100%">Применить</button>
   </div>
 </div>
 
@@ -3717,7 +3719,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <select id="apxSel" class="sel"></select>
     </div>
     <div class="field-err" id="apxErr"></div>
-    <button class="btn btn-p" id="apxBtn" onclick="submitAccProxy()" style="width:100%">Сохранить</button>
+    <button class="btn btn-p" data-main id="apxBtn" onclick="submitAccProxy()" style="width:100%">Сохранить</button>
   </div>
 </div>
 
@@ -3730,7 +3732,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="antText" rows="4" maxlength="500" placeholder="Пометка для себя: назначение, кластер, статус…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
     <div class="field-err" id="antErr"></div>
-    <button class="btn btn-p" id="antBtn" onclick="submitAccNote()" style="width:100%">Сохранить</button>
+    <button class="btn btn-p" data-main id="antBtn" onclick="submitAccNote()" style="width:100%">Сохранить</button>
   </div>
 </div>
 
@@ -3762,7 +3764,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field-err" id="amErr"></div>
-    <button class="btn btn-p" id="amBtn" onclick="submitAccMeta()" style="width:100%">Сохранить</button>
+    <button class="btn btn-p" data-main id="amBtn" onclick="submitAccMeta()" style="width:100%">Сохранить</button>
   </div>
 </div>
 
@@ -3786,7 +3788,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field-err" id="msErr"></div>
-    <button class="btn btn-p" id="msBtn" onclick="submitMassStage()" style="width:100%">Применить</button>
+    <button class="btn btn-p" data-main id="msBtn" onclick="submitMassStage()" style="width:100%">Применить</button>
   </div>
 </div>
 
@@ -3805,7 +3807,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field"><label id="ceLbl">Новое описание *</label><textarea id="ceValue" rows="3" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
     <div class="field-err" id="ceErr"></div>
-    <button class="btn btn-p" id="ceBtn" onclick="submitChanEdit()" style="width:100%">Применить</button>
+    <button class="btn btn-p" data-main id="ceBtn" onclick="submitChanEdit()" style="width:100%">Применить</button>
   </div>
 </div>
 
@@ -4084,7 +4086,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           </select>
         </div>
         <div class="field-err" id="fcErr"></div>
-        <button class="btn btn-p" id="fcBtn" style="width:100%" onclick="submitFindContact()">🚀 Запустить поиск</button>
+        <button class="btn btn-p" data-main id="fcBtn" style="width:100%" onclick="submitFindContact()">🚀 Запустить поиск</button>
       </div>
     </details>
   </div>
@@ -4352,7 +4354,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="checkbox" id="intNotify" checked> Уведомлять в ЛС при срабатывании
       </label>
       <div id="intErr" style="color:var(--red);font-size:13px;min-height:16px"></div>
-      <button class="btn btn-p" style="width:100%" id="intAddBtn" onclick="addIntentRule()">➕ Добавить правило</button>
+      <button class="btn btn-p" data-main style="width:100%" id="intAddBtn" onclick="addIntentRule()">➕ Добавить правило</button>
       <div id="intCancelEdit" style="display:none;text-align:center;padding:8px;color:var(--hint);cursor:pointer;font-size:13px" onclick="cancelIntentEdit()">Отменить правку</div>
     </div>
     <div class="sec" style="display:flex;justify-content:space-between;align-items:center">
@@ -4772,7 +4774,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
            правила канала. Появляется на подтверждении, публикацию не блокирует. -->
       <div id="mpEditorial" style="margin-bottom:10px;font-size:13px"></div>
       <div class="field-err" id="mpErr"></div>
-      <button class="btn btn-p" id="mpBtn" onclick="sendMassPublish()" style="width:100%;margin-top:4px">📡 Опубликовать</button>
+      <button class="btn btn-p" data-main id="mpBtn" onclick="sendMassPublish()" style="width:100%;margin-top:4px">📡 Опубликовать</button>
     </div>
     <div class="lst"><div class="li tap" onclick="openEditorialRules()"><div class="ava ava-purple">✍️</div><div class="li-body"><div class="li-name">Правила редактора</div><div class="li-sub">Проверка на повторы и голос канала перед публикацией</div></div><span class="chev">›</span></div></div>
     <div class="sec" style="margin-top:4px">Последние операции публикации</div>
@@ -4810,7 +4812,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="proxyIsolationBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyImportBox" style="display:none;margin-bottom:8px">
       <textarea id="proxyImport" rows="4" placeholder="socks5://user:pass@host:port&#10;http://host:port&#10;по одному на строку"></textarea>
-      <button class="btn btn-p" style="width:100%;margin-top:6px" onclick="submitProxyImport()">Импортировать</button>
+      <button class="btn btn-p" data-main style="width:100%;margin-top:6px" onclick="submitProxyImport()">Импортировать</button>
     </div>
     <div class="sec" style="margin-top:8px">🌐 Способ получения IP на аккаунт</div>
     <div style="margin:0 16px 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
@@ -4922,7 +4924,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Второй username</label><input id="beuInput" maxlength="33" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="например, myshopapp"></div>
     <div id="beuChips" style="display:flex;gap:6px;flex-wrap:wrap;margin:-2px 0 8px"></div>
     <div id="beuErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
-    <button class="btn btn-p" id="beuBtn" onclick="saveBotExtraUsername()" style="width:100%;margin-top:8px">Привязать</button>
+    <button class="btn btn-p" data-main id="beuBtn" onclick="saveBotExtraUsername()" style="width:100%;margin-top:8px">Привязать</button>
     <button class="btn" id="beuClear" onclick="saveBotExtraUsername(true)" style="width:100%;margin-top:8px;display:none">Отвязать</button>
     <a class="btn" href="https://t.me/BotFather" target="_blank" rel="noopener" style="display:block;text-align:center;width:100%;margin-top:8px;box-sizing:border-box">Открыть @BotFather</a>
   </div>
@@ -4998,7 +5000,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="number" id="setterCount" min="0" value="0">
     </div>
     <div id="setterErr" style="color:var(--red);font-size:13px;margin:6px 0"></div>
-    <button class="btn btn-p" id="setterBtn" onclick="submitProfileSetter()" style="width:100%">🚀 Запустить</button>
+    <button class="btn btn-p" data-main id="setterBtn" onclick="submitProfileSetter()" style="width:100%">🚀 Запустить</button>
   </div>
 </div>
 
@@ -5086,7 +5088,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field"><label>Сообщений на ресурс (1–200)</label><input type="number" id="cscanLimit" value="50" min="1" max="200" class="inp"></div>
       <div class="field"><label>Аккаунтов для чтения (1–10)</label><input type="number" id="cscanAccCount" value="2" min="1" max="10" class="inp"></div>
       <div class="field-err" id="cscanErr"></div>
-      <button class="btn btn-p" id="cscanBtn" onclick="submitComplianceScan()" style="width:100%">🛡️ Запустить проверку</button>
+      <button class="btn btn-p" data-main id="cscanBtn" onclick="submitComplianceScan()" style="width:100%">🛡️ Запустить проверку</button>
     </div>
     <div class="sec" style="margin-top:8px">История задач</div>
     <div class="lst" id="reporterHistory"></div>
@@ -5126,7 +5128,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field"><label>Количество аккаунтов (0 = все доступные)</label><input type="number" id="boostAccCount" value="0" min="0" class="inp"></div>
       <div class="field-err" id="boostErr"></div>
-      <button class="btn btn-p" id="boostBtn" onclick="submitBoost()" style="width:100%">🚀 Запустить</button>
+      <button class="btn btn-p" data-main id="boostBtn" onclick="submitBoost()" style="width:100%">🚀 Запустить</button>
     </div>
     <div class="sec" style="margin-top:8px">История накруток</div>
     <div class="lst" id="boostHistory"></div>
@@ -5142,7 +5144,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="filter-chips mod-tabs" data-module="health" data-tab="diag" role="tablist" aria-label="Вкладки модуля «Здоровье»"></div>
   <div class="sub-sb">
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Проверка всей цепочки исполнения: доступы, аккаунты, очередь и живое подключение одного аккаунта (тот же путь, что у операций).</div>
-    <button class="btn btn-p" id="diagBtn" onclick="runDiag()" style="width:100%;margin-bottom:10px">▶️ Запустить диагностику</button>
+    <button class="btn btn-p" data-main id="diagBtn" onclick="runDiag()" style="width:100%;margin-bottom:10px">▶️ Запустить диагностику</button>
     <div id="diagResult"></div>
   </div>
 </div>
@@ -5219,7 +5221,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="growthAccCount" min="1" max="10" value="3"></div>
       <div class="field-err" id="growthErr"></div>
-      <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
+      <button class="btn btn-p" data-main id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
     </div>
     <div class="sec" style="margin-top:14px">💬 ИИ-комментинг</div>
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Под постами указанных каналов бот оставит КОНТЕКСТНЫЙ комментарий, сгенерированный ИИ по тексту поста (нужны ключи ИИ). Естественно, по теме, на языке поста.</div>
@@ -5237,7 +5239,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="aicAccCount" min="1" max="10" value="3"></div>
       <div class="field-err" id="aicErr"></div>
-      <button class="btn btn-p" id="aicBtn" onclick="submitAiComment()" style="width:100%">💬 Запустить ИИ-комментинг</button>
+      <button class="btn btn-p" data-main id="aicBtn" onclick="submitAiComment()" style="width:100%">💬 Запустить ИИ-комментинг</button>
     </div>
     <div class="sec" style="margin-top:8px">История</div>
     <div class="lst" id="growthHistory"></div>
@@ -5258,7 +5260,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div style="font-size:12px;color:var(--hint);padding:0 2px 4px">Синонимы в <code>{вариант1|вариант2}</code>, каждый вариант проверяется движком. Сверху — пример, снизу — сам шаблон для копирования в софт.</div>
     <div class="field-err" id="spinErr"></div>
-    <button class="btn btn-p" id="spinBtn" onclick="submitSpin()" style="width:100%;margin-top:8px">🎲 Сгенерировать</button>
+    <button class="btn btn-p" data-main id="spinBtn" onclick="submitSpin()" style="width:100%;margin-top:8px">🎲 Сгенерировать</button>
     <div class="lst" id="spinResult" style="margin-top:10px"></div>
     <button class="btn btn-s" id="spinRerollBtn" onclick="rerollSpin()" style="width:100%;margin-top:8px;display:none">🔁 Ещё генерация</button>
   </div>
@@ -5374,7 +5376,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </select>
       </div>
       <div class="field-err" id="bfErr"></div>
-      <button class="btn btn-p" id="bfBtn" onclick="submitBotFactory()" style="width:100%">🏭 Создать ботов</button>
+      <button class="btn btn-p" data-main id="bfBtn" onclick="submitBotFactory()" style="width:100%">🏭 Создать ботов</button>
     </div>
     <div class="sec" style="margin-top:8px">Последние боты</div>
     <div class="lst" id="botFactoryRecent"></div>
@@ -5427,7 +5429,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="number" id="pAge" value="25" min="18" max="80" class="inp">
       </div>
       <div class="field-err" id="pErr"></div>
-      <button class="btn btn-p" onclick="submitPersona()" style="width:100%">🎭 Создать персону</button>
+      <button class="btn btn-p" data-main onclick="submitPersona()" style="width:100%">🎭 Создать персону</button>
     </div>
   </div>
 </div>
@@ -5444,7 +5446,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:8px 16px">
       <div class="field"><label>Номера телефонов (по одному на строке или через запятую)</label><textarea id="phoneCheckInput" rows="5" placeholder="+79001234567&#10;+79001234568&#10;+79001234569" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field-err" id="phoneCheckErr"></div>
-      <button class="btn btn-p" id="phoneCheckBtn" onclick="submitPhoneCheck()" style="width:100%">🔍 Проверить</button>
+      <button class="btn btn-p" data-main id="phoneCheckBtn" onclick="submitPhoneCheck()" style="width:100%">🔍 Проверить</button>
     </div>
     <div class="sec" style="margin-top:8px">История задач</div>
     <div class="lst" id="phoneCheckHistory"></div>
@@ -5558,7 +5560,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <input type="text" id="ccChatId" placeholder="ID чата (-1001234567890)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     <textarea id="ccDesc" rows="2" placeholder="Описание (необязательно)" style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px"></textarea>
     <div id="ccErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
-    <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitCommunityCreate()">Создать</button>
+    <button class="btn btn-p" data-main style="width:100%;margin-top:8px" onclick="submitCommunityCreate()">Создать</button>
   </div>
 </div>
 
@@ -5739,7 +5741,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <div style="padding:0 16px">
       <div id="ucErr" class="field-note" style="display:none;color:var(--red);padding:0 2px 8px"></div>
-      <button class="btn btn-p" style="width:100%" id="ucBtn" onclick="launchUniCampaign()">🚀 Запустить кампанию</button>
+      <button class="btn btn-p" data-main style="width:100%" id="ucBtn" onclick="launchUniCampaign()">🚀 Запустить кампанию</button>
       <div class="field-note" style="padding:8px 2px 16px">Кампания встанет одной записью, а по каждому ресурсу — своей операцией: их видно и можно остановить в «Операциях»</div>
     </div>
   </div>
@@ -6012,7 +6014,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="field-note" style="margin-top:-6px">Закрыть аудиторию за один прогон до потолка ёмкости (≈50/аккаунт), полагаясь на живые сигналы флуда, а не на предсказанный суточный лимит. <b style="color:var(--red)">Выше риск бана.</b> Реальную защиту держат FloodWait/PeerFlood и стоп-кран флота.</div>
       </details>
       <div class="field-err" id="massInviteErr"></div>
-      <button class="btn btn-p" id="massInviteBtn" onclick="submitMassInvite()" style="width:100%">🚀 Запустить инвайт</button>
+      <button class="btn btn-p" data-main id="massInviteBtn" onclick="submitMassInvite()" style="width:100%">🚀 Запустить инвайт</button>
     </div>
     <div class="sec" style="margin-top:8px">История операций</div>
     <div class="lst" id="massInviteHistory"></div>
@@ -6280,7 +6282,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       оплачено, но не опубликовано. Проверки плотные в первые часы и редкие
       дальше: подмену почти всегда делают в начале.
     </div>
-    <button class="btn btn-p" style="width:100%" onclick="submitNotary()">⚖️ Поставить под наблюдение</button>
+    <button class="btn btn-p" data-main style="width:100%" onclick="submitNotary()">⚖️ Поставить под наблюдение</button>
   </div>
 </div>
 
@@ -6321,7 +6323,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="lst" id="fcChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
     </div>
     <div class="field-err" id="fdErr"></div>
-    <button class="btn btn-p" id="fdBtn" style="width:100%" onclick="submitFolder()">📁 Создать и получить ссылку</button>
+    <button class="btn btn-p" data-main id="fdBtn" style="width:100%" onclick="submitFolder()">📁 Создать и получить ссылку</button>
   </div>
 </div>
 
@@ -6774,7 +6776,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚙️ Настройки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="saveSettings()">Сохранить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" data-main style="padding:7px 14px;font-size:13px" onclick="saveSettings()">Сохранить</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Уведомления</div>
@@ -6914,7 +6916,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="errRepText" style="width:100%;min-height:160px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:12px;color:var(--text);font-size:14px;resize:vertical;box-sizing:border-box" maxlength="2000" placeholder="Опишите ошибку подробно…"></textarea>
     </div>
     <div id="errRepErr" style="color:var(--red);font-size:13px;margin:4px 0"></div>
-    <button class="btn btn-p" id="errRepBtn" onclick="submitErrReport()" style="width:100%">📤 Отправить</button>
+    <button class="btn btn-p" data-main id="errRepBtn" onclick="submitErrReport()" style="width:100%">📤 Отправить</button>
     <div class="sec" style="margin-top:16px">Мои отчёты</div>
     <div class="lst" id="errRepList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -6979,7 +6981,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field-err" id="bcastErr"></div>
-    <button class="btn btn-p" id="bcastBtn" onclick="sendBcast()" style="width:100%">📢 Отправить</button>
+    <button class="btn btn-p" data-main id="bcastBtn" onclick="sendBcast()" style="width:100%">📢 Отправить</button>
   </div>
 </div>
 
@@ -7037,7 +7039,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
     </details>
     <div class="field-err" id="arErr"></div>
-    <button class="btn btn-p" id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
+    <button class="btn btn-p" data-main id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
   </div>
 </div>
 
@@ -7066,7 +7068,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="fnMsg" rows="4" maxlength="4096" placeholder="Текст первого сообщения…"></textarea>
     </div>
     <div class="field-err" id="fnErr"></div>
-    <button class="btn btn-p" id="fnBtn" onclick="saveFunnel()" style="width:100%">🔄 Создать</button>
+    <button class="btn btn-p" data-main id="fnBtn" onclick="saveFunnel()" style="width:100%">🔄 Создать</button>
   </div>
 </div>
 
@@ -7084,7 +7086,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="compLabel" maxlength="60" placeholder="Напр: Главный конкурент">
     </div>
     <div class="field-err" id="compErr"></div>
-    <button class="btn btn-p" id="compBtn" onclick="saveComp()" style="width:100%">➕ Добавить</button>
+    <button class="btn btn-p" data-main id="compBtn" onclick="saveComp()" style="width:100%">➕ Добавить</button>
   </div>
 </div>
 
@@ -7109,7 +7111,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div id="netbcBots" class="lst" style="max-height:220px;overflow:auto;padding:4px 10px"></div>
     </div>
     <div class="field-err" id="netbcErr"></div>
-    <button class="btn btn-p" id="netbcBtn" onclick="sendNetBc()" style="width:100%">📣 Разослать</button>
+    <button class="btn btn-p" data-main id="netbcBtn" onclick="sendNetBc()" style="width:100%">📣 Разослать</button>
   </div>
 </div>
 
@@ -7129,7 +7131,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field-err" id="netRoleErr"></div>
-    <button class="btn btn-p" onclick="saveNetRole()" style="width:100%">💾 Сохранить</button>
+    <button class="btn btn-p" data-main onclick="saveNetRole()" style="width:100%">💾 Сохранить</button>
   </div>
 </div>
 
@@ -7159,7 +7161,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-note">Повторяемая рассылка сама планирует следующую отправку</div>
     </div>
     <div class="field-err" id="schErr"></div>
-    <button class="btn btn-p" id="schBtn" onclick="saveSchedule()" style="width:100%">⏰ Запланировать</button>
+    <button class="btn btn-p" data-main id="schBtn" onclick="saveSchedule()" style="width:100%">⏰ Запланировать</button>
   </div>
 </div>
 
@@ -7178,7 +7180,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-note"><span id="tplLen">0</span>/4096</div>
     </div>
     <div class="field-err" id="tplErr"></div>
-    <button class="btn btn-p" id="tplBtn" onclick="saveTpl()" style="width:100%">💾 Сохранить</button>
+    <button class="btn btn-p" data-main id="tplBtn" onclick="saveTpl()" style="width:100%">💾 Сохранить</button>
   </div>
 </div>
 
@@ -7197,7 +7199,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="proxyLabel" maxlength="50" placeholder="Напр: RU-proxy-1">
     </div>
     <div class="field-err" id="proxyErr"></div>
-    <button class="btn btn-p" id="proxyBtn" onclick="saveProxy()" style="width:100%">➕ Добавить</button>
+    <button class="btn btn-p" data-main id="proxyBtn" onclick="saveProxy()" style="width:100%">➕ Добавить</button>
   </div>
 </div>
 
@@ -7235,7 +7237,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <textarea id="accImportText" rows="4" placeholder="StringSession аккаунта…&#10;по одной сессии на строку" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea>
         <div class="field-note">Формат (Telethon/Pyrogram) определяется автоматически. Сессия проверяется подключением и шифруется при сохранении.</div>
       </div>
-      <button class="btn btn-p" id="accImportBtn" onclick="submitAccImport()" style="width:100%">➕ Импортировать</button>
+      <button class="btn btn-p" data-main id="accImportBtn" onclick="submitAccImport()" style="width:100%">➕ Импортировать</button>
     </div>
 
     <!-- Способ 2: вход по номеру телефона -->
@@ -7244,7 +7246,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <label>Номер телефона</label>
         <input type="tel" id="accPhoneNum" placeholder="+71234567890" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <div class="field-note">Telegram пришлёт код в приложение на этом номере.</div>
-        <button class="btn btn-p" id="accPhoneStartBtn" onclick="accPhoneStart()" style="width:100%;margin-top:8px">📨 Отправить код</button>
+        <button class="btn btn-p" data-main id="accPhoneStartBtn" onclick="accPhoneStart()" style="width:100%;margin-top:8px">📨 Отправить код</button>
       </div>
       <div class="field" id="accPhoneStep-code" style="display:none">
         <label>Код из Telegram</label>
@@ -7326,7 +7328,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-note">Только a-z, A-Z, 0-9, _ и -. Ссылка: t.me/bot?start=<b>параметр</b></div>
     </div>
     <div class="field-err" id="dlErr"></div>
-    <button class="btn btn-p" id="dlBtn" onclick="saveDl()" style="width:100%">➕ Создать</button>
+    <button class="btn btn-p" data-main id="dlBtn" onclick="saveDl()" style="width:100%">➕ Создать</button>
   </div>
 </div>
 
@@ -7344,7 +7346,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="cmdDesc" maxlength="256" placeholder="Помощь">
     </div>
     <div class="field-err" id="cmdErr"></div>
-    <button class="btn btn-p" id="cmdSaveBtn" onclick="saveCmd()" style="width:100%">➕ Добавить</button>
+    <button class="btn btn-p" data-main id="cmdSaveBtn" onclick="saveCmd()" style="width:100%">➕ Добавить</button>
   </div>
 </div>
 
@@ -7357,7 +7359,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Заголовок (необязательно)</label><input type="text" id="aiMemTitle" placeholder="Краткое описание"></div>
     <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="4" placeholder="Запишите факт, инструкцию или заметку для ИИ-ассистента…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="aiMemErr"></div>
-    <button class="btn btn-p" id="aiMemBtn" onclick="submitAiMemory()" style="width:100%">💾 Сохранить</button>
+    <button class="btn btn-p" data-main id="aiMemBtn" onclick="submitAiMemory()" style="width:100%">💾 Сохранить</button>
   </div>
 </div>
 
@@ -7369,7 +7371,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Username, @username, ссылка или ID</label><input type="text" id="regCheckTarget" placeholder="@username или t.me/group"></div>
     <div class="field-note">Определяет примерную дату регистрации аккаунта или создания группы/канала</div>
     <div class="field-err" id="regCheckErr"></div>
-    <button class="btn btn-p" id="regCheckBtn" onclick="submitRegCheck()" style="width:100%">🔍 Проверить</button>
+    <button class="btn btn-p" data-main id="regCheckBtn" onclick="submitRegCheck()" style="width:100%">🔍 Проверить</button>
   </div>
 </div>
 
@@ -7428,7 +7430,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
     </details>
     <div class="field-err" id="warmupErr"></div>
-    <button class="btn btn-p" id="warmupBtn" onclick="submitWarmup()" style="width:100%">🚀 Запустить прогрев</button>
+    <button class="btn btn-p" data-main id="warmupBtn" onclick="submitWarmup()" style="width:100%">🚀 Запустить прогрев</button>
   </div>
 </div>
 
@@ -7439,7 +7441,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Username канала (без @)</label><input type="text" id="adIntelCh" placeholder="target_channel"></div>
     <div class="field-note">ИИ просканирует рекламу в канале и оценит качество аудитории</div>
     <div class="field-err" id="adIntelErr"></div>
-    <button class="btn btn-p" id="adIntelBtn" onclick="submitAdIntelChannel()" style="width:100%">🚀 Запустить сканирование</button>
+    <button class="btn btn-p" data-main id="adIntelBtn" onclick="submitAdIntelChannel()" style="width:100%">🚀 Запустить сканирование</button>
   </div>
 </div>
 
@@ -7464,7 +7466,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field"><label>Лимит (макс. 10000)</label><input type="number" id="parserLimit" min="10" max="10000" value="500"></div>
     <div class="field-err" id="parserErr"></div>
-    <button class="btn btn-p" id="parserBtn" onclick="submitParser()" style="width:100%">🚀 Запустить</button>
+    <button class="btn btn-p" data-main id="parserBtn" onclick="submitParser()" style="width:100%">🚀 Запустить</button>
   </div>
 </div>
 
@@ -7496,7 +7498,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field"><label>Заметки</label><input type="text" id="dealNotes" maxlength="500" placeholder="Необязательно"></div>
     <div class="field-err" id="dealErr"></div>
-    <button class="btn btn-p" id="dealSaveBtn" onclick="saveDeal()" style="width:100%">➕ Создать</button>
+    <button class="btn btn-p" data-main id="dealSaveBtn" onclick="saveDeal()" style="width:100%">➕ Создать</button>
   </div>
 </div>
 
@@ -7508,7 +7510,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Название</label><input type="text" id="wsName" maxlength="100" placeholder="Напр: Команда продаж"></div>
     <div class="field"><label>Описание (необязательно)</label><input type="text" id="wsDesc" maxlength="500" placeholder="Описание…"></div>
     <div class="field-err" id="wsErr"></div>
-    <button class="btn btn-p" id="wsSaveBtn" onclick="saveWorkspace()" style="width:100%">➕ Создать</button>
+    <button class="btn btn-p" data-main id="wsSaveBtn" onclick="saveWorkspace()" style="width:100%">➕ Создать</button>
   </div>
 </div>
 
@@ -7524,7 +7526,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>SMM-панель</label><select id="promoOrderPanel" class="sel"><option value="">— не выбрана —</option></select></div>
     <div style="color:var(--hint);font-size:12px;padding:2px 0 6px">Бот и панель нужны для запуска накрутки. Панели добавляются через Telegram-бота командой /promo.</div>
     <div class="field-err" id="promoOrderErr"></div>
-    <button class="btn btn-p" id="promoOrderBtn" onclick="savePromoOrder()" style="width:100%">➕ Создать заказ</button>
+    <button class="btn btn-p" data-main id="promoOrderBtn" onclick="savePromoOrder()" style="width:100%">➕ Создать заказ</button>
   </div>
 </div>
 
@@ -7536,7 +7538,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Username бота (без @)</label><input type="text" id="promoBotUsername" placeholder="my_bot" oninput="this.value=this.value.replace(/^@/,'')"></div>
     <div class="field-note">Бот будет «созревать» 21 день перед продвижением</div>
     <div class="field-err" id="promoBotErr"></div>
-    <button class="btn btn-p" id="promoBotBtn" onclick="savePromoBot()" style="width:100%">➕ Добавить</button>
+    <button class="btn btn-p" data-main id="promoBotBtn" onclick="savePromoBot()" style="width:100%">➕ Добавить</button>
   </div>
 </div>
 
@@ -7624,7 +7626,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-note">Рассылка на тысячи получателей идёт сутками. Ночью (23:00–07:00 по стране аккаунта) отправка приостанавливается и продолжается утром: ночные ЛС дают низкий отклик и жалобы на спам</div>
     </div>
     <div class="field-err" id="cmpErr"></div>
-    <button class="btn btn-p" id="cmpBtn" onclick="saveCmp()" style="width:100%">📨 Создать черновик</button>
+    <button class="btn btn-p" data-main id="cmpBtn" onclick="saveCmp()" style="width:100%">📨 Создать черновик</button>
   </div>
 </div>
 
@@ -7650,7 +7652,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field-err" id="chPostErr"></div>
-    <button class="btn btn-p" id="chPostBtn" onclick="sendChPost()" style="width:100%">📤 Опубликовать</button>
+    <button class="btn btn-p" data-main id="chPostBtn" onclick="sendChPost()" style="width:100%">📤 Опубликовать</button>
   </div>
 </div>
 
@@ -7722,7 +7724,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field-err" id="rkAddErr"></div>
-    <button class="btn btn-p" id="rkAddBtn" onclick="submitRankingAdd()" style="width:100%">🔍 Добавить</button>
+    <button class="btn btn-p" data-main id="rkAddBtn" onclick="submitRankingAdd()" style="width:100%">🔍 Добавить</button>
   </div>
 </div>
 
@@ -7807,7 +7809,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="nbCreateDesc" rows="2" placeholder="Описание сети…" class="input-bc"></textarea>
     </div>
     <div class="field-err" id="nbCreateErr"></div>
-    <button class="btn btn-p" id="nbCreateBtn" onclick="submitNetCreate()" style="width:100%">🕸️ Создать</button>
+    <button class="btn btn-p" data-main id="nbCreateBtn" onclick="submitNetCreate()" style="width:100%">🕸️ Создать</button>
   </div>
 </div>
 
@@ -7834,7 +7836,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="nbNodeLabel" placeholder="Необязательная метка" class="inp">
     </div>
     <div class="field-err" id="nbNodeErr"></div>
-    <button class="btn btn-p" onclick="submitNetAddNode()" style="width:100%">➕ Добавить</button>
+    <button class="btn btn-p" data-main onclick="submitNetAddNode()" style="width:100%">➕ Добавить</button>
   </div>
 </div>
 
@@ -7861,7 +7863,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field-err" id="nbEdgeErr"></div>
-    <button class="btn btn-p" onclick="submitNetAddEdge()" style="width:100%">🔗 Добавить</button>
+    <button class="btn btn-p" data-main onclick="submitNetAddEdge()" style="width:100%">🔗 Добавить</button>
   </div>
 </div>
 
@@ -7942,7 +7944,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="wfCreateTriggerVal" placeholder="" class="inp" style="margin-top:6px;display:none">
     </div>
     <div class="field-err" id="wfCreateErr"></div>
-    <button class="btn btn-p" id="wfCreateBtn" onclick="submitWorkflowCreate()" style="width:100%">🔄 Создать</button>
+    <button class="btn btn-p" data-main id="wfCreateBtn" onclick="submitWorkflowCreate()" style="width:100%">🔄 Создать</button>
   </div>
 </div>
 
@@ -8099,7 +8101,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="number" id="wfStepWhElseGoto" min="1" placeholder="Если не удалось — перейти к шагу № (пусто = дальше)" class="inp" style="margin-top:6px">
     </div>
     <div class="field-err" id="wfStepErr"></div>
-    <button class="btn btn-p" onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
+    <button class="btn btn-p" data-main onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
   </div>
 </div>
 
@@ -20018,7 +20020,7 @@ async function openContactCRM(id) {
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки ($)</label><input id="crm-value" type="number" value="${crm.deal_value||0}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><input id="crm-remind-text" placeholder="Текст напоминания" class="inp"></div>
-      <button class="btn btn-p" onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
+      <button class="btn btn-p" data-main onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
     </div>`;
     if (crm.next_reminder_at) {
       html += `<div style="padding:0 16px 8px"><div style="padding:8px 12px;background:rgba(251,191,36,.1);border-radius:8px;font-size:13px">⏰ ${new Date(crm.next_reminder_at).toLocaleString('ru-RU')}${crm.next_reminder_text?' · '+esc(crm.next_reminder_text):''}</div></div>`;
@@ -22896,7 +22898,7 @@ async function computeCampaignPlan() {
         ${row('Рекоменд. лимит/аккаунт', p.recommended_per_account)}
         ${p.extra_accounts?row('Не хватает аккаунтов', '+'+p.extra_accounts):''}
       </div>
-      <button class="btn btn-p" style="width:100%;margin-top:10px" onclick="launchFromPlan()">🚀 Открыть инвайт с этими настройками</button>`;
+      <button class="btn btn-p" data-main style="width:100%;margin-top:10px" onclick="launchFromPlan()">🚀 Открыть инвайт с этими настройками</button>`;
   } catch(e){ el.innerHTML = '<div style="color:var(--red);font-size:13px">'+esc(errRu(e,'Ошибка'))+'</div>'; }
 }
 async function launchFromPlan() {
@@ -32774,5 +32776,6 @@ function renderAudSegChart(segments) {
 <script src="screens/find_mine.js"></script>
 <script src="screens/workflow_map.js"></script>
 <script src="screens/desktop.js"></script>
+<script src="screens/main_button.js"></script>
 </body>
 </html>
