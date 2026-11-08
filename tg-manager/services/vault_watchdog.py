@@ -83,8 +83,12 @@ async def _check_once(pool: asyncpg.Pool, bot: Bot) -> int:
         if stale and notified is None:
             chat_id = r["user_chat_id"] or r["owner_id"]
             try:
-                await bot.send_message(chat_id, _TEXT.format(days=days), parse_mode="HTML")
-                sent += 1
+                # Общий слой: тумблер «Советы», уровень «инфо».
+                from database import db as _db
+                if await _db.notify_if_enabled(pool, bot, int(chat_id), "advice",
+                                               _TEXT.format(days=days),
+                                               dedup_key="vault_stale"):
+                    sent += 1
             except Exception:
                 log.debug("vault_watchdog: не удалось уведомить owner=%s", r["owner_id"])
             # метку ставим в любом случае — не долбим при недоступном чате

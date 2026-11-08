@@ -2875,6 +2875,10 @@ _NOTIF_SQL: dict[str, str] = {
     "position_change": "position_change = NOT position_change",
     "op_complete": "op_complete     = NOT op_complete",
     "restriction": "restriction     = NOT restriction",
+    "leads": "leads           = NOT leads",
+    "reports": "reports         = NOT reports",
+    "advice": "advice          = NOT advice",
+    "digest_only": "digest_only     = NOT digest_only",
 }
 
 _NOTIF_LABELS = {
@@ -2883,7 +2887,26 @@ _NOTIF_LABELS = {
     "position_change": "Изменение позиций",
     "op_complete": "Завершение операций",
     "restriction": "Ограничения аккаунтов",
+    "leads": "Лиды и заявки",
+    "reports": "Ежедневные отчёты",
+    "advice": "Советы и напоминания",
 }
+
+
+def _notif_on(row, field: str, default: bool = True) -> bool:
+    """Значение тумблера; колонки нет (миграция не накатилась) — значение по умолчанию."""
+    try:
+        v = row[field]
+    except (KeyError, TypeError):
+        return default
+    return default if v is None else bool(v)
+
+
+def _notif_label(field: str) -> str:
+    """Подпись с уровнем: ⚡ — «нужно действие», приходит сразу и ночью."""
+    from services.quiet_hours import level_of, ACTION
+    mark = " ⚡" if level_of(field) == ACTION else ""
+    return _NOTIF_LABELS[field] + mark
 
 
 async def _get_or_create_notif(
@@ -2903,12 +2926,18 @@ async def _get_or_create_notif(
 
 def _notif_kb(row: asyncpg.Record) -> object:
     kb = InlineKeyboardBuilder()
-    for field, label in _NOTIF_LABELS.items():
-        val = row[field]
-        icon = "✅" if val else "❌"
+    for field in _NOTIF_LABELS:
+        icon = "✅" if _notif_on(row, field) else "❌"
         kb.button(
-            text=f"{icon} {label}", callback_data=BmCb(action="notif_toggle", sub=field)
+            text=f"{icon} {_notif_label(field)}",
+            callback_data=BmCb(action="notif_toggle", sub=field),
         )
+    digest = _notif_on(row, "digest_only", False)
+    kb.button(
+        text=("🗞 Несрочное: одной сводкой в день" if digest
+              else "🗞 Несрочное: сразу"),
+        callback_data=BmCb(action="notif_toggle", sub="digest_only"),
+    )
     q = _quiet_of(row)
     if q:
         from services.quiet_hours import window_label
@@ -2923,7 +2952,7 @@ def _notif_kb(row: asyncpg.Record) -> object:
                 kb.button(text=f"{mark}{a:02d}–{b:02d}",
                           callback_data=BmCb(action="notif_quiet", sub=f"{a}-{b}"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
-    n = len(_NOTIF_LABELS) + (1 if q else 0)
+    n = len(_NOTIF_LABELS) + 1 + (1 if q else 0)
     kb.adjust(*([1] * n), *([3] if q and q["on"] else []), 1)
     return kb.as_markup()
 
@@ -2939,9 +2968,16 @@ def _quiet_of(row) -> dict | None:
 
 def _notif_text(row: asyncpg.Record) -> str:
     lines = ["<b>🔔 Настройки уведомлений</b>\n"]
-    for field, label in _NOTIF_LABELS.items():
-        icon = "✅" if row[field] else "❌"
-        lines.append(f"{icon} {label}")
+    for field in _NOTIF_LABELS:
+        icon = "✅" if _notif_on(row, field) else "❌"
+        lines.append(f"{icon} {_notif_label(field)}")
+    lines.append("\n⚡ — нужно действие: приходит сразу, даже в тихие часы.")
+    if _notif_on(row, "digest_only", False):
+        try:
+            hour = int(row["digest_hour"])
+        except (KeyError, TypeError, ValueError):
+            hour = 9
+        lines.append(f"🗞 Остальное копится и приходит одной сводкой в {hour:02d}:00.")
     q = _quiet_of(row)
     if q and q["on"]:
         from services.quiet_hours import window_label

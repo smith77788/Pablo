@@ -6792,16 +6792,33 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="checkbox" id="set-notif-ops" style="width:18px;height:18px;accent-color:var(--accent)">
       </label>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
-        <span style="font-size:14px">⚠️ Критические ошибки (флуд/ограничения)</span>
+        <span style="font-size:14px">⚠️ Ограничения и защита аккаунтов ⚡</span>
         <input type="checkbox" id="set-notif-error" style="width:18px;height:18px;accent-color:var(--accent)" checked>
       </label>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">👤 Новые подписчики ботов</span>
         <input type="checkbox" id="set-notif-newuser" style="width:18px;height:18px;accent-color:var(--accent)" checked>
       </label>
-      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0">
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">📈 Изменение позиций в поиске</span>
         <input type="checkbox" id="set-notif-position" style="width:18px;height:18px;accent-color:var(--accent)" checked>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
+        <span style="font-size:14px">🎯 Лиды и заявки ⚡</span>
+        <input type="checkbox" id="set-notif-leads" style="width:18px;height:18px;accent-color:var(--accent)" checked>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
+        <span style="font-size:14px">📋 Ежедневные отчёты</span>
+        <input type="checkbox" id="set-notif-reports" style="width:18px;height:18px;accent-color:var(--accent)" checked>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0">
+        <span style="font-size:14px">💡 Советы и напоминания</span>
+        <input type="checkbox" id="set-notif-advice" style="width:18px;height:18px;accent-color:var(--accent)" checked>
+      </label>
+      <div style="font-size:12px;color:var(--hint);line-height:1.4;padding:2px 0 8px">⚡ — нужно действие: приходит сразу, даже в тихие часы.</div>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-top:1px solid var(--sep)">
+        <span style="font-size:14px">🗞 Несрочное — одной сводкой в день (в 09:00)</span>
+        <input type="checkbox" id="set-digest-only" style="width:18px;height:18px;accent-color:var(--accent)">
       </label>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-top:1px solid var(--sep)">
         <span style="font-size:14px">🌙 Тихие часы</span>
@@ -30497,6 +30514,10 @@ async function openSettings() {
       setChk('set-notif-error', backend.notif_error, true);
       setChk('set-notif-newuser', backend.notif_new_user, true);
       setChk('set-notif-position', backend.notif_position, true);
+      setChk('set-notif-leads', backend.notif_leads, true);
+      setChk('set-notif-reports', backend.notif_reports, true);
+      setChk('set-notif-advice', backend.notif_advice, true);
+      setChk('set-digest-only', backend.digest_only, false);
       setChk('set-quiet', backend.quiet_enabled, false);
       const qw = document.getElementById('set-quiet-window');
       const qv = (backend.quiet_start ?? 23) + '-' + (backend.quiet_end ?? 8);
@@ -30598,6 +30619,10 @@ async function saveSettings() {
     notif_error: document.getElementById('set-notif-error')?.checked ?? true,
     notif_new_user: document.getElementById('set-notif-newuser')?.checked ?? true,
     notif_position: document.getElementById('set-notif-position')?.checked ?? true,
+    notif_leads: document.getElementById('set-notif-leads')?.checked ?? true,
+    notif_reports: document.getElementById('set-notif-reports')?.checked ?? true,
+    notif_advice: document.getElementById('set-notif-advice')?.checked ?? true,
+    digest_only: !!document.getElementById('set-digest-only')?.checked,
     proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
   };
   _saveLocalSettings(s);

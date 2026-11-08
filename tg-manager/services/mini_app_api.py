@@ -6914,6 +6914,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # «новый подписчик» / «позиция изменилась» было неоткуда.
             settings["notif_new_user"] = bool(_ns.get("new_user", True))
             settings["notif_position"] = bool(_ns.get("position_change", True))
+            # Тумблеры фоновых уведомлений (v312) и «несрочное — сводкой».
+            settings["notif_leads"] = bool(_ns.get("leads", True))
+            settings["notif_reports"] = bool(_ns.get("reports", True))
+            settings["notif_advice"] = bool(_ns.get("advice", True))
         except Exception as _e:
             log.debug("user_settings_get notif overlay uid=%d: %s", uid, _e)
         # Тихие часы (services/quiet_hours.py) — тоже из notification_settings.
@@ -6926,6 +6930,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 settings.update({"quiet_enabled": bool(_q["quiet_enabled"]),
                                  "quiet_start": int(_q["quiet_start"]),
                                  "quiet_end": int(_q["quiet_end"]), "tz": _q["tz"]})
+            settings["digest_only"] = bool(await pool.fetchval(
+                "SELECT digest_only FROM notification_settings WHERE user_id=$1", uid))
             settings["quiet_held"] = int(await pool.fetchval(
                 "SELECT COUNT(*) FROM notification_held WHERE user_id=$1", uid) or 0)
         except Exception as _e:
@@ -6985,6 +6991,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     )
             except Exception as _ne:
                 log.warning("settings→notification_settings sync failed uid=%d: %s", uid, _ne)
+            # Фоновые уведомления (v312) — только если фронт их прислал.
+            if "notif_leads" in data or "digest_only" in data:
+                try:
+                    await pool.execute(
+                        "INSERT INTO notification_settings(user_id, leads, reports, advice, "
+                        "digest_only) VALUES($1,$2,$3,$4,$5) "
+                        "ON CONFLICT(user_id) DO UPDATE SET leads=$2, reports=$3, advice=$4, "
+                        "digest_only=$5, updated_at=now()",
+                        uid, bool(data.get("notif_leads", True)),
+                        bool(data.get("notif_reports", True)),
+                        bool(data.get("notif_advice", True)),
+                        bool(data.get("digest_only", False)))
+                except Exception as _le:
+                    log.warning("settings→notification levels sync failed uid=%d: %s", uid, _le)
             # Тихие часы — только если фронт их прислал (старый клиент не знает
             # этих полей и не должен их сбрасывать). Часы вне 0..23 — 400.
             if "quiet_enabled" in data:

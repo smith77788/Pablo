@@ -32,9 +32,29 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 log = logging.getLogger(__name__)
 
-# Срочное идёт и ночью: ограничение аккаунта или флуд, оставленные до утра,
-# — это аккаунт, потерянный к утру.
-URGENT = frozenset({"restriction", "flood_warning"})
+# Уровни уведомлений. «Нужно действие» идёт сразу, и ночью тоже: ограничение
+# аккаунта или флуд, оставленные до утра, — это аккаунт, потерянный к утру, а
+# клиент, ждущий ответа до утра, — потерянная продажа. «Инфо» в тихие часы
+# (и всегда, если владелец выбрал «только сводкой») копится в сводку.
+# Третий уровень — «тишина» — это выключенный тумблер типа.
+ACTION, INFO = "action", "info"
+LEVELS = {
+    "restriction": ACTION,     # ограничения, защита аккаунтов, волна банов
+    "flood_warning": ACTION,
+    "leads": ACTION,           # горячий лид из сценария или по намерению
+    "op_complete": INFO,
+    "new_user": INFO,
+    "position_change": INFO,
+    "reports": INFO,           # ежедневные отчёты фоновых сервисов
+    "advice": INFO,            # советы «организма», зависшие подключения
+    "deploy": INFO,
+}
+URGENT = frozenset(p for p, lvl in LEVELS.items() if lvl == ACTION)
+
+
+def level_of(pref: str) -> str:
+    """Уровень типа; неизвестный тип — «инфо» (будить ради него нельзя)."""
+    return LEVELS.get(pref, INFO)
 
 DEFAULT_TZ = "Europe/Moscow"
 FLUSH_EVERY = 300          # секунд между обходами очереди
@@ -47,6 +67,8 @@ PREF_LABELS = {
     "new_user": "👤 Новые подписчики",
     "position_change": "📈 Позиции в поиске",
     "deploy": "🚀 Обновления",
+    "reports": "📋 Отчёты",
+    "advice": "💡 Советы",
 }
 
 PRESETS = ((22, 8), (23, 8), (0, 9))
@@ -103,21 +125,45 @@ async def save(pool, uid: int, enabled: bool, start: int, end: int,
 
 
 async def _settings(pool, uid: int):
+    # SELECT *: digest_only появился в v312, без миграции читаем как «выкл».
     return await pool.fetchrow(
-        "SELECT quiet_enabled, quiet_start, quiet_end, tz "
-        "FROM notification_settings WHERE user_id=$1", uid)
+        "SELECT * FROM notification_settings WHERE user_id=$1", uid)
+
+
+def _get(row, key, default=None):
+    try:
+        return row[key] if key in row.keys() else default
+    except (AttributeError, KeyError):
+        try:
+            return row.get(key, default)
+        except AttributeError:
+            return default
+
+
+async def save_digest(pool, uid: int, digest_only: bool, hour: int = 9) -> None:
+    """«Несрочное — только сводкой» и час этой сводки по местному времени."""
+    if not 0 <= int(hour) <= 23:
+        raise ValueError("digest hour must be 0..23")
+    await pool.execute(
+        "INSERT INTO notification_settings(user_id, digest_only, digest_hour) "
+        "VALUES($1,$2,$3) ON CONFLICT(user_id) DO UPDATE SET digest_only=$2, "
+        "digest_hour=$3, updated_at=now()", uid, bool(digest_only), int(hour))
 
 
 async def should_hold(pool, uid: int, pref: str,
                       now_utc: Optional[dt.datetime] = None) -> bool:
-    """Придержать ли уведомление до конца тихих часов."""
-    if pref in URGENT:
+    """Придержать ли уведомление: до конца тихих часов или до ежедневной сводки."""
+    if level_of(pref) == ACTION:
         return False
     try:
         row = await _settings(pool, uid)
+        if not row:
+            return False
         # Строго True: «что-то истинное» от чужого пула или старой схемы не
         # должно глушить уведомления.
-        if not row or row["quiet_enabled"] is not True:
+        if _get(row, "digest_only") is True:
+            return True
+        if row["quiet_enabled"] is not True:
             return False
         now_utc = now_utc or dt.datetime.now(dt.timezone.utc)
         return in_quiet(now_utc, int(row["quiet_start"]), int(row["quiet_end"]), row["tz"])
@@ -161,13 +207,15 @@ def plain_line(text: str) -> str:
     return s
 
 
-def build_digest(rows: list, window: str) -> str:
+def build_digest(rows: list, window: str, *, daily: bool = False) -> str:
     """Сводка: по типам, свежие сверху, с честным счётом скрытого."""
     total = len(rows)
     by_pref: dict[str, list] = {}
     for r in rows:
         by_pref.setdefault(r["pref"], []).append(r)
-    lines = [f"🌙 <b>Пока были тихие часы ({window})</b> — уведомлений: {total}"]
+    head = (f"🗞 <b>Сводка за день</b> — уведомлений: {total}" if daily
+            else f"🌙 <b>Пока были тихие часы ({window})</b> — уведомлений: {total}")
+    lines = [head]
     shown = 0
     for pref, items in by_pref.items():
         label = PREF_LABELS.get(pref, "🔔 Прочее")
@@ -191,14 +239,19 @@ async def flush_once(pool, bot, now_utc: Optional[dt.datetime] = None) -> int:
     отправленных сводок."""
     now_utc = now_utc or dt.datetime.now(dt.timezone.utc)
     owners = await pool.fetch(
-        "SELECT DISTINCT h.user_id, s.quiet_enabled, s.quiet_start, s.quiet_end, s.tz "
+        "SELECT DISTINCT ON (h.user_id) h.user_id AS held_uid, s.* "
         "FROM notification_held h "
-        "LEFT JOIN notification_settings s ON s.user_id = h.user_id")
+        "LEFT JOIN notification_settings s ON s.user_id = h.user_id "
+        "ORDER BY h.user_id")
     sent = 0
     for o in owners:
-        uid = o["user_id"]
+        uid = _get(o, "held_uid") or o["user_id"]
         if o["quiet_enabled"] and in_quiet(now_utc, o["quiet_start"], o["quiet_end"], o["tz"]):
             continue  # ещё ночь у этого владельца
+        daily = _get(o, "digest_only") is True
+        if daily and not digest_due(now_utc, _get(o, "digest_hour", 9),
+                                    _get(o, "last_digest_at"), o["tz"]):
+            continue  # сводка за день — в свой час, раз в сутки
         rows = await pool.fetch(
             "SELECT id, pref, text, created_at AT TIME ZONE $2 AS created_at "
             "FROM notification_held WHERE user_id=$1 ORDER BY id",
@@ -208,7 +261,8 @@ async def flush_once(pool, bot, now_utc: Optional[dt.datetime] = None) -> int:
         window = window_label(o["quiet_start"] if o["quiet_start"] is not None else 23,
                               o["quiet_end"] if o["quiet_end"] is not None else 8)
         try:
-            await bot.send_message(uid, build_digest(list(rows), window), parse_mode="HTML")
+            await bot.send_message(uid, build_digest(list(rows), window, daily=daily),
+                                   parse_mode="HTML")
         except Exception as exc:
             from database.db import _notify_failure_is_permanent
             if not _notify_failure_is_permanent(exc):
@@ -218,8 +272,30 @@ async def flush_once(pool, bot, now_utc: Optional[dt.datetime] = None) -> int:
         await pool.execute(
             "DELETE FROM notification_held WHERE user_id=$1 AND id <= $2",
             uid, max(r["id"] for r in rows))
+        if daily:
+            await pool.execute(
+                "UPDATE notification_settings SET last_digest_at=$2 WHERE user_id=$1",
+                uid, now_utc)
         sent += 1
     return sent
+
+
+def digest_due(now_utc: dt.datetime, hour, last_at, tz: Optional[str]) -> bool:
+    """Пора ли ежедневной сводке: местный час не раньше заданного, и сегодня
+    по местному календарю её ещё не было."""
+    zone = tz_or_default(tz)
+    local = now_utc.astimezone(zone)
+    try:
+        hour = int(hour if hour is not None else 9)
+    except (TypeError, ValueError):
+        hour = 9
+    if local.hour < hour:
+        return False
+    if last_at is None:
+        return True
+    if last_at.tzinfo is None:
+        last_at = last_at.replace(tzinfo=dt.timezone.utc)
+    return last_at.astimezone(zone).date() < local.date()
 
 
 async def run(pool, bot) -> None:

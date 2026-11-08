@@ -5143,24 +5143,26 @@ async def record_flood_event(
 
 
 async def get_notification_settings(pool: asyncpg.Pool, user_id: int) -> dict:
-    """Return notification preferences for a user. Defaults to all True if no record."""
+    """Тумблеры уведомлений владельца: тип → включён ли. Нет записи — всё включено.
+
+    SELECT * , а не список колонок: тумблеры добавляются миграциями (v312 —
+    leads/reports/advice), и база, где миграция ещё не накатилась, должна
+    отдавать «включено», а не падать.
+    """
+    result = {p: True for p in NOTIFY_PREFS}
     row = await pool.fetchrow(
-        "SELECT new_user, flood_warning, position_change, op_complete, restriction "
-        "FROM notification_settings WHERE user_id=$1",
-        user_id,
-    )
+        "SELECT * FROM notification_settings WHERE user_id=$1", user_id)
     if row:
-        result = dict(row)
-        result.setdefault("deploy", True)
-        return result
-    return {
-        "new_user": True,
-        "flood_warning": True,
-        "position_change": True,
-        "op_complete": True,
-        "restriction": True,
-        "deploy": True,
-    }
+        for p in NOTIFY_PREFS:
+            if p in row.keys() and row[p] is not None:
+                result[p] = bool(row[p])
+    return result
+
+
+# Все типы уведомлений, которые человек может выключить. Уровень каждого
+# (сразу / в сводку) — services/quiet_hours.LEVELS.
+NOTIFY_PREFS = ("new_user", "flood_warning", "position_change", "op_complete",
+                "restriction", "deploy", "leads", "reports", "advice")
 
 
 # In-memory rate-limit cache: (user_id, pref) -> last_sent_timestamp
