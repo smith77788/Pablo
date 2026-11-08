@@ -174,3 +174,46 @@ async def cmd_unmute(message: Message, pool: asyncpg.Pool) -> None:
     await message.answer(
         f"🔔 Вернул {n} уведомлени(й). Снова буду предупреждать о проблемах.",
         reply_markup=terminal_kb())
+
+
+@router.callback_query(SnoozeCb.filter(F.action == "daily"))
+async def cb_daily_report(
+    callback: CallbackQuery,
+    callback_data: SnoozeCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """Включить/выключить ежедневную сводку кнопкой под отчётом."""
+    from services import weekly_report
+
+    uid = callback.from_user.id
+    on = callback_data.code == "on"
+    try:
+        await weekly_report.set_daily(pool, uid, on)
+    except Exception:
+        log.warning("cb_daily_report: сохранить не вышло uid=%s", uid, exc_info=True)
+        await callback.answer("Не удалось сохранить — попробуйте ещё раз.", show_alert=True)
+        return
+    try:
+        await callback.message.edit_reply_markup(reply_markup=weekly_report._kb(on))
+    except Exception:
+        log.debug("cb_daily_report: edit failed uid=%s", uid, exc_info=True)
+    await callback.answer("Сводка будет приходить каждое утро" if on
+                          else "Ежедневная сводка выключена")
+
+
+@router.message(Command("summary"))
+async def cmd_summary(message: Message, pool: asyncpg.Pool) -> None:
+    """/summary — сводка за последние сутки прямо сейчас."""
+    from services import weekly_report
+
+    uid = message.from_user.id
+    try:
+        text = await weekly_report.build_daily(pool, uid)
+    except Exception:
+        log.warning("cmd_summary failed uid=%s", uid, exc_info=True)
+        await message.answer("Не удалось собрать сводку. Попробуйте через минуту.",
+                             reply_markup=terminal_kb())
+        return
+    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True,
+                         reply_markup=weekly_report._kb(
+                             await weekly_report.daily_enabled(pool, uid)))

@@ -106,6 +106,7 @@ async def _tick(pool, bot) -> int:
         try:
             from services import weekly_report
             await weekly_report.maybe_send(pool, bot, oid)
+            await weekly_report.maybe_send_daily(pool, bot, oid)
         except Exception:
             log.debug("organism.runner: weekly report failed owner=%s", oid, exc_info=True)
         # Каскад аудитории: свернуть состояния всех контактов владельца в единую
