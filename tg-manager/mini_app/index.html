@@ -32086,6 +32086,17 @@ async function openWorkflowDetail(wfId, wfName) {
         <button class="btn btn-s" style="width:100%;margin-top:6px" onclick="saveWorkflowGoal(${wfId})">💾 Сохранить цель</button>
       </div>`;
     html += _wfStatsSummary(d.stats);
+    // Черновик: люди идут по опубликованной версии, пока её не заменят.
+    if (!legacy && d.draft) {
+      html += `<div class="sec">📝 Черновик шагов</div>
+      <div class="hint" style="margin:0 16px 6px">Ниже — черновик. Люди сейчас проходят версию ${Number(d.steps_version) || 1} (${(d.published_steps || []).length} шаг.), пока вы не опубликуете правки. Тестовый запуск идёт по черновику.</div>
+      <div style="display:flex;gap:8px;padding:0 16px 8px">
+        <button class="btn btn-p" id="wfdPublishBtn" tabindex="0" style="flex:1 1 auto;min-height:36px;font-size:13px" onclick="publishWorkflowDraft(${Number(wfId)}, this)">🚀 Опубликовать</button>
+        <button class="btn btn-s" id="wfdDiscardBtn" tabindex="0" style="flex:1 1 auto;min-height:36px;font-size:13px" onclick="discardWorkflowDraft(${Number(wfId)}, this)">↩️ Отменить черновик</button>
+      </div>`;
+    } else if (!legacy && d.active) {
+      html += `<div class="hint" style="margin:0 16px 6px">Версия ${Number(d.steps_version) || 1}. Сценарий включён: правка шагов попадёт в черновик и дойдёт до людей после публикации.</div>`;
+    }
 
     if (!steps.length) {
       html += empty('📝', 'Нет шагов', 'Нажмите + Шаг для добавления', {label:'➕ Добавить шаг', fn:'openWfAddStepModal()'});
@@ -32125,7 +32136,8 @@ async function openWorkflowDetail(wfId, wfName) {
         if (stype === 'delay' && s.until_field) extra.push('📅 до даты из поля «' + s.until_field + '»' + (s.offset_minutes ? (s.offset_minutes < 0 ? ', за ' + (-s.offset_minutes) : ', через ' + s.offset_minutes) + ' мин' : ''));
         if (stype === 'delay' && s.until_time) extra.push('до ' + s.until_time + ' по времени человека' + (s.weekdays_only ? ', только будни' : ''));
         (s.branches || []).forEach(b => extra.push('🎲 ' + b.label + ' · ' + b.weight + '% → шаг ' + b.goto));
-        const st = ((d.stats || {}).steps || {})[String(i)];
+        // У черновика своя нумерация шагов: счётчики опубликованной версии к нему не относятся.
+        const st = d.draft ? null : ((d.stats || {}).steps || {})[String(i)];
         if (st) {
           const labels = (d.stats || {}).outcome_labels || {};
           const parts = Object.entries(st.outcomes || {}).map(([k, n]) => {
@@ -32232,8 +32244,9 @@ function wfGoalHint() {
   const g = document.getElementById('wfdGoal');
   const v = document.getElementById('wfdGoalVal');
   if (!g || !v) return;
-  v.style.display = (g.value === 'tag_added' || g.value === 'event') ? 'block' : 'none';
-  v.placeholder = g.value === 'tag_added' ? 'Имя тега' : 'Выберите событие из подсказок к полю';
+  v.style.display = (g.value === 'tag_added' || g.value === 'event' || g.value === 'deal_stage') ? 'block' : 'none';
+  v.placeholder = g.value === 'tag_added' ? 'Имя тега'
+    : (g.value === 'deal_stage' ? 'Этап: выиграна, проиграна, переговоры…' : 'Выберите событие из подсказок к полю');
 }
 
 async function saveWorkflowGoal(wfId) {
@@ -32328,6 +32341,25 @@ async function deleteWorkflowStep(wfId, idx, el) {
   try {
     await api(`/api/miniapp/workflows/${wfId}/steps/${idx}`, { method: 'DELETE' });
     toast('🗑 Шаг удалён');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+}
+
+async function publishWorkflowDraft(wfId, el) {
+  if (el) el.disabled = true;
+  try {
+    const r = await api(`/api/miniapp/workflows/${wfId}/publish`, { method: 'POST', body: '{}' });
+    toast('🚀 Опубликована версия ' + ((r && r.steps_version) || '') + ': новые люди пойдут по ней');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
+  finally { if (el) el.disabled = false; }
+}
+
+async function discardWorkflowDraft(wfId, el) {
+  if (!await confirmDelete('Отменить черновик', el)) return;
+  try {
+    await api(`/api/miniapp/workflows/${wfId}/discard_draft`, { method: 'POST', body: '{}' });
+    toast('↩️ Черновик отменён');
     _wfReopen();
   } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); }
 }
@@ -32547,9 +32579,9 @@ async function submitWfAddStep() {
     if (weg) payload.else_goto = weg;
   }
   try {
-    await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });
+    const r = await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });
     closeModal('mo-wf-step');
-    toast('✅ Шаг добавлен');
+    toast(r && r.draft ? '✅ Шаг добавлен в черновик' : '✅ Шаг добавлен');
     _wfReopen();
   } catch(e) { fail('Ошибка: ' + errRu(e)); }
 }

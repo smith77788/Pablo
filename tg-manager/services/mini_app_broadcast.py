@@ -416,6 +416,8 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.exception("create_crm_deal uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+        from database import db as _db
+        await _db.emit_deal_created(pool, uid, deal_id, title, "manual")
         return _json_resp({"ok": True, "deal_id": deal_id})
 
     async def update_crm_deal_stage(request: web.Request) -> web.Response:

@@ -260,6 +260,8 @@ def setup_routes(app: web.Application, pool) -> None:
             "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
             "       wd.goal_type, wd.goal_value, wd.legacy_kind, wd.send_window, "
             "       wd.max_per_day, wd.inbound_token, "
+            "       wd.draft_steps, COALESCE(wd.steps_version,1) AS steps_version, "
+            "       wd.published_at, "
             "       b.username AS bot_username "
             "  FROM workflow_definitions wd "
             "  LEFT JOIN managed_bots b ON b.bot_id = wd.bot_id "
@@ -301,7 +303,17 @@ def setup_routes(app: web.Application, pool) -> None:
                            "legacy_kind": row.get("legacy_kind") or "",
                            "legacy_note": (_lf.guard_message(row["legacy_kind"])
                                            if row.get("legacy_kind") else ""),
-                           "steps": _steps_of(row), "runs": runs,
+                           # Есть черновик — экран правит его; люди идут
+                           # по опубликованным шагам (published_steps).
+                           "steps": (_wf._steps_list(row["draft_steps"])
+                                     if row.get("draft_steps") is not None
+                                     else _steps_of(row)),
+                           "draft": row.get("draft_steps") is not None,
+                           "published_steps": _steps_of(row),
+                           "steps_version": row.get("steps_version") or 1,
+                           "published_at": (row["published_at"].isoformat()
+                                            if row.get("published_at") else None),
+                           "runs": runs,
                            "stats": stats,
                            "goals": _rt.GOAL_TYPES,
                            # Словари для экрана: что умеет исполнитель.
@@ -325,25 +337,43 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        row = await _safe_fetchrow(pool,
-            "SELECT steps FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
-            wid, uid)
-        if row is None:
-            return _err("Воркфлоу не найден", 404)
         from services import workflow_engine as _wf
         try:
-            # Уже сохранённые шаги считаются здесь: предел на сценарий имеет
-            # смысл только вместе с ними.
-            step = _wf.validate_steps([body], already=len(_steps_of(row)))[0]
+            added = await _wf.append_step(pool, uid, wid, body)
         except ValueError as e:
             return _err(str(e), 400)
-        res = await pool.execute(
-            "UPDATE workflow_definitions SET steps = COALESCE(steps,'[]'::jsonb) || $1::jsonb, "
-            "updated_at=NOW() WHERE id=$2 AND owner_id=$3",
-            json.dumps([step]), wid, uid)
-        if isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0":
+        if added is None:
             return _err("Воркфлоу не найден", 404)
-        return _json_resp({"ok": True, "step": step})
+        step, in_draft = added
+        return _json_resp({"ok": True, "step": step, "draft": in_draft})
+
+    async def _draft_action(request: web.Request, publish: bool) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        if wid is None:
+            return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
+        from services import workflow_engine as _wf
+        if publish:
+            version = await _wf.publish_draft(pool, uid, wid)
+            if version is None:
+                return _err("Черновика нет: публиковать нечего", 404)
+            return _json_resp({"ok": True, "steps_version": version})
+        if not await _wf.discard_draft(pool, uid, wid):
+            return _err("Черновика нет", 404)
+        return _json_resp({"ok": True})
+
+    async def workflow_publish(request: web.Request) -> web.Response:
+        """POST /workflows/{id}/publish — черновик шагов становится рабочим."""
+        return await _draft_action(request, True)
+
+    async def workflow_discard_draft(request: web.Request) -> web.Response:
+        """POST /workflows/{id}/discard_draft — выбросить черновик шагов."""
+        return await _draft_action(request, False)
 
     # ── Пауза, активация, удаление ───────────────────────────────────────────
 
@@ -783,6 +813,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_any)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)
     app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/publish", workflow_publish)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/discard_draft", workflow_discard_draft)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
     app.router.add_get("/api/miniapp/workflow/run/{run_id}/log", workflow_run_log)
     app.router.add_post("/api/miniapp/workflows/import", workflow_import)
