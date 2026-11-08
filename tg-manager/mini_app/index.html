@@ -1708,6 +1708,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="acc-kpi-num" id="kpi-proxydown" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Прокси мёртв</div>
       </div>
     </div>
+    <!-- Выживаемость флота: доля потерь за 7 и 30 дней и что их вызывает. -->
+    <div id="accSurvival" style="display:none;margin:4px 0 8px;padding:10px 12px;border-radius:var(--radius);background:var(--bg2);font-size:13px;line-height:1.45"></div>
     <!-- Быстрое удаление невоскрешаемых (появляется, когда есть мёртвые) -->
     <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(248,113,113,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
     <!-- Массовые действия по аккаунтам -->
