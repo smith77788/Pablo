@@ -22652,7 +22652,7 @@ async function _ucLoadChats() {
   box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   const q = (document.getElementById('ucChatQ').value || '').trim();
   try {
-    const d = await api('/api/miniapp/campaign/chats' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    const d = await api(`/api/miniapp/campaign/chats?q=${encodeURIComponent(q)}`);
     const rows = d.chats || [];
     if (!rows.length) {
       box.innerHTML = q

@@ -132,7 +132,7 @@ def test_announce_goes_only_to_picked_groups(posted):
 def test_uni_campaign_screen_can_pick_groups():
     html = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
     assert 'id="ucChatScope"' in html and '<option value="pick">Выбрать группы</option>' in html
-    assert "api('/api/miniapp/campaign/chats'" in html
+    assert "api(`/api/miniapp/campaign/chats?q=" in html
     spec = html[html.index("function _ucSpec()"):html.index("function _ucSummary(")]
     assert "chat_ids: picked" in spec
 
