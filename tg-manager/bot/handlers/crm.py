@@ -743,6 +743,12 @@ async def msg_rule_name(
             reply_markup=kb.as_markup(),
         )
         return
+    # bot_id попал в состояние из кнопки, а её можно подделать: без сверки
+    # правило вставало в чужой бот, и тот отвечал подписчикам чужим текстом.
+    if not await db.get_bot(pool, data.get("bot_id", 0), message.from_user.id):
+        await state.clear()
+        await message.answer("❌ Бот не найден.")
+        return
     await state.clear()
     await db.add_automation_rule(
         pool,

@@ -184,3 +184,28 @@ def test_tag_and_deeplink_are_not_created_in_foreign_bot():
     _run(deeplinks.msg_dl_param(_Msg("promo1"), _State(
         {"bot_id": VICTIM_BOT, "link_name": "x"}), pool))
     assert pool.writes == []
+
+
+def test_auto_reply_and_rules_are_not_added_to_foreign_bot(monkeypatch):
+    from bot.handlers import auto_reply, crm
+
+    async def _plan(*a, **kw):
+        return "pro"
+
+    monkeypatch.setattr(auto_reply, "get_plan", _plan)
+    pool = _Pool()
+    _run(auto_reply.msg_ar_text(_Msg("Переходите: https://evil.example"), _State(
+        {"bot_id": VICTIM_BOT, "trigger_type": "start"}), pool))
+    assert not [w for w in pool.writes if "auto_replies" in w]
+
+    pool = _Pool()
+    _run(auto_reply.msg_ext_rule_name(_Msg("правило"), _State({
+        "bot_id": VICTIM_BOT, "trigger_type": "inactivity", "trigger_value": "3",
+        "action_type": "send_message", "action_value": "evil"}), pool))
+    assert not [w for w in pool.writes if "automation_rules" in w]
+
+    pool = _Pool()
+    _run(crm.msg_rule_name(_Msg("правило"), _State({
+        "bot_id": VICTIM_BOT, "trigger_type": "keyword", "trigger_value": "x",
+        "action_type": "send_message", "action_value": "evil"}), pool))
+    assert not [w for w in pool.writes if "automation_rules" in w]

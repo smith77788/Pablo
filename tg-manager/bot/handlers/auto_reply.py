@@ -188,6 +188,12 @@ async def msg_ar_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         return
     data = await state.get_data()
     bot_id = data["bot_id"]
+    # bot_id попал в состояние из кнопки, а её можно подделать: без сверки
+    # правило вставало в чужой бот, и тот отвечал подписчикам чужим текстом.
+    if not await db.get_bot(pool, bot_id, message.from_user.id):
+        await state.clear()
+        await message.answer("❌ Бот не найден.")
+        return
     # Check subscription rule limit
     plan = await get_plan(pool, message.from_user.id)
     limit = _AR_LIMITS.get(plan, 5)
@@ -558,8 +564,14 @@ async def msg_ext_rule_name(
         )
         return
     data = await state.get_data()
-    await state.clear()
     bot_id = data["bot_id"]
+    # bot_id попал в состояние из кнопки, а её можно подделать: без сверки
+    # правило вставало в чужой бот, и тот отвечал подписчикам чужим текстом.
+    if not await db.get_bot(pool, bot_id, message.from_user.id):
+        await state.clear()
+        await message.answer("❌ Бот не найден.")
+        return
+    await state.clear()
     trigger_type = data["trigger_type"]
     trigger_value = data.get("trigger_value")
     action_type = data["action_type"]
