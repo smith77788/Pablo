@@ -8002,7 +8002,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <label style="margin-top:6px">Или ждать до времени человека (ЧЧ:ММ)</label>
       <input type="text" id="wfStepUntil" placeholder="10:00" maxlength="5" class="inp">
       <label class="chk-row" style="margin-top:6px"><input type="checkbox" id="wfStepWeekdays"> Только в будни</label>
-      <div class="hint">Время берётся по часовому поясу человека: поле контакта timezone, иначе язык Телеграма, иначе Москва. Если время задано, минуты не нужны.</div>
+      <label style="margin-top:6px">Или ждать до даты из поля (напоминание о записи)</label>
+      <div style="display:flex;gap:6px">
+        <input type="text" id="wfStepUntilField" placeholder="appointment" class="inp" style="flex:1 1 auto" aria-label="Поле с датой">
+        <input type="number" id="wfStepOffset" placeholder="-60" class="inp" style="flex:0 0 110px" aria-label="Сдвиг в минутах">
+      </div>
+      <div class="hint">Время берётся по часовому поясу человека: поле контакта timezone, иначе язык Телеграма, иначе Москва. Если время задано, минуты не нужны. Дата в поле: 2026-11-10 15:00, 10.11.2026 15:00 или 10.11 (без года — ближайшая, без времени — 10:00). Сдвиг −60 — за час до неё. Даты нет или она прошла — сценарий идёт дальше сразу.</div>
     </div>
     <div class="field" id="wfStepAiField" style="display:none">
       <label>Что должен сделать ИИ</label>
@@ -31953,6 +31958,7 @@ async function openWorkflowDetail(wfId, wfName) {
         if (stype === 'webhook') extra.push('🔁 повторов при сбое: ' + (s.retries ?? 3) + (s.save_as ? ' · 💾 ответ в {{' + s.save_as + '_…}}' : ''));
         if (s.else_goto) extra.push((stype === 'webhook' ? 'не удалось' : 'иначе') + ' → шаг ' + s.else_goto);
         if (s.timeout_goto) extra.push('нет ответа → шаг ' + s.timeout_goto);
+        if (stype === 'delay' && s.until_field) extra.push('📅 до даты из поля «' + s.until_field + '»' + (s.offset_minutes ? (s.offset_minutes < 0 ? ', за ' + (-s.offset_minutes) : ', через ' + s.offset_minutes) + ' мин' : ''));
         if (stype === 'delay' && s.until_time) extra.push('до ' + s.until_time + ' по времени человека' + (s.weekdays_only ? ', только будни' : ''));
         (s.branches || []).forEach(b => extra.push('🎲 ' + b.label + ' · ' + b.weight + '% → шаг ' + b.goto));
         const st = ((d.stats || {}).steps || {})[String(i)];
@@ -32263,7 +32269,7 @@ function openWfAddStepModal() {
    'wfStepWhSaveAs', 'wfStepWhRetries', 'wfStepWhElseGoto',
    'wfStepWaitEvent', 'wfStepWaitValue', 'wfStepWaitTimeout', 'wfStepWaitTimeoutGoto',
    'wfStepAiPrompt', 'wfStepAiSaveAs', 'wfStepAiFallback',
-   'wfStepUntil', 'wfStepBranches']
+   'wfStepUntil', 'wfStepUntilField', 'wfStepOffset', 'wfStepBranches']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('wfStepErr').style.display = 'none';
   document.getElementById('mo-wf-step').classList.add('show');
@@ -32333,7 +32339,10 @@ async function submitWfAddStep() {
     Object.assign(payload, { text, save_as: val('wfStepSaveAs'), validate: val('wfStepValidate') });
   } else if (type === 'delay') {
     const until = val('wfStepUntil');
-    if (until) {
+    if (val('wfStepUntilField')) {
+      payload.until_field = val('wfStepUntilField');
+      payload.offset_minutes = parseInt(val('wfStepOffset'), 10) || 0;
+    } else if (until) {
       payload.until_time = until;
       payload.weekdays_only = document.getElementById('wfStepWeekdays').checked;
     } else {

@@ -978,7 +978,19 @@ def validate_step(step, index: int = 0) -> dict:
 
     elif stype == "delay":
         until = str(step.get("until_time") or "").strip()
-        if until:
+        ufield = str(step.get("until_field") or "").strip()
+        if ufield:
+            # Напоминание к дате из поля: «за час до записи» — поле appointment,
+            # сдвиг -60. Дату пишет человек или вебхук, разбирается при исполнении.
+            out["until_field"] = _field_name(ufield, where)
+            try:
+                offset = int(step.get("offset_minutes") or 0)
+            except (TypeError, ValueError):
+                raise ValueError(f"{where}: сдвиг — число минут, например -60")
+            if abs(offset) > MAX_STEP_DELAY_MIN:
+                raise ValueError(f"{where}: сдвиг не больше {MAX_STEP_DELAY_MIN // 1440} суток")
+            out["offset_minutes"] = offset
+        elif until:
             # Умная задержка: до ближайшего «ЧЧ:ММ» по времени человека,
             # по желанию только в будни.
             if not _HHMM_RE.match(until):

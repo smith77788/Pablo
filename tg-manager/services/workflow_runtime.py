@@ -324,6 +324,39 @@ def parse_send_window(value: str | None) -> tuple[int, int] | None:
     return start, end
 
 
+_DT_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d",
+               "%d.%m.%Y %H:%M", "%d.%m.%Y", "%d.%m %H:%M", "%d.%m")
+_DATE_ONLY_HOUR = 10  # «10.11» без времени — напоминание в 10 утра
+
+
+def parse_field_datetime(raw, now_utc: datetime, tz_name: str | None) -> datetime | None:
+    """Дата из поля человека → момент UTC. None — не дата. ЧИСТАЯ.
+
+    Без года («10.11») — ближайшая такая дата (дни рождения). Без времени —
+    10:00 по часам человека."""
+    text = re.sub(r"\s+", " ", str(raw or "").strip())[:40]
+    if not text:
+        return None
+    zone = _zone(tz_name) or ZoneInfo(DEFAULT_TZ)
+    local_now = now_utc.astimezone(zone)
+    for fmt in _DT_FORMATS:
+        try:
+            dt = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if "%H" not in fmt:
+            dt = dt.replace(hour=_DATE_ONLY_HOUR)
+        if "%Y" not in fmt:
+            try:
+                dt = dt.replace(year=local_now.year)
+                if dt.replace(tzinfo=zone) < local_now - timedelta(days=1):
+                    dt = dt.replace(year=local_now.year + 1)
+            except ValueError:  # 29.02 не в високосный год
+                return None
+        return dt.replace(tzinfo=zone).astimezone(timezone.utc)
+    return None
+
+
 _WORK_DAYS_WORDS = ("будни", "пн-пт", "weekdays")
 
 
@@ -1384,7 +1417,21 @@ async def advance(pool, http, run: dict, main_bot=None) -> None:
 
         if stype == "delay":
             now = datetime.now(timezone.utc)
-            if step.get("until_time"):
+            if step.get("until_field"):
+                tz_name = contact_tz(fields, contact.get("language_code"))
+                name = step["until_field"]
+                raw = fields.get(name, run_vars.get(name))
+                target = parse_field_datetime(raw, now, tz_name)
+                offset = int(step.get("offset_minutes") or 0)
+                if target is None:
+                    # Даты нет или она нечитаема — не ждём вечно: дальше сразу.
+                    when = now
+                    detail = f"в поле «{name}» нет даты"
+                else:
+                    when = max(now, target + timedelta(minutes=offset))
+                    detail = (f"до {name} {offset:+d} мин" if offset else f"до {name}") \
+                        + (" (уже прошло)" if when == now else "")
+            elif step.get("until_time"):
                 tz_name = contact_tz(fields, contact.get("language_code"),
                                      step.get("tz"))
                 try:

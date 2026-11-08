@@ -1483,3 +1483,44 @@ def test_a_lead_card_goes_to_the_sales_chat_escaped(pool, tg):
         assert (await _run_row(pool, wf_id))["status"] == "completed"
 
     _run(go())
+
+
+# ── Напоминание к дате из поля ───────────────────────────────────────────────
+
+def test_a_reminder_waits_for_the_date_in_the_field(pool, tg):
+    from datetime import datetime, timedelta, timezone
+
+    async def go():
+        when = (datetime.now(timezone.utc) + timedelta(days=3)).astimezone(
+            __import__("zoneinfo").ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d %H:%M")
+        await pool.execute(
+            "UPDATE bot_users SET fields = jsonb_build_object('appointment', $3::text, "
+            "'timezone', 'Europe/Moscow') WHERE bot_id=$1 AND user_id=$2", BOT_ID, USER, when)
+        wf_id = await _workflow(pool, [
+            {"type": "delay", "until_field": "appointment", "offset_minutes": -60},
+            {"type": "message", "text": "Через час ждём вас"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert not _texts(tg), "напоминание ушло сразу, а не перед записью"
+        target = datetime.strptime(when, "%Y-%m-%d %H:%M").replace(
+            tzinfo=__import__("zoneinfo").ZoneInfo("Europe/Moscow")) - timedelta(minutes=60)
+        assert abs((run["next_run_at"] - target).total_seconds()) < 60
+
+    _run(go())
+
+
+def test_no_date_in_the_field_does_not_hang_the_run(pool, tg):
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "delay", "until_field": "appointment", "offset_minutes": -60},
+            {"type": "message", "text": "Дальше"},
+        ])
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        await _tick(pool)
+        assert _texts(tg) == ["Дальше"]
+        assert (await _run_row(pool, wf_id))["status"] == "completed"
+
+    _run(go())
