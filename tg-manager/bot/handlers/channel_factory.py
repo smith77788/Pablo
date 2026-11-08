@@ -18,6 +18,7 @@ import logging
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -663,9 +664,9 @@ async def cb_chanf_do_create(
     )
 
     if "error" in result:
-        err = html.escape(result["error"])
+        err = result["error"]
         await callback.message.edit_text(
-            f"❌ <b>Ошибка создания</b>\n\n<code>{err}</code>",
+            f"❌ <b>Ошибка создания</b>\n\n<code>{owner_error(err)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

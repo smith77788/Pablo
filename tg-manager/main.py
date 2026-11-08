@@ -510,6 +510,10 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     Теперь это обычная функция, и tests/test_dispatcher_builds.py её вызывает.
     """
     dp = Dispatcher(storage=storage)
+    # Повторный ответ на ту же кнопку Telegram отвергает — человек не видел
+    # ни «Нет аккаунтов», ни «Ошибка». Обёртка доставляет его сообщением.
+    from bot.utils import callback_answer_once
+    callback_answer_once.install()
     activity_log_middleware = UserActivityLogMiddleware()
     gate_middleware = SubscriptionGateMiddleware()
     latency_middleware = LatencyMiddleware()
@@ -663,6 +667,10 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     _admin_audit.install(admin_users_handler.router, admin_handler.router)
     dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
+    # Строго последним: сюда доходят только нажатия, которые не взял никто,
+    # и человек получает объяснение вместо вечных «часиков» на кнопке.
+    from bot.handlers import stale_button as stale_button_handler
+    dp.include_router(stale_button_handler.router)
     dp.error.register(_global_error_handler)
     install_error_monitoring(dp)
     return dp

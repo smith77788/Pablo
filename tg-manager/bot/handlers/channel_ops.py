@@ -58,6 +58,7 @@ from bot.utils.op_helpers import _acc_label, _progress_text, backoff
 from services import session_simulator, operation_bus
 from services.logger import log_exc_swallow
 from bot.utils.event_status import mark_handled_error
+from bot.utils.owner_error import owner_error
 
 # ── Bulk Pacing Presets ──────────────────────────────────────────────────────
 
@@ -870,9 +871,9 @@ async def cb_do_create(
         _acc=acc,
     )
     if "error" in result:
-        err = html.escape(result["error"])
+        err = result["error"]
         await callback.message.edit_text(
-            f"❌ <b>Ошибка создания</b>\n\n<code>{err}</code>",
+            f"❌ <b>Ошибка создания</b>\n\n<code>{owner_error(err)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -2809,7 +2810,7 @@ async def fsm_invite_usernames_file(
     except Exception as e:
         log.warning('handler error in fsm_invite_usernames_file: %s', e)
         await state.clear()
-        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
         return
     usernames = _parse_username_list(raw)
     if not usernames:
@@ -5055,7 +5056,7 @@ async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> Non
     except Exception as e:
         log.warning('handler error in fsm_bulk_dm_usernames_file: %s', e)
         await state.clear()
-        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
         return
     usernames = _parse_username_list(raw)
     if not usernames:

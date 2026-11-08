@@ -144,14 +144,22 @@ async function loadMoreAccounts() {
   finally { ACC_LOADING=false; }
 }
 
+function _accToolsShown(on) {
+  // Счётчики, массовые действия и поиск нужны списку, а не его отсутствию.
+  const t = document.getElementById('accTools');
+  if (t) t.style.display = on ? '' : 'none';
+}
+
 function renderAccounts(list) {
   const el = document.getElementById('accList');
   if (!list.length) {
     const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
+    _accToolsShown(!!filtered);
     if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
-    else el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт прямо здесь: по номеру, QR-коду, файлу .session, архиву tdata или строке сессии',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
+    else el.innerHTML=empty('📱','Добавьте первый аккаунт','Аккаунты Telegram выполняют рассылки, инвайты и сбор аудитории. Подключить можно по номеру, QR-коду, файлу .session, архиву tdata или строке сессии — это займёт пару минут',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
     return;
   }
+  _accToolsShown(true);
   el.innerHTML = list.map(a=>{
     const name = a.first_name||(a.username?'@'+a.username:'#'+a.id);
     const phone = a.phone || '';

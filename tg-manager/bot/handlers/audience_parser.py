@@ -40,6 +40,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -548,7 +549,7 @@ async def _run_ops_and_report(
     try:
         res = await coro
     except AudienceOpError as e:
-        await callback.answer(f"⚠️ {e}", show_alert=True)
+        await callback.answer(f"⚠️ {owner_error(e, html_escape=False)}", show_alert=True)
         return
     except Exception:
         log_exc_swallow(log, f"audience_ops {verb} failed")
@@ -951,7 +952,7 @@ async def cb_parser_geo_radius(
         results = await _exec_geo_parse(dict(acc), lat, lon, radius)
     except Exception as exc:
         await callback.message.edit_text(
-            f"❌ Ошибка гео-парсинга: <code>{exc}</code>",
+            f"❌ Ошибка гео-парсинга: <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )

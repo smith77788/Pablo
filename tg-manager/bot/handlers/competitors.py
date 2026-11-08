@@ -16,6 +16,7 @@ from bot.states import AddCompetitorFSM
 from bot.utils.op_helpers import safe_edit
 from bot.utils.subscription import require_plan, locked_text
 from services.logger import log_exc_swallow
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -211,7 +212,7 @@ async def comp_got_label(
             reply_markup=kb.as_markup(),
         )
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}", reply_markup=kb.as_markup())
+        await message.answer(f"❌ Ошибка: {owner_error(e)}", reply_markup=kb.as_markup())
 
 
 async def _save_competitor(

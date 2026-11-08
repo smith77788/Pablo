@@ -6,6 +6,7 @@ import logging
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.filters import Command
@@ -151,7 +152,7 @@ async def msg_api_key_name(
     try:
         created = await _keys.create_key(pool, message.from_user.id, name)
     except ValueError as e:
-        await message.answer(str(e))
+        await message.answer(owner_error(e))
         return
     except Exception as e:
         log.warning("api_hub: key create error: %s", e)

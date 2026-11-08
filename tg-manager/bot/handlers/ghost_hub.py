@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import asyncpg
 from aiogram import Router, F
+from bot.utils.owner_error import owner_error
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -186,7 +187,7 @@ async def cb_ghost_pick_acc(
     except Exception as e:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-        await callback.message.edit_text(f"❌ Ошибка: {html.escape(str(e))}", parse_mode="HTML", reply_markup=kb.as_markup())
+        await callback.message.edit_text(f"❌ Ошибка: {owner_error(e)}", parse_mode="HTML", reply_markup=kb.as_markup())
         return
     profile = await pool.fetchrow(
         "SELECT * FROM ghost_profiles WHERE owner_id = $1 AND account_id = $2",

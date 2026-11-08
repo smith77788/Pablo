@@ -30,6 +30,7 @@ from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 import os as _os
 from aiogram.types import WebAppInfo as _WebAppInfo
 from config import MINI_APP_URL as _MINI_APP_URL
+from bot.utils.owner_error import owner_error
 
 def _valid_mini_app_url(url: str) -> str:
     """Validate and normalise Mini App URL.
@@ -987,7 +988,7 @@ async def cb_ops_retry_all_failed(
     try:
         res = await _obus.resubmit_unfinished(pool, user_id)
     except Exception as e:
-        await callback.answer(f"Не удалось повторить: {e}", show_alert=True)
+        await callback.answer(f"Не удалось повторить: {owner_error(e, html_escape=False)}", show_alert=True)
         return
     reset_count = int(res.get("retried") or 0)
     if reset_count == 0:
@@ -2658,12 +2659,12 @@ async def cb_op_retry(
     try:
         res = await _obus_retry.resubmit_one(pool, user_id, op_id)
     except _obus_retry.PlanRequiredError as exc:
-        await callback.answer(str(exc) or "Операция недоступна на вашем тарифе.",
+        await callback.answer(owner_error(exc, html_escape=False) or "Операция недоступна на вашем тарифе.",
                               show_alert=True)
         return
     except Exception as exc:
         mark_handled_error(f"op_retry update: {exc}")
-        await callback.answer(f"Ошибка при перезапуске: {str(exc)[:80]}", show_alert=True)
+        await callback.answer(f"Ошибка при перезапуске: {owner_error(exc, html_escape=False)}", show_alert=True)
         return
     if not res.get("ok"):
         await callback.answer(res.get("reason") or "Повторять нечего.",
@@ -2870,15 +2871,15 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 # ── Notifications ─────────────────────────────────────────────────────────
 
 _NOTIF_SQL: dict[str, str] = {
-    "new_user": "new_user        = NOT new_user",
-    "flood_warning": "flood_warning   = NOT flood_warning",
-    "position_change": "position_change = NOT position_change",
-    "op_complete": "op_complete     = NOT op_complete",
-    "restriction": "restriction     = NOT restriction",
-    "leads": "leads           = NOT leads",
-    "reports": "reports         = NOT reports",
-    "advice": "advice          = NOT advice",
-    "digest_only": "digest_only     = NOT digest_only",
+    "new_user": "new_user = NOT notification_settings.new_user",
+    "flood_warning": "flood_warning = NOT notification_settings.flood_warning",
+    "position_change": "position_change = NOT notification_settings.position_change",
+    "op_complete": "op_complete = NOT notification_settings.op_complete",
+    "restriction": "restriction = NOT notification_settings.restriction",
+    "leads": "leads = NOT notification_settings.leads",
+    "reports": "reports = NOT notification_settings.reports",
+    "advice": "advice = NOT notification_settings.advice",
+    "digest_only": "digest_only = NOT notification_settings.digest_only",
 }
 
 _NOTIF_LABELS = {
@@ -3013,7 +3014,9 @@ async def cb_notif_toggle(
             callback.from_user.id,
         )
     except Exception:
-        await callback.answer("❌ Ошибка обновления настроек", show_alert=True)
+        log.warning("cb_notif_toggle: не удалось переключить %s", field, exc_info=True)
+        await _edit(callback, "❌ Не удалось сохранить настройку. Попробуйте ещё раз.",
+                    _notif_kb(await _get_or_create_notif(pool, callback.from_user.id) or {}))
         return
     try:
         row = await pool.fetchrow(
@@ -3023,7 +3026,8 @@ async def cb_notif_toggle(
     except Exception:
         row = None
     if row is None:
-        await callback.answer("Ошибка чтения настроек", show_alert=True)
+        await _edit(callback, "❌ Не удалось прочитать настройки. Попробуйте ещё раз.",
+                    _notif_kb({}))
         return
     await _edit(callback, _notif_text(row), _notif_kb(row))
 

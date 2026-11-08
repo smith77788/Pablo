@@ -26,6 +26,7 @@ import html
 import logging
 
 from aiogram import F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -207,7 +208,7 @@ async def _run_spin(message: Message, state: FSMContext, script: str) -> None:
             script, complete=_ai_complete, count=_SPIN_COUNT
         )
     except spintax_service.SpintaxServiceError as exc:
-        await wait.edit_text(f"⚠️ {html.escape(str(exc))}")
+        await wait.edit_text(f"⚠️ {owner_error(exc)}")
         return
     except Exception:
         log_exc_swallow(log, "spin: непредвиденная ошибка генерации")

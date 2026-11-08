@@ -1538,6 +1538,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
       <div class="copilot-list"></div>
     </div>
+    <!-- Инструменты списка прячутся, пока ботов нет (renderBots): десять
+         действий над пустотой выталкивали «подключите первого бота» за край
+         экрана, и новичок не понимал, с чего начать. -->
+    <div id="botTools">
     <!-- Массовые действия по ботам -->
     <div style="display:flex;gap:8px;padding:0 0 6px">
       <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📢 Рассылка</button>
@@ -1570,6 +1574,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <input type="text" id="botSearch" class="inp lst-search" oninput="onBotSearch(this.value)"
            placeholder="🔍 Поиск: имя или @username" autocomplete="off" aria-label="Поиск по ботам">
     <div class="lf-chips" id="botFilterChips" role="group" aria-label="Срез списка ботов"></div>
+    </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <!-- Остаток списка: сервер отдаёт срез, а в шапке стоит полное число. Без
          этой строки «700 ботов» в шапке и 500 карточек в списке выглядели как
@@ -1683,6 +1688,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
       <div class="copilot-list"></div>
     </div>
+    <!-- Инструменты списка прячутся, пока аккаунтов нет (renderAccounts):
+         шесть нулевых счётчиков и семь действий над пустотой выталкивали
+         «Добавьте аккаунт» за нижний край экрана. -->
+    <div id="accTools">
     <!-- KPI status bar -->
     <div class="acc-kpi" id="accKpi">
       <div class="acc-kpi-card on" onclick="filterAcc('all',this)" data-filter="all">
@@ -1725,6 +1734,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(var(--fg-rgb),.12);background:rgba(var(--fg-rgb),.06);color:var(--text);font-size:13px">
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
     <div id="stageChips" style="display:none;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch"></div>
+    </div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div id="accLoadMore" style="padding:6px 16px 0"></div>
     <div class="sec-row" style="margin-top:12px">

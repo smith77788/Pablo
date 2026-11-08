@@ -38,6 +38,7 @@ from database import db
 from services import railway_api
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -470,7 +471,7 @@ async def cmd_reconcile_payments(message: Message, pool: asyncpg.Pool, bot) -> N
         async with aiohttp.ClientSession() as http:
             rep = await payment_recovery.reconcile(pool, bot, http, dry_run=not apply)
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}", reply_markup=terminal_kb())
+        await message.answer(f"❌ Ошибка: {owner_error(e)}", reply_markup=terminal_kb())
         return
     lines = [
         f"{'♻️ Применено' if apply else '🔎 Сухой прогон'}",
@@ -501,7 +502,7 @@ async def cmd_trial_stats(message: Message, pool: asyncpg.Pool) -> None:
             "FROM free_op_usage WHERE month = $2",
             free_quota.monthly_limit(), free_quota.month_start())
     except Exception as e:
-        await message.answer(f"❌ Не удалось посчитать: {e}", reply_markup=terminal_kb())
+        await message.answer(f"❌ Не удалось посчитать: {owner_error(e)}", reply_markup=terminal_kb())
         return
     rate = f"{c['rate']} %" if c["rate"] is not None else "— (ни один триал ещё не закончился)"
     med = f"{c['median_days']} дн." if c["median_days"] is not None else "—"
@@ -4120,7 +4121,7 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     except Exception as exc:
         log.warning('handler error in msg_gate_add: %s', exc)
         await state.clear()
-        await message.answer(f"❌ Ошибка БД: {_html.escape(str(exc)[:100])}", parse_mode="HTML")
+        await message.answer(f"❌ Ошибка БД: {owner_error(exc)}", parse_mode="HTML")
         return
 
     # Reload channels into memory

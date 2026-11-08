@@ -10,6 +10,7 @@ import string
 import aiohttp
 import asyncpg
 from aiogram import Router, F
+from bot.utils.owner_error import owner_error
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
@@ -938,7 +939,7 @@ async def cb_pay(
             )
     except usdt_invoice.NoFreeAmountError as exc:
         await callback.message.edit_text(
-            f"⏳ <b>Счёт не создан.</b>\n\n{exc}",
+            f"⏳ <b>Счёт не создан.</b>\n\n{owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )

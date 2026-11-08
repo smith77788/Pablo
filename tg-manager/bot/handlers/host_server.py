@@ -25,6 +25,7 @@ from bot.utils.subscription import is_platform_admin
 from services import host_server as hs
 from services import usdt_invoice
 from services.logger import log_exc_swallow
+from bot.utils.owner_error import owner_error
 
 router = Router(name="host_server")
 log = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ async def cb_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
         res = await hs.create_purchase(pool, uid)
     except usdt_invoice.NoFreeAmountError as exc:
-        await callback.message.edit_text(f"⏳ Счёт не создан.\n\n{exc}")
+        await callback.message.edit_text(f"⏳ Счёт не создан.\n\n{owner_error(exc)}")
         return
     except Exception:
         log_exc_swallow(log, "host cb_buy")
@@ -301,7 +302,7 @@ async def _rental_action(callback, callback_data, pool, new_status, as_provider)
     try:
         await hs.set_rental_status(pool, callback.from_user.id, callback_data.rid, new_status, as_provider=as_provider)
     except (ValueError, PermissionError) as e:
-        await callback.answer(str(e), show_alert=True)
+        await callback.answer(owner_error(e, html_escape=False), show_alert=True)
         return
     await cb_my(callback, pool)
 
@@ -441,7 +442,7 @@ async def _save_offering(callback: CallbackQuery, state: FSMContext, pool: async
             allow_device_compute=consent,
         )
     except (ValueError, PermissionError) as e:
-        await callback.message.edit_text(f"❌ {html.escape(str(e))}", reply_markup=kb.as_markup())
+        await callback.message.edit_text(f"❌ {owner_error(e)}", reply_markup=kb.as_markup())
         return
     except Exception:
         log_exc_swallow(log, "host _save_offering")

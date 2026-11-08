@@ -22,6 +22,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.utils.op_helpers import safe_answer
 from services.logger import log_exc_swallow
 from services import keyword_watcher as kw
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -142,7 +143,7 @@ async def msg_kw_keywords(message: Message, state: FSMContext, pool: asyncpg.Poo
             pool, message.from_user.id, int(data["account_id"]),
             data["chat_ref"], keywords)
     except ValueError as e:
-        await message.answer(f"⚠️ {e}")
+        await message.answer(f"⚠️ {owner_error(e)}")
         return
     except Exception:
         log_exc_swallow(log, "kw create_watcher failed")

@@ -15,6 +15,7 @@ from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.owner_error import owner_error
 
 
 def _is_admin(uid: int) -> bool:
@@ -841,7 +842,7 @@ async def cb_export_csv_users(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         users = await db.get_all_platform_users(pool, limit=10000, offset=0)
     except Exception as e:
         log_exc_swallow(log, "Ошибка экспорта CSV пользователей")
-        await callback.message.answer(f"❌ Ошибка: {e}")
+        await callback.message.answer(f"❌ Ошибка: {owner_error(e)}")
         return
 
     import io

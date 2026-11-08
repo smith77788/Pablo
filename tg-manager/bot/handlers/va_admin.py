@@ -10,6 +10,7 @@ import html
 import logging
 
 from aiogram import F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
@@ -41,7 +42,7 @@ async def va_add_photo(message: Message, pool) -> None:
         item = await va_media.add_photo(pool, message.from_user.id, channel_id, photo.file_id,
                                         photo.file_unique_id, parts[2])
     except va_media.MediaError as exc:
-        await message.answer(str(exc), parse_mode=None)
+        await message.answer(owner_error(exc, html_escape=False), parse_mode=None)
         return
     await message.answer(f"Фото №{item['id']} добавлено в медиатеку канала. "
                          "Проверить и отключить его можно на экране администратора.", parse_mode=None)
@@ -80,7 +81,7 @@ async def va_skip(callback: CallbackQuery, callback_data: VaCb, pool) -> None:
     try:
         await ca.reject_draft(pool, callback.from_user.id, callback_data.id)
     except ca.ChannelAdminError as e:
-        await callback.answer(str(e), show_alert=True)
+        await callback.answer(owner_error(e, html_escape=False), show_alert=True)
         return
     await callback.answer("Пропущено")
     from aiogram.utils.keyboard import InlineKeyboardBuilder
