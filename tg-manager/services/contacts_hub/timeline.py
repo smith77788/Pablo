@@ -27,7 +27,7 @@ def _hist_title(field: str) -> str:
 
 def build_timeline(history=None, events=None, sources=None, crm=None,
                    limit: int = 60, received=None, replies=None,
-                   orders=None) -> list[dict]:
+                   orders=None, scenarios=None) -> list[dict]:
     """Собрать единую ленту касаний контакта.
 
     Аргументы — уже выбранные из БД строки (dict-подобные):
@@ -38,6 +38,8 @@ def build_timeline(history=None, events=None, sources=None, crm=None,
       received: [{campaign, status, at}]  что ему отправляли (рассылки)
       replies:  [{channel, text, at}]     что он написал в ответ
       orders:   [{total_cents, currency, status, items, at}]  что купил
+      scenarios: [{workflow, step_idx, outcome_label, at}]  что с ним делали
+                сценарии (журнал шагов workflow_step_log)
     Возвращает список {ts, icon, kind, title, detail}, отсортированный по времени
     (новые сверху), обрезанный до limit. Записи без времени отбрасываются.
     """
@@ -97,6 +99,14 @@ def build_timeline(history=None, events=None, sources=None, crm=None,
         items.append({"ts": o.get("at"), "icon": "🛒", "kind": "order",
                       "title": f"Заказ · {ORDER_STATUS_LABEL.get(o.get('status'), o.get('status') or '')}",
                       "detail": _money(o.get("total_cents"), o.get("currency"))})
+
+    for w in scenarios or []:
+        step = w.get("step_idx")
+        where = f"шаг {int(step) + 1}" if isinstance(step, int) and step >= 0 else ""
+        items.append({"ts": w.get("at"), "icon": "🔄", "kind": "scenario",
+                      "title": f"Сценарий «{str(w.get('workflow') or 'без имени')[:60]}»",
+                      "detail": " · ".join(b for b in (where, str(w.get("outcome_label") or ""))
+                                           if b)[:160]})
 
     items = [i for i in items if i.get("ts") is not None]
     items.sort(key=lambda i: i["ts"], reverse=True)

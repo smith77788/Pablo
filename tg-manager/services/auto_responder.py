@@ -1678,14 +1678,18 @@ async def _process_bot(
                                 "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id
                             )
                             if _deal_owner:
-                                await pool.execute(
+                                _deal_id = await pool.fetchval(
                                     """INSERT INTO crm_deals
                                            (owner_id, title, contact, stage, created_at)
-                                       VALUES ($1, $2, $3, 'lead', NOW())""",
+                                       VALUES ($1, $2, $3, 'lead', NOW())
+                                    RETURNING id""",
                                     _deal_owner,
                                     deal_title,
                                     user_label,
                                 )
+                                await db.emit_deal_created(
+                                    pool, _deal_owner, _deal_id, deal_title, "rule",
+                                    bot_id=bot_id, chat_id=chat_id)
                         except Exception as exc:
                             log.warning(
                                 "auto_responder: create_deal failed bot=%d chat=%d: %s",
@@ -2168,14 +2172,18 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
                         "SELECT added_by FROM managed_bots WHERE bot_id=$1", rule["bot_id"]
                     )
                     if _deal_owner:
-                        await pool.execute(
+                        _deal_id = await pool.fetchval(
                             """INSERT INTO crm_deals
                                    (owner_id, title, contact, stage, created_at)
-                               VALUES ($1, $2, $3, 'lead', NOW())""",
+                               VALUES ($1, $2, $3, 'lead', NOW())
+                            RETURNING id""",
                             _deal_owner,
                             f"{title_prefix} — id{chat_id}",
                             str(chat_id),
                         )
+                        await db.emit_deal_created(
+                            pool, _deal_owner, _deal_id, f"{title_prefix} — id{chat_id}",
+                            "rule", bot_id=rule["bot_id"], chat_id=chat_id)
                 elif rule["action_type"] == "webhook":
                     url = (rule["action_value"] or "").strip()
                     if url:

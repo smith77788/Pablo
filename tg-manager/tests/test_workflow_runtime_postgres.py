@@ -443,6 +443,69 @@ def test_reaching_the_goal_stops_the_follow_up(pool, tg):
     _run(go())
 
 
+def test_a_deal_moved_to_won_in_crm_ends_the_follow_up(pool, tg):
+    """Цель «сделка прогона дошла до этапа»: менеджер перевёл сделку в
+    «выиграна» в CRM — дожим этому человеку больше не идёт.
+
+    Смена этапа приходит в шину без человека (её делает менеджер), поэтому
+    по человеку цель не находилась бы никогда — ищется по сделке прогона."""
+    from database import db
+    from services import workflow_engine as wf, workflow_runtime as rt
+
+    assert rt.validate_goal("deal_stage", "Выиграна") == ("deal_stage", "won")
+    with pytest.raises(ValueError):
+        rt.validate_goal("deal_stage", "куплено")
+
+    async def go():
+        wf_id = await _workflow(pool, [
+            {"type": "action", "action": "create_deal", "value": "Заявка"},
+            {"type": "delay", "delay_minutes": 60},
+            {"type": "message", "text": "Остались вопросы по заказу?"},
+        ])
+        await wf.set_goal(pool, OWNER, wf_id, "deal_stage", "won")
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "running"
+        deal_id = int(json.loads(run["vars"])["_deal_id"]
+                      if isinstance(run["vars"], str) else run["vars"]["_deal_id"])
+        # Промежуточный этап — ещё не цель.
+        assert await db.move_crm_deal_stage(pool, deal_id, OWNER, "negotiation")
+        await pool.execute("UPDATE automation_events SET created_at = now() - "
+                           "interval '5 seconds' WHERE owner_id=$1", OWNER)
+        await _tick(pool)
+        assert (await _run_row(pool, wf_id))["status"] == "running"
+        assert await db.move_crm_deal_stage(pool, deal_id, OWNER, "won")
+        await pool.execute("UPDATE automation_events SET created_at = now() - "
+                           "interval '5 seconds' WHERE owner_id=$1", OWNER)
+        await _tick(pool)
+        run = await _run_row(pool, wf_id)
+        assert run["status"] == "completed" and run["goal_reached_at"] is not None
+        await pool.execute("UPDATE workflow_runs SET next_run_at=now() WHERE id=$1",
+                           run["id"])
+        await _tick(pool)
+        assert "Остались вопросы по заказу?" not in _texts(tg)
+
+    _run(go())
+
+
+def test_a_deal_created_anywhere_reaches_the_bus(pool, tg):
+    """`deal.created` писал только сценарий: сделка, созданная вручную или из
+    бота, сценарий запустить не могла."""
+    from database import db
+
+    async def go():
+        deal_id = await db.create_crm_deal(pool, OWNER, "Ручная сделка")
+        row = await pool.fetchrow(
+            "SELECT data FROM automation_events WHERE owner_id=$1 "
+            "AND event_type='deal.created' ORDER BY id DESC LIMIT 1", OWNER)
+        assert row is not None, "создание сделки не попало в шину"
+        data = json.loads(row["data"]) if isinstance(row["data"], str) else row["data"]
+        assert data["deal_id"] == deal_id and data["source"] == "bot"
+
+    _run(go())
+
+
 def test_the_journal_counts_people_per_step_and_revenue_once(pool, tg):
     """Журнал шагов: сколько людей на каждом шаге, кто что нажал, сколько
     денег. Повтор апдейта оплаты не удваивает выручку."""
@@ -1563,5 +1626,89 @@ def test_no_date_in_the_field_does_not_hang_the_run(pool, tg):
         await _tick(pool)
         assert _texts(tg) == ["Дальше"]
         assert (await _run_row(pool, wf_id))["status"] == "completed"
+
+    _run(go())
+
+
+def test_editing_a_live_scenario_goes_to_a_draft_until_published(pool, tg):
+    """Правка включённого сценария не доходит до людей на полпути.
+
+    Раньше шаг, добавленный или удалённый в работающем сценарии, сразу
+    становился рабочим: новые люди получали недособранную версию, а
+    отличить, по какой версии шёл прогон, было нельзя."""
+    from services import workflow_engine as wf
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "Старое приветствие"}])
+        step, in_draft = await wf.append_step(
+            pool, OWNER, wf_id, {"type": "message", "text": "Новое продолжение"})
+        assert in_draft and step["text"] == "Новое продолжение"
+        assert await wf.delete_step(pool, OWNER, wf_id, 0) == 1  # тоже в черновик
+        row = await pool.fetchrow(
+            "SELECT steps, draft_steps, steps_version FROM workflow_definitions "
+            "WHERE id=$1", wf_id)
+        assert [s["text"] for s in json.loads(row["steps"])] == ["Старое приветствие"]
+        assert [s["text"] for s in json.loads(row["draft_steps"])] == ["Новое продолжение"]
+
+        # Человек пришёл, пока черновик не опубликован: идёт по версии 1.
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        assert _texts(tg) == ["Старое приветствие"]
+        assert (await _run_row(pool, wf_id))["steps_version"] == 1
+
+        assert await wf.publish_draft(pool, OWNER, wf_id) == 2
+        assert await wf.publish_draft(pool, OWNER, wf_id) is None  # публиковать нечего
+        await pool.execute("DELETE FROM workflow_runs WHERE workflow_id=$1", wf_id)
+        await _emit_old(pool, "contact.started", {"param": ""})
+        await _tick(pool)
+        assert _texts(tg)[-1] == "Новое продолжение"
+        assert (await _run_row(pool, wf_id))["steps_version"] == 2
+
+    _run(go())
+
+
+def test_a_draft_can_be_discarded_and_an_off_scenario_is_edited_directly(pool, tg):
+    from services import workflow_engine as wf
+
+    async def go():
+        wf_id = await _workflow(pool, [{"type": "message", "text": "Раз"}])
+        await wf.append_step(pool, OWNER, wf_id, {"type": "message", "text": "Два"})
+        assert await wf.discard_draft(pool, OWNER, wf_id) is True
+        assert await wf.discard_draft(pool, OWNER, wf_id) is False
+        row = await pool.fetchrow(
+            "SELECT steps, draft_steps FROM workflow_definitions WHERE id=$1", wf_id)
+        assert row["draft_steps"] is None and len(json.loads(row["steps"])) == 1
+
+        # Выключенный сценарий никто не проходит — правка сразу в шаги.
+        off_id = await _workflow(pool, [{"type": "message", "text": "Раз"}], active=False)
+        _, in_draft = await wf.append_step(pool, OWNER, off_id,
+                                           {"type": "message", "text": "Два"})
+        assert in_draft is False
+        assert len(json.loads(await pool.fetchval(
+            "SELECT steps FROM workflow_definitions WHERE id=$1", off_id))) == 2
+        # Чужой сценарий не правится.
+        assert await wf.append_step(pool, OWNER + 1, off_id,
+                                    {"type": "message", "text": "Чужое"}) is None
+
+    _run(go())
+
+
+def test_a_test_run_follows_the_draft(pool, tg):
+    """Тестовый запуск проверяет то, что владелец сейчас собирает."""
+    from services import workflow_engine as wf
+
+    async def go():
+        await pool.execute(
+            "INSERT INTO bot_users(bot_id, user_id, first_name, is_active) "
+            "VALUES($1,$2,'Владелец',TRUE) ON CONFLICT DO NOTHING", BOT_ID, OWNER)
+        wf_id = await _workflow(pool, [{"type": "message", "text": "Опубликовано"}],
+                                trigger="manual")
+        await wf.append_step(pool, OWNER, wf_id, {"type": "message", "text": "Из черновика"})
+        res = await wf.execute_workflow(pool, OWNER, wf_id)
+        assert res.get("ok"), res
+        await _tick(pool)
+        assert _texts(tg) == ["Опубликовано", "Из черновика"]
+        run = await _run_row(pool, wf_id)
+        assert run["steps_version"] is None  # тест не выдаётся за версию
 
     _run(go())

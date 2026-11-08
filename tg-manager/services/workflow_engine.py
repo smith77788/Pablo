@@ -481,6 +481,11 @@ async def execute_workflow(
     if not wf:
         return {"ok": False, "error": "Воркфлоу не найден", "code": 404}
     wf = dict(wf)
+    if wf.get("draft_steps") is not None:
+        # Тестовый прогон проверяет то, что владелец сейчас собирает: черновик.
+        # Люди по-прежнему проходят опубликованные шаги.
+        wf["steps"] = wf["draft_steps"]
+        wf["steps_version"] = None
     total_steps = len(_rt._as_list(wf.get("steps")))
     if not total_steps:
         return {"ok": False, "error": "В сценарии нет шагов", "code": 400}
@@ -519,15 +524,10 @@ async def delete_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     """
     async with pool.acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow(
-                "SELECT steps FROM workflow_definitions "
-                "WHERE id=$1 AND owner_id=$2 FOR UPDATE", workflow_id, owner_id)
-            if row is None:
+            target = await _edit_target(conn, owner_id, workflow_id)
+            if target is None:
                 return None
-            steps = row["steps"]
-            if isinstance(steps, str):
-                steps = json.loads(steps or "[]")
-            steps = steps if isinstance(steps, list) else []
+            column, steps = target
             if not 0 <= index < len(steps):
                 return None
             del steps[index]
@@ -539,9 +539,82 @@ async def delete_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
                     log.info("delete_step: шаг %s сценария %s со старым языком "
                              "отброшен", i + 1, workflow_id)
             await conn.execute(
-                "UPDATE workflow_definitions SET steps=$1::jsonb, updated_at=NOW() "
+                f"UPDATE workflow_definitions SET {column}=$1::jsonb, updated_at=NOW() "
                 "WHERE id=$2 AND owner_id=$3", json.dumps(kept), workflow_id, owner_id)
     return len(kept)
+
+
+# ── Черновик и публикация ───────────────────────────────────────────────────
+# Включённый сценарий проходят живые люди. Правка его шагов идёт в черновик
+# (`draft_steps`), а люди проходят опубликованные `steps`, пока владелец не
+# нажмёт «Опубликовать». Выключенный сценарий никто не проходит — его шаги
+# правятся напрямую, без лишнего шага для нового сценария.
+
+def _steps_list(raw) -> list:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "[]")
+        except Exception:
+            return []
+    return list(raw) if isinstance(raw, list) else []
+
+
+async def _edit_target(conn, owner_id: int, workflow_id: int) -> tuple[str, list] | None:
+    """Что правит владелец: ('draft_steps' | 'steps', текущие шаги). None —
+    сценария нет у владельца. Вызывать в транзакции: строка блокируется."""
+    row = await conn.fetchrow(
+        """SELECT steps, draft_steps, COALESCE(is_active, FALSE) AS active
+             FROM workflow_definitions
+            WHERE id=$1 AND owner_id=$2 FOR UPDATE""", workflow_id, owner_id)
+    if row is None:
+        return None
+    if row["draft_steps"] is not None:
+        return "draft_steps", _steps_list(row["draft_steps"])
+    if row["active"]:
+        return "draft_steps", _steps_list(row["steps"])
+    return "steps", _steps_list(row["steps"])
+
+
+async def append_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                      raw_step: dict) -> tuple[dict, bool] | None:
+    """Добавить шаг. (шаг, ушёл ли в черновик) или None — сценария нет.
+    ValueError — шаг не прошёл проверку."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            target = await _edit_target(conn, owner_id, workflow_id)
+            if target is None:
+                return None
+            column, steps = target
+            # Уже сохранённые шаги считаются: предел на сценарий имеет смысл
+            # только вместе с ними.
+            step = validate_steps([raw_step], already=len(steps))[0]
+            steps.append(step)
+            await conn.execute(
+                f"UPDATE workflow_definitions SET {column}=$1::jsonb, updated_at=NOW() "
+                "WHERE id=$2 AND owner_id=$3", json.dumps(steps), workflow_id, owner_id)
+    return step, column == "draft_steps"
+
+
+async def publish_draft(pool: asyncpg.Pool, owner_id: int,
+                        workflow_id: int) -> int | None:
+    """Опубликовать черновик: новые люди пойдут по нему. Номер версии или
+    None — черновика нет. Идущие прогоны доходят по своей версии (снимок)."""
+    return await pool.fetchval(
+        """UPDATE workflow_definitions
+              SET steps = draft_steps, draft_steps = NULL,
+                  steps_version = COALESCE(steps_version, 1) + 1,
+                  published_at = now(), updated_at = now()
+            WHERE id=$1 AND owner_id=$2 AND draft_steps IS NOT NULL
+        RETURNING steps_version""", workflow_id, owner_id)
+
+
+async def discard_draft(pool: asyncpg.Pool, owner_id: int, workflow_id: int) -> bool:
+    """Выбросить черновик. False — черновика нет."""
+    res = await pool.execute(
+        """UPDATE workflow_definitions SET draft_steps=NULL, updated_at=now()
+            WHERE id=$1 AND owner_id=$2 AND draft_steps IS NOT NULL""",
+        workflow_id, owner_id)
+    return isinstance(res, str) and res.endswith(" 1")
 
 
 async def set_trigger(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
@@ -1285,7 +1358,7 @@ async def recent_runs(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     """
     rows = await pool.fetch(
         """SELECT id, status, current_step, total_steps, started_at, finished_at,
-                  error_message, chat_id, source, goal_reached_at
+                  error_message, chat_id, source, goal_reached_at, steps_version
              FROM workflow_runs
             WHERE workflow_id = $1 AND owner_id = $2
             ORDER BY id DESC LIMIT $3""",
