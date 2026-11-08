@@ -40,10 +40,11 @@ global.num = n => String(n);
 eval(fs.readFileSync(process.argv[2], 'utf8') + '\n;globalThis.wfEdges=wfEdges;globalThis._wfmSvg=_wfmSvg;');
 const steps = JSON.parse(process.argv[3]);
 const edges = globalThis.wfEdges(steps);
-const svg = globalThis._wfmSvg(steps, {steps: {"0": {reached: 12}}});
+const svg = globalThis._wfmSvg(steps, {steps: {"0": {reached: 12}, "1": {reached: 9, dropped: 4}}});
 console.log(JSON.stringify({edges, rects: (svg.match(/<rect /g) || []).length,
   paths: (svg.match(/<path d="M/g) || []).length, has12: svg.includes('👥 12'),
-  hasEnd: svg.includes('Конец')}));
+  hasEnd: svg.includes('Конец'), drop4: svg.includes('↘ 4 ушли'),
+  dropCount: (svg.match(/ушли</g) || []).length}));
 """
 
 
@@ -87,9 +88,54 @@ def test_svg_draws_every_step_jumps_and_stats():
     assert d["rects"] == len(STEPS) + 1          # шаги + «Конец»
     assert d["paths"] >= 8                       # прыжки и ветки — дугами
     assert d["has12"] and d["hasEnd"]
+    # «Отвалилось» — только там, где кто-то ушёл, а не «0 ушли» на каждом шаге.
+    assert d["drop4"] and d["dropCount"] == 1
 
 
 def test_wired_in_workflow_screen():
     html = miniapp_html()
     assert '<script src="screens/workflow_map.js"></script>' in html
     assert "openWorkflowMap(${Number(wfId)})" in html
+
+
+def test_dropped_counts_runs_that_ended_badly_at_their_last_step():
+    """На живом Postgres: прогон с ошибкой считается на последнем исполненном
+    шаге, завершённый и идущий прогоны не считаются."""
+    dsn = os.getenv("INFRAGRAM_TEST_DSN")
+    if not dsn:
+        pytest.skip("нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
+    import asyncio
+    import asyncpg
+    from services import workflow_engine as we
+    owner = 88_500_001
+
+    async def _go():
+        try:
+            pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+        except Exception as exc:
+            pytest.skip(f"Postgres недоступен: {str(exc)[:120]}")
+        try:
+            wf = await pool.fetchval(
+                "INSERT INTO workflow_definitions(owner_id, name, steps) VALUES ($1,'drop test','[]') RETURNING id", owner)
+            runs = {}
+            for st in ("failed", "completed", "running", "expired"):
+                runs[st] = await pool.fetchval(
+                    "INSERT INTO workflow_runs(owner_id, workflow_id, status) VALUES ($1,$2,$3) RETURNING id",
+                    owner, wf, st)
+            log = [("failed", 0), ("failed", 1), ("completed", 0), ("completed", 1), ("completed", 2),
+                   ("running", 0), ("expired", 0)]
+            for st, idx in log:
+                await pool.execute(
+                    "INSERT INTO workflow_step_log(run_id, workflow_id, owner_id, step_idx, step_type, outcome) "
+                    "VALUES ($1,$2,$3,$4,'message','sent')", runs[st], wf, owner, idx)
+            d = await we.workflow_stats(pool, owner, wf)
+            steps = {int(k): v for k, v in d["steps"].items()}
+            assert steps[0].get("dropped") == 1      # истёкший ушёл после шага 1
+            assert steps[1].get("dropped") == 1      # упавший — после шага 2
+            assert "dropped" not in steps[2]         # завершённый не «ушёл»
+        finally:
+            await pool.execute("DELETE FROM workflow_step_log WHERE owner_id=$1", owner)
+            await pool.execute("DELETE FROM workflow_runs WHERE owner_id=$1", owner)
+            await pool.execute("DELETE FROM workflow_definitions WHERE owner_id=$1", owner)
+            await pool.close()
+    asyncio.run(_go())

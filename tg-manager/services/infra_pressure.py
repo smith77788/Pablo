@@ -220,7 +220,7 @@ def format_pressure_report(data: dict) -> str:
     c_tr = _pts("trust")
 
     lines = [
-        "🌡 <b>Давление инфраструктуры</b>",
+        "🌡 <b>Риск бана</b>",
         "",
         f"{emoji} <b>{score}/100</b> — {label}",
         f"[{bar}]",
@@ -238,7 +238,7 @@ def format_pressure_report(data: dict) -> str:
     if score >= 81:
         lines += [
             "",
-            "⛔ <b>Критическое давление!</b>",
+            "⛔ <b>Критический риск бана!</b>",
             "• Немедленно снизьте нагрузку на инфраструктуру",
             "• Часть аккаунтов требует восстановления",
             "• Добавьте аккаунты или снизьте нагрузку",
@@ -246,7 +246,7 @@ def format_pressure_report(data: dict) -> str:
     elif score >= 71:
         lines += [
             "",
-            "🔴 <b>Высокое давление!</b>",
+            "🔴 <b>Высокий риск бана!</b>",
             "• Добавьте аккаунты или снизьте нагрузку",
             "• Уменьшите количество одновременных операций",
             "• Рекомендуется авто-ротация кулдаун-аккаунтов",
@@ -254,7 +254,7 @@ def format_pressure_report(data: dict) -> str:
     elif score >= 61:
         lines += [
             "",
-            "⚠️ <b>Повышенное давление</b>",
+            "⚠️ <b>Повышенный риск бана</b>",
             "• Уменьшите количество одновременных операций",
             "• Мониторьте flood-события",
         ]
@@ -335,7 +335,7 @@ def format_pool_pressure(pools: dict[str, dict]) -> str:
     """Human-readable pool pressure breakdown для вставки в отчёты."""
     if not pools:
         return ""
-    lines = ["", "🏊 <b>Давление по пулам:</b>"]
+    lines = ["", "🏊 <b>Риск бана по пулам:</b>"]
     for pool_name, data in sorted(pools.items()):
         emoji = data["pressure_emoji"]
         score = data["score"]

@@ -30,6 +30,16 @@ import logging
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _fresh_notify_slots():
+    """Уведомления идут через общий слой с анти-спамом на 60 с в памяти
+    процесса: слот, занятый соседним тестом, глушил бы сообщение этого."""
+    from database import db as _db
+    _db._notify_cooldown.clear()
+    yield
+    _db._notify_cooldown.clear()
+
 COUNTER = "infragram_shield_apply_write_failures_total"
 
 

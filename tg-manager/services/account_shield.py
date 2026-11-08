@@ -454,6 +454,11 @@ async def _notify_pause(
                 "Отключите аккаунт вручную в списке аккаунтов.\n\n"
                 f"<i>{decision.note}</i>"
             )
-        await bot.send_message(owner_id, text, parse_mode="HTML")
+        # Общий слой: тумблер «Ограничения аккаунтов», уровень «нужно действие»
+        # (идёт и в тихие часы). Ключ — аккаунт: паузы разных аккаунтов не
+        # делят один слот анти-спама.
+        from database import db as _db
+        await _db.notify_if_enabled(pool, bot, owner_id, "restriction", text,
+                                    dedup_key=f"shield:{decision.account_id}:{bool(applied)}")
     except Exception as exc:
         log.debug("account_shield._notify_pause owner=%d: %s", owner_id, exc)

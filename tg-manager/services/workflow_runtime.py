@@ -1878,10 +1878,11 @@ async def _do_action(pool, run, step, contact, fields, main_bot, *,
     elif action == "notify_owner":
         if main_bot is None:
             return
-        try:
-            await main_bot.send_message(owner, _lead_card(value, contact, chat_id, fields),
-                                        parse_mode="HTML")
-        except Exception:
+        # Общий слой: тумблер «Лиды», уровень «нужно действие» (сразу).
+        if not await db.notify_if_enabled(
+                pool, main_bot, owner, "leads",
+                _lead_card(value, contact, chat_id, fields),
+                dedup_key=f"wf:{run.get('id')}:{step.get('id', '')}"):
             log.info("workflow_runtime: уведомление владельцу %s не доставлено", owner)
     elif action == "notify_chat":
         # Карточка заявки в чат отдела продаж — от бота сценария: он должен

@@ -213,8 +213,8 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             "губернатор уже притормозил, но причину стоит устранить.",
             {"kind": "governor"})
     if fleet.get("governor_level") == "red":
-        add("gov_red", "warn", f"Флот под давлением ×{fleet.get('governor_mult')}",
-            f"Давление {fleet.get('pressure')}/100 — рисковые операции лучше "
+        add("gov_red", "warn", f"Высокий риск бана ×{fleet.get('governor_mult')}",
+            f"Риск бана {fleet.get('pressure')}/100 — рисковые операции лучше "
             "отложить, флот прогреть.", {"kind": "governor"})
 
     bots = snap.get("bots") or {}
@@ -323,7 +323,7 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             and fleet.get("active", 0) > 0 and graph.get("contacts", 0) > 0
             and fleet.get("governor_level") != "red" and hot == 0):
         add("idle", "info", "Флот свободен",
-            "Нет активных операций, давление в норме. Запустите инвайт или "
+            "Нет активных операций, риск бана в норме. Запустите инвайт или "
             "напишите сегменту.", {"kind": "invite"})
 
     cw = snap.get("chat_warmup") or {}
@@ -348,7 +348,7 @@ def narrative(snap: dict) -> str:
     o = snap.get("ops") or {}
     parts = [f"Флот: {f.get('accounts', 0)} акк. ({f.get('active', 0)} активны"
              + (f", {f['dead']} мёртвых" if f.get("dead") else "") + ")",
-             f"давление {f.get('pressure', 0)}/100"]
+             f"риск бана {f.get('pressure', 0)}/100"]
     an = snap.get("anomalies") or {}
     day = []
     # Риск-сигналы — вперёд: сводка должна кричать о том, что горит.

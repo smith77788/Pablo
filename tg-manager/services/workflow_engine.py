@@ -1444,6 +1444,21 @@ async def workflow_stats(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
         workflow_id, owner_id)
     for r in reached:
         steps.setdefault(int(r["step_idx"]), {"outcomes": {}})["reached"] = int(r["n"])
+    # «Отвалились на шаге»: прогон, закончившийся НЕ по сценарию (ошибка,
+    # истёк, остановлен, отменён), считается на последнем шаге, который он
+    # успел исполнить. Это шаг, после которого человек ушёл, то есть место,
+    # которое надо чинить. Прогон, дошедший до конца, сюда не попадает.
+    dropped_at = await pool.fetch(
+        """SELECT last_idx AS step_idx, count(*) AS n FROM (
+               SELECT DISTINCT ON (l.run_id) l.run_id, l.step_idx AS last_idx
+                 FROM workflow_step_log l
+                 JOIN workflow_runs r ON r.id = l.run_id
+                WHERE l.workflow_id=$1 AND l.owner_id=$2
+                  AND r.status IN ('failed','expired','stopped','cancelled')
+                ORDER BY l.run_id, l.id DESC) t
+            GROUP BY last_idx""", workflow_id, owner_id)
+    for r in dropped_at:
+        steps.setdefault(int(r["step_idx"]), {"outcomes": {}})["dropped"] = int(r["n"])
     revenue = [dict(r) for r in await pool.fetch(
         """SELECT currency, sum(amount) AS amount, count(*) AS payments
              FROM workflow_step_log

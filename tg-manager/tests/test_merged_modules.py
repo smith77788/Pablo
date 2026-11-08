@@ -131,10 +131,11 @@ def test_audience_analytics_is_one_module():
 
 
 def test_shield_is_one_module():
-    _assert_module("shield", "🛡 Щит", "Щит",
+    _assert_module("shield", "🛡 Защита аккаунтов", "Защита аккаунтов",
                    {"accounts": ("s-shield", "openShield"),
-                    "resources": ("s-shieldcheck", "openShieldCheck")},
-                   gone=("Проверка ограничений",))
+                    "resources": ("s-shieldcheck", "openShieldCheck"),
+                    "habits": ("s-physics", "openPhysics")},
+                   gone=("Проверка ограничений", "Щит", "Физика"))
     assert "_renderModuleTabs()" in _fn_body("_shScreen")
 
 

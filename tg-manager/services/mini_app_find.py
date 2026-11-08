@@ -6,7 +6,8 @@ Telegram, но не было поиска по своему: чтобы откр
 список. У лидеров (amoCRM, Notion, Linear) это одна строка поиска сверху.
 
 Ручка одна: ``GET /api/miniapp/find?q=`` ищет подстроку без учёта регистра
-в контактах, ботах, аккаунтах, каналах, ИИ-менеджерах и операциях владельца и
+в контактах, сделках, ботах, аккаунтах, каналах, ИИ-менеджерах и операциях
+владельца и
 отдаёт по несколько первых совпадений в группе с ЧЕСТНЫМ счётом всех
 совпадений группы: «ещё 37» лучше, чем молча оборванный список.
 
@@ -42,6 +43,21 @@ _GROUPS = (
      "display_name ILIKE $2 ESCAPE '\\' OR first_name ILIKE $2 ESCAPE '\\' "
      "OR last_name ILIKE $2 ESCAPE '\\' OR username ILIKE $2 ESCAPE '\\' "
      "OR company ILIKE $2 ESCAPE '\\')"),
+    # Сделки — главный объект продавца (amoCRM ищет прежде всего их). Ищутся по
+    # названию, клиенту и заметке; в подписи этап доски (те же слова, что в
+    # колонках канбана, intent_sensor._stage_label).
+    ("deals", "💼 Сделки",
+     "SELECT id::text AS id, title, CONCAT_WS(' · ', contact, CASE stage "
+     "WHEN 'lead' THEN 'Лид' WHEN 'contact' THEN 'Контакт' "
+     "WHEN 'proposal' THEN 'Предложение' WHEN 'negotiation' THEN 'Переговоры' "
+     "WHEN 'won' THEN 'Выиграно' WHEN 'lost' THEN 'Проиграно' "
+     "ELSE stage END) AS sub "
+     "FROM crm_deals WHERE owner_id=$1 AND ("
+     "title ILIKE $2 ESCAPE '\\' OR contact ILIKE $2 ESCAPE '\\' "
+     "OR notes ILIKE $2 ESCAPE '\\') ORDER BY updated_at DESC, id DESC LIMIT $3",
+     "SELECT COUNT(*) FROM crm_deals WHERE owner_id=$1 AND ("
+     "title ILIKE $2 ESCAPE '\\' OR contact ILIKE $2 ESCAPE '\\' "
+     "OR notes ILIKE $2 ESCAPE '\\')"),
     ("bots", "🤖 Боты",
      "SELECT bot_id::text AS id, COALESCE('@' || NULLIF(username,''), first_name, 'Бот') AS title, "
      "first_name AS sub FROM managed_bots WHERE added_by=$1 AND ("
