@@ -1,6 +1,7 @@
 """Фоновый воркер для выполнения очереди операций (параллельный режим)."""
 
 import asyncio
+import collections
 import contextlib
 import json
 import logging
@@ -15448,6 +15449,27 @@ async def _exec_channel_add(
         await release_accounts([int(acc["id"])])
 
 
+def _health_check_parallel() -> int:
+    """Сколько РАЗНЫХ выходов в сеть проверка здоровья держит одновременно."""
+    return _int_env("CHECK_HEALTH_PARALLEL", 8, 1, 32)
+
+
+def _health_check_lanes(accounts: list[dict]) -> "dict[str, collections.deque]":
+    """Разложить аккаунты по выходам в сеть: {выход: deque[(индекс, аккаунт)]}.
+
+    Выход — прокси аккаунта (по адресу, а не по id: два id могут вести на один
+    и тот же прокси), а без прокси — общий выход сервера. Внутри полосы
+    аккаунты идут строго по одному и в исходном порядке; параллелятся только
+    полосы. Порядок полос — по первому появлению, чтобы проверка шла от
+    начала списка, как раньше.
+    """
+    lanes: dict[str, collections.deque] = {}
+    for idx, acc in enumerate(accounts):
+        key = (acc.get("proxy_url") or "").strip() or "__direct__"
+        lanes.setdefault(key, collections.deque()).append((idx, acc))
+    return lanes
+
+
 async def _exec_check_accounts_health(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -15593,14 +15615,17 @@ async def _exec_check_accounts_health(
     # Статусы, считающиеся «здоровыми» для бейджа лога (ok vs error).
     _HEALTHY = {"active"}
 
-    for idx, acc in enumerate(accounts):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "checked": idx,
-                "summary": f"Отменено. Проверено: {idx}/{n}",
-            }
-
+    # Проверка шла строго по одному: подключение, get_me, диалог с @SpamBot
+    # и пауза 2,5 с — не меньше 5 с на аккаунт. 1 000 аккаунтов проверялись
+    # около полутора часов, 5 000 — около семи (замер 08.11.2026). Теперь
+    # аккаунты идут параллельно, но ровно по одному на каждый выход в сеть:
+    # аккаунты за одним прокси (и все без прокси — это IP сервера) по-прежнему
+    # проверяются строго друг за другом, так что ни один IP не видит больше
+    # одновременных подключений, чем раньше. Параллельно идут только РАЗНЫЕ
+    # прокси, по `CHECK_HEALTH_PARALLEL` одновременно (1 — прежний порядок).
+    # Отмена читается перед каждым аккаунтом в каждой полосе.
+    async def _check_one(idx: int, acc: dict) -> None:
+        nonlocal errors, deactivated, reactivated, unchanged, spamblock_temp, spamblock_perm
         session_str = acc.get("session_str") or ""
         result: dict = {"status": "no_session", "reason": ""}
         try:
@@ -15722,6 +15747,40 @@ async def _exec_check_accounts_health(
 
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+
+    lanes = _health_check_lanes(accounts)
+    parallel = max(1, min(_health_check_parallel(), len(lanes)))
+    ready = collections.deque(lanes.keys())
+    checked = 0
+    cancelled = False
+
+    async def _lane_worker() -> None:
+        nonlocal checked, cancelled
+        while ready and not cancelled:
+            lane = ready.popleft()
+            queue = lanes[lane]
+            idx, acc = queue.popleft()
+            if await _is_cancelled(pool, op_id):
+                cancelled = True
+                return
+            try:
+                await _check_one(idx, acc)
+            finally:
+                checked += 1
+            # Полоса возвращается в конец очереди: пока этот аккаунт
+            # проверялся, её не брал никто другой, и разные прокси
+            # чередуются по кругу.
+            if queue:
+                ready.append(lane)
+
+    await asyncio.gather(*(_lane_worker() for _ in range(parallel)))
+    if cancelled:
+        return {
+            "status": "cancelled",
+            "checked": checked,
+            "summary": f"Отменено. Проверено: {checked}/{n}",
+        }
 
     # Вся раскладка — ОДНОЙ строкой и в порядке важности, а не по алфавиту
     # кодов. Плашка исхода показывает первые строки итога; при раскладке

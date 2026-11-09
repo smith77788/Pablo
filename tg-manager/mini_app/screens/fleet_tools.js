@@ -348,7 +348,7 @@ function accTableHtml(list) {
     return `<tr class="fx-tr${ACC_SEL_MODE && sel ? ' fx-on' : ''}" onclick="${onclick}">`
       + (ACC_SEL_MODE ? `<td class="fx-chk"><span class="acc-check ${sel ? 'on' : ''}">${sel ? '✓' : ''}</span></td>` : '')
       + `<td>${phoneFlag(a.phone || '')} ${esc(name)}</td><td class="fx-mono">${esc(a.phone || '')}</td>`
-      + `<td><span class="badge ${s.cls}">${s.status}</span>${a.health_reason && (a.health_status === 'quarantine' || a.health_status === 'at_risk') ? `<div class="fx-dim">${esc(a.health_reason)}</div>` : ''}</td>`
+      + `<td><span class="badge ${s.cls}">${s.status}</span>${a.verdict ? (a.verdict.level !== 'ok' && a.verdict.reason ? `<div class="fx-dim">${esc(a.verdict.reason)}</div>` : '') : (a.health_reason && (a.health_status === 'quarantine' || a.health_status === 'at_risk') ? `<div class="fx-dim">${esc(a.health_reason)}</div>` : '')}</td>`
       + `<td>${trust}%</td><td>${proxy}</td><td>${esc(a.pool || '')}</td>`
       + `<td>${stageBadge(a.stage)}</td><td>${accTagsHtml(a)}</td>`
       + `<td class="fx-dim">${a.last_used ? ago(a.last_used) : '—'}</td></tr>`;

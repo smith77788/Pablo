@@ -167,7 +167,8 @@ def test_screen_counts_accounts_needing_repair():
                "name": "acc", "reason": "нет сессии — переимпортируйте аккаунт",
                "ready_in": None, "hint": None}]
     text = screen._render(states)
-    assert "нужна починка: <b>1</b>" in text
+    # Метка одна на продукт (account_verdict): «нужна починка» = «Нужно действие».
+    assert "Нужно действие: <b>1</b>" in text
     assert "нет сессии" in text
 
 
