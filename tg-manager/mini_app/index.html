@@ -7906,6 +7906,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-failed" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Ошибки</div></div>
     </div>
     <div class="hint" style="margin:0 14px 10px">Сценарий выполняется сам: запускается по выбранному событию (например, когда человек открыл бота) и проходит шаги — сообщения с кнопками, вопросы, паузы, условия, счёт на оплату. Включите сценарий, чтобы он заработал, а проверить его можно кнопкой «Тестовый запуск» на себе.</div>
+    <div class="hint" id="wfHealth" style="margin:0 14px 10px"></div>
     <div class="sec">Шаблоны сценариев</div>
     <div style="display:flex;gap:8px;padding:4px 16px 8px;overflow-x:auto">
       <div class="mgmt-tile" onclick="createWorkflowFromTemplate('welcome')" style="min-width:100px;flex:1">
@@ -31957,6 +31958,15 @@ async function loadWorkflows() {
     const wfFailEl = document.getElementById('wf-failed');
     wfFailEl.textContent = wfFail;
     wfFailEl.style.color = wfFail ? 'var(--red)' : '';
+    const h = d.health || {};
+    const hEl = document.getElementById('wfHealth');
+    if (hEl) {
+      const bad = (h.failed_24h || 0) + (h.overdue || 0);
+      hEl.innerHTML = (bad ? '⚠️ ' : '✅ ') + 'За сутки: прошли ' + (h.done_24h || 0) + ' · упали ' + (h.failed_24h || 0)
+        + (h.overdue ? ' · шагов опаздывают больше 5 мин: ' + h.overdue : '')
+        + (h.failed_24h ? ' — откройте сценарий с ошибкой и нажмите «Повторить все упавшие»' : '');
+      hEl.style.color = bad ? 'var(--red)' : '';
+    }
 
     if (!wfs.length) {
       txt('wfList', empty('🔄', 'Нет сценариев', 'Начните с шаблона выше — это пара минут', {label:'🔄 Создать сценарий', fn:'openWorkflowCreateModal()'}));

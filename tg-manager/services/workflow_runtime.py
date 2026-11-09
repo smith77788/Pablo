@@ -1008,6 +1008,11 @@ async def _finish(pool, run: dict, status: str, note: str | None = None,
     steps = _as_list(run.get("steps_snapshot"))
     idx = int(run.get("current_step") or 0)
     stype = steps[idx].get("type", "?") if 0 <= idx < len(steps) else "end"
+    try:
+        from services import metrics as _metrics
+        _metrics.inc("infragram_workflow_runs_finished_total", {"status": status})
+    except Exception:
+        pass
     await _log(pool, run, idx, stype, status, note)
     if status == "completed":
         await bus.emit(pool, run["owner_id"], "workflow.completed",
@@ -2447,6 +2452,19 @@ def failure_alert_text(name: str, reason: str | None, step: int | None,
     return "\n".join(lines)
 
 
+def failure_alert_markup(wf_id: int):
+    """Кнопка «Повторить упавшие» прямо в оповещении о сбое: владельцу не
+    нужно искать сценарий в мини-аппе, чтобы вернуть людей в прогон."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from bot.callbacks import ScenCb
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔁 Повторить упавшие",
+                             callback_data=ScenCb(action="retry", wf_id=int(wf_id)).pack()),
+        InlineKeyboardButton(text="📋 Все сценарии",
+                             callback_data=ScenCb(action="list").pack()),
+    ]])
+
+
 async def alert_failures(pool, main_bot) -> int:
     """Разобрать события `workflow.failed` и оповестить владельцев.
     Возвращает число отправленных оповещений."""
@@ -2491,6 +2509,7 @@ async def alert_failures(pool, main_bot) -> int:
                 try:
                     if await db.notify_if_enabled(
                             pool, main_bot, ev["owner_id"], "op_complete", text,
+                            failure_alert_markup(wf_id),
                             dedup_key=f"workflow_failed:{wf_id}"):
                         sent += 1
                 except Exception:
@@ -2518,6 +2537,18 @@ async def tick(pool, http, main_bot=None) -> None:
     except Exception:
         log.exception("workflow_runtime: тайм-ауты ожиданий")
     runs = await _claim_due(pool)
+    # Опоздание шага: насколько позже срока исполнитель взял самый
+    # просроченный прогон пачки. Растёт — исполнитель не успевает, и это
+    # видно на графике раньше, чем в жалобах.
+    try:
+        from services import metrics as _metrics
+        now = datetime.now(timezone.utc)
+        lag = max(((now - r["next_run_at"]).total_seconds() for r in runs
+                   if r.get("next_run_at")), default=0.0)
+        _metrics.gauge("infragram_workflow_step_lag_seconds", max(0.0, lag))
+        _metrics.inc("infragram_workflow_steps_claimed_total", value=float(len(runs)))
+    except Exception:
+        pass
     for run in runs:
         try:
             await advance(pool, http, run, main_bot)

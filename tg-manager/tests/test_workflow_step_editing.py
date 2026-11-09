@@ -284,3 +284,42 @@ def test_scheduled_scenario_runs_on_every_bot_once(pool, fleet):
         await pool.execute("UPDATE workflow_definitions SET is_active=FALSE WHERE id=$1", fleet)
 
     _run(go())
+
+
+# ── Здоровье сценариев ──────────────────────────────────────────────────────
+
+def test_failure_alert_has_retry_button():
+    """Оповещение о сбое ведёт прямо к повтору, а не «ищите в мини-аппе»."""
+    from bot.callbacks import ScenCb
+    from services import workflow_runtime as rt
+    kb = rt.failure_alert_markup(42)
+    datas = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert ScenCb(action="retry", wf_id=42).pack() in datas
+
+
+def test_executor_metrics_are_described():
+    from services import metrics
+    for name in ("infragram_workflow_runs_finished_total",
+                 "infragram_workflow_steps_claimed_total",
+                 "infragram_workflow_step_lag_seconds"):
+        assert name in metrics._HELP
+
+
+def test_finished_run_is_counted(pool, lead):
+    from services import metrics
+    from services import workflow_runtime as rt
+
+    async def go():
+        wfd = dict(await pool.fetchrow(
+            "SELECT * FROM workflow_definitions WHERE id=$1", lead))
+        rid = await rt.start_run(pool, wfd, BOT_ID, 5552, force=True)
+        run = dict(await pool.fetchrow("SELECT * FROM workflow_runs WHERE id=$1", rid))
+        before = metrics.snapshot()["counters"].get(_KEY, 0)
+        assert await rt._finish(pool, run, "failed", "проверка")
+        return before
+
+    before = _run(go())
+    assert metrics.snapshot()["counters"].get(_KEY, 0) >= before + 1
+
+
+_KEY = 'infragram_workflow_runs_finished_total{status="failed"}'

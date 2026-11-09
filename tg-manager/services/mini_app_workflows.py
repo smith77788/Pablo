@@ -128,7 +128,21 @@ def setup_routes(app: web.Application, pool) -> None:
                 # Зеркало воронки или автоворонки: шаги меняются в их разделе.
                 "legacy_kind": r.get("legacy_kind") or "",
             } for r in (rows or [])]
-            return _json_resp({"workflows": workflows})
+            # Здоровье исполнителя за сутки: сколько прошли, сколько упали и
+            # сколько шагов опаздывают дольше пяти минут. «Активен» без этого
+            # ничего не говорит о том, работает ли сценарий на деле.
+            health = await _safe_fetchrow(pool,
+                """SELECT count(*) FILTER (WHERE status='completed'
+                                              AND finished_at > now() - interval '1 day') AS done,
+                          count(*) FILTER (WHERE status='failed'
+                                              AND finished_at > now() - interval '1 day') AS failed,
+                          count(*) FILTER (WHERE status='running'
+                                              AND next_run_at < now() - interval '5 minutes') AS overdue
+                     FROM workflow_runs WHERE owner_id=$1""", uid)
+            return _json_resp({"workflows": workflows,
+                               "health": {"done_24h": int((health or {}).get("done") or 0),
+                                          "failed_24h": int((health or {}).get("failed") or 0),
+                                          "overdue": int((health or {}).get("overdue") or 0)}})
         except Exception:
             log.exception("workflow_list uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
