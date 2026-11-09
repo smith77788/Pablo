@@ -76,8 +76,8 @@ async def _build_dashboard(pool: asyncpg.Pool, owner_id: int) -> tuple[str, obje
     except Exception:
         geo_plans = 0
     try:
-        from services.infra_memory import get_account_health
-        pulse = (await get_account_health(pool, owner_id))["summary"]
+        from services.infra_memory import get_account_health_summary
+        pulse = await get_account_health_summary(pool, owner_id)
     except Exception:
         pulse = {}
     try:

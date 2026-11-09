@@ -223,7 +223,11 @@ def setup_routes(app: web.Application, pool) -> None:
         if not admin and rows:
             try:
                 from services.infra_memory import get_account_health
-                _hp = await get_account_health(pool, uid)
+                # Пульс только для строк этой страницы: вердикт тот же, а
+                # считать весь флот ради ста строк стоило ~200 мс на каждую
+                # страницу и подгрузку при 10 000 аккаунтов (замер 08.11.2026).
+                _hp = await get_account_health(
+                    pool, uid, account_ids=[r["id"] for r in rows])
                 _hmap = {a["account_id"]: a for a in _hp.get("accounts", [])}
                 for r in rows:
                     h = _hmap.get(r["id"])
@@ -384,7 +388,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not admin:
             try:
                 from services.infra_memory import get_account_health
-                _hp = await get_account_health(pool, uid)
+                _hp = await get_account_health(pool, uid, account_ids=[acc_id])
                 health = next((a for a in _hp.get("accounts", [])
                                if a["account_id"] == acc_id), None)
             except Exception as _e:

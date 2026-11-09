@@ -68,6 +68,7 @@ GET /api/miniapp/accounts
 GET /api/miniapp/accounts/export
 GET /api/miniapp/accounts/export_json
 GET /api/miniapp/accounts/health
+GET /api/miniapp/accounts/survival
 GET /api/miniapp/accounts/tags
 GET /api/miniapp/ad_intel
 GET /api/miniapp/admin/actions
@@ -400,6 +401,7 @@ HEAD /api/miniapp/accounts
 HEAD /api/miniapp/accounts/export
 HEAD /api/miniapp/accounts/export_json
 HEAD /api/miniapp/accounts/health
+HEAD /api/miniapp/accounts/survival
 HEAD /api/miniapp/accounts/tags
 HEAD /api/miniapp/ad_intel
 HEAD /api/miniapp/admin/actions
