@@ -194,7 +194,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       (SELECT COUNT(*) FROM managed_bots mb
                         WHERE mb.acc_id = tg_accounts.id) AS bots_owned
                FROM tg_accounts WHERE {where}
-               ORDER BY {order}
+               ORDER BY {order}, id
                LIMIT ${len(args)+1} OFFSET ${len(args)+2}""", *page_args)
         # Сколько всего под текущим фильтром — для пагинации «Загрузить ещё».
         filtered_total = await _safe_count(pool,

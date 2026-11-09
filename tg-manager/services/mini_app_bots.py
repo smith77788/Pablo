@@ -79,7 +79,7 @@ def setup_routes(app: web.Application, pool) -> None:
                LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
                WHERE ({visible})
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active{group}
-               ORDER BY {order} LIMIT $2 OFFSET $3"""
+               ORDER BY {order}, mb.bot_id LIMIT $2 OFFSET $3"""
         from services import list_sort
         order = list_sort.order_by("bots", q.get("sort"), q.get("dir"))
         try:

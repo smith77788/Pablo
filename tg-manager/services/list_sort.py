@@ -59,22 +59,23 @@ SORTS: dict[str, dict[str, tuple[str, str, str]]] = {
     },
 }
 
-# Стабильный последний ключ: у каждого вида свой столбец id.
-_TIEBREAK = {"accounts": "id", "bots": "mb.bot_id", "channels": "channel_id",
-             "proxies": "id"}
-
-
 def order_by(kind: str, sort: str | None, direction: str | None = None) -> str:
-    """Готовое тело ORDER BY для вида ресурса. Неизвестный ключ — порядок по
-    умолчанию; направление — только ASC или DESC."""
+    """Ключи сортировки для ORDER BY без последнего, стабильного ключа.
+
+    Стабильный ключ (id строки) запрос дописывает сам литералом:
+    `ORDER BY {order}, id`. Так его видит и человек, и сторож листания
+    (tests/test_paging_does_not_skip_or_repeat_people.py), а без него страницы
+    по offset теряли бы и повторяли строки с равными значениями.
+    Неизвестный ключ — порядок по умолчанию; направление — только ASC или DESC.
+    """
     table = SORTS[kind]
     if not sort or sort not in table or sort == "default":
-        return f"{table['default'][0]}, {_TIEBREAK[kind]}"
+        return table["default"][0]
     expr, default_dir, _ = table[sort]
     d = (direction or "").upper()
     if d not in ("ASC", "DESC"):
         d = default_dir
-    return f"{expr} {d} NULLS LAST, {_TIEBREAK[kind]}"
+    return f"{expr} {d} NULLS LAST"
 
 
 def options(kind: str) -> list[dict]:

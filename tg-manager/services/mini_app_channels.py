@@ -82,7 +82,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       END AS role
                FROM visible
                WHERE TRUE{cond}
-               ORDER BY {order}
+               ORDER BY {order}, channel_id
                LIMIT $2 OFFSET $3""", uid, limit, offset, *extra)
         # Считаем ТО ЖЕ, что показывает список: он отдаёт DISTINCT channel_id, а
         # счётчик брал DISTINCT id (первичный ключ строки). Один и тот же канал

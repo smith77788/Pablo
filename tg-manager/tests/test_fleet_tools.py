@@ -42,10 +42,13 @@ def test_only_whitelisted_keys_reach_sql():
     assert "DROP" not in bad and bad == list_sort.order_by("accounts", None)
     assert "DROP" not in list_sort.order_by("accounts", "phone", "asc; DROP")
     assert list_sort.order_by("proxies", "latency", "asc").startswith("latency_avg_ms ASC")
+    # Стабильный ключ (id) дописывает сам запрос литералом — его проверяет
+    # tests/test_paging_does_not_skip_or_repeat_people.py. Здесь — что в
+    # выражении нет ничего, кроме белого списка и направления.
     for kind, table in list_sort.SORTS.items():
         for key in table:
-            assert list_sort.order_by(kind, key).rstrip().split(", ")[-1] in (
-                "id", "mb.bot_id", "channel_id"), (kind, key)
+            o = list_sort.order_by(kind, key, "desc")
+            assert o == table["default"][0] or o == f"{table[key][0]} DESC NULLS LAST", (kind, key)
 
 
 def test_mass_cap_matches_the_screen():

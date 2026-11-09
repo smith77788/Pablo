@@ -98,7 +98,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # объясняется отказ удаления (409 «прокси назначен N аккаунтам») ДО тапа.
         try:
             rows = await pool.fetch(
-                """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check,
+                f"""SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check,
                           created_at, COALESCE(is_backup, FALSE) AS is_backup,
                           -- latency_avg_ms пишет сторож прокси; экран «Пул»
                           -- читал его как latency_ms и потому ВСЕГДА показывал
@@ -107,7 +107,7 @@ def setup_routes(app: web.Application, pool) -> None:
                           (SELECT COUNT(*) FROM tg_accounts a
                             WHERE a.owner_id=$1 AND a.proxy_id=user_proxies.id) AS acc_count
                    FROM user_proxies WHERE owner_id=$1
-                   ORDER BY """ + _order + """ LIMIT $2 OFFSET $3""", uid, limit, offset)
+                   ORDER BY {_order}, id LIMIT $2 OFFSET $3""", uid, limit, offset)
         except Exception:
             rows = await _safe_fetch(pool,
                 """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
