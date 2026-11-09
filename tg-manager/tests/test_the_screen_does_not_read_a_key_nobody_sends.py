@@ -176,6 +176,22 @@ def _matches(pattern: str, route: str) -> bool:
     return True
 
 
+def _most_literal(hits: list[str]) -> list[str]:
+    """Из подходящих роутов — с наименьшим числом шаблонных сегментов.
+
+    `/workflows/templates` подходит и под `/workflows/templates`, и под
+    `/workflows/{wf_id}`. Роутер aiohttp отдаёт литеральный (он заведён
+    раньше; см. test_a_literal_route_wins_like_the_router), значит и правило
+    судит по нему, а не считает вызов неоднозначным.
+    """
+    if len(hits) < 2:
+        return hits
+    holes = {h: sum(1 for seg in h.strip("/").split("/")
+                    if seg.startswith("{") and seg.endswith("}")) for h in hits}
+    best = min(holes.values())
+    return [h for h in hits if holes[h] == best]
+
+
 def _strip_comments(src: str) -> str:
     """Комментарий — не код.
 
@@ -203,7 +219,8 @@ def _scan(functions: dict[str, str], routes: dict[tuple[str, str], set[str]]):
             if pat is None:
                 continue
             meth = _method(arg)
-            hits = [p for (mm, p) in routes if mm == meth and _matches(pat, p)]
+            hits = _most_literal(
+                [p for (mm, p) in routes if mm == meth and _matches(pat, p)])
             if len(hits) > 1:
                 ambiguous += 1
                 continue
@@ -305,3 +322,23 @@ def test_the_dead_account_count_is_taken_from_where_it_lies():
     # прошлую правку, и порядок по сырому тексту получался обратным.
     code = _strip_comments(js)
     assert code.index("cnt == null") < code.index("Мёртвых аккаунтов нет"), code
+
+
+def test_a_literal_route_wins_like_the_router():
+    """Правило выбирает литеральный роут так же, как настоящий роутер."""
+    import asyncio
+
+    from aiohttp.test_utils import make_mocked_request
+
+    assert _most_literal(["/a/{x}", "/a/templates"]) == ["/a/templates"]
+    assert _most_literal(["/a/{x}/b", "/a/{y}/b"]) == ["/a/{x}/b", "/a/{y}/b"]
+
+    app = web.Application()
+    M.setup_routes(app, _Pool())
+
+    async def _resolve(path):
+        mi = await app.router.resolve(make_mocked_request("GET", path, app=app))
+        return mi.route.resource.canonical
+
+    assert asyncio.run(_resolve("/api/miniapp/workflows/templates")) == \
+        "/api/miniapp/workflows/templates"

@@ -81,7 +81,11 @@ class _Pool:
     async def fetchval(self, *a, **k):
         return 3
 
-    async def fetch(self, *a, **k):
+    async def fetch(self, query, *args, **k):
+        # Выбранные боты сверяются с базой (живые и свои): заглушка отвечает,
+        # что все выбранные есть. Пустой ответ превращал выбор в «нет ботов».
+        if "FROM managed_bots" in query and len(args) > 1:
+            return [{"bot_id": b} for b in args[1]]
         return []
 
     async def fetchrow(self, *a, **k):
@@ -137,3 +141,13 @@ def test_selected_bot_only(monkeypatch):
 def test_all_bots_only_when_asked_explicitly(monkeypatch):
     status, data, sub = _post(monkeypatch, {"description": "новое", "all": True})
     assert status == 200 and sub and "bot_ids" not in sub[0]
+
+
+def test_a_bot_that_is_gone_is_not_sent(monkeypatch):
+    """Удалённый или выключенный бот из выбора в операцию не попадает."""
+    async def _only_111(self, query, *args, **k):
+        return [{"bot_id": 111}] if "FROM managed_bots" in query else []
+
+    monkeypatch.setattr(_Pool, "fetch", _only_111)
+    status, data, sub = _post(monkeypatch, {"description": "новое", "bot_ids": [111, 222]})
+    assert status == 200 and sub[0].get("bot_ids") == [111]
