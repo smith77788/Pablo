@@ -24,7 +24,7 @@ _UI = miniapp_source()
 def _accounts_query() -> str:
     body = api_function("accounts")
     i = body.index("SELECT id, phone")
-    return body[i:body.index("ORDER BY is_active DESC")]
+    return body[i:body.index("ORDER BY {order}")]
 
 
 def test_account_rows_carry_proxy_state():
@@ -60,7 +60,8 @@ def test_credentials_are_not_selected():
 # ── Интерфейс ─────────────────────────────────────────────────────────────────
 
 def _render() -> str:
-    return js_function("renderAccounts")
+    # Статус строки вынесен в accStatusOf (его зовут и карточки, и таблица).
+    return js_function("accStatusOf") + js_function("renderAccounts")
 
 
 def test_ui_shows_dead_proxy_instead_of_active():
@@ -89,9 +90,9 @@ def test_strict_false_comparison_not_falsy():
 
 def test_dead_proxy_outranks_plain_active_but_not_a_ban():
     """Порядок веток: бан и кулдаун важнее сообщения про прокси."""
-    r = _render()
+    r = js_function("accStatusOf")
     assert r.index("'🚫 Бан'") < r.index("a.proxy_alive === false")
-    assert r.index("a.proxy_alive === false") < r.index("status='Активен'")
+    assert r.index("a.proxy_alive === false") < r.index("status:'Активен'")
 
 
 # ── Срез «простаивают из-за прокси» ───────────────────────────────────────────

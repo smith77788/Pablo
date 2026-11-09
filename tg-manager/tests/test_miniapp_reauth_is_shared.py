@@ -118,7 +118,11 @@ def _run() -> dict:
            # Проверка «сервер перезапускается» вызывается из _apiRaw; у
            # подставных ответов нет заголовков — она обязана сказать «нет».
            .replace("__BOOTING__", "const BOOT_RETRY_MAX = 6, BOOT_RETRY_MS = 1;\n"
-                    "const BOOT_MSG = 'перезапуск';\n" + _fn_source("_serverBooting"))
+                    "const BOOT_MSG = 'перезапуск';\n" + _fn_source("_serverBooting")
+                    # Повтор чтения при секундном сбое (_readRetryDelay) тоже
+                    # зовётся из _apiRaw.
+                    + "\nconst READ_RETRY_MAX = 2, READ_RETRY_BASE_MS = [1, 1];\n"
+                    + _fn_source("_readRetryDelay"))
            .replace("__APIRAW__", _fn_source("_apiRaw")))
     # `_reAuth` опирается на переменную-ссылку рядом с собой; в вырезанном куске
     # её нет, поэтому объявляем сами — так же, как объявлены подставные fetchT и tg.

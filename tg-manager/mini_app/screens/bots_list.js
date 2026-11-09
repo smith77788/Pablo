@@ -11,9 +11,10 @@
 // грузится раньше.
 
 async function loadBots() {
+  fleetToolsInit('bots');
   try {
     BOT_OFFSET = 0;
-    const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0');
+    const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0' + fleetSortQS('bots'));
     BOTS = d.bots||[];
     BOT_OFFSET = BOTS.length;
     BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
@@ -37,7 +38,7 @@ async function loadMoreBots() {
   const box = document.getElementById('botLoadMore');
   if (box) box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=' + BOT_OFFSET);
+    const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=' + BOT_OFFSET + fleetSortQS('bots'));
     const more = d.bots||[];
     // Пустая страница (ботов удалили между запросами) — дальше идти некуда,
     // иначе кнопка «загрузить ещё» осталась бы вечной.
@@ -267,7 +268,7 @@ function renderBots() {
     const sel = BOT_SEL.has(b.bot_id);
     const handleHtml = handle ? `<div class="bot-card-lbl" style="margin-top:-2px">${esc(handle)}</div>` : '';
     if (BOT_SEL_MODE) {
-      return `<div class="bot-card ${sel?'sel':''}" onclick="toggleBotSel(${b.bot_id})">
+      return `<div class="bot-card ${sel?'sel':''}" onclick="toggleBotSel(${b.bot_id},event)">
         <div class="bot-card-ava" style="background:${grad}">${initials}</div>
         <div class="bot-card-name">${esc(name)}</div>
         ${handleHtml}
@@ -319,8 +320,10 @@ function toggleBotSelMode() {
   updateBotSelBar();
 }
 
-function toggleBotSel(id) {
-  if (BOT_SEL.has(id)) BOT_SEL.delete(id); else BOT_SEL.add(id);
+function toggleBotSel(id, ev) {
+  if (!fleetRangePick('bots', _botsFiltered().map(b=>b.bot_id), BOT_SEL, id, ev)) {
+    if (BOT_SEL.has(id)) BOT_SEL.delete(id); else BOT_SEL.add(id);
+  }
   renderBots();
   updateBotSelBar();
 }

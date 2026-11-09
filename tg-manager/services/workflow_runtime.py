@@ -153,7 +153,12 @@ def trigger_matches(wf: dict, event: dict) -> bool:
         return False
     wf_bot = wf.get("bot_id")
     ev_bot = event.get("bot_id")
-    if wf_bot and ev_bot and int(wf_bot) != int(ev_bot):
+    scope = [int(b) for b in (wf.get("bot_ids") or []) if b]
+    if scope:
+        # Сценарий на нескольких ботах слушает каждый бот списка — и только их.
+        if not ev_bot or int(ev_bot) not in scope:
+            return False
+    elif wf_bot and ev_bot and int(wf_bot) != int(ev_bot):
         return False
     value = (wf.get("trigger_value") or "").strip()
     etype = event.get("event_type") or ""
@@ -891,8 +896,8 @@ async def dispatch_events(pool) -> int:
     started = 0
     owners = {e["owner_id"] for e in events}
     rows = await pool.fetch(
-        """SELECT id, owner_id, bot_id, steps, steps_version, trigger_type, trigger_value,
-                  allow_reentry, name
+        """SELECT id, owner_id, bot_id, bot_ids, steps, steps_version, trigger_type,
+                  trigger_value, allow_reentry, name
              FROM workflow_definitions
             WHERE owner_id = ANY($1::bigint[]) AND is_active
               AND trigger_type IS NOT NULL AND trigger_type <> 'manual'""",
@@ -1003,6 +1008,11 @@ async def _finish(pool, run: dict, status: str, note: str | None = None,
     steps = _as_list(run.get("steps_snapshot"))
     idx = int(run.get("current_step") or 0)
     stype = steps[idx].get("type", "?") if 0 <= idx < len(steps) else "end"
+    try:
+        from services import metrics as _metrics
+        _metrics.inc("infragram_workflow_runs_finished_total", {"status": status})
+    except Exception:
+        pass
     await _log(pool, run, idx, stype, status, note)
     if status == "completed":
         await bus.emit(pool, run["owner_id"], "workflow.completed",
@@ -2345,7 +2355,10 @@ async def _start_scheduled(pool, wf: dict, now_utc: datetime) -> int:
               SET last_id = EXCLUDED.last_id, updated_at = now()
             WHERE automation_cursors.last_id < EXCLUDED.last_id
            RETURNING last_id""",
-        f"workflow_schedule:{wf['id']}", day)
+        # Отметка своя у каждого бота сценария: запуск на первом боте не должен
+        # засчитываться остальным. У сценария на одном боте имя прежнее.
+        f"workflow_schedule:{wf['id']}" + (f":{wf['bot_id']}" if wf.get("_multi") else ""),
+        day)
     if not claimed:
         return 0
     where = ["TRUE"]
@@ -2382,26 +2395,31 @@ async def scan_audience_triggers(pool, now_utc: datetime | None = None,
         if not got:
             return 0
     rows = await pool.fetch(
-        """SELECT id, owner_id, bot_id, steps, steps_version, trigger_type, trigger_value,
-                  allow_reentry, name
+        """SELECT id, owner_id, bot_id, bot_ids, steps, steps_version, trigger_type,
+                  trigger_value, allow_reentry, name
              FROM workflow_definitions
             WHERE is_active AND bot_id IS NOT NULL AND legacy_kind IS NULL
               AND trigger_type IN ('inactive', 'schedule')""")
     started = 0
     for r in rows:
-        wf = dict(r)
-        try:
-            if wf["trigger_type"] == "inactive":
-                n = await _start_inactive(pool, wf)
-            else:
-                n = await _start_scheduled(pool, wf, now_utc)
-        except Exception:
-            log.exception("workflow_runtime: запуск по аудитории, сценарий %s", wf["id"])
-            continue
-        if n:
-            log.info("workflow_runtime: сценарий %s запущен для %d человек (%s)",
-                     wf["id"], n, wf["trigger_type"])
-            started += n
+        base = dict(r)
+        bots = [int(b) for b in (base.get("bot_ids") or []) if b] or [base["bot_id"]]
+        # Сценарий на нескольких ботах — тот же запуск по людям каждого бота.
+        for bot in bots:
+            wf = {**base, "bot_id": bot, "_multi": len(bots) > 1}
+            try:
+                if wf["trigger_type"] == "inactive":
+                    n = await _start_inactive(pool, wf)
+                else:
+                    n = await _start_scheduled(pool, wf, now_utc)
+            except Exception:
+                log.exception("workflow_runtime: запуск по аудитории, сценарий %s бот %s",
+                              wf["id"], bot)
+                continue
+            if n:
+                log.info("workflow_runtime: сценарий %s (бот %s) запущен для %d человек (%s)",
+                         wf["id"], bot, n, wf["trigger_type"])
+                started += n
     if started:
         wake()
     return started
@@ -2432,6 +2450,19 @@ def failure_alert_text(name: str, reason: str | None, step: int | None,
                  "этот сценарий, там же журнал). О новых сбоях этого сценария "
                  "напомню не раньше чем через час.")
     return "\n".join(lines)
+
+
+def failure_alert_markup(wf_id: int):
+    """Кнопка «Повторить упавшие» прямо в оповещении о сбое: владельцу не
+    нужно искать сценарий в мини-аппе, чтобы вернуть людей в прогон."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from bot.callbacks import ScenCb
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔁 Повторить упавшие",
+                             callback_data=ScenCb(action="retry", wf_id=int(wf_id)).pack()),
+        InlineKeyboardButton(text="📋 Все сценарии",
+                             callback_data=ScenCb(action="list").pack()),
+    ]])
 
 
 async def alert_failures(pool, main_bot) -> int:
@@ -2478,6 +2509,7 @@ async def alert_failures(pool, main_bot) -> int:
                 try:
                     if await db.notify_if_enabled(
                             pool, main_bot, ev["owner_id"], "op_complete", text,
+                            failure_alert_markup(wf_id),
                             dedup_key=f"workflow_failed:{wf_id}"):
                         sent += 1
                 except Exception:
@@ -2505,6 +2537,18 @@ async def tick(pool, http, main_bot=None) -> None:
     except Exception:
         log.exception("workflow_runtime: тайм-ауты ожиданий")
     runs = await _claim_due(pool)
+    # Опоздание шага: насколько позже срока исполнитель взял самый
+    # просроченный прогон пачки. Растёт — исполнитель не успевает, и это
+    # видно на графике раньше, чем в жалобах.
+    try:
+        from services import metrics as _metrics
+        now = datetime.now(timezone.utc)
+        lag = max(((now - r["next_run_at"]).total_seconds() for r in runs
+                   if r.get("next_run_at")), default=0.0)
+        _metrics.gauge("infragram_workflow_step_lag_seconds", max(0.0, lag))
+        _metrics.inc("infragram_workflow_steps_claimed_total", value=float(len(runs)))
+    except Exception:
+        pass
     for run in runs:
         try:
             await advance(pool, http, run, main_bot)

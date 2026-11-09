@@ -630,6 +630,13 @@ def _cache_drop_user(uid) -> int:
     if not uid:
         return 0
     want = str(uid)
+    # Сводка пульса здоровья кэшируется отдельно (infra_memory) — действие
+    # владельца сносит и её, иначе «снял риск» и не увидел этого на главной.
+    try:
+        from services.infra_memory import drop_health_summary
+        drop_health_summary(uid)
+    except Exception:  # pragma: no cover — сброс кэша не должен ронять ответ
+        pass
     dead = [k for k in _cache
             if (parts := k.split(":", 2)) and len(parts) >= 2 and parts[1] == want]
     for k in dead:
@@ -1826,8 +1833,9 @@ async def account_health_summary(pool, uid: int) -> dict:
     монолите, а второй источник правды о пульсе плодить нельзя — CLAUDE.md.
     """
     try:
-        from services.infra_memory import get_account_health
-        return (await get_account_health(pool, uid))["summary"]
+        from services.infra_memory import get_account_health_summary
+        s = await get_account_health_summary(pool, uid)
+        return {k: s.get(k, 0) for k in ("healthy", "at_risk", "quarantine", "total")}
     except Exception:
         return {"healthy": 0, "at_risk": 0, "quarantine": 0, "total": 0}
 
@@ -8081,6 +8089,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_deals_board.setup_routes(app, pool)
     from services import mini_app_find
     mini_app_find.setup_routes(app, pool)
+    from services import mini_app_saved_views
+    mini_app_saved_views.setup_routes(app, pool)
     mini_app_fleet.setup_routes(app, pool)
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
@@ -9552,27 +9562,42 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 st = os.stat(_index_path)
             except OSError:
                 return web.FileResponse(_index_path)   # пусть aiohttp отдаст 404
+            from services import miniapp_assets as _ma
             key = (int(st.st_mtime), int(st.st_size))
-            etag = f'W/"{key[0]:x}-{key[1]:x}"'
-
-            # Повторное открытие: браузер прислал тот же ETag — тело не гоним.
-            if request.headers.get("If-None-Match") == etag:
-                return web.Response(status=304, headers={"ETag": etag})
-
-            cached = _MINIAPP_GZ.get("key") == key and _MINIAPP_GZ.get("body")
-            if not cached:
+            if _MINIAPP_GZ.get("key") != key or not _MINIAPP_GZ.get("html"):
                 try:
-                    import gzip as _gzip
                     from services import miniapp_minify as _mm
                     with open(_index_path, "rb") as _f:
                         _raw = _f.read().decode("utf-8")
                     # Без комментариев и отступов: −25% сжатого размера на
                     # холодном старте (services/miniapp_minify.py).
-                    _MINIAPP_GZ["body"] = _gzip.compress(
-                        _mm.safe(_mm.minify_html, _raw, "index.html").encode("utf-8"), 6)
-                    _MINIAPP_GZ["key"] = key
+                    _html = _mm.safe(_mm.minify_html, _raw, "index.html")
                 except OSError:
                     return web.FileResponse(_index_path)
+                _MINIAPP_GZ.clear()
+                _MINIAPP_GZ.update(key=key, html=_html, refs=_ma.asset_refs(_html))
+            # Версии файлов в ссылках: их ответы кэшируются навсегда, поэтому
+            # ETag страницы обязан меняться вместе с ЛЮБЫМ из них — иначе
+            # деплой, поменявший один скрипт экрана, получал бы 304 на старую
+            # страницу со старыми ссылками (services/miniapp_assets.py).
+            versions = {}
+            for _rel in _MINIAPP_GZ["refs"]:
+                _full = _ma.resolve(_static_dir, _rel)
+                _tok = _ma.version_token(_full) if _full else None
+                if _tok:
+                    versions[_rel] = _tok
+            etag = _ma.page_etag(key, versions)
+
+            # Повторное открытие: браузер прислал тот же ETag — тело не гоним.
+            if request.headers.get("If-None-Match") == etag:
+                return web.Response(status=304, headers={"ETag": etag,
+                                                         "Cache-Control": "no-cache"})
+
+            if _MINIAPP_GZ.get("etag") != etag or not _MINIAPP_GZ.get("body"):
+                import gzip as _gzip
+                _MINIAPP_GZ["body"] = _gzip.compress(
+                    _ma.stamp_versions(_MINIAPP_GZ["html"], versions).encode("utf-8"), 6)
+                _MINIAPP_GZ["etag"] = etag
 
             headers = {
                 "ETag": etag,
@@ -9611,7 +9636,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             st = os.stat(full)
             key = (int(st.st_mtime), int(st.st_size))
             etag = f'W/"{key[0]:x}-{key[1]:x}"'
-            headers = {"ETag": etag, "Cache-Control": "no-cache", "Vary": "Accept-Encoding"}
+            # Адрес с ТЕКУЩЕЙ версией файла (её вписывает serve_index) не
+            # меняется никогда — его можно не перепроверять: повторное
+            # открытие берёт файл из кэша браузера без запроса в сеть. Чужая
+            # или устаревшая версия — как раньше, с перепроверкой.
+            from services import miniapp_assets as _ma
+            _v = request.query.get("v")
+            _cc = (_ma.IMMUTABLE if _v and _v == f"{key[0]:x}{key[1]:x}"
+                   else "no-cache")
+            headers = {"ETag": etag, "Cache-Control": _cc, "Vary": "Accept-Encoding"}
             if request.headers.get("If-None-Match") == etag:
                 return web.Response(status=304, headers=headers)
             if "gzip" not in (request.headers.get("Accept-Encoding") or ""):
