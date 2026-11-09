@@ -132,11 +132,19 @@ async function loadMoreAccounts() {
   try {
     const ad = await api(_accQuery(ACC_OFFSET));
     const more = ad.accounts||[];
+    const hadRows = CUR_ACCS.length > 0;
     CUR_ACCS = CUR_ACCS.concat(more);
     ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
     if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
     ACC_OFFSET += more.length;
-    renderAccounts(CUR_ACCS);
+    // Новая страница дописывается в конец, а не перерисовывает весь список:
+    // стоимость подгрузки — 100 строк, а не все загруженные.
+    const listEl = document.getElementById('accList');
+    if (hadRows && more.length && listEl && !fleetIsWide() && listEl.querySelector('.acc-row')) {
+      listEl.insertAdjacentHTML('beforeend', more.map(accRowHtml).join(''));
+    } else {
+      renderAccounts(CUR_ACCS);
+    }
     renderLoadMore(ad.page);
   } catch(e){
     toast('⚠️ '+errRu(e,'Ошибка'));
@@ -176,7 +184,14 @@ function renderAccounts(list) {
   }
   // Широкий экран — плотная таблица с сортировкой по заголовкам (fleet_tools.js).
   if (fleetIsWide()) { el.innerHTML = accTableHtml(list); return; }
-  el.innerHTML = list.map(a=>{
+  el.innerHTML = list.map(accRowHtml).join('');
+}
+
+// Одна строка мобильного списка. Вынесена, чтобы подгрузка и выбор строки
+// не перерисовывали весь список: при 3 000 загруженных аккаунтов каждая
+// подгрузка строила HTML всех строк заново и занимала до 4,5 с на слабом
+// телефоне (замер 08.11.2026), а каждое касание в режиме выбора — столько же.
+function accRowHtml(a) {
     const name = a.first_name||(a.username?'@'+a.username:'#'+a.id);
     const phone = a.phone || '';
     const flag = phoneFlag(phone);
@@ -199,7 +214,7 @@ function renderAccounts(list) {
         <span style="font-size:10px;color:var(--hint)">${trust}%</span>
         <span class="chev">›</span>
       </div>`;
-    return `<div class="acc-row ${ACC_SEL_MODE&&sel?'sel':''}" onclick="${onclick}">
+    return `<div class="acc-row ${ACC_SEL_MODE&&sel?'sel':''}" data-acc-id="${a.id}" onclick="${onclick}">
       ${checkbox}
       <div class="ava ${ava_cls}" style="font-size:15px">${flag}</div>
       <div class="acc-body">
@@ -213,7 +228,6 @@ function renderAccounts(list) {
       </div>
       ${right}
     </div>`;
-  }).join('');
 }
 
 function accSelAll() {
