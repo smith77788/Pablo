@@ -96,6 +96,32 @@ def _grows(it: str, fsrc: str) -> bool:
     return False
 
 
+def _bounded(it: str, fsrc: str) -> bool:
+    """Коллекция цикла ограничена: запросом, срезом именно её или страницей.
+
+    НАХОДКА (09.11.2026). Раньше годился ЛЮБОЙ срез `[:N]` где угодно в функции.
+    «Аккаунты по пулам» строили кнопку на каждый аккаунт, а проверку проходили
+    из-за `label[:20]` — обрезки подписи кнопки. Срез засчитывается, только
+    если режет саму коллекцию цикла.
+    """
+    if re.search(r"\bLIMIT\s+\$?\d+|\blimit\s*=\s*\d+|islice\(", fsrc, re.IGNORECASE):
+        return True
+    if "[" in it:  # for x in items[:10] / items[a:b]
+        return True
+    name = re.escape(it)
+    slice_ = r"\[\s*\w*\s*:\s*[\w\s+*]*\]"
+    if re.search(rf"^\s*{name}\s*(?::[^=\n]+)?=\s*.*{slice_}", fsrc, re.MULTILINE):
+        return True
+    return bool(re.search(rf"^\s*{name}\s*(?::[^=\n]+)?=\s*(?:_cap|cap_slice)\(", fsrc, re.MULTILINE))
+
+
+def test_bound_must_cut_the_loop_collection():
+    """Обрезка подписи кнопки — не потолок списка."""
+    assert not _bounded("accs", "    for acc in accs:\n        kb.button(text=label[:20])\n")
+    assert _bounded("chunk", "    chunk = bots[start : start + PAGE_SIZE]\n")
+    assert _bounded("accounts", "    rows = await pool.fetch('SELECT ... LIMIT 30')\n")
+
+
 def test_derived_names_are_seen():
     """Анти-пустота для производных имён: без неё _grows мог бы молча ослепнуть."""
     assert _grows("shown", "    shown = list(all_accounts or [])\n")
@@ -114,8 +140,7 @@ def test_account_pickers_are_capped():
         # постраничность — тоже годится. Последнее — про `quick_pick_kb`: он
         # строит кнопки только когда список короткий, а длинный отдаёт
         # постраничному варианту.
-        if re.search(r"\bLIMIT\s+\d+|\blimit\s*=\s*\d+|\[:\s*\d+\s*\]|islice\(|"
-                     r"\[\s*\w+\s*:\s*\w+\s*\+\s*\w+\s*\]", fsrc, re.I):
+        if _bounded(it, fsrc):
             continue
         if re.search(r"if\s+len\([^)]+\)\s*>\s*\w+\s*:\s*\n\s*return", fsrc):
             continue

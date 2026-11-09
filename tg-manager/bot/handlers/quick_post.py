@@ -24,6 +24,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.callbacks import AssetTplCb, QuickPostCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.states import QuickPostFSM
@@ -388,7 +389,8 @@ async def cb_qp_from_template(
         return
 
     kb = InlineKeyboardBuilder()
-    for tpl in templates:
+    _shown = _cap(templates)
+    for tpl in _shown:
         try:
             data = (
                 json.loads(tpl["template"])
@@ -404,6 +406,7 @@ async def cb_qp_from_template(
             text=btn_text[:64],
             callback_data=QuickPostCb(action="use_template", val=tpl["id"]),
         )
+    _cap_note(kb, templates, _shown, what="tpl")
     kb.button(text="◀️ Назад", callback_data=QuickPostCb(action="back_to_step1_prompt"))
     kb.adjust(1)
 

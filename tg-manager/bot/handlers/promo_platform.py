@@ -1276,12 +1276,14 @@ async def cb_panels(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить панель", callback_data=PromoCb(action="panel_add"))
-    for p in panels:
+    _shown = _cap(panels)
+    for p in _shown:
         active_mark = "✅" if p["is_active"] else "⛔"
         kb.button(
             text=f"{active_mark} {p['name']}",
             callback_data=PromoCb(action="panel_detail", item_id=p["id"]),
         )
+    _cap_note(kb, panels, _shown, what="panel")
     kb.button(text="◀️ Платформа", callback_data=PromoCb(action="menu"))
     kb.adjust(1)
     await safe_edit(callback, text, reply_markup=kb.as_markup())

@@ -22,6 +22,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.callbacks import MassPubCb, BmCb, MassOpCb
 from bot.states import MassPublishFSM2
 from bot.utils.op_helpers import (
@@ -196,11 +197,13 @@ async def cb_mpub_start(
             )
             return
         kb = InlineKeyboardBuilder()
-        for acc in accounts:
+        _shown = _cap(accounts)
+        for acc in _shown:
             kb.button(
                 text=_acc_label(acc),
                 callback_data=MassPubCb(action="pick_account", target_id=acc["id"]),
             )
+        _cap_note(kb, accounts, _shown, what="acc")
         kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
         kb.adjust(1)
         await state.set_state(MassPublishFSM2.choosing_target)

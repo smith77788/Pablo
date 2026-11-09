@@ -7182,6 +7182,30 @@ async def update_account_pool(
     )
 
 
+async def assign_pool_to_unpooled(
+    pool: asyncpg.Pool, owner_id: int, acc_ids: list[int], pool_name: str | None
+) -> int:
+    """Назначить пул тем из ``acc_ids``, у кого пула нет. Одним запросом.
+
+    Раньше массовое назначение шло по два запроса на аккаунт (прочитать,
+    записать): на 10 000 аккаунтов — 20 000 обращений к базе подряд в одном
+    нажатии кнопки. Возвращает, скольким аккаунтам пул назначен.
+    """
+    if not acc_ids:
+        return 0
+    res = await pool.execute(
+        "UPDATE tg_accounts SET pool=$3 WHERE owner_id=$1 AND id = ANY($2::int[]) "
+        "AND (pool IS NULL OR pool = '')",
+        owner_id,
+        list(acc_ids),
+        pool_name,
+    )
+    try:
+        return int(str(res).split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 async def update_account_labels(
     pool: asyncpg.Pool, acc_id: int, owner_id: int, labels: list[str]
 ) -> None:
