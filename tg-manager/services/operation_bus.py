@@ -795,6 +795,9 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "📢",
     },
     "ai_comment": {
+        # Повтор после таймаута клиента — второй такой же комментарий флота
+        # под теми же постами: снаружи это выглядит как спам.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "AI-комментирование",
         "min_plan": "pro",
         "max_retries": 1,

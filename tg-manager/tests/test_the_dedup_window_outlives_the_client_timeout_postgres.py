@@ -149,7 +149,7 @@ def test_the_irreversible_types_actually_carry_the_window():
         "bulk_dm_adhoc", "dm_campaign", "mass_invite",
         "self_promo_blast", "niche_growth_post", "quick_post",
         "seed_presence_pack", "content_clone", "clone_adapt", "crosspost_run",
-        "community_liven",
+        "community_liven", "ai_comment",
         # Жалоба: второй раз — вторая жалоба на то же, уже от флота
         "mass_report", "report_peer", "strike",
         # Правка профилей и оформления видна снаружи и делается флотом
