@@ -178,6 +178,32 @@ async def _auto_failover(pool, owner_id: int, dead_proxy_id: int,
     return {"moved": moved, "stranded": len(stranded) - moved}
 
 
+async def _open_outage(pool, owner_id: int, proxy_id: int, accounts: int) -> None:
+    """Открыть строку простоя (schema_v316). Без аккаунтов простоя нет.
+
+    История простоя — надстройка: её сбой (схема ещё не применена) не мешает
+    ни уведомлению, ни записи живости прокси.
+    """
+    if accounts <= 0:
+        return
+    try:
+        await pool.execute(
+            "INSERT INTO proxy_outages(owner_id, proxy_id, accounts) VALUES ($1, $2, $3)",
+            owner_id, proxy_id, accounts)
+    except Exception:
+        log.debug("proxy_watchdog: простой не записан proxy=%s", proxy_id)
+
+
+async def _close_outage(pool, proxy_id: int) -> None:
+    """Прокси ожил — закрыть открытый простой."""
+    try:
+        await pool.execute(
+            "UPDATE proxy_outages SET ended_at=now() WHERE proxy_id=$1 AND ended_at IS NULL",
+            proxy_id)
+    except Exception:
+        log.debug("proxy_watchdog: простой не закрыт proxy=%s", proxy_id)
+
+
 async def check_proxy_alive(proxy_url: str, timeout_s: float = 10.0) -> dict:
     """Доступен ли прокси. {alive, latency_ms}.
 
@@ -288,6 +314,8 @@ async def check_once(pool, bot) -> dict:
         except Exception:
             log.warning("proxy_watchdog: не удалось записать состояние прокси id=%s", r["id"])
             continue
+        if d["clear_notice"]:
+            await _close_outage(pool, r["id"])
         if d["notify"]:
             # Полный адрес прокси содержит логин и пароль — в сообщение он
             # попадать не должен. И маскировать надо расшифрованный адрес:
@@ -297,6 +325,7 @@ async def check_once(pool, bot) -> dict:
 
             label = proxy_display(r["proxy_url"], r["label"])
             text = build_alert(label, r["assigned"], d["streak"])
+            stranded_after = int(r["assigned"] or 0)
             # Автопереезд — только по включённой владельцем настройке и только в
             # момент подтверждённой смерти (та же серия, что для уведомления).
             # Любой сбой здесь не мешает сообщить о смерти прокси.
@@ -304,8 +333,10 @@ async def check_once(pool, bot) -> dict:
                 if await auto_failover_enabled(pool, r["owner_id"]):
                     fo = await _auto_failover(pool, r["owner_id"], r["id"], alive_now)
                     text += build_failover_note(fo["moved"], fo["stranded"])
+                    stranded_after = int(fo["stranded"])
             except Exception:
                 log.warning("proxy_watchdog: автопереезд не удался proxy=%s", r["id"])
+            await _open_outage(pool, r["owner_id"], r["id"], stranded_after)
             if await _notify(pool, bot, r["owner_id"], r["id"], text):
                 alerted += 1
 
