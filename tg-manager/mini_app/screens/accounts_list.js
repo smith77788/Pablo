@@ -430,6 +430,12 @@ function renderAccSurvival(d) {
     lines.push('<div style="color:var(--hint)">С прокси — ' + (px.with_proxy || 0) + ', без прокси — ' + (px.no_proxy || 0) +
       (px.unknown ? ', неизвестно — ' + px.unknown : '') + '</div>');
   }
+  const pd = d.proxy_downtime || {};
+  if (pd.outages) {
+    lines.push('<div style="color:var(--hint)">Простой из-за прокси за 30 дней: ' + pd.account_hours +
+      ' аккаунто-часов, отказов прокси — ' + pd.outages +
+      (pd.open_now ? '. Сейчас стоят ' + pd.accounts_now + ' аккаунт(ов) на ' + pd.open_now + ' мёртвых прокси' : '') + '</div>');
+  }
   if (v.text) lines.push('<div style="margin-top:4px;color:' + tone + '">' + esc(v.text) + '</div>');
   return lines.join('');
 }
