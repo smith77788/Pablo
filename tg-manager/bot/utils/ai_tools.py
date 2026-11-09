@@ -415,6 +415,18 @@ async def action_post_to_channel(
 # ── EXECUTOR (runs confirmed actions) ─────────────────────────────────────────
 
 
+async def _pick_account(pool: asyncpg.Pool, user_id: int, action: str) -> dict | None:
+    """Аккаунт для действия ассистента — через общий подбор флота.
+
+    Раньше здесь брался «активный с наивысшим trust_score» своим запросом:
+    аккаунт на паузе Telegram, под спам-блоком, замороженный или в карантине
+    риск-пульса выигрывал выбор, и ассистент предлагал создать канал или бота
+    именно им. Общий подбор (flood_engine.get_best_account) их отсекает и
+    чередует аккаунты, а не изнашивает один «любимый»."""
+    from services import flood_engine
+    return await flood_engine.get_best_account(pool, user_id, action, min_trust_score=0.0)
+
+
 async def action_create_channel(
     pool: asyncpg.Pool,
     user_id: int,
@@ -423,13 +435,9 @@ async def action_create_channel(
     username: str = "",
     is_group: bool = False,
 ) -> dict:
-    acc_row = await pool.fetchrow(
-        "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
-        user_id,
-    )
+    acc_row = await _pick_account(pool, user_id, "create_channel")
     if not acc_row:
-        return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
+        return {"error": "Нет свободных аккаунтов: подключите аккаунт через /accounts или дождитесь, пока закончится пауза у имеющихся"}
     kind = "группу" if is_group else "канал"
     uname_str = f", username: @{username}" if username else ""
     return {
@@ -451,13 +459,9 @@ async def action_create_bot(
     description: str = "",
 ) -> dict:
     """Создать нового бота через BotFather используя аккаунт с наивысшим trust_score."""
-    acc_row = await pool.fetchrow(
-        "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
-        user_id,
-    )
+    acc_row = await _pick_account(pool, user_id, "create_bot")
     if not acc_row:
-        return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
+        return {"error": "Нет свободных аккаунтов: подключите аккаунт через /accounts или дождитесь, пока закончится пауза у имеющихся"}
     uname_str = f", @{username}" if username else ""
     desc_str = (
         f"\nОписание: {description[:60]}{'...' if len(description) > 60 else ''}"
@@ -482,13 +486,9 @@ async def action_create_group(
     username: str = "",
 ) -> dict:
     """Создать группу/супергруппу. Отдельный инструмент для ясности AI."""
-    acc_row = await pool.fetchrow(
-        "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
-        user_id,
-    )
+    acc_row = await _pick_account(pool, user_id, "create_channel")
     if not acc_row:
-        return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
+        return {"error": "Нет свободных аккаунтов: подключите аккаунт через /accounts или дождитесь, пока закончится пауза у имеющихся"}
     uname_str = f", @{username}" if username else ""
     return {
         "pending_action": "create_group",
@@ -521,13 +521,9 @@ async def action_bulk_create_channels(
             acc_id,
         )
     else:
-        acc_row = await pool.fetchrow(
-            "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-            "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
-            user_id,
-        )
+        acc_row = await _pick_account(pool, user_id, "create_channel")
     if not acc_row:
-        return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
+        return {"error": "Нет свободных аккаунтов: подключите аккаунт через /accounts или дождитесь, пока закончится пауза у имеющихся"}
     return {
         "pending_action": "bulk_create_channels",
         "acc_id": acc_row["id"],
