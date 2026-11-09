@@ -163,7 +163,6 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
     except Exception:
         log_exc_swallow(log, "fleet_pulse daily budget check")
 
-    import time as _t
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     out: list[dict[str, Any]] = []
@@ -239,6 +238,11 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
             "risk": round(risk, 2),
             "trust": round(float(r["trust_score"]), 2),
             "hint": _trust_hint(r["trust_score"]) if state == "ready" else None,
+            # Фаза авто-реабилитации: по ней одна метка здоровья
+            # (account_verdict) отличает «система снимает спам-блок сама» от
+            # «снять не вышло, нужен владелец».
+            "rehab_phase": (rehab.get(acc_id) or {}).get("phase"),
+            "acc_status": status,
         })
 
     out.sort(key=lambda a: (STATE_ORDER.index(a["state"]),
