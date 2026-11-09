@@ -795,6 +795,42 @@ file_download на Android — отдельная задача (ожидаетс
 
 ---
 
+## Раздел G — Фокусный проход «только Critical» (честный вывод: Critical в проверенных поверхностях НЕТ)
+
+Отдельный проход по Critical-классам (CVSS 9.0+: обход аутентификации, MITM/компрометация ключей,
+захват аккаунта). Результат — **негативный**: в проверенных поверхностях чистого Critical нет.
+
+### G.1 — Passcode-локация (macOS) — криптографически корректна, bypass'а нет
+`PasscodeLockController.swift:397–407`: `checkNextValue` не сравнивает строки, а **расшифровывает**
+данные аккаунта ключом из пасскода (`appEncryption.applyPasscode` → `decrypt() != nil`). Неверный
+пасскод → расшифровка не удаётся. Правильный дизайн.
+
+### G.2 — autologin_token — НЕ самостоятельный Critical (нужен внешний redirect на домене Telegram)
+Единственный call-site `InAppLinks.swift:924`; `applyTo` (`AppDelegate.swift:130–142`) строго требует
+`domains.contains(host)`, где `domains` = серверные `autologin_domains` (домены Telegram). На
+attacker-хост токен **не дописывается**. Утечка возможна только через open-redirect на домене Telegram
+(вне этого репо) или Referer на веб-стороне. Это defense-in-depth gap, не standalone-дыра клиента.
+
+### G.3 — MTProto 2.0 key-exchange (tdesktop `mtproto/`) — реализация корректна, Critical-MITM закрыт
+Проверены главные анти-MITM точки протокола:
+- **DH-валидация** (`mtproto_dh_utils.cpp`): `IsPrimeAndGoodCheck` — 2048 бит, простота, g-специфичные
+  mod-условия, safe-prime `(p-1)/2`; `IsGoodModExpFirst` — границы `g_a` (`2^(2048-64) < g_a <
+  p-2^(2048-64)`); `CreateAuthKey` повторно валидирует полученный `g_a`.
+- **Key exchange** (`details/mtproto_dc_key_creator.cpp`): nonce/server_nonce equality (`:643,648`),
+  **SHA1 расшифрованного `server_DH_inner_data`** (`:653–664`), **`IsPrimeAndGood(dh_prime,g)`**
+  (`:668`), `new_nonce_hash` в fail-ветке (`:688`), RSA-ключ сервера по fingerprint (`:525`).
+
+Все классические Critical-баги MTProto (слабый prime, пропуск answer-hash, неограниченный `g_a`,
+неподтверждённый RSA) **отсутствуют**. Негативный результат.
+
+### Вывод по Critical
+В клиентском UI-коде (4 платформы) и в проверенном key-exchange MTProto **чистого Critical нет**;
+потолок — **High** (Finding 4). Настоящий Critical-tier, если и существует, лежит в не-проверенных
+поверхностях: message-layer крипто MTProto (msg_key/AES-IGE на приёме), парсеры медиа/стикеров/видео
+(RCE) в TelegramCore — их исходников нет в этих клонах. **High не выдаётся за Critical.**
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**
