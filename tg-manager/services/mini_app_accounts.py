@@ -403,6 +403,15 @@ def setup_routes(app: web.Application, pool) -> None:
                                if a["account_id"] == acc_id), None)
             except Exception as _e:
                 log.debug("account_detail health owner=%s acc=%s: %s", uid, acc_id, _e)
+        # Та же одна метка, что в списке (account_verdict): карточка не имеет
+        # права называть аккаунт иначе, чем строка, по которой в неё пришли.
+        verdict = None
+        if not admin:
+            try:
+                from services import account_verdict as _verdict
+                verdict = await _verdict.for_account(pool, uid, dict(acc))
+            except Exception as _e:
+                log.debug("account_detail verdict owner=%s acc=%s: %s", uid, acc_id, _e)
         # Прокси/IP аккаунта — ЧЕРЕЗ ЧТО он выходит в сеть. Пользователь должен
         # видеть свой реальный IP и уникален ли он. Транспорт (account_manager):
         # свой прокси (уник. IP 1:1) → свой IPv6 → CF-relay (ОБЩИЙ IP) → прямое.
@@ -456,6 +465,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "rehab": rehab,
             "recent_ops": recent_ops,
             "health": health,
+            "verdict": verdict,
             "transport": transport,
         })
 

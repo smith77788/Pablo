@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from services import account_verdict as av
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -93,3 +95,52 @@ def test_wired_into_accounts_list_and_screen():
     assert "_verdict.annotate(pool, uid, rows)" in api
     js = open(os.path.join(ROOT, "mini_app", "screens", "accounts_list.js"), encoding="utf-8").read()
     assert "a.verdict && ACC_VERDICT_STYLE[a.verdict.level]" in js
+
+
+def test_detail_card_uses_the_same_verdict():
+    api = open(os.path.join(ROOT, "services", "mini_app_accounts.py"), encoding="utf-8").read()
+    assert "_verdict.for_account(pool, uid, dict(acc))" in api
+    assert '"verdict": verdict,' in api
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    assert "const _v = d.verdict;" in html and "accVerdictLabel(_v)" in html
+
+
+DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
+def test_for_account_on_real_schema():
+    import asyncio
+
+    import asyncpg
+
+    owner = 987650077
+
+    async def _run():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
+        try:
+            async with pool.acquire() as c:
+                await c.execute("DELETE FROM tg_accounts WHERE owner_id=$1", owner)
+
+                async def _acc(n, **kw):
+                    return await c.fetchval(
+                        "INSERT INTO tg_accounts(owner_id, phone, session_str, is_active, "
+                        "acc_status, cooldown_until) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+                        owner, f"+7999222{n:04d}", kw.get("session", "s"),
+                        kw.get("active", True), kw.get("status", "active"), kw.get("cd"))
+                ok = await _acc(1)
+                cool = await _acc(2, cd=datetime.now(timezone.utc) + timedelta(hours=2))
+                frozen = await _acc(3, status="frozen")
+                banned = await _acc(4, status="banned")
+                off = await _acc(5, active=False)
+                rows = {r["id"]: dict(r) for r in await c.fetch(
+                    "SELECT id, is_active, acc_status FROM tg_accounts WHERE owner_id=$1", owner)}
+            got = {i: (await av.for_account(pool, owner, rows[i]))["level"]
+                   for i in (ok, cool, frozen, banned, off)}
+            assert got[cool] == "pause" and got[frozen] == "action"
+            assert got[banned] == "lost" and got[off] == "off"
+            assert got[ok] in ("ok", "pause")  # без лога действий бюджет может держать паузу
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
