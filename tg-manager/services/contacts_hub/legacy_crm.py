@@ -157,6 +157,12 @@ async def backfill_legacy_crm(pool, *, dry_run: bool = False) -> dict[str, int]:
                  FROM crm_contacts c ORDER BY c.id""")
         tx = conn.transaction()
         await tx.start()
+        # Два веб-процесса на старте не переносят одно и то же вперегонки:
+        # второй видит занятый замок и выходит, ничего не тронув.
+        if not await conn.fetchval(
+                "SELECT pg_try_advisory_xact_lock(hashtext('legacy_crm_backfill'))"):
+            await tx.rollback()
+            return {**out, "busy": 1}
         try:
             for r in rows:
                 out["total"] += 1
@@ -183,3 +189,34 @@ async def backfill_legacy_crm(pool, *, dry_run: bool = False) -> dict[str, int]:
     log.info("Перенос «Клиентов» в «Контакты»%s: %s",
              " (пробный, откатан)" if dry_run else "", out)
     return out
+
+
+BACKFILL_KEY = "backfill:legacy_crm_v1"
+
+
+async def run_backfill_once(pool) -> dict[str, int] | None:
+    """Перенос на старте — один раз за жизнь базы (решение владельца 09.11.2026).
+
+    Отметка лежит в журнале `schema_migrations`, тем же способом, что и
+    инлайн-миграции. Отметка ставится, только если ни одна строка не упала:
+    иначе следующий старт повторит перенос (он идемпотентен). Fail-open: сбой
+    переноса не мешает приложению подняться.
+    """
+    try:
+        done = await pool.fetchval(
+            "SELECT 1 FROM schema_migrations WHERE filename=$1 AND status='ok'",
+            BACKFILL_KEY)
+        if done:
+            return None
+        res = await backfill_legacy_crm(pool)
+        if not res.get("failed") and not res.get("busy"):
+            await pool.execute(
+                """INSERT INTO schema_migrations(filename, status, error_count, applied_at)
+                   VALUES($1, 'ok', 0, now())
+                   ON CONFLICT (filename) DO UPDATE SET status='ok',
+                       error_count=0, applied_at=now()""", BACKFILL_KEY)
+        return res
+    except Exception:
+        log.warning("перенос «Клиентов» в «Контакты» не прошёл, повторится "
+                    "на следующем старте", exc_info=True)
+        return None

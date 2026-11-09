@@ -2590,6 +2590,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def _apply_inline_migrations(application: web.Application) -> None:
         await apply_inline_migrations(pool)
+        # Одна база людей, шаг 2: старые «Клиенты» переезжают в «Контакты»
+        # один раз (отметка в schema_migrations). В фоне — старт не ждёт.
+        from services.contacts_hub.legacy_crm import run_backfill_once
+        application["legacy_crm_backfill"] = asyncio.create_task(run_backfill_once(pool))
 
     app.on_startup.append(_apply_inline_migrations)
 

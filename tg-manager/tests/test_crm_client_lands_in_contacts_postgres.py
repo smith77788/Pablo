@@ -164,3 +164,26 @@ def test_backfill_is_idempotent_and_dry_run_changes_nothing(pool):
     assert _run(pool.fetchval(
         "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1", OWNER)) == 3
     _run(pool.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER))
+
+
+def test_startup_backfill_runs_once_and_is_wired():
+    """Перенос подключён к старту веб-процесса и отмечается в журнале."""
+    src = (ROOT / "services/mini_app_api.py").read_text(encoding="utf-8")
+    hook = src[src.index("async def _apply_inline_migrations(application"):][:900]
+    assert "run_backfill_once(pool)" in hook
+
+
+def test_run_backfill_once_marks_journal(pool):
+    from services.contacts_hub.legacy_crm import BACKFILL_KEY, run_backfill_once
+    # Журнал заводит раннер миграций (database/db.py), а не schema_v*.sql.
+    _run(pool.execute(
+        """CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY,
+             status TEXT NOT NULL, error_count INT NOT NULL DEFAULT 0,
+             last_error TEXT, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"""))
+    _run(pool.execute("DELETE FROM schema_migrations WHERE filename=$1", BACKFILL_KEY))
+    first = _run(run_backfill_once(pool))
+    assert first is not None and first["failed"] == 0
+    assert _run(pool.fetchval(
+        "SELECT status FROM schema_migrations WHERE filename=$1", BACKFILL_KEY)) == "ok"
+    assert _run(run_backfill_once(pool)) is None, "перенос пошёл второй раз"
+    _run(pool.execute("DELETE FROM schema_migrations WHERE filename=$1", BACKFILL_KEY))
