@@ -4789,7 +4789,7 @@ async def shutdown(
                       last_error=$2
                 WHERE id = ANY($1::bigint[]) AND status='running'""",
             [int(i) for i in op_ids],
-            "Воркер остановлен на рестарте — операция возвращена в очередь",
+            "Сервис перезапускался — операция продолжится автоматически с места остановки (уже сделанное не повторится)",
             log_ctx="[shutdown_requeue]",
         )
         try:
@@ -6920,6 +6920,58 @@ def _bp_diff(before: dict, after: dict) -> str:
     return "; ".join(parts)
 
 
+_BP_METHOD_LABEL = {
+    "setMyName": "Имя",
+    "setMyDescription": "Описание",
+    "setMyShortDescription": "Короткое описание",
+}
+
+# Частые ответы Telegram на setMy* — по-русски. Остальное показываем как есть:
+# сырой текст Telegram лучше, чем голое «Ошибка», по которому ничего не понять.
+_BP_KNOWN_ERRORS = (
+    ("too long", "текст длиннее, чем разрешает Telegram"),
+    ("not modified", "значение уже такое же"),
+    ("bot was blocked", "бот заблокирован"),
+    ("not found", "бот не найден в Telegram"),
+    ("forbidden", "Telegram запретил действие"),
+)
+
+
+def _bp_reason(field: str, data: dict | None = None, exc: BaseException | None = None) -> str:
+    """Причина провала одного поля профиля — человекочитаемо и КОНКРЕТНО.
+
+    Жалоба владельца: в журнале «🟠 Ошибка; 🟠 Ошибка» и пустая карточка — не
+    понять ни какое поле не применилось, ни почему. Теперь строка называет
+    поле и причину: «Описание: 🟡 Нет связи с Telegram (TimeoutError)»."""
+    from services import bot_health
+    if exc is not None:
+        detail = (str(exc) or "").strip() or type(exc).__name__
+        if detail != type(exc).__name__:
+            detail = f"{type(exc).__name__}: {detail}"
+        kind = bot_health.classify_error(detail)
+        if kind == bot_health.OTHER:
+            # Исключение без ответа Telegram — почти всегда сеть/таймаут.
+            kind = bot_health.NETWORK
+        return f"{field}: {bot_health._LABEL[kind]} ({detail[:160]})"
+    data = data or {}
+    desc = str(data.get("description") or "").strip()
+    code = data.get("error_code")
+    kind = bot_health.classify_error(desc, code)
+    label = bot_health._LABEL.get(kind, bot_health._LABEL[bot_health.OTHER])
+    if kind == bot_health.FLOOD:
+        from services.bot_api import retry_after_of
+        ra = retry_after_of(data)
+        return f"{field}: {label}" + (f" — ещё {ra} с" if ra else "")
+    if kind == bot_health.UNAUTHORIZED:
+        return f"{field}: {label}"
+    low = desc.lower()
+    ru = next((t for k, t in _BP_KNOWN_ERRORS if k in low), "")
+    raw = desc or (f"код {code}" if code else "Telegram не объяснил причину")
+    if code and desc:
+        raw = f"{code}: {desc}"
+    return f"{field}: {label} — " + (f"{ru} ({raw[:160]})" if ru else raw[:200])
+
+
 async def _exec_bulk_bot_profile(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -7002,20 +7054,25 @@ async def _exec_bulk_bot_profile(
 
     ok_count = 0
     fail_count = 0
+    # Боты, сделанные прошлыми прогонами (рестарт воркера, повтор). Раньше они
+    # двигали прогресс, но в итог не попадали: операция писала «87/87 (100%)»
+    # и «обновлено 14, ошибок 7» — 66 ботов будто исчезали.
+    prev_ok = 0
     async with aiohttp.ClientSession() as sess:
-        for b in bots_rows:
+        for step, b in enumerate(bots_rows, start=1):
             if await _is_cancelled(pool, op_id):
                 return {
-                    "status": "cancelled", "ok": ok_count, "failed": fail_count,
-                    "summary": f"Отменено. Обновлено: {ok_count}, ошибок: {fail_count}",
+                    "status": "cancelled", "ok": prev_ok + ok_count, "failed": fail_count,
+                    "summary": f"Отменено. Обновлено: {prev_ok + ok_count}, "
+                               f"ошибок: {fail_count}",
                 }
             # Подпись бота в журнале — его @username (см. _bp_bot_label). Старый
             # номер строки тоже считается сделанным: операция, начатая до этой
             # правки, при повторе не тронет уже изменённых ботов второй раз.
             target = _bp_bot_label(b)
             if target in already or str(b["id"]) in already:
-                await _safe_execute(
-                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                prev_ok += 1
+                await _mark_progress(pool, op_id, step)
                 continue
 
             # Снимок «как было» для отката — ДО изменения. Читаем текущие значения
@@ -7044,16 +7101,28 @@ async def _exec_bulk_bot_profile(
 
             reasons: list[str] = []
             for method, pkey, val in api_fields:
+                _field = _BP_METHOD_LABEL.get(method, method)
                 try:
                     data = await bot_api._call(sess, b["token"], method, **{pkey: val})
+                    # Короткий флуд Telegram (setMy* лимитирован сильнее
+                    # прочих методов) — отсыпаем и пробуем поле ещё раз, а не
+                    # записываем бота в ошибки, которые потом добивать вручную.
+                    if not data.get("ok") and bot_health.classify_error(
+                            data.get("description", ""),
+                            data.get("error_code")) == bot_health.FLOOD:
+                        _ra = bot_api.retry_after_of(data) or 5
+                        if _ra <= 30:
+                            await asyncio.sleep(_ra + 1)
+                            data = await bot_api._call(
+                                sess, b["token"], method, **{pkey: val})
                 except Exception as e:  # noqa: BLE001 — любая ошибка = провал поля, не всей операции
-                    reasons.append(bot_health._LABEL[bot_health.OTHER])
-                    log.warning("bulk_bot_profile: bot=%s %s error=%s", b.get("bot_id"), method, e)
+                    reasons.append(_bp_reason(_field, exc=e))
+                    log.warning("bulk_bot_profile: bot=%s %s error=%r", b.get("bot_id"), method, e)
                     continue
                 if not data.get("ok"):
-                    _kind = bot_health.classify_error(
-                        data.get("description", ""), data.get("error_code"))
-                    reasons.append(bot_health._LABEL.get(_kind, bot_health._LABEL[bot_health.OTHER]))
+                    reasons.append(_bp_reason(_field, data))
+                    log.warning("bulk_bot_profile: bot=%s %s tg=%s %s", b.get("bot_id"),
+                                method, data.get("error_code"), data.get("description"))
 
             if greeting:
                 try:
@@ -7066,7 +7135,7 @@ async def _exec_bulk_bot_profile(
                                 "INSERT INTO auto_replies(bot_id, trigger_type, response_text, is_active) "
                                 "VALUES($1,'start',$2,TRUE)", b["bot_id"], greeting)
                 except Exception as e:  # noqa: BLE001
-                    reasons.append("приветствие не сохранено")
+                    reasons.append(f"Приветствие: не сохранено ({type(e).__name__})")
                     log.warning("bulk_bot_profile: bot=%s greeting error=%s", b.get("bot_id"), e)
 
             if not reasons:
@@ -7074,20 +7143,29 @@ async def _exec_bulk_bot_profile(
                 # Через дверь журнала (не raw execute): потеря отметки «ok»
                 # заставила бы повтор изменить этого бота второй раз.
                 await _journal_done(
-                    pool, op_id, ok_count + fail_count, target,
+                    pool, op_id, step, target,
                     _bp_diff(_before, {"name": name, "description": description,
                                        "short_description": short_description,
                                        "greeting": greeting})[:900])
             else:
                 fail_count += 1
+                # Ошибка прошлого прогона по этому же боту устарела: в журнале
+                # остаётся только последняя попытка, иначе один бот висит в
+                # логе дважды («@bot · Ошибка» ×2) и счётчик ошибок врёт.
+                await _safe_execute(
+                    pool,
+                    "DELETE FROM operation_log WHERE op_id=$1 AND target=$2 "
+                    "AND status='error'", op_id, target,
+                    log_ctx=f" bot_profile op={op_id}")
                 await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
-                    op_id, ok_count + fail_count, target, "; ".join(reasons)[:300],
+                    op_id, step, target, "\n".join(reasons)[:900],
                     log_ctx=f" bot_profile op={op_id}")
-            await _safe_execute(
-                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            # Абсолютная позиция, а не +1: после возврата в очередь прогресс
+            # не «перескакивает» и не уходит за total.
+            await _mark_progress(pool, op_id, step)
             # Небольшая пауза бережёт от флуд-лимита Bot API; виток цикла сам
             # перечитывает отмену, поэтому обычного sleep здесь достаточно.
             await asyncio.sleep(1)
@@ -7096,9 +7174,18 @@ async def _exec_bulk_bot_profile(
         lbl for lbl, on in (("имя", bool(name)), ("описание", bool(description)),
                             ("короткое описание", bool(short_description)),
                             ("приветствие", bool(greeting))) if on)
+    total_ok = prev_ok + ok_count
+    _prev = f" (из них {prev_ok} — в прошлых прогонах)" if prev_ok else ""
+    if fail_count:
+        summary = (f"Профиль ботов ({_changed}): обновлено {total_ok} из {len(bots_rows)}"
+                   f"{_prev}, не удалось: {fail_count} — причины в журнале, "
+                   f"«Повтор» доделает только их")
+    else:
+        summary = (f"Профиль ботов обновлён ({_changed}): {total_ok} из "
+                   f"{len(bots_rows)}{_prev}")
     return {
-        "status": "done", "ok": ok_count, "failed": fail_count,
-        "summary": f"Профиль ботов обновлён ({_changed}): {ok_count}, ошибок: {fail_count}",
+        "status": "done", "ok": total_ok, "failed": fail_count,
+        "summary": summary,
     }
 
 
