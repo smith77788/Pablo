@@ -230,6 +230,13 @@ async def _gather_state(pool: asyncpg.Pool, uid: int) -> dict:
             out[k] = [dict(r) for r in (v or [])]
         else:
             out[k] = int(v or 0)
+    # Цель из онбординга: тому, кто выбрал «продавать через бота», аккаунты
+    # не нужны, и первым шагом ему положен бот, а не импорт сессии.
+    try:
+        from services.onboarding import load_goal
+        out["goal"] = await load_goal(pool, uid)
+    except Exception:
+        out["goal"] = None
     return out
 
 
@@ -253,8 +260,28 @@ def build_suggestions(state: dict) -> list[dict]:
     acc = state.get("acc_active", 0)
     op_types = _recent_op_types(state)
 
-    # 0. Совсем пустой аккаунт — первый шаг онбординга.
-    if acc == 0:
+    # 0. Совсем пустой аккаунт — первый шаг онбординга. Раньше «Добавьте первый
+    # аккаунт» вставал наверх на КАЖДОЙ вкладке у всех, в том числе у того, кто
+    # выбрал цель «продавать через бота» и уже подключил бота: аккаунты ему не
+    # нужны. Теперь у такой цели первый шаг — бот, а баннер про аккаунты не
+    # показывается.
+    goal = state.get("goal")
+    if acc == 0 and goal == "sell_bot":
+        if not state.get("bots", 0):
+            s.append(
+                {
+                    "id": "add_first_bot",
+                    "priority": 100,
+                    "icon": "🤖",
+                    "title": "Подключите своего бота",
+                    "reason": "Вставьте токен от @BotFather — ИИ-менеджер начнёт "
+                    "отвечать клиентам и принимать заказы.",
+                    "cta": "Подключить бота",
+                    "nav": "bots",
+                    "fn": "openBotAddModal",
+                }
+            )
+    elif acc == 0:
         s.append(
             {
                 "id": "add_first_account",

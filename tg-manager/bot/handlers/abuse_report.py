@@ -69,7 +69,12 @@ async def cmd_report_abuse(message: Message, state: FSMContext, pool: asyncpg.Po
         from bot.callbacks import StrikeCb
         kb = InlineKeyboardBuilder()
         kb.button(text='Подключить почту', callback_data=StrikeCb(action='emails').pack())
-        await message.answer('Сначала подключите свой почтовый ящик.', reply_markup=kb.as_markup())
+        await message.answer(
+            '📧 Жалоба уходит письмом в официальный abuse-адрес Telegram с вашего '
+            'почтового ящика — так ответ Telegram придёт вам. Подключите ящик '
+            '(Gmail, Яндекс, Mail.ru и др.: адрес и пароль приложения) и вернитесь '
+            'к /report_abuse.',
+            reply_markup=kb.as_markup())
         return
     await state.set_state(AbuseFSM.mailbox)
     kb = InlineKeyboardBuilder()

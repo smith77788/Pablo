@@ -511,6 +511,10 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     Теперь это обычная функция, и tests/test_dispatcher_builds.py её вызывает.
     """
     dp = Dispatcher(storage=storage)
+    # Повторный ответ на ту же кнопку Telegram отвергает — человек не видел
+    # ни «Нет аккаунтов», ни «Ошибка». Обёртка доставляет его сообщением.
+    from bot.utils import callback_answer_once
+    callback_answer_once.install()
     activity_log_middleware = UserActivityLogMiddleware()
     gate_middleware = SubscriptionGateMiddleware()
     latency_middleware = LatencyMiddleware()
@@ -668,6 +672,10 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     _admin_audit.install(admin_users_handler.router, admin_handler.router)
     dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
+    # Строго последним: сюда доходят только нажатия, которые не взял никто,
+    # и человек получает объяснение вместо вечных «часиков» на кнопке.
+    from bot.handlers import stale_button as stale_button_handler
+    dp.include_router(stale_button_handler.router)
     dp.error.register(_global_error_handler)
     install_error_monitoring(dp)
     return dp
@@ -1135,23 +1143,24 @@ async def main() -> None:
     # следующем старте.
     from aiogram.types import BotCommand
 
+    # В меню команд — без двойников. Раньше там было 16 пунктов: /menu рядом
+    # со /start, /tasks рядом с операциями, английское «Spintax» и /promo,
+    # который у большинства упирается в замок. Остальные команды работают,
+    # если их набрать, и открываются из меню бота.
     _commands = (
         [
-            BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="menu", description="🏠 Infragram OS"),
-            BotCommand(command="about", description="✨ Что умеет Infragram"),
+            BotCommand(command="start", description="🏠 Главное меню"),
+            BotCommand(command="summary", description="📊 Итоги за день"),
             BotCommand(command="pulse", description="💓 Пульс флота — кто на паузе и почему"),
             BotCommand(command="budget", description="💸 Экономика флота — где утекает бюджет"),
-            BotCommand(command="summary", description="📊 Сводка за день"),
-            BotCommand(command="find", description="🔍 Найти функцию"),
-            BotCommand(command="post", description="✍️ Быстрый пост в каналы"),
-            BotCommand(command="spin", description="🎲 Spintax — рандомизация текста"),
             BotCommand(command="accounts", description="📱 Мои аккаунты"),
-            BotCommand(command="tasks", description="⚡ Активные задачи"),
+            BotCommand(command="post", description="✍️ Быстрый пост в каналы"),
+            BotCommand(command="ops", description="⚡ Операции: что идёт и чем кончилось"),
             BotCommand(command="scenarios", description="🤖 Сценарии: сводка, повтор упавших"),
-            BotCommand(command="promo", description="🚀 Продвижение ботов"),
-            BotCommand(command="subscription", description="💳 Подписка & Тариф"),
-            BotCommand(command="app", description="📱 Открыть Mini App"),
+            BotCommand(command="find", description="🔍 Найти функцию"),
+            BotCommand(command="app", description="📱 Открыть приложение"),
+            BotCommand(command="subscription", description="💳 Подписка и тариф"),
+            BotCommand(command="about", description="✨ Что умеет Infragram"),
             BotCommand(command="cancel", description="Отменить текущее действие"),
         ]
     )

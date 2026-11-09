@@ -16,6 +16,7 @@ from database import db
 from services import bot_api
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services.secret_masking import mask_bot_token
+from bot.utils.owner_error import owner_error
 
 router = Router()
 
@@ -186,7 +187,7 @@ async def msg_bulk_name(
             pool, message.from_user.id, http, bot_api.set_name, name
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
@@ -240,7 +241,7 @@ async def msg_bulk_localized_name(
             pool, message.from_user.id, http, bot_api.set_name, name, lang
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Имя [{lang or 'default'}] → «{name[:30]}»"),
@@ -278,7 +279,7 @@ async def msg_bulk_desc(
             pool, message.from_user.id, http, bot_api.set_description, desc
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
         _result_text(ok, fail, total, "Описание обновлено"),
@@ -328,7 +329,7 @@ async def msg_bulk_localized_desc(
             pool, message.from_user.id, http, bot_api.set_description, desc, lang
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Описание [{lang or 'default'}]"),
@@ -366,7 +367,7 @@ async def msg_bulk_short(
             pool, message.from_user.id, http, bot_api.set_short_description, short
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
         _result_text(ok, fail, total, "Краткое описание обновлено"),
@@ -416,7 +417,7 @@ async def msg_bulk_localized_short(
             pool, message.from_user.id, http, bot_api.set_short_description, short, lang
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Краткое [{lang or 'default'}]"),
@@ -467,7 +468,7 @@ async def msg_bulk_commands(
             pool, message.from_user.id, http, bot_api.set_my_commands, commands, ""
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
         _result_text(ok, fail, total, "Команды установлены"),
@@ -532,7 +533,7 @@ async def msg_bulk_localized_commands(
             pool, message.from_user.id, http, bot_api.set_my_commands, commands, lang
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Команды [{lang or 'default'}]"),

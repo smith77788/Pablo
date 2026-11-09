@@ -231,7 +231,7 @@ PRESETS: dict[str, list[dict]] = {
         {
             "id": "support_bot",
             "name": "🤖 Бот Поддержки",
-            "description": "Customer support бот — принимает заявки и отвечает на вопросы",
+            "description": "Бот поддержки клиентов — принимает заявки и отвечает на вопросы",
             "customize_fields": [
                 {"key": "COMPANY", "label": "Название вашей компании/сервиса", "default": "нашу службу поддержки"},
                 {"key": "HOURS", "label": "Часы работы", "default": "пн-пт 9:00-18:00 МСК"},

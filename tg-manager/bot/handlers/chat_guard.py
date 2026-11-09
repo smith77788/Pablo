@@ -24,6 +24,7 @@ import time
 
 import asyncpg
 from aiogram import Bot, F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
@@ -593,7 +594,7 @@ async def cmd_ban(message: Message, command: CommandObject, bot: Bot,
         await cg.reset_warnings(pool, message.chat.id, uid)
         await message.reply(f"🔨 Забанен: {name}")
     except Exception as e:
-        await message.reply(f"⚠️ Не удалось забанить: {html.escape(str(e)[:120])}")
+        await message.reply(f"⚠️ Не удалось забанить: {owner_error(e)}")
 
 
 @router.message(Command("unban"), F.chat.type.in_(_GROUP))
@@ -609,7 +610,7 @@ async def cmd_unban(message: Message, command: CommandObject, bot: Bot,
         await bot.unban_chat_member(message.chat.id, uid, only_if_banned=True)
         await message.reply(f"✅ Разбанен: {name}")
     except Exception as e:
-        await message.reply(f"⚠️ Не удалось: {html.escape(str(e)[:120])}")
+        await message.reply(f"⚠️ Не удалось: {owner_error(e)}")
 
 
 @router.message(Command("kick"), F.chat.type.in_(_GROUP))
@@ -628,7 +629,7 @@ async def cmd_kick(message: Message, command: CommandObject, bot: Bot,
         await bot.unban_chat_member(message.chat.id, uid, only_if_banned=True)
         await message.reply(f"👋 Удалён из чата: {name}")
     except Exception as e:
-        await message.reply(f"⚠️ Не удалось: {html.escape(str(e)[:120])}")
+        await message.reply(f"⚠️ Не удалось: {owner_error(e)}")
 
 
 @router.message(Command("mute"), F.chat.type.in_(_GROUP))
@@ -651,7 +652,7 @@ async def cmd_mute(message: Message, command: CommandObject, bot: Bot,
             until_date=until)
         await message.reply(f"🔇 {name} в мьюте на {minutes} мин.")
     except Exception as e:
-        await message.reply(f"⚠️ Не удалось замьютить: {html.escape(str(e)[:120])}")
+        await message.reply(f"⚠️ Не удалось замьютить: {owner_error(e)}")
 
 
 @router.message(Command("unmute"), F.chat.type.in_(_GROUP))
@@ -673,7 +674,7 @@ async def cmd_unmute(message: Message, command: CommandObject, bot: Bot,
                 can_send_other_messages=True, can_add_web_page_previews=True))
         await message.reply(f"🔊 Мьют снят: {name}")
     except Exception as e:
-        await message.reply(f"⚠️ Не удалось: {html.escape(str(e)[:120])}")
+        await message.reply(f"⚠️ Не удалось: {owner_error(e)}")
 
 
 @router.message(Command("warn"), F.chat.type.in_(_GROUP))

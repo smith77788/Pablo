@@ -236,7 +236,13 @@ function renderBots() {
   // Пустой список ≠ «ботов нет»: боты могли быть созданы с аккаунтов флота, а
   // скан ресурсов их никогда не находил (бот — не канал). Даём найти их, а не
   // только вставлять токены руками по одному.
-  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет подключённых ботов','Боты, созданные с ваших аккаунтов, можно найти сканом флота — или подключить по токену от @BotFather',{label:'🔍 Найти ботов на флоте',fn:'scanFleetBots()'}); renderBotLoadMore(0); return; }
+  // Инструменты списка (массовые действия, поиск, срезы) — только когда есть
+  // что обрабатывать. Главный путь новичка — токен от @BotFather: скан флота
+  // без подключённых аккаунтов ничего не найдёт, а раньше именно он стоял
+  // единственной кнопкой пустого экрана.
+  const _tools = document.getElementById('botTools');
+  if (_tools) _tools.style.display = BOTS.length ? '' : 'none';
+  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Подключите первого бота','Вставьте токен от @BotFather — и бот сразу начнёт принимать подписчиков, отвечать клиентам и делать рассылки. Нет бота? Создайте его в «Фабрике ботов» или найдите уже созданные с ваших аккаунтов',{label:'🔑 Подключить по токену',fn:'openBotAddModal()'}) + '<div style="display:flex;gap:8px;justify-content:center;margin-top:10px"><button class="btn btn-s" style="font-size:13px;padding:9px 14px" onclick="openBotFactory()">🏭 Фабрика ботов</button><button class="btn btn-s" style="font-size:13px;padding:9px 14px" onclick="scanFleetBots()">🔍 Найти на флоте</button></div>'; renderBotLoadMore(0); return; }
   const _list = _botsFiltered();
   // Пустой результат поиска ≠ «ботов нет»: разные причины, разный выход.
   if (!_list.length) {

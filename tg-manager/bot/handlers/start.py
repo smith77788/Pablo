@@ -46,6 +46,7 @@ from bot.handlers.admin import notify_new_platform_user
 from services.logger import log_exc_swallow
 import logging
 from bot.utils.op_helpers import safe_answer
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 
@@ -61,13 +62,25 @@ async def _record_reentry_safe(pool, uid: int, days_absent: float) -> None:
         log.debug("record_reentry failed: %s", e)
 
 
-BUILD_VERSION = "2026.06.06-r36"
+def _build_version() -> str:
+    """Версия сборки — коммит, который сейчас развёрнут.
+
+    Раньше здесь была строка «2026.06.06-r36», которую никто не менял: /version
+    полгода показывал одно и то же, а deploy_notifier, сверяющий версию с
+    deploy_log, считал каждый новый деплой уже объявленным.
+    """
+    import os
+    sha = (os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "")[:7]
+    return sha or "dev"
+
+
+BUILD_VERSION = _build_version()
 
 
 @router.message(Command("version"))
 async def cmd_version(message: Message) -> None:
     await message.answer(
-        f"🔖 <b>Infragram OS</b> build <code>{BUILD_VERSION}</code>", parse_mode="HTML"
+        f"🔖 <b>Infragram OS</b>, сборка <code>{BUILD_VERSION}</code>", parse_mode="HTML"
     )
 
 
@@ -81,7 +94,7 @@ async def cmd_dbdiag(message: Message, pool: asyncpg.Pool) -> None:
         dbname = await pool.fetchval("SELECT current_database()")
         host = await pool.fetchval("SELECT inet_server_addr()::text")
     except Exception as e:
-        await message.answer(f"❌ Не удалось опросить БД: {e}")
+        await message.answer(f"❌ Не удалось опросить БД: {owner_error(e)}")
         return
     lines = [f"🗄 <b>Диагностика БД</b>", f"подключены к: <code>{dbname}</code>",
              f"host: <code>{host}</code>", ""]
@@ -797,6 +810,16 @@ async def cmd_app(message: Message) -> None:
     url = _valid_mini_app_url(_MINI_APP_URL)
 
     if not url:
+        # Инструкция по Railway — только администратору: клиенту она ничего не
+        # даёт и читается как «сервис сломан».
+        from bot.handlers.admin import is_admin
+        if not is_admin(message.from_user.id):
+            await message.answer(
+                "📱 <b>Приложение временно недоступно</b>\n\n"
+                "Все разделы есть и в боте: /menu",
+                parse_mode="HTML",
+            )
+            return
         await message.answer(
             "📱 <b>Infragram Mini App</b>\n\n"
             "Приложение не настроено. Добавьте в Railway:\n"

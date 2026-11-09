@@ -35,6 +35,7 @@ from services import (
     avatar_factory,
 )
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -1404,7 +1405,7 @@ async def msg_gp_custom_geo_file(
         content = raw.read() if hasattr(raw, "read") else bytes(raw)
     except Exception as e:
         await wait_msg.delete()
-        await _reply(message, f"⚠️ Не удалось скачать файл: {e}", _cancel_kb())
+        await _reply(message, f"⚠️ Не удалось скачать файл: {owner_error(e)}", _cancel_kb())
         return
 
     await wait_msg.delete()
@@ -3327,7 +3328,7 @@ async def cb_gp_bulk_run(
         pool, callback.from_user.id, plan_id, action
     )
     if not op_id:
-        await callback.answer(f"⚠️ {err}", show_alert=True)
+        await callback.answer(f"⚠️ {owner_error(err, html_escape=False)}", show_alert=True)
         return
 
     await callback.answer(

@@ -1167,7 +1167,7 @@ def format_copilot_report(
         "opportunity": "💡",
     }
 
-    lines = ["🤖 <b>Infrastructure Copilot</b>\n"]
+    lines = ["🤖 <b>ИИ-аналитик инфраструктуры</b>\n"]
 
     shown = insights[:max_items]
     for ins in shown:
@@ -1308,7 +1308,7 @@ async def run_copilot_loop(pool: asyncpg.Pool, bot) -> None:
 
 
 def _format_critical_alert(insights: list[CopilotInsight]) -> str:
-    lines = ["🚨 <b>Infrastructure Copilot: критические проблемы</b>\n"]
+    lines = ["🚨 <b>ИИ-аналитик: критические проблемы</b>\n"]
     for i in insights:
         lines.append(f"• <b>{html.escape(i.title)}</b>")
         lines.append(f"  {html.escape(i.explanation)}")

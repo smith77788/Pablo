@@ -148,6 +148,26 @@ async def _money(pool, uid: int, days: int) -> dict | None:
     return out if ok else None
 
 
+_HAS_RESOURCES_SQL = """
+SELECT EXISTS(SELECT 1 FROM managed_bots WHERE added_by = $1)
+    OR EXISTS(SELECT 1 FROM tg_accounts WHERE owner_id = $1)
+"""
+
+
+async def _has_resources(pool, uid: int) -> bool | None:
+    """Есть ли у владельца хоть один бот или аккаунт.
+
+    Пустой «Требует внимания» у пустого проекта — не «всё в порядке»: раньше
+    новичок без единого бота читал «прокси и боты живы». None — не смогли
+    спросить базу; тогда экран ведёт себя как раньше.
+    """
+    try:
+        return bool(await pool.fetchval(_HAS_RESOURCES_SQL, uid))
+    except Exception:
+        log.warning("итоги: не удалось проверить наличие ресурсов", exc_info=True)
+        return None
+
+
 async def compute(pool, uid: int, days: int = 7, *, with_attention: bool = True) -> dict:
     """Итоги владельца за `days` дней (1..90) и сравнение с прошлым периодом."""
     days = _clamp_days(days)
@@ -168,6 +188,7 @@ async def compute(pool, uid: int, days: int = 7, *, with_attention: bool = True)
         "reach": _metric(reach),
         "attention": [],
         "attention_total": 0,
+        "has_resources": await _has_resources(pool, uid),
     }
     if with_attention:
         try:
@@ -243,6 +264,9 @@ def bot_text(summary: dict) -> str:
         more = int(summary.get("attention_total") or 0) - len(att)
         if more > 0:
             lines.append(f"<i>и ещё {more} — в приложении</i>")
+    elif summary.get("has_resources") is False:
+        lines += ["", "🚀 Подключите бота или аккаунт — здесь появятся итоги и то, "
+                      "что требует вашего внимания."]
     else:
         lines += ["", "✅ Ничего не требует внимания."]
     return "\n".join(lines)

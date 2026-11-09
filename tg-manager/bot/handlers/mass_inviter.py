@@ -13,6 +13,7 @@ import logging
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -730,7 +731,7 @@ async def _refs_from_document(message: Message, mode: str):
         return await asyncio.to_thread(
             ilp.parse_invite_file, doc.file_name or "list.txt", data, mode=mode)
     except ValueError as e:
-        await message.answer(f"⚠️ {html.escape(str(e))}")
+        await message.answer(f"⚠️ {owner_error(e)}")
         return None
 
 
@@ -1331,7 +1332,7 @@ async def cb_inviter_confirm(
         return
     except Exception as exc:
         log.exception("mass_invite submit owner=%s", owner_id)
-        await callback.answer(f"⚠️ Не удалось поставить в очередь: {str(exc)[:150]}", show_alert=True)
+        await callback.answer(f"⚠️ Не удалось поставить в очередь: {owner_error(exc, html_escape=False)}", show_alert=True)
         return
 
     kb = InlineKeyboardBuilder()

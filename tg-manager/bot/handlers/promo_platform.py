@@ -27,7 +27,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import BmCb, PromoCb, RankCb
+from bot.callbacks import BmCb, PromoCb, RankCb, VisCb
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import (
     PromoAddBotFSM,
@@ -170,10 +170,22 @@ async def _show_menu(target, pool: asyncpg.Pool, edit: bool = True) -> None:
         await msg.answer(text, reply_markup=kb.as_markup())
 
 
+def _LOCKED_TEXT() -> str:
+    # Раньше замок говорил только «ПОДПИСКА. Оформите: /subscription» — ни что
+    # даёт раздел, ни какой тариф и за сколько. Общий текст замка это знает.
+    from bot.utils.subscription import locked_text
+    return locked_text("Платформа продвижения ботов", _PRO)
+
+
+def _locked_kb():
+    from bot.keyboards import subscription_locked_markup
+    return subscription_locked_markup(_PRO, back_callback=BmCb(action="main"))
+
+
 @router.message(Command("promo"))
 async def cmd_promo(message: Message, pool: asyncpg.Pool) -> None:
     if not await require_plan(pool, message.from_user.id, _PRO):
-        await message.answer("🔒 <b>Платформа продвижения — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
+        await message.answer(_LOCKED_TEXT(), reply_markup=_locked_kb())
         return
     await _show_menu(message, pool, edit=False)
 
@@ -183,9 +195,7 @@ async def cb_promo_menu(callback: CallbackQuery, state: FSMContext, pool: asyncp
     await state.clear()
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
-        await callback.message.edit_text(
-            "🔒 <b>Платформа продвижения — 💎 ПОДПИСКА</b>\n\nОформите: /subscription"
-        )
+        await callback.message.edit_text(_LOCKED_TEXT(), reply_markup=_locked_kb())
         return
     await _show_menu(callback, pool, edit=True)
 
@@ -503,7 +513,7 @@ async def cb_order_check_smm(callback: CallbackQuery, callback_data: PromoCb, po
 async def cb_new_order_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
-        await callback.message.edit_text("🔒 <b>Новый заказ — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
+        await callback.message.edit_text(_LOCKED_TEXT(), reply_markup=_locked_kb())
         return
     await state.set_state(PromoOrderFSM.keyword)
     kb = InlineKeyboardBuilder()
@@ -904,7 +914,7 @@ async def cb_bot_delete(callback: CallbackQuery, callback_data: PromoCb, pool: a
 async def cb_bot_add_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
-        await callback.message.edit_text("🔒 <b>Склад ботов — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
+        await callback.message.edit_text(_LOCKED_TEXT(), reply_markup=_locked_kb())
         return
     await state.set_state(PromoAddBotFSM.username)
     kb = InlineKeyboardBuilder()
@@ -1443,7 +1453,7 @@ async def cb_panel_delete(callback: CallbackQuery, callback_data: PromoCb, pool:
 async def cb_panel_add_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
-        await callback.message.edit_text("🔒 <b>SMM-панели — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
+        await callback.message.edit_text(_LOCKED_TEXT(), reply_markup=_locked_kb())
         return
     await state.set_state(PromoAddPanelFSM.name)
     kb = InlineKeyboardBuilder()
@@ -1595,7 +1605,7 @@ async def fsm_panel_service_id(message: Message, state: FSMContext, pool: asyncp
 async def cb_topcheck_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
-        await callback.message.edit_text("🔒 <b>Чекер топа — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
+        await callback.message.edit_text(_LOCKED_TEXT(), reply_markup=_locked_kb())
         return
     await state.set_state(PromoTopCheckFSM.keyword)
     kb = InlineKeyboardBuilder()
@@ -1646,7 +1656,9 @@ async def fsm_topcheck_keyword(message: Message, state: FSMContext, pool: asyncp
         rows = []
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Трекер позиций", callback_data=RankCb(action="menu"))
+    # RankCb(action="menu") без bot_id отвечал «Бот не найден» — вход в
+    # позиции общий, через панель видимости.
+    kb.button(text="📊 Трекер позиций", callback_data=VisCb(action="dashboard"))
     kb.button(text="◀️ Платформа", callback_data=PromoCb(action="menu"))
     kb.adjust(1)
 

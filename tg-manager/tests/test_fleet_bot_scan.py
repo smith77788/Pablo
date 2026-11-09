@@ -119,8 +119,9 @@ def test_api_endpoints_are_owner_scoped_and_wired():
 
 def test_ui_offers_the_scan_instead_of_only_manual_token():
     assert "scanFleetBots" in _UI and "showDiscoveredBots" in _UI
-    # Пустой экран больше не утверждает, что ботов нет.
-    assert "Нет подключённых ботов" in _UI
+    # Пустой экран не утверждает, что ботов нет: он зовёт подключить первого
+    # и рядом предлагает найти уже созданных на флоте.
+    assert "Подключите первого бота" in _UI and "Найти на флоте" in _UI
 
 
 # ── Подключение найденных: скан без этого — тупик ──────────────────────────

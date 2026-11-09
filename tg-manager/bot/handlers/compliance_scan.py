@@ -12,6 +12,7 @@ import re
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -108,7 +109,7 @@ async def msg_scan_resources(message: Message, state: FSMContext, pool: asyncpg.
         )
     except Exception as exc:
         log.exception("compliance_scan submit uid=%s", message.from_user.id)
-        await message.answer(f"⚠️ Не удалось поставить в очередь: {str(exc)[:150]}")
+        await message.answer(f"⚠️ Не удалось поставить в очередь: {owner_error(exc)}")
         return
 
     kb = InlineKeyboardBuilder()

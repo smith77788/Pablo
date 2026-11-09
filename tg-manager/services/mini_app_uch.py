@@ -1996,6 +1996,50 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_ai_query")
             return _err(_INTERNAL_ERROR, 500)
 
+    # Номер контакта — UUID. Старая или испорченная ссылка («/contacts/1»)
+    # падала в asyncpg на приведении типа и отдавала «Внутренняя ошибка
+    # сервера» (500) на пяти запросах карточки. Это не сбой, а «нет такого
+    # контакта» — 404 до похода в базу.
+    import functools as _ft
+    import uuid as _uuid
+
+    def _uuid_guard(handler):
+        @_ft.wraps(handler)
+        async def _wrapped(request):
+            # Сначала вход: посторонний без токена получает свой 401 от
+            # обработчика, а не подсказку «такого контакта нет».
+            if _get_uid(request) is not None:
+                try:
+                    _uuid.UUID(str(request.match_info.get("contact_id", "")))
+                except ValueError:
+                    return _err("Контакт не найден", 404)
+            return await handler(request)
+        return _wrapped
+
+    # Обёртка надевается на имя, а не в строке регистрации: так маршрут
+    # по-прежнему читается как «путь → обработчик».
+    uch_contact_detail = _uuid_guard(uch_contact_detail)
+    uch_contact_update = _uuid_guard(uch_contact_update)
+    uch_contact_message = _uuid_guard(uch_contact_message)
+    uch_contact_media = _uuid_guard(uch_contact_media)
+    uch_contact_invite = _uuid_guard(uch_contact_invite)
+    uch_contact_delete = _uuid_guard(uch_contact_delete)
+    uch_toggle_favorite = _uuid_guard(uch_toggle_favorite)
+    uch_contact_invite_history = _uuid_guard(uch_contact_invite_history)
+    uch_contact_opt_out = _uuid_guard(uch_contact_opt_out)
+    uch_contact_allow_invite = _uuid_guard(uch_contact_allow_invite)
+    uch_contact_versions = _uuid_guard(uch_contact_versions)
+    uch_rollback_preview = _uuid_guard(uch_rollback_preview)
+    uch_rollback = _uuid_guard(uch_rollback)
+    uch_timeline = _uuid_guard(uch_timeline)
+    uch_relationships = _uuid_guard(uch_relationships)
+    uch_identity = _uuid_guard(uch_identity)
+    uch_crm_get = _uuid_guard(uch_crm_get)
+    uch_crm_upsert = _uuid_guard(uch_crm_upsert)
+    uch_crm_activity = _uuid_guard(uch_crm_activity)
+    uch_crm_reminder = _uuid_guard(uch_crm_reminder)
+
+
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)

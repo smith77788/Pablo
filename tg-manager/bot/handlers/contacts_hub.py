@@ -46,7 +46,7 @@ async def _show_menu(target, state: FSMContext | None = None) -> None:
     if state is not None:
         await state.clear()
     text = (
-        "🗂 <b>Contacts Hub</b>\n\n"
+        "🗂 <b>Контакты</b>\n\n"
         "Единый реестр контактов со всех аккаунтов: поиск, авто-теги, "
         "граф связей, избранное."
     )

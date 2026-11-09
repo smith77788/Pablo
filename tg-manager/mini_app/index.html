@@ -1426,10 +1426,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          (screens/summary.js, /api/miniapp/summary). Стоит ПЕРВЫМ: главный
          экран отвечает на вопрос «что мне это принесло», а состояние флота
          ниже. -->
+    <!-- 🚀 Онбординг: выбор цели и чеклист активации новичка. Стоит ВЫШЕ
+         итогов, но виден только до активации (loadOnboarding прячет его), так
+         что у работающего владельца первым остаются итоги. Раньше новичок
+         видел сначала стену нулей, а выбор цели — за нижним краем экрана
+         (обход 08.11.2026). -->
+    <div id="onboardCard" style="margin:12px 16px 12px;display:none"></div>
     <div id="summaryWrap"></div>
     <div id="homeDataStatus" role="status" aria-live="polite" class="home-data-status"></div>
-    <!-- 🚀 Онбординг: чеклист активации новичка (скрывается после активации) -->
-    <div id="onboardCard" style="margin:12px 16px 0;display:none"></div>
     <!-- Operation Progress -->
     <div id="opProgress" style="display:none;margin:10px 16px;background:var(--bg);border-radius:14px;padding:12px 16px;border:1px solid var(--sep)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
@@ -1559,6 +1563,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
       <div class="copilot-list"></div>
     </div>
+    <!-- Инструменты списка прячутся, пока ботов нет (renderBots): десять
+         действий над пустотой выталкивали «подключите первого бота» за край
+         экрана, и новичок не понимал, с чего начать. -->
+    <div id="botTools">
     <!-- Массовые действия по ботам -->
     <div style="display:flex;gap:8px;padding:0 0 6px">
       <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📢 Рассылка</button>
@@ -1592,6 +1600,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
            placeholder="🔍 Поиск: имя или @username" autocomplete="off" aria-label="Поиск по ботам">
     <div id="fx-bots"></div>
     <div class="lf-chips" id="botFilterChips" role="group" aria-label="Срез списка ботов"></div>
+    </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <!-- Остаток списка: сервер отдаёт срез, а в шапке стоит полное число. Без
          этой строки «700 ботов» в шапке и 500 карточек в списке выглядели как
@@ -1706,6 +1715,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
       <div class="copilot-list"></div>
     </div>
+    <!-- Инструменты списка прячутся, пока аккаунтов нет (renderAccounts):
+         шесть нулевых счётчиков и семь действий над пустотой выталкивали
+         «Добавьте аккаунт» за нижний край экрана. -->
+    <div id="accTools">
     <!-- KPI status bar -->
     <div class="acc-kpi" id="accKpi">
       <div class="acc-kpi-card on" onclick="filterAcc('all',this)" data-filter="all">
@@ -1754,6 +1767,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="lf-chips" id="accTagChips" style="display:none" role="group" aria-label="Теги аккаунтов"></div>
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
     <div id="stageChips" style="display:none;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch"></div>
+    </div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div id="accLoadMore" style="padding:6px 16px 0"></div>
     <div class="sec-row" style="margin-top:12px">
@@ -2108,7 +2122,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-broadcasts">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
-    <div class="hdr-title">📨 Рассылки</div>
+    <div class="hdr-title">✉️ Сообщения</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
   <div class="sb">
@@ -8370,7 +8384,9 @@ async function acquireSessionToken() {
       body: JSON.stringify({initData: tg.initData}),
     });
     if (!r.ok) throw new Error('Auth '+r.status);
-    return (await r.json()).token;
+    const _a = await r.json();
+    if (typeof _a.is_admin === 'boolean') window._AUTH_IS_ADMIN = _a.is_admin;
+    return _a.token;
   }
   // Вне Telegram: связывание устройства.
   let dt = null;
@@ -10056,7 +10072,9 @@ async function loadHome() {
     loadHome.lastData = d;
     renderCards(d);
     renderAct(d.recent_activity||[]);
-    homeLoadState('homeDataStatus', 'Показатели обновлены в ' + new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}));
+    // Время обновления уже показывает блок «Итоги» — вторая такая же строка
+    // на том же экране только шумела. Здесь остаются загрузка и ошибка.
+    homeLoadState('homeDataStatus', '');
   } catch(e) {
     homeLoadState('homeDataStatus', cached ? 'Не удалось обновить показатели. Показаны предыдущие данные, они могут быть устаревшими.' : 'Показатели недоступны. Это не нулевые значения.', true);
     if (!cached) {
@@ -31002,6 +31020,9 @@ function initPayment(planKey, label, price) {
 
 // ── Admin Panel ──────────────────────────────────────
 async function loadAdminSection() {
+  // Сервер сказал при входе, что это не админ, — не пробуем админскую ручку
+  // (раньше каждый вход обычного пользователя начинался с 403).
+  if (window._AUTH_IS_ADMIN === false) return;
   try {
     const stats = await api('/api/miniapp/admin/stats');
     window.IS_ADMIN = true;  // раздел админки доступен → показываем админ-поля (темп автоповтора кода)

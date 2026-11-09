@@ -12,6 +12,7 @@ import re
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -173,7 +174,7 @@ async def cb_ai_comment_tone(
         )
     except Exception as exc:
         log.exception("ai_comment submit uid=%s", callback.from_user.id)
-        await callback.message.edit_text(f"⚠️ Не удалось поставить в очередь: {str(exc)[:150]}")
+        await callback.message.edit_text(f"⚠️ Не удалось поставить в очередь: {owner_error(exc)}")
         return
 
     kb = InlineKeyboardBuilder()

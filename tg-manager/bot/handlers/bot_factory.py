@@ -8,6 +8,7 @@ import logging
 import aiohttp
 import asyncpg
 from aiogram import F, Router
+from bot.utils.subscription import locked_text
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -325,7 +326,7 @@ async def cb_factory_do_create_bots(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
         await callback.message.edit_text(
-            "🔒 <b>Фабрика ботов — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Фабрика ботов", "pro"),
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

@@ -26,10 +26,14 @@ def test_route_registered():
 
 
 def test_summary_is_first_on_home():
+    """Итоги — первое, что видит работающий владелец. Выше них стоит только
+    карточка онбординга новичка: она скрыта (display:none) и показывается до
+    активации, чтобы новичок начинал с выбора цели, а не со стены нулей."""
     home = HTML[HTML.index('<div class="screen show" id="s-home">'):]
     sb = home[home.index('<div class="sb">'):]
-    first = re.search(r'<div[^>]*id="([^"]+)"', sb[len('<div class="sb">'):])
-    assert first and first.group(1) == "summaryWrap"
+    ids = re.findall(r'<div([^>]*)id="([^"]+)"', sb[len('<div class="sb">'):])[:2]
+    assert ids[0][1] == "onboardCard" and "display:none" in sb[:sb.index("summaryWrap")]
+    assert ids[1][1] == "summaryWrap"
 
 
 def test_home_load_also_loads_summary():

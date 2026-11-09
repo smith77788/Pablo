@@ -106,6 +106,11 @@ function renderSummary(d) {
       severity: it.severity, title: it.title, detail: it.detail,
       buttonHtml: it.action ? UI.button(it.action.label || 'Открыть', 'sumAct', i) : '',
     })).join('');
+  } else if (d.has_resources === false) {
+    // Пустой проект — не «всё в порядке»: следить пока не за чем.
+    att = UI.alert({ severity: 'info', title: 'Пока нечего проверять',
+      detail: 'Подключите бота или аккаунт — здесь появятся сбои и то, что требует вашего решения.',
+      buttonHtml: UI.button('🔑 Подключить бота', 'openBotAddModal') });
   } else {
     att = UI.ok('Ничего не требует внимания: операции идут, прокси и боты живы.');
   }

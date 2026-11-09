@@ -53,11 +53,12 @@ from bot.states import (
     SendReactionFSM,
     UpdateProfileFSM,
 )
-from bot.utils.subscription import require_plan
+from bot.utils.subscription import locked_text, require_plan
 from bot.utils.op_helpers import _acc_label, _progress_text, backoff
 from services import session_simulator, operation_bus
 from services.logger import log_exc_swallow
 from bot.utils.event_status import mark_handled_error
+from bot.utils.owner_error import owner_error
 
 # ── Bulk Pacing Presets ──────────────────────────────────────────────────────
 
@@ -503,6 +504,14 @@ def _account_picker_kb(accounts: list, action: str) -> InlineKeyboardBuilder:
 # ── /ops entry point (redirect to Infragram OS) ────────────────────────────
 
 
+# Один текст пустого состояния на /ops и /report: раньше каждая команда
+# говорила о пустоте по-своему, и было непонятно, про одно ли это.
+_NO_OPS_YET = (
+    "<i>Операций пока не было. Они появятся здесь, когда вы запустите "
+    "рассылку, вступление в чаты или публикацию.</i>"
+)
+
+
 @router.message(Command("ops"))
 async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
     """Quick access to operation reports and queue."""
@@ -537,7 +546,7 @@ async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
     partial_24h = int(stats["partial_24h"] or 0) if stats else 0
     failed = int(stats["failed"] or 0) if stats else 0
 
-    status_line = (
+    status_line = _NO_OPS_YET if not (running or pending or done_24h or partial_24h or failed) else (
         f"🔄 Активных: <b>{running}</b>  ⏳ Ожидают: <b>{pending}</b>\n"
         f"✅ Завершено (24ч): <b>{done_24h}</b>  ❌ Ошибок: <b>{failed}</b>"
         # Строка только при ненулевом числе: на чистом экране лишнего нуля не
@@ -584,7 +593,7 @@ async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
               "failed": "❌", "cancelled": "🚫"}
     lines = ["📊 <b>Отчёт по операциям</b>\n"]
     if not ops:
-        lines.append("<i>Операций ещё не было.</i>")
+        lines.append(_NO_OPS_YET)
     else:
         for op in ops:
             icon = _icons.get(op["status"], "❓")
@@ -870,9 +879,9 @@ async def cb_do_create(
         _acc=acc,
     )
     if "error" in result:
-        err = html.escape(result["error"])
+        err = result["error"]
         await callback.message.edit_text(
-            f"❌ <b>Ошибка создания</b>\n\n<code>{err}</code>",
+            f"❌ <b>Ошибка создания</b>\n\n<code>{owner_error(err)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -918,7 +927,7 @@ async def cb_bulk_create_start(
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Массовое создание — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Массовое создание", _PRO),
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -1310,7 +1319,7 @@ async def cb_bulk_post_chans_start(
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Пост в каналы — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Пост в каналы", _STARTER),
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -2449,7 +2458,7 @@ async def cb_members_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Управление участниками — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Управление участниками", _STARTER),
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -2809,7 +2818,7 @@ async def fsm_invite_usernames_file(
     except Exception as e:
         log.warning('handler error in fsm_invite_usernames_file: %s', e)
         await state.clear()
-        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
         return
     usernames = _parse_username_list(raw)
     if not usernames:
@@ -3040,7 +3049,6 @@ async def _run_invite_bg(
             total_items=len(usernames), label=label,
         )
     except PlanRequiredError as exc:
-        from bot.utils.subscription import locked_text
         await msg_obj.answer(
             locked_text("Инвайт в канал", exc.required_plan),
             parse_mode="HTML",
@@ -3232,7 +3240,7 @@ async def cb_botfather_pick_account(
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Создание бота — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Создание бота", _PRO),
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -5055,7 +5063,7 @@ async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> Non
     except Exception as e:
         log.warning('handler error in fsm_bulk_dm_usernames_file: %s', e)
         await state.clear()
-        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
         return
     usernames = _parse_username_list(raw)
     if not usernames:
@@ -5921,7 +5929,6 @@ async def cb_contact_invite_start(
     await safe_answer(callback)
     await state.clear()
     if not await require_plan(pool, callback.from_user.id, _PRO):
-        from bot.utils.subscription import locked_text
 
         await callback.message.edit_text(
             locked_text("Инвайт из контактов", "pro"),

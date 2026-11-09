@@ -6,6 +6,7 @@ import html
 import json
 import logging
 from aiogram import Router, F
+from bot.utils.owner_error import owner_error
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -1903,7 +1904,7 @@ async def fsm_seo_edit_value(
         )
     else:
         await message.answer(
-            f"❌ <b>Ошибка обновления:</b> {err}",
+            f"❌ <b>Ошибка обновления:</b> {owner_error(err)}",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

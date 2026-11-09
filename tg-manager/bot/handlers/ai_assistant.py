@@ -16,6 +16,7 @@ from pathlib import Path
 import asyncpg
 import aiohttp
 from aiogram import Router, F
+from bot.utils.subscription import locked_text
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -1000,7 +1001,7 @@ async def cb_ai_start(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await safe_edit(callback,
-            "🔒 <b>AI-ассистент — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("AI-ассистент", "enterprise"),
             kb.as_markup())
         return
     await state.set_state(AiChat.chatting)

@@ -23,6 +23,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ProfileSetterCb, BmCb
 from bot.utils.op_helpers import terminal_kb
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -358,7 +359,7 @@ async def _run_local_op(callback: CallbackQuery, op: str, owner_id: int,
             await callback.answer("Неизвестная операция", show_alert=True)
             return
     except ValueError as e:
-        await callback.answer(f"⚠️ {e}", show_alert=True)
+        await callback.answer(f"⚠️ {owner_error(e, html_escape=False)}", show_alert=True)
         return
     except Exception:
         log.exception("local op %s failed", op)

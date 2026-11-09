@@ -71,6 +71,7 @@ from services.account_manager import (
     start_qr_login,
     wait_qr_login,
 )
+from bot.utils.owner_error import owner_error
 
 router = Router()
 
@@ -173,7 +174,21 @@ def _api_configured() -> bool:
         return False
 
 
-def _api_missing_text() -> str:
+def _api_missing_text(uid: int | None = None) -> str:
+    # Инструкция про переменные окружения — для администратора платформы.
+    # Клиент раньше видел «задайте TG_API_ID… перезапустите бота», то есть
+    # указания, которые выполнить не может и которые читаются как поломка.
+    try:
+        from bot.handlers.admin import is_admin
+        admin = uid is not None and is_admin(int(uid))
+    except Exception:
+        admin = False
+    if not admin:
+        return (
+            "⏳ <b>Подключение аккаунтов временно недоступно</b>\n\n"
+            "Это настройка на стороне платформы, а не ваша ошибка. Пока можно "
+            "подключить бота по токену — для этого аккаунты не нужны."
+        )
     return (
         "⚙️ <b>API не настроен</b>\n\n"
         "Для работы с личными аккаунтами необходимо задать переменные окружения:\n"
@@ -644,7 +659,7 @@ async def cb_add_account(
 
     if not _api_configured():
         await callback.message.edit_text(
-            _api_missing_text(),
+            _api_missing_text(callback.from_user.id),
             parse_mode="HTML",
             reply_markup=_cancel_markup(),
         )
@@ -858,7 +873,7 @@ async def cb_qr_login(
     # платного лимита. Тексты и экран апгрейда — те же, что в cb_add_account.
     if not _api_configured():
         await callback.message.edit_text(
-            _api_missing_text(), parse_mode="HTML", reply_markup=_cancel_markup(),
+            _api_missing_text(callback.from_user.id), parse_mode="HTML", reply_markup=_cancel_markup(),
         )
         return
     plan, limit = await _get_account_limit(pool, user_id)
@@ -1776,7 +1791,7 @@ async def cb_acc_export_json(
             acc["session_str"], TG_API_ID,
             user_id=int(acc.get("tg_user_id") or 0))
     except session_export.SessionExportError as e:
-        await callback.answer(f"⚠️ {e}", show_alert=True)
+        await callback.answer(f"⚠️ {owner_error(e, html_escape=False)}", show_alert=True)
         return
     except Exception:
         log_exc_swallow(log, "export_json failed")
@@ -1874,7 +1889,7 @@ async def cb_relog_account(
     if not _api_configured():
         await safe_answer(callback)
         await callback.message.edit_text(
-            _api_missing_text(),
+            _api_missing_text(callback.from_user.id),
             parse_mode="HTML",
             reply_markup=_cancel_markup(),
         )
@@ -2080,7 +2095,7 @@ async def cb_assign_proxy(
             await callback.answer("✅ Прокси назначен", show_alert=True)
     except Exception as exc:
         mark_handled_error(f"assign_proxy: {exc}")
-        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        await callback.answer(f"❌ Ошибка: {owner_error(exc, html_escape=False)}", show_alert=True)
         return
     # Refresh account view
     acc = await db.get_tg_account(pool, acc_id, callback.from_user.id)
@@ -3537,7 +3552,7 @@ async def cb_import_menu(
     await safe_answer(callback)
     if not _api_configured():
         await callback.message.edit_text(
-            _api_missing_text(), parse_mode="HTML", reply_markup=_cancel_markup()
+            _api_missing_text(callback.from_user.id), parse_mode="HTML", reply_markup=_cancel_markup()
         )
         return
     plan, limit = await _get_account_limit(pool, callback.from_user.id)
@@ -4105,7 +4120,7 @@ async def _finalize_import(
             system_lang_code=device.get("system_lang_code"),
         )
     except db.AccountNotSaved as exc:
-        await message.answer(f"❌ {escape(str(exc))}", reply_markup=terminal_kb())
+        await message.answer(f"❌ {owner_error(exc)}", reply_markup=terminal_kb())
         return
     except Exception:
         log.exception("_finalize_import: запись аккаунта owner=%s", message.from_user.id)
@@ -4516,7 +4531,7 @@ async def fsm_batch_import_file(
             downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
         )
     except Exception as e:
-        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
         return
 
     if filename.endswith(".zip"):

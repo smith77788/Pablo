@@ -29,6 +29,7 @@ from services.account_manager import (
     normalize_telegram_join_ref,
 )
 from services.logger import log_exc_swallow
+from bot.utils.owner_error import owner_error
 
 # SMTP авто-определение по домену почты
 _SMTP_PRESETS: dict[str, tuple[str, int]] = {
@@ -778,7 +779,7 @@ async def cb_strike_admin_grant(
             callback.from_user.id,
         )
     except Exception as exc:
-        await callback.answer(f"❌ Ошибка: {exc}", show_alert=True)
+        await callback.answer(f"❌ Ошибка: {owner_error(exc, html_escape=False)}", show_alert=True)
         return
     await callback.answer(f"✅ Массовые жалобы активированы для {target_id}", show_alert=True)
 

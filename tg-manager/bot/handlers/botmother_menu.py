@@ -30,6 +30,7 @@ from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 import os as _os
 from aiogram.types import WebAppInfo as _WebAppInfo
 from config import MINI_APP_URL as _MINI_APP_URL
+from bot.utils.owner_error import owner_error
 
 def _valid_mini_app_url(url: str) -> str:
     """Validate and normalise Mini App URL.
@@ -473,6 +474,11 @@ def _wip_kb(back_action: str = "main"):
     return kb.as_markup()
 
 
+# Сколько главное меню ждёт строку статистики, прежде чем показаться без неё.
+_MAIN_STATS_WAIT = 0.8
+# Ссылки на недождавшиеся подсчёты, чтобы сборщик мусора не снял их на полпути.
+_MAIN_STATS_INFLIGHT: set = set()
+
 _MAIN_MENU_TEXT = (
     "🏠 <b>Infragram</b>\n\n"
     "📊 <b>Итоги</b> — деньги, лиды, ответы и охват за неделю\n"
@@ -578,11 +584,13 @@ async def cb_main(
         await _edit(callback, _MAIN_MENU_TEXT + cached, _main_menu_kb())
         return
 
-    # Show menu immediately without stats, then enrich in background
-    await _edit(callback, _MAIN_MENU_TEXT, _main_menu_kb())
-
-    # Build stats in background and push a follow-up edit
-    async def _push_stats() -> None:
+    # Одна правка экрана, а не две. Раньше меню выводилось сразу, а строка
+    # статистики дописывалась вторым edit из фоновой задачи. Если человек успевал
+    # нажать следующую кнопку (например «Подключить бота»), запоздавшая правка
+    # затирала уже открытый экран главным меню — экран «мигал» и шаг терялся.
+    # Теперь ждём статистику недолго; не успела — меню без неё, а подсчёт
+    # доезжает в кэш и покажется при следующем открытии.
+    async def _stats_line() -> str:
         status_line = ""
         try:
             from services import infra_pressure as _ip
@@ -627,10 +635,15 @@ async def cb_main(
         except Exception:
             log_exc_swallow(log, "cb_main: stats fetch failed")
         menu_cache.set(cache_key, status_line)
-        if status_line:
-            await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
+        return status_line
 
-    spawn(_push_stats())
+    task = asyncio.ensure_future(_stats_line())
+    done, _pending = await asyncio.wait({task}, timeout=_MAIN_STATS_WAIT)
+    line = task.result() if task in done else ""
+    if task not in done:
+        _MAIN_STATS_INFLIGHT.add(task)
+        task.add_done_callback(_MAIN_STATS_INFLIGHT.discard)
+    await _edit(callback, _MAIN_MENU_TEXT + line, _main_menu_kb())
 
 
 # ── Итоги, разделы по задачам, все инструменты ─────────────────────────────
@@ -987,7 +1000,7 @@ async def cb_ops_retry_all_failed(
     try:
         res = await _obus.resubmit_unfinished(pool, user_id)
     except Exception as e:
-        await callback.answer(f"Не удалось повторить: {e}", show_alert=True)
+        await callback.answer(f"Не удалось повторить: {owner_error(e, html_escape=False)}", show_alert=True)
         return
     reset_count = int(res.get("retried") or 0)
     if reset_count == 0:
@@ -2658,12 +2671,12 @@ async def cb_op_retry(
     try:
         res = await _obus_retry.resubmit_one(pool, user_id, op_id)
     except _obus_retry.PlanRequiredError as exc:
-        await callback.answer(str(exc) or "Операция недоступна на вашем тарифе.",
+        await callback.answer(owner_error(exc, html_escape=False) or "Операция недоступна на вашем тарифе.",
                               show_alert=True)
         return
     except Exception as exc:
         mark_handled_error(f"op_retry update: {exc}")
-        await callback.answer(f"Ошибка при перезапуске: {str(exc)[:80]}", show_alert=True)
+        await callback.answer(f"Ошибка при перезапуске: {owner_error(exc, html_escape=False)}", show_alert=True)
         return
     if not res.get("ok"):
         await callback.answer(res.get("reason") or "Повторять нечего.",
@@ -2870,15 +2883,15 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 # ── Notifications ─────────────────────────────────────────────────────────
 
 _NOTIF_SQL: dict[str, str] = {
-    "new_user": "new_user        = NOT new_user",
-    "flood_warning": "flood_warning   = NOT flood_warning",
-    "position_change": "position_change = NOT position_change",
-    "op_complete": "op_complete     = NOT op_complete",
-    "restriction": "restriction     = NOT restriction",
-    "leads": "leads           = NOT leads",
-    "reports": "reports         = NOT reports",
-    "advice": "advice          = NOT advice",
-    "digest_only": "digest_only     = NOT digest_only",
+    "new_user": "new_user = NOT notification_settings.new_user",
+    "flood_warning": "flood_warning = NOT notification_settings.flood_warning",
+    "position_change": "position_change = NOT notification_settings.position_change",
+    "op_complete": "op_complete = NOT notification_settings.op_complete",
+    "restriction": "restriction = NOT notification_settings.restriction",
+    "leads": "leads = NOT notification_settings.leads",
+    "reports": "reports = NOT notification_settings.reports",
+    "advice": "advice = NOT notification_settings.advice",
+    "digest_only": "digest_only = NOT notification_settings.digest_only",
 }
 
 _NOTIF_LABELS = {
@@ -3013,7 +3026,9 @@ async def cb_notif_toggle(
             callback.from_user.id,
         )
     except Exception:
-        await callback.answer("❌ Ошибка обновления настроек", show_alert=True)
+        log.warning("cb_notif_toggle: не удалось переключить %s", field, exc_info=True)
+        await _edit(callback, "❌ Не удалось сохранить настройку. Попробуйте ещё раз.",
+                    _notif_kb(await _get_or_create_notif(pool, callback.from_user.id) or {}))
         return
     try:
         row = await pool.fetchrow(
@@ -3023,7 +3038,8 @@ async def cb_notif_toggle(
     except Exception:
         row = None
     if row is None:
-        await callback.answer("Ошибка чтения настроек", show_alert=True)
+        await _edit(callback, "❌ Не удалось прочитать настройки. Попробуйте ещё раз.",
+                    _notif_kb({}))
         return
     await _edit(callback, _notif_text(row), _notif_kb(row))
 

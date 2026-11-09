@@ -12,6 +12,7 @@ import logging
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.owner_error import owner_error
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -104,7 +105,7 @@ async def msg_search_query(message: Message, state: FSMContext, pool: asyncpg.Po
         return
     except Exception as exc:
         log.exception("global_search uid=%s q=%r", message.from_user.id, query)
-        await status.edit_text(f"⚠️ Ошибка: {html.escape(str(exc)[:140])}")
+        await status.edit_text(f"⚠️ Ошибка: {owner_error(exc)}")
         return
 
     if not res.get("ok"):

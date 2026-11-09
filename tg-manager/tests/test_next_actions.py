@@ -309,3 +309,20 @@ def test_build_ecosystem_has_apply():
     # assign_proxies применяется через вылизанный apply_rotation → есть apply
     p = build_suggestions(_base(acc_no_proxy=2))
     assert next(x for x in p if x["id"] == "assign_proxies").get("apply") == "Назначить прокси"
+
+
+def test_bot_seller_is_not_told_to_add_an_account():
+    """Дефект 8: «Добавьте первый аккаунт» стоял на каждой вкладке и у того,
+    кто выбрал цель «продавать через бота» — ему аккаунты не нужны."""
+    with_bot = build_suggestions(_base(acc_active=0, bots=1, goal="sell_bot"))
+    assert "add_first_account" not in _ids(with_bot)
+    no_bot = build_suggestions(_base(acc_active=0, bots=0, goal="sell_bot"))
+    assert "add_first_account" not in _ids(no_bot)
+    assert no_bot[0]["id"] == "add_first_bot"
+    assert no_bot[0]["fn"] == "openBotAddModal"
+
+
+def test_other_goals_still_start_with_an_account():
+    for goal in (None, "outreach", "crm"):
+        sugs = build_suggestions(_base(acc_active=0, bots=0, goal=goal))
+        assert sugs[0]["id"] == "add_first_account", goal

@@ -16,6 +16,7 @@ from typing import Any
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.subscription import locked_text
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -47,6 +48,7 @@ from bot.utils.op_helpers import (
 from services import task_registry as _treg
 from database.db import fetch_bots
 from bot.utils.op_helpers import safe_answer
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -248,7 +250,7 @@ async def cb_mass_publish_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Публикация / рассылка — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("Публикация / рассылка", "pro"),
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -529,7 +531,7 @@ async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
         downloaded = await message.bot.download_file(file_info.file_path)
         text = downloaded.read().decode("utf-8", errors="ignore").strip()
     except Exception as e:
-        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
         return
     if not text:
         await message.answer("⚠️ Файл пустой.")
@@ -837,7 +839,7 @@ async def cb_cancel_op(
             pool, callback_data.op_id, callback.from_user.id)
     except Exception as exc:
         mark_handled_error(f"cancel_op: {exc}")
-        await callback.answer(f"Ошибка БД: {exc}", show_alert=True)
+        await callback.answer(f"Ошибка БД: {owner_error(exc, html_escape=False)}", show_alert=True)
         return
     if not result:
         await callback.answer("Операция уже завершена или не найдена.", show_alert=True)
@@ -857,12 +859,12 @@ async def cb_retry_op(
         res = await operation_bus.resubmit_one(
             pool, callback.from_user.id, callback_data.op_id)
     except operation_bus.PlanRequiredError as e:
-        await callback.answer(str(e) or "Операция недоступна на вашем тарифе.",
-                              show_alert=True)
+        _why = owner_error(e, html_escape=False) if e.args else "Операция недоступна на вашем тарифе."
+        await callback.answer(_why, show_alert=True)
         return
     except Exception as e:
         log_exc_swallow(log, f"retry_op #{callback_data.op_id}")
-        await callback.answer(f"Не удалось повторить: {e}", show_alert=True)
+        await callback.answer(f"Не удалось повторить: {owner_error(e, html_escape=False)}", show_alert=True)
         return
     if not res.get("ok"):
         await callback.answer(res.get("reason") or "Повторять нечего.",
@@ -892,7 +894,7 @@ async def cb_retry_all_failed(
         res = await operation_bus.resubmit_unfinished(pool, callback.from_user.id)
     except Exception as e:
         log_exc_swallow(log, "retry_all_failed")
-        await callback.answer(f"Не удалось повторить: {e}", show_alert=True)
+        await callback.answer(f"Не удалось повторить: {owner_error(e, html_escape=False)}", show_alert=True)
         return
     reset_count = int(res.get("retried") or 0)
     if reset_count == 0:
@@ -984,7 +986,7 @@ async def cb_op_detail(
             op_id, user_id,
         )
     except Exception as e:
-        await callback.answer(f"Ошибка БД: {e}", show_alert=True)
+        await callback.answer(f"Ошибка БД: {owner_error(e, html_escape=False)}", show_alert=True)
         return
 
     if not op:
@@ -1439,7 +1441,7 @@ async def cb_bulk_bot_edit_start(
         await safe_answer(callback)
         await safe_edit(
             callback,
-            "🔒 <b>Массовое редактирование ботов — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("Массовое редактирование ботов", "pro"),
             reply_markup=subscription_locked_markup(
                 "pro", back_callback=BmCb(action="operations")
             ),
@@ -1759,7 +1761,7 @@ async def cb_bulk_join_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Массовый join — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("Массовый join", "pro"),
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -1877,7 +1879,7 @@ async def fsm_bulk_join_links_file(
         downloaded = await message.bot.download_file(file_info.file_path)
         raw = downloaded.read().decode("utf-8", errors="ignore")
     except Exception as e:
-        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
         return
     links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not links:
@@ -2142,7 +2144,7 @@ async def cb_bulk_leave_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Массовый leave — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("Массовый leave", "pro"),
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -2241,7 +2243,7 @@ async def fsm_bulk_leave_channels_file(
         downloaded = await message.bot.download_file(file_info.file_path)
         raw = downloaded.read().decode("utf-8", errors="ignore")
     except Exception as e:
-        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
         return
     channels = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not channels:
