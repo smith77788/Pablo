@@ -96,10 +96,9 @@ def _auth(monkeypatch):
 def test_every_offered_template_exists():
     """Экран предлагает четыре — все четыре должны быть описаны на сервере."""
     html = INDEX.read_text("utf-8")
-    i = html.index("const tplNames = {")
-    offered = html[i:html.index("}", i)]
-    for key in ("welcome", "drip", "react", "condition"):
-        assert key in offered, f"{key} исчез из экрана"
+    # Плитки шаблонов зовут мастер с ключом шаблона.
+    for key in ("welcome", "drip", "react", "condition", "lead"):
+        assert f"createWorkflowFromTemplate('{key}')" in html, f"{key} исчез из экрана"
         assert WF.workflow_template(key), f"шаблон {key} не описан на сервере"
 
 
@@ -174,7 +173,7 @@ def test_the_screen_says_how_a_workflow_starts():
     проверить тестовым запуском."""
     html = INDEX.read_text("utf-8")
     i = html.index('<div class="hdr-title">🔄 Сценарии</div>', html.index('id="s-workflows"'))
-    head = html[i:html.index('<div class="sec">Шаблоны воркфлоу</div>', i)]
+    head = html[i:html.index('<div class="sec">Шаблоны сценариев</div>', i)]
     assert "пока не выполняется" not in head, "экран снова отрицает исполнение"
     assert "Тестовый запуск" in head and "запускается" in head
 
@@ -189,3 +188,18 @@ def test_execution_is_handed_to_the_runtime():
         assert marker not in body, (
             "в execute_workflow появилось настоящее исполнение шагов — пора "
             "убрать с экрана предупреждение и поправить этот тест")
+
+
+def test_wizard_texts_replace_template_placeholders():
+    """Мастер присылает свои тексты: сценарий не рождается с заготовками."""
+    pool = _Pool()
+    resp = _create(pool, {"name": "Привет", "template": "drip",
+                          "texts": {"0": "Мой первый текст", "2": "  "}})
+    assert resp.status == 200, _body(resp)
+    insert = next(a for q, a in pool.calls if "INSERT INTO workflow_definitions" in q)
+    steps = json.loads(insert[3])
+    assert steps[0]["text"] == "Мой первый текст"
+    # Пустое поле — заготовка остаётся, а не пустое сообщение.
+    assert steps[2]["text"] == WF.WORKFLOW_TEMPLATES["drip"]["steps"][2]["text"]
+    bad = _create(_Pool(), {"name": "x", "template": "drip", "texts": {"99": "a"}})
+    assert bad.status == 400

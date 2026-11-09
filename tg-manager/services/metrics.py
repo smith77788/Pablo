@@ -45,6 +45,10 @@ _HELP = {
     "infragram_service_stalls_total": "Зависания фоновых сервисов (одно ожидание дольше порога)",
     "infragram_event_loop_stalls_total": "Замирания цикла событий дольше порога (весь процесс не отвечал)",
     "infragram_operations_total": "Операции по типу и исходу",
+    # Исполнитель сценариев (services/workflow_runtime.py).
+    "infragram_workflow_runs_finished_total": "Завершённые прогоны сценариев по исходу (completed, failed, expired…)",
+    "infragram_workflow_steps_claimed_total": "Прогоны сценариев, взятые исполнителем на шаг",
+    "infragram_workflow_step_lag_seconds": "Опоздание самого просроченного шага сценария в последней пачке, сек",
     "infragram_operation_seconds_sum": "Суммарная длительность операций, сек",
     "infragram_operation_seconds_count": "Число завершённых операций",
     "infragram_flood_events_total": "События FloodWait/PeerFlood",

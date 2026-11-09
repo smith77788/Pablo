@@ -7967,7 +7967,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-failed" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Ошибки</div></div>
     </div>
     <div class="hint" style="margin:0 14px 10px">Сценарий выполняется сам: запускается по выбранному событию (например, когда человек открыл бота) и проходит шаги — сообщения с кнопками, вопросы, паузы, условия, счёт на оплату. Включите сценарий, чтобы он заработал, а проверить его можно кнопкой «Тестовый запуск» на себе.</div>
-    <div class="sec">Шаблоны воркфлоу</div>
+    <div class="hint" id="wfHealth" style="margin:0 14px 10px"></div>
+    <div class="sec">Шаблоны сценариев</div>
     <div style="display:flex;gap:8px;padding:4px 16px 8px;overflow-x:auto">
       <div class="mgmt-tile" onclick="createWorkflowFromTemplate('welcome')" style="min-width:100px;flex:1">
         <div class="mgmt-tile-ico">👋</div>
@@ -7994,7 +7995,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Загрузить</div>
       </div>
     </div>
-    <div class="sec">Мои воркфлоу</div>
+    <div class="sec">Мои сценарии</div>
     <div class="lst" id="wfList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -8003,10 +8004,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="mo-wf-create" onclick="if(event.target===this)closeModal('mo-wf-create')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-wf-create')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🔄 Новый воркфлоу</div>
+    <div class="modal-title">🔄 Новый сценарий</div>
     <div class="field">
       <label>Название *</label>
-      <input type="text" id="wfCreateName" placeholder="Мой воркфлоу" class="inp">
+      <input type="text" id="wfCreateName" placeholder="Мой сценарий" class="inp">
     </div>
     <div class="field">
       <label>Бот</label>
@@ -8014,7 +8015,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Описание</label>
-      <textarea id="wfCreateDesc" rows="2" placeholder="Назначение воркфлоу…" class="input-bc"></textarea>
+      <textarea id="wfCreateDesc" rows="2" placeholder="Назначение сценария…" class="input-bc"></textarea>
     </div>
     <div class="field">
       <label>Когда запускать</label>
@@ -8036,17 +8037,52 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-workflow-detail">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title" id="wfd-name">Воркфлоу</div>
+    <div class="hdr-title" id="wfd-name">Сценарий</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWfAddStepModal()">+ Шаг</button></div>
   </div>
   <div class="sub-sb" id="wfd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ MODAL: ADD WORKFLOW STEP ══════════════════════ -->
+<div class="mbg" id="mo-wf-tpl" onclick="if(event.target===this)closeModal('mo-wf-tpl')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-wf-tpl')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title" id="wfTplTitle">✨ Шаблон</div>
+    <div class="hint" id="wfTplTrigger" style="margin-bottom:8px"></div>
+    <div class="field"><label>Название</label><input class="inp" id="wfTplName"></div>
+    <div class="field">
+      <label style="display:flex;justify-content:space-between;align-items:center">1. На каких ботах <span class="hint" role="button" tabindex="0" style="cursor:pointer" onclick="_wfTplAll()">отметить все</span></label>
+      <div id="wfTplBots" style="max-height:28vh;overflow:auto"></div>
+    </div>
+    <div class="hint" style="margin:4px 0 6px">2. Ваши тексты — люди получат именно их. Заготовку можно оставить, но лучше написать своё.</div>
+    <div id="wfTplTexts"></div>
+    <label class="chk-row" style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" id="wfTplActivate" checked> <span>3. Включить сразу после создания</span></label>
+    <div id="wfTplErr" class="hint" style="display:none;color:var(--red)"></div>
+    <button class="btn btn-p" data-main id="wfTplBtn" onclick="submitWfTemplate()" style="width:100%">🚀 Создать сценарий</button>
+  </div>
+</div>
+
+<div class="mbg" id="mo-wf-bots" onclick="if(event.target===this)closeModal('mo-wf-bots')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-wf-bots')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">🤖 Боты сценария</div>
+    <div class="hint" style="margin-bottom:8px">Один сценарий работает на всех отмеченных ботах: правка и публикация — один раз для всех. Ничего не отмечено — все ваши боты.</div>
+    <input class="inp" id="wfBotsFilter" placeholder="Найти бота" oninput="_wfBotsRender()" style="margin-bottom:6px">
+    <div style="display:flex;gap:8px;margin-bottom:6px">
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="_wfBotsAll(true)">Отметить все</button>
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="_wfBotsAll(false)">Снять все</button>
+    </div>
+    <div id="wfBotsList" style="max-height:45vh;overflow:auto"></div>
+    <div class="hint" id="wfBotsCount" style="margin:6px 0"></div>
+    <div id="wfBotsErr" class="hint" style="display:none;color:var(--red)"></div>
+    <button class="btn btn-p" data-main id="wfBotsBtn" onclick="submitWfBots()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
 <div class="mbg" id="mo-wf-step" onclick="if(event.target===this)closeModal('mo-wf-step')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-wf-step')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">➕ Добавить шаг</div>
+    <div class="modal-title" id="wfStepTitle">➕ Добавить шаг</div>
     <div class="field">
       <label>Тип шага *</label>
       <select id="wfStepType" class="sel">
@@ -8185,7 +8221,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="number" id="wfStepWhElseGoto" min="1" placeholder="Если не удалось — перейти к шагу № (пусто = дальше)" class="inp" style="margin-top:6px">
     </div>
     <div class="field-err" id="wfStepErr"></div>
-    <button class="btn btn-p" data-main onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
+    <button class="btn btn-p" data-main id="wfStepSubmitBtn" onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
   </div>
 </div>
 
@@ -32048,9 +32084,18 @@ async function loadWorkflows() {
     const wfFailEl = document.getElementById('wf-failed');
     wfFailEl.textContent = wfFail;
     wfFailEl.style.color = wfFail ? 'var(--red)' : '';
+    const h = d.health || {};
+    const hEl = document.getElementById('wfHealth');
+    if (hEl) {
+      const bad = (h.failed_24h || 0) + (h.overdue || 0);
+      hEl.innerHTML = (bad ? '⚠️ ' : '✅ ') + 'За сутки: прошли ' + (h.done_24h || 0) + ' · упали ' + (h.failed_24h || 0)
+        + (h.overdue ? ' · шагов опаздывают больше 5 мин: ' + h.overdue : '')
+        + (h.failed_24h ? ' — откройте сценарий с ошибкой и нажмите «Повторить все упавшие»' : '');
+      hEl.style.color = bad ? 'var(--red)' : '';
+    }
 
     if (!wfs.length) {
-      txt('wfList', empty('🔄', 'Нет воркфлоу', 'Создайте первый процесс', {label:'🔄 Создать сценарий', fn:'openWorkflowCreateModal()'}));
+      txt('wfList', empty('🔄', 'Нет сценариев', 'Начните с шаблона выше — это пара минут', {label:'🔄 Создать сценарий', fn:'openWorkflowCreateModal()'}));
       return;
     }
     txt('wfList', wfs.map(w => {
@@ -32074,7 +32119,7 @@ async function loadWorkflows() {
 
 function openWorkflowCreateModal() {
   if (!BOTS.length) { toast('❗ Сначала загрузите боты'); return; }
-  document.getElementById('wfCreateBot').innerHTML = '<option value="">Не привязан</option>' + BOTS.map(b => {
+  document.getElementById('wfCreateBot').innerHTML = '<option value="">Все мои боты</option>' + BOTS.map(b => {
     const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + b.bot_id);
     return `<option value="${b.bot_id}">${esc(name)}</option>`;
   }).join('');
@@ -32108,7 +32153,7 @@ async function submitWorkflowCreate() {
     const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name, bot_id, description, trigger_type, trigger_value }) });
     closeModal('mo-wf-create');
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Воркфлоу создан');
+    toast('✅ Сценарий создан');
     loadWorkflows();
   } catch(e) {
     errEl.textContent = 'Ошибка: ' + errRu(e); errEl.style.display = 'block';
@@ -32134,17 +32179,74 @@ function wfTriggerHint(prefix) {
   inp.placeholder = WF_TRIGGER_PH[t] || '';
 }
 
+// Мастер шаблона: бот(ы) → свои тексты → создать (и сразу включить).
+// Раньше шаблон создавался выключенным, на первом попавшемся боте и с
+// текстами-заготовками, которые нельзя было поправить, — до работающего
+// сценария человек не доходил.
+let _wfTpl = null;
+let _wfTplBots = new Set();
+
 async function createWorkflowFromTemplate(tpl) {
-  const tplNames = { welcome: '👋 Приветствие', drip: '💧 Дрип-серия', react: '⚡ Реакция на событие', condition: '🔀 Условная логика', lead: '🎯 Квалификация заявки' };
-  if (!await askConfirm('Создать воркфлоу по шаблону "' + tplNames[tpl] + '"?')) return;
-  // Шаблон отправляет сообщения — значит, ему нужен бот. Первый бот владельца;
-  // сменить можно в деталях, пересоздав сценарий.
-  const bot_id = (BOTS && BOTS.length) ? BOTS[0].bot_id : undefined;
+  if (!BOTS.length) { toast('❗ Сначала подключите бота'); return; }
   try {
-    const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name: tplNames[tpl], template: tpl, bot_id }) });
-    toast(`✅ Воркфлоу по шаблону создан · ${(d && d.steps) || 0} шагов`);
+    const d = await api('/api/miniapp/workflows/templates');
+    _wfTpl = (d.templates || []).find(t => t.key === tpl);
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); return; }
+  if (!_wfTpl) { toast('⚠️ Шаблон не найден'); return; }
+  _wfTplBots = new Set([Number(BOTS[0].bot_id)]);
+  document.getElementById('wfTplTitle').textContent = '✨ ' + _wfTpl.label;
+  document.getElementById('wfTplName').value = _wfTpl.label;
+  document.getElementById('wfTplTrigger').textContent = 'Запуск: ' + (_wfTpl.trigger || 'вручную');
+  document.getElementById('wfTplActivate').checked = true;
+  document.getElementById('wfTplErr').style.display = 'none';
+  _wfTplBotsRender();
+  txt('wfTplTexts', _wfTpl.steps.map((st, i) => (st.type === 'message' || st.type === 'ask')
+    ? `<div class="field"><label>Шаг ${i + 1} · ${st.type === 'ask' ? 'вопрос' : 'сообщение'}</label><textarea class="input-bc" rows="2" data-wftpl="${i}">${esc(st.text || '')}</textarea></div>`
+    : '').join(''));
+  document.getElementById('mo-wf-tpl').classList.add('show');
+}
+
+function _wfTplBotsRender() {
+  txt('wfTplBots', BOTS.map(b => {
+    const id = Number(b.bot_id);
+    const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + id);
+    return `<label class="chk-row" style="display:flex;gap:8px;align-items:center;padding:4px 2px;cursor:pointer"><input type="checkbox" ${_wfTplBots.has(id) ? 'checked' : ''} onchange="if(this.checked)_wfTplBots.add(${id});else _wfTplBots.delete(${id});"> <span>${esc(name)}</span></label>`;
+  }).join(''));
+}
+
+function _wfTplAll() { BOTS.forEach(b => _wfTplBots.add(Number(b.bot_id))); _wfTplBotsRender(); }
+
+async function submitWfTemplate() {
+  const errEl = document.getElementById('wfTplErr');
+  const fail = m => { errEl.textContent = m; errEl.style.display = 'block'; };
+  errEl.style.display = 'none';
+  if (!_wfTplBots.size) return fail('Отметьте хотя бы одного бота');
+  const name = document.getElementById('wfTplName').value.trim();
+  if (!name) return fail('Введите название');
+  const texts = {};
+  document.querySelectorAll('#wfTplTexts textarea[data-wftpl]').forEach(el => { texts[el.dataset.wftpl] = el.value; });
+  const bots = Array.from(_wfTplBots);
+  const btn = document.getElementById('wfTplBtn');
+  btn.disabled = true;
+  try {
+    const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name, template: _wfTpl.key, bot_id: bots[0], texts }) });
+    if (bots.length > 1) await api(`/api/miniapp/workflows/${d.id}/bots`, { method: 'POST', body: JSON.stringify({ bot_ids: bots }) });
+    closeModal('mo-wf-tpl');
+    let on = false;
+    if (document.getElementById('wfTplActivate').checked) {
+      const chk = await api(`/api/miniapp/workflows/${d.id}/check`);
+      const probs = (chk && chk.problems) || [];
+      if (!probs.some(p => p.level === 'block') && (!probs.length || await askConfirm('Перед включением:\n• ' + probs.map(p => p.text).join('\n• ') + '\n\nВсё равно включить?'))) {
+        await api(`/api/miniapp/workflows/${d.id}`, { method: 'PATCH', body: JSON.stringify({ active: true }) });
+        on = true;
+      }
+    }
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast(on ? '✅ Сценарий создан и включён' + (bots.length > 1 ? ' на ' + bots.length + ' ботах' : '') : '✅ Сценарий создан — проверьте и включите');
     loadWorkflows();
-  } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
+    openWorkflowDetail(d.id, name);
+  } catch(e) { fail('Ошибка: ' + errRu(e)); }
+  finally { btn.disabled = false; }
 }
 
 async function openWorkflowDetail(wfId, wfName) {
@@ -32155,13 +32257,28 @@ async function openWorkflowDetail(wfId, wfName) {
   try {
     const d = await api('/api/miniapp/workflows/' + wfId);
     const steps = d.steps || [];
+    _wfSteps = steps;
     // Зеркало воронки или автоворонки: шаги, включение и удаление живут в их
     // разделе, здесь — цель, статистика и журнал по людям.
     const legacy = !!d.legacy_kind;
     let html = '';
+    // Почему сценарий не заработает — до того, как владелец его включит, а
+    // не после жалоб подписчиков.
+    const wfProblems = legacy ? [] : (d.problems || []);
+    if (wfProblems.length) {
+      const blocks = wfProblems.filter(p => p.level === 'block');
+      html += `<div class="hint" style="margin:0 14px 8px;padding:8px 10px;border-radius:8px;background:${blocks.length ? 'var(--bg-red-12, rgba(255,59,48,.12))' : 'var(--bg-orange-12, rgba(255,149,0,.12))'}">
+        <b>${blocks.length ? '⛔ Сценарий не заработает' : '⚠️ Проверьте перед включением'}</b><br>${wfProblems.map(p => (p.level === 'block' ? '⛔ ' : '⚠️ ') + esc(p.text)).join('<br>')}</div>`;
+    }
 
-    if (d.bot_id) {
-      html += `<div class="hint" style="margin:0 14px 8px">🤖 Бот: ${d.bot_username ? '@' + esc(d.bot_username) : '#' + d.bot_id}</div>`;
+    _wfBotIds = (d.bot_ids && d.bot_ids.length) ? d.bot_ids.map(Number) : (d.bot_id ? [Number(d.bot_id)] : []);
+    {
+      const nm = id => { const b = (BOTS || []).find(x => Number(x.bot_id) === id); return b && b.username ? '@' + b.username : '#' + id; };
+      let botsLine;
+      if (!_wfBotIds.length) botsLine = 'все мои боты';
+      else if (_wfBotIds.length === 1) botsLine = d.bot_username ? '@' + d.bot_username : nm(_wfBotIds[0]);
+      else botsLine = _wfBotIds.slice(0, 3).map(nm).join(', ') + (_wfBotIds.length > 3 ? ' и ещё ' + (_wfBotIds.length - 3) : '') + ' (' + _wfBotIds.length + ')';
+      html += `<div class="hint" style="margin:0 14px 8px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>🤖 Боты: ${esc(botsLine)}</span>${legacy ? '' : `<button class="btn btn-s" style="padding:4px 10px;font-size:12px;flex:0 0 auto" onclick="openWfBotsModal()">Изменить</button>`}</div>`;
     }
     if (legacy) {
       html += `<div class="hint" style="margin:0 14px 8px">🔗 ${esc(d.legacy_note || '')}${d.active ? '' : ' Сейчас воронка выключена.'}</div>`;
@@ -32287,7 +32404,7 @@ async function openWorkflowDetail(wfId, wfName) {
             ${!isLast ? '<div class="ffstep-tail"></div>' : ''}
           </div>
           <div class="ffstep-body" style="border-left:3px solid ${color}">
-            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : (s.until_time ? '· до ' + esc(s.until_time) : '')}</span>${legacy ? '' : `<span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span>`}</div>
+            <div class="ffstep-delay" style="color:${color};display:flex;justify-content:space-between;gap:6px"><span>${i + 1}. ${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : (s.until_time ? '· до ' + esc(s.until_time) : '')}</span>${legacy ? '' : `<span style="display:flex;gap:4px">${i > 0 ? `<span class="icon-btn sm" role="button" tabindex="0" aria-label="Поднять шаг" onclick="moveWorkflowStep(${wfId}, ${i}, ${i - 1}, this)">↑</span>` : ''}${!isLast ? `<span class="icon-btn sm" role="button" tabindex="0" aria-label="Опустить шаг" onclick="moveWorkflowStep(${wfId}, ${i}, ${i + 1}, this)">↓</span>` : ''}<span class="icon-btn sm" role="button" tabindex="0" aria-label="Изменить шаг" onclick="openWfAddStepModal(${i})">✏️</span><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаг" onclick="deleteWorkflowStep(${wfId}, ${i}, this)">🗑</span></span>`}</div>
             <div class="ffstep-text">${esc(body)}</div>
             ${extra.length ? '<div class="hint" style="margin-top:4px">' + extra.map(esc).join('<br>') + '</div>' : ''}
           </div>
@@ -32521,6 +32638,18 @@ async function cancelWorkflowRun(runId) {
 
 async function toggleWorkflow(wfId, active) {
   try {
+    if (active === 'true') {
+      // Проверка до включения: блокирующее — отказ с причиной, остальное —
+      // предупреждение, которое владелец подтверждает осознанно.
+      const chk = await api(`/api/miniapp/workflows/${wfId}/check`);
+      const probs = (chk && chk.problems) || [];
+      const blocks = probs.filter(p => p.level === 'block');
+      if (blocks.length) {
+        await askConfirm('Сценарий не заработает:\n• ' + blocks.map(p => p.text).join('\n• ') + '\n\nИсправьте это и включите снова.');
+        return;
+      }
+      if (probs.length && !await askConfirm('Перед включением:\n• ' + probs.map(p => p.text).join('\n• ') + '\n\nВсё равно включить?')) return;
+    }
     await api(`/api/miniapp/workflows/${wfId}`, { method: 'PATCH', body: JSON.stringify({ active: active === 'true' }) });
     toast(active === 'true' ? '▶️ Активирован' : '⏸ На паузе');
     back();
@@ -32575,7 +32704,7 @@ async function copyWorkflow(wfId, el) {
 }
 
 async function deleteWorkflow(wfId, _el) {
-  if (!await confirmDelete('Удалить воркфлоу', _el)) return;
+  if (!await confirmDelete('Удалить сценарий', _el)) return;
   try {
     await api(`/api/miniapp/workflows/${wfId}`, { method: 'DELETE' });
     toast('🗑 Удалён');
@@ -32584,8 +32713,105 @@ async function deleteWorkflow(wfId, _el) {
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
 }
 
-function openWfAddStepModal() {
+let _wfSteps = [];
+let _wfEditIdx = null;
+let _wfBotIds = [];
+let _wfBotsPick = new Set();
+
+function openWfBotsModal() {
   if (!_currentWfId) return;
+  if (!BOTS.length) { toast('❗ Сначала загрузите боты'); return; }
+  _wfBotsPick = new Set(_wfBotIds);
+  document.getElementById('wfBotsFilter').value = '';
+  document.getElementById('wfBotsErr').style.display = 'none';
+  _wfBotsRender();
+  document.getElementById('mo-wf-bots').classList.add('show');
+}
+
+function _wfBotsRender() {
+  const q = (document.getElementById('wfBotsFilter').value || '').trim().toLowerCase();
+  const list = BOTS.filter(b => !q || String(b.username || b.first_name || b.bot_id).toLowerCase().includes(q));
+  txt('wfBotsList', list.map(b => {
+    const id = Number(b.bot_id);
+    const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + id);
+    return `<label class="chk-row" style="display:flex;gap:8px;align-items:center;padding:6px 2px;cursor:pointer"><input type="checkbox" ${_wfBotsPick.has(id) ? 'checked' : ''} onchange="_wfBotsToggle(${id}, this.checked)"> <span>${esc(name)}</span>${b.is_active === false ? '<span class="hint">· отключён</span>' : ''}</label>`;
+  }).join('') || '<div class="hint">Ничего не найдено</div>');
+  document.getElementById('wfBotsCount').textContent = _wfBotsPick.size ? 'Отмечено ботов: ' + _wfBotsPick.size : 'Не отмечено — сценарий будет на всех ваших ботах';
+}
+
+function _wfBotsToggle(id, on) { if (on) _wfBotsPick.add(id); else _wfBotsPick.delete(id); _wfBotsRender(); }
+
+function _wfBotsAll(on) {
+  const q = (document.getElementById('wfBotsFilter').value || '').trim().toLowerCase();
+  BOTS.filter(b => !q || String(b.username || b.first_name || b.bot_id).toLowerCase().includes(q))
+    .forEach(b => { if (on) _wfBotsPick.add(Number(b.bot_id)); else _wfBotsPick.delete(Number(b.bot_id)); });
+  _wfBotsRender();
+}
+
+async function submitWfBots() {
+  const btn = document.getElementById('wfBotsBtn');
+  const errEl = document.getElementById('wfBotsErr');
+  errEl.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/miniapp/workflows/${_currentWfId}/bots`, { method: 'POST', body: JSON.stringify({ bot_ids: Array.from(_wfBotsPick) }) });
+    closeModal('mo-wf-bots');
+    const notes = (r.results || []).filter(x => x.reason).map(x => (x.username ? '@' + x.username : '#' + x.bot_id) + ': ' + x.reason);
+    if (notes.length) await askConfirm('Подключено ботов: ' + (r.connected || 0) + (r.skipped ? ', пропущено: ' + r.skipped : '') + '\n\n• ' + notes.slice(0, 15).join('\n• ') + (notes.length > 15 ? '\n…и ещё ' + (notes.length - 15) : ''));
+    else toast(r.connected ? '✅ Сценарий на ботах: ' + r.connected : '✅ Сценарий на всех ваших ботах');
+    _wfReopen();
+  } catch(e) { errEl.textContent = errRu(e); errEl.style.display = 'block'; }
+  finally { btn.disabled = false; }
+}
+
+async function moveWorkflowStep(wfId, from, to, el) {
+  if (el) el.style.pointerEvents = 'none';
+  try {
+    const r = await api(`/api/miniapp/workflows/${wfId}/steps/${from}/move`, { method: 'POST', body: JSON.stringify({ to }) });
+    toast(r && r.draft ? '↕️ Шаг переставлен в черновике' : '↕️ Шаг переставлен');
+    _wfReopen();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Ошибка')); if (el) el.style.pointerEvents = ''; }
+}
+
+// Шаг → поля модалки: та же форма, что при добавлении, только заполненная.
+function _wfFillStepModal(s) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined && v !== null) el.value = v; };
+  const typeEl = document.getElementById('wfStepType');
+  typeEl.value = s.type || 'message';
+  typeEl.dispatchEvent(new Event('change'));
+  set('wfStepMsg', s.text || '');
+  if (s.type === 'message') {
+    set('wfStepMedia', s.media || '');
+    if (s.media_kind) set('wfStepMediaKind', s.media_kind);
+    set('wfStepButtons', (s.buttons || []).map(b => b.url ? b.text + ' | ' + b.url : (b.goto ? b.text + ' -> ' + b.goto : b.text)).join('\n'));
+  } else if (s.type === 'ask') {
+    set('wfStepSaveAs', s.save_as); set('wfStepValidate', s.validate || 'any');
+  } else if (s.type === 'delay') {
+    set('wfStepDelay', s.delay_minutes || ''); set('wfStepUntil', s.until_time || '');
+    set('wfStepUntilField', s.until_field || ''); set('wfStepOffset', s.offset_minutes || '');
+    const wd = document.getElementById('wfStepWeekdays'); if (wd) wd.checked = !!s.weekdays_only;
+  } else if (s.type === 'split') {
+    set('wfStepBranches', (s.branches || []).map(b => b.label + ' ' + b.weight + (b.goto ? ' -> ' + b.goto : '')).join('\n'));
+  } else if (s.type === 'condition') {
+    set('wfStepCondition', s.condition); set('wfStepConditionVal', s.condition_value || ''); set('wfStepElseGoto', s.else_goto || '');
+  } else if (s.type === 'action') {
+    set('wfStepAction', s.action); set('wfStepActionVal', s.action === 'goto' ? (s.goto || s.value || '') : (s.value || ''));
+  } else if (s.type === 'invoice') {
+    set('wfStepInvTitle', s.title || ''); set('wfStepInvAmount', s.amount || ''); if (s.currency) set('wfStepInvCurrency', s.currency);
+  } else if (s.type === 'ai') {
+    set('wfStepAiPrompt', s.text || ''); set('wfStepAiSaveAs', s.save_as || ''); set('wfStepAiFallback', s.fallback || '');
+  } else if (s.type === 'wait') {
+    set('wfStepWaitEvent', s.event || ''); set('wfStepWaitValue', s.value || '');
+    set('wfStepWaitTimeout', s.timeout_minutes || ''); set('wfStepWaitTimeoutGoto', s.timeout_goto || '');
+  } else if (s.type === 'webhook') {
+    set('wfStepUrl', s.url || ''); set('wfStepWhSaveAs', s.save_as || '');
+    set('wfStepWhRetries', s.retries ?? ''); set('wfStepWhElseGoto', s.else_goto || '');
+  }
+}
+
+function openWfAddStepModal(editIdx) {
+  if (!_currentWfId) return;
+  _wfEditIdx = (typeof editIdx === 'number' && _wfSteps[editIdx]) ? editIdx : null;
   ['wfStepMsg', 'wfStepDelay', 'wfStepConditionVal', 'wfStepButtons', 'wfStepSaveAs', 'wfStepMedia',
    'wfStepElseGoto', 'wfStepActionVal', 'wfStepInvTitle', 'wfStepInvAmount', 'wfStepUrl',
    'wfStepWhSaveAs', 'wfStepWhRetries', 'wfStepWhElseGoto',
@@ -32594,6 +32820,10 @@ function openWfAddStepModal() {
    'wfStepUntil', 'wfStepUntilField', 'wfStepOffset', 'wfStepBranches']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('wfStepErr').style.display = 'none';
+  const editing = _wfEditIdx !== null;
+  document.getElementById('wfStepTitle').textContent = editing ? '✏️ Шаг ' + (_wfEditIdx + 1) : '➕ Добавить шаг';
+  document.getElementById('wfStepSubmitBtn').textContent = editing ? '💾 Сохранить шаг' : '➕ Добавить шаг';
+  if (editing) _wfFillStepModal(_wfSteps[_wfEditIdx]);
   document.getElementById('mo-wf-step').classList.add('show');
   tg.HapticFeedback?.impactOccurred('medium');
 }
@@ -32705,9 +32935,14 @@ async function submitWfAddStep() {
     if (weg) payload.else_goto = weg;
   }
   try {
-    const r = await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });
+    const editing = _wfEditIdx !== null;
+    const r = editing
+      ? await api(`/api/miniapp/workflows/${_currentWfId}/steps/${_wfEditIdx}`, { method: 'PUT', body: JSON.stringify(payload) })
+      : await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });
     closeModal('mo-wf-step');
-    toast(r && r.draft ? '✅ Шаг добавлен в черновик' : '✅ Шаг добавлен');
+    _wfEditIdx = null;
+    toast(editing ? (r && r.draft ? '✅ Шаг изменён в черновике' : '✅ Шаг изменён')
+                  : (r && r.draft ? '✅ Шаг добавлен в черновик' : '✅ Шаг добавлен'));
     _wfReopen();
   } catch(e) { fail('Ошибка: ' + errRu(e)); }
 }

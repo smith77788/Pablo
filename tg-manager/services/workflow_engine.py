@@ -479,7 +479,7 @@ async def execute_workflow(
         'SELECT * FROM workflow_definitions WHERE id = $1 AND owner_id = $2',
         workflow_id, owner_id)
     if not wf:
-        return {"ok": False, "error": "Воркфлоу не найден", "code": 404}
+        return {"ok": False, "error": "Сценарий не найден", "code": 404}
     wf = dict(wf)
     if wf.get("draft_steps") is not None:
         # Тестовый прогон проверяет то, что владелец сейчас собирает: черновик.
@@ -530,7 +530,11 @@ async def delete_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
             column, steps = target
             if not 0 <= index < len(steps):
                 return None
+            old_len = len(steps)
             del steps[index]
+            # Переходы «на шаг N» — номера, и без пересчёта удаление шага
+            # молча уводило кнопки и ветки на соседний шаг.
+            steps = remap_jumps(steps, lambda n: _after_delete(n, index + 1, old_len))
             kept = []
             for i, st in enumerate(steps):
                 try:
@@ -542,6 +546,294 @@ async def delete_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
                 f"UPDATE workflow_definitions SET {column}=$1::jsonb, updated_at=NOW() "
                 "WHERE id=$2 AND owner_id=$3", json.dumps(kept), workflow_id, owner_id)
     return len(kept)
+
+
+# ── Переходы при правке ─────────────────────────────────────────────────────
+# Переход хранится НОМЕРОМ шага (с единицы): `goto` действия «перейти»,
+# `else_goto`, `timeout_goto`, `paid_goto`, `goto` кнопок и веток A/B.
+# Удаление, вставка и перестановка меняют номера, и каждый переход обязан
+# поехать вместе со своим шагом. Номер за концом сценария («шаг, который ещё
+# не добавлен», исполнитель читает его как «завершить») не трогаем.
+
+_JUMP_KEYS = ("goto", "else_goto", "timeout_goto", "paid_goto")
+
+
+def remap_jumps(steps: list, f) -> list:
+    """Копия шагов, где каждый номер перехода n заменён на f(n). ЧИСТАЯ."""
+    def _one(n):
+        try:
+            k = int(n)
+        except (TypeError, ValueError):
+            return n
+        return f(k) if k >= 1 else n
+
+    out = []
+    for st in steps:
+        if not isinstance(st, dict):
+            out.append(st)
+            continue
+        st = json.loads(json.dumps(st))
+        for key in _JUMP_KEYS:
+            if st.get(key) not in (None, "", 0, "0"):
+                st[key] = _one(st[key])
+        for listkey in ("buttons", "branches"):
+            for b in st.get(listkey) or []:
+                if isinstance(b, dict) and b.get("goto") not in (None, "", 0, "0"):
+                    b["goto"] = _one(b["goto"])
+        # Действие «перейти» со старых времён могло хранить номер в value.
+        if st.get("type") == "action" and st.get("action") == "goto" \
+                and st.get("value") not in (None, "") and "goto" not in st:
+            st["value"] = str(_one(st["value"]))
+        out.append(st)
+    return out
+
+
+def _after_delete(n: int, deleted: int, old_len: int) -> int:
+    """Номер шага n после удаления шага `deleted` (оба с единицы).
+
+    Переход на удалённый шаг ведёт на тот, что встал на его место: человек
+    идёт дальше по сценарию, а не проваливается в конец."""
+    if n > old_len or n < deleted:
+        return n
+    if n == deleted:
+        return deleted
+    return n - 1
+
+
+def _after_permutation(order: list[int], old_len: int):
+    """f(n) для новой расстановки: order[новый_индекс] = старый_индекс."""
+    where = {old: new for new, old in enumerate(order)}
+
+    def f(n: int) -> int:
+        if n > old_len:
+            return n
+        return where.get(n - 1, n - 1) + 1
+    return f
+
+
+async def update_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                      index: int, raw_step: dict) -> tuple[dict, bool] | None:
+    """Заменить шаг на месте. (шаг, ушёл ли в черновик) или None — нет
+    сценария или шага. ValueError — шаг не прошёл проверку.
+
+    Раньше исправить текст шага было нельзя вовсе: только удалить и добавить
+    в конец, сломав порядок. Шаблоны с текстами-заготовками так и оставались
+    заготовками."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            target = await _edit_target(conn, owner_id, workflow_id)
+            if target is None:
+                return None
+            column, steps = target
+            if not 0 <= index < len(steps):
+                return None
+            step = validate_step(raw_step, index)
+            steps[index] = step
+            await conn.execute(
+                f"UPDATE workflow_definitions SET {column}=$1::jsonb, updated_at=NOW() "
+                "WHERE id=$2 AND owner_id=$3", json.dumps(steps), workflow_id, owner_id)
+    return step, column == "draft_steps"
+
+
+async def move_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                    index: int, to: int) -> tuple[int, bool] | None:
+    """Переставить шаг с места `index` на место `to` (оба с нуля), переходы
+    едут вместе с шагами. (новое место, черновик ли) или None — нет
+    сценария или такого шага."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            target = await _edit_target(conn, owner_id, workflow_id)
+            if target is None:
+                return None
+            column, steps = target
+            n = len(steps)
+            if not 0 <= index < n:
+                return None
+            to = max(0, min(int(to), n - 1))
+            order = list(range(n))
+            order.insert(to, order.pop(index))
+            moved = [steps[i] for i in order]
+            moved = remap_jumps(moved, _after_permutation(order, n))
+            await conn.execute(
+                f"UPDATE workflow_definitions SET {column}=$1::jsonb, updated_at=NOW() "
+                "WHERE id=$2 AND owner_id=$3", json.dumps(moved), workflow_id, owner_id)
+    return to, column == "draft_steps"
+
+
+# ── Боты сценария ───────────────────────────────────────────────────────────
+# Сценарий принадлежал одному боту, и сменить бота после создания было
+# нельзя («пересоздайте сценарий»). А чтобы поставить сценарий на сто ботов,
+# владелец делал сто копий и правил текст сто раз. Теперь у сценария список
+# ботов: одно определение, одна публикация — и итог по каждому боту.
+
+MAX_SCENARIO_BOTS = 500
+
+
+async def set_bots(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                   bot_ids: list) -> dict | None:
+    """Назначить сценарию ботов. None — сценария нет у владельца.
+
+    Пустой список — «все мои боты» (как «Не привязан» раньше: сценарий по
+    событию слушает каждого бота владельца). Чужие и несуществующие боты
+    пропускаются с причиной; отключённые — подключаются, но с пометкой, что
+    работать на них сценарий не будет, пока бот не включат.
+
+    ValueError — с русским текстом для владельца."""
+    try:
+        wanted = list(dict.fromkeys(int(b) for b in (bot_ids or [])))
+    except (TypeError, ValueError):
+        raise ValueError("Список ботов — номера ботов")
+    if len(wanted) > MAX_SCENARIO_BOTS:
+        raise ValueError(f"Не больше {MAX_SCENARIO_BOTS} ботов на сценарий")
+    cur = await pool.fetchrow(
+        "SELECT trigger_type FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
+        workflow_id, owner_id)
+    if cur is None:
+        return None
+    ttype = cur["trigger_type"] or "manual"
+    if not wanted and ttype in ("inactive", "schedule", "webhook"):
+        raise ValueError("Этот способ запуска работает по подписчикам конкретных ботов: "
+                         "выберите хотя бы одного")
+    rows = {r["bot_id"]: r for r in await pool.fetch(
+        """SELECT bot_id, username, is_active FROM managed_bots
+            WHERE bot_id = ANY($1::bigint[]) AND added_by=$2""",
+        wanted, owner_id)} if wanted else {}
+    results, ok = [], []
+    for b in wanted:
+        r = rows.get(b)
+        if r is None:
+            results.append({"bot_id": b, "ok": False, "reason": "бот не найден среди ваших"})
+            continue
+        ok.append(b)
+        results.append({"bot_id": b, "username": r["username"], "ok": True,
+                        "reason": None if r["is_active"] else
+                        "бот отключён — сценарий заработает, когда его включат"})
+    if wanted and not ok:
+        raise ValueError("Ни один из выбранных ботов не найден среди ваших")
+    if ttype == "webhook" and len(ok) > 1:
+        raise ValueError("Входящий вебхук называет человека по номеру в одном боте: "
+                         "для сценария с вебхуком выберите одного бота")
+    await pool.execute(
+        """UPDATE workflow_definitions
+              SET bot_id=$3, bot_ids=$4::bigint[], updated_at=NOW()
+            WHERE id=$1 AND owner_id=$2""",
+        workflow_id, owner_id, ok[0] if ok else None, ok if len(ok) > 1 else None)
+    return {"bot_id": ok[0] if ok else None, "bot_ids": ok,
+            "connected": sum(1 for r in results if r["ok"]),
+            "skipped": sum(1 for r in results if not r["ok"]),
+            "results": results}
+
+
+# ── Проверка перед включением ───────────────────────────────────────────────
+# Включить можно было что угодно: сценарий без шагов, с сообщениями без бота,
+# с удалённым ботом — он числился «🟢 Активен» и не делал ничего, а владелец
+# узнавал об этом от подписчиков. Теперь включение проходит проверку.
+
+_SENDS = frozenset({"message", "ask", "invoice", "ai"})
+
+
+def _template_texts() -> set[str]:
+    return {st["text"] for tpl in WORKFLOW_TEMPLATES.values()
+            for st in tpl["steps"] if st.get("text")}
+
+
+def check_steps(steps: list, trigger_type: str | None) -> list[dict]:
+    """Проблемы шагов без БД: [{level: 'block'|'warn', text}]. ЧИСТАЯ."""
+    out: list[dict] = []
+    steps = _steps_list(steps)
+    if not steps:
+        out.append({"level": "block", "text": "В сценарии нет шагов — добавьте хотя бы один"})
+        return out
+    n = len(steps)
+    tpl_texts = _template_texts()
+    for i, st in enumerate(steps, 1):
+        if not isinstance(st, dict):
+            continue
+        if st.get("type") in ("message", "ask") and st.get("text") in tpl_texts:
+            out.append({"level": "warn",
+                        "text": f"Шаг {i}: текст из шаблона не изменён — люди получат заготовку"})
+        jumps = [st.get(k) for k in _JUMP_KEYS]
+        jumps += [b.get("goto") for b in (st.get("buttons") or []) + (st.get("branches") or [])
+                  if isinstance(b, dict)]
+        for j in jumps:
+            try:
+                k = int(j)
+            except (TypeError, ValueError):
+                continue
+            if k > n:
+                out.append({"level": "warn",
+                            "text": f"Шаг {i} ведёт на шаг {k}, которого нет — "
+                                    "на этом месте сценарий закончится"})
+                break
+    if (trigger_type or "manual") == "manual":
+        out.append({"level": "warn",
+                    "text": "Способ запуска — «Только вручную»: сам сценарий не "
+                            "запустится, только тестом или из другого сценария"})
+    return out
+
+
+async def activation_problems(pool: asyncpg.Pool, owner_id: int,
+                              workflow_id: int) -> list[dict] | None:
+    """Почему сценарий не заработает, если его включить. None — сценария нет.
+
+    'block' — включать нельзя (отказ с причиной), 'warn' — включить можно,
+    но владелец должен увидеть предупреждение до включения."""
+    row = await pool.fetchrow(
+        """SELECT steps, draft_steps, bot_id, bot_ids, trigger_type
+             FROM workflow_definitions WHERE id=$1 AND owner_id=$2""",
+        workflow_id, owner_id)
+    if row is None:
+        return None
+    steps = _steps_list(row["steps"])
+    problems = []
+    if not steps and row["draft_steps"] is not None and _steps_list(row["draft_steps"]):
+        problems.append({"level": "block",
+                         "text": "Шаги есть только в черновике — сначала опубликуйте его"})
+    else:
+        problems.extend(check_steps(steps, row["trigger_type"]))
+    sends = any(isinstance(s, dict) and s.get("type") in _SENDS for s in steps)
+    scope = [int(b) for b in (row["bot_ids"] or []) if b]
+    if sends and scope:
+        alive = {r["bot_id"] for r in await pool.fetch(
+            """SELECT bot_id FROM managed_bots
+                WHERE bot_id = ANY($1::bigint[]) AND added_by=$2 AND is_active=TRUE""",
+            scope, owner_id)}
+        dead = [b for b in scope if b not in alive]
+        if not alive:
+            problems.append({"level": "block",
+                             "text": "Все боты сценария отключены или удалены — "
+                                     "выберите работающих ботов"})
+        elif dead:
+            problems.append({"level": "warn",
+                             "text": f"Ботов сценария не работает: {len(dead)} из "
+                                     f"{len(scope)} — на них сценарий не запустится"})
+    elif sends:
+        if row["bot_id"]:
+            ok = await pool.fetchval(
+                """SELECT 1 FROM managed_bots
+                    WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE""",
+                row["bot_id"], owner_id)
+            if not ok:
+                problems.append({"level": "block",
+                                 "text": "Бот сценария отключён или удалён — "
+                                         "привяжите сценарий к работающему боту"})
+        else:
+            have = await pool.fetchval(
+                "SELECT 1 FROM managed_bots WHERE added_by=$1 AND is_active=TRUE LIMIT 1",
+                owner_id)
+            if not have:
+                problems.append({"level": "block",
+                                 "text": "Нет ни одного подключённого бота — "
+                                         "сообщения сценария отправлять некому"})
+    return problems
+
+
+def blocking_text(problems: list[dict]) -> str | None:
+    """Текст отказа во включении или None, если блокирующих проблем нет."""
+    blocks = [p["text"] for p in problems or [] if p.get("level") == "block"]
+    if not blocks:
+        return None
+    return "Сценарий не заработает: " + "; ".join(blocks)
 
 
 # ── Черновик и публикация ───────────────────────────────────────────────────
@@ -626,12 +918,15 @@ async def set_trigger(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     подписчикам ОДНОГО бота: сценарий без бота так не запустится никогда,
     и это отказ при сохранении, а не тихое «ничего не происходит»."""
     if trigger_type in ("inactive", "schedule", "webhook"):
-        bot_id = await pool.fetchval(
-            "SELECT bot_id FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
+        cur = await pool.fetchrow(
+            "SELECT bot_id, bot_ids FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
             workflow_id, owner_id)
-        if bot_id is None:
+        if cur is not None and cur["bot_id"] is None:
             raise ValueError("Этот способ запуска работает по подписчикам бота: "
                              "сначала привяжите сценарий к боту")
+        if trigger_type == "webhook" and cur is not None and len(cur["bot_ids"] or []) > 1:
+            raise ValueError("Входящий вебхук называет человека по номеру в одном боте: "
+                             "оставьте у сценария одного бота")
     res = await pool.execute(
         """UPDATE workflow_definitions
               SET trigger_type=$3, trigger_value=$4,
@@ -752,7 +1047,7 @@ async def _set_active(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     # воркфлоу либо не существует, либо принадлежит другому владельцу. Разницу
     # НЕ раскрываем: иначе по коду ответа можно перебирать чужие id.
     if isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0":
-        raise LookupError("Воркфлоу не найден")
+        raise LookupError("Сценарий не найден")
     return {"active": active}
 
 
@@ -1269,6 +1564,11 @@ def validate_step(step, index: int = 0) -> dict:
                 "Допустимые: " + ", ".join(sorted(WORKFLOW_ACTIONS)))
         out["action"] = name
         value = str(step.get("value") or "").strip()
+        if name == "goto" and not value and step.get("goto") not in (None, ""):
+            # Сохранённый шаг «перейти» хранит номер в `goto`, а не в `value`:
+            # повторная проверка (удаление соседнего шага, правка) не должна
+            # отбрасывать его как «без значения».
+            value = str(step.get("goto")).strip()
         if name in _ACTIONS_NEED_VALUE and not value:
             raise ValueError(f"{where}: для действия «{WORKFLOW_ACTIONS[name]}» "
                              "нужно значение")

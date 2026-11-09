@@ -134,6 +134,14 @@ async def cb_retry(callback: CallbackQuery, callback_data: ScenCb, pool) -> None
 async def cb_toggle(callback: CallbackQuery, callback_data: ScenCb, pool) -> None:
     from services import workflow_engine as wf
     fn = wf.pause_workflow if callback_data.action == "pause" else wf.resume_workflow
+    if callback_data.action == "resume":
+        # Та же проверка, что в мини-аппе: включить молчащий сценарий нельзя.
+        problems = await wf.activation_problems(
+            pool, callback.from_user.id, int(callback_data.wf_id or 0))
+        refusal = wf.blocking_text(problems or [])
+        if refusal:
+            await safe_answer(callback, refusal[:190], show_alert=True)
+            return
     try:
         await fn(pool, callback.from_user.id, int(callback_data.wf_id or 0))
         ok = True

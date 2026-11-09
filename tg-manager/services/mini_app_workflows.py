@@ -128,7 +128,21 @@ def setup_routes(app: web.Application, pool) -> None:
                 # Зеркало воронки или автоворонки: шаги меняются в их разделе.
                 "legacy_kind": r.get("legacy_kind") or "",
             } for r in (rows or [])]
-            return _json_resp({"workflows": workflows})
+            # Здоровье исполнителя за сутки: сколько прошли, сколько упали и
+            # сколько шагов опаздывают дольше пяти минут. «Активен» без этого
+            # ничего не говорит о том, работает ли сценарий на деле.
+            health = await _safe_fetchrow(pool,
+                """SELECT count(*) FILTER (WHERE status='completed'
+                                              AND finished_at > now() - interval '1 day') AS done,
+                          count(*) FILTER (WHERE status='failed'
+                                              AND finished_at > now() - interval '1 day') AS failed,
+                          count(*) FILTER (WHERE status='running'
+                                              AND next_run_at < now() - interval '5 minutes') AS overdue
+                     FROM workflow_runs WHERE owner_id=$1""", uid)
+            return _json_resp({"workflows": workflows,
+                               "health": {"done_24h": int((health or {}).get("done") or 0),
+                                          "failed_24h": int((health or {}).get("failed") or 0),
+                                          "overdue": int((health or {}).get("overdue") or 0)}})
         except Exception:
             log.exception("workflow_list uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -144,7 +158,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось разобрать запрос", 400)
         name = validate_string(body.get("name"), max_len=120)
         if not name:
-            return _err("Укажите название воркфлоу", 400)
+            return _err("Укажите название сценария", 400)
         desc = validate_string(body.get("description"), max_len=500) or None
         # Бот. Экран присылает bot_id с самого начала, обработчик его не читал,
         # и выбор владельца исчезал без следа. Пустая строка из селекта
@@ -172,6 +186,19 @@ def setup_routes(app: web.Application, pool) -> None:
         tpl = _wf.workflow_template(template) if template else None
         if template and not tpl:
             return _err("Неизвестный шаблон сценария", 400)
+        # Свои тексты вместо заготовок шаблона — мастер создания присылает их
+        # сразу, чтобы сценарий не родился с «Письмо 1: с чего начать».
+        texts = body.get("texts")
+        if tpl and isinstance(texts, dict):
+            for key, val in texts.items():
+                try:
+                    i = int(key)
+                except (TypeError, ValueError):
+                    return _err("Неверный номер шага в текстах", 400)
+                if not 0 <= i < len(tpl["steps"]) or not isinstance(val, str):
+                    return _err("Неверный номер шага в текстах", 400)
+                if tpl["steps"][i].get("type") in ("message", "ask") and val.strip():
+                    tpl["steps"][i]["text"] = val.strip()
         try:
             # Шаблоны проверяются тем же словарём, что и шаги от владельца:
             # шаблон, разошедшийся со словарём, нарисовал бы «⚫ undefined» на
@@ -209,6 +236,22 @@ def setup_routes(app: web.Application, pool) -> None:
             out.update(template=tpl["key"], template_label=tpl["label"])
         return _json_resp(out)
 
+    async def workflow_templates(request: web.Request) -> web.Response:
+        """GET /workflows/templates — шаблоны для мастера: шаги и тексты,
+        которые владелец заменит своими до создания сценария."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import workflow_engine as _wf
+        from services import workflow_runtime as _rt
+        out = []
+        for key in _wf.WORKFLOW_TEMPLATES:
+            tpl = _wf.workflow_template(key)
+            out.append({"key": key, "label": tpl["label"],
+                        "trigger": _rt.TRIGGER_TYPES.get(tpl.get("trigger_type") or "manual"),
+                        "steps": tpl["steps"]})
+        return _json_resp({"templates": out})
+
     async def workflow_create(request: web.Request) -> web.Response:
         """Создать сценарий сразу со шагами (POST /workflow/create {name, steps[]}).
 
@@ -225,7 +268,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось разобрать запрос", 400)
         name = validate_string(body.get("name"), max_len=120)
         if not name:
-            return _err("Укажите название воркфлоу", 400)
+            return _err("Укажите название сценария", 400)
         from services import workflow_engine as _wf
         raw = body.get("steps")
         if not isinstance(raw, list) or not raw:
@@ -254,7 +297,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if wid is None:
             return _err("Неверный идентификатор", 400)
         row = await _safe_fetchrow(pool,
-            "SELECT wd.id, wd.name, wd.description, wd.steps, wd.bot_id, "
+            "SELECT wd.id, wd.name, wd.description, wd.steps, wd.bot_id, wd.bot_ids, "
             "       COALESCE(wd.is_active,FALSE) AS is_active, "
             "       wd.trigger_type, wd.trigger_value, "
             "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
@@ -268,7 +311,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "       AND b.added_by = wd.owner_id "
             " WHERE wd.id=$1 AND wd.owner_id=$2", wid, uid)
         if not row:
-            return _err("Воркфлоу не найден", 404)
+            return _err("Сценарий не найден", 404)
         from services import workflow_engine as _wf
         from services import workflow_runtime as _rt
         from services import automation_events as _bus
@@ -285,11 +328,19 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.exception("workflow_detail stats uid=%s wf=%s", uid, wid)
             stats = None
+        try:
+            problems = await _wf.activation_problems(pool, uid, wid) or []
+        except Exception:
+            log.exception("workflow_detail check uid=%s wf=%s", uid, wid)
+            problems = []
         return _json_resp({"id": row["id"], "name": row["name"],
+                           "problems": problems,
                            "description": row["description"] or "",
                            "active": bool(row["is_active"]),
                            "bot_id": row["bot_id"],
                            "bot_username": row["bot_username"],
+                           # Сценарий на нескольких ботах: весь список.
+                           "bot_ids": list(row.get("bot_ids") or []),
                            "trigger_type": row.get("trigger_type") or "manual",
                            "trigger_value": row.get("trigger_value") or "",
                            "allow_reentry": bool(row.get("allow_reentry")),
@@ -343,7 +394,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except ValueError as e:
             return _err(str(e), 400)
         if added is None:
-            return _err("Воркфлоу не найден", 404)
+            return _err("Сценарий не найден", 404)
         step, in_draft = added
         return _json_resp({"ok": True, "step": step, "draft": in_draft})
 
@@ -388,6 +439,15 @@ def setup_routes(app: web.Application, pool) -> None:
         if blocked is not None:
             return blocked
         from services import workflow_engine as _wf
+        if active:
+            # Включить можно только то, что заработает: иначе сценарий
+            # числится «активным» и молчит.
+            problems = await _wf.activation_problems(pool, uid, wid)
+            if problems is None:
+                return _err("Сценарий не найден", 404)
+            refusal = _wf.blocking_text(problems)
+            if refusal:
+                return _err(refusal, 400)
         try:
             res = await (_wf.resume_workflow if active else _wf.pause_workflow)(
                 pool, uid, wid)
@@ -429,7 +489,7 @@ def setup_routes(app: web.Application, pool) -> None:
             except ValueError as e:
                 return _err(str(e), 400)
             if not await _wf.set_goal(pool, uid, wid, gtype, gval):
-                return _err("Воркфлоу не найден", 404)
+                return _err("Сценарий не найден", 404)
             if "active" not in body and "trigger_type" not in body \
                     and "allow_reentry" not in body:
                 return _json_resp({"ok": True, "goal_type": gtype or "",
@@ -447,7 +507,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 "SELECT trigger_type, trigger_value FROM workflow_definitions "
                 "WHERE id=$1 AND owner_id=$2", wid, uid)
             if not cur:
-                return _err("Воркфлоу не найден", 404)
+                return _err("Сценарий не найден", 404)
             try:
                 ttype, tval = _rt.validate_trigger(
                     body.get("trigger_type", cur["trigger_type"]),
@@ -492,6 +552,107 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Шаг не найден", 404)
         return _json_resp({"ok": True, "steps": left})
 
+    def _step_idx(request: web.Request):
+        try:
+            idx = int(request.match_info["idx"])
+        except (KeyError, ValueError, TypeError):
+            return None
+        return idx if idx >= 0 else None
+
+    async def workflow_update_step(request: web.Request) -> web.Response:
+        """Изменить шаг на месте: PUT /workflows/{id}/steps/{idx} {type,...}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        idx = _step_idx(request)
+        if wid is None or idx is None:
+            return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        from services import workflow_engine as _wf
+        try:
+            res = await _wf.update_step(pool, uid, wid, idx, body)
+        except ValueError as e:
+            return _err(str(e), 400)
+        if res is None:
+            return _err("Шаг не найден", 404)
+        step, in_draft = res
+        return _json_resp({"ok": True, "step": step, "draft": in_draft})
+
+    async def workflow_move_step(request: web.Request) -> web.Response:
+        """Переставить шаг: POST /workflows/{id}/steps/{idx}/move {to} (с нуля)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        idx = _step_idx(request)
+        if wid is None or idx is None:
+            return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
+        try:
+            body = await request.json()
+            to = int(body.get("to"))
+        except Exception:
+            return _err("Укажите, куда переставить шаг", 400)
+        from services import workflow_engine as _wf
+        res = await _wf.move_step(pool, uid, wid, idx, to)
+        if res is None:
+            return _err("Шаг не найден", 404)
+        pos, in_draft = res
+        return _json_resp({"ok": True, "to": pos, "draft": in_draft})
+
+    async def workflow_set_bots(request: web.Request) -> web.Response:
+        """POST /workflows/{id}/bots {bot_ids: [...]} — на каких ботах работает
+        сценарий. Пустой список — все боты владельца. Ответ — итог по каждому
+        боту: подключён или пропущен и почему."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        if wid is None:
+            return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        raw = body.get("bot_ids") if isinstance(body, dict) else None
+        if not isinstance(raw, list):
+            return _err("Передайте список ботов", 400)
+        from services import workflow_engine as _wf
+        try:
+            res = await _wf.set_bots(pool, uid, wid, raw)
+        except ValueError as e:
+            return _err(str(e), 400)
+        if res is None:
+            return _err("Сценарий не найден", 404)
+        return _json_resp({"ok": True, **res})
+
+    async def workflow_check(request: web.Request) -> web.Response:
+        """GET /workflows/{id}/check — заработает ли сценарий, если включить."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        if wid is None:
+            return _err("Неверный идентификатор", 400)
+        from services import workflow_engine as _wf
+        problems = await _wf.activation_problems(pool, uid, wid)
+        if problems is None:
+            return _err("Сценарий не найден", 404)
+        return _json_resp({"ok": not _wf.blocking_text(problems),
+                           "problems": problems})
+
     async def workflow_cancel_run(request: web.Request) -> web.Response:
         """Остановить прогон: POST /workflow/run/{run_id}/cancel."""
         uid = _get_uid(request)
@@ -530,7 +691,7 @@ def setup_routes(app: web.Application, pool) -> None:
             if "max_per_day" in body:
                 cap = await _wf.set_max_per_day(pool, uid, wid, body.get("max_per_day"))
         except LookupError:
-            return _err("Воркфлоу не найден", 404)
+            return _err("Сценарий не найден", 404)
         except ValueError as e:
             return _err(str(e), 400)
         return _json_resp({"ok": True, "send_window": stored or "",
@@ -585,7 +746,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             return _json_resp(await _wf.export_workflow(pool, uid, wid))
         except LookupError:
-            return _err("Воркфлоу не найден", 404)
+            return _err("Сценарий не найден", 404)
         except ValueError as e:
             return _err(str(e), 400)
 
@@ -653,7 +814,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             res = await _wf.copy_workflow(pool, uid, wf_id, bot_id=bot_id, name=name)
         except LookupError:
-            return _err("Воркфлоу не найден", 404)
+            return _err("Сценарий не найден", 404)
         except ValueError as e:
             return _err(str(e), 400)
         return _json_resp(res)
@@ -735,7 +896,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not ok:
             # Разницу «нет такого» и «чужой» не раскрываем: иначе по коду
             # ответа можно перебирать чужие id.
-            return _err("Воркфлоу не найден", 404)
+            return _err("Сценарий не найден", 404)
         return _json_resp({"ok": True})
 
     # ── Запуск и состояние ───────────────────────────────────────────────────
@@ -772,7 +933,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not result.get("ok"):
             # Раньше здесь стояло `{"ok": True, **result}`: отказ уходил кодом
             # 200, и экран показывал успех на несуществующем сценарии.
-            return _err(result.get("error") or "Воркфлоу не найден",
+            return _err(result.get("error") or "Сценарий не найден",
                         int(result.get("code") or 404))
         return _json_resp({"ok": True, "run_id": result.get("run_id"),
                            "total_steps": result.get("total_steps", 0),
@@ -794,7 +955,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "SELECT 1 FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
             wid, uid)
         if not owns:
-            return _err("Воркфлоу не найден", 404)
+            return _err("Сценарий не найден", 404)
         try:
             run = await _wf.latest_run(pool, uid, wid)
         except Exception:
@@ -807,12 +968,17 @@ def setup_routes(app: web.Application, pool) -> None:
         return _json_resp({"ok": True, "run": run})
 
     app.router.add_get("/api/miniapp/workflows", workflow_list)
+    app.router.add_get("/api/miniapp/workflows/templates", workflow_templates)
     app.router.add_post("/api/miniapp/workflows", workflow_create_plural)
     app.router.add_get("/api/miniapp/workflows/{wf_id}", workflow_detail_plural)
     app.router.add_patch("/api/miniapp/workflows/{wf_id}", workflow_toggle_plural)
     app.router.add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_any)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)
     app.router.add_delete("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_delete_step)
+    app.router.add_put("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_update_step)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/steps/{idx}/move", workflow_move_step)
+    app.router.add_get("/api/miniapp/workflows/{wf_id}/check", workflow_check)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/bots", workflow_set_bots)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/publish", workflow_publish)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/discard_draft", workflow_discard_draft)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)
