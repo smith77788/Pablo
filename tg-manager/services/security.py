@@ -38,6 +38,15 @@ _RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in ("true"
 _RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))
 _RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "120"))
 _RATE_LIMIT_AUTH_MAX = int(os.getenv("RATE_LIMIT_AUTH_MAX", "30"))
+# Лимит для ВОШЕДШЕГО пользователя (ключ — его id, а не адрес). 120 в минуту
+# на всё приложение не выдерживали обычного темпа: один экран мини-аппа
+# открывается пачкой из 5–15 запросов (список, счётчики, фильтры, поток
+# событий), и быстрые переходы «Операции → Контакты → SEO → Хранилище»
+# упирались в 429 за полминуты, а экран оставался пустым. Перебор и злоупотребление
+# закрывают отдельные лимиты: вход (RATE_LIMIT_AUTH_MAX) и аноним по адресу
+# (RATE_LIMIT_MAX_REQUESTS) остаются прежними.
+_RATE_LIMIT_USER_MAX = max(
+    _RATE_LIMIT_MAX_REQUESTS, int(os.getenv("RATE_LIMIT_USER_MAX", "600")))
 # Сколько ДОВЕРЕННЫХ прокси стоит перед приложением. X-Forwarded-For дописывает
 # каждый прокси справа, а клиент волен прислать сколько угодно значений слева —
 # поэтому реальный адрес берём N-м С КОНЦА, где N — число своих прокси
@@ -220,8 +229,9 @@ async def check_rate_limit_for_path(
         return await _rate_limiter.check(
             _rate_key(request, uid), _RATE_LIMIT_AUTH_MAX, _RATE_LIMIT_WINDOW
         )
+    limit = _RATE_LIMIT_USER_MAX if uid else _RATE_LIMIT_MAX_REQUESTS
     return await _rate_limiter.check(
-        _rate_key(request, uid), _RATE_LIMIT_MAX_REQUESTS, _RATE_LIMIT_WINDOW
+        _rate_key(request, uid), limit, _RATE_LIMIT_WINDOW
     )
 
 
