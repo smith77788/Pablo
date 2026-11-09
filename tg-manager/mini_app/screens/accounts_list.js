@@ -81,6 +81,7 @@ async function loadAccounts() {
   }).catch(e => {
     document.getElementById('accList').innerHTML=errHtml(errRu(e),'loadAccounts()');
   });
+  loadAccSurvival();
   // Превью на вкладке аккаунтов показывает ТРИ канала. Раньше оно тянуло срез в
   // 500 строк и затирало им CUR_CHANNELS — тот самый список, который экран
   // каналов подгрузил постранично. После переключения вкладок «Выбрать все» на
@@ -351,4 +352,45 @@ function accRu(v) {
           // владельцу английским ключом как есть.
           cooldown:'⏸ Отдыхает после лимита', no_session:'🔌 Нет сессии',
           frozen:'🧊 Заморожен', unknown:'— Неизвестно'}[String(v||'').toLowerCase()] || (v || '—');
+}
+
+// Выживаемость флота — главная цифра здоровья: сколько аккаунтов из ста ушло
+// за неделю и месяц, лучше ли это прошлой недели и что убивает флот. Карточка
+// второстепенна: любая ошибка просто прячет её, список аккаунтов не трогает.
+async function loadAccSurvival() {
+  const box = document.getElementById('accSurvival');
+  if (!box) return;
+  try {
+    const d = await api('/api/miniapp/accounts/survival');
+    box.innerHTML = renderAccSurvival(d);
+    box.style.display = box.innerHTML ? '' : 'none';
+  } catch(e) { box.style.display = 'none'; }
+}
+
+function renderAccSurvival(d) {
+  if (!d || !d.windows || !d.windows['30'] || !d.windows['30'].base) return '';
+  const w7 = d.windows['7'], w30 = d.windows['30'];
+  const v = d.verdict || {};
+  const tone = v.level === 'bad' ? 'var(--red)' : (v.level === 'warn' ? 'var(--orange)' : 'var(--green)');
+  const tr = d.trend || {};
+  const trTxt = tr.direction === 'better' ? '↓ лучше прошлой недели (' + tr.prev_week + ')'
+              : tr.direction === 'worse' ? '↑ хуже прошлой недели (' + tr.prev_week + ')'
+              : 'как на прошлой неделе';
+  const lines = [
+    '<div style="font-weight:700;margin-bottom:2px">🛡 Выживаемость за 30 дней: <span style="color:' + tone + '">' + w30.survival_pct + '%</span></div>',
+    '<div>Потеряно ' + w30.lost + ' из ' + w30.base + ' (' + w30.lost_pct + '%) · ограничено ' + w30.restricted +
+      ' · вернулось в строй ' + w30.recovered + '</div>',
+    '<div style="color:var(--hint)">За 7 дней: потеряно ' + w7.lost + ', ' + trTxt + '</div>',
+  ];
+  if (w30.lost) {
+    const causes = (d.causes || []).map(c => esc(c.label) + ' — ' + c.count).join(', ');
+    const ages = (d.by_age || []).filter(a => a.count).map(a => esc(a.label) + ' — ' + a.count).join(', ');
+    const px = d.by_proxy || {};
+    lines.push('<div style="color:var(--hint)">Причины: ' + causes + '</div>');
+    lines.push('<div style="color:var(--hint)">Возраст при потере: ' + ages + '</div>');
+    lines.push('<div style="color:var(--hint)">С прокси — ' + (px.with_proxy || 0) + ', без прокси — ' + (px.no_proxy || 0) +
+      (px.unknown ? ', неизвестно — ' + px.unknown : '') + '</div>');
+  }
+  if (v.text) lines.push('<div style="margin-top:4px;color:' + tone + '">' + esc(v.text) + '</div>');
+  return lines.join('');
 }

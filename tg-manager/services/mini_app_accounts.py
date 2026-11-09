@@ -1702,6 +1702,18 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("accounts_health uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def accounts_survival(request: web.Request) -> web.Response:
+        """Выживаемость флота: доля потерь за 7 и 30 дней, причины, тренд."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.account_survival import fetch_survival
+            return _json_resp(await fetch_survival(pool, uid))
+        except Exception:
+            log.exception("accounts_survival uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def _resolve_proxy_url(_uid: int, proxy_id) -> tuple[int | None, str | None]:
         """proxy_id → (validated_proxy_id, proxy_url) со скоупом по владельцу."""
         try:
@@ -2062,6 +2074,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/meta", account_set_meta)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_get("/api/miniapp/accounts/health", accounts_health)
+    app.router.add_get("/api/miniapp/accounts/survival", accounts_survival)
     app.router.add_post("/api/miniapp/account/add/phone/start", account_add_phone_start)
     app.router.add_post("/api/miniapp/account/add/phone/code", account_add_phone_code)
     app.router.add_post("/api/miniapp/account/add/phone/2fa", account_add_phone_2fa)

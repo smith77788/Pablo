@@ -1708,6 +1708,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="acc-kpi-num" id="kpi-proxydown" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Прокси мёртв</div>
       </div>
     </div>
+    <!-- Выживаемость флота: доля потерь за 7 и 30 дней и что их вызывает. -->
+    <div id="accSurvival" style="display:none;margin:4px 0 8px;padding:10px 12px;border-radius:var(--radius);background:var(--bg2);font-size:13px;line-height:1.45"></div>
     <!-- Быстрое удаление невоскрешаемых (появляется, когда есть мёртвые) -->
     <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(248,113,113,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
     <!-- Массовые действия по аккаунтам -->
@@ -6845,6 +6847,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           </select>
         </div>
         <div style="font-size:11px;color:var(--hint);margin-top:6px">«Только через прокси» — массовые действия без прокси блокируются (защита от банов). «Можно без прокси» — работают и без прокси, но с риском блокировок. Одиночные чтения (напр. контакты) прокси не требуют в любом режиме.</div>
+      </div>
+      <div style="padding:8px 0;border-bottom:1px solid var(--sep)">
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span style="font-size:14px">🔁 Автопереезд с мёртвого прокси</span>
+          <input type="checkbox" id="set-proxy-autofailover">
+        </label>
+        <div style="font-size:11px;color:var(--hint);margin-top:6px">Когда прокси не отвечает три проверки подряд, аккаунты с него сами переезжают на свободные живые прокси, сначала той же страны. Двух аккаунтов на один прокси автомат не ставит. Если свободных прокси нет, придёт сообщение.</div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">💻 Связанные устройства</span>
@@ -30521,6 +30530,7 @@ async function openSettings() {
       if (qw && [...qw.options].some(o => o.value === qv)) qw.value = qv;
       if (backend.quiet_held) txt('set-quiet-hint', 'Сейчас в сводке ждут: ' + num(backend.quiet_held) + '. Ограничения и флуд аккаунтов приходят сразу.');
       if (ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
+      setChk('set-proxy-autofailover', backend.proxy_auto_failover, false);
       _fillTzSelect(backend.tz);
     }
   } catch(e) {
@@ -30621,6 +30631,7 @@ async function saveSettings() {
     notif_advice: document.getElementById('set-notif-advice')?.checked ?? true,
     digest_only: !!document.getElementById('set-digest-only')?.checked,
     proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
+    proxy_auto_failover: !!document.getElementById('set-proxy-autofailover')?.checked,
   };
   _saveLocalSettings(s);
   // Тихие часы считаются по местному времени — пояс берём у браузера.
