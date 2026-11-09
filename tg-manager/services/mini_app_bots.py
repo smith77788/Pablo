@@ -1574,9 +1574,22 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(_terr, 400)
 
         if bot_ids:
-            cnt = await _safe_count(
-                pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
-                "AND is_active AND bot_id = ANY($2::bigint[])", uid, bot_ids)
+            # В операцию пишем только тех выбранных, кто реально есть и активен:
+            # иначе в карточке «Профиль ботов: 87 шт.», а в параметрах
+            # «Боты: 89» — удалённые/выключенные боты из выбора, которых
+            # исполнитель всё равно пропустит.
+            try:
+                _rows = await pool.fetch(
+                    "SELECT DISTINCT bot_id FROM managed_bots WHERE added_by=$1 "
+                    "AND is_active AND bot_id = ANY($2::bigint[])", uid, bot_ids)
+                _live = {int(r["bot_id"]) for r in _rows}
+                bot_ids = [b for b in dict.fromkeys(bot_ids) if b in _live]
+            except Exception:
+                log.exception("bots_bulk_profile: выбор ботов uid=%d", uid)
+                return _err(_INTERNAL_ERROR, 500)
+            cnt = len(bot_ids)
+            if not cnt:
+                return _err("Нет подходящих ботов", 400)
         else:
             cnt = await _safe_count(
                 pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active", uid)

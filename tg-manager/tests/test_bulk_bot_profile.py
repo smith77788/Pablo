@@ -284,3 +284,75 @@ def test_ui_previews_before_applying():
     i_prev = src.index("profile_preview")
     i_apply = src.index("'/api/miniapp/bots/bulk_profile'")
     assert i_prev < i_apply, "применение идёт раньше предпросмотра — предпросмотра нет"
+
+
+# ── Жалоба: «87/87 (100%)», а итог «обновлено 14, ошибок 7»; лог «Ошибка; Ошибка» ──
+
+@pytest.mark.asyncio
+async def test_summary_counts_bots_done_by_previous_runs(monkeypatch):
+    """Боты, сделанные прошлым прогоном (рестарт/повтор), входят в итог."""
+    bots = [{"id": i, "bot_id": 100 + i, "token": f"T{i}", "username": f"b{i}"}
+            for i in range(1, 5)]
+    _patch_common(monkeypatch, bots, {"ok": True})
+
+    async def done_two(pool, op_id):
+        return {"@b1", "@b2"}
+    monkeypatch.setattr(op_worker, "completed_targets", done_two)
+    pool = _Pool()
+    res = await op_worker._exec_bulk_bot_profile(
+        pool, None, 7, 99, {"bot_ids": [101, 102, 103, 104], "name": "Имя"})
+    assert res["ok"] == 4 and res["failed"] == 0
+    assert "4 из 4" in res["summary"] and "2 — в прошлых прогонах" in res["summary"]
+    # прогресс — абсолютная позиция, никогда не больше total
+    progress = [a[0] for q, a in pool.calls if "SET done_items=$1" in q]
+    assert progress == [1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_error_names_field_and_concrete_telegram_reason(monkeypatch):
+    bots = [{"id": 1, "bot_id": 111, "token": "T1", "username": "b1"}]
+    _patch_common(monkeypatch, bots, {"ok": False, "error_code": 400,
+                                      "description": "Bad Request: description is too long"})
+    pool = _Pool()
+    res = await op_worker._exec_bulk_bot_profile(
+        pool, None, 7, 99, {"bot_ids": [111], "description": "x", "short_description": "y"})
+    assert res["failed"] == 1
+    msg = [a[3] for q, a in pool.calls if "INSERT INTO operation_log" in q and "'error'" in q][0]
+    assert "Описание:" in msg and "Короткое описание:" in msg
+    assert "description is too long" in msg and "длиннее" in msg
+    assert msg.strip() != "🟠 Ошибка; 🟠 Ошибка"
+    # прежняя ошибка по этому боту удаляется — в логе одна строка на бота
+    assert any("DELETE FROM operation_log" in q for q, _ in pool.calls)
+
+
+@pytest.mark.asyncio
+async def test_exception_reason_is_not_bare_error(monkeypatch):
+    bots = [{"id": 1, "bot_id": 111, "token": "T1", "username": "b1"}]
+    _patch_common(monkeypatch, bots, {"ok": True})
+    from services import bot_api
+
+    async def boom(sess, token, method, **params):
+        raise asyncio.TimeoutError()
+    monkeypatch.setattr(bot_api, "_call", boom)
+    pool = _Pool()
+    await op_worker._exec_bulk_bot_profile(
+        pool, None, 7, 99, {"bot_ids": [111], "name": "Имя"})
+    msg = [a[3] for q, a in pool.calls if "INSERT INTO operation_log" in q and "'error'" in q][0]
+    assert msg.startswith("Имя:") and "TimeoutError" in msg and "Нет связи" in msg
+
+
+@pytest.mark.asyncio
+async def test_short_flood_is_waited_out_and_retried(monkeypatch):
+    bots = [{"id": 1, "bot_id": 111, "token": "T1", "username": "b1"}]
+    _patch_common(monkeypatch, bots, {"ok": True})
+    from services import bot_api
+    answers = [{"ok": False, "error_code": 429, "description": "Too Many Requests: retry after 3",
+                "parameters": {"retry_after": 3}}, {"ok": True}]
+
+    async def flaky(sess, token, method, **params):
+        return answers.pop(0)
+    monkeypatch.setattr(bot_api, "_call", flaky)
+    pool = _Pool()
+    res = await op_worker._exec_bulk_bot_profile(
+        pool, None, 7, 99, {"bot_ids": [111], "name": "Имя"})
+    assert res["ok"] == 1 and res["failed"] == 0

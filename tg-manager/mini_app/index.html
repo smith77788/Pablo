@@ -13977,7 +13977,7 @@ async function openOpDetail(opId) {
         ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru-RU')}</div></div></div>`:''}
         ${(o.duration_s!=null)?`<div class="row"><div class="row-body"><div class="row-name">${o.finished_at?'Длительность':'Идёт уже'}</div><div class="row-val">${esc(_opDuration(o.duration_s))}${(o.duration_s>0&&dDone>0)?' · '+esc(_opSpeed(dDone,o.duration_s)):''}</div></div></div>`:''}
         ${(o.summary&&o.summary!==o.error_msg)?`<div class="row"><div class="row-body"><div class="row-name">Итог</div><div class="row-val" style="white-space:pre-line">${esc(o.summary)}</div></div></div>`:''}
-        ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">${o.status==='failed'?'Причина ошибки':'Ошибка'}</div><div class="row-val" style="color:var(--red)">${esc(o.error_msg)}</div></div></div>`:''}
+        ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">${o.status==='failed'?'Причина ошибки':o.status==='partial'?'Итог':(o.status==='pending'||o.status==='running')?'Последнее событие':'Ошибка'}</div><div class="row-val" style="color:${o.status==='partial'?'var(--orange,#e0a040)':(o.status==='pending'||o.status==='running')?'var(--hint)':'var(--red)'};white-space:pre-line">${esc(o.error_msg)}</div></div></div>`:''}
       </div>
     `;
     if (o.status==='running') {
@@ -14168,7 +14168,7 @@ function renderOpLog() {
     el.innerHTML = OPLOG_ROWS.length
       ? OPLOG_ROWS.map((l,i)=>`<div class="row" style="cursor:pointer" role="button" tabindex="0" onclick="openOpLogRow(${i})"><div class="row-body">
           <div class="row-name">${esc(l.target||'')}</div>
-          <div class="row-val" style="white-space:normal">${esc(l.message||'').substring(0,160)}${(l.message||'').length>160?'…':''} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
+          <div class="row-val" style="white-space:normal">${esc((l.message||'').replace(/\n/g,'; ')).substring(0,160)}${(l.message||'').length>160?'…':''} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
         </div><div class="row-right"><span class="chev">›</span></div></div>`).join('')
       : `<div style="padding:14px;font-size:13px;color:var(--hint);text-align:center">${OPLOG_Q ? 'По этому поиску записей нет.' : 'По этому срезу записей нет.'}</div>`;
   }
