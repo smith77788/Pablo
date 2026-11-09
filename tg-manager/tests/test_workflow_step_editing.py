@@ -197,3 +197,90 @@ def test_activation_blocked_without_working_bot(pool, lead):
 def test_activation_blocked_for_empty_scenario(pool, lead):
     res = _run(wf.create_workflow(pool, OWNER, "Пустой", steps=[], bot_id=BOT_ID))
     assert "нет шагов" in wf.blocking_text(_run(wf.activation_problems(pool, OWNER, res["id"])))
+
+
+# ── Один сценарий на много ботов ────────────────────────────────────────────
+
+BOT2 = BOT_ID + 1
+FOREIGN = BOT_ID + 2
+
+
+def test_trigger_listens_only_to_listed_bots():
+    from services import workflow_runtime as rt
+    wfd = {"id": 1, "trigger_type": "start", "bot_id": 10, "bot_ids": [10, 11]}
+    ev = {"event_type": "contact.started", "data": {}}
+    assert rt.trigger_matches(wfd, {**ev, "bot_id": 11})
+    assert rt.trigger_matches(wfd, {**ev, "bot_id": 10})
+    assert not rt.trigger_matches(wfd, {**ev, "bot_id": 12})
+    # Без списка — как раньше.
+    assert not rt.trigger_matches({**wfd, "bot_ids": None}, {**ev, "bot_id": 11})
+
+
+@pytest.fixture()
+def fleet(pool, lead):
+    async def _mk():
+        await pool.execute("DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[])",
+                           [BOT2, FOREIGN])
+        await pool.execute(
+            "INSERT INTO managed_bots(token, bot_id, username, is_active, added_by) "
+            "VALUES($1,$2,'wf_edit_bot2',FALSE,$3), ($4,$5,'wf_edit_foreign',TRUE,$6)",
+            f"1234:wf-edit-{BOT2}", BOT2, OWNER, f"1234:wf-edit-{FOREIGN}", FOREIGN, OWNER + 7)
+    _run(_mk())
+    yield lead
+    _run(pool.execute("DELETE FROM bot_users WHERE bot_id = ANY($1::bigint[])",
+                      [BOT_ID, BOT2]))
+    _run(pool.execute("DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[])",
+                      [BOT2, FOREIGN]))
+
+
+def test_set_bots_reports_each_bot(pool, fleet):
+    res = _run(wf.set_bots(pool, OWNER, fleet, [BOT_ID, BOT2, FOREIGN, BOT_ID]))
+    assert res["bot_ids"] == [BOT_ID, BOT2]
+    assert res["connected"] == 2 and res["skipped"] == 1
+    by = {r["bot_id"]: r for r in res["results"]}
+    assert by[FOREIGN]["ok"] is False
+    assert "отключён" in by[BOT2]["reason"]
+    row = _run(pool.fetchrow("SELECT bot_id, bot_ids FROM workflow_definitions WHERE id=$1",
+                             fleet))
+    assert row["bot_id"] == BOT_ID and list(row["bot_ids"]) == [BOT_ID, BOT2]
+    # Один бот из двух не работает — предупреждение, не отказ.
+    probs = _run(wf.activation_problems(pool, OWNER, fleet))
+    assert any("1 из 2" in p["text"] for p in probs)
+    assert wf.blocking_text(probs) is None
+    # Вебхук на нескольких ботах — отказ.
+    with pytest.raises(ValueError):
+        _run(wf.set_trigger(pool, OWNER, fleet, "webhook", None))
+    # Только чужие — отказ, прежний список на месте.
+    with pytest.raises(ValueError):
+        _run(wf.set_bots(pool, OWNER, fleet, [FOREIGN]))
+    # Пусто — все мои боты.
+    res = _run(wf.set_bots(pool, OWNER, fleet, []))
+    assert res["bot_id"] is None and res["bot_ids"] == []
+
+
+def test_scheduled_scenario_runs_on_every_bot_once(pool, fleet):
+    from datetime import datetime, timedelta, timezone
+    from services import workflow_runtime as rt
+
+    async def go():
+        await pool.execute("UPDATE managed_bots SET is_active=TRUE WHERE bot_id=$1", BOT2)
+        for b in (BOT_ID, BOT2):
+            await pool.execute(
+                "INSERT INTO bot_users(bot_id, user_id, first_name, is_active) "
+                "VALUES($1, 5551, 'Ира', TRUE) ON CONFLICT DO NOTHING", b)
+        await wf.set_bots(pool, OWNER, fleet, [BOT_ID, BOT2])
+        await wf.set_trigger(pool, OWNER, fleet, "schedule", "10:00", True)
+        await pool.execute("UPDATE workflow_definitions SET is_active=TRUE WHERE id=$1", fleet)
+        await pool.execute("DELETE FROM automation_cursors WHERE consumer LIKE $1",
+                           f"workflow_schedule:{fleet}%")
+        morning = datetime(2026, 11, 4, 7, 30, tzinfo=timezone.utc)
+        assert await rt.scan_audience_triggers(pool, morning, force=True) == 2
+        bots = sorted(r["bot_id"] for r in await pool.fetch(
+            "SELECT bot_id FROM workflow_runs WHERE workflow_id=$1", fleet))
+        assert bots == [BOT_ID, BOT2]
+        assert await rt.scan_audience_triggers(pool, morning + timedelta(minutes=20),
+                                               force=True) == 0
+        await pool.execute("DELETE FROM workflow_runs WHERE workflow_id=$1", fleet)
+        await pool.execute("UPDATE workflow_definitions SET is_active=FALSE WHERE id=$1", fleet)
+
+    _run(go())

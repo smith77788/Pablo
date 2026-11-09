@@ -254,7 +254,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if wid is None:
             return _err("Неверный идентификатор", 400)
         row = await _safe_fetchrow(pool,
-            "SELECT wd.id, wd.name, wd.description, wd.steps, wd.bot_id, "
+            "SELECT wd.id, wd.name, wd.description, wd.steps, wd.bot_id, wd.bot_ids, "
             "       COALESCE(wd.is_active,FALSE) AS is_active, "
             "       wd.trigger_type, wd.trigger_value, "
             "       COALESCE(wd.allow_reentry,FALSE) AS allow_reentry, "
@@ -296,6 +296,8 @@ def setup_routes(app: web.Application, pool) -> None:
                            "active": bool(row["is_active"]),
                            "bot_id": row["bot_id"],
                            "bot_username": row["bot_username"],
+                           # Сценарий на нескольких ботах: весь список.
+                           "bot_ids": list(row.get("bot_ids") or []),
                            "trigger_type": row.get("trigger_type") or "manual",
                            "trigger_value": row.get("trigger_value") or "",
                            "allow_reentry": bool(row.get("allow_reentry")),
@@ -563,6 +565,35 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Шаг не найден", 404)
         pos, in_draft = res
         return _json_resp({"ok": True, "to": pos, "draft": in_draft})
+
+    async def workflow_set_bots(request: web.Request) -> web.Response:
+        """POST /workflows/{id}/bots {bot_ids: [...]} — на каких ботах работает
+        сценарий. Пустой список — все боты владельца. Ответ — итог по каждому
+        боту: подключён или пропущен и почему."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        wid = _wf_id(request)
+        if wid is None:
+            return _err("Неверный идентификатор", 400)
+        blocked = await _legacy_block(wid, uid)
+        if blocked is not None:
+            return blocked
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        raw = body.get("bot_ids") if isinstance(body, dict) else None
+        if not isinstance(raw, list):
+            return _err("Передайте список ботов", 400)
+        from services import workflow_engine as _wf
+        try:
+            res = await _wf.set_bots(pool, uid, wid, raw)
+        except ValueError as e:
+            return _err(str(e), 400)
+        if res is None:
+            return _err("Сценарий не найден", 404)
+        return _json_resp({"ok": True, **res})
 
     async def workflow_check(request: web.Request) -> web.Response:
         """GET /workflows/{id}/check — заработает ли сценарий, если включить."""
@@ -903,6 +934,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_put("/api/miniapp/workflows/{wf_id}/steps/{idx}", workflow_update_step)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/steps/{idx}/move", workflow_move_step)
     app.router.add_get("/api/miniapp/workflows/{wf_id}/check", workflow_check)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/bots", workflow_set_bots)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/publish", workflow_publish)
     app.router.add_post("/api/miniapp/workflows/{wf_id}/discard_draft", workflow_discard_draft)
     app.router.add_post("/api/miniapp/workflow/run/{run_id}/cancel", workflow_cancel_run)

@@ -7982,6 +7982,23 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ MODAL: ADD WORKFLOW STEP ══════════════════════ -->
+<div class="mbg" id="mo-wf-bots" onclick="if(event.target===this)closeModal('mo-wf-bots')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-wf-bots')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">🤖 Боты сценария</div>
+    <div class="hint" style="margin-bottom:8px">Один сценарий работает на всех отмеченных ботах: правка и публикация — один раз для всех. Ничего не отмечено — все ваши боты.</div>
+    <input class="inp" id="wfBotsFilter" placeholder="Найти бота" oninput="_wfBotsRender()" style="margin-bottom:6px">
+    <div style="display:flex;gap:8px;margin-bottom:6px">
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="_wfBotsAll(true)">Отметить все</button>
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="_wfBotsAll(false)">Снять все</button>
+    </div>
+    <div id="wfBotsList" style="max-height:45vh;overflow:auto"></div>
+    <div class="hint" id="wfBotsCount" style="margin:6px 0"></div>
+    <div id="wfBotsErr" class="hint" style="display:none;color:var(--red)"></div>
+    <button class="btn btn-p" data-main id="wfBotsBtn" onclick="submitWfBots()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
 <div class="mbg" id="mo-wf-step" onclick="if(event.target===this)closeModal('mo-wf-step')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-wf-step')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
@@ -31948,7 +31965,7 @@ async function loadWorkflows() {
 
 function openWorkflowCreateModal() {
   if (!BOTS.length) { toast('❗ Сначала загрузите боты'); return; }
-  document.getElementById('wfCreateBot').innerHTML = '<option value="">Не привязан</option>' + BOTS.map(b => {
+  document.getElementById('wfCreateBot').innerHTML = '<option value="">Все мои боты</option>' + BOTS.map(b => {
     const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + b.bot_id);
     return `<option value="${b.bot_id}">${esc(name)}</option>`;
   }).join('');
@@ -32043,8 +32060,14 @@ async function openWorkflowDetail(wfId, wfName) {
         <b>${blocks.length ? '⛔ Сценарий не заработает' : '⚠️ Проверьте перед включением'}</b><br>${wfProblems.map(p => (p.level === 'block' ? '⛔ ' : '⚠️ ') + esc(p.text)).join('<br>')}</div>`;
     }
 
-    if (d.bot_id) {
-      html += `<div class="hint" style="margin:0 14px 8px">🤖 Бот: ${d.bot_username ? '@' + esc(d.bot_username) : '#' + d.bot_id}</div>`;
+    _wfBotIds = (d.bot_ids && d.bot_ids.length) ? d.bot_ids.map(Number) : (d.bot_id ? [Number(d.bot_id)] : []);
+    {
+      const nm = id => { const b = (BOTS || []).find(x => Number(x.bot_id) === id); return b && b.username ? '@' + b.username : '#' + id; };
+      let botsLine;
+      if (!_wfBotIds.length) botsLine = 'все мои боты';
+      else if (_wfBotIds.length === 1) botsLine = d.bot_username ? '@' + d.bot_username : nm(_wfBotIds[0]);
+      else botsLine = _wfBotIds.slice(0, 3).map(nm).join(', ') + (_wfBotIds.length > 3 ? ' и ещё ' + (_wfBotIds.length - 3) : '') + ' (' + _wfBotIds.length + ')';
+      html += `<div class="hint" style="margin:0 14px 8px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>🤖 Боты: ${esc(botsLine)}</span>${legacy ? '' : `<button class="btn btn-s" style="padding:4px 10px;font-size:12px;flex:0 0 auto" onclick="openWfBotsModal()">Изменить</button>`}</div>`;
     }
     if (legacy) {
       html += `<div class="hint" style="margin:0 14px 8px">🔗 ${esc(d.legacy_note || '')}${d.active ? '' : ' Сейчас воронка выключена.'}</div>`;
@@ -32481,6 +32504,54 @@ async function deleteWorkflow(wfId, _el) {
 
 let _wfSteps = [];
 let _wfEditIdx = null;
+let _wfBotIds = [];
+let _wfBotsPick = new Set();
+
+function openWfBotsModal() {
+  if (!_currentWfId) return;
+  if (!BOTS.length) { toast('❗ Сначала загрузите боты'); return; }
+  _wfBotsPick = new Set(_wfBotIds);
+  document.getElementById('wfBotsFilter').value = '';
+  document.getElementById('wfBotsErr').style.display = 'none';
+  _wfBotsRender();
+  document.getElementById('mo-wf-bots').classList.add('show');
+}
+
+function _wfBotsRender() {
+  const q = (document.getElementById('wfBotsFilter').value || '').trim().toLowerCase();
+  const list = BOTS.filter(b => !q || String(b.username || b.first_name || b.bot_id).toLowerCase().includes(q));
+  txt('wfBotsList', list.map(b => {
+    const id = Number(b.bot_id);
+    const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + id);
+    return `<label class="chk-row" style="display:flex;gap:8px;align-items:center;padding:6px 2px;cursor:pointer"><input type="checkbox" ${_wfBotsPick.has(id) ? 'checked' : ''} onchange="_wfBotsToggle(${id}, this.checked)"> <span>${esc(name)}</span>${b.is_active === false ? '<span class="hint">· отключён</span>' : ''}</label>`;
+  }).join('') || '<div class="hint">Ничего не найдено</div>');
+  document.getElementById('wfBotsCount').textContent = _wfBotsPick.size ? 'Отмечено ботов: ' + _wfBotsPick.size : 'Не отмечено — сценарий будет на всех ваших ботах';
+}
+
+function _wfBotsToggle(id, on) { if (on) _wfBotsPick.add(id); else _wfBotsPick.delete(id); _wfBotsRender(); }
+
+function _wfBotsAll(on) {
+  const q = (document.getElementById('wfBotsFilter').value || '').trim().toLowerCase();
+  BOTS.filter(b => !q || String(b.username || b.first_name || b.bot_id).toLowerCase().includes(q))
+    .forEach(b => { if (on) _wfBotsPick.add(Number(b.bot_id)); else _wfBotsPick.delete(Number(b.bot_id)); });
+  _wfBotsRender();
+}
+
+async function submitWfBots() {
+  const btn = document.getElementById('wfBotsBtn');
+  const errEl = document.getElementById('wfBotsErr');
+  errEl.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/miniapp/workflows/${_currentWfId}/bots`, { method: 'POST', body: JSON.stringify({ bot_ids: Array.from(_wfBotsPick) }) });
+    closeModal('mo-wf-bots');
+    const notes = (r.results || []).filter(x => x.reason).map(x => (x.username ? '@' + x.username : '#' + x.bot_id) + ': ' + x.reason);
+    if (notes.length) await askConfirm('Подключено ботов: ' + (r.connected || 0) + (r.skipped ? ', пропущено: ' + r.skipped : '') + '\n\n• ' + notes.slice(0, 15).join('\n• ') + (notes.length > 15 ? '\n…и ещё ' + (notes.length - 15) : ''));
+    else toast(r.connected ? '✅ Сценарий на ботах: ' + r.connected : '✅ Сценарий на всех ваших ботах');
+    _wfReopen();
+  } catch(e) { errEl.textContent = errRu(e); errEl.style.display = 'block'; }
+  finally { btn.disabled = false; }
+}
 
 async function moveWorkflowStep(wfId, from, to, el) {
   if (el) el.style.pointerEvents = 'none';

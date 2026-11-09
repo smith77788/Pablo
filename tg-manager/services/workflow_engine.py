@@ -660,6 +660,70 @@ async def move_step(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     return to, column == "draft_steps"
 
 
+# ── Боты сценария ───────────────────────────────────────────────────────────
+# Сценарий принадлежал одному боту, и сменить бота после создания было
+# нельзя («пересоздайте сценарий»). А чтобы поставить сценарий на сто ботов,
+# владелец делал сто копий и правил текст сто раз. Теперь у сценария список
+# ботов: одно определение, одна публикация — и итог по каждому боту.
+
+MAX_SCENARIO_BOTS = 500
+
+
+async def set_bots(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                   bot_ids: list) -> dict | None:
+    """Назначить сценарию ботов. None — сценария нет у владельца.
+
+    Пустой список — «все мои боты» (как «Не привязан» раньше: сценарий по
+    событию слушает каждого бота владельца). Чужие и несуществующие боты
+    пропускаются с причиной; отключённые — подключаются, но с пометкой, что
+    работать на них сценарий не будет, пока бот не включат.
+
+    ValueError — с русским текстом для владельца."""
+    try:
+        wanted = list(dict.fromkeys(int(b) for b in (bot_ids or [])))
+    except (TypeError, ValueError):
+        raise ValueError("Список ботов — номера ботов")
+    if len(wanted) > MAX_SCENARIO_BOTS:
+        raise ValueError(f"Не больше {MAX_SCENARIO_BOTS} ботов на сценарий")
+    cur = await pool.fetchrow(
+        "SELECT trigger_type FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
+        workflow_id, owner_id)
+    if cur is None:
+        return None
+    ttype = cur["trigger_type"] or "manual"
+    if not wanted and ttype in ("inactive", "schedule", "webhook"):
+        raise ValueError("Этот способ запуска работает по подписчикам конкретных ботов: "
+                         "выберите хотя бы одного")
+    rows = {r["bot_id"]: r for r in await pool.fetch(
+        """SELECT bot_id, username, is_active FROM managed_bots
+            WHERE bot_id = ANY($1::bigint[]) AND added_by=$2""",
+        wanted, owner_id)} if wanted else {}
+    results, ok = [], []
+    for b in wanted:
+        r = rows.get(b)
+        if r is None:
+            results.append({"bot_id": b, "ok": False, "reason": "бот не найден среди ваших"})
+            continue
+        ok.append(b)
+        results.append({"bot_id": b, "username": r["username"], "ok": True,
+                        "reason": None if r["is_active"] else
+                        "бот отключён — сценарий заработает, когда его включат"})
+    if wanted and not ok:
+        raise ValueError("Ни один из выбранных ботов не найден среди ваших")
+    if ttype == "webhook" and len(ok) > 1:
+        raise ValueError("Входящий вебхук называет человека по номеру в одном боте: "
+                         "для сценария с вебхуком выберите одного бота")
+    await pool.execute(
+        """UPDATE workflow_definitions
+              SET bot_id=$3, bot_ids=$4::bigint[], updated_at=NOW()
+            WHERE id=$1 AND owner_id=$2""",
+        workflow_id, owner_id, ok[0] if ok else None, ok if len(ok) > 1 else None)
+    return {"bot_id": ok[0] if ok else None, "bot_ids": ok,
+            "connected": sum(1 for r in results if r["ok"]),
+            "skipped": sum(1 for r in results if not r["ok"]),
+            "results": results}
+
+
 # ── Проверка перед включением ───────────────────────────────────────────────
 # Включить можно было что угодно: сценарий без шагов, с сообщениями без бота,
 # с удалённым ботом — он числился «🟢 Активен» и не делал ничего, а владелец
@@ -715,7 +779,7 @@ async def activation_problems(pool: asyncpg.Pool, owner_id: int,
     'block' — включать нельзя (отказ с причиной), 'warn' — включить можно,
     но владелец должен увидеть предупреждение до включения."""
     row = await pool.fetchrow(
-        """SELECT steps, draft_steps, bot_id, trigger_type
+        """SELECT steps, draft_steps, bot_id, bot_ids, trigger_type
              FROM workflow_definitions WHERE id=$1 AND owner_id=$2""",
         workflow_id, owner_id)
     if row is None:
@@ -728,7 +792,22 @@ async def activation_problems(pool: asyncpg.Pool, owner_id: int,
     else:
         problems.extend(check_steps(steps, row["trigger_type"]))
     sends = any(isinstance(s, dict) and s.get("type") in _SENDS for s in steps)
-    if sends:
+    scope = [int(b) for b in (row["bot_ids"] or []) if b]
+    if sends and scope:
+        alive = {r["bot_id"] for r in await pool.fetch(
+            """SELECT bot_id FROM managed_bots
+                WHERE bot_id = ANY($1::bigint[]) AND added_by=$2 AND is_active=TRUE""",
+            scope, owner_id)}
+        dead = [b for b in scope if b not in alive]
+        if not alive:
+            problems.append({"level": "block",
+                             "text": "Все боты сценария отключены или удалены — "
+                                     "выберите работающих ботов"})
+        elif dead:
+            problems.append({"level": "warn",
+                             "text": f"Ботов сценария не работает: {len(dead)} из "
+                                     f"{len(scope)} — на них сценарий не запустится"})
+    elif sends:
         if row["bot_id"]:
             ok = await pool.fetchval(
                 """SELECT 1 FROM managed_bots
@@ -839,12 +918,15 @@ async def set_trigger(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     подписчикам ОДНОГО бота: сценарий без бота так не запустится никогда,
     и это отказ при сохранении, а не тихое «ничего не происходит»."""
     if trigger_type in ("inactive", "schedule", "webhook"):
-        bot_id = await pool.fetchval(
-            "SELECT bot_id FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
+        cur = await pool.fetchrow(
+            "SELECT bot_id, bot_ids FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
             workflow_id, owner_id)
-        if bot_id is None:
+        if cur is not None and cur["bot_id"] is None:
             raise ValueError("Этот способ запуска работает по подписчикам бота: "
                              "сначала привяжите сценарий к боту")
+        if trigger_type == "webhook" and cur is not None and len(cur["bot_ids"] or []) > 1:
+            raise ValueError("Входящий вебхук называет человека по номеру в одном боте: "
+                             "оставьте у сценария одного бота")
     res = await pool.execute(
         """UPDATE workflow_definitions
               SET trigger_type=$3, trigger_value=$4,

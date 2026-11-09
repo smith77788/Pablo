@@ -1098,6 +1098,7 @@ POST /api/miniapp/workflow/{wf_id}/resume
 POST /api/miniapp/workflow/{wf_id}/retry_failed
 POST /api/miniapp/workflows
 POST /api/miniapp/workflows/import
+POST /api/miniapp/workflows/{wf_id}/bots
 POST /api/miniapp/workflows/{wf_id}/copy
 POST /api/miniapp/workflows/{wf_id}/discard_draft
 POST /api/miniapp/workflows/{wf_id}/inbound_token
