@@ -244,6 +244,16 @@ def setup_routes(app: web.Application, pool) -> None:
             except Exception as _e:  # fail-soft: пульс не должен ронять список
                 log.debug("accounts health merge owner=%s: %s", uid, _e)
 
+        # Одна метка здоровья на строку (Работает / Пауза / Нужно действие /
+        # Потерян) — из пульса флота, тем же предикатом, что дверь выбора.
+        # Фронт рисует значок по ней, а не собирает его сам из шести оценок.
+        if not admin and rows:
+            try:
+                from services import account_verdict as _verdict
+                await _verdict.annotate(pool, uid, rows)
+            except Exception as _e:  # fail-soft: метка не должна ронять список
+                log.debug("accounts verdict owner=%s: %s", uid, _e)
+
         # Одно действие-лечение на строку. Считается ПОСЛЕ мержа пульса —
         # карантин/риск видны только оттуда. Список важнее подсказки: любая
         # ошибка здесь молча оставляет строки без кнопок.
