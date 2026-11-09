@@ -74,6 +74,17 @@ READY_MAX_LOOP_LAG_SEC = 5.0
 
 async def readiness_response(pool) -> web.Response:
     """Ответ проверки готовности: база + цикл событий. Никогда не бросает."""
+    body = await readiness(pool)
+    return web.json_response(body, status=200 if body["ok"] else 503,
+                             headers={"Cache-Control": "no-store"})
+
+
+async def readiness(pool) -> dict:
+    """Признаки готовности экземпляра: база отвечает и цикл событий не стоит.
+
+    Одна проверка на двоих: её отдаёт `/health/ready` внешнему монитору и по ней
+    же решает пульс `uptime_heartbeat`, слать ли «жив» или «сбой».
+    """
     import time
 
     from services import loop_lag
@@ -93,14 +104,12 @@ async def readiness_response(pool) -> web.Response:
     loop = loop_lag.snapshot()
     loop_ok = (not loop["running"]) or loop["max_lag_sec_1m"] < READY_MAX_LOOP_LAG_SEC
     ok = db_ok and loop_ok
-    body = {
+    return {
         "ok": ok,
         "db": {"ok": db_ok, "ms": db_ms},
         "loop": {"ok": loop_ok, "lag_sec": loop["lag_sec"],
                  "max_lag_sec_1m": loop["max_lag_sec_1m"]},
     }
-    return web.json_response(body, status=200 if ok else 503,
-                             headers={"Cache-Control": "no-store"})
 
 
 def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:

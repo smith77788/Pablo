@@ -683,6 +683,10 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
 
 async def main() -> None:
     install_button_style_patch()
+    # Ошибки во внешний сервис (SENTRY_DSN) — первым делом: падение на старте
+    # (миграции, пул) тоже должно до него доехать. Без переменной — ничего.
+    from services import observability as _observability
+    _observability.init_error_tracking()
 
     bot_session = AiohttpSession()
     # Проверка сертификата Telegram ВКЛЮЧЕНА: токен бота едет в каждом адресе
@@ -1283,6 +1287,11 @@ async def main() -> None:
         # (метрики) и, если цикл встал, снимает стек того, кто его держит.
         from services import loop_lag as _loop_lag
         _spawn(_web_resilient("loop_lag", _loop_lag.run))
+        # Пульс внешнему монитору (MONITOR_HEARTBEAT_URL) — во ВСЕХ ролях: он
+        # единственный сигнал, который ловит смерть процесса целиком. Без
+        # переменной не запускается (services/observability.py).
+        if _observability.heartbeat_url():
+            _spawn(_web_resilient("uptime_heartbeat", _observability.run_heartbeat, pool, http))
         # Сторож ЗАВИСШИХ сервисов: присмотр лечит падение, а повисший проход
         # (ожидание без потолка) снаружи неотличим от работающего. Раз в минуту
         # смотрит, на чём стоит каждый сервис; час на одном ожидании — админу.
