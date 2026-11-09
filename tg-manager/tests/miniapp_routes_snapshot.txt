@@ -374,6 +374,7 @@ GET /api/miniapp/widgets/templates
 GET /api/miniapp/workflow/run/{run_id}/log
 GET /api/miniapp/workflow/{wf_id}/status
 GET /api/miniapp/workflows
+GET /api/miniapp/workflows/templates
 GET /api/miniapp/workflows/{wf_id}
 GET /api/miniapp/workflows/{wf_id}/check
 GET /api/miniapp/workflows/{wf_id}/export
@@ -705,6 +706,7 @@ HEAD /api/miniapp/widgets/templates
 HEAD /api/miniapp/workflow/run/{run_id}/log
 HEAD /api/miniapp/workflow/{wf_id}/status
 HEAD /api/miniapp/workflows
+HEAD /api/miniapp/workflows/templates
 HEAD /api/miniapp/workflows/{wf_id}
 HEAD /api/miniapp/workflows/{wf_id}/check
 HEAD /api/miniapp/workflows/{wf_id}/export

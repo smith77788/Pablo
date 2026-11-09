@@ -479,7 +479,7 @@ async def execute_workflow(
         'SELECT * FROM workflow_definitions WHERE id = $1 AND owner_id = $2',
         workflow_id, owner_id)
     if not wf:
-        return {"ok": False, "error": "Воркфлоу не найден", "code": 404}
+        return {"ok": False, "error": "Сценарий не найден", "code": 404}
     wf = dict(wf)
     if wf.get("draft_steps") is not None:
         # Тестовый прогон проверяет то, что владелец сейчас собирает: черновик.
@@ -1047,7 +1047,7 @@ async def _set_active(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
     # воркфлоу либо не существует, либо принадлежит другому владельцу. Разницу
     # НЕ раскрываем: иначе по коду ответа можно перебирать чужие id.
     if isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0":
-        raise LookupError("Воркфлоу не найден")
+        raise LookupError("Сценарий не найден")
     return {"active": active}
 
 
