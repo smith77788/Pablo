@@ -68,6 +68,8 @@ def setup_routes(app: web.Application, pool) -> None:
         search = (q.get("search") or "").strip()[:100] or None
 
         cond, extra = _channel_filter_sql(kind, role, search, next_param=4)
+        from services import list_sort
+        order = list_sort.order_by("channels", q.get("sort"), q.get("dir"))
         rows = await _safe_fetch(pool,
             f"""WITH visible AS ({_CHANNELS_ONE_ROW_SQL})
                SELECT channel_id AS id, channel_id, username, title, member_count,
@@ -80,7 +82,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       END AS role
                FROM visible
                WHERE TRUE{cond}
-               ORDER BY member_count DESC NULLS LAST, channel_id
+               ORDER BY {order}, channel_id
                LIMIT $2 OFFSET $3""", uid, limit, offset, *extra)
         # Считаем ТО ЖЕ, что показывает список: он отдаёт DISTINCT channel_id, а
         # счётчик брал DISTINCT id (первичный ключ строки). Один и тот же канал

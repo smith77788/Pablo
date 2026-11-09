@@ -204,7 +204,7 @@ def setup_routes(app, pool) -> None:
     async def ai_draft(request):
         try:
             uid, thread, err = await _thread(request)
-            if err:
+            if err is not None:
                 return err
             msgs = thread.get("messages") or []
             out = await draft_reply(msgs, owner_id=uid)
@@ -217,7 +217,7 @@ def setup_routes(app, pool) -> None:
     async def ai_summary(request):
         try:
             uid, thread, err = await _thread(request)
-            if err:
+            if err is not None:
                 return err
             msgs = thread.get("messages") or []
             out = await summarize(msgs, owner_id=uid)

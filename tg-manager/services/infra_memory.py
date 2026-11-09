@@ -889,7 +889,72 @@ async def is_account_quarantined(pool, account_id: int, *, days: int = QUARANTIN
     return acc in await quarantined_accounts(pool, [acc], days=days)
 
 
-async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
+# Сводка пульса на главной: короткий кэш на владельца + один расчёт на всех
+# одновременных ждущих. При открытии главной сводку просят дашборд, итоги и
+# «требует внимания» почти одновременно, и каждый считал весь флот заново
+# (замер 08.11.2026: 10 владельцев открывают главную — 4,4 с до последнего
+# ответа, цикл событий процесса стоит до 0,3 с, а в нём же живёт бот).
+# Срок короткий: пульс — живой сигнал, а кэш ответов мини-аппа и так 30 с.
+# Действие владельца в мини-аппе сносит запись (`drop_health_summary`
+# зовётся из общего сброса кэша пользователя), так что своё действие он
+# видит сразу. Только сводка: поштучный вердикт по-прежнему считается свежим.
+HEALTH_SUMMARY_TTL_S = 10.0
+_health_summary_cache: dict[int, tuple[float, dict]] = {}
+_health_summary_inflight: dict[int, asyncio.Future] = {}
+
+
+def drop_health_summary(owner_id=None) -> None:
+    """Забыть сводку пульса владельца (None — всех)."""
+    if owner_id is None:
+        _health_summary_cache.clear()
+        return
+    try:
+        _health_summary_cache.pop(int(owner_id), None)
+    except (TypeError, ValueError):
+        pass
+
+
+async def get_account_health_summary(pool, owner_id: int) -> dict:
+    """Сводка пульса {healthy, at_risk, quarantine, total, avg_score}.
+
+    avg_score — средний балл пульса 0..1 (None, когда активных аккаунтов нет):
+    его выводит дашборд как «здоровье флота». Вердикт тот же, что у
+    `get_account_health` — это его итог, а не второй расчёт.
+    """
+    oid = int(owner_id or 0)
+    now = time.monotonic()
+    hit = _health_summary_cache.get(oid)
+    if hit and now - hit[0] < HEALTH_SUMMARY_TTL_S:
+        return dict(hit[1])
+    fut = _health_summary_inflight.get(oid)
+    if fut is not None:
+        return dict(await asyncio.shield(fut))
+    fut = asyncio.get_running_loop().create_future()
+    _health_summary_inflight[oid] = fut
+    try:
+        full = await get_account_health(pool, oid)
+        accs = full.get("accounts") or []
+        out = dict(full.get("summary") or {})
+        out["avg_score"] = (sum(float(a.get("score") or 0) for a in accs) / len(accs)
+                            if accs else None)
+        # Сбой расчёта отдаёт пустой ответ — его не запоминаем, иначе
+        # блип базы держал бы «0 аккаунтов» весь срок кэша. Пустой флот
+        # пересчитывается каждый раз: это один дешёвый запрос.
+        if accs:
+            _health_summary_cache[oid] = (time.monotonic(), out)
+        fut.set_result(out)
+        return dict(out)
+    except BaseException as e:
+        if not fut.done():
+            fut.set_exception(e)
+            fut.exception()  # пометить извлечённым: ждущих может не быть
+        raise
+    finally:
+        _health_summary_inflight.pop(oid, None)
+
+
+async def get_account_health(pool, owner_id: int, *, days: int = 7,
+                             account_ids=None) -> dict:
     """Риск-пульс всех активных аккаунтов владельца — единый сигнал здоровья.
 
     Агрегирует поверх иммунных таблиц (read-only, продюсеры не трогаем):
@@ -899,63 +964,92 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
     снял риск вручную (кнопка «Сбросить кулдаун»), и пульс обязан это показать.
     score 0..1 (1 = здоров). status: quarantine|at_risk|healthy.
     Возвращает {accounts:[...], summary:{healthy, at_risk, quarantine, total}}.
+
+    account_ids — посчитать пульс только для этих аккаунтов (тот же вердикт,
+    те же правила). Нужен странице списка: ей пульс нужен для 100 строк, а
+    считался для всего флота владельца — на 10 000 аккаунтов это ~200 мс на
+    каждую страницу и подгрузку. summary тогда описывает только эти id.
+    None — весь флот, как раньше. Пустой список — пустой ответ без запроса.
     """
     empty = {"accounts": [], "summary": {"healthy": 0, "at_risk": 0,
                                          "quarantine": 0, "total": 0}}
     if not pool or not owner_id:
         return empty
+    ids = None
+    if account_ids is not None:
+        ids = sorted({int(x) for x in account_ids})
+        if not ids:
+            return empty
     try:
+        # ОДИН проход по журналам вместо четырёх вложенных подзапросов на
+        # каждую строку флота. Замер 08.11.2026 на живой базе (10 000
+        # аккаунтов, 50 000 ограничений, 100 000 флудов): старая форма стоила
+        # ~120 мс SQL на КАЖДЫЙ вызов, а зовут его список аккаунтов, дашборд,
+        # итоги и «требует внимания» — при открытии главной 4–6 раз подряд.
+        # Окна те же: `restrictions`/`severe`/`floods` — за $2 дней,
+        # `severe_gate` — за $3 (окно гейта), и всё после risk_cleared_at.
+        # Эквивалентность старой форме держит
+        # tests/test_account_health_is_one_pass_postgres.py.
         rows = await pool.fetch(
             """
-            SELECT a.id, a.phone, COALESCE(a.acc_status,'active') AS acc_status,
-              a.trust_score,
-              -- Без строки сессии аккаунт не подключается НИ к чему: его не
-              -- берёт ни одна дверь выбора. Пульс об этом не спрашивал и
-              -- показывал такой аккаунт здоровым — та же ложь, что была со
-              -- спам-блоком, только причина ещё проще.
-              (a.session_str IS NOT NULL AND a.session_str <> '') AS has_session,
-              -- истёк ли кулдаун: acc_status='cooldown' с прошедшим окном НЕ риск
-              -- (само-heal в account_monitor чистит статус, но здесь окно закрываем
-              -- сразу, чтобы UI не держал «Под риском» до следующего цикла монитора)
-              (a.cooldown_until IS NOT NULL AND a.cooldown_until > NOW()) AS cd_active,
-              -- risk_cleared_at — владелец вручную снял риск («взять в работу»).
-              -- Тот же фильтр, что в is_account_quarantined: иначе операции
-              -- аккаунт уже берут, а пульс продолжает светить «Карантин», и
-              -- владелец видит ту же жалобу «кулдаун не сбрасывается».
-              -- История событий цела, новое ограничение снова уводит в карантин.
-              (SELECT COUNT(*) FROM restriction_events r
-                 WHERE r.account_id=a.id
-                   AND r.created_at > NOW() - make_interval(days => $2)
-                   AND (a.risk_cleared_at IS NULL
-                        OR r.created_at > a.risk_cleared_at)) AS restrictions,
-              (SELECT COUNT(*) FROM restriction_events r
-                 WHERE r.account_id=a.id
-                   AND r.created_at > NOW() - make_interval(days => $2)
-                   AND (a.risk_cleared_at IS NULL
-                        OR r.created_at > a.risk_cleared_at)
-                   AND (r.severity='critical' OR r.event_type ILIKE '%ban%'
-                        OR r.event_type ILIKE '%block%'
-                        OR r.event_type ILIKE '%restrict%')) AS severe,
-              -- То же серьёзное ограничение, но в окне ГЕЙТА ($3), а не экрана.
-              -- Вердикт «Карантин» стоит на нём: он обязан значить ровно то же,
-              -- что значит отказ дверей выбора взять аккаунт в работу.
-              (SELECT COUNT(*) FROM restriction_events r
-                 WHERE r.account_id=a.id
-                   AND r.created_at > NOW() - make_interval(days => $3)
-                   AND (a.risk_cleared_at IS NULL
-                        OR r.created_at > a.risk_cleared_at)
-                   AND (r.severity='critical' OR r.event_type ILIKE '%ban%'
-                        OR r.event_type ILIKE '%block%'
-                        OR r.event_type ILIKE '%restrict%')) AS severe_gate,
-              (SELECT COUNT(*) FROM account_flood_log f
-                 WHERE f.account_id=a.id
-                   AND f.created_at > NOW() - make_interval(days => $2)
-                   AND (a.risk_cleared_at IS NULL
-                        OR f.created_at > a.risk_cleared_at)) AS floods
-            FROM tg_accounts a
-            WHERE a.owner_id=$1 AND a.is_active=TRUE
+            WITH acc AS (
+              SELECT a.id, a.phone, COALESCE(a.acc_status,'active') AS acc_status,
+                a.trust_score,
+                -- Без строки сессии аккаунт не подключается НИ к чему: его не
+                -- берёт ни одна дверь выбора. Пульс об этом не спрашивал и
+                -- показывал такой аккаунт здоровым.
+                (a.session_str IS NOT NULL AND a.session_str <> '') AS has_session,
+                -- истёк ли кулдаун: acc_status='cooldown' с прошедшим окном НЕ риск
+                (a.cooldown_until IS NOT NULL AND a.cooldown_until > NOW()) AS cd_active,
+                -- risk_cleared_at — владелец вручную снял риск («взять в работу»).
+                -- Тот же фильтр, что в is_account_quarantined.
+                a.risk_cleared_at
+              FROM tg_accounts a
+              WHERE a.owner_id=$1 AND a.is_active=TRUE
+                AND ($4::int[] IS NULL OR a.id = ANY($4::int[]))
+            ),
+            re AS (
+              SELECT r.account_id,
+                COUNT(*) FILTER (
+                  WHERE r.created_at > NOW() - make_interval(days => $2)) AS restrictions,
+                COUNT(*) FILTER (
+                  WHERE r.created_at > NOW() - make_interval(days => $2)
+                    AND (r.severity='critical' OR r.event_type ILIKE '%ban%'
+                         OR r.event_type ILIKE '%block%'
+                         OR r.event_type ILIKE '%restrict%')) AS severe,
+                -- То же серьёзное ограничение, но в окне ГЕЙТА ($3), а не экрана.
+                -- Вердикт «Карантин» стоит на нём: он обязан значить ровно то же,
+                -- что значит отказ дверей выбора взять аккаунт в работу.
+                COUNT(*) FILTER (
+                  WHERE r.created_at > NOW() - make_interval(days => $3)
+                    AND (r.severity='critical' OR r.event_type ILIKE '%ban%'
+                         OR r.event_type ILIKE '%block%'
+                         OR r.event_type ILIKE '%restrict%')) AS severe_gate
+              FROM restriction_events r
+              JOIN acc a ON a.id = r.account_id
+              WHERE r.created_at > NOW() - make_interval(days => GREATEST($2, $3))
+                AND (a.risk_cleared_at IS NULL OR r.created_at > a.risk_cleared_at)
+              GROUP BY r.account_id
+            ),
+            fl AS (
+              SELECT f.account_id, COUNT(*) AS floods
+              FROM account_flood_log f
+              JOIN acc a ON a.id = f.account_id
+              WHERE f.created_at > NOW() - make_interval(days => $2)
+                AND (a.risk_cleared_at IS NULL OR f.created_at > a.risk_cleared_at)
+              GROUP BY f.account_id
+            )
+            SELECT a.id, a.phone, a.acc_status, a.trust_score, a.has_session,
+                   a.cd_active,
+                   COALESCE(re.restrictions, 0) AS restrictions,
+                   COALESCE(re.severe, 0) AS severe,
+                   COALESCE(re.severe_gate, 0) AS severe_gate,
+                   COALESCE(fl.floods, 0) AS floods
+            FROM acc a
+            LEFT JOIN re ON re.account_id = a.id
+            LEFT JOIN fl ON fl.account_id = a.id
             ORDER BY a.id
-            """, owner_id, days, QUARANTINE_DAYS)
+            """, owner_id, days, QUARANTINE_DAYS, ids)
     except Exception as e:
         log.warning("get_account_health owner=%s: %s", owner_id, e)
         return empty
