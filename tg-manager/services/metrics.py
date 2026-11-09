@@ -209,6 +209,9 @@ _HELP = {
     "infragram_op_stalls_total": "Операции, о застревании которых предупредили владельца",
     "infragram_session_deaths_total": "Смерти сессий (auth key убит)",
     "infragram_db_pool_connections": "Соединения пула БД",
+    "infragram_bot_stale_updates_skipped_total":
+        "Личные сообщения боту, пропущенные как устаревшие: пролежали у Telegram "
+        "дольше STALE_UPDATE_MAX_AGE_SEC, пока бот не работал",
 }
 
 

@@ -254,6 +254,9 @@ PROCESS_LOCAL: dict[str, str] = {
 # Производное состояние: расхождение стоит лишней работы или устаревшего
 # показания на экране, но не корректности и не доступа.
 CACHE: dict[str, str] = {
+    "services/managed_bot_webhooks.py:_probe_cache": (
+        "итог проверки «на угаданном адресе отвечает наш приёмник вебхуков» "
+        "(час / 10 мин); на другой реплике проверка просто повторится"),
     "services/infra_memory.py:_health_summary_cache": (
         "сводка пульса здоровья флота на владельца, 10 с; источник правды — "
         "restriction_events/account_flood_log/tg_accounts в БД. На другой "

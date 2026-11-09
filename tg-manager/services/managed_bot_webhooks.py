@@ -23,6 +23,14 @@
   * Включено, когда известен публичный HTTPS-адрес (PUBLIC_BASE_URL или
     адрес вебхука главного бота WEBHOOK_URL). MANAGED_BOTS_DELIVERY=polling
     возвращает всех ботов на опрос на следующем проходе.
+  * Если ни одной из двух переменных нет, адрес берётся из MINI_APP_URL, а
+    затем из RAILWAY_PUBLIC_DOMAIN. Раньше без PUBLIC_BASE_URL вебхуки не
+    включались вовсе, и все боты клиентов отвечали с задержкой до 10 секунд,
+    хотя публичный адрес у сервера был — мини-апп на нём и живёт. Такой
+    «угаданный» адрес сначала проверяется (`_guessed_base_is_ours`): на нём
+    должен отвечать именно наш приёмник вебхуков. Не отвечает — проход
+    сверки пропускается целиком, боты остаются как есть, а не снимаются с
+    вебхука из-за сетевого блипа.
 """
 from __future__ import annotations
 
@@ -66,20 +74,87 @@ def _make_secret(bot_token: str) -> str:
     return hashlib.sha256(bot_token.encode()).hexdigest()
 
 
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}" if parts.netloc else ""
+
+
+def _normalize(raw: str) -> str | None:
+    raw = (raw or "").strip().rstrip("/")
+    if raw.endswith("/miniapp"):
+        raw = raw[: -len("/miniapp")]
+    return raw if raw.startswith("https://") else None
+
+
 def base_url() -> str | None:
-    """Публичный HTTPS-адрес сервера или None (тогда только опрос)."""
+    """Публичный HTTPS-адрес, ЯВНО заданный для вебхуков, или None."""
     if os.getenv("MANAGED_BOTS_DELIVERY", "").strip().lower() == "polling":
         return None
     raw = (os.getenv("PUBLIC_BASE_URL", "") or "").strip()
     if not raw:
         main_hook = (os.getenv("WEBHOOK_URL", "") or "").strip()
         if main_hook:
-            parts = urlsplit(main_hook)
-            raw = f"{parts.scheme}://{parts.netloc}" if parts.netloc else ""
-    raw = raw.rstrip("/")
-    if raw.endswith("/miniapp"):
-        raw = raw[: -len("/miniapp")]
-    return raw if raw.startswith("https://") else None
+            raw = _origin(main_hook)
+    return _normalize(raw)
+
+
+def guessed_base_url() -> str | None:
+    """Адрес сервера, выведенный из MINI_APP_URL / RAILWAY_PUBLIC_DOMAIN.
+
+    Только когда явного адреса нет и опрос не включён принудительно. Перед
+    использованием его проверяет `_guessed_base_is_ours`: MINI_APP_URL может
+    указывать и на чужой хостинг страницы.
+    """
+    if os.getenv("MANAGED_BOTS_DELIVERY", "").strip().lower() == "polling":
+        return None
+    if base_url():
+        return None
+    mini = (os.getenv("MINI_APP_URL", "") or "").strip()
+    if mini:
+        got = _normalize(_origin(mini))
+        if got:
+            return got
+    domain = (os.getenv("RAILWAY_PUBLIC_DOMAIN", "") or "").strip().strip("/")
+    if domain and "/" not in domain and ":" not in domain:
+        return _normalize(f"https://{domain}")
+    return None
+
+
+# Итог проверки угаданного адреса: {адрес: (годен, monotonic-до)}.
+_probe_cache: dict[str, tuple[bool, float]] = {}
+_PROBE_OK_TTL = 3600.0
+_PROBE_FAIL_TTL = 600.0
+
+
+async def _guessed_base_is_ours(http: aiohttp.ClientSession, base: str) -> bool:
+    """На адресе отвечает НАШ приёмник вебхуков.
+
+    Стучимся в `/tgbot/hook/0` без секрета: наш обработчик отвечает ровно
+    401 «unauthorized», не трогая базу. Любой другой ответ (404 чужого
+    хостинга, страница-заглушка) — адрес не наш, вебхуки на него не ставим.
+    """
+    now = time.monotonic()
+    hit = _probe_cache.get(base)
+    if hit and hit[1] > now:
+        return hit[0]
+    ok = False
+    try:
+        async with http.post(
+            f"{base}{HOOK_PREFIX}0",
+            timeout=aiohttp.ClientTimeout(total=10),
+            allow_redirects=False,
+        ) as resp:
+            ok = resp.status == 401 and (await resp.text()).strip() == "unauthorized"
+    except Exception as e:  # noqa: BLE001 — сеть: просто «не подтверждён»
+        log.info("managed_bot_webhooks: проверка адреса %s не прошла: %s",
+                 base, type(e).__name__)
+    _probe_cache[base] = (ok, now + (_PROBE_OK_TTL if ok else _PROBE_FAIL_TTL))
+    if not ok:
+        log.warning(
+            "managed_bot_webhooks: по адресу %s не отвечает приёмник вебхуков — "
+            "боты остаются на опросе. Задайте PUBLIC_BASE_URL, если сервер "
+            "доступен по другому адресу.", base)
+    return ok
 
 
 def hook_url(base: str, bot_id: int) -> str:
@@ -172,6 +247,14 @@ async def sync(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> dict:
 
     stats = {"on": 0, "off": 0, "fallback": 0}
     base = base_url()
+    if not base:
+        guessed = guessed_base_url()
+        if guessed:
+            if not await _guessed_base_is_ours(http, guessed):
+                # Не подтвердили — ничего не меняем: снять всех с вебхука из-за
+                # сетевого блипа на проверке значило бы замедлить всех ботов.
+                return stats
+            base = guessed
     if not base:
         rows = await pool.fetch(
             "SELECT bot_id, token FROM managed_bots WHERE COALESCE(use_webhook,FALSE)")
