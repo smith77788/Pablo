@@ -462,45 +462,54 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(_INTERNAL_ERROR, 500)
 
     async def crm_contacts(request: web.Request) -> web.Response:
+        """Вкладка «Клиенты» модуля CRM — это «Контакты» (одна база людей).
+
+        До 09.11.2026 вкладка читала свою таблицу crm_contacts, а сделки,
+        воронка денег, когорты и рассылки по контактам — unified_contacts:
+        человек из «Клиентов» не попадал ни в одну сделку. Теперь список, поиск
+        и теги берутся из «Контактов» тем же get_contacts, что и экран
+        «Контакты» (одно условие для среза и счётчика). Старые клиенты туда
+        перенесены (contacts_hub/legacy_crm), новые зеркалятся при записи.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        search = (request.query.get("q") or "").strip()
-        tag = (request.query.get("tag") or "").strip()
+        search = (request.query.get("q") or "").strip() or None
+        tag = None if search else ((request.query.get("tag") or "").strip() or None)
         try:
             offset = max(0, int(request.query.get("offset", 0)))
         except (TypeError, ValueError):
             offset = 0
-        # Срез и счётчик обязаны стоять на ОДНОМ условии. Раньше `total` считал
-        # контакты без фильтра, и при поиске шапка писала «240 контактов» над
-        # тремя найденными, а кнопка «Показать ещё» (её фронт показывает, пока
-        # offset < total) не исчезала никогда: следующая страница отфильтрованной
-        # выборки пуста, список не растёт, кнопка стоит. Поэтому условие
-        # собирается ОДИН раз и подставляется в оба запроса — разойтись им негде.
-        cond = ["owner_id=$1"]
-        args: list = [uid]
-        if search:
-            args.append(f"%{search}%")
-            n = len(args)
-            cond.append(f"(first_name ILIKE ${n} OR last_name ILIKE ${n} "
-                        f"OR username ILIKE ${n} OR phone ILIKE ${n})")
-        elif tag:
-            args.append(tag)
-            cond.append(f"${len(args)}=ANY(tags)")
-        where = " AND ".join(cond)
-        rows = await _safe_fetch(pool,
-            f"""SELECT id, tg_user_id, username, first_name, last_name, phone,
-                       tags, notes, source, created_at
-                FROM crm_contacts WHERE {where}
-                ORDER BY created_at DESC, id LIMIT 50 OFFSET ${len(args) + 1}""",
-            *args, offset)
-        total = await _safe_count(
-            pool, f"SELECT COUNT(*) FROM crm_contacts WHERE {where}", *args)
-        # Unique tags across all contacts
+        from services.contacts_hub.repository import get_contacts
+        try:
+            page = await get_contacts(pool, uid, search=search, tag=tag,
+                                      sort_by="discovered", limit=50, offset=offset)
+        except Exception:
+            log.exception("crm_contacts uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        rows = []
+        for c in page["contacts"]:
+            phones = c.get("phones") or []
+            cf = c.get("custom_fields") or {}
+            rows.append({
+                "id": str(c["id"]),
+                "tg_user_id": c.get("telegram_user_id"),
+                "username": c.get("username"),
+                "first_name": c.get("first_name"),
+                "last_name": c.get("last_name"),
+                "phone": phones[0] if phones else None,
+                "tags": c.get("tags") or [],
+                "notes": c.get("notes") or None,
+                "source": ("CRM" if isinstance(cf, dict)
+                           and (cf.get("legacy_crm_id") or cf.get("crm_client")) else None),
+                "created_at": c.get("discovered_at") or c.get("created_at"),
+            })
         tags_row = await _safe_fetch(pool,
-            "SELECT DISTINCT unnest(tags) AS tag FROM crm_contacts WHERE owner_id=$1 ORDER BY tag", uid)
+            "SELECT DISTINCT unnest(tags) AS tag FROM unified_contacts "
+            "WHERE owner_id=$1 ORDER BY tag", uid)
         all_tags = [r["tag"] for r in tags_row]
-        return _json_resp({"contacts": rows, "total": total, "offset": offset, "all_tags": all_tags})
+        return _json_resp({"contacts": rows, "total": page["total"], "offset": offset,
+                           "all_tags": all_tags})
 
     async def crm_contact_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -519,54 +528,59 @@ def setup_routes(app: web.Application, pool) -> None:
         notes = str(data.get("notes", "")).strip() or None
         if not first_name and not username and not phone:
             return _err("Укажите имя, @username или номер телефона", 400)
-        tg_user_id = int(tg_user_id_raw) if tg_user_id_raw else None
-        if not tg_user_id:
-            import random as _rand
-            tg_user_id = _rand.randint(2_000_000_000, 9_000_000_000)
         try:
-            cid = await pool.fetchval(
-                """INSERT INTO crm_contacts
-                   (owner_id, tg_user_id, first_name, last_name, username, phone, tags, notes, source)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
-                   ON CONFLICT (owner_id, tg_user_id) DO UPDATE
-                     SET first_name=EXCLUDED.first_name,
-                         last_name=EXCLUDED.last_name,
-                         username=EXCLUDED.username,
-                         phone=EXCLUDED.phone,
-                         tags=EXCLUDED.tags,
-                         notes=EXCLUDED.notes,
-                         updated_at=now()
-                   RETURNING id""",
-                uid, tg_user_id, first_name or None, last_name, username, phone,
-                tags, notes,
-            )
-            # Шаг 1 сведения двух баз: клиент сразу появляется и в «Контактах».
-            from services.contacts_hub.legacy_crm import mirror_crm_contact
-            await mirror_crm_contact(
-                pool, uid, legacy_id=cid, tg_user_id=tg_user_id,
-                tg_is_real=bool(tg_user_id_raw), username=username,
-                first_name=first_name, last_name=last_name, phone=phone,
-                tags=tags, notes=notes)
-            return _json_resp({"id": cid, "ok": True})
-        except Exception:
-            log.exception("crm_contact_create uid=%d", uid)
+            tg_user_id = int(tg_user_id_raw) if tg_user_id_raw else None
+        except (TypeError, ValueError):
+            return _err("Telegram ID — это число", 400)
+        # Шаг 5 сведения двух баз: клиент пишется прямо в «Контакты», старая
+        # таблица crm_contacts больше не пополняется. Придуманный Telegram ID
+        # (раньше — случайное число, если поле пустое) больше не нужен.
+        from services.contacts_hub.legacy_crm import add_crm_client
+        cid = await add_crm_client(
+            pool, uid, tg_user_id=tg_user_id, username=username,
+            first_name=first_name, last_name=last_name, phone=phone,
+            tags=tags, notes=notes)
+        if not cid:
+            log.error("crm_contact_create uid=%d: контакт не сохранён", uid)
             return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"id": cid, "ok": True})
 
     async def crm_contact_delete(request: web.Request) -> web.Response:
+        """Удалить человека из «Клиентов» = из «Контактов» (база одна).
+
+        id — uuid контакта. Если у контакта есть пара в старой таблице
+        (custom_fields.legacy_crm_id), она удаляется тоже: иначе старые
+        читатели crm_contacts продолжали бы писать удалённому. Числовой id —
+        старая строка crm_contacts (страница, открытая до выкладки): удаляется
+        она и её зеркало.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        raw = (request.match_info.get("contact_id") or "").strip()
+        import uuid as _uuid
         try:
-            contact_id = int(request.match_info["contact_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор контакта", 400)
-        try:
-            await pool.execute(
-                "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", contact_id, uid
-            )
+            if raw.isdigit():
+                legacy_id = int(raw)
+                await pool.execute(
+                    "DELETE FROM unified_contacts WHERE owner_id=$1 "
+                    "AND custom_fields->>'legacy_crm_id' = $2::text", uid, str(legacy_id))
+                await pool.execute(
+                    "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", legacy_id, uid)
+                return _json_resp({"ok": True})
+            try:
+                cid = _uuid.UUID(raw)
+            except ValueError:
+                return _err("Неверный идентификатор контакта", 400)
+            legacy = await pool.fetchval(
+                "DELETE FROM unified_contacts WHERE id=$1 AND owner_id=$2 "
+                "RETURNING custom_fields->>'legacy_crm_id'", cid, uid)
+            if legacy and str(legacy).isdigit():
+                await pool.execute(
+                    "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", int(legacy), uid)
             return _json_resp({"ok": True})
         except Exception:
-            log.exception("crm_contact_delete uid=%d cid=%d", uid, contact_id)
+            log.exception("crm_contact_delete uid=%d id=%s", uid, raw[:40])
             return _err(_INTERNAL_ERROR, 500)
 
     async def delete_template(request: web.Request) -> web.Response:

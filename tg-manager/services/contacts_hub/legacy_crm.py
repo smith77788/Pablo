@@ -62,10 +62,15 @@ async def mirror_crm_contact(
 
 async def _mirror_on(conn, owner_id, legacy_id, tg_user_id, real_tg, username,
                      first_name, last_name, phone, tags, notes) -> tuple[str, bool]:
-    """Тело зеркала на взятом соединении: (id контакта, создан ли новый)."""
+    """Тело зеркала на взятом соединении: (id контакта, создан ли новый).
+
+    legacy_id=None — клиент, заведённый во вкладке «Клиенты» уже без старой
+    таблицы (шаг 5): метка у него `crm_client`, а не номер строки.
+    """
+    marker = ({"legacy_crm_id": int(legacy_id)} if legacy_id is not None
+              else {"crm_client": True})
     async with conn.transaction():
-        cid = await _find(conn, int(owner_id), int(legacy_id),
-                          real_tg, username, phone)
+        cid = await _find(conn, int(owner_id), legacy_id, real_tg, username, phone)
         if cid:
             await conn.execute(
                 """UPDATE unified_contacts SET
@@ -83,14 +88,13 @@ async def _mirror_on(conn, owner_id, legacy_id, tg_user_id, real_tg, username,
                        WHEN $9::text IS NULL
                          OR strpos(COALESCE(notes, ''), $9::text) > 0 THEN notes
                        ELSE concat_ws(E'\\n', NULLIF(notes, ''), $9::text) END,
-                     custom_fields = COALESCE(custom_fields, '{}'::jsonb)
-                       || jsonb_build_object('legacy_crm_id', $2::bigint),
+                     custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $2::jsonb,
                      updated_at = NOW()
                    WHERE id = $1""",
-                cid, int(legacy_id), first_name, last_name, username,
+                cid, json.dumps(marker), first_name, last_name, username,
                 real_tg, phone, tags, notes)
             return str(cid), False
-        extra = {"legacy_crm_id": int(legacy_id), "legacy_crm_created": True}
+        extra = {**marker, "legacy_crm_created": True}
         if tg_user_id and not real_tg:
             extra["legacy_tg_user_id"] = int(tg_user_id)
         display = " ".join(p for p in (first_name, last_name) if p) or username
@@ -107,11 +111,13 @@ async def _mirror_on(conn, owner_id, legacy_id, tg_user_id, real_tg, username,
         return str(new_id), True
 
 
-async def _find(conn, owner_id: int, legacy_id: int, real_tg, username, phone):
-    row = await conn.fetchrow(
-        "SELECT id FROM unified_contacts WHERE owner_id=$1 "
-        "AND custom_fields->>'legacy_crm_id' = $2::text LIMIT 1",
-        owner_id, str(legacy_id))
+async def _find(conn, owner_id: int, legacy_id, real_tg, username, phone):
+    row = None
+    if legacy_id is not None:
+        row = await conn.fetchrow(
+            "SELECT id FROM unified_contacts WHERE owner_id=$1 "
+            "AND custom_fields->>'legacy_crm_id' = $2::text LIMIT 1",
+            owner_id, str(legacy_id))
     if not row and real_tg:
         row = await conn.fetchrow(
             "SELECT id FROM unified_contacts WHERE owner_id=$1 "
@@ -157,6 +163,12 @@ async def backfill_legacy_crm(pool, *, dry_run: bool = False) -> dict[str, int]:
                  FROM crm_contacts c ORDER BY c.id""")
         tx = conn.transaction()
         await tx.start()
+        # Два веб-процесса на старте не переносят одно и то же вперегонки:
+        # второй видит занятый замок и выходит, ничего не тронув.
+        if not await conn.fetchval(
+                "SELECT pg_try_advisory_xact_lock(hashtext('legacy_crm_backfill'))"):
+            await tx.rollback()
+            return {**out, "busy": 1}
         try:
             for r in rows:
                 out["total"] += 1
@@ -183,3 +195,79 @@ async def backfill_legacy_crm(pool, *, dry_run: bool = False) -> dict[str, int]:
     log.info("Перенос «Клиентов» в «Контакты»%s: %s",
              " (пробный, откатан)" if dry_run else "", out)
     return out
+
+
+BACKFILL_KEY = "backfill:legacy_crm_v1"
+
+
+async def run_backfill_once(pool) -> dict[str, int] | None:
+    """Перенос на старте — один раз за жизнь базы (решение владельца 09.11.2026).
+
+    Отметка лежит в журнале `schema_migrations`, тем же способом, что и
+    инлайн-миграции. Отметка ставится, только если ни одна строка не упала:
+    иначе следующий старт повторит перенос (он идемпотентен). Fail-open: сбой
+    переноса не мешает приложению подняться.
+    """
+    try:
+        done = await pool.fetchval(
+            "SELECT 1 FROM schema_migrations WHERE filename=$1 AND status='ok'",
+            BACKFILL_KEY)
+        if done:
+            return None
+        res = await backfill_legacy_crm(pool)
+        if not res.get("failed") and not res.get("busy"):
+            await pool.execute(
+                """INSERT INTO schema_migrations(filename, status, error_count, applied_at)
+                   VALUES($1, 'ok', 0, now())
+                   ON CONFLICT (filename) DO UPDATE SET status='ok',
+                       error_count=0, applied_at=now()""", BACKFILL_KEY)
+        return res
+    except Exception:
+        log.warning("перенос «Клиентов» в «Контакты» не прошёл, повторится "
+                    "на следующем старте", exc_info=True)
+        return None
+
+
+# Аудитория «CRM» (старый тип рассылки и инвайта 'crm') — ЛЮДИ ИЗ «КЛИЕНТОВ»
+# внутри «Контактов»: у кого есть метка legacy_crm_id (перенесён из старой
+# таблицы) или crm_client (заведён во вкладке «Клиенты» после шага 5). Подзапрос отдаёт те же
+# колонки, что старая таблица (tg_user_id, username, first_name, last_name,
+# phone), поэтому читатели сменили только источник. Отличия от старой таблицы:
+#   * придуманный ID ручного клиента сюда не попадает — писать на него было
+#     некому, рассылка тратила на него попытку;
+#   * исключённые из рассылок (excluded) не попадают: старая таблица о них не
+#     знала, и личный контакт получал рассылку «по CRM».
+# Шаг 4 сведения двух баз (09.11.2026). Подставлять как `FROM {CRM_ROWS} c`.
+CRM_ROWS = (
+    "(SELECT id, owner_id, telegram_user_id AS tg_user_id, username, first_name, "
+    "last_name, phones->>0 AS phone, created_at FROM unified_contacts "
+    "WHERE (custom_fields ? 'legacy_crm_id' OR custom_fields ? 'crm_client') "
+    "AND excluded = FALSE)"
+)
+
+
+async def add_crm_client(pool, owner_id: int, *, tg_user_id=None, username=None,
+                         first_name=None, last_name=None, phone=None, tags=None,
+                         notes=None) -> str | None:
+    """Клиент из вкладки «Клиенты» или из бота — сразу в «Контакты» (шаг 5).
+
+    Старая таблица больше не пополняется. Telegram ID пишется, только если его
+    ввёл человек: придуманных ID больше нет. Тот же человек (по ID, @username,
+    телефону) не заводится второй раз — дополняется. None — не удалось.
+    """
+    if not pool or not owner_id:
+        return None
+    username = (_clean(username) or "").lstrip("@") or None
+    first_name, last_name = _clean(first_name), _clean(last_name)
+    phone, notes = _clean(phone), _clean(notes)
+    tags = [t for t in (_clean(t) for t in (tags or [])) if t]
+    real_tg = int(tg_user_id) if tg_user_id else None
+    try:
+        async with pool.acquire() as conn:
+            cid, _created = await _mirror_on(conn, int(owner_id), None, None, real_tg,
+                                             username, first_name, last_name,
+                                             phone, tags, notes)
+            return cid
+    except Exception:
+        log.warning("add_crm_client owner=%s", owner_id, exc_info=True)
+        return None

@@ -20,6 +20,7 @@ from bot.callbacks import DmCb, BmCb
 from bot.states import DmCampaignFSM
 from services import intelligence_engine
 from services.logger import log_exc_swallow
+from services.contacts_hub.legacy_crm import CRM_ROWS
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from bot.utils.event_status import mark_handled_error
@@ -901,7 +902,7 @@ async def _show_dm_preview(
     else:
         try:
             count_row = await pool.fetchrow(
-                "SELECT COUNT(DISTINCT tg_user_id) AS cnt FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
+                f"SELECT COUNT(DISTINCT tg_user_id) AS cnt FROM {CRM_ROWS} c WHERE owner_id=$1 AND tg_user_id > 0",
                 callback.from_user.id,
             )
         except Exception:
@@ -996,7 +997,7 @@ async def cb_dm_launch_or_draft(
             elif target_type == "crm":
                 audience_cnt = (
                     await pool.fetchval(
-                        "SELECT COUNT(DISTINCT tg_user_id) FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
+                        f"SELECT COUNT(DISTINCT tg_user_id) FROM {CRM_ROWS} c WHERE owner_id=$1 AND tg_user_id > 0",
                         callback.from_user.id,
                     )
                     or 0

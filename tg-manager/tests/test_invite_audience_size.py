@@ -60,7 +60,8 @@ def test_counts_every_source_the_executor_supports():
 def test_counter_matches_what_the_executor_loads():
     """Счётчик и исполнитель обязаны смотреть в одни и те же таблицы."""
     body, ex = _handler(), _exec_body()
-    for table in ("parsed_audiences", "crm_contacts", "bot_users"):
+    # «Клиенты» CRM живут в «Контактах»: оба берут их одним подзапросом CRM_ROWS.
+    for table in ("parsed_audiences", "CRM_ROWS", "bot_users"):
         assert table in body and table in ex, (
             f"{table}: счётчик и исполнитель разошлись по источнику данных"
         )

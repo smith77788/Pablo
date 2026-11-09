@@ -836,40 +836,18 @@ async def msg_contact_info(message: Message, state: FSMContext, pool: asyncpg.Po
         )
         return
 
-    # tg_user_id обязателен и UNIQUE(owner_id, tg_user_id) — для ручного контакта
-    # без реального Telegram ID генерируем синтетический (как в mini-app).
-    import random as _rand
-    tg_user_id = _rand.randint(2_000_000_000, 9_000_000_000)
+    # Шаг 5 сведения двух баз: клиент пишется прямо в «Контакты», старая
+    # таблица crm_contacts больше не пополняется (и придуманный ID не нужен).
+    from services.contacts_hub.legacy_crm import add_crm_client
     owner_id = message.from_user.id
-    try:
-        cid = await pool.fetchval(
-            """INSERT INTO crm_contacts
-               (owner_id, tg_user_id, first_name, last_name, username, phone, tags, notes, source)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
-               ON CONFLICT (owner_id, tg_user_id) DO UPDATE
-                 SET first_name=EXCLUDED.first_name,
-                     last_name=EXCLUDED.last_name,
-                     username=EXCLUDED.username,
-                     phone=EXCLUDED.phone,
-                     updated_at=now()
-               RETURNING id""",
-            owner_id, tg_user_id, first_name, last_name, username, phone, [], None,
-        )
-    except Exception as exc:
-        log.warning("crm contact_add uid=%s: %s", owner_id, exc)
+    cid = await add_crm_client(pool, owner_id, username=username,
+                               first_name=first_name, last_name=last_name, phone=phone)
+    if not cid:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ В CRM", callback_data=CrmCb(action="dashboard"))
-        await message.answer(
-            f"⚠️ Не удалось сохранить контакт: {html.escape(str(exc)[:150])}",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
-        )
+        await message.answer("⚠️ Не удалось сохранить контакт, попробуйте ещё раз.",
+                             reply_markup=kb.as_markup())
         return
-    # Шаг 1 сведения двух баз: клиент сразу появляется и в «Контактах».
-    # ID здесь всегда придуманный — в telegram_user_id он не попадёт.
-    from services.contacts_hub.legacy_crm import mirror_crm_contact
-    await mirror_crm_contact(
-        pool, owner_id, legacy_id=cid, tg_user_id=tg_user_id, tg_is_real=False,
-        username=username, first_name=first_name, last_name=last_name, phone=phone)
 
     disp = first_name or (f"@{username}" if username else phone)
     kb = InlineKeyboardBuilder()

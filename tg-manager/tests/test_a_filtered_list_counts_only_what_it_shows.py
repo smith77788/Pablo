@@ -1,6 +1,7 @@
 """Шапка и кнопка «Показать ещё» описывают ОТФИЛЬТРОВАННЫЙ список, а не весь.
 
-Экран контактов (CRM) ходит за страницей по 50 и рядом получает `total`. Срез
+Экран контактов (CRM → «Клиенты», с 09.11.2026 читает «Контакты» через
+contacts_hub.repository.get_contacts) ходит за страницей по 50 и рядом получает `total`. Срез
 по поиску и по метке считал только список, а `total` оставался числом ВСЕХ
 контактов владельца. Видно это было дважды:
 
@@ -95,7 +96,7 @@ def _where(q: str) -> set[str]:
     m = re.search(r"(?i)\bwhere\b(.*?)(?:\border\s+by\b|\blimit\b|$)", q,
                   re.DOTALL)
     assert m, f"в запросе нет WHERE: {' '.join(q.split())[:90]}"
-    return {" ".join(p.split()).lower()
+    return {re.sub(r"\s*=\s*", "=", " ".join(p.split()).lower())
             for p in re.split(r"(?i)\s+AND\s+(?![^(]*\))", m.group(1))
             if p.strip()}
 
@@ -105,7 +106,7 @@ def _page_and_count(pool) -> tuple[tuple[str, tuple], tuple[str, tuple]]:
     for q, a in pool.calls:
         if "LIMIT" in q and "COUNT(" not in q.upper():
             page = page or (q, a)
-        elif "COUNT(*)" in q.upper() and "crm_contacts" in q:
+        elif "COUNT(*)" in q.upper() and "unified_contacts" in q:
             count = count or (q, a)
     assert page, "запроса страницы не было — проверять нечего"
     assert count, "запроса счётчика не было — проверять нечего"
@@ -146,8 +147,8 @@ def test_the_filter_value_is_a_parameter_not_glued_sql():
     _call(pool, q="Иван'; DROP")
     (pq, pa), (cq, ca) = _page_and_count(pool)
     assert "DROP" not in pq and "DROP" not in cq, "строка поиска вклеена в SQL"
-    assert any("Иван" in str(x) for x in pa), "поиск не передан параметром"
-    assert any("Иван" in str(x) for x in ca), "счётчик не получил срез параметром"
+    assert any("иван" in str(x).lower() for x in pa), "поиск не передан параметром"
+    assert any("иван" in str(x).lower() for x in ca), "счётчик не получил срез параметром"
 
 
 # ── Почему это видно владельцу ──────────────────────────────────────────────

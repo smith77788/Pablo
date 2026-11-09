@@ -60,7 +60,7 @@ async def _scenario():
     pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
     try:
         await pool.execute("DELETE FROM parsed_audiences WHERE owner_id=$1", OWNER)
-        await pool.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER)
+        await pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER)
         rows = [  # (username, tg_user_id, is_bot, source_id)
             ("Ivan", 1, False, 100), ("ivan", 1, False, 200),  # повтор из двух каналов
             ("Olga", 2, False, 100), (None, 555, False, 100),   # приглашена / приглашён
@@ -73,9 +73,11 @@ async def _scenario():
                 "INSERT INTO parsed_audiences(owner_id, source_type, source_id, parse_run_id, "
                 "username, tg_user_id, is_bot) VALUES($1,'channel',$5,1,$2,$3,$4)",
                 OWNER, u, i, bot, src_id)
+        # «Клиенты» CRM — это «Контакты» с меткой legacy_crm_id (09.11.2026).
         await pool.execute(
-            "INSERT INTO crm_contacts(owner_id, username, tg_user_id) VALUES"
-            "($1,'Ivan',10),($1,NULL,11)", OWNER)
+            "INSERT INTO unified_contacts(owner_id, username, telegram_user_id, custom_fields)"
+            " VALUES ($1,'Ivan',10,'{\"legacy_crm_id\":1}'),($1,NULL,11,'{\"legacy_crm_id\":2}')",
+            OWNER)
         if await pool.fetchval("SELECT to_regclass('invite_target_log')"):
             await pool.execute("DELETE FROM invite_target_log WHERE owner_id=$1", OWNER)
         await idd.remember(pool, OWNER, ["@chan"], ["@OLGA", "555", "11"])
@@ -103,7 +105,7 @@ async def _scenario():
         return b, b_crm, len(keys), fresh
     finally:
         await pool.execute("DELETE FROM parsed_audiences WHERE owner_id=$1", OWNER)
-        await pool.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER)
+        await pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER)
         await pool.close()
 
 

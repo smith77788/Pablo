@@ -33,15 +33,17 @@ def _run(coro):
     return _LOOP.run_until_complete(coro)
 
 
-def test_both_write_paths_mirror_into_contacts():
-    """Без Postgres: обе двери записи в crm_contacts зовут зеркало."""
+def test_both_write_paths_go_straight_to_contacts():
+    """Без Postgres: обе двери записи «Клиентов» (форма мини-аппа и бот) пишут
+    в «Контакты» через add_crm_client, а старую таблицу не пополняет никто
+    (шаг 5). Новая запись в crm_contacts снова развела бы две базы."""
+    import re
     for rel in ("services/mini_app_broadcast.py", "bot/handlers/crm.py"):
         src = (ROOT / rel).read_text(encoding="utf-8")
-        assert src.count("INSERT INTO crm_contacts") == 1, rel
-        tail = src[src.index("INSERT INTO crm_contacts"):]
-        assert "await mirror_crm_contact(" in tail[:2500], (
-            f"{rel}: клиент пишется в старую базу, но не появляется в «Контактах»")
-    assert "tg_is_real=False" in (ROOT / "bot/handlers/crm.py").read_text(encoding="utf-8")
+        assert "await add_crm_client(" in src, rel
+    for path in list((ROOT / "services").rglob("*.py")) + list((ROOT / "bot").rglob("*.py")):
+        assert not re.search(r"INSERT\s+INTO\s+crm_contacts\b",
+                             path.read_text(encoding="utf-8")), path
 
 
 @pytest.fixture(scope="module")
@@ -164,3 +166,138 @@ def test_backfill_is_idempotent_and_dry_run_changes_nothing(pool):
     assert _run(pool.fetchval(
         "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1", OWNER)) == 3
     _run(pool.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER))
+
+
+def test_startup_backfill_runs_once_and_is_wired():
+    """Перенос подключён к старту веб-процесса и отмечается в журнале."""
+    src = (ROOT / "services/mini_app_api.py").read_text(encoding="utf-8")
+    hook = src[src.index("async def _apply_inline_migrations(application"):][:900]
+    assert "run_backfill_once(pool)" in hook
+
+
+def test_run_backfill_once_marks_journal(pool):
+    from services.contacts_hub.legacy_crm import BACKFILL_KEY, run_backfill_once
+    # Журнал заводит раннер миграций (database/db.py), а не schema_v*.sql.
+    _run(pool.execute(
+        """CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY,
+             status TEXT NOT NULL, error_count INT NOT NULL DEFAULT 0,
+             last_error TEXT, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"""))
+    _run(pool.execute("DELETE FROM schema_migrations WHERE filename=$1", BACKFILL_KEY))
+    first = _run(run_backfill_once(pool))
+    assert first is not None and first["failed"] == 0
+    assert _run(pool.fetchval(
+        "SELECT status FROM schema_migrations WHERE filename=$1", BACKFILL_KEY)) == "ok"
+    assert _run(run_backfill_once(pool)) is None, "перенос пошёл второй раз"
+    _run(pool.execute("DELETE FROM schema_migrations WHERE filename=$1", BACKFILL_KEY))
+
+
+def _call(pool, method, path, body=None):
+    """Позвать ручку /crm/* настоящим HTTP-запросом от имени OWNER."""
+    async def go():
+        from aiohttp import web
+        from aiohttp.test_utils import TestClient, TestServer
+
+        from services import mini_app_api as M
+        from services import mini_app_broadcast as B
+        orig = M._get_uid
+        M._get_uid = lambda r: OWNER
+        try:
+            app = web.Application()
+            B.setup_routes(app, pool)
+            client = TestClient(TestServer(app))
+            await client.start_server()
+            try:
+                resp = await client.request(method, path, json=body)
+                return resp.status, await resp.json()
+            finally:
+                await client.close()
+        finally:
+            M._get_uid = orig
+    return _run(go())
+
+
+def test_clients_tab_shows_contacts_and_deletes_from_both(pool):
+    """Шаг 3: вкладка «Клиенты» — это «Контакты». Человек, заведённый в
+    «Контактах», виден во вкладке; клиент, добавленный во вкладке, виден в
+    «Контактах»; удаление убирает его из обеих таблиц."""
+    _run(pool.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER))
+    _run(pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER))
+    _run(pool.execute(
+        "INSERT INTO unified_contacts (owner_id, username, first_name, tags) "
+        "VALUES ($1, 'from_hub', 'Из контактов', ARRAY['hub'])", OWNER))
+    st, d = _call(pool, "POST", "/api/miniapp/crm/contact",
+                  {"first_name": "Из вкладки", "phone": "+75550001122", "tags": ["crm"]})
+    assert st == 200, d
+    st, d = _call(pool, "GET", "/api/miniapp/crm/contacts")
+    assert st == 200, d
+    names = {c["first_name"] for c in d["contacts"]}
+    assert names == {"Из контактов", "Из вкладки"} and d["total"] == 2
+    assert set(d["all_tags"]) == {"hub", "crm"}
+    mine = next(c for c in d["contacts"] if c["first_name"] == "Из вкладки")
+    assert mine["phone"] == "+75550001122" and mine["source"] == "CRM"
+    st, d2 = _call(pool, "GET", "/api/miniapp/crm/contacts?q=" + "вкладки")
+    assert [c["first_name"] for c in d2["contacts"]] == ["Из вкладки"] and d2["total"] == 1
+    st, d3 = _call(pool, "GET", "/api/miniapp/crm/contacts?q=" + "5550001")
+    assert [c["first_name"] for c in d3["contacts"]] == ["Из вкладки"], "поиск по телефону пропал"
+    st, _ = _call(pool, "DELETE", "/api/miniapp/crm/contact/" + mine["id"])
+    assert st == 200
+    assert _run(pool.fetchval(
+        "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1", OWNER)) == 0, (
+        "в старой таблице остался удалённый — старые читатели напишут ему")
+    st, d = _call(pool, "GET", "/api/miniapp/crm/contacts")
+    assert [c["first_name"] for c in d["contacts"]] == ["Из контактов"]
+    st, _ = _call(pool, "DELETE", "/api/miniapp/crm/contact/not-a-uuid")
+    assert st == 400
+
+
+def test_nobody_reads_the_old_table_any_more():
+    """Шаг 4: старую таблицу читают только перенос (legacy_crm) и удаление во
+    вкладке «Клиенты», которое снимает пару строки вместе с контактом. Новый читатель crm_contacts снова
+    развёл бы две базы: «вижу во вкладке» и «пишу рассылкой» разошлись бы."""
+    import re
+    allowed = {"services/contacts_hub/legacy_crm.py", "services/mini_app_broadcast.py"}
+    bad = []
+    for path in list((ROOT / "services").rglob("*.py")) + list((ROOT / "bot").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in allowed:
+            continue
+        code = "\n".join(l for l in path.read_text(encoding="utf-8").splitlines()
+                         if not l.lstrip().startswith("#"))
+        if re.search(r"\b(FROM|JOIN|INTO|UPDATE)\s+crm_contacts\b", code):
+            bad.append(rel)
+    assert not bad, f"снова читают старую таблицу вместо «Контактов»: {bad}"
+    src = (ROOT / "services/mini_app_broadcast.py").read_text(encoding="utf-8")
+    body = src[src.index("async def crm_contacts("):src.index("async def crm_contact_create(")]
+    assert "FROM crm_contacts" not in body, "вкладка «Клиенты» снова читает старую таблицу"
+
+
+def test_crm_audience_is_clients_inside_contacts(pool):
+    """Аудитория «CRM» — люди с меткой из «Клиентов», с настоящим ID и не
+    исключённые из рассылок."""
+    from services.contacts_hub.legacy_crm import CRM_ROWS
+    _run(pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER))
+    _run(pool.execute(
+        """INSERT INTO unified_contacts (owner_id, telegram_user_id, first_name, custom_fields, excluded)
+           VALUES ($1, 6_000_000_001, 'клиент', '{"legacy_crm_id": 1}', FALSE),
+                  ($1, NULL,          'без id', '{"legacy_crm_id": 2}', FALSE),
+                  ($1, 6_000_000_003, 'исключён', '{"legacy_crm_id": 3}', TRUE),
+                  ($1, 6_000_000_004, 'не клиент', '{}', FALSE)""", OWNER))
+    ids = _run(pool.fetch(
+        f"SELECT tg_user_id FROM {CRM_ROWS} c WHERE owner_id=$1 AND tg_user_id > 0", OWNER))
+    assert [r["tg_user_id"] for r in ids] == [6_000_000_001]
+
+
+def test_clients_added_after_step5_are_crm_audience(pool):
+    """Клиент, заведённый во вкладке после шага 5, — в аудитории «CRM», без
+    придуманного ID; повтор с тем же @username не заводит второго."""
+    from services.contacts_hub.legacy_crm import CRM_ROWS, add_crm_client
+    _run(pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER))
+    a = _run(add_crm_client(pool, OWNER, tg_user_id=6_100_000_001, username="@neo",
+                            first_name="Нео", tags=["vip"]))
+    b = _run(add_crm_client(pool, OWNER, username="neo", phone="+70001112233"))
+    assert a and a == b, "тот же человек заведён дважды"
+    c = _run(add_crm_client(pool, OWNER, first_name="Без ID"))
+    rows = _run(pool.fetch(f"SELECT * FROM {CRM_ROWS} x WHERE owner_id=$1", OWNER))
+    assert {r["first_name"] for r in rows} == {"Нео", "Без ID"}
+    assert next(r for r in rows if r["first_name"] == "Без ID")["tg_user_id"] is None
+    assert c

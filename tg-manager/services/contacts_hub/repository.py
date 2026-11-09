@@ -111,6 +111,9 @@ def _segment_where(owner_id, f: dict):
                 f'username ILIKE ${idx} OR display_name ILIKE ${idx} OR '
                 f'CAST(telegram_user_id AS TEXT) ILIKE ${idx} OR '
                 f'notes ILIKE ${idx} OR company ILIKE ${idx} OR '
+                # Телефон: вкладка «Клиенты» CRM искала по нему, а теперь
+                # она читает эти же «Контакты» (одна база людей, 09.11.2026).
+                f'phones::text ILIKE ${idx} OR '
                 f'${idx + 1} = ANY(tags))')
             params.append(f'%{w}%')
             params.append(w)
