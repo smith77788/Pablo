@@ -14957,7 +14957,7 @@ async function loadCRM(append) {
       return;
     }
     const html = contacts.map(c=>{
-      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || (c.username?'@'+c.username:'Пользователь '+c.tg_user_id);
+      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || (c.username?'@'+c.username:(c.phone||(c.tg_user_id?'Пользователь '+c.tg_user_id:'Без имени')));
       const tags = (c.tags||[]).map(t=>`<span class="badge b-gy" style="font-size:10px">#${esc(t)}</span>`).join(' ');
       return `<div class="li">
         <div class="ava ava-red">👤</div>
@@ -14966,7 +14966,7 @@ async function loadCRM(append) {
           <div class="li-sub">${c.phone?esc(c.phone)+' · ':''} ${tags||'без тегов'} ${c.source?`· <span class="badge b-gy" style="font-size:10px">${esc(c.source)}</span>`:''}</div>
         </div>
         <div class="li-right">
-          <button class="icon-btn sm danger" onclick="deleteCrmContact(${c.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
+          <button class="icon-btn sm danger" onclick="deleteCrmContact('${escJs(String(c.id))}', this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>`;
     }).join('');

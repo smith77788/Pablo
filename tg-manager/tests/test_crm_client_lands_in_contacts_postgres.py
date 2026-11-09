@@ -187,3 +187,62 @@ def test_run_backfill_once_marks_journal(pool):
         "SELECT status FROM schema_migrations WHERE filename=$1", BACKFILL_KEY)) == "ok"
     assert _run(run_backfill_once(pool)) is None, "перенос пошёл второй раз"
     _run(pool.execute("DELETE FROM schema_migrations WHERE filename=$1", BACKFILL_KEY))
+
+
+def _call(pool, method, path, body=None):
+    """Позвать ручку /crm/* настоящим HTTP-запросом от имени OWNER."""
+    async def go():
+        from aiohttp import web
+        from aiohttp.test_utils import TestClient, TestServer
+
+        from services import mini_app_api as M
+        from services import mini_app_broadcast as B
+        orig = M._get_uid
+        M._get_uid = lambda r: OWNER
+        try:
+            app = web.Application()
+            B.setup_routes(app, pool)
+            client = TestClient(TestServer(app))
+            await client.start_server()
+            try:
+                resp = await client.request(method, path, json=body)
+                return resp.status, await resp.json()
+            finally:
+                await client.close()
+        finally:
+            M._get_uid = orig
+    return _run(go())
+
+
+def test_clients_tab_shows_contacts_and_deletes_from_both(pool):
+    """Шаг 3: вкладка «Клиенты» — это «Контакты». Человек, заведённый в
+    «Контактах», виден во вкладке; клиент, добавленный во вкладке, виден в
+    «Контактах»; удаление убирает его из обеих таблиц."""
+    _run(pool.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER))
+    _run(pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER))
+    _run(pool.execute(
+        "INSERT INTO unified_contacts (owner_id, username, first_name, tags) "
+        "VALUES ($1, 'from_hub', 'Из контактов', ARRAY['hub'])", OWNER))
+    st, d = _call(pool, "POST", "/api/miniapp/crm/contact",
+                  {"first_name": "Из вкладки", "phone": "+75550001122", "tags": ["crm"]})
+    assert st == 200, d
+    st, d = _call(pool, "GET", "/api/miniapp/crm/contacts")
+    assert st == 200, d
+    names = {c["first_name"] for c in d["contacts"]}
+    assert names == {"Из контактов", "Из вкладки"} and d["total"] == 2
+    assert set(d["all_tags"]) == {"hub", "crm"}
+    mine = next(c for c in d["contacts"] if c["first_name"] == "Из вкладки")
+    assert mine["phone"] == "+75550001122" and mine["source"] == "CRM"
+    st, d2 = _call(pool, "GET", "/api/miniapp/crm/contacts?q=" + "вкладки")
+    assert [c["first_name"] for c in d2["contacts"]] == ["Из вкладки"] and d2["total"] == 1
+    st, d3 = _call(pool, "GET", "/api/miniapp/crm/contacts?q=" + "5550001")
+    assert [c["first_name"] for c in d3["contacts"]] == ["Из вкладки"], "поиск по телефону пропал"
+    st, _ = _call(pool, "DELETE", "/api/miniapp/crm/contact/" + mine["id"])
+    assert st == 200
+    assert _run(pool.fetchval(
+        "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1", OWNER)) == 0, (
+        "в старой таблице остался удалённый — старые читатели напишут ему")
+    st, d = _call(pool, "GET", "/api/miniapp/crm/contacts")
+    assert [c["first_name"] for c in d["contacts"]] == ["Из контактов"]
+    st, _ = _call(pool, "DELETE", "/api/miniapp/crm/contact/not-a-uuid")
+    assert st == 400
