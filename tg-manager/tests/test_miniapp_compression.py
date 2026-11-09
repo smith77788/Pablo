@@ -63,7 +63,14 @@ def _served(path) -> bytes:
     from services import miniapp_minify as mm
     src = open(path, encoding="utf-8").read()
     p = str(path)
-    fn = mm.minify_html if p.endswith(".html") else mm.strip_js if p.endswith(".js") else mm.strip_css
+    if p.endswith(".html"):
+        # Страница уходит со ссылками `?v=<версия>` на свои скрипты и стили
+        # (services/miniapp_assets.py) — ровно это и сравниваем.
+        from services import miniapp_assets as ma
+        html = mm.minify_html(src)
+        return ma.stamp_versions(
+            html, ma.versions_for(os.path.dirname(p), html)).encode("utf-8")
+    fn = mm.strip_js if p.endswith(".js") else mm.strip_css
     return fn(src).encode("utf-8")
 
 
@@ -156,3 +163,57 @@ async def test_asset_route_does_not_escape_the_folder(client):
 async def test_other_static_still_served(client):
     r = await client.get("/miniapp/manifest.webmanifest")
     assert r.status == 200
+
+
+# ── Повторное открытие без сети ──────────────────────────────────────────────
+# Замер 08.11.2026 (Chromium, процессор ×4, мобильная сеть 150 мс): повторное
+# открытие главной стоило ~1,5 с, из них 36 перепроверок скриптов и стилей по
+# сети, по одной задержке на файл. Теперь ссылки несут версию файла, ответ на
+# адрес с текущей версией кэшируется навсегда, и повторное открытие берёт их
+# из кэша браузера: ~0,8 с.
+
+async def test_page_links_carry_file_versions(client):
+    from services import miniapp_assets as ma
+    r = await client.get("/miniapp", headers={"Accept-Encoding": "identity"})
+    html = (await r.read()).decode("utf-8")
+    assert r.headers.get("Cache-Control") == "no-cache", "страница обязана перепроверяться"
+    import re
+    stamped = re.findall(r'(?:src|href)="[A-Za-z0-9_\-/.]+\.(?:js|css)\?v=[0-9a-f]+"', html)
+    assert len(stamped) > 10, "ссылки на скрипты экранов без версии"
+    # asset_refs находит только ссылки БЕЗ версии — их не должно остаться.
+    unversioned = ma.asset_refs(html)
+    assert not unversioned, f"ссылки без версии перепроверяются на каждом открытии: {unversioned}"
+
+
+async def test_versioned_asset_is_cached_forever_and_bare_is_not(client):
+    from services import miniapp_assets as ma
+    rel = "screens/ui_kit.js"
+    v = ma.version_token(os.path.join(ROOT, "mini_app", rel))
+    r = await client.get(f"/miniapp/{rel}?v={v}", headers={"Accept-Encoding": "gzip"})
+    assert r.status == 200
+    assert "immutable" in r.headers.get("Cache-Control", "")
+    # Без версии или со старой — по-прежнему с перепроверкой: адрес без
+    # отпечатка может завтра отдать другой файл.
+    for q in ("", "?v=deadbeef"):
+        r = await client.get(f"/miniapp/{rel}{q}", headers={"Accept-Encoding": "gzip"})
+        assert r.headers.get("Cache-Control") == "no-cache", q
+
+
+async def test_page_etag_changes_when_only_a_screen_script_changes(client):
+    """Деплой, поменявший один скрипт экрана, обязан поменять ETag страницы.
+
+    Иначе браузер получит 304 на страницу со СТАРЫМИ ссылками, а старый адрес
+    закэширован навсегда — экран застрял бы на прошлой версии.
+    """
+    rel = os.path.join(ROOT, "mini_app", "screens", "ui_kit.js")
+    r1 = await client.get("/miniapp", headers={"Accept-Encoding": "gzip"})
+    e1 = r1.headers.get("ETag")
+    st = os.stat(rel)
+    try:
+        os.utime(rel, (st.st_atime, st.st_mtime + 7))
+        r2 = await client.get("/miniapp", headers={"Accept-Encoding": "gzip",
+                                                    "If-None-Match": e1})
+        assert r2.status == 200, "страница отдала 304 со старыми ссылками"
+        assert r2.headers.get("ETag") != e1
+    finally:
+        os.utime(rel, (st.st_atime, st.st_mtime))

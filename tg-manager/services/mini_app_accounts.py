@@ -32,6 +32,12 @@ import re
 from aiohttp import web
 
 
+# Потолок «применить ко всему срезу». Было 5000 — меньше, чем флот у крупных
+# владельцев; сверх потолка операция честно сообщает, сколько не вошло (поле
+# capped в ответе). Совпадает с FLEET_MASS_CAP в mini_app/screens/fleet_tools.js.
+MASS_CAP = 20000
+
+
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
     from services.mini_app_api import (
@@ -43,8 +49,18 @@ def setup_routes(app: web.Application, pool) -> None:
     )
     from services.security import validate_string
 
+    def _mass_cap() -> int:
+        # Читаем при каждом вызове: тест подменяет потолок на маленький.
+        return MASS_CAP
+
+    def _norm_tag(raw) -> str:
+        """Тег: без решётки и крайних пробелов, нижний регистр, до 32 символов."""
+        t = str(raw or "").strip().lstrip("#").strip().lower()
+        t = re.sub(r"\s+", " ", t)
+        return t[:32]
+
     def _accounts_where(uid: int, flt: str, stage: str, q: str, admin: bool = False,
-                        acc_pool: str = "", geo: str = "") -> tuple[str, list]:
+                        acc_pool: str = "", geo: str = "", tag: str = "") -> tuple[str, list]:
         """Собрать WHERE + args для списка аккаунтов из фильтра здоровья, CRM-статуса
         и поиска. Возвращает (sql_where, args). Серверная фильтрация снимает
         100-лимит клиента: срез считается по ВСЕЙ таблице, не по загруженной странице.
@@ -109,6 +125,12 @@ def setup_routes(app: web.Application, pool) -> None:
             clauses.append(
                 "COALESCE((SELECT UPPER(p.geo_country) FROM user_proxies p "
                 "WHERE p.id = tg_accounts.proxy_id), 'UNKNOWN') = ${}".format(len(args)))
+        # Тег (schema_v314): аккаунт в срезе, если на нём есть эта метка.
+        if tag:
+            args.append(tag)
+            clauses.append(
+                "EXISTS (SELECT 1 FROM account_tags t WHERE t.account_id = tg_accounts.id "
+                "AND t.tag = ${})".format(len(args)))
         return " AND ".join(clauses), args
 
     async def accounts(request: web.Request) -> web.Response:
@@ -130,6 +152,9 @@ def setup_routes(app: web.Application, pool) -> None:
         q = (qs.get("q") or "").strip()[:64]
         acc_pool = (qs.get("pool") or "").strip()[:64]
         acc_geo = _geo_code(qs.get("geo"))
+        acc_tag = _norm_tag(qs.get("tag"))
+        from services import list_sort
+        order = list_sort.order_by("accounts", qs.get("sort"), qs.get("dir"))
         try:
             offset = max(0, int(qs.get("offset", 0)))
         except (TypeError, ValueError):
@@ -141,7 +166,7 @@ def setup_routes(app: web.Application, pool) -> None:
 
         # admin=True — межтенантный просмотр всех аккаунтов платформы (без owner-скоупа).
         where, args = _accounts_where(uid, flt, stage, q, admin=admin,
-                                      acc_pool=acc_pool, geo=acc_geo)
+                                      acc_pool=acc_pool, geo=acc_geo, tag=acc_tag)
         page_args = args + [limit, offset]
         rows = await _safe_fetch(pool,
             f"""SELECT id, phone, first_name, username, is_active, last_used, added_at,
@@ -149,7 +174,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       -- (фронт рендерит как «${{trust}}%»). Без *100 всё было ~1%.
                       ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until, cluster, stage,
+                      cooldown_until, cluster, stage, pool,
                       -- Без сессии аккаунт не берёт ни одна операция (условие
                       -- двери выбора). Строке это тоже нужно: иначе экран
                       -- показывает «Активен» там, где работать нечем.
@@ -169,7 +194,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       (SELECT COUNT(*) FROM managed_bots mb
                         WHERE mb.acc_id = tg_accounts.id) AS bots_owned
                FROM tg_accounts WHERE {where}
-               ORDER BY is_active DESC, last_used DESC NULLS LAST, id
+               ORDER BY {order}, id
                LIMIT ${len(args)+1} OFFSET ${len(args)+2}""", *page_args)
         # Сколько всего под текущим фильтром — для пагинации «Загрузить ещё».
         filtered_total = await _safe_count(pool,
@@ -184,10 +209,25 @@ def setup_routes(app: web.Application, pool) -> None:
         # хотя активны»). Мержим health_status в каждую строку (owner-scoped;
         # для admin межтенантного просмотра пропускаем — health по своим).
         rows = [dict(r) for r in (rows or [])]
+        # Теги строк страницы — одним запросом. Без таблицы (миграция не
+        # прошла) список работает как раньше, просто без тегов.
+        if rows:
+            tag_rows = await _safe_fetch(pool,
+                "SELECT account_id, tag FROM account_tags WHERE account_id = ANY($1::bigint[]) "
+                "ORDER BY tag", [int(r["id"]) for r in rows])
+            tmap: dict[int, list[str]] = {}
+            for t in (tag_rows or []):
+                tmap.setdefault(int(t["account_id"]), []).append(t["tag"])
+            for r in rows:
+                r["tags"] = tmap.get(int(r["id"]), [])
         if not admin and rows:
             try:
                 from services.infra_memory import get_account_health
-                _hp = await get_account_health(pool, uid)
+                # Пульс только для строк этой страницы: вердикт тот же, а
+                # считать весь флот ради ста строк стоило ~200 мс на каждую
+                # страницу и подгрузку при 10 000 аккаунтов (замер 08.11.2026).
+                _hp = await get_account_health(
+                    pool, uid, account_ids=[r["id"] for r in rows])
                 _hmap = {a["account_id"]: a for a in _hp.get("accounts", [])}
                 for r in rows:
                     h = _hmap.get(r["id"])
@@ -272,8 +312,19 @@ def setup_routes(app: web.Application, pool) -> None:
                 "filtered_total": filtered_total,
                 "has_more": offset + len(rows) < filtered_total,
                 "filter": flt, "stage": stage, "q": q, "pool": acc_pool,
+                "tag": acc_tag, "sort": qs.get("sort") or "default",
             },
         })
+
+    async def accounts_tags(request: web.Request) -> web.Response:
+        """Теги владельца с числом аккаунтов — для чипов фильтра и подсказок."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            "SELECT tag, COUNT(*) AS n FROM account_tags WHERE owner_id=$1 "
+            "GROUP BY tag ORDER BY COUNT(*) DESC, tag LIMIT 200", uid)
+        return _json_resp({"tags": [{"tag": r["tag"], "count": int(r["n"])} for r in (rows or [])]})
 
     async def account_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -337,7 +388,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not admin:
             try:
                 from services.infra_memory import get_account_health
-                _hp = await get_account_health(pool, uid)
+                _hp = await get_account_health(pool, uid, account_ids=[acc_id])
                 health = next((a for a in _hp.get("accounts", [])
                                if a["account_id"] == acc_id), None)
             except Exception as _e:
@@ -558,6 +609,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # чтобы админ случайно не оперировал над чужими. Платформенный срез —
         # только явным {"scope":"platform"} в теле.
         admin = _body_wants_platform_scope(uid, body)
+        capped = 0
         # Режим «применить ко всему срезу»: id берём не из загруженной страницы,
         # а резолвим весь набор под текущим фильтром на сервере (тот же WHERE, что
         # и список) со скоупом owner/admin. Снимает 100-лимит для масс-операций.
@@ -576,11 +628,22 @@ def setup_routes(app: web.Application, pool) -> None:
             # То же и про срез по стране: иначе «применить ко всему срезу»
             # ушло бы по всему флоту, а владелец видел одну страну.
             bgeo = _geo_code(body.get("geo"))
+            btag = _norm_tag(body.get("tag"))
             where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin,
-                                           acc_pool=bpool, geo=bgeo)
+                                           acc_pool=bpool, geo=bgeo, tag=btag)
+            # Потолок выборки — MASS_CAP. Сколько под фильтром сверх него,
+            # отдаём в ответе (capped): операция не должна молча взять
+            # меньше, чем видел владелец.
             owned = await _safe_fetch(pool,
-                f"SELECT id FROM tg_accounts WHERE {where} ORDER BY id LIMIT 5000", *wargs)
+                f"SELECT id FROM tg_accounts WHERE {where} ORDER BY id LIMIT {_mass_cap() + 1}",
+                *wargs)
             ids = [int(r["id"]) for r in (owned or [])]
+            cap = _mass_cap()
+            if len(ids) > cap:
+                total_under = await _safe_count(pool,
+                    f"SELECT COUNT(*) FROM tg_accounts WHERE {where}", *wargs)
+                capped = max(0, int(total_under or 0) - cap)
+                ids = ids[:cap]
             if not ids:
                 return _err("Под фильтром нет аккаунтов", 404)
         else:
@@ -600,6 +663,20 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Аккаунты не найдены", 404)
         n = len(ids)
         try:
+            if op in ("add_tag", "remove_tag"):
+                tag = _norm_tag(body.get("value") or body.get("tag_value"))
+                if not tag:
+                    return _err("Укажите тег", 400)
+                if op == "add_tag":
+                    await pool.execute(
+                        "INSERT INTO account_tags(account_id, tag, owner_id) "
+                        "SELECT a.id, $2, a.owner_id FROM tg_accounts a WHERE a.id = ANY($1::bigint[]) "
+                        "ON CONFLICT DO NOTHING", ids, tag)
+                else:
+                    await pool.execute(
+                        "DELETE FROM account_tags WHERE account_id = ANY($1::bigint[]) AND tag = $2",
+                        ids, tag)
+                return _json_resp({"ok": True, "count": n, "tag": tag, "capped": capped})
             if op == "check":
                 _params = {"account_ids": ids, "check_spambot": True}
                 if admin:
@@ -609,12 +686,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 op_id = await _obus.submit(
                     pool, uid, "check_accounts_health", _params,
                     total_items=n, label=f"Проверка · аккаунтов: {n}")
-                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+                return _json_resp({"ok": True, "op_id": op_id, "count": n, "capped": capped})
             if op == "scan":
                 op_id = await _obus.submit(
                     pool, uid, "scan_owned_resources", {"account_ids": ids},
                     total_items=n, label=f"Скан ресурсов: {n} акк.")
-                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+                return _json_resp({"ok": True, "op_id": op_id, "count": n, "capped": capped})
             if op == "set_stage":
                 # Пере­мещение в CRM-статус — чистое DB-действие, без очереди/Telethon.
                 raw = body.get("stage")
@@ -624,7 +701,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 await pool.execute(
                     "UPDATE tg_accounts SET stage=$1 WHERE owner_id=$2 AND id=ANY($3::bigint[])",
                     stage, uid, ids)
-                return _json_resp({"ok": True, "count": n, "stage": stage})
+                return _json_resp({"ok": True, "count": n, "stage": stage, "capped": capped})
             if op == "detach_proxy":
                 # Снять прокси у выбранных аккаунтов — чтобы работать БЕЗ прокси
                 # (прямое соединение). Чистое DB-действие. После этого аккаунт
@@ -632,7 +709,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 await pool.execute(
                     "UPDATE tg_accounts SET proxy_id=NULL WHERE owner_id=$1 AND id=ANY($2::bigint[])",
                     uid, ids)
-                return _json_resp({"ok": True, "count": n})
+                return _json_resp({"ok": True, "count": n, "capped": capped})
             if op == "delete":
                 # Жёсткое удаление аккаунтов (напр. массово — невоскрешаемые:
                 # фильтр 'dead'). Необратимо. Связанные строки: часть таблиц имеет
@@ -657,7 +734,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     await record_manual_action(
                         pool, uid, "accounts_bulk_delete",
                         target=",".join(str(i) for i in ids[:50]))
-                return _json_resp({"ok": True, "count": deleted})
+                return _json_resp({"ok": True, "count": deleted, "capped": capped})
             if op == "leave_all":
                 # leave_all_chats — по одному аккаунту, ставим N операций
                 op_ids = []
@@ -666,7 +743,7 @@ def setup_routes(app: web.Application, pool) -> None:
                         pool, uid, "leave_all_chats", {"account_id": aid},
                         total_items=1, label=f"Выход из всех чатов (акк. {aid})")
                     op_ids.append(int(oid))
-                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+                return _json_resp({"ok": True, "op_ids": op_ids, "count": n, "capped": capped})
             if op in ("name", "avatar", "2fa", "username", "bio", "close_sessions", "privacy",
                       "clear_bio", "remove_username", "remove_avatar", "reset_2fa",
                       "set_online", "check_restriction"):
@@ -676,7 +753,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 op_id = await _obus.submit(
                     pool, uid, "profile_setter", params,
                     total_items=n, label=f"{label}: {n} акк.")
-                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+                return _json_resp({"ok": True, "op_id": op_id, "count": n, "capped": capped})
             return _err("Неизвестная операция", 400)
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -1702,6 +1779,18 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("accounts_health uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def accounts_survival(request: web.Request) -> web.Response:
+        """Выживаемость флота: доля потерь за 7 и 30 дней, причины, тренд."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.account_survival import fetch_survival
+            return _json_resp(await fetch_survival(pool, uid))
+        except Exception:
+            log.exception("accounts_survival uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def _resolve_proxy_url(_uid: int, proxy_id) -> tuple[int | None, str | None]:
         """proxy_id → (validated_proxy_id, proxy_url) со скоупом по владельцу."""
         try:
@@ -2035,6 +2124,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/accounts/revive", accounts_revive)
     app.router.add_get("/api/miniapp/accounts", accounts)
     app.router.add_get("/api/miniapp/accounts/export", accounts_export)
+    app.router.add_get("/api/miniapp/accounts/tags", accounts_tags)
     app.router.add_get("/api/miniapp/account/{acc_id}", account_detail)
     app.router.add_post("/api/miniapp/account/{acc_id}/warmup/start", start_warmup)
     app.router.add_post("/api/miniapp/account/{acc_id}/warmup/pause", pause_warmup)
@@ -2062,6 +2152,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/meta", account_set_meta)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_get("/api/miniapp/accounts/health", accounts_health)
+    app.router.add_get("/api/miniapp/accounts/survival", accounts_survival)
     app.router.add_post("/api/miniapp/account/add/phone/start", account_add_phone_start)
     app.router.add_post("/api/miniapp/account/add/phone/code", account_add_phone_code)
     app.router.add_post("/api/miniapp/account/add/phone/2fa", account_add_phone_2fa)

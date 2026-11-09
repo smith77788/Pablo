@@ -79,16 +79,21 @@ def setup_routes(app: web.Application, pool) -> None:
                LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
                WHERE ({visible})
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active{group}
-               ORDER BY subscriber_count DESC, mb.bot_id LIMIT $2 OFFSET $3"""
+               ORDER BY {order}, mb.bot_id LIMIT $2 OFFSET $3"""
+        from services import list_sort
+        order = list_sort.order_by("bots", q.get("sort"), q.get("dir"))
         try:
             rows = await pool.fetch(
                 _BOTS_SQL.format(health=_BOT_HEALTH_COLS, visible=_BOTS_VISIBLE_SQL,
-                                 group=",\n mb.last_error, mb.fail_streak, mb.last_ok_at, mb.extra_username"),
+                                 group=",\n mb.last_error, mb.fail_streak, mb.last_ok_at, mb.extra_username",
+                                 order=order),
                 uid, limit, offset)
         except Exception:
             log.warning("bots uid=%d: нет колонок здоровья, показываем список без них", uid)
+            # Без колонок здоровья сортировать по сбоям нечем — порядок по умолчанию.
             rows = await _safe_fetch(
-                pool, _BOTS_SQL.format(health="", visible=_BOTS_VISIBLE_SQL, group=""),
+                pool, _BOTS_SQL.format(health="", visible=_BOTS_VISIBLE_SQL, group="",
+                                       order=list_sort.order_by("bots", None)),
                 uid, limit, offset)
         # Честное состояние каждого бота. Раньше бот с отозванным токеном
         # выглядел здесь ровно как рабочий: подписчики ему писали, ответа не

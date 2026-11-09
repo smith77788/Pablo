@@ -64,7 +64,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # (он owner-scoped), поэтому там health-aware SQL по всей платформе,
         # считающий ТЕ ЖЕ durable-сигналы: мёртвый статус/нет сессии → 0,
         # активный кулдаун → 35, иначе доверие минус штраф за флуды.
-        from services.infra_memory import get_account_health as _get_health
+        from services.infra_memory import get_account_health_summary as _get_health
         _health_sql = (
             """SELECT ROUND(AVG(
                     CASE
@@ -159,13 +159,12 @@ def setup_routes(app: web.Application, pool) -> None:
         if _adm:
             stats["acc_health"] = int(r["acc_health"]) if r.get("acc_health") is not None else 100
         else:
+            # Средний балл пульса считает сама сводка (короткий кэш на
+            # владельца, один расчёт на всю главную) — тот же итог, что
+            # раньше считался здесь по всему списку аккаунтов.
             _pulse = r.get("pulse") or {}
-            _paccs = _pulse.get("accounts") or []
-            if _paccs:
-                stats["acc_health"] = int(round(
-                    sum(float(a.get("score") or 0) for a in _paccs) / len(_paccs) * 100))
-            else:
-                stats["acc_health"] = 100
+            _avg = _pulse.get("avg_score")
+            stats["acc_health"] = int(round(float(_avg) * 100)) if _avg is not None else 100
         stats["queue_backlog"] = int(r["queue_backlog"] or 0)
         stats["ops_failed"] = int(r["ops_failed"] or 0)
         return _json_resp(stats)

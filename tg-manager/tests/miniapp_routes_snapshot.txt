@@ -48,6 +48,7 @@ DELETE /api/miniapp/uch/segments/{seg_id}
 DELETE /api/miniapp/uch/smart-tags/rules/{rule_id}
 DELETE /api/miniapp/va/channel/{cid}/media/{mid}
 DELETE /api/miniapp/va/references/{rid}
+DELETE /api/miniapp/views/{view_id}
 DELETE /api/miniapp/warmup/{plan_id}
 DELETE /api/miniapp/webhooks/{wh_id}
 DELETE /api/miniapp/workflow/{wf_id}
@@ -67,6 +68,8 @@ GET /api/miniapp/accounts
 GET /api/miniapp/accounts/export
 GET /api/miniapp/accounts/export_json
 GET /api/miniapp/accounts/health
+GET /api/miniapp/accounts/survival
+GET /api/miniapp/accounts/tags
 GET /api/miniapp/ad_intel
 GET /api/miniapp/admin/actions
 GET /api/miniapp/admin/audit
@@ -362,6 +365,7 @@ GET /api/miniapp/vault/recent
 GET /api/miniapp/vault/search
 GET /api/miniapp/vault/settings
 GET /api/miniapp/vault/status
+GET /api/miniapp/views
 GET /api/miniapp/vlayer/analytics
 GET /api/miniapp/vlayer/entity/{entity_type}/{entity_id}
 GET /api/miniapp/vlayer/overview
@@ -399,6 +403,8 @@ HEAD /api/miniapp/accounts
 HEAD /api/miniapp/accounts/export
 HEAD /api/miniapp/accounts/export_json
 HEAD /api/miniapp/accounts/health
+HEAD /api/miniapp/accounts/survival
+HEAD /api/miniapp/accounts/tags
 HEAD /api/miniapp/ad_intel
 HEAD /api/miniapp/admin/actions
 HEAD /api/miniapp/admin/audit
@@ -694,6 +700,7 @@ HEAD /api/miniapp/vault/recent
 HEAD /api/miniapp/vault/search
 HEAD /api/miniapp/vault/settings
 HEAD /api/miniapp/vault/status
+HEAD /api/miniapp/views
 HEAD /api/miniapp/vlayer/analytics
 HEAD /api/miniapp/vlayer/entity/{entity_type}/{entity_id}
 HEAD /api/miniapp/vlayer/overview
@@ -975,6 +982,7 @@ POST /api/miniapp/promo/order
 POST /api/miniapp/promo/order/{order_id}/boost
 POST /api/miniapp/promo/order/{order_id}/cancel
 POST /api/miniapp/promo/warehouse/bot
+POST /api/miniapp/proxies/bulk
 POST /api/miniapp/proxies/check_all
 POST /api/miniapp/proxies/import
 POST /api/miniapp/proxy
@@ -1075,6 +1083,7 @@ POST /api/miniapp/va/drafts/{did}/reject
 POST /api/miniapp/va/references/{rid}/refresh
 POST /api/miniapp/vault/chat/{chat_id}/reply
 POST /api/miniapp/vault/settings
+POST /api/miniapp/views
 POST /api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased
 POST /api/miniapp/warmup
 POST /api/miniapp/warmup/bulk_start

@@ -81,3 +81,14 @@ def test_second_build_is_rejected(dispatcher):
 
     with pytest.raises(RuntimeError, match="already attached"):
         main.build_dispatcher(MemoryStorage())
+
+
+def test_stale_private_messages_are_filtered_first(dispatcher):
+    """Сообщения, накопленные за перезапуск, не выбрасываются целиком
+    (`drop_pending_updates` снят): отсекается только давнее личное, и это
+    первый слой — до антифлуда, базы и обработчиков."""
+    from bot.middlewares.stale_update import StaleUpdateMiddleware
+
+    outer = list(dispatcher.message.outer_middleware)
+    assert outer and isinstance(outer[0], StaleUpdateMiddleware), (
+        "фильтр устаревших сообщений не стоит первым на dp.message")
