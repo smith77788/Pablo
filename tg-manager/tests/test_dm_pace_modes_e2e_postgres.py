@@ -103,7 +103,7 @@ def telegram(monkeypatch):
 
 async def _seed(p, pace):
     await p.execute("DELETE FROM dm_campaigns WHERE owner_id=$1", OWNER)
-    await p.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER)
+    await p.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER)
     await p.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER)
     for i in range(2):
         await p.execute(
@@ -112,8 +112,10 @@ async def _seed(p, pace):
             OWNER, f"+7996{i:07d}", f"sess{i}", f"Acc{i}")
     for i in range(CONTACTS):
         await p.execute(
-            "INSERT INTO crm_contacts(owner_id,tg_user_id,username) VALUES($1,$2,$3)",
-            OWNER, 610000 + i, f"u{i}")
+            # «Клиенты» CRM — «Контакты» с меткой legacy_crm_id (09.11.2026).
+            "INSERT INTO unified_contacts(owner_id,telegram_user_id,username,custom_fields)"
+            " VALUES($1,$2,$3,jsonb_build_object('legacy_crm_id',$4::int))",
+            OWNER, 610000 + i, f"u{i}", i + 1)
     params = {"quiet_hours": False}
     if pace is not None:
         params["pace"] = pace

@@ -5468,8 +5468,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         WHERE ua.bot_id=$1 AND {_COHORT_SQL[cohort_type]}""",
                     int(target_id), uid)
             elif target_type == "crm":
+                from services.contacts_hub.legacy_crm import CRM_ROWS
                 total_targets = await _safe_count(pool,
-                    "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0", uid)
+                    f"SELECT COUNT(*) FROM {CRM_ROWS} c WHERE owner_id=$1 AND tg_user_id > 0", uid)
             elif target_type == "segment" and _segment_filters is not None:
                 from services.contacts_hub import repository as _repo
                 total_targets = await _repo.count_segment(pool, uid, _segment_filters)

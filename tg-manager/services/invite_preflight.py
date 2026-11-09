@@ -330,7 +330,8 @@ async def audience_breakdown(pool, owner_id: int, source: str, group: str = "",
         args.extend(fp)
         src = f"SELECT {key} AS k FROM parsed_audiences WHERE {where}{fsql}"
     elif source == "crm":
-        src = f"SELECT {key} AS k FROM crm_contacts WHERE owner_id=$1"
+        from services.contacts_hub.legacy_crm import CRM_ROWS
+        src = f"SELECT {key} AS k FROM {CRM_ROWS} c WHERE owner_id=$1"
     else:
         src = (f"SELECT {key} AS k FROM bot_users bu JOIN managed_bots mb "
                "ON mb.bot_id = bu.bot_id WHERE mb.added_by=$1 AND bu.is_active=TRUE")

@@ -220,3 +220,19 @@ async def run_backfill_once(pool) -> dict[str, int] | None:
         log.warning("перенос «Клиентов» в «Контакты» не прошёл, повторится "
                     "на следующем старте", exc_info=True)
         return None
+
+
+# Аудитория «CRM» (старый тип рассылки и инвайта 'crm') — ЛЮДИ ИЗ «КЛИЕНТОВ»
+# внутри «Контактов»: у кого есть метка legacy_crm_id. Подзапрос отдаёт те же
+# колонки, что старая таблица (tg_user_id, username, first_name, last_name,
+# phone), поэтому читатели сменили только источник. Отличия от старой таблицы:
+#   * придуманный ID ручного клиента сюда не попадает — писать на него было
+#     некому, рассылка тратила на него попытку;
+#   * исключённые из рассылок (excluded) не попадают: старая таблица о них не
+#     знала, и личный контакт получал рассылку «по CRM».
+# Шаг 4 сведения двух баз (09.11.2026). Подставлять как `FROM {CRM_ROWS} c`.
+CRM_ROWS = (
+    "(SELECT id, owner_id, telegram_user_id AS tg_user_id, username, first_name, "
+    "last_name, phones->>0 AS phone, created_at FROM unified_contacts "
+    "WHERE custom_fields ? 'legacy_crm_id' AND excluded = FALSE)"
+)

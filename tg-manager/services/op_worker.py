@@ -19777,9 +19777,10 @@ async def _exec_mass_invite(
             # человек из одного канала. Подробности — в interleave_by_source.
             user_refs = interleave_by_source(_pairs)
         elif source == "crm":
+            from services.contacts_hub.legacy_crm import CRM_ROWS
             _pairs = await _page_source(
-                "SELECT username, tg_user_id, phone FROM crm_contacts WHERE owner_id=$1 "
-                "ORDER BY id DESC", owner_id)
+                f"SELECT username, tg_user_id, phone FROM {CRM_ROWS} c WHERE owner_id=$1 "
+                "ORDER BY created_at DESC, id DESC", owner_id)
             for ref, _ in _pairs:
                 (phones if str(ref).startswith("+") else user_refs).append(ref)
         elif source == "segment":

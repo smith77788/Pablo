@@ -267,15 +267,16 @@ def setup_routes(app: web.Application, pool) -> None:
         )
         # Имя получателя вместо голого id: «id 783215441» владельцу ничего не
         # говорит, а имя у нас почти всегда есть — цели берутся из CRM или из
-        # спарсенной аудитории, и обе таблицы хранят имя и @username.
+        # спарсенной аудитории, и обе таблицы хранят имя и @username. «Клиенты»
+        # CRM с 09.11.2026 живут в «Контактах» — имя берётся оттуда.
         recent = await _safe_fetch(
             pool,
             """SELECT l.tg_user_id, l.status, l.error_msg, l.sent_at,
                       COALESCE(c.first_name, p.first_name) AS name,
                       COALESCE(c.username, p.username)     AS username
                  FROM dm_campaign_log l
-            LEFT JOIN LATERAL (SELECT first_name, username FROM crm_contacts
-                                WHERE owner_id=$2 AND tg_user_id=l.tg_user_id
+            LEFT JOIN LATERAL (SELECT first_name, username FROM unified_contacts
+                                WHERE owner_id=$2 AND telegram_user_id=l.tg_user_id
                                 LIMIT 1) c ON TRUE
             LEFT JOIN LATERAL (SELECT first_name, username FROM parsed_audiences
                                 WHERE owner_id=$2 AND tg_user_id=l.tg_user_id
@@ -354,8 +355,8 @@ def setup_routes(app: web.Application, pool) -> None:
                        COALESCE(c.first_name, p.first_name) AS name,
                        COALESCE(c.username, p.username)     AS username
                   FROM dm_campaign_log l
-             LEFT JOIN LATERAL (SELECT first_name, username FROM crm_contacts
-                                 WHERE owner_id=$2 AND tg_user_id=l.tg_user_id
+             LEFT JOIN LATERAL (SELECT first_name, username FROM unified_contacts
+                                 WHERE owner_id=$2 AND telegram_user_id=l.tg_user_id
                                  LIMIT 1) c ON TRUE
              LEFT JOIN LATERAL (SELECT first_name, username FROM parsed_audiences
                                  WHERE owner_id=$2 AND tg_user_id=l.tg_user_id

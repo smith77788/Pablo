@@ -83,7 +83,7 @@ class _Stand:
 
     async def seed(self, *, accounts=2, parsed=0, crm=0):
         p = self.pool
-        for t in ("operation_queue", "parsed_audiences", "crm_contacts", "invite_target_log"):
+        for t in ("operation_queue", "parsed_audiences", "unified_contacts", "invite_target_log"):
             try:
                 await p.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWNER)
             except Exception:
@@ -103,8 +103,10 @@ class _Stand:
                 "tg_user_id,username) VALUES($1,'channel',$2,$3,$4)",
                 OWNER, "ch_a" if i % 2 else "ch_b", 810000 + i, f"p{i}")
         for i in range(crm):
-            await p.execute("INSERT INTO crm_contacts(owner_id,tg_user_id,username) "
-                            "VALUES($1,$2,$3)", OWNER, 710000 + i, f"c{i}")
+            # «Клиенты» CRM — это «Контакты» с меткой legacy_crm_id (09.11.2026).
+            await p.execute("INSERT INTO unified_contacts(owner_id,telegram_user_id,username,"
+                            "custom_fields) VALUES($1,$2,$3,jsonb_build_object('legacy_crm_id',$4::int))",
+                            OWNER, 710000 + i, f"c{i}", i + 1)
         self.sent.clear()
         self.per_acc.clear()
         self.flooder = ids[0] if ids else None

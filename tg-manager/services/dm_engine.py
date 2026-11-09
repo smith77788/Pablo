@@ -843,9 +843,11 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             if r["user_id"] not in sent_ids
         ]
     elif target_type == "crm":
+        # «Клиенты» теперь живут в «Контактах» (contacts_hub/legacy_crm).
+        from services.contacts_hub.legacy_crm import CRM_ROWS
         rows = await pool.fetch(
             "SELECT DISTINCT ON (tg_user_id) tg_user_id, username, first_name "
-            "FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0 "
+            f"FROM {CRM_ROWS} c WHERE owner_id=$1 AND tg_user_id > 0 "
             "AND tg_user_id " + (_EXCLUDE_SENT % 2) +
             f" ORDER BY tg_user_id LIMIT {_MAX_CAMPAIGN_TARGETS}",
             campaign["owner_id"], campaign_id,

@@ -120,15 +120,17 @@ class _Stand:
         return ids
 
     async def seed_crm_campaign(self, *, contacts=5):
-        """Кампания по crm-источнику: аккаунты + crm_contacts + строка dm_campaigns."""
+        """Кампания по crm-источнику: аккаунты + «Клиенты» (в «Контактах» с
+        меткой legacy_crm_id, с 09.11.2026) + строка dm_campaigns."""
         p = self.pool
         await self.seed(accounts=2)
-        await p.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER)
+        await p.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER)
         await p.execute("DELETE FROM dm_campaigns WHERE owner_id=$1", OWNER)
         for i in range(contacts):
             await p.execute(
-                "INSERT INTO crm_contacts(owner_id,tg_user_id,username) VALUES($1,$2,$3)",
-                OWNER, 600000 + i, f"u{i}")
+                "INSERT INTO unified_contacts(owner_id,telegram_user_id,username,custom_fields)"
+                " VALUES($1,$2,$3,jsonb_build_object('legacy_crm_id',$4::int))",
+                OWNER, 600000 + i, f"u{i}", i + 1)
         return await p.fetchval(
             "INSERT INTO dm_campaigns(owner_id,name,text_template,target_type,status) "
             "VALUES($1,'e2e','Привет','crm','pending') RETURNING id", OWNER)

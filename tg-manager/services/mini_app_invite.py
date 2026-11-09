@@ -313,9 +313,10 @@ def setup_routes(app: web.Application, pool) -> None:
                         uid)
                 hint = "Соберите аудиторию в «Парсер аудитории» — оттуда она попадёт сюда."
             elif source == "crm":
+                from services.contacts_hub.legacy_crm import CRM_ROWS
                 total = await _safe_count(
                     pool,
-                    "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1 "
+                    f"SELECT COUNT(*) FROM {CRM_ROWS} c WHERE owner_id=$1 "
                     "AND (username IS NOT NULL OR tg_user_id IS NOT NULL OR phone IS NOT NULL)",
                     uid)
                 hint = "Добавьте контакты в CRM или импортируйте их."

@@ -246,3 +246,41 @@ def test_clients_tab_shows_contacts_and_deletes_from_both(pool):
     assert [c["first_name"] for c in d["contacts"]] == ["Из контактов"]
     st, _ = _call(pool, "DELETE", "/api/miniapp/crm/contact/not-a-uuid")
     assert st == 400
+
+
+def test_nobody_reads_the_old_table_any_more():
+    """Шаг 4: старую таблицу читают только мост и обе двери записи, которые
+    держат её в паре с «Контактами». Новый читатель crm_contacts снова
+    развёл бы две базы: «вижу во вкладке» и «пишу рассылкой» разошлись бы."""
+    import re
+    allowed = {"services/contacts_hub/legacy_crm.py", "services/mini_app_broadcast.py",
+               "bot/handlers/crm.py"}
+    bad = []
+    for path in list((ROOT / "services").rglob("*.py")) + list((ROOT / "bot").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in allowed:
+            continue
+        code = "\n".join(l for l in path.read_text(encoding="utf-8").splitlines()
+                         if not l.lstrip().startswith("#"))
+        if re.search(r"\b(FROM|JOIN|INTO|UPDATE)\s+crm_contacts\b", code):
+            bad.append(rel)
+    assert not bad, f"снова читают старую таблицу вместо «Контактов»: {bad}"
+    src = (ROOT / "services/mini_app_broadcast.py").read_text(encoding="utf-8")
+    body = src[src.index("async def crm_contacts("):src.index("async def crm_contact_create(")]
+    assert "FROM crm_contacts" not in body, "вкладка «Клиенты» снова читает старую таблицу"
+
+
+def test_crm_audience_is_clients_inside_contacts(pool):
+    """Аудитория «CRM» — люди с меткой из «Клиентов», с настоящим ID и не
+    исключённые из рассылок."""
+    from services.contacts_hub.legacy_crm import CRM_ROWS
+    _run(pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER))
+    _run(pool.execute(
+        """INSERT INTO unified_contacts (owner_id, telegram_user_id, first_name, custom_fields, excluded)
+           VALUES ($1, 6_000_000_001, 'клиент', '{"legacy_crm_id": 1}', FALSE),
+                  ($1, NULL,          'без id', '{"legacy_crm_id": 2}', FALSE),
+                  ($1, 6_000_000_003, 'исключён', '{"legacy_crm_id": 3}', TRUE),
+                  ($1, 6_000_000_004, 'не клиент', '{}', FALSE)""", OWNER))
+    ids = _run(pool.fetch(
+        f"SELECT tg_user_id FROM {CRM_ROWS} c WHERE owner_id=$1 AND tg_user_id > 0", OWNER))
+    assert [r["tg_user_id"] for r in ids] == [6_000_000_001]

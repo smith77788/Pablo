@@ -71,9 +71,10 @@ def test_recent_sends_show_a_name_not_a_bare_id():
 
 
 def test_backend_resolves_the_name_for_recent():
-    """Имя берётся из CRM и спарсенной аудитории по tg_user_id владельца."""
+    """Имя берётся из «Контактов» (там и «Клиенты» CRM с 09.11.2026) и
+    спарсенной аудитории по tg_user_id владельца."""
     h = _handler("dm_campaign_report")
-    assert "crm_contacts" in h, "имя из CRM не ищется"
+    assert "unified_contacts" in h, "имя из «Контактов»/CRM не ищется"
     assert "parsed_audiences" in h, "имя из спарсенной аудитории не ищется"
     # Скоуп по владельцу обязателен: иначе имя подтянется из чужой базы.
     assert h.count("owner_id=$2") >= 2, h[-900:]
