@@ -19,6 +19,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.callbacks import ProxyCb, BmCb
 from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from bot.keyboards import subscription_locked_markup
@@ -181,7 +182,8 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         kb.button(text="➕ Добавить прокси", callback_data=ProxyCb(action="add"))
     else:
-        for row in rows:
+        _shown = _cap(rows)
+        for row in _shown:
             if row["is_alive"] is True:
                 status = "✅"
             elif row["is_alive"] is False:
@@ -223,6 +225,7 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 text=f"🗑 {html.escape(label[:18])}",
                 callback_data=ProxyCb(action="delete", proxy_id=row["id"]),
             )
+        _cap_note(kb, rows, _shown, what="proxy")
 
     kb.button(text="◀️ Назад", callback_data=ProxyCb(action="menu"))
     kb.adjust(2)

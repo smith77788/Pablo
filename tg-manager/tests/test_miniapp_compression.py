@@ -217,3 +217,62 @@ async def test_page_etag_changes_when_only_a_screen_script_changes(client):
         assert r2.headers.get("ETag") != e1
     finally:
         os.utime(rel, (st.st_atime, st.st_mtime))
+
+
+# ── Brotli ───────────────────────────────────────────────────────────────────
+# Замер 09.11.2026 (3G 1,6 Мбит/с, CPU 4x): готовая главная 4,3 → 3,6 с.
+# Страница 420 → 299 КБ, до первого экрана 616 → 497 КБ. Сжатие идёт в фоне,
+# пока не готово — gzip (services/miniapp_brotli.py).
+
+async def _wait_br(client, path, ae="gzip, deflate, br"):
+    import asyncio
+    for _ in range(400):
+        r = await client.get(path, headers={"Accept-Encoding": ae})
+        body = await r.read()
+        if r.headers.get("Content-Encoding") == "br":
+            return r, body
+        assert r.headers.get("Content-Encoding") == "gzip", "пока brotli не готов — gzip"
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{path}: brotli так и не появился")
+
+
+async def test_index_is_brotli_once_ready_and_same_page(client):
+    brotli = pytest.importorskip("brotli")
+    r, body = await _wait_br(client, "/miniapp")
+    assert brotli.decompress(body) == _served(INDEX)
+    assert r.headers.get("Vary") == "Accept-Encoding"
+    gz = await (await client.get("/miniapp", headers={"Accept-Encoding": "gzip"})).read()
+    assert len(body) < len(gz) * 0.85, f"brotli {len(body)} против gzip {len(gz)}"
+    # Клиент без br по-прежнему получает gzip: кэш brotli ему не отдаётся.
+    r2 = await client.get("/miniapp", headers={"Accept-Encoding": "gzip"})
+    assert r2.headers.get("Content-Encoding") == "gzip"
+
+
+async def test_screen_script_is_brotli_once_ready(client):
+    brotli = pytest.importorskip("brotli")
+    rel = "screens/accounts_list.js"
+    _, body = await _wait_br(client, "/miniapp/" + rel)
+    assert brotli.decompress(body) == _served(os.path.join(ROOT, "mini_app", rel))
+
+
+async def test_br_only_client_gets_a_readable_body(client):
+    """Клиент «только br», пока сжатие не готово, не получает gzip, о котором не просил."""
+    from services import miniapp_brotli as mb
+    mb._br_cache.clear()
+    rel = "screens/bots_list.js"
+    r = await client.get("/miniapp/" + rel, headers={"Accept-Encoding": "br"})
+    body = await r.read()
+    enc = r.headers.get("Content-Encoding")
+    assert enc in (None, "br"), enc
+    if enc is None:
+        assert body == _served(os.path.join(ROOT, "mini_app", rel))
+
+
+def test_accepts_parses_the_header():
+    from services import miniapp_brotli as mb
+    assert mb.accepts("gzip, deflate, br")
+    assert mb.accepts("br;q=1.0, gzip;q=0.8")
+    assert not mb.accepts("gzip, deflate")
+    assert not mb.accepts("br;q=0, gzip")
+    assert not mb.accepts("xbr, gzip")
+    assert not mb.accepts(None)

@@ -257,6 +257,13 @@ CACHE: dict[str, str] = {
     "services/managed_bot_webhooks.py:_probe_cache": (
         "итог проверки «на угаданном адресе отвечает наш приёмник вебхуков» "
         "(час / 10 мин); на другой реплике проверка просто повторится"),
+    "services/miniapp_brotli.py:_br_cache": (
+        "brotli-тело страницы и скриптов мини-аппа на текущую версию файла; "
+        "производное от файла на диске, другая реплика сожмёт своё"),
+    "services/miniapp_brotli.py:_br_pending": (
+        "сжатия, уже идущие в ЭТОМ процессе, — чтобы не запускать одно дважды"),
+    "services/miniapp_brotli.py:_br_tasks": (
+        "ссылки на фоновые задачи сжатия ЭТОГО процесса, чтобы их не собрал GC"),
     "services/infra_memory.py:_health_summary_cache": (
         "сводка пульса здоровья флота на владельца, 10 с; источник правды — "
         "restriction_events/account_flood_log/tg_accounts в БД. На другой "

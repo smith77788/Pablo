@@ -12230,6 +12230,11 @@ function toggleAccSel(id, ev) {
   // Shift+клик — диапазон от прошлого клика (fleet_tools.js).
   if (!fleetRangePick('accounts', CUR_ACCS.map(a=>a.id), ACC_SEL, id, ev)) {
     if (ACC_SEL.has(id)) ACC_SEL.delete(id); else ACC_SEL.add(id);
+    // Одно касание — одна строка. Перерисовка всего списка на каждое касание
+    // стоила секунды на длинном списке и слабом телефоне.
+    const row = !fleetIsWide() && document.querySelector('#accList .acc-row[data-acc-id="' + id + '"]');
+    const acc = row && CUR_ACCS.find(a => a.id === id);
+    if (row && acc) { row.outerHTML = accRowHtml(acc); updateAccSelBar(); return; }
   }
   renderAccounts(_accFiltered());
   updateAccSelBar();

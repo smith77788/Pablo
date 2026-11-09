@@ -1610,12 +1610,14 @@ async def vis_trends(
             bot_id = bots[0]["bot_id"]
         else:
             sel_kb = InlineKeyboardBuilder()
-            for bot in bots:
+            _shown = _cap(bots)
+            for bot in _shown:
                 label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
                 sel_kb.button(
                     text=f"🤖 {label}",
                     callback_data=VisCb(action="trends", bot_id=bot["bot_id"]),
                 )
+            _cap_note(sel_kb, bots, _shown, what="bot")
             sel_kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
             sel_kb.adjust(1)
             await safe_edit(
