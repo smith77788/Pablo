@@ -841,6 +841,36 @@ attacker-хост токен **не дописывается**. Утечка в�
 
 ---
 
+## Раздел I — RCE-поверхность: парсеры недоверенного ввода (Telegram-iOS source)
+
+Цель — найти memory-corruption/RCE (Critical) в коде, который парсит недоверенные данные (сервер, пиры,
+медиа). В клоне Telegram-iOS есть реальные исходники `TelegramApi`, `MtProtoKit`, `TelegramCore`, `Postbox`.
+
+### I.1 — TL-десериализация (`TelegramApi`) — корректна, bounds-checked
+Это **главный Telegram-специфичный парсер**: разбирает каждое входящее серверное сообщение.
+- Swift-ридер `Buffer.swift:337–398`: все `read*` проверяют `offset + N <= _size`; `readBuffer`/
+  `withReadBufferNoCopy` — `count >= 0 && offset + count <= size`.
+- Нативный ридер `ObjC/Sources/TLEngine.m:47–101`: `TLReadRaw` проверяет `offset + count > length`
+  перед `memcpy`; `TLReadBytesRange` ограничивает `count` 3-байтным префиксом (≤ 16 МБ), корректно
+  считает padding и проверяет границы. На 64-бит `size_t` переполнения `offset + count` нет.
+**Over-read/RCE в TL-парсинге нет.**
+
+### I.2 — MTProto крипто (key-exchange + message-layer) — см. Раздел G, корректно.
+Secret-chat E2E переиспользует те же примитивы (AES-IGE, SHA256 msg_key) — отдельного гап-а не видно.
+
+### I.3 — Медиа-кодеки (webp/ffmpeg/dav1d/libvpx/openh264/mozjpeg/boringssl) — вне скоупа
+Это **upstream third-party** библиотеки (в `third-party/`, подключены как сабмодули — исходников в
+shallow-клоне нет). По правилам Telegram Bug Bounty баги в них — **non-qualifying (#8,
+«outdated/flawed open-source software versions»)**, если только это не кастомный форк Telegram.
+`rlottie`-обёртка (`.tgs`) в репо — лишь glue (40 КБ); сам парсер — upstream.
+
+### Вывод по RCE
+В **Telegram-написанных** парсерах недоверенного ввода (TL, MTProto) memory-corruption/Critical **нет** —
+они аккуратно bounds-checked. Реальная RCE-поверхность — upstream медиа-кодеки, которые (а) не в этих
+клонах, (б) non-qualifying по правилам программы, (в) требуют fuzzing, а не чтения кода.
+
+---
+
 ## Раздел H — Направление: манипуляция поиском и блокировка/удаление каналов/чатов/ботов/профилей
 
 Защитная проверка: есть ли **клиентский** дефект, позволяющий атакующему манипулировать поисковой
