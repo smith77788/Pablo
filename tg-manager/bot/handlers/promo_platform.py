@@ -588,9 +588,11 @@ async def fsm_order_pick_bot(callback: CallbackQuery, state: FSMContext, pool: a
 
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Без панели", callback_data="promo_panel_0")
-    for p in active_panels:
+    _shown = _cap(active_panels)
+    for p in _shown:
         balance_str = f" 💰{p['balance']}" if p["balance"] else ""
         kb.button(text=f"{p['name']}{balance_str}", callback_data=f"promo_panel_{p['id']}")
+    _cap_note(kb, active_panels, _shown, what="panel")
     kb.adjust(1)
 
     bot_label = "не выбран"

@@ -74,16 +74,48 @@ def test_detector_sees_the_pickers():
     assert len(capped) >= 50, f"обрезанных пикеров всего {len(capped)} — потолок растеряли"
 
 
+def _grows(it: str, fsrc: str) -> bool:
+    """Цикл идёт по растущей коллекции — прямо или через производное имя.
+
+    НАХОДКА (09.11.2026). Детектор смотрел только на имя в `for`: меню «Мои
+    аккаунты» шло по `shown = list(all_accounts or [])` и проскочило. Оно строило
+    кнопку на каждый аккаунт, а сборка клавиатуры в aiogram квадратична: на
+    10 000 аккаунтов одно нажатие держало весь процесс минутами. Теперь имя,
+    собранное из растущей коллекции (фильтр, копия, `x or []`), тоже растущее.
+    """
+    if it in GROWING:
+        return True
+    if not re.fullmatch(r"\w+", it):
+        return False
+    for m in re.finditer(rf"^\s*{re.escape(it)}\s*(?::[^=\n]+)?=\s*(.+)$", fsrc, re.MULTILINE):
+        rhs = m.group(1)
+        if re.search(r"\b(?:_cap|cap_slice|cap_items)\(|\[:\s*\d+\s*\]", rhs):
+            continue
+        if any(re.search(rf"\b(?:\w*_)?{g}\b", rhs) for g in GROWING):
+            return True
+    return False
+
+
+def test_derived_names_are_seen():
+    """Анти-пустота для производных имён: без неё _grows мог бы молча ослепнуть."""
+    assert _grows("shown", "    shown = list(all_accounts or [])\n")
+    assert _grows("ready", "    ready = [b for b in bots if b]\n")
+    assert not _grows("opts", "    opts = ['a', 'b']\n")
+    assert not _grows("_shown", "    _shown = _cap(accounts)\n")
+
+
 def test_account_pickers_are_capped():
     """Ни один цикл по растущей коллекции не строит кнопку на каждый элемент."""
     bad = []
     for path, line, fn, it, fsrc in _picker_loops():
-        if it not in GROWING:
+        if not _grows(it, fsrc):
             continue
-        # Уже ограничено запросом, срезом или ранним выходом на постраничность —
-        # тоже годится. Последнее — про `quick_pick_kb`: он строит кнопки только
-        # когда список короткий, а длинный отдаёт постраничному варианту.
-        if re.search(r"\bLIMIT\s+\d+|\[:\s*\d+\s*\]|islice\(", fsrc, re.I):
+        # Уже ограничено запросом, срезом, страницей или ранним выходом на
+        # постраничность — тоже годится. Последнее — про `quick_pick_kb`: он
+        # строит кнопки только когда список короткий, а длинный отдаёт
+        # постраничному варианту.
+        if re.search(r"\bLIMIT\s+\d+|\blimit\s*=\s*\d+|\[:\s*\d+\s*\]|islice\(|"
+                     r"\[\s*\w+\s*:\s*\w+\s*\+\s*\w+\s*\]", fsrc, re.I):
             continue
         if re.search(r"if\s+len\([^)]+\)\s*>\s*\w+\s*:\s*\n\s*return", fsrc):
             continue

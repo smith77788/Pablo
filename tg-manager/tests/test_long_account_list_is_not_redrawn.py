@@ -26,7 +26,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from miniapp_source import js_functions  # noqa: E402
+from miniapp_source import js_functions
 
 pytestmark = pytest.mark.skipif(not shutil.which("node"), reason="нет node")
 
@@ -65,7 +65,7 @@ def _run(body: str) -> dict:
     F = js_functions()
     src = "\n".join(F[n] for n in ("loadMoreAccounts", "toggleAccSel"))
     script = _PRELUDE + src + "\n(async () => {\n" + body + "\n})().catch(e => { console.error(e); process.exit(2); });"
-    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30, check=False)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout.strip().splitlines()[-1])
 

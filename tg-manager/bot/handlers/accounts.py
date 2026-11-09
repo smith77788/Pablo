@@ -25,6 +25,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 log = logging.getLogger(__name__)
 
 _DIALOGS_PAGE_SIZE = 10
+# Строк и кнопок аккаунтов на одной странице меню «Мои аккаунты». Раньше меню
+# строило кнопку на КАЖДЫЙ аккаунт: Telegram такую клавиатуру не принимает уже
+# на сотне-другой, а сборка её в aiogram квадратична (каждая кнопка копирует всю
+# разметку) — на 1 000 аккаунтов 8 с, на 10 000 минуты, и всё это время стоит
+# весь процесс: бот, мини-апп и фоновые циклы (замер 09.11.2026).
+_ACC_MENU_PAGE = 20
 
 from bot.callbacks import AccCb, BmCb, BotCb, ChanCb, MassOpCb, AutoRegCb
 from bot.keyboards import subscription_locked_markup
@@ -392,6 +398,7 @@ async def cb_accounts_menu(
         callback.from_user.id,
         edit=True,
         status_filter=status_filter,
+        page=callback_data.page,
     )
 
 
@@ -402,6 +409,7 @@ async def _show_accounts_menu(
     *,
     edit: bool,
     status_filter: str = "all",
+    page: int = 0,
 ) -> None:
     from aiogram.types import InlineKeyboardButton
 
@@ -461,7 +469,11 @@ async def _show_accounts_menu(
         lines = [
             f"📱 <b>Telegram-аккаунты</b> ({badge}) · {filter_label}: {len(shown)}\n"
         ]
-        for acc in shown:
+        pages = (len(shown) + _ACC_MENU_PAGE - 1) // _ACC_MENU_PAGE
+        page = min(max(page, 0), pages - 1)
+        start = page * _ACC_MENU_PAGE
+        page_accs = shown[start : start + _ACC_MENU_PAGE]
+        for acc in page_accs:
             name = escape(acc["first_name"] or "")
             uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
             phone = escape(acc.get("phone", ""))
@@ -479,8 +491,13 @@ async def _show_accounts_menu(
                 text=f"{st_emoji} {display}",
                 callback_data=AccCb(action="view", acc_id=acc["id"]),
             )
+        if pages > 1:
+            lines.append(
+                f"\n<i>Страница {page + 1} из {pages}. Поиск по всем аккаунтам — в мини-аппе.</i>"
+            )
         text = "\n".join(lines)
     else:
+        pages = 1
         if status_filter == "problem":
             text = "📱 <b>Telegram-аккаунты</b>\n\n✅ Проблемных аккаунтов нет!"
         elif status_filter == "active":
@@ -502,6 +519,19 @@ async def _show_accounts_menu(
 
     # All buttons so far are 1 per row
     kb.adjust(1)
+
+    if pages > 1:
+        _fcode = {"all": 0, "active": 1, "problem": 2}.get(status_filter, 0)
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(
+                text="◀️", callback_data=AccCb(action="menu", chat_id=_fcode, page=page - 1).pack()))
+        nav.append(InlineKeyboardButton(
+            text=f"{page + 1}/{pages}", callback_data=AccCb(action="menu", chat_id=_fcode, page=page).pack()))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton(
+                text="▶️", callback_data=AccCb(action="menu", chat_id=_fcode, page=page + 1).pack()))
+        kb.row(*nav)
 
     # Filter tabs in one explicit row
     if total > 0:
