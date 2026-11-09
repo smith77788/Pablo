@@ -1169,6 +1169,10 @@ async def cb_admin(
     elif action == "error_reports":
         await _adm_error_reports(callback, pool, page=0, status="new")
 
+    elif action.startswith("failures"):
+        _fd = action.split(":")[-1]
+        await _adm_failures(callback, pool, days=int(_fd) if _fd.isdigit() else 7)
+
     elif action.startswith("error_reports:"):
         # Формат: error_reports:page:status  или  error_report:ID
         parts = action.split(":")
@@ -3276,6 +3280,7 @@ def _error_reports_kb(
     if nav_btns:
         kb.adjust(len(nav_btns))
 
+    kb.button(text="📊 Частые сбои операций", callback_data="adm:failures:7")
     kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
     return kb.as_markup()
 
@@ -3322,6 +3327,52 @@ async def _adm_error_reports(
         parse_mode="HTML",
         reply_markup=_error_reports_kb(reports, page, status, total),
     )
+
+
+def _failures_text(digest: dict) -> str:
+    """Текст сводки сбоев операций для админки (см. services.error_digest)."""
+    from html import escape
+    from services import operation_bus
+
+    days, failed, finished = digest["days"], digest["failed"], digest["finished"]
+    lines = [f"📊 <b>Частые сбои операций за {days} дн.</b>"]
+    if not failed:
+        lines.append("")
+        lines.append("За этот срок ни одна операция не сорвалась.")
+        return "\n".join(lines)
+    share = f" ({failed * 100 / finished:.1f}%)" if finished else ""
+    lines.append(
+        f"Сорвалось <b>{failed}</b> из {finished} завершённых{share}, "
+        f"задето пользователей: <b>{digest['users_hit']}</b>.")
+    lines.append("Сверху то, что задело больше людей.")
+    for i, g in enumerate(digest["groups"], 1):
+        lines.append("")
+        lines.append(
+            f"{i}. <b>{escape(operation_bus.describe(g['op_type']))}</b>\n"
+            f"   людей: {g['users']}, сбоев: {g['count']}, "
+            f"пример: операция №{g['example_id']}\n"
+            f"   <code>{escape(g['error'])}</code>")
+    text = "\n".join(lines)
+    return text if len(text) <= 3900 else text[:3900].rsplit("\n\n", 1)[0] + "\n\n…"
+
+
+async def _adm_failures(callback: CallbackQuery, pool: asyncpg.Pool, days: int) -> None:
+    """Сводка: какие операции срываются чаще всего и у скольких людей."""
+    from services import error_digest
+
+    kb = InlineKeyboardBuilder()
+    for d in (1, 7, 30):
+        kb.button(text=("▶ " if d == days else "") + f"{d} дн.",
+                  callback_data=f"adm:failures:{d}")
+    kb.button(text="🐛 Отчёты пользователей", callback_data="adm:error_reports")
+    kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
+    kb.adjust(3, 1, 1)
+    try:
+        text = _failures_text(await error_digest.top_failures(pool, days=days, limit=12))
+    except Exception:
+        log_exc_swallow(log, "сводка сбоев операций")
+        text = "❌ Не удалось собрать сводку сбоев. Попробуйте ещё раз."
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 async def _adm_show_error_report(
