@@ -143,3 +143,30 @@ def test_метки_типа_у_ждущих_во_входящих():
     ])
     assert [r.get("intent") for r in rows] == ["ready_to_buy", "complaint", None, None]
     assert rows[0]["intent_label"] == "Готов купить"
+
+
+def test_черновик_и_сводка_отказывают_без_токена_даже_при_ложном_ответе(monkeypatch):
+    """Регрессия: `if err:` в ai-draft/ai-summary. В aiohttp 3.10 ответ —
+    MutableMapping с len 0, bool(401) == False, проверка пропускалась и
+    обработчик падал 500 на thread.get. Здесь ответ отказа нарочно ложный —
+    поведение не должно зависеть от версии aiohttp."""
+    from aiohttp import web
+    from services import mini_app_api as M
+
+    class _FalsyResponse(web.Response):
+        def __bool__(self):
+            return False
+
+    monkeypatch.setattr(M, "_get_uid", lambda request: None)
+    monkeypatch.setattr(M, "_err", lambda msg, status=400: _FalsyResponse(status=status, text=msg))
+    app = web.Application()
+    ia.setup_routes(app, object())
+    handlers = {r.resource.canonical: r.handler for r in app.router.routes()}
+
+    class _Req:
+        match_info = {"peer_user_id": "5"}
+        headers: dict = {}
+
+    for path in ("/api/miniapp/inbox/{peer_user_id}/ai-draft",
+                 "/api/miniapp/inbox/{peer_user_id}/ai-summary"):
+        assert asyncio.run(handlers[path](_Req())).status == 401
