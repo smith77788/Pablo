@@ -1260,6 +1260,11 @@ async def record_peer_flood(
         action_type=action_type,
         operation_id=operation_id,
     )
+    try:  # дверь к Telegram узнаёт о блоке сразу, а не через 5 минут
+        from services import account_gate as _gate
+        _gate.set_status(account_id, "spamblock")
+    except Exception:
+        pass
     if pool is not None:
         try:
             await pool.execute(

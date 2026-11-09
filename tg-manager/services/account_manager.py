@@ -31,6 +31,7 @@ import asyncpg  # noqa: F401 — используется в аннотация�
 from config import TG_API_ID, TG_API_HASH, TG_PROXY, CF_RELAY_URL
 from services.logger import log_exc_swallow
 from services import bot_usernames as _bot_usernames
+from services import account_gate as _account_gate
 
 log = logging.getLogger(__name__)
 
@@ -268,8 +269,15 @@ def _wrap_client_flood_floor(client, account_id):
         return client
     from services import flood_engine as _fe
 
+    from services import account_gate as _gate
+
     async def _call(sender, request, *a, **k):
         names = _request_names(request)
+        _refused = _gate.refusal(aid, request)
+        if _refused is not None:
+            log.info("acc=%s: %s не отправлен — аккаунт под ограничением (%s)",
+                     aid, ",".join(names)[:80], _refused.status)
+            raise _refused
         left = max((_fe.floor_remaining(aid, n) for n in names), default=0.0)
         if left > _fe.FLOOR_WAIT_INLINE_S:
             from telethon.errors import FloodWaitError
@@ -286,7 +294,10 @@ def _wrap_client_flood_floor(client, account_id):
         if left > 0:
             await asyncio.sleep(left)
         try:
-            return await _orig_call(sender, request, *a, **k)
+            _res = await _orig_call(sender, request, *a, **k)
+            if not _gate.in_operation():
+                _gate.note_direct_action(aid, request)
+            return _res
         except Exception as e:
             if type(e).__name__ == "FloodWaitError":
                 secs = getattr(e, "seconds", 0) or 0
@@ -672,6 +683,7 @@ def forget_account_transport(account_id: int | None) -> None:
     if account_id is not None:
         _ACC_TRANSPORT.pop(int(account_id), None)
         forget_account_identity(account_id)
+        _account_gate.forget(account_id)
 
 
 async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int:
@@ -704,7 +716,7 @@ async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int
     rows = await pool.fetch(
         "SELECT a.id, a.owner_id, a.cf_relay_url, a.proxy_id, p.proxy_url, a.phone, "
         "a.session_str, a.device_model, a.system_version, a.app_version, "
-        "a.lang_code, a.system_lang_code "
+        "a.lang_code, a.system_lang_code, a.acc_status "
         "FROM tg_accounts a "
         "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
         + where, *args)
@@ -716,8 +728,10 @@ async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int
                    and (owner_id is None or v.get("owner_id") == int(owner_id))]:
         _ACC_TRANSPORT.pop(acc_id, None)
         forget_account_identity(acc_id)
+        _account_gate.forget(acc_id)
 
     for r in rows:
+        _account_gate.set_status(r["id"], r.get("acc_status"))
         set_account_transport(
             r["id"], owner_id=r["owner_id"], cf_relay_url=r["cf_relay_url"],
             proxy_id=r["proxy_id"], proxy_url=r["proxy_url"], phone=r.get("phone"))

@@ -313,6 +313,12 @@ CACHE: dict[str, str] = {
         "картой транспорта — добирает устройство, которого нет в выборке"),
     "services/account_manager.py:_ACC_SESSION": (
         "обратная сторона _SESSION_ACC: по ней снимается старый ключ при смене сессии"),
+    "services/account_gate.py:_STATUS": (
+        "копия tg_accounts.acc_status для двери к Telegram; перечитывается "
+        "account_manager.prime_account_transport на каждой реплике"),
+    "services/account_gate.py:_direct_unsaved": (
+        "очередь записи действий мимо очереди операций в operation_audit "
+        "(pacing_store.flush_direct_actions), как _dirty"),
     "services/account_manager.py:_OWNER_IPV6_SUBNET": "праймится из БД на старте операции",
     "services/account_manager.py:_OWNER_PROXY_POLICY": "праймится из БД на старте операции",
     "services/account_manager.py:_proxy_stats": "статистика прокси; сводная — в infra_memory",

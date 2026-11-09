@@ -180,11 +180,40 @@ async def flush_flood_floor(pool) -> int:
     return done
 
 
+async def flush_direct_actions(pool) -> int:
+    """Дописать в суточный бюджет действия, сделанные мимо очереди операций.
+
+    Их считает дверь к Telegram (account_gate.note_direct_action): кнопка
+    бота, мини-приложение и фоновые циклы работают с аккаунтом напрямую и в
+    operation_audit не пишут, поэтому очередь считала такой аккаунт свежим и
+    добирала ему полный дневной лимит поверх уже сделанного."""
+    from services import account_budget, account_gate, account_manager
+
+    items = account_gate.drain_direct_actions()
+    done = 0
+    for i, (aid, action, n) in enumerate(items):
+        owner = (account_manager._ACC_TRANSPORT.get(aid) or {}).get("owner_id")
+        if not owner:
+            # Владельца ещё нет в карте (аккаунт только добавлен) — подождём
+            # следующего перечитывания, действие не теряем.
+            account_gate.requeue_direct_actions([(aid, action, n)])
+            continue
+        try:
+            await account_budget.record_actions(pool, int(owner), aid, action, n,
+                                                result="ok")
+            done += 1
+        except asyncio.CancelledError:
+            account_gate.requeue_direct_actions(items[i:])
+            raise
+    return done
+
+
 async def sync_once(pool, worker_id: str = "") -> None:
     """Один обмен: сначала запись (чтобы окно включало свои исходы), потом чтение."""
     await flush_events(pool, worker_id)
     await flush_account_states(pool)
     await flush_flood_floor(pool)
+    await flush_direct_actions(pool)
     await pull_window(pool)
 
 
@@ -212,3 +241,4 @@ async def _final_flush(pool, worker_id: str) -> None:
     await flush_events(pool, worker_id)
     await flush_account_states(pool)
     await flush_flood_floor(pool)
+    await flush_direct_actions(pool)
