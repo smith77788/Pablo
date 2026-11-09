@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -74,16 +75,115 @@ def test_detector_sees_the_pickers():
     assert len(capped) >= 50, f"обрезанных пикеров всего {len(capped)} — потолок растеряли"
 
 
+# Таблицы, число строк в которых растёт с тарифом владельца.
+GROWING_TABLES = (
+    "tg_accounts", "managed_bots", "managed_channels", "user_proxies",
+    "managed_groups", "bot_warehouse", "relay_sessions",
+)
+
+
+def _fetched_unbounded(it: str, fsrc: str) -> bool:
+    """`rows = await pool.fetch("... FROM tg_accounts ...")` без LIMIT.
+
+    НАХОДКА (09.11.2026). «Переподключение аккаунтов» звало коллекцию `rows`
+    и строило кнопку на каждый аккаунт: по имени её не поймать. Источник
+    коллекции — запрос к растущей таблице без LIMIT — ловит независимо от имени.
+    """
+    try:
+        tree = ast.parse(textwrap.dedent(fsrc))
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == it for t in node.targets)):
+            continue
+        val = ast.unparse(node.value)
+        if "fetch(" not in val or re.search(r"\bLIMIT\b", val, re.IGNORECASE):
+            continue
+        if any(re.search(rf"\bFROM\s+{t}\b", val, re.IGNORECASE) for t in GROWING_TABLES):
+            return True
+    return False
+
+
+def _grows(it: str, fsrc: str) -> bool:
+    """Цикл идёт по растущей коллекции — прямо или через производное имя.
+
+    НАХОДКА (09.11.2026). Детектор смотрел только на имя в `for`: меню «Мои
+    аккаунты» шло по `shown = list(all_accounts or [])` и проскочило. Оно строило
+    кнопку на каждый аккаунт, а сборка клавиатуры в aiogram квадратична: на
+    10 000 аккаунтов одно нажатие держало весь процесс минутами. Теперь имя,
+    собранное из растущей коллекции (фильтр, копия, `x or []`), тоже растущее.
+    """
+    # enumerate(accounts) / sorted(bots, ...) / list(x or []) — та же коллекция.
+    # Через enumerate(accounts) проскочило «Создать канал» (09.11.2026): кнопка на
+    # каждый аккаунт, 460 с на одно нажатие при 10 000 аккаунтов.
+    m = re.fullmatch(r"(?:enumerate|sorted|list|reversed|tuple)\(\s*(\w+)[^()]*\)", it)
+    if m:
+        it = m.group(1)
+    if it in GROWING:
+        return True
+    if not re.fullmatch(r"\w+", it):
+        return False
+    if _fetched_unbounded(it, fsrc):
+        return True
+    for m in re.finditer(rf"^\s*{re.escape(it)}\s*(?::[^=\n]+)?=\s*(.+)$", fsrc, re.MULTILINE):
+        rhs = m.group(1)
+        if re.search(r"\b(?:_cap|cap_slice|cap_items)\(|\[:\s*\d+\s*\]|\bLIMIT\b", rhs):
+            continue
+        if any(re.search(rf"(?<![.\w])(?:\w*_)?{g}\b", rhs) for g in GROWING):
+            return True
+    return False
+
+
+def _bounded(it: str, fsrc: str) -> bool:
+    """Коллекция цикла ограничена: запросом, срезом именно её или страницей.
+
+    НАХОДКА (09.11.2026). Раньше годился ЛЮБОЙ срез `[:N]` где угодно в функции.
+    «Аккаунты по пулам» строили кнопку на каждый аккаунт, а проверку проходили
+    из-за `label[:20]` — обрезки подписи кнопки. Срез засчитывается, только
+    если режет саму коллекцию цикла.
+    """
+    if re.search(r"\bLIMIT\s+\$?\d+|\blimit\s*=\s*\d+|islice\(", fsrc, re.IGNORECASE):
+        return True
+    if "[" in it:  # for x in items[:10] / items[a:b]
+        return True
+    name = re.escape(it)
+    slice_ = r"\[\s*\w*\s*:\s*[\w\s+*]*\]"
+    if re.search(rf"^\s*{name}\s*(?::[^=\n]+)?=\s*.*{slice_}", fsrc, re.MULTILINE):
+        return True
+    return bool(re.search(rf"^\s*{name}\s*(?::[^=\n]+)?=\s*(?:_cap|cap_slice)\(", fsrc, re.MULTILINE))
+
+
+def test_bound_must_cut_the_loop_collection():
+    """Обрезка подписи кнопки — не потолок списка."""
+    assert not _bounded("accs", "    for acc in accs:\n        kb.button(text=label[:20])\n")
+    assert _bounded("chunk", "    chunk = bots[start : start + PAGE_SIZE]\n")
+    assert _bounded("accounts", "    rows = await pool.fetch('SELECT ... LIMIT 30')\n")
+
+
+def test_derived_names_are_seen():
+    """Анти-пустота для производных имён: без неё _grows мог бы молча ослепнуть."""
+    assert _grows("shown", "    shown = list(all_accounts or [])\n")
+    assert _grows("ready", "    ready = [b for b in bots if b]\n")
+    assert not _grows("opts", "    opts = ['a', 'b']\n")
+    assert not _grows("_shown", "    _shown = _cap(accounts)\n")
+    assert _grows("enumerate(accounts)", "")
+    assert _grows("enumerate(accounts, 1)", "")
+    assert _grows("rows", "async def f(pool):\n    rows = await pool.fetch('SELECT id FROM tg_accounts WHERE owner_id=$1', 1)\n")
+    assert not _grows("rows", "async def f(pool):\n    rows = await pool.fetch('SELECT id FROM tg_accounts LIMIT 20')\n")
+
+
 def test_account_pickers_are_capped():
     """Ни один цикл по растущей коллекции не строит кнопку на каждый элемент."""
     bad = []
     for path, line, fn, it, fsrc in _picker_loops():
-        if it not in GROWING:
+        if not _grows(it, fsrc):
             continue
-        # Уже ограничено запросом, срезом или ранним выходом на постраничность —
-        # тоже годится. Последнее — про `quick_pick_kb`: он строит кнопки только
-        # когда список короткий, а длинный отдаёт постраничному варианту.
-        if re.search(r"\bLIMIT\s+\d+|\[:\s*\d+\s*\]|islice\(", fsrc, re.I):
+        # Уже ограничено запросом, срезом, страницей или ранним выходом на
+        # постраничность — тоже годится. Последнее — про `quick_pick_kb`: он
+        # строит кнопки только когда список короткий, а длинный отдаёт
+        # постраничному варианту.
+        if _bounded(it, fsrc):
             continue
         if re.search(r"if\s+len\([^)]+\)\s*>\s*\w+\s*:\s*\n\s*return", fsrc):
             continue

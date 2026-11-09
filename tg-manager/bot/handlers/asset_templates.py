@@ -681,7 +681,8 @@ async def cb_apply(
         title_val = data.get("title", "")
         about_val = data.get("description", "") or data.get("about", "")
         kb = InlineKeyboardBuilder()
-        for acc in accounts:
+        _shown = _cap(accounts)
+        for acc in _shown:
             name = (acc["first_name"] or "").strip()
             uname = (
                 f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
@@ -697,6 +698,7 @@ async def cb_apply(
                     text=f"👤 {label}",
                     callback_data=GroupFCb(action=action, acc_id=acc["id"]),
                 )
+        _cap_note(kb, accounts, _shown, what="acc")
         kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
         kb.adjust(1)
 
@@ -845,7 +847,8 @@ async def cb_apply(
             tpl_preview.append(f"🤖 Команд: {len(cmds)}")
 
         kb = InlineKeyboardBuilder()
-        for bot_row in bots:
+        _shown = _cap(bots)
+        for bot_row in _shown:
             name = bot_row["first_name"] or ""
             uname = (
                 f"@{bot_row['username']}"
@@ -859,6 +862,7 @@ async def cb_apply(
                     tpl_id=callback_data.tpl_id, bot_id=bot_row["bot_id"]
                 ),
             )
+        _cap_note(kb, bots, _shown, what="bot")
         kb.adjust(1)
         kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
 
@@ -1365,7 +1369,8 @@ async def cb_lib_apply(
             action_key = "create_acc"
             icon = "👥"
         kb = InlineKeyboardBuilder()
-        for acc in accounts:
+        _shown = _cap(accounts)
+        for acc in _shown:
             name = (acc["first_name"] or "").strip()
             uname = (
                 f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
@@ -1381,6 +1386,7 @@ async def cb_lib_apply(
                     text=f"👤 {label}",
                     callback_data=GroupFCb(action=action_key, acc_id=acc["id"]),
                 )
+        _cap_note(kb, accounts, _shown, what="acc")
         kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
         kb.adjust(1)
         title_val = data.get("title", "")
@@ -1478,7 +1484,8 @@ async def _show_bot_pick_for_preset(
         )
         return
     kb = InlineKeyboardBuilder()
-    for bot_row in bots:
+    _shown = _cap(bots)
+    for bot_row in _shown:
         name = bot_row["first_name"] or ""
         uname = (
             f"@{bot_row['username']}"
@@ -1490,6 +1497,7 @@ async def _show_bot_pick_for_preset(
             text=f"🤖 {label[:40]}",
             callback_data=TplBotApplyCb(tpl_id=0, bot_id=bot_row["bot_id"], preset_key=key),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.adjust(1)
     kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
     await callback.message.edit_text(
@@ -1720,7 +1728,8 @@ async def _show_bot_pick_customize(target: Message, state: FSMContext, pool: asy
     operator = subs.get("OPERATOR", "—")
 
     kb = InlineKeyboardBuilder()
-    for bot_row in bots:
+    _shown = _cap(bots)
+    for bot_row in _shown:
         name = bot_row["first_name"] or ""
         uname = (
             f"@{bot_row['username']}"
@@ -1732,6 +1741,7 @@ async def _show_bot_pick_customize(target: Message, state: FSMContext, pool: asy
             text=f"🤖 {label[:40]}",
             callback_data=BotCustomizeCb(action="apply", bot_id=bot_row["bot_id"]),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.adjust(1)
     kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
 

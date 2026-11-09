@@ -71,6 +71,9 @@ def test_watchdog_moves_accounts_on_real_schema(monkeypatch):
         pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
         try:
             async with pool.acquire() as c:
+                with open(os.path.join(ROOT, "schema_v316_proxy_outages.sql"), encoding="utf-8") as f:
+                    await c.execute(f.read())
+                await c.execute("DELETE FROM proxy_outages WHERE owner_id=$1", owner)
                 await c.execute("DELETE FROM tg_accounts WHERE owner_id=$1", owner)
                 await c.execute("DELETE FROM user_proxies WHERE owner_id=$1", owner)
                 await c.execute("DELETE FROM platform_users WHERE user_id=$1", owner)
@@ -114,6 +117,25 @@ def test_watchdog_moves_accounts_on_real_schema(monkeypatch):
             assert got == [free_de, free_us, dead, busy]
             assert len(sent) == 1 and "2 аккаунт(ов) переселены" in sent[0]
             assert "1 остались" in sent[0]
+
+            # Простой открыт на одного аккаунта, оставшегося на мёртвом прокси.
+            out = await pool.fetch(
+                "SELECT proxy_id, accounts, ended_at FROM proxy_outages WHERE owner_id=$1", owner)
+            assert [(o["proxy_id"], o["accounts"], o["ended_at"]) for o in out] == [(dead, 1, None)]
+            from services import account_survival as sv
+            pd = await sv.fetch_proxy_downtime(pool, owner)
+            assert pd["open_now"] == 1 and pd["accounts_now"] == 1 and pd["outages"] == 1
+
+            # Прокси ожил — простой закрыт.
+            async def _all_alive(url, timeout_s=10.0):
+                return {"alive": True, "latency_ms": 10}
+
+            monkeypatch.setattr(W, "check_proxy_alive", _all_alive)
+            await W.check_once(pool, object())
+            closed = await pool.fetchval(
+                "SELECT COUNT(*) FROM proxy_outages WHERE owner_id=$1 AND ended_at IS NOT NULL", owner)
+            assert closed == 1
+            assert (await sv.fetch_proxy_downtime(pool, owner))["open_now"] == 0
         finally:
             await pool.close()
 

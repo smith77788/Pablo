@@ -12212,6 +12212,11 @@ function toggleAccSel(id, ev) {
   // Shift+клик — диапазон от прошлого клика (fleet_tools.js).
   if (!fleetRangePick('accounts', CUR_ACCS.map(a=>a.id), ACC_SEL, id, ev)) {
     if (ACC_SEL.has(id)) ACC_SEL.delete(id); else ACC_SEL.add(id);
+    // Одно касание — одна строка. Перерисовка всего списка на каждое касание
+    // стоила секунды на длинном списке и слабом телефоне.
+    const row = !fleetIsWide() && document.querySelector('#accList .acc-row[data-acc-id="' + id + '"]');
+    const acc = row && CUR_ACCS.find(a => a.id === id);
+    if (row && acc) { row.outerHTML = accRowHtml(acc); updateAccSelBar(); return; }
   }
   renderAccounts(_accFiltered());
   updateAccSelBar();
@@ -12559,6 +12564,14 @@ function buildAccDetail(d) {
   else if (a.acc_status==='spamblock') statusBadge = '<span class="badge b-rd">🚫 Спам-блок — идёт реабилитация</span>';
   else if (cd) statusBadge = `<span class="badge b-or">⏸ На паузе ${cooldownLeft(a.cooldown_until)}</span>`;
   else statusBadge = '<span class="badge b-gr">🟢 Активен</span>';
+  // Метка с сервера — та же, что в строке списка (account_verdict). Цепочка
+  // выше остаётся запасным путём, когда метки нет (просмотр админа).
+  const _v = d.verdict;
+  if (_v && typeof ACC_VERDICT_STYLE !== 'undefined' && ACC_VERDICT_STYLE[_v.level]) {
+    const _vs = ACC_VERDICT_STYLE[_v.level];
+    statusBadge = `<span class="badge ${_vs.cls}">${_vs.icon ? _vs.icon + ' ' : ''}${esc(accVerdictLabel(_v))}</span>`
+      + (_v.level !== 'ok' && _v.reason ? `<div style="font-size:12px;color:var(--hint);margin-top:4px">${esc(_v.reason)}</div>` : '');
+  }
 
   if (caps.is_premium) statusBadge += ' <span class="badge" style="background:rgba(251,191,36,.18);color:var(--orange)">⭐ Premium</span>';
   if (a.stage && ACC_STAGES[a.stage]) statusBadge += ' '+stageBadge(a.stage);

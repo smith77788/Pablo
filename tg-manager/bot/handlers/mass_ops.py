@@ -20,6 +20,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.callbacks import MassOpCb, BmCb
 from services.logger import log_exc_swallow
 from services import operation_bus, infra_orchestrator
@@ -340,11 +341,13 @@ async def cb_mp_filter_chosen(
             )
             return
         kb = InlineKeyboardBuilder()
-        for acc in accounts:
+        _shown = _cap(accounts)
+        for acc in _shown:
             kb.button(
                 text=f"👤 {_acc_label(acc)}",
                 callback_data=MassOpCb(action="mp_acc_pick", op_id=acc["id"]),
             )
+        _cap_note(kb, accounts, _shown, what="acc")
         kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
         kb.adjust(1)
         await safe_edit(

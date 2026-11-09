@@ -807,7 +807,8 @@ def relay_menu(
     kb = InlineKeyboardBuilder()
     toggle = "🔴 Отключить диалоги" if relay_enabled else "🟢 Включить диалоги"
     kb.button(text=toggle, callback_data=RelayCb(action="toggle", bot_id=bot_id))
-    for s in sessions:
+    _shown = _cap(sessions)
+    for s in _shown:
         name = (
             f"@{s['username']}"
             if s["username"]
@@ -818,6 +819,7 @@ def relay_menu(
             text=f"💬 {name}: {preview}",
             callback_data=RelayCb(action="session", bot_id=bot_id, session_id=s["id"]),
         )
+    _cap_note(kb, sessions, _shown, what="sess")
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()

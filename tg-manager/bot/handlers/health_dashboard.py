@@ -17,6 +17,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.callbacks import (
     HealthCb,
     BmCb,
@@ -1720,7 +1721,8 @@ async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
     kb = InlineKeyboardBuilder()
 
-    for acc in rows:
+    _shown = _cap(rows)
+    for acc in _shown:
         st = _effective_acc_status(acc)
         active = acc["is_active"]
         name = (
@@ -1738,6 +1740,7 @@ async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             text=f"{status_icon} {html.escape(name[:20])} — {st}",
             callback_data=AccCb(action="relog", acc_id=acc["id"]),
         )
+    _cap_note(kb, rows, _shown, what="acc")
     kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
     kb.adjust(1)
 
@@ -1776,7 +1779,8 @@ async def cb_set_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     ]
 
     kb = InlineKeyboardBuilder()
-    for acc in rows:
+    _shown = _cap(rows)
+    for acc in _shown:
         name = (
             acc.get("username")
             or acc.get("first_name")
@@ -1798,6 +1802,7 @@ async def cb_set_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             text=f"⏸ {html.escape(name[:20])}{cd_label}",
             callback_data=HealthCb(action="set_cooldown_confirm", page=acc["id"]),
         )
+    _cap_note(kb, rows, _shown, what="acc")
     kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
     kb.adjust(1)
 
@@ -1927,7 +1932,8 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
         "🔓 <b>Снять паузы и карантин</b>\n",
         f"Не берутся в работу: <b>{len(rows)}</b> аккаунт(ов)\n",
     ]
-    for acc in rows:
+    _shown = _cap(rows)
+    for acc in _shown:
         name = (
             acc.get("username")
             or acc.get("first_name")
@@ -1977,6 +1983,7 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
             text=f"🔓 {name[:22]}",
             callback_data=HealthCb(action="reset_cooldown_one", page=acc["id"]),
         )
+    _cap_note(kb, rows, _shown, what="acc")
 
     kb.button(
         text="🔓 Освободить ВСЕ",
