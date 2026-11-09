@@ -152,10 +152,39 @@ async def flush_account_states(pool) -> int:
         return 0
 
 
+async def flush_flood_floor(pool) -> int:
+    """Дописать в базу паузы, которые увидела сама дверь к Telegram.
+
+    Порог (flood_engine.note_floor) живёт в памяти: у клиента аккаунта нет
+    пула. Здесь пауза ложится в tg_accounts тем же apply_cooldown, что и у
+    вызывающих, — он паузу только продлевает, поэтому запись вызывающего и
+    эта друг другу не мешают, а счётчик флудов дважды не растёт."""
+    from services import flood_engine
+
+    items = flood_engine.drain_floor_unsaved()
+    done = 0
+    for i, (aid, left) in enumerate(items):
+        try:
+            ok = await flood_engine.apply_cooldown(
+                pool, aid, left, reason="пауза Telegram (замечена на входе)")
+        except asyncio.CancelledError:
+            flood_engine.requeue_floor_unsaved(items[i:])
+            raise
+        except Exception:
+            ok = False
+        if ok:
+            done += 1
+        else:
+            flood_engine.requeue_floor_unsaved([(aid, left)])
+            _metric("infragram_pacing_sync_errors_total")
+    return done
+
+
 async def sync_once(pool, worker_id: str = "") -> None:
     """Один обмен: сначала запись (чтобы окно включало свои исходы), потом чтение."""
     await flush_events(pool, worker_id)
     await flush_account_states(pool)
+    await flush_flood_floor(pool)
     await pull_window(pool)
 
 
@@ -182,3 +211,4 @@ async def run_sync_loop(pool, worker_id: str = "") -> None:
 async def _final_flush(pool, worker_id: str) -> None:
     await flush_events(pool, worker_id)
     await flush_account_states(pool)
+    await flush_flood_floor(pool)

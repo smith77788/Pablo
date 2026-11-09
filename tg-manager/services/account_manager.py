@@ -235,6 +235,73 @@ def _session_key(session_string: str, device: dict | None) -> str:
     return ""
 
 
+def _request_names(request) -> list[str]:
+    """Имена видов запроса (одного или пачки) — ключ нижнего порога паузы."""
+    items = request if isinstance(request, (list, tuple)) else [request]
+    return [type(r).__name__ for r in items if r is not None]
+
+
+def _wrap_client_flood_floor(client, account_id):
+    """Нижний порог паузы Telegram на КАЖДОМ запросе клиента аккаунта.
+
+    Единственное место, через которое проходит любой запрос любого пути (все
+    высокоуровневые методы Telethon и `client(Request)` сходятся в `_call`),
+    поэтому гарантия не зависит от того, не забыл ли вызывающий записать паузу:
+
+      • Telegram ответил FloodWait → пауза отмечена в flood_engine.note_floor
+        (подбор аккаунтов сразу видит аккаунт на паузе) и поднимается дальше
+        как раньше — поведение вызывающего не меняется;
+      • тот же вид запроса с этого аккаунта раньше срока → до Telegram не
+        доходит: клиент сам отвечает той же FloodWaitError с остатком паузы.
+        Повтор под действующей паузой — то, за что Telegram удлиняет паузу и
+        ограничивает аккаунт.
+
+    Только FloodWaitError: медленный режим чата (SlowModeWaitError) — свойство
+    чата, а не аккаунта, и паузу аккаунту не ставит. Без account_id (логин,
+    проверка чужой сессии) порог не вешается — отмечать некого."""
+    try:
+        aid = int(account_id)
+    except (TypeError, ValueError):
+        return client
+    _orig_call = getattr(client, "_call", None)
+    if aid <= 0 or _orig_call is None or getattr(client, "_infragram_floor", False):
+        return client
+    from services import flood_engine as _fe
+
+    async def _call(sender, request, *a, **k):
+        names = _request_names(request)
+        left = max((_fe.floor_remaining(aid, n) for n in names), default=0.0)
+        if left > _fe.FLOOR_WAIT_INLINE_S:
+            from telethon.errors import FloodWaitError
+            _fe.note_floor_refused()
+            log.info("acc=%s: %s не отправлен — Telegram просил подождать ещё %.0f с",
+                     aid, ",".join(names)[:80], left)
+            secs = int(left) + 1
+            try:
+                err = FloodWaitError(request=request, capture=secs)
+            except TypeError:  # другая сигнатура — пауза всё равно та же
+                err = FloodWaitError(f"A wait of {secs} seconds is required")
+            err.seconds = secs
+            raise err
+        if left > 0:
+            await asyncio.sleep(left)
+        try:
+            return await _orig_call(sender, request, *a, **k)
+        except Exception as e:
+            if type(e).__name__ == "FloodWaitError":
+                secs = getattr(e, "seconds", 0) or 0
+                for n in names:
+                    _fe.note_floor(aid, n, secs)
+            raise
+
+    try:
+        client._call = _call
+        client._infragram_floor = True
+    except Exception:
+        log.debug("flood floor: клиент не принял обёртку", exc_info=True)
+    return client
+
+
 def _wrap_client_session_mutex(client, session_key: str):
     """Обернуть connect/disconnect клиента процессным мьютексом сессии.
 
@@ -604,6 +671,7 @@ def forget_account_transport(account_id: int | None) -> None:
     """Убрать аккаунт из карты — при удалении аккаунта."""
     if account_id is not None:
         _ACC_TRANSPORT.pop(int(account_id), None)
+        forget_account_identity(account_id)
 
 
 async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int:
@@ -634,7 +702,9 @@ async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int
         where = f"WHERE a.owner_id = $1 AND {_has_session}"
         args = [int(owner_id)]
     rows = await pool.fetch(
-        "SELECT a.id, a.owner_id, a.cf_relay_url, a.proxy_id, p.proxy_url, a.phone "
+        "SELECT a.id, a.owner_id, a.cf_relay_url, a.proxy_id, p.proxy_url, a.phone, "
+        "a.session_str, a.device_model, a.system_version, a.app_version, "
+        "a.lang_code, a.system_lang_code "
         "FROM tg_accounts a "
         "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
         + where, *args)
@@ -645,11 +715,20 @@ async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int
                    if k not in fresh
                    and (owner_id is None or v.get("owner_id") == int(owner_id))]:
         _ACC_TRANSPORT.pop(acc_id, None)
+        forget_account_identity(acc_id)
 
     for r in rows:
         set_account_transport(
             r["id"], owner_id=r["owner_id"], cf_relay_url=r["cf_relay_url"],
             proxy_id=r["proxy_id"], proxy_url=r["proxy_url"], phone=r.get("phone"))
+        try:
+            # Смену сессии (перелогин) set_account_identity видит сам и
+            # старый ключ снимает.
+            set_account_identity(
+                r["id"], r.get("session_str"),
+                **{k: r.get(k) for k in _DEVICE_KEYS})
+        except Exception:
+            log_exc_swallow(log, "карта личности аккаунта")
     return len(_ACC_TRANSPORT)
 
 
@@ -679,6 +758,103 @@ async def run_transport_refresh_loop(pool: Any, interval: int = _TRANSPORT_REFRE
         except Exception:
             log_exc_swallow(log, "обновление карты транспорта аккаунтов")
         await asyncio.sleep(interval)
+
+
+# ── ЛИЧНОСТЬ АККАУНТА ПО СЕССИИ: кто бы ни открыл клиента, он тот же ────────
+# Карта транспорта выше страхует словарь, в котором ЕСТЬ id. Но на 09.11.2026
+# 22 собственные выборки (SEO, фабрики каналов и групп, консоль ИИ, …) строят
+# словарь вообще без id, а ещё 29 — без сохранённого устройства. По id же
+# выбираются не только прокси и релей, но и устройство по умолчанию, и пара
+# api_id/api_hash (tg_apps.for_account). Клиент из такого словаря приходит в
+# Telegram ДРУГИМ ЧЕЛОВЕКОМ: с адреса хоста вместо своего прокси, с чужой
+# моделью телефона и под другим приложением — та же сессия, которую минуту
+# назад операция вела через прокси с её настоящим устройством. Для Telegram
+# это самый сильный признак угнанной или фермерской сессии: в лучшем случае
+# ограничение, в худшем — отзыв ключа.
+#
+# Сессию клиент получает ВСЕГДА, поэтому опознаём аккаунт по ней: карта
+# «ключ сессии → id» и сохранённое устройство аккаунта. Чего в словаре нет —
+# добираем; что вызывающий передал явно — не трогаем.
+_SESSION_ACC: dict[str, int] = {}
+_ACC_DEVICE: dict[int, dict[str, Any]] = {}
+_DEVICE_KEYS = ("device_model", "system_version", "app_version",
+                "lang_code", "system_lang_code")
+
+
+# id → (отпечаток строки сессии из базы, ключ сессии): обратная сторона карты.
+# По ней старый ключ снимается при смене сессии, а неизменившаяся строка не
+# расшифровывается заново на каждом обновлении карты.
+_ACC_SESSION: dict[int, tuple[int, str]] = {}
+
+
+def set_account_identity(account_id: int | None, session_str: str | None = None,
+                         **device: Any) -> None:
+    """Запомнить сессию и сохранённое устройство аккаунта (при чтении из БД)."""
+    if account_id is None:
+        return
+    aid = int(account_id)
+    if session_str:
+        mark = hash(session_str)
+        known = _ACC_SESSION.get(aid)
+        if not known or known[0] != mark:
+            if known:
+                _SESSION_ACC.pop(known[1], None)
+            key = _session_key(session_str, None)
+            if key:
+                _SESSION_ACC[key] = aid
+                _ACC_SESSION[aid] = (mark, key)
+    saved = {k: v for k, v in device.items() if k in _DEVICE_KEYS and v}
+    if saved:
+        _ACC_DEVICE[aid] = saved
+    else:
+        _ACC_DEVICE.pop(aid, None)
+
+
+def forget_account_identity(account_id: int | None) -> None:
+    if account_id is None:
+        return
+    aid = int(account_id)
+    _ACC_DEVICE.pop(aid, None)
+    known = _ACC_SESSION.pop(aid, None)
+    if known:
+        _SESSION_ACC.pop(known[1], None)
+
+
+def _complete_account_identity(session_string: str, device: dict | None) -> dict | None:
+    """Добрать в словарь аккаунта id (по сессии) и сохранённое устройство.
+
+    Возвращает НОВЫЙ словарь (словарь вызывающего не меняем) либо исходное
+    значение, если добирать нечего. Без сессии или для неизвестной сессии
+    (логин, проверка чужой сессии при импорте) ничего не делает."""
+    d = dict(device) if device is not None else {}
+    changed = []
+    if not (d.get("id") or d.get("acc_id")) and session_string:
+        aid = _SESSION_ACC.get(_session_key(session_string, None))
+        if aid:
+            d["id"] = aid
+            changed.append("id")
+    aid = d.get("id") or d.get("acc_id")
+    try:
+        saved = _ACC_DEVICE.get(int(aid)) if aid else None
+    except (TypeError, ValueError):
+        saved = None
+    if saved:
+        for k in _DEVICE_KEYS:
+            if not d.get(k) and saved.get(k):
+                d[k] = saved[k]
+                changed.append(k)
+    if not changed:
+        return device
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_account_identity_completed_total",
+               {"what": "id" if "id" in changed else "device"})
+    except Exception:
+        pass
+    log.info("acc=%s: личность аккаунта добрана по сессии (%s) — выборка "
+             "вызывающего неполная, берите database.db.telethon_accounts_query()",
+             d.get("id"), ", ".join(changed))
+    return d
 
 
 def _fill_transport_fields(device: dict[str, Any]) -> list[str]:
@@ -1554,6 +1730,10 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     # продолжают работать без миграции.
     session_string = decrypt_token(session_string or "")
 
+    # Сначала — КТО это: id по сессии и сохранённое устройство. Иначе словарь
+    # без id получил бы ниже чужое устройство, чужую пару приложения и прямой
+    # выход с адреса хоста (см. _complete_account_identity).
+    device = _complete_account_identity(session_string, device)
     d = _normalize_device_profile(device)
 
     # ── НЕПОЛНЫЙ СЛОВАРЬ АККАУНТА — МОЛЧАЛИВАЯ СМЕРТЬ СЕССИИ ─────────────────
@@ -1736,6 +1916,9 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
                       _client.session.dc_id, "IPv6" if use_ipv6 else "IPv4")
     except Exception as _e:
         log.warning("acc=%s: не удалось сохранить DC сессии: %s", d.get("id"), _e)
+    # Пауза Telegram замечается и соблюдается на каждом запросе этого клиента,
+    # кто бы и зачем его ни открыл (см. _wrap_client_flood_floor).
+    _wrap_client_flood_floor(_client, d.get("id"))
     # RAW-коннекторы (десятки функций _make_client(...).connect() мимо
     # connect_client) получают мьютекс сессии автоматически: одну сессию в момент
     # держит ровно один живой коннект. connect_client управляет мьютексом сам

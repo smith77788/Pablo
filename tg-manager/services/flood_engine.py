@@ -291,6 +291,112 @@ def clear_all_cooldowns(account_ids: list[int]) -> int:
     return cleared
 
 
+# ── Нижний порог: пауза, которую увидела сама дверь к Telegram ────────────────
+# ЗАЧЕМ. Запись паузы Telegram (note_flood / record_flood) — обязанность того,
+# кто вызвал действие. Вызывающих больше сотни, и на 09.11.2026 в 53 файлах,
+# работающих аккаунтами (фабрики каналов и групп, SEO, чистка, витрины,
+# консоль ИИ, …), записи нет вовсе: Telegram сказал «ждите 10 минут», экран
+# показал ошибку — а подбор аккаунтов считает аккаунт отдохнувшим и через
+# секунду отдаёт его следующей операции, прямо под действующее ограничение.
+# Повторный запрос во время паузы Telegram читает как упорство и отвечает
+# паузой длиннее, а затем ограничением аккаунта. Это и есть «флот получает
+# ограничения, хотя система должна его беречь».
+#
+# ЧТО ЗДЕСЬ. Клиент аккаунта (account_manager._make_client) сообщает сюда о
+# КАЖДОЙ паузе, которую вернул Telegram, — независимо от того, кто и зачем
+# делал запрос. Порог хранит два факта:
+#   • (аккаунт, вид запроса) → до какого момента Telegram просил не повторять.
+#     Тот же запрос раньше срока до Telegram НЕ ДОХОДИТ: клиент отвечает той же
+#     паузой сам (так делает и сам Telethon, но его память живёт один коннект,
+#     а наши коннекты — по одному на операцию);
+#   • пауза аккаунта в памяти (`cooldown_until`) — только продлевается, поэтому
+#     с записью вызывающего (record_flood) не конфликтует и дважды не штрафует.
+# В базу порог дописывает pacing_store (у двери нет пула), тоже через
+# apply_cooldown, который паузу только продлевает.
+_request_floor: dict[tuple[int, str], float] = {}
+# Аккаунт → момент (wall-clock), до которого паузу ещё надо дописать в базу.
+_floor_unsaved: dict[int, float] = {}
+# Пауза короче этого в базу не пишется: статус «на паузе» на несколько секунд
+# только мигал бы на экране. В памяти она соблюдается всегда.
+_FLOOR_PERSIST_MIN_S = 30.0
+# Остаток короче этого клиент просто дожидается сам (код, который честно
+# проспал названную паузу и повторил, не должен получать отказ из-за долей
+# секунды); дольше — отвечает паузой, не обращаясь к Telegram.
+FLOOR_WAIT_INLINE_S = 2.0
+_FLOOR_MAX_KEYS = 20000
+
+
+def note_floor(account_id, request_name: str, seconds) -> float:
+    """Дверь к Telegram увидела паузу. Вернуть применённые секунды (0 — нет).
+
+    Синхронная и без базы: зовётся из клиента аккаунта на любом пути. Счётчики
+    серии флудов не трогает — это делает record_flood у вызывающего, а порог
+    страхует тех, кто записать забыл."""
+    try:
+        aid = int(account_id)
+        secs = float(seconds)
+    except (TypeError, ValueError):
+        return 0.0
+    if aid <= 0 or secs <= 0:
+        return 0.0
+    now = time.monotonic()
+    if len(_request_floor) > _FLOOR_MAX_KEYS:
+        for k in [k for k, v in _request_floor.items() if v <= now]:
+            _request_floor.pop(k, None)
+    key = (aid, str(request_name or ""))
+    _request_floor[key] = max(_request_floor.get(key, 0.0), now + secs)
+    state = get_account_state(aid)
+    state.cooldown_until = max(state.cooldown_until, now + secs)
+    if secs >= _FLOOR_PERSIST_MIN_S:
+        _floor_unsaved[aid] = max(_floor_unsaved.get(aid, 0.0), time.time() + secs)
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_flood_floor_events_total", {"kind": "noted"})
+    except Exception:
+        pass
+    return secs
+
+
+def floor_remaining(account_id, request_name: str) -> float:
+    """Сколько секунд Telegram ещё просил не повторять этот запрос с аккаунта."""
+    try:
+        key = (int(account_id), str(request_name or ""))
+    except (TypeError, ValueError):
+        return 0.0
+    until = _request_floor.get(key)
+    if not until:
+        return 0.0
+    left = until - time.monotonic()
+    if left <= 0:
+        _request_floor.pop(key, None)
+        return 0.0
+    return left
+
+
+def note_floor_refused() -> None:
+    """Счётчик: запрос остановлен порогом и до Telegram не дошёл."""
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_flood_floor_events_total", {"kind": "refused"})
+    except Exception:
+        pass
+
+
+def drain_floor_unsaved() -> list[tuple[int, float]]:
+    """Снять паузы, ждущие записи в базу: [(аккаунт, осталось секунд)]."""
+    now = time.time()
+    out = [(aid, until - now) for aid, until in _floor_unsaved.items()]
+    _floor_unsaved.clear()
+    return [(aid, left) for aid, left in out if left >= _FLOOR_PERSIST_MIN_S]
+
+
+def requeue_floor_unsaved(items) -> None:
+    """Вернуть паузы в очередь записи, если база не приняла."""
+    now = time.time()
+    for aid, left in items:
+        _floor_unsaved[int(aid)] = max(_floor_unsaved.get(int(aid), 0.0), now + float(left))
+
+
 def is_account_cooling(account_id: int) -> bool:
     """Check if an account is currently in cooldown.
 

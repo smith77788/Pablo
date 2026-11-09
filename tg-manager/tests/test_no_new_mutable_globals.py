@@ -305,6 +305,14 @@ CACHE: dict[str, str] = {
     "services/account_manager.py:_ACC_TRANSPORT": (
         "релей/прокси аккаунта; истина в tg_accounts, авторитетно перечитывается "
         "на старте операции — добирает поля, которых нет в выборке вызывающего"),
+    "services/account_manager.py:_SESSION_ACC": (
+        "ключ сессии → id аккаунта; истина в tg_accounts, перечитывается вместе "
+        "с картой транспорта — опознаёт аккаунт, когда в словаре вызывающего нет id"),
+    "services/account_manager.py:_ACC_DEVICE": (
+        "сохранённое устройство аккаунта из tg_accounts, перечитывается вместе с "
+        "картой транспорта — добирает устройство, которого нет в выборке"),
+    "services/account_manager.py:_ACC_SESSION": (
+        "обратная сторона _SESSION_ACC: по ней снимается старый ключ при смене сессии"),
     "services/account_manager.py:_OWNER_IPV6_SUBNET": "праймится из БД на старте операции",
     "services/account_manager.py:_OWNER_PROXY_POLICY": "праймится из БД на старте операции",
     "services/account_manager.py:_proxy_stats": "статистика прокси; сводная — в infra_memory",
@@ -357,6 +365,12 @@ DB_BACKED: dict[str, str] = {
     "services/flood_engine.py:_dirty": (
         "очередь записи обучаемого состояния в account_pacing_state "
         "(services/pacing_store.py), как _dirty_account_keys у infra_memory"),
+    "services/flood_engine.py:_request_floor": (
+        "нижний порог паузы Telegram по (аккаунт, вид запроса), замеченный "
+        "клиентом аккаунта; пауза аккаунта из него дописывается в tg_accounts "
+        "через _floor_unsaved → pacing_store.flush_flood_floor"),
+    "services/flood_engine.py:_floor_unsaved": (
+        "очередь записи паузы аккаунта в tg_accounts (pacing_store), как _dirty"),
     "services/infra_memory.py:_account_memory": "infra_memory_accounts, флаш приростом",
     "services/infra_memory.py:_proxy_memory": "infra_memory_proxies, флаш приростом",
     "services/infra_memory.py:_dirty_account_keys": "очередь флаша",
