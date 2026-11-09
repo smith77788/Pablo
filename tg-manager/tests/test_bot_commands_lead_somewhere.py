@@ -61,3 +61,35 @@ def test_server_setup_instructions_are_for_admins_only(monkeypatch):
     src = _src("start.py")
     app = src[src.index("async def cmd_app"):]
     assert app.index("is_admin(message.from_user.id)") < app.index("Добавьте в Railway")
+
+
+def test_command_menu_is_short_and_has_no_twins():
+    """Дефект 22: в меню команд было 16 пунктов, /menu дублировал /start,
+    /tasks — операции, а «Spintax» висел по-английски."""
+    import re
+    main = (H.parents[1] / "main.py").read_text(encoding="utf-8")
+    block = main.split("_commands = (", 1)[1].split("_set_boot_phase(\"bot-commands\")", 1)[0]
+    cmds = re.findall(r'command="(\w+)", description="([^"]+)"', block)
+    names = [c for c, _ in cmds]
+    assert len(names) <= 13, names
+    assert len(set(names)) == len(names), names
+    assert not ({"menu", "start"} <= set(names)), "/menu и /start в меню — одно и то же"
+    assert not ({"tasks", "ops"} <= set(names)), "/tasks и /ops в меню — про одно и то же"
+    for c, d in cmds:
+        assert not re.search(r"[A-Za-z]{4,}", d.replace("Infragram", "")), (c, d)
+
+
+def test_tasks_empty_state_does_not_claim_everything_is_done():
+    """Пустой /tasks говорил «Все фоновые операции завершены», хотя очередь
+    он не видит, и сыпал словами op_worker / bulk join/leave."""
+    from bot.handlers.active_tasks import _build_text_and_kb
+    text, kb = _build_text_and_kb(991799)
+    assert "завершены" not in text and "op_worker" not in text and "bulk" not in text, text
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("Очередь" in t for t in labels), labels
+
+
+def test_ops_and_report_share_one_empty_text():
+    src = _src("channel_ops.py")
+    assert src.count("_NO_OPS_YET") >= 3
+    assert "Операций ещё не было" not in src

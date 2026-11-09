@@ -504,6 +504,14 @@ def _account_picker_kb(accounts: list, action: str) -> InlineKeyboardBuilder:
 # ── /ops entry point (redirect to Infragram OS) ────────────────────────────
 
 
+# Один текст пустого состояния на /ops и /report: раньше каждая команда
+# говорила о пустоте по-своему, и было непонятно, про одно ли это.
+_NO_OPS_YET = (
+    "<i>Операций пока не было. Они появятся здесь, когда вы запустите "
+    "рассылку, вступление в чаты или публикацию.</i>"
+)
+
+
 @router.message(Command("ops"))
 async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
     """Quick access to operation reports and queue."""
@@ -538,7 +546,7 @@ async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
     partial_24h = int(stats["partial_24h"] or 0) if stats else 0
     failed = int(stats["failed"] or 0) if stats else 0
 
-    status_line = (
+    status_line = _NO_OPS_YET if not (running or pending or done_24h or partial_24h or failed) else (
         f"🔄 Активных: <b>{running}</b>  ⏳ Ожидают: <b>{pending}</b>\n"
         f"✅ Завершено (24ч): <b>{done_24h}</b>  ❌ Ошибок: <b>{failed}</b>"
         # Строка только при ненулевом числе: на чистом экране лишнего нуля не
@@ -585,7 +593,7 @@ async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
               "failed": "❌", "cancelled": "🚫"}
     lines = ["📊 <b>Отчёт по операциям</b>\n"]
     if not ops:
-        lines.append("<i>Операций ещё не было.</i>")
+        lines.append(_NO_OPS_YET)
     else:
         for op in ops:
             icon = _icons.get(op["status"], "❓")

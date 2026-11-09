@@ -14,17 +14,17 @@ from bot.utils.op_helpers import safe_answer
 router = Router()
 
 _KIND_LABELS = {
-    "strike": "⚔️ Strike",
+    "strike": "⚔️ Удар",
     "mass_join": "👥 Массовый вступ",
     "mass_leave": "🚪 Массовый выход",
     "mass_report": "🚨 Массовая жалоба",
     "warmup": "🔥 Прогрев аккаунта",
     "scan": "🔍 Сканирование",
     "publish": "📢 Публикация",
-    "dm_campaign": "✉️ DM-кампания",
+    "dm_campaign": "✉️ Рассылка в личку",
     "bulk_edit": "✏️ Массовое редактирование",
     "invite": "📩 Инвайт в канал",
-    "global_presence": "🌍 Global Presence",
+    "global_presence": "🌍 Присутствие в чатах",
     "bulk_post": "📤 Публикация / рассылка",
     "bulk_leave": "🚪 Массовый выход",
 }
@@ -35,13 +35,18 @@ def _build_text_and_kb(user_id: int):
     kb = InlineKeyboardBuilder()
 
     if not tasks:
+        # Раньше здесь было «Все фоновые операции завершены» — неправда, если
+        # в очереди идёт рассылка или вступление: их этот список не видит.
+        # Плюс внутренние слова (op_worker, bulk join/leave). Теперь честно
+        # говорим, что показано, и ведём туда, где видно остальное.
         text = (
-            "✅ <b>Активных задач нет</b>\n\n"
-            "Все фоновые операции завершены.\n\n"
-            "<i>ℹ️ Операции из очереди (bulk join/leave/publish) "
-            "продолжают выполняться через op_worker и видны в "
-            "📋 Очередь операций.</i>"
+            "✅ <b>Сейчас ничего не выполняется</b>\n\n"
+            "Здесь видны задачи, запущенные из этого чата. Рассылки, "
+            "вступления и публикации из очереди — в разделе «Операции» (/ops)."
         )
+        from bot.callbacks import MassOpCb
+        kb.button(text="📋 Очередь операций",
+                  callback_data=MassOpCb(action="queue", op_type="all", page=0))
     else:
         lines = [f"⚡ <b>Активные задачи</b> ({len(tasks)}):\n"]
         for entry in tasks:
@@ -55,8 +60,8 @@ def _build_text_and_kb(user_id: int):
             )
         text = "\n".join(lines)
         text += (
-            "\n\n<i>♻️ После перезапуска бота задачи из op_worker "
-            "возобновятся автоматически. Прогрев — в течение 1 часа.</i>"
+            "\n\n<i>♻️ Если бот перезапустится, операции из очереди продолжатся "
+            "сами. Прогрев — в течение часа.</i>"
         )
         if len(tasks) > 1:
             kb.button(text="🛑 Отменить всё", callback_data=TaskCb(action="cancel_all"))
