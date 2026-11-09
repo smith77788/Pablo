@@ -156,7 +156,32 @@ async function loadMoreAccounts() {
 }
 
 // Состояние аккаунта одним словом — для карточки и для строки таблицы.
+// Метка с сервера (account_verdict) — одна на продукт: Работает / Пауза до
+// ЧЧ:ММ / Нужно действие / Потерян. Цепочка ниже — только запасной путь,
+// когда сервер метку не прислал (межтенантный просмотр админа).
+const ACC_VERDICT_STYLE = {
+  ok: {cls:'b-gr', ava_cls:'ava-teal', icon:'✅'},
+  pause: {cls:'b-or', ava_cls:'ava-orange', icon:'⏳'},
+  action: {cls:'b-rd', ava_cls:'ava-red', icon:'🔧'},
+  lost: {cls:'b-rd', ava_cls:'ava-red', icon:'⛔️'},
+  off: {cls:'b-gy', ava_cls:'ava-teal', icon:''},
+};
+
+function accVerdictLabel(v) {
+  let label = v.label;
+  if (v.level === 'pause' && v.ready_in_sec > 0) {
+    const t = new Date(Date.now() + v.ready_in_sec * 1000);
+    const hm = String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0');
+    label += (v.ready_in_sec >= 86400 ? ' до ' + t.toLocaleDateString('ru-RU',{day:'numeric',month:'short'}) + ' ' : ' до ') + hm;
+  }
+  return label;
+}
+
 function accStatusOf(a) {
+  if (a.verdict && ACC_VERDICT_STYLE[a.verdict.level]) {
+    const st = ACC_VERDICT_STYLE[a.verdict.level];
+    return {status: (st.icon ? st.icon + ' ' : '') + accVerdictLabel(a.verdict), cls: st.cls, ava_cls: st.ava_cls};
+  }
   const cd = isOnCooldown(a);
   if (a.acc_status==='session_expired') return {status:'🔑 Релог', cls:'b-or', ava_cls:'ava-orange'};
   if (!a.is_active) return {status:'Выкл', cls:'b-gy', ava_cls:'ava-teal'};
@@ -198,12 +223,17 @@ function accRowHtml(a) {
     const trust = a.trust_score!=null?Math.round(a.trust_score):100;
     const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
     const {status, cls, ava_cls} = accStatusOf(a);
-    const proxyNote = (a.has_proxy && a.proxy_alive === false)
+    // С серверной меткой причина одна — её и печатаем; старые заметки ниже
+    // остаются только запасным путём без метки.
+    const verdictNote = (a.verdict && a.verdict.level !== 'ok' && a.verdict.reason)
+      ? `<div class="acc-phone" style="color:var(--${a.verdict.level==='pause'?'orange':(a.verdict.level==='off'?'hint':'red')})">${esc(a.verdict.reason)}</div>`
+      : '';
+    const proxyNote = a.verdict ? '' : (a.has_proxy && a.proxy_alive === false)
       ? `<div class="acc-phone" style="color:var(--red)">🔌 прокси не отвечает${a.proxy_label?' · '+esc(a.proxy_label):''} — аккаунт цел, замените прокси</div>`
       : '';
     // «🛑 На паузе» без причины отправляло человека искать объяснение в
     // карточку аккаунта. Причину считает пульс — печатаем её здесь же.
-    const pulseNote = (a.health_reason && (a.health_status==='quarantine' || a.health_status==='at_risk'))
+    const pulseNote = a.verdict ? verdictNote : (a.health_reason && (a.health_status==='quarantine' || a.health_status==='at_risk'))
       ? `<div class="acc-phone" style="color:var(--${a.health_status==='quarantine'?'red':'orange'})">${esc(a.health_reason)}</div>`
       : '';
     const sel = ACC_SEL.has(a.id);
@@ -211,7 +241,7 @@ function accRowHtml(a) {
     const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
     const right = ACC_SEL_MODE ? '' : `<div class="acc-right">
         <span class="badge ${cls}">${status}</span>
-        <span style="font-size:10px;color:var(--hint)">${trust}%</span>
+        ${a.verdict ? '' : `<span style="font-size:10px;color:var(--hint)">${trust}%</span>`}
         <span class="chev">›</span>
       </div>`;
     return `<div class="acc-row ${ACC_SEL_MODE&&sel?'sel':''}" data-acc-id="${a.id}" onclick="${onclick}">
@@ -413,6 +443,12 @@ function renderAccSurvival(d) {
     lines.push('<div style="color:var(--hint)">Возраст при потере: ' + ages + '</div>');
     lines.push('<div style="color:var(--hint)">С прокси — ' + (px.with_proxy || 0) + ', без прокси — ' + (px.no_proxy || 0) +
       (px.unknown ? ', неизвестно — ' + px.unknown : '') + '</div>');
+  }
+  const pd = d.proxy_downtime || {};
+  if (pd.outages) {
+    lines.push('<div style="color:var(--hint)">Простой из-за прокси за 30 дней: ' + pd.account_hours +
+      ' аккаунто-часов, отказов прокси — ' + pd.outages +
+      (pd.open_now ? '. Сейчас стоят ' + pd.accounts_now + ' аккаунт(ов) на ' + pd.open_now + ' мёртвых прокси' : '') + '</div>');
   }
   if (v.text) lines.push('<div style="margin-top:4px;color:' + tone + '">' + esc(v.text) + '</div>');
   return lines.join('');

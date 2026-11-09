@@ -214,4 +214,35 @@ async def fetch_survival(pool, owner_id: int) -> dict:
         # Схема событий могла быть ещё не применена — это не ошибка владельца.
         log.debug("account_survival owner=%s: %s", owner_id, exc)
         rows = []
-    return summarize([dict(r) for r in rows], int(fleet_now or 0))
+    report = summarize([dict(r) for r in rows], int(fleet_now or 0))
+    report["proxy_downtime"] = await fetch_proxy_downtime(pool, owner_id)
+    return report
+
+
+_DOWNTIME_SQL = """
+SELECT COUNT(*) AS outages,
+       COUNT(*) FILTER (WHERE ended_at IS NULL) AS open_now,
+       COALESCE(SUM(accounts) FILTER (WHERE ended_at IS NULL), 0) AS accounts_now,
+       COALESCE(SUM(accounts * EXTRACT(EPOCH FROM (
+           LEAST(COALESCE(ended_at, now()), now())
+           - GREATEST(started_at, now() - INTERVAL '30 days'))) / 3600.0), 0) AS account_hours
+  FROM proxy_outages
+ WHERE owner_id = $1
+   AND COALESCE(ended_at, now()) > now() - INTERVAL '30 days'
+"""
+
+
+async def fetch_proxy_downtime(pool, owner_id: int) -> dict:
+    """Простой аккаунтов из-за мёртвых прокси за 30 дней (schema_v316).
+
+    account_hours — сумма «аккаунт × час» простоя: аккаунты стояли из-за
+    прокси, а не из-за себя, и чинить надо прокси.
+    """
+    try:
+        r = await pool.fetchrow(_DOWNTIME_SQL, owner_id)
+    except Exception as exc:
+        log.debug("proxy_downtime owner=%s: %s", owner_id, exc)
+        return {"outages": 0, "open_now": 0, "accounts_now": 0, "account_hours": 0.0}
+    return {"outages": int(r["outages"] or 0), "open_now": int(r["open_now"] or 0),
+            "accounts_now": int(r["accounts_now"] or 0),
+            "account_hours": round(float(r["account_hours"] or 0), 1)}
