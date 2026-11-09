@@ -87,6 +87,16 @@ async def annotate(pool, owner_id: int, rows: list[dict]) -> None:
             r["verdict"] = v
 
 
+async def for_account(pool, owner_id: int, row: dict) -> dict | None:
+    """Метка одного аккаунта — для его карточки. Пульс считается только по нему."""
+    from services import fleet_pulse
+    pulse = None
+    if row.get("is_active"):
+        states = await fleet_pulse.account_states(pool, owner_id, account_ids=[int(row["id"])])
+        pulse = next((s for s in states if int(s["id"]) == int(row["id"])), None)
+    return verdict_for(row, pulse)
+
+
 def summarize(verdicts: list[dict | None]) -> dict:
     """Сколько аккаунтов в каждой метке."""
     out = {k: 0 for k in LABEL}

@@ -92,7 +92,8 @@ def _human_left(seconds: float) -> str:
     return f"{s // 3600} ч {(s % 3600) // 60} мин"
 
 
-async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
+async def account_states(pool, owner_id: int,
+                         account_ids: list[int] | None = None) -> list[dict[str, Any]]:
     """Состояние каждого активного аккаунта владельца.
 
     Возвращает список словарей: id, phone, name, state (dead|quarantine|cooling|
@@ -127,8 +128,10 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
         "FROM tg_accounts a "
         "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
         "WHERE a.owner_id=$1 AND a.is_active=TRUE "
-        "ORDER BY a.id",
-        owner_id)
+        # Карточке одного аккаунта не нужен пульс всего флота.
+        + ("AND a.id = ANY($2::bigint[]) " if account_ids else "")
+        + "ORDER BY a.id",
+        *([owner_id, [int(i) for i in account_ids]] if account_ids else [owner_id]))
 
     # Живая фаза авто-реабилитации по спам-блокам (если таблица есть).
     rehab: dict[int, dict] = {}
