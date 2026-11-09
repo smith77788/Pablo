@@ -1405,10 +1405,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          (screens/summary.js, /api/miniapp/summary). Стоит ПЕРВЫМ: главный
          экран отвечает на вопрос «что мне это принесло», а состояние флота
          ниже. -->
+    <!-- 🚀 Онбординг: выбор цели и чеклист активации новичка. Стоит ВЫШЕ
+         итогов, но виден только до активации (loadOnboarding прячет его), так
+         что у работающего владельца первым остаются итоги. Раньше новичок
+         видел сначала стену нулей, а выбор цели — за нижним краем экрана
+         (обход 08.11.2026). -->
+    <div id="onboardCard" style="margin:12px 16px 12px;display:none"></div>
     <div id="summaryWrap"></div>
     <div id="homeDataStatus" role="status" aria-live="polite" class="home-data-status"></div>
-    <!-- 🚀 Онбординг: чеклист активации новичка (скрывается после активации) -->
-    <div id="onboardCard" style="margin:12px 16px 0;display:none"></div>
     <!-- Operation Progress -->
     <div id="opProgress" style="display:none;margin:10px 16px;background:var(--bg);border-radius:14px;padding:12px 16px;border:1px solid var(--sep)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
