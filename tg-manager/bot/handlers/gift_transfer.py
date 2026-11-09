@@ -361,11 +361,13 @@ async def cb_start_transfer(callback: CallbackQuery, state: FSMContext, pool):
     kb.button(text="❌ Снять выбор", callback_data="gt:transfer_none")
     kb.row()
 
-    for acc in accounts_with_gifts:
+    _shown = _cap(accounts_with_gifts)
+    for acc in _shown:
         kb.button(
             text=f"📱 {acc['phone']} ({acc['transfer_count']}⭐)",
             callback_data=f"gt:transfer_toggle:{acc['id']}",
         )
+    _cap_note(kb, accounts_with_gifts, _shown, what="acc")
 
     kb.row()
     kb.button(text="▶️ Выбрать получателя", callback_data="gt:select_recipient")

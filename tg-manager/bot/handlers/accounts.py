@@ -25,6 +25,15 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 log = logging.getLogger(__name__)
 
 _DIALOGS_PAGE_SIZE = 10
+# Строк и кнопок аккаунтов на одной странице меню «Мои аккаунты». Раньше меню
+# строило кнопку на КАЖДЫЙ аккаунт: Telegram такую клавиатуру не принимает уже
+# на сотне-другой, а сборка её в aiogram квадратична (каждая кнопка копирует всю
+# разметку) — на 1 000 аккаунтов 8 с, на 10 000 минуты, и всё это время стоит
+# весь процесс: бот, мини-апп и фоновые циклы (замер 09.11.2026).
+_ACC_MENU_PAGE = 20
+# «Аккаунты по пулам»: сколько пулов и аккаунтов в каждом показывать.
+_POOLS_SHOWN = 10
+_POOL_ACCS_SHOWN = 5
 
 from bot.callbacks import AccCb, BmCb, BotCb, ChanCb, MassOpCb, AutoRegCb
 from bot.keyboards import subscription_locked_markup
@@ -392,6 +401,7 @@ async def cb_accounts_menu(
         callback.from_user.id,
         edit=True,
         status_filter=status_filter,
+        page=callback_data.page,
     )
 
 
@@ -402,6 +412,7 @@ async def _show_accounts_menu(
     *,
     edit: bool,
     status_filter: str = "all",
+    page: int = 0,
 ) -> None:
     from aiogram.types import InlineKeyboardButton
 
@@ -461,7 +472,11 @@ async def _show_accounts_menu(
         lines = [
             f"📱 <b>Telegram-аккаунты</b> ({badge}) · {filter_label}: {len(shown)}\n"
         ]
-        for acc in shown:
+        pages = (len(shown) + _ACC_MENU_PAGE - 1) // _ACC_MENU_PAGE
+        page = min(max(page, 0), pages - 1)
+        start = page * _ACC_MENU_PAGE
+        page_accs = shown[start : start + _ACC_MENU_PAGE]
+        for acc in page_accs:
             name = escape(acc["first_name"] or "")
             uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
             phone = escape(acc.get("phone", ""))
@@ -479,8 +494,13 @@ async def _show_accounts_menu(
                 text=f"{st_emoji} {display}",
                 callback_data=AccCb(action="view", acc_id=acc["id"]),
             )
+        if pages > 1:
+            lines.append(
+                f"\n<i>Страница {page + 1} из {pages}. Поиск по всем аккаунтам — в мини-аппе.</i>"
+            )
         text = "\n".join(lines)
     else:
+        pages = 1
         if status_filter == "problem":
             text = "📱 <b>Telegram-аккаунты</b>\n\n✅ Проблемных аккаунтов нет!"
         elif status_filter == "active":
@@ -502,6 +522,19 @@ async def _show_accounts_menu(
 
     # All buttons so far are 1 per row
     kb.adjust(1)
+
+    if pages > 1:
+        _fcode = {"all": 0, "active": 1, "problem": 2}.get(status_filter, 0)
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(
+                text="◀️", callback_data=AccCb(action="menu", chat_id=_fcode, page=page - 1).pack()))
+        nav.append(InlineKeyboardButton(
+            text=f"{page + 1}/{pages}", callback_data=AccCb(action="menu", chat_id=_fcode, page=page).pack()))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton(
+                text="▶️", callback_data=AccCb(action="menu", chat_id=_fcode, page=page + 1).pack()))
+        kb.row(*nav)
 
     # Filter tabs in one explicit row
     if total > 0:
@@ -2602,14 +2635,17 @@ async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMC
         pool_groups.keys(),
         key=lambda x: (_POOL_ORDER.index(x) if x in _POOL_ORDER else 99, x),
     )
-    for p_name in sorted_pools:
+    # По 5 аккаунтов на пул и не больше 10 пулов. Раньше здесь была кнопка на
+    # КАЖДЫЙ аккаунт: на 10 000 аккаунтов экран не открывался, а сборка
+    # клавиатуры держала весь процесс минутами (замер 09.11.2026).
+    for p_name in sorted_pools[:_POOLS_SHOWN]:
         accs = pool_groups[p_name]
         icon = _POOL_ICON.get(p_name, "⚪")
         active_cnt = sum(1 for a in accs if a.get("is_active", True))
         lines.append(
             f"\n{icon} <b>{escape(p_name)}</b> ({len(accs)} акк., {active_cnt} активных):"
         )
-        for acc in accs:
+        for acc in accs[:_POOL_ACCS_SHOWN]:
             name = escape(acc.get("first_name") or "")
             phone = escape(acc.get("phone") or "")
             label = name or phone or f"ID {acc['id']}"
@@ -2622,6 +2658,13 @@ async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMC
                 text=f"{st} {label[:20]}",
                 callback_data=AccCb(action="view", acc_id=acc["id"]),
             )
+        if len(accs) > _POOL_ACCS_SHOWN:
+            lines.append(f"  … и ещё {len(accs) - _POOL_ACCS_SHOWN}")
+    if len(sorted_pools) > _POOLS_SHOWN:
+        lines.append(
+            f"\n<i>Пулов: {len(sorted_pools)}, показаны первые {_POOLS_SHOWN}. "
+            "Все пулы и аккаунты — в мини-аппе.</i>"
+        )
 
     kb.adjust(1)
     kb.button(
@@ -2692,12 +2735,7 @@ async def cb_bulk_pool_set(
     pool_name = existing_pools[pool_idx]
     await state.clear()
     uid = callback.from_user.id
-    updated = 0
-    for acc_id in acc_ids:
-        acc = await db.get_tg_account(pool, acc_id, uid)
-        if acc and not acc.get("pool"):
-            await db.update_account_pool(pool, acc_id, uid, pool_name)
-            updated += 1
+    updated = await db.assign_pool_to_unpooled(pool, uid, acc_ids, pool_name)
     await callback.answer(f"✅ Назначен пул «{pool_name}» для {updated} аккаунтов", show_alert=True)
     await cb_pools_view(callback, pool, state)
 
@@ -4984,12 +5022,7 @@ async def handle_pool_input(
 
     if bulk_mode and bulk_acc_ids:
         # Bulk assignment: apply to all accounts that have no pool
-        updated = 0
-        for aid in bulk_acc_ids:
-            acc = await db.get_tg_account(pool, aid, uid)
-            if acc and not acc.get("pool"):
-                await db.update_account_pool(pool, aid, uid, pool_name)
-                updated += 1
+        updated = await db.assign_pool_to_unpooled(pool, uid, bulk_acc_ids, pool_name)
         kb = InlineKeyboardBuilder()
         kb.button(text="🏊 Пулы", callback_data=AccCb(action="pools_view"))
         kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
