@@ -345,11 +345,14 @@ async def cb_chanf_create_start(
         )
         return
     kb = InlineKeyboardBuilder()
-    for i, acc in enumerate(accounts):
+    # Потолок: на 10 000 аккаунтов кнопка на каждый держала весь процесс 460 с.
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=_acc_label(acc),
             callback_data=ChanFactCb(action="create_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown, what="acc")
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(3)
     await state.set_state(ChannelFactoryFSM.choosing_account)

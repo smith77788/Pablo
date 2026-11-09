@@ -14,6 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.callbacks import ClustMCb, BotCb, NetBcCb, BmCb
 from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from bot.keyboards import subscription_locked_markup
@@ -507,7 +508,8 @@ async def cb_cluster_add_bot_pick(
             f"🔗 <b>Добавить бота в кластер «{_html.escape(cluster_name)}»</b>\n",
             "Выберите бота:",
         ]
-        for bot_rec in rows:
+        _shown = _cap(rows)
+        for bot_rec in _shown:
             name = (
                 bot_rec["username"] or bot_rec["first_name"] or f"id{bot_rec['bot_id']}"
             )
@@ -515,6 +517,7 @@ async def cb_cluster_add_bot_pick(
                 text=f"🤖 @{name}",
                 callback_data=ClustMCb(action="add_bot", cluster_name=cluster_name, bot_id=bot_rec["bot_id"]),
             )
+        _cap_note(kb, rows, _shown, what="bot")
 
     kb.button(text="◀️ Назад", callback_data=ClustMCb(action="view", cluster_name=cluster_name))
     kb.adjust(1)
