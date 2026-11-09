@@ -9599,7 +9599,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 # Всегда перепроверять: мини-апп деплоится часто, а показывать
                 # устаревший интерфейс из кэша хуже, чем один запрос с 304.
                 "Cache-Control": "no-cache",
+                "Vary": "Accept-Encoding",
             }
+            # Brotli на четверть легче gzip (services/miniapp_brotli.py). Пока
+            # фоновое сжатие этой версии не готово — отдаём gzip, как раньше.
+            from services import miniapp_brotli as _mb
+            if _mb.accepts(request.headers.get("Accept-Encoding")):
+                import gzip as _gz_br
+                _br = _mb.get_or_schedule(
+                    "index.html", etag, lambda: _gz_br.decompress(_MINIAPP_GZ["body"]))
+                if _br is not None:
+                    headers["Content-Encoding"] = "br"
+                    return web.Response(body=_br, headers=headers,
+                                        content_type="text/html", charset="utf-8")
             if "gzip" in (request.headers.get("Accept-Encoding") or ""):
                 headers["Content-Encoding"] = "gzip"
                 return web.Response(body=_MINIAPP_GZ["body"], headers=headers,
@@ -9642,7 +9654,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             headers = {"ETag": etag, "Cache-Control": _cc, "Vary": "Accept-Encoding"}
             if request.headers.get("If-None-Match") == etag:
                 return web.Response(status=304, headers=headers)
-            if "gzip" not in (request.headers.get("Accept-Encoding") or ""):
+            from services import miniapp_brotli as _mb
+            _accepts_br = _mb.accepts(request.headers.get("Accept-Encoding"))
+            if "gzip" not in (request.headers.get("Accept-Encoding") or "") and not _accepts_br:
                 return web.FileResponse(full, headers=headers)
             hit = _ASSET_GZ.get(full)
             if not hit or hit[0] != key:
@@ -9654,6 +9668,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 hit = (key, _gzip.compress(
                     _mm.safe(_fn, _src, os.path.basename(full)).encode("utf-8"), 6))
                 _ASSET_GZ[full] = hit
+            if _accepts_br:
+                import gzip as _gz_br
+                _br = _mb.get_or_schedule(full, key, lambda: _gz_br.decompress(hit[1]))
+                if _br is not None:
+                    headers["Content-Encoding"] = "br"
+                    return web.Response(body=_br, headers=headers, content_type=ctype,
+                                        charset="utf-8")
+            if "gzip" not in (request.headers.get("Accept-Encoding") or ""):
+                import gzip as _gz_plain
+                return web.Response(body=_gz_plain.decompress(hit[1]), headers=headers,
+                                    content_type=ctype, charset="utf-8")
             headers["Content-Encoding"] = "gzip"
             return web.Response(body=hit[1], headers=headers, content_type=ctype,
                                 charset="utf-8")
