@@ -33,15 +33,17 @@ def _run(coro):
     return _LOOP.run_until_complete(coro)
 
 
-def test_both_write_paths_mirror_into_contacts():
-    """Без Postgres: обе двери записи в crm_contacts зовут зеркало."""
+def test_both_write_paths_go_straight_to_contacts():
+    """Без Postgres: обе двери записи «Клиентов» (форма мини-аппа и бот) пишут
+    в «Контакты» через add_crm_client, а старую таблицу не пополняет никто
+    (шаг 5). Новая запись в crm_contacts снова развела бы две базы."""
+    import re
     for rel in ("services/mini_app_broadcast.py", "bot/handlers/crm.py"):
         src = (ROOT / rel).read_text(encoding="utf-8")
-        assert src.count("INSERT INTO crm_contacts") == 1, rel
-        tail = src[src.index("INSERT INTO crm_contacts"):]
-        assert "await mirror_crm_contact(" in tail[:2500], (
-            f"{rel}: клиент пишется в старую базу, но не появляется в «Контактах»")
-    assert "tg_is_real=False" in (ROOT / "bot/handlers/crm.py").read_text(encoding="utf-8")
+        assert "await add_crm_client(" in src, rel
+    for path in list((ROOT / "services").rglob("*.py")) + list((ROOT / "bot").rglob("*.py")):
+        assert not re.search(r"INSERT\s+INTO\s+crm_contacts\b",
+                             path.read_text(encoding="utf-8")), path
 
 
 @pytest.fixture(scope="module")
@@ -249,12 +251,11 @@ def test_clients_tab_shows_contacts_and_deletes_from_both(pool):
 
 
 def test_nobody_reads_the_old_table_any_more():
-    """Шаг 4: старую таблицу читают только мост и обе двери записи, которые
-    держат её в паре с «Контактами». Новый читатель crm_contacts снова
+    """Шаг 4: старую таблицу читают только перенос (legacy_crm) и удаление во
+    вкладке «Клиенты», которое снимает пару строки вместе с контактом. Новый читатель crm_contacts снова
     развёл бы две базы: «вижу во вкладке» и «пишу рассылкой» разошлись бы."""
     import re
-    allowed = {"services/contacts_hub/legacy_crm.py", "services/mini_app_broadcast.py",
-               "bot/handlers/crm.py"}
+    allowed = {"services/contacts_hub/legacy_crm.py", "services/mini_app_broadcast.py"}
     bad = []
     for path in list((ROOT / "services").rglob("*.py")) + list((ROOT / "bot").rglob("*.py")):
         rel = path.relative_to(ROOT).as_posix()
@@ -284,3 +285,19 @@ def test_crm_audience_is_clients_inside_contacts(pool):
     ids = _run(pool.fetch(
         f"SELECT tg_user_id FROM {CRM_ROWS} c WHERE owner_id=$1 AND tg_user_id > 0", OWNER))
     assert [r["tg_user_id"] for r in ids] == [6_000_000_001]
+
+
+def test_clients_added_after_step5_are_crm_audience(pool):
+    """Клиент, заведённый во вкладке после шага 5, — в аудитории «CRM», без
+    придуманного ID; повтор с тем же @username не заводит второго."""
+    from services.contacts_hub.legacy_crm import CRM_ROWS, add_crm_client
+    _run(pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER))
+    a = _run(add_crm_client(pool, OWNER, tg_user_id=6_100_000_001, username="@neo",
+                            first_name="Нео", tags=["vip"]))
+    b = _run(add_crm_client(pool, OWNER, username="neo", phone="+70001112233"))
+    assert a and a == b, "тот же человек заведён дважды"
+    c = _run(add_crm_client(pool, OWNER, first_name="Без ID"))
+    rows = _run(pool.fetch(f"SELECT * FROM {CRM_ROWS} x WHERE owner_id=$1", OWNER))
+    assert {r["first_name"] for r in rows} == {"Нео", "Без ID"}
+    assert next(r for r in rows if r["first_name"] == "Без ID")["tg_user_id"] is None
+    assert c

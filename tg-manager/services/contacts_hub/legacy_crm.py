@@ -62,10 +62,15 @@ async def mirror_crm_contact(
 
 async def _mirror_on(conn, owner_id, legacy_id, tg_user_id, real_tg, username,
                      first_name, last_name, phone, tags, notes) -> tuple[str, bool]:
-    """Тело зеркала на взятом соединении: (id контакта, создан ли новый)."""
+    """Тело зеркала на взятом соединении: (id контакта, создан ли новый).
+
+    legacy_id=None — клиент, заведённый во вкладке «Клиенты» уже без старой
+    таблицы (шаг 5): метка у него `crm_client`, а не номер строки.
+    """
+    marker = ({"legacy_crm_id": int(legacy_id)} if legacy_id is not None
+              else {"crm_client": True})
     async with conn.transaction():
-        cid = await _find(conn, int(owner_id), int(legacy_id),
-                          real_tg, username, phone)
+        cid = await _find(conn, int(owner_id), legacy_id, real_tg, username, phone)
         if cid:
             await conn.execute(
                 """UPDATE unified_contacts SET
@@ -83,14 +88,13 @@ async def _mirror_on(conn, owner_id, legacy_id, tg_user_id, real_tg, username,
                        WHEN $9::text IS NULL
                          OR strpos(COALESCE(notes, ''), $9::text) > 0 THEN notes
                        ELSE concat_ws(E'\\n', NULLIF(notes, ''), $9::text) END,
-                     custom_fields = COALESCE(custom_fields, '{}'::jsonb)
-                       || jsonb_build_object('legacy_crm_id', $2::bigint),
+                     custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $2::jsonb,
                      updated_at = NOW()
                    WHERE id = $1""",
-                cid, int(legacy_id), first_name, last_name, username,
+                cid, json.dumps(marker), first_name, last_name, username,
                 real_tg, phone, tags, notes)
             return str(cid), False
-        extra = {"legacy_crm_id": int(legacy_id), "legacy_crm_created": True}
+        extra = {**marker, "legacy_crm_created": True}
         if tg_user_id and not real_tg:
             extra["legacy_tg_user_id"] = int(tg_user_id)
         display = " ".join(p for p in (first_name, last_name) if p) or username
@@ -107,11 +111,13 @@ async def _mirror_on(conn, owner_id, legacy_id, tg_user_id, real_tg, username,
         return str(new_id), True
 
 
-async def _find(conn, owner_id: int, legacy_id: int, real_tg, username, phone):
-    row = await conn.fetchrow(
-        "SELECT id FROM unified_contacts WHERE owner_id=$1 "
-        "AND custom_fields->>'legacy_crm_id' = $2::text LIMIT 1",
-        owner_id, str(legacy_id))
+async def _find(conn, owner_id: int, legacy_id, real_tg, username, phone):
+    row = None
+    if legacy_id is not None:
+        row = await conn.fetchrow(
+            "SELECT id FROM unified_contacts WHERE owner_id=$1 "
+            "AND custom_fields->>'legacy_crm_id' = $2::text LIMIT 1",
+            owner_id, str(legacy_id))
     if not row and real_tg:
         row = await conn.fetchrow(
             "SELECT id FROM unified_contacts WHERE owner_id=$1 "
@@ -223,7 +229,8 @@ async def run_backfill_once(pool) -> dict[str, int] | None:
 
 
 # Аудитория «CRM» (старый тип рассылки и инвайта 'crm') — ЛЮДИ ИЗ «КЛИЕНТОВ»
-# внутри «Контактов»: у кого есть метка legacy_crm_id. Подзапрос отдаёт те же
+# внутри «Контактов»: у кого есть метка legacy_crm_id (перенесён из старой
+# таблицы) или crm_client (заведён во вкладке «Клиенты» после шага 5). Подзапрос отдаёт те же
 # колонки, что старая таблица (tg_user_id, username, first_name, last_name,
 # phone), поэтому читатели сменили только источник. Отличия от старой таблицы:
 #   * придуманный ID ручного клиента сюда не попадает — писать на него было
@@ -234,5 +241,33 @@ async def run_backfill_once(pool) -> dict[str, int] | None:
 CRM_ROWS = (
     "(SELECT id, owner_id, telegram_user_id AS tg_user_id, username, first_name, "
     "last_name, phones->>0 AS phone, created_at FROM unified_contacts "
-    "WHERE custom_fields ? 'legacy_crm_id' AND excluded = FALSE)"
+    "WHERE (custom_fields ? 'legacy_crm_id' OR custom_fields ? 'crm_client') "
+    "AND excluded = FALSE)"
 )
+
+
+async def add_crm_client(pool, owner_id: int, *, tg_user_id=None, username=None,
+                         first_name=None, last_name=None, phone=None, tags=None,
+                         notes=None) -> str | None:
+    """Клиент из вкладки «Клиенты» или из бота — сразу в «Контакты» (шаг 5).
+
+    Старая таблица больше не пополняется. Telegram ID пишется, только если его
+    ввёл человек: придуманных ID больше нет. Тот же человек (по ID, @username,
+    телефону) не заводится второй раз — дополняется. None — не удалось.
+    """
+    if not pool or not owner_id:
+        return None
+    username = (_clean(username) or "").lstrip("@") or None
+    first_name, last_name = _clean(first_name), _clean(last_name)
+    phone, notes = _clean(phone), _clean(notes)
+    tags = [t for t in (_clean(t) for t in (tags or [])) if t]
+    real_tg = int(tg_user_id) if tg_user_id else None
+    try:
+        async with pool.acquire() as conn:
+            cid, _created = await _mirror_on(conn, int(owner_id), None, None, real_tg,
+                                             username, first_name, last_name,
+                                             phone, tags, notes)
+            return cid
+    except Exception:
+        log.warning("add_crm_client owner=%s", owner_id, exc_info=True)
+        return None

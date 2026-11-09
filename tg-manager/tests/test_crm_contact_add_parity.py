@@ -2,7 +2,7 @@
 
 Раньше добавить контакт вручную можно было только из mini-app
 (POST /api/miniapp/crm/contact). Бот получил кнопку «👤 Новый контакт» и FSM
-с тем же upsert в crm_contacts (source='manual').
+с тем же upsert. С 09.11.2026 оба пишут в «Контакты» (add_crm_client).
 """
 from __future__ import annotations
 
@@ -57,11 +57,13 @@ def test_menu_button_and_handlers_wired():
     assert "AddContact.waiting_info" in h
 
 
-def test_insert_uses_manual_source_upsert():
+def test_bot_and_app_add_through_the_same_door():
+    """С 09.11.2026 (одна база людей, шаг 5) и бот, и мини-апп заводят клиента
+    одной дверью add_crm_client — прямо в «Контакты», без старой таблицы."""
     h = _read("bot/handlers/crm.py")
-    assert "INSERT INTO crm_contacts" in h
-    assert "'manual'" in h
-    assert "ON CONFLICT (owner_id, tg_user_id) DO UPDATE" in h
+    assert "await add_crm_client(" in h and "INSERT INTO crm_contacts" not in h
+    api = _read("services/mini_app_broadcast.py")
+    assert "await add_crm_client(" in api and "INSERT INTO crm_contacts" not in api
 
 
 def test_app_endpoint_still_present():

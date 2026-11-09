@@ -500,7 +500,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 "phone": phones[0] if phones else None,
                 "tags": c.get("tags") or [],
                 "notes": c.get("notes") or None,
-                "source": "CRM" if isinstance(cf, dict) and cf.get("legacy_crm_id") else None,
+                "source": ("CRM" if isinstance(cf, dict)
+                           and (cf.get("legacy_crm_id") or cf.get("crm_client")) else None),
                 "created_at": c.get("discovered_at") or c.get("created_at"),
             })
         tags_row = await _safe_fetch(pool,
@@ -527,38 +528,22 @@ def setup_routes(app: web.Application, pool) -> None:
         notes = str(data.get("notes", "")).strip() or None
         if not first_name and not username and not phone:
             return _err("Укажите имя, @username или номер телефона", 400)
-        tg_user_id = int(tg_user_id_raw) if tg_user_id_raw else None
-        if not tg_user_id:
-            import random as _rand
-            tg_user_id = _rand.randint(2_000_000_000, 9_000_000_000)
         try:
-            cid = await pool.fetchval(
-                """INSERT INTO crm_contacts
-                   (owner_id, tg_user_id, first_name, last_name, username, phone, tags, notes, source)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
-                   ON CONFLICT (owner_id, tg_user_id) DO UPDATE
-                     SET first_name=EXCLUDED.first_name,
-                         last_name=EXCLUDED.last_name,
-                         username=EXCLUDED.username,
-                         phone=EXCLUDED.phone,
-                         tags=EXCLUDED.tags,
-                         notes=EXCLUDED.notes,
-                         updated_at=now()
-                   RETURNING id""",
-                uid, tg_user_id, first_name or None, last_name, username, phone,
-                tags, notes,
-            )
-            # Шаг 1 сведения двух баз: клиент сразу появляется и в «Контактах».
-            from services.contacts_hub.legacy_crm import mirror_crm_contact
-            await mirror_crm_contact(
-                pool, uid, legacy_id=cid, tg_user_id=tg_user_id,
-                tg_is_real=bool(tg_user_id_raw), username=username,
-                first_name=first_name, last_name=last_name, phone=phone,
-                tags=tags, notes=notes)
-            return _json_resp({"id": cid, "ok": True})
-        except Exception:
-            log.exception("crm_contact_create uid=%d", uid)
+            tg_user_id = int(tg_user_id_raw) if tg_user_id_raw else None
+        except (TypeError, ValueError):
+            return _err("Telegram ID — это число", 400)
+        # Шаг 5 сведения двух баз: клиент пишется прямо в «Контакты», старая
+        # таблица crm_contacts больше не пополняется. Придуманный Telegram ID
+        # (раньше — случайное число, если поле пустое) больше не нужен.
+        from services.contacts_hub.legacy_crm import add_crm_client
+        cid = await add_crm_client(
+            pool, uid, tg_user_id=tg_user_id, username=username,
+            first_name=first_name, last_name=last_name, phone=phone,
+            tags=tags, notes=notes)
+        if not cid:
+            log.error("crm_contact_create uid=%d: контакт не сохранён", uid)
             return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"id": cid, "ok": True})
 
     async def crm_contact_delete(request: web.Request) -> web.Response:
         """Удалить человека из «Клиентов» = из «Контактов» (база одна).
