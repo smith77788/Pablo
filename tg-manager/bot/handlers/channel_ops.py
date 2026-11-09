@@ -3049,7 +3049,6 @@ async def _run_invite_bg(
             total_items=len(usernames), label=label,
         )
     except PlanRequiredError as exc:
-        from bot.utils.subscription import locked_text
         await msg_obj.answer(
             locked_text("Инвайт в канал", exc.required_plan),
             parse_mode="HTML",
@@ -5930,7 +5929,6 @@ async def cb_contact_invite_start(
     await safe_answer(callback)
     await state.clear()
     if not await require_plan(pool, callback.from_user.id, _PRO):
-        from bot.utils.subscription import locked_text
 
         await callback.message.edit_text(
             locked_text("Инвайт из контактов", "pro"),
