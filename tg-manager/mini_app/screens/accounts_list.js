@@ -64,6 +64,8 @@ async function reauthAccount(id) {
 }
 
 async function loadAccounts() {
+  fleetToolsInit('accounts');
+  loadAccTags();
   // Accounts and channels load independently — one failure doesn't break the other
   api(_accQuery(0)).then(ad => {
     CUR_ACCS = ad.accounts||[];
@@ -145,36 +147,42 @@ async function loadMoreAccounts() {
   finally { ACC_LOADING=false; }
 }
 
+// Состояние аккаунта одним словом — для карточки и для строки таблицы.
+function accStatusOf(a) {
+  const cd = isOnCooldown(a);
+  if (a.acc_status==='session_expired') return {status:'🔑 Релог', cls:'b-or', ava_cls:'ava-orange'};
+  if (!a.is_active) return {status:'Выкл', cls:'b-gy', ava_cls:'ava-teal'};
+  if (a.acc_status==='banned') return {status:'🚫 Бан', cls:'b-rd', ava_cls:'ava-red'};
+  if (cd) return {status:'⏳ Кулдаун', cls:'b-or', ava_cls:'ava-orange'};
+  // Риск-пульс: аккаунт «активен и подключён», но иммунная система держит его
+  // в карантине/риске и операции его пропускают → показываем РЕАЛЬНОЕ состояние,
+  // а не ложное «Активен» (иначе «аккаунты не работают, хотя активны»).
+  if (a.health_status==='quarantine') return {status:'🛑 На паузе', cls:'b-rd', ava_cls:'ava-red'};
+  if (a.health_status==='at_risk') return {status:'⚠️ Под риском', cls:'b-or', ava_cls:'ava-orange'};
+  // Мёртвый прокси: аккаунт цел, но каждая его операция падает по сети. Без
+  // этого он показывался «Активен», и человек шёл чинить аккаунт вместо
+  // замены прокси. Аккаунты БЕЗ прокси работают с адреса хоста — это норма.
+  if (a.has_proxy && a.proxy_alive === false) return {status:'🔌 Прокси', cls:'b-rd', ava_cls:'ava-red'};
+  return {status:'Активен', cls:'b-gr', ava_cls:'ava-teal'};
+}
+
 function renderAccounts(list) {
   const el = document.getElementById('accList');
   if (!list.length) {
-    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
+    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || ACC_TAG_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
     if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
     else el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт прямо здесь: по номеру, QR-коду, файлу .session, архиву tdata или строке сессии',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
     return;
   }
+  // Широкий экран — плотная таблица с сортировкой по заголовкам (fleet_tools.js).
+  if (fleetIsWide()) { el.innerHTML = accTableHtml(list); return; }
   el.innerHTML = list.map(a=>{
     const name = a.first_name||(a.username?'@'+a.username:'#'+a.id);
     const phone = a.phone || '';
     const flag = phoneFlag(phone);
-    const cd = isOnCooldown(a);
     const trust = a.trust_score!=null?Math.round(a.trust_score):100;
     const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
-    let status, cls, ava_cls;
-    if (a.acc_status==='session_expired') { status='🔑 Релог'; cls='b-or'; ava_cls='ava-orange'; }
-    else if (!a.is_active) { status='Выкл'; cls='b-gy'; ava_cls='ava-teal'; }
-    else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; ava_cls='ava-red'; }
-    else if (cd) { status='⏳ Кулдаун'; cls='b-or'; ava_cls='ava-orange'; }
-    // Риск-пульс: аккаунт «активен и подключён», но иммунная система держит его
-    // в карантине/риске и операции его пропускают → показываем РЕАЛЬНОЕ состояние,
-    // а не ложное «Активен» (иначе «аккаунты не работают, хотя активны»).
-    else if (a.health_status==='quarantine') { status='🛑 На паузе'; cls='b-rd'; ava_cls='ava-red'; }
-    else if (a.health_status==='at_risk') { status='⚠️ Под риском'; cls='b-or'; ava_cls='ava-orange'; }
-    // Мёртвый прокси: аккаунт цел, но каждая его операция падает по сети. Без
-    // этого он показывался «Активен», и человек шёл чинить аккаунт вместо
-    // замены прокси. Аккаунты БЕЗ прокси работают с адреса хоста — это норма.
-    else if (a.has_proxy && a.proxy_alive === false) { status='🔌 Прокси'; cls='b-rd'; ava_cls='ava-red'; }
-    else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
+    const {status, cls, ava_cls} = accStatusOf(a);
     const proxyNote = (a.has_proxy && a.proxy_alive === false)
       ? `<div class="acc-phone" style="color:var(--red)">🔌 прокси не отвечает${a.proxy_label?' · '+esc(a.proxy_label):''} — аккаунт цел, замените прокси</div>`
       : '';
@@ -184,7 +192,7 @@ function renderAccounts(list) {
       ? `<div class="acc-phone" style="color:var(--${a.health_status==='quarantine'?'red':'orange'})">${esc(a.health_reason)}</div>`
       : '';
     const sel = ACC_SEL.has(a.id);
-    const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id})` : `openAccount(${a.id})`;
+    const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id},event)` : `openAccount(${a.id})`;
     const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
     const right = ACC_SEL_MODE ? '' : `<div class="acc-right">
         <span class="badge ${cls}">${status}</span>
@@ -197,6 +205,7 @@ function renderAccounts(list) {
       <div class="acc-body">
         <div class="acc-name">${esc(name)} ${stageBadge(a.stage)}</div>
         <div class="acc-phone">${esc(phone)}</div>
+        ${(a.tags||[]).length ? `<div class="fx-tags">${accTagsHtml(a)}</div>` : ''}
         ${proxyNote}
         ${pulseNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
