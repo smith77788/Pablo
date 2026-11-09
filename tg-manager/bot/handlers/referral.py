@@ -92,12 +92,15 @@ def _dashboard_keyboard(share_url: str | None = None) -> object:
 @router.message(Command("referral"))
 async def cmd_referral(message: Message) -> None:
 
+    # Команда ведёт прямо в раздел, а не пересказывает путь по меню.
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Открыть Infragram OS", callback_data=BmCb(action="main"))
+    kb.button(text="🔗 Моя ссылка и доход", callback_data=RefCb(action="menu"))
+    kb.button(text="🏆 Топ рефереров", callback_data=RefCb(action="leaderboard"))
+    kb.adjust(1)
     await message.answer(
         "👥 <b>Реферальная программа</b>\n\n"
-        "Откройте Infragram OS и перейдите в:\n"
-        "<code>/menu → ⚙️ Настройки → 👥 Рефералы</code>",
+        "Приглашайте по своей ссылке и получайте процент с каждой оплаты "
+        "приглашённых.",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )

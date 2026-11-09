@@ -103,12 +103,16 @@ async def _has_active_account(pool: asyncpg.Pool, owner_id: int) -> bool:
 @router.message(Command("ranking"))
 async def cmd_ranking(message: Message) -> None:
 
+    # Команда ведёт прямо в раздел. Раньше она писала «откройте /menu → …»
+    # (и путь в подсказке давно разошёлся с меню) — тупик вместо действия.
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Открыть Infragram OS", callback_data=BmCb(action="main"))
+    kb.button(text="📊 Открыть позиции в поиске", callback_data=VisCb(action="dashboard"))
+    kb.button(text="🏠 Все разделы", callback_data=BmCb(action="main"))
+    kb.adjust(1)
     await message.answer(
-        "📊 <b>Трекер позиций</b>\n\n"
-        "Откройте Infragram OS и перейдите в:\n"
-        "<code>/menu → 📊 Аналитика → 📊 Позиции</code>",
+        "📊 <b>Позиции в поиске</b>\n\n"
+        "Где ваши боты и каналы стоят в поиске Telegram по нужным словам "
+        "и как позиции меняются со временем.",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
