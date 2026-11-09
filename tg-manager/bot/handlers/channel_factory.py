@@ -18,6 +18,7 @@ import logging
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.subscription import locked_text
 from bot.utils.owner_error import owner_error
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -143,7 +144,7 @@ async def cb_chanf_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Импорт каналов — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Импорт каналов", _PRO),
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -330,7 +331,7 @@ async def cb_chanf_create_start(
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Создание каналов — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Создание каналов", _PRO),
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -785,7 +786,7 @@ async def cb_chanf_bulk_create_start(
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Массовое создание — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Массовое создание", _PRO),
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -1028,7 +1029,7 @@ async def cb_chanf_bulk_edit_start(
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Массовое редактирование — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Массовое редактирование", _PRO),
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

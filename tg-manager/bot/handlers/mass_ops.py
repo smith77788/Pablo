@@ -16,6 +16,7 @@ from typing import Any
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.subscription import locked_text
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -248,7 +249,7 @@ async def cb_mass_publish_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Публикация / рассылка — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("Публикация / рассылка", "pro"),
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -1437,7 +1438,7 @@ async def cb_bulk_bot_edit_start(
         await safe_answer(callback)
         await safe_edit(
             callback,
-            "🔒 <b>Массовое редактирование ботов — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("Массовое редактирование ботов", "pro"),
             reply_markup=subscription_locked_markup(
                 "pro", back_callback=BmCb(action="operations")
             ),
@@ -1757,7 +1758,7 @@ async def cb_bulk_join_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Массовый join — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("Массовый join", "pro"),
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -2140,7 +2141,7 @@ async def cb_bulk_leave_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Массовый leave — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            locked_text("Массовый leave", "pro"),
             reply_markup=_back_menu_kb().as_markup(),
         )
         return

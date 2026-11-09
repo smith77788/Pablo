@@ -2089,7 +2089,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-broadcasts">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
-    <div class="hdr-title">📨 Рассылки</div>
+    <div class="hdr-title">✉️ Сообщения</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
   <div class="sb">
@@ -8287,7 +8287,9 @@ async function acquireSessionToken() {
       body: JSON.stringify({initData: tg.initData}),
     });
     if (!r.ok) throw new Error('Auth '+r.status);
-    return (await r.json()).token;
+    const _a = await r.json();
+    if (typeof _a.is_admin === 'boolean') window._AUTH_IS_ADMIN = _a.is_admin;
+    return _a.token;
   }
   // Вне Telegram: связывание устройства.
   let dt = null;
@@ -9932,7 +9934,9 @@ async function loadHome() {
     loadHome.lastData = d;
     renderCards(d);
     renderAct(d.recent_activity||[]);
-    homeLoadState('homeDataStatus', 'Показатели обновлены в ' + new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}));
+    // Время обновления уже показывает блок «Итоги» — вторая такая же строка
+    // на том же экране только шумела. Здесь остаются загрузка и ошибка.
+    homeLoadState('homeDataStatus', '');
   } catch(e) {
     homeLoadState('homeDataStatus', cached ? 'Не удалось обновить показатели. Показаны предыдущие данные, они могут быть устаревшими.' : 'Показатели недоступны. Это не нулевые значения.', true);
     if (!cached) {
@@ -30841,6 +30845,9 @@ function initPayment(planKey, label, price) {
 
 // ── Admin Panel ──────────────────────────────────────
 async function loadAdminSection() {
+  // Сервер сказал при входе, что это не админ, — не пробуем админскую ручку
+  // (раньше каждый вход обычного пользователя начинался с 403).
+  if (window._AUTH_IS_ADMIN === false) return;
   try {
     const stats = await api('/api/miniapp/admin/stats');
     window.IS_ADMIN = true;  // раздел админки доступен → показываем админ-поля (темп автоповтора кода)

@@ -38,3 +38,26 @@ def test_promo_lock_explains_value_and_offers_plans():
 
 def test_position_tracker_entry_needs_no_bot_id():
     assert "RankCb(action=\"menu\"))" not in _src("promo_platform.py")
+
+
+def test_no_bare_subscription_lock_anywhere():
+    """Голый замок «— 💎 ПОДПИСКА. Оформите: /subscription» не говорит ни что
+    даёт раздел, ни какой тариф и за сколько. Обход нашёл его в 21 месте —
+    теперь везде общий `locked_text` с тарифом и ценой."""
+    import re
+    bare = re.compile(r"ПОДПИСКА</b>\\n\\nОформите")
+    hits = [f.name for f in sorted(H.glob("*.py")) if bare.search(f.read_text(encoding="utf-8"))]
+    assert not hits, hits
+
+
+def test_server_setup_instructions_are_for_admins_only(monkeypatch):
+    """Клиент не видит «добавьте в Railway» и «задайте TG_API_ID»: выполнить
+    это он не может, а читается это как поломка сервиса."""
+    from bot.handlers import accounts, admin
+    monkeypatch.setattr(admin, "is_admin", lambda uid: uid == 1)
+    assert "TG_API_ID" not in accounts._api_missing_text(2)
+    assert "TG_API_ID" not in accounts._api_missing_text(None)
+    assert "TG_API_ID" in accounts._api_missing_text(1)
+    src = _src("start.py")
+    app = src[src.index("async def cmd_app"):]
+    assert app.index("is_admin(message.from_user.id)") < app.index("Добавьте в Railway")

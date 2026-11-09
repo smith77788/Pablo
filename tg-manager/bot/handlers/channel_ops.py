@@ -53,7 +53,7 @@ from bot.states import (
     SendReactionFSM,
     UpdateProfileFSM,
 )
-from bot.utils.subscription import require_plan
+from bot.utils.subscription import locked_text, require_plan
 from bot.utils.op_helpers import _acc_label, _progress_text, backoff
 from services import session_simulator, operation_bus
 from services.logger import log_exc_swallow
@@ -919,7 +919,7 @@ async def cb_bulk_create_start(
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Массовое создание — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Массовое создание", _PRO),
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -1311,7 +1311,7 @@ async def cb_bulk_post_chans_start(
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Пост в каналы — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Пост в каналы", _STARTER),
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -2450,7 +2450,7 @@ async def cb_members_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Управление участниками — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Управление участниками", _STARTER),
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -3233,7 +3233,7 @@ async def cb_botfather_pick_account(
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Создание бота — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Создание бота", _PRO),
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )

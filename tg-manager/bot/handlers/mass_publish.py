@@ -18,6 +18,7 @@ import logging
 
 import asyncpg
 from aiogram import F, Router
+from bot.utils.subscription import locked_text
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -128,7 +129,7 @@ async def cb_mpub_start(
 
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Публикация / рассылка — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Публикация / рассылка", _STARTER),
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -760,7 +761,7 @@ async def cb_mpub_dry_run(
 
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Сухой прогон — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            locked_text("Сухой прогон", _STARTER),
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

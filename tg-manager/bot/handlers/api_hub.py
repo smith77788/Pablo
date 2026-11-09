@@ -239,7 +239,7 @@ async def cb_api_docs(
 ) -> None:
     await safe_answer(callback)
     text = (
-        "📖 <b>Infragram Compute API</b>\n\n"
+        "📖 <b>API Infragram</b>\n\n"
         "<b>Аутентификация:</b>\n"
         "<code>X-Api-Key: bm_your_key</code>\n\n"
         "Владелец берётся из ключа — owner_id передавать не нужно.\n\n"

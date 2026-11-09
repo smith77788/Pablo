@@ -474,6 +474,11 @@ def _wip_kb(back_action: str = "main"):
     return kb.as_markup()
 
 
+# Сколько главное меню ждёт строку статистики, прежде чем показаться без неё.
+_MAIN_STATS_WAIT = 0.8
+# Ссылки на недождавшиеся подсчёты, чтобы сборщик мусора не снял их на полпути.
+_MAIN_STATS_INFLIGHT: set = set()
+
 _MAIN_MENU_TEXT = (
     "🏠 <b>Infragram</b>\n\n"
     "📊 <b>Итоги</b> — деньги, лиды, ответы и охват за неделю\n"
@@ -579,11 +584,13 @@ async def cb_main(
         await _edit(callback, _MAIN_MENU_TEXT + cached, _main_menu_kb())
         return
 
-    # Show menu immediately without stats, then enrich in background
-    await _edit(callback, _MAIN_MENU_TEXT, _main_menu_kb())
-
-    # Build stats in background and push a follow-up edit
-    async def _push_stats() -> None:
+    # Одна правка экрана, а не две. Раньше меню выводилось сразу, а строка
+    # статистики дописывалась вторым edit из фоновой задачи. Если человек успевал
+    # нажать следующую кнопку (например «Подключить бота»), запоздавшая правка
+    # затирала уже открытый экран главным меню — экран «мигал» и шаг терялся.
+    # Теперь ждём статистику недолго; не успела — меню без неё, а подсчёт
+    # доезжает в кэш и покажется при следующем открытии.
+    async def _stats_line() -> str:
         status_line = ""
         try:
             from services import infra_pressure as _ip
@@ -628,10 +635,15 @@ async def cb_main(
         except Exception:
             log_exc_swallow(log, "cb_main: stats fetch failed")
         menu_cache.set(cache_key, status_line)
-        if status_line:
-            await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
+        return status_line
 
-    spawn(_push_stats())
+    task = asyncio.ensure_future(_stats_line())
+    done, _pending = await asyncio.wait({task}, timeout=_MAIN_STATS_WAIT)
+    line = task.result() if task in done else ""
+    if task not in done:
+        _MAIN_STATS_INFLIGHT.add(task)
+        task.add_done_callback(_MAIN_STATS_INFLIGHT.discard)
+    await _edit(callback, _MAIN_MENU_TEXT + line, _main_menu_kb())
 
 
 # ── Итоги, разделы по задачам, все инструменты ─────────────────────────────

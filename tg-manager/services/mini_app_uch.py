@@ -1996,12 +1996,29 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_ai_query")
             return _err(_INTERNAL_ERROR, 500)
 
+    # Номер контакта — UUID. Старая или испорченная ссылка («/contacts/1»)
+    # падала в asyncpg на приведении типа и отдавала «Внутренняя ошибка
+    # сервера» (500) на пяти запросах карточки. Это не сбой, а «нет такого
+    # контакта» — 404 до похода в базу.
+    import functools as _ft
+    import uuid as _uuid
+
+    def _uuid_guard(handler):
+        @_ft.wraps(handler)
+        async def _wrapped(request):
+            try:
+                _uuid.UUID(str(request.match_info.get("contact_id", "")))
+            except ValueError:
+                return _err("Контакт не найден", 404)
+            return await handler(request)
+        return _wrapped
+
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/message", uch_contact_message)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/media", uch_contact_media)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/invite", uch_contact_invite)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", _uuid_guard(uch_contact_detail))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", _uuid_guard(uch_contact_update))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/message", _uuid_guard(uch_contact_message))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/media", _uuid_guard(uch_contact_media))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/invite", _uuid_guard(uch_contact_invite))
     app.router.add_post("/api/miniapp/uch/segment/preview", uch_segment_preview)
     app.router.add_post("/api/miniapp/uch/segment/message", uch_segment_message)
     app.router.add_post("/api/miniapp/uch/segment/media", uch_segment_media)
@@ -2016,7 +2033,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_patch("/api/miniapp/uch/intent/rule/{rule_id}", uch_intent_rule_update)
     app.router.add_get("/api/miniapp/uch/intent/hits", uch_intent_hits)
     app.router.add_post("/api/miniapp/uch/intent/seed", uch_intent_seed)
-    app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
+    app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", _uuid_guard(uch_contact_delete))
     app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
     app.router.add_post("/api/miniapp/uch/sync", uch_sync)
@@ -2025,23 +2042,23 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/uch/groups", uch_group_create)
     app.router.add_put("/api/miniapp/uch/groups/{group_id}", uch_group_update)
     app.router.add_delete("/api/miniapp/uch/groups/{group_id}", uch_group_delete)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/favorite", uch_toggle_favorite)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/invite_history", uch_contact_invite_history)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/opt_out", uch_contact_opt_out)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/allow_invite", uch_contact_allow_invite)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/versions", uch_contact_versions)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/favorite", _uuid_guard(uch_toggle_favorite))
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/invite_history", _uuid_guard(uch_contact_invite_history))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/opt_out", _uuid_guard(uch_contact_opt_out))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/allow_invite", _uuid_guard(uch_contact_allow_invite))
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/versions", _uuid_guard(uch_contact_versions))
     # Тот же путь: GET — что изменится, POST — изменить.
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", uch_rollback_preview)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", uch_rollback)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/timeline", uch_timeline)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/relationships", uch_relationships)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/identity", uch_identity)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", _uuid_guard(uch_rollback_preview))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", _uuid_guard(uch_rollback))
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/timeline", _uuid_guard(uch_timeline))
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/relationships", _uuid_guard(uch_relationships))
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/identity", _uuid_guard(uch_identity))
     app.router.add_get("/api/miniapp/uch/crm/pipeline", uch_crm_pipeline)
     app.router.add_get("/api/miniapp/uch/export/{fmt}", uch_export)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_get)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_upsert)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/reminder", uch_crm_reminder)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm", _uuid_guard(uch_crm_get))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm", _uuid_guard(uch_crm_upsert))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/activity", _uuid_guard(uch_crm_activity))
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/reminder", _uuid_guard(uch_crm_reminder))
     app.router.add_get("/api/miniapp/uch/duplicates", uch_duplicates)
     # Тот же путь: GET — что переедет, POST — слить.
     app.router.add_get("/api/miniapp/uch/merge", uch_merge_preview)

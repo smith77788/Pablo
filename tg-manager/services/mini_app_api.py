@@ -2627,7 +2627,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not user:
             return _err("Подпись Telegram не подтвердилась — откройте приложение заново", 401)
         token = make_token(user["user_id"], bot_token)
-        return _json_resp({"token": token, "user": user})
+        # Признак админа — чтобы мини-апп не пробовал админские ручки вслепую:
+        # раньше каждый вход обычного пользователя начинался с 403 на
+        # /admin/stats (лишний запрос и шум в журнале). Доступ решают сами
+        # ручки, признак лишь избавляет от пробы.
+        return _json_resp({"token": token, "user": user,
+                           "is_admin": _is_admin(user["user_id"])})
 
     # ── Связывание устройства (автономный вход вне Telegram: PWA/Android) ─────
 
