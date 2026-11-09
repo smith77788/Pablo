@@ -152,6 +152,18 @@ jobs:
           pip install pip-audit
           pip-audit -r requirements.txt --progress-spinner off
 
+      # SAST: только высокая важность и высокая уверенность (-lll -iii), чтобы
+      # шаг падал на настоящем, а не на 1000 низких предупреждений. B413 снят:
+      # это «pyCrypto заброшен», а у нас pycryptodome — живая библиотека с тем
+      # же именем модуля Crypto. Протокольные SHA1/MD5 формата tdata помечены
+      # nosec на месте с причиной. Поиск секретов в репозитории —
+      # tests/test_security_hardening_round3.py.
+      - name: Статический анализ безопасности (Bandit)
+        if: matrix.shard == 1
+        run: |
+          pip install bandit
+          bandit -q -r . -x ./tests -lll -iii -s B413
+
       # Обращение к несуществующему имени — это падение при исполнении строки,
       # и синтаксис его не ловит. Набор правил и обоснование, почему сюда не
       # берутся стилевые правила, — в tests/test_no_undefined_names.py.

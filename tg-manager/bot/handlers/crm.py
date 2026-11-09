@@ -864,6 +864,12 @@ async def msg_contact_info(message: Message, state: FSMContext, pool: asyncpg.Po
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
         return
+    # Шаг 1 сведения двух баз: клиент сразу появляется и в «Контактах».
+    # ID здесь всегда придуманный — в telegram_user_id он не попадёт.
+    from services.contacts_hub.legacy_crm import mirror_crm_contact
+    await mirror_crm_contact(
+        pool, owner_id, legacy_id=cid, tg_user_id=tg_user_id, tg_is_real=False,
+        username=username, first_name=first_name, last_name=last_name, phone=phone)
 
     disp = first_name or (f"@{username}" if username else phone)
     kb = InlineKeyboardBuilder()

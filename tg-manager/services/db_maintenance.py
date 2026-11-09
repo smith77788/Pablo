@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 import asyncpg
 
@@ -295,6 +296,56 @@ async def _prune_operation_log(pool: asyncpg.Pool) -> tuple[int, Exception | Non
     )
 
 
+def audience_retention_days() -> int:
+    """Срок хранения собранных аудиторий в днях; 0 — не чистить.
+
+    Собранные аудитории — персональные данные третьих лиц (имена, юзернеймы,
+    телефоны). 152-ФЗ и GDPR требуют хранить их не дольше, чем нужно, но
+    сколько именно нужно — решение владельца платформы, а не кода. Поэтому
+    срок задаётся переменной AUDIENCE_RETENTION_DAYS, а без неё ничего не
+    удаляется (поведение как раньше). Меньше 7 дней не принимаем: опечатка в
+    переменной не должна стирать свежий парсинг всех клиентов.
+    """
+    raw = (os.environ.get("AUDIENCE_RETENTION_DAYS") or "").strip()
+    if not raw:
+        return 0
+    try:
+        days = int(raw)
+    except ValueError:
+        log.warning("db_maintenance: AUDIENCE_RETENTION_DAYS=%r не число — уборка аудиторий выключена", raw)
+        return 0
+    if days <= 0:
+        return 0
+    if days < 7:
+        log.warning("db_maintenance: AUDIENCE_RETENTION_DAYS=%d меньше 7 — беру 7", days)
+        return 7
+    return days
+
+
+async def _prune_parsed_audiences(pool: asyncpg.Pool, days: int) -> tuple[int, Exception | None]:
+    """Удалить строки аудиторий старше срока, по владельцу.
+
+    По владельцу, а не одним условием по дате: единственный индекс по дате —
+    (owner_id, parsed_at), и с owner_id в условии каждая пачка идёт по нему,
+    а не полным проходом по таблице на миллионы строк.
+    """
+    try:
+        owners = [r["owner_id"] for r in await pool.fetch(
+            "SELECT DISTINCT owner_id FROM parsed_audiences")]
+    except Exception as e:  # noqa: BLE001 — причину отдаём вызывающему
+        return 0, e
+    total = 0
+    for oid in owners:
+        n, err = await _prune_batched(
+            pool, "parsed_audiences",
+            "owner_id = $1 AND parsed_at < NOW() - make_interval(days => $2)",
+            int(oid), int(days))
+        total += n
+        if err is not None:
+            return total, err
+    return total, None
+
+
 async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
     """Execute one maintenance pass. Returns {table: rows_deleted}."""
     results: dict[str, int] = {}
@@ -308,6 +359,13 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
             log.info(
                 "db_maintenance: pruned %d rows from %s (>%s)", deleted, table, interval
             )
+
+    days = audience_retention_days()
+    if days:
+        deleted, err = await _prune_parsed_audiences(pool, days)
+        _record(results, "parsed_audiences", deleted, err)
+        if deleted:
+            log.info("db_maintenance: pruned %d parsed audience rows (>%d days)", deleted, days)
 
     # Orphaned infra_memory rows — rows whose account/proxy no longer exists.
     # infra_memory_accounts has no FK to tg_accounts, so deleted accounts leave

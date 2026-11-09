@@ -33,7 +33,7 @@ def test_backend_resolves_whole_filter_scoped():
     for part in ("uid", "flt", "stage", "qterm", "admin=admin", "acc_pool=", "geo="):
         assert part in call.group(1), f"в срезе масс-действия нет {part}"
     # предохранитель от неограниченного enqueue
-    assert "LIMIT 5000" in mass
+    assert "LIMIT {_mass_cap() + 1}" in mass and "capped" in mass
 
 
 def test_ui_sends_select_all_filtered():

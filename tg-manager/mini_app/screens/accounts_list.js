@@ -64,6 +64,8 @@ async function reauthAccount(id) {
 }
 
 async function loadAccounts() {
+  fleetToolsInit('accounts');
+  loadAccTags();
   // Accounts and channels load independently — one failure doesn't break the other
   api(_accQuery(0)).then(ad => {
     CUR_ACCS = ad.accounts||[];
@@ -81,6 +83,7 @@ async function loadAccounts() {
   }).catch(e => {
     document.getElementById('accList').innerHTML=errHtml(errRu(e),'loadAccounts()');
   });
+  loadAccSurvival();
   // Превью на вкладке аккаунтов показывает ТРИ канала. Раньше оно тянуло срез в
   // 500 строк и затирало им CUR_CHANNELS — тот самый список, который экран
   // каналов подгрузил постранично. После переключения вкладок «Выбрать все» на
@@ -144,36 +147,42 @@ async function loadMoreAccounts() {
   finally { ACC_LOADING=false; }
 }
 
+// Состояние аккаунта одним словом — для карточки и для строки таблицы.
+function accStatusOf(a) {
+  const cd = isOnCooldown(a);
+  if (a.acc_status==='session_expired') return {status:'🔑 Релог', cls:'b-or', ava_cls:'ava-orange'};
+  if (!a.is_active) return {status:'Выкл', cls:'b-gy', ava_cls:'ava-teal'};
+  if (a.acc_status==='banned') return {status:'🚫 Бан', cls:'b-rd', ava_cls:'ava-red'};
+  if (cd) return {status:'⏳ Кулдаун', cls:'b-or', ava_cls:'ava-orange'};
+  // Риск-пульс: аккаунт «активен и подключён», но иммунная система держит его
+  // в карантине/риске и операции его пропускают → показываем РЕАЛЬНОЕ состояние,
+  // а не ложное «Активен» (иначе «аккаунты не работают, хотя активны»).
+  if (a.health_status==='quarantine') return {status:'🛑 На паузе', cls:'b-rd', ava_cls:'ava-red'};
+  if (a.health_status==='at_risk') return {status:'⚠️ Под риском', cls:'b-or', ava_cls:'ava-orange'};
+  // Мёртвый прокси: аккаунт цел, но каждая его операция падает по сети. Без
+  // этого он показывался «Активен», и человек шёл чинить аккаунт вместо
+  // замены прокси. Аккаунты БЕЗ прокси работают с адреса хоста — это норма.
+  if (a.has_proxy && a.proxy_alive === false) return {status:'🔌 Прокси', cls:'b-rd', ava_cls:'ava-red'};
+  return {status:'Активен', cls:'b-gr', ava_cls:'ava-teal'};
+}
+
 function renderAccounts(list) {
   const el = document.getElementById('accList');
   if (!list.length) {
-    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
+    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || ACC_TAG_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
     if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
     else el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт прямо здесь: по номеру, QR-коду, файлу .session, архиву tdata или строке сессии',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
     return;
   }
+  // Широкий экран — плотная таблица с сортировкой по заголовкам (fleet_tools.js).
+  if (fleetIsWide()) { el.innerHTML = accTableHtml(list); return; }
   el.innerHTML = list.map(a=>{
     const name = a.first_name||(a.username?'@'+a.username:'#'+a.id);
     const phone = a.phone || '';
     const flag = phoneFlag(phone);
-    const cd = isOnCooldown(a);
     const trust = a.trust_score!=null?Math.round(a.trust_score):100;
     const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
-    let status, cls, ava_cls;
-    if (a.acc_status==='session_expired') { status='🔑 Релог'; cls='b-or'; ava_cls='ava-orange'; }
-    else if (!a.is_active) { status='Выкл'; cls='b-gy'; ava_cls='ava-teal'; }
-    else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; ava_cls='ava-red'; }
-    else if (cd) { status='⏳ Кулдаун'; cls='b-or'; ava_cls='ava-orange'; }
-    // Риск-пульс: аккаунт «активен и подключён», но иммунная система держит его
-    // в карантине/риске и операции его пропускают → показываем РЕАЛЬНОЕ состояние,
-    // а не ложное «Активен» (иначе «аккаунты не работают, хотя активны»).
-    else if (a.health_status==='quarantine') { status='🛑 На паузе'; cls='b-rd'; ava_cls='ava-red'; }
-    else if (a.health_status==='at_risk') { status='⚠️ Под риском'; cls='b-or'; ava_cls='ava-orange'; }
-    // Мёртвый прокси: аккаунт цел, но каждая его операция падает по сети. Без
-    // этого он показывался «Активен», и человек шёл чинить аккаунт вместо
-    // замены прокси. Аккаунты БЕЗ прокси работают с адреса хоста — это норма.
-    else if (a.has_proxy && a.proxy_alive === false) { status='🔌 Прокси'; cls='b-rd'; ava_cls='ava-red'; }
-    else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
+    const {status, cls, ava_cls} = accStatusOf(a);
     const proxyNote = (a.has_proxy && a.proxy_alive === false)
       ? `<div class="acc-phone" style="color:var(--red)">🔌 прокси не отвечает${a.proxy_label?' · '+esc(a.proxy_label):''} — аккаунт цел, замените прокси</div>`
       : '';
@@ -183,7 +192,7 @@ function renderAccounts(list) {
       ? `<div class="acc-phone" style="color:var(--${a.health_status==='quarantine'?'red':'orange'})">${esc(a.health_reason)}</div>`
       : '';
     const sel = ACC_SEL.has(a.id);
-    const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id})` : `openAccount(${a.id})`;
+    const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id},event)` : `openAccount(${a.id})`;
     const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
     const right = ACC_SEL_MODE ? '' : `<div class="acc-right">
         <span class="badge ${cls}">${status}</span>
@@ -196,6 +205,7 @@ function renderAccounts(list) {
       <div class="acc-body">
         <div class="acc-name">${esc(name)} ${stageBadge(a.stage)}</div>
         <div class="acc-phone">${esc(phone)}</div>
+        ${(a.tags||[]).length ? `<div class="fx-tags">${accTagsHtml(a)}</div>` : ''}
         ${proxyNote}
         ${pulseNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
@@ -351,4 +361,45 @@ function accRu(v) {
           // владельцу английским ключом как есть.
           cooldown:'⏸ Отдыхает после лимита', no_session:'🔌 Нет сессии',
           frozen:'🧊 Заморожен', unknown:'— Неизвестно'}[String(v||'').toLowerCase()] || (v || '—');
+}
+
+// Выживаемость флота — главная цифра здоровья: сколько аккаунтов из ста ушло
+// за неделю и месяц, лучше ли это прошлой недели и что убивает флот. Карточка
+// второстепенна: любая ошибка просто прячет её, список аккаунтов не трогает.
+async function loadAccSurvival() {
+  const box = document.getElementById('accSurvival');
+  if (!box) return;
+  try {
+    const d = await api('/api/miniapp/accounts/survival');
+    box.innerHTML = renderAccSurvival(d);
+    box.style.display = box.innerHTML ? '' : 'none';
+  } catch(e) { box.style.display = 'none'; }
+}
+
+function renderAccSurvival(d) {
+  if (!d || !d.windows || !d.windows['30'] || !d.windows['30'].base) return '';
+  const w7 = d.windows['7'], w30 = d.windows['30'];
+  const v = d.verdict || {};
+  const tone = v.level === 'bad' ? 'var(--red)' : (v.level === 'warn' ? 'var(--orange)' : 'var(--green)');
+  const tr = d.trend || {};
+  const trTxt = tr.direction === 'better' ? '↓ лучше прошлой недели (' + tr.prev_week + ')'
+              : tr.direction === 'worse' ? '↑ хуже прошлой недели (' + tr.prev_week + ')'
+              : 'как на прошлой неделе';
+  const lines = [
+    '<div style="font-weight:700;margin-bottom:2px">🛡 Выживаемость за 30 дней: <span style="color:' + tone + '">' + w30.survival_pct + '%</span></div>',
+    '<div>Потеряно ' + w30.lost + ' из ' + w30.base + ' (' + w30.lost_pct + '%) · ограничено ' + w30.restricted +
+      ' · вернулось в строй ' + w30.recovered + '</div>',
+    '<div style="color:var(--hint)">За 7 дней: потеряно ' + w7.lost + ', ' + trTxt + '</div>',
+  ];
+  if (w30.lost) {
+    const causes = (d.causes || []).map(c => esc(c.label) + ' — ' + c.count).join(', ');
+    const ages = (d.by_age || []).filter(a => a.count).map(a => esc(a.label) + ' — ' + a.count).join(', ');
+    const px = d.by_proxy || {};
+    lines.push('<div style="color:var(--hint)">Причины: ' + causes + '</div>');
+    lines.push('<div style="color:var(--hint)">Возраст при потере: ' + ages + '</div>');
+    lines.push('<div style="color:var(--hint)">С прокси — ' + (px.with_proxy || 0) + ', без прокси — ' + (px.no_proxy || 0) +
+      (px.unknown ? ', неизвестно — ' + px.unknown : '') + '</div>');
+  }
+  if (v.text) lines.push('<div style="margin-top:4px;color:' + tone + '">' + esc(v.text) + '</div>');
+  return lines.join('');
 }
