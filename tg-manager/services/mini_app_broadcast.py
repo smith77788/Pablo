@@ -559,14 +559,15 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Unauthorized", 401)
         raw = (request.match_info.get("contact_id") or "").strip()
         import uuid as _uuid
+
+        from services.contacts_hub.legacy_crm import forget_legacy_row
         try:
             if raw.isdigit():
                 legacy_id = int(raw)
                 await pool.execute(
                     "DELETE FROM unified_contacts WHERE owner_id=$1 "
                     "AND custom_fields->>'legacy_crm_id' = $2::text", uid, str(legacy_id))
-                await pool.execute(
-                    "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", legacy_id, uid)
+                await forget_legacy_row(pool, uid, legacy_id)
                 return _json_resp({"ok": True})
             try:
                 cid = _uuid.UUID(raw)
@@ -576,8 +577,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 "DELETE FROM unified_contacts WHERE id=$1 AND owner_id=$2 "
                 "RETURNING custom_fields->>'legacy_crm_id'", cid, uid)
             if legacy and str(legacy).isdigit():
-                await pool.execute(
-                    "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", int(legacy), uid)
+                await forget_legacy_row(pool, uid, int(legacy))
             return _json_resp({"ok": True})
         except Exception:
             log.exception("crm_contact_delete uid=%d id=%s", uid, raw[:40])

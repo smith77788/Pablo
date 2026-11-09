@@ -271,3 +271,14 @@ async def add_crm_client(pool, owner_id: int, *, tg_user_id=None, username=None,
     except Exception:
         log.warning("add_crm_client owner=%s", owner_id, exc_info=True)
         return None
+
+
+async def forget_legacy_row(pool, owner_id: int, legacy_id: int) -> None:
+    """Снять строку старой таблицы вместе с удалённым контактом.
+
+    Таблица заморожена (шаг 5) и экраном не читается, но перенос, не
+    дописавший отметку, повторится на следующем старте: оставленная строка
+    вернула бы удалённого человека в «Контакты».
+    """
+    await pool.execute(
+        "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", int(legacy_id), int(owner_id))

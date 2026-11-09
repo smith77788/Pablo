@@ -255,7 +255,7 @@ def test_nobody_reads_the_old_table_any_more():
     вкладке «Клиенты», которое снимает пару строки вместе с контактом. Новый читатель crm_contacts снова
     развёл бы две базы: «вижу во вкладке» и «пишу рассылкой» разошлись бы."""
     import re
-    allowed = {"services/contacts_hub/legacy_crm.py", "services/mini_app_broadcast.py"}
+    allowed = {"services/contacts_hub/legacy_crm.py"}
     bad = []
     for path in list((ROOT / "services").rglob("*.py")) + list((ROOT / "bot").rglob("*.py")):
         rel = path.relative_to(ROOT).as_posix()
