@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -298,13 +297,6 @@ async def extract_facts_via_gateway(pool: asyncpg.Pool, bot_id: int, user_id: in
 # модели). Счёт по числу сообщений, а не по «прошло N с прошлого раза»:
 # проход, который ничего не нашёл, не должен повторяться на каждом сообщении.
 EXTRACT_EVERY = 4
-_bg_tasks: set[asyncio.Task] = set()
-
-
-def _spawn(coro) -> None:
-    task = asyncio.create_task(coro)
-    _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
 
 
 async def _extract_quietly(pool, bot_id: int, user_id: int, owner_id) -> None:
@@ -341,7 +333,9 @@ async def remember_turn(pool: asyncpg.Pool, bot_id: int, user_id: int,
             if wait:
                 await _extract_quietly(pool, bot_id, user_id, owner_id)
             else:
-                _spawn(_extract_quietly(pool, bot_id, user_id, owner_id))
+                from services import bg_tasks
+                bg_tasks.spawn(_extract_quietly(pool, bot_id, user_id, owner_id),
+                               name=f"semantic_extract_{bot_id}")
         return True
     except Exception as exc:  # noqa: BLE001
         log.warning("semantic_memory.remember_turn bot=%s: %s", bot_id, exc)
