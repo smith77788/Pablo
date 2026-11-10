@@ -382,7 +382,9 @@ function accPoolBanner() {
     + 'border-radius:10px;background:var(--bg-blue-16);font-size:13px';
   let rows = '';
   if (ACC_POOL_FILTER) rows += '<div style="display:flex;align-items:center;gap:8px">'
-    + '<span style="flex:1">Пул: <b>' + esc(ACC_POOL_FILTER) + '</b></span>'
+    + '<span style="flex:1">Пул: <b>' + esc(typeof infraPoolLabel === 'function'
+        ? (ACC_POOL_FILTER === '__none__' ? 'Без пула' : infraPoolLabel(ACC_POOL_FILTER))
+        : ACC_POOL_FILTER) + '</b></span>'
     + '<span class="icon-tap" onclick="accPoolClear()" role="button" tabindex="0">Снять \u2715</span></div>';
   if (ACC_GEO_FILTER) rows += '<div style="display:flex;align-items:center;gap:8px">'
     + '<span style="flex:1">Страна: <b>' + esc(ACC_GEO_TITLE || ACC_GEO_FILTER) + '</b></span>'

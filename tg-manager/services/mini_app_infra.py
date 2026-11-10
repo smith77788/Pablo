@@ -24,7 +24,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.debug("infra: журнал действия %s не записан", action, exc_info=True)
 
-    async def _body(request: web.Request) -> dict:
+    async def _infra_body(request: web.Request) -> dict:
         try:
             b = await request.json()
         except Exception:
@@ -108,7 +108,7 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        body = await _body(request)
+        body = await _infra_body(request)
         raw = body.get("pool")
         if raw in (None, ""):
             name = None
@@ -141,7 +141,7 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        body = await _body(request)
+        body = await _infra_body(request)
         old = str(body.get("from") or "").strip()
         if not old:
             return _err("Не указан пул", 400)
@@ -164,7 +164,7 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        body = await _body(request)
+        body = await _infra_body(request)
         name = str(body.get("pool") or "").strip()
         if not name:
             return _err("Не указан пул", 400)

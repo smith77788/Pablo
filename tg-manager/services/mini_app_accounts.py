@@ -38,6 +38,10 @@ from aiohttp import web
 MASS_CAP = 20000
 
 
+# Значение среза «пул», означающее «аккаунты без пула».
+UNPOOLED = "__none__"
+
+
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
     from services.mini_app_api import (
@@ -114,7 +118,11 @@ def setup_routes(app: web.Application, pool) -> None:
         # Пул — то, чем владелец делит флот на группы. На экране «Инфраструктура»
         # он был виден числом («Пул europe — 42 акк») и ничем больше: открыть
         # эти 42 аккаунта было нечем, среза под пул не существовало.
-        if acc_pool:
+        if acc_pool == UNPOOLED:
+            # «Без пула» — отдельный срез: строка «Без пула» на экране пулов
+            # открывала ВЕСЬ флот (пустой пул = нет фильтра).
+            clauses.append("(pool IS NULL OR pool = '')")
+        elif acc_pool:
             args.append(acc_pool)
             clauses.append(f"pool = ${len(args)}")
         # Страна аккаунта = страна его прокси (так же считает geo_router). На

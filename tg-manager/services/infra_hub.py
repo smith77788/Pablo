@@ -352,7 +352,7 @@ def result_tone(result: Optional[str]) -> str:
 _DAY = re.compile(r"^day\s+(\d+)$", re.I)
 _ALL_FAILED = re.compile(r"^all\s+(\d+)\s+actions?\s+failed$", re.I)
 _SOME_FAILED = re.compile(r"^(\d+)\s*/\s*(\d+)\s+failed$", re.I)
-_WAIT = re.compile(r"(?:wait of|flood ?wait[^0-9]*)(\d+)\s*(?:seconds?|s)?", re.I)
+_WAIT = re.compile(r"(?:wait of|flood ?wait[^0-9]*)\s*(\d+)\s*(?:seconds?|s)?", re.I)
 _CYR = re.compile(r"[А-Яа-яЁё]")
 
 # Частые тексты Telegram/Telethon → что это значит для владельца.

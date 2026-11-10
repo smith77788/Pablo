@@ -144,7 +144,7 @@ async function openInfra() {
         {label: '➕ Создать пул', fn: 'infraPoolCreate()'}));
     } else {
       txt('infraPools', actions + INFRA_POOLS.map(_infraPoolRow).join('')
-        + (INFRA_UNPOOLED.total ? `<div class="row tap" onclick="healthGoAccounts('all','','')" role="button" tabindex="0">
+        + (INFRA_UNPOOLED.total ? `<div class="row tap" onclick="healthGoAccounts('all','','__none__')" role="button" tabindex="0">
             <div class="row-ico" style="background:var(--sep)">⚪</div>
             <div class="row-body"><div class="row-name">Без пула</div>
               <div class="row-val">${num(INFRA_UNPOOLED.total)} ${plural(INFRA_UNPOOLED.total, 'аккаунт', 'аккаунта', 'аккаунтов')} не входят ни в один пул</div></div>
