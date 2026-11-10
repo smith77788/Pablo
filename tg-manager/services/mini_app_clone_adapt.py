@@ -200,7 +200,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Боты-цели не найдены", 404)
             n = len(targets)
             label = (f"Клон {_bot_label(src)} → {_bot_label(bots[targets[0]])}" if n == 1
-                     else f"Клон {_bot_label(src)} → {n} ботов")
+                     else f"Клон {_bot_label(src)} → ботов: {n}")
             op_id = await _obus.submit(
                 pool, uid, "clone_adapt", {
                     "source_bot_id": req["source_bot_id"],
@@ -310,7 +310,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             op_id = await _obus.submit(
                 pool, uid, "clone_adapt_rollback", {"source_op_id": src_op_id},
-                total_items=int(cnt), label=f"Откат клона: {cnt} ботов")
+                total_items=int(cnt), label=f"Откат клона: ботов {cnt}")
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:

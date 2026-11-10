@@ -532,7 +532,7 @@ async def cb_ca_run(
                 "fields": fields,
                 "settings": settings,
             }, total_items=len(targets),
-            label=f"Клон @{src_label} → {len(targets)} ботов")
+            label=f"Клон @{src_label} → ботов: {len(targets)}")
     except PermissionError as exc:
         kb.button(text="◀️ К меню", callback_data=CloneAdaptCb(action="menu"))
         await callback.message.edit_text(
