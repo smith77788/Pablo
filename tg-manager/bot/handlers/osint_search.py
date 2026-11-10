@@ -21,6 +21,7 @@ from services import operation_bus
 from services import osint_search as _osint
 
 from bot.callbacks import BmCb, OsintCb
+from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 router = Router(name="osint_search")
@@ -90,7 +91,7 @@ async def msg_osint_query(message: Message, state: FSMContext, pool: asyncpg.Poo
     try:
         kind, query = _osint.parse_query(message.text or "")
     except ValueError as exc:
-        await message.answer(f"⚠️ {html.escape(str(exc))}. Попробуйте ещё раз.",
+        await message.answer(f"⚠️ {owner_error(exc)}. Попробуйте ещё раз.",
                              reply_markup=_cancel_kb())
         return
     await state.clear()
@@ -105,8 +106,8 @@ async def msg_osint_query(message: Message, state: FSMContext, pool: asyncpg.Poo
             pool, message.from_user.id, "osint_search",
             {"kind": kind, "query": query}, total_items=1, label=label)
     except PermissionError as exc:
-        await message.answer(f"🔒 {html.escape(str(exc) or 'Нужна подписка')}",
-                             reply_markup=_menu_kb())
+        reason = owner_error(exc) if exc.args else "Нужна подписка"
+        await message.answer(f"🔒 {reason}", reply_markup=_menu_kb())
         return
     except Exception:
         log.exception("osint_search: не удалось поставить поиск uid=%s",
