@@ -171,6 +171,8 @@ def reason_label(reason: str | None) -> str:
         return "распад по времени — давно тишина"
     if r.startswith("cascade:"):
         return "пересчёт температуры по аудитории"
+    if r == "manual" or r.startswith("manual:"):
+        return "владелец перевёл вручную"
     return SIGNAL_LABEL.get(r, r)
 
 # Что КАЖДОЕ состояние значит и что с ним ДЕЛАТЬ — простым языком. Это и есть
@@ -225,17 +227,185 @@ def rank(value: str | None) -> int:
         return -1
 
 
-def ttl_for(value: str) -> timedelta | None:
-    """Сколько живёт рунг до распада. Терминальные — бессрочно (None)."""
+def ttl_for(value: str, rules: dict | None = None) -> timedelta | None:
+    """Сколько живёт рунг до распада. Терминальные — бессрочно (None).
+
+    `rules` — правила владельца (`normalize_rules`); без них — стандартные сроки."""
     if value in _TERMINAL:
         return None
-    return timedelta(hours=_TTL_HOURS.get(value, DEFAULT_TTL_HOURS))
+    hours = ((rules or {}).get("ttl_hours") or _TTL_HOURS).get(value)
+    return timedelta(hours=int(hours or DEFAULT_TTL_HOURS))
+
+
+# ── Правила модели (настраивает владелец) ──────────────────────────────────
+#
+# Всё, что выше, — стандартные правила, и до этой правки других не было: какую
+# ступень даёт «спросил цену», сколько живёт «готов купить» и сколько горячих
+# делает аудиторию горячей, решал код. А это решения о бизнесе владельца:
+# у дорогого товара «готов купить» живёт неделю, у доставки еды — час, и
+# «отписался от бота» для одного — потеря, а для другого — шум. Без настройки
+# модель врала ровно там, где бизнес отличается от средней температуры.
+#
+# Правила хранятся одной строкой на владельца (`vlayer_rules`, jsonb) и
+# читаются через `normalize_rules`: всё, чего нет или что вне границ, берётся
+# из стандарта. Значит, сломанная строка в базе не ломает слой — он просто
+# работает по стандарту.
+
+# Куда сигнал может вести по воле владельца. «Купил» сюда не входит: покупка —
+# факт (оплата), а не вывод, и назначать её слабому сигналу нельзя — иначе
+# «Купил» из терминального факта станет догадкой, и купившего перестанут
+# дожимать по ошибке.
+RULE_TARGETS = ("curious", "interested", "qualified", "ready", LOST, "off")
+RULE_TARGET_LABEL = {**{v: VALUE_LABEL[v] for v in RULE_TARGETS if v in VALUE_LABEL},
+                     "off": "Не учитывать"}
+# «Заплатил» не настраивается: это единственная дорога в «Купил».
+LOCKED_SIGNALS = ("paid",)
+# Порядок сигналов на экране: от слабого к сильному, негатив — в конце.
+RULE_SIGNALS = tuple(s for s in SIGNAL_LABEL if s not in LOCKED_SIGNALS)
+TTL_RUNGS = ("curious", "interested", "qualified", "ready")
+TTL_MIN_H, TTL_MAX_H = 1, 2160            # от часа до 90 дней
+CASCADE_HOT_AT = ("interested", "qualified", "ready", "purchased")
+
+DEFAULT_RULES: dict = {
+    "signal_target": {**SIGNAL_TARGET, **{s: LOST for s in NEGATIVE_SIGNALS}},
+    "ttl_hours": dict(_TTL_HOURS),
+    "audience": {"hot_at": "ready", "min_count": 20, "min_share": 0.15},
+    "bot": {"hot_at": "qualified", "min_count": 5, "min_share": 0.1},
+    "cooling_window_hours": 24,
+}
+
+
+def _clamp_int(v, lo: int, hi: int, default: int) -> int:
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, n))
+
+
+def _clamp_float(v, lo: float, hi: float, default: float) -> float:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return default
+    if x != x:                              # NaN
+        return default
+    return max(lo, min(hi, x))
+
+
+def normalize_rules(raw: dict | None) -> dict:
+    """Правила владельца поверх стандарта, с проверкой каждого поля.
+
+    Неизвестный сигнал, неизвестная ступень, срок вне границ — берётся
+    стандарт, а не ошибка: правила читаются на горячем пути каждого сигнала,
+    и мусор в базе не должен останавливать слой. «Заплатил» всегда ведёт в
+    «Купил», что бы ни пришло.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    out: dict = {}
+    st_raw = raw.get("signal_target") if isinstance(raw.get("signal_target"), dict) else {}
+    st = dict(DEFAULT_RULES["signal_target"])
+    for sig in RULE_SIGNALS:
+        v = st_raw.get(sig)
+        if v in RULE_TARGETS:
+            st[sig] = v
+    for sig in LOCKED_SIGNALS:
+        st[sig] = SIGNAL_TARGET[sig]
+    out["signal_target"] = st
+    ttl_raw = raw.get("ttl_hours") if isinstance(raw.get("ttl_hours"), dict) else {}
+    out["ttl_hours"] = {
+        r: _clamp_int(ttl_raw.get(r, DEFAULT_RULES["ttl_hours"][r]),
+                      TTL_MIN_H, TTL_MAX_H, DEFAULT_RULES["ttl_hours"][r])
+        for r in TTL_RUNGS}
+    for key in ("audience", "bot"):
+        d = DEFAULT_RULES[key]
+        c = raw.get(key) if isinstance(raw.get(key), dict) else {}
+        hot_at = c.get("hot_at") if c.get("hot_at") in CASCADE_HOT_AT else d["hot_at"]
+        out[key] = {
+            "hot_at": hot_at,
+            "min_count": _clamp_int(c.get("min_count", d["min_count"]), 1, 100000,
+                                    d["min_count"]),
+            "min_share": round(_clamp_float(c.get("min_share", d["min_share"]),
+                                            0.01, 1.0, d["min_share"]), 3),
+        }
+    out["cooling_window_hours"] = _clamp_int(
+        raw.get("cooling_window_hours", DEFAULT_RULES["cooling_window_hours"]),
+        1, 168, DEFAULT_RULES["cooling_window_hours"])
+    return out
+
+
+def rules_diff(rules: dict) -> list[str]:
+    """Что в правилах владельца отличается от стандарта — по-русски.
+
+    Нужно экрану, чтобы показать «у вас изменено: …», а не заставлять
+    сравнивать два десятка полей глазами."""
+    d = normalize_rules(None)
+    r = normalize_rules(rules)
+    out: list[str] = []
+    for sig in RULE_SIGNALS:
+        if r["signal_target"][sig] != d["signal_target"][sig]:
+            out.append(f"«{SIGNAL_LABEL[sig]}» → "
+                       f"{RULE_TARGET_LABEL.get(r['signal_target'][sig])}")
+    for rung in TTL_RUNGS:
+        if r["ttl_hours"][rung] != d["ttl_hours"][rung]:
+            out.append(f"«{VALUE_LABEL[rung]}» живёт {r['ttl_hours'][rung]} ч")
+    for key, name in (("audience", "аудитории"), ("bot", "бота")):
+        if r[key] != d[key]:
+            out.append(f"порог горячей {name} изменён")
+    if r["cooling_window_hours"] != d["cooling_window_hours"]:
+        out.append(f"«вот-вот остынут» — за {r['cooling_window_hours']} ч")
+    return out
+
+
+async def get_rules(pool, owner_id: int) -> dict:
+    """Правила владельца, уже проверенные. Fail-open: на сбое — стандарт.
+
+    Fail-open здесь безопасен: правила меняют только толкование сигнала, ни
+    одного внешнего действия от них не зависит."""
+    try:
+        raw = await pool.fetchval(
+            "SELECT rules FROM vlayer_rules WHERE owner_id=$1", int(owner_id))
+    except Exception:
+        log.debug("virtual_layer.get_rules failed owner=%s", owner_id, exc_info=True)
+        return normalize_rules(None)
+    if isinstance(raw, str):
+        # asyncpg отдаёт jsonb строкой — кодек на пуле не ставится (CLAUDE.md).
+        try:
+            import json
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            raw = None
+    return normalize_rules(raw)
+
+
+async def save_rules(pool, owner_id: int, raw: dict | None) -> dict:
+    """Записать правила (проверенные) и вернуть то, что записано."""
+    import json
+    rules = normalize_rules(raw)
+    await pool.execute(
+        "INSERT INTO vlayer_rules (owner_id, rules, updated_at) "
+        "VALUES ($1, $2::jsonb, now()) "
+        "ON CONFLICT (owner_id) DO UPDATE SET rules=EXCLUDED.rules, updated_at=now()",
+        int(owner_id), json.dumps(rules, ensure_ascii=False))
+    return rules
+
+
+async def reset_rules(pool, owner_id: int) -> dict:
+    """Вернуть стандарт: строку удаляем, слой читает DEFAULT_RULES."""
+    await pool.execute("DELETE FROM vlayer_rules WHERE owner_id=$1", int(owner_id))
+    return normalize_rules(None)
+
+
+def cascade_kwargs(rules: dict | None, level: str = "audience") -> dict:
+    """Пороги каскада из правил: {hot_at, min_count, min_share}."""
+    return dict(normalize_rules(rules)[level])
 
 
 # ── SIGNAL → переход (чистая функция) ──────────────────────────────────────
 
 def apply_signal(current: dict | None, signal: str, *,
-                 confidence: float = 0.6, now: datetime | None = None) -> dict | None:
+                 confidence: float = 0.6, now: datetime | None = None,
+                 rules: dict | None = None) -> dict | None:
     """current-состояние + сигнал → НОВОЕ состояние, либо None если не изменилось.
 
     current: {"value","confidence","expires_at"} или None (состояния ещё нет).
@@ -252,13 +422,23 @@ def apply_signal(current: dict | None, signal: str, *,
     cur_conf = float((current or {}).get("confidence") or 0.0)
     conf = max(0.0, min(1.0, float(confidence)))
 
-    if signal in NEGATIVE_SIGNALS:
+    # Куда ведёт сигнал — по правилам владельца, если они есть. «off» — владелец
+    # велел этот сигнал не учитывать (например, «отписался от бота» у него шум).
+    if rules is not None:
+        target = (rules.get("signal_target") or {}).get(signal)
+        if signal in LOCKED_SIGNALS:
+            target = SIGNAL_TARGET[signal]
+    else:
+        target = LOST if signal in NEGATIVE_SIGNALS else SIGNAL_TARGET.get(signal)
+    if target == "off":
+        return None
+
+    if target == LOST:
         if cur_val == LOST:
             return None
         return {"value": LOST, "confidence": max(conf, 0.9),
                 "expires_at": None, "reason": f"signal:{signal}"}
 
-    target = SIGNAL_TARGET.get(signal)
     if target is None:
         return None                          # неизвестный сигнал не трогает состояние
     # «Заплатил» — не вывод, а факт, и он сильнее прежнего «Потерян»: человека
@@ -275,29 +455,30 @@ def apply_signal(current: dict | None, signal: str, *,
     if tr > cr:
         # Продвижение: значение растёт, уверенность = уверенность сигнала.
         return {"value": target, "confidence": conf,
-                "expires_at": _expiry(target, now), "reason": f"signal:{signal}"}
+                "expires_at": _expiry(target, now, rules), "reason": f"signal:{signal}"}
     if tr == cr and cr >= 0:
         # Подтверждение того же рунга: копим уверенность, продлеваем срок.
         new_conf = min(0.98, cur_conf + (1.0 - cur_conf) * 0.4)
         if new_conf - cur_conf < 0.01:
             # Уже уверены — обновим только срок (продление), значение то же.
             return {"value": cur_val, "confidence": cur_conf,
-                    "expires_at": _expiry(cur_val, now), "reason": "reaffirm",
+                    "expires_at": _expiry(cur_val, now, rules), "reason": "reaffirm",
                     "value_changed": False}
         return {"value": cur_val, "confidence": new_conf,
-                "expires_at": _expiry(cur_val, now), "reason": "reaffirm",
+                "expires_at": _expiry(cur_val, now, rules), "reason": "reaffirm",
                 "value_changed": False}
     return None                              # сигнал слабее текущего — игнор
 
 
-def _expiry(value: str, now: datetime) -> datetime | None:
-    ttl = ttl_for(value)
+def _expiry(value: str, now: datetime, rules: dict | None = None) -> datetime | None:
+    ttl = ttl_for(value, rules)
     return now + ttl if ttl else None
 
 
 # ── Распад (чистая функция) ────────────────────────────────────────────────
 
-def decay(current: dict, *, now: datetime | None = None) -> dict | None:
+def decay(current: dict, *, now: datetime | None = None,
+          rules: dict | None = None) -> dict | None:
     """Просроченное состояние → вниз по лестнице, либо None если распад не нужен.
 
     Внизу лестницы (new) распадаться некуда. Терминальные не распадаются.
@@ -342,7 +523,7 @@ def decay(current: dict, *, now: datetime | None = None) -> dict | None:
         if rank(val) <= 0:
             exp = None                       # пришли на дно: срок тут не нужен
             break
-        ttl = ttl_for(val)
+        ttl = ttl_for(val, rules)
         exp = (exp + ttl) if ttl else None
     if rungs == 0 and exp is not None:
         return None                          # ниже new не опускаем и срок цел
@@ -350,7 +531,8 @@ def decay(current: dict, *, now: datetime | None = None) -> dict | None:
             "expires_at": exp, "reason": "decay", "value_changed": rungs > 0}
 
 
-def effective(state: dict | None, *, now: datetime | None = None) -> dict | None:
+def effective(state: dict | None, *, now: datetime | None = None,
+              rules: dict | None = None) -> dict | None:
     """Состояние, каким оно ЕСТЬ сейчас: с применённым распадом, но без записи.
 
     Запись состояния — это значение на момент записи плюс срок, до которого
@@ -364,7 +546,7 @@ def effective(state: dict | None, *, now: datetime | None = None) -> dict | None
     if not state:
         return None
     out = dict(state)
-    change = decay(out, now=now)
+    change = decay(out, now=now, rules=rules)
     if change is not None:
         out.update({"value": change["value"],
                     "confidence": change["confidence"],
@@ -534,9 +716,11 @@ async def signal(pool, owner_id: int, entity_type: str, entity_id,
     # терминальное состояние стиралось, и купившего снова дожимали. Теперь
     # запись — только поверх того, что прочитано; иначе сигнал пересчитывается
     # от свежего состояния.
+    rules = await get_rules(pool, owner_id) if state_key == "funnel" else None
     for _attempt in range(_SIGNAL_RETRIES):
         current = await get_state(pool, owner_id, entity_type, eid, state_key)
-        change = apply_signal(current, signal_name, confidence=confidence, now=now)
+        change = apply_signal(current, signal_name, confidence=confidence, now=now,
+                              rules=rules)
         if change is None:
             return None
         from_value = (current or {}).get("value")
@@ -664,10 +848,19 @@ async def _decay_batch(pool, where: str, args: list, limit: int,
         f"expires_at, source FROM virtual_states WHERE {where} "
         f"ORDER BY expires_at LIMIT {int(limit)}",
         *args)
+    # Сроки распада — по правилам КАЖДОГО владельца: пачка общая на всех.
+    rules_by_owner: dict = {}
     n = 0
     for r in rows:
         cur = dict(r)
-        new = decay(cur, now=now)
+        oid = cur.get("owner_id")
+        if cur.get("state_key") == "funnel" and oid is not None:
+            if oid not in rules_by_owner:
+                rules_by_owner[oid] = await get_rules(pool, oid)
+            rules = rules_by_owner[oid]
+        else:
+            rules = None
+        new = decay(cur, now=now, rules=rules)
         if new is None:
             continue
         if new.get("value_changed") is False:
@@ -1074,6 +1267,67 @@ async def mark_purchased(pool, owner_id: int, entity_type: str, entity_id, *,
     return change
 
 
+# Ступени, на которые владелец может поставить человека руками.
+MANUAL_STAGES = tuple(LADDER) + (LOST,)
+
+
+def manual_change(current: dict | None, value: str, *,
+                  rules: dict | None = None,
+                  now: datetime | None = None) -> dict | None:
+    """Решение владельца «человек на ступени X» → запись состояния.
+
+    Чистая функция. Ручная правка, в отличие от сигнала, может вести и ВНИЗ, и
+    из терминального состояния: владелец знает то, чего слой не видел (человек
+    отказался по телефону, или «Потерян» был ошибкой). Уверенность высокая —
+    это факт от человека, а не вывод. Срок жизни — как у любой ступени, по
+    правилам владельца: ручная отметка «готов купить» тоже остывает, если
+    человек потом молчит. None — значение уже такое.
+    """
+    if value not in MANUAL_STAGES:
+        raise ValueError(f"unknown stage: {value}")
+    if (current or {}).get("value") == value:
+        return None
+    now = _now(now)
+    exp = None if rank(value) <= 0 else _expiry(value, now, rules)
+    return {"value": value, "confidence": 0.95, "expires_at": exp,
+            "reason": "manual"}
+
+
+async def set_stage(pool, owner_id: int, entity_type: str, entity_id, value: str,
+                    *, source: str = "owner") -> dict | None:
+    """Владелец сам ставит человека на ступень. «Купил» идёт через
+    `mark_purchased` — одна дорога в «Купил», со снятием «ходит по кругу».
+
+    Возвращает применённое изменение или None (значение уже такое)."""
+    if value == "purchased":
+        return await mark_purchased(pool, owner_id, entity_type, entity_id,
+                                    source=source)
+    eid = str(entity_id)
+    rules = await get_rules(pool, owner_id)
+    for _attempt in range(_SIGNAL_RETRIES):
+        current = await get_state(pool, owner_id, entity_type, eid)
+        change = manual_change(current, value, rules=rules)
+        if change is None:
+            return None
+        from_value = (current or {}).get("value")
+        if await _write(pool, owner_id, entity_type, eid, "funnel", change, source,
+                        from_value, if_unchanged=True):
+            break
+    else:
+        return None
+    ev = virtual_event_for(from_value, change["value"])
+    if ev:
+        try:
+            from services.organism import spine
+            await spine.emit(pool, owner_id, ev, {
+                "entity_type": entity_type, "entity_id": eid, "state_key": "funnel",
+                "from": from_value, "to": change["value"],
+                "confidence": change["confidence"], "source": source})
+        except Exception:
+            log.debug("virtual_layer: manual emit failed ev=%s", ev, exc_info=True)
+    return change
+
+
 async def bouncing_list(pool, owner_id: int, *, entity_type: str = USER,
                         state_key: str = "funnel", limit: int = 50) -> list[dict]:
     """Кто сейчас «ходит по кругу» — без тех, кто уже купил.
@@ -1157,7 +1411,7 @@ async def entity_history(pool, owner_id: int, entity_type: str, entity_id,
         if cur:
             _val = cur.get("value")
             _exp = _aware(cur.get("expires_at"))
-            _ttl = ttl_for(_val) if _val else None
+            _ttl = ttl_for(_val, await get_rules(pool, owner_id)) if _val else None
             out["current"] = {
                 "value": _val,
                 "label": VALUE_LABEL.get(_val,
@@ -1258,6 +1512,8 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
     """
     out = {"funnel": [], "ladder": [], "hot": [], "cooling": [], "total": 0,
            "audience": None, "bots": [], "bouncing": []}
+    rules = await get_rules(pool, owner_id)
+    out["cooling_window_hours"] = rules["cooling_window_hours"]
     try:
         # Просроченность спрашиваем вместе со значением: распределение
         # воронки считалось по СЫРОМУ value, и на том же экране получалось
@@ -1335,9 +1591,10 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
             "FROM virtual_states WHERE owner_id=$1 AND state_key=$2 "
             "AND value = ANY($3::text[]) "
             "AND expires_at IS NOT NULL AND expires_at > now() "
-            "AND expires_at <= now() + interval '24 hours' "
+            "AND expires_at <= now() + make_interval(hours => $4) "
             "ORDER BY expires_at ASC LIMIT 30",
-            owner_id, state_key, ["interested", "qualified", "ready"])
+            owner_id, state_key, ["interested", "qualified", "ready"],
+            int(rules["cooling_window_hours"]))
         out["cooling"] = [
             {"entity_type": r["entity_type"], "entity_id": r["entity_id"],
              "value": r["value"], "label": VALUE_LABEL.get(r["value"], r["value"]),
@@ -1459,43 +1716,99 @@ def _source_label(source, bot_name=None) -> str:
     return s or "—"
 
 
+ANALYTICS_PERIODS = (7, 30, 90)   # None — за всё время
+
+
+def leaks_from_rows(rows) -> list[dict]:
+    """rows: [{from_value, lost, cooled}] → «где теряем людей» по ступеням.
+
+    lost — ушли в «Потерян» прямо с этой ступени (отписка, отказ); cooled —
+    съехали вниз распадом (замолчали). Это два разных лекарства: потерянным
+    нужен другой оффер, остывающим — касание раньше, чем истечёт срок. Порядок —
+    по лестнице, пустые ступени не показываем."""
+    by: dict[str, dict] = {}
+    for r in rows or []:
+        v = r.get("from_value") if isinstance(r, dict) else r["from_value"]
+        if v not in LADDER:
+            continue
+        lost = int((r.get("lost") if isinstance(r, dict) else r["lost"]) or 0)
+        cooled = int((r.get("cooled") if isinstance(r, dict) else r["cooled"]) or 0)
+        if lost or cooled:
+            by[v] = {"value": v, "label": VALUE_LABEL[v], "lost": lost,
+                     "cooled": cooled, "total": lost + cooled}
+    out = [by[v] for v in LADDER if v in by]
+    worst = max((x["total"] for x in out), default=0)
+    for x in out:
+        x["worst"] = bool(worst and x["total"] == worst)
+    return out
+
+
+def overall_conversion(conversion: list[dict]) -> int | None:
+    """Сквозная конверсия: из «присматривается» в «купил», в процентах."""
+    first = next((c for c in conversion if c["value"] == "curious"), None)
+    last = next((c for c in conversion if c["value"] == "purchased"), None)
+    if not first or not last or not first["reached"]:
+        return None
+    return round(last["reached"] / first["reached"] * 100)
+
+
+def _period(days) -> int | None:
+    try:
+        d = int(days)
+    except (TypeError, ValueError):
+        return None
+    return d if d in ANALYTICS_PERIODS else None
+
+
 async def analytics(pool, owner_id: int, *, entity_type: str = USER,
-                    state_key: str = "funnel") -> dict:
-    """Тренды слоя для экрана: конверсия воронки, моментум 7д, лучшие источники.
+                    state_key: str = "funnel", days: int | None = None) -> dict:
+    """Тренды слоя: конверсия, моментум, источники, время до покупки, утечки и
+    то, что двигает людей. `days` — 7/30/90 или None (всё время).
+
+    Раньше всё считалось за всё время, и вопрос «стало ли лучше за этот
+    месяц» был без ответа: одна старая волна навсегда держала конверсию. И не
+    было двух главных для продаж вещей — СКОЛЬКО времени человек идёт до
+    покупки и НА КАКОЙ ступени мы его теряем.
 
     Read-only, fail-open по каждому блоку (пустой блок вместо падения экрана).
     """
-    out = {"conversion": [], "momentum": None, "by_source": []}
+    days = _period(days)
+    win = days or 7                          # окно моментума: период или неделя
+    out = {"days": days, "conversion": [], "overall_pct": None, "momentum": None,
+           "by_source": [], "time_to": None, "leaks": [], "drivers": []}
+    # Условие периода одно на все запросы: NULL — без ограничения.
+    period = ("($4::int IS NULL OR created_at >= now() - make_interval(days => $4::int))")
     try:
         rows = await pool.fetch(
             "WITH e AS (SELECT entity_id, MAX(CASE to_value "
             "WHEN 'curious' THEN 1 WHEN 'interested' THEN 2 WHEN 'qualified' THEN 3 "
             "WHEN 'ready' THEN 4 WHEN 'purchased' THEN 5 ELSE 0 END) AS maxr "
             "FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
-            "AND state_key=$3 GROUP BY entity_id) "
+            "AND state_key=$3 AND " + period + " GROUP BY entity_id) "
             "SELECT maxr, COUNT(*) AS c FROM e GROUP BY maxr",
-            owner_id, entity_type, state_key)
+            owner_id, entity_type, state_key, days)
         out["conversion"] = conversion_from_maxranks([dict(r) for r in rows])
+        out["overall_pct"] = overall_conversion(out["conversion"])
     except Exception:
         log.debug("virtual_layer.analytics conversion failed owner=%s", owner_id)
     try:
         row = await pool.fetchrow(
             "SELECT "
             "COUNT(DISTINCT entity_id) FILTER (WHERE to_value IN ('ready','purchased') "
-            "  AND created_at >= now()-interval '7 days') AS hot_now, "
+            "  AND created_at >= now()-make_interval(days => $4)) AS hot_now, "
             "COUNT(DISTINCT entity_id) FILTER (WHERE to_value IN ('ready','purchased') "
-            "  AND created_at >= now()-interval '14 days' "
-            "  AND created_at < now()-interval '7 days') AS hot_prev, "
+            "  AND created_at >= now()-make_interval(days => $4 * 2) "
+            "  AND created_at < now()-make_interval(days => $4)) AS hot_prev, "
             "COUNT(DISTINCT entity_id) FILTER (WHERE to_value='lost' "
-            "  AND created_at >= now()-interval '7 days') AS lost_now, "
+            "  AND created_at >= now()-make_interval(days => $4)) AS lost_now, "
             "COUNT(DISTINCT entity_id) FILTER (WHERE to_value='lost' "
-            "  AND created_at >= now()-interval '14 days' "
-            "  AND created_at < now()-interval '7 days') AS lost_prev "
+            "  AND created_at >= now()-make_interval(days => $4 * 2) "
+            "  AND created_at < now()-make_interval(days => $4)) AS lost_prev "
             "FROM virtual_state_history "
             "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3",
-            owner_id, entity_type, state_key)
+            owner_id, entity_type, state_key, int(win))
         if row:
-            out["momentum"] = momentum_delta(dict(row))
+            out["momentum"] = {**momentum_delta(dict(row)), "window_days": int(win)}
     except Exception:
         log.debug("virtual_layer.analytics momentum failed owner=%s", owner_id)
     try:
@@ -1516,6 +1829,65 @@ async def analytics(pool, owner_id: int, *, entity_type: str = USER,
             for r in src_rows]
     except Exception:
         log.debug("virtual_layer.analytics by_source failed owner=%s", owner_id)
+    # Сколько идут до «готов купить» и до покупки: от ПЕРВОГО замеченного
+    # перехода человека (за всё время) до первого достижения ступени (в
+    # периоде). Медиана, а не среднее: один «купил через полгода» среднее
+    # уводит, а медиану — нет. Пришедшие сразу на ступень (ноль часов) не
+    # считаем: у них пути не было, и медиана ими занижалась бы.
+    try:
+        tr = await pool.fetchrow(
+            "WITH h AS (SELECT entity_id, MIN(created_at) AS first_at, "
+            "  MIN(created_at) FILTER (WHERE to_value IN ('ready','purchased')) AS ready_at, "
+            "  MIN(created_at) FILTER (WHERE to_value='purchased') AS paid_at "
+            "  FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
+            "  AND state_key=$3 GROUP BY entity_id) "
+            "SELECT "
+            "percentile_cont(0.5) WITHIN GROUP (ORDER BY "
+            "  EXTRACT(EPOCH FROM ready_at - first_at) / 3600.0) "
+            "  FILTER (WHERE ready_at > first_at AND ($4::int IS NULL "
+            "    OR ready_at >= now() - make_interval(days => $4::int))) AS ready_h, "
+            "COUNT(*) FILTER (WHERE ready_at > first_at AND ($4::int IS NULL "
+            "    OR ready_at >= now() - make_interval(days => $4::int))) AS ready_n, "
+            "percentile_cont(0.5) WITHIN GROUP (ORDER BY "
+            "  EXTRACT(EPOCH FROM paid_at - first_at) / 3600.0) "
+            "  FILTER (WHERE paid_at > first_at AND ($4::int IS NULL "
+            "    OR paid_at >= now() - make_interval(days => $4::int))) AS paid_h, "
+            "COUNT(*) FILTER (WHERE paid_at > first_at AND ($4::int IS NULL "
+            "    OR paid_at >= now() - make_interval(days => $4::int))) AS paid_n "
+            "FROM h", owner_id, entity_type, state_key, days)
+        if tr and (tr["ready_n"] or tr["paid_n"]):
+            out["time_to"] = {
+                "ready_hours": round(float(tr["ready_h"]), 1) if tr["ready_h"] is not None else None,
+                "ready_n": int(tr["ready_n"] or 0),
+                "purchased_hours": round(float(tr["paid_h"]), 1) if tr["paid_h"] is not None else None,
+                "purchased_n": int(tr["paid_n"] or 0)}
+    except Exception:
+        log.debug("virtual_layer.analytics time_to failed owner=%s", owner_id)
+    try:
+        lk = await pool.fetch(
+            "SELECT from_value, "
+            "COUNT(*) FILTER (WHERE to_value='lost') AS lost, "
+            "COUNT(*) FILTER (WHERE reason='decay' AND to_value<>'lost') AS cooled "
+            "FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
+            "AND state_key=$3 AND from_value IS NOT NULL AND " + period +
+            " GROUP BY from_value", owner_id, entity_type, state_key, days)
+        out["leaks"] = leaks_from_rows([dict(r) for r in lk])
+    except Exception:
+        log.debug("virtual_layer.analytics leaks failed owner=%s", owner_id)
+    # Что двигает людей вверх: какие действия (сигналы) дали переходы. Ответ на
+    # «на что реагирует моя аудитория» — и на то, какие правила стоит менять.
+    try:
+        dr = await pool.fetch(
+            "SELECT reason, COUNT(DISTINCT entity_id) AS c "
+            "FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
+            "AND state_key=$3 AND (reason LIKE 'signal:%' OR reason='manual') "
+            "AND to_value <> 'lost' AND " + period +
+            " GROUP BY reason ORDER BY c DESC LIMIT 10",
+            owner_id, entity_type, state_key, days)
+        out["drivers"] = [{"reason": r["reason"], "label": reason_label(r["reason"]),
+                           "count": int(r["c"])} for r in dr]
+    except Exception:
+        log.debug("virtual_layer.analytics drivers failed owner=%s", owner_id)
     return out
 
 
@@ -1559,10 +1931,11 @@ async def segment(pool, owner_id: int, value: str, *, entity_type: str = USER,
         log.debug("virtual_layer.segment failed owner=%s", owner_id)
         return out
     people: list[dict] = []
+    rules = await get_rules(pool, owner_id)
     for r in rows:
         if effective_value(r["value"], bool(r["expired"])) != value:
             continue
-        _ttl = ttl_for(value)
+        _ttl = ttl_for(value, rules)
         people.append({
             "entity_type": entity_type, "entity_id": r["entity_id"],
             "confidence": round(float(r["confidence"] or 0), 2),
