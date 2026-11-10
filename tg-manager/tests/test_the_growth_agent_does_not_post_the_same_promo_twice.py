@@ -90,6 +90,7 @@ def harness(monkeypatch):
     """Исполнитель с заглушенным окружением: наружу ходит только _Telegram."""
     import services
     from services import op_worker
+    from services.niche_searcher import filter_groups as _real_filter
 
     tg = _Telegram()
     groups = {"value": [
@@ -102,7 +103,7 @@ def harness(monkeypatch):
         seen["exclude_ids"] = set(kw.get("exclude_ids") or ())
         return list(groups["value"])
 
-    async def _keywords(desc):
+    async def _keywords(desc, *a, **kw):
         return [desc]
 
     async def _enforce(pool, owner_id, *texts, **kw):
@@ -111,7 +112,8 @@ def harness(monkeypatch):
     for name, mod in (
         ("niche_searcher", _module("services.niche_searcher",
                                    generate_keywords=_keywords,
-                                   search_niche_groups=_search)),
+                                   search_niche_groups=_search,
+                                   filter_groups=_real_filter)),
         ("account_manager", _module("services.account_manager",
                                     join_channel=tg.join_channel,
                                     post_to_channel=tg.post_to_channel)),
