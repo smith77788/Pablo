@@ -40,6 +40,7 @@ DELETE /api/miniapp/sales/product/{prid}
 DELETE /api/miniapp/sales/promo/{prid}
 DELETE /api/miniapp/self_promo/{tpl_id}
 DELETE /api/miniapp/semantic_memory/{bot_id}/user/{user_id}
+DELETE /api/miniapp/semantic_memory/{bot_id}/user/{user_id}/fact/{key}
 DELETE /api/miniapp/stars/experiment/{exp_id}
 DELETE /api/miniapp/template/{tpl_id}
 DELETE /api/miniapp/uch/contacts/{contact_id}
@@ -311,6 +312,7 @@ GET /api/miniapp/self_promo/audience
 GET /api/miniapp/selfpromo/overview
 GET /api/miniapp/semantic_memory
 GET /api/miniapp/semantic_memory/{bot_id}
+GET /api/miniapp/semantic_memory/{bot_id}/user/{user_id}
 GET /api/miniapp/seo
 GET /api/miniapp/settings
 GET /api/miniapp/shield
@@ -654,6 +656,7 @@ HEAD /api/miniapp/self_promo/audience
 HEAD /api/miniapp/selfpromo/overview
 HEAD /api/miniapp/semantic_memory
 HEAD /api/miniapp/semantic_memory/{bot_id}
+HEAD /api/miniapp/semantic_memory/{bot_id}/user/{user_id}
 HEAD /api/miniapp/seo
 HEAD /api/miniapp/settings
 HEAD /api/miniapp/shield
@@ -1167,6 +1170,7 @@ POST /api/miniapp/workspace/join
 POST /api/miniapp/workspace/{ws_id}/invite
 POST /webhook/crm/{token}
 POST /webhook/scenario/{token}
+PUT /api/miniapp/ai_memory/{mem_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/toggle
 PUT /api/miniapp/auto_reply/{reply_id}/toggle
@@ -1187,6 +1191,8 @@ PUT /api/miniapp/ghost/{profile_id}/toggle
 PUT /api/miniapp/persona/{persona_id}/toggle
 PUT /api/miniapp/presence_pack/{pack_id}/config
 PUT /api/miniapp/self_promo/{tpl_id}/toggle
+PUT /api/miniapp/semantic_memory/{bot_id}/settings
+PUT /api/miniapp/semantic_memory/{bot_id}/user/{user_id}/fact
 PUT /api/miniapp/stars/experiment/{exp_id}/toggle
 PUT /api/miniapp/uch/groups/{group_id}
 PUT /api/miniapp/uch/smart-tags/rules/{rule_id}/toggle

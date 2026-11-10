@@ -6004,6 +6004,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="memory" data-tab="notes" role="tablist" aria-label="Вкладки модуля «ИИ Память»"></div>
   <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px;line-height:1.45">
+      Записи — то, что ИИ-ассистент Infragram знает о вашем проекте. <b>📌 Закреплённые</b> он учитывает в каждом ответе,
+      остальные — когда вопрос совпадает со словами записи или её тегами. Ассистент сам добавляет сюда то, что вы
+      просите запомнить в чате.
+    </div>
+    <div style="display:flex;gap:8px;margin:0 0 8px">
+      <input id="aiMemQ" type="search" placeholder="Поиск по записям и #тегам" style="flex:1"
+             oninput="aiMemSearchSoon()" onkeydown="if(event.key==='Enter')openAiMemory(false, true)">
+    </div>
+    <div class="filter-chips" id="aiMemKinds" role="tablist" aria-label="Тип записи" style="margin-bottom:6px"></div>
     <div class="lst" id="aiMemoryList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -7916,9 +7926,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="aiMemMbg" onclick="if(event.target===this)closeAiMemoryModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeAiMemoryModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🧠 Новая запись в памяти</div>
-    <div class="field"><label>Заголовок (необязательно)</label><input type="text" id="aiMemTitle" placeholder="Краткое описание"></div>
-    <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="4" placeholder="Запишите факт, инструкцию или заметку для ИИ-ассистента…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="modal-title" id="aiMemModalTitle">🧠 Новая запись в памяти</div>
+    <div class="field"><label>Тип записи</label>
+      <select id="aiMemKind" class="sel">
+        <option value="note">📝 Заметка — справка о проекте</option>
+        <option value="instruction">📋 Инструкция — как ассистенту действовать</option>
+        <option value="fact">💡 Факт — цифры, имена, ссылки</option>
+        <option value="rule">⚙️ Правило — чего не делать никогда</option>
+      </select></div>
+    <div class="field"><label>Заголовок (необязательно)</label><input type="text" id="aiMemTitle" maxlength="180" placeholder="Краткое описание"></div>
+    <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="5" maxlength="8000" placeholder="Например: «Наш основной канал — @brand, публикуем в 10:00 и 19:00 по Москве»" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Теги (через запятую, необязательно)</label><input type="text" id="aiMemTags" placeholder="канал, рассылки, цены"></div>
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:4px 0 10px;cursor:pointer">
+      <input type="checkbox" id="aiMemPinned" style="margin-top:2px">
+      <span>📌 Закрепить — ассистент учитывает запись в каждом ответе, а не только при совпадении слов</span>
+    </label>
     <div class="field-err" id="aiMemErr"></div>
     <button class="btn btn-p" data-main id="aiMemBtn" onclick="submitAiMemory()" style="width:100%">💾 Сохранить</button>
   </div>
@@ -22654,9 +22676,17 @@ async function openReferral() {
 }
 
 // ── AI Memory ───────────────────────────────────────────
-function openAiMemoryModal() {
-  document.getElementById('aiMemTitle').value='';
-  document.getElementById('aiMemBody').value='';
+// Записи ИИ-памяти владельца: правка, закрепление, тип, теги, поиск.
+let AIMEM_EDIT_ID = null;
+function openAiMemoryModal(id) {
+  const m = id ? AIMEM_ROWS.find(r => r.id === id) : null;
+  AIMEM_EDIT_ID = m ? m.id : null;
+  document.getElementById('aiMemModalTitle').textContent = m ? '🧠 Правка записи' : '🧠 Новая запись в памяти';
+  document.getElementById('aiMemKind').value = (m && MEM_KIND[m.kind]) ? m.kind : 'note';
+  document.getElementById('aiMemTitle').value = m ? (m.title || '') : '';
+  document.getElementById('aiMemBody').value = m ? (m.body || '') : '';
+  document.getElementById('aiMemTags').value = m ? (m.tags || []).join(', ') : '';
+  document.getElementById('aiMemPinned').checked = !!(m && m.pinned);
   document.getElementById('aiMemErr').textContent='';
   document.getElementById('aiMemBtn').disabled=false;
   document.getElementById('aiMemMbg').classList.add('show');
@@ -22665,45 +22695,83 @@ function closeAiMemoryModal() { document.getElementById('aiMemMbg').classList.re
 async function submitAiMemory() {
   const title = document.getElementById('aiMemTitle').value.trim();
   const body = document.getElementById('aiMemBody').value.trim();
+  const kind = document.getElementById('aiMemKind').value;
+  const tags = document.getElementById('aiMemTags').value;
+  const pinned = document.getElementById('aiMemPinned').checked;
   const errEl = document.getElementById('aiMemErr');
   if (!body) { errEl.textContent='Заполните содержимое'; return; }
   const btn = document.getElementById('aiMemBtn');
   btn.disabled=true; btn.textContent='Сохраняю…';
   try {
-    await api('/api/miniapp/ai_memory',{method:'POST',body:JSON.stringify({title,body})});
-    toast('🧠 Запись сохранена');
+    const payload = JSON.stringify({title, body, kind, tags, pinned});
+    if (AIMEM_EDIT_ID) await api(`/api/miniapp/ai_memory/${AIMEM_EDIT_ID}`, {method:'PUT', body:payload});
+    else await api('/api/miniapp/ai_memory', {method:'POST', body:payload});
+    toast(AIMEM_EDIT_ID ? '🧠 Запись обновлена' : '🧠 Запись сохранена');
     closeAiMemoryModal();
-    openAiMemory();
+    openAiMemory(false, true);
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
 }
 const MEM_KIND = {note:'📝',instruction:'📋',fact:'💡',rule:'⚙️'};
+const MEM_KIND_RU = {note:'Заметка',instruction:'Инструкция',fact:'Факт',rule:'Правило'};
+let AIMEM_KIND = '';
+let _aiMemTimer = null;
+function aiMemSearchSoon() {
+  clearTimeout(_aiMemTimer);
+  _aiMemTimer = setTimeout(() => openAiMemory(false, true), 350);
+}
+function aiMemSetKind(k) { AIMEM_KIND = (k === 'all') ? '' : k; openAiMemory(false, true); }
+function renderAiMemKinds() {
+  const chips = [['all','Все'], ...Object.keys(MEM_KIND).map(k => [k, MEM_KIND[k]+' '+MEM_KIND_RU[k]])];
+  txt('aiMemKinds', chips.map(([k, l]) => {
+    const on = (k === 'all' && !AIMEM_KIND) || k === AIMEM_KIND;
+    return `<div class="chip${on?' active':''}" role="tab" aria-selected="${on}" onclick="aiMemSetKind('${k}')">${esc(l)}</div>`;
+  }).join(''));
+}
 // Страницы по СМЕЩЕНИЮ, а не растущим потолком: у ручки свой предел, и на
 // нём растущий limit — стена, а кнопка «Показать ещё» при честном итоге
 // остаётся и перестаёт работать.
 let AIMEM_ROWS = [], AIMEM_OFFSET = 0;
 async function openAiMemoryMore() { AIMEM_OFFSET = AIMEM_ROWS.length; await openAiMemory(true); }
-async function openAiMemory(keep) {
-  if (!keep) { AIMEM_ROWS = []; AIMEM_OFFSET = 0; push('s-aimemory'); }
-  if (!keep) txt('aiMemoryList','<div class="spin-wrap"><div class="spin"></div></div>');
+// keep — дозагрузка страницы; inPlace — перерисовка того же экрана (поиск,
+// фильтр, после правки) без нового шага в истории «Назад».
+async function openAiMemory(keep, inPlace) {
+  if (!keep) {
+    AIMEM_ROWS = []; AIMEM_OFFSET = 0;
+    if (!inPlace) {
+      AIMEM_KIND = '';
+      const qEl = document.getElementById('aiMemQ'); if (qEl) qEl.value = '';
+      push('s-aimemory');
+    }
+    renderAiMemKinds();
+    txt('aiMemoryList','<div class="spin-wrap"><div class="spin"></div></div>');
+  }
+  const q = ((document.getElementById('aiMemQ')||{}).value || '').trim();
   try {
-    const d = await api('/api/miniapp/ai_memory?limit=50&offset='+AIMEM_OFFSET);
+    const d = await api('/api/miniapp/ai_memory?limit=50&offset='+AIMEM_OFFSET
+      + '&q='+encodeURIComponent(q) + '&kind='+encodeURIComponent(AIMEM_KIND));
     const _page = listOf(d,'memories');
     AIMEM_ROWS = AIMEM_OFFSET ? AIMEM_ROWS.concat(_page) : _page;
     const mems = AIMEM_ROWS;
     const memTotal = totalOf(d, mems);
     // Плитка называет ВСЁ число записей, а не длину показанной страницы.
-    txt('m-aimem-val',`${num(memTotal)} записей`);
-    if (!mems.length) { txt('aiMemoryList', empty('🧠','Нет записей','Добавьте заметки для ИИ-ассистента', {label:'➕ Добавить запись', fn:'openAiMemoryModal()'})); return; }
+    if (!q && !AIMEM_KIND) txt('m-aimem-val',`${num(memTotal)} записей`);
+    if (!mems.length) {
+      if (q || AIMEM_KIND) { txt('aiMemoryList', empty('🔎','Ничего не нашлось','Измените запрос или выберите другой тип записи')); return; }
+      txt('aiMemoryList', empty('🧠','Нет записей','Расскажите ассистенту о проекте: каналы, цены, тон общения, чего нельзя делать. Он будет учитывать это в ответах', {label:'➕ Добавить запись', fn:'openAiMemoryModal()'}));
+      return;
+    }
     txt('aiMemoryList', mems.map(m=>`
-      <div class="row">
-        <div class="row-ico" style="background:var(--bg-purple-16)">${m.pinned?'📌':(MEM_KIND[m.kind]||'📝')}</div>
+      <div class="row tap" onclick="openAiMemoryModal(${Number(m.id)})">
+        <div class="row-ico" style="background:var(--bg-purple-16)">${MEM_KIND[m.kind]||'📝'}</div>
         <div class="row-body">
-          <div class="row-name">${esc(m.title||m.body.slice(0,40))}</div>
-          <div class="row-val">${m.title?esc(m.body.slice(0,60)):''} ${(m.tags||[]).map(t=>'#'+esc(t)).join(' ')}</div>
+          <div class="row-name">${m.pinned?'📌 ':''}${esc(m.title||m.body.slice(0,60))}</div>
+          <div class="row-val wrap">${m.title?esc(m.body.slice(0,140)):''}${m.body.length>(m.title?140:60)?'…':''}</div>
+          <div class="row-val" style="font-size:11px;color:var(--hint)">${esc(MEM_KIND_RU[m.kind]||'Заметка')}${m.source==='ai'||m.source==='ai_tool'?' · добавил ассистент':''} · ${m.updated_at?new Date(m.updated_at).toLocaleDateString('ru-RU'):''} ${(m.tags||[]).map(t=>'#'+esc(t)).join(' ')}</div>
         </div>
-        <div class="row-right">
-          <button class="icon-btn sm danger" onclick="deleteAiMem(${m.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
+        <div class="row-right" style="display:flex;gap:4px">
+          <button class="icon-btn sm" onclick="event.stopPropagation();toggleAiMemPin(${Number(m.id)}, this)" aria-label="${m.pinned?'Открепить':'Закрепить'}" title="${m.pinned?'Открепить':'Закрепить'}">${m.pinned?'📍':'📌'}</button>
+          <button class="icon-btn sm danger" onclick="event.stopPropagation();deleteAiMem(${Number(m.id)}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>
     `).join('') + moreBtn(mems.length, memTotal, 'openAiMemoryMore()'));
@@ -22711,12 +22779,22 @@ async function openAiMemory(keep) {
     txt('aiMemoryList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openAiMemory', keep)}));
   }
 }
+async function toggleAiMemPin(id, el) {
+  const m = AIMEM_ROWS.find(r => r.id === id);
+  if (!m) return;
+  if (el) el.disabled = true;
+  try {
+    await api(`/api/miniapp/ai_memory/${id}`, {method:'PUT', body: JSON.stringify({pinned: !m.pinned})});
+    toast(m.pinned ? 'Запись откреплена' : '📌 Запись закреплена');
+    openAiMemory(false, true);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); if (el) el.disabled = false; }
+}
 async function deleteAiMem(id, _el) {
   if (!await confirmDelete('Удалить запись из ИИ-памяти', _el)) return;
   try {
     await api(`/api/miniapp/ai_memory/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
-    openAiMemory();
+    openAiMemory(false, true);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
 
