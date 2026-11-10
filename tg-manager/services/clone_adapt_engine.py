@@ -142,10 +142,10 @@ def settings_summary(fields: list[str], settings: dict) -> str:
     if reps:
         parts.append(f"замен: {len(reps)}")
     if settings.get("swap_mentions"):
-        parts.append("упоминания источника → цель")
+        parts.append("@ники образца → ники ботов")
     langs = settings.get("langs")
     if langs == "all":
-        parts.append("все языки источника")
+        parts.append("все переводы образца")
     elif langs:
         parts.append("языки: " + ", ".join(langs))
     if not settings.get("skip_same", True):
