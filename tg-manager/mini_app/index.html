@@ -26903,7 +26903,11 @@ async function openAdIntel(tab) {
     const notes = [];
     if (d.failed_channels) notes.push(`⚠️ ${d.failed_channels} ${plural(d.failed_channels,'канал','канала','каналов')} не удалось обновить — причина в карточке канала`);
     if (d.suspicious_channels) notes.push(`🚩 У ${d.suspicious_channels} ${plural(d.suspicious_channels,'канала','каналов','каналов')} есть признаки накрутки`);
-    if (notes.length) txt('adIntelAlert', `<div class="card" style="margin:0 16px 8px;font-size:13px">${notes.map(esc).join('<br>')}</div>`);
+    // Кто сейчас рекламируется активнее всех — быстрый вход в карточку.
+    const leaders = (d.top_advertisers ? d.top_advertisers.map(a =>
+      `<span class="chip tap" role="button" tabindex="0" onclick="openAdAdvertiser('${escJs(a.username)}')">${esc((a.kind==='site'||a.kind==='invite') ? a.username : '@'+a.username)} · ${num(a.placements||0)} в ${num(a.channels||0)} ${plural(a.channels||0,'канале','каналах','каналах')}</span>`) : []).slice(0,5).join('');
+    const lead = leaders ? `<div class="field-note" style="padding:0 16px 4px">Активнее всех рекламируются:</div><div class="filter-chips" style="padding:0 16px 8px">${leaders}</div>` : '';
+    txt('adIntelAlert', (notes.length ? `<div class="card" style="margin:0 16px 8px;font-size:13px">${notes.map(esc).join('<br>')}</div>` : '') + lead);
     if (!d.total_channels) {
       // Пусто: вкладки и поиск ни к чему — одна понятная дверь.
       adIntelShowTab('channels');

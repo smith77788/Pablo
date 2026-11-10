@@ -1,4 +1,5 @@
 DELETE /api/miniapp/account/{acc_id}
+DELETE /api/miniapp/ad_intel/channel/{username}
 DELETE /api/miniapp/ai_memory/{mem_id}
 DELETE /api/miniapp/api_key/{key_id}
 DELETE /api/miniapp/asset_template/{tpl_id}
@@ -73,6 +74,11 @@ GET /api/miniapp/accounts/health
 GET /api/miniapp/accounts/survival
 GET /api/miniapp/accounts/tags
 GET /api/miniapp/ad_intel
+GET /api/miniapp/ad_intel/ads
+GET /api/miniapp/ad_intel/advertiser/{username}
+GET /api/miniapp/ad_intel/advertisers
+GET /api/miniapp/ad_intel/channel/{username}
+GET /api/miniapp/ad_intel/channels
 GET /api/miniapp/admin/actions
 GET /api/miniapp/admin/audit
 GET /api/miniapp/admin/broadcast/recent
@@ -422,6 +428,11 @@ HEAD /api/miniapp/accounts/health
 HEAD /api/miniapp/accounts/survival
 HEAD /api/miniapp/accounts/tags
 HEAD /api/miniapp/ad_intel
+HEAD /api/miniapp/ad_intel/ads
+HEAD /api/miniapp/ad_intel/advertiser/{username}
+HEAD /api/miniapp/ad_intel/advertisers
+HEAD /api/miniapp/ad_intel/channel/{username}
+HEAD /api/miniapp/ad_intel/channels
 HEAD /api/miniapp/admin/actions
 HEAD /api/miniapp/admin/audit
 HEAD /api/miniapp/admin/broadcast/recent
@@ -799,6 +810,8 @@ POST /api/miniapp/accounts/check_all
 POST /api/miniapp/accounts/mass
 POST /api/miniapp/accounts/revive
 POST /api/miniapp/ad_intel/channel
+POST /api/miniapp/ad_intel/channel/{username}/auto
+POST /api/miniapp/ad_intel/channel/{username}/rescan
 POST /api/miniapp/admin/broadcast
 POST /api/miniapp/admin/report/{report_id}/status
 POST /api/miniapp/admin/user/{user_id}/ban
