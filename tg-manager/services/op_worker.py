@@ -12657,6 +12657,11 @@ async def _exec_strike(
 
     summary_text = format_strike_summary(results)
     total_reported = sum(getattr(r, "peer_reported", 0) for r in results)
+    total_emails = sum(getattr(r, "emails_sent", 0) for r in results)
+    # Исход по ФАКТУ: не ушло НИ ОДНОЙ жалобы и НИ ОДНОГО письма = провал, а не
+    # «выполнено». (Крах staggered_strike уже отдаёт failed выше по except.)
+    # Письма учитываем отдельно: legal-only заход (без флота) шлёт только их.
+    _strike_did_anything = bool(total_reported or total_emails)
 
     # ── Настойчивая эскалация: переповтор, пока цель не снята ──────────────────
     # Реальные тейкдауны идут во времени: площадка/модерация реагирует не мгновенно.
@@ -12705,12 +12710,18 @@ async def _exec_strike(
             )
 
     return {
-        "status": "done",
+        "status": "done" if _strike_did_anything else "failed",
         "target": target,
         "waves_planned": num_waves,
         "accounts_used": len(viable),
         "total_reported": total_reported,
-        "summary": summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}",
+        "emails_sent": total_emails,
+        "summary": (
+            (summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}")
+            if _strike_did_anything else
+            f"⚠️ Strike по {target}: не отправлено ни одной жалобы и ни одного письма (0). "
+            "Операция не выполнена."
+        ),
     }
 
 

@@ -36,3 +36,17 @@ def test_report_peer_already_honest():
     # чтобы не деградировал обратно к безусловному успеху.
     src = inspect.getsource(op_worker._exec_report_peer)
     assert '"done" if ok_count else "failed"' in src
+
+
+def test_strike_outcome_counts_reports_and_emails():
+    # _exec_strike: 0 отправленных жалоб И 0 писем = провал, а не «выполнено».
+    # Письма обязаны учитываться — legal-only заход (без флота) шлёт только их,
+    # и учёт одних MTProto-жалоб ложно пометил бы успешную рассылку писем провалом.
+    src = inspect.getsource(op_worker._exec_strike)
+    assert 'emails_sent' in src, "исход Strike обязан учитывать и отправленные письма"
+    assert '_strike_did_anything' in src
+    assert '"done" if _strike_did_anything else "failed"' in src, (
+        "0 жалоб и 0 писем обязаны давать failed, а не безусловный done"
+    )
+    # прежней безусловной лжи больше нет
+    assert '"status": "done",\n        "target": target,' not in src
