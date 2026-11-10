@@ -38,6 +38,20 @@ RUN python -m venv /app/pablo/.venv \
     && /app/pablo/.venv/bin/pip install --no-cache-dir -r /app/pablo/requirements.txt
 COPY assistant/ /app/pablo/assistant/
 
+# ---------------------------------------------------------------------------
+# Additive: модуль blackbird (OSINT-поиск аккаунтов по username/email).
+# Свой каталог /app/blackbird и свой venv — его пины (aiohttp, pillow,
+# reportlab, rich) не пересекаются с tg-manager. Это не сервис: ничего не
+# запускается при старте, только по вызову:
+#   /app/blackbird/.venv/bin/python -m pablo_blackbird -u <username>
+# Пишет только в BLACKBIRD_WORKDIR (по умолчанию /tmp/blackbird).
+# ---------------------------------------------------------------------------
+COPY blackbird/requirements.txt /app/blackbird/requirements.txt
+RUN python -m venv /app/blackbird/.venv \
+    && /app/blackbird/.venv/bin/pip install --no-cache-dir -r /app/blackbird/requirements.txt
+COPY blackbird/upstream/ /app/blackbird/upstream/
+COPY blackbird/pablo_blackbird/ /app/blackbird/pablo_blackbird/
+
 # Run tg-manager (foreground) + assistant (background, self-restarting).
 COPY start-all.sh /app/start-all.sh
 RUN chmod +x /app/start-all.sh

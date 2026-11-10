@@ -99,6 +99,7 @@ from bot.handlers import boost as boost_handler
 from bot.handlers import mass_inviter as mass_inviter_handler
 from bot.handlers import profile_setter as profile_setter_handler
 from bot.handlers import phone_checker as phone_checker_handler
+from bot.handlers import osint_search as osint_search_handler
 from bot.handlers import reporter_standalone as reporter_handler
 from bot.handlers import abuse_report as abuse_report_handler
 from bot.handlers import content_cloner as content_cloner_handler
@@ -627,6 +628,7 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     dp.include_router(mass_inviter_handler.router)
     dp.include_router(profile_setter_handler.router)
     dp.include_router(phone_checker_handler.router)
+    dp.include_router(osint_search_handler.router)
     dp.include_router(reporter_handler.router)
     dp.include_router(content_cloner_handler.router)
     dp.include_router(auto_registrar_handler.router)

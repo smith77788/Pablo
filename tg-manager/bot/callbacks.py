@@ -727,6 +727,12 @@ class PhoneCheckerCb(CallbackData, prefix="phchk"):
     action: str          # menu|start
 
 
+class OsintCb(CallbackData, prefix="osint"):
+    """Поиск аккаунтов по нику или почте (модуль blackbird)."""
+
+    action: str          # menu|start
+
+
 class ReporterCb(CallbackData, prefix="rpt"):
     """Репортер — массовые жалобы."""
 

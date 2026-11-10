@@ -2435,6 +2435,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Комьюнити</div>
         <div class="mgmt-tile-val" id="m-community-val"></div>
       </div>
+      <!-- Поиск аккаунтов человека по нику/почте на ~600 сайтах (модуль
+           blackbird, screens/osint_search.js). -->
+      <div class="mgmt-tile" onclick="openOsint()">
+        <div class="mgmt-tile-ico">🕵️</div>
+        <div class="mgmt-tile-lbl">Поиск по нику</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
     </div>
 
     <!-- ✉️ Сообщения — состав раздела: services/task_sections.py -->
@@ -9409,6 +9416,7 @@ const MODULE_KEYWORDS = {
   'Массовые жалобы':'strike страйк жалоба репорт снос бан заблокировать report abuse удалить конкурента',
   'Массовый инвайт':'пригласить добавить участников инвайтинг invite',
   'Парсер':'собрать спарсить аудиторию участников подписчиков выгрузить парсинг',
+  'Поиск по нику':'osint осинт найти человека аккаунты соцсети ник username почта email профили пробить blackbird',
   'Рассылки':'спам рассылка сообщения дм dm broadcast массовая отправка публикация в каналы единая кампания всё сразу campaign сеть ботов всем подписчикам расписание отложенная a/b тест эксперимент',
   'Прогрев':'разогреть отлежать нагулять антибан антидетект warmup',
   'Прокси':'ip адрес socks5 http изоляция подсеть',
@@ -9526,6 +9534,7 @@ const MODULE_DESCS = {
   'Создать каналы':'Массовое создание каналов',
   'Массовая публикация':'Пост во все каналы/аккаунты разом','Массопубликация':'Пост во все каналы/аккаунты разом',
   'Массовый инвайт':'Приглашение пользователей в каналы/группы','Парсер':'Сбор аудитории из чатов и каналов',
+  'Поиск по нику':'Аккаунты человека по нику или почте на 600 сайтах',
   'Поиск Telegram':'Позиции ботов и каналов, живая выдача, SEO и вывод в топ — в одном месте',
   'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов',
   'CRM':'Клиенты, сделки по этапам, воронка денег и когорты','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
@@ -30429,6 +30438,7 @@ const OP_RU = {
   crosspost_run:'Кросспостинг', content_clone:'Клонирование контента',
   clone_adapt:'Клонирование с адаптацией', parse_audience:'Сбор аудитории',
   phone_check:'Проверка номеров', reg_check:'Проверка регистрации',
+  osint_search:'Поиск по нику',
   account_warmup:'Прогрев аккаунта', check_accounts_health:'Проверка здоровья аккаунтов',
   check_owned_restrictions:'Проверка ограничений каналов/чатов/ботов',
   check_bot_geoban:'Гео-доступность каналов, чатов и ботов по странам',
@@ -33229,6 +33239,7 @@ function renderAudSegChart(segments) {
 <script src="screens/widgets.js"></script>
 <script src="screens/home_screen.js"></script>
 <script src="screens/find_mine.js"></script>
+<script src="screens/osint_search.js"></script>
 <script src="screens/workflow_map.js"></script>
 <script src="screens/desktop.js"></script>
 <script src="screens/main_button.js"></script>

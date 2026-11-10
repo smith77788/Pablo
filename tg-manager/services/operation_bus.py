@@ -740,6 +740,14 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "☎️",
     },
+    # Поиск аккаунтов по нику/почте (модуль blackbird). Только чтение
+    # публичных страниц с сервера: аккаунты Telegram не участвуют.
+    "osint_search": {
+        "description": "Поиск аккаунтов по нику или почте",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🕵️",
+    },
     "parse_audience": {
         "description": "Парсинг аудитории",
         "min_plan": "starter",
