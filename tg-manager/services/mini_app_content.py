@@ -693,22 +693,36 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            # Счётчики — подзапросами, а не двумя LEFT JOIN подряд: соединение
+            # переписки и фактов давало произведение строк, и «Фактов» на
+            # экране было умножено на число сообщений бота.
             rows = await pool.fetch(
                 """
                 SELECT mb.bot_id, mb.username, mb.first_name,
-                       COUNT(DISTINCT bum.user_id) AS conv_users,
-                       COUNT(buf.id) AS fact_count
+                       COALESCE((SELECT COUNT(DISTINCT bum.user_id)
+                                   FROM bot_user_memory bum
+                                  WHERE bum.bot_id = mb.bot_id), 0) AS conv_users,
+                       COALESCE((SELECT COUNT(*) FROM bot_user_facts buf
+                                  WHERE buf.bot_id = mb.bot_id), 0) AS fact_count,
+                       (SELECT MAX(bum2.created_at) FROM bot_user_memory bum2
+                         WHERE bum2.bot_id = mb.bot_id) AS last_at,
+                       COALESCE(ms.enabled, TRUE) AS enabled,
+                       COALESCE(ms.auto_extract_facts, TRUE) AS auto_extract_facts,
+                       COALESCE(ms.max_history_days, 90) AS max_history_days
                 FROM managed_bots mb
-                LEFT JOIN bot_user_memory bum ON bum.bot_id = mb.bot_id
-                LEFT JOIN bot_user_facts buf ON buf.bot_id = mb.bot_id
+                LEFT JOIN memory_settings ms ON ms.bot_id = mb.bot_id
                 WHERE mb.added_by = $1
-                GROUP BY mb.bot_id, mb.username, mb.first_name
-                ORDER BY fact_count DESC NULLS LAST
-                LIMIT 30
+                ORDER BY fact_count DESC, conv_users DESC, mb.bot_id
+                LIMIT 300
                 """,
                 uid,
             )
-            return _json_resp([dict(r) for r in rows])
+            out = []
+            for r in rows:
+                d = dict(r)
+                d["last_at"] = d["last_at"].isoformat() if d.get("last_at") else None
+                out.append(d)
+            return _json_resp(out)
         except Exception:
             log.exception("semantic_memory_overview uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -728,25 +742,39 @@ def setup_routes(app: web.Application, pool) -> None:
             # Имя собеседника, а не его номер. Экран показывал «User 783215441»:
             # смысл семантической памяти в том, что это факты О ЧЕЛОВЕКЕ, а по
             # номеру человека не узнать ни владельцу, ни кому-либо ещё.
+            # Поиск: по имени, @username или по тексту факта («кто из Казани»,
+            # «кто хотел доставку»). Пустая строка — без фильтра. Итог считается
+            # тем же фильтром, иначе «Показать ещё» обещало бы чужие строки.
+            q = (request.query.get("q") or "").strip()[:100]
+            like = "%" + q.replace("\\", "").replace("%", "").replace("_", "") + "%"
             facts = await pool.fetch(
                 "SELECT f.user_id, f.fact_key, f.fact_value, f.confidence, f.updated_at, "
                 "       bu.first_name, bu.last_name, bu.username "
                 "FROM bot_user_facts f "
                 "LEFT JOIN bot_users bu ON bu.bot_id = f.bot_id AND bu.user_id = f.user_id "
-                "WHERE f.bot_id=$1 "
+                "WHERE f.bot_id=$1 AND ($4 = '' OR f.user_id IN ("
+                "  SELECT f2.user_id FROM bot_user_facts f2 "
+                "  LEFT JOIN bot_users b2 ON b2.bot_id = f2.bot_id AND b2.user_id = f2.user_id "
+                "  WHERE f2.bot_id=$1 AND (f2.fact_value ILIKE $5 OR b2.first_name ILIKE $5 "
+                "    OR b2.last_name ILIKE $5 OR b2.username ILIKE $5))) "
                 "ORDER BY f.updated_at DESC, f.user_id, f.fact_key, f.id "
                 "LIMIT $2 OFFSET $3",
-                bot_id, _list_limit(request, 100, 2000), _list_offset(request),
+                bot_id, _list_limit(request, 100, 2000), _list_offset(request), q, like,
             )
             total = await _safe_count(pool,
-                "SELECT COUNT(*) FROM bot_user_facts WHERE bot_id=$1", bot_id)
+                "SELECT COUNT(*) FROM bot_user_facts f WHERE f.bot_id=$1 AND ($2 = '' "
+                "OR f.user_id IN (SELECT f2.user_id FROM bot_user_facts f2 "
+                "  LEFT JOIN bot_users b2 ON b2.bot_id = f2.bot_id AND b2.user_id = f2.user_id "
+                "  WHERE f2.bot_id=$1 AND (f2.fact_value ILIKE $3 OR b2.first_name ILIKE $3 "
+                "    OR b2.last_name ILIKE $3 OR b2.username ILIKE $3)))",
+                bot_id, q, like)
             # Было — голый массив; сотня фактов выдавалась за всю память бота.
             return _json_resp({"items": [
                 {
                     "user_id": r["user_id"],
                     "fact_key": r["fact_key"],
                     "fact_value": r["fact_value"],
-                    "confidence": r["confidence"],
+                    "by_owner": float(r["confidence"] or 0) >= 1.0,
                     "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
                     "name": " ".join(x for x in (r["first_name"], r["last_name"]) if x).strip(),
                     "username": r["username"] or "",
@@ -784,6 +812,154 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.exception("semantic_memory_forget uid=%d bot=%d user=%d",
                           uid, bot_id, user_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def _own_memory_bot(request: web.Request, uid: int):
+        """bot_id из пути, если бот принадлежит владельцу; иначе — ответ-ошибка."""
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return None, _err("Неверный идентификатор бота", 400)
+        owner = await pool.fetchval(
+            "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
+        if owner != uid:
+            return None, _err("Это не ваш ресурс", 403)
+        return bot_id, None
+
+    async def semantic_memory_person(request: web.Request) -> web.Response:
+        """Карточка собеседника: всё, что бот о нём знает, и переписка.
+
+        Раньше владелец видел только строки фактов: откуда они взялись, понять
+        было нельзя — переписку показывал лишь Telegram-бот.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            user_id = int(request.match_info["user_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        try:
+            bot_id, err = await _own_memory_bot(request, uid)
+            if err:
+                return err
+            from services import semantic_memory as _sm
+            person = await pool.fetchrow(
+                "SELECT first_name, last_name, username FROM bot_users "
+                "WHERE bot_id=$1 AND user_id=$2", bot_id, user_id)
+            facts = await _sm.get_user_facts(pool, bot_id, user_id)
+            history = await _sm.get_user_history(
+                pool, bot_id, user_id, limit=_list_limit(request, 50, 300))
+            n_msgs = await _safe_count(pool,
+                "SELECT COUNT(*) FROM bot_user_memory WHERE bot_id=$1 AND user_id=$2",
+                bot_id, user_id)
+            name = " ".join(x for x in ((person or {}).get("first_name"),
+                                        (person or {}).get("last_name")) if x).strip()
+            return _json_resp({
+                "user_id": user_id,
+                "name": name,
+                "username": (person or {}).get("username") or "",
+                "facts": [{
+                    "fact_key": f["fact_key"], "fact_value": f["fact_value"],
+                    "by_owner": float(f["confidence"] or 0) >= 1.0,
+                    "updated_at": f["updated_at"].isoformat() if f["updated_at"] else None,
+                } for f in facts],
+                "messages_total": n_msgs,
+                "history": [{
+                    "role": h["role"], "text": h["text"],
+                    "created_at": h["created_at"].isoformat() if h["created_at"] else None,
+                } for h in history],
+            })
+        except Exception:
+            log.exception("semantic_memory_person uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def semantic_memory_fact_set(request: web.Request) -> web.Response:
+        """Владелец пишет или правит факт о человеке (ИИ его потом не затрёт)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            user_id = int(request.match_info["user_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        key = str((body or {}).get("key") or "").strip().lower()
+        value = str((body or {}).get("value") or "").strip()
+        from services import semantic_memory as _sm
+        if key not in _sm.FACT_KEYS:
+            return _err("Неизвестное поле памяти", 400)
+        if not value:
+            return _err("Заполните значение", 400)
+        if len(value) > 2000:
+            return _err("Слишком длинно: не больше 2000 знаков", 400)
+        try:
+            bot_id, err = await _own_memory_bot(request, uid)
+            if err:
+                return err
+            await _sm.set_fact(pool, bot_id, user_id, key, value)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("semantic_memory_fact_set uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def semantic_memory_fact_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            user_id = int(request.match_info["user_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        key = (request.match_info.get("key") or "").strip().lower()
+        try:
+            bot_id, err = await _own_memory_bot(request, uid)
+            if err:
+                return err
+            from services import semantic_memory as _sm
+            deleted = await _sm.delete_fact(pool, bot_id, user_id, key)
+            return _json_resp({"ok": True, "deleted": deleted})
+        except Exception:
+            log.exception("semantic_memory_fact_delete uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def semantic_memory_settings(request: web.Request) -> web.Response:
+        """Настройки памяти бота из приложения: раньше они были только в
+        Telegram-боте, а в мини-аппе модуль не говорил даже, включена ли память."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        body = body if isinstance(body, dict) else {}
+        days = body.get("max_history_days")
+        if days is not None:
+            try:
+                days = int(days)
+            except (TypeError, ValueError):
+                return _err("Срок хранения — число дней", 400)
+            if not 1 <= days <= 3650:
+                return _err("Срок хранения — от 1 до 3650 дней", 400)
+        enabled = body.get("enabled")
+        extract = body.get("auto_extract_facts")
+        try:
+            bot_id, err = await _own_memory_bot(request, uid)
+            if err:
+                return err
+            from services import semantic_memory as _sm
+            await _sm.upsert_settings(
+                pool, bot_id,
+                enabled=bool(enabled) if enabled is not None else None,
+                max_history_days=days,
+                auto_extract_facts=bool(extract) if extract is not None else None)
+            return _json_resp({"ok": True, **(await _sm.get_settings(pool, bot_id))})
+        except Exception:
+            log.exception("semantic_memory_settings uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
     async def audience_dna_list(request: web.Request) -> web.Response:
@@ -914,3 +1090,12 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/audience_dna/{bot_id}/history", audience_dna_history)
     app.router.add_delete("/api/miniapp/semantic_memory/{bot_id}/user/{user_id}",
                           semantic_memory_forget)
+    app.router.add_get("/api/miniapp/semantic_memory/{bot_id}/user/{user_id}",
+                       semantic_memory_person)
+    app.router.add_put("/api/miniapp/semantic_memory/{bot_id}/user/{user_id}/fact",
+                       semantic_memory_fact_set)
+    app.router.add_delete(
+        "/api/miniapp/semantic_memory/{bot_id}/user/{user_id}/fact/{key}",
+        semantic_memory_fact_delete)
+    app.router.add_put("/api/miniapp/semantic_memory/{bot_id}/settings",
+                       semantic_memory_settings)
