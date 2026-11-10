@@ -3628,13 +3628,24 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ CLONE ADAPT ══════════════════════ -->
+<!-- «Клон и адаптация» (screens/clone_adapt.js): профиль одного бота на
+     другие с переработкой — шаблон имени, замены, языки, предпросмотр
+     «было → станет», откат и подробная история. -->
 <div class="screen" id="s-cloneadapt">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔄 Клон и адаптация</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCloneModal()">+ Клонировать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCloneModal()">+ Новый клон</button></div>
   </div>
   <div class="sub-sb">
+    <div class="sec-desc">Берёт оформление одного бота — имя, описания, команды, фото, кнопку меню, права и переводы — и переносит на другие боты. По пути текст можно переработать: имя по шаблону, замены слов, ваши @ники вместо ников образца. Перед запуском видно, что изменится у каждого бота, а после — можно вернуть как было.</div>
+    <div id="claStats"></div>
+    <div class="chip-row" id="claFilter" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">
+      <span class="chip on" data-f="" onclick="claSetFilter('')">Все</span>
+      <span class="chip" data-f="ok" onclick="claSetFilter('ok')">Изменено</span>
+      <span class="chip" data-f="same" onclick="claSetFilter('same')">Уже совпадало</span>
+      <span class="chip" data-f="problem" onclick="claSetFilter('problem')">С ошибками</span>
+    </div>
     <div class="sec">История клонирования ботов</div>
     <div class="lst" id="caHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -4025,26 +4036,65 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
-<!-- Modal: Clone Adapt -->
+<!-- Modal: Clone Adapt — мастер клона (screens/clone_adapt.js) -->
 <div class="mbg" id="mo-clone" onclick="if(event.target===this)closeModal('mo-clone')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-clone')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🔄 Клонировать профиль бота</div>
-    <div class="field"><label>Источник (откуда)</label><select id="clSrc" class="sel"><option value="">Загрузка…</option></select></div>
-    <div class="field"><label>Цель (куда)</label><select id="clTgt" class="sel"><option value="">Загрузка…</option></select></div>
-    <div class="field"><label>Что копировать</label>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
-        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFname" checked> Имя</label>
-        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFdesc" checked> Описание</label>
-        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFshort"> Краткое опис.</label>
-        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFphoto"> Фото</label>
-        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFcmds"> Команды</label>
+    <div class="modal-title">🔄 Новый клон</div>
+
+    <div class="sec">1. Образец</div>
+    <div class="field"><label>С какого бота брать оформление</label><select id="clSrc" class="sel" onchange="claSourceChanged()"><option value="">Загрузка…</option></select></div>
+    <div id="claSrcCard" style="font-size:12px;color:var(--hint);margin-bottom:8px"></div>
+
+    <div class="sec">2. Куда переносить</div>
+    <div class="field">
+      <input type="text" id="claTgtSearch" class="inp-sm" placeholder="Найти бота по имени или @нику" oninput="claRenderTargets()">
+      <div style="display:flex;gap:6px;margin:6px 0">
+        <span class="chip" onclick="claTargetsAll(true)">Выбрать все</span>
+        <span class="chip" onclick="claTargetsAll(false)">Снять все</span>
+        <span id="claTgtCount" style="font-size:12px;color:var(--hint);align-self:center"></span>
       </div>
+      <div id="claTargets" style="max-height:220px;overflow:auto"></div>
     </div>
+
+    <div class="sec">3. Что копировать</div>
+    <div id="claFields" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+
+    <div class="sec">4. Адаптация</div>
+    <div class="field" id="claNameBox">
+      <label>Имя у копий</label>
+      <input type="text" id="claNameTpl" class="inp-sm" value="{name}" maxlength="120" oninput="claPreviewStale()">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+        <span class="chip" onclick="claNamePreset('{name}')">Как у образца</span>
+        <span class="chip" onclick="claNamePreset('{name} ')">Имя + приписка</span>
+        <span class="chip" onclick="claNamePreset('{name} #{n}')">Имя + номер</span>
+        <span class="chip" onclick="claNamePreset('{target}')">Оставить своё имя</span>
+      </div>
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Метки: {name} — имя образца, {n} — номер бота по порядку, {target} — нынешнее имя бота, {username} — его @ник. Работают и в описаниях.</div>
+    </div>
+    <div class="field">
+      <label>Замены в текстах</label>
+      <div id="claReps"></div>
+      <span class="chip" onclick="claAddRep()">+ Замена</span>
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Например «Москва» → «Казань»: применяется к имени, описаниям и командам.</div>
+    </div>
+    <label class="chk-row" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;margin:6px 0"><input type="checkbox" id="claSwap" checked onchange="claPreviewStale()"> <span>Менять @ник и ссылку t.me образца на ник самого бота</span></label>
+    <label class="chk-row" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;margin:6px 0"><input type="checkbox" id="claSkipSame" checked onchange="claPreviewStale()"> <span>Не трогать поля, которые уже совпадают (бережёт лимиты Telegram)</span></label>
+    <div class="field">
+      <label>Языки</label>
+      <select id="claLangMode" class="sel" onchange="claLangModeChanged()">
+        <option value="base">Только основной профиль</option>
+        <option value="all">Все переводы образца</option>
+        <option value="pick">Выбрать языки</option>
+      </select>
+      <div id="claLangs" style="display:none;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
+    </div>
+
     <div class="field-err" id="cl-err"></div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-clone')" style="flex:1 1 auto">Отмена</button>
-      <button class="btn btn-p" onclick="submitCloneAdapt()" style="flex:2">Клонировать</button>
+    <div id="claPreview"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-s" onclick="claPreview()" style="flex:1 1 auto">👁 Что изменится</button>
+      <button class="btn btn-p" id="claRunBtn" onclick="submitCloneAdapt()" style="flex:1 1 auto">Запустить</button>
     </div>
   </div>
 </div>
@@ -29383,78 +29433,11 @@ async function submitCloner() {
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
 }
 
-// ── Clone Adapt ─────────────────────────────────────────
+// ── Clone Adapt — экран в screens/clone_adapt.js; здесь только состояние ──
 // Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
-let CA_ROWS = [], CA_OFFSET = 0;
-async function openCloneAdaptMore() { CA_OFFSET = CA_ROWS.length; await openCloneAdapt(true); }
-async function openCloneAdapt(keep) {
-  if (!keep) { CA_ROWS = []; CA_OFFSET = 0; push('s-cloneadapt'); }
-  if (!keep) txt('caHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const d = await api('/api/miniapp/clone_adapt/history?limit=30&offset='+CA_OFFSET);
-    const _page = listOf(d,'items');
-    CA_ROWS = CA_OFFSET ? CA_ROWS.concat(_page) : _page;
-    const rows = CA_ROWS;
-    const caTotal = totalOf(d, rows);
-    if (!rows.length) { txt('caHistory', empty('🔄','Нет истории','')); return; }
-    txt('caHistory', rows.map(r => {
-      const src = r.source_name || (r.source_uname?'@'+r.source_uname:'—');
-      const tgt = r.target_name || (r.target_uname?'@'+r.target_uname:'—');
-      const [cls,lbl]=stb(r.status==='ok'?'done':r.status);
-      return `
-        <div class="row">
-          <div class="row-body">
-            <div class="row-name">${esc(src)} → ${esc(tgt)}</div>
-            <div class="row-val">Поля: ${esc(r.fields||'—')}</div>
-            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${ago(r.created_at)}</div>
-            ${r.details?`<div class="row-val" style="color:var(--hint)">${esc(r.details)}</div>`:''}
-          </div>
-        </div>
-      `;
-    }).join('') + moreBtn(rows.length, caTotal, 'openCloneAdaptMore()'));
-  } catch(e) { txt('caHistory', errHtml(errRu(e), 'openCloneAdapt()')); }
-}
-
-async function openCloneModal() {
-  const srcEl = document.getElementById('clSrc');
-  const tgtEl = document.getElementById('clTgt');
-  srcEl.innerHTML = '<option value="">Загрузка…</option>';
-  tgtEl.innerHTML = '<option value="">Загрузка…</option>';
-  try {
-    const d = await api('/api/miniapp/bots');
-    const bots = d.bots || d || [];
-    const opts = bots.map(b=>`<option value="${b.bot_id}">@${esc(b.username||b.first_name)}</option>`).join('');
-    srcEl.innerHTML = opts || '<option value="">Нет ботов</option>';
-    tgtEl.innerHTML = opts || '<option value="">Нет ботов</option>';
-  } catch(e) {
-    srcEl.innerHTML = '<option value="">Ошибка</option>';
-    tgtEl.innerHTML = '<option value="">Ошибка</option>';
-  }
-  showModal('mo-clone');
-}
-async function submitCloneAdapt() {
-  const errEl = document.getElementById('cl-err');
-  errEl.textContent = '';
-  const source_bot_id = document.getElementById('clSrc').value;
-  const target_bot_id = document.getElementById('clTgt').value;
-  if (!source_bot_id || !target_bot_id) { errEl.textContent='Выберите источник и цель'; return; }
-  if (source_bot_id === target_bot_id) { errEl.textContent='Источник и цель должны быть разными'; return; }
-  const fields = [];
-  if (document.getElementById('clFname').checked) fields.push('name');
-  if (document.getElementById('clFdesc').checked) fields.push('desc');
-  if (document.getElementById('clFshort').checked) fields.push('short');
-  if (document.getElementById('clFphoto').checked) fields.push('photo');
-  if (document.getElementById('clFcmds').checked) fields.push('commands');
-  if (!fields.length) { errEl.textContent='Выберите что копировать'; return; }
-  try {
-    const r = await api('/api/miniapp/clone_adapt/submit',{method:'POST',body:JSON.stringify({
-      source_bot_id:parseInt(source_bot_id), target_bot_id:parseInt(target_bot_id), fields:fields.join(',')
-    })});
-    closeModal('mo-clone');
-    toast(`✅ Задача #${r.op_id} поставлена в очередь`);
-    openCloneAdapt();
-  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-}
+let CA_ROWS = [], CA_OFFSET = 0, CA_FILTER = '';
+let CLA = {bots: [], targets: new Set(), fields: new Set(['name','desc','short','commands']),
+           profile: null, langs: new Set(), reps: [], previewOk: false};
 
 // ── Content Mesh ────────────────────────────────────────
 async function openContentMesh() {
@@ -33790,5 +33773,6 @@ function renderAudSegChart(segments) {
 <script src="screens/desktop.js"></script>
 <script src="screens/main_button.js"></script>
 <script src="screens/fleet_tools.js"></script>
+<script src="screens/clone_adapt.js"></script>
 </body>
 </html>
