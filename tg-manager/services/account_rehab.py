@@ -32,6 +32,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
@@ -71,9 +72,266 @@ def _jitter(base: int, frac: float = 0.35) -> int:
     return max(60, base + random.randint(-d, d))
 
 
-def _backoff_sec(attempts: int) -> int:
+def _backoff_sec(attempts: int, pace: str = "normal") -> int:
     idx = min(attempts, len(_RECHECK_BACKOFF_H) - 1)
-    return _jitter(_RECHECK_BACKOFF_H[idx] * 3600, frac=0.25)
+    base = _RECHECK_BACKOFF_H[idx] * 3600 * PACE_MULT.get(pace, 1.0)
+    # Даже «быстрый» темп не перепроверяет чаще пола: частые запросы к
+    # @SpamBot сами по себе выглядят подозрительно и блок не снимают.
+    return max(_MIN_RECHECK_GAP_SEC, _jitter(int(base), frac=0.25))
+
+
+def _warm_gap(pace: str = "normal") -> int:
+    return max(_MIN_WARM_GAP_SEC,
+               _jitter(int(_WARM_GAP_SEC * PACE_MULT.get(pace, 1.0))))
+
+
+# ── Настройки владельца ───────────────────────────────────────────────────────
+# Раньше всё было зашито в код: темп, число перепроверок, аппеляция, отдых
+# после снятия. Владелец не мог ни притормозить восстановление на время
+# волны блокировок, ни запретить автоматике писать @SpamBot, ни выключить
+# уведомления. Значения по умолчанию совпадают с прежним поведением.
+PACE_MULT = {"careful": 1.6, "normal": 1.0, "fast": 0.6}
+PACE_LABEL = {
+    "careful": "Бережный — реже действия и проверки",
+    "normal": "Обычный",
+    "fast": "Быстрый — чаще, но не чаще безопасного предела",
+}
+_MIN_RECHECK_GAP_SEC = 3 * 3600
+_MIN_WARM_GAP_SEC = 20 * 60
+_MAX_RECHECKS_RANGE = (3, 16)
+_REST_HOURS_RANGE = (0, 168)
+# Предохранитель: даже если Telegram назвал дату снятия, бесконечно ходить по
+# кругу нельзя — после стольких перепроверок аккаунт отдаётся человеку.
+_HARD_MAX_RECHECKS = 40
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "paused": False,         # всё восстановление на паузе
+    "auto_appeal": True,     # автоматика сама пишет @SpamBot «это ошибка»
+    "pace": "normal",
+    "max_rechecks": _MAX_RECHECKS,
+    "rest_hours": 24,        # отдых после снятия: операции аккаунт не берут
+    "notify_freed": True,
+    "notify_stuck": True,
+}
+
+
+def normalize_settings(raw: Optional[dict]) -> dict[str, Any]:
+    """Привести настройки к допустимым значениям (с экрана приходит что угодно)."""
+    out = dict(DEFAULT_SETTINGS)
+    raw = dict(raw or {})
+    for k in ("paused", "auto_appeal", "notify_freed", "notify_stuck"):
+        if k in raw and raw[k] is not None:
+            v = raw[k]
+            if isinstance(v, str):
+                v = v.strip().lower() in ("1", "true", "yes", "on", "да")
+            out[k] = bool(v)
+    pace = str(raw.get("pace") or out["pace"]).strip().lower()
+    out["pace"] = pace if pace in PACE_MULT else "normal"
+    for k, (lo, hi) in (("max_rechecks", _MAX_RECHECKS_RANGE),
+                        ("rest_hours", _REST_HOURS_RANGE)):
+        if raw.get(k) is None:
+            continue
+        try:
+            out[k] = max(lo, min(hi, int(raw[k])))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+async def get_settings(pool, owner_id: int) -> dict[str, Any]:
+    """Настройки владельца; при любом сбое — значения по умолчанию."""
+    try:
+        row = await pool.fetchrow(
+            """SELECT paused, auto_appeal, pace, max_rechecks, rest_hours,
+                      notify_freed, notify_stuck
+                 FROM rehab_settings WHERE owner_id=$1""", owner_id)
+    except Exception:
+        return dict(DEFAULT_SETTINGS)
+    return normalize_settings(dict(row) if row else None)
+
+
+async def save_settings(pool, owner_id: int, patch: dict) -> dict[str, Any]:
+    """Сохранить изменения поверх текущих настроек; вернуть итог."""
+    cur = await get_settings(pool, owner_id)
+    cur.update({k: v for k, v in (patch or {}).items() if k in DEFAULT_SETTINGS})
+    s = normalize_settings(cur)
+    await pool.execute(
+        """INSERT INTO rehab_settings(owner_id, paused, auto_appeal, pace,
+                   max_rechecks, rest_hours, notify_freed, notify_stuck, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+           ON CONFLICT (owner_id) DO UPDATE SET
+               paused=EXCLUDED.paused, auto_appeal=EXCLUDED.auto_appeal,
+               pace=EXCLUDED.pace, max_rechecks=EXCLUDED.max_rechecks,
+               rest_hours=EXCLUDED.rest_hours, notify_freed=EXCLUDED.notify_freed,
+               notify_stuck=EXCLUDED.notify_stuck, updated_at=now()""",
+        owner_id, s["paused"], s["auto_appeal"], s["pace"], s["max_rechecks"],
+        s["rest_hours"], s["notify_freed"], s["notify_stuck"])
+    return s
+
+
+# ── Дата снятия из ответа @SpamBot ────────────────────────────────────────────
+# Временный блок называет дату: «Your account will be automatically released
+# on 13 Nov 2026, 15:42 UTC». Раньше её не читали: перепроверки шли по
+# слепому бэк-оффу (≈13 суток на восемь попыток), и блок на месяц уходил
+# «на разбор» с советом заменить аккаунт, хотя Telegram сам назвал день,
+# когда всё кончится. Теперь перепроверка ставится сразу после этой даты,
+# а пока она не наступила, аккаунт не считается безнадёжным.
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7,
+    "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "янв": 1, "фев": 2, "мар": 3, "апр": 4, "мая": 5, "май": 5, "июн": 6,
+    "июл": 7, "авг": 8, "сен": 9, "окт": 10, "ноя": 11, "дек": 12,
+    "січ": 1, "лют": 2, "бер": 3, "кві": 4, "тра": 5, "чер": 6, "лип": 7,
+    "сер": 8, "вер": 9, "жов": 10, "лис": 11, "гру": 12,
+}
+_RX_DMY_WORD = re.compile(
+    r"(\d{1,2})\s+([A-Za-zА-Яа-яЁёІіЇїЄє]{3,})\.?\s+(\d{4})"
+    r"(?:\s*(?:г\.?|р\.?)?,?\s*(?:at\s+|в\s+|о\s+)?(\d{1,2}):(\d{2}))?")
+_RX_MDY_WORD = re.compile(
+    r"([A-Za-z]{3,})\.?\s+(\d{1,2}),?\s+(\d{4})"
+    r"(?:,?\s*(?:at\s+)?(\d{1,2}):(\d{2}))?")
+_RX_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?")
+_RX_DOTTED = re.compile(
+    r"(\d{1,2})[./](\d{1,2})[./](\d{4})(?:,?\s*(\d{1,2}):(\d{2}))?")
+
+
+def parse_release_at(text: Optional[str], now=None):
+    """Дата автоматического снятия из ответа @SpamBot или None.
+
+    Чистая функция. Время без пояса считается UTC (так пишет @SpamBot).
+    Дата в далёком прошлом или дальше года вперёд — не дата снятия, а шум.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    if not text:
+        return None
+    now = now or datetime.now(timezone.utc)
+
+    def _mk(y, mo, d, hh, mm):
+        try:
+            return datetime(int(y), int(mo), int(d), int(hh or 0), int(mm or 0),
+                            tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return None
+
+    cands = []
+    for m in _RX_DMY_WORD.finditer(text):
+        mo = _MONTHS.get(m.group(2).lower()[:3])
+        if mo:
+            cands.append(_mk(m.group(3), mo, m.group(1), m.group(4), m.group(5)))
+    for m in _RX_MDY_WORD.finditer(text):
+        mo = _MONTHS.get(m.group(1).lower()[:3])
+        if mo:
+            cands.append(_mk(m.group(3), mo, m.group(2), m.group(4), m.group(5)))
+    for m in _RX_ISO.finditer(text):
+        cands.append(_mk(m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)))
+    for m in _RX_DOTTED.finditer(text):
+        cands.append(_mk(m.group(3), m.group(2), m.group(1), m.group(4), m.group(5)))
+    for dt in cands:
+        if dt is None:
+            continue
+        if now - timedelta(days=2) <= dt <= now + timedelta(days=400):
+            return dt
+    return None
+
+
+def _future(dt, now=None) -> bool:
+    from datetime import datetime, timezone
+
+    if dt is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt > now
+    except (AttributeError, TypeError):
+        return False
+
+
+def _secs_until(dt, now=None) -> int:
+    from datetime import datetime, timezone
+
+    now = now or datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0, int((dt - now).total_seconds()))
+
+
+# ── История шагов ─────────────────────────────────────────────────────────────
+# Что автоматика делала с аккаунтом, видно по журналу, а не по одной строке
+# «заметка», которую затирал каждый следующий шаг. Подписи — здесь, на сервере.
+EVENT_LABEL = {
+    "enrolled": "🩹 Взят на восстановление",
+    "relapse": "🔁 Повторный спам-блок — восстановление начато заново",
+    "appeal": "📨 Запрос снятия у @SpamBot",
+    "appeal_skipped": "⏭ Запрос снятия пропущен (выключен в настройках)",
+    "warming": "🌱 Тихий прогрев",
+    "recheck": "🔍 Перепроверка у @SpamBot",
+    "release_date": "📅 Telegram назвал дату снятия",
+    "freed": "✅ Ограничение снято",
+    "rest": "😴 Отдых перед возвратом в операции",
+    "stuck": "🛠 Передан вам на разбор",
+    "frozen": "🧊 Заморожен Telegram",
+    "gone": "🚫 Восстанавливать нечего",
+    "manual_now": "⏩ Вы ускорили следующий шаг",
+    "manual_off": "⏹ Вы выключили восстановление",
+    "manual_restart": "🔁 Вы перезапустили восстановление",
+    "manual_appeal": "🛡 Вы отправили запрос снятия",
+}
+
+
+async def _log_event(pool, acc_id: int, owner_id, step: str,
+                     outcome: str = "", detail: str = "") -> None:
+    """Записать шаг в историю. Журнал не должен ронять сам шаг."""
+    try:
+        await pool.execute(
+            """INSERT INTO account_rehab_events(acc_id, owner_id, step, outcome, detail)
+               VALUES ($1, $2, $3, $4, $5)""",
+            int(acc_id), int(owner_id or 0), step, (outcome or "")[:60],
+            (detail or "")[:400])
+    except Exception:
+        log.debug("rehab: шаг истории не записан acc=%s step=%s", acc_id, step)
+
+
+async def history(pool, owner_id: int, acc_id: int, limit: int = 100) -> list[dict]:
+    """История восстановления одного аккаунта, новые сверху."""
+    rows = await pool.fetch(
+        """SELECT at, step, outcome, detail FROM account_rehab_events
+            WHERE acc_id=$1 AND owner_id=$2
+            ORDER BY at DESC, id DESC LIMIT $3""",
+        acc_id, owner_id, max(1, min(500, int(limit))))
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["label"] = EVENT_LABEL.get(d["step"], d["step"])
+        d["at"] = d["at"].isoformat() if d.get("at") else None
+        out.append(d)
+    return out
+
+
+async def _rest_after_release(pool, acc_id: int, owner_id, hours: int) -> None:
+    """Мягкий возврат: после снятия аккаунт отдыхает, операции его не берут.
+
+    Сообщение об итоге и раньше советовало «не нагружайте сразу», но совет
+    ничего не делал: аккаунт уходил в рассылки в ту же минуту, и блок
+    возвращался. Отдых ставится через `cooldown_until` — его уважает единая
+    дверь выбора аккаунтов (`resource_selector`). Уже стоящий более долгий
+    отдых не укорачивается.
+    """
+    if not hours or hours <= 0:
+        return
+    try:
+        await pool.execute(
+            """UPDATE tg_accounts
+                  SET cooldown_until = GREATEST(COALESCE(cooldown_until, now()),
+                                                now() + make_interval(hours => $2))
+                WHERE id=$1""",
+            acc_id, int(hours))
+        await _log_event(pool, acc_id, owner_id, "rest", "",
+                         f"{int(hours)} ч без операций")
+    except Exception:
+        log.debug("rehab: отдых после снятия не поставлен acc=%s", acc_id)
 
 
 # ── Синхронизация набора реабилитируемых с реальностью ─────────────────────────
@@ -81,12 +339,16 @@ async def _sync_enrollment(pool) -> None:
     """Завести стейт для новых спам-блоков и закрыть тех, кто уже сменил статус."""
     # 1) Новые под спам-блоком, которых ещё нет в реабилитации.
     await pool.execute(
-        """INSERT INTO account_rehab_state(acc_id, owner_id, phase, next_action_at)
-           SELECT a.id, a.owner_id, 'appeal', now()
-           FROM tg_accounts a
-           WHERE COALESCE(a.acc_status, 'active') = 'spamblock'
-             AND a.session_str IS NOT NULL AND length(a.session_str) > 10
-           ON CONFLICT (acc_id) DO NOTHING"""
+        """WITH ins AS (
+               INSERT INTO account_rehab_state(acc_id, owner_id, phase, next_action_at)
+               SELECT a.id, a.owner_id, 'appeal', now()
+               FROM tg_accounts a
+               WHERE COALESCE(a.acc_status, 'active') = 'spamblock'
+                 AND a.session_str IS NOT NULL AND length(a.session_str) > 10
+               ON CONFLICT (acc_id) DO NOTHING
+               RETURNING acc_id, owner_id)
+           INSERT INTO account_rehab_events(acc_id, owner_id, step)
+           SELECT acc_id, owner_id, 'enrolled' FROM ins"""
     )
     # 2) Кто больше не под спам-блоком — закрыть реабилитацию соответствующим итогом.
     #    active/warming/cooldown → freed (сняли где-то ещё); dead → gone.
@@ -117,6 +379,33 @@ async def _sync_enrollment(pool) -> None:
     # заблокируют СНОВА через месяц, восстановление подхватит его как обычно,
     # а не промолчит из-за давно забытого выключения.
 
+    # 3) Повторный блок. Строка аккаунта, которого уже восстанавливали, стоит
+    #    в 'freed' (или 'gone', если сессию потом перезалили), и шаг 1 её не
+    #    трогает (ON CONFLICT DO NOTHING), а цикл берёт только активные фазы.
+    #    Обещание из комментария выше не выполнялось: повторно заблокированный
+    #    аккаунт не подхватывался НИКОГДА и молча висел под спам-блоком.
+    #    Заморозку, которую владелец обжаловал до простого спам-блока, тоже
+    #    берём заново — автоматика ей больше не мешает.
+    await pool.execute(
+        """WITH re AS (
+               UPDATE account_rehab_state r
+                  SET phase='appeal', attempts=0, appeal_count=0, warm_cycles=0,
+                      kind=NULL, release_at=NULL, freed_at=NULL,
+                      notified_phase=NULL, relapses = r.relapses + 1,
+                      note='повторный спам-блок — восстановление начато заново',
+                      first_seen=now(), next_action_at=now(), updated_at=now()
+                 FROM tg_accounts a
+                WHERE a.id = r.acc_id
+                  AND COALESCE(a.acc_status,'active') = 'spamblock'
+                  AND a.session_str IS NOT NULL AND length(a.session_str) > 10
+                  AND (r.phase IN ('freed','gone')
+                       OR (r.phase = 'stuck' AND r.note = $1))
+               RETURNING r.acc_id, r.owner_id)
+           INSERT INTO account_rehab_events(acc_id, owner_id, step)
+           SELECT acc_id, owner_id, 'relapse' FROM re""",
+        _FROZEN_NOTE,
+    )
+
 
 async def _due_rows(pool, limit: int) -> list[dict]:
     rows = await pool.fetch(
@@ -127,6 +416,9 @@ async def _due_rows(pool, limit: int) -> list[dict]:
              AND r.next_action_at <= now()
              AND COALESCE(a.acc_status,'active') = 'spamblock'
              AND a.session_str IS NOT NULL AND length(a.session_str) > 10
+             -- Пауза владельца: строки стоят на месте, шаги не делаются.
+             AND NOT EXISTS (SELECT 1 FROM rehab_settings s
+                              WHERE s.owner_id = r.owner_id AND s.paused)
            ORDER BY r.next_action_at ASC
            LIMIT $1""",
         limit,
@@ -141,9 +433,11 @@ async def _advance(
     inc_attempts: int = 0, inc_appeals: int = 0,
     inc_warm_cycles: int = 0, inc_warm_actions: int = 0,
     freed: bool = False,
+    release_at=None,
 ) -> None:
     await pool.execute(
         """UPDATE account_rehab_state SET
+               release_at = COALESCE($11::timestamptz, release_at),
                phase = $2,
                note = $3,
                kind = COALESCE($4, kind),
@@ -159,7 +453,7 @@ async def _advance(
            WHERE acc_id = $1""",
         acc_id, phase, note[:400], kind,
         inc_attempts, inc_appeals, inc_warm_cycles, inc_warm_actions,
-        delay_sec, freed,
+        delay_sec, freed, release_at,
     )
 
 
@@ -272,54 +566,95 @@ async def _process(pool, r: dict) -> None:
     from services import account_manager, account_status
 
     acc_id = int(r["acc_id"])
+    owner_id = r.get("owner_id")
     phase = r["phase"]
     sess = r.get("session_str")
-    acc_for_client = {"acc_id": acc_id, "owner_id": r["owner_id"], "session_str": sess}
+    acc_for_client = {"acc_id": acc_id, "owner_id": owner_id, "session_str": sess}
+    cfg = normalize_settings(r.get("_cfg"))
+    pace = cfg["pace"]
+    release_at = r.get("release_at")
+
+    async def _freed(note: str, **inc) -> None:
+        await _advance(pool, acc_id, phase="freed", note=note, freed=True, **inc)
+        await _log_event(pool, acc_id, owner_id, "freed", "ok", note)
+        await _rest_after_release(pool, acc_id, owner_id, cfg["rest_hours"])
 
     if phase == "appeal":
+        if not cfg["auto_appeal"]:
+            # Владелец запретил автоматике писать @SpamBot — сразу к тихому
+            # прогреву; снятие узнаем на перепроверке.
+            await _advance(pool, acc_id, phase="warming",
+                           note="запрос снятия выключен в настройках",
+                           delay_sec=_warm_gap(pace))
+            await _log_event(pool, acc_id, owner_id, "appeal_skipped")
+            return
         try:
             res = await asyncio.wait_for(
-                account_manager.appeal_spamblock(sess, {"id": acc_id, "owner_id": r["owner_id"]}),
+                account_manager.appeal_spamblock(sess, {"id": acc_id, "owner_id": owner_id}),
                 timeout=90)
         except Exception as e:
             res = {"ok": False, "status": "error", "reply": str(e)[:120]}
         st = res.get("status")
         if st in ("frozen", "banned"):
             await _hand_over_terminal(pool, acc_id, st, inc_appeals=0)
+            await _log_event(pool, acc_id, owner_id, "frozen" if st == "frozen" else "gone", st)
             return
         if st == "free":
             await account_status.set_status(
                 pool, acc_id, "active", reason="Спам-блок снят (аппеляция)", source="rehab")
-            await _advance(pool, acc_id, phase="freed",
-                           note="снят по аппеляции", inc_appeals=1, freed=True)
+            await _freed("снят по аппеляции", inc_appeals=1)
             log.info("rehab: acc=%d освобождён по аппеляции", acc_id)
             return
+        rel = parse_release_at(res.get("full_reply") or res.get("reply"))
         # Аппеляция отправлена (или блок ещё держится) → к тихому прогреву.
         await _advance(pool, acc_id, phase="warming",
                        note=f"аппеляция: {st}", inc_appeals=1,
-                       delay_sec=_jitter(_WARM_GAP_SEC))
+                       kind="temp" if rel else None, release_at=rel,
+                       delay_sec=_warm_gap(pace))
+        await _log_event(pool, acc_id, owner_id, "appeal", st or "")
+        if rel:
+            await _log_event(pool, acc_id, owner_id, "release_date", "",
+                             rel.strftime("%d.%m.%Y %H:%M UTC"))
         return
 
     if phase == "warming":
         done = await _quiet_warmup(pool, acc_for_client)
         cycles = int(r["warm_cycles"]) + 1
+        await _log_event(pool, acc_id, owner_id, "warming", "",
+                         f"{done} пассивных действий")
+        if _future(release_at):
+            # Telegram назвал дату. До неё перепроверять незачем: держим
+            # аккаунт живым редким тихим прогревом (раз в сутки), а
+            # перепроверку ставим сразу после даты снятия.
+            left = _secs_until(release_at)
+            if left > 30 * 3600:
+                await _advance(pool, acc_id, phase="warming",
+                               note=f"ждём даты снятия; тихий прогрев ({done} действ.)",
+                               inc_warm_cycles=1, inc_warm_actions=done,
+                               delay_sec=_jitter(20 * 3600, frac=0.2))
+            else:
+                await _advance(pool, acc_id, phase="recheck",
+                               note="перепроверка сразу после даты снятия",
+                               inc_warm_cycles=1, inc_warm_actions=done,
+                               delay_sec=left + random.randint(20 * 60, 90 * 60))
+            return
         if cycles >= _WARM_CYCLES_BEFORE_RECHECK:
             await _advance(pool, acc_id, phase="recheck",
                            note=f"прогрет ({done} действ.), к перепроверке",
                            inc_warm_cycles=1, inc_warm_actions=done,
-                           delay_sec=_jitter(_WARM_GAP_SEC))
+                           delay_sec=_warm_gap(pace))
         else:
             await _advance(pool, acc_id, phase="warming",
                            note=f"тихий прогрев ({done} действ.)",
                            inc_warm_cycles=1, inc_warm_actions=done,
-                           delay_sec=_jitter(_WARM_GAP_SEC))
+                           delay_sec=_warm_gap(pace))
         return
 
     if phase == "recheck":
         try:
             chk = await asyncio.wait_for(
                 account_manager.check_account_status_full(
-                    sess, {"id": acc_id, "owner_id": r["owner_id"]}, check_spambot=True),
+                    sess, {"id": acc_id, "owner_id": owner_id}, check_spambot=True),
                 timeout=60)
         except Exception as e:
             chk = {"status": "unknown", "reason": str(e)[:120]}
@@ -330,13 +665,13 @@ async def _process(pool, r: dict) -> None:
             await account_status.set_status(
                 pool, acc_id, "active",
                 reason="Спам-блок снят (перепроверка после прогрева)", source="rehab")
-            await _advance(pool, acc_id, phase="freed",
-                           note="снят по перепроверке", inc_attempts=1, freed=True)
+            await _freed("снят по перепроверке", inc_attempts=1)
             log.info("rehab: acc=%d освобождён после прогрева (попытка %d)", acc_id, attempts)
             return
 
         if status == "frozen":
             await _hand_over_terminal(pool, acc_id, "frozen", inc_attempts=1)
+            await _log_event(pool, acc_id, owner_id, "frozen", "frozen")
             return
 
         if status in _DEAD_STATUSES:
@@ -345,26 +680,45 @@ async def _process(pool, r: dict) -> None:
                 source="rehab")
             await _advance(pool, acc_id, phase="gone",
                            note=f"терминальный статус: {status}", inc_attempts=1)
+            await _log_event(pool, acc_id, owner_id, "gone", status)
             return
 
-        # Всё ещё спам-блок. Уточняем kind; при вечном и исчерпанных попытках — stuck.
+        # Всё ещё спам-блок. Уточняем kind и дату снятия.
         kind = chk.get("spamblock_kind") or r.get("kind")
+        rel = parse_release_at(chk.get("spambot_reply") or chk.get("reason"))
+        if rel is not None:
+            kind = "temp"
+            if not release_at or rel != release_at:
+                await _log_event(pool, acc_id, owner_id, "release_date", "",
+                                 rel.strftime("%d.%m.%Y %H:%M UTC"))
+        rel_eff = rel or release_at
+        await _log_event(pool, acc_id, owner_id, "recheck",
+                         status if status != "spamblock" else (kind or "spamblock"))
+        waiting_release = _future(rel_eff)
+        max_rechecks = cfg["max_rechecks"]
         exhausted = (
-            attempts >= _MAX_RECHECKS
-            or (kind == "perm" and int(r["appeal_count"]) >= _MAX_APPEALS
-                and attempts >= max(3, _MAX_RECHECKS // 2))
+            attempts >= _HARD_MAX_RECHECKS
+            or (not waiting_release and (
+                attempts >= max_rechecks
+                or (kind == "perm" and int(r["appeal_count"]) >= _MAX_APPEALS
+                    and attempts >= max(3, max_rechecks // 2))))
         )
         if exhausted:
             await _advance(pool, acc_id, phase="stuck", kind=kind,
                            note=f"не снят за {attempts} перепроверок ({kind or '?'}) — нужен ручной разбор",
-                           inc_attempts=1)
+                           inc_attempts=1, release_at=rel)
+            await _log_event(pool, acc_id, owner_id, "stuck", kind or "",
+                             f"{attempts} перепроверок")
             log.info("rehab: acc=%d застрял (%s), уходит на ручной разбор", acc_id, kind)
             return
 
         # Ещё одна итерация прогрева с растущим бэк-оффом.
+        delay = _backoff_sec(attempts, pace)
+        if waiting_release:
+            delay = min(delay, _jitter(_WARM_GAP_SEC))
         await _advance(pool, acc_id, phase="warming", kind=kind,
                        note=f"ещё под блоком ({kind or '?'}), попытка {attempts}",
-                       inc_attempts=1, delay_sec=_backoff_sec(attempts))
+                       inc_attempts=1, release_at=rel, delay_sec=delay)
         return
 
 
@@ -388,8 +742,13 @@ async def run_rehab_cycle(pool) -> int:
         return 0
 
     handled = 0
+    cfg_cache: dict = {}
     for r in rows:
         try:
+            oid = r.get("owner_id")
+            if oid is not None and oid not in cfg_cache:
+                cfg_cache[oid] = await get_settings(pool, oid)
+            r["_cfg"] = cfg_cache.get(oid)
             await _process(pool, r)
             handled += 1
         except asyncio.CancelledError:
@@ -470,7 +829,7 @@ ACTIVE_PHASES = ("appeal", "warming", "recheck")
 ATTENTION_PHASES = ("stuck",)
 
 
-def describe(row: dict, now=None) -> dict[str, Any]:
+def describe(row: dict, now=None, settings: Optional[dict] = None) -> dict[str, Any]:
     """Что происходит с аккаунтом в реабилитации и когда следующий шаг.
 
     Чистая функция: строка состояния → то, что видит человек.
@@ -500,13 +859,37 @@ def describe(row: dict, now=None) -> dict[str, Any]:
             wait_s = max(0, int((nxt - now).total_seconds()))
         except (AttributeError, TypeError, ValueError):
             wait_s = None
+    def _aware(v):
+        if v is None or not hasattr(v, "tzinfo"):
+            return None
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+
+    # Дата, которую назвал сам Telegram, — главное, что хочет знать человек
+    # о временном блоке: «когда он вернётся».
+    rel = _aware(row.get("release_at"))
+    release_in = None
+    if phase in ACTIVE_PHASES and rel is not None and rel > now:
+        release_in = int((rel - now).total_seconds())
+    rest_until = _aware(row.get("cooldown_until"))
+    rest_in = None
+    if phase == "freed" and rest_until is not None and rest_until > now:
+        rest_in = int((rest_until - now).total_seconds())
+        hint = ("Ограничение снято. Аккаунт отдыхает и пока не участвует в"
+                " операциях — так блок не вернётся сразу. Потом он вернётся в"
+                " строй сам.")
+    max_att = int((settings or {}).get("max_rechecks") or _MAX_RECHECKS)
     return {
         "phase": phase,
         "label": label,
         "hint": hint,
         "note": row.get("note") or "",
         "attempts": int(row.get("attempts") or 0),
-        "max_attempts": _MAX_RECHECKS,
+        "max_attempts": max_att,
+        "release_at": rel.isoformat() if rel is not None else None,
+        "release_in_seconds": release_in,
+        "rest_in_seconds": rest_in,
+        "relapses": int(row.get("relapses") or 0),
+        "frozen": frozen,
         "next_in_seconds": wait_s,
         "active": phase in ACTIVE_PHASES,
         "attention": phase in ATTENTION_PHASES,
@@ -549,6 +932,10 @@ def build_terminal_alert(name: str, phase: str, attempts: int,
     )
 
 
+class _SkipNotify(Exception):
+    """Уведомление выключено владельцем."""
+
+
 async def notify_terminal(pool, bot) -> int:
     """Сообщить владельцам об аккаунтах, чьё восстановление завершилось.
 
@@ -569,9 +956,19 @@ async def notify_terminal(pool, bot) -> int:
         return 0
 
     sent = 0
+    cfg_cache: dict = {}
     for r in rows:
         name = r["first_name"] or r["phone"] or f"аккаунт #{r['acc_id']}"
+        oid = r["owner_id"]
+        if oid not in cfg_cache:
+            cfg_cache[oid] = await get_settings(pool, oid)
+        cfg = cfg_cache[oid]
+        # Выключенное в настройках уведомление не шлётся, но итог помечается
+        # сообщённым — иначе при включении прилетела бы пачка старых новостей.
+        want = cfg["notify_freed"] if r["phase"] == "freed" else cfg["notify_stuck"]
         try:
+            if not want:
+                raise _SkipNotify()
             from database import db as _db
 
             await _db.notify_if_enabled(
@@ -581,6 +978,8 @@ async def notify_terminal(pool, bot) -> int:
                     frozen=str(r.get("acc_status") or "").lower() == "frozen"),
                 dedup_key=f"rehab:{r['acc_id']}:{r['phase']}")
             sent += 1
+        except _SkipNotify:
+            pass
         except Exception:
             log.debug("rehab: уведомление не отправлено acc=%s", r["acc_id"])
         try:
@@ -616,14 +1015,17 @@ async def run_manual_appeal(pool, owner_id: int, acc_id: int, acc: dict) -> dict
         log.exception("rehab: ручная аппеляция acc=%s", acc_id)
         res = {"ok": False, "status": "error", "reply": "", "steps": 0}
     st = res.get("status") or "error"
-    await record_manual_appeal(pool, owner_id, acc_id, st)
+    await record_manual_appeal(
+        pool, owner_id, acc_id, st,
+        release_at=parse_release_at(res.get("full_reply") or res.get("reply")))
     await record_manual_action(
         pool, owner_id, "spamblock_appeal", target=f"account:{acc_id}",
         result="success" if st in ("free", "appeal_sent") else st)
     return res
 
 
-async def record_manual_appeal(pool, owner_id: int, acc_id: int, status: str) -> None:
+async def record_manual_appeal(pool, owner_id: int, acc_id: int, status: str,
+                               release_at=None) -> None:
     """Учесть аппеляцию, которую человек отправил сам (кнопка в карточке).
 
     Раньше ручная аппеляция шла к @SpamBot мимо реабилитации: счётчик
@@ -663,6 +1065,9 @@ async def record_manual_appeal(pool, owner_id: int, acc_id: int, status: str) ->
                     WHERE acc_id=$1 AND owner_id=$2
                       AND phase IN ('appeal','warming','recheck','off','stuck')""",
                 acc_id, owner_id)
+            await _log_event(pool, acc_id, owner_id, "manual_appeal", "free")
+            cfg = await get_settings(pool, owner_id)
+            await _rest_after_release(pool, acc_id, owner_id, cfg["rest_hours"])
             return
         if status in ("frozen", "banned"):
             # @SpamBot ответил заморозкой/баном — ни одной кнопки не нажато
@@ -682,6 +1087,7 @@ async def record_manual_appeal(pool, owner_id: int, acc_id: int, status: str) ->
                       AND phase IN ('appeal','warming','recheck','off','stuck')""",
                 acc_id, owner_id, "stuck" if frozen else "gone",
                 _FROZEN_NOTE if frozen else "заблокирован Telegram — восстанавливать нечего")
+            await _log_event(pool, acc_id, owner_id, "manual_appeal", status)
             return
         if status not in ("appeal_sent", "still_blocked"):
             return
@@ -697,13 +1103,15 @@ async def record_manual_appeal(pool, owner_id: int, acc_id: int, status: str) ->
         await pool.execute(
             """INSERT INTO account_rehab_state(
                    acc_id, owner_id, phase, appeal_count, note,
-                   last_action_at, next_action_at)
+                   last_action_at, next_action_at, release_at)
                SELECT a.id, a.owner_id, 'warming', 1, $3, now(),
-                      now() + make_interval(secs => $4)
+                      now() + make_interval(secs => $4), $5::timestamptz
                  FROM tg_accounts a
                 WHERE a.id=$1 AND a.owner_id=$2
                ON CONFLICT (acc_id) DO UPDATE
                   SET appeal_count = account_rehab_state.appeal_count + 1,
+                      release_at = COALESCE(EXCLUDED.release_at,
+                                            account_rehab_state.release_at),
                       phase = CASE WHEN account_rehab_state.phase = 'appeal'
                                    THEN 'warming' ELSE account_rehab_state.phase END,
                       note = EXCLUDED.note,
@@ -712,7 +1120,11 @@ async def record_manual_appeal(pool, owner_id: int, acc_id: int, status: str) ->
                                                 EXCLUDED.next_action_at),
                       updated_at = now()
                 WHERE account_rehab_state.owner_id = EXCLUDED.owner_id""",
-            acc_id, owner_id, note, _jitter(_WARM_GAP_SEC))
+            acc_id, owner_id, note, _jitter(_WARM_GAP_SEC), release_at)
+        await _log_event(pool, acc_id, owner_id, "manual_appeal", status)
+        if release_at is not None:
+            await _log_event(pool, acc_id, owner_id, "release_date", "",
+                             release_at.strftime("%d.%m.%Y %H:%M UTC"))
     except Exception as e:
         log.warning("rehab: ручная аппеляция acc=%s не учтена: %s", acc_id, e)
 
@@ -732,6 +1144,8 @@ async def force_now(pool, owner_id: int, acc_id: int) -> bool:
                   AND phase IN ('appeal','warming','recheck')
              RETURNING acc_id""",
             acc_id, owner_id)
+        if row is not None:
+            await _log_event(pool, acc_id, owner_id, "manual_now")
         return row is not None
     except Exception as e:
         log.warning("rehab: ускорить шаг acc=%s не удалось: %s", acc_id, e)
@@ -764,30 +1178,48 @@ async def set_enabled(pool, owner_id: int, acc_id: int, enabled: bool) -> bool:
                   AND ($3 <> 'appeal' OR phase IN ('stuck','off'))
              RETURNING acc_id""",
             acc_id, owner_id, phase, note)
+        if row is not None:
+            await _log_event(pool, acc_id, owner_id,
+                             "manual_restart" if enabled else "manual_off")
         return row is not None
     except Exception as e:
         log.warning("rehab: смена режима acc=%s не удалась: %s", acc_id, e)
         return False
 
 
+# Срезы списка на экране. Ключ приходит с экрана, SQL — только отсюда.
+VIEWS = {
+    "all": "TRUE",
+    "active": "r.phase IN ('appeal','warming','recheck')",
+    "attention": "r.phase = 'stuck'",
+    "freed": "r.phase = 'freed'",
+    "closed": "r.phase IN ('gone','off')",
+}
+
+
 async def list_for_owner(pool, owner_id: int, limit: int = 100,
-                         offset: int = 0) -> list[dict]:
+                         offset: int = 0, view: str = "all",
+                         settings: Optional[dict] = None) -> list[dict]:
     """Аккаунты владельца в реабилитации — с человеческим описанием фазы.
 
     Страница, а не весь список: при волне блокировок на флоте строк тут больше
     сотни, а кнопки ⏩/⏹/🔁 живут в строке — аккаунт за потолком нельзя было ни
     поторопить, ни остановить. Порядок кладёт наверх тех, кому нужен разбор,
     поэтому за потолком оставалось самое спокойное, но и его не было видно.
+    `view` — срез из `VIEWS` (неизвестный — весь список).
     """
+    cond = VIEWS.get(view or "all", "TRUE")
     try:
         rows = await pool.fetch(
-            """SELECT r.acc_id, r.phase, r.kind, r.attempts, r.appeal_count,
-                      r.warm_cycles, r.note, r.first_seen, r.last_action_at,
-                      r.next_action_at, r.freed_at,
-                      a.phone, a.first_name, a.username, a.acc_status
+            f"""SELECT r.acc_id, r.phase, r.kind, r.attempts, r.appeal_count,
+                      r.warm_cycles, r.warm_actions, r.note, r.first_seen,
+                      r.last_action_at, r.next_action_at, r.freed_at,
+                      r.release_at, r.relapses,
+                      a.phone, a.first_name, a.username, a.acc_status,
+                      a.cooldown_until
                  FROM account_rehab_state r
                  JOIN tg_accounts a ON a.id = r.acc_id
-                WHERE r.owner_id=$1
+                WHERE r.owner_id=$1 AND {cond}
                 -- `updated_at` у двух строк совпадает запросто (один проход
                 -- автоматики правит их вместе), а со сдвигом страницы без
                 -- уникального хвоста теряют и повторяют аккаунты.
@@ -802,11 +1234,36 @@ async def list_for_owner(pool, owner_id: int, limit: int = 100,
     out = []
     for r in rows:
         d = dict(r)
-        d["state"] = describe(d)
-        for k in ("first_seen", "last_action_at", "next_action_at", "freed_at"):
+        d["state"] = describe(d, settings=settings)
+        for k in ("first_seen", "last_action_at", "next_action_at", "freed_at",
+                  "release_at", "cooldown_until"):
             d[k] = d[k].isoformat() if d.get(k) else None
         out.append(d)
     return out
+
+
+async def restart_all_stuck(pool, owner_id: int) -> int:
+    """Дать ещё одну попытку всем, кого автоматика отдала на разбор.
+
+    Заморозку не трогает: её снимает только апелляция владельца. Шаги не
+    делаются залпом — цикл всё равно берёт не больше трёх аккаунтов за тик,
+    а старт каждого разнесён случайной задержкой.
+    """
+    rows = await pool.fetch(
+        """UPDATE account_rehab_state r
+              SET phase='appeal', note='перезапущено вручную (все застрявшие)',
+                  attempts=0, appeal_count=0, warm_cycles=0, notified_phase=NULL,
+                  next_action_at = now() + make_interval(secs => (random()*3600)::int),
+                  updated_at=now()
+             FROM tg_accounts a
+            WHERE a.id = r.acc_id AND r.owner_id=$1 AND r.phase='stuck'
+              AND COALESCE(a.acc_status,'active') <> 'frozen'
+              AND COALESCE(r.note,'') <> $2
+          RETURNING r.acc_id""",
+        owner_id, _FROZEN_NOTE)
+    for r in rows:
+        await _log_event(pool, r["acc_id"], owner_id, "manual_restart")
+    return len(rows)
 
 
 # ── Сводка для UI/диагностики ──────────────────────────────────────────────────
@@ -819,10 +1276,43 @@ async def rehab_overview(pool, owner_id: int) -> dict[str, Any]:
     )
     by_phase = {r["phase"]: int(r["n"]) for r in rows}
     active = sum(by_phase.get(p, 0) for p in ("appeal", "warming", "recheck"))
-    return {
+    freed = by_phase.get("freed", 0)
+    stuck = by_phase.get("stuck", 0)
+    gone = by_phase.get("gone", 0)
+    finished = freed + stuck + gone
+    out = {
         "in_progress": active,
-        "freed": by_phase.get("freed", 0),
-        "stuck": by_phase.get("stuck", 0),
-        "gone": by_phase.get("gone", 0),
+        "freed": freed,
+        "stuck": stuck,
+        "gone": gone,
+        "off": by_phase.get("off", 0),
         "by_phase": by_phase,
+        # Доля возвращённых среди завершённых — честный ответ на «работает ли».
+        "success_pct": round(100 * freed / finished) if finished else None,
+        "avg_hours_to_free": None,
+        "frozen": 0,
+        "relapses": 0,
+        "waiting_release": 0,
     }
+    try:
+        st = await pool.fetchrow(
+            """SELECT
+                 avg(EXTRACT(EPOCH FROM (r.freed_at - r.first_seen)) / 3600.0)
+                   FILTER (WHERE r.phase='freed' AND r.freed_at IS NOT NULL) AS avg_h,
+                 count(*) FILTER (WHERE r.phase='stuck'
+                                  AND a.acc_status='frozen') AS frozen,
+                 COALESCE(sum(r.relapses), 0) AS relapses,
+                 count(*) FILTER (WHERE r.phase IN ('appeal','warming','recheck')
+                                  AND r.release_at > now()) AS waiting_release
+               FROM account_rehab_state r
+               JOIN tg_accounts a ON a.id = r.acc_id
+              WHERE r.owner_id=$1""", owner_id)
+        if st:
+            out["avg_hours_to_free"] = (round(float(st["avg_h"]), 1)
+                                        if st["avg_h"] is not None else None)
+            out["frozen"] = int(st["frozen"] or 0)
+            out["relapses"] = int(st["relapses"] or 0)
+            out["waiting_release"] = int(st["waiting_release"] or 0)
+    except Exception:
+        log.debug("rehab: расширенная сводка не получена owner=%s", owner_id)
+    return out

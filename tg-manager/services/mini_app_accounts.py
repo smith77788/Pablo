@@ -399,8 +399,11 @@ def setup_routes(app: web.Application, pool) -> None:
         # решения человека).
         rehab = None
         _rh_row = await _safe_fetchrow(pool,
-            """SELECT phase, note, attempts, next_action_at
-                 FROM account_rehab_state WHERE acc_id=$1""", acc_id)
+            """SELECT r.phase, r.note, r.attempts, r.next_action_at,
+                      r.release_at, r.relapses, a.acc_status, a.cooldown_until
+                 FROM account_rehab_state r
+                 JOIN tg_accounts a ON a.id = r.acc_id
+                WHERE r.acc_id=$1""", acc_id)
         if _rh_row:
             try:
                 from services import account_rehab as _rh

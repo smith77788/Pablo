@@ -5930,14 +5930,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             counts = {"in_progress": 0, "freed": 0, "stuck": 0, "gone": 0, "by_phase": {}}
         lim = _list_limit(request, 100, 500)
         off = _list_offset(request)
-        accounts = await _rh.list_for_owner(pool, uid, limit=lim, offset=off)
+        view = (request.query.get("view") or "all").strip().lower()
+        if view not in _rh.VIEWS:
+            view = "all"
+        settings = await _rh.get_settings(pool, uid)
+        accounts = await _rh.list_for_owner(pool, uid, limit=lim, offset=off,
+                                            view=view, settings=settings)
         # Итог берём из той же сводки, что и плитки сверху — лишнего запроса не
         # нужно: `by_phase` считает ВСЕ строки реабилитации. Если сводка не
-        # получилась, итог не меньше того, что уже на экране.
-        total = max(sum(int(v) for v in (counts.get("by_phase") or {}).values()),
-                    off + len(accounts))
+        # получилась, итог не меньше того, что уже на экране. Для среза —
+        # сумма его фаз.
+        bp = counts.get("by_phase") or {}
+        view_phases = {"active": ("appeal", "warming", "recheck"),
+                       "attention": ("stuck",), "freed": ("freed",),
+                       "closed": ("gone", "off")}.get(view)
+        view_total = (sum(int(v) for v in bp.values()) if view_phases is None
+                      else sum(int(bp.get(p, 0)) for p in view_phases))
+        total = max(view_total, off + len(accounts))
         return _json_resp({"ok": True, **counts, "accounts": accounts,
-                           "total": total,
+                           "total": total, "view": view,
+                           "settings": settings,
+                           "pace_labels": _rh.PACE_LABEL,
                            "page": {"limit": lim, "offset": off,
                                     "has_more": off + len(accounts) < total}})
 
@@ -5972,9 +5985,98 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "phase": "appeal" if action == "restart" else "off"})
         return _err("Неизвестное действие", 400)
 
+    async def rehab_history_ep(request: web.Request) -> web.Response:
+        """Что автоматика делала с одним аккаунтом — по шагам, новые сверху."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор аккаунта", 400)
+        from services import account_rehab as _rh
 
+        row = await pool.fetchrow(
+            """SELECT r.acc_id, r.phase, r.kind, r.attempts, r.appeal_count,
+                      r.warm_cycles, r.warm_actions, r.note, r.first_seen,
+                      r.last_action_at, r.next_action_at, r.freed_at,
+                      r.release_at, r.relapses,
+                      a.phone, a.first_name, a.username, a.acc_status,
+                      a.cooldown_until
+                 FROM account_rehab_state r
+                 JOIN tg_accounts a ON a.id = r.acc_id
+                WHERE r.acc_id=$1 AND r.owner_id=$2""", acc_id, uid)
+        if not row:
+            return _err("Аккаунт не найден в восстановлении", 404)
+        settings = await _rh.get_settings(pool, uid)
+        acc = dict(row)
+        acc["state"] = _rh.describe(acc, settings=settings)
+        for k in ("first_seen", "last_action_at", "next_action_at", "freed_at",
+                  "release_at", "cooldown_until"):
+            acc[k] = acc[k].isoformat() if acc.get(k) else None
+        lim = _list_limit(request, 100, 500)
+        try:
+            events = await _rh.history(pool, uid, acc_id, limit=lim)
+        except Exception:
+            log.warning("rehab_history uid=%s acc=%s", uid, acc_id, exc_info=True)
+            events = []
+        return _json_resp({"ok": True, "account": acc, "events": events,
+                           "capped": len(events) >= lim})
 
+    async def rehab_settings_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import account_rehab as _rh
 
+        return _json_resp({"ok": True, "settings": await _rh.get_settings(pool, uid),
+                           "pace_labels": _rh.PACE_LABEL,
+                           "defaults": _rh.DEFAULT_SETTINGS})
+
+    async def rehab_settings_save(request: web.Request) -> web.Response:
+        """Темп, лимит перепроверок, отдых после снятия, аппеляция, пауза,
+        уведомления — всё, что раньше было зашито в код."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный формат запроса", 400)
+        if not isinstance(body, dict):
+            return _err("Неверный формат запроса", 400)
+        from services import account_rehab as _rh
+
+        try:
+            s = await _rh.save_settings(pool, uid, body)
+        except Exception:
+            log.exception("rehab_settings_save uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "settings": s})
+
+    async def rehab_bulk(request: web.Request) -> web.Response:
+        """Действия над всем восстановлением сразу.
+
+        `restart_stuck` — ещё попытка всем, кого автоматика отдала на разбор
+        (кроме замороженных); `pause` / `resume` — пауза всего восстановления.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        action = (request.match_info.get("action") or "").lower()
+        from services import account_rehab as _rh
+
+        if action == "restart_stuck":
+            try:
+                n = await _rh.restart_all_stuck(pool, uid)
+            except Exception:
+                log.exception("rehab_bulk restart uid=%s", uid)
+                return _err(_INTERNAL_ERROR, 500)
+            return _json_resp({"ok": True, "count": n})
+        if action in ("pause", "resume"):
+            s = await _rh.save_settings(pool, uid, {"paused": action == "pause"})
+            return _json_resp({"ok": True, "settings": s})
+        return _err("Неизвестное действие", 400)
 
 
 
@@ -8557,6 +8659,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/stage",
                         vlayer_set_stage)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
+    app.router.add_get("/api/miniapp/rehab/settings", rehab_settings_get)
+    app.router.add_post("/api/miniapp/rehab/settings", rehab_settings_save)
+    app.router.add_post("/api/miniapp/rehab_bulk/{action}", rehab_bulk)
+    app.router.add_get("/api/miniapp/rehab/{acc_id}/history", rehab_history_ep)
     app.router.add_post("/api/miniapp/rehab/{acc_id}/{action}", rehab_action)
     # A/B Experiments
     # Health Dashboard
