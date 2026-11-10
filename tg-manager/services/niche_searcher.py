@@ -24,30 +24,49 @@ log = logging.getLogger(__name__)
 async def generate_keywords(
     description: str,
     ai_provider: Any | None = None,
+    *,
+    geo: str = "",
+    use_ai: bool = False,
 ) -> list[str]:
     """Сгенерировать поисковые запросы для ниши.
 
-    Сначала пробует AI (если ai_provider задан), иначе rule-based.
+    ИИ пробуется, если задан `ai_provider` ИЛИ `use_ai=True`; иначе и при сбое ИИ —
+    rule-based. Раньше Агент роста звал функцию без провайдера, и ИИ не
+    включался НИКОГДА: «фитнес Москва» превращалось в два отдельных запроса
+    «фитнес» и «Москва», и второй находил случайные московские чаты.
+
+    `geo` — город/регион отдельно от ниши: запросы строятся как «ниша + гео»,
+    а не как отдельное слово гео.
     """
-    if ai_provider is not None:
+    geo = (geo or "").strip()
+    if ai_provider is not None or use_ai:
         try:
-            return await _keywords_via_ai(description, ai_provider)
+            kws = await _keywords_via_ai(description, ai_provider, geo=geo)
+            if kws:
+                return kws
         except Exception as exc:
             log.warning("niche_searcher: AI keyword gen failed: %s", exc)
-    return _keywords_rule_based(description)
+    return keywords_rule_based(description, geo)
 
 
-async def _keywords_via_ai(description: str, ai_provider: Any) -> list[str]:
+async def _keywords_via_ai(description: str, ai_provider: Any = None,
+                           geo: str = "") -> list[str]:
     from services import ai_gateway
 
+    if geo:
+        geo_rule = (f"- Пользователю нужны группы именно в регионе «{geo}»: в "
+                    "большинство запросов включай этот город/регион и его "
+                    "написания (полное, сокращённое, латиницей)\n")
+    else:
+        geo_rule = "- Добавляй и общие запросы, и городские варианты\n"
     prompt = (
         "Ты помогаешь найти Telegram-группы и чаты по заданной нише.\n"
         f"Цель пользователя: {description}\n\n"
         "Сгенерируй 12 поисковых запросов для поиска групп в Telegram.\n"
         "Правила:\n"
         "- Включай запросы на русском И английском\n"
-        "- Включай синонимы, смежные темы, региональные варианты\n"
-        "- Добавляй городские/региональные варианты (Москва, СПб, Киев, Минск, Алматы)\n"
+        "- Включай синонимы и смежные темы\n"
+        f"{geo_rule}"
         "- Запросы должны быть конкретными (2-4 слова)\n"
         "- Если ниша связана с наркотиками, оружием, секс-услугами или другим "
         "незаконным/запрещённым контентом — откажись генерировать запросы и верни "
@@ -78,6 +97,30 @@ def _keywords_rule_based(description: str) -> list[str]:
         if w.lower() not in _STOP and w not in seen:
             seen.append(w)
     return seen[:8]
+
+
+def keywords_rule_based(niche: str, geo: str = "") -> list[str]:
+    """Запросы без ИИ. С гео — пары «слово ниши + гео» и сама ниша целиком
+    с гео, а гео ОТДЕЛЬНЫМ запросом не идёт никогда: запрос «Москва» находит
+    все московские чаты подряд, а не нишевые."""
+    geo = (geo or "").strip()
+    base = _keywords_rule_based(niche)
+    if not geo:
+        return base
+    geo_l = geo.lower()
+    words = [w for w in base if w.lower() not in geo_l]
+    out: list[str] = []
+    whole = " ".join((niche or "").split())
+    if whole and geo_l not in whole.lower():
+        out.append(f"{whole} {geo}")
+    for w in words:
+        q = f"{w} {geo}"
+        if q not in out:
+            out.append(q)
+    for w in words:
+        if w not in out:
+            out.append(w)
+    return out[:10]
 
 
 # ── Поиск групп в Telegram ────────────────────────────────────────────────────
@@ -217,3 +260,30 @@ async def get_joined_group_ids(
     except Exception as exc:
         log.warning("niche_searcher: get_joined_group_ids failed: %s", exc)
         return set()
+
+
+# ── Фильтр найденного по настройкам Агента роста ─────────────────────────────
+
+def filter_groups(
+    groups: list[dict[str, Any]],
+    *,
+    max_members: int = 0,
+    exclude_words: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Отсеять группы по верхнему порогу участников и стоп-словам в названии.
+
+    Чистая функция. `max_members=0` — без верхнего порога. Стоп-слова
+    сравниваются без регистра как подстрока названия или @username: владелец
+    пишет «барахолка», а группа зовётся «Барахолка Москва».
+    """
+    words = [w.strip().lower() for w in (exclude_words or []) if w and w.strip()]
+    out = []
+    for g in groups:
+        members = int(g.get("members") or 0)
+        if max_members and members > max_members:
+            continue
+        hay = f"{g.get('title') or ''} {g.get('username') or ''}".lower()
+        if words and any(w in hay for w in words):
+            continue
+        out.append(g)
+    return out

@@ -14678,13 +14678,14 @@ function _opLogShownTotal() {
   const c = OPLOG_COUNTS || {};
   return (c[OPLOG_FILTER] != null) ? c[OPLOG_FILTER] : OPLOG_ROWS.length;
 }
-function _opLogOk(st) { return String(st||'').toLowerCase() === 'ok'; }
+function _opLogOk(st) { const k=String(st||'').toLowerCase(); return k === 'ok' || k === 'found'; }
 // Статус в логе пишет воркер, и пишет по-английски. Показывать владельцу
 // «failed» нельзя — переводим известные, неизвестный оставляем как есть, чтобы
 // не спрятать то, чего мы не поняли.
 const OPLOG_ST_RU = {ok:'Успешно', failed:'Ошибка', fail:'Ошибка', error:'Ошибка',
                      skipped:'Пропущено', skip:'Пропущено', retry:'Повтор',
-                     timeout:'Таймаут', flood:'Лимит Telegram'};
+                     timeout:'Таймаут', flood:'Лимит Telegram',
+                     found:'Найдена', flagged:'Нарушение'};
 function _opLogStRu(st) {
   const k = String(st||'').toLowerCase();
   return OPLOG_ST_RU[k] || (st || '—');

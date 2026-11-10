@@ -103,20 +103,19 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось разобрать запрос", 400)
         niche = validate_string(body.get("niche"), max_len=200)
         geo = validate_string(body.get("geo"), max_len=60) or ""
-        promo_text = validate_string(body.get("promo_text"), max_len=4096)
-        try:
-            acc_count = max(1, min(validate_integer(body.get("acc_count") or 3, min_val=1, max_val=10) or 3, 10))
-        except (TypeError, ValueError):
-            acc_count = 3
+        promo_text = validate_string(body.get("promo_text"), max_len=4096) or ""
+        from services.growth_agent_settings import growth_eta_minutes, growth_settings
+        cfg = growth_settings(body)
         if not niche:
             return _err("Укажите нишу", 400)
-        if not promo_text:
+        if not promo_text and not cfg["dry_run"]:
             return _err("Укажите рекламный текст", 400)
-        if check_sql_suspicious(promo_text):
+        if promo_text and check_sql_suspicious(promo_text):
             return _err("Недопустимые символы в тексте промо")
         from services import content_safety
 
-        _v = await content_safety.enforce(pool, uid, niche, promo_text, surface="growth_agent")
+        _v = await content_safety.enforce(
+            pool, uid, niche, promo_text, " ".join(cfg["keywords"]), surface="growth_agent")
         if _v.blocked:
             return _err("Контент заблокирован политикой платформы", 403)
         # Нужен хотя бы один активный аккаунт с сессией.
@@ -126,12 +125,16 @@ def setup_routes(app: web.Application, pool) -> None:
         if not has_acc:
             return _err("Нет активных аккаунтов", 400)
         try:
-            label = f"Growth Agent: {niche[:40]}"
+            label = (f"Поиск групп: {niche[:40]}" if cfg["dry_run"]
+                     else f"Агент роста: {niche[:40]}")
+            params = {"niche": niche, "geo": geo, "promo_text": promo_text, **cfg}
             op_id = await _obus.submit(
-                pool, uid, "niche_growth_post",
-                {"niche": niche, "geo": geo, "promo_text": promo_text, "acc_count": acc_count},
-                total_items=5, label=label)
-            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+                pool, uid, "niche_growth_post", params,
+                total_items=cfg["max_groups"], label=label)
+            eta = growth_eta_minutes(cfg["max_groups"], cfg["pace"]) if not cfg["dry_run"] else (0, 0)
+            return _json_resp({"ok": True, "op_id": op_id, "label": label,
+                               "max_groups": cfg["max_groups"], "dry_run": cfg["dry_run"],
+                               "eta_min": eta[0], "eta_max": eta[1]})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
