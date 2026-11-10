@@ -9,8 +9,9 @@
 * правка отправленного голосования сохраняет голоса и не даёт поменять
   варианты опроса (голоса привязаны к номеру варианта);
 * вызовы идут под именами Bot API 10.4 (sendWidget, allow_queries, is_shared,
-  public_data, editSharedWidgetData…), а если обычный адрес метода не знает
-  (404) — повторяются через бета-шлюз;
+  public_data, editSharedWidgetData…) на ОСНОВНОЙ Bot API, а если он метода
+  не знает (404, сервер ещё старый) — через бета-шлюз, и какое-то время сразу
+  туда; основной снова берёт всё, как только ответит; off выключает бету;
 * отказ Telegram доходит до человека по-русски.
 """
 from __future__ import annotations
@@ -131,6 +132,16 @@ def test_vote_data_trims_names_to_fit_1024_bytes():
     assert 0 < len(out["n"]) <= bw.RSVP_NAMES_MAX
 
 
+@pytest.fixture(autouse=True)
+def _fresh_route(monkeypatch):
+    monkeypatch.setattr(bw, "_main_missing_until", 0.0)
+    monkeypatch.delenv("TG_WIDGETS_API_BASE", raising=False)
+
+
+_MISSING = {"ok": False, "error_code": 404, "description": "Not Found"}
+_OK = {"ok": True, "result": {"message_id": 1, "chat": {"id": 5}}}
+
+
 class _FakeApi:
     def __init__(self, answers):
         self.answers = list(answers)
@@ -160,10 +171,72 @@ def test_unknown_method_is_retried_through_the_beta_gateway(monkeypatch):
     fake = _FakeApi([{"ok": False, "error_code": 404, "description": "Not Found"},
                      {"ok": True, "result": {"message_id": 1, "chat": {"id": 5}}}])
     monkeypatch.setattr(bw.bot_api, "_call", fake)
-    monkeypatch.delenv("TG_WIDGETS_API_BASE", raising=False)
     res = _run(bw.send(None, "t", 5, "<b>hi</b>"))
     assert res["ok"]
     assert [c[1] for c in fake.calls] == [None, bw.BETA_BASE]
+
+
+def test_main_api_goes_first_and_beta_is_untouched_when_main_knows_widgets(monkeypatch):
+    fake = _FakeApi([_OK, _OK])
+    monkeypatch.setattr(bw.bot_api, "_call", fake)
+    assert _run(bw.send(None, "t", 5, "<b>hi</b>"))["ok"]
+    assert _run(bw.send_shared(None, "t", 6, "w1"))["ok"]
+    assert [c[1] for c in fake.calls] == [None, None]
+    assert bw.route() == "main"
+
+
+def test_old_main_api_is_not_knocked_twice_on_every_call(monkeypatch):
+    fake = _FakeApi([dict(_MISSING), _OK, _OK])
+    monkeypatch.setattr(bw.bot_api, "_call", fake)
+    assert _run(bw.send(None, "t", 5, "<b>hi</b>"))["ok"]
+    assert bw.route() == "beta"
+    assert _run(bw.send(None, "t", 5, "<b>hi</b>"))["ok"]
+    assert [c[1] for c in fake.calls] == [None, bw.BETA_BASE, bw.BETA_BASE]
+
+
+def test_main_api_is_rechecked_and_wins_back_after_the_pause(monkeypatch):
+    fake = _FakeApi([dict(_MISSING), _OK, _OK])
+    monkeypatch.setattr(bw.bot_api, "_call", fake)
+    assert _run(bw.send(None, "t", 5, "<b>hi</b>"))["ok"]
+    monkeypatch.setattr(bw, "_main_missing_until", 1.0)  # пауза истекла
+    assert _run(bw.send(None, "t", 5, "<b>hi</b>"))["ok"]
+    assert [c[1] for c in fake.calls] == [None, bw.BETA_BASE, None]
+    assert bw.route() == "main" and bw._main_missing_until == 0.0
+
+
+def test_beta_gone_while_main_is_marked_old_falls_back_to_main(monkeypatch):
+    fake = _FakeApi([dict(_MISSING), _OK])
+    monkeypatch.setattr(bw.bot_api, "_call", fake)
+    monkeypatch.setattr(bw, "_main_missing_until", 10 ** 12)
+    assert _run(bw.send(None, "t", 5, "<b>hi</b>"))["ok"]
+    assert [c[1] for c in fake.calls] == [bw.BETA_BASE, None]
+    assert bw.route() == "main"
+
+
+def test_both_gateways_without_widgets_cost_two_calls_and_explain(monkeypatch):
+    fake = _FakeApi([dict(_MISSING), dict(_MISSING)])
+    monkeypatch.setattr(bw.bot_api, "_call", fake)
+    res = _run(bw.send(None, "t", 5, "<b>hi</b>"))
+    assert not res["ok"] and "Bot API 10.4" in res["error"]
+    assert len(fake.calls) == 2
+
+
+@pytest.mark.parametrize("value", ["off", "OFF", "0", "none"])
+def test_beta_fallback_can_be_switched_off(monkeypatch, value):
+    monkeypatch.setenv("TG_WIDGETS_API_BASE", value)
+    fake = _FakeApi([dict(_MISSING)])
+    monkeypatch.setattr(bw.bot_api, "_call", fake)
+    assert not _run(bw.send(None, "t", 5, "<b>hi</b>"))["ok"]
+    assert [c[1] for c in fake.calls] == [None]
+    assert bw.route() == "main"
+
+
+def test_custom_beta_gateway_is_respected(monkeypatch):
+    monkeypatch.setenv("TG_WIDGETS_API_BASE", "https://bot-api.example/beta")
+    fake = _FakeApi([dict(_MISSING), _OK])
+    monkeypatch.setattr(bw.bot_api, "_call", fake)
+    assert _run(bw.send(None, "t", 5, "<b>hi</b>"))["ok"]
+    assert fake.calls[1][1] == "https://bot-api.example/beta"
 
 
 def test_shared_widget_edit_reaches_every_copy(monkeypatch):
@@ -187,7 +260,7 @@ def test_message_widget_edit_goes_by_chat_and_message(monkeypatch):
 
 
 @pytest.mark.parametrize("desc,code,word", [
-    ("Bad Request: INPUT_MEDIA_WIDGET_NOT_ALLOWED", 400, "в каналы — нельзя"),
+    ("Bad Request: INPUT_MEDIA_WIDGET_NOT_ALLOWED", 400, "только в личку"),
     ("Bad Request: INPUT_MEDIA_WIDGET_TOO_LARGE", 400, "4 КБ"),
     ("Bad Request: CHAT_SEND_PHOTOS_FORBIDDEN", 400, "медиа"),
     ("Bad Request: chat not found", 400, "Чат не найден"),

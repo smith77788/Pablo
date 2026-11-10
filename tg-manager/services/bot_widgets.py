@@ -3,8 +3,9 @@
 ЗАЧЕМ. С Telegram 13.2 сообщение бота может быть маленькой HTML-страницей
 прямо в пузыре чата: отсчёт до события, карточка с кнопкой, викторина, опрос с
 живыми голосами. Отправить такое может только бот — в личку человеку, который
-его запустил, или в группу, где бот состоит (в каналы нельзя; переслать
-готовый виджет можно куда угодно). У владельца в Infragram есть свои боты —
+его запустил. С выхода Bot API 10.4 (9 ноября 2026) Telegram в рабочей среде
+пускает виджеты только в личные чаты и с защитой от пересылки и копирования
+(copyMessage виджет не копирует); группы и инлайн-режим — позже. У владельца в Infragram есть свои боты —
 значит, он может слать виджеты от их имени.
 
 Как устроен виджет (TelegramMessenger/widget-sandbox: docs/tgw-format.md,
@@ -25,9 +26,14 @@ docs/sdk-v1.md, docs/profile-v1.md):
   * тот же виджет можно разослать подписчикам (sendSharedWidget) — и у всех
     будет один общий счёт голосов, а не тысяча отдельных опросов.
 
-Bot API 10.4 сначала включён на бета-шлюзе (https://api.telegram.org/beta):
-вызовы виджетов идут на обычный адрес и, если Telegram метода не знает (404),
-на бету. Шлюз можно переназначить переменной TG_WIDGETS_API_BASE.
+ОСНОВНОЙ BOT API — ГЛАВНЫЙ ПУТЬ. До 9 ноября 2026 методы виджетов были только
+на бета-шлюзе (https://api.telegram.org/beta). С Bot API 10.4 они в основном
+API, и все вызовы идут туда. Бета осталась запасным путём: если основной адрес
+отвечает «метод не найден» (404 — сервер ещё на старой версии), вызов
+повторяется через бету, и на MAIN_RECHECK_S секунд следующие вызовы идут сразу
+туда, а не стучатся дважды. Как только основной адрес снова ответит по-
+настоящему, запасной путь забывается. Шлюз переназначает переменная
+TG_WIDGETS_API_BASE; значение off выключает запасной путь совсем.
 """
 from __future__ import annotations
 
@@ -51,10 +57,24 @@ SIZE_MAX = 600  # ширина/высота пузыря в точках: 0 — 
 SHARED_CACHE_S = 5  # как часто копии общего виджета перечитывают данные
 
 BETA_BASE = "https://api.telegram.org/beta"
+MAIN_RECHECK_S = 600  # сколько не стучаться в основной адрес после его 404
+_OFF = {"off", "0", "no", "none", "false", "-"}
+
+# Монотонное время, до которого основной Bot API считается «ещё без виджетов».
+_main_missing_until = 0.0
 
 
-def beta_base() -> str:
-    return (os.environ.get("TG_WIDGETS_API_BASE") or BETA_BASE).strip()
+def beta_base() -> str | None:
+    """Запасной шлюз для методов виджетов; None — запасного пути нет."""
+    v = (os.environ.get("TG_WIDGETS_API_BASE") or "").strip()
+    if v.lower() in _OFF:
+        return None
+    return v or BETA_BASE
+
+
+def route() -> str:
+    """Куда сейчас идут вызовы виджетов: "main" или "beta" (для диагностики)."""
+    return "beta" if beta_base() and time.monotonic() < _main_missing_until else "main"
 
 
 def packed_size(html_bytes: bytes) -> int:
@@ -674,13 +694,31 @@ def method_missing(data: dict) -> bool:
 
 
 async def call(session, token: str, method: str, **params) -> dict:
-    """Метод виджетов: обычный адрес Bot API, а если метода там нет — бета."""
+    """Метод виджетов: основной Bot API, а если он метода не знает — бета.
+
+    Порядок: основной адрес → (404) бета. Пока действует отметка «основной
+    без виджетов», сначала бета; если и она метода не знает — всё равно
+    пробуем основной, вдруг он уже обновился.
+    """
+    global _main_missing_until
+    base = beta_base()
+    beta_tried = False
+    if base and time.monotonic() < _main_missing_until:
+        data = await bot_api._call(session, token, method, api_base=base, **params)
+        if not method_missing(data):
+            return data
+        beta_tried = True
     data = await bot_api._call(session, token, method, **params)
-    if method_missing(data):
-        base = beta_base()
-        if base:
-            data = await bot_api._call(session, token, method, api_base=base, **params)
-    return data
+    if not method_missing(data):
+        _main_missing_until = 0.0
+        return data
+    if not base or beta_tried:
+        return data
+    if not _main_missing_until:
+        log.warning("bot_widgets: основной Bot API не знает %s — запасной путь через %s",
+                    method, base)
+    _main_missing_until = time.monotonic() + MAIN_RECHECK_S
+    return await bot_api._call(session, token, method, api_base=base, **params)
 
 
 _ERRORS_RU: tuple[tuple[str, str], ...] = (
@@ -689,8 +727,8 @@ _ERRORS_RU: tuple[tuple[str, str], ...] = (
     ("INPUT_MEDIA_WIDGET_HTML_INVALID",
      "Telegram не принял код виджета: нужен HTML-текст без нулевых символов."),
     ("INPUT_MEDIA_WIDGET_NOT_ALLOWED",
-     "Сюда виджет отправить нельзя. Бот шлёт виджеты в личку тому, кто его запустил, "
-     "и в группы, где он состоит; в каналы — нельзя (туда виджет можно только переслать)."),
+     "Сюда виджет отправить нельзя. Сейчас Telegram пускает виджеты только в личку "
+     "тому, кто запустил бота; в группы и каналы — пока нельзя."),
     ("DATA_TOO_LARGE", "Данные виджета больше 1024 байт — сократите тексты."),
     ("DATA_INVALID", "Telegram не принял данные виджета."),
     ("WIDGET_QUERY_NOT_ALLOWED", "Этому виджету нельзя спрашивать бота."),
