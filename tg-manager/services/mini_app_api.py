@@ -5766,11 +5766,127 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         from services import virtual_layer as _vl
+        # Период: 7/30/90 дней; всё прочее (и пусто) — за всё время.
+        days = _vl._period(request.query.get("days"))
         try:
-            return _json_resp({"ok": True, **await _vl.analytics(pool, uid)})
+            return _json_resp({"ok": True,
+                               **await _vl.analytics(pool, uid, days=days)})
         except Exception:
             log.exception("vlayer_analytics uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
+
+    def _vlayer_rules_payload(_vl, rules: dict) -> dict:
+        """Правила + всё, что экрану нужно, чтобы их показать по-русски."""
+        return {
+            "ok": True, "rules": rules, "defaults": _vl.normalize_rules(None),
+            "changed": _vl.rules_diff(rules),
+            "signals": [{"key": k, "label": _vl.SIGNAL_LABEL[k]}
+                        for k in _vl.RULE_SIGNALS],
+            "locked": [{"key": k, "label": _vl.SIGNAL_LABEL[k],
+                        "target_label": _vl.VALUE_LABEL["purchased"]}
+                       for k in _vl.LOCKED_SIGNALS],
+            "targets": [{"value": v, "label": _vl.RULE_TARGET_LABEL[v]}
+                        for v in _vl.RULE_TARGETS],
+            "ttl_rungs": [{"value": v, "label": _vl.VALUE_LABEL[v]}
+                          for v in _vl.TTL_RUNGS],
+            "hot_at": [{"value": v, "label": _vl.VALUE_LABEL[v]}
+                       for v in _vl.CASCADE_HOT_AT],
+            "limits": {"ttl_min": _vl.TTL_MIN_H, "ttl_max": _vl.TTL_MAX_H},
+        }
+
+    async def vlayer_rules_get(request: web.Request) -> web.Response:
+        """Правила модели поведения владельца (или стандартные)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        rules = await _vl.get_rules(pool, uid)
+        return _json_resp(_vlayer_rules_payload(_vl, rules))
+
+    async def vlayer_rules_save(request: web.Request) -> web.Response:
+        """Сохранить правила. Всё вне границ заменяется стандартом
+        (normalize_rules), поэтому ответ — то, что реально записано."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        raw = (body or {}).get("rules") if isinstance(body, dict) else None
+        if not isinstance(raw, dict):
+            return _err("Нет правил в запросе", 400)
+        try:
+            rules = await _vl.save_rules(pool, uid, raw)
+        except Exception:
+            log.exception("vlayer_rules_save uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp(_vlayer_rules_payload(_vl, rules))
+
+    async def vlayer_rules_reset(request: web.Request) -> web.Response:
+        """Вернуть стандартные правила."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        try:
+            rules = await _vl.reset_rules(pool, uid)
+        except Exception:
+            log.exception("vlayer_rules_reset uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp(_vlayer_rules_payload(_vl, rules))
+
+    async def vlayer_set_stage(request: web.Request) -> web.Response:
+        """Владелец ставит человека на ступень вручную (вверх, вниз, в «Потерян»).
+
+        Слой видит только то, что прошло через систему; отказ по телефону или
+        ошибочный «Потерян» исправить было нечем, кроме «Купил». Пишется в
+        историю с причиной «владелец перевёл вручную»."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        etype = (request.match_info.get("entity_type") or "").strip()
+        eid = (request.match_info.get("entity_id") or "").strip()
+        if etype != _vl.USER:
+            return _err("Ступень можно поменять только у человека", 400)
+        if not eid or len(eid) > 128:
+            return _err("Неверный идентификатор", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        value = str((body or {}).get("value") or "").strip()
+        if value not in _vl.MANUAL_STAGES:
+            return _err("Неизвестная ступень", 400)
+        # id приходит из адреса: чужой или несуществующий контакт не трогаем.
+        try:
+            known = await pool.fetchval(
+                "SELECT 1 FROM unified_contacts WHERE owner_id=$1 AND id::text=$2",
+                uid, eid)
+        except Exception:
+            known = None
+        if not known:
+            return _err("Контакт не найден", 404)
+        try:
+            change = await _vl.set_stage(pool, uid, _vl.USER, eid, value)
+        except Exception:
+            log.exception("vlayer_set_stage uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        # CRM и модель обязаны говорить одно: «Купил» → «Выиграно»,
+        # «Потерян» → «Проиграно». Промежуточные ступени CRM не трогаем —
+        # у неё свои стадии, и однозначного соответствия нет.
+        crm_stage = {"purchased": "won", _vl.LOST: "lost"}.get(value)
+        if crm_stage:
+            try:
+                from services.contacts_hub.crm_engine import upsert_crm
+                await upsert_crm(pool, uid, eid, {"stage": crm_stage})
+            except Exception:
+                log.debug("vlayer_set_stage crm failed uid=%s", uid, exc_info=True)
+        return _json_resp({"ok": True, "changed": change is not None,
+                           "value": value,
+                           "label": _vl.VALUE_LABEL.get(value, value)})
 
     # ── «Нотариус»: заверение рекламных размещений ────────────────────────
 
@@ -8218,6 +8334,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         vlayer_mark_purchased)
     app.router.add_get("/api/miniapp/vlayer/analytics", vlayer_analytics)
     app.router.add_get("/api/miniapp/vlayer/segment/{value}", vlayer_segment)
+    app.router.add_get("/api/miniapp/vlayer/rules", vlayer_rules_get)
+    app.router.add_post("/api/miniapp/vlayer/rules", vlayer_rules_save)
+    app.router.add_post("/api/miniapp/vlayer/rules/reset", vlayer_rules_reset)
+    app.router.add_post("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/stage",
+                        vlayer_set_stage)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
     app.router.add_post("/api/miniapp/rehab/{acc_id}/{action}", rehab_action)
     # A/B Experiments
