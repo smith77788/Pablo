@@ -11,6 +11,7 @@ from typing import Optional
 
 import asyncpg
 from services.logger import log_exc_swallow
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -299,6 +300,53 @@ def detect_niches(title: str, texts: list[str], max_niches: int = 5) -> list[str
 # ── Сканирование рекламных постов ─────────────────────────────────────────
 
 
+_PUBLIC_USERNAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{3,31}")
+_TME_PREFIX = re.compile(
+    r"^(?:https?://)?(?:www\.)?(?:t|telegram)\.(?:me|dog)/(?:s/)?", re.I)
+
+
+# Служебные разделы t.me — не имена каналов (t.me/joinchat/HASH и т. п.).
+_TME_SERVICE_PATHS = frozenset({
+    "joinchat", "addlist", "share", "proxy", "socks", "addstickers",
+    "addemoji", "login", "setlanguage", "addtheme", "boost", "giftcode",
+})
+
+
+def channel_username_from(text) -> str:
+    """Имя публичного канала из того, что вставил человек: `@name`, `name`,
+    `t.me/name`, `https://t.me/name/123`, `t.me/s/name`. Пустая строка — если
+    это не публичное имя (приватная ссылка-приглашение, мусор).
+
+    Раньше с ввода срезалась только «@», и вставленная ссылка уходила в
+    Telegram как «@https://t.me/name»: сканирование падало с английским
+    «Cannot find any entity», хотя канал существует."""
+    s = str(text or "").strip()
+    s = _TME_PREFIX.sub("", s.lstrip("@")).lstrip("@")
+    s = re.split(r"[/?#\s]", s, maxsplit=1)[0]
+    if s.lower() in _TME_SERVICE_PATHS:
+        return ""
+    return s if _PUBLIC_USERNAME.fullmatch(s) else ""
+
+
+def channel_open_error(channel_username: str, exc: BaseException) -> str:
+    """Причина по-русски, почему канал не открылся (владелец не читает
+    английский, а сырой текст Telethon — английский)."""
+    name, low = type(exc).__name__, str(exc).lower()
+    if (name in ("UsernameNotOccupiedError", "UsernameInvalidError")
+            or "cannot find any entity" in low or "no user has" in low
+            or "nobody is using" in low):
+        return (f"Канал @{channel_username} не найден. Проверьте имя: нужен "
+                "публичный канал, например @durov или ссылка t.me/durov")
+    if name in ("ChannelPrivateError", "ChannelBannedError"):
+        return (f"Канал @{channel_username} закрыт или недоступен этому аккаунту")
+    if name == "FloodWaitError":
+        return ("Telegram просит подождать: аккаунт сделал слишком много "
+                f"запросов. Повторите через {getattr(exc, 'seconds', 0) or 60} с")
+    if name in ("TimeoutError", "CancelledError") or isinstance(exc, asyncio.TimeoutError):
+        return "Telegram не ответил вовремя. Повторите попытку позже"
+    return f"Не удалось открыть канал @{channel_username}. Повторите попытку позже"
+
+
 async def scan_channel_ads(
     pool: asyncpg.Pool,
     channel_username: str,
@@ -313,9 +361,13 @@ async def scan_channel_ads(
     """
     from services import account_manager
 
-    channel_username = channel_username.lstrip("@").strip()
+    _given = str(channel_username or "").strip()
+    channel_username = channel_username_from(_given)
     if not channel_username:
-        return {"status": "error", "error": "Пустой username канала"}
+        return {"status": "error", "error": (
+            "Укажите публичный канал: @имя или ссылку t.me/имя. "
+            "Закрытые каналы по ссылке-приглашению не сканируются"
+            if _given else "Не указан канал")}
 
     # Получаем аккаунт из пула
     async with pool.acquire() as conn:
@@ -324,7 +376,13 @@ async def scan_channel_ads(
             "lang_code, system_lang_code, "
             "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
             "FROM tg_accounts "
-            "WHERE id = $1 AND owner_id = $2 AND is_active = TRUE",
+            "WHERE id = $1 AND owner_id = $2 AND is_active = TRUE "
+            # Названный вызывающим аккаунт не берём под ограничением или на
+            # паузе: экран бота выбирал «первый активный», не спрашивая ни о
+            # том, ни о другом. Тогда ниже аккаунт подберёт общий подбор.
+            "AND COALESCE(acc_status, 'active') NOT IN ("
+            + _acc_status.sql_dead_list() + ") "
+            "AND (cooldown_until IS NULL OR cooldown_until <= now())",
             account_id,
             owner_id,
         )
@@ -349,7 +407,10 @@ async def scan_channel_ads(
                 client.get_entity(f"@{channel_username}"),
                 timeout=account_manager._OP_TIMEOUT)
         except Exception as exc:
-            return {"status": "error", "error": f"Не удалось получить канал: {exc}"}
+            log.info("scan_channel_ads: @%s не открылся: %s: %s",
+                     channel_username, type(exc).__name__, str(exc)[:200])
+            return {"status": "error",
+                    "error": channel_open_error(channel_username, exc)}
 
         channel_title = getattr(entity, "title", channel_username)
         subscribers = getattr(entity, "participants_count", 0) or 0

@@ -23645,9 +23645,12 @@ async def _exec_ad_intel_scan(
     """
     from services import ad_intelligence as _ai
 
-    channel = (params.get("channel") or "").strip().lstrip("@")
+    _given = str(params.get("channel") or "").strip()
+    channel = _ai.channel_username_from(_given)
     if not channel:
-        return {"status": "failed", "summary": "⚠️ channel не указан"}
+        return {"status": "failed", "summary": (
+            "⚠️ Укажите публичный канал: @имя или ссылку t.me/имя"
+            if _given else "⚠️ Канал не указан")}
 
     # Одна дверь: сырой `ORDER BY last_used` брал аккаунт, не спрашивая ни о
     # кулдауне, ни о статусе, ни о живости прокси — скан уходил забаненным или
@@ -23681,7 +23684,8 @@ async def _exec_ad_intel_scan(
     try:
         result = await _ai.scan_channel_ads(pool, channel, account_id, owner_id)
         if result.get("status") == "error":
-            return {"status": "failed", "summary": f"⚠️ Ошибка сканирования @{channel}: {result.get('error', 'неизвестная ошибка')}"}
+            return {"status": "failed",
+                    "summary": f"⚠️ {result.get('error') or 'Сканирование не удалось'}"}
 
         ad_posts = result.get("ad_posts_found", 0)
         return {
@@ -23692,7 +23696,8 @@ async def _exec_ad_intel_scan(
         }
     except Exception as exc:
         log.exception("_exec_ad_intel_scan op=%d channel=%s", op_id, channel)
-        return {"status": "failed", "summary": f"⚠️ Ошибка сканирования: {exc}"}
+        return {"status": "failed",
+                "summary": f"⚠️ {_ai.channel_open_error(channel, exc)}"}
 
 
 def _blast_final_status(ok_count: int, total: int, cancelled: bool) -> str:

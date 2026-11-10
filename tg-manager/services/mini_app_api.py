@@ -6064,11 +6064,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            channel = str(body.get("channel", "")).strip().lstrip("@")
+            _given = str(body.get("channel", "")).strip()
         except Exception:
             return _err("Неверное тело запроса", 400)
-        if not channel:
+        if not _given:
             return _err("Укажите канал", 400)
+        from services.ad_intelligence import channel_username_from
+        channel = channel_username_from(_given)
+        if not channel:
+            # Отказ сразу, а не сорванная операция через минуту.
+            return _err("Нужен публичный канал: @имя или ссылка t.me/имя. "
+                        "Закрытые каналы по ссылке-приглашению не сканируются", 400)
         label = f"Разведка рекламы @{channel}"
         try:
             op_id = await _obus.submit(

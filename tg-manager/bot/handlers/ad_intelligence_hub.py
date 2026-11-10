@@ -200,10 +200,9 @@ async def msg_adi_channel_input(
 ) -> None:
     raw = (message.text or "").strip()
     # Нормализуем: @username или t.me/username → username
-    username = raw.lstrip("@").strip()
-    if "t.me/" in username:
-        username = username.split("t.me/")[-1].split("/")[0].strip()
-    if not username or len(username) < 3:
+    from services.ad_intelligence import channel_username_from
+    username = channel_username_from(raw)
+    if not username:
         await message.answer(
             "⚠️ Неверный формат. Отправь <code>@username</code> или "
             "<code>t.me/channelname</code>.",
