@@ -3001,21 +3001,72 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Profile Setter ─────────────────────────────────────────────────────────
 
+    # Какие аккаунты годятся для оформления: живые, с сессией, не в паузе.
+    # Одно условие на статус, выбор и отправку — иначе экран обещал бы одно
+    # число, а операция ушла бы на другое.
+    _SETTER_ELIGIBLE = (
+        "owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+        "AND (cooldown_until IS NULL OR cooldown_until < NOW())"
+    )
+
     async def profile_setter_status(request: web.Request) -> web.Response:
+        """Сколько аккаунтов можно оформить и какие именно (для выбора)."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            total = await pool.fetchval(
-                "SELECT COUNT(*) FROM tg_accounts "
-                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-                "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
+            rows = await pool.fetch(
+                "SELECT a.id, a.phone, a.first_name, a.username, "
+                "(a.twofa_enc IS NOT NULL) AS twofa_saved, "
+                "pp.persona_name "
+                "FROM tg_accounts a "
+                "LEFT JOIN persona_profiles pp ON pp.account_id=a.id AND pp.owner_id=a.owner_id "
+                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
+                "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+                "ORDER BY a.trust_score DESC NULLS LAST, a.id LIMIT 500",
                 uid,
             )
         except Exception:
             log.exception("profile_setter_status uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"available_accounts": int(total or 0)})
+        accounts = [{
+            "id": r["id"],
+            "phone": r["phone"] or "",
+            "first_name": r["first_name"] or "",
+            "username": r["username"] or "",
+            "twofa_saved": bool(r["twofa_saved"]),
+            "persona": r["persona_name"] or "",
+        } for r in rows]
+        return _json_resp({
+            "available_accounts": len(accounts),
+            "accounts": accounts,
+            "twofa_saved": sum(1 for a in accounts if a["twofa_saved"]),
+        })
+
+    async def profile_setter_preview(request: web.Request) -> web.Response:
+        """Как будут выглядеть профили после оформления.
+
+        Рендер — ТЕМИ ЖЕ функциями движка, что и у исполнителя, иначе
+        предпросмотр стал бы вторым источником правды.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        from services import profile_setter_engine as _pse
+        fields = {k: str(body.get(k) or "")[:512]
+                  for k in ("first_name", "last_name", "about")}
+        un = str(body.get("username") or "").strip().lstrip("@")[:200]
+        try:
+            out = _pse.render_preview(fields)
+            if un:
+                out["usernames"] = [_pse.render_username(un, i) for i in range(3)]
+        except Exception as exc:
+            return _err(f"Шаблон не разворачивается: {str(exc)[:100]}", 400)
+        return _json_resp(out)
 
     async def profile_setter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3023,61 +3074,52 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            op = validate_string(body.get("op"), max_len=20)
+            op = validate_string(body.get("op"), max_len=20) or ""
             acc_count = validate_integer(body.get("acc_count", 0), min_val=0) or 0
         except Exception:
             return _err("Неверное тело запроса", 400)
-        if op not in ("name", "avatar", "2fa"):
-            return _err("Операция: имя, аватар или двухфакторная защита", 400)
-        if acc_count < 0:
-            return _err("Число аккаунтов не может быть отрицательным", 400)
+        from services import profile_setter_engine as _pse
         try:
-            total = await pool.fetchval(
-                "SELECT COUNT(*) FROM tg_accounts "
-                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-                "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
-                uid,
-            )
-        except Exception:
-            log.exception("profile_setter_submit fetchval uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        total = int(total or 0)
-        use = min(acc_count, total) if acc_count > 0 else total
-        if use == 0:
-            return _err("Нет доступных аккаунтов", 400)
+            params = _pse.build_setter_params(op, body)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        want_ids: list[int] = []
+        for raw in (body.get("account_ids") or [])[:500]:
+            try:
+                want_ids.append(int(raw))
+            except (TypeError, ValueError):
+                return _err("Неверный список аккаунтов", 400)
         try:
-            rows = await pool.fetch(
-                "SELECT id FROM tg_accounts "
-                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-                "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
-                "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
-                uid, use,
-            )
+            # Явный выбор проверяется тем же условием и тем же владельцем:
+            # чужой или выбывший id просто не попадёт в выборку.
+            if want_ids:
+                rows = await pool.fetch(
+                    "SELECT id FROM tg_accounts WHERE " + _SETTER_ELIGIBLE
+                    + " AND id = ANY($2::bigint[])",
+                    uid, want_ids,
+                )
+                got = {r["id"] for r in rows}
+                account_ids = [i for i in want_ids if i in got]
+            else:
+                rows = await pool.fetch(
+                    "SELECT id FROM tg_accounts WHERE " + _SETTER_ELIGIBLE + " "
+                    "ORDER BY trust_score DESC NULLS LAST, id LIMIT $2",
+                    uid, acc_count if acc_count > 0 else 500,
+                )
+                account_ids = [r["id"] for r in rows]
         except Exception:
             log.exception("profile_setter_submit fetch uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        account_ids = [r["id"] for r in rows]
-        params: dict = {"op": op, "account_ids": account_ids}
-        if op == "name":
-            params["name_data"] = {
-                "first_name": str(body.get("first_name", "")).strip()[:64],
-                "last_name": str(body.get("last_name", "")).strip()[:64],
-                "about": str(body.get("about", "")).strip()[:70],
-            }
-        elif op == "avatar":
-            url = str(body.get("avatar_url", "")).strip()
-            if not url.startswith("http"):
-                return _err("Ссылка на аватар должна начинаться с http", 400)
-            params["avatar_url"] = url
-        elif op == "2fa":
-            new_pass = str(body.get("new_password", "")).strip()
-            if len(new_pass) < 4:
-                return _err("Пароль минимум 4 символа", 400)
-            params["new_password"] = new_pass
-            params["current_password"] = str(body.get("current_password", "")).strip()
-            params["hint"] = str(body.get("hint", "")).strip()
-        label_map = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
-        label = f"Сеттер: {label_map.get(op, op)} × {len(account_ids)} акк."
+        if not account_ids:
+            return _err("Нет доступных аккаунтов", 400)
+        # Канарейка: сначала один аккаунт — владелец смотрит результат и только
+        # потом раскатывает на флот. Ошибка в шаблоне стоит одного профиля.
+        if body.get("canary"):
+            account_ids = account_ids[:1]
+        params["account_ids"] = account_ids
+        label = _pse.setter_label(op, params, len(account_ids))
+        if body.get("canary"):
+            label = "🧪 Проба · " + label
         try:
             op_id = await _obus.submit(
                 pool, uid, "bulk_set_profile", params,
@@ -3089,7 +3131,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("profile_setter_submit insert uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(account_ids)})
+        return _json_resp({"ok": True, "op_id": op_id, "label": label,
+                           "count": len(account_ids), "account_ids": account_ids})
+
+    async def profile_setter_twofa(request: web.Request) -> web.Response:
+        """Сохранённые пароли 2FA своих аккаунтов — чтобы владелец мог их
+        записать. Только свои аккаунты (owner_id в запросе), только POST:
+        GET оседает в истории и логах прокси."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                "SELECT id, phone, first_name, username, twofa_enc FROM tg_accounts "
+                "WHERE owner_id=$1 AND twofa_enc IS NOT NULL ORDER BY id",
+                uid,
+            )
+        except Exception:
+            log.exception("profile_setter_twofa uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        from services.token_vault import decrypt_token
+        items = [{
+            "id": r["id"],
+            "phone": r["phone"] or "",
+            "name": r["first_name"] or (("@" + r["username"]) if r["username"] else ""),
+            "password": decrypt_token(r["twofa_enc"]) or "",
+        } for r in rows]
+        # Факт показа — в журнал (без самих паролей): кто и сколько открыл.
+        log.info("profile_setter_twofa reveal uid=%d accounts=%d", uid, len(items))
+        return _json_resp({"items": items})
 
     # ── Account Cleaner ────────────────────────────────────────────────────────
 
@@ -8458,6 +8528,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Profile Setter
     app.router.add_get("/api/miniapp/profile_setter/status", profile_setter_status)
     app.router.add_post("/api/miniapp/profile_setter", profile_setter_submit)
+    app.router.add_post("/api/miniapp/profile_setter/preview", profile_setter_preview)
+    app.router.add_post("/api/miniapp/profile_setter/twofa", profile_setter_twofa)
     # Bot Notes
     # Bot Commands
     # Account Shield

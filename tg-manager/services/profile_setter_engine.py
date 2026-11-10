@@ -80,9 +80,10 @@ async def set_name_bio(
     session_string: str,
     _acc: dict | None,
     first_name: str = "",
-    last_name: str = "",
-    about: str = "",
+    last_name: str | None = "",
+    about: str | None = "",
 ) -> dict[str, Any]:
+    """Имя, фамилия, описание. ``None`` в поле — не трогать его."""
     from telethon.tl.functions.account import UpdateProfileRequest
 
     try:
@@ -584,22 +585,222 @@ def expand_spintax(text: str) -> str:
     return _expand(text)
 
 
-async def apply_op(session_string: str, acc: dict, op: str, params: dict) -> dict:
+# ── Набор аватаров ───────────────────────────────────────────────────────────
+
+MAX_AVATAR_URLS = 50
+
+
+def avatar_urls_of(params: dict) -> list[str]:
+    """Все адреса аватаров операции: набор ``avatar_urls`` или один ``avatar_url``.
+
+    Одна картинка на весь флот — это одинаковое лицо у сотни аккаунтов; даже с
+    байтовой уникализацией человек видит один и тот же портрет. Поэтому экран
+    принимает НАБОР, а старые операции в очереди (один адрес) читаются как
+    набор из одного.
+    """
+    urls = [str(u).strip() for u in (params.get("avatar_urls") or []) if str(u).strip()]
+    if not urls and str(params.get("avatar_url") or "").strip():
+        urls = [str(params["avatar_url"]).strip()]
+    return urls[:MAX_AVATAR_URLS]
+
+
+def pick_avatar_url(params: dict, slot: int) -> str:
+    """Аватар для аккаунта номер ``slot`` в прогоне — по кругу по набору.
+
+    По кругу, а не случайно: при наборе из десяти картинок на десять аккаунтов
+    случайный выбор почти наверняка дал бы двоим одно лицо, а круг — нет.
+    """
+    urls = avatar_urls_of(params)
+    if not urls:
+        return ""
+    return urls[int(slot) % len(urls)]
+
+
+# ── Предпросмотр оформления ──────────────────────────────────────────────────
+
+_FIELD_LIMITS = {"first_name": 64, "last_name": 64, "about": 70, "username": 32}
+
+
+def render_preview(fields: dict, draws: int = 8, show: int = 5) -> dict:
+    """Как будут выглядеть профили — теми же функциями, что и исполнитель.
+
+    Возвращает ``{samples, distinct, too_long}``: ``samples`` — до ``show``
+    РАЗНЫХ профилей, ``distinct`` — сколько разных вышло из ``draws`` бросков
+    (1 = у всех аккаунтов будет одно и то же), ``too_long`` — поля, которые
+    Telegram обрежет (подпись по-русски). Чистая функция.
+    """
+    labels = {"first_name": "Имя", "last_name": "Фамилия", "about": "Описание",
+              "username": "Юзернейм"}
+    rolled: list[dict] = []
+    too_long: set[str] = set()
+    for _ in range(max(1, int(draws))):
+        one = {}
+        for key, limit in _FIELD_LIMITS.items():
+            tpl = str(fields.get(key) or "")
+            if not tpl:
+                continue
+            val = expand_spintax(tpl)
+            if len(val) > limit:
+                too_long.add(labels[key])
+            one[key] = val[:limit]
+        rolled.append(one)
+    seen: list[dict] = []
+    for r in rolled:
+        if r not in seen:
+            seen.append(r)
+    return {
+        "samples": seen[:show],
+        "distinct": len(seen),
+        "too_long": sorted(too_long),
+    }
+
+
+# ── Сборка параметров операции с экрана ──────────────────────────────────────
+
+# Операции экрана «Оформление» → подпись по-русски (её видит владелец в
+# очереди, в итогах и в подтверждении).
+SETTER_OPS = {
+    "name": "Имя и описание",
+    "avatar": "Аватар",
+    "2fa": "Пароль 2FA",
+    "username": "Юзернейм",
+    "privacy": "Приватность",
+    "close_sessions": "Закрыть чужие сеансы",
+    "remove_avatar": "Удалить фото",
+    "clear_bio": "Очистить описание",
+    "reset_2fa": "Снять 2FA",
+}
+
+PRIVACY_LABELS = {"phone": "номер телефона", "invite": "добавление в группы",
+                  "lastseen": "время в сети"}
+
+_USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
+
+
+def build_setter_params(op: str, body: dict) -> dict:
+    """Проверить ввод экрана и собрать params операции (без account_ids).
+
+    Ошибка ввода — ``ValueError`` с текстом для владельца. Чистая функция: та же
+    проверка, что на сервере, тестируется без базы и сети.
+    """
+    if op not in SETTER_OPS:
+        raise ValueError("Неизвестная операция оформления")
+    params: dict = {"op": op}
+    if op == "name":
+        nd = {k: str(body.get(k) or "").strip()[:512]
+              for k in ("first_name", "last_name", "about")}
+        if not any(nd.values()):
+            raise ValueError("Заполните хотя бы одно поле: имя, фамилию или описание")
+        params["name_data"] = nd
+        params["keep_empty"] = True
+    elif op == "avatar":
+        raw = body.get("avatar_urls")
+        if isinstance(raw, str):
+            raw = raw.splitlines()
+        urls = [str(u).strip() for u in (raw or []) if str(u).strip()]
+        one = str(body.get("avatar_url") or "").strip()
+        if one and one not in urls:
+            urls.insert(0, one)
+        if not urls:
+            raise ValueError("Добавьте хотя бы одну картинку")
+        if len(urls) > MAX_AVATAR_URLS:
+            raise ValueError(f"Не больше {MAX_AVATAR_URLS} картинок в наборе")
+        bad = [u for u in urls if not u.lower().startswith(("http://", "https://"))]
+        if bad:
+            raise ValueError("Каждая ссылка на картинку должна начинаться с http")
+        params["avatar_urls"] = urls
+    elif op == "2fa":
+        new_pass = str(body.get("new_password") or "").strip()
+        if len(new_pass) < 4:
+            raise ValueError("Пароль — минимум 4 символа")
+        params["new_password"] = new_pass[:64]
+        params["current_password"] = str(body.get("current_password") or "").strip()[:64]
+        params["hint"] = str(body.get("hint") or "").strip()[:64]
+    elif op == "username":
+        tpl = str(body.get("username") or "").strip().lstrip("@")
+        if not tpl:
+            raise ValueError("Укажите шаблон юзернейма")
+        # Шаблон проверяем на броске: спинтакс и {rand} раскрываются у каждого
+        # аккаунта, а заведомо негодная форма должна отбиться здесь, а не
+        # сотней одинаковых ошибок в итогах операции.
+        sample = render_username(tpl, 0)
+        if not _USERNAME_RE.match(sample):
+            raise ValueError("Юзернейм: латиница, цифры и «_», 5–32 символа, "
+                             "начинается с буквы")
+        params["username"] = tpl[:200]
+    elif op == "privacy":
+        key = str(body.get("privacy_key") or "").strip()
+        if key not in PRIVACY_LABELS:
+            raise ValueError("Выберите, что скрыть или открыть")
+        params["privacy_key"] = key
+        params["privacy_allow"] = bool(body.get("privacy_allow"))
+    elif op == "reset_2fa":
+        # Пустой пароль допустим: исполнитель возьмёт сохранённый у аккаунта.
+        params["current_password"] = str(body.get("current_password") or "").strip()[:64]
+    return params
+
+
+def setter_label(op: str, params: dict, count: int) -> str:
+    """Подпись операции в очереди: что делаем и на скольких аккаунтах."""
+    what = SETTER_OPS.get(op, op)
+    if op == "privacy":
+        verb = "открыть" if params.get("privacy_allow") else "скрыть"
+        what = f"Приватность: {verb} {PRIVACY_LABELS.get(params.get('privacy_key'), '')}"
+    elif op == "avatar":
+        n = len(avatar_urls_of(params))
+        if n > 1:
+            what = f"Аватар (набор из {n})"
+    return f"Оформление: {what} × {count} акк."
+
+
+def render_username(template: str, slot: int) -> str:
+    """Юзернейм для аккаунта: спинтакс + ``{rand}`` (4 случайные цифры) +
+    ``{n}`` (номер аккаунта в прогоне). Без ``{rand}``/``{n}``/спинтакса весь
+    флот получил бы один и тот же юзернейм, а он уникален в Telegram — второй
+    аккаунт получил бы отказ «занято»."""
+    import random as _r
+
+    out = expand_spintax(template or "")
+    out = out.replace("{n}", str(int(slot) + 1))
+    while "{rand}" in out:
+        out = out.replace("{rand}", f"{_r.randint(0, 9999):04d}", 1)
+    return out.strip().lstrip("@")
+
+
+def name_bio_kwargs(name_data: dict, params: dict) -> dict:
+    """Аргументы ``set_name_bio`` по шаблонам — спинтакс раскрыт для аккаунта.
+
+    ``keep_empty`` (так шлёт экран «Оформление»): пустое поле значит «не
+    трогать», а не «стереть». Без этого владелец, менявший только описание,
+    терял фамилии всего флота: ``UpdateProfileRequest(last_name="")`` её
+    стирает. Старые операции и карточка аккаунта (без флага) ведут себя
+    по-прежнему — пустое поле очищается.
+    """
+    keep = bool(params.get("keep_empty"))
+    out: dict = {"first_name": expand_spintax(name_data.get("first_name", "") or "")}
+    for key in ("last_name", "about"):
+        tpl = name_data.get(key, "") or ""
+        if keep and not tpl.strip():
+            out[key] = None
+        else:
+            out[key] = expand_spintax(tpl)
+    return out
+
+
+async def apply_op(session_string: str, acc: dict, op: str, params: dict,
+                   slot: int = 0) -> dict:
     """Единый диспетчер аккаунт-операции (op → движковая функция).
 
     ОДНА реализация для очереди (op_worker._exec_bulk_set_profile) и инлайн-пути
     (mini_app account_profile) — без дублей. Возвращает {ok, error, ...}.
+    ``slot`` — номер аккаунта в прогоне: по нему выбирается аватар из набора и
+    подставляется ``{n}`` в юзернейм.
     """
     if op == "name":
         nd = params.get("name_data", {})
-        return await set_name_bio(
-            session_string, acc,
-            expand_spintax(nd.get("first_name", "")),
-            expand_spintax(nd.get("last_name", "")),
-            expand_spintax(nd.get("about", "")),
-        )
+        return await set_name_bio(session_string, acc, **name_bio_kwargs(nd, params))
     if op == "avatar":
-        return await set_avatar_from_url(session_string, acc, params.get("avatar_url", ""))
+        return await set_avatar_from_url(session_string, acc, pick_avatar_url(params, slot))
     if op == "2fa":
         return await set_2fa_password(
             session_string, acc,
@@ -608,7 +809,8 @@ async def apply_op(session_string: str, acc: dict, op: str, params: dict) -> dic
             hint=params.get("hint", ""),
         )
     if op == "username":
-        return await set_username(session_string, acc, expand_spintax(params.get("username", "")))
+        return await set_username(session_string, acc,
+                                  render_username(params.get("username", ""), slot))
     if op == "close_sessions":
         return await close_other_sessions(session_string, acc)
     if op == "privacy":
