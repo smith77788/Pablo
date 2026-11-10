@@ -22677,13 +22677,24 @@ async def _exec_mass_report(
 
     from services.reporter_engine import REPORT_REASONS
     reason_label = REPORT_REASONS.get(reason, ("?", ""))[0]
+    # Исход — по ФАКТУ (счётчикам), а не по намерению. Ни одной отправленной
+    # жалобы = провал; часть не прошла = partial. Иначе операция, не отправившая
+    # ничего, показывала бы «выполнено» (ложный успех).
+    if ok_count == 0 and total > 0:
+        status = "failed"
+    elif fail_count > 0:
+        status = "partial"
+    else:
+        status = "done"
+    head = (f"✅ Отправлено: {ok_count}/{total}" if ok_count
+            else f"⚠️ Не отправлено ни одной жалобы: 0/{total}")
     summary = (
         f"🚨 Жалобы на {target} [{reason_label}]\n"
-        f"✅ Отправлено: {ok_count}/{total}"
+        f"{head}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
         + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
     )
-    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+    return {"status": status, "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
 # ── Content Clone executor ──────────────────────────────────────────────────
