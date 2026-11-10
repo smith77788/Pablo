@@ -29398,7 +29398,7 @@ function mgRender() {
           <div class="row-name">${esc(mgLangLabel(p.lang))}</div>
           ${parts.join('')}
         </div>
-        ${isDef?'<span class="chev">›</span>':`<div class="row-right"><button class="btn btn-s" style="padding:5px 9px;font-size:12px" onclick="event.stopPropagation();mgReset('${escJs(p.lang)}')" aria-label="Убрать язык">🗑</button></div>`}
+        ${isDef?'<span class="chev">›</span>':`<div class="row-right" style="flex:0 0 auto"><button class="btn btn-s" style="padding:5px 9px;font-size:12px;width:auto;min-width:0" onclick="event.stopPropagation();mgReset('${escJs(p.lang)}')" aria-label="Убрать язык">🗑</button></div>`}
       </div>`;
   };
   const missing = (MG_DATA.languages||[]).filter(l=>!mgProfile(l.code));
