@@ -154,3 +154,36 @@ def test_a_refused_or_failed_request_is_not_counted(gate):
     with pytest.raises(RuntimeError):
         asyncio.run(failing._call(None, JoinChannelRequest()))
     assert gate.drain_direct_actions() == []
+
+
+def test_a_spam_block_nobody_recorded_still_stops_the_account(gate):
+    """PEER_FLOOD ловят 17 файлов, а записывают четыре. Экран показал ошибку —
+    и аккаунт уходил в следующие приглашения прямо под блок."""
+    import telethon.errors as errors
+    from services import account_manager as am, flood_engine
+    saved = dict(flood_engine._flood_state)
+    saved_q = dict(gate._peer_flood_unsaved)
+    gate._peer_flood_unsaved.clear()
+
+    class _Blocked(_Client):
+        async def _call(self, sender, request, ordered=False):
+            self.sent.append(type(request).__name__)
+            raise errors.PeerFloodError("PEER_FLOOD")
+
+    raw = _Blocked()
+    client = am._wrap_client_flood_floor(raw, 7103)
+    try:
+        with pytest.raises(errors.PeerFloodError):
+            asyncio.run(client._call(None, InviteToChannelRequest()))
+        # Вызывающий ничего не записал, а аккаунт уже остановлен везде.
+        with pytest.raises(gate.AccountRestrictedError):
+            asyncio.run(client._call(None, InviteToChannelRequest()))
+        assert raw.sent == ["InviteToChannelRequest"], "второй запрос ушёл под блок"
+        assert flood_engine.is_account_cooling(7103)
+        assert flood_engine.seconds_until_ready(7103) > 47 * 3600
+        assert gate.drain_peer_floods() == [(7103, "InviteToChannelRequest")]
+    finally:
+        flood_engine._flood_state.clear()
+        flood_engine._flood_state.update(saved)
+        gate._peer_flood_unsaved.clear()
+        gate._peer_flood_unsaved.update(saved_q)

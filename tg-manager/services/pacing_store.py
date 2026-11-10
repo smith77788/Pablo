@@ -208,12 +208,48 @@ async def flush_direct_actions(pool) -> int:
     return done
 
 
+async def flush_peer_floods(pool) -> int:
+    """Дописать в базу спам-блок, который увидела сама дверь к Telegram
+    (account_gate.note_peer_flood): статус и пауза на 48 часов, как у
+    исполнителей операций. Уже помеченный аккаунт не трогаем — причину и
+    срок там поставил тот, кто знал больше."""
+    from services import account_gate, account_status, flood_engine
+
+    items = account_gate.drain_peer_floods()
+    done = 0
+    for i, (aid, name) in enumerate(items):
+        try:
+            await pool.execute(
+                """UPDATE tg_accounts
+                      SET acc_status = 'spamblock', status_reason = $2
+                    WHERE id = $1
+                      AND COALESCE(acc_status, 'active') NOT IN ("""
+                + account_status.sql_dead_list() + ")",
+                aid, f"Telegram ответил PEER_FLOOD на {name or 'запрос'} "
+                     "(замечено на входе); исходящие действия на паузе 48 ч")
+            # Без reason: причину статуса выше (или более раннюю, у уже
+            # помеченного аккаунта) пауза затирать не должна.
+            if await flood_engine.apply_cooldown(
+                    pool, aid, account_gate.PEER_FLOOD_COOLDOWN_S):
+                done += 1
+            else:
+                account_gate.requeue_peer_floods([(aid, name)])
+        except asyncio.CancelledError:
+            account_gate.requeue_peer_floods(items[i:])
+            raise
+        except Exception:
+            account_gate.requeue_peer_floods([(aid, name)])
+            _metric("infragram_pacing_sync_errors_total")
+    return done
+
+
 async def sync_once(pool, worker_id: str = "") -> None:
     """Один обмен: сначала запись (чтобы окно включало свои исходы), потом чтение."""
     await flush_events(pool, worker_id)
     await flush_account_states(pool)
     await flush_flood_floor(pool)
     await flush_direct_actions(pool)
+    await flush_peer_floods(pool)
     await pull_window(pool)
 
 
@@ -242,3 +278,4 @@ async def _final_flush(pool, worker_id: str) -> None:
     await flush_account_states(pool)
     await flush_flood_floor(pool)
     await flush_direct_actions(pool)
+    await flush_peer_floods(pool)

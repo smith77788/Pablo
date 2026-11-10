@@ -49,3 +49,48 @@ def test_a_join_made_outside_the_queue_is_seen_by_the_budget():
     before, after, again = asyncio.run(go())
     assert after - before == 3
     assert again == 0, "повторная запись удвоила бы счёт"
+
+
+def test_a_spam_block_seen_at_the_door_reaches_the_database():
+    import asyncpg
+    from services import account_gate, flood_engine, pacing_store
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
+        saved_q = dict(account_gate._peer_flood_unsaved)
+        saved_s = dict(account_gate._STATUS)
+        saved_f = dict(flood_engine._flood_state)
+        account_gate._peer_flood_unsaved.clear()
+        try:
+            await pool.execute("DELETE FROM tg_accounts WHERE id = ANY($1::bigint[])",
+                               [ACC, ACC + 1])
+            await pool.execute(
+                """INSERT INTO tg_accounts(id, owner_id, phone, session_str, acc_status, status_reason)
+                   VALUES ($1, $3, '+990071002', '', 'active', NULL),
+                          ($2, $3, '+990071003', '', 'frozen', 'заморожен раньше')""",
+                ACC, ACC + 1, OWNER)
+            account_gate.note_peer_flood(ACC, "InviteToChannelRequest")
+            account_gate.note_peer_flood(ACC + 1, "InviteToChannelRequest")
+            assert await pacing_store.flush_peer_floods(pool) == 2
+            rows = await pool.fetch(
+                "SELECT id, acc_status, status_reason, "
+                "       cooldown_until > now() + INTERVAL '47 hours' AS paused "
+                "FROM tg_accounts WHERE id = ANY($1::bigint[]) ORDER BY id",
+                [ACC, ACC + 1])
+            return [dict(r) for r in rows], await pacing_store.flush_peer_floods(pool)
+        finally:
+            await pool.execute("DELETE FROM tg_accounts WHERE id = ANY($1::bigint[])",
+                               [ACC, ACC + 1])
+            for live, old in ((account_gate._peer_flood_unsaved, saved_q),
+                              (account_gate._STATUS, saved_s),
+                              (flood_engine._flood_state, saved_f)):
+                live.clear()
+                live.update(old)
+            await pool.close()
+
+    (fresh, frozen), again = asyncio.run(go())
+    assert fresh["acc_status"] == "spamblock" and fresh["paused"]
+    assert "PEER_FLOOD" in fresh["status_reason"]
+    # Более тяжёлый статус и его причину дверь не затирает.
+    assert (frozen["acc_status"], frozen["status_reason"]) == ("frozen", "заморожен раньше")
+    assert again == 0

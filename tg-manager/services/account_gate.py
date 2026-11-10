@@ -72,6 +72,13 @@ _BUDGET_ACTION = {
 _direct_unsaved: dict[tuple[int, str], int] = {}
 
 
+# Аккаунт → вид запроса, на который Telegram ответил PEER_FLOOD; ждёт записи
+# статуса в базу (pacing_store.flush_peer_floods).
+_peer_flood_unsaved: dict[int, str] = {}
+# Столько же, сколько у исполнителей операций (flood_engine.record_peer_flood).
+PEER_FLOOD_COOLDOWN_S = 48 * 3600
+
+
 class AccountRestrictedError(Exception):
     """Запрос не отправлен: аккаунт под ограничением Telegram."""
 
@@ -175,3 +182,50 @@ def requeue_direct_actions(items) -> None:
     for aid, action, n in items:
         key = (int(aid), str(action))
         _direct_unsaved[key] = _direct_unsaved.get(key, 0) + int(n)
+
+
+def note_peer_flood(account_id, request_name: str = "") -> None:
+    """Telegram ответил PEER_FLOOD: аккаунт помечен за спам.
+
+    Исполнители операций записывают это сами (flood_engine.record_peer_flood),
+    но ошибку ловят 17 файлов, а записывают четыре. На остальных путях экран
+    показывал ошибку, аккаунт оставался «активным» и уходил в следующую
+    рассылку или приглашения прямо под блок — это и удлиняет ограничение.
+
+    Здесь то же самое делает дверь: блок действует сразу в этом процессе
+    (отказ в `refusal`, пауза в подборе аккаунтов), а в базу статус дописывает
+    pacing_store. Повторная запись поверх исполнителя безвредна: статус тот
+    же, пауза только продлевается."""
+    try:
+        aid = int(account_id)
+    except (TypeError, ValueError):
+        return
+    if aid <= 0:
+        return
+    _STATUS[aid] = "spamblock"
+    _peer_flood_unsaved[aid] = str(request_name or "")[:80]
+    try:
+        import time as _time
+        from services import flood_engine as _fe
+        state = _fe.get_account_state(aid)
+        state.cooldown_until = max(state.cooldown_until,
+                                   _time.monotonic() + PEER_FLOOD_COOLDOWN_S)
+    except Exception:
+        log.debug("note_peer_flood: пауза в памяти не поставлена", exc_info=True)
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_flood_events_total",
+               {"kind": "peer_flood_at_door", "action": "direct"})
+    except Exception:
+        pass
+
+
+def drain_peer_floods() -> list[tuple[int, str]]:
+    out = list(_peer_flood_unsaved.items())
+    _peer_flood_unsaved.clear()
+    return out
+
+
+def requeue_peer_floods(items) -> None:
+    for aid, name in items:
+        _peer_flood_unsaved.setdefault(int(aid), str(name))

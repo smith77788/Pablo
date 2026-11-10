@@ -316,6 +316,9 @@ CACHE: dict[str, str] = {
     "services/account_gate.py:_STATUS": (
         "копия tg_accounts.acc_status для двери к Telegram; перечитывается "
         "account_manager.prime_account_transport на каждой реплике"),
+    "services/account_gate.py:_peer_flood_unsaved": (
+        "очередь записи спам-блока, замеченного на входе, в tg_accounts "
+        "(pacing_store.flush_peer_floods), как _dirty"),
     "services/account_gate.py:_direct_unsaved": (
         "очередь записи действий мимо очереди операций в operation_audit "
         "(pacing_store.flush_direct_actions), как _dirty"),
