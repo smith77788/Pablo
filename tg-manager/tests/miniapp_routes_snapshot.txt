@@ -200,8 +200,9 @@ GET /api/miniapp/global_presence
 GET /api/miniapp/global_presence/{plan_id}
 GET /api/miniapp/graph
 GET /api/miniapp/graph/overlaps
+GET /api/miniapp/growth/goal/{gid}/plan
+GET /api/miniapp/growth/goals
 GET /api/miniapp/growth/overview
-GET /api/miniapp/growth/plan
 GET /api/miniapp/health
 GET /api/miniapp/host_server/market
 GET /api/miniapp/host_server/my
@@ -302,6 +303,7 @@ GET /api/miniapp/sales/persona/{pid}/stats
 GET /api/miniapp/sales/personas
 GET /api/miniapp/self_promo
 GET /api/miniapp/self_promo/audience
+GET /api/miniapp/selfpromo/overview
 GET /api/miniapp/semantic_memory
 GET /api/miniapp/semantic_memory/{bot_id}
 GET /api/miniapp/seo
@@ -535,8 +537,9 @@ HEAD /api/miniapp/global_presence
 HEAD /api/miniapp/global_presence/{plan_id}
 HEAD /api/miniapp/graph
 HEAD /api/miniapp/graph/overlaps
+HEAD /api/miniapp/growth/goal/{gid}/plan
+HEAD /api/miniapp/growth/goals
 HEAD /api/miniapp/growth/overview
-HEAD /api/miniapp/growth/plan
 HEAD /api/miniapp/health
 HEAD /api/miniapp/host_server/market
 HEAD /api/miniapp/host_server/my
@@ -637,6 +640,7 @@ HEAD /api/miniapp/sales/persona/{pid}/stats
 HEAD /api/miniapp/sales/personas
 HEAD /api/miniapp/self_promo
 HEAD /api/miniapp/self_promo/audience
+HEAD /api/miniapp/selfpromo/overview
 HEAD /api/miniapp/semantic_memory
 HEAD /api/miniapp/semantic_memory/{bot_id}
 HEAD /api/miniapp/seo
@@ -902,6 +906,9 @@ POST /api/miniapp/global_search
 POST /api/miniapp/groups/announce
 POST /api/miniapp/groups/import_all
 POST /api/miniapp/growth
+POST /api/miniapp/growth/goal
+POST /api/miniapp/growth/goal/{gid}/delete
+POST /api/miniapp/growth/goal/{gid}/update
 POST /api/miniapp/host_server/buy
 POST /api/miniapp/host_server/offering
 POST /api/miniapp/host_server/offering/{offering_id}/toggle
@@ -1015,6 +1022,13 @@ POST /api/miniapp/sales/persona/{pid}/unassign
 POST /api/miniapp/schedule/{sch_id}/cancel
 POST /api/miniapp/self_promo/template
 POST /api/miniapp/self_promo/{tpl_id}/launch
+POST /api/miniapp/selfpromo/campaign
+POST /api/miniapp/selfpromo/campaign/{cid}/delete
+POST /api/miniapp/selfpromo/campaign/{cid}/launch
+POST /api/miniapp/selfpromo/campaign/{cid}/status
+POST /api/miniapp/selfpromo/preview
+POST /api/miniapp/selfpromo/test
+POST /api/miniapp/selfpromo/texts
 POST /api/miniapp/seo/analyze
 POST /api/miniapp/seo/apply
 POST /api/miniapp/seo/apply_all

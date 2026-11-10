@@ -69,6 +69,8 @@ from services import mini_app_workspace
 from services import mini_app_crm
 from services import mini_app_my_data
 from services import mini_app_widgets
+from services import mini_app_selfpromo
+from services import mini_app_growth_plan
 from services import mini_app_bot_people
 from services.security import (
     check_rate_limit,
@@ -8140,6 +8142,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_crm.setup_routes(app, pool)
     mini_app_my_data.setup_routes(app, pool)
     mini_app_widgets.setup_routes(app, pool)
+    mini_app_selfpromo.setup_routes(app, pool)
+    mini_app_growth_plan.setup_routes(app, pool)
     mini_app_bot_people.setup_routes(app, pool)
     # ИИ в переписке оператора: черновик ответа и сводка (services/ai_inbox_assist).
     from services import ai_inbox_assist

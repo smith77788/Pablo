@@ -4097,11 +4097,30 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📈 Мотор роста</div>
     <div class="hdr-meta">
-      <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openSelfPromoCreateModal()">+ Создать</button>
+      <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="spcOpenEditor()">+ Кампания</button>
     </div>
   </div>
   <div class="filter-chips mod-tabs" data-module="growth" data-tab="self" role="tablist" aria-label="Вкладки модуля «Мотор роста»"></div>
   <div class="sub-sb">
+    <!-- Самопиар своих каналов и ботов по своей аудитории (screens/selfpromo.js).
+         Раньше экран умел только рекламу самой платформы — она теперь внизу,
+         в свёрнутом блоке. -->
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 2px 6px">
+      Расскажите подписчикам своих ботов про другие ваши боты и каналы. Это бесплатно,
+      и эти люди вас уже знают. Один человек получает сообщение один раз.
+    </div>
+    <div id="spcKpis" style="display:flex;gap:8px;padding:2px 0 6px;flex-wrap:wrap"></div>
+    <div id="spcIdeasWrap" style="display:none">
+      <div class="sec">💡 С чего начать</div>
+      <div class="lst" id="spcIdeas"></div>
+    </div>
+    <div class="sec">Кампании</div>
+    <div class="lst" id="spcList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:10px 2px">🤝 Реклама Infragram по вашей реферальной ссылке</summary>
+    <div style="display:flex;justify-content:flex-end;padding:0 16px 6px">
+      <button class="btn btn-s" style="min-height:32px;padding:6px 12px;font-size:13px" onclick="openSelfPromoCreateModal()">+ Шаблон</button>
+    </div>
     <!-- Настройки/инфо: куда ведёт реклама -->
     <div id="spInfo" style="background:var(--bg2);border-radius:var(--radius-lg);padding:12px;margin:4px 16px 10px">
       <div style="font-size:13px;font-weight:600;margin-bottom:6px">⚙️ Куда ведёт реклама</div>
@@ -4113,6 +4132,117 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec">Шаблоны самопиара</div>
     <div class="lst" id="spList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </details>
+  </div>
+</div>
+
+<!-- ══════════ САМОПИАР: РЕДАКТОР КАМПАНИИ ══════════ -->
+<div class="screen" id="s-spc-edit">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title" id="spcEditTitle">📣 Новая кампания</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">1. Что продвигаем</div>
+    <div class="lst" style="padding:14px">
+      <div class="field">
+        <label>Что</label>
+        <select id="spcKind" onchange="spcKindChanged()">
+          <option value="bot" selected>🤖 Своего бота</option>
+          <option value="channel">📡 Свой канал или группу</option>
+          <option value="link">🔗 Любую ссылку</option>
+        </select>
+      </div>
+      <div class="field" id="spcTargetWrap">
+        <label id="spcTargetLbl">Какого бота</label>
+        <select id="spcTarget" onchange="spcTargetChanged()"></select>
+      </div>
+      <div class="field" id="spcUrlWrap" style="display:none">
+        <label id="spcUrlLbl">Ссылка (https://…)</label>
+        <input type="url" id="spcUrl" class="inp" maxlength="300" placeholder="https://" style="width:100%;box-sizing:border-box" oninput="spcPreviewSoon()">
+        <div class="field-note" id="spcUrlNote"></div>
+      </div>
+    </div>
+
+    <div class="sec">2. Где показываем</div>
+    <div class="lst" style="padding:14px">
+      <div class="field">
+        <label>Подписчикам ботов — сообщением в личку от бота</label>
+        <div id="spcBots" style="max-height:220px;overflow:auto;margin-top:4px"></div>
+      </div>
+      <div class="field">
+        <label>Постом в своих каналах (необязательно)</label>
+        <div id="spcChannels" style="max-height:180px;overflow:auto;margin-top:4px"></div>
+      </div>
+    </div>
+
+    <div class="sec">3. Кому</div>
+    <div class="lst" style="padding:14px">
+      <div class="field">
+        <label>Аудитория</label>
+        <select id="spcSegment" onchange="spcPreviewSoon()"></select>
+      </div>
+      <label class="chk-row" id="spcSkipWrap" style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:10px">
+        <input type="checkbox" id="spcSkip" checked onchange="spcPreviewSoon()"> Не слать тем, кто уже подписан на продвигаемого бота
+      </label>
+      <div class="field">
+        <label>Не беспокоить одного человека самопиаром чаще, чем</label>
+        <select id="spcCooldown" onchange="spcPreviewSoon()">
+          <option value="0">Без паузы</option>
+          <option value="3">Раз в 3 дня</option>
+          <option value="7" selected>Раз в неделю</option>
+          <option value="14">Раз в 2 недели</option>
+          <option value="30">Раз в месяц</option>
+        </select>
+        <div class="field-note">Пауза считается между всеми вашими кампаниями самопиара</div>
+      </div>
+    </div>
+
+    <div class="sec">4. Сообщение</div>
+    <div class="lst" style="padding:14px">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button type="button" class="btn btn-s" style="flex:1;min-height:36px;font-size:13px;padding:8px 6px" onclick="spcPickText(true, this)">✨ Варианты от ИИ</button>
+        <button type="button" class="btn btn-s" style="flex:1;min-height:36px;font-size:13px;padding:8px 6px" onclick="spcPickText(false, this)">📋 Готовые тексты</button>
+      </div>
+      <div class="field">
+        <label>Текст</label>
+        <textarea id="spcBody" class="inp" rows="5" maxlength="3500" placeholder="Например: У нас появился канал с новостями — подписывайтесь" style="width:100%;box-sizing:border-box;resize:vertical" oninput="spcCount()"></textarea>
+        <div class="field-note"><span id="spcBodyLen">0</span>/3500 · {{first_name}} подставит имя человека</div>
+      </div>
+      <div class="field">
+        <label>Надпись на кнопке со ссылкой</label>
+        <input type="text" id="spcButton" class="inp" maxlength="40" placeholder="Например: Перейти" style="width:100%;box-sizing:border-box">
+        <div class="field-note">Пусто — ссылка будет в конце текста</div>
+      </div>
+      <div class="field">
+        <label>Название кампании (для себя)</label>
+        <input type="text" id="spcName" class="inp" maxlength="80" placeholder="Пусто — назовём сами" style="width:100%;box-sizing:border-box">
+      </div>
+    </div>
+
+    <div class="sec">5. Как часто</div>
+    <div class="lst" style="padding:14px">
+      <div class="field">
+        <label>Автопоказ новым подписчикам</label>
+        <select id="spcAuto">
+          <option value="0" selected>Только вручную</option>
+          <option value="1">Каждый день — тем, кто ещё не получал</option>
+          <option value="3">Раз в 3 дня — тем, кто ещё не получал</option>
+          <option value="7">Раз в неделю — тем, кто ещё не получал</option>
+          <option value="14">Раз в 2 недели — тем, кто ещё не получал</option>
+          <option value="30">Раз в месяц — тем, кто ещё не получал</option>
+        </select>
+        <div class="field-note">Кампания сама догоняет новых людей. Второй раз одному человеку она не уходит никогда.</div>
+      </div>
+    </div>
+
+    <div style="padding:0 16px 20px">
+      <div id="spcPreview" class="field-note" style="white-space:pre-line;padding:10px 12px;margin-bottom:10px;background:var(--bg2);border-radius:var(--radius)"></div>
+      <div id="spcErr" class="field-err"></div>
+      <button class="btn btn-s" id="spcTestBtn" onclick="spcTest()" style="width:100%;margin-bottom:8px">🧪 Отправить пробное себе</button>
+      <button class="btn btn-s" id="spcSaveBtn" onclick="spcSave(false)" style="width:100%;margin-bottom:8px">💾 Сохранить без запуска</button>
+      <button class="btn btn-p" id="spcLaunchBtn" onclick="spcSave(true)" style="width:100%">🚀 Сохранить и запустить</button>
+    </div>
   </div>
 </div>
 
@@ -5271,20 +5401,70 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="filter-chips mod-tabs" data-module="growth" data-tab="plan" role="tablist" aria-label="Вкладки модуля «Мотор роста»"></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 4px">
-      Единый взгляд на продвижение: активность инструментов и прирост каналов за период.
+      Поставьте цель каналу или боту — план покажет, успеваете ли вы, сколько нужно в день и чем расти из того, что у вас уже есть.
     </div>
     <div id="growthHubTotals" style="display:flex;gap:8px;padding:6px 16px 4px;flex-wrap:wrap"></div>
-    <div class="sec">🎯 Цель роста</div>
-    <div style="display:flex;gap:8px;padding:4px 0 2px;align-items:flex-end;flex-wrap:wrap">
-      <div style="flex:1;min-width:110px"><label style="font-size:11px;color:var(--hint)">Сколько подписчиков</label><input type="number" id="ghGoal" value="1000" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
-      <div style="flex:1;min-width:90px"><label style="font-size:11px;color:var(--hint)">За сколько дней</label><input type="number" id="ghDays" value="14" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
-      <button class="btn btn-p" style="flex:0 0 auto" onclick="runGrowthPlan()">План →</button>
+    <!-- Цели роста (screens/growth_plan.js). Раньше здесь был калькулятор,
+         который делил число по вшитым долям и ничего не сохранял. -->
+    <div class="sec-row"><div class="sec">🎯 Мои цели</div><span class="sec-btn" onclick="gpOpenNew()" role="button" tabindex="0">+ Новая цель</span></div>
+    <div class="lst" id="gpGoals"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="gpNewWrap" style="display:none">
+      <div class="sec" id="gpNewSec">Новая цель</div>
+      <div class="lst" style="padding:14px">
+        <div class="field" id="gpAssetWrap">
+          <label>Что растим</label>
+          <select id="gpAsset" onchange="gpAssetChanged()"></select>
+        </div>
+        <div class="field">
+          <label>До скольких подписчиков довести</label>
+          <input type="number" id="gpTarget" class="inp" min="1" inputmode="numeric" style="width:100%;box-sizing:border-box">
+          <div class="field-note" id="gpNowNote"></div>
+        </div>
+        <div class="field">
+          <label>За сколько дней</label>
+          <select id="gpDays">
+            <option value="7">Неделя</option>
+            <option value="14">Две недели</option>
+            <option value="30" selected>Месяц</option>
+            <option value="60">Два месяца</option>
+            <option value="90">Три месяца</option>
+            <option value="180">Полгода</option>
+            <option value="365">Год</option>
+          </select>
+        </div>
+        <div class="field-err" id="gpNewErr"></div>
+        <button class="btn btn-p" id="gpNewBtn" onclick="gpSaveGoal()" style="width:100%">🎯 Поставить цель</button>
+        <button class="btn btn-s" onclick="gpCloseNew()" style="width:100%;margin-top:8px">Отмена</button>
+      </div>
     </div>
-    <div id="growthHubPlan" style="padding:2px 16px"></div>
     <div class="sec">Инструменты роста</div>
     <div class="lst" id="growthHubTools"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Прирост каналов</div>
     <div class="lst" id="growthHubChannels"></div>
+  </div>
+</div>
+
+<!-- ══════════ ПЛАН РОСТА: ОДНА ЦЕЛЬ (screens/growth_plan.js) ══════════ -->
+<div class="screen" id="s-growthgoal">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title" id="gpGoalTitle">🎯 Цель</div>
+  </div>
+  <div class="sub-sb">
+    <div id="gpGoalHead" style="padding:8px 0 4px"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="gpGoalBody" style="display:none">
+      <div class="sec">Сегодня</div>
+      <div class="lst" id="gpToday"></div>
+      <div class="sec">Чем расти</div>
+      <div class="field-note" id="gpCoverage" style="padding:0 2px 8px;white-space:normal"></div>
+      <div class="lst" id="gpLevers"></div>
+      <div class="sec">Что уже делали</div>
+      <div class="lst" id="gpLog"></div>
+      <div style="display:flex;gap:8px;padding:14px 0 20px">
+        <button class="btn btn-s" style="flex:1" onclick="gpEditGoal()">✏️ Изменить цель или срок</button>
+        <button class="btn btn-s" style="flex:0 0 auto" onclick="gpDeleteGoal()">🗑 Удалить цель</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -18217,6 +18397,7 @@ async function runDiag() {
 const _GROWTH_TOOL_FN = {boost:'openBoost', growth_agent:'openGrowth', self_promo:'openSelfPromo'};
 async function openGrowthHub() {
   push('s-growthhub');
+  gpLoad();
   txt('growthHubTools','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('growthHubChannels','');
   txt('growthHubTotals','');
@@ -18252,27 +18433,6 @@ async function openGrowthHub() {
     }).join('') : empty('📡','Нет каналов','Создайте канал в фабрике — прирост появится здесь'));
   } catch(e) {
     txt('growthHubTools', empty('⚠️','Ошибка',errRu(e)||'Не удалось загрузить', {label:'↺ Повторить',fn:retryCall('openGrowthHub')}));
-  }
-}
-async function runGrowthPlan() {
-  const goal = parseInt(document.getElementById('ghGoal').value)||1000;
-  const days = parseInt(document.getElementById('ghDays').value)||14;
-  txt('growthHubPlan','<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const p = await api(`/api/miniapp/growth/plan?goal=${goal}&days=${days}`);
-    const verdict = p.feasible_invite===false
-      ? `<div class="row" style="background:var(--bg-red-16);border-radius:10px;margin:4px 0"><div class="row-ico">⚠️</div><div class="row-body"><div class="row-name" style="font-size:12px;white-space:normal">${esc(p.verdict||'Инвайт-доля недостижима текущим флотом')}</div></div></div>`
-      : (p.verdict?`<div class="hint" style="font-size:11px;color:var(--hint);padding:2px 2px 6px">${esc(p.verdict)}</div>`:'');
-    const steps = (p.steps||[]).map(s=>`
-      <div class="row tap" onclick="${(_GROWTH_TOOL_FN[s.kind]||'openGrowthHub')}()">
-        <div class="row-ico" style="background:var(--bg-purple-16)">${Math.round((s.weight||0)*100)}%</div>
-        <div class="row-body"><div class="row-name">${esc(s.label)} <span style="color:var(--green)">+${num(s.target)}</span></div><div class="row-val" style="white-space:normal;font-size:12px">${esc(s.why)}</div></div>
-        <span class="chev">›</span>
-      </div>`).join('');
-    const seo = p.seo?`<div class="row tap" onclick="openSeoObj()"><div class="row-ico" style="background:var(--bg-green-16)">🔎</div><div class="row-body"><div class="row-name">${esc(p.seo.label)}</div><div class="row-val" style="white-space:normal;font-size:12px">${esc(p.seo.why)}</div></div><span class="chev">›</span></div>`:'';
-    txt('growthHubPlan', verdict + steps + seo);
-  } catch(e) {
-    txt('growthHubPlan', empty('⚠️','Ошибка',errRu(e)||'Не удалось рассчитать план', {label:'↺ Повторить',fn:retryCall('runGrowthPlan')}));
   }
 }
 // ── Growth Agent ─────────────────────────────────────────
@@ -22796,6 +22956,10 @@ let UC_ACC_SEL = new Set();
 let UC_BOT_SEL = new Set();
 // Экран «🧩 Виджеты в чатах» (screens/widgets.js).
 let WG = {tpls: [], limits: {}, tpl: '', edit: null, offset: 0, items: []};
+// Экран «📣 Самопиар» (screens/selfpromo.js): обзор и редактор кампании.
+let SPC = {data: null, edit: null, previewTimer: 0, counts: null};
+// «🎯 План роста» (screens/growth_plan.js): цели и открытая цель.
+let GP = {data: null, goal: null, edit: null};
 let UC_CHAT_SEL = new Map();
 
 const UC_KIND_BOX = {channels:'ucKChannels', chats:'ucKChats', bots:'ucKBots', dm:'ucKDm'};
@@ -29349,6 +29513,7 @@ function copySpRefLink() {
 let _SP_ROWS = [];
 async function openSelfPromo() {
   push('s-selfpromo');
+  spcLoad();
   // Показать реальную реф-ссылку на системного бота
   const link = refLink();
   const el = document.getElementById('spRefLink');
@@ -33237,6 +33402,8 @@ function renderAudSegChart(segments) {
 <script src="screens/cohorts.js"></script>
 <script src="screens/deals_board.js"></script>
 <script src="screens/widgets.js"></script>
+<script src="screens/selfpromo.js"></script>
+<script src="screens/growth_plan.js"></script>
 <script src="screens/home_screen.js"></script>
 <script src="screens/find_mine.js"></script>
 <script src="screens/osint_search.js"></script>

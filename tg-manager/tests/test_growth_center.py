@@ -76,38 +76,22 @@ def test_brain_no_stall_when_growth_active_or_no_channels():
                    for s in build_suggestions(_snap(growth={"channels": 0, "growth_ops_7d": 0})))
 
 
-def test_recommend_plan_splits_goal_across_tools():
-    p = growth_center.recommend_plan(1000, 14, n_accounts=20, daily_capacity=400)
-    kinds = [s["kind"] for s in p["steps"]]
-    assert kinds == ["invite", "self_promo", "growth_agent", "boost"]
-    # веса суммируются в 1.0, цели — доли от goal
-    assert abs(sum(s["weight"] for s in p["steps"]) - 1.0) < 1e-9
-    assert p["steps"][0]["target"] == 500   # invite = 50%
-    assert p["steps"][3]["target"] == 100   # boost = 10%
-    assert p["seo"]["kind"] == "seo"
-    assert p["goal"] == 1000 and p["deadline_days"] == 14
+def test_the_fixed_share_plan_is_gone():
+    """Раскладка цели по вшитым долям 50/20/20/10 удалена (09.11.2026).
 
-
-def test_recommend_plan_flags_infeasible_invite_with_no_fleet():
-    p = growth_center.recommend_plan(100000, 1, n_accounts=0, daily_capacity=0)
-    assert p["feasible_invite"] is False
-    assert p["verdict"]
-
-
-def test_recommend_plan_clamps_bad_input():
-    p = growth_center.recommend_plan(0, 0, n_accounts=-5)
-    assert p["goal"] == 1 and p["deadline_days"] == 1
-    assert p["fleet_accounts"] == 0
-
-
-def test_plan_endpoint_and_ui_wired():
+    Она не смотрела ни на то, что растят, ни на то, чем владелец располагает,
+    цель не сохранялась и прогресс не считался — владелец назвал модуль
+    бесполезным. Цели и рычаги теперь в services/growth_plan.py
+    (tests/test_growth_plan_postgres.py). Мёртвая функция ждёт, пока её
+    выберут вместо живой, поэтому проверяем, что она не вернулась.
+    """
+    assert not hasattr(growth_center, "recommend_plan")
     api = api_source()
-    assert "async def growth_plan" in api
-    assert '"/api/miniapp/growth/plan"' in api
-    assert "growth_center.recommend_plan" in api
+    assert '"/api/miniapp/growth/plan"' not in api
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-    assert "function runGrowthPlan" in html
-    assert "/api/miniapp/growth/plan" in html
+    assert "function runGrowthPlan" not in html
+    assert "/api/miniapp/growth/goals" in open(
+        os.path.join(ROOT, "mini_app", "screens", "growth_plan.js"), encoding="utf-8").read()
 
 
 def test_endpoint_and_ui_wired():

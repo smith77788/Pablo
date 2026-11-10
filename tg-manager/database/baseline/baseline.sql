@@ -26,6 +26,251 @@ END;
 $$;
 
 --
+-- Name: _integration_emit_account_added(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public._integration_emit_account_added() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    BEGIN
+        IF EXISTS (SELECT 1 FROM webhook_endpoints
+                   WHERE owner_id = NEW.owner_id AND is_active) THEN
+            INSERT INTO integration_events (owner_id, event, payload)
+            VALUES (NEW.owner_id, 'account.added', jsonb_build_object(
+                'account_id', NEW.id,
+                'phone', NEW.phone,
+                'username', NEW.username,
+                'status', COALESCE(NEW.acc_status, 'ok')));
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'integration event (account %) skipped: %', NEW.id, SQLERRM;
+    END;
+    RETURN NEW;
+END;
+$$;
+
+--
+-- Name: _integration_emit_account_status(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public._integration_emit_account_status() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.acc_status IS DISTINCT FROM OLD.acc_status THEN
+        BEGIN
+            IF EXISTS (SELECT 1 FROM webhook_endpoints
+                       WHERE owner_id = NEW.owner_id AND is_active) THEN
+                INSERT INTO integration_events (owner_id, event, payload)
+                VALUES (NEW.owner_id,
+                    CASE WHEN NEW.acc_status IN ('banned', 'spamblock', 'deactivated',
+                                                 'session_expired', 'frozen')
+                         THEN 'account.lost' ELSE 'account.status_changed' END,
+                    jsonb_build_object(
+                        'account_id', NEW.id,
+                        'phone', NEW.phone,
+                        'username', NEW.username,
+                        'old_status', OLD.acc_status,
+                        'new_status', NEW.acc_status));
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'integration event (account %) skipped: %', NEW.id, SQLERRM;
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+--
+-- Name: _integration_emit_automation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public._integration_emit_automation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.event_type <> 'webhook.received' THEN
+        BEGIN
+            IF EXISTS (SELECT 1 FROM webhook_endpoints
+                       WHERE owner_id = NEW.owner_id AND is_active
+                         AND (cardinality(events) = 0 OR NEW.event_type = ANY(events))) THEN
+                INSERT INTO integration_events (owner_id, event, payload)
+                VALUES (NEW.owner_id, NEW.event_type,
+                        COALESCE(NEW.data, '{}'::jsonb)
+                        || jsonb_strip_nulls(jsonb_build_object(
+                               'bot_id', NEW.bot_id, 'chat_id', NEW.chat_id,
+                               'automation_event_id', NEW.id)));
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'integration event (automation %) skipped: %', NEW.id, SQLERRM;
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+--
+-- Name: _integration_emit_deal(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public._integration_emit_deal() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF TG_OP = 'INSERT'
+       OR NEW.stage IS DISTINCT FROM OLD.stage
+       OR NEW.value IS DISTINCT FROM OLD.value
+       OR NEW.title IS DISTINCT FROM OLD.title THEN
+        BEGIN
+            IF EXISTS (SELECT 1 FROM webhook_endpoints
+                       WHERE owner_id = NEW.owner_id AND is_active
+                         AND (cardinality(events) = 0 OR 'deal.updated' = ANY(events))) THEN
+                INSERT INTO integration_events (owner_id, event, payload)
+                VALUES (NEW.owner_id, 'deal.updated', jsonb_strip_nulls(jsonb_build_object(
+                    'deal_id', NEW.id,
+                    'title', NEW.title,
+                    'contact', NEW.contact,
+                    'stage', NEW.stage,
+                    'old_stage', CASE WHEN TG_OP = 'UPDATE' THEN OLD.stage END,
+                    'value', NEW.value,
+                    'created', TG_OP = 'INSERT')));
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'integration event (crm_deals %) skipped: %', NEW.id, SQLERRM;
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+--
+-- Name: _integration_emit_operation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public._integration_emit_operation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.status IS DISTINCT FROM OLD.status
+       AND NEW.status IN ('done', 'partial', 'failed', 'cancelled') THEN
+        BEGIN
+            IF EXISTS (SELECT 1 FROM webhook_endpoints
+                       WHERE owner_id = NEW.owner_id AND is_active) THEN
+                INSERT INTO integration_events (owner_id, event, payload)
+                VALUES (NEW.owner_id, 'operation.' || NEW.status, jsonb_build_object(
+                    'operation_id', NEW.id,
+                    'op_type', NEW.op_type,
+                    'status', NEW.status,
+                    'total_items', NEW.total_items,
+                    'done_items', NEW.done_items,
+                    'error', NEW.error_msg,
+                    'created_at', NEW.created_at,
+                    'finished_at', COALESCE(NEW.finished_at, now())));
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'integration event (operation %) skipped: %', NEW.id, SQLERRM;
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+--
+-- Name: _integration_emit_pipeline(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public._integration_emit_pipeline() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF TG_OP = 'INSERT'
+       OR NEW.stage IS DISTINCT FROM OLD.stage
+       OR NEW.deal_value IS DISTINCT FROM OLD.deal_value
+       OR NEW.currency IS DISTINCT FROM OLD.currency THEN
+        BEGIN
+            IF EXISTS (SELECT 1 FROM webhook_endpoints
+                       WHERE owner_id = NEW.owner_id AND is_active
+                         AND (cardinality(events) = 0 OR 'pipeline.updated' = ANY(events))) THEN
+                INSERT INTO integration_events (owner_id, event, payload)
+                VALUES (NEW.owner_id, 'pipeline.updated', jsonb_strip_nulls(jsonb_build_object(
+                    'contact_id', NEW.contact_id,
+                    'stage', COALESCE(NEW.stage, 'lead'),
+                    'old_stage', CASE WHEN TG_OP = 'UPDATE' THEN OLD.stage END,
+                    'deal_value', NEW.deal_value,
+                    'currency', COALESCE(NEW.currency, 'USD'),
+                    'created', TG_OP = 'INSERT')));
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'integration event (contact_crm %) skipped: %', NEW.id, SQLERRM;
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+--
+-- Name: _integration_emit_restriction(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public._integration_emit_restriction() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    BEGIN
+        IF EXISTS (SELECT 1 FROM webhook_endpoints
+                   WHERE owner_id = NEW.owner_id AND is_active) THEN
+            INSERT INTO integration_events (owner_id, event, payload)
+            VALUES (NEW.owner_id, 'account.restricted', jsonb_build_object(
+                'account_id', NEW.account_id,
+                'bot_id', NEW.bot_id,
+                'kind', NEW.event_type,
+                'severity', NEW.severity));
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'integration event (restriction %) skipped: %', NEW.id, SQLERRM;
+    END;
+    RETURN NEW;
+END;
+$$;
+
+--
+-- Name: abuse_reports; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.abuse_reports (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    ref_id text NOT NULL,
+    target text NOT NULL,
+    category text NOT NULL,
+    evidence jsonb DEFAULT '[]'::jsonb NOT NULL,
+    context text DEFAULT ''::text NOT NULL,
+    recipient text DEFAULT ''::text NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    error text,
+    sent_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: abuse_reports_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.abuse_reports_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: abuse_reports_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.abuse_reports_id_seq OWNED BY public.abuse_reports.id;
+
+--
 -- Name: account_capabilities; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -146,6 +391,19 @@ CREATE TABLE public.account_niche_profiles (
 );
 
 --
+-- Name: account_pacing_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.account_pacing_state (
+    account_id bigint NOT NULL,
+    consecutive_floods integer DEFAULT 0 NOT NULL,
+    risk_score real DEFAULT 0 NOT NULL,
+    action_delays jsonb DEFAULT '{}'::jsonb NOT NULL,
+    last_flood_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
 -- Name: account_rehab_state; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -217,6 +475,17 @@ CREATE SEQUENCE public.account_status_events_id_seq
 --
 
 ALTER SEQUENCE public.account_status_events_id_seq OWNED BY public.account_status_events.id;
+
+--
+-- Name: account_tags; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.account_tags (
+    account_id bigint NOT NULL,
+    tag text NOT NULL,
+    owner_id bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 --
 -- Name: account_trust_history; Type: TABLE; Schema: public; Owner: -
@@ -538,7 +807,8 @@ CREATE TABLE public.admin_audit_log (
     action text NOT NULL,
     target_user_id bigint,
     details jsonb DEFAULT '{}'::jsonb,
-    created_at timestamp with time zone DEFAULT now()
+    created_at timestamp with time zone DEFAULT now(),
+    source text DEFAULT 'app'::text NOT NULL
 );
 
 --
@@ -568,6 +838,44 @@ CREATE TABLE public.admin_state (
     data text DEFAULT ''::text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+--
+-- Name: ai_reply_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ai_reply_log (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    source text NOT NULL,
+    source_id bigint,
+    provider text,
+    model text,
+    user_text text DEFAULT ''::text NOT NULL,
+    reply text DEFAULT ''::text NOT NULL,
+    guard text,
+    guard_detail text,
+    rating smallint,
+    latency_ms integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_reply_log_rating_check CHECK ((rating = ANY (ARRAY['-1'::integer, 1])))
+);
+
+--
+-- Name: ai_reply_log_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ai_reply_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: ai_reply_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ai_reply_log_id_seq OWNED BY public.ai_reply_log.id;
 
 --
 -- Name: ambassador_status; Type: TABLE; Schema: public; Owner: -
@@ -653,7 +961,9 @@ CREATE TABLE public.api_keys (
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_used_at timestamp with time zone,
-    requests_total bigint DEFAULT 0 NOT NULL
+    requests_total bigint DEFAULT 0 NOT NULL,
+    scopes text[] DEFAULT ARRAY['read'::text, 'write'::text] NOT NULL,
+    revoked_at timestamp with time zone
 );
 
 --
@@ -783,7 +1093,8 @@ CREATE TABLE public.auto_funnel_runs (
     status text DEFAULT 'active'::text NOT NULL,
     started_at timestamp with time zone DEFAULT now() NOT NULL,
     last_sent_step integer,
-    fail_count integer DEFAULT 0
+    fail_count integer DEFAULT 0,
+    workflow_run_id bigint
 );
 
 --
@@ -936,6 +1247,47 @@ CREATE SEQUENCE public.auto_reply_log_id_seq
 --
 
 ALTER SEQUENCE public.auto_reply_log_id_seq OWNED BY public.auto_reply_log.id;
+
+--
+-- Name: automation_cursors; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.automation_cursors (
+    consumer text NOT NULL,
+    last_id bigint DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: automation_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.automation_events (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    event_type text NOT NULL,
+    bot_id bigint,
+    chat_id bigint,
+    data jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: automation_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.automation_events_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: automation_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.automation_events_id_seq OWNED BY public.automation_events.id;
 
 --
 -- Name: automation_rules; Type: TABLE; Schema: public; Owner: -
@@ -1465,7 +1817,14 @@ CREATE TABLE public.bot_sales_orders (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     discount_cents integer DEFAULT 0 NOT NULL,
-    promo_code text DEFAULT ''::text NOT NULL
+    promo_code text DEFAULT ''::text NOT NULL,
+    invoice_sent_at timestamp with time zone,
+    invoice_currency text,
+    invoice_amount bigint,
+    paid_at timestamp with time zone,
+    paid_amount bigint,
+    paid_currency text,
+    payment_charge_id text
 );
 
 --
@@ -1557,7 +1916,10 @@ CREATE TABLE public.bot_sales_personas (
     require_age_confirm boolean DEFAULT false NOT NULL,
     age_confirm_message text DEFAULT ''::text NOT NULL,
     require_payment_proof boolean DEFAULT false NOT NULL,
-    notify_channel_chat_id bigint
+    notify_channel_chat_id bigint,
+    payment_in_chat text DEFAULT ''::text NOT NULL,
+    stars_per_unit integer DEFAULT 0 NOT NULL,
+    payment_provider_token text
 );
 
 --
@@ -1757,7 +2119,8 @@ CREATE TABLE public.bot_users (
     is_blocked boolean DEFAULT false NOT NULL,
     phone text,
     suspect boolean DEFAULT false NOT NULL,
-    flagged_at timestamp with time zone
+    flagged_at timestamp with time zone,
+    fields jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 --
@@ -1816,6 +2179,57 @@ CREATE SEQUENCE public.bot_warehouse_id_seq
 --
 
 ALTER SEQUENCE public.bot_warehouse_id_seq OWNED BY public.bot_warehouse.id;
+
+--
+-- Name: bot_widget_votes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.bot_widget_votes (
+    widget_row bigint NOT NULL,
+    voter_id bigint NOT NULL,
+    voter_name text DEFAULT ''::text NOT NULL,
+    option smallint NOT NULL,
+    voted_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT bot_widget_votes_option_check CHECK (((option >= 0) AND (option <= 9)))
+);
+
+--
+-- Name: bot_widgets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.bot_widgets (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    bot_id bigint NOT NULL,
+    chat_id bigint NOT NULL,
+    message_id bigint NOT NULL,
+    widget_id text,
+    template text DEFAULT 'html'::text NOT NULL,
+    title text DEFAULT ''::text NOT NULL,
+    public_data text DEFAULT ''::text NOT NULL,
+    chat_data text DEFAULT ''::text NOT NULL,
+    allow_queries boolean DEFAULT false NOT NULL,
+    revision integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: bot_widgets_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.bot_widgets_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: bot_widgets_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.bot_widgets_id_seq OWNED BY public.bot_widgets.id;
 
 --
 -- Name: botmother_memory; Type: TABLE; Schema: public; Owner: -
@@ -1921,7 +2335,10 @@ CREATE TABLE public.broadcasts (
     target_user_ids jsonb,
     buttons jsonb,
     silent boolean DEFAULT false NOT NULL,
-    delivery_log_pruned boolean DEFAULT false NOT NULL
+    delivery_log_pruned boolean DEFAULT false NOT NULL,
+    status_note text,
+    scheduled_id bigint,
+    widget_id text
 );
 
 --
@@ -1991,6 +2408,19 @@ CREATE TABLE public.business_connections (
     notify_deleted boolean DEFAULT true NOT NULL,
     notify_edited boolean DEFAULT true NOT NULL,
     stale_notified_at timestamp with time zone
+);
+
+--
+-- Name: campaign_spend; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.campaign_spend (
+    owner_id bigint NOT NULL,
+    campaign_kind text DEFAULT 'dm'::text NOT NULL,
+    campaign_id bigint NOT NULL,
+    amount numeric(14,2) DEFAULT 0 NOT NULL,
+    currency text DEFAULT 'RUB'::text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 --
@@ -2235,7 +2665,19 @@ CREATE TABLE public.chat_warmup_sessions (
     last_seen_msg bigint DEFAULT 0 NOT NULL,
     messages_sent integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now()
+    updated_at timestamp with time zone DEFAULT now(),
+    lang text DEFAULT 'ru'::text NOT NULL,
+    active_from smallint,
+    active_to smallint,
+    daily_limit integer DEFAULT 0 NOT NULL,
+    per_account_daily integer DEFAULT 0 NOT NULL,
+    reply_len text DEFAULT 'short'::text NOT NULL,
+    react_pct smallint DEFAULT 28 NOT NULL,
+    ends_at timestamp with time zone,
+    max_messages integer DEFAULT 0 NOT NULL,
+    CONSTRAINT chat_warmup_sessions_active_from_check CHECK (((active_from >= 0) AND (active_from <= 23))),
+    CONSTRAINT chat_warmup_sessions_active_to_check CHECK (((active_to >= 0) AND (active_to <= 23))),
+    CONSTRAINT chat_warmup_sessions_react_pct_check CHECK (((react_pct >= 0) AND (react_pct <= 60)))
 );
 
 --
@@ -3126,6 +3568,36 @@ CREATE SEQUENCE public.content_performance_id_seq
 ALTER SEQUENCE public.content_performance_id_seq OWNED BY public.content_performance.id;
 
 --
+-- Name: copilot_feedback; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.copilot_feedback (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    action_id text NOT NULL,
+    kind text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT copilot_feedback_kind_check CHECK ((kind = ANY (ARRAY['opened'::text, 'applied'::text, 'snoozed'::text])))
+);
+
+--
+-- Name: copilot_feedback_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.copilot_feedback_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: copilot_feedback_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.copilot_feedback_id_seq OWNED BY public.copilot_feedback.id;
+
+--
 -- Name: crm_activity; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3201,11 +3673,12 @@ CREATE TABLE public.crm_deals (
     owner_id bigint NOT NULL,
     title text NOT NULL,
     contact text,
-    stage text DEFAULT 'new'::text NOT NULL,
+    stage text DEFAULT 'lead'::text NOT NULL,
     value numeric(14,2) DEFAULT 0,
     notes text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    currency text,
     CONSTRAINT crm_deals_stage_check CHECK ((stage = ANY (ARRAY['new'::text, 'contacted'::text, 'qualified'::text, 'won'::text, 'lost'::text])))
 );
 
@@ -3226,6 +3699,22 @@ CREATE SEQUENCE public.crm_deals_id_seq
 --
 
 ALTER SEQUENCE public.crm_deals_id_seq OWNED BY public.crm_deals.id;
+
+--
+-- Name: crm_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.crm_links (
+    endpoint_id bigint NOT NULL,
+    local_key text NOT NULL,
+    owner_id bigint NOT NULL,
+    contact_ext_id text,
+    deal_ext_id text,
+    last_stage text,
+    last_price numeric(14,2),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 --
 -- Name: crosspost_links; Type: TABLE; Schema: public; Owner: -
@@ -3991,6 +4480,48 @@ CREATE SEQUENCE public.experiments_id_seq
 ALTER SEQUENCE public.experiments_id_seq OWNED BY public.experiments.id;
 
 --
+-- Name: fleet_pacing_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fleet_pacing_events (
+    id bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    action_type text DEFAULT ''::text NOT NULL,
+    ok boolean DEFAULT false NOT NULL,
+    flood boolean DEFAULT false NOT NULL,
+    ban boolean DEFAULT false NOT NULL,
+    worker_id text
+);
+
+--
+-- Name: fleet_pacing_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.fleet_pacing_events_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: fleet_pacing_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.fleet_pacing_events_id_seq OWNED BY public.fleet_pacing_events.id;
+
+--
+-- Name: free_op_usage; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.free_op_usage (
+    owner_id bigint NOT NULL,
+    month date NOT NULL,
+    used integer DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
 -- Name: funnel_steps; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4034,7 +4565,8 @@ CREATE TABLE public.funnel_subscriptions (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
     conversion_recorded boolean DEFAULT false,
-    dropped boolean DEFAULT false NOT NULL
+    dropped boolean DEFAULT false NOT NULL,
+    workflow_run_id bigint
 );
 
 --
@@ -4089,6 +4621,17 @@ CREATE SEQUENCE public.funnels_id_seq
 --
 
 ALTER SEQUENCE public.funnels_id_seq OWNED BY public.funnels.id;
+
+--
+-- Name: fx_rates; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fx_rates (
+    currency text NOT NULL,
+    rub_per_unit numeric NOT NULL,
+    fetched_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT fx_rates_rub_per_unit_check CHECK ((rub_per_unit > (0)::numeric))
+);
 
 --
 -- Name: ghost_action_log; Type: TABLE; Schema: public; Owner: -
@@ -4585,6 +5128,45 @@ CREATE SEQUENCE public.growth_actions_id_seq
 ALTER SEQUENCE public.growth_actions_id_seq OWNED BY public.growth_actions.id;
 
 --
+-- Name: growth_asset_goals; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.growth_asset_goals (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    asset_kind text NOT NULL,
+    asset_id bigint NOT NULL,
+    title text DEFAULT ''::text NOT NULL,
+    baseline integer NOT NULL,
+    target integer NOT NULL,
+    started_on date DEFAULT CURRENT_DATE NOT NULL,
+    deadline date NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    reached_on date,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT growth_asset_goals_asset_kind_check CHECK ((asset_kind = ANY (ARRAY['channel'::text, 'bot'::text]))),
+    CONSTRAINT growth_asset_goals_status_check CHECK ((status = ANY (ARRAY['active'::text, 'done'::text, 'archived'::text])))
+);
+
+--
+-- Name: growth_asset_goals_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.growth_asset_goals_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: growth_asset_goals_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.growth_asset_goals_id_seq OWNED BY public.growth_asset_goals.id;
+
+--
 -- Name: growth_content_seeds; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4983,6 +5565,41 @@ CREATE SEQUENCE public.inactivity_alerts_sent_id_seq
 ALTER SEQUENCE public.inactivity_alerts_sent_id_seq OWNED BY public.inactivity_alerts_sent.id;
 
 --
+-- Name: inbox_messages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inbox_messages (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    account_id bigint NOT NULL,
+    peer_user_id bigint NOT NULL,
+    peer_name text,
+    peer_username text,
+    msg_id bigint NOT NULL,
+    text_enc text,
+    msg_date timestamp with time zone DEFAULT now() NOT NULL,
+    is_read boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: inbox_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.inbox_messages_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: inbox_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.inbox_messages_id_seq OWNED BY public.inbox_messages.id;
+
+--
 -- Name: infra_memory_accounts; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5060,6 +5677,36 @@ CREATE SEQUENCE public.infrastructure_alerts_id_seq
 --
 
 ALTER SEQUENCE public.infrastructure_alerts_id_seq OWNED BY public.infrastructure_alerts.id;
+
+--
+-- Name: integration_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.integration_events (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    event text NOT NULL,
+    payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    fanned_out_at timestamp with time zone
+);
+
+--
+-- Name: integration_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.integration_events_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: integration_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.integration_events_id_seq OWNED BY public.integration_events.id;
 
 --
 -- Name: intent_operation_links; Type: TABLE; Schema: public; Owner: -
@@ -5280,6 +5927,20 @@ CREATE TABLE public.llm_cooldowns (
 );
 
 --
+-- Name: llm_owner_usage; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.llm_owner_usage (
+    day date NOT NULL,
+    owner_id bigint NOT NULL,
+    task text NOT NULL,
+    calls integer DEFAULT 0 NOT NULL,
+    ok integer DEFAULT 0 NOT NULL,
+    input_tokens bigint DEFAULT 0 NOT NULL,
+    output_tokens bigint DEFAULT 0 NOT NULL
+);
+
+--
 -- Name: llm_usage; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5325,6 +5986,7 @@ CREATE TABLE public.managed_bots (
     extra_username text,
     extra_username_verified boolean DEFAULT false NOT NULL,
     extra_username_checked_at timestamp with time zone,
+    webhook_failed_at timestamp with time zone,
     CONSTRAINT managed_bots_bot_role_check CHECK ((bot_role = ANY (ARRAY['entry'::text, 'conversion'::text, 'retention'::text, 'general'::text])))
 );
 
@@ -5387,6 +6049,19 @@ CREATE SEQUENCE public.managed_channels_id_seq
 --
 
 ALTER SEQUENCE public.managed_channels_id_seq OWNED BY public.managed_channels.id;
+
+--
+-- Name: media_uploads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.media_uploads (
+    token text NOT NULL,
+    owner_id bigint NOT NULL,
+    mime text NOT NULL,
+    size_bytes integer NOT NULL,
+    data bytea NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 --
 -- Name: memory_settings; Type: TABLE; Schema: public; Owner: -
@@ -5973,6 +6648,35 @@ CREATE TABLE public.notification_dedup (
 );
 
 --
+-- Name: notification_held; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_held (
+    id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    pref text NOT NULL,
+    text text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: notification_held_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.notification_held_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: notification_held_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.notification_held_id_seq OWNED BY public.notification_held.id;
+
+--
 -- Name: notification_settings; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5983,7 +6687,20 @@ CREATE TABLE public.notification_settings (
     position_change boolean DEFAULT true NOT NULL,
     op_complete boolean DEFAULT true NOT NULL,
     restriction boolean DEFAULT true NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    quiet_enabled boolean DEFAULT false NOT NULL,
+    quiet_start smallint DEFAULT 23 NOT NULL,
+    quiet_end smallint DEFAULT 8 NOT NULL,
+    tz text DEFAULT 'Europe/Moscow'::text NOT NULL,
+    leads boolean DEFAULT true NOT NULL,
+    reports boolean DEFAULT true NOT NULL,
+    advice boolean DEFAULT true NOT NULL,
+    digest_only boolean DEFAULT false NOT NULL,
+    digest_hour smallint DEFAULT 9 NOT NULL,
+    last_digest_at timestamp with time zone,
+    CONSTRAINT notification_settings_digest_hour_check CHECK (((digest_hour >= 0) AND (digest_hour <= 23))),
+    CONSTRAINT notification_settings_quiet_end_check CHECK (((quiet_end >= 0) AND (quiet_end <= 23))),
+    CONSTRAINT notification_settings_quiet_start_check CHECK (((quiet_start >= 0) AND (quiet_start <= 23)))
 );
 
 --
@@ -6001,6 +6718,17 @@ CREATE TABLE public.observation_state (
 );
 
 --
+-- Name: onboarding_goals; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.onboarding_goals (
+    owner_id bigint NOT NULL,
+    goal text NOT NULL,
+    chosen_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT onboarding_goals_goal_check CHECK ((goal = ANY (ARRAY['sell_bot'::text, 'crm'::text, 'outreach'::text])))
+);
+
+--
 -- Name: onboarding_progress; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -6011,6 +6739,17 @@ CREATE TABLE public.onboarding_progress (
     first_result_op_type text,
     first_result_label text,
     first_result_ok integer
+);
+
+--
+-- Name: onboarding_step_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.onboarding_step_log (
+    owner_id bigint NOT NULL,
+    step_id text NOT NULL,
+    goal text,
+    done_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 --
@@ -6157,7 +6896,9 @@ CREATE TABLE public.operation_queue (
     revive_count integer DEFAULT 0 NOT NULL,
     acct_wait_since timestamp with time zone,
     journal_pruned boolean DEFAULT false NOT NULL,
-    pause_requested boolean DEFAULT false NOT NULL
+    pause_requested boolean DEFAULT false NOT NULL,
+    revive_mark integer DEFAULT 0 NOT NULL,
+    revive_total integer DEFAULT 0 NOT NULL
 );
 
 --
@@ -6215,6 +6956,17 @@ CREATE TABLE public.organism_state (
     owner_id bigint NOT NULL,
     key text NOT NULL,
     value jsonb DEFAULT '{}'::jsonb NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: owner_money_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.owner_money_settings (
+    owner_id bigint NOT NULL,
+    currency text DEFAULT 'RUB'::text NOT NULL,
+    manual_rates jsonb DEFAULT '{}'::jsonb NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -6321,7 +7073,10 @@ CREATE TABLE public.payments (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     expires_at timestamp with time zone DEFAULT (now() + '00:30:00'::interval) NOT NULL,
     confirmed_at timestamp with time zone,
-    CONSTRAINT payments_currency_check CHECK ((currency = ANY (ARRAY['TON'::text, 'USDT_TRC20'::text]))),
+    tier text,
+    recurring_of text,
+    recurring_canceled_at timestamp with time zone,
+    CONSTRAINT payments_currency_check CHECK (((currency = ANY (ARRAY['TON'::text, 'USDT_TRC20'::text, 'XTR'::text])) OR ((wallet_address = 'telegram_card'::text) AND (currency ~ '^[A-Z]{3}$'::text)))),
     CONSTRAINT payments_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirming'::text, 'confirmed'::text, 'expired'::text, 'failed'::text])))
 );
 
@@ -6789,6 +7544,36 @@ CREATE SEQUENCE public.proxy_health_log_id_seq
 ALTER SEQUENCE public.proxy_health_log_id_seq OWNED BY public.proxy_health_log.id;
 
 --
+-- Name: proxy_outages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.proxy_outages (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    proxy_id bigint NOT NULL,
+    accounts integer DEFAULT 0 NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    ended_at timestamp with time zone
+);
+
+--
+-- Name: proxy_outages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.proxy_outages_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: proxy_outages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.proxy_outages_id_seq OWNED BY public.proxy_outages.id;
+
+--
 -- Name: proxy_performance; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -6921,6 +7706,37 @@ CREATE SEQUENCE public.recovery_events_id_seq
 --
 
 ALTER SEQUENCE public.recovery_events_id_seq OWNED BY public.recovery_events.id;
+
+--
+-- Name: referral_commissions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.referral_commissions (
+    id bigint NOT NULL,
+    referrer_id bigint NOT NULL,
+    referred_id bigint NOT NULL,
+    payment_ref text NOT NULL,
+    paid_months integer NOT NULL,
+    days integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: referral_commissions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.referral_commissions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: referral_commissions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.referral_commissions_id_seq OWNED BY public.referral_commissions.id;
 
 --
 -- Name: referral_conversions; Type: TABLE; Schema: public; Owner: -
@@ -7334,6 +8150,36 @@ CREATE SEQUENCE public.saved_segments_id_seq
 ALTER SEQUENCE public.saved_segments_id_seq OWNED BY public.saved_segments.id;
 
 --
+-- Name: saved_views; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.saved_views (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    kind text NOT NULL,
+    name text NOT NULL,
+    params jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: saved_views_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.saved_views_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: saved_views_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.saved_views_id_seq OWNED BY public.saved_views.id;
+
+--
 -- Name: scheduled_broadcasts; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -7587,6 +8433,87 @@ CREATE TABLE public.seen_entities (
 );
 
 --
+-- Name: self_promo_campaigns; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.self_promo_campaigns (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    title text NOT NULL,
+    target_kind text NOT NULL,
+    target_ref bigint,
+    target_url text NOT NULL,
+    body text NOT NULL,
+    button_text text DEFAULT ''::text NOT NULL,
+    bot_ids bigint[] DEFAULT '{}'::bigint[] NOT NULL,
+    channel_ids bigint[] DEFAULT '{}'::bigint[] NOT NULL,
+    segment text DEFAULT 'all'::text NOT NULL,
+    skip_target_audience boolean DEFAULT true NOT NULL,
+    cooldown_days integer DEFAULT 7 NOT NULL,
+    auto_days integer DEFAULT 0 NOT NULL,
+    next_auto_at timestamp with time zone,
+    deep_link_id integer,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_run_at timestamp with time zone,
+    CONSTRAINT self_promo_campaigns_auto_days_check CHECK (((auto_days >= 0) AND (auto_days <= 90))),
+    CONSTRAINT self_promo_campaigns_cooldown_days_check CHECK (((cooldown_days >= 0) AND (cooldown_days <= 90))),
+    CONSTRAINT self_promo_campaigns_status_check CHECK ((status = ANY (ARRAY['active'::text, 'paused'::text, 'archived'::text]))),
+    CONSTRAINT self_promo_campaigns_target_kind_check CHECK ((target_kind = ANY (ARRAY['bot'::text, 'channel'::text, 'link'::text])))
+);
+
+--
+-- Name: self_promo_campaigns_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.self_promo_campaigns_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: self_promo_campaigns_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.self_promo_campaigns_id_seq OWNED BY public.self_promo_campaigns.id;
+
+--
+-- Name: self_promo_launches; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.self_promo_launches (
+    id bigint NOT NULL,
+    campaign_id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    trigger text DEFAULT 'manual'::text NOT NULL,
+    recipients integer DEFAULT 0 NOT NULL,
+    channel_posts integer DEFAULT 0 NOT NULL,
+    broadcast_ids bigint[] DEFAULT '{}'::bigint[] NOT NULL,
+    op_ids bigint[] DEFAULT '{}'::bigint[] NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: self_promo_launches_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.self_promo_launches_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: self_promo_launches_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.self_promo_launches_id_seq OWNED BY public.self_promo_launches.id;
+
+--
 -- Name: self_promo_runs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -7618,6 +8545,19 @@ CREATE SEQUENCE public.self_promo_runs_id_seq
 --
 
 ALTER SEQUENCE public.self_promo_runs_id_seq OWNED BY public.self_promo_runs.id;
+
+--
+-- Name: self_promo_sends; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.self_promo_sends (
+    campaign_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    bot_id bigint NOT NULL,
+    launch_id bigint,
+    sent_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 --
 -- Name: self_promo_templates; Type: TABLE; Schema: public; Owner: -
@@ -7698,6 +8638,18 @@ CREATE SEQUENCE public.seo_score_history_id_seq
 --
 
 ALTER SEQUENCE public.seo_score_history_id_seq OWNED BY public.seo_score_history.id;
+
+--
+-- Name: sheets_connections; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sheets_connections (
+    owner_id bigint NOT NULL,
+    client_email text NOT NULL,
+    credentials_enc text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 --
 -- Name: shield_actions; Type: TABLE; Schema: public; Owner: -
@@ -8180,6 +9132,7 @@ CREATE TABLE public.subscriptions (
     started_at timestamp with time zone DEFAULT now() NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
+    tier text,
     CONSTRAINT subscriptions_plan_check CHECK ((plan = ANY (ARRAY['free'::text, 'paid'::text, 'starter'::text, 'pro'::text, 'enterprise'::text])))
 );
 
@@ -9525,6 +10478,87 @@ CREATE SEQUENCE public.wb_operations_id_seq
 ALTER SEQUENCE public.wb_operations_id_seq OWNED BY public.wb_operations.id;
 
 --
+-- Name: webhook_deliveries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.webhook_deliveries (
+    id bigint NOT NULL,
+    endpoint_id bigint NOT NULL,
+    event_id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    event text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_status_code integer,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    delivered_at timestamp with time zone
+);
+
+--
+-- Name: webhook_deliveries_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.webhook_deliveries_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: webhook_deliveries_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.webhook_deliveries_id_seq OWNED BY public.webhook_deliveries.id;
+
+--
+-- Name: webhook_endpoints; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.webhook_endpoints (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    kind text DEFAULT 'http'::text NOT NULL,
+    name text DEFAULT ''::text NOT NULL,
+    url text,
+    spreadsheet_id text,
+    sheet_name text,
+    secret_enc text,
+    events text[] DEFAULT '{}'::text[] NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    disabled_reason text,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    last_success_at timestamp with time zone,
+    last_failure_at timestamp with time zone,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    crm_config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    inbound_token text,
+    inbound_secret_enc text,
+    last_inbound_at timestamp with time zone,
+    CONSTRAINT webhook_endpoints_kind_chk CHECK ((kind = ANY (ARRAY['http'::text, 'sheets'::text, 'amocrm'::text, 'bitrix24'::text])))
+);
+
+--
+-- Name: webhook_endpoints_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.webhook_endpoints_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: webhook_endpoints_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.webhook_endpoints_id_seq OWNED BY public.webhook_endpoints.id;
+
+--
 -- Name: workflow_definitions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -9537,7 +10571,21 @@ CREATE TABLE public.workflow_definitions (
     is_active boolean DEFAULT true,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
-    bot_id bigint
+    bot_id bigint,
+    trigger_type text,
+    trigger_value text,
+    allow_reentry boolean DEFAULT false NOT NULL,
+    goal_type text,
+    goal_value text,
+    legacy_kind text,
+    legacy_id bigint,
+    send_window text,
+    max_per_day integer,
+    inbound_token text,
+    draft_steps jsonb,
+    steps_version integer DEFAULT 1 NOT NULL,
+    published_at timestamp with time zone,
+    bot_ids bigint[]
 );
 
 --
@@ -9574,7 +10622,21 @@ CREATE TABLE public.workflow_runs (
     error_message text,
     started_at timestamp with time zone,
     finished_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now()
+    created_at timestamp with time zone DEFAULT now(),
+    bot_id bigint,
+    chat_id bigint,
+    steps_snapshot jsonb,
+    vars jsonb DEFAULT '{}'::jsonb NOT NULL,
+    next_run_at timestamp with time zone,
+    exec_seq integer DEFAULT 0 NOT NULL,
+    wait_kind text,
+    wait_until timestamp with time zone,
+    claimed_until timestamp with time zone,
+    fail_count integer DEFAULT 0 NOT NULL,
+    trigger_event_id bigint,
+    source text,
+    goal_reached_at timestamp with time zone,
+    steps_version integer
 );
 
 --
@@ -9594,6 +10656,41 @@ CREATE SEQUENCE public.workflow_runs_id_seq
 --
 
 ALTER SEQUENCE public.workflow_runs_id_seq OWNED BY public.workflow_runs.id;
+
+--
+-- Name: workflow_step_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.workflow_step_log (
+    id bigint NOT NULL,
+    run_id bigint NOT NULL,
+    workflow_id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    step_idx integer NOT NULL,
+    step_type text NOT NULL,
+    outcome text NOT NULL,
+    detail text,
+    amount bigint,
+    currency text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: workflow_step_log_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.workflow_step_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: workflow_step_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.workflow_step_log_id_seq OWNED BY public.workflow_step_log.id;
 
 --
 -- Name: workspace_invites; Type: TABLE; Schema: public; Owner: -
@@ -9689,6 +10786,12 @@ CREATE SEQUENCE public.workspaces_id_seq
 ALTER SEQUENCE public.workspaces_id_seq OWNED BY public.workspaces.id;
 
 --
+-- Name: abuse_reports id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.abuse_reports ALTER COLUMN id SET DEFAULT nextval('public.abuse_reports_id_seq'::regclass);
+
+--
 -- Name: account_flood_log id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -9767,6 +10870,12 @@ ALTER TABLE ONLY public.adaptive_pacing_log ALTER COLUMN id SET DEFAULT nextval(
 ALTER TABLE ONLY public.admin_audit_log ALTER COLUMN id SET DEFAULT nextval('public.admin_audit_log_id_seq'::regclass);
 
 --
+-- Name: ai_reply_log id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ai_reply_log ALTER COLUMN id SET DEFAULT nextval('public.ai_reply_log_id_seq'::regclass);
+
+--
 -- Name: anomaly_events id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -9825,6 +10934,12 @@ ALTER TABLE ONLY public.auto_replies ALTER COLUMN id SET DEFAULT nextval('public
 --
 
 ALTER TABLE ONLY public.auto_reply_log ALTER COLUMN id SET DEFAULT nextval('public.auto_reply_log_id_seq'::regclass);
+
+--
+-- Name: automation_events id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.automation_events ALTER COLUMN id SET DEFAULT nextval('public.automation_events_id_seq'::regclass);
 
 --
 -- Name: automation_rules id; Type: DEFAULT; Schema: public; Owner: -
@@ -9951,6 +11066,12 @@ ALTER TABLE ONLY public.bot_users ALTER COLUMN id SET DEFAULT nextval('public.bo
 --
 
 ALTER TABLE ONLY public.bot_warehouse ALTER COLUMN id SET DEFAULT nextval('public.bot_warehouse_id_seq'::regclass);
+
+--
+-- Name: bot_widgets id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bot_widgets ALTER COLUMN id SET DEFAULT nextval('public.bot_widgets_id_seq'::regclass);
 
 --
 -- Name: botmother_memory id; Type: DEFAULT; Schema: public; Owner: -
@@ -10169,6 +11290,12 @@ ALTER TABLE ONLY public.content_meshes ALTER COLUMN id SET DEFAULT nextval('publ
 ALTER TABLE ONLY public.content_performance ALTER COLUMN id SET DEFAULT nextval('public.content_performance_id_seq'::regclass);
 
 --
+-- Name: copilot_feedback id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.copilot_feedback ALTER COLUMN id SET DEFAULT nextval('public.copilot_feedback_id_seq'::regclass);
+
+--
 -- Name: crm_activity id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -10307,6 +11434,12 @@ ALTER TABLE ONLY public.experiment_variants ALTER COLUMN id SET DEFAULT nextval(
 ALTER TABLE ONLY public.experiments ALTER COLUMN id SET DEFAULT nextval('public.experiments_id_seq'::regclass);
 
 --
+-- Name: fleet_pacing_events id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fleet_pacing_events ALTER COLUMN id SET DEFAULT nextval('public.fleet_pacing_events_id_seq'::regclass);
+
+--
 -- Name: funnel_steps id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -10403,6 +11536,12 @@ ALTER TABLE ONLY public.graph_nodes ALTER COLUMN id SET DEFAULT nextval('public.
 ALTER TABLE ONLY public.growth_actions ALTER COLUMN id SET DEFAULT nextval('public.growth_actions_id_seq'::regclass);
 
 --
+-- Name: growth_asset_goals id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.growth_asset_goals ALTER COLUMN id SET DEFAULT nextval('public.growth_asset_goals_id_seq'::regclass);
+
+--
 -- Name: growth_content_seeds id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -10463,10 +11602,22 @@ ALTER TABLE ONLY public.immunity_rules ALTER COLUMN id SET DEFAULT nextval('publ
 ALTER TABLE ONLY public.inactivity_alerts_sent ALTER COLUMN id SET DEFAULT nextval('public.inactivity_alerts_sent_id_seq'::regclass);
 
 --
+-- Name: inbox_messages id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inbox_messages ALTER COLUMN id SET DEFAULT nextval('public.inbox_messages_id_seq'::regclass);
+
+--
 -- Name: infrastructure_alerts id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.infrastructure_alerts ALTER COLUMN id SET DEFAULT nextval('public.infrastructure_alerts_id_seq'::regclass);
+
+--
+-- Name: integration_events id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.integration_events ALTER COLUMN id SET DEFAULT nextval('public.integration_events_id_seq'::regclass);
 
 --
 -- Name: intents id; Type: DEFAULT; Schema: public; Owner: -
@@ -10607,6 +11758,12 @@ ALTER TABLE ONLY public.notary_observations ALTER COLUMN id SET DEFAULT nextval(
 ALTER TABLE ONLY public.notary_watches ALTER COLUMN id SET DEFAULT nextval('public.notary_watches_id_seq'::regclass);
 
 --
+-- Name: notification_held id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_held ALTER COLUMN id SET DEFAULT nextval('public.notification_held_id_seq'::regclass);
+
+--
 -- Name: op_telemetry id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -10721,6 +11878,12 @@ ALTER TABLE ONLY public.promo_orders ALTER COLUMN id SET DEFAULT nextval('public
 ALTER TABLE ONLY public.proxy_health_log ALTER COLUMN id SET DEFAULT nextval('public.proxy_health_log_id_seq'::regclass);
 
 --
+-- Name: proxy_outages id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.proxy_outages ALTER COLUMN id SET DEFAULT nextval('public.proxy_outages_id_seq'::regclass);
+
+--
 -- Name: proxy_performance id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -10743,6 +11906,12 @@ ALTER TABLE ONLY public.ranking_alerts ALTER COLUMN id SET DEFAULT nextval('publ
 --
 
 ALTER TABLE ONLY public.recovery_events ALTER COLUMN id SET DEFAULT nextval('public.recovery_events_id_seq'::regclass);
+
+--
+-- Name: referral_commissions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.referral_commissions ALTER COLUMN id SET DEFAULT nextval('public.referral_commissions_id_seq'::regclass);
 
 --
 -- Name: referral_conversions id; Type: DEFAULT; Schema: public; Owner: -
@@ -10811,6 +11980,12 @@ ALTER TABLE ONLY public.routing_rules ALTER COLUMN id SET DEFAULT nextval('publi
 ALTER TABLE ONLY public.saved_segments ALTER COLUMN id SET DEFAULT nextval('public.saved_segments_id_seq'::regclass);
 
 --
+-- Name: saved_views id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.saved_views ALTER COLUMN id SET DEFAULT nextval('public.saved_views_id_seq'::regclass);
+
+--
 -- Name: scheduled_broadcasts id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -10845,6 +12020,18 @@ ALTER TABLE ONLY public.search_rankings ALTER COLUMN id SET DEFAULT nextval('pub
 --
 
 ALTER TABLE ONLY public.security_violations ALTER COLUMN id SET DEFAULT nextval('public.security_violations_id_seq'::regclass);
+
+--
+-- Name: self_promo_campaigns id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.self_promo_campaigns ALTER COLUMN id SET DEFAULT nextval('public.self_promo_campaigns_id_seq'::regclass);
+
+--
+-- Name: self_promo_launches id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.self_promo_launches ALTER COLUMN id SET DEFAULT nextval('public.self_promo_launches_id_seq'::regclass);
 
 --
 -- Name: self_promo_runs id; Type: DEFAULT; Schema: public; Owner: -
@@ -11117,6 +12304,18 @@ ALTER TABLE ONLY public.wb_operation_targets ALTER COLUMN id SET DEFAULT nextval
 ALTER TABLE ONLY public.wb_operations ALTER COLUMN id SET DEFAULT nextval('public.wb_operations_id_seq'::regclass);
 
 --
+-- Name: webhook_deliveries id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_deliveries ALTER COLUMN id SET DEFAULT nextval('public.webhook_deliveries_id_seq'::regclass);
+
+--
+-- Name: webhook_endpoints id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_endpoints ALTER COLUMN id SET DEFAULT nextval('public.webhook_endpoints_id_seq'::regclass);
+
+--
 -- Name: workflow_definitions id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -11127,6 +12326,12 @@ ALTER TABLE ONLY public.workflow_definitions ALTER COLUMN id SET DEFAULT nextval
 --
 
 ALTER TABLE ONLY public.workflow_runs ALTER COLUMN id SET DEFAULT nextval('public.workflow_runs_id_seq'::regclass);
+
+--
+-- Name: workflow_step_log id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workflow_step_log ALTER COLUMN id SET DEFAULT nextval('public.workflow_step_log_id_seq'::regclass);
 
 --
 -- Name: workspace_invites id; Type: DEFAULT; Schema: public; Owner: -
@@ -11145,6 +12350,13 @@ ALTER TABLE ONLY public.workspace_members ALTER COLUMN id SET DEFAULT nextval('p
 --
 
 ALTER TABLE ONLY public.workspaces ALTER COLUMN id SET DEFAULT nextval('public.workspaces_id_seq'::regclass);
+
+--
+-- Name: abuse_reports abuse_reports_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.abuse_reports
+    ADD CONSTRAINT abuse_reports_pkey PRIMARY KEY (id);
 
 --
 -- Name: account_capabilities account_capabilities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -11182,6 +12394,13 @@ ALTER TABLE ONLY public.account_niche_profiles
     ADD CONSTRAINT account_niche_profiles_pkey PRIMARY KEY (account_id);
 
 --
+-- Name: account_pacing_state account_pacing_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account_pacing_state
+    ADD CONSTRAINT account_pacing_state_pkey PRIMARY KEY (account_id);
+
+--
 -- Name: account_rehab_state account_rehab_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -11201,6 +12420,13 @@ ALTER TABLE ONLY public.account_risk_scores
 
 ALTER TABLE ONLY public.account_status_events
     ADD CONSTRAINT account_status_events_pkey PRIMARY KEY (id);
+
+--
+-- Name: account_tags account_tags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account_tags
+    ADD CONSTRAINT account_tags_pkey PRIMARY KEY (account_id, tag);
 
 --
 -- Name: account_trust_history account_trust_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -11299,6 +12525,13 @@ ALTER TABLE ONLY public.admin_audit_log
 
 ALTER TABLE ONLY public.admin_state
     ADD CONSTRAINT admin_state_pkey PRIMARY KEY (admin_id);
+
+--
+-- Name: ai_reply_log ai_reply_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ai_reply_log
+    ADD CONSTRAINT ai_reply_log_pkey PRIMARY KEY (id);
 
 --
 -- Name: ambassador_status ambassador_status_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -11411,6 +12644,20 @@ ALTER TABLE ONLY public.auto_replies
 
 ALTER TABLE ONLY public.auto_reply_log
     ADD CONSTRAINT auto_reply_log_pkey PRIMARY KEY (id);
+
+--
+-- Name: automation_cursors automation_cursors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.automation_cursors
+    ADD CONSTRAINT automation_cursors_pkey PRIMARY KEY (consumer);
+
+--
+-- Name: automation_events automation_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.automation_events
+    ADD CONSTRAINT automation_events_pkey PRIMARY KEY (id);
 
 --
 -- Name: automation_rules automation_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -11672,6 +12919,27 @@ ALTER TABLE ONLY public.bot_warehouse
     ADD CONSTRAINT bot_warehouse_pkey PRIMARY KEY (id);
 
 --
+-- Name: bot_widget_votes bot_widget_votes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bot_widget_votes
+    ADD CONSTRAINT bot_widget_votes_pkey PRIMARY KEY (widget_row, voter_id);
+
+--
+-- Name: bot_widgets bot_widgets_bot_id_chat_id_message_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bot_widgets
+    ADD CONSTRAINT bot_widgets_bot_id_chat_id_message_id_key UNIQUE (bot_id, chat_id, message_id);
+
+--
+-- Name: bot_widgets bot_widgets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bot_widgets
+    ADD CONSTRAINT bot_widgets_pkey PRIMARY KEY (id);
+
+--
 -- Name: botmother_memory botmother_memory_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -11719,6 +12987,13 @@ ALTER TABLE ONLY public.bulk_edit_snapshots
 
 ALTER TABLE ONLY public.business_connections
     ADD CONSTRAINT business_connections_pkey PRIMARY KEY (connection_id);
+
+--
+-- Name: campaign_spend campaign_spend_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.campaign_spend
+    ADD CONSTRAINT campaign_spend_pkey PRIMARY KEY (owner_id, campaign_kind, campaign_id);
 
 --
 -- Name: cf_worker_pool cf_worker_pool_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -12064,6 +13339,13 @@ ALTER TABLE ONLY public.content_performance
     ADD CONSTRAINT content_performance_pkey PRIMARY KEY (id);
 
 --
+-- Name: copilot_feedback copilot_feedback_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.copilot_feedback
+    ADD CONSTRAINT copilot_feedback_pkey PRIMARY KEY (id);
+
+--
 -- Name: crm_activity crm_activity_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -12083,6 +13365,13 @@ ALTER TABLE ONLY public.crm_contacts
 
 ALTER TABLE ONLY public.crm_deals
     ADD CONSTRAINT crm_deals_pkey PRIMARY KEY (id);
+
+--
+-- Name: crm_links crm_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.crm_links
+    ADD CONSTRAINT crm_links_pkey PRIMARY KEY (endpoint_id, local_key);
 
 --
 -- Name: crosspost_links crosspost_links_owner_id_source_channel_id_target_channel_i_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -12316,6 +13605,20 @@ ALTER TABLE ONLY public.experiments
     ADD CONSTRAINT experiments_pkey PRIMARY KEY (id);
 
 --
+-- Name: fleet_pacing_events fleet_pacing_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fleet_pacing_events
+    ADD CONSTRAINT fleet_pacing_events_pkey PRIMARY KEY (id);
+
+--
+-- Name: free_op_usage free_op_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.free_op_usage
+    ADD CONSTRAINT free_op_usage_pkey PRIMARY KEY (owner_id, month);
+
+--
 -- Name: funnel_steps funnel_steps_funnel_id_step_order_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -12349,6 +13652,13 @@ ALTER TABLE ONLY public.funnel_subscriptions
 
 ALTER TABLE ONLY public.funnels
     ADD CONSTRAINT funnels_pkey PRIMARY KEY (id);
+
+--
+-- Name: fx_rates fx_rates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fx_rates
+    ADD CONSTRAINT fx_rates_pkey PRIMARY KEY (currency);
 
 --
 -- Name: ghost_action_log ghost_action_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -12484,6 +13794,13 @@ ALTER TABLE ONLY public.growth_actions
     ADD CONSTRAINT growth_actions_pkey PRIMARY KEY (id);
 
 --
+-- Name: growth_asset_goals growth_asset_goals_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.growth_asset_goals
+    ADD CONSTRAINT growth_asset_goals_pkey PRIMARY KEY (id);
+
+--
 -- Name: growth_content_seeds growth_content_seeds_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -12610,6 +13927,20 @@ ALTER TABLE ONLY public.inactivity_alerts_sent
     ADD CONSTRAINT inactivity_alerts_sent_pkey PRIMARY KEY (id);
 
 --
+-- Name: inbox_messages inbox_messages_account_id_peer_user_id_msg_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inbox_messages
+    ADD CONSTRAINT inbox_messages_account_id_peer_user_id_msg_id_key UNIQUE (account_id, peer_user_id, msg_id);
+
+--
+-- Name: inbox_messages inbox_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inbox_messages
+    ADD CONSTRAINT inbox_messages_pkey PRIMARY KEY (id);
+
+--
 -- Name: infra_memory_accounts infra_memory_accounts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -12636,6 +13967,13 @@ ALTER TABLE ONLY public.infra_pressure_cache
 
 ALTER TABLE ONLY public.infrastructure_alerts
     ADD CONSTRAINT infrastructure_alerts_pkey PRIMARY KEY (id);
+
+--
+-- Name: integration_events integration_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.integration_events
+    ADD CONSTRAINT integration_events_pkey PRIMARY KEY (id);
 
 --
 -- Name: intent_operation_links intent_operation_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -12722,6 +14060,13 @@ ALTER TABLE ONLY public.llm_cooldowns
     ADD CONSTRAINT llm_cooldowns_pkey PRIMARY KEY (key);
 
 --
+-- Name: llm_owner_usage llm_owner_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.llm_owner_usage
+    ADD CONSTRAINT llm_owner_usage_pkey PRIMARY KEY (day, owner_id, task);
+
+--
 -- Name: llm_usage llm_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -12762,6 +14107,13 @@ ALTER TABLE ONLY public.managed_channels
 
 ALTER TABLE ONLY public.managed_channels
     ADD CONSTRAINT managed_channels_pkey PRIMARY KEY (id);
+
+--
+-- Name: media_uploads media_uploads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.media_uploads
+    ADD CONSTRAINT media_uploads_pkey PRIMARY KEY (token);
 
 --
 -- Name: memory_settings memory_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -12918,6 +14270,13 @@ ALTER TABLE ONLY public.notification_dedup
     ADD CONSTRAINT notification_dedup_pkey PRIMARY KEY (user_id, dedup_key);
 
 --
+-- Name: notification_held notification_held_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_held
+    ADD CONSTRAINT notification_held_pkey PRIMARY KEY (id);
+
+--
 -- Name: notification_settings notification_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -12932,11 +14291,25 @@ ALTER TABLE ONLY public.observation_state
     ADD CONSTRAINT observation_state_pkey PRIMARY KEY (keyword_id, entity_id, account_id);
 
 --
+-- Name: onboarding_goals onboarding_goals_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.onboarding_goals
+    ADD CONSTRAINT onboarding_goals_pkey PRIMARY KEY (owner_id);
+
+--
 -- Name: onboarding_progress onboarding_progress_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.onboarding_progress
     ADD CONSTRAINT onboarding_progress_pkey PRIMARY KEY (owner_id);
+
+--
+-- Name: onboarding_step_log onboarding_step_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.onboarding_step_log
+    ADD CONSTRAINT onboarding_step_log_pkey PRIMARY KEY (owner_id, step_id);
 
 --
 -- Name: op_circuit_breaker op_circuit_breaker_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -12986,6 +14359,13 @@ ALTER TABLE ONLY public.organism_events
 
 ALTER TABLE ONLY public.organism_state
     ADD CONSTRAINT organism_state_pkey PRIMARY KEY (owner_id, key);
+
+--
+-- Name: owner_money_settings owner_money_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.owner_money_settings
+    ADD CONSTRAINT owner_money_settings_pkey PRIMARY KEY (owner_id);
 
 --
 -- Name: parsed_audiences parsed_audiences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -13163,6 +14543,13 @@ ALTER TABLE ONLY public.proxy_health_log
     ADD CONSTRAINT proxy_health_log_pkey PRIMARY KEY (id);
 
 --
+-- Name: proxy_outages proxy_outages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.proxy_outages
+    ADD CONSTRAINT proxy_outages_pkey PRIMARY KEY (id);
+
+--
 -- Name: proxy_performance proxy_performance_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -13189,6 +14576,20 @@ ALTER TABLE ONLY public.ranking_alerts
 
 ALTER TABLE ONLY public.recovery_events
     ADD CONSTRAINT recovery_events_pkey PRIMARY KEY (id);
+
+--
+-- Name: referral_commissions referral_commissions_payment_ref_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.referral_commissions
+    ADD CONSTRAINT referral_commissions_payment_ref_key UNIQUE (payment_ref);
+
+--
+-- Name: referral_commissions referral_commissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.referral_commissions
+    ADD CONSTRAINT referral_commissions_pkey PRIMARY KEY (id);
 
 --
 -- Name: referral_conversions referral_conversions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -13310,6 +14711,20 @@ ALTER TABLE ONLY public.saved_segments
     ADD CONSTRAINT saved_segments_pkey PRIMARY KEY (id);
 
 --
+-- Name: saved_views saved_views_owner_id_kind_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.saved_views
+    ADD CONSTRAINT saved_views_owner_id_kind_name_key UNIQUE (owner_id, kind, name);
+
+--
+-- Name: saved_views saved_views_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.saved_views
+    ADD CONSTRAINT saved_views_pkey PRIMARY KEY (id);
+
+--
 -- Name: scheduled_broadcasts scheduled_broadcasts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -13387,11 +14802,32 @@ ALTER TABLE ONLY public.seen_entities
     ADD CONSTRAINT seen_entities_pkey PRIMARY KEY (entity_id, chat_id);
 
 --
+-- Name: self_promo_campaigns self_promo_campaigns_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.self_promo_campaigns
+    ADD CONSTRAINT self_promo_campaigns_pkey PRIMARY KEY (id);
+
+--
+-- Name: self_promo_launches self_promo_launches_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.self_promo_launches
+    ADD CONSTRAINT self_promo_launches_pkey PRIMARY KEY (id);
+
+--
 -- Name: self_promo_runs self_promo_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.self_promo_runs
     ADD CONSTRAINT self_promo_runs_pkey PRIMARY KEY (id);
+
+--
+-- Name: self_promo_sends self_promo_sends_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.self_promo_sends
+    ADD CONSTRAINT self_promo_sends_pkey PRIMARY KEY (campaign_id, user_id);
 
 --
 -- Name: self_promo_templates self_promo_templates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -13413,6 +14849,13 @@ ALTER TABLE ONLY public.seo_ai_suggestions
 
 ALTER TABLE ONLY public.seo_score_history
     ADD CONSTRAINT seo_score_history_pkey PRIMARY KEY (id);
+
+--
+-- Name: sheets_connections sheets_connections_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sheets_connections
+    ADD CONSTRAINT sheets_connections_pkey PRIMARY KEY (owner_id);
 
 --
 -- Name: shield_actions shield_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -13919,6 +15362,27 @@ ALTER TABLE ONLY public.wb_operations
     ADD CONSTRAINT wb_operations_pkey PRIMARY KEY (id);
 
 --
+-- Name: webhook_deliveries webhook_deliveries_once; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_deliveries
+    ADD CONSTRAINT webhook_deliveries_once UNIQUE (endpoint_id, event_id);
+
+--
+-- Name: webhook_deliveries webhook_deliveries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_deliveries
+    ADD CONSTRAINT webhook_deliveries_pkey PRIMARY KEY (id);
+
+--
+-- Name: webhook_endpoints webhook_endpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_endpoints
+    ADD CONSTRAINT webhook_endpoints_pkey PRIMARY KEY (id);
+
+--
 -- Name: workflow_definitions workflow_definitions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -13931,6 +15395,13 @@ ALTER TABLE ONLY public.workflow_definitions
 
 ALTER TABLE ONLY public.workflow_runs
     ADD CONSTRAINT workflow_runs_pkey PRIMARY KEY (id);
+
+--
+-- Name: workflow_step_log workflow_step_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workflow_step_log
+    ADD CONSTRAINT workflow_step_log_pkey PRIMARY KEY (id);
 
 --
 -- Name: workspace_invites workspace_invites_invite_code_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -14124,6 +15595,12 @@ CREATE INDEX content_meshes_enabled_idx ON public.content_meshes USING btree (en
 CREATE INDEX content_meshes_owner_idx ON public.content_meshes USING btree (owner_id);
 
 --
+-- Name: copilot_feedback_owner_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX copilot_feedback_owner_idx ON public.copilot_feedback USING btree (owner_id, created_at DESC);
+
+--
 -- Name: ghost_action_log_executed_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14184,10 +15661,22 @@ CREATE INDEX graph_nodes_type_idx ON public.graph_nodes USING btree (entity_type
 CREATE INDEX growth_schedule_active_idx ON public.growth_schedule USING btree (is_active, next_run_at) WHERE (is_active = true);
 
 --
+-- Name: idx_abuse_reports_owner; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_abuse_reports_owner ON public.abuse_reports USING btree (owner_id, created_at DESC);
+
+--
 -- Name: idx_account_rehab_due; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_account_rehab_due ON public.account_rehab_state USING btree (next_action_at) WHERE (phase = ANY (ARRAY['appeal'::text, 'warming'::text, 'recheck'::text]));
+
+--
+-- Name: idx_account_tags_owner_tag; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_account_tags_owner_tag ON public.account_tags USING btree (owner_id, tag);
 
 --
 -- Name: idx_activity_log_errors; Type: INDEX; Schema: public; Owner: -
@@ -14256,6 +15745,18 @@ CREATE INDEX idx_admin_audit_created ON public.admin_audit_log USING btree (crea
 CREATE INDEX idx_admin_audit_target ON public.admin_audit_log USING btree (target_user_id);
 
 --
+-- Name: idx_ai_reply_log_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ai_reply_log_created ON public.ai_reply_log USING btree (created_at);
+
+--
+-- Name: idx_ai_reply_log_owner_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ai_reply_log_owner_created ON public.ai_reply_log USING btree (owner_id, created_at DESC, id DESC);
+
+--
 -- Name: idx_anomaly_events_detected; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14310,6 +15811,12 @@ CREATE INDEX idx_asset_templates_owner ON public.asset_templates USING btree (ow
 CREATE INDEX idx_audience_dna_bot ON public.audience_dna USING btree (bot_id, computed_at DESC);
 
 --
+-- Name: idx_auto_funnel_runs_workflow_run; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auto_funnel_runs_workflow_run ON public.auto_funnel_runs USING btree (workflow_run_id) WHERE (workflow_run_id IS NOT NULL);
+
+--
 -- Name: idx_auto_replies_bot_active; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14326,6 +15833,18 @@ CREATE INDEX idx_auto_reply_log_bot_id ON public.auto_reply_log USING btree (bot
 --
 
 CREATE INDEX idx_auto_reply_log_chat_id ON public.auto_reply_log USING btree (bot_id, chat_id, fired_at DESC);
+
+--
+-- Name: idx_automation_events_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_automation_events_created ON public.automation_events USING btree (created_at);
+
+--
+-- Name: idx_automation_events_owner; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_automation_events_owner ON public.automation_events USING btree (owner_id, id);
 
 --
 -- Name: idx_automation_rules_bot_active; Type: INDEX; Schema: public; Owner: -
@@ -14460,6 +15979,12 @@ CREATE INDEX idx_bot_sales_examples_persona ON public.bot_sales_examples USING b
 CREATE INDEX idx_bot_sales_faq_persona ON public.bot_sales_faq USING btree (persona_id);
 
 --
+-- Name: idx_bot_sales_orders_customer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bot_sales_orders_customer ON public.bot_sales_orders USING btree (owner_id, customer_chat_id);
+
+--
 -- Name: idx_bot_sales_promos_persona; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14526,6 +16051,18 @@ CREATE INDEX idx_bot_users_user_id ON public.bot_users USING btree (user_id);
 CREATE INDEX idx_bot_warehouse_owner_status ON public.bot_warehouse USING btree (owner_id, status);
 
 --
+-- Name: idx_bot_widgets_bot_widget; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bot_widgets_bot_widget ON public.bot_widgets USING btree (bot_id, widget_id) WHERE (widget_id IS NOT NULL);
+
+--
+-- Name: idx_bot_widgets_owner_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bot_widgets_owner_created ON public.bot_widgets USING btree (owner_id, created_at DESC);
+
+--
 -- Name: idx_botmother_memory_owner_kind; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14572,6 +16109,12 @@ CREATE INDEX idx_broadcasts_bot ON public.broadcasts USING btree (bot_id);
 --
 
 CREATE INDEX idx_broadcasts_bot_created ON public.broadcasts USING btree (bot_id, created_at DESC);
+
+--
+-- Name: idx_broadcasts_scheduled_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_broadcasts_scheduled_id ON public.broadcasts USING btree (scheduled_id) WHERE (scheduled_id IS NOT NULL);
 
 --
 -- Name: idx_broadcasts_status; Type: INDEX; Schema: public; Owner: -
@@ -14662,6 +16205,12 @@ CREATE INDEX idx_chat_warmup_log_owner ON public.chat_warmup_log USING btree (ow
 --
 
 CREATE INDEX idx_chat_warmup_log_session ON public.chat_warmup_log USING btree (session_id, created_at DESC);
+
+--
+-- Name: idx_chat_warmup_log_session_ok; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_chat_warmup_log_session_ok ON public.chat_warmup_log USING btree (session_id, created_at) WHERE (status = 'ok'::text);
 
 --
 -- Name: idx_chat_warmup_owner_status; Type: INDEX; Schema: public; Owner: -
@@ -14850,6 +16399,12 @@ CREATE INDEX idx_crm_deals_owner ON public.crm_deals USING btree (owner_id);
 CREATE INDEX idx_crm_deals_stage ON public.crm_deals USING btree (owner_id, stage);
 
 --
+-- Name: idx_crm_links_deal; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_crm_links_deal ON public.crm_links USING btree (endpoint_id, deal_ext_id) WHERE (deal_ext_id IS NOT NULL);
+
+--
 -- Name: idx_crosspost_owner; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14932,6 +16487,12 @@ CREATE INDEX idx_discovered_bots_owner ON public.discovered_bots USING btree (ow
 --
 
 CREATE INDEX idx_dl_build ON public.deploy_log USING btree (build);
+
+--
+-- Name: idx_dm_campaign_log_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_dm_campaign_log_user ON public.dm_campaign_log USING btree (tg_user_id, sent_at);
 
 --
 -- Name: idx_dm_campaigns_owner; Type: INDEX; Schema: public; Owner: -
@@ -15084,6 +16645,12 @@ CREATE INDEX idx_experiments_active_sweep ON public.experiments USING btree (sta
 CREATE INDEX idx_export_jobs_owner ON public.contact_export_jobs USING btree (owner_id, status);
 
 --
+-- Name: idx_fleet_pacing_events_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_fleet_pacing_events_created ON public.fleet_pacing_events USING btree (created_at);
+
+--
 -- Name: idx_flood_log_account; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -15154,6 +16721,12 @@ CREATE INDEX idx_funnel_subs_funnel_user ON public.funnel_subscriptions USING bt
 --
 
 CREATE INDEX idx_funnel_subs_next_send ON public.funnel_subscriptions USING btree (next_send_at) WHERE ((completed = false) AND ((dropped IS NULL) OR (dropped = false)));
+
+--
+-- Name: idx_funnel_subs_workflow_run; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_funnel_subs_workflow_run ON public.funnel_subscriptions USING btree (workflow_run_id) WHERE (workflow_run_id IS NOT NULL);
 
 --
 -- Name: idx_funnels_bot_active; Type: INDEX; Schema: public; Owner: -
@@ -15288,6 +16861,12 @@ CREATE INDEX idx_gpt_plan_status ON public.global_presence_targets USING btree (
 CREATE INDEX idx_growth_actions_goal ON public.growth_actions USING btree (goal_id, executed_at DESC);
 
 --
+-- Name: idx_growth_asset_goals_owner; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_growth_asset_goals_owner ON public.growth_asset_goals USING btree (owner_id, deadline);
+
+--
 -- Name: idx_growth_goals_owner_active; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -15390,6 +16969,18 @@ CREATE INDEX idx_imsig_threat ON public.immunity_signatures USING btree (owner_i
 CREATE INDEX idx_inactivity_alerts_bot_rule ON public.inactivity_alerts_sent USING btree (bot_id, rule_id, sent_at DESC);
 
 --
+-- Name: idx_inbox_messages_owner_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inbox_messages_owner_date ON public.inbox_messages USING btree (owner_id, msg_date DESC);
+
+--
+-- Name: idx_inbox_messages_owner_peer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inbox_messages_owner_peer ON public.inbox_messages USING btree (owner_id, peer_user_id, msg_date DESC);
+
+--
 -- Name: idx_infra_alerts_first_seen; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -15418,6 +17009,18 @@ CREATE INDEX idx_infra_memory_proxies_updated ON public.infra_memory_proxies USI
 --
 
 CREATE INDEX idx_infrastructure_alerts_owner_active ON public.infrastructure_alerts USING btree (owner_id, is_active, first_seen_at DESC);
+
+--
+-- Name: idx_integration_events_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_integration_events_created ON public.integration_events USING btree (created_at);
+
+--
+-- Name: idx_integration_events_unfanned; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_integration_events_unfanned ON public.integration_events USING btree (id) WHERE (fanned_out_at IS NULL);
 
 --
 -- Name: idx_intent_hits_owner_time; Type: INDEX; Schema: public; Owner: -
@@ -15504,6 +17107,18 @@ CREATE INDEX idx_linked_users_b ON public.linked_platform_users USING btree (own
 CREATE INDEX idx_llm_cooldowns_until ON public.llm_cooldowns USING btree (until);
 
 --
+-- Name: idx_llm_owner_usage_day; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_llm_owner_usage_day ON public.llm_owner_usage USING btree (day);
+
+--
+-- Name: idx_llm_owner_usage_owner_day; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_llm_owner_usage_owner_day ON public.llm_owner_usage USING btree (owner_id, day DESC);
+
+--
 -- Name: idx_llm_usage_day; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -15556,6 +17171,18 @@ CREATE INDEX idx_managed_channels_owner_admin ON public.managed_channels USING b
 --
 
 CREATE INDEX idx_managed_channels_type ON public.managed_channels USING btree (owner_id, type);
+
+--
+-- Name: idx_media_uploads_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_media_uploads_created ON public.media_uploads USING btree (created_at);
+
+--
+-- Name: idx_media_uploads_owner; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_media_uploads_owner ON public.media_uploads USING btree (owner_id, created_at);
 
 --
 -- Name: idx_mesh_queue_pending_mesh; Type: INDEX; Schema: public; Owner: -
@@ -15660,6 +17287,12 @@ CREATE INDEX idx_notary_watches_owner ON public.notary_watches USING btree (owne
 CREATE INDEX idx_notification_dedup_sent ON public.notification_dedup USING btree (last_sent);
 
 --
+-- Name: idx_notification_held_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_notification_held_user ON public.notification_held USING btree (user_id, id);
+
+--
 -- Name: idx_obs_state_keyword; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -15676,6 +17309,12 @@ CREATE INDEX idx_observations_entity_time ON public.search_observations USING bt
 --
 
 CREATE UNIQUE INDEX idx_observations_snapshot_entity ON public.search_observations USING btree (snapshot_id, entity_id);
+
+--
+-- Name: idx_onboarding_step_log_start; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_onboarding_step_log_start ON public.onboarding_step_log USING btree (done_at) WHERE (step_id = 'start'::text);
 
 --
 -- Name: idx_op_audit_account_action; Type: INDEX; Schema: public; Owner: -
@@ -16008,6 +17647,18 @@ CREATE INDEX idx_proxy_health_checked ON public.proxy_health_log USING btree (ch
 CREATE INDEX idx_proxy_health_proxy ON public.proxy_health_log USING btree (proxy_id, checked_at DESC);
 
 --
+-- Name: idx_proxy_outages_open; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_proxy_outages_open ON public.proxy_outages USING btree (proxy_id) WHERE (ended_at IS NULL);
+
+--
+-- Name: idx_proxy_outages_owner; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_proxy_outages_owner ON public.proxy_outages USING btree (owner_id, started_at DESC);
+
+--
 -- Name: idx_proxy_perf_url; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -16096,6 +17747,12 @@ CREATE INDEX idx_ref_conv_occurred ON public.referral_conversions USING btree (o
 --
 
 CREATE INDEX idx_ref_conv_referrer ON public.referral_conversions USING btree (referrer_id, bot_id);
+
+--
+-- Name: idx_referral_commissions_referrer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_referral_commissions_referrer ON public.referral_commissions USING btree (referrer_id, created_at DESC);
 
 --
 -- Name: idx_referrals_bot_referrer; Type: INDEX; Schema: public; Owner: -
@@ -16258,6 +17915,36 @@ CREATE INDEX idx_seen_entities_entity ON public.seen_entities USING btree (entit
 --
 
 CREATE INDEX idx_seen_entities_last ON public.seen_entities USING btree (last_seen_at);
+
+--
+-- Name: idx_self_promo_campaigns_auto; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_self_promo_campaigns_auto ON public.self_promo_campaigns USING btree (next_auto_at) WHERE ((auto_days > 0) AND (status = 'active'::text));
+
+--
+-- Name: idx_self_promo_campaigns_owner; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_self_promo_campaigns_owner ON public.self_promo_campaigns USING btree (owner_id, created_at DESC);
+
+--
+-- Name: idx_self_promo_launches_campaign; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_self_promo_launches_campaign ON public.self_promo_launches USING btree (campaign_id, created_at DESC);
+
+--
+-- Name: idx_self_promo_sends_launch; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_self_promo_sends_launch ON public.self_promo_sends USING btree (launch_id);
+
+--
+-- Name: idx_self_promo_sends_owner_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_self_promo_sends_owner_user ON public.self_promo_sends USING btree (owner_id, user_id, sent_at DESC);
 
 --
 -- Name: idx_seo_score_history_entity; Type: INDEX; Schema: public; Owner: -
@@ -16974,10 +18661,40 @@ CREATE UNIQUE INDEX idx_wb_targets_op_ref ON public.wb_operation_targets USING b
 CREATE INDEX idx_wb_targets_pending ON public.wb_operation_targets USING btree (op_id, status);
 
 --
+-- Name: idx_webhook_deliveries_due; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webhook_deliveries_due ON public.webhook_deliveries USING btree (next_attempt_at) WHERE (status = 'pending'::text);
+
+--
+-- Name: idx_webhook_deliveries_endpoint; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webhook_deliveries_endpoint ON public.webhook_deliveries USING btree (endpoint_id, created_at DESC);
+
+--
+-- Name: idx_webhook_endpoints_owner_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webhook_endpoints_owner_active ON public.webhook_endpoints USING btree (owner_id) WHERE is_active;
+
+--
 -- Name: idx_workflow_definitions_bot; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_workflow_definitions_bot ON public.workflow_definitions USING btree (bot_id) WHERE (bot_id IS NOT NULL);
+
+--
+-- Name: idx_workflow_definitions_goal; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_definitions_goal ON public.workflow_definitions USING btree (owner_id) WHERE (goal_type IS NOT NULL);
+
+--
+-- Name: idx_workflow_definitions_inbound_token; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_workflow_definitions_inbound_token ON public.workflow_definitions USING btree (inbound_token) WHERE (inbound_token IS NOT NULL);
 
 --
 -- Name: idx_workflow_definitions_owner; Type: INDEX; Schema: public; Owner: -
@@ -16986,16 +18703,64 @@ CREATE INDEX idx_workflow_definitions_bot ON public.workflow_definitions USING b
 CREATE INDEX idx_workflow_definitions_owner ON public.workflow_definitions USING btree (owner_id, name);
 
 --
+-- Name: idx_workflow_definitions_trigger; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_definitions_trigger ON public.workflow_definitions USING btree (owner_id, trigger_type) WHERE (is_active AND (trigger_type IS NOT NULL));
+
+--
+-- Name: idx_workflow_runs_due; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_runs_due ON public.workflow_runs USING btree (next_run_at) WHERE (status = 'running'::text);
+
+--
 -- Name: idx_workflow_runs_owner_status; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_workflow_runs_owner_status ON public.workflow_runs USING btree (owner_id, status);
 
 --
+-- Name: idx_workflow_runs_person; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_runs_person ON public.workflow_runs USING btree (bot_id, chat_id);
+
+--
+-- Name: idx_workflow_runs_wait_until; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_runs_wait_until ON public.workflow_runs USING btree (wait_until) WHERE (status = 'waiting'::text);
+
+--
+-- Name: idx_workflow_runs_waiting; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_runs_waiting ON public.workflow_runs USING btree (bot_id, chat_id) WHERE (status = 'waiting'::text);
+
+--
 -- Name: idx_workflow_runs_workflow; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_workflow_runs_workflow ON public.workflow_runs USING btree (workflow_id, started_at DESC);
+
+--
+-- Name: idx_workflow_step_log_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_step_log_created ON public.workflow_step_log USING btree (created_at);
+
+--
+-- Name: idx_workflow_step_log_run; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_step_log_run ON public.workflow_step_log USING btree (run_id, id);
+
+--
+-- Name: idx_workflow_step_log_wf; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_step_log_wf ON public.workflow_step_log USING btree (workflow_id, step_idx);
 
 --
 -- Name: idx_ws_owner; Type: INDEX; Schema: public; Owner: -
@@ -17196,10 +18961,22 @@ CREATE INDEX smm_panels_owner_idx ON public.smm_panels USING btree (owner_id);
 CREATE UNIQUE INDEX uq_bot_mesh_hop_step ON public.bot_mesh_hops USING btree (task_id, step, to_bot);
 
 --
+-- Name: uq_bot_sales_orders_charge; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_bot_sales_orders_charge ON public.bot_sales_orders USING btree (payment_charge_id) WHERE ((payment_charge_id IS NOT NULL) AND (payment_charge_id <> ''::text));
+
+--
 -- Name: uq_cf_worker_pool_owner_url; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX uq_cf_worker_pool_owner_url ON public.cf_worker_pool USING btree (owner_id, worker_url);
+
+--
+-- Name: uq_growth_asset_goals_one_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_growth_asset_goals_one_active ON public.growth_asset_goals USING btree (owner_id, asset_kind, asset_id) WHERE (status = 'active'::text);
 
 --
 -- Name: uq_managed_bots_extra_username; Type: INDEX; Schema: public; Owner: -
@@ -17208,16 +18985,94 @@ CREATE UNIQUE INDEX uq_cf_worker_pool_owner_url ON public.cf_worker_pool USING b
 CREATE UNIQUE INDEX uq_managed_bots_extra_username ON public.managed_bots USING btree (lower(extra_username)) WHERE (extra_username IS NOT NULL);
 
 --
+-- Name: uq_payments_card_charge; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_payments_card_charge ON public.payments USING btree (tx_hash) WHERE ((wallet_address = 'telegram_card'::text) AND (tx_hash IS NOT NULL));
+
+--
+-- Name: uq_payments_xtr_charge; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_payments_xtr_charge ON public.payments USING btree (tx_hash) WHERE ((currency = 'XTR'::text) AND (tx_hash IS NOT NULL));
+
+--
 -- Name: uq_va_reference_channels; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX uq_va_reference_channels ON public.va_reference_channels USING btree (owner_id, channel_id, lower(ref_username));
 
 --
+-- Name: uq_webhook_endpoints_inbound_token; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_webhook_endpoints_inbound_token ON public.webhook_endpoints USING btree (inbound_token) WHERE (inbound_token IS NOT NULL);
+
+--
+-- Name: uq_webhook_endpoints_owner_crm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_webhook_endpoints_owner_crm ON public.webhook_endpoints USING btree (owner_id, kind) WHERE (kind = ANY (ARRAY['amocrm'::text, 'bitrix24'::text]));
+
+--
+-- Name: uq_workflow_definitions_legacy; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_workflow_definitions_legacy ON public.workflow_definitions USING btree (legacy_kind, legacy_id) WHERE (legacy_kind IS NOT NULL);
+
+--
+-- Name: uq_workflow_runs_live; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_workflow_runs_live ON public.workflow_runs USING btree (workflow_id, bot_id, chat_id) WHERE ((status = ANY (ARRAY['running'::text, 'waiting'::text])) AND (chat_id IS NOT NULL));
+
+--
 -- Name: tg_accounts trg_immunity_capture_status; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER trg_immunity_capture_status AFTER UPDATE OF acc_status ON public.tg_accounts FOR EACH ROW EXECUTE FUNCTION public._immunity_capture_status();
+
+--
+-- Name: tg_accounts trg_integration_emit_account_added; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_integration_emit_account_added AFTER INSERT ON public.tg_accounts FOR EACH ROW EXECUTE FUNCTION public._integration_emit_account_added();
+
+--
+-- Name: tg_accounts trg_integration_emit_account_status; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_integration_emit_account_status AFTER UPDATE OF acc_status ON public.tg_accounts FOR EACH ROW EXECUTE FUNCTION public._integration_emit_account_status();
+
+--
+-- Name: automation_events trg_integration_emit_automation; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_integration_emit_automation AFTER INSERT ON public.automation_events FOR EACH ROW EXECUTE FUNCTION public._integration_emit_automation();
+
+--
+-- Name: crm_deals trg_integration_emit_deal; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_integration_emit_deal AFTER INSERT OR UPDATE OF stage, value, title ON public.crm_deals FOR EACH ROW EXECUTE FUNCTION public._integration_emit_deal();
+
+--
+-- Name: operation_queue trg_integration_emit_operation; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_integration_emit_operation AFTER UPDATE OF status ON public.operation_queue FOR EACH ROW EXECUTE FUNCTION public._integration_emit_operation();
+
+--
+-- Name: contact_crm trg_integration_emit_pipeline; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_integration_emit_pipeline AFTER INSERT OR UPDATE OF stage, deal_value, currency ON public.contact_crm FOR EACH ROW EXECUTE FUNCTION public._integration_emit_pipeline();
+
+--
+-- Name: restriction_events trg_integration_emit_restriction; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_integration_emit_restriction AFTER INSERT ON public.restriction_events FOR EACH ROW EXECUTE FUNCTION public._integration_emit_restriction();
 
 --
 -- Name: account_flood_log account_flood_log_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -17234,6 +19089,13 @@ ALTER TABLE ONLY public.account_health_history
     ADD CONSTRAINT account_health_history_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.tg_accounts(id) ON DELETE CASCADE;
 
 --
+-- Name: account_tags account_tags_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account_tags
+    ADD CONSTRAINT account_tags_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.tg_accounts(id) ON DELETE CASCADE;
+
+--
 -- Name: account_trust_history account_trust_history_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -17246,20 +19108,6 @@ ALTER TABLE ONLY public.account_trust_history
 
 ALTER TABLE ONLY public.ad_posts_log
     ADD CONSTRAINT ad_posts_log_placement_id_fkey FOREIGN KEY (placement_id) REFERENCES public.ad_placements(id) ON DELETE CASCADE;
-
---
--- Name: admin_audit_log admin_audit_log_admin_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.admin_audit_log
-    ADD CONSTRAINT admin_audit_log_admin_id_fkey FOREIGN KEY (admin_id) REFERENCES public.platform_users(user_id);
-
---
--- Name: admin_audit_log admin_audit_log_target_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.admin_audit_log
-    ADD CONSTRAINT admin_audit_log_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.platform_users(user_id);
 
 --
 -- Name: ambassador_status ambassador_status_tier_key_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -17388,6 +19236,20 @@ ALTER TABLE ONLY public.bot_users
     ADD CONSTRAINT bot_users_bot_id_fkey FOREIGN KEY (bot_id) REFERENCES public.managed_bots(bot_id) ON DELETE CASCADE;
 
 --
+-- Name: bot_widget_votes bot_widget_votes_widget_row_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bot_widget_votes
+    ADD CONSTRAINT bot_widget_votes_widget_row_fkey FOREIGN KEY (widget_row) REFERENCES public.bot_widgets(id) ON DELETE CASCADE;
+
+--
+-- Name: bot_widgets bot_widgets_bot_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bot_widgets
+    ADD CONSTRAINT bot_widgets_bot_id_fkey FOREIGN KEY (bot_id) REFERENCES public.managed_bots(bot_id) ON DELETE CASCADE;
+
+--
 -- Name: broadcast_campaign_ops broadcast_campaign_ops_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -17512,6 +19374,13 @@ ALTER TABLE ONLY public.contact_versions
 
 ALTER TABLE ONLY public.crm_activity
     ADD CONSTRAINT crm_activity_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.crm_deals(id) ON DELETE CASCADE;
+
+--
+-- Name: crm_links crm_links_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.crm_links
+    ADD CONSTRAINT crm_links_endpoint_id_fkey FOREIGN KEY (endpoint_id) REFERENCES public.webhook_endpoints(id) ON DELETE CASCADE;
 
 --
 -- Name: deep_link_visits deep_link_visits_link_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -18004,11 +19873,25 @@ ALTER TABLE ONLY public.search_snapshots
     ADD CONSTRAINT search_snapshots_keyword_id_fkey FOREIGN KEY (keyword_id) REFERENCES public.tracked_keywords(id) ON DELETE CASCADE;
 
 --
+-- Name: self_promo_launches self_promo_launches_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.self_promo_launches
+    ADD CONSTRAINT self_promo_launches_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.self_promo_campaigns(id) ON DELETE CASCADE;
+
+--
 -- Name: self_promo_runs self_promo_runs_template_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.self_promo_runs
     ADD CONSTRAINT self_promo_runs_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.self_promo_templates(id) ON DELETE SET NULL;
+
+--
+-- Name: self_promo_sends self_promo_sends_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.self_promo_sends
+    ADD CONSTRAINT self_promo_sends_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.self_promo_campaigns(id) ON DELETE CASCADE;
 
 --
 -- Name: stars_events stars_events_experiment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -18100,6 +19983,20 @@ ALTER TABLE ONLY public.wb_operation_targets
 
 ALTER TABLE ONLY public.wb_operation_targets
     ADD CONSTRAINT wb_operation_targets_op_id_fkey FOREIGN KEY (op_id) REFERENCES public.wb_operations(id) ON DELETE CASCADE;
+
+--
+-- Name: webhook_deliveries webhook_deliveries_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_deliveries
+    ADD CONSTRAINT webhook_deliveries_endpoint_id_fkey FOREIGN KEY (endpoint_id) REFERENCES public.webhook_endpoints(id) ON DELETE CASCADE;
+
+--
+-- Name: webhook_deliveries webhook_deliveries_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_deliveries
+    ADD CONSTRAINT webhook_deliveries_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.integration_events(id) ON DELETE CASCADE;
 
 --
 -- Name: workflow_runs workflow_runs_workflow_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

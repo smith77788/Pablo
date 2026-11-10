@@ -1362,6 +1362,9 @@ async def main() -> None:
         # в приложениях, но API для их отправки ещё не опубликован.
         from services import telegram_updates_watch as _tg_updates
         _spawn(_resilient("telegram_updates_watch", _tg_updates.run, pool, bot))
+        # Самопиар: автопоказ кампаний новым подписчикам (раз в N дней).
+        from services import self_promo as _self_promo
+        _spawn(_resilient("self_promo_auto", _self_promo.run, pool))
         _spawn(
             _resilient("shadowban_monitor", shadowban_monitor.run, pool, bot)
         )
