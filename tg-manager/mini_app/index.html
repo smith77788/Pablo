@@ -893,6 +893,8 @@ input,select,textarea{font-family:inherit}
    было ни одной: выпадающий список выглядел ровно как поле ввода, и
    понять, что он открывается, можно было только ткнув. Рисуем шеврон
    фоном и освобождаем под него место справа. */
+.vl-in{background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:8px 10px;font-size:13px;color:var(--text);font-family:inherit;outline:none}
+.vl-in:focus{border-color:var(--accent)}
 select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%237a8ba1' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 8px;padding-right:32px}
 .sel{width:100%;padding:10px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:14px;-webkit-appearance:none;appearance:none}
 .sel:focus{border-color:var(--accent)}
@@ -24659,7 +24661,7 @@ async function openVLayerRules() {
 function _vlRulesHtml(d) {
   const r = d.rules, def = d.defaults;
   const opt = (list, cur) => list.map(t => `<option value="${esc(t.value)}"${t.value === cur ? ' selected' : ''}>${esc(t.label)}</option>`).join('');
-  let h = `<div style="font-size:12px;color:var(--hint);padding:2px 2px 8px;line-height:1.5">
+  let h = `<div style="font-size:12px;color:var(--hint);padding:2px 16px 8px;line-height:1.5">
     Модель ставит человека на ступень по его действиям и снимает со ступени, если он долго молчит.
     Здесь вы решаете, что значит каждое действие для вашего бизнеса. Изменения действуют на
     <b>новые</b> действия и на ближайший пересчёт остывания.</div>`;
@@ -24674,7 +24676,7 @@ function _vlRulesHtml(d) {
     const cur = r.signal_target[sg.key], dv = def.signal_target[sg.key];
     return `<div class="row"><div class="row-body"><div class="row-name">${esc(sg.label)}</div>
       ${cur !== dv ? `<div class="row-val">стандарт: ${esc((d.targets.find(t => t.value === dv) || {}).label || dv)}</div>` : ''}</div>
-      <select data-vlsig="${esc(sg.key)}" style="flex:0 0 auto;max-width:48%">${opt(d.targets, cur)}</select></div>`;
+      <select class="vl-in" data-vlsig="${esc(sg.key)}" style="flex:0 0 auto;max-width:48%">${opt(d.targets, cur)}</select></div>`;
   }).join('');
   h += (d.locked || []).map(sg => `<div class="row" style="opacity:.6"><div class="row-body"><div class="row-name">${esc(sg.label)}</div><div class="row-val">всегда → ${esc(sg.target_label)}: оплата — факт, а не догадка</div></div></div>`).join('');
   h += '</div>';
@@ -24683,7 +24685,7 @@ function _vlRulesHtml(d) {
   h += `<div style="padding:0 16px 6px;font-size:12px;color:var(--hint);line-height:1.4">Если человек молчит дольше — он съезжает на ступень ниже. Дорогой товар думают неделями — ставьте больше; быстрые покупки — меньше. От ${d.limits.ttl_min} до ${d.limits.ttl_max} ч.</div><div class="lst">`;
   h += (d.ttl_rungs || []).map(t => `<div class="row"><div class="row-body"><div class="row-name">${esc(t.label)}</div>
       <div class="row-val">стандарт: ${num(def.ttl_hours[t.value])} ч</div></div>
-      <input type="number" inputmode="numeric" min="${d.limits.ttl_min}" max="${d.limits.ttl_max}" data-vlttl="${esc(t.value)}" value="${r.ttl_hours[t.value]}" style="flex:0 0 90px;width:90px"> <span style="font-size:12px;color:var(--hint);margin-left:4px">ч</span></div>`).join('');
+      <input class="vl-in" type="number" inputmode="numeric" min="${d.limits.ttl_min}" max="${d.limits.ttl_max}" data-vlttl="${esc(t.value)}" value="${r.ttl_hours[t.value]}" style="flex:0 0 90px;width:90px"> <span style="font-size:12px;color:var(--hint);margin-left:4px">ч</span></div>`).join('');
   h += '</div>';
   // 3. Пороги горячего.
   const thr = (key, title, hint) => {
@@ -24692,18 +24694,18 @@ function _vlRulesHtml(d) {
       <div style="padding:0 16px 6px;font-size:12px;color:var(--hint);line-height:1.4">${hint} Стандарт: от «${esc((d.hot_at.find(x => x.value === dc.hot_at) || {}).label || '')}», ${dc.min_count} чел. и ${Math.round(dc.min_share * 100)}%.</div>
       <div class="lst">
       <div class="row"><div class="row-body"><div class="row-name">Горячим считать человека от ступени</div></div>
-        <select data-vlcas="${key}:hot_at" style="flex:0 0 auto;max-width:48%">${opt(d.hot_at, c.hot_at)}</select></div>
+        <select class="vl-in" data-vlcas="${key}:hot_at" style="flex:0 0 auto;max-width:48%">${opt(d.hot_at, c.hot_at)}</select></div>
       <div class="row"><div class="row-body"><div class="row-name">Минимум горячих, чел.</div></div>
-        <input type="number" inputmode="numeric" min="1" data-vlcas="${key}:min_count" value="${c.min_count}" style="flex:0 0 90px;width:90px"></div>
+        <input class="vl-in" type="number" inputmode="numeric" min="1" data-vlcas="${key}:min_count" value="${c.min_count}" style="flex:0 0 90px;width:90px"></div>
       <div class="row"><div class="row-body"><div class="row-name">И не меньше доли, %</div></div>
-        <input type="number" inputmode="numeric" min="1" max="100" data-vlcas="${key}:min_share" value="${Math.round(c.min_share * 100)}" style="flex:0 0 90px;width:90px"></div>
+        <input class="vl-in" type="number" inputmode="numeric" min="1" max="100" data-vlcas="${key}:min_share" value="${Math.round(c.min_share * 100)}" style="flex:0 0 90px;width:90px"></div>
       </div>`;
   };
   h += thr('audience', '3. Когда аудитория «горячая»', 'Нужны оба условия: и число, и доля. Тёплой считается половина порога.');
   h += thr('bot', '4. Когда бот «горячий»', 'То же, но по людям одного бота — порог ниже, аудитория у бота меньше.');
   h += `<div class="sec">5. Список «вот-вот остынут»</div><div class="lst">
     <div class="row"><div class="row-body"><div class="row-name">Показывать тех, кто остынет в ближайшие</div><div class="row-val">стандарт: ${def.cooling_window_hours} ч</div></div>
-    <input type="number" inputmode="numeric" min="1" max="168" id="vlCoolWin" value="${r.cooling_window_hours}" style="flex:0 0 90px;width:90px"> <span style="font-size:12px;color:var(--hint);margin-left:4px">ч</span></div></div>`;
+    <input class="vl-in" type="number" inputmode="numeric" min="1" max="168" id="vlCoolWin" value="${r.cooling_window_hours}" style="flex:0 0 90px;width:90px"> <span style="font-size:12px;color:var(--hint);margin-left:4px">ч</span></div></div>`;
   h += `<div style="padding:12px 0 4px"><button class="btn btn-p" data-main style="width:100%" onclick="vlRulesSave()">💾 Сохранить правила</button></div>
     <div style="padding:4px 0"><button class="btn btn-s" style="width:100%" onclick="vlRulesReset()">↺ Вернуть стандартные</button></div>
     <div style="height:16px"></div>`;
@@ -24768,6 +24770,7 @@ function _vlDecayText(cur) {
 // Список людей на одной ступени воронки: число на экране обязано открываться
 // срезом тех самых людей (принцип проекта), а не оставаться числом.
 async function openVLayerSegment(value) {
+  document.querySelectorAll('#vlTabs .chip').forEach(c => c.classList.toggle('on', c.dataset.t === 'overview'));
   txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/vlayer/segment/' + encodeURIComponent(value));
@@ -24800,6 +24803,7 @@ async function openVLayerSegment(value) {
 // «как он сюда пришёл», а третий заход по кругу и первый подъём дожимают
 // по-разному.
 async function openVLayerEntity(entityType, entityId) {
+  document.querySelectorAll('#vlTabs .chip').forEach(c => c.classList.toggle('on', c.dataset.t === 'overview'));
   txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/vlayer/entity/' + encodeURIComponent(entityType)
