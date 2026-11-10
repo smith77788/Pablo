@@ -6070,13 +6070,28 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="profiles" data-tab="personas" role="tablist" aria-label="Вкладки модуля «Профили»"></div>
   <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px;line-height:1.5">
+      Персона — характер аккаунта: как он пишет в прогреве чатов и в ИИ-комментариях. Работает только у персоны, <b>привязанной к аккаунту</b>; у аккаунтов без персоны свой случайный стиль.
+    </div>
     <div id="personaStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:12px">Создать персону</div>
+    <div class="sec" style="margin-top:12px" id="pFormTitle">Создать персону</div>
     <div style="padding:8px 16px">
+      <input type="hidden" id="pEditId" value="">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <span class="chip" role="button" tabindex="0" onclick="personaTemplate('expert')">🔬 Эксперт</span>
+        <span class="chip" role="button" tabindex="0" onclick="personaTemplate('friend')">😊 Свой парень</span>
+        <span class="chip" role="button" tabindex="0" onclick="personaTemplate('skeptic')">🤨 Скептик</span>
+        <span class="chip" role="button" tabindex="0" onclick="personaTemplate('girl')">🌸 Девушка-блогер</span>
+      </div>
       <div class="field">
         <label>Имя персоны *</label>
-        <input type="text" id="pName" placeholder="Например: Алексей" class="inp">
+        <input type="text" id="pName" maxlength="64" placeholder="Например: Алексей Смирнов" class="inp">
+      </div>
+      <div class="field">
+        <label>Аккаунт, которым она говорит</label>
+        <select id="pAccount" class="sel"></select>
+        <div class="field-note">Без аккаунта персона ни в одном диалоге не участвует.</div>
       </div>
       <div class="field">
         <label>Стиль речи</label>
@@ -6085,16 +6100,30 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <option value="formal">🎩 Формальный</option>
           <option value="expert">🔬 Экспертный</option>
           <option value="friendly">😊 Дружелюбный</option>
-          <option value="sarcastic">😏 Саркастический</option>
+          <option value="sarcastic">😏 Саркастичный</option>
+          <option value="neutral">😐 Нейтральный</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Настрой</label>
+        <select id="pTone" class="sel">
+          <option value="positive">🙂 Позитивный</option>
+          <option value="neutral">😐 Ровный</option>
+          <option value="skeptical">🤨 Скептичный</option>
+          <option value="enthusiastic">🤩 Восторженный</option>
         </select>
       </div>
       <div class="field">
         <label>Ниша / тема</label>
-        <input type="text" id="pNiche" placeholder="Крипто, инвестиции, IT…" class="inp">
+        <input type="text" id="pNiche" maxlength="64" placeholder="Крипто, инвестиции, IT…" class="inp">
       </div>
       <div class="field">
-        <label>Биография (кратко)</label>
-        <textarea id="pBio" rows="2" placeholder="Краткое описание персонажа…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
+        <label>Биография (её же можно поставить в «О себе»)</label>
+        <textarea id="pBio" rows="2" maxlength="1000" placeholder="Краткое описание персонажа…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      </div>
+      <div class="field">
+        <label>Предыстория и манера (необязательно)</label>
+        <textarea id="pBackstory" rows="2" maxlength="2000" placeholder="Работает в банке, по вечерам торгует. Пишет коротко, без смайликов…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
       </div>
       <div class="field">
         <label>Интересы (через запятую)</label>
@@ -6104,8 +6133,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <label>Возраст</label>
         <input type="number" id="pAge" value="25" min="18" max="80" class="inp">
       </div>
+      <div class="field">
+        <label>Проверить голос: реплика собеседника</label>
+        <input type="text" id="pTryMsg" maxlength="500" placeholder="Привет! Как тебе последние новости в твоей теме?" class="inp">
+        <button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="previewPersona(this)">🗣 Как ответит персона</button>
+        <div id="pTryOut" style="margin-top:6px"></div>
+      </div>
       <div class="field-err" id="pErr"></div>
-      <button class="btn btn-p" data-main onclick="submitPersona()" style="width:100%">🎭 Создать персону</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" id="pCancelEdit" style="display:none;flex:1" onclick="resetPersonaForm()">Отмена</button>
+        <button class="btn btn-p" data-main id="pSubmit" onclick="submitPersona()" style="flex:2">🎭 Создать персону</button>
+      </div>
     </div>
   </div>
 </div>
@@ -22906,7 +22944,19 @@ function bfSetMode(mode) {
 
 
 // ── Persona Hub ─────────────────────────────────────────
-const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'😊 Непринуждённый',expert:'🔬 Эксперт',friendly:'🤗 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
+const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'💬 Разговорный',expert:'🔬 Экспертный',friendly:'😊 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
+let PERSONAS = [];
+let PERSONA_ACCS = [];
+const PERSONA_TEMPLATES = {
+  expert: {style:'expert', tone:'neutral', age:34, niche:'инвестиции', interests:'рынки, аналитика, технологии',
+           bio:'Аналитик, 10 лет на рынке.', backstory:'Пишет по делу, приводит цифры, не любит хайп и обещания быстрых денег.'},
+  friend: {style:'casual', tone:'positive', age:27, niche:'', interests:'спорт, музыка, путешествия',
+           bio:'Обычный парень, люблю движ.', backstory:'Пишет коротко, иногда строчными, шутит, смайлики ставит редко.'},
+  skeptic: {style:'neutral', tone:'skeptical', age:41, niche:'', interests:'новости, техника, рыбалка',
+            bio:'Верю фактам, а не обещаниям.', backstory:'Переспрашивает, просит пруфы, но без грубости.'},
+  girl: {style:'friendly', tone:'enthusiastic', age:24, niche:'лайфстайл', interests:'красота, кофе, путешествия, фото',
+         bio:'Пишу о том, что вдохновляет ✨', backstory:'Тёплая, эмоциональная, делится впечатлениями, задаёт вопросы.'},
+};
 async function openPersonas() {
   push('s-personas');
   txt('personaStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -22914,30 +22964,115 @@ async function openPersonas() {
   try {
     const d = await api('/api/miniapp/personas');
     const personas = d.personas||[];
+    PERSONAS = personas;
+    PERSONA_ACCS = d.accounts||[];
     const active = personas.filter(p=>p.is_active).length;
+    const bound = personas.filter(p=>p.account_id).length;
     txt('personaStats',`
       <div class="kpi-card"><div class="kpi-val">${personas.length}</div><div class="kpi-lbl">Персон</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${active}</div><div class="kpi-lbl">Активных</div></div>
+      <div class="kpi-card"><div class="kpi-val">${bound}</div><div class="kpi-lbl">С аккаунтом</div></div>
     `);
     txt('m-persona-val',`${active} активных · ${personas.length} ${plural(personas.length,'персона','персоны','персон')}`);
-    if (!personas.length) { txt('personaList', empty('🎭','Нет персон','Заполните форму ниже и нажмите «Создать персону»')); return; }
-    txt('personaList', personas.map(p=>`
-      <div class="row">
+    fillPersonaAccounts();
+    if (!personas.length) { txt('personaList', empty('🎭','Нет персон','Выберите шаблон ниже или заполните форму и нажмите «Создать персону»')); return; }
+    txt('personaList', personas.map(p=>{
+      const acc = p.account_id
+        ? `📱 ${esc(p.first_name||p.phone||('#'+p.account_id))}${p.username?' · @'+esc(p.username):''}`
+        : '<span style="color:var(--orange)">⚠️ без аккаунта — в диалогах не участвует</span>';
+      const mem = p.memory_n ? ` · 🧠 ${num(p.memory_n)}` : '';
+      return `
+      <div class="row" style="flex-wrap:wrap">
         <div class="row-ico" style="background:var(--bg-purple-16)">${p.is_active?'🟢':'⚫'}</div>
-        <div class="row-body">
-          <div class="row-name">${esc(p.persona_name)} ${PERSONA_STYLE[p.speech_style]||p.speech_style||''}</div>
-          <div class="row-val">${esc(p.first_name||p.phone||'')} · ${esc(p.niche||'')} · ${p.age||'?'} лет</div>
+        <div class="row-body" style="min-width:0">
+          <div class="row-name">${esc(p.persona_name)} · ${PERSONA_STYLE[p.speech_style]||esc(p.style_label||'')}</div>
+          <div class="row-val">${acc}</div>
+          <div class="row-val">${esc(p.niche||'без ниши')} · ${p.age||'?'} лет${p.tone_label?' · '+esc(p.tone_label):''}${mem}</div>
         </div>
-        <div class="row-right" style="display:flex;gap:6px">
+        <div class="row-right" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn ${p.is_active?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="togglePersona(${p.id},${p.is_active})">${p.is_active?'Выкл':'Вкл'}</button>
+          <button class="icon-btn sm" onclick="editPersona(${p.id})" aria-label="Изменить" title="Изменить">✏️</button>
+          ${p.account_id?`<button class="icon-btn sm" onclick="applyPersonaProfile(${p.id}, this)" aria-label="Оформить аккаунт" title="Поставить имя и описание персоны в профиль аккаунта">🎨</button>`:''}
           <button class="icon-btn sm danger" onclick="deletePersona(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
-      </div>
-    `).join(''));
+      </div>`;}).join(''));
   } catch(e) {
     txt('personaStats','');
     txt('personaList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openPersonas')}));
   }
+}
+function fillPersonaAccounts(selected) {
+  const sel = document.getElementById('pAccount');
+  if (!sel) return;
+  const editId = parseInt((document.getElementById('pEditId')||{}).value)||0;
+  const mine = editId ? (PERSONAS.find(p=>p.id===editId)||{}).account_id : null;
+  const cur = selected !== undefined ? selected : (sel.value || 'auto');
+  const free = PERSONA_ACCS.filter(a=>!a.persona || a.id===mine);
+  sel.innerHTML = `<option value="auto">✨ Свободный аккаунт автоматически</option>`
+    + `<option value="">— без аккаунта —</option>`
+    + free.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||('#'+a.id))}${a.username?' · @'+esc(a.username):''}</option>`).join('');
+  sel.value = [...sel.options].some(o=>o.value===String(cur)) ? String(cur) : 'auto';
+}
+function personaTemplate(k) {
+  const t = PERSONA_TEMPLATES[k]; if (!t) return;
+  const set = (id,v) => { const el=document.getElementById(id); if (el) el.value = v; };
+  set('pStyle', t.style); set('pTone', t.tone); set('pAge', t.age); set('pNiche', t.niche);
+  set('pInterests', t.interests); set('pBio', t.bio); set('pBackstory', t.backstory);
+  const n = document.getElementById('pName'); if (n && !n.value.trim()) n.focus();
+}
+function _personaBody() {
+  const v = id => ((document.getElementById(id)||{}).value||'').trim();
+  return {
+    persona_name: v('pName'),
+    account_id: v('pAccount'),
+    speech_style: v('pStyle')||'casual',
+    tone: v('pTone')||'positive',
+    niche: v('pNiche'),
+    bio: v('pBio'),
+    backstory: v('pBackstory'),
+    interests: v('pInterests'),
+    age: parseInt(v('pAge')||'25'),
+  };
+}
+function editPersona(id) {
+  const p = PERSONAS.find(x=>x.id===id); if (!p) return;
+  const set = (k,v) => { const el=document.getElementById(k); if (el) el.value = v==null?'':v; };
+  set('pEditId', p.id); set('pName', p.persona_name); set('pStyle', p.speech_style||'casual');
+  set('pTone', p.tone||'positive'); set('pNiche', p.niche); set('pBio', p.bio); set('pBackstory', p.backstory);
+  set('pInterests', (p.interests||[]).join(', ')); set('pAge', p.age||25);
+  fillPersonaAccounts(p.account_id ? String(p.account_id) : '');
+  txt('pFormTitle', `Изменить персону «${esc(p.persona_name)}»`);
+  txt('pSubmit', '💾 Сохранить');
+  const c = document.getElementById('pCancelEdit'); if (c) c.style.display = '';
+  const t = document.getElementById('pFormTitle'); if (t && t.scrollIntoView) t.scrollIntoView({behavior:'smooth'});
+}
+function resetPersonaForm() {
+  ['pEditId','pName','pNiche','pBio','pBackstory','pInterests','pTryMsg'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  const a = document.getElementById('pAge'); if (a) a.value='25';
+  txt('pFormTitle','Создать персону'); txt('pSubmit','🎭 Создать персону'); txt('pTryOut',''); txt('pErr','');
+  const c = document.getElementById('pCancelEdit'); if (c) c.style.display = 'none';
+  fillPersonaAccounts('auto');
+}
+async function previewPersona(btn) {
+  const body = _personaBody();
+  if (!body.persona_name) { txt('pErr','Сначала укажите имя персоны'); return; }
+  txt('pErr','');
+  body.message = ((document.getElementById('pTryMsg')||{}).value||'').trim();
+  const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Думает…';
+  try {
+    const d = await api('/api/miniapp/persona/preview', {method:'POST', body:JSON.stringify(body)});
+    txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.message||'')}</div><div style="margin-top:4px">🎭 ${esc(d.reply||'')}</div></div>`);
+  } catch(e) { txt('pTryOut', `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось получить ответ'))}</div>`); }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+async function applyPersonaProfile(id, el) {
+  const p = PERSONAS.find(x=>x.id===id); if (!p) return;
+  const about = (p.bio||'').slice(0,70);
+  if (!await askConfirm(`Поставить в профиль аккаунта имя «${p.persona_name}»${about?' и описание «'+about+'»':''}?`)) return;
+  try {
+    const r = await api(`/api/miniapp/persona/${id}/apply_profile`, {method:'POST', body:'{}'});
+    toast(`🎨 Оформление поставлено в очередь (#${r.op_id})`);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
 }
 async function togglePersona(id, active) {
   try {
@@ -22951,38 +23086,32 @@ async function deletePersona(id, _el) {
   try {
     await api(`/api/miniapp/persona/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
+    if (parseInt((document.getElementById('pEditId')||{}).value)===id) resetPersonaForm();
     openPersonas();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
 async function submitPersona() {
-  const name = (document.getElementById('pName')||{}).value?.trim();
+  const body = _personaBody();
   const errEl = document.getElementById('pErr');
-  if (!name) { if(errEl) errEl.textContent='Укажите имя персоны'; return; }
+  if (!body.persona_name) { if(errEl) errEl.textContent='Укажите имя персоны'; return; }
   if(errEl) errEl.textContent='';
-  const btn = document.querySelector('#s-personas .btn-p');
-  if(btn) { btn.disabled=true; btn.textContent='Создание...'; }
+  const editId = parseInt((document.getElementById('pEditId')||{}).value)||0;
+  const btn = document.getElementById('pSubmit');
+  if(btn) { btn.disabled=true; btn.textContent= editId ? 'Сохраняю…' : 'Создание...'; }
   try {
-    await api('/api/miniapp/persona', {
-      method:'POST',
+    await api(editId ? `/api/miniapp/persona/${editId}` : '/api/miniapp/persona', {
+      method: editId ? 'PUT' : 'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        persona_name: name,
-        speech_style: document.getElementById('pStyle')?.value||'casual',
-        niche: document.getElementById('pNiche')?.value?.trim()||'',
-        bio: document.getElementById('pBio')?.value?.trim()||'',
-        interests: document.getElementById('pInterests')?.value?.trim()||'',
-        age: parseInt(document.getElementById('pAge')?.value||'25')
-      })
+      body: JSON.stringify(body)
     });
-    toast('🎭 Персона создана!');
-    ['pName','pNiche','pBio','pInterests'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-    document.getElementById('pAge').value='25';
+    toast(editId ? '💾 Персона сохранена' : '🎭 Персона создана!');
+    resetPersonaForm();
     openPersonas();
   } catch(e) {
     if(errEl) errEl.textContent='Ошибка: '+errRu(e);
-    toast('⚠️ Ошибка создания');
+    toast(editId ? '⚠️ Ошибка сохранения' : '⚠️ Ошибка создания');
   } finally {
-    if(btn) { btn.disabled=false; btn.textContent='🎭 Создать персону'; }
+    if(btn) { btn.disabled=false; btn.textContent = (parseInt((document.getElementById('pEditId')||{}).value)||0) ? '💾 Сохранить' : '🎭 Создать персону'; }
   }
 }
 
