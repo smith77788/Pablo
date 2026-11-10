@@ -2,7 +2,7 @@
 
 Вынесено из `services/mini_app_api.py`: 30 маршрутов — контент-сетка
 (`/content_mesh/*`: правила, цели, включение, удаление), нарративный движок,
-самопродвижение, спинтакс, клонирование контента и его адаптация, ДНК
+самопродвижение, спинтакс, ДНК
 аудитории и семантическая память.
 
 Вместе с ручками уехали `_own_mesh` (скоуп владельца для правила сетки) и
@@ -11,6 +11,8 @@
 
 Поведение при переносе не менялось: тела обработчиков и строки регистрации
 маршрутов перенесены дословно.
+
+«Клон и адаптация» (`/clone_adapt/*`) переехал в `services/mini_app_clone_adapt.py`.
 """
 from __future__ import annotations
 
@@ -39,33 +41,6 @@ def setup_routes(app: web.Application, pool) -> None:
     # Тот же потолок, что в LIMIT исполнителя: за один запуск больше не уйдёт.
     _SELF_PROMO_CAP = 1000
 
-    async def clone_adapt_history(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            rows = await pool.fetch(
-                """
-                SELECT h.id, h.source_bot_id, h.target_bot_id, h.fields,
-                       h.status, h.details, h.created_at,
-                       sb.username AS source_uname, sb.first_name AS source_name,
-                       tb.username AS target_uname, tb.first_name AS target_name
-                FROM clone_adapt_history h
-                LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
-                LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
-                WHERE h.owner_id=$1 ORDER BY h.created_at DESC, h.id DESC
-                LIMIT $2 OFFSET $3
-                """,
-                uid, _list_limit(request, 30, 1000), _list_offset(request),
-            )
-            total = await _safe_count(pool,
-                "SELECT COUNT(*) FROM clone_adapt_history WHERE owner_id=$1", uid)
-            # Было — голый массив; история обрывалась на 30 записях молча.
-            return _json_resp({"items": [dict(r) for r in rows], "total": total})
-        except Exception:
-            log.exception("clone_adapt_history uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
     async def content_mesh_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -87,51 +62,6 @@ def setup_routes(app: web.Application, pool) -> None:
             return _json_resp({"enabled": new_state})
         except Exception:
             log.exception("content_mesh_toggle uid=%d mesh=%d", uid, mesh_id)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def clone_adapt_submit(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        source_bot_id = data.get("source_bot_id")
-        target_bot_id = data.get("target_bot_id")
-        fields = data.get("fields", "name,desc")
-        if not source_bot_id or not target_bot_id:
-            return _err("Выберите бота-источник и бота-получателя", 400)
-        if int(source_bot_id) == int(target_bot_id):
-            return _err("Источник и цель должны быть разными ботами", 400)
-        try:
-            src = await pool.fetchrow(
-                "SELECT bot_id, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-                int(source_bot_id), uid,
-            )
-            tgt = await pool.fetchrow(
-                "SELECT bot_id, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-                int(target_bot_id), uid,
-            )
-            if not src:
-                return _err("Исходный бот не найден", 404)
-            if not tgt:
-                return _err("Целевой бот не найден", 404)
-            src_name = src["username"] or src["first_name"] or f"id{src['bot_id']}"
-            tgt_name = tgt["username"] or tgt["first_name"] or f"id{tgt['bot_id']}"
-            op_id = await _obus.submit(
-                pool, uid, "clone_adapt", {
-                    "source_bot_id": int(source_bot_id),
-                    "target_bot_id": int(target_bot_id),
-                    "fields": fields,
-                }, total_items=1, label=f"Клонирование: @{src_name} → @{tgt_name}")
-            return _json_resp({"op_id": op_id, "ok": True})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("clone_adapt_submit uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
     async def content_mesh_create(request: web.Request) -> web.Response:
@@ -954,8 +884,6 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("audience_dna_history uid=%d bot=%d", uid, bot_id)
             return _err(_INTERNAL_ERROR, 500)
 
-    app.router.add_get("/api/miniapp/clone_adapt/history", clone_adapt_history)
-    app.router.add_post("/api/miniapp/clone_adapt/submit", clone_adapt_submit)
     app.router.add_post("/api/miniapp/content_mesh", content_mesh_create)
     app.router.add_get("/api/miniapp/content_mesh/{mesh_id}/targets", content_mesh_targets_list)
     app.router.add_post("/api/miniapp/content_mesh/{mesh_id}/target", content_mesh_target_add)
