@@ -22979,7 +22979,7 @@ async def _exec_ai_comment(
     ставится до отправки и переживает операцию, то есть второй запуск по тем
     же каналам не пишет второй комментарий под тот же пост.
     """
-    from services import ai_comment_engine, account_manager, content_safety
+    from services import ai_comment_engine, account_manager, content_safety, persona_engine
     from services.growth_agent_settings import comment_settings
 
     channels = [str(c).strip() for c in (params.get("channels") or []) if str(c).strip()]
@@ -23055,12 +23055,16 @@ async def _exec_ai_comment(
             continue
         acc = accounts[idx % len(accounts)]
         try:
+            # Персона аккаунта (экран «Профили → Персоны») задаёт голос
+            # комментария: без неё весь флот пишет одним голосом.
+            _persona = await persona_engine.persona_prompt_for_account(pool, int(acc["id"]))
             res = await ai_comment_engine.post_ai_comment(
                 acc["session_str"], dict(acc), ref, niche=niche, tone=tone,
                 posts=cfg["posts_per_channel"], pick=cfg["post_pick"],
                 max_age_hours=cfg["max_post_age_hours"], length=cfg["length"],
                 extra_instruction=cfg["extra_instruction"],
-                join_discussion=cfg["join_discussion"], mark=_mark_post)
+                join_discussion=cfg["join_discussion"], mark=_mark_post,
+                persona=_persona)
             if res.get("ok"):
                 ok_count += 1
                 comments_total += len(res.get("comments") or []) or 1
