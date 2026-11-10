@@ -7,6 +7,7 @@ DELETE /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 DELETE /api/miniapp/auto_reply/{reply_id}
 DELETE /api/miniapp/bot/{bot_id}
 DELETE /api/miniapp/bot/{bot_id}/avatar
+DELETE /api/miniapp/bot/{bot_id}/multigeo/{lang}
 DELETE /api/miniapp/bot/{bot_id}/webhook
 DELETE /api/miniapp/channel/{ch_id}
 DELETE /api/miniapp/chatlist_folders/{folder_id}
@@ -810,6 +811,9 @@ POST /api/miniapp/bot/{bot_id}/avatar
 POST /api/miniapp/bot/{bot_id}/deeplink
 POST /api/miniapp/bot/{bot_id}/funnel
 POST /api/miniapp/bot/{bot_id}/multigeo
+POST /api/miniapp/bot/{bot_id}/multigeo/apply
+POST /api/miniapp/bot/{bot_id}/multigeo/copy
+POST /api/miniapp/bot/{bot_id}/multigeo/translate
 POST /api/miniapp/bot/{bot_id}/profile
 POST /api/miniapp/bot/{bot_id}/schedule
 POST /api/miniapp/bot/{bot_id}/swarm
