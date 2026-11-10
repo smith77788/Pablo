@@ -139,4 +139,6 @@ def test_brain_turns_it_into_an_action():
 def test_snapshot_counts_them():
     from services.organism import world
     src = inspect.getsource(world._vlayer)
-    assert "'bouncing'" in src and "state_key='pattern'" in src
+    assert "active_bouncing_ids" in src, "счётчик не из общего с экраном условия"
+    vsrc = inspect.getsource(vl.active_bouncing_ids)
+    assert "'bouncing'" in vsrc and "PATTERN_KEY" in vsrc

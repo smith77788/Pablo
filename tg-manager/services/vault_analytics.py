@@ -94,3 +94,39 @@ def analyze_dialogs(rows) -> dict:
         "busiest_hour": busiest_hour,
         "top_peers": top_peers,
     }
+
+
+def response_stats(rows) -> dict:
+    """Скорость ответа внутри одного диалога, в обе стороны.
+
+    rows — сообщения диалога по времени: {direction, msg_date}. Серия подряд
+    идущих сообщений одной стороны считается одним «ходом»; задержка ответа —
+    от ПЕРВОГО сообщения серии до первого сообщения другой стороны. Так десять
+    сообщений клиента подряд не превращаются в десять «быстрых ответов».
+
+    owner_unanswered — серии клиента, после которых вы так и не написали
+    (последняя серия, если она за клиентом, сюда входит).
+    """
+    turns: list[tuple[str, float]] = []
+    for r in rows or []:
+        d = (r.get("direction") or "in").lower()
+        ts = _ts(r.get("msg_date"))
+        if ts is None:
+            continue
+        if not turns or turns[-1][0] != d:
+            turns.append((d, ts))
+    owner: list[float] = []
+    peer: list[float] = []
+    for (d1, t1), (d2, t2) in zip(turns, turns[1:]):
+        if d1 == "in" and d2 == "out":
+            owner.append(max(0.0, t2 - t1))
+        elif d1 == "out" and d2 == "in":
+            peer.append(max(0.0, t2 - t1))
+    unanswered = 1 if turns and turns[-1][0] == "in" else 0
+    return {
+        "owner_reply_median_min": round(median(owner) / 60, 1) if owner else None,
+        "peer_reply_median_min": round(median(peer) / 60, 1) if peer else None,
+        "owner_replies": len(owner),
+        "owner_unanswered": unanswered,
+        "turns": len(turns),
+    }

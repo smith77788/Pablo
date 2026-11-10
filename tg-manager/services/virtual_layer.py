@@ -1074,6 +1074,56 @@ async def mark_purchased(pool, owner_id: int, entity_type: str, entity_id, *,
     return change
 
 
+# Кто по-настоящему «ходит по кругу». Отметка `pattern=bouncing` ставится по
+# истории воронки и сама не знала ничего о том, что было после: человек купил
+# (оплата прошла мимо системы, заказ бота-продавца, «Купил» в Хранилище) или
+# владелец уже ведёт с ним живой разговор — а организм продолжал присылать
+# «N ходят по кругу» и советовать «другое предложение, живой разговор». Живой
+# разговор после отметки и есть тот совет, который уже выполнен.
+# Одно условие на счётчик уведомления (organism.world) и на список под
+# кнопкой «Открыть» (bouncing_list) — число и список обязаны совпадать.
+# Псевдоним строки отметки — `p`.
+BOUNCING_STILL_ACTIVE_SQL = """
+  NOT EXISTS (
+    SELECT 1 FROM virtual_states f WHERE f.owner_id=p.owner_id
+       AND f.entity_type=p.entity_type AND f.entity_id=p.entity_id
+       AND f.state_key='funnel' AND f.value='purchased')
+  AND NOT EXISTS (
+    SELECT 1 FROM unified_contacts uc
+     WHERE uc.owner_id=p.owner_id AND uc.id::text=p.entity_id
+       AND uc.telegram_user_id IS NOT NULL
+       AND (EXISTS (SELECT 1 FROM vault_messages vm
+                     WHERE vm.owner_id=p.owner_id AND vm.chat_id=uc.telegram_user_id
+                       AND vm.direction='out' AND vm.msg_date > p.updated_at)
+         OR EXISTS (SELECT 1 FROM vault_chat_state vs
+                     WHERE vs.owner_id=p.owner_id AND vs.chat_id=uc.telegram_user_id
+                       AND (vs.purchased_at IS NOT NULL
+                            OR vs.handled_at > p.updated_at))
+         OR EXISTS (SELECT 1 FROM bot_sales_orders o
+                     WHERE o.owner_id=p.owner_id
+                       AND o.customer_chat_id=uc.telegram_user_id
+                       AND o.paid_at IS NOT NULL)))
+"""
+
+
+async def active_bouncing_ids(pool, owner_id: int, *, entity_type: str = USER,
+                              limit: int = 500) -> list[str]:
+    """id тех, кто сейчас «ходит по кругу» (без купивших и тех, с кем уже
+    говорят). Для счётчика и отпечатка напоминания. Fail-open: []."""
+    try:
+        rows = await pool.fetch(
+            "SELECT p.entity_id FROM virtual_states p WHERE p.owner_id=$1 "
+            "AND p.entity_type=$2 AND p.state_key=$3 AND p.value='bouncing' AND "
+            + BOUNCING_STILL_ACTIVE_SQL
+            + " ORDER BY p.updated_at DESC LIMIT $4",
+            owner_id, entity_type, PATTERN_KEY, int(limit))
+        return [str(r["entity_id"]) for r in rows]
+    except Exception:
+        log.debug("virtual_layer.active_bouncing_ids failed owner=%s", owner_id,
+                  exc_info=True)
+        return []
+
+
 async def bouncing_list(pool, owner_id: int, *, entity_type: str = USER,
                         state_key: str = "funnel", limit: int = 50) -> list[dict]:
     """Кто сейчас «ходит по кругу» — без тех, кто уже купил.
@@ -1090,9 +1140,9 @@ async def bouncing_list(pool, owner_id: int, *, entity_type: str = USER,
             "  AND f.entity_type=p.entity_type AND f.entity_id=p.entity_id "
             "  AND f.state_key=$3 "
             "WHERE p.owner_id=$1 AND p.entity_type=$2 AND p.state_key=$4 "
-            "AND p.value='bouncing' "
-            "AND COALESCE(f.value, '') <> 'purchased' "
-            "ORDER BY p.updated_at DESC LIMIT $5",
+            "AND p.value='bouncing' AND "
+            + BOUNCING_STILL_ACTIVE_SQL
+            + " ORDER BY p.updated_at DESC LIMIT $5",
             owner_id, entity_type, state_key, PATTERN_KEY, int(limit))
         out = [{"entity_type": r["entity_type"], "entity_id": r["entity_id"],
                 "value": r["funnel"],

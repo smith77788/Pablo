@@ -356,8 +356,10 @@ GET /api/miniapp/va/channels
 GET /api/miniapp/va/posts
 GET /api/miniapp/va/strategy
 GET /api/miniapp/vault/analytics
+GET /api/miniapp/vault/chat/{chat_id}/info
 GET /api/miniapp/vault/chat/{chat_id}/messages
 GET /api/miniapp/vault/chats
+GET /api/miniapp/vault/dialogs
 GET /api/miniapp/vault/export
 GET /api/miniapp/vault/media/{chat_id}/{msg_id}
 GET /api/miniapp/vault/owners
@@ -691,8 +693,10 @@ HEAD /api/miniapp/va/channels
 HEAD /api/miniapp/va/posts
 HEAD /api/miniapp/va/strategy
 HEAD /api/miniapp/vault/analytics
+HEAD /api/miniapp/vault/chat/{chat_id}/info
 HEAD /api/miniapp/vault/chat/{chat_id}/messages
 HEAD /api/miniapp/vault/chats
+HEAD /api/miniapp/vault/dialogs
 HEAD /api/miniapp/vault/export
 HEAD /api/miniapp/vault/media/{chat_id}/{msg_id}
 HEAD /api/miniapp/vault/owners
@@ -1082,6 +1086,7 @@ POST /api/miniapp/va/drafts/{did}/regenerate
 POST /api/miniapp/va/drafts/{did}/reject
 POST /api/miniapp/va/references/{rid}/refresh
 POST /api/miniapp/vault/chat/{chat_id}/reply
+POST /api/miniapp/vault/chat/{chat_id}/state
 POST /api/miniapp/vault/settings
 POST /api/miniapp/views
 POST /api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased
