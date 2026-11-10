@@ -358,7 +358,6 @@ GET /api/miniapp/va/strategy
 GET /api/miniapp/vault/analytics
 GET /api/miniapp/vault/chat/{chat_id}/info
 GET /api/miniapp/vault/chat/{chat_id}/messages
-GET /api/miniapp/vault/chats
 GET /api/miniapp/vault/dialogs
 GET /api/miniapp/vault/export
 GET /api/miniapp/vault/media/{chat_id}/{msg_id}
@@ -695,7 +694,6 @@ HEAD /api/miniapp/va/strategy
 HEAD /api/miniapp/vault/analytics
 HEAD /api/miniapp/vault/chat/{chat_id}/info
 HEAD /api/miniapp/vault/chat/{chat_id}/messages
-HEAD /api/miniapp/vault/chats
 HEAD /api/miniapp/vault/dialogs
 HEAD /api/miniapp/vault/export
 HEAD /api/miniapp/vault/media/{chat_id}/{msg_id}

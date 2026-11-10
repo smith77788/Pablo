@@ -232,13 +232,21 @@ def _snooze_kb(suggestion_id: str, action: dict | None = None):
     ob = _open_button(action)
     if ob:
         kb.button(text=ob[0], web_app=ob[1])
+    # Ждущих ответа можно разобрать и не открывая приложение: список диалогов
+    # с карточками и «Ответить» живёт прямо в боте.
+    in_bot = (action or {}).get("kind") == "vault"
+    if in_bot:
+        from bot.callbacks import VaultCb
+        kb.button(text="💬 Ждущие ответа — в боте",
+                  callback_data=VaultCb(a="list", f="waiting"))
     for code, label, _secs in brain.SNOOZE_PRESETS:
         kb.button(text=f"🔕 {label}",
                   callback_data=SnoozeCb(action="mute", sid=suggestion_id, code=code))
     kb.button(text="🚫 Больше не напоминать",
               callback_data=SnoozeCb(action="off", sid=suggestion_id, code="never"))
     # Открыть (если есть) — отдельной строкой сверху, затем snooze-периоды 2×2.
-    kb.adjust(*([1, 2, 2, 1] if ob else [2, 2, 1]))
+    head = ([1] if ob else []) + ([1] if in_bot else [])
+    kb.adjust(*head, 2, 2, 1)
     return kb.as_markup()
 
 

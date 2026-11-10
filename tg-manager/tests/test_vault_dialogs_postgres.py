@@ -58,7 +58,17 @@ def pool():
     _run(p.close())
 
 
-NOW = dt.datetime.now(dt.timezone.utc)
+def _now():
+    # Берём живое время при КАЖДОЙ вставке, а не фиксируем при импорте:
+    # `set_state(handled=...)` пишет `now()` базой, и если прогон всего набора
+    # длится минуты, фиксированный импортный NOW уезжает в прошлое относительно
+    # отметки — «новое» сообщение оказывается старше отметки, и диалог
+    # ошибочно считается отвеченным. Так падал test_purchase_and_handled в
+    # полном прогоне и был зелёным в одиночку.
+    return dt.datetime.now(dt.timezone.utc)
+
+
+NOW = _now()
 
 
 def _clean(pool):
@@ -87,7 +97,7 @@ def _put(pool, chat, direction, text, minutes_ago, *, deleted=False, name="Кл�
            VALUES ($1,'c',$2,$3,$4,$2,$5,$6,$7,$8,$9)""",
         OWNER, chat, _MID[0], direction, name,
         encrypt_token(text) if text else None, media,
-        NOW - dt.timedelta(minutes=minutes_ago), deleted))
+        _now() - dt.timedelta(minutes=minutes_ago), deleted))
 
 
 def _waiting_ids(pool):
