@@ -27651,19 +27651,13 @@ async function openInfraHealth() {
   try {
     const d = await api('/api/miniapp/infra_health');
     const alerts = d.alerts||[];
-    const recovery = d.recovery||[];
     const sevCls = {info:'b-bl',warning:'b-or',error:'b-rd',critical:'b-rd'};
     if (!alerts.length) {
       txt('ihAlerts', empty('✅','Оповещений нет','Детектор проверяет ошибки, очередь, флуд и доверие аккаунтов каждые пять минут',
         {label:'⚙️ Посмотреть операции', fn:'openOps()'}));
     } else {
-      // Одна карточка на эпизод: когда начался, когда подтверждён последний
-      // раз и сколько раз. Раньше каждая получасовая запись была отдельной
-      // «критичной» карточкой, и закончившаяся волна висела неделями.
-      const head = alerts.length > 1
-        ? `<div style="display:flex;justify-content:flex-end;padding:0 16px 6px"><button class="btn btn-g" style="padding:5px 12px;font-size:12px;min-width:0" onclick="ihResolveAll(${alerts.length})">Снять все</button></div>`
-        : '';
-      txt('ihAlerts', head + alerts.map(a=>{
+      // Одна карточка на эпизод (см. anomaly_detector.get_active_anomalies).
+      txt('ihAlerts', alerts.map(a=>{
         const go = ihAnomalyGo(a.alert_type);
         const t = esc(String(a.alert_type||'').replace(/[^a-z_]/g,''));
         const occ = Number(a.occurrences||1);
@@ -27686,10 +27680,15 @@ async function openInfraHealth() {
           </div>
         </div>`;
       }).join(''));
+      // Раньше каждое оповещение снималось своим подтверждением.
+      const box = document.getElementById('ihAlerts');
+      if (box && alerts.length > 1) box.insertAdjacentHTML('afterbegin',
+        `<div style="display:flex;justify-content:flex-end;padding:8px 14px"><button class="btn btn-g" style="padding:5px 12px;font-size:12px;min-width:0" onclick="ihResolveAll(${alerts.length})">Снять все</button></div>`);
     }
     // Своей плитки у инфраструктуры больше нет (вкладка модуля «Здоровье»), а
     // голый getElementById на снятой плитке ронял экран.
     txt('m-ih-val', alerts.length?`${alerts.length} ${plural(alerts.length,'оповещение','оповещения','оповещений')}`:'Всё в норме');
+    const recovery = d.recovery||[];
     if (!recovery.length) {
       txt('ihRecovery', empty('🔄','Система ничего не чинила','Здесь появятся аккаунты и прокси, которые она починила сама'));
     } else {
