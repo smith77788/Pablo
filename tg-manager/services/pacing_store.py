@@ -243,6 +243,33 @@ async def flush_peer_floods(pool) -> int:
     return done
 
 
+async def flush_bans(pool) -> int:
+    """Выключить в базе аккаунт, про который Telegram ответил «заблокирован»
+    на пути мимо очереди (account_gate.note_ban). Запись та же, что у
+    исполнителей операций; уже выключенный аккаунт не трогаем."""
+    from services import account_gate
+
+    items = account_gate.drain_bans()
+    done = 0
+    for i, (aid, name) in enumerate(items):
+        try:
+            await pool.execute(
+                """UPDATE tg_accounts
+                      SET is_active = FALSE, acc_status = 'banned',
+                          status_reason = $2
+                    WHERE id = $1 AND is_active = TRUE""",
+                aid, f"Telegram: аккаунт заблокирован ({name or 'ответ на запрос'}, "
+                     "замечено на входе)")
+            done += 1
+        except asyncio.CancelledError:
+            account_gate.requeue_bans(items[i:])
+            raise
+        except Exception:
+            account_gate.requeue_bans([(aid, name)])
+            _metric("infragram_pacing_sync_errors_total")
+    return done
+
+
 async def sync_once(pool, worker_id: str = "") -> None:
     """Один обмен: сначала запись (чтобы окно включало свои исходы), потом чтение."""
     await flush_events(pool, worker_id)
@@ -250,6 +277,7 @@ async def sync_once(pool, worker_id: str = "") -> None:
     await flush_flood_floor(pool)
     await flush_direct_actions(pool)
     await flush_peer_floods(pool)
+    await flush_bans(pool)
     await pull_window(pool)
 
 
@@ -279,3 +307,4 @@ async def _final_flush(pool, worker_id: str) -> None:
     await flush_flood_floor(pool)
     await flush_direct_actions(pool)
     await flush_peer_floods(pool)
+    await flush_bans(pool)

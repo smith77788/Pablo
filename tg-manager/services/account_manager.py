@@ -303,8 +303,8 @@ def _wrap_client_flood_floor(client, account_id):
                 secs = getattr(e, "seconds", 0) or 0
                 for n in names:
                     _fe.note_floor(aid, n, secs)
-            elif type(e).__name__ == "PeerFloodError":
-                _gate.note_peer_flood(aid, names[0] if names else "")
+            else:
+                _gate.note_error(aid, names[0] if names else "", e)
             raise
 
     try:

@@ -187,3 +187,51 @@ def test_a_spam_block_nobody_recorded_still_stops_the_account(gate):
         flood_engine._flood_state.update(saved)
         gate._peer_flood_unsaved.clear()
         gate._peer_flood_unsaved.update(saved_q)
+
+
+def test_a_ban_seen_outside_the_queue_takes_the_account_out_of_rotation(gate):
+    """Экран или фоновый цикл получил «аккаунт заблокирован» и ничего не
+    записал: подбор продолжал отдавать его в операции, и каждая падала."""
+    import telethon.errors as errors
+    from services import account_manager as am, flood_engine
+    saved = dict(flood_engine._flood_state)
+    saved_q = dict(gate._ban_unsaved)
+    gate._ban_unsaved.clear()
+
+    class _Banned(_Client):
+        async def _call(self, sender, request, ordered=False):
+            raise errors.UserDeactivatedBanError("USER_DEACTIVATED_BAN")
+
+    client = am._wrap_client_flood_floor(_Banned(), 7104)
+    try:
+        with pytest.raises(errors.UserDeactivatedBanError):
+            asyncio.run(client._call(None, GetDialogsRequest()))
+        assert flood_engine.is_account_cooling(7104)
+        assert gate.drain_bans() == [(7104, "UserDeactivatedBanError")]
+    finally:
+        flood_engine._flood_state.clear()
+        flood_engine._flood_state.update(saved)
+        gate._ban_unsaved.clear()
+        gate._ban_unsaved.update(saved_q)
+
+
+def test_a_revoked_key_is_not_a_ban_at_the_door(gate):
+    """AUTH_KEY_UNREGISTERED даёт и наш собственный сбой транспорта. На общем
+    входе контекста нет — живой аккаунт выключать по нему нельзя."""
+    import telethon.errors as errors
+    from services import account_manager as am
+    saved_q = dict(gate._ban_unsaved)
+    gate._ban_unsaved.clear()
+
+    class _NoKey(_Client):
+        async def _call(self, sender, request, ordered=False):
+            raise errors.AuthKeyUnregisteredError("AUTH_KEY_UNREGISTERED")
+
+    client = am._wrap_client_flood_floor(_NoKey(), 7105)
+    try:
+        with pytest.raises(errors.AuthKeyUnregisteredError):
+            asyncio.run(client._call(None, GetDialogsRequest()))
+        assert gate.drain_bans() == []
+    finally:
+        gate._ban_unsaved.clear()
+        gate._ban_unsaved.update(saved_q)

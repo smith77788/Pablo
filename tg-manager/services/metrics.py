@@ -212,6 +212,14 @@ _HELP = {
         "Операции, возвращённые в очередь: место на владельца не освободилось",
     "infragram_op_stalls_total": "Операции, о застревании которых предупредили владельца",
     "infragram_session_deaths_total": "Смерти сессий (auth key убит)",
+    "infragram_account_identity_completed_total": (
+        "Клиент аккаунта собран по неполному словарю: id, устройство или прокси "
+        "добраны по сессии на общем входе"),
+    "infragram_flood_floor_events_total": (
+        "Паузы Telegram на общем входе: noted — замечена, refused — запрос "
+        "остановлен до истечения паузы и до Telegram не дошёл"),
+    "infragram_restricted_account_refusals_total": (
+        "Запросы, не отправленные с аккаунта под спам-блоком или заморозкой"),
     "infragram_db_pool_connections": "Соединения пула БД",
     "infragram_bot_stale_updates_skipped_total":
         "Личные сообщения боту, пропущенные как устаревшие: пролежали у Telegram "

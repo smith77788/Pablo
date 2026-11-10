@@ -229,3 +229,66 @@ def drain_peer_floods() -> list[tuple[int, str]]:
 def requeue_peer_floods(items) -> None:
     for aid, name in items:
         _peer_flood_unsaved.setdefault(int(aid), str(name))
+
+
+# Аккаунт → имя ошибки Telegram «аккаунт заблокирован»; ждёт записи в базу
+# (pacing_store.flush_bans).
+_ban_unsaved: dict[int, str] = {}
+# Только однозначные ответы «аккаунта больше нет». Отзыв ключа сессии
+# (AUTH_KEY_UNREGISTERED) сюда НЕ входит намеренно: его же даёт наш
+# собственный сбой транспорта (сессия с адресом не того дата-центра), и на
+# общем входе, где контекста нет, живой аккаунт выключался бы навсегда.
+# Мёртвую сессию по-прежнему определяют исполнители и монитор аккаунтов.
+_BAN_ERRORS = frozenset({
+    "UserDeactivatedBanError", "UserDeactivatedError", "PhoneNumberBannedError",
+})
+
+
+def note_error(account_id, request_name: str, exc: BaseException) -> None:
+    """Дверь к Telegram получила ошибку. Отметить то, что касается АККАУНТА,
+    а не запроса: спам-блок и блокировку. Никогда не бросает."""
+    name = type(exc).__name__
+    if name == "PeerFloodError":
+        note_peer_flood(account_id, request_name)
+    elif name in _BAN_ERRORS:
+        note_ban(account_id, name)
+
+
+def note_ban(account_id, error_name: str = "") -> None:
+    """Telegram ответил, что аккаунт заблокирован или удалён.
+
+    Исполнители операций выключают такой аккаунт сразу, но ошибку ловят и
+    экраны, и фоновые циклы, которые ничего не записывают: до следующего
+    обхода монитора аккаунт оставался «активным», подбор отдавал его в новые
+    операции, и каждая падала с ошибкой у пользователя."""
+    try:
+        aid = int(account_id)
+    except (TypeError, ValueError):
+        return
+    if aid <= 0:
+        return
+    _ban_unsaved[aid] = str(error_name or "")[:60]
+    try:  # подбор аккаунтов в этом процессе перестаёт брать его сразу
+        import time as _time
+        from services import flood_engine as _fe
+        state = _fe.get_account_state(aid)
+        state.cooldown_until = max(state.cooldown_until,
+                                   _time.monotonic() + PEER_FLOOD_COOLDOWN_S)
+    except Exception:
+        log.debug("note_ban: пауза в памяти не поставлена", exc_info=True)
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_session_deaths_total", {"kind": "ban_at_door"})
+    except Exception:
+        pass
+
+
+def drain_bans() -> list[tuple[int, str]]:
+    out = list(_ban_unsaved.items())
+    _ban_unsaved.clear()
+    return out
+
+
+def requeue_bans(items) -> None:
+    for aid, name in items:
+        _ban_unsaved.setdefault(int(aid), str(name))

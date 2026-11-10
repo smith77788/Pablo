@@ -94,3 +94,36 @@ def test_a_spam_block_seen_at_the_door_reaches_the_database():
     # Более тяжёлый статус и его причину дверь не затирает.
     assert (frozen["acc_status"], frozen["status_reason"]) == ("frozen", "заморожен раньше")
     assert again == 0
+
+
+def test_a_ban_seen_at_the_door_switches_the_account_off_in_the_database():
+    import asyncpg
+    from services import account_gate, flood_engine, pacing_store
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
+        saved_q = dict(account_gate._ban_unsaved)
+        saved_f = dict(flood_engine._flood_state)
+        account_gate._ban_unsaved.clear()
+        try:
+            await pool.execute("DELETE FROM tg_accounts WHERE id = $1", ACC)
+            await pool.execute(
+                """INSERT INTO tg_accounts(id, owner_id, phone, session_str, acc_status)
+                   VALUES ($1, $2, '+990071002', '', 'active')""", ACC, OWNER)
+            account_gate.note_ban(ACC, "UserDeactivatedBanError")
+            assert await pacing_store.flush_bans(pool) == 1
+            row = await pool.fetchrow(
+                "SELECT is_active, acc_status, status_reason FROM tg_accounts WHERE id=$1", ACC)
+            return dict(row), await pacing_store.flush_bans(pool)
+        finally:
+            await pool.execute("DELETE FROM tg_accounts WHERE id = $1", ACC)
+            account_gate._ban_unsaved.clear()
+            account_gate._ban_unsaved.update(saved_q)
+            flood_engine._flood_state.clear()
+            flood_engine._flood_state.update(saved_f)
+            await pool.close()
+
+    row, again = asyncio.run(go())
+    assert (row["is_active"], row["acc_status"]) == (False, "banned")
+    assert "заблокирован" in row["status_reason"]
+    assert again == 0
