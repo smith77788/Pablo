@@ -12810,6 +12810,7 @@ function buildAccDetail(d) {
     ${capsHtml}
     ${limitsHtml}
     ${rehabHtml}
+    ${typeof accPoolRowHtml === 'function' ? accPoolRowHtml(a) : ''}
     ${warmupHtml}
     ${recentOpsHtml}
     <div style="height:16px"></div>`;

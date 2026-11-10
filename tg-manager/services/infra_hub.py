@@ -293,6 +293,10 @@ ACTION_RU: dict[str, str] = {
     "workspace_member_join": "Участник вошёл в команду",
     "workspace_member_leave": "Участник вышел из команды",
     "workspace_member_remove": "Участник удалён из команды",
+    "pool_assign": "Назначен пул аккаунтам",
+    "pool_rename": "Пул переименован",
+    "pool_dissolve": "Пул распущен",
+    "pool_rebalance": "Автораспределение по пулам",
 }
 
 RESULT_RU: dict[str, str] = {

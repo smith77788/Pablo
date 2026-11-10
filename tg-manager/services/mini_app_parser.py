@@ -84,9 +84,14 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            # Каждый канал — со своим видом и числом участников: на карте
+            # «Доставка Барнаул» встречалась дважды, и понять, что это канал и
+            # его группа обсуждения, было не из чего.
             rows = await pool.fetch(
-                """SELECT a.id AS acc_id, a.phone, a.first_name,
-                          mc.id AS channel_pk, mc.channel_id, mc.title, mc.username
+                """SELECT a.id AS acc_id, a.phone, a.first_name, a.username AS acc_username,
+                          a.pool, COALESCE(a.acc_status, 'active') AS acc_status, a.is_active,
+                          mc.id AS channel_pk, mc.channel_id, mc.title, mc.username,
+                          mc.type AS ch_type, mc.members_count
                    FROM tg_accounts a
                    LEFT JOIN managed_channels mc
                        ON mc.acc_id = a.id AND mc.owner_id = a.owner_id
@@ -98,16 +103,39 @@ def setup_routes(app: web.Application, pool) -> None:
             for r in rows:
                 acc = by_acc.setdefault(r["acc_id"], {
                     "acc_id": r["acc_id"],
-                    "label": f"@{r['phone']}" if not r["first_name"] else r["first_name"],
+                    "label": (r["first_name"] or (f"@{r['acc_username']}" if r["acc_username"]
+                                                  else (r["phone"] or f"#{r['acc_id']}"))),
+                    "pool": r["pool"],
+                    "acc_status": r["acc_status"],
+                    "is_active": bool(r["is_active"]),
                     "channels": [],
+                    "_seen": set(),
                 })
-                if r["channel_pk"] is not None:
+                if r["channel_pk"] is not None and r["channel_id"] not in acc["_seen"]:
+                    acc["_seen"].add(r["channel_id"])
+                    t = (r["ch_type"] or "").lower()
                     acc["channels"].append({
                         "id": r["channel_pk"],
                         "channel_id": r["channel_id"],
                         "title": r["title"] or "",
                         "username": r["username"] or "",
+                        "kind": "group" if ("group" in t or t == "chat") else "channel",
+                        "members": r["members_count"],
                     })
+            for acc in by_acc.values():
+                acc.pop("_seen", None)
+            # Каналы, чей аккаунт-владелец удалён из флота: в карте их не было
+            # видно вовсе, хотя управлять ими больше нечем.
+            try:
+                orphans = int(await pool.fetchval(
+                    """SELECT COUNT(*) FROM managed_channels mc
+                       WHERE mc.owner_id=$1 AND NOT EXISTS (
+                           SELECT 1 FROM tg_accounts a
+                            WHERE a.id = mc.acc_id AND a.owner_id = mc.owner_id)""",
+                    uid) or 0)
+            except Exception as e:
+                log.warning("topology_links orphans uid=%d: %s", uid, e)
+                orphans = 0
             bot_rows = await pool.fetch(
                 """SELECT b.bot_id, b.username, b.first_name,
                           COUNT(bu.user_id) FILTER (WHERE bu.is_active) AS subs
@@ -120,6 +148,7 @@ def setup_routes(app: web.Application, pool) -> None:
             )
             return _json_resp({
                 "accounts": list(by_acc.values()),
+                "orphan_channels": orphans,
                 "bots": [
                     {
                         "bot_id": r["bot_id"],
