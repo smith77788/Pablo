@@ -24140,11 +24140,20 @@ async def _exec_ad_intel_scan(
                     "summary": f"⚠️ {result.get('error') or 'Сканирование не удалось'}"}
 
         ad_posts = result.get("ad_posts_found", 0)
+        new_posts = result.get("new_ad_posts", 0)
+        advs = result.get("advertisers_found", 0)
+        flags = result.get("fraud_flags") or []
+        summary = (f"📡 Разведка рекламы @{channel}: рекламных постов {ad_posts}"
+                   f" (новых {new_posts}), рекламодателей {advs}, "
+                   f"качество {float(result.get('quality_score') or 0):.0f}/100")
+        if flags:
+            summary += f". ⚠️ {flags[0]}"
         return {
             "status": "done",
             "channel": channel,
             "ad_posts_found": ad_posts,
-            "summary": f"🔍 Ad Intel @{channel}: найдено {ad_posts} рекламных постов",
+            "new_ad_posts": new_posts,
+            "summary": summary,
         }
     except Exception as exc:
         log.exception("_exec_ad_intel_scan op=%d channel=%s", op_id, channel)

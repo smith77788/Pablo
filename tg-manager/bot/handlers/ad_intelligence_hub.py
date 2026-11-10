@@ -16,7 +16,6 @@ Flows:
 
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 
@@ -128,13 +127,13 @@ async def cb_adi_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCon
         }
 
     text = (
-        "📡 <b>Ad Intelligence — Рекламная разведка</b>\n\n"
+        "📡 <b>Разведка рекламы</b>\n\n"
         f"📦 Каналов в базе: <b>{stats['total_channels']}</b>\n"
-        f"⭐ Средний quality score: <b>{stats['avg_quality']:.1f}/100</b>\n"
+        f"⭐ Среднее качество каналов: <b>{stats['avg_quality']:.1f}/100</b>\n"
         f"🔄 Отсканировано за 7 дней: <b>{stats['recently_scanned']}</b>\n"
         f"👥 Активных рекламодателей (30д): <b>{stats['advertisers_30d']}</b>\n"
         f"📝 Всего рекламных постов: <b>{stats['total_ad_posts']}</b>\n\n"
-        "<i>Сканируй каналы, находи рекламодателей, оценивай качество аудитории.</i>"
+        "<i>Добавьте чужой канал — разведка найдёт его рекламодателей, оценит охват, вовлечённость и цену поста и будет обновлять данные раз в сутки. Полный экран с фильтрами — в мини-аппе.</i>"
     )
 
     kb = _main_kb()
@@ -162,13 +161,13 @@ async def cmd_ad_intel(message: Message, pool: asyncpg.Pool, state: FSMContext) 
         }
 
     text = (
-        "📡 <b>Ad Intelligence — Рекламная разведка</b>\n\n"
+        "📡 <b>Разведка рекламы</b>\n\n"
         f"📦 Каналов в базе: <b>{stats['total_channels']}</b>\n"
-        f"⭐ Средний quality score: <b>{stats['avg_quality']:.1f}/100</b>\n"
+        f"⭐ Среднее качество каналов: <b>{stats['avg_quality']:.1f}/100</b>\n"
         f"🔄 Отсканировано за 7 дней: <b>{stats['recently_scanned']}</b>\n"
         f"👥 Активных рекламодателей (30д): <b>{stats['advertisers_30d']}</b>\n"
         f"📝 Всего рекламных постов: <b>{stats['total_ad_posts']}</b>\n\n"
-        "<i>Сканируй каналы, находи рекламодателей, оценивай качество аудитории.</i>"
+        "<i>Добавьте чужой канал — разведка найдёт его рекламодателей, оценит охват, вовлечённость и цену поста и будет обновлять данные раз в сутки. Полный экран с фильтрами — в мини-аппе.</i>"
     )
 
     kb = _main_kb()
@@ -213,86 +212,45 @@ async def msg_adi_channel_input(
 
     await state.clear()
 
-    # Получаем аккаунт для сканирования
-    async with pool.acquire() as conn:
-        acc = await conn.fetchrow(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE LIMIT 1",
-            message.from_user.id,
-        )
+    # Скан идёт ОПЕРАЦИЕЙ, а не прямо из обработчика: прямой вызов брал
+    # «первый активный» аккаунт без захвата под операцию, то есть мог поднять
+    # вторую сессию на auth-key, уже занятый другой операцией
+    # (AUTH_KEY_DUPLICATED), и держал обработчик бота до минуты.
+    await _queue_scan(message, pool, message.from_user.id, username)
 
-    if not acc:
-        await message.answer(
-            "⚠️ Нет активных аккаунтов Telegram в пуле.\n"
-            "Добавь аккаунт в разделе <b>Аккаунты</b> для сканирования каналов.",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
 
-    status_msg = await message.answer(
-        f"🔍 Сканирую <b>@{html.escape(username)}</b>...\n"
-        "<i>Читаю последние 100 постов, ищу рекламу...</i>",
-        parse_mode="HTML",
-    )
-
-    from services.ad_intelligence import scan_channel_ads
-
-    try:
-        result = await asyncio.wait_for(
-            scan_channel_ads(pool, username, acc["id"], message.from_user.id),
-            timeout=60,
-        )
-    except asyncio.TimeoutError:
-        await status_msg.edit_text(
-            "⏱ Превышено время ожидания при сканировании канала.",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
-    except Exception as exc:
-        log.exception("msg_adi_channel_input: scan_channel_ads error")
-        await status_msg.edit_text(
-            f"❌ Ошибка при сканировании: <code>{html.escape(str(exc)[:200])}</code>",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
-
-    if result.get("status") == "error":
-        await status_msg.edit_text(
-            f"❌ Не удалось просканировать канал.\n"
-            f"<code>{html.escape(result.get('error', 'Неизвестная ошибка'))}</code>",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
-
-    qs = result.get("quality_score", 0.0)
-    ad_posts = result.get("ad_posts_found", 0)
-    subs = result.get("subscribers", 0)
-    title = result.get("channel_title", username)
-
-    text = (
-        f"✅ <b>@{html.escape(username)}</b> — сканирование завершено\n\n"
-        f"📺 Название: <b>{html.escape(title)}</b>\n"
-        f"👥 Подписчиков: <b>{_fmt_num(subs)}</b>\n"
-        f"⭐ Quality Score: <b>{qs:.1f}/100</b> {_quality_label(qs)}\n"
-        f"{_quality_bar(qs)}\n\n"
-        f"📝 Найдено рекламных постов: <b>{ad_posts}</b>\n\n"
-        "<i>Канал добавлен в базу Ad Intelligence.</i>"
-    )
-
+async def _queue_scan(target: Message, pool: asyncpg.Pool, owner_id: int,
+                      username: str, *, edit: bool = False) -> None:
+    from services import operation_bus as _obus
     kb = InlineKeyboardBuilder()
-    placement_id = result.get("placement_id", 0)
-    if placement_id:
-        kb.button(
-            text="🔎 Детали канала",
-            callback_data=AdIntelCb(action="placement_detail", placement_id=placement_id),
-        )
     kb.button(text="➕ Добавить ещё", callback_data=AdIntelCb(action="add_channel"))
     kb.button(text="◀️ Дашборд", callback_data=AdIntelCb(action="menu"))
     kb.adjust(1)
-    await status_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    try:
+        op_id = await _obus.submit(
+            pool, owner_id, "ad_intel_scan", {"channel": username},
+            total_items=1, label=f"Разведка рекламы @{username}")
+    except PermissionError as exc:
+        text = f"⚠️ {html.escape(str(exc) or 'Нужна подписка')}"
+        op_id = 0
+    except Exception:
+        log.exception("ad_intel: постановка скана @%s не удалась", username)
+        text = "⚠️ Не удалось поставить сканирование в очередь. Повторите позже."
+        op_id = 0
+    if op_id:
+        text = (
+            f"🔍 Сканирование <b>@{html.escape(username)}</b> поставлено в очередь "
+            f"(операция №{op_id}).\n\n"
+            "Разведка прочитает последние 100 постов, найдёт рекламу и "
+            "рекламодателей, оценит охват, вовлечённость и цену поста. Обычно "
+            "это занимает до минуты; итог придёт в уведомлении об операции, а "
+            "канал появится в «Топе каналов». Дальше он будет обновляться сам "
+            "раз в сутки."
+        )
+    if edit:
+        await target.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    else:
+        await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Топ каналов ───────────────────────────────────────────────────────────
@@ -348,8 +306,8 @@ async def cb_adi_top_channels(
         title = html.escape(r["channel_title"] or r["channel_username"])
         lines.append(
             f"{i}. <b>{title}</b> (@{uname})\n"
-            f"   👥 {subs} · ER {er} · ⭐ {qs:.0f}/100\n"
-            f"   💰 ~{price:,} ⭐ за пост · 📝 {r['ad_posts_count']} рекл. постов\n"
+            f"   👥 {subs} · охват {er} · качество {qs:.0f}/100\n"
+            f"   💰 ~{price:,} ₽ за пост · 📝 {r['ad_posts_count']} рекл. постов\n"
         )
         # Кликабельная кнопка деталей на каждый канал (handler placement_detail уже есть)
         kb.button(
@@ -421,10 +379,10 @@ async def cb_adi_placement_detail(
         f"@{html.escape(r['channel_username'])}\n\n"
         f"👥 Подписчиков: <b>{_fmt_num(r['subscribers'])}</b>\n"
         f"👁 Средние просмотры: <b>{_fmt_num(r['views_avg'])}</b>\n"
-        f"📈 ER: <b>{_fmt_er(r['er_rate'])}</b>\n"
-        f"⭐ Quality Score: <b>{qs:.1f}/100</b> {_quality_label(qs)}\n"
+        f"📈 Охват поста: <b>{_fmt_er(r['er_rate'])}</b> от подписчиков\n"
+        f"⭐ Качество: <b>{qs:.1f}/100</b> {_quality_label(qs)}\n"
         f"{_quality_bar(qs)}\n\n"
-        f"💰 Оценка цены рекламы: <b>{r['ad_price_est']:,} Stars</b>\n"
+        f"💰 Оценка цены поста: <b>~{r['ad_price_est']:,} ₽</b>\n"
         f"📝 Рекламных постов найдено: <b>{r['ad_posts_count']}</b>\n"
         f"🗓 Последняя реклама: <b>{last_ad}</b>\n"
         f"🔄 Сканирование: <b>{scanned}</b>\n"
@@ -453,7 +411,7 @@ async def cb_adi_rescan_channel(
     callback_data: AdIntelCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer("Запускаю сканирование...")
+    await callback.answer("Ставлю сканирование в очередь…")
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -461,74 +419,13 @@ async def cb_adi_rescan_channel(
             callback_data.placement_id,
             callback.from_user.id,
         )
-        acc = await conn.fetchrow(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE LIMIT 1",
-            callback.from_user.id,
-        )
 
     if not row:
         await callback.answer("Канал не найден", show_alert=True)
         return
 
-    if not acc:
-        await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов для сканирования.",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
-
-    await callback.message.edit_text(
-        f"🔍 Ресканирую <b>@{html.escape(row['channel_username'])}</b>...",
-        parse_mode="HTML",
-    )
-
-    from services.ad_intelligence import scan_channel_ads
-
-    try:
-        result = await asyncio.wait_for(
-            scan_channel_ads(pool, row["channel_username"], acc["id"], callback.from_user.id),
-            timeout=60,
-        )
-    except asyncio.TimeoutError:
-        await callback.message.edit_text(
-            "⏱ Таймаут при сканировании.", parse_mode="HTML", reply_markup=_back_kb().as_markup()
-        )
-        return
-    except Exception as exc:
-        await callback.message.edit_text(
-            f"❌ Ошибка: <code>{html.escape(str(exc)[:200])}</code>",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
-
-    if result.get("status") == "error":
-        await callback.message.edit_text(
-            f"❌ {html.escape(result.get('error', 'Ошибка'))}",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
-
-    qs = result.get("quality_score", 0.0)
-    ad_posts = result.get("ad_posts_found", 0)
-    await callback.message.edit_text(
-        f"✅ Ресканирование завершено!\n\n"
-        f"⭐ Quality Score: <b>{qs:.1f}/100</b> {_quality_label(qs)}\n"
-        f"📝 Рекламных постов найдено: <b>{ad_posts}</b>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardBuilder()
-        .button(
-            text="🔎 Обновлённые детали",
-            callback_data=AdIntelCb(
-                action="placement_detail", placement_id=callback_data.placement_id
-            ),
-        )
-        .button(text="◀️ Дашборд", callback_data=AdIntelCb(action="menu"))
-        .adjust(1)
-        .as_markup(),
-    )
+    await _queue_scan(callback.message, pool, callback.from_user.id,
+                      row["channel_username"], edit=True)
 
 
 # ── Рекомендации ─────────────────────────────────────────────────────────
@@ -543,7 +440,7 @@ async def cb_adi_recommendations(
 
     await callback.message.edit_text(
         "💡 <b>Рекомендации для размещения рекламы</b>\n\n"
-        "Укажи бюджет в Stars (Telegram) или отправь <code>0</code> для "
+        "Укажи бюджет на один пост в рублях или отправь <code>0</code> для "
         "рекомендаций без ограничения бюджета.\n\n"
         "<i>Например: 5000</i>",
         parse_mode="HTML",
@@ -562,7 +459,7 @@ async def msg_adi_budget_input(
             raise ValueError("negative")
     except (ValueError, TypeError):
         await message.answer(
-            "⚠️ Введи число (количество Stars) или <code>0</code> без ограничения.",
+            "⚠️ Введи сумму в рублях или <code>0</code> без ограничения.",
             parse_mode="HTML",
             reply_markup=_cancel_kb().as_markup(),
         )
@@ -584,7 +481,7 @@ async def msg_adi_budget_input(
         return
 
     if not recs:
-        budget_str = f"до {budget:,} Stars" if budget > 0 else "без ограничения бюджета"
+        budget_str = f"до {budget:,} ₽" if budget > 0 else "без ограничения бюджета"
         await message.answer(
             f"📭 Нет рекомендаций ({budget_str}).\n\n"
             "Добавь больше каналов в базу для получения рекомендаций.",
@@ -593,7 +490,7 @@ async def msg_adi_budget_input(
         )
         return
 
-    budget_str = f"до {budget:,} ⭐" if budget > 0 else "без ограничения"
+    budget_str = f"до {budget:,} ₽" if budget > 0 else "без ограничения"
     lines = [f"💡 <b>Рекомендации для размещения</b> ({budget_str})\n"]
 
     for i, rec in enumerate(recs[:10], 1):
@@ -607,14 +504,14 @@ async def msg_adi_budget_input(
 
         lines.append(
             f"{i}. <b>{title}</b> (@{uname})\n"
-            f"   👥 {subs} · ER {er} · ⭐ {qs:.0f}/100\n"
-            f"   💰 ~{price:,} Stars · ROI-индекс: <b>{roi:.1f}</b>\n"
+            f"   👥 {subs} · охват {er} · качество {qs:.0f}/100\n"
+            f"   💰 ~{price:,} ₽ · индекс выгоды: <b>{roi:.1f}</b>\n"
         )
 
     if len(recs) > 10:
         lines.append(f"\n<i>...и ещё {len(recs)-10} каналов</i>")
 
-    lines.append("\n<i>ROI-индекс: quality_score / (цена/1000). Выше = выгоднее.</i>")
+    lines.append("\n<i>Индекс выгоды: качество ÷ (цена ÷ 1000). Выше — выгоднее.</i>")
 
     await message.answer(
         "\n".join(lines),
@@ -743,9 +640,9 @@ async def msg_adi_niche_input(
     lines = [f"📊 <b>Рыночный отчёт{niche_label}</b>\n"]
 
     lines.append(f"📦 Каналов проанализировано: <b>{report['total_channels']}</b>")
-    lines.append(f"⭐ Средний quality score: <b>{report['avg_quality']}/100</b>")
+    lines.append(f"⭐ Среднее качество каналов: <b>{report['avg_quality']}/100</b>")
     lines.append(
-        f"💰 Средняя цена рекламы: <b>{report['avg_price']:,} Stars</b>"
+        f"💰 Средняя цена поста: <b>~{report['avg_price']:,} ₽</b>"
     )
     lines.append(f"📝 Всего рекламных постов: <b>{report['total_ad_posts']}</b>\n")
 
@@ -758,8 +655,8 @@ async def msg_adi_niche_input(
             subs = _fmt_num(ch["subscribers"])
             price = ch["ad_price_est"]
             lines.append(
-                f"{i}. @{uname} · 👥{subs} · ER {er} · "
-                f"⭐{qs:.0f} · 💰{price:,}⭐"
+                f"{i}. @{uname} · 👥{subs} · охват {er} · "
+                f"⭐{qs:.0f} · 💰~{price:,} ₽"
             )
 
     if report["active_advertisers"]:

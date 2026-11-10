@@ -1373,6 +1373,9 @@ async def main() -> None:
         # Сводка за тихие часы: придержанное ночью уходит одним сообщением.
         from services import quiet_hours as _quiet_hours
         _spawn(_resilient("quiet_hours", _quiet_hours.run, pool, bot))
+        # Разведка рекламы: каналы на разведке пересканируются раз в сутки.
+        from services import ad_intel_refresher as _ad_intel_refresher
+        _spawn(_resilient("ad_intel_refresher", _ad_intel_refresher.run, pool, bot))
         # Новая версия Bot API — сразу админам: HTML-виджеты (HTMLBubbles) уже
         # в приложениях, но API для их отправки ещё не опубликован.
         from services import telegram_updates_watch as _tg_updates
