@@ -4415,6 +4415,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🧠 ИИ Память</div></div>
   <div class="filter-chips mod-tabs" data-module="memory" data-tab="facts" role="tablist" aria-label="Вкладки модуля «ИИ Память»"></div>
   <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px;line-height:1.45">
+      Боты с ИИ-ответами (правило «ИИ-ответ» и ИИ-продавец) запоминают каждого собеседника: имя, город, интересы,
+      что он хотел купить. В следующих ответах бот учитывает это сам и не переспрашивает известное.
+      Откройте бота, чтобы посмотреть, что он помнит, поправить факты или выключить память.
+    </div>
     <div class="sec">Память по ботам</div>
     <div class="lst" id="semList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -4424,7 +4429,20 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-semfacts">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="semfacts-name">Факты</div></div>
   <div class="sub-sb">
+    <div id="semSettings"></div>
+    <div style="display:flex;gap:8px;margin:8px 0">
+      <input id="semQ" type="search" placeholder="Поиск: имя, @username, город, интерес…" style="flex:1"
+             oninput="semSearchSoon()" onkeydown="if(event.key==='Enter')retrySemFacts()">
+    </div>
     <div class="lst" id="semfactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Карточка собеседника: что бот о нём помнит и переписка -->
+<div class="screen" id="s-semperson">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="sempersonName">Собеседник</div></div>
+  <div class="sub-sb">
+    <div id="sempersonBody"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -30549,26 +30567,73 @@ async function deleteSelfPromoTemplate(id, _el) {
 }
 
 // ── Semantic Memory ────────────────────────────────────
+// Память ботов о собеседниках: список ботов → люди и факты → карточка
+// человека (правка фактов, заметка владельца, переписка, «забыть»).
+let SEM_BOTS = new Map();
 async function openSemanticMemory() {
   push('s-semantic');
   txt('semList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/semantic_memory');
+    SEM_BOTS = new Map((rows||[]).map(r => [Number(r.bot_id), r]));
     if (!rows.length) { txt('semList', empty('🧬','Память пока пуста',
       'Бот запоминает факты о собеседнике по ходу диалогов — как только они пойдут, они появятся здесь',
       {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
-    txt('semList', rows.map(r => `
-      <div class="row tap" onclick="openSemFacts(${r.bot_id},'${escJs(r.first_name||r.username||'Бот')}')">
+    txt('semList', rows.map(r => {
+      const on = r.enabled !== false;
+      const last = r.last_at ? ' · последний диалог '+new Date(r.last_at).toLocaleDateString('ru-RU') : '';
+      return `
+      <div class="row tap" onclick="openSemFacts(${Number(r.bot_id)},'${escJs(r.first_name||r.username||'Бот')}')">
         <div class="row-ico" style="background:var(--bg-purple-16)">🤖</div>
         <div class="row-body">
           <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
-          <div class="row-val">Диалогов: ${r.conv_users||0} · Фактов: ${r.fact_count||0}</div>
+          <div class="row-val">${on?'🟢 Память включена':'⚪ Память выключена'} · Собеседников: ${num(r.conv_users||0)} · Фактов: ${num(r.fact_count||0)}${last}</div>
         </div>
         <div class="row-right chev">›</div>
-      </div>
-    `).join(''));
+      </div>`;
+    }).join(''));
   } catch(e) { txt('semList', errHtml(errRu(e), 'openSemanticMemory()')); }
 }
+function renderSemSettings(botId) {
+  const r = SEM_BOTS.get(Number(botId));
+  if (!r) { txt('semSettings', ''); return; }
+  const on = r.enabled !== false, ex = r.auto_extract_facts !== false;
+  const days = Number(r.max_history_days || 90);
+  const opts = [7, 30, 90, 180, 365];
+  if (!opts.includes(days)) opts.push(days);
+  txt('semSettings', `<div class="card" style="font-size:13px;line-height:1.5">
+    <div style="font-weight:600;margin-bottom:6px">⚙️ Настройки памяти</div>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer">
+      <input type="checkbox" ${on?'checked':''} onchange="saveSemSettings({enabled:this.checked}, this)" style="margin-top:2px">
+      <span><b>Память включена</b><br><span style="color:var(--hint)">Бот записывает диалоги и учитывает их в ИИ-ответах. Выключите — новые сообщения не запоминаются, а то, что уже есть, бот перестаёт использовать.</span></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer">
+      <input type="checkbox" ${ex?'checked':''} ${on?'':'disabled'} onchange="saveSemSettings({auto_extract_facts:this.checked}, this)" style="margin-top:2px">
+      <span><b>Сам выделять факты</b><br><span style="color:var(--hint)">ИИ выписывает из переписки имя, город, интересы, цели — на первом сообщении человека и дальше раз в четыре реплики. Факты, которые вы поправили сами, он не трогает.</span></span>
+    </label>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+      <span>Хранить переписку</span>
+      <select class="sel" style="flex:0 0 auto;width:auto" onchange="saveSemSettings({max_history_days:Number(this.value)}, this)">
+        ${opts.sort((a,b)=>a-b).map(d=>`<option value="${d}" ${d===days?'selected':''}>${d} ${plural(d,'день','дня','дней')}</option>`).join('')}
+      </select>
+    </div>
+    <div style="color:var(--hint);font-size:12px;margin-top:4px">Сообщения старше срока удаляются из базы, факты остаются, пока вы их не сотрёте.</div>
+  </div>`);
+}
+async function saveSemSettings(patch, el) {
+  if (!_SEMF_ARGS) return;
+  const botId = _SEMF_ARGS[0];
+  if (el) el.disabled = true;
+  try {
+    const r = await api(`/api/miniapp/semantic_memory/${botId}/settings`, {method:'PUT', body: JSON.stringify(patch)});
+    const cur = SEM_BOTS.get(Number(botId)) || {bot_id: botId};
+    SEM_BOTS.set(Number(botId), Object.assign(cur, {enabled: r.enabled, auto_extract_facts: r.auto_extract_facts, max_history_days: r.max_history_days}));
+    toast('✅ Настройки памяти сохранены');
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  renderSemSettings(botId);
+}
+let _semQTimer = null;
+function semSearchSoon() { clearTimeout(_semQTimer); _semQTimer = setTimeout(() => { SEMF_ROWS = []; SEMF_OFFSET = 0; retrySemFacts(); }, 350); }
 // Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
 let _SEMF_ARGS = null, SEMF_ROWS = [], SEMF_OFFSET = 0;
 async function openSemFactsMore() {
@@ -30584,17 +30649,23 @@ async function openSemFacts(botId, botName, keep) {
   if (!keep) {
     SEMF_ROWS = []; SEMF_OFFSET = 0;
     push('s-semfacts');
-    document.getElementById('semfacts-name').textContent = botName + ' — факты';
+    document.getElementById('semfacts-name').textContent = botName + ' — память';
+    const qEl = document.getElementById('semQ'); if (qEl) qEl.value = '';
     txt('semfactsList', '<div class="spin-wrap"><div class="spin"></div></div>');
   }
+  renderSemSettings(botId);
+  const q = ((document.getElementById('semQ')||{}).value || '').trim();
   try {
-    const d = await api(`/api/miniapp/semantic_memory/${botId}?limit=100&offset=${SEMF_OFFSET}`);
+    const d = await api(`/api/miniapp/semantic_memory/${botId}?limit=100&offset=${SEMF_OFFSET}&q=${encodeURIComponent(q)}`);
     const _page = listOf(d,'items');
     SEMF_ROWS = SEMF_OFFSET ? SEMF_ROWS.concat(_page) : _page;
     const rows = SEMF_ROWS;
     const semTotal = totalOf(d, rows);
-    if (!rows.length) { txt('semfactsList', empty('🧬','Бот ещё ничего не запомнил',
-      'Факты о собеседнике извлекаются из переписки: имя, город, интересы, что человек хотел купить. Они появятся, когда с ботом начнут разговаривать.')); return; }
+    if (!rows.length) {
+      if (q) { txt('semfactsList', empty('🔎','Никого не нашлось','Поиск идёт по имени, @username и тексту фактов')); return; }
+      txt('semfactsList', empty('🧬','Бот ещё ничего не запомнил',
+      'Факты о собеседнике извлекаются из переписки: имя, город, интересы, что человек хотел купить. Они появятся, когда с ботом начнут разговаривать.')); return;
+    }
     // Map, а не объект: у объекта ключи-числа браузер сортирует по возрастанию,
     // и порядок «свежие факты сверху», который задаёт запрос, терялся —
     // собеседники выстраивались по номеру.
@@ -30606,13 +30677,13 @@ async function openSemFacts(botId, botName, keep) {
     txt('semfactsList', [...byUser.entries()].map(([uid2, facts]) => {
       const f0 = facts[0]||{};
       const who = f0.name || (f0.username ? '@'+f0.username : '');
-      return `<div class="li">
+      return `<div class="li tap" onclick="openSemPerson(${Number(uid2)})">
         <div class="row-ico" style="background:var(--bg-purple-16)">👤</div>
         <div class="li-body">
           <div class="li-name">${who ? esc(who) : 'Собеседник без имени'}${f0.name && f0.username ? ' · @'+esc(f0.username) : ''}</div>
-          ${facts.map(f=>`<div class="li-sub wrap"><span style="color:var(--hint)">${esc(semFactRu(f.fact_key))}:</span> ${esc(f.fact_value)}</div>`).join('')}
+          ${facts.map(f=>`<div class="li-sub wrap"><span style="color:var(--hint)">${esc(semFactRu(f.fact_key))}${f.by_owner?' ✍️':''}:</span> ${esc(f.fact_value)}</div>`).join('')}
         </div>
-        <button class="btn btn-s" style="padding:5px 10px;min-width:0;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="forgetSemUser(${Number(uid2)},${facts.length},this)">Забыть</button>
+        <button class="btn btn-s" style="padding:5px 10px;min-width:0;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="event.stopPropagation();forgetSemUser(${Number(uid2)},${facts.length},this)">Забыть</button>
       </div>`;
     }).join('') + moreBtn(rows.length, semTotal, 'openSemFactsMore()'));
   } catch(e) { txt('semfactsList', errHtml(errRu(e), 'retrySemFacts()')); }
@@ -30624,7 +30695,7 @@ async function openSemFacts(botId, botName, keep) {
 const SEM_FACT_RU = {
   name:'Имя', interests:'Интересы', purchases:'Покупки',
   pain_points:'Что болит', location:'Откуда', language:'Язык',
-  goals:'Чего хочет',
+  goals:'Чего хочет', note:'Заметка владельца',
 };
 function semFactRu(k) { return SEM_FACT_RU[String(k||'').toLowerCase()] || (k || '—'); }
 
@@ -30642,6 +30713,101 @@ async function forgetSemUser(userId, factCount, el) {
     // Перерисовка НА МЕСТЕ после удаления: список читается с начала, иначе при
     // нажатом «Показать ещё» страница по старому смещению доклеилась бы к уже
     // показанным строкам — и забытый собеседник остался бы на экране.
+    SEMF_ROWS = []; SEMF_OFFSET = 0;
+    openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+// Карточка собеседника. Факт, поправленный владельцем (✍️), извлечение ИИ
+// больше не перезаписывает — правка не «откатывается сама».
+let SEMP_USER = null, SEMP_DATA = null;
+async function openSemPerson(userId, inPlace) {
+  if (!_SEMF_ARGS) return;
+  const botId = _SEMF_ARGS[0];
+  SEMP_USER = Number(userId);
+  if (!inPlace) {
+    push('s-semperson');
+    txt('sempersonBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  }
+  try {
+    const d = await api(`/api/miniapp/semantic_memory/${botId}/user/${SEMP_USER}?limit=60`);
+    SEMP_DATA = d;
+    const who = d.name || (d.username ? '@'+d.username : 'Собеседник без имени');
+    document.getElementById('sempersonName').textContent = who;
+    const known = new Set((d.facts||[]).map(f => f.fact_key));
+    const keyOpts = Object.keys(SEM_FACT_RU).map(k =>
+      `<option value="${k}">${esc(SEM_FACT_RU[k])}${known.has(k)?' (заменить)':''}</option>`).join('');
+    const facts = (d.facts||[]).map(f => `
+      <div class="li">
+        <div class="li-body">
+          <div class="li-sub" style="color:var(--hint)">${esc(semFactRu(f.fact_key))} · ${f.by_owner?'✍️ записали вы':'🤖 выделил ИИ'}</div>
+          <div class="li-name wrap" style="font-weight:400">${esc(f.fact_value)}</div>
+        </div>
+        <div style="display:flex;gap:4px">
+          <button class="icon-btn sm" onclick="editSemFact('${escJs(f.fact_key)}')" aria-label="Изменить" title="Изменить">✏️</button>
+          <button class="icon-btn sm danger" onclick="deleteSemFact('${escJs(f.fact_key)}', this)" aria-label="Удалить факт" title="Удалить факт">🗑</button>
+        </div>
+      </div>`).join('') || '<div class="hint" style="padding:10px">Фактов пока нет — добавьте свой ниже или дождитесь, пока ИИ выделит их из переписки.</div>';
+    const hist = (d.history||[]).slice().reverse().map(h => `
+      <div style="display:flex;justify-content:${h.role==='user'?'flex-start':'flex-end'};margin:4px 0">
+        <div style="max-width:85%;padding:7px 10px;border-radius:12px;font-size:13px;white-space:pre-wrap;word-break:break-word;background:${h.role==='user'?'var(--bg-input)':'var(--bg-purple-16)'}">
+          ${esc(h.text)}<div style="font-size:10px;color:var(--hint);margin-top:2px">${h.role==='user'?'Собеседник':'Бот'} · ${h.created_at?new Date(h.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):''}</div>
+        </div>
+      </div>`).join('');
+    const shown = (d.history||[]).length, total = Number(d.messages_total||0);
+    txt('sempersonBody', `
+      ${d.username?`<div class="hint" style="padding:0 2px 8px">@${esc(d.username)} · ID ${SEMP_USER}</div>`:''}
+      <div class="sec">Что бот знает</div>
+      <div class="lst">${facts}</div>
+      <div class="card" style="margin-top:8px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px">➕ Добавить или поправить факт</div>
+        <select id="sempKey" class="sel" style="margin-bottom:6px">${keyOpts}</select>
+        <textarea id="sempVal" rows="2" maxlength="2000" placeholder="Например: постоянный клиент, предпочитает доставку вечером" style="width:100%;resize:vertical;padding:8px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
+        <button class="btn btn-p" id="sempSave" style="width:100%;margin-top:6px" onclick="saveSemFact()">💾 Сохранить факт</button>
+        <div class="hint" style="font-size:12px;padding-top:4px">Бот увидит это в следующем ответе этому человеку.</div>
+      </div>
+      <div class="sec">Переписка${total?` · ${num(shown)} из ${num(total)}`:''}</div>
+      ${hist || '<div class="hint" style="padding:10px">Переписки в памяти нет: она пишется, когда бот отвечает через ИИ, и удаляется по сроку хранения.</div>'}
+      <button class="btn btn-s" style="width:100%;margin-top:12px;background:var(--bg-red-18);color:var(--red)" onclick="forgetSemPerson(this)">🗑 Забыть этого собеседника</button>`);
+  } catch(e) { txt('sempersonBody', errHtml(errRu(e), `openSemPerson(${SEMP_USER}, true)`)); }
+}
+function editSemFact(key) {
+  const f = ((SEMP_DATA||{}).facts||[]).find(x => x.fact_key === key);
+  const sel = document.getElementById('sempKey'), ta = document.getElementById('sempVal');
+  if (!sel || !ta) return;
+  sel.value = key; ta.value = f ? f.fact_value : ''; ta.focus();
+}
+async function saveSemFact() {
+  if (!_SEMF_ARGS || !SEMP_USER) return;
+  const key = document.getElementById('sempKey').value;
+  const value = document.getElementById('sempVal').value.trim();
+  if (!value) { toast('Заполните значение'); return; }
+  const btn = document.getElementById('sempSave'); btn.disabled = true;
+  try {
+    await api(`/api/miniapp/semantic_memory/${_SEMF_ARGS[0]}/user/${SEMP_USER}/fact`, {method:'PUT', body: JSON.stringify({key, value})});
+    toast('✅ Факт сохранён');
+    SEMF_ROWS = []; SEMF_OFFSET = 0;
+    openSemPerson(SEMP_USER, true);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); btn.disabled = false; }
+}
+async function deleteSemFact(key, el) {
+  if (!_SEMF_ARGS || !SEMP_USER) return;
+  if (!await confirmDelete('Удалить факт «'+semFactRu(key)+'»', el)) return;
+  try {
+    await api(`/api/miniapp/semantic_memory/${_SEMF_ARGS[0]}/user/${SEMP_USER}/fact/${encodeURIComponent(key)}`, {method:'DELETE'});
+    toast('🗑 Факт удалён');
+    openSemPerson(SEMP_USER, true);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+async function forgetSemPerson(el) {
+  if (!_SEMF_ARGS || !SEMP_USER) return;
+  const n = ((SEMP_DATA||{}).facts||[]).length;
+  if (!await confirmDelete('Забыть собеседника', el,
+      `Сотрутся ${n} ${plural(n,'факт','факта','фактов')} и вся переписка, которую бот о нём помнит. Вернуть нельзя.`)) return;
+  try {
+    await api(`/api/miniapp/semantic_memory/${_SEMF_ARGS[0]}/user/${SEMP_USER}`, {method:'DELETE'});
+    toast('🗑 Собеседник забыт');
+    back();
     SEMF_ROWS = []; SEMF_OFFSET = 0;
     openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
