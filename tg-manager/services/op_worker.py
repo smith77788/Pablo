@@ -7006,6 +7006,19 @@ async def _exec_bulk_bot_profile(
     description = (params.get("description") or "").strip()
     short_description = (params.get("short_description") or "").strip()
     greeting = (params.get("greeting") or "").strip()
+    # Язык профиля (вкладка «Языки бота» переносит профиль языка на другие
+    # боты). '' — профиль по умолчанию, как было всегда. Код проверяется: в
+    # Telegram уходят только две латинские буквы, иначе операция отказывается,
+    # а не правит профиль по умолчанию вместо языка.
+    language_code = str(params.get("language_code") or "").strip().lower()
+    if language_code and not (len(language_code) == 2 and language_code.isascii()
+                              and language_code.isalpha()):
+        return {"status": "failed",
+                "summary": f"⚠️ Неверный код языка «{language_code[:10]}» — профиль не меняли"}
+    if language_code and greeting:
+        # Приветствие — локальное правило без языка; с языком его не смешиваем.
+        greeting = ""
+    _lc_kw = {"language_code": language_code} if language_code else {}
 
     # Поля для Bot API: (метод, имя-параметра, значение). Приветствие — отдельно,
     # это не вызов Telegram, а локальное правило.
@@ -7084,13 +7097,20 @@ async def _exec_bulk_bot_profile(
             # (этот бот просто не попадёт в откат), но это логируем.
             _before: dict = {}
             try:
+                # Профиль языка снимается ключами «name:de» — тот же формат, что
+                # у «Клона и адаптации»: общий откат (clone_adapt_engine.
+                # restore_calls) вернёт профиль ТОГО ЖЕ языка, а не по умолчанию.
+                _sfx = f":{language_code}" if language_code else ""
                 if name:
-                    _before["name"] = await bot_api.get_my_name(sess, b["token"])
+                    _before["name" + _sfx] = await bot_api.get_my_name(
+                        sess, b["token"], language_code)
                 if description:
-                    _before["description"] = await bot_api.get_my_description(sess, b["token"])
+                    _before["description" + _sfx] = await bot_api.get_my_description(
+                        sess, b["token"], language_code)
                 if short_description:
-                    _before["short_description"] = await bot_api.get_my_short_description(
-                        sess, b["token"])
+                    _before["short_description" + _sfx] = (
+                        await bot_api.get_my_short_description(
+                            sess, b["token"], language_code))
                 if greeting:
                     _before["greeting"] = await pool.fetchval(
                         "SELECT response_text FROM auto_replies WHERE bot_id=$1 "
@@ -7107,7 +7127,7 @@ async def _exec_bulk_bot_profile(
             for method, pkey, val in api_fields:
                 _field = _BP_METHOD_LABEL.get(method, method)
                 try:
-                    data = await bot_api._call(sess, b["token"], method, **{pkey: val})
+                    data = await bot_api._call(sess, b["token"], method, **{pkey: val}, **_lc_kw)
                     # Короткий флуд Telegram (setMy* лимитирован сильнее
                     # прочих методов) — отсыпаем и пробуем поле ещё раз, а не
                     # записываем бота в ошибки, которые потом добивать вручную.
@@ -7118,7 +7138,7 @@ async def _exec_bulk_bot_profile(
                         if _ra <= 30:
                             await asyncio.sleep(_ra + 1)
                             data = await bot_api._call(
-                                sess, b["token"], method, **{pkey: val})
+                                sess, b["token"], method, **{pkey: val}, **_lc_kw)
                 except Exception as e:  # noqa: BLE001 — любая ошибка = провал поля, не всей операции
                     reasons.append(_bp_reason(_field, exc=e))
                     log.warning("bulk_bot_profile: bot=%s %s error=%r", b.get("bot_id"), method, e)
@@ -7148,7 +7168,8 @@ async def _exec_bulk_bot_profile(
                 # заставила бы повтор изменить этого бота второй раз.
                 await _journal_done(
                     pool, op_id, step, target,
-                    _bp_diff(_before, {"name": name, "description": description,
+                    _bp_diff({k.partition(":")[0]: v for k, v in _before.items()},
+                             {"name": name, "description": description,
                                        "short_description": short_description,
                                        "greeting": greeting})[:900])
             else:
@@ -7178,6 +7199,9 @@ async def _exec_bulk_bot_profile(
         lbl for lbl, on in (("имя", bool(name)), ("описание", bool(description)),
                             ("короткое описание", bool(short_description)),
                             ("приветствие", bool(greeting))) if on)
+    if language_code:
+        from services.bot_localization import lang_label as _bl_label
+        _changed = f"{_changed}; язык: {_bl_label(language_code)}"
     total_ok = prev_ok + ok_count
     _prev = f" (из них {prev_ok} — в прошлых прогонах)" if prev_ok else ""
     if fail_count:
