@@ -939,6 +939,8 @@ POST /api/miniapp/inbox/{peer_user_id}/ai-summary
 POST /api/miniapp/inbox/{peer_user_id}/read
 POST /api/miniapp/inbox/{peer_user_id}/reply
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
+POST /api/miniapp/infra_health/mute/{anomaly_type}
+POST /api/miniapp/infra_health/resolve_all
 POST /api/miniapp/invite/grant_admin
 POST /api/miniapp/invite/join_all
 POST /api/miniapp/invite/parse_file

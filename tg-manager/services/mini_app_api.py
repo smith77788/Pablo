@@ -108,7 +108,7 @@ ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "re
 # флоту вместо тех пяти. Список сверяется с ветками билдера тестом
 # tests/test_account_filter_is_not_silently_widened.py.
 ACCOUNT_FILTERS = ("all", "active", "cooldown", "banned", "spamblock",
-                   "proxy_down", "dead")
+                   "proxy_down", "dead", "low_trust", "flooded")
 
 # Статусы operation_queue, которые вправе прийти фильтром с фронта. Колонка —
 # обычный TEXT без CHECK, поэтому список живёт здесь и его сторожит тест
@@ -142,6 +142,85 @@ ACTIVE_ACC_SQL = (
     "AND (cooldown_until IS NULL OR cooldown_until <= now())")
 
 _cache: dict[str, tuple[float, Any]] = {}
+
+# Срезы здоровья флота, которые и считает экран «Здоровье», и открывает список
+# аккаунтов (`_accounts_where`). Одно условие на двоих: плитка «Низкий траст 3»
+# обязана открывать ровно этих троих, а массовое действие по срезу — идти по
+# ним же. Раньше у «Низкого траста» и «Флуда» списка не было вовсе: число на
+# экране было, а посмотреть, кто это, — нечем.
+_LOW_TRUST_SQL = "trust_score IS NOT NULL AND trust_score < 0.4"
+_FLOODED_SQL = (
+    "EXISTS (SELECT 1 FROM account_flood_log l WHERE l.account_id = tg_accounts.id "
+    "AND l.created_at > now() - interval '7 days')")
+_PROXY_DOWN_SQL = (
+    "proxy_id IS NOT NULL AND EXISTS ("
+    "SELECT 1 FROM user_proxies p WHERE p.id = tg_accounts.proxy_id "
+    "AND p.is_alive IS FALSE)")
+
+
+def fleet_verdict(c: dict, alerts: list[dict] | None = None) -> dict:
+    """Итог здоровья флота одной фразой — и ПОЧЕМУ, с дверью к каждой причине.
+
+    Статус на экране «Здоровье» смотрел только на бан и низкий траст: при
+    трёх критических оповещениях о волне флудов и половине флота в кулдауне
+    он писал «✅ Норма». Здесь учитывается всё, что мешает операциям, а
+    каждая причина несёт срез списка аккаунтов (`filter`) или экран (`open`),
+    где её чинят, и подсказку, что делать.
+
+    level: ok | warn | crit. Порядок причин — от самой срочной.
+    """
+    alerts = alerts or []
+    total = int(c.get("total") or 0)
+    active = int(c.get("active") or 0)
+    reasons: list[dict] = []
+
+    def add(key, level, count, text, hint, filter_=None, open_=None):
+        if count:
+            reasons.append({"key": key, "level": level, "count": int(count),
+                            "text": text, "hint": hint,
+                            "filter": filter_, "open": open_})
+
+    crit_alerts = [a for a in alerts if a.get("severity") == "critical"]
+    warn_alerts = [a for a in alerts if a.get("severity") != "critical"]
+    if total and not active:
+        add("none_usable", "crit", total, "Ни один аккаунт сейчас не может работать",
+            "Операции встанут. Откройте разбор: он покажет, на каком шаге "
+            "отсеиваются аккаунты.", open_="fleetdoctor")
+    add("alerts_crit", "crit", len(crit_alerts), "Критичные оповещения",
+        "Детектор видит сбой прямо сейчас — откройте, там сказано, что делать.",
+        open_="infra")
+    add("proxy_down", "warn", c.get("proxy_down"), "Прокси не отвечает",
+        "Сами аккаунты целы, но их операции падают по сети. Замените прокси.",
+        filter_="proxy_down")
+    add("spamblock", "warn", c.get("spamblock"), "Спам-блок",
+        "Система сама просит снятия у @SpamBot и держит аккаунт только на "
+        "пассивных действиях. Ничего делать не нужно — следите за восстановлением.",
+        filter_="spamblock")
+    add("cooldown", "warn", c.get("cooling"), "На паузе после флуда",
+        "Telegram попросил подождать. Вернутся сами; если таких много — "
+        "снизьте темп операций.", filter_="cooldown")
+    add("flooded_24h", "warn", c.get("flooded_24h"), "Ловили флуд за сутки",
+        "Признак слишком быстрого темпа. Дайте этим аккаунтам отдохнуть.",
+        filter_="flooded")
+    add("low_trust", "warn", c.get("low_trust"), "Низкое доверие",
+        "Такие аккаунты чаще получают ограничения. Прогрейте их и не ставьте "
+        "в массовые операции.", filter_="low_trust")
+    add("dead", "warn", c.get("dead"), "Мёртвые: бан, удалён или сессия отозвана",
+        "В операциях не участвуют. Отозванную сессию можно перезалить, "
+        "остальное — убрать кнопкой «Очистить мёртвое».", filter_="dead")
+    add("alerts_warn", "warn", len(warn_alerts), "Предупреждения детектора",
+        "Пока не сбой, но стоит посмотреть.", open_="infra")
+
+    if any(r["level"] == "crit" for r in reasons):
+        level, text = "crit", "Нужны действия"
+    elif reasons:
+        level, text = "warn", "Есть что поправить"
+    elif not total:
+        level, text = "warn", "Аккаунтов пока нет"
+    else:
+        level, text = "ok", "Норма — всё работает"
+    return {"level": level, "text": text, "reasons": reasons}
+
 _CACHE_TTL = 30  # секунд
 try:
     _DASHBOARD_QUERY_TIMEOUT = float(os.getenv("MINIAPP_DASHBOARD_QUERY_TIMEOUT", "8"))
@@ -5985,13 +6064,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            # Каждое число здесь обязано совпадать со списком, который открывает
+            # его плитка (`_accounts_where`): «Активных 34» раньше считалось по
+            # acc_status='active', а плитка открывала ACTIVE_ACC_SQL; «Забанено»
+            # складывало бан с деактивацией, а открывало только бан.
             stats = await pool.fetchrow(
-                """SELECT
+                f"""SELECT
                    COUNT(*) AS total,
-                   COUNT(*) FILTER (WHERE acc_status='active') AS active,
-                   COUNT(*) FILTER (WHERE acc_status IN ('banned','deactivated')) AS banned,
-                   COUNT(*) FILTER (WHERE cooldown_until > now()) AS cooling,
-                   COUNT(*) FILTER (WHERE trust_score IS NOT NULL AND trust_score < 0.4) AS low_trust
+                   COUNT(*) FILTER (WHERE {ACTIVE_ACC_SQL}) AS active,
+                   COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') = 'banned') AS banned,
+                   COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')
+                                    IN ('banned','deactivated','session_expired')) AS dead,
+                   COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') = 'spamblock') AS spamblock,
+                   COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL
+                                      AND cooldown_until > now()) AS cooling,
+                   COUNT(*) FILTER (WHERE {_LOW_TRUST_SQL}) AS low_trust,
+                   COUNT(*) FILTER (WHERE {_FLOODED_SQL}) AS flooded_7d,
+                   COUNT(*) FILTER (WHERE EXISTS (
+                       SELECT 1 FROM account_flood_log l
+                        WHERE l.account_id = tg_accounts.id
+                          AND l.created_at > now() - interval '24 hours')) AS flooded_24h,
+                   COUNT(*) FILTER (WHERE {_PROXY_DOWN_SQL}) AS proxy_down
                    FROM tg_accounts WHERE owner_id=$1""",
                 uid,
             )
@@ -6001,9 +6094,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE ta.owner_id=$1 AND afl.created_at > now()-interval '7 days'""",
                 uid,
             )
+            # План прогрева переживает свой аккаунт: на экране было «На
+            # прогреве 49» при 34 аккаунтах. Считаем только планы живых
+            # аккаунтов этого владельца.
             warmup_active = await pool.fetchval(
-                "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1 AND status='active'", uid
+                """SELECT COUNT(*) FROM account_warmup_plans wp
+                   JOIN tg_accounts ta ON ta.id = wp.account_id AND ta.owner_id = wp.owner_id
+                   WHERE wp.owner_id=$1 AND wp.status='active'""",
+                uid,
             )
+            alerts: list[dict] = []
+            try:
+                from services import anomaly_detector as _ad
+                alerts = await _ad.get_active_anomalies(pool, uid)
+            except Exception:
+                log.exception("health_overview alerts uid=%d", uid)
             # Recent flood events.
             # Со строки флуд-события владелец идёт РАЗБИРАТЬ ПРИЧИНУ — а причина
             # (что за операция флудила, её статус и ошибка) живёт в карточке
@@ -6036,11 +6141,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE ta.owner_id=$1""",
                 uid,
             )
+            counts = {k: int(stats[k] or 0) for k in (
+                "total", "active", "banned", "dead", "spamblock", "cooling",
+                "low_trust", "flooded_7d", "flooded_24h", "proxy_down")}
             return _json_resp({
-                "total": stats["total"], "active": stats["active"],
-                "banned": stats["banned"], "cooling": stats["cooling"],
-                "low_trust": stats["low_trust"], "flood_7d": flood_7d,
+                **counts,
+                "flood_7d": flood_7d,
                 "warmup_active": warmup_active,
+                "verdict": fleet_verdict(counts, alerts),
                 "events_total": events_total or 0,
                 "events": [
                     {**dict(e), "created_at": e["created_at"].isoformat() if e["created_at"] else None}
@@ -7295,6 +7403,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Оповещение не найдено или уже снято", 404)
         return _json_resp({"ok": True})
 
+    async def infra_health_resolve_all(request: web.Request) -> web.Response:
+        """Снять все активные оповещения владельца одним нажатием.
+
+        Если причина осталась, детектор найдёт её снова через пять минут, —
+        это и сказано в подтверждении на экране.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import anomaly_detector
+        n = await anomaly_detector.resolve_all_anomalies(pool, uid)
+        if n < 0:
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "resolved": n})
+
+    async def infra_health_mute(request: web.Request) -> web.Response:
+        """Не присылать в Telegram сообщения об аномалии этого типа N часов.
+
+        Кнопки «Не присылать 24 ч / неделю» были только под сообщением бота;
+        в мини-аппе тревогу можно было лишь снять, и через пять минут детектор
+        находил её снова. hours=0 — снова присылать.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import anomaly_detector
+        a_type = request.match_info.get("anomaly_type") or ""
+        if a_type not in anomaly_detector.ANOMALY_TYPES:
+            return _err("Неизвестный тип оповещения")
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        hours = validate_integer((data or {}).get("hours", 24), min_val=0, max_val=720)
+        if hours is None:
+            return _err("Срок — от 0 до 720 часов")
+        if not await anomaly_detector.mute(pool, uid, a_type, hours):
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "hours": hours})
+
     async def infra_health_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -7310,17 +7458,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import anomaly_detector
 
+            muted = await anomaly_detector.muted_until(pool, uid)
+            # Одна карточка на эпизод: начало эпизода, последнее подтверждение
+            # и сколько раз детектор его подтверждал. Раньше каждая получасовая
+            # запись была отдельной «критичной» карточкой, а закончившаяся
+            # волна висела неделями (get_active_anomalies).
             for a in await anomaly_detector.get_active_anomalies(pool, uid):
+                a_type = a.get("anomaly_type") or "anomaly"
                 alerts.append({
                     "id": a.get("id"),
-                    "alert_type": a.get("anomaly_type") or "anomaly",
+                    "alert_type": a_type,
                     "severity": a.get("severity") or "warning",
                     "title": a.get("title") or "",
                     "description": a.get("description") or "",
                     "target_type": a.get("detector"),
                     "affected_count": a.get("affected_count"),
                     "is_active": True,
-                    "first_seen_at": a.get("detected_at"),
+                    "first_seen_at": a.get("first_detected_at") or a.get("detected_at"),
+                    "last_seen_at": a.get("last_detected_at") or a.get("detected_at"),
+                    "occurrences": int(a.get("occurrences") or 1),
+                    "muted_until": muted.get(a_type),
                     "resolved_at": None,
                 })
         except Exception:
@@ -8481,6 +8638,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Infra Health Center
     app.router.add_get("/api/miniapp/infra_health", infra_health_overview)
     app.router.add_post("/api/miniapp/infra_health/anomaly/{anomaly_id}/resolve", infra_health_resolve)
+    app.router.add_post("/api/miniapp/infra_health/resolve_all", infra_health_resolve_all)
+    app.router.add_post("/api/miniapp/infra_health/mute/{anomaly_type}", infra_health_mute)
     # Swarm
     app.router.add_get("/api/miniapp/swarm", swarm_metrics)
     # Presence Packs

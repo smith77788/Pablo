@@ -41,6 +41,7 @@ MASS_CAP = 20000
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
     from services.mini_app_api import (
+        _FLOODED_SQL, _LOW_TRUST_SQL, _PROXY_DOWN_SQL,
         ACCOUNT_FILTERS, ACCOUNT_STAGES, ACTIVE_ACC_SQL, _INTERNAL_ERROR,
         _body_wants_platform_scope, _csv_resp, _err, _geo_code, _get_uid,
         _json_resp, _obus, _proxy_display_host, _safe_count, _safe_fetch,
@@ -88,10 +89,13 @@ def setup_routes(app: web.Application, pool) -> None:
             # целы, но каждая их операция падает по сети. Без этого среза мёртвый
             # прокси нельзя было ни увидеть списком, ни починить оптом.
             # Строго is_alive=FALSE: непроверенный прокси (NULL) — не мёртвый.
-            clauses.append(
-                "proxy_id IS NOT NULL AND EXISTS ("
-                "SELECT 1 FROM user_proxies p WHERE p.id = tg_accounts.proxy_id "
-                "AND p.is_alive IS FALSE)")
+            clauses.append(_PROXY_DOWN_SQL)
+        elif flt == "low_trust":
+            # Тот же порог, что у плитки «Низкий траст» на экране «Здоровье».
+            clauses.append(_LOW_TRUST_SQL)
+        elif flt == "flooded":
+            # Ловили флуд-ожидание за 7 дней — плитка «Флуд 7д» на «Здоровье».
+            clauses.append(_FLOODED_SQL)
         elif flt == "dead":
             # Невоскрешаемые: забанен / удалён-деактивирован / сессия отозвана.
             # Именно их массово удаляют «в один тап». Конфликт двух IP (cooldown)

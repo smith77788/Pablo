@@ -5520,6 +5520,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Проверка всей цепочки исполнения: доступы, аккаунты, очередь и живое подключение одного аккаунта (тот же путь, что у операций).</div>
     <button class="btn btn-p" data-main id="diagBtn" onclick="runDiag()" style="width:100%;margin-bottom:10px">▶️ Запустить диагностику</button>
+    <!-- Вторая половина ответа «почему не работает»: воронка отбора аккаунтов
+         (кто на каком шаге отсеялся) жила отдельным экраном, и из модуля
+         «Здоровье» к ней не было дороги. -->
+    <button class="btn btn-s" onclick="openFleetDoctor()" style="width:100%;margin-bottom:10px">🩺 Почему операции не берут аккаунты</button>
     <div id="diagResult"></div>
   </div>
 </div>
@@ -6942,6 +6946,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="health" data-tab="accounts" role="tablist" aria-label="Вкладки модуля «Здоровье»"></div>
   <div class="sub-sb">
+    <!-- Итог одной фразой и ПОЧЕМУ: каждая причина ведёт в свой список.
+         Раньше здесь была плитка «Статус», которая смотрела только на бан и
+         траст и писала «Норма» при трёх критических оповещениях. -->
+    <div id="healthVerdict" style="padding:8px 16px 0"></div>
     <div class="home-fleet">
       <div class="home-fleet-title">Обслуживание флота</div>
       <div class="home-fleet-copy">Проверка ботов, аккаунтов и каналов. Перед удалением покажем состав и запросим подтверждение.</div>
@@ -26053,31 +26061,63 @@ function healthGoAccounts(filter, stage, accPool) {
 
 
 
+// Куда ведёт причина из итога здоровья (services/mini_app_api.fleet_verdict).
+function healthReasonGo(r) {
+  if (r.filter) return `healthGoAccounts('${String(r.filter).replace(/[^a-z_]/g,'')}')`;
+  if (r.open === 'infra') return 'openInfraHealth()';
+  if (r.open === 'fleetdoctor') return 'openFleetDoctor()';
+  return '';
+}
+function healthVerdictHtml(v) {
+  v = v || {};
+  const tone = {ok:['✅','var(--bg-green-16)','var(--green)'],
+                warn:['⚠️','rgba(251,191,36,.12)','var(--orange)'],
+                crit:['🔴','var(--bg-red-16)','var(--red)']}[v.level] || ['ℹ️','var(--bg2)','inherit'];
+  const reasons = v.reasons || [];
+  let h = `<div style="background:${tone[1]};border-radius:14px;padding:12px 14px;margin-bottom:4px">
+    <div style="font-size:16px;font-weight:700;color:${tone[2]}">${tone[0]} ${esc(v.text||'—')}</div>`;
+  if (!reasons.length) {
+    h += `<div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">Банов, пауз, флуда, мёртвых прокси и оповещений детектора нет.</div>`;
+  } else {
+    h += `<div style="font-size:12px;color:var(--hint);margin-top:4px">Требуют внимания — нажмите, чтобы открыть список:</div>`;
+    h += reasons.map(r => {
+      const go = healthReasonGo(r);
+      const c = r.level === 'crit' ? 'var(--red)' : 'var(--orange)';
+      return `<div ${go?`class="tap" onclick="${go}" role="button" tabindex="0"`:''}
+        style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--sep);margin-top:6px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600">${esc(r.text)} · <span style="color:${c}">${num(r.count)}</span></div>
+          <div style="font-size:12px;color:var(--hint);line-height:1.4;margin-top:2px">${esc(r.hint||'')}</div>
+        </div>${go?'<span class="chev" style="align-self:center">›</span>':''}</div>`;
+    }).join('');
+  }
+  return h + '</div>';
+}
+
 async function openHealth() {
   push('s-health');
+  txt('healthVerdict','');
   txt('healthStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('healthEvents','');
   try {
     const d = await api('/api/miniapp/health');
-    const risk = d.banned>0||d.low_trust>0?'⚠️ Есть угрозы':'✅ Норма';
-    const riskColor = d.banned>0||d.low_trust>0?'var(--orange)':'var(--green)';
-    // Срезы, которые сервер умеет фильтровать (all/active/cooldown/banned).
-    // Остальные числа не притворяемся, что открываются, — ссылок у них нет.
-    const go = (f, val, lbl, style) =>
-      `<div class="kpi-card tap-card" onclick="healthGoAccounts('${f}')" role="button" tabindex="0" aria-label="${lbl}: открыть список">`
-      + `<div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl} ›</div></div>`;
-    const plain = (val, lbl, style) =>
-      `<div class="kpi-card"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl}</div></div>`;
+    txt('healthVerdict', healthVerdictHtml(d.verdict));
+    // Каждая плитка открывает ровно тот срез, который считает: сервер считает
+    // числа тем же условием, что и список (`_accounts_where`). Раньше
+    // «Низкий траст» и «Флуд 7д» были просто числами.
+    const go = (f, val, lbl, style, fn) =>
+      `<div class="kpi-card tap-card" onclick="${fn||`healthGoAccounts('${f}')`}" role="button" tabindex="0" aria-label="${lbl}: открыть список">`
+      + `<div class="kpi-val"${style?` style="${style}"`:''}>${num(val)}</div><div class="kpi-lbl">${lbl} ›</div></div>`;
     txt('healthStats',
         go('all', d.total||0, 'Аккаунтов')
-      + go('active', d.active||0, 'Активных', kpiTone(d.active,'green'))
+      + go('active', d.active||0, 'Готовы к работе', kpiTone(d.active,'green'))
+      + go('cooldown', d.cooling||0, 'На паузе (флуд)', kpiTone(d.cooling,'orange'))
+      + go('spamblock', d.spamblock||0, 'Спам-блок', kpiTone(d.spamblock,'orange'))
+      + go('flooded', d.flooded_7d||0, 'Ловили флуд 7д', kpiTone(d.flooded_7d,'orange'))
+      + go('low_trust', d.low_trust||0, 'Низкое доверие', kpiTone(d.low_trust,'red'))
       + go('banned', d.banned||0, 'Забанено', kpiTone(d.banned,'red'))
-      + go('cooldown', d.cooling||0, 'В кулдауне', kpiTone(d.cooling,'orange'))
-      + plain(d.low_trust||0, 'Низкий траст', kpiTone(d.low_trust,'red'))
-      + plain(d.flood_7d||0, 'Флуд 7д', kpiTone(d.flood_7d,'orange'))
-      + plain(d.warmup_active||0, 'На прогреве')
-      + plain(risk, 'Статус', 'color:'+riskColor));
-    txt('m-health-val',`${d.banned||0} забанено · ${d.flood_7d||0} флуд`);
+      + go('', d.warmup_active||0, 'На прогреве', '', 'openWarmup()'));
+    txt('m-health-val',`${d.banned||0} забанено · ${d.flooded_7d||0} с флудом`);
     const events = d.events||[];
     if (!events.length) { txt('healthEvents', empty('📋','Нет флуд-событий','Пока Telegram не просил ваши аккаунты подождать')); return; }
     // Клик ВЕДЁТ В ОПЕРАЦИЮ — там причина флуда, статус и кнопки разбора
@@ -26106,6 +26146,7 @@ async function openHealth() {
     }
     txt('healthEvents', html);
   } catch(e) {
+    txt('healthVerdict','');
     txt('healthStats','');
     txt('healthEvents', errHtml(errRu(e), 'openHealth()'));
   }
@@ -27544,14 +27585,15 @@ async function submitAssetTplCreate() {
 // Экран показывал находки детектора аномалий как текст и только: типы и
 // детекторы вылезали латиницей (error_spike, queue_surge), разобраться с
 // оповещением можно было лишь из бота, а «затронуто: 12» никуда не вело.
+// [название, куда ведёт, подпись кнопки «что делать»]
 const IH_ANOMALY = {
-  error_spike:    ['📈 Всплеск ошибок', 'openOps()'],
-  success_drop:   ['📉 Просели успешные операции', 'openOps()'],
-  queue_surge:    ['🧱 Очередь разбухла', 'openOps()'],
-  flood_wave:     ['🌊 Волна флуд-ожиданий', "healthGoAccounts('cooldown','')"],
-  trust_collapse: ['💔 Обвал доверия аккаунтов', 'openHealth()'],
-  latency_spike:  ['🐌 Операции стали медленнее', 'openOps()'],
-  queue_frozen:   ['🧊 Очередь не разбирается', 'openOps()'],
+  error_spike:    ['📈 Всплеск ошибок', "opsGo('failed')", '❌ Упавшие операции'],
+  success_drop:   ['📉 Просели успешные операции', "opsGo('failed')", '❌ Упавшие операции'],
+  queue_surge:    ['🧱 Очередь разбухла', "opsGo('pending')", '⏳ Что в очереди'],
+  flood_wave:     ['🌊 Волна флуд-ожиданий', "healthGoAccounts('flooded','')", '📱 Кто ловил флуд'],
+  trust_collapse: ['💔 Обвал доверия аккаунтов', "healthGoAccounts('low_trust','')", '📱 У кого низкое доверие'],
+  latency_spike:  ['🐌 Медленные прокси', 'openProxies()', '🌐 К прокси'],
+  queue_frozen:   ['🧊 Очередь не разбирается', 'openFleetDoctor()', '🩺 Разобрать причину'],
 };
 const IH_RECOVERY = {account:'аккаунт', operation:'операция', proxy:'прокси', queue:'очередь'};
 const IH_ACTION = {
@@ -27560,6 +27602,7 @@ const IH_ACTION = {
 };
 function ihAnomalyName(t) { return (IH_ANOMALY[t] || [])[0] || (t || 'находка'); }
 function ihAnomalyGo(t) { return (IH_ANOMALY[t] || [])[1] || ''; }
+function ihAnomalyAct(t) { return (IH_ANOMALY[t] || [])[2] || 'Открыть'; }
 function ihRecoveryRu(t) { return IH_RECOVERY[t] || (t || '—'); }
 function ihActionRu(a) { return IH_ACTION[a] || (a || '—'); }
 
@@ -27571,6 +27614,35 @@ async function ihResolve(id, el) {
     toast('✅ Снято');
     openInfraHealth();
   } catch(e) { if (el) el.disabled = false; toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+// Снять все разом: раньше каждое оповещение снималось своим подтверждением.
+async function ihResolveAll(n) {
+  if (!await askConfirm(`Снять все оповещения (${n})?\n\nЕсли причина осталась, детектор найдёт её снова через пять минут.`)) return;
+  try {
+    const r = await api('/api/miniapp/infra_health/resolve_all', {method:'POST'});
+    toast(`✅ Снято: ${num(r.resolved||0)}`);
+    openInfraHealth();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+// Не присылать в Telegram сообщения об этом типе. Раньше заглушить тревогу
+// можно было только кнопкой под сообщением бота.
+async function ihMute(type, mutedNow) {
+  let hours;
+  if (mutedNow) hours = 0;
+  else {
+    const v = await askChoice('Не присылать сообщения об этом в Telegram', [
+      {value:'24',  label:'🔕 На сутки', sub:'на экране оповещение останется'},
+      {value:'168', label:'🔕 На неделю', sub:''},
+    ]);
+    if (v === null) return;
+    hours = Number(v);
+  }
+  try {
+    await api('/api/miniapp/infra_health/mute/'+encodeURIComponent(type),
+              {method:'POST', body:JSON.stringify({hours})});
+    toast(hours ? '🔕 Не буду присылать' : '🔔 Снова присылаю');
+    openInfraHealth();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 async function openInfraHealth() {
   push('s-infrahealth');
@@ -27585,18 +27657,33 @@ async function openInfraHealth() {
       txt('ihAlerts', empty('✅','Оповещений нет','Детектор проверяет ошибки, очередь, флуд и доверие аккаунтов каждые пять минут',
         {label:'⚙️ Посмотреть операции', fn:'openOps()'}));
     } else {
-      txt('ihAlerts', alerts.map(a=>{
+      // Одна карточка на эпизод: когда начался, когда подтверждён последний
+      // раз и сколько раз. Раньше каждая получасовая запись была отдельной
+      // «критичной» карточкой, и закончившаяся волна висела неделями.
+      const head = alerts.length > 1
+        ? `<div style="display:flex;justify-content:flex-end;padding:0 16px 6px"><button class="btn btn-g" style="padding:5px 12px;font-size:12px;min-width:0" onclick="ihResolveAll(${alerts.length})">Снять все</button></div>`
+        : '';
+      txt('ihAlerts', head + alerts.map(a=>{
         const go = ihAnomalyGo(a.alert_type);
+        const t = esc(String(a.alert_type||'').replace(/[^a-z_]/g,''));
+        const occ = Number(a.occurrences||1);
+        const since = a.first_seen_at ? 'длится с '+ago(a.first_seen_at) : '';
+        const last = (occ > 1 && a.last_seen_at) ? ` · подтверждено ${num(occ)} ${plural(occ,'раз','раза','раз')}, последний — ${ago(a.last_seen_at)}` : '';
+        const muted = !!a.muted_until;
         return `
         <div class="row"${go?` onclick="${go}" role="button" tabindex="0" style="cursor:pointer"`:''}>
           <div class="row-ico" style="background:var(--bg-red-16)">⚠️</div>
           <div class="row-body">
             <div class="row-name"><span class="badge ${sevCls[a.severity]||'b-gy'}">${esc(sevRu(a.severity))}</span> ${esc(a.title)}</div>
             ${a.description?`<div class="row-val" style="white-space:normal;line-height:1.35">${esc(a.description)}</div>`:''}
-            <div class="row-val">${esc(ihAnomalyName(a.alert_type))}${a.affected_count?' · затронуто: '+num(a.affected_count):''}${go?' ›':''}</div>
-            <div class="row-val" style="color:var(--hint)">${ago(a.first_seen_at)}</div>
+            <div class="row-val">${esc(ihAnomalyName(a.alert_type))}${a.affected_count?' · затронуто: '+num(a.affected_count):''}</div>
+            <div class="row-val" style="color:var(--hint);white-space:normal">${since}${last}${muted?' · 🔕 в Telegram не присылаю':''}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+              ${go?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();${go}">${esc(ihAnomalyAct(a.alert_type))}</button>`:''}
+              <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();ihMute('${t}',${muted})">${muted?'🔔 Присылать снова':'🔕 Не присылать'}</button>
+              ${a.id?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();ihResolve(${Number(a.id)},this)">Снять</button>`:''}
+            </div>
           </div>
-          ${a.id?`<div class="row-right"><button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();ihResolve(${Number(a.id)},this)">Снять</button></div>`:''}
         </div>`;
       }).join(''));
     }
