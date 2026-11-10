@@ -29378,7 +29378,7 @@ function mgRender() {
   const def = mgProfile('default');
   const warn = def && def.name ? '' :
     '<div style="font-size:12px;color:var(--orange,#f0a020);margin-top:4px">⚠️ У профиля по умолчанию нет имени — заполните его первым.</div>';
-  txt('mgSummary', `<div style="font-size:13px">Своих профилей: <b>${own.length}</b>${total?` · из списка — ${covered} из ${total}`:''}</div>${warn}`);
+  txt('mgSummary', `<div style="font-size:13px">Языков со своим профилем: <b>${covered}</b>${total?` из ${total}`:''}${own.length>covered?` (и ещё ${own.length-covered} вне списка)`:''}</div>${warn}`);
   if (!profiles.length) {
     txt('mgProfiles', empty('🌍','Профилей пока нет','Начните с профиля по умолчанию — его увидят все языки без своего профиля',
       {label:'✏️ Заполнить', fn:"openMultigeoSetModal('default')"}));
@@ -29398,10 +29398,7 @@ function mgRender() {
           <div class="row-name">${esc(mgLangLabel(p.lang))}</div>
           ${parts.join('')}
         </div>
-        <div class="row-right" style="display:flex;gap:6px">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="event.stopPropagation();openMultigeoSetModal('${escJs(p.lang)}')" aria-label="Изменить">✏️</button>
-          ${isDef?'':`<button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="event.stopPropagation();mgReset('${escJs(p.lang)}')" aria-label="Сбросить язык">🗑</button>`}
-        </div>
+        ${isDef?'<span class="chev">›</span>':`<div class="row-right"><button class="btn btn-s" style="padding:5px 9px;font-size:12px" onclick="event.stopPropagation();mgReset('${escJs(p.lang)}')" aria-label="Убрать язык">🗑</button></div>`}
       </div>`;
   };
   const missing = (MG_DATA.languages||[]).filter(l=>!mgProfile(l.code));
