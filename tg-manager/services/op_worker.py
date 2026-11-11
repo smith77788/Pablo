@@ -22610,10 +22610,16 @@ async def _exec_mass_report(
     # которые в этот момент ведут другую операцию или прогрев — две сессии
     # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
     # Освобождение — централизованно в finally _run_op_task по op_id.
+    # Сколько доступных было ДО захвата: если захват вернёт меньше, часть
+    # выбранных аккаунтов занята другой операцией/прогревом. Владелец видел
+    # «Аккаунтов: 1» без объяснения — теперь скажем это прямо в сводке, а не
+    # оставим его гадать, почему из выбранного среза пошёл один.
+    _available_cnt = len(accounts)
     accounts = await _claim_available_accounts(op_id, accounts, owner_id)
     if not accounts:
         return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+    _busy_cnt = _available_cnt - len(accounts)
 
     # Риск-пульс: жалоба с аккаунта под недавним серьёзным ограничением = быстрый бан
     # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
@@ -22703,9 +22709,13 @@ async def _exec_mass_report(
         f"🚨 Жалобы на {target} [{reason_label}]\n"
         f"{head}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+        # «Занято» объясняет, почему из выбранного среза в работу пошло меньше:
+        # эти аккаунты в этот момент вела другая операция/прогрев (аренда сессии).
+        + (f"\n⏳ Занято другими операциями: {_busy_cnt}" if _busy_cnt else "")
         + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
     )
-    return {"status": status, "ok": ok_count, "failed": fail_count, "summary": summary}
+    return {"status": status, "ok": ok_count, "failed": fail_count,
+            "busy": _busy_cnt, "summary": summary}
 
 
 # ── Content Clone executor ──────────────────────────────────────────────────

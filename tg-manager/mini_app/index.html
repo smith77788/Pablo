@@ -2544,6 +2544,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Накрутка</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openComplaints()">
+        <div class="mgmt-tile-ico">🚨</div>
+        <div class="mgmt-tile-lbl">Жалобы</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openCompliance()">
         <div class="mgmt-tile-ico">✅</div>
         <div class="mgmt-tile-lbl">Комплаенс</div>
@@ -5303,6 +5308,70 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec" style="margin-top:8px">История задач</div>
     <div class="lst" id="reporterHistory"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: ЖАЛОБЫ (единый модуль) ══════════════════════ -->
+<!-- Единая дверь жалобы на запрещённый ресурс: выбор аккаунтов флота (in-app
+     жалоба) И почтовых ящиков (письмо в компетентный орган с автоподстановкой
+     текста по категории). Оба вектора по одной категории. Backend:
+     /api/miniapp/complaint/submit (services/mini_app_protection.py). -->
+<div class="screen" id="s-complaints">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🚨 Жалобы</div>
+  </div>
+  <div class="sub-sb">
+    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Жалоба на запрещённый ресурс двумя векторами сразу: выбранные аккаунты флота подают in-app жалобу, выбранные почтовые ящики шлют письмо в компетентный орган. Текст письма подставляется по категории автоматически.</div>
+
+    <div class="sec">Цель и категория</div>
+    <div style="padding:8px 16px">
+      <div class="field"><label>Запрещённый ресурс (@username, ссылка или ID)</label><input type="text" id="cmpTarget" placeholder="@username или t.me/channel"></div>
+      <div class="field">
+        <label>Категория нарушения</label>
+        <select id="cmpCategory" class="sel"><option value="">Загрузка…</option></select>
+      </div>
+      <div class="field"><label>Короткое пояснение к in-app жалобе (необязательно)</label><input type="text" id="cmpReportText" placeholder="Напр.: продажа запрещённого" maxlength="512"></div>
+    </div>
+
+    <div class="sec">1️⃣ Аккаунты флота (in-app жалоба)</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <div style="font-size:12px;color:var(--hint);margin-bottom:6px">Жалоба уйдёт с КАЖДОГО отмеченного аккаунта. Больше аккаунтов — выше охват, но и выше риск для них. Ничего не отмечено — in-app вектор пропускается.</div>
+      <div id="cmpAccounts" style="max-height:170px;overflow-y:auto;margin-bottom:6px"><div class="spin-wrap"><div class="spin"></div></div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:8px 6px" onclick="cmpSelectAllAccounts(true)">✅ Все</button>
+        <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:8px 6px" onclick="cmpSelectAllAccounts(false)">⬜ Снять</button>
+      </div>
+    </div>
+
+    <div class="sec">2️⃣ Почтовые ящики (письмо в органы)</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <div style="font-size:12px;color:var(--hint);margin-bottom:6px">Письмо уйдёт с КАЖДОГО отмеченного ящика. Это легитимный юридический вектор — именно он реально приводит к удалению ресурса. Нужны доказательства ниже.</div>
+      <div id="cmpMailboxes" style="max-height:150px;overflow-y:auto;margin-bottom:6px"><div class="spin-wrap"><div class="spin"></div></div></div>
+      <button class="btn btn-s" style="width:100%;font-size:13px;padding:8px 6px" onclick="openMailboxes()">📧 Подключить / управлять ящиками</button>
+    </div>
+
+    <div class="sec">Доказательства для письма</div>
+    <div style="padding:8px 16px">
+      <div style="font-size:12px;color:var(--hint);margin-bottom:6px">⚠️ Только ССЫЛКИ и ID на нарушение (ссылка на сообщение, message_id). Сам запрещённый материал прикладывать нельзя — он отклоняется. Заполняется, только если выбран хотя бы один ящик.</div>
+      <div class="field"><label>Ссылки / ID (по одной в строке)</label><textarea id="cmpEvidence" rows="3" placeholder="https://t.me/target/123&#10;https://t.me/target/456"></textarea></div>
+      <div class="field"><label>Опишите нарушение словами (для письма)</label><textarea id="cmpContext" rows="3" placeholder="Что именно нарушает правила и почему это запрещённый ресурс"></textarea></div>
+    </div>
+
+    <div style="padding:0 16px 10px">
+      <div class="field-err" id="cmpErr"></div>
+      <button class="btn btn-d" data-main id="cmpBtn" onclick="submitComplaint()" style="width:100%">🚨 Подать жалобу</button>
+      <div id="cmpResult" style="margin-top:10px"></div>
+    </div>
+
+    <div class="sec" style="margin-top:8px">Дополнительно</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="openReporter()">🛡️ Проверка ресурса на запрещёнку</button>
+      <button class="btn btn-s" style="width:100%" onclick="openStrike()">⚔️ Массовый тейкдаун (волнами, эскалация, пакет жалобы)</button>
+    </div>
+
+    <div class="sec" style="margin-top:8px">История почтовых жалоб</div>
+    <div class="lst" id="cmpHistory"></div>
   </div>
 </div>
 
@@ -18045,6 +18114,139 @@ async function submitReporter() {
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='🚨 Отправить репорт'; }
 }
+
+// ─── Единый модуль Жалоб ───────────────────────────────────────────────────
+// Одна дверь: выбранные аккаунты флота подают in-app жалобу, выбранные ящики
+// шлют письмо в компетентный орган. Категория ведёт оба вектора (tg_reason с
+// сервера). Backend: /api/miniapp/complaint/submit.
+async function openComplaints() {
+  push('s-complaints');
+  // Категории — единый список (abuse_report.CATEGORIES), общий для обоих векторов.
+  const sel = document.getElementById('cmpCategory');
+  try {
+    const d = await api('/api/miniapp/report_channels');
+    const cats = (d && d.categories) || [];
+    sel.innerHTML = cats.length
+      ? cats.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')
+      : '<option value="">Категории недоступны</option>';
+  } catch(e) { sel.innerHTML = '<option value="">Категории недоступны</option>'; }
+  accPickerSearchBox('cmpAccounts', _complaintLoadAccs);
+  _complaintLoadAccs('');
+  _complaintLoadMailboxes();
+  _loadComplaintHistory();
+}
+
+async function _complaintLoadAccs(q) {
+  try {
+    const r = await accPickerLoad('active', q);
+    const live = r.accs;
+    txt('cmpAccounts', live.length
+      ? live.map(a=>`<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px">
+          <input type="checkbox" class="cmp-acc-cb" value="${a.id}">
+          ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
+      : `<div style="font-size:13px;color:var(--hint)">${q ? 'По запросу активных не найдено' : 'Нет активных аккаунтов'}</div>`);
+    accPickerSetNote('cmpAccounts', accPickerNote(r));
+  } catch(e) {
+    txt('cmpAccounts','<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>');
+    accPickerSetNote('cmpAccounts', '⚠️ ' + errRu(e,'Аккаунты не загрузились'));
+  }
+}
+
+async function _complaintLoadMailboxes() {
+  const box = document.getElementById('cmpMailboxes');
+  try {
+    const d = await api('/api/miniapp/mailboxes') || {};
+    const all = Array.isArray(d.mailboxes) ? d.mailboxes : [];
+    const active = all.filter(m=>m.is_active);
+    if (!all.length) { box.innerHTML = '<div style="font-size:13px;color:var(--hint)">Ящики не подключены. Нажмите «Подключить» ниже — без них письмо не уйдёт.</div>'; return; }
+    box.innerHTML = all.map(m=>{
+      const on = !!m.is_active;
+      return `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px;${on?'':'opacity:.5'}">
+        <input type="checkbox" class="cmp-mbox-cb" value="${m.id}" ${on?'':'disabled'}>
+        ${esc(m.email)}${on?'':' · отключён'}</label>`;
+    }).join('');
+    if (!active.length) accPickerSetNote('cmpMailboxes', '⚠️ Нет подключённых ящиков — переподключите почту.');
+  } catch(e) {
+    box.innerHTML = '<div style="font-size:13px;color:var(--hint)">Не удалось загрузить ящики</div>';
+  }
+}
+
+function cmpSelectAllAccounts(on) {
+  document.querySelectorAll('.cmp-acc-cb').forEach(cb=>{ cb.checked = !!on; });
+}
+
+async function _loadComplaintHistory() {
+  const box = document.getElementById('cmpHistory');
+  try {
+    const d = await api('/api/miniapp/complaint/history') || {};
+    const rows = Array.isArray(d.email) ? d.email : [];
+    txt('cmpHistory', rows.length
+      ? rows.map(r=>{
+          const st = r.status==='sent' ? '✅ отправлено' : r.status==='send_failed' ? '⚠️ не ушло' : r.status==='no_mailbox' ? '📭 нет ящика' : esc(r.status||'');
+          return `<div class="row"><div class="row-name">📧 ${esc(r.target||'')} · ${esc(r.category||'')}</div>
+            <div class="row-val">${st}${r.recipient?(' → '+esc(r.recipient)):''} · ${ago(r.created_at)}</div></div>`;
+        }).join('')
+      : empty('📧','Почтовых жалоб ещё не было','Здесь появятся отправленные письма в органы'));
+  } catch(e) { txt('cmpHistory', empty('📧','История недоступна','')); }
+}
+
+async function submitComplaint() {
+  const errEl = document.getElementById('cmpErr');
+  const resEl = document.getElementById('cmpResult');
+  errEl.textContent=''; resEl.innerHTML='';
+  const target = (document.getElementById('cmpTarget').value||'').trim();
+  const category = document.getElementById('cmpCategory').value||'';
+  const report_text = (document.getElementById('cmpReportText').value||'').trim();
+  const evidence = (document.getElementById('cmpEvidence').value||'').trim();
+  const context = (document.getElementById('cmpContext').value||'').trim();
+  const accIds = [...document.querySelectorAll('.cmp-acc-cb:checked')].map(cb=>+cb.value);
+  const mboxIds = [...document.querySelectorAll('.cmp-mbox-cb:checked')].map(cb=>+cb.value);
+  if (!target) { errEl.textContent='Укажите запрещённый ресурс'; return; }
+  if (!category) { errEl.textContent='Выберите категорию нарушения'; return; }
+  if (!accIds.length && !mboxIds.length) { errEl.textContent='Отметьте хотя бы один аккаунт флота или почтовый ящик'; return; }
+  if (mboxIds.length && (!evidence || context.length < 20)) {
+    errEl.textContent='Для письма нужны ссылки-доказательства и описание нарушения (от 20 символов)'; return;
+  }
+  const parts = [];
+  if (accIds.length) parts.push(`${accIds.length} ${plural(accIds.length,'аккаунта','аккаунтов','аккаунтов')} флота (in-app жалоба)`);
+  if (mboxIds.length) parts.push(`${mboxIds.length} ${plural(mboxIds.length,'ящик','ящика','ящиков')} (письмо в органы)`);
+  if (!await askConfirm(`Подать жалобу на «${target}»?\n\n${parts.join('\n')}\n\nОтменить отправленные жалобы и письма нельзя.`)) return;
+  const btn = document.getElementById('cmpBtn');
+  btn.disabled=true; btn.textContent='Подаю…';
+  try {
+    const r = await api('/api/miniapp/complaint/submit', {method:'POST', body:JSON.stringify({
+      target, category, report_text,
+      account_ids: accIds, mailbox_ids: mboxIds,
+      evidence, context,
+    })});
+    const lines = [];
+    if (r.in_app) {
+      if (r.in_app.op_id) {
+        lines.push(`🚨 In-app жалоба поставлена · ${r.in_app.accounts} акк.${(r.in_app.selected>r.in_app.accounts)?` (из ${r.in_app.selected} выбранных доступно ${r.in_app.accounts})`:''} · операция #${r.in_app.op_id}`);
+        pollOpResult(r.in_app.op_id, 'Жалоба (флот)');
+      } else if (r.in_app.error) {
+        lines.push(`⚠️ In-app жалоба не поставлена: ${esc(r.in_app.error)}`);
+      }
+    }
+    if (r.email) {
+      if (r.email.error) {
+        lines.push(`⚠️ Письмо не отправлено: ${esc(r.email.error)}`);
+      } else {
+        lines.push(`📧 Письма: ✅ ${r.email.sent||0} отправлено${r.email.failed?` · ⚠️ ${r.email.failed} не ушло`:''}${r.email.no_mailbox?` · 📭 ${r.email.no_mailbox} без ящика`:''}`);
+        if (Array.isArray(r.email.escalation) && r.email.escalation.length) {
+          lines.push('⚖️ Также подайте в органы вручную: ' + r.email.escalation.map(esc).join('; '));
+        }
+      }
+    }
+    resEl.innerHTML = lines.length
+      ? `<div class="lst" style="padding:12px;font-size:13px;line-height:1.5">${lines.join('<br>')}</div>`
+      : '';
+    if (r.ok) toast('🚨 Жалоба подана'); else toast('⚠️ Жалоба не выполнена — см. детали');
+    _loadComplaintHistory();
+  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
+  finally { btn.disabled=false; btn.textContent='🚨 Подать жалобу'; }
+}
+
 async function submitComplianceScan() {
   const raw = document.getElementById('cscanResources').value.trim();
   const resources = raw.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);

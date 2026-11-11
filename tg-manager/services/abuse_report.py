@@ -24,52 +24,84 @@ from typing import Any, Awaitable, Callable, Optional
 
 log = logging.getLogger(__name__)
 
-# ── Категории нарушений (закрытый список) ────────────────────────────────────
-# tg_reason — подсказка, какой повод выбрать и в in-app «Пожаловаться».
-# escalate — внеплатформенные органы, которые реально действуют (веб-формы).
+# ── Категории нарушений (ЕДИНЫЙ закрытый список для обоих векторов) ───────────
+# Один источник правды для модуля Жалоб: категория сразу задаёт и email-письмо
+# (subject/escalate/получатель), и повод in-app жалобы флотом.
+#   tg_reason — ключ reporter_engine.REPORT_REASONS: повод MTProto-жалобы, который
+#               подадут выбранные аккаунты флота по этой же категории.
+#   escalate  — внеплатформенные органы (веб-формы), которые реально действуют;
+#               их оператор подаёт сам (мы не вкладываем сам материал).
 CATEGORIES: dict[str, dict] = {
     "csam": {
         "label": "Насилие над детьми (CSAM)",
         "subject": "Report: child sexual abuse material (CSAM)",
+        "tg_reason": "childabuse",
         "escalate": ["NCMEC CyberTipline — report.cybertip.org",
                      "IWF — report.iwf.org.uk"],
     },
     "terrorism": {
         "label": "Терроризм / призывы к насилию",
         "subject": "Report: terrorism / incitement to violence",
+        "tg_reason": "violence",
         "escalate": [],
     },
     "scam": {
         "label": "Мошенничество / обман",
         "subject": "Report: fraud / scam",
+        "tg_reason": "fake",
         "escalate": [],
     },
     "drugs": {
         "label": "Продажа запрещённых веществ",
         "subject": "Report: sale of illegal substances",
+        "tg_reason": "drugs",
+        "escalate": [],
+    },
+    "porn": {
+        "label": "Порнография (18+)",
+        "subject": "Report: pornography",
+        "tg_reason": "porn",
         "escalate": [],
     },
     "copyright": {
         "label": "Нарушение авторских прав (правообладатель)",
         "subject": "Copyright infringement report",
+        "tg_reason": "other",
         "escalate": [],
     },
     "privacy": {
         "label": "Нарушение приватности / персональные данные",
         "subject": "Privacy violation report",
+        "tg_reason": "personal",
         "escalate": [],
     },
     "intimate": {
         "label": "Интимные материалы без согласия",
         "subject": "Non-consensual intimate imagery report",
+        "tg_reason": "porn",
+        "escalate": [],
+    },
+    "spam": {
+        "label": "Спам / массовая рассылка",
+        "subject": "Report: spam / unsolicited bulk messaging",
+        "tg_reason": "spam",
         "escalate": [],
     },
     "other": {
         "label": "Другое нарушение правил Telegram",
         "subject": "Report: Telegram Terms of Service violation",
+        "tg_reason": "other",
         "escalate": [],
     },
 }
+
+# Повод MTProto-жалобы по умолчанию, если у категории нет своего (или она чужая).
+_DEFAULT_TG_REASON = "other"
+
+
+def tg_reason_for(category: str) -> str:
+    """Повод in-app жалобы флотом по категории (ключ reporter_engine.REPORT_REASONS)."""
+    return str(CATEGORIES.get(category, {}).get("tg_reason") or _DEFAULT_TG_REASON)
 
 _MAX_EVIDENCE = 30
 _MAX_CONTEXT = 4000
@@ -82,8 +114,14 @@ _MATERIAL_RE = re.compile(r"(data:|base64,|;base64|\.(jpg|jpeg|png|mp4|webm|gif)
 
 
 def categories_public() -> list[dict]:
-    """Список категорий для UI: [{key, label}]."""
-    return [{"key": k, "label": v["label"]} for k, v in CATEGORIES.items()]
+    """Список категорий для UI: [{key, label, tg_reason}].
+
+    tg_reason отдаётся, чтобы единый модуль Жалоб одной категорией подал и
+    письмо (email-вектор), и in-app жалобу флотом (reporter_engine).
+    """
+    return [{"key": k, "label": v["label"],
+             "tg_reason": v.get("tg_reason", _DEFAULT_TG_REASON)}
+            for k, v in CATEGORIES.items()]
 
 
 def recipients_for(category: str) -> list[str]:
@@ -321,6 +359,60 @@ async def send_report(pool, owner_id: int, data: Any, *,
             "note": "Письмо отправлено. Решение о блокировке принимает модерация "
                     "платформы — это НЕ подтверждение удаления ресурса."
                     if ok else "Не удалось отправить письмо с вашего ящика."}
+
+
+async def send_report_multi(pool, owner_id: int, data: Any, mailbox_ids: list[int], *,
+                            send_fn: Optional[SendFn] = None,
+                            now: Optional[datetime] = None) -> dict:
+    """Отправить жалобу с НЕСКОЛЬКИХ ящиков оператора (по одному письму с каждого).
+
+    Единый модуль Жалоб: оператор выбирает один или несколько своих подключённых
+    ящиков, и с каждого уходит отдельное письмо в компетентный орган с
+    автоподстановкой текста по категории. Исход по ФАКТУ, по каждому ящику
+    отдельно (sent/send_failed/no_mailbox/invalid) — без ложного успеха.
+
+    Валидация обращения — ОДИН раз: если ссылки/контекст неполны, не шлём ни
+    одного письма и возвращаем ошибку (иначе каждый ящик вернул бы тот же список).
+    """
+    ids: list[int] = []
+    for raw in (mailbox_ids or []):
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    # Дедуп, сохраняя порядок.
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        return {"status": "invalid", "errors": ["Не выбран ни один почтовый ящик"],
+                "requested": 0, "sent": 0, "failed": 0, "no_mailbox": 0, "results": []}
+
+    clean, errors = validate_report(data)
+    if errors:
+        return {"status": "invalid", "errors": errors, "requested": len(ids),
+                "sent": 0, "failed": 0, "no_mailbox": 0, "results": []}
+
+    results: list[dict] = []
+    sent = failed = no_mailbox = 0
+    recipients: list[str] = []
+    escalation: list[str] = escalation_for(clean["category"])
+    for mid in ids:
+        res = await send_report(pool, owner_id, {**clean, "mailbox_id": mid},
+                                send_fn=send_fn, now=now)
+        status = res.get("status")
+        recipients = res.get("recipients") or recipients
+        if status == "sent":
+            sent += 1
+        elif status == "no_mailbox":
+            no_mailbox += 1
+        else:
+            failed += 1
+        results.append({"mailbox_id": mid, "status": status,
+                        "ref_id": res.get("ref_id"), "error": res.get("error")})
+    return {"status": "sent" if sent else ("no_mailbox" if no_mailbox and not failed
+                                           else "send_failed"),
+            "requested": len(ids), "sent": sent, "failed": failed,
+            "no_mailbox": no_mailbox, "results": results,
+            "recipients": recipients, "escalation": escalation}
 
 
 async def _store(pool, owner_id: int, clean: dict, ref_id: str, *, status: str,

@@ -152,6 +152,7 @@ GET /api/miniapp/community/node/{node_id}/invite_link
 GET /api/miniapp/community/node/{node_id}/members
 GET /api/miniapp/community/nodes
 GET /api/miniapp/competitors
+GET /api/miniapp/complaint/history
 GET /api/miniapp/compliance
 GET /api/miniapp/compliance/export
 GET /api/miniapp/config
@@ -489,6 +490,7 @@ HEAD /api/miniapp/community/node/{node_id}/invite_link
 HEAD /api/miniapp/community/node/{node_id}/members
 HEAD /api/miniapp/community/nodes
 HEAD /api/miniapp/competitors
+HEAD /api/miniapp/complaint/history
 HEAD /api/miniapp/compliance
 HEAD /api/miniapp/compliance/export
 HEAD /api/miniapp/config
@@ -862,6 +864,7 @@ POST /api/miniapp/community/node/{node_id}/channels
 POST /api/miniapp/community/node/{node_id}/liven
 POST /api/miniapp/community/node/{node_id}/staff
 POST /api/miniapp/competitor
+POST /api/miniapp/complaint/submit
 POST /api/miniapp/compliance_scan
 POST /api/miniapp/content_cloner/submit
 POST /api/miniapp/content_mesh
