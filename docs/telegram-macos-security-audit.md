@@ -95,6 +95,27 @@ Or, alternatively, show the user confirmation **before** issuing the fetch, allo
 
 ---
 
+## Finding 2c — LOW (macOS parity-gap, найден диффом с iOS)
+
+### `web_app_open_link`: нет allowlist схем на macOS (iOS есть)
+
+**Файл:** `WebpageModalController.swift:1907,1911` → `BrowserHooks.openLink` → `execute(inapp:.external)`.
+
+iOS `web_app_open_link` отбрасывает любую схему кроме `http/https` и server-`allowedProtocols`
+(`WebAppController.swift:1398`). macOS **не проверяет схему** — передаёт `url` напрямую в `openLink`.
+Проверено по факту, что реально проходит:
+- `file://` и `ton://` **заблокированы** в `parseInAppLink` (`LinkParsing.swift:164–173` → `.nothing`) —
+  опасного локального чтения/запуска НЕТ.
+- Остаётся узкий остаток: кастомная **короткая** схема (`://` до 10-го символа переживает нормализацию
+  в `execute`, `InAppLinks.swift:885–893`) доходит до `NSWorkspace.shared.open(url)` **без
+  подтверждения** (needConfirm=false при совпадающем host). Это стандартные `tel:`/`maps:`/`facetime:`
+  (низкий импакт) или URL-схема уже установленного на машине приложения.
+
+**Severity: LOW** (запуск по короткой схеме, 1 клик, без прямого доступа к файлам). **Fix:** добавить
+iOS-подобный allowlist схем (`http`/`https` + `allowedProtocols`) перед `openLink`.
+
+---
+
 ## Finding 2 — CONFIRMED · LOW-MEDIUM (кросс-платформенно)
 
 ### `web_app_open_tg_link`: Missing User Interaction Gate
