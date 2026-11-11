@@ -13885,6 +13885,7 @@ function buildChDetail(d) {
     </div>
 
     <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
+      ${c.type==='channel' ? '' : `<button class="btn btn-p" onclick="startChatWarmup('${escJs(c.username||('#'+c.channel_id))}')" style="flex:1 1 100%" title="Флот вступит в чат и будет вести в нём живой диалог">🔥 Разогрев флотом</button>`}
       ${c.username?`<button class="btn btn-s" onclick="openTgUser('${escJs(c.username)}')" style="flex:1 1 auto;min-width:88px" title="Открыть канал в Telegram">↗ Открыть в Telegram</button>`:''}
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📝 Опубликовать</button>
       <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>
@@ -13893,7 +13894,6 @@ function buildChDetail(d) {
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👑 Админы</button>
       <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👥 Инвайтинг</button>
       <button class="btn btn-s" onclick="openParserForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📊 Собрать аудиторию</button>
-      ${c.type==='channel' ? '' : `<button class="btn btn-s" onclick="startChatWarmup('${escJs(c.username||('#'+c.channel_id))}')" style="flex:1 1 auto;min-width:88px" title="Флот вступит в чат и будет вести в нём живой диалог">🔥 Разогрев флотом</button>`}
       <button class="btn btn-s" onclick="openChAutopost([${c.channel_id}])" style="flex:1 1 auto;min-width:88px">🔁 Автопостинг</button>
       <button class="btn btn-s" onclick="openChDestructive('clear',[${c.channel_id}])" style="flex:1 1 auto;min-width:88px">🧹 Очистить посты</button>
       ${c.role==='member'
