@@ -101,21 +101,14 @@ async def _vlayer(pool, owner_id: int) -> dict:
         log.debug("world._vlayer events failed owner=%s", owner_id)
 
     # Ходят по кругу: невидимый триггер, которого нет как события Telegram.
-    try:
-        # Купившие по кругу больше не ходят. Без этого исключения отметка
-        # «bouncing» жила вечно, и владелец получал «5 ходят по кругу» про
-        # людей, которые уже заплатили. Условие то же, что в списке на экране
-        # (virtual_layer.bouncing_list) — число и список обязаны совпадать.
-        out["bouncing"] = int(await pool.fetchval(
-            "SELECT COUNT(*) FROM virtual_states p WHERE p.owner_id=$1 "
-            "AND p.entity_type='user' AND p.state_key='pattern' "
-            "AND p.value='bouncing' AND NOT EXISTS ("
-            "  SELECT 1 FROM virtual_states f WHERE f.owner_id=p.owner_id "
-            "  AND f.entity_type=p.entity_type AND f.entity_id=p.entity_id "
-            "  AND f.state_key='funnel' AND f.value='purchased')",
-            owner_id) or 0)
-    except Exception:
-        log.debug("world._vlayer bouncing failed owner=%s", owner_id)
+    # Купившие (state funnel='purchased', оплаченный заказ, «Купил» в
+    # Хранилище) и те, с кем владелец уже говорит после отметки, по кругу
+    # больше не ходят — условие общее со списком на экране
+    # (virtual_layer.BOUNCING_STILL_ACTIVE_SQL), число и список совпадают.
+    from services import virtual_layer as _vl
+    ids = await _vl.active_bouncing_ids(pool, owner_id)
+    out["bouncing"] = len(ids)
+    out["bouncing_ids"] = ids[:200]
 
     # Самый горячий бот: по состоянию, посчитанному каскадом «бот ← люди».
     try:
@@ -400,19 +393,19 @@ async def _vault(pool, owner_id: int) -> dict:
         out["stale_days"] = d.get("stale_days")
     except Exception:
         return out
-    # Диалоги, где последнее сообщение — входящее (клиент ждёт ответа) за 7 дн.
-    # Один дешёвый агрегат; сильный сигнал для продаж. fail-open.
+    # Кто ждёт ответа — то же решение, что у списка «Ждут ответа» в Хранилище
+    # (services.vault_dialogs): число в напоминании и список под «Открыть»
+    # обязаны совпадать. Раньше здесь был свой агрегат «последнее входящее
+    # позже последнего исходящего», и он напоминал про тех, кто написал
+    # «спасибо», кому ответили другим путём и кто уже купил. fail-open.
     try:
-        n = await pool.fetchval(
-            "SELECT COUNT(*) FROM ("
-            "  SELECT chat_id, "
-            "    MAX(msg_date) FILTER (WHERE direction='in')  AS last_in, "
-            "    MAX(msg_date) FILTER (WHERE direction='out') AS last_out "
-            "  FROM vault_messages WHERE owner_id=$1 "
-            "    AND msg_date > NOW() - INTERVAL '7 days' GROUP BY chat_id"
-            ") t WHERE last_in IS NOT NULL AND (last_out IS NULL OR last_in > last_out)",
-            owner_id)
-        out["waiting_reply"] = int(n or 0)
+        from services import vault_dialogs
+        waiting = await vault_dialogs.waiting_chats(pool, owner_id, days=7)
+        out["waiting_reply"] = len(waiting)
+        out["waiting"] = [
+            {"chat_id": w["chat_id"], "name": w["peer_name"],
+             "since": w["since"].isoformat() if w["since"] else None}
+            for w in waiting[:50]]
     except Exception:
         log.debug("world._vault waiting failed owner=%s", owner_id)
     return out

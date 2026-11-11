@@ -1943,6 +1943,41 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <style>
 .vfilter{flex:0 0 auto;font-size:12px;padding:8px 12px;border-radius:14px;background:var(--bg2);color:var(--hint);border:1px solid var(--sep);cursor:pointer;white-space:nowrap}
 .vfilter.on{background:var(--btn-solid);color:var(--btn-text);border-color:var(--btn-solid)}
+/* Список диалогов в стиле Telegram */
+.vfolders{display:flex;gap:4px;overflow-x:auto;padding:2px 0 8px;border-bottom:1px solid var(--sep);margin-bottom:2px;scrollbar-width:none}
+.vfolders::-webkit-scrollbar{display:none}
+.vfold{flex:0 0 auto;font-size:14px;font-weight:600;padding:7px 12px;border-radius:16px;color:var(--hint);cursor:pointer;white-space:nowrap}
+.vfold.on{color:var(--accent);background:var(--bg2)}
+.vfold-n{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--hint);color:var(--bg);font-size:11px;line-height:18px;text-align:center;margin-left:2px}
+.vfold.on .vfold-n{background:var(--accent)}
+.vava{flex:0 0 auto;border-radius:50%;color:#fff;font-weight:600;display:flex;align-items:center;justify-content:center;user-select:none}
+.vrow{display:flex;align-items:center;gap:10px;padding:8px 4px;-webkit-user-select:none;user-select:none}
+.vrow+.vrow .vrow-body{border-top:1px solid var(--sep)}
+.vrow-body{flex:1;min-width:0;padding:4px 0}
+.vrow-top,.vrow-bot{display:flex;align-items:center;gap:6px}
+.vrow-name{flex:1;min-width:0;font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vrow-time{font-size:12px;color:var(--hint);white-space:nowrap}
+.vrow-tick{color:var(--accent);margin-right:3px}
+.vrow-prev{flex:1;min-width:0;font-size:14px;color:var(--hint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.vrow-you{color:var(--text)}
+.vrow-unread{min-width:22px;height:22px;padding:0 7px;border-radius:11px;background:var(--accent);color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
+.vrow-unread.muted{background:var(--hint)}
+.vrow-wait,.vrow-pin{font-size:14px}
+.vday{text-align:center;margin:6px 0}
+.vday span{display:inline-block;font-size:12px;padding:3px 10px;border-radius:12px;background:var(--bg2);color:var(--hint)}
+.vmenu-i{padding:13px 4px;font-size:15px;border-bottom:1px solid var(--sep)}
+.vmenu-i:last-child{border-bottom:0}
+.vinfo-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.vinfo-c{background:var(--bg3);border-radius:10px;padding:8px;text-align:center}
+.vinfo-v{font-size:16px;font-weight:700}
+.vinfo-l{font-size:11px;color:var(--hint)}
+.vinfo-rows{margin-top:10px;font-size:13px}
+.vinfo-rows div{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--sep)}
+.vinfo-rows span{color:var(--hint)}
+.vinfo-rows b{text-align:right;font-weight:600}
+.vinfo-acts{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:12px}
+.vinfo-acts .btn.on{border-color:var(--accent)}
+#vchat-head{flex:1;min-width:0;display:flex;align-items:center;gap:8px;cursor:pointer}
 </style>
 <div class="screen" id="s-vault">
   <div class="hdr">
@@ -1962,11 +1997,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:9px 4px" onclick="openVaultRecent('edited')">✏️ Изменённые</button>
     </div>
     <div id="vaultAnalytics" style="padding:2px 16px"></div>
-    <div style="padding:2px 0 6px"><input type="text" id="vaultSearch" placeholder="🔍 Поиск по сообщениям…" oninput="vaultSearchDebounced()" class="inp"></div>
-    <div id="vaultInboxTabs" style="display:none;gap:6px;padding:2px 0 6px">
-      <button class="btn btn-s vinbox on" data-f="all" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="setVaultInbox('all')">Все</button>
-      <button class="btn btn-s vinbox" id="vinboxWaiting" data-f="waiting" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="setVaultInbox('waiting')">⏳ Ждут ответа</button>
-    </div>
+    <div style="padding:2px 0 6px"><input type="text" id="vaultSearch" placeholder="🔍 Поиск: имя, ник или текст сообщения" oninput="vaultSearchDebounced()" class="inp"></div>
+    <div id="vaultFolders" class="vfolders" role="tablist"></div>
+    <div style="font-size:11px;color:var(--hint);padding:2px 2px 4px">Удерживайте диалог — закрепить, отметить отвеченным или купившим, убрать в архив.</div>
     <div class="lst" id="vaultList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div style="padding:8px 0"><button class="btn btn-s" style="width:100%;font-size:12px" onclick="downloadVaultExport('html', null)">⬇️ Экспорт всего архива (HTML)</button></div>
   </div>
@@ -2000,13 +2033,33 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<div class="mbg" id="mo-vault-menu" onclick="if(event.target===this)closeModal('mo-vault-menu')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-vault-menu')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title" id="vaultMenuTitle">Диалог</div>
+    <div id="vaultMenuBody"></div>
+  </div>
+</div>
+
+<div class="mbg" id="mo-vault-info" onclick="if(event.target===this)closeModal('mo-vault-info')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-vault-info')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">ℹ️ О диалоге</div>
+    <div id="vaultInfoBody"></div>
+  </div>
+</div>
+
 <div id="vmediaOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:9999;align-items:center;justify-content:center;padding:16px"></div>
 
 <div class="screen" id="s-vaultchat">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title" id="vchat-title">Диалог</div>
-    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="downloadVaultExport('html', VAULT_CHAT)" title="Экспорт чата" aria-label="Экспорт чата">⬇️</span></div>
+    <div id="vchat-head" role="button" tabindex="0" onclick="openVaultDialogInfo()" aria-label="О диалоге">
+      <div id="vchat-ava"></div>
+      <div style="min-width:0"><div class="hdr-title" id="vchat-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Диалог</div>
+        <div id="vchat-sub" style="font-size:12px;color:var(--hint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div></div>
+    </div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="openVaultRowMenu(VAULT_CHAT)" title="Действия" aria-label="Действия">⋯</span></div>
   </div>
   <div style="display:flex;gap:6px;padding:6px 12px;overflow-x:auto;border-bottom:1px solid var(--sep)">
     <span class="vfilter on" data-f="all" onclick="setVaultFilter('all')">Все</span>
@@ -11103,6 +11156,8 @@ function runPulseAction(a) {
     // сообщение» в общий список и искать его там — лишняя работа.
     const cid = prm;
     if (cid && /^-?\d+$/.test(String(cid))) { openVault(); return openVaultChat(Number(cid)); }
+    // «N клиентов ждут ответа» — сразу папка ждущих, а не весь архив.
+    if (cid === 'waiting') return openVault(false, 'waiting');
     return openVault();
   }
   if (k==='governor' || k==='invite') return openMassInvite();
@@ -18900,9 +18955,9 @@ async function changeVaultOwner(select) {
   await openVault(true);
 }
 
-async function openVault(refreshOnly) {
+async function openVault(refreshOnly, folder) {
   if (!refreshOnly) push('s-vault');
-  _VAULT_INBOX = 'all';
+  VAULT_FOLDER = folder || 'all';
   document.getElementById('vaultConnect').style.display = 'none';
   const s = document.getElementById('vaultSearch'); if (s) s.value = '';
   txt('vaultList','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -18928,8 +18983,7 @@ async function openVault(refreshOnly) {
     } else if (diag.health === 'stale') {
       renderVaultStale(st.bot_username, diag);
     }
-    const d = await api(vaultPath('/api/miniapp/vault/chats'));
-    renderVaultChats(d.chats || []);
+    await reloadVaultDialogs();
   } catch(e) { txt('vaultList', errHtml(errRu(e),'openVault()')); }
   loadVaultAnalytics();
 }
@@ -19023,50 +19077,37 @@ function renderVaultConnect(botUsername, diag) {
 }
 
 let _VAULT_CHATS = [];
-let _VAULT_INBOX = 'all';   // 'all' | 'waiting'
-function setVaultInbox(f) {
-  _VAULT_INBOX = f;
-  document.querySelectorAll('#vaultInboxTabs .vinbox').forEach(e => e.classList.toggle('on', e.dataset.f === f));
-  renderVaultChats(_VAULT_CHATS);
+let VAULT_FOLDER = 'all';   // all | unread | waiting | deleted | archived
+let _VAULT_COUNTS = {};
+let VAULT_INFO = null;      // карточка открытого диалога (ответ /info)
+async function setVaultInbox(f) {
+  VAULT_FOLDER = f;
+  renderVaultFolders();
+  txt('vaultList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try { await reloadVaultDialogs(); }
+  catch(e) { txt('vaultList', errHtml(errRu(e), "setVaultInbox('"+f+"')")); }
 }
+// Список диалогов как в Telegram (строки — vaultRowHtml в screens/vault_dialogs.js).
+// Порядок и «ждёт ли ответа» решает сервер: закреплённые сверху, дальше по
+// свежести; в папке «Ждут ответа» — дольше всех ждущий первым.
 function renderVaultChats(list) {
   _VAULT_CHATS = list || [];
-  const waiting = _VAULT_CHATS.filter(c => c.awaiting_reply).length;
-  // Вкладки inbox: «Все» и «Ждут ответа N» — единый поток входящих под рукой.
-  const tabs = document.getElementById('vaultInboxTabs');
-  if (tabs) {
-    tabs.style.display = _VAULT_CHATS.length ? 'flex' : 'none';
-    const wb = document.getElementById('vinboxWaiting');
-    if (wb) wb.textContent = waiting ? `⏳ Ждут ответа ${waiting}` : '⏳ Ждут ответа';
-  }
-  { const cntEl = document.getElementById('vaultCnt'); if (cntEl) cntEl.textContent = _VAULT_CHATS.length ? (_VAULT_CHATS.length+' чат.') : ''; }
-  if (!_VAULT_CHATS.length) {
-    txt('vaultList', empty('🗄','Архив пуст','Подключите бота к бизнес-аккаунту — и переписка начнёт сохраняться'));
-    return;
-  }
-  VAULT_NAMES = {};
+  renderVaultFolders();
+  { const cntEl = document.getElementById('vaultCnt'); if (cntEl) cntEl.textContent = _VAULT_COUNTS.all ? (_VAULT_COUNTS.all+' чат.') : ''; }
   _VAULT_CHATS.forEach(c => { VAULT_NAMES[c.chat_id] = c.peer_name; });
-  // Ждущие ответа — вперёд (единый inbox: сначала то, что требует реакции).
-  const sorted = _VAULT_CHATS.slice().sort((a, b) => {
-    if (!!a.awaiting_reply !== !!b.awaiting_reply) return a.awaiting_reply ? -1 : 1;
-    return (b.last_date || '').localeCompare(a.last_date || '');
-  });
-  const view = _VAULT_INBOX === 'waiting' ? sorted.filter(c => c.awaiting_reply) : sorted;
-  if (!view.length) {
-    txt('vaultList', empty('✅','Все отвечено','Нет диалогов, ждущих ответа'));
+  if (!_VAULT_CHATS.length) {
+    const q = ((document.getElementById('vaultSearch')||{}).value||'').trim();
+    const msg = q ? ['🔍','Диалогов не найдено','Ищем и по тексту сообщений — смотрите ниже']
+      : VAULT_FOLDER === 'waiting' ? ['✅','Все отвечено','Нет диалогов, ждущих ответа']
+      : VAULT_FOLDER === 'unread' ? ['👁','Всё прочитано','Новых входящих нет']
+      : VAULT_FOLDER === 'archived' ? ['🗄','Архив пуст','Удерживайте диалог, чтобы убрать его в архив']
+      : VAULT_FOLDER === 'deleted' ? ['🗑','Удалённых нет','Здесь появятся чаты, где собеседник что-то удалил']
+      : ['🗄','Архив пуст','Подключите бота к бизнес-аккаунту — и переписка начнёт сохраняться'];
+    txt('vaultList', empty(msg[0], msg[1], msg[2]));
     return;
   }
-  txt('vaultList', view.map(c => {
-    const del = c.deleted > 0 ? `<span class="badge b-rd" style="margin-left:6px">🗑 ${c.deleted}</span>` : '';
-    const wait = c.awaiting_reply ? `<span class="badge b-or" style="margin-left:6px">⏳ ждёт</span>` : '';
-    const date = c.last_date ? new Date(c.last_date).toLocaleDateString('ru-RU') : '';
-    return `<div class="li tap" onclick="openVaultChat(${c.chat_id})">
-      <div class="row-ico" style="background:var(--bg-blue-16)">👤</div>
-      <div class="li-body"><div class="li-name">${esc(c.peer_name)}${wait}${del}</div>
-        <div class="li-sub">${esc(c.last_preview||'')||'—'}</div></div>
-      <div class="li-right"><div style="font-size:11px;color:var(--hint)">${date}</div><span class="chev">›</span></div>
-    </div>`;
-  }).join(''));
+  txt('vaultList', _VAULT_CHATS.map(vaultRowHtml).join(''));
+  vaultBindLongPress(document.getElementById('vaultList'));
 }
 
 async function openVaultChat(chatId) {
@@ -19074,7 +19115,17 @@ async function openVaultChat(chatId) {
   VAULT_FILTER = 'all';
   document.querySelectorAll('#s-vaultchat .vfilter').forEach(e => e.classList.toggle('on', e.dataset.f === 'all'));
   txt('vchat-title', esc(VAULT_NAMES[chatId] || 'Диалог'));
+  { const av = document.getElementById('vchat-ava'); if (av) av.innerHTML = vaultAvatar(VAULT_NAMES[chatId] || '?', chatId, 34); }
+  VAULT_INFO = null;
+  vaultChatSubtitle();
   push('s-vaultchat');
+  // Открыли — значит прочитали: счётчик непрочитанных гаснет, как в Telegram.
+  // Чужое хранилище администратор смотрит без отметок.
+  if (!VAULT_READ_ONLY) {
+    api(vaultPath('/api/miniapp/vault/chat/'+chatId+'/state'), {method:'POST', body: JSON.stringify({read:true})})
+      .then(() => { const c = _vaultChatById(chatId); if (c) { c.unread = 0; renderVaultChats(_VAULT_CHATS); } })
+      .catch(() => {});
+  }
   const comp = document.getElementById('vchatComposer');
   comp.style.display = VAULT_CAN_REPLY ? 'flex' : 'none';
   await reloadVaultChat();
@@ -19113,7 +19164,7 @@ async function reloadVaultChat() {
     const older = d.has_more
       ? `<div id="vchatMore" style="text-align:center;padding:8px"><button class="btn btn-s" style="font-size:12px" onclick="loadOlderVaultMessages()">↑ Показать более ранние</button></div>`
       : '';
-    body.innerHTML = older + msgs.map(m => vaultBubble(m)).join('');
+    body.innerHTML = older + vaultBubblesHtml(msgs);
     body.scrollTop = body.scrollHeight;
   } catch(e) { body.innerHTML = errHtml(errRu(e),'reloadVaultChat()'); }
 }
@@ -19132,7 +19183,7 @@ async function loadOlderVaultMessages() {
     const olderBtn = d.has_more
       ? `<div id="vchatMore" style="text-align:center;padding:8px"><button class="btn btn-s" style="font-size:12px" onclick="loadOlderVaultMessages()">↑ Показать более ранние</button></div>`
       : '<div style="text-align:center;padding:8px;font-size:12px;color:var(--hint)">Начало переписки</div>';
-    if (more) more.outerHTML = olderBtn + msgs.map(m => vaultBubble(m)).join('');
+    if (more) more.outerHTML = olderBtn + vaultBubblesHtml(msgs);
     body.scrollTop += body.scrollHeight - before;
   } catch(e) {
     if (more) more.innerHTML = `<div style="font-size:12px;color:var(--red)">${esc(errRu(e,'Ошибка'))}</div>`;
@@ -19216,13 +19267,13 @@ function vaultBubble(m) {
   const out = m.direction === 'out';
   const media = vaultMediaLine(m);
   const text = m.text ? `<div style="white-space:pre-wrap;word-break:break-word${m.deleted?';text-decoration:line-through;opacity:.6':''}">${esc(m.text)}</div>` : '';
-  const time = m.date ? new Date(m.date).toLocaleString('ru-RU') : '';
+  const time = m.date ? new Date(m.date).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}) : '';
   const marks = [m.edited?'✏️ изменено':'', m.deleted?'🗑 удалено':''].filter(Boolean).join(' · ');
   const markHtml = marks ? `<div style="font-size:10px;color:${m.deleted?'var(--red)':'var(--hint)'};margin-top:2px">${marks}</div>` : '';
   return `<div style="display:flex;${out?'justify-content:flex-end':''}">
     <div style="max-width:82%;padding:8px 12px;border-radius:14px;font-size:14px;${out?'background:var(--bubble-out);color:var(--text);border-bottom-right-radius:4px':'background:var(--bubble-in);color:var(--text);border-bottom-left-radius:4px'}">
       ${media}${text||(m.media_label?'':'<i style="opacity:.5">пустое</i>')}${markHtml}
-      <div style="font-size:10px;opacity:.5;margin-top:3px;text-align:right">${time}</div>
+      <div style="font-size:10px;opacity:.5;margin-top:3px;text-align:right">${m.edited?'изм. ':''}${time}${out?' ✓':''}</div>
     </div></div>`;
 }
 
@@ -19235,6 +19286,7 @@ async function sendVaultReply() {
     await api(vaultPath('/api/miniapp/vault/chat/'+VAULT_CHAT+'/reply'), {method:'POST', body: JSON.stringify({text})});
     inp.value = '';
     await reloadVaultChat();
+    reloadVaultDialogs().then(vaultChatSubtitle).catch(() => {});
   } catch(e) { toast('⚠️ '+errRu(e,'Не отправлено')); }
   finally { inp.disabled = false; inp.focus(); }
 }
@@ -19246,9 +19298,18 @@ function vaultSearchDebounced() {
 
 async function vaultDoSearch() {
   const q = (document.getElementById('vaultSearch').value||'').trim();
-  if (q.length < 2) { const d = await api(vaultPath('/api/miniapp/vault/chats')); renderVaultChats(d.chats||[]); return; }
+  if (q.length < 2) { await reloadVaultDialogs(); return; }
   txt('vaultList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
+    // Сначала диалоги по имени/нику/заметке — как поиск чатов в Telegram,
+    // ниже — совпадения в тексте сообщений.
+    const dd = await api(vaultPath('/api/miniapp/vault/dialogs?folder=all&q='+encodeURIComponent(q)));
+    const dlg = dd.chats || [];
+    const dlgHtml = dlg.length
+      ? '<div class="field-note" style="padding:6px 2px">Диалоги</div>' + dlg.slice(0, 20).map(vaultRowHtml).join('')
+        + '<div class="field-note" style="padding:10px 2px 6px">Сообщения</div>'
+      : '';
+    dlg.forEach(c => { VAULT_NAMES[c.chat_id] = c.peer_name; });
     const d = await api(vaultPath('/api/miniapp/vault/search?q='+encodeURIComponent(q)));
     const res = d.results || [];
     // Архив мог быть просмотрен не до конца — тогда «ничего не найдено» неправда.
@@ -19257,12 +19318,12 @@ async function vaultDoSearch() {
       ? `<div class="field-note" style="padding:6px 2px">Просмотрено ${num(d.scanned||0)} из ${num(d.archive_total||0)} сообщений — архив большой. Уточните запрос или ищите внутри нужного чата.</div>`
       : '';
     if (!res.length) {
-      txt('vaultList', scanNote + empty('🔍','Ничего не найдено',
+      txt('vaultList', dlgHtml + scanNote + empty('🔍', dlg.length ? 'В тексте сообщений не найдено' : 'Ничего не найдено',
         partial ? 'Поиск не дошёл до конца архива' : 'Искали и в тексте, и в имени собеседника'));
       return;
     }
     res.forEach(m => { VAULT_NAMES[m.chat_id] = m.peer_name; });
-    txt('vaultList', scanNote + res.map(m => {
+    txt('vaultList', dlgHtml + scanNote + res.map(m => {
       const del = m.deleted ? '<span class="badge b-rd" style="margin-left:6px">🗑</span>' : '';
       return `<div class="li tap" onclick="openVaultChat(${m.chat_id})">
         <div class="row-ico" style="background:var(--bg-blue-16)">💬</div>
@@ -33504,6 +33565,7 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_factory.js"></script>
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>
+<script src="screens/vault_dialogs.js"></script>
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>
 <script src="screens/deals_board.js"></script>
