@@ -1010,11 +1010,15 @@ POST /api/miniapp/pair
 POST /api/miniapp/pair/exchange
 POST /api/miniapp/parser/submit
 POST /api/miniapp/persona
+POST /api/miniapp/persona/preview
+POST /api/miniapp/persona/{persona_id}/apply_profile
 POST /api/miniapp/phone_check
 POST /api/miniapp/presence_pack
 POST /api/miniapp/presence_pack/{pack_id}/promote
 POST /api/miniapp/presence_pack/{pack_id}/seed
 POST /api/miniapp/profile_setter
+POST /api/miniapp/profile_setter/preview
+POST /api/miniapp/profile_setter/twofa
 POST /api/miniapp/promo/order
 POST /api/miniapp/promo/order/{order_id}/boost
 POST /api/miniapp/promo/order/{order_id}/cancel
@@ -1188,6 +1192,7 @@ PUT /api/miniapp/editorial/policy
 PUT /api/miniapp/funnel/{funnel_id}/toggle
 PUT /api/miniapp/ghost/{profile_id}
 PUT /api/miniapp/ghost/{profile_id}/toggle
+PUT /api/miniapp/persona/{persona_id}
 PUT /api/miniapp/persona/{persona_id}/toggle
 PUT /api/miniapp/presence_pack/{pack_id}/config
 PUT /api/miniapp/self_promo/{tpl_id}/toggle

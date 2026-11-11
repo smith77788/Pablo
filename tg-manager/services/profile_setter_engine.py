@@ -760,11 +760,12 @@ def render_username(template: str, slot: int) -> str:
     аккаунт получил бы отказ «занято»."""
     import random as _r
 
-    out = expand_spintax(template or "")
-    out = out.replace("{n}", str(int(slot) + 1))
+    # Подстановки — ДО спинтакса: иначе движок прочитал бы {n} как группу из
+    # одного варианта и отдал бы букву «n» всему флоту.
+    out = (template or "").replace("{n}", str(int(slot) + 1))
     while "{rand}" in out:
         out = out.replace("{rand}", f"{_r.randint(0, 9999):04d}", 1)
-    return out.strip().lstrip("@")
+    return expand_spintax(out).strip().lstrip("@")
 
 
 def name_bio_kwargs(name_data: dict, params: dict) -> dict:
