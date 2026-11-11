@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 
 from services import bot_api, bot_localization as bl
+from tests.miniapp_source import miniapp_html, miniapp_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,7 +43,7 @@ def test_catalog_has_no_duplicates_and_russian_names():
 
 
 def test_miniapp_screen_keeps_no_own_language_list():
-    html = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    html = miniapp_html()
     start = html.index('<div class="screen" id="s-multigeo">')
     end = html.index("CONTENT CLONER", start)
     block = html[start:end]
@@ -255,7 +256,7 @@ async def test_bulk_bot_profile_rejects_bad_language_code():
 def test_routes_are_registered_and_called_by_the_screen(route):
     src = (ROOT / "services" / "mini_app_bots.py").read_text(encoding="utf-8")
     assert route in src
-    html = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    html = miniapp_source()
     tail = route.rsplit("/", 1)[1]
     if tail != "{lang}":
         assert f"/multigeo/{tail}`" in html, f"экран не зовёт {route}"

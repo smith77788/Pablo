@@ -1371,14 +1371,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 langs.append(lc)
         if not langs:
             return _err("Выберите языки, которые переносить", 400)
-        bot_ids: list[int] = []
-        for x in (body.get("bot_ids") or []):
-            try:
-                b = int(x)
-            except (TypeError, ValueError):
-                continue
-            if b != src_bot_id and b not in bot_ids:
-                bot_ids.append(b)
+        from services.security import selection_ids as _sel_ids
+        # Перенос «на всех» без явного выбора не делаем: нет ключа — тоже ошибка.
+        _picked, _serr = _sel_ids(body, "bot_ids", what="бот", cap=500)
+        if _serr:
+            return _err(_serr, 400)
+        bot_ids = [b for b in (_picked or []) if b != src_bot_id]
         if not bot_ids:
             return _err("Выберите боты, на которые переносить", 400)
         try:
