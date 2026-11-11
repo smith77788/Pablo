@@ -922,9 +922,24 @@ context.startActivity(intent);  // ← запуск Activity, которую о�
 3. **Нет подтверждения пользователя** и нет ограничения по package — в отличие от
    `createChooser`, который дал бы пользователю выбор.
 
+#### Точная модель срабатывания (уточнено — zero-second-click)
+- Дефолтный клик по ссылке идёт через `Browser.openUrl(… allowIntent=false …)` → intent-схема
+  блокируется (`if (isIntentScheme && !allowIntent) return false`). Прямой `intent://` из чата не проходит.
+- **Но** единственная точка с `allowIntent=true` — навигация **в in-app браузере**
+  (`BotWebViewContainer.java:4275`, `openInExternalApp(context, url, true)`), и она вызывается для
+  ЛЮБОЙ навигации WebView. Обработчик — `shouldOverrideUrlLoading(WebView, String)` (`:4256`), это
+  **deprecated-перегрузка без `hasGesture()`** → отличить клик от JS-редиректа нельзя, гейта жеста нет.
+- **Итог:** жертва открывает **любую attacker https-ссылку** (обычное действие — ссылка грузится в
+  in-app браузере, т.к. https при клике разрешён), а уже загруженная страница делает
+  `location.href = "intent://…;component=…;end"` → `startActivity` **без единого дополнительного клика**.
+
+Второй sink с тем же дефектом — `Browser.openInExternalBrowser:503–518` (`parseUri`+`startActivity` без
+очистки), достижим когда in-app браузер отключён. Корневая причина общая — непросанитизированный
+`Intent.parseUri` в `Browser.java`.
+
 #### Сценарий атаки (защитная формулировка)
-Жертва открывает ссылку (из чата или сообщения бота), ведущую на страницу в in-app браузере Telegram.
-Страница содержит `<a href="intent://…#Intent;action=android.intent.action.MAIN;component=com.target/.Activity;end">`
+Страница в in-app браузере содержит
+`<a href="intent://…#Intent;action=android.intent.action.MAIN;component=com.target/.Activity;end">`
 или JS-редирект на такой URL. Клиент без подтверждения вызывает `startActivity` → запускается
 **exported-Activity целевого приложения**. Границы импакта:
 - Невозможно установить APK, выполнить нативный код в контексте Telegram, прочитать чужие данные.
