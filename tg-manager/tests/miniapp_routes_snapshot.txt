@@ -200,8 +200,9 @@ GET /api/miniapp/global_presence
 GET /api/miniapp/global_presence/{plan_id}
 GET /api/miniapp/graph
 GET /api/miniapp/graph/overlaps
+GET /api/miniapp/growth/goal/{gid}/plan
+GET /api/miniapp/growth/goals
 GET /api/miniapp/growth/overview
-GET /api/miniapp/growth/plan
 GET /api/miniapp/health
 GET /api/miniapp/host_server/market
 GET /api/miniapp/host_server/my
@@ -250,6 +251,9 @@ GET /api/miniapp/networks/{net_id}/deploy_plan
 GET /api/miniapp/new_users
 GET /api/miniapp/new_users/export
 GET /api/miniapp/next_actions
+GET /api/miniapp/niche/campaign/{cid}/assets
+GET /api/miniapp/niche/campaign/{cid}/log
+GET /api/miniapp/niche/overview
 GET /api/miniapp/node/{node_id}/threads
 GET /api/miniapp/nodes
 GET /api/miniapp/notary
@@ -302,6 +306,7 @@ GET /api/miniapp/sales/persona/{pid}/stats
 GET /api/miniapp/sales/personas
 GET /api/miniapp/self_promo
 GET /api/miniapp/self_promo/audience
+GET /api/miniapp/selfpromo/overview
 GET /api/miniapp/semantic_memory
 GET /api/miniapp/semantic_memory/{bot_id}
 GET /api/miniapp/seo
@@ -356,8 +361,9 @@ GET /api/miniapp/va/channels
 GET /api/miniapp/va/posts
 GET /api/miniapp/va/strategy
 GET /api/miniapp/vault/analytics
+GET /api/miniapp/vault/chat/{chat_id}/info
 GET /api/miniapp/vault/chat/{chat_id}/messages
-GET /api/miniapp/vault/chats
+GET /api/miniapp/vault/dialogs
 GET /api/miniapp/vault/export
 GET /api/miniapp/vault/media/{chat_id}/{msg_id}
 GET /api/miniapp/vault/owners
@@ -536,8 +542,9 @@ HEAD /api/miniapp/global_presence
 HEAD /api/miniapp/global_presence/{plan_id}
 HEAD /api/miniapp/graph
 HEAD /api/miniapp/graph/overlaps
+HEAD /api/miniapp/growth/goal/{gid}/plan
+HEAD /api/miniapp/growth/goals
 HEAD /api/miniapp/growth/overview
-HEAD /api/miniapp/growth/plan
 HEAD /api/miniapp/health
 HEAD /api/miniapp/host_server/market
 HEAD /api/miniapp/host_server/my
@@ -586,6 +593,9 @@ HEAD /api/miniapp/networks/{net_id}/deploy_plan
 HEAD /api/miniapp/new_users
 HEAD /api/miniapp/new_users/export
 HEAD /api/miniapp/next_actions
+HEAD /api/miniapp/niche/campaign/{cid}/assets
+HEAD /api/miniapp/niche/campaign/{cid}/log
+HEAD /api/miniapp/niche/overview
 HEAD /api/miniapp/node/{node_id}/threads
 HEAD /api/miniapp/nodes
 HEAD /api/miniapp/notary
@@ -638,6 +648,7 @@ HEAD /api/miniapp/sales/persona/{pid}/stats
 HEAD /api/miniapp/sales/personas
 HEAD /api/miniapp/self_promo
 HEAD /api/miniapp/self_promo/audience
+HEAD /api/miniapp/selfpromo/overview
 HEAD /api/miniapp/semantic_memory
 HEAD /api/miniapp/semantic_memory/{bot_id}
 HEAD /api/miniapp/seo
@@ -692,8 +703,9 @@ HEAD /api/miniapp/va/channels
 HEAD /api/miniapp/va/posts
 HEAD /api/miniapp/va/strategy
 HEAD /api/miniapp/vault/analytics
+HEAD /api/miniapp/vault/chat/{chat_id}/info
 HEAD /api/miniapp/vault/chat/{chat_id}/messages
-HEAD /api/miniapp/vault/chats
+HEAD /api/miniapp/vault/dialogs
 HEAD /api/miniapp/vault/export
 HEAD /api/miniapp/vault/media/{chat_id}/{msg_id}
 HEAD /api/miniapp/vault/owners
@@ -904,6 +916,9 @@ POST /api/miniapp/global_search
 POST /api/miniapp/groups/announce
 POST /api/miniapp/groups/import_all
 POST /api/miniapp/growth
+POST /api/miniapp/growth/goal
+POST /api/miniapp/growth/goal/{gid}/delete
+POST /api/miniapp/growth/goal/{gid}/update
 POST /api/miniapp/host_server/buy
 POST /api/miniapp/host_server/offering
 POST /api/miniapp/host_server/offering/{offering_id}/toggle
@@ -954,6 +969,12 @@ POST /api/miniapp/networks/{net_id}/edges
 POST /api/miniapp/networks/{net_id}/nodes
 POST /api/miniapp/next_actions/apply
 POST /api/miniapp/next_actions/feedback
+POST /api/miniapp/niche/asset/{aid}/skip
+POST /api/miniapp/niche/campaign
+POST /api/miniapp/niche/campaign/{cid}/delete
+POST /api/miniapp/niche/campaign/{cid}/presence
+POST /api/miniapp/niche/campaign/{cid}/scan
+POST /api/miniapp/niche/keywords
 POST /api/miniapp/node
 POST /api/miniapp/notary
 POST /api/miniapp/notary/{watch_id}/check
@@ -1017,6 +1038,13 @@ POST /api/miniapp/sales/persona/{pid}/unassign
 POST /api/miniapp/schedule/{sch_id}/cancel
 POST /api/miniapp/self_promo/template
 POST /api/miniapp/self_promo/{tpl_id}/launch
+POST /api/miniapp/selfpromo/campaign
+POST /api/miniapp/selfpromo/campaign/{cid}/delete
+POST /api/miniapp/selfpromo/campaign/{cid}/launch
+POST /api/miniapp/selfpromo/campaign/{cid}/status
+POST /api/miniapp/selfpromo/preview
+POST /api/miniapp/selfpromo/test
+POST /api/miniapp/selfpromo/texts
 POST /api/miniapp/seo/analyze
 POST /api/miniapp/seo/apply
 POST /api/miniapp/seo/apply_all
@@ -1085,6 +1113,7 @@ POST /api/miniapp/va/drafts/{did}/regenerate
 POST /api/miniapp/va/drafts/{did}/reject
 POST /api/miniapp/va/references/{rid}/refresh
 POST /api/miniapp/vault/chat/{chat_id}/reply
+POST /api/miniapp/vault/chat/{chat_id}/state
 POST /api/miniapp/vault/settings
 POST /api/miniapp/views
 POST /api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased

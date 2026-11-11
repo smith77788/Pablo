@@ -131,6 +131,72 @@ def _is_session_conflict_error(error_text: str) -> bool:
     return bool(_SESSION_CONFLICT_PATTERNS.search(error_text or ""))
 
 
+# ── Английские ответы Telegram в итоге операции ─────────────────────────────
+#
+# Исполнители подставляют текст исключения в итог: «⚠️ Ошибка проверки: {exc}».
+# Текст исключения Telethon — английский, а владелец и его пользователи
+# английского не читают: в сводке частых сбоев первой строкой стояло «Cannot
+# find any entity corresponding to …». Переводить в каждом из десятков мест
+# значит снова положиться на память вызывающего, поэтому перевод стоит в
+# единственной точке, через которую проходит итог любой операции
+# (`_normalize_result`). Неизвестная фраза остаётся как есть: лучше английская
+# причина, чем потерянная.
+_TG_PHRASES: tuple[tuple[re.Pattern, str], ...] = tuple(
+    (re.compile(p, re.IGNORECASE), r) for p, r in (
+        (r"\s*\(caused by \w+\)", ""),
+        (r"Cannot find any entity corresponding to \"?([^\"\n]{1,80})\"?",
+         r"не найден адресат «\1» — проверьте имя или ссылку"),
+        (r"No user has \"?([^\"\n]{1,80})\"? as username",
+         r"имя «\1» в Telegram никем не занято"),
+        (r"Nobody is using this username, or the username is unacceptable[^\n]*",
+         "такого имени в Telegram нет"),
+        (r"A wait of (\d+) seconds is required",
+         r"Telegram просит подождать \1 с"),
+        (r"The channel specified is private and you lack permission to access it[^\n]*",
+         "канал закрыт или аккаунт потерял к нему доступ"),
+        (r"Chat admin privileges are required to do that in the specified chat[^\n]*",
+         "нужны права администратора в этом чате"),
+        (r"You can't write in this chat[^\n]*",
+         "аккаунту запрещено писать в этот чат"),
+        (r"You have joined too many channels/supergroups[^\n]*",
+         "аккаунт состоит в слишком многих каналах и группах"),
+        (r"The chat the user tried to join has expired and is not valid anymore[^\n]*",
+         "ссылка-приглашение недействительна или истекла"),
+        (r"The user has been deleted/deactivated[^\n]*",
+         "аккаунт удалён или заблокирован Telegram"),
+        (r"The key is not registered in the system[^\n]*",
+         "сессия аккаунта недействительна — войдите в аккаунт заново"),
+        (r"The authorization has been invalidated[^\n]*",
+         "вход в аккаунт отозван — войдите в аккаунт заново"),
+        (r"An invalid Peer was used[^\n]*", "Telegram не узнал адресата"),
+        (r"Too many requests[^\n]*", "слишком много запросов к Telegram"),
+        (r"Cannot send requests while disconnected[^\n]*",
+         "соединение с Telegram разорвано"),
+        (r"Connection to Telegram failed \d+ time\(s\)",
+         "не удалось подключиться к Telegram"),
+        (r"The message text is empty[^\n]*", "пустой текст сообщения"),
+        (r"The provided media object is invalid[^\n]*",
+         "Telegram не принял вложение"),
+        (r"You're banned from sending messages in supergroups/channels[^\n]*",
+         "аккаунту запрещено писать в группах и каналах"),
+        (r"The user's privacy settings do not allow you to do this[^\n]*",
+         "настройки приватности человека это запрещают"),
+    ))
+
+
+def russify_telegram_text(text):
+    """Заменить известные английские ответы Telegram русскими. Остальное
+    не трогает; не-строку возвращает как есть."""
+    if not isinstance(text, str) or not text:
+        return text
+    # Быстрый выход: в русском итоге латиницы слов почти нет.
+    if not re.search(r"[A-Za-z]{4}", text):
+        return text
+    for pat, repl in _TG_PHRASES:
+        text = pat.sub(repl, text)
+    return text
+
+
 def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
     """Обеспечить единый формат результата операции для хранения и отчётов.
 
@@ -166,6 +232,7 @@ def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
         failed = result.get("failed", 0)
         result["summary"] = f"✅ {ok} успешно, ❌ {failed} ошибок"
 
+    result["summary"] = russify_telegram_text(result["summary"])
     result["duration_s"] = round(duration_s, 1)
     result["op_type"] = op_type
     return result

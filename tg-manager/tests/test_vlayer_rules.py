@@ -230,7 +230,7 @@ def test_routes_and_screen_wired():
                  "async function vlSetStage", 'id="vlTabs"',
                  "/api/miniapp/vlayer/rules", "/stage'"):
         assert frag in html
-    assert "vlayer_rules" in _read("schema_v318_vlayer_rules.sql")
+    assert "vlayer_rules" in _read("schema_v320_vlayer_rules.sql")
 
 
 def test_runner_cascade_reads_owner_rules():

@@ -42,7 +42,7 @@ def test_all_four_business_handlers_present():
 def test_api_routes_registered():
     for route in (
         '"/api/miniapp/vault/status"',
-        '"/api/miniapp/vault/chats"',
+        '"/api/miniapp/vault/dialogs"',
         '"/api/miniapp/vault/chat/{chat_id}/messages"',
         '"/api/miniapp/vault/search"',
         '"/api/miniapp/vault/chat/{chat_id}/reply"',
@@ -72,8 +72,8 @@ def test_recent_and_export_screens():
 
 def test_api_owner_scoped():
     """Все vault-эндпоинты берут uid из токена и скоупят по нему (не по query)."""
-    m = re.search(r"async def vault_chats\(.*?async def vault_messages\(", API, re.S)
-    assert m and "_get_uid(request)" in m.group(0), "vault_chats не скоупится по владельцу"
+    m = re.search(r"async def vault_dialogs\(.*?async def vault_dialog_info\(", API, re.S)
+    assert m and "_get_uid(request)" in m.group(0), "vault_dialogs не скоупится по владельцу"
 
 
 def test_vault_command_present():
