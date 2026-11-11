@@ -1034,7 +1034,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Аккаунт не найден", 404)
             new_state = not bool(row["is_active"])
             await pool.execute(
-                "UPDATE tg_accounts SET is_active=$1 WHERE id=$2 AND owner_id=$3",
+                # Ручное переключение снимает метку паузы щита: иначе щит по
+                # истечении срока включил бы аккаунт, выключенный владельцем.
+                "UPDATE tg_accounts SET is_active=$1, shield_paused_until=NULL "
+                "WHERE id=$2 AND owner_id=$3",
                 new_state, acc_id, uid)
             return _json_resp({"ok": True, "is_active": new_state})
         except Exception:
@@ -1699,6 +1702,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 # аккаунт, и защищает здесь именно SQL, а не снимок.
                 """UPDATE tg_accounts
                    SET is_active=TRUE,
+                       shield_paused_until=NULL,
                        acc_status='active',
                        status_reason=NULL,
                        in_operation=FALSE,

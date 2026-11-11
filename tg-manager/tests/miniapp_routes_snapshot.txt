@@ -1078,6 +1078,8 @@ POST /api/miniapp/sheets/connect
 POST /api/miniapp/sheets/disconnect
 POST /api/miniapp/sheets/export
 POST /api/miniapp/shield/config
+POST /api/miniapp/shield/resume
+POST /api/miniapp/shield/run
 POST /api/miniapp/spintax/expand
 POST /api/miniapp/spintax/generate
 POST /api/miniapp/stars/experiment

@@ -121,7 +121,9 @@ def test_booleans_survive_being_false():
     pool = _Pool()
     asyncio.run(save_shield_config(pool, 7, auto_pause=False))
     assert pool.calls, "выключение авто-паузы не дошло до базы"
-    assert pool.calls[0][1] == (7, False)
+    # Флажок и реакция щита — две записи одной настройки (schema_v323):
+    # выключенная авто-пауза = реакция «охлаждать», и пишутся они вместе.
+    assert pool.calls[0][1] == (7, False, "cool")
 
 
 # ─── маршрут ──────────────────────────────────────────────────────────────────
@@ -148,7 +150,12 @@ def test_history_rows_carry_the_account():
     assert "a.id AS account_id" in body, "история щита не отдаёт аккаунт"
     assert '"account_id": r["account_id"]' in body
     assert "history_total" in body, "потолок в 20 записей нечем показать честно"
-    assert "cool_duration_hours" in body, "длительность паузы не отдаётся на экран"
+    # Конфиг отдаётся целиком через ShieldConfig.as_dict() — одна сборка на
+    # сводку и на сохранение, а не две копии словаря.
+    from services.account_shield import ShieldConfig
+    assert "as_dict()" in body, "конфиг щита не отдаётся на экран"
+    assert "cool_duration_hours" in ShieldConfig().as_dict(), (
+        "длительность паузы не отдаётся на экран")
 
 
 # ─── экран ────────────────────────────────────────────────────────────────────
@@ -156,7 +163,10 @@ def test_history_rows_carry_the_account():
 
 @pytest.mark.parametrize("field", [
     "risk_threshold", "ban_prob_threshold", "cool_duration_hours",
-    "auto_pause", "notify_admin",
+    # auto_pause на экране — это реакция щита (schema_v323): три варианта
+    # вместо флажка, который при выключении молча не применял паузу.
+    "response_mode", "notify_admin",
+    "pause_risk_threshold", "pause_ban_threshold", "cool_hours",
 ])
 def test_every_config_row_is_clickable(field):
     body = _js_func("openShield")
