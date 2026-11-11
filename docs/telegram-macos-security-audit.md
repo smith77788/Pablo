@@ -1067,6 +1067,64 @@ LOW и non-qualifying. Защитная рекомендация: добавит
 
 ---
 
+## Раздел J — Finding 4 на 5-й платформе: Telegram Web (`tweb`), подтверждено ДИНАМИЧЕСКИ
+
+Исходники: `morethanwords/tweb` — `src/components/telegramWebView.ts`, `src/components/webApp.tsx`.
+Web-клиент запускается в браузере, поэтому его мост (`postMessage` между host и iframe мини-аппа)
+удалось прогнать **реальным кодом** в Chromium (не стаб).
+
+### J.1 — Та же архитектура `same_origin`-флага, та же дыра для legacy-ботов
+Web-мост привязывается к origin только когда сервер прислал флаг `same_origin`
+(`webApp.tsx:202–208 getSameOrigin()` → `telegramWebView.setOrigin()`). Для legacy-ботов (без флага)
+`this.origin` остаётся `undefined`, и:
+
+- **Вход** (`telegramWebView.ts:71`):
+  ```js
+  if(this.origin && origin !== this.origin || typeof(data) !== 'string') { return; }
+  this.onTelegramWebViewEvent(JSON.parse(data));
+  ```
+  При `this.origin === undefined` первый клауз ложен → сообщение **любого origin принимается**.
+- **Выход** (`telegramWebView.ts:116–119`):
+  ```js
+  this.iframe.contentWindow.postMessage(JSON.stringify({eventType, eventData}), this.origin || '*');
+  ```
+  При legacy — `targetOrigin = '*'` → ответы уходят на **текущий** origin iframe.
+- Мост **переживает кросс-origin навигацию**: WeakMap ключуется по `contentWindow` (WindowProxy,
+  `:79–81`), который сохраняет идентичность. То есть если мини-апп перенаправит свой iframe на
+  attacker.com, мост остаётся привязан.
+
+**Доказательство из комментариев самих разработчиков** (`:113–115`): они прямо описывают утечку —
+«an answer to a request the mini app made (its location, the clipboard, a custom method result) would be
+handed to whatever document occupies the frame» — и защищают от неё **только** same_origin-ботов
+(`this.origin`), оставляя legacy на `'*'`.
+
+### J.2 — Динамическое подтверждение (реальный код в Chromium)
+`docs/poc-harness/web-bridge-test.js` воспроизводит `onMessage`(:71) и dispatch(:119) **verbatim**,
+создаёт реальный iframe, навигирует его bot-origin → attacker-origin и измеряет мост:
+
+```
+WEB BRIDGE (legacy bot, origin bound = undefined)
+  inbound accepted from attacker-origin iframe:  web_app_read_text_from_clipboard  ✗ (принят)
+  outbound answer reached attacker iframe:        clipboard_text_received {"data":"SECRET-2FA 889922"}  ✗ (утёк)
+
+WEB BRIDGE (modern bot, same_origin)
+  inbound accepted:  (none / rejected)   outbound reached attacker: (none)
+```
+
+### J.3 — Нюанс sandbox
+iframe мини-аппа создаётся с `allow-scripts allow-same-origin` (`webApp.tsx:56–64`). Для кросс-origin
+бот-страницы `window.frameElement` недоступен (нельзя снять свой sandbox) — классического escape нет;
+проблема именно в origin-привязке моста, а не в sandbox.
+
+### Вывод
+Finding 4 — **универсальный архитектурный дефект на 5 платформах**: macOS, iOS, Android, Desktop **и Web**.
+Во всех мост доверяет по серверному флагу (`sameOrigin`/`useSecuredEventProxy`/`restrictBridgeToOrigin`/
+`same_origin`); при его отсутствии (все legacy-боты) origin не проверяется и результаты (буфер обмена,
+локация, custom-method; на native ещё биометрия) уходят на origin атакующего после навигации iframe/WebView.
+**Пять отдельных app-level репортов.** Web-находка — единственная, подтверждённая динамически на реальном коде.
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**
