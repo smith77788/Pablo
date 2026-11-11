@@ -252,7 +252,7 @@ def test_dry_run_neither_joins_nor_posts(growth):
     assert res["status"] == "done", res
     assert growth.calls["joined"] == [] and growth.calls["posted"] == []
     assert res["groups_found"] == 2
-    assert any("'found'" in q for q, _ in pool.log), "найденное не легло в журнал"
+    assert any("найдена" in str(a) for _q, a in pool.log), "найденное не легло в журнал"
 
 
 def test_each_posted_group_is_in_the_journal(growth):
@@ -364,7 +364,7 @@ def test_all_posts_already_commented_is_an_honest_refusal(engine):
 def test_migration_for_commented_posts_is_registered():
     import os
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    fname = "schema_v317_ai_comment_posts.sql"
+    fname = "schema_v321_ai_comment_posts.sql"
     sql = open(os.path.join(root, fname), encoding="utf-8").read()
     assert "PRIMARY KEY (owner_id, channel_id, post_id)" in sql
     assert fname in open(os.path.join(root, "schema_checksums.txt"), encoding="utf-8").read()

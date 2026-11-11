@@ -22976,15 +22976,14 @@ async def _exec_ai_comment(
 
     async def _mark_post(channel_id: int, post_id: int) -> bool:
         """Отметка поста — цена комментария. Не легла — комментария нет."""
-        try:
-            res = await pool.execute(
-                "INSERT INTO ai_comment_posts(owner_id, channel_id, post_id, op_id) "
-                "VALUES($1,$2,$3,$4) ON CONFLICT (owner_id, channel_id, post_id) DO NOTHING",
-                owner_id, channel_id, post_id, op_id)
-        except Exception as exc:
-            log.warning("ai_comment op=%d: отметка поста %s/%s не легла (%s) — "
-                        "комментария не будет", op_id, channel_id, post_id, exc)
-            return False
+        res = await _safe_execute(
+            pool,
+            "INSERT INTO ai_comment_posts(owner_id, channel_id, post_id, op_id) "
+            "VALUES($1,$2,$3,$4) ON CONFLICT (owner_id, channel_id, post_id) DO NOTHING",
+            owner_id, channel_id, post_id, op_id,
+            log_ctx=f"[ai_comment_mark op={op_id}]")
+        if res == "ERROR":
+            return False  # отметка не легла — комментария не будет
         inserted = str(res or "").endswith(" 1")
         return inserted or not cfg["skip_commented"]
 
@@ -23614,9 +23613,9 @@ async def _exec_niche_growth_post(
                 await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'found',$4)", op_id, i,
+                    "VALUES($1,$2,$3,'ok',$4)", op_id, i,
                     g.get("join_ref") or str(g.get("id") or ""),
-                    (f"{g.get('title') or ''} · участников: {int(g.get('members') or 0)}")[:200],
+                    (f"найдена: {g.get('title') or ''} · участников: {int(g.get('members') or 0)}")[:200],
                     log_ctx=f" op={op_id}", where="niche_growth_preview")
             lines = [f"• {g.get('title') or g.get('join_ref')} ({g.get('join_ref')}, "
                      f"{int(g.get('members') or 0)} уч.)" for g in groups[:15]]
