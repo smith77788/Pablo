@@ -1827,7 +1827,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="achat-title">Чат</div>
-    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="reloadAccountChat()" title="Обновить" aria-label="Обновить">🔄</span></div>
+    <div class="hdr-meta"><span class="icon-btn" id="achat-warm" style="display:none" role="button" tabindex="0" onclick="startChatWarmup(ACC_CHAT_USER)" title="Разогрев флотом: аккаунты вступят и будут вести здесь живой диалог" aria-label="Разогрев флотом">🔥</span><span class="icon-btn" role="button" tabindex="0" onclick="reloadAccountChat()" title="Обновить" aria-label="Обновить">🔄</span></div>
   </div>
   <div class="sub-sb" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
     <div id="achatBody" style="flex:1;overflow-y:auto;padding:8px 12px"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -11110,16 +11110,23 @@ async function openDigest() {
 // и любого другого места, где чат уже открыт. Своей формы не просит: настройки
 // (темп, часы, лимиты) правятся на экране разогрева, куда мы и уводим.
 async function startChatWarmup(ref, btn) {
-  const chat = String(ref || '').trim();
-  if (!chat) { toast('⚠️ У чата нет ссылки — откройте «Разогрев чата» и укажите её вручную'); return; }
-  const shown = chat.startsWith('#') ? chat : '@' + chat.replace(/^@/, '');
+  const chat = String(ref || '').trim().replace(/^@/, '');
+  // Вступить в чат флот может только по публичной ссылке или инвайту: по
+  // внутреннему id чужой аккаунт чат даже не найдёт. Поэтому без @ника —
+  // не молчаливый отказ и не тупик, а экран разогрева с объяснением.
+  if (!chat) {
+    toast('⚠️ У этого чата нет публичной ссылки — вставьте инвайт-ссылку вручную');
+    openChatWarmup();
+    return;
+  }
+  const shown = '@' + chat;
   if (!await askConfirm(`Запустить разогрев чата ${shown} флотом?\n\n`
       + 'Аккаунты вступят в чат и будут вести в нём осмысленный диалог: между собой и с участниками. '
       + 'Темп, часы работы и лимиты можно поправить на экране «Разогрев чата».')) return;
   if (btn) btn.disabled = true;
   try {
     const d = await api('/api/miniapp/chatwarmup/session', {method:'POST', body:JSON.stringify({
-      chat_ref: chat.startsWith('#') ? chat.slice(1) : '@' + chat.replace(/^@/, ''),
+      chat_ref: '@' + chat,
       mode:'mixed', intensity:'normal'})});
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🔥 Разогрев запущен' + (d && d.accounts ? ` · аккаунтов: ${num(d.accounts)}` : ''));
@@ -13047,6 +13054,9 @@ let ACC_CHAT_NAME = '';
 let ACC_CHAT_HASH = null;    // access_hash открытого собеседника (для резолва без общего чата)
 let ACC_DIALOGS = {};        // peer id → имя (чтобы не тащить имя через onclick)
 let ACC_DIALOG_HASH = {};    // peer id → access_hash
+let ACC_DIALOG_KIND = {};    // peer id → kind (user/bot/group/channel)
+let ACC_DIALOG_USER = {};    // peer id → @ник чата (разогрев флотом только по нему)
+let ACC_CHAT_USER = '';      // @ник открытого чата, '' у лички и приватных групп
 let ACC_CONTACTS = [];
 let ACC_CONT_SEL = null;     // Set выбранных user_id (режим множественного выбора) или null
 
@@ -13058,7 +13068,10 @@ async function openAccountDialogs(accId) {
     const d = await api('/api/miniapp/account/'+accId+'/dialogs');
     const list = d.dialogs || [];
     ACC_DIALOGS = {}; ACC_DIALOG_HASH = {};
-    list.forEach(dg => { ACC_DIALOGS[dg.id] = dg.name; ACC_DIALOG_HASH[dg.id] = dg.access_hash; });
+    list.forEach(dg => {
+      ACC_DIALOGS[dg.id] = dg.name; ACC_DIALOG_HASH[dg.id] = dg.access_hash;
+      ACC_DIALOG_KIND[dg.id] = dg.kind || ''; ACC_DIALOG_USER[dg.id] = dg.username || '';
+    });
     if (!list.length) { txt('adlgList', empty('💬','Нет диалогов','У аккаунта пока нет переписок')); return; }
     txt('adlgList', list.map(dg => {
       const ico = {user:'👤',bot:'🤖',group:'👥',channel:'📡'}[dg.kind] || '💬';
@@ -13084,6 +13097,12 @@ async function openAccountChat(accId, peer, name, accessHash) {
   ACC_CHAT_HASH = (accessHash != null && accessHash !== '') ? accessHash
                   : (ACC_DIALOG_HASH[peer] != null ? ACC_DIALOG_HASH[peer] : null);
   txt('achat-title', esc(ACC_CHAT_NAME));
+  // Разогрев предлагаем только там, где он возможен: группа или канал, а не
+  // личка и не бот. Кнопку прячем, а не показываем мёртвой.
+  ACC_CHAT_USER = ACC_DIALOG_USER[peer] || '';
+  const _warmBtn = document.getElementById('achat-warm');
+  const _kind = ACC_DIALOG_KIND[peer] || '';
+  if (_warmBtn) _warmBtn.style.display = (_kind === 'group' || _kind === 'channel') ? '' : 'none';
   push('s-accchat');
   await reloadAccountChat();
 }
@@ -13885,7 +13904,7 @@ function buildChDetail(d) {
     </div>
 
     <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
-      ${c.type==='channel' ? '' : `<button class="btn btn-p" onclick="startChatWarmup('${escJs(c.username||('#'+c.channel_id))}')" style="flex:1 1 100%" title="Флот вступит в чат и будет вести в нём живой диалог">🔥 Разогрев флотом</button>`}
+      ${c.type==='channel' ? '' : `<button class="btn btn-p" onclick="startChatWarmup('${escJs(c.username||'')}', this)" style="flex:1 1 100%" title="Флот вступит в чат и будет вести в нём живой диалог">🔥 Разогрев флотом</button>`}
       ${c.username?`<button class="btn btn-s" onclick="openTgUser('${escJs(c.username)}')" style="flex:1 1 auto;min-width:88px" title="Открыть канал в Telegram">↗ Открыть в Telegram</button>`:''}
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📝 Опубликовать</button>
       <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>

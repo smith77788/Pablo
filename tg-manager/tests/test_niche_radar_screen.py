@@ -137,3 +137,41 @@ def test_any_own_chat_can_be_warmed_up_in_one_tap():
         "разогрев стоит после других действий — владелец его не найдёт")
     assert "flex:1 1 100%" in row.split("🔥 Разогрев флотом")[0].rsplit("<button", 1)[1], (
         "кнопка разогрева не во всю ширину ряда")
+
+
+def test_chat_opened_from_account_dialogs_can_be_warmed_up_too():
+    """Своих чатов в мини-аппе ДВА списка, и владелец спрашивал про «любой»
+    (11.11.2026, трижды): каталог «Каналы и чаты» → карточка чата, и диалоги
+    аккаунта → консоль чата. Кнопка была только в первом, поэтому для него
+    вопрос выглядел незакрытым.
+
+    В консоли чата кнопка живёт в шапке и показывается только для группы или
+    канала: в личке и у бота разогревать нечего, а мёртвая кнопка хуже её
+    отсутствия.
+    """
+    html = miniapp_html()
+    hdr = html[html.index('id="s-accchat"'):]
+    hdr = hdr[:hdr.index('class="sub-sb"')]   # вся шапка экрана консоли чата
+    assert 'id="achat-warm"' in hdr, "в шапке консоли чата нет кнопки разогрева"
+    assert "startChatWarmup(" in hdr, "кнопка в шапке ничего не запускает"
+
+    f = js_function("openAccountChat")
+    assert "ACC_DIALOG_KIND[peer]" in f, "видимость кнопки не зависит от вида диалога"
+    assert "'group'" in f and "'channel'" in f, (
+        "разогрев предлагается в личке или боту, где он невозможен")
+    assert "ACC_DIALOG_USER[peer]" in f, "в консоли не берётся @ник чата"
+    assert "dg.username" in js_function("openAccountDialogs"), (
+        "список диалогов не запоминает @ник — разогреву нечего передать")
+
+
+def test_warmup_without_a_public_link_explains_instead_of_failing():
+    """Вступить в чат флот может только по публичной ссылке или инвайту: по
+    внутреннему id чужой аккаунт чат не найдёт. Раньше кнопка отправляла на
+    сервер числовой id и запуск падал непонятной ошибкой.
+    """
+    f = js_function("startChatWarmup")
+    head = f[:f.index("askConfirm(")]
+    assert "openChatWarmup()" in head, (
+        "без ссылки кнопка — тупик: не открывает экран, где ссылку можно вставить")
+    assert "#" not in f.split("chat_ref")[1].split("\n")[0], (
+        "на сервер по-прежнему уходит внутренний id вместо @ника")
