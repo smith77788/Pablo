@@ -18180,8 +18180,10 @@ async function _loadComplaintHistory() {
   try {
     const d = await api('/api/miniapp/complaint/history') || {};
     const rows = Array.isArray(d.email) ? d.email : [];
+    const note = (d.has_more && d.total > rows.length)
+      ? `<div class="field-note" style="padding:6px 2px">Показаны ${rows.length} из ${num(d.total)} — остальные не поместились.</div>` : '';
     txt('cmpHistory', rows.length
-      ? rows.map(r=>{
+      ? note + rows.map(r=>{
           const st = r.status==='sent' ? '✅ отправлено' : r.status==='send_failed' ? '⚠️ не ушло' : r.status==='no_mailbox' ? '📭 нет ящика' : esc(r.status||'');
           return `<div class="row"><div class="row-name">📧 ${esc(r.target||'')} · ${esc(r.category||'')}</div>
             <div class="row-val">${st}${r.recipient?(' → '+esc(r.recipient)):''} · ${ago(r.created_at)}</div></div>`;

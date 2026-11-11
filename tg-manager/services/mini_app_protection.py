@@ -744,11 +744,17 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Unauthorized", 401)
         try:
             from services import abuse_report
-            rows = await abuse_report.history(pool, uid, limit=_list_limit(request, 30, 100))
-            return _json_resp({"ok": True, "email": rows})
+            lim = _list_limit(request, 30, 100)
+            rows = await abuse_report.history(pool, uid, limit=lim)
+            # Честный итог: список урезан потолком — говорим, сколько всего, чтобы
+            # экран не выдал первые N за всю историю (храповик «потолок назван»).
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM abuse_reports WHERE owner_id=$1", uid)
+            return _json_resp({"ok": True, "email": rows, "total": int(total or 0),
+                               "has_more": int(total or 0) > len(rows)})
         except Exception:
             log.exception("complaint_history uid=%d", uid)
-            return _json_resp({"ok": True, "email": []})
+            return _json_resp({"ok": True, "email": [], "total": 0, "has_more": False})
 
     app.router.add_post("/api/miniapp/complaint/submit", complaint_submit)
     app.router.add_get("/api/miniapp/complaint/history", complaint_history)
