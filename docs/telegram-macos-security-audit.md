@@ -879,6 +879,84 @@ shallow-клоне нет). По правилам Telegram Bug Bounty баги �
 «outdated/flawed open-source software versions»)**, если только это не кастомный форк Telegram.
 `rlottie`-обёртка (`.tgs`) в репо — лишь glue (40 КБ); сам парсер — upstream.
 
+### I.4 — Finding 7 (NEW, HIGH, Android): Intent Scheme Hijacking через in-app браузер
+**Файлы:**
+- `TMessagesProj/src/main/java/org/telegram/messenger/browser/Browser.java:551–584` (`openInExternalApp`)
+- `TMessagesProj/src/main/java/org/telegram/ui/web/BotWebViewContainer.java:4275` (call-site)
+**CVSS estimate:** 7.5 `AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:H/A:N` (High).
+
+#### Контекст
+Публичный канал постил «критическую RCE в Telegram Widget / запуск любого приложения на Android».
+Видео-PoC от «V12» показывает: бот `/start` → у пользователя на телефоне открывается **системный
+калькулятор**. Я нашёл конкретный класс дефекта в коде, но severity **HIGH**, а не Critical — пост
+преувеличен. Фиксирую корректную оценку.
+
+#### Описание
+Когда в-app браузер Telegram Android (`!bot` ветка в WebView-делегате) обрабатывает навигацию, он
+вызывает `Browser.openInExternalApp(context, url, allowIntent=true)` (`BotWebViewContainer.java:4275`).
+В `openInExternalApp`:
+```java
+final boolean isIntentScheme = url.startsWith("intent://") || … ;
+if (isIntentScheme && !allowIntent) return false;
+final Intent intent = isIntentScheme
+    ? Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)  // ← парсинг intent://
+    : new Intent(Intent.ACTION_VIEW, uri);
+if (!isIntentScheme && Build.VERSION.SDK_INT >= R) {
+    intent.addCategory(Intent.CATEGORY_BROWSABLE);
+    intent.addCategory(Intent.CATEGORY_DEFAULT);
+    intent.addFlags(FLAG_ACTIVITY_NEW_TASK);
+    intent.addFlags(FLAG_ACTIVITY_REQUIRE_NON_BROWSER);  // ← НЕ применяется к intent-схеме!
+} else if (!isIntentScheme && !hasAppToOpen(context, url)) {
+    return false;
+}
+context.startActivity(intent);  // ← запуск Activity, которую описала атакующая страница
+```
+
+Ключевые дефекты (известный класс «Intent Scheme Hijacking», Google-документированная рекомендация):
+1. **После `parseUri` нет очистки опасных полей Intent**: `intent.setSelector(null)`,
+   `intent.setComponent(null)`, `intent.setPackage(null)`. Атакующая страница может навязать
+   `component=com.android.calculator2/.Calculator`, `action=MAIN`, `category=LAUNCHER` и т.д.
+2. **Защитные флаги `FLAG_ACTIVITY_REQUIRE_NON_BROWSER` и `addCategory(BROWSABLE)` не применяются к
+   intent-схеме** (`if (!isIntentScheme && …)`), то есть мишень может быть НЕ браузером/BROWSABLE —
+   любой `exported=true` Activity установленных приложений.
+3. **Нет подтверждения пользователя** и нет ограничения по package — в отличие от
+   `createChooser`, который дал бы пользователю выбор.
+
+#### Сценарий атаки (защитная формулировка)
+Жертва открывает ссылку (из чата или сообщения бота), ведущую на страницу в in-app браузере Telegram.
+Страница содержит `<a href="intent://…#Intent;action=android.intent.action.MAIN;component=com.target/.Activity;end">`
+или JS-редирект на такой URL. Клиент без подтверждения вызывает `startActivity` → запускается
+**exported-Activity целевого приложения**. Границы импакта:
+- Невозможно установить APK, выполнить нативный код в контексте Telegram, прочитать чужие данные.
+- Возможно: UI-redress (показать интерфейс другого приложения — платёжную форму, экран передачи
+  денег, настройки) или триггерить exported-функции (deeplink в банковское приложение с параметрами
+  перевода, если его deeplink защищён слабо). Это **НЕ «RCE на любой Android»**, пост канала «Бэкдор»
+  преувеличил.
+
+Правильная оценка — **HIGH (CVSS 7.5)**, кросс-scope (компрометирует/выставляет другое приложение),
+требует UI-клика пользователя. Это и имел в виду «V12 Telegram Widgets RCE» — но заголовок из поста
+не соответствует технике.
+
+#### Рекомендация (Google-гайдлайн)
+```java
+if (isIntentScheme) {
+    final Intent intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME);
+    intent.addCategory(Intent.CATEGORY_BROWSABLE);   // отфильтровать неBROWSABLE цели
+    intent.setComponent(null);                        // запретить явный component от атакующего
+    intent.setSelector(null);                         // запретить селектор
+    // Опционально: разрешать только intent-схему для конкретного набора известных пакетов
+    …
+    context.startActivity(intent);
+}
+```
+
+#### Кросс-платформенная сверка
+- **macOS/iOS** не используют intent-схему; аналог через `NSWorkspace.shared.open`/
+  `UIApplication.shared.open` — вектор требует отдельной проверки кастомных схем, но в проверенных
+  `WebAppController.swift:3413` URL жёстко задан (`https://t.me/...`), не бот-контролируемый.
+- **Telegram Desktop** — intent-схемы нет (Linux/Win/mac).
+- Подтверждено только для **Android in-app browser**.
+
 ### Вывод по RCE
 В **Telegram-написанных** парсерах недоверенного ввода (TL, MTProto) memory-corruption/Critical **нет** —
 они аккуратно bounds-checked. Реальная RCE-поверхность — upstream медиа-кодеки, которые (а) не в этих
