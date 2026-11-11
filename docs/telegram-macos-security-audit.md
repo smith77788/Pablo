@@ -767,6 +767,21 @@ iOS `web_app_request_file_download` → `downloadFile(url:fileName:)` без п�
 отключён (`setAllowFileAccess(false)` и др., `:466–469`). То есть Android *мог бы* энфорсить origin и
 для legacy, но политика та же: при `sameOrigin==false` проверка отключена. Дефект идентичен.
 
+### E.1b — Проверка слуха «Critical RCE в Telegram Widget» (Android, из публичного канала) — НЕ подтверждается кодом
+Публичный канал заявил «критическую дыру в виджетах для ботов → хак любого Android → запуск любого
+приложения». Предметная проверка единственного RCE-классового вектора Android WebView:
+- `addJavascriptInterface`-рефлексия (JS→Java `Runtime.exec`) работает только на API < 17; здесь
+  `minSdkVersion 23` (`build.gradle:138`) → **вектор невозможен на всех поддерживаемых устройствах**.
+- Из JS достижимы только @JavascriptInterface-методы: `postEvent` (пересылка строк в обработчик событий)
+  и `resolveShare` (`BotWebViewContainer.java:3581`). `resolveShare` = **Web Share API**: пишет файл
+  страницы в кэш с санитизацией имени (`FileLoader.fixFileName`), затем `ACTION_SEND` + `createChooser`
+  (пользователь сам выбирает цель), FileProvider read-only, click-gated (10 с). **Ни исполнения, ни
+  установки APK.**
+- Для ботов мост вообще не через `addJavascriptInterface`, а через `WebMessageListener` (fail-closed).
+
+Вывод: заявленный RCE **кодом не подтверждается**. Без CVE/PoC/деталей это непроверяемый слух; находку
+под него не выдумываем. Если появятся технические детали V12 — проверим конкретно.
+
 ### E.2 — Findings 1 / 5 / 6 на Android — не углублялись в этом проходе
 Приоритет был подтвердить кросс-платформенность F4. Детальная проверка парити по share_to_story/biometry/
 file_download на Android — отдельная задача (ожидается, что, как и на iOS, там есть серверные/URL-гейты).
