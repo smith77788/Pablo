@@ -183,6 +183,7 @@ The subsequent `savePanel(file:named:for:)` uses an `NSSavePanel`, which require
 | 3 | File download `fileName` path traversal | N/A | MITIGATED | `WebpageModalController.swift:2685` |
 | 4 | JS-Bridge Hijacking (`sameOrigin == false`) | CRITICAL | CONFIRMED | `WebpageModalController.swift:1271,1621,1695,2892` |
 | 5 | Biometric Auth bypass (`accessGranted` missing) | HIGH | CONFIRMED | `WebpageModalController.swift:2015,2055` |
+| 5b | Biometry Keychain item not account-scoped (cross-account leak) | MEDIUM | CONFIRMED | `WebpageModalController.swift:2035,2073` |
 | 6 | `web_app_request_file_download` zero-click size probe (IP leak + SSRF) | MEDIUM-HIGH | CONFIRMED | `WebpageModalController.swift:2169` → `FileDownload.swift:45` |
 
 ---
@@ -497,6 +498,30 @@ case "web_app_biometry_request_auth":
     }
     // ... остальной код
 ```
+
+### Finding 5b — MEDIUM (связанный, найден кросс-платформенным диффом): Keychain-итем биометрии НЕ scoped по Telegram-аккаунту
+
+**Файл:** `WebpageModalController.swift:2031–2036` (запись), `:2067–2074` (чтение).
+
+Keychain-запрос биометрии на macOS использует:
+```swift
+kSecAttrService: "TelegramMiniApp",
+kSecAttrAccount: "bot_id_\(botPeer.id.toInt64())"   // ← только botId, БЕЗ Telegram-аккаунта
+```
+То есть на одном устройстве с **несколькими Telegram-аккаунтами** секрет бота **общий для всех аккаунтов**:
+1. Бот X под аккаунтом A сохраняет токен (`web_app_biometry_update_token`).
+2. Пользователь переключается на аккаунт B и открывает мини-апп того же бота X.
+3. `web_app_biometry_request_auth` (к тому же без `accessGranted`, см. выше) читает `bot_id_<X>` →
+   возвращает **токен аккаунта A** в мини-апп, работающий под аккаунтом B.
+
+**Асимметрия с iOS (эталон):** iOS использует keyId `A<accountId>WebBot<botId>`
+(`WebAppController.swift:2620, 2695`) — scoped по аккаунту. Значит macOS — упущение, не замысел.
+Device storage (`setBotStorageValue`) и secure storage (`WebAppSecureStorage`, uuid per-account) на
+macOS **scoped** через postbox/uuid — дыра именно в биометрии.
+
+**Impact:** cross-account утечка биометрически-защищённого секрета бота в пределах одного устройства.
+**Fix:** включить Telegram account id в `kSecAttrAccount`, напр.
+`"acc_\(context.peerId.toInt64())_bot_\(botPeer.id.toInt64())"`, как на iOS.
 
 ---
 
