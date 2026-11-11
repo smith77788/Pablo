@@ -231,7 +231,8 @@ async def _queue_scan(target: Message, pool: asyncpg.Pool, owner_id: int,
             pool, owner_id, "ad_intel_scan", {"channel": username},
             total_items=1, label=f"Разведка рекламы @{username}")
     except PermissionError as exc:
-        text = f"⚠️ {html.escape(str(exc) or 'Нужна подписка')}"
+        from bot.utils.owner_error import owner_error
+        text = f"⚠️ {owner_error(exc)}"
         op_id = 0
     except Exception:
         log.exception("ad_intel: постановка скана @%s не удалась", username)
