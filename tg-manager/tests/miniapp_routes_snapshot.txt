@@ -251,6 +251,9 @@ GET /api/miniapp/networks/{net_id}/deploy_plan
 GET /api/miniapp/new_users
 GET /api/miniapp/new_users/export
 GET /api/miniapp/next_actions
+GET /api/miniapp/niche/campaign/{cid}/assets
+GET /api/miniapp/niche/campaign/{cid}/log
+GET /api/miniapp/niche/overview
 GET /api/miniapp/node/{node_id}/threads
 GET /api/miniapp/nodes
 GET /api/miniapp/notary
@@ -588,6 +591,9 @@ HEAD /api/miniapp/networks/{net_id}/deploy_plan
 HEAD /api/miniapp/new_users
 HEAD /api/miniapp/new_users/export
 HEAD /api/miniapp/next_actions
+HEAD /api/miniapp/niche/campaign/{cid}/assets
+HEAD /api/miniapp/niche/campaign/{cid}/log
+HEAD /api/miniapp/niche/overview
 HEAD /api/miniapp/node/{node_id}/threads
 HEAD /api/miniapp/nodes
 HEAD /api/miniapp/notary
@@ -959,6 +965,12 @@ POST /api/miniapp/networks/{net_id}/edges
 POST /api/miniapp/networks/{net_id}/nodes
 POST /api/miniapp/next_actions/apply
 POST /api/miniapp/next_actions/feedback
+POST /api/miniapp/niche/asset/{aid}/skip
+POST /api/miniapp/niche/campaign
+POST /api/miniapp/niche/campaign/{cid}/delete
+POST /api/miniapp/niche/campaign/{cid}/presence
+POST /api/miniapp/niche/campaign/{cid}/scan
+POST /api/miniapp/niche/keywords
 POST /api/miniapp/node
 POST /api/miniapp/notary
 POST /api/miniapp/notary/{watch_id}/check

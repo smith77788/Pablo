@@ -5444,6 +5444,105 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- ══════════ РАДАР НИШИ (screens/niche.js) ══════════ -->
+<div class="screen" id="s-niche">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">📈 Мотор роста</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="nrOpenForm()">+ Ниша</button></div>
+  </div>
+  <div class="filter-chips mod-tabs" data-module="growth" data-tab="niche" role="tablist" aria-label="Вкладки модуля «Мотор роста»"></div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 2px 4px">
+      Агент ищет в Telegram максимум чужих чатов и каналов вашей ниши, флот вступает в них
+      и работает там: комментарии по теме, реакции, присутствие.
+    </div>
+    <div class="field-note" id="nrAccNote" style="padding:0 2px 8px"></div>
+    <div id="nrForm" style="display:none">
+      <div class="sec" id="nrFormSec">Новая ниша</div>
+      <div class="lst" style="padding:14px">
+        <div class="field">
+          <label>Ниша — чем занимаетесь, что ищем</label>
+          <input type="text" id="nrNiche" class="inp" maxlength="200" placeholder="Например: доставка еды, крипта, фитнес" style="width:100%;box-sizing:border-box">
+        </div>
+        <div class="field">
+          <label>Гео (необязательно)</label>
+          <input type="text" id="nrGeo" class="inp" maxlength="60" placeholder="Например: Москва" style="width:100%;box-sizing:border-box">
+        </div>
+        <div class="field">
+          <label>Свои ключевые слова (по одному в строке, необязательно)</label>
+          <textarea id="nrKeywords" class="inp" rows="3" placeholder="Агент и сам соберёт запросы — здесь можно добавить свои" style="width:100%;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+        <div class="field">
+          <label>Минимум участников</label>
+          <input type="number" id="nrMinMembers" class="inp" min="0" value="100" inputmode="numeric" style="width:100%;box-sizing:border-box">
+          <div class="field-note">Мелкие чаты дают мало, но их много — 0 берёт все</div>
+        </div>
+        <div class="field">
+          <label>Тон комментариев</label>
+          <select id="nrTone"></select>
+        </div>
+        <div class="field">
+          <label>О чём рассказываем (контекст для комментариев)</label>
+          <textarea id="nrPromo" class="inp" rows="3" maxlength="1000" placeholder="Чем вы полезны — ИИ учтёт это в комментариях по теме" style="width:100%;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+        <div class="field">
+          <label>Ссылка на ваш ресурс (необязательно)</label>
+          <input type="url" id="nrLink" class="inp" maxlength="300" placeholder="https://t.me/…" style="width:100%;box-sizing:border-box">
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button type="button" class="btn btn-s" style="flex:1;min-height:36px;font-size:13px;padding:8px 6px" onclick="nrPreviewKeywords(false, this)">👀 Какие запросы</button>
+          <button type="button" class="btn btn-s" style="flex:1;min-height:36px;font-size:13px;padding:8px 6px" onclick="nrPreviewKeywords(true, this)">✨ Добавить от ИИ</button>
+        </div>
+        <div class="field-note" id="nrPreview" style="white-space:pre-line;margin-bottom:8px"></div>
+        <div class="field-err" id="nrFormErr"></div>
+        <button class="btn btn-p" id="nrSaveScanBtn" onclick="nrSave(true)" style="width:100%">🔭 Сохранить и искать</button>
+        <button class="btn btn-s" id="nrSaveBtn" onclick="nrSave(false)" style="width:100%;margin-top:8px">💾 Только сохранить</button>
+        <button class="btn btn-s" onclick="nrCloseForm()" style="width:100%;margin-top:8px">Отмена</button>
+      </div>
+    </div>
+    <div class="sec">Ниши</div>
+    <div class="lst" id="nrList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-niche-assets">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title" id="nrAssetsTitle">📋 Каталог ниши</div>
+  </div>
+  <div class="sub-sb">
+    <div id="nrAssetsKpis" style="display:flex;gap:8px;padding:8px 0 6px;flex-wrap:wrap"></div>
+    <div class="sec">Что делаем в этих ресурсах</div>
+    <div class="lst" style="padding:14px">
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0">
+        <input type="checkbox" class="nr-act" value="join" checked> ➕ Вступать в найденные чаты
+      </label>
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0">
+        <input type="checkbox" class="nr-act" value="comment" checked> 💬 Писать комментарии по теме (ИИ)
+      </label>
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0;margin-bottom:8px">
+        <input type="checkbox" class="nr-act" value="reaction"> 👍 Ставить реакции
+      </label>
+      <div style="display:flex;gap:8px">
+        <div class="field" style="flex:1"><label>Аккаунтов</label><input type="number" id="nrAccCount" class="inp" min="1" max="10" value="3" style="width:100%;box-sizing:border-box"></div>
+        <div class="field" style="flex:1"><label>Действий за проход</label><input type="number" id="nrLimit" class="inp" min="1" max="60" value="12" style="width:100%;box-sizing:border-box"></div>
+      </div>
+      <button class="btn btn-p" id="nrPresenceBtn" onclick="nrPresence()" style="width:100%">🤝 Запустить присутствие</button>
+      <div class="field-note" style="padding-top:8px">Один ресурс трогаем не чаще раза в двое суток, между действиями — паузы. Остановить можно в «Операциях».</div>
+    </div>
+    <div class="sec-row"><div class="sec">Найденные ресурсы</div><span class="sec-btn" onclick="nrOpenLog()" role="button" tabindex="0">Журнал</span></div>
+    <div style="display:flex;gap:6px;padding:0 0 8px;overflow-x:auto">
+      <button class="btn btn-s" style="flex:0 0 auto;min-height:32px;padding:6px 12px;font-size:13px" onclick="nrFilter('')">Все</button>
+      <button class="btn btn-s" style="flex:0 0 auto;min-height:32px;padding:6px 12px;font-size:13px" onclick="nrFilter('found')">Найденные</button>
+      <button class="btn btn-s" style="flex:0 0 auto;min-height:32px;padding:6px 12px;font-size:13px" onclick="nrFilter('joined')">Вступили</button>
+      <button class="btn btn-s" style="flex:0 0 auto;min-height:32px;padding:6px 12px;font-size:13px" onclick="nrFilter('failed')">Не вышло</button>
+    </div>
+    <div class="lst" id="nrAssets"></div>
+    <div class="lst" id="nrLog" style="margin-top:10px"></div>
+  </div>
+</div>
+
 <!-- ══════════ ПЛАН РОСТА: ОДНА ЦЕЛЬ (screens/growth_plan.js) ══════════ -->
 <div class="screen" id="s-growthgoal">
   <div class="hdr">
@@ -9578,7 +9677,7 @@ function toggleLab() {
 // запросы «бан», «спам», «жалоба», «клон» не находили НИЧЕГО — при том что
 // модули есть (Дэшборд здоровья, Массовые жалобы, Клонер). Ключ — подпись плитки.
 const MODULE_KEYWORDS = {
-  'Мотор роста':'самопиар продвижение по своей аудитории рост агент роста',
+  'Мотор роста':'самопиар продвижение рост ниша радар чаты каналы комментарии реакции цель',
   'Профили':'персоны персона личность аватар имя описание оформление аккаунтов',
   'Интеграции':'api ключи ключ api-ключ токен вебхук webhook sheets amocrm bitrix',
   'Сеть ботов':'задачи между ботами связки бот каналы пакет mesh рой кластер',
@@ -9694,7 +9793,7 @@ const MODULE_DESCS = {
   
   'Хранилище':'История переписки: удалённые и изменённые сообщения',
   'Менеджер продаж':'Бот-продавец: товары, ответы на вопросы, заказы',
-  'Мотор роста':'Цель роста, подобранные под неё шаги и самопиар по своей аудитории',
+  'Мотор роста':'Цели роста, самопиар и радар ниши: чужие чаты по теме, вступление и комментарии',
   'Накрутка':'Просмотры, реакции, сторис, подписчики',
   'Восстановление':'Возврат аккаунтов после ограничений',
   'Облако':'Файлы кусками в приватных каналах аккаунтов',
@@ -10080,6 +10179,7 @@ const SCREEN_MODULES = {
     tabs: [
       {key:'plan', label:'🎯 План роста', sid:'s-growthhub', open: () => openGrowthHub()},
       {key:'self', label:'📣 Самопиар',   sid:'s-selfpromo', open: () => openSelfPromo()},
+      {key:'niche', label:'🔭 Радар ниши', sid:'s-niche', open: () => openNiche()},
     ],
   },
   // У «Интеграций» уже был блок API-ключей с кнопкой «Все ключи», а рядом —
@@ -11498,6 +11598,8 @@ function renderAct(items) {
     warmup_started:    ['🌱','Прогрев запущен'],
     strike:            ['⚡','Массовые жалобы'],
     niche_growth_post: ['🌿','Пост агента роста'],
+    niche_scan: ['🔭','Поиск ресурсов ниши'],
+    niche_presence: ['🤝','Присутствие в нише'],
     broadcast:         ['📢','Рассылка'],
     parse_members:     ['👥','Парсинг участников'],
     invite_members:    ['➕','Добавление участников'],
@@ -22960,6 +23062,8 @@ let WG = {tpls: [], limits: {}, tpl: '', edit: null, offset: 0, items: []};
 let SPC = {data: null, edit: null, previewTimer: 0, counts: null};
 // «🎯 План роста» (screens/growth_plan.js): цели и открытая цель.
 let GP = {data: null, goal: null, edit: null};
+// «🔭 Радар ниши» (screens/niche.js): кампании ниши и каталог найденного.
+let NR = {data: null, edit: null, openCampaign: null, status: ''};
 let UC_CHAT_SEL = new Map();
 
 const UC_KIND_BOX = {channels:'ucKChannels', chats:'ucKChats', bots:'ucKBots', dm:'ucKDm'};
@@ -27763,6 +27867,7 @@ const MASS_OP_LABELS = {
   bulk_dm_adhoc:'📨 Рассылка ЛС', boost_views:'👁 Просмотры', boost_reactions:'❤ Реакции',
   boost_stories:'📖 Сторис', boost_subscribers:'👥 Подписчики/участники', boost_bot_starts:'🚀 Старты в ботах',
   niche_growth_post:'🌿 Агент роста',
+  niche_scan:'🔭 Радар ниши', niche_presence:'🤝 Присутствие в нише',
   check_accounts_health:'🔍 Проверка аккаунтов', scan_owned_resources:'🔎 Скан ресурсов',
   check_owned_restrictions:'🕶 Проверка ограничений',
   check_bot_geoban:'🌍 Гео-доступность',
@@ -30609,6 +30714,7 @@ const OP_RU = {
   check_bot_geoban:'Гео-доступность каналов, чатов и ботов по странам',
   strike:'Страйк', self_promo_blast:'Самореклама',
   niche_growth_post:'Продвижение в нише', ad_intel_scan:'Разведка рекламы',
+  niche_scan:'Поиск ресурсов по нише', niche_presence:'Присутствие в нише',
   compliance_scan:'Проверка соответствия', find_contact:'Поиск контакта',
   delete_contacts:'Удаление контактов', delete_private_dialogs:'Удаление переписок',
   promote_all_admins:'Выдача прав инвайтерам', profile_setter:'Настройка профиля',
@@ -33404,6 +33510,7 @@ function renderAudSegChart(segments) {
 <script src="screens/widgets.js"></script>
 <script src="screens/selfpromo.js"></script>
 <script src="screens/growth_plan.js"></script>
+<script src="screens/niche.js"></script>
 <script src="screens/home_screen.js"></script>
 <script src="screens/find_mine.js"></script>
 <script src="screens/osint_search.js"></script>

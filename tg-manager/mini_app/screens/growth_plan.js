@@ -215,6 +215,7 @@ function gpAct(a) {
     case 'accounts': return goTab('accounts');
     case 'parser': return openParser();
     case 'va': return openVaAdmin();
+    case 'niche': return openNiche();
     case 'growth_agent': return openGrowth();
     case 'seo': return openSeoObj();
     case 'boost': return openBoost();

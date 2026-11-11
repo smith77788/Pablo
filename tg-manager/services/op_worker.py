@@ -5466,6 +5466,8 @@ def _build_dispatch() -> dict:
         "content_clone": _exec_content_clone,
         "clone_adapt": _exec_clone_adapt,
         "niche_growth_post": _exec_niche_growth_post,
+        "niche_scan": _exec_niche_scan,
+        "niche_presence": _exec_niche_presence,
         # quick_post переиспользует mass_publish: тот уже умеет явный channel_ids.
         "quick_post": _exec_mass_publish,
         # ── Разведка, жалобы, подарки ─────────────────────────────────────────
@@ -22961,6 +22963,297 @@ async def _exec_ai_comment(
     summary = (f"💬 AI-комментинг\n✅ Успешно: {ok_count}/{total}"
                + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+async def _exec_niche_scan(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Радар ниши: найти в Telegram МАКСИМУМ ресурсов по нише и пополнить каталог.
+
+    Пять источников (services/niche_radar.py): поиск по словам, поиск по
+    сообщениям, похожие каналы, чаты обсуждений каналов. Ищет ОДИН аккаунт:
+    поиск расходует его лимиты, а каталог всё равно общий для владельца.
+    params: {campaign_id, deep}
+    """
+    from services import niche_radar
+
+    campaign = await niche_radar.get_campaign(pool, owner_id, params.get("campaign_id"))
+    if not campaign:
+        return {"status": "failed", "summary": "⚠️ Кампания ниши не найдена"}
+
+    accounts = await resource_selector.select_accounts(
+        pool, owner_id, 1, action_type="parse")
+    if not accounts:
+        return {"status": "failed",
+                "summary": "⚠️ Нет свободного аккаунта для поиска — добавьте или разгрузите флот"}
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+    if not accounts:
+        return {"status": "requeue", "summary": "⏳ Аккаунты на карантине — повторим позже"}
+    claimed = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed:
+        return {"status": "requeue", "summary": "⏳ Аккаунт занят другой операцией"}
+    acc = next(a for a in accounts if int(a["id"]) in set(claimed))
+    if not acc.get("session_str"):
+        return {"status": "failed", "summary": "⚠️ У аккаунта нет сессии"}
+
+    keywords = list(campaign["keywords"] or [])
+    ai_words = await niche_radar.ai_keywords(campaign["niche"], campaign["geo"])
+    keywords = niche_radar.expand_keywords(campaign["niche"], campaign["geo"],
+                                           keywords + ai_words)
+    known = await niche_radar.known_ids(pool, owner_id)
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(keywords), op_id)
+
+    async def _progress(found: int, spent: int) -> None:
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+            min(spent, len(keywords)), op_id)
+
+    async def _stop() -> bool:
+        return await _is_cancelled(pool, op_id)
+
+    try:
+        assets = await niche_radar.scan(
+            acc["session_str"], dict(acc), keywords,
+            min_members=int(campaign["min_members"] or 0), known=known,
+            deep=params.get("deep") is not False,
+            on_progress=_progress, should_stop=_stop)
+    except Exception as exc:
+        log.warning("niche_scan op=%d: поиск не удался: %s", op_id, exc)
+        return {"status": "failed", "summary": f"⚠️ Поиск не удался: {str(exc)[:120]}"}
+
+    saved = await niche_radar.save_assets(pool, owner_id, int(campaign["id"]), assets)
+    await _safe_execute(
+        pool, "UPDATE niche_campaigns SET last_scan_at=NOW() WHERE id=$1", int(campaign["id"]))
+    stats = await niche_radar.campaign_stats(pool, owner_id, int(campaign["id"]))
+    if await _is_cancelled(pool, op_id):
+        return {"status": "cancelled",
+                "summary": f"🛑 Поиск остановлен, успели найти {saved}"}
+    groups = sum(1 for a in assets if a["kind"] == "group")
+    return {
+        "status": "done", "ok": saved,
+        "summary": (f"🔭 Радар ниши: найдено {saved} новых "
+                    f"({groups} чатов, {len(assets) - groups} каналов). "
+                    f"Всего в каталоге: {stats.get('found', 0)}."),
+    }
+
+
+# Сколько действий за один проход присутствия делает ОДИН аккаунт. Выше —
+# сигнатура: живой человек не комментирует десять чужих чатов подряд.
+_NICHE_PER_ACCOUNT = 4
+_NICHE_COOLDOWN_H = 48
+_NICHE_REACTIONS = ("👍", "🔥", "❤️", "👏", "🤔", "⚡")
+
+
+async def _exec_niche_presence(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Присутствие в нише: флот вступает в найденные ресурсы и действует в них.
+
+    Действия: вступление, контекстный ИИ-комментарий под свежим постом (в чате
+    обсуждений канала или в самой группе) и реакция. Очередь считает чистая
+    `niche_radar.plan_round`: ресурс не трогаем чаще раза в двое суток, у
+    аккаунта не больше нескольких действий за проход, аккаунты идут по кругу.
+    params: {campaign_id, acc_count, actions: [join|comment|reaction], limit}
+    """
+    import random as _random
+    from datetime import datetime, timezone
+
+    from services import ai_comment_engine, account_manager, boost_engine, content_safety
+    from services import niche_radar
+
+    campaign = await niche_radar.get_campaign(pool, owner_id, params.get("campaign_id"))
+    if not campaign:
+        return {"status": "failed", "summary": "⚠️ Кампания ниши не найдена"}
+    wanted = [a for a in (params.get("actions") or ["join", "comment", "reaction"])
+              if a in ("join", "comment", "reaction")]
+    if not wanted:
+        return {"status": "failed", "summary": "⚠️ Не выбрано ни одного действия"}
+    acc_count = max(1, min(int(params.get("acc_count") or 3), 10))
+
+    verdict = await content_safety.enforce(
+        pool, owner_id, campaign["niche"], campaign["promo_text"] or "", surface="niche_presence")
+    if verdict.blocked:
+        return {"status": "failed", "summary": "⚠️ Контент заблокирован политикой платформы"}
+
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, action_type="comment", respect_cooldown=True)
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue", "summary": "⏳ Все аккаунты заняты — повторим позже"}
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+    accounts = accounts[:acc_count]
+    if not accounts:
+        return {"status": "requeue", "summary": "⏳ Аккаунты на карантине — повторим позже"}
+    by_id = {int(a["id"]): a for a in accounts}
+
+    # Вступление идёт первым: без него комментировать негде.
+    rows = await pool.fetch(
+        """SELECT * FROM niche_assets
+            WHERE owner_id=$1 AND campaign_id=$2 AND status IN ('found', 'joined')
+            ORDER BY (status='found') DESC, score DESC, members DESC LIMIT 200""",
+        owner_id, int(campaign["id"]))
+    assets = [dict(r) for r in rows]
+    if not assets:
+        return {"status": "done",
+                "summary": "🔭 В каталоге нет ресурсов — сначала запустите поиск"}
+
+    # Повтор операции (сетевой сбой, воскрешение после рестарта, ручной) ведёт
+    # по тому же списку сначала. Без журнала целей аккаунт вступил бы в тот же
+    # чат и написал бы туда второй комментарий — а это та самая сигнатура, от
+    # которой защищают паузы. Цель — id ресурса; вопрос по ней закрыт и
+    # успехом, и окончательным отказом (забанен, приватный).
+    _settled = await settled_targets(pool, op_id)
+    if _settled:
+        log.info("niche_presence op=%d: повтор — по %d ресурсам вопрос уже закрыт",
+                 op_id, len(_settled))
+
+    limit = max(1, min(int(params.get("limit") or _NICHE_PER_ACCOUNT * len(accounts)), 60))
+    plan = niche_radar.plan_round(
+        assets, accounts=list(by_id), per_account=max(1, limit // max(1, len(accounts))),
+        cooldown_hours=_NICHE_COOLDOWN_H, now=datetime.now(timezone.utc))
+    if not plan:
+        return {"status": "done",
+                "summary": "🕒 Все ресурсы трогали недавно — присутствие вернётся позже"}
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(plan), op_id)
+
+    joined = comments = reactions = failed = 0
+    cancelled = False
+    for idx, (acc_id, asset) in enumerate(plan, 1):
+        if await _is_cancelled(pool, op_id):
+            cancelled = True
+            break
+        acc = by_id[acc_id]
+        ref = "@" + asset["username"]
+        aid = int(asset["id"])
+        if str(aid) in _settled:
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
+        try:
+            if asset["status"] == "found":
+                if "join" not in wanted:
+                    continue
+                res = await account_manager.join_channel(acc["session_str"], ref, dict(acc))
+                if res.get("error"):
+                    err = str(res["error"])
+                    bad = any(w in err.lower() for w in
+                              ("banned", "private", "invalid", "not found", "forbidden"))
+                    await pool.execute(
+                        "UPDATE niche_assets SET status=$2, skip_reason=$3 WHERE id=$1",
+                        aid, "banned" if bad else "failed", err[:200])
+                    await niche_radar.log_action(pool, owner_id, aid, op_id=op_id, acc_id=acc_id,
+                                                 kind="join", status="error", detail=err)
+                    if bad:
+                        # Забанен или приватный — повтор ничего не изменит.
+                        await _journal_write(
+                            pool,
+                            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                            "VALUES($1,$2,$3,'skip',$4)", op_id, idx, str(aid), err[:200])
+                    failed += 1
+                    if "flood" in err.lower():
+                        await _pause_watching_for_cancel(pool, op_id, 60, "niche_join_flood")
+                else:
+                    await pool.execute(
+                        "UPDATE niche_assets SET status='joined', joined_acc_id=$2, joined_at=NOW()"
+                        " WHERE id=$1", aid, acc_id)
+                    await niche_radar.log_action(pool, owner_id, aid, op_id=op_id, acc_id=acc_id,
+                                                 kind="join")
+                    await _journal_done(pool, op_id, idx, str(aid), ref)
+                    joined += 1
+            else:
+                kind = "comment" if "comment" in wanted else "reaction"
+                if kind == "reaction" and "reaction" not in wanted:
+                    continue
+                if kind == "comment":
+                    # Один вход и для канала (чат обсуждений), и для группы
+                    # (ответ в ней самой): в нише групп больше, чем каналов.
+                    res = await ai_comment_engine.post_ai_comment_anywhere(
+                        acc["session_str"], dict(acc), ref,
+                        niche=campaign["niche"], tone=campaign["tone"])
+                    if res.get("ok"):
+                        comments += 1
+                        await niche_radar.log_action(
+                            pool, owner_id, aid, op_id=op_id, acc_id=acc_id, kind="comment",
+                            detail=(res.get("comment") or "")[:200])
+                        await _journal_done(pool, op_id, idx, str(aid),
+                                            (res.get("comment") or "")[:200])
+                    else:
+                        failed += 1
+                        err = str(res.get("error") or "")
+                        await niche_radar.log_action(pool, owner_id, aid, op_id=op_id,
+                                                     acc_id=acc_id, kind="comment",
+                                                     status="error", detail=err)
+                        if "flood" in err.lower():
+                            await _pause_watching_for_cancel(pool, op_id, 60, "niche_comment_flood")
+                elif "reaction" in wanted:
+                    msg_id = await _niche_recent_msg(acc, ref)
+                    if msg_id:
+                        rr = await boost_engine.boost_reaction(
+                            acc["session_str"], dict(acc), ref, msg_id,
+                            _random.choice(_NICHE_REACTIONS))
+                        if rr.get("ok"):
+                            reactions += 1
+                            await niche_radar.log_action(pool, owner_id, aid, op_id=op_id,
+                                                         acc_id=acc_id, kind="reaction")
+                            await _journal_done(pool, op_id, idx, str(aid), "реакция")
+                        else:
+                            failed += 1
+                            await niche_radar.log_action(
+                                pool, owner_id, aid, op_id=op_id, acc_id=acc_id, kind="reaction",
+                                status="error", detail=str(rr.get("error") or ""))
+        except Exception as exc:
+            failed += 1
+            log.warning("niche_presence op=%d asset=%s: %s", op_id, aid, exc)
+            await niche_radar.log_action(pool, owner_id, aid, op_id=op_id, acc_id=acc_id,
+                                         kind="error", status="error", detail=str(exc)[:200])
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < len(plan):
+            # Органическая пауза: ровный темп по чужим чатам — та же сигнатура.
+            await _pause_watching_for_cancel(
+                pool, op_id, _random.uniform(45, 110), "niche_presence_pace")
+
+    done = joined + comments + reactions
+    parts = []
+    if joined:
+        parts.append(f"вступили в {joined}")
+    if comments:
+        parts.append(f"комментариев {comments}")
+    if reactions:
+        parts.append(f"реакций {reactions}")
+    summary = "🤝 Присутствие в нише: " + (", ".join(parts) if parts else "действий не вышло")
+    if failed:
+        summary += f"\n⚠️ Не удалось: {failed}"
+    if cancelled:
+        return {"status": "cancelled", "ok": done, "failed": failed,
+                "summary": "🛑 Остановлено. " + summary}
+    if done == 0 and failed:
+        return {"status": "failed", "ok": 0, "failed": failed, "summary": summary}
+    return {"status": "done", "ok": done, "failed": failed, "summary": summary}
+
+
+async def _niche_recent_msg(acc: dict, ref: str) -> int | None:
+    """id свежего сообщения ресурса — цель для реакции. None — не достали."""
+    from services.account_manager import _make_client
+
+    client = _make_client(acc.get("session_str") or "", dict(acc))
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15.0)
+        msgs = await asyncio.wait_for(client.get_messages(ref, limit=5), timeout=20.0)
+        ids = [int(m.id) for m in (msgs or []) if getattr(m, "id", None)]
+        return ids[0] if ids else None
+    except Exception as exc:
+        log.debug("niche_recent_msg %s: %s", ref, str(exc)[:120])
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log.debug("niche_recent_msg: disconnect", exc_info=True)
 
 
 async def _exec_compliance_scan(
