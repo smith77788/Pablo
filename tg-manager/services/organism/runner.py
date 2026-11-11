@@ -141,9 +141,12 @@ async def _tick(pool, bot) -> int:
         if _do_cascade or oid in cooled_owners:
             try:
                 from services import virtual_layer as _vl
+                # Пороги «горячей аудитории» — из правил владельца (экран
+                # «Правила модели»); без правил — прежние 20 человек и 15%.
+                _rules = await _vl.get_rules(pool, oid)
                 await _vl.recompute_cascade(
                     pool, oid, _vl.NETWORK, "audience", _vl.USER,
-                    min_count=20, min_share=0.15)
+                    **_vl.cascade_kwargs(_rules, "audience"))
             except Exception:
                 log.debug("organism.runner: cascade failed owner=%s", oid, exc_info=True)
             # Каскад «бот ← люди». Раньше его было не из чего построить: связи
@@ -153,7 +156,9 @@ async def _tick(pool, bot) -> int:
             # только что она греется вообще.
             try:
                 from services import virtual_layer as _vl2
-                bot_temp = await _vl2.recompute_bot_cascade(pool, oid)
+                bot_temp = await _vl2.recompute_bot_cascade(
+                    pool, oid, **_vl2.cascade_kwargs(
+                        await _vl2.get_rules(pool, oid), "bot"))
                 if bot_temp:
                     log.info("organism.runner: температура ботов owner=%s: %s",
                              oid, bot_temp)

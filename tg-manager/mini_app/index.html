@@ -893,6 +893,8 @@ input,select,textarea{font-family:inherit}
    было ни одной: выпадающий список выглядел ровно как поле ввода, и
    понять, что он открывается, можно было только ткнув. Рисуем шеврон
    фоном и освобождаем под него место справа. */
+.vl-in{background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:8px 10px;font-size:13px;color:var(--text);font-family:inherit;outline:none}
+.vl-in:focus{border-color:var(--accent)}
 select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%237a8ba1' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 8px;padding-right:32px}
 .sel{width:100%;padding:10px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:14px;-webkit-appearance:none;appearance:none}
 .sel:focus{border-color:var(--accent)}
@@ -6618,6 +6620,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🧠 Модель поведения</div>
+  </div>
+  <div class="filter-chips" id="vlTabs" role="tablist" aria-label="Вкладки модели поведения">
+    <div class="chip on" data-t="overview" role="tab" onclick="openVLayer()">📊 Обзор</div>
+    <div class="chip" data-t="analytics" role="tab" onclick="openVLayerAnalytics()">📈 Аналитика</div>
+    <div class="chip" data-t="rules" role="tab" onclick="openVLayerRules()">⚙️ Правила</div>
   </div>
   <div class="sub-sb">
     <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
@@ -24652,9 +24659,19 @@ async function openWarmup() {
 // честная (наши рассылки/боты/посты), вступление — выбор пользователя.
 let FC_SEL = new Set();
 // ── Virtual Layer: модель поведения аудитории ────────────────────────────
+// Вкладки экрана. Раньше всё — сводка, тренды, люди, лента — шло одной
+// лентой на десяток экранов прокрутки, и до нужного блока было не добраться;
+// правил не было вовсе. Теперь три вкладки, и каждая отвечает на один вопрос:
+// «где аудитория сейчас», «как она движется», «по каким правилам считаем».
+let VL_DAYS = 30;
+function _vlTab(t) {
+  push('s-vlayer');                       // повтор на вершине стека — no-op
+  document.querySelectorAll('#vlTabs .chip').forEach(c => c.classList.toggle('on', c.dataset.t === t));
+  txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+}
 async function openVLayer() {
   push('s-vlayer');
-  txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  _vlTab('overview');
   try {
     // Тренды тянем параллельно и мягко (catch→null): аналитика не должна рушить
     // основную сводку, если по ней что-то пойдёт не так.
@@ -24686,7 +24703,8 @@ async function openVLayer() {
         тишина, сам съезжает вниз: обычный тег так не умеет. Ступени снизу вверх:
         Присматривается → Интерес → Квалифицирован → Готов купить → Купил; в сторону —
         Остыл/Потерян. Нажмите на любого человека, чтобы увидеть, <b>почему</b> он здесь и
-        что делать.
+        что делать. Какое действие на какую ступень ведёт и сколько живёт ступень — настраивается
+        во вкладке <b>⚙️ Правила</b>.
       </div>
     </details>`;
     // «Вот-вот остынут» — срочное, поэтому вверху: эти люди распадутся вниз в
@@ -24781,7 +24799,7 @@ async function openVLayer() {
     }
     // Тренды и конверсия — КАК движется аудитория (шаг 3). Сразу после воронки:
     // она отвечает «где сейчас», а это — «куда и как быстро».
-    html += _vlAnalyticsHtml(an);
+    html += _vlAnalyticsCompact(an);
     // «Горячие» — кого дожимать первыми.
     if (hot.length) {
       html += '<div class="sec">🔥 Дожать в первую очередь</div>';
@@ -24855,7 +24873,8 @@ function _vlAnalyticsHtml(an) {
                 cooling: ['🧊','Аудитория остывает','var(--hint)'],
                 mixed:   ['➖','Без явного тренда','var(--orange)'] }[m.verdict] || ['➖','',''];
     const arrow = x => x === 'up' ? '↑' : x === 'down' ? '↓' : '→';
-    h += '<div class="sec">📈 Тренды · 7 дней против прошлых</div>';
+    const wd = m.window_days || 7;
+    h += `<div class="sec">📈 Тренды · ${wd} дн. против прошлых ${wd}</div>`;
     h += `<div class="card" style="border-left:3px solid ${V[2]};margin-bottom:8px">
       <div style="font-weight:600;font-size:14px">${V[0]} ${esc(V[1])}</div>
       <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.5">
@@ -24881,6 +24900,188 @@ function _vlAnalyticsHtml(an) {
   return h;
 }
 
+// Короткая выжимка трендов для «Обзора»: полная аналитика живёт во вкладке,
+// а здесь — одна карточка с главным и дверь туда.
+function _vlAnalyticsCompact(an) {
+  if (!an) return '';
+  const m = an.momentum || {};
+  const parts = [];
+  if (an.overall_pct != null) parts.push(`сквозная конверсия <b>${an.overall_pct}%</b>`);
+  if (m.hot_now || m.hot_prev) parts.push(`дошли до «готов купить» за неделю: <b>${num(m.hot_now)}</b> (было ${num(m.hot_prev)})`);
+  if (!parts.length) return '';
+  return `<div class="card" style="margin:8px 0;cursor:pointer" onclick="openVLayerAnalytics()">
+    <div style="font-weight:600;font-size:14px">📈 Тренды</div>
+    <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.5">${parts.join(' · ')}</div>
+    <div style="font-size:12px;color:var(--accent,#7c3aed);margin-top:6px">Вся аналитика: время до покупки, где теряем людей →</div>
+  </div>`;
+}
+
+// Часы → «5 ч», «2,5 дн.»: медиана пути до покупки бывает и часами, и неделями.
+function _vlHours(h) {
+  if (h == null) return '—';
+  if (h < 1) return 'меньше часа';
+  if (h < 48) return Math.round(h) + ' ч';
+  return (Math.round(h / 24 * 10) / 10).toString().replace('.', ',') + ' дн.';
+}
+
+// Вкладка «Аналитика»: период, конверсия, время до покупки, утечки, драйверы.
+async function openVLayerAnalytics(days) {
+  if (days !== undefined) VL_DAYS = days;
+  _vlTab('analytics');
+  try {
+    const q = VL_DAYS ? ('?days=' + VL_DAYS) : '';
+    const an = await api('/api/miniapp/vlayer/analytics' + q);
+    const P = [[7,'7 дней'],[30,'30 дней'],[90,'90 дней'],[0,'Всё время']];
+    let html = '<div class="filter-chips" style="padding:0 0 8px">' + P.map(([d,l]) =>
+      `<div class="chip${(VL_DAYS||0)===d?' on':''}" onclick="openVLayerAnalytics(${d})">${l}</div>`).join('') + '</div>';
+    const conv = (an.conversion || []).filter(c => c.reached > 0);
+    if (!conv.length && !(an.leaks||[]).length && !(an.drivers||[]).length) {
+      html += empty('📭','За этот период движения не было','Выберите период шире или загляните позже — переходы появятся по мере переписки.');
+      txt('vlayerBody', html); return;
+    }
+    // Главные числа одной строкой плиток.
+    const tt = an.time_to || {};
+    html += `<div class="kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px">
+      <div class="card" style="text-align:center;padding:10px"><div style="font-size:18px;font-weight:700">${an.overall_pct != null ? an.overall_pct + '%' : '—'}</div><div style="font-size:11px;color:var(--hint)">из «присматривается» купили</div></div>
+      <div class="card" style="text-align:center;padding:10px"><div style="font-size:18px;font-weight:700">${_vlHours(tt.ready_hours)}</div><div style="font-size:11px;color:var(--hint)">путь до «готов купить»${tt.ready_n ? ' · ' + num(tt.ready_n) + ' чел.' : ''}</div></div>
+      <div class="card" style="text-align:center;padding:10px"><div style="font-size:18px;font-weight:700">${_vlHours(tt.purchased_hours)}</div><div style="font-size:11px;color:var(--hint)">путь до покупки${tt.purchased_n ? ' · ' + num(tt.purchased_n) + ' чел.' : ''}</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--hint);padding:0 2px 8px;line-height:1.4">Время — медиана: у половины людей путь короче, у половины длиннее. Считается от первого замеченного действия человека.</div>`;
+    html += _vlAnalyticsHtml(an);
+    // Где теряем людей — главное, что можно исправить.
+    const leaks = an.leaks || [];
+    if (leaks.length) {
+      html += '<div class="sec">🕳 Где теряем людей</div>';
+      html += '<div style="padding:0 16px 6px;font-size:12px;color:var(--hint);line-height:1.4">«Ушли» — отказ, отписка, блокировка. «Остыли» — замолчали, и ступень истекла. Остывающих спасает касание раньше срока, ушедших — другой оффер.</div>';
+      const lmax = Math.max(...leaks.map(x => x.total), 1);
+      html += leaks.map(x => `<div style="padding:7px 16px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
+          <span>${x.worst ? '⚠️ ' : ''}С «${esc(x.label)}»</span>
+          <span><b>${num(x.total)}</b> <span style="color:var(--hint)">· ушли ${num(x.lost)} · остыли ${num(x.cooled)}</span></span></div>
+        <div style="height:6px;background:var(--sep);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${Math.max(4, Math.round(x.total / lmax * 100))}%;background:${x.worst ? 'var(--red)' : 'var(--orange)'};border-radius:3px"></div></div>
+      </div>`).join('');
+    }
+    // Что двигает людей вверх.
+    const dr = an.drivers || [];
+    if (dr.length) {
+      html += '<div class="sec">⚡ Что двигает людей вверх</div><div class="lst">';
+      html += dr.map(x => `<div class="row"><div class="row-body">
+        <div class="row-name">${esc(x.label || x.reason)}</div>
+        <div class="row-val">${num(x.count)} чел. продвинулись по воронке</div></div></div>`).join('') + '</div>';
+      html += `<div style="padding:4px 16px 0;font-size:12px;color:var(--hint)">Действие двигает не туда, куда надо? Поменяйте его ступень во вкладке <a href="#" onclick="openVLayerRules();return false">⚙️ Правила</a>.</div>`;
+    }
+    html += '<div style="height:16px"></div>';
+    txt('vlayerBody', html);
+  } catch(e) { txt('vlayerBody', errHtml(errRu(e), 'openVLayerAnalytics()')); }
+}
+
+// Вкладка «Правила»: владелец сам решает, что значит каждое действие человека,
+// сколько живёт каждая ступень и когда аудитория считается горячей.
+let VL_RULES = null;
+async function openVLayerRules() {
+  _vlTab('rules');
+  try {
+    const d = await api('/api/miniapp/vlayer/rules');
+    VL_RULES = d;
+    txt('vlayerBody', _vlRulesHtml(d));
+  } catch(e) { txt('vlayerBody', errHtml(errRu(e), 'openVLayerRules()')); }
+}
+
+function _vlRulesHtml(d) {
+  const r = d.rules, def = d.defaults;
+  const opt = (list, cur) => list.map(t => `<option value="${esc(t.value)}"${t.value === cur ? ' selected' : ''}>${esc(t.label)}</option>`).join('');
+  let h = `<div style="font-size:12px;color:var(--hint);padding:2px 16px 8px;line-height:1.5">
+    Модель ставит человека на ступень по его действиям и снимает со ступени, если он долго молчит.
+    Здесь вы решаете, что значит каждое действие для вашего бизнеса. Изменения действуют на
+    <b>новые</b> действия и на ближайший пересчёт остывания.</div>`;
+  const ch = d.changed || [];
+  h += ch.length
+    ? `<div class="card" style="margin-bottom:8px;border-left:3px solid var(--accent,#7c3aed)"><div style="font-weight:600;font-size:13px">Изменено относительно стандарта</div><div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.5">${ch.map(esc).join('<br>')}</div></div>`
+    : `<div class="card" style="margin-bottom:8px"><div style="font-size:13px">✅ Работают стандартные правила</div></div>`;
+  // 1. Действие → ступень.
+  h += '<div class="sec">1. Действие человека → ступень</div>';
+  h += '<div style="padding:0 16px 6px;font-size:12px;color:var(--hint);line-height:1.4">Действие поднимает человека до выбранной ступени (вниз не опускает). «Потерян» — сразу в потерянные. «Не учитывать» — действие игнорируется.</div><div class="lst">';
+  h += (d.signals || []).map(sg => {
+    const cur = r.signal_target[sg.key], dv = def.signal_target[sg.key];
+    return `<div class="row"><div class="row-body"><div class="row-name">${esc(sg.label)}</div>
+      ${cur !== dv ? `<div class="row-val">стандарт: ${esc((d.targets.find(t => t.value === dv) || {}).label || dv)}</div>` : ''}</div>
+      <select class="vl-in" data-vlsig="${esc(sg.key)}" style="flex:0 0 auto;max-width:48%">${opt(d.targets, cur)}</select></div>`;
+  }).join('');
+  h += (d.locked || []).map(sg => `<div class="row" style="opacity:.6"><div class="row-body"><div class="row-name">${esc(sg.label)}</div><div class="row-val">всегда → ${esc(sg.target_label)}: оплата — факт, а не догадка</div></div></div>`).join('');
+  h += '</div>';
+  // 2. Срок жизни ступени.
+  h += '<div class="sec">2. Сколько живёт ступень без новых действий</div>';
+  h += `<div style="padding:0 16px 6px;font-size:12px;color:var(--hint);line-height:1.4">Если человек молчит дольше — он съезжает на ступень ниже. Дорогой товар думают неделями — ставьте больше; быстрые покупки — меньше. От ${d.limits.ttl_min} до ${d.limits.ttl_max} ч.</div><div class="lst">`;
+  h += (d.ttl_rungs || []).map(t => `<div class="row"><div class="row-body"><div class="row-name">${esc(t.label)}</div>
+      <div class="row-val">стандарт: ${num(def.ttl_hours[t.value])} ч</div></div>
+      <input class="vl-in" type="number" inputmode="numeric" min="${d.limits.ttl_min}" max="${d.limits.ttl_max}" data-vlttl="${esc(t.value)}" value="${r.ttl_hours[t.value]}" style="flex:0 0 90px;width:90px"> <span style="font-size:12px;color:var(--hint);margin-left:4px">ч</span></div>`).join('');
+  h += '</div>';
+  // 3. Пороги горячего.
+  const thr = (key, title, hint) => {
+    const c = r[key], dc = def[key];
+    return `<div class="sec">${title}</div>
+      <div style="padding:0 16px 6px;font-size:12px;color:var(--hint);line-height:1.4">${hint} Стандарт: от «${esc((d.hot_at.find(x => x.value === dc.hot_at) || {}).label || '')}», ${dc.min_count} чел. и ${Math.round(dc.min_share * 100)}%.</div>
+      <div class="lst">
+      <div class="row"><div class="row-body"><div class="row-name">Горячим считать человека от ступени</div></div>
+        <select class="vl-in" data-vlcas="${key}:hot_at" style="flex:0 0 auto;max-width:48%">${opt(d.hot_at, c.hot_at)}</select></div>
+      <div class="row"><div class="row-body"><div class="row-name">Минимум горячих, чел.</div></div>
+        <input class="vl-in" type="number" inputmode="numeric" min="1" data-vlcas="${key}:min_count" value="${c.min_count}" style="flex:0 0 90px;width:90px"></div>
+      <div class="row"><div class="row-body"><div class="row-name">И не меньше доли, %</div></div>
+        <input class="vl-in" type="number" inputmode="numeric" min="1" max="100" data-vlcas="${key}:min_share" value="${Math.round(c.min_share * 100)}" style="flex:0 0 90px;width:90px"></div>
+      </div>`;
+  };
+  h += thr('audience', '3. Когда аудитория «горячая»', 'Нужны оба условия: и число, и доля. Тёплой считается половина порога.');
+  h += thr('bot', '4. Когда бот «горячий»', 'То же, но по людям одного бота — порог ниже, аудитория у бота меньше.');
+  h += `<div class="sec">5. Список «вот-вот остынут»</div><div class="lst">
+    <div class="row"><div class="row-body"><div class="row-name">Показывать тех, кто остынет в ближайшие</div><div class="row-val">стандарт: ${def.cooling_window_hours} ч</div></div>
+    <input class="vl-in" type="number" inputmode="numeric" min="1" max="168" id="vlCoolWin" value="${r.cooling_window_hours}" style="flex:0 0 90px;width:90px"> <span style="font-size:12px;color:var(--hint);margin-left:4px">ч</span></div></div>`;
+  h += `<div style="padding:12px 0 4px"><button class="btn btn-p" data-main style="width:100%" onclick="vlRulesSave()">💾 Сохранить правила</button></div>
+    <div style="padding:4px 0"><button class="btn btn-s" style="width:100%" onclick="vlRulesReset()">↺ Вернуть стандартные</button></div>
+    <div style="height:16px"></div>`;
+  return h;
+}
+
+async function vlRulesSave() {
+  if (!VL_RULES) return;
+  const rules = JSON.parse(JSON.stringify(VL_RULES.rules));
+  document.querySelectorAll('#vlayerBody [data-vlsig]').forEach(el => { rules.signal_target[el.dataset.vlsig] = el.value; });
+  document.querySelectorAll('#vlayerBody [data-vlttl]').forEach(el => { rules.ttl_hours[el.dataset.vlttl] = parseInt(el.value, 10); });
+  document.querySelectorAll('#vlayerBody [data-vlcas]').forEach(el => {
+    const [k, f] = el.dataset.vlcas.split(':');
+    rules[k][f] = f === 'hot_at' ? el.value : f === 'min_share' ? (parseFloat(el.value) || 0) / 100 : parseInt(el.value, 10);
+  });
+  const cw = document.getElementById('vlCoolWin');
+  if (cw) rules.cooling_window_hours = parseInt(cw.value, 10);
+  try {
+    const d = await api('/api/miniapp/vlayer/rules', {method:'POST', body: JSON.stringify({rules})});
+    VL_RULES = d;
+    txt('vlayerBody', _vlRulesHtml(d));
+    toast('✅ Правила сохранены');
+  } catch(e) { toast('⚠️ ' + errRu(e)); }
+}
+
+async function vlRulesReset() {
+  if (!confirm('Вернуть стандартные правила модели? Ваши настройки будут сброшены.')) return;
+  try {
+    const d = await api('/api/miniapp/vlayer/rules/reset', {method:'POST', body:'{}'});
+    VL_RULES = d;
+    txt('vlayerBody', _vlRulesHtml(d));
+    toast('↺ Стандартные правила');
+  } catch(e) { toast('⚠️ ' + errRu(e)); }
+}
+
+// Ручной перевод на ступень: слой видит только то, что прошло через систему,
+// а отказ по телефону или ошибочный «Потерян» исправить было нечем.
+async function vlSetStage(entityId, value, label) {
+  try {
+    await api('/api/miniapp/vlayer/entity/' + 'user/' + encodeURIComponent(entityId) + '/stage',
+      {method:'POST', body: JSON.stringify({value})});
+    toast('✅ Теперь: ' + label);
+  } catch(e) { toast('⚠️ ' + errRu(e)); return; }
+  openVLayerEntity('user', entityId);
+}
+
 // Таймер распада состояния: главный смысл слоя — состояние тает без активности.
 // Показываем человеку, когда оно «протухнет», чтобы было видно срочность.
 function _vlDecayText(cur) {
@@ -24899,6 +25100,7 @@ function _vlDecayText(cur) {
 // Список людей на одной ступени воронки: число на экране обязано открываться
 // срезом тех самых людей (принцип проекта), а не оставаться числом.
 async function openVLayerSegment(value) {
+  document.querySelectorAll('#vlTabs .chip').forEach(c => c.classList.toggle('on', c.dataset.t === 'overview'));
   txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/vlayer/segment/' + encodeURIComponent(value));
@@ -24931,6 +25133,7 @@ async function openVLayerSegment(value) {
 // «как он сюда пришёл», а третий заход по кругу и первый подъём дожимают
 // по-разному.
 async function openVLayerEntity(entityType, entityId) {
+  document.querySelectorAll('#vlTabs .chip').forEach(c => c.classList.toggle('on', c.dataset.t === 'overview'));
   txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/vlayer/entity/' + encodeURIComponent(entityType)
@@ -24961,6 +25164,13 @@ async function openVLayerEntity(entityType, entityId) {
         html += `<button class="btn btn-s" style="width:100%;margin-bottom:10px"
           onclick="vlMarkPurchased('${escJs(entityId)}', false)">✅ Отметить: купил</button>`;
       }
+      const ST = [['new','Новый'],['curious','Присматривается'],['interested','Интерес'],
+                  ['qualified','Квалифицирован'],['ready','Готов купить'],['purchased','Купил'],['lost','Потерян']];
+      html += '<div class="sec">Перевести на ступень вручную</div>';
+      html += '<div style="padding:0 16px 4px;font-size:12px;color:var(--hint);line-height:1.4">Если вы знаете больше модели — например, человек отказался по телефону. Переход попадёт в историю.</div>';
+      html += '<div class="filter-chips">' + ST.map(([v, l]) => v === cur.value
+        ? `<div class="chip on">${l}</div>`
+        : `<div class="chip" onclick="vlSetStage('${escJs(entityId)}','${v}','${l}')">${l}</div>`).join('') + '</div>';
     }
     const tr = d.transitions || [];
     html += '<div class="sec">История переходов</div>';
