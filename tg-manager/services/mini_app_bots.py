@@ -1141,87 +1141,291 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("relay_toggle uid=%d bot=%d", uid, bot_id)
             return _err(_INTERNAL_ERROR, 500)
 
-    async def multigeo_get(request: web.Request) -> web.Response:
+    # ── Языки бота (модуль «Гео-сеть») ──────────────────────────────────────
+    # Общая основа — services/bot_localization: один список языков, запись с
+    # причинами по-русски, сброс языка, черновой ИИ-перевод.
+
+    async def _mg_bot_token(request: web.Request):
+        """(uid, bot_id, token) своего активного бота или готовый ответ-ошибка."""
         uid = _get_uid(request)
         if not uid:
-            return _err("Unauthorized", 401)
+            return None, _err("Unauthorized", 401)
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Неверный идентификатор бота", 400)
+            return None, _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
                 bot_id, uid,
             )
         except Exception as e:
-            log.warning("multigeo_get db error: %s", e)
-            return _err("Ошибка базы данных", 500)
+            log.warning("multigeo db error: %s", e)
+            return None, _err("Ошибка базы данных", 500)
         if not row:
-            return _err("Бот не найден", 404)
+            return None, _err("Бот не найден", 404)
+        return (uid, bot_id, row["token"]), None
+
+    async def multigeo_get(request: web.Request) -> web.Response:
+        ctx, err = await _mg_bot_token(request)
+        if err:
+            return err
+        _uid, _bot_id, token = ctx
         import aiohttp as _aiohttp
         from services import bot_api as _bapi
-        langs = ["", "ru", "en", "de", "fr", "es", "it", "uk", "pt", "zh", "ar"]
+        from services import bot_localization as _bl
+        langs = [""] + _bl.LANG_CODES
         try:
             async with _aiohttp.ClientSession() as session:
-                # Параллельно: последовательно это 33 запроса к Telegram подряд.
-                result = await _bapi.get_localized_profiles(session, row["token"], langs)
+                # Параллельно: последовательно это по три запроса на язык подряд.
+                result = await _bapi.get_localized_profiles(
+                    session, token, langs, concurrency=12)
         except Exception:
             log.exception("multigeo_get")
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"profiles": result})
+        for p in result:
+            p["label"] = _bl.lang_label(p.get("lang") or "")
+        return _json_resp({"profiles": result, **_bl.catalog()})
 
     async def multigeo_set(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            bot_id = int(request.match_info["bot_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор бота", 400)
+        """Сохранить профиль одного языка.
+
+        Пришедший ключ — записать, отсутствующий — не трогать. Пустое поле
+        сбрасывает его только при `replace: true` (форма правки шлёт все три
+        поля и сама решает, что значит пустое); без отметки пустое поле, как и
+        раньше, не трогаем."""
+        ctx, err = await _mg_bot_token(request)
+        if err:
+            return err
+        _uid, _bot_id, token = ctx
         try:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        lang = (body.get("lang") or "").strip()
-        name = (body.get("name") or "").strip()[:64]
-        description = (body.get("description") or "").strip()[:512]
-        short_description = (body.get("short_description") or "").strip()[:120]
-        if lang == "default":
-            lang = ""
-        try:
-            row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-                bot_id, uid,
-            )
-        except Exception as e:
-            log.warning("multigeo_set db error: %s", e)
-            return _err("Ошибка базы данных", 500)
-        if not row:
-            return _err("Бот не найден", 404)
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос")
+        from services import bot_localization as _bl
+        lang = _bl.normalize_lang(body.get("lang"))
+        if lang is None:
+            return _err("Неверный код языка", 400)
+        fields = _bl.clean_fields(body)
+        if body.get("replace") is not True:
+            fields = {k: v for k, v in fields.items() if v}
+        if not fields:
+            return _err("Заполните хотя бы одно поле", 400)
         import aiohttp as _aiohttp
-        from services import bot_api as _bapi
-        errors = []
         try:
             async with _aiohttp.ClientSession() as session:
-                if name:
-                    ok = await _bapi.set_name(session, row["token"], name, lang)
-                    if not ok:
-                        errors.append("name")
-                if description:
-                    ok = await _bapi.set_description(session, row["token"], description, lang)
-                    if not ok:
-                        errors.append("description")
-                if short_description:
-                    ok = await _bapi.set_short_description(session, row["token"], short_description, lang)
-                    if not ok:
-                        errors.append("short_description")
+                res = await _bl.apply_profile(session, token, lang, fields)
         except Exception:
             log.exception("multigeo_set")
             return _err(_INTERNAL_ERROR, 500)
-        if errors:
-            return _json_resp({"ok": False, "errors": errors})
-        return _json_resp({"ok": True})
+        if not res["ok"]:
+            # errors — список ключей (прежний контракт экрана), reasons — почему.
+            return _json_resp({"ok": False, "errors": list(res["errors"]),
+                               "reasons": res["errors"], "saved": res["saved"]})
+        return _json_resp({"ok": True, "saved": res["saved"]})
+
+    async def multigeo_reset(request: web.Request) -> web.Response:
+        """Убрать отдельный профиль языка: человек с этим языком снова видит
+        профиль по умолчанию. Профиль по умолчанию так не убирается."""
+        ctx, err = await _mg_bot_token(request)
+        if err:
+            return err
+        _uid, _bot_id, token = ctx
+        from services import bot_localization as _bl
+        lang = _bl.normalize_lang(request.match_info.get("lang"))
+        if lang is None:
+            return _err("Неверный код языка", 400)
+        if not lang:
+            return _err("Профиль по умолчанию сбросить нельзя — его можно только изменить", 400)
+        import aiohttp as _aiohttp
+        try:
+            async with _aiohttp.ClientSession() as session:
+                res = await _bl.apply_profile(
+                    session, token, lang, {f: "" for f in _bl.FIELDS})
+        except Exception:
+            log.exception("multigeo_reset")
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": res["ok"], "reasons": res["errors"]})
+
+    async def multigeo_translate(request: web.Request) -> web.Response:
+        """Черновой ИИ-перевод профиля на выбранные языки. В Telegram ничего
+        не пишет: черновики возвращаются на экран, владелец правит и сохраняет."""
+        ctx, err = await _mg_bot_token(request)
+        if err:
+            return err
+        uid, _bot_id, token = ctx
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос")
+        from services import bot_localization as _bl
+        src_lang = _bl.normalize_lang(body.get("source_lang"))
+        if src_lang is None:
+            return _err("Неверный язык-источник", 400)
+        targets: list[str] = []
+        for x in (body.get("target_langs") or []):
+            lc = _bl.normalize_lang(x)
+            if lc and lc != src_lang and lc not in targets:
+                targets.append(lc)
+        if not targets:
+            return _err("Выберите хотя бы один язык для перевода", 400)
+        if len(targets) > 30:
+            return _err("За один раз — не больше 30 языков", 400)
+        import aiohttp as _aiohttp
+        from services import bot_api as _bapi
+        try:
+            async with _aiohttp.ClientSession() as session:
+                prof = await _bapi.get_localized_profiles(session, token, [src_lang])
+        except Exception:
+            log.exception("multigeo_translate read")
+            return _err(_INTERNAL_ERROR, 500)
+        source = prof[0] if prof else {}
+        if not any((source.get(f) or "").strip() for f in _bl.FIELDS):
+            return _err(f"У языка «{_bl.lang_label(src_lang)}» пустой профиль — переводить нечего", 400)
+        try:
+            res = await _bl.translate_profile(
+                source, targets, owner_id=uid,
+                translate_name=body.get("translate_name") is True)
+        except Exception:
+            log.exception("multigeo_translate uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not res["drafts"]:
+            return _err("ИИ не ответил — проверьте подключение ИИ в настройках или повторите позже", 502)
+        return _json_resp({"ok": True, "source": {f: source.get(f) or "" for f in _bl.FIELDS},
+                           **res})
+
+    async def multigeo_apply(request: web.Request) -> web.Response:
+        """Сохранить профили нескольких языков разом (черновики перевода).
+        Итог — по каждому языку отдельно: что сохранилось и почему нет."""
+        ctx, err = await _mg_bot_token(request)
+        if err:
+            return err
+        _uid, _bot_id, token = ctx
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        items = body.get("profiles") if isinstance(body, dict) else None
+        if not isinstance(items, list) or not items:
+            return _err("Нет профилей для сохранения", 400)
+        if len(items) > 30:
+            return _err("За один раз — не больше 30 языков", 400)
+        from services import bot_localization as _bl
+        plan: list[tuple[str, dict]] = []
+        seen: set[str] = set()
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            lang = _bl.normalize_lang(it.get("lang"))
+            if lang is None or lang in seen:
+                continue
+            fields = {k: v for k, v in _bl.clean_fields(it).items() if v}
+            if fields:
+                seen.add(lang)
+                plan.append((lang, fields))
+        if not plan:
+            return _err("Нет заполненных профилей для сохранения", 400)
+        import aiohttp as _aiohttp
+        results = []
+        try:
+            async with _aiohttp.ClientSession() as session:
+                # Подряд, а не параллельно: setMy* у Telegram лимитирован
+                # сильнее прочих методов, а флуд-паузу apply_profile отсыпает сам.
+                for lang, fields in plan:
+                    r = await _bl.apply_profile(session, token, lang, fields)
+                    results.append({"lang": lang or "default",
+                                    "label": _bl.lang_label(lang), **r})
+        except Exception:
+            log.exception("multigeo_apply")
+            return _err(_INTERNAL_ERROR, 500)
+        ok_n = sum(1 for r in results if r["ok"])
+        return _json_resp({"ok": ok_n == len(results), "saved": ok_n,
+                           "total": len(results), "results": results})
+
+    async def multigeo_copy(request: web.Request) -> web.Response:
+        """Перенести языковые профили бота на другие свои боты.
+
+        Это массовое изменение профиля, поэтому оно идёт той же операцией
+        bulk_bot_profile, что и экран «Массовый профиль»: по-ботный журнал,
+        снимок «как было» и откат. Одна операция на язык — у каждой свой
+        снимок и свой откат."""
+        ctx, err = await _mg_bot_token(request)
+        if err:
+            return err
+        uid, src_bot_id, token = ctx
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос")
+        from services import bot_localization as _bl
+        langs: list[str] = []
+        for x in (body.get("langs") or []):
+            lc = _bl.normalize_lang(x)
+            if lc is not None and lc not in langs:
+                langs.append(lc)
+        if not langs:
+            return _err("Выберите языки, которые переносить", 400)
+        from services.security import selection_ids as _sel_ids
+        # Перенос «на всех» без явного выбора не делаем: нет ключа — тоже ошибка.
+        _picked, _serr = _sel_ids(body, "bot_ids", what="бот", cap=500)
+        if _serr:
+            return _err(_serr, 400)
+        bot_ids = [b for b in (_picked or []) if b != src_bot_id]
+        if not bot_ids:
+            return _err("Выберите боты, на которые переносить", 400)
+        try:
+            _rows = await pool.fetch(
+                "SELECT DISTINCT bot_id FROM managed_bots WHERE added_by=$1 "
+                "AND is_active AND bot_id = ANY($2::bigint[])", uid, bot_ids)
+        except Exception:
+            log.exception("multigeo_copy: выбор ботов uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        live = {int(r["bot_id"]) for r in _rows}
+        bot_ids = [b for b in bot_ids if b in live]
+        if not bot_ids:
+            return _err("Нет подходящих ботов", 400)
+        import aiohttp as _aiohttp
+        from services import bot_api as _bapi
+        try:
+            async with _aiohttp.ClientSession() as session:
+                profs = await _bapi.get_localized_profiles(session, token, langs)
+        except Exception:
+            log.exception("multigeo_copy read")
+            return _err(_INTERNAL_ERROR, 500)
+        by_lang = {("" if p["lang"] == "default" else p["lang"]): p for p in profs}
+        ops: list[dict] = []
+        skipped: list[str] = []
+        for lang in langs:
+            p = by_lang.get(lang)
+            fields = {f: (p.get(f) or "").strip() for f in _bl.FIELDS} if p else {}
+            if not any(fields.values()):
+                skipped.append(_bl.lang_label(lang))
+                continue
+            params = {**fields, "language_code": lang, "bot_ids": bot_ids,
+                      "source_bot_id": src_bot_id}
+            try:
+                op_id = await _obus.submit(
+                    pool, uid, "bulk_bot_profile", params, total_items=len(bot_ids),
+                    label=f"Профиль ботов ({_bl.lang_label(lang)}): {len(bot_ids)} шт.")
+            except PermissionError as exc:
+                return _err(f"Перенос профилей доступен на тарифе "
+                            f"«{getattr(exc, 'required_plan', '')}» и выше — продлите подписку", 403)
+            except Exception:
+                log.exception("multigeo_copy submit uid=%d", uid)
+                return _err(_INTERNAL_ERROR, 500)
+            if op_id:
+                ops.append({"lang": lang or "default", "label": _bl.lang_label(lang),
+                            "op_id": op_id})
+        if not ops:
+            return _err("У выбранных языков пустые профили — переносить нечего", 400)
+        return _json_resp({"ok": True, "ops": ops, "bots": len(bot_ids),
+                           "skipped": skipped})
 
     async def toggle_bot(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -1771,6 +1975,10 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_put("/api/miniapp/bot/{bot_id}/relay/toggle", relay_toggle)
     app.router.add_get("/api/miniapp/bot/{bot_id}/multigeo", multigeo_get)
     app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo", multigeo_set)
+    app.router.add_delete("/api/miniapp/bot/{bot_id}/multigeo/{lang}", multigeo_reset)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo/translate", multigeo_translate)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo/apply", multigeo_apply)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo/copy", multigeo_copy)
     app.router.add_post("/api/miniapp/bots/scan_fleet", bots_scan_fleet)
     app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
     app.router.add_post("/api/miniapp/bots/connect_discovered", bots_connect_discovered)

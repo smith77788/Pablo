@@ -3561,18 +3561,38 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌍 Гео-сеть</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openMultigeoSetModal()">✏️ Изменить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openMgTranslate()">🪄 Перевести</button></div>
   </div>
   <div class="filter-chips mod-tabs" data-module="geo" data-tab="langs" role="tablist" aria-label="Вкладки модуля «Гео-сеть»"></div>
   <div class="sub-sb">
+    <div style="font-size:12px;color:var(--hint);padding:4px 16px 8px">Telegram показывает человеку имя и описание бота на языке его приложения. Язык без своего профиля видит профиль <b>по умолчанию</b>.</div>
     <div class="sec">Выберите бота</div>
     <div class="lst" style="margin:0 16px 8px;padding:8px">
-      <select id="mg-bot-sel" onchange="loadMultigeo()" class="sel">
+      <select id="mg-bot-sel" onchange="loadMultigeo()" class="sel" aria-label="Бот">
         <option value="">Загрузка ботов…</option>
       </select>
     </div>
+    <div id="mgSummary" style="padding:0 16px 4px"></div>
     <div class="sec" style="margin-top:4px">Профили по языкам</div>
     <div class="lst" id="mgProfiles"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:8px">Действия</div>
+    <div class="lst" id="mgActions">
+      <div class="row tap" onclick="openMultigeoSetModal()" role="button" tabindex="0">
+        <div class="row-ico" style="background:var(--bg-blue-16)">➕</div>
+        <div class="row-body"><div class="row-name">Добавить язык</div><div class="row-val">Свой профиль для выбранного языка</div></div>
+        <span class="chev">›</span>
+      </div>
+      <div class="row tap" onclick="openMgTranslate()" role="button" tabindex="0">
+        <div class="row-ico" style="background:var(--bg-purple-16)">🪄</div>
+        <div class="row-body"><div class="row-name">Перевести на другие языки</div><div class="row-val">ИИ готовит черновики — вы правите и сохраняете</div></div>
+        <span class="chev">›</span>
+      </div>
+      <div class="row tap" onclick="openMgCopy()" role="button" tabindex="0">
+        <div class="row-ico" style="background:var(--bg-blue-16)">📤</div>
+        <div class="row-body"><div class="row-name">Перенести на другие боты</div><div class="row-val">Те же языковые профили — у выбранных ботов, с откатом</div></div>
+        <span class="chev">›</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -3580,26 +3600,65 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="mo-multigeo" onclick="if(event.target===this)closeModal('mo-multigeo')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-multigeo')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🌍 Настроить профиль бота</div>
-    <div class="field"><label>Язык</label><select id="mg-lang" class="sel">
-      <option value="">🌐 По умолчанию (все языки)</option>
-      <option value="ru">🇷🇺 Русский</option>
-      <option value="en">🇬🇧 English</option>
-      <option value="de">🇩🇪 Deutsch</option>
-      <option value="fr">🇫🇷 Français</option>
-      <option value="es">🇪🇸 Español</option>
-      <option value="it">🇮🇹 Italiano</option>
-      <option value="uk">🇺🇦 Українська</option>
-      <option value="pt">🇧🇷 Português</option>
-      <option value="zh">🇨🇳 中文</option>
-    </select></div>
-    <div class="field"><label>Имя бота (макс. 64 символа)</label><input id="mg-name" type="text" maxlength="64" placeholder="Имя на выбранном языке" class="inp"></div>
-    <div class="field"><label>Описание (макс. 512 символов)</label><textarea id="mg-desc" rows="3" maxlength="512" placeholder="Описание бота на выбранном языке" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
-    <div class="field"><label>Краткое описание (макс. 120 символов)</label><input id="mg-short" type="text" maxlength="120" placeholder="Краткое описание" class="inp"></div>
+    <div class="modal-title" id="mg-title">🌍 Профиль бота на языке</div>
+    <div class="field"><label>Язык</label><select id="mg-lang" class="sel" onchange="mgLangPicked()"></select></div>
+    <div id="mg-hint" style="font-size:12px;color:var(--hint);margin:-4px 0 8px"></div>
+    <div class="field"><label>Имя бота <span id="mg-name-cnt" style="float:right;color:var(--hint)"></span></label><input id="mg-name" type="text" maxlength="64" placeholder="Имя на выбранном языке" class="inp" oninput="mgCount()"></div>
+    <div class="field"><label>Описание — видно в пустом чате до «Старт» <span id="mg-desc-cnt" style="float:right;color:var(--hint)"></span></label><textarea id="mg-desc" rows="4" maxlength="512" placeholder="Описание бота на выбранном языке" oninput="mgCount()" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Краткое описание — в профиле и при пересылке <span id="mg-short-cnt" style="float:right;color:var(--hint)"></span></label><input id="mg-short" type="text" maxlength="120" placeholder="Краткое описание" class="inp" oninput="mgCount()"></div>
     <div class="field-err" id="mg-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-multigeo')" style="flex:1 1 auto">Отмена</button>
-      <button class="btn btn-p" onclick="submitMultigeoSet()" style="flex:2">💾 Сохранить</button>
+      <button class="btn btn-p" id="mg-save" onclick="submitMultigeoSet()" style="flex:2">💾 Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: перевод профиля на языки -->
+<div class="mbg" id="mo-mg-translate" onclick="if(event.target===this)closeModal('mo-mg-translate')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-mg-translate')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">🪄 Перевести профиль</div>
+    <div id="mgtStep1">
+      <div class="field"><label>С какого языка</label><select id="mgt-src" class="sel"></select></div>
+      <div class="field"><label>На какие языки <span id="mgt-cnt" style="float:right;color:var(--hint)"></span></label>
+        <div id="mgt-groups" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+        <div id="mgt-langs" style="max-height:200px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:6px;-webkit-overflow-scrolling:touch"></div>
+      </div>
+      <label class="chk-row" style="font-size:13px;display:block;margin:6px 0"><input type="checkbox" id="mgt-name" style="vertical-align:middle"> Переводить и имя бота (обычно имя — бренд, его оставляют как есть)</label>
+      <div class="field-err" id="mgt-err"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-d" onclick="closeModal('mo-mg-translate')" style="flex:1 1 auto">Отмена</button>
+        <button class="btn btn-p" id="mgt-go" onclick="mgRunTranslate()" style="flex:2">🪄 Подготовить черновики</button>
+      </div>
+    </div>
+    <div id="mgtStep2" style="display:none">
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Это черновики — в Telegram пока ничего не записано. Поправьте, что нужно, и сохраните.</div>
+      <div id="mgt-drafts" style="max-height:50vh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
+      <div class="field-err" id="mgt-err2"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-d" onclick="mgTranslateBack()" style="flex:1 1 auto">← Назад</button>
+        <button class="btn btn-p" id="mgt-apply" onclick="mgApplyDrafts()" style="flex:2">💾 Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: перенос языковых профилей на другие боты -->
+<div class="mbg" id="mo-mg-copy" onclick="if(event.target===this)closeModal('mo-mg-copy')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-mg-copy')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">📤 Перенести на другие боты</div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Выбранные языковые профили этого бота запишутся выбранным ботам. Идёт операцией: прогресс и журнал — в «Операциях», там же откат.</div>
+    <div class="field"><label>Какие языки</label><div id="mgc-langs" style="display:flex;flex-wrap:wrap;gap:6px"></div></div>
+    <div class="field"><label>На какие боты <span id="mgc-cnt" style="float:right;color:var(--hint)"></span></label>
+      <label class="chk-row" style="font-size:13px;display:block;margin-bottom:6px"><input type="checkbox" id="mgc-all" onchange="mgCopyAll(this.checked)" style="vertical-align:middle"> Выбрать все</label>
+      <div id="mgc-bots" style="max-height:200px;overflow-y:auto;border:1px solid var(--border-input);border-radius:10px;padding:8px"></div>
+    </div>
+    <div class="field-err" id="mgc-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-mg-copy')" style="flex:1 1 auto">Отмена</button>
+      <button class="btn btn-p" id="mgc-go" onclick="mgRunCopy()" style="flex:2">📤 Перенести</button>
     </div>
   </div>
 </div>
@@ -29258,90 +29317,340 @@ async function exportCompliance() {
   }
 }
 
-// ── Multigeo ────────────────────────────────────────────
+// ── Multigeo («Гео-сеть» → «Языки бота») ────────────────
+// Список языков, их группы и пределы длины приходят С СЕРВЕРА
+// (services/bot_localization). Своего списка экран не держит: раньше их было
+// три разных, и профиль на польском или турецком, заданный в боте, здесь не
+// показывался вовсе.
+let MG_DATA = {profiles:[], languages:[], groups:[], limits:{name:64,description:512,short_description:120}};
+let MG_BOTS = [];
+let MG_TSEL = new Set();
+let MG_DRAFTS = [];
+let MG_EDIT_EXISTING = false;
+function mgBotId() { return (document.getElementById('mg-bot-sel')||{}).value || ''; }
+function mgLangLabel(code) {
+  if (!code || code==='default') return '🌐 По умолчанию';
+  const l = (MG_DATA.languages||[]).find(x=>x.code===code);
+  return l ? `${l.flag} ${l.name}` : String(code).toUpperCase();
+}
+function mgProfile(code) {
+  return (MG_DATA.profiles||[]).find(p=>p.lang===(code||'default')) || null;
+}
 async function openMultigeo() {
   push('s-multigeo');
   const sel = document.getElementById('mg-bot-sel');
   txt('mgProfiles','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('mgSummary','');
   try {
     const d = await api('/api/miniapp/bots');
-    const bots = d.bots||[];
-    if (!bots.length) {
+    MG_BOTS = d.bots||[];
+    if (!MG_BOTS.length) {
       sel.innerHTML='<option value="">Нет ботов</option>';
-      txt('mgProfiles', empty('🤖','Нет ботов','Добавьте бота в разделе Боты'));
+      txt('mgProfiles', empty('🤖','Нет ботов','Добавьте бота в разделе «Боты»'));
       return;
     }
-    sel.innerHTML=bots.map(b=>`<option value="${b.bot_id}">@${esc(b.username||'')} ${esc(b.first_name||'')}</option>`).join('');
+    const keep = sel.value;
+    sel.innerHTML=MG_BOTS.map(b=>`<option value="${b.bot_id}">@${esc(b.username||'')} ${esc(b.first_name||'')}</option>`).join('');
+    if (keep && MG_BOTS.some(b=>String(b.bot_id)===keep)) sel.value = keep;
     await loadMultigeo();
   } catch(e) {
     txt('mgProfiles', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openMultigeo')}));
   }
 }
 async function loadMultigeo() {
-  const botId = document.getElementById('mg-bot-sel').value;
+  const botId = mgBotId();
   if (!botId) return;
   txt('mgProfiles','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api(`/api/miniapp/bot/${botId}/multigeo`);
-    const profiles = d.profiles||[];
-    const langNames = {default:'🌐 По умолчанию',ru:'🇷🇺 Русский',en:'🇬🇧 English',de:'🇩🇪 Deutsch',fr:'🇫🇷 Français',es:'🇪🇸 Español',it:'🇮🇹 Italiano',uk:'🇺🇦 Українська',pt:'🇧🇷 Português',zh:'🇨🇳 中文'};
-    if (!profiles.length) { txt('mgProfiles', empty('🌍','Профилей нет','Нажмите ✏️ Изменить, чтобы добавить')); return; }
-    txt('mgProfiles', profiles.map(p=>`
-      <div class="row">
-        <div class="row-ico" style="background:var(--bg-purple-16)">🌍</div>
-        <div class="row-body">
-          <div class="row-name">${langNames[p.lang]||p.lang}</div>
-          ${p.name?`<div class="row-val">📛 ${esc(p.name)}</div>`:''}
-          ${p.description?`<div class="row-val">📝 ${esc(p.description.slice(0,80))}${p.description.length>80?'…':''}</div>`:''}
-          ${p.short_description?`<div class="row-val">💬 ${esc(p.short_description)}</div>`:''}
-        </div>
-        <div class="row-right">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="openMultigeoSetModal('${p.lang}','${escJs(p.name||'')}','${escJs(p.description||'')}','${escJs(p.short_description||'')}')" aria-label="Изменить">✏️</button>
-        </div>
-      </div>
-    `).join(''));
+    MG_DATA = {profiles: d.profiles||[], languages: d.languages||[], groups: d.groups||[],
+               limits: d.limits||MG_DATA.limits};
+    mgRender();
   } catch(e) {
     txt('mgProfiles', empty('⚠️','Ошибка загрузки',errRu(e), {label:'↺ Повторить',fn:retryCall('loadMultigeo')}));
   }
 }
-function openMultigeoSetModal(lang='', name='', desc='', short='') {
-  document.getElementById('mg-lang').value = lang==='default'?'':lang;
-  document.getElementById('mg-name').value = name;
-  document.getElementById('mg-desc').value = desc;
-  document.getElementById('mg-short').value = short;
+function mgRender() {
+  const profiles = MG_DATA.profiles||[];
+  const own = profiles.filter(p=>p.lang!=='default');
+  const total = (MG_DATA.languages||[]).length;
+  const covered = own.filter(p=>(MG_DATA.languages||[]).some(l=>l.code===p.lang)).length;
+  const def = mgProfile('default');
+  const warn = def && def.name ? '' :
+    '<div style="font-size:12px;color:var(--orange,#f0a020);margin-top:4px">⚠️ У профиля по умолчанию нет имени — заполните его первым.</div>';
+  txt('mgSummary', `<div style="font-size:13px">Языков со своим профилем: <b>${covered}</b>${total?` из ${total}`:''}${own.length>covered?` (и ещё ${own.length-covered} вне списка)`:''}</div>${warn}`);
+  if (!profiles.length) {
+    txt('mgProfiles', empty('🌍','Профилей пока нет','Начните с профиля по умолчанию — его увидят все языки без своего профиля',
+      {label:'✏️ Заполнить', fn:"openMultigeoSetModal('default')"}));
+    return;
+  }
+  const row = p => {
+    const isDef = p.lang==='default';
+    const lim = MG_DATA.limits||{};
+    const parts = [];
+    parts.push(p.name ? `<div class="row-val">📛 ${esc(p.name)}</div>` : `<div class="row-val" style="color:var(--hint)">📛 имя — как по умолчанию</div>`);
+    if (p.description) parts.push(`<div class="row-val">📝 ${esc(p.description.slice(0,90))}${p.description.length>90?'…':''} <span style="color:var(--hint)">${p.description.length}/${lim.description||512}</span></div>`);
+    if (p.short_description) parts.push(`<div class="row-val">💬 ${esc(p.short_description)}</div>`);
+    return `
+      <div class="row tap" onclick="openMultigeoSetModal('${escJs(p.lang)}')" role="button" tabindex="0">
+        <div class="row-ico" style="background:var(--bg-purple-16)">${isDef?'🌐':'🗣'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(mgLangLabel(p.lang))}</div>
+          ${parts.join('')}
+        </div>
+        ${isDef?'<span class="chev">›</span>':`<div class="row-right" style="flex:0 0 auto"><button class="btn btn-s" style="padding:5px 9px;font-size:12px;width:auto;min-width:0" onclick="event.stopPropagation();mgReset('${escJs(p.lang)}')" aria-label="Убрать язык">🗑</button></div>`}
+      </div>`;
+  };
+  const missing = (MG_DATA.languages||[]).filter(l=>!mgProfile(l.code));
+  const chips = missing.length ? `
+    <div style="padding:10px 12px 6px;font-size:12px;color:var(--hint)">Без своего профиля (видят профиль по умолчанию) — нажмите, чтобы добавить:</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px">${missing.map(l=>
+      `<span class="chip" style="flex:0 0 auto" onclick="openMultigeoSetModal('${escJs(l.code)}')">${l.flag} ${esc(l.name)}</span>`).join('')}</div>` : '';
+  txt('mgProfiles', profiles.map(row).join('') + chips);
+}
+function mgFillLangSelect(selected, lockToSelected) {
+  const sel = document.getElementById('mg-lang');
+  const opts = [{code:'', label:'🌐 По умолчанию (все языки)'}]
+    .concat((MG_DATA.languages||[]).map(l=>({code:l.code, label:`${l.flag} ${l.name}${mgProfile(l.code)?' ✓':''}`})));
+  // Язык, которого нет в списке (настроен раньше, например вьетнамский), тоже
+  // правится — добавляем его отдельной строкой.
+  if (selected && !opts.some(o=>o.code===selected)) opts.push({code:selected, label:selected.toUpperCase()});
+  sel.innerHTML = opts.map(o=>`<option value="${esc(o.code)}">${esc(o.label)}</option>`).join('');
+  sel.value = selected||'';
+  sel.disabled = !!lockToSelected;
+}
+function mgLangPicked() {
+  const code = document.getElementById('mg-lang').value;
+  const p = mgProfile(code||'default');
+  MG_EDIT_EXISTING = !!p;
+  document.getElementById('mg-name').value = p ? (p.name||'') : '';
+  document.getElementById('mg-desc').value = p ? (p.description||'') : '';
+  document.getElementById('mg-short').value = p ? (p.short_description||'') : '';
+  const isDef = !code;
+  document.getElementById('mg-hint').textContent = isDef
+    ? 'Профиль по умолчанию видят все, у чьего языка нет своего профиля. Имя обязательно.'
+    : (p ? 'Пустое поле сбросится — для него будет показан профиль по умолчанию.'
+         : 'Заполните то, что должно отличаться; пустые поля возьмутся из профиля по умолчанию.');
+  if (!p && !isDef) {
+    const def = mgProfile('default');
+    document.getElementById('mg-name').placeholder = def&&def.name ? `Как по умолчанию: ${def.name}` : 'Имя на выбранном языке';
+  } else {
+    document.getElementById('mg-name').placeholder = 'Имя на выбранном языке';
+  }
   document.getElementById('mg-err').textContent='';
+  mgCount();
+}
+function mgCount() {
+  const lim = MG_DATA.limits||{};
+  [['mg-name','mg-name-cnt',lim.name||64],['mg-desc','mg-desc-cnt',lim.description||512],['mg-short','mg-short-cnt',lim.short_description||120]]
+    .forEach(([i,c,m])=>{ const n=(document.getElementById(i).value||'').length; const el=document.getElementById(c);
+      el.textContent=`${n}/${m}`; el.style.color = n>m*0.9 ? 'var(--orange,#f0a020)' : 'var(--hint)'; });
+}
+function openMultigeoSetModal(lang='') {
+  if (!mgBotId()) { toast('Сначала выберите бота'); return; }
+  const code = (lang==='default') ? '' : (lang||'');
+  // Правка конкретного языка — язык закреплён; «Добавить язык» — первый
+  // незаполненный язык из списка, а не пустая форма поверх профиля по умолчанию.
+  let pick = code;
+  if (lang==='' ) {
+    const first = (MG_DATA.languages||[]).find(l=>!mgProfile(l.code));
+    pick = mgProfile('default') ? (first ? first.code : '') : '';
+  }
+  mgFillLangSelect(pick, lang!=='' );
+  document.getElementById('mg-title').textContent = lang!=='' && mgProfile(lang||'default') ? '✏️ Изменить профиль' : '➕ Профиль на языке';
+  mgLangPicked();
   showModal('mo-multigeo');
 }
 async function submitMultigeoSet() {
-  const botId = document.getElementById('mg-bot-sel').value;
+  const botId = mgBotId();
   const errEl = document.getElementById('mg-err');
   if (!botId) { errEl.textContent='Выберите бота'; return; }
+  const code = document.getElementById('mg-lang').value||'';
   const body = {
-    lang: document.getElementById('mg-lang').value||'default',
+    lang: code||'default',
     name: document.getElementById('mg-name').value.trim(),
     description: document.getElementById('mg-desc').value.trim(),
     short_description: document.getElementById('mg-short').value.trim(),
   };
-  if (!body.name && !body.description && !body.short_description) { errEl.textContent='Заполните хотя бы одно поле'; return; }
+  if (!code && !body.name) { errEl.textContent='У профиля по умолчанию должно быть имя'; return; }
+  if (!body.name && !body.description && !body.short_description) {
+    errEl.textContent = MG_EDIT_EXISTING ? 'Все поля пусты — чтобы убрать язык, нажмите 🗑 в списке' : 'Заполните хотя бы одно поле';
+    return;
+  }
+  // У существующего профиля пустое поле означает «сбросить» — форма шлёт все
+  // три поля с отметкой replace. У нового языка пустые поля просто не трогаем.
+  if (MG_EDIT_EXISTING) body.replace = true;
   errEl.textContent='';
+  const btn = document.getElementById('mg-save'); btn.disabled = true;
   try {
     const r = await api(`/api/miniapp/bot/${botId}/multigeo`,{method:'POST',body:JSON.stringify(body)});
     if (!r.ok) {
-      // Сервер перечисляет НЕ сохранённые поля своими ключами (name,
-      // description, short_description) — владельцу они ничего не говорят, а
-      // по-английски он не читает. Переводим в названия полей формы.
-      const FLD = {name:'название', description:'описание',
-                   short_description:'короткое описание'};
-      const bad = (r.errors||[]).map(f=>FLD[f]||f);
-      errEl.textContent = bad.length
-        ? 'Телеграм не принял: ' + bad.join(', ')
-        : 'Телеграм не принял профиль';
+      const FLD = {name:'имя', description:'описание', short_description:'краткое описание'};
+      const rs = r.reasons||{};
+      const bad = (r.errors||[]).map(f=>(FLD[f]||f) + (rs[f]?` — ${rs[f]}`:''));
+      errEl.textContent = bad.length ? 'Telegram не принял: ' + bad.join('; ') : 'Telegram не принял профиль';
+      if ((r.saved||[]).length) loadMultigeo();
       return;
     }
-    toast('✅ Профиль обновлён');
+    toast('✅ Профиль сохранён: ' + mgLangLabel(code));
     closeModal('mo-multigeo');
     loadMultigeo();
   } catch(e) { errEl.textContent=errRu(e); }
+  finally { btn.disabled = false; }
+}
+async function mgReset(code) {
+  const botId = mgBotId();
+  if (!botId || !code || code==='default') return;
+  if (!await askConfirm(`Убрать профиль «${mgLangLabel(code)}»?\nЛюди с этим языком будут видеть профиль по умолчанию.`)) return;
+  try {
+    const r = await api(`/api/miniapp/bot/${botId}/multigeo/${encodeURIComponent(code)}`, {method:'DELETE'});
+    if (r.ok) toast('🗑 Язык убран: ' + mgLangLabel(code));
+    else toast('⚠️ Telegram убрал не всё: ' + Object.values(r.reasons||{}).join('; '));
+    loadMultigeo();
+  } catch(e) { toast('⚠️ '+errRu(e)); }
+}
+
+// Перевод: шаг 1 — выбор языков, шаг 2 — черновики с правкой.
+function openMgTranslate() {
+  if (!mgBotId()) { toast('Сначала выберите бота'); return; }
+  const filled = (MG_DATA.profiles||[]);
+  if (!filled.length) { toast('Сначала заполните профиль по умолчанию — его и будем переводить'); return; }
+  const src = document.getElementById('mgt-src');
+  src.innerHTML = filled.map(p=>`<option value="${esc(p.lang)}">${esc(mgLangLabel(p.lang))}</option>`).join('');
+  src.value = mgProfile('default') ? 'default' : filled[0].lang;
+  // По умолчанию отмечены языки без своего профиля — их и не хватает.
+  MG_TSEL = new Set((MG_DATA.languages||[]).filter(l=>!mgProfile(l.code)).map(l=>l.code));
+  document.getElementById('mgt-groups').innerHTML =
+    (MG_DATA.groups||[]).map(g=>`<span class="chip" style="flex:0 0 auto" onclick="mgPickGroup('${escJs(g.key)}')">${esc(g.label)}</span>`).join('')
+    + `<span class="chip" style="flex:0 0 auto" onclick="mgPickGroup('missing')">Без профиля</span>`
+    + `<span class="chip" style="flex:0 0 auto" onclick="mgPickGroup('none')">Снять все</span>`;
+  document.getElementById('mgt-name').checked = false;
+  document.getElementById('mgt-err').textContent='';
+  document.getElementById('mgtStep1').style.display='';
+  document.getElementById('mgtStep2').style.display='none';
+  mgRenderTLangs();
+  showModal('mo-mg-translate');
+}
+function mgRenderTLangs() {
+  document.getElementById('mgt-langs').innerHTML = (MG_DATA.languages||[]).map(l=>{
+    const on = MG_TSEL.has(l.code);
+    return `<span class="chip${on?' on':''}" style="flex:0 0 auto${on?';background:var(--accent);color:#fff':''}" onclick="mgToggleTLang('${escJs(l.code)}')">${l.flag} ${esc(l.name)}${mgProfile(l.code)?' ✓':''}</span>`;
+  }).join('');
+  document.getElementById('mgt-cnt').textContent = `выбрано: ${MG_TSEL.size}`;
+}
+function mgToggleTLang(code) { MG_TSEL.has(code) ? MG_TSEL.delete(code) : MG_TSEL.add(code); mgRenderTLangs(); }
+function mgPickGroup(key) {
+  if (key==='none') MG_TSEL = new Set();
+  else if (key==='missing') MG_TSEL = new Set((MG_DATA.languages||[]).filter(l=>!mgProfile(l.code)).map(l=>l.code));
+  else { const g=(MG_DATA.groups||[]).find(x=>x.key===key); (g&&g.codes||[]).forEach(c=>MG_TSEL.add(c)); }
+  mgRenderTLangs();
+}
+async function mgRunTranslate() {
+  const botId = mgBotId();
+  const err = document.getElementById('mgt-err');
+  const src = document.getElementById('mgt-src').value;
+  const targets = [...MG_TSEL].filter(c=>c!==src);
+  if (!targets.length) { err.textContent='Выберите хотя бы один язык'; return; }
+  if (targets.length>30) { err.textContent='За один раз — не больше 30 языков'; return; }
+  const filled = targets.filter(c=>mgProfile(c));
+  if (filled.length && !await askConfirm(`У ${filled.length} из выбранных языков уже есть свой профиль. Черновик его заменит, если вы его сохраните. Продолжить?`)) return;
+  err.textContent='';
+  const btn = document.getElementById('mgt-go'); btn.disabled = true; btn.textContent='⏳ ИИ переводит…';
+  try {
+    const r = await api(`/api/miniapp/bot/${botId}/multigeo/translate`, {method:'POST', body:JSON.stringify({
+      source_lang: src, target_langs: targets, translate_name: document.getElementById('mgt-name').checked})});
+    MG_DRAFTS = Object.entries(r.drafts||{}).map(([lang,f])=>({lang, ...f}));
+    const failed = (r.failed||[]).map(mgLangLabel);
+    mgRenderDrafts(failed);
+  } catch(e) { err.textContent = errRu(e); }
+  finally { btn.disabled = false; btn.textContent='🪄 Подготовить черновики'; }
+}
+function mgRenderDrafts(failed) {
+  const lim = MG_DATA.limits||{};
+  const inp = 'width:100%;padding:8px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;margin-top:4px';
+  document.getElementById('mgt-drafts').innerHTML = (failed&&failed.length
+      ? `<div style="font-size:12px;color:var(--orange,#f0a020);margin-bottom:8px">ИИ не справился: ${esc(failed.join(', '))} — повторите позже или заполните вручную.</div>` : '')
+    + MG_DRAFTS.map((d,i)=>`
+      <div style="border:1px solid var(--border-input);border-radius:10px;padding:8px;margin-bottom:8px">
+        <label class="chk-row" style="font-weight:600;display:block"><input type="checkbox" id="mgd-on-${i}" checked style="vertical-align:middle"> ${esc(mgLangLabel(d.lang))}</label>
+        <input id="mgd-name-${i}" maxlength="${lim.name||64}" value="${esc(d.name||'')}" placeholder="Имя" style="${inp}">
+        <textarea id="mgd-desc-${i}" maxlength="${lim.description||512}" rows="3" placeholder="Описание" style="${inp};resize:vertical">${esc(d.description||'')}</textarea>
+        <input id="mgd-short-${i}" maxlength="${lim.short_description||120}" value="${esc(d.short_description||'')}" placeholder="Краткое описание" style="${inp}">
+      </div>`).join('');
+  document.getElementById('mgt-apply').textContent = `💾 Сохранить (${MG_DRAFTS.length})`;
+  document.getElementById('mgt-err2').textContent='';
+  document.getElementById('mgtStep1').style.display='none';
+  document.getElementById('mgtStep2').style.display='';
+}
+function mgTranslateBack() {
+  document.getElementById('mgtStep1').style.display='';
+  document.getElementById('mgtStep2').style.display='none';
+}
+async function mgApplyDrafts() {
+  const botId = mgBotId();
+  const err = document.getElementById('mgt-err2');
+  const profiles = MG_DRAFTS.map((d,i)=>document.getElementById(`mgd-on-${i}`).checked ? {
+    lang: d.lang,
+    name: document.getElementById(`mgd-name-${i}`).value.trim(),
+    description: document.getElementById(`mgd-desc-${i}`).value.trim(),
+    short_description: document.getElementById(`mgd-short-${i}`).value.trim(),
+  } : null).filter(Boolean);
+  if (!profiles.length) { err.textContent='Отметьте хотя бы один язык'; return; }
+  const btn = document.getElementById('mgt-apply'); btn.disabled = true; btn.textContent='⏳ Сохраняю…';
+  try {
+    const r = await api(`/api/miniapp/bot/${botId}/multigeo/apply`, {method:'POST', body:JSON.stringify({profiles})});
+    const bad = (r.results||[]).filter(x=>!x.ok);
+    if (!bad.length) {
+      toast(`✅ Сохранено языков: ${r.saved}`);
+      closeModal('mo-mg-translate');
+    } else {
+      err.textContent = `Сохранено ${r.saved} из ${r.total}. Не принято: ` +
+        bad.map(x=>`${x.label} (${Object.values(x.errors||{}).join(', ')})`).join('; ');
+    }
+    loadMultigeo();
+  } catch(e) { err.textContent = errRu(e); }
+  finally { btn.disabled = false; btn.textContent = `💾 Сохранить (${MG_DRAFTS.length})`; }
+}
+
+// Перенос языковых профилей на другие боты — массовой операцией с откатом.
+function openMgCopy() {
+  const botId = mgBotId();
+  if (!botId) { toast('Сначала выберите бота'); return; }
+  const filled = MG_DATA.profiles||[];
+  if (!filled.length) { toast('У этого бота нет профилей — переносить нечего'); return; }
+  const others = MG_BOTS.filter(b=>String(b.bot_id)!==String(botId));
+  if (!others.length) { toast('Других ботов нет — добавьте их в разделе «Боты»'); return; }
+  document.getElementById('mgc-langs').innerHTML = filled.map(p=>
+    `<label class="chk-row" style="font-size:13px;flex:0 0 auto"><input type="checkbox" class="mgc-lang" value="${esc(p.lang)}" checked style="vertical-align:middle"> ${esc(mgLangLabel(p.lang))}</label>`).join('');
+  document.getElementById('mgc-bots').innerHTML = others.map(b=>
+    `<label class="chk-row" style="font-size:13px;display:block"><input type="checkbox" class="mgc-bot" value="${b.bot_id}" onchange="mgCopyCount()" style="vertical-align:middle"> @${esc(b.username||'')} ${esc(b.first_name||'')}</label>`).join('');
+  document.getElementById('mgc-all').checked = false;
+  document.getElementById('mgc-err').textContent='';
+  mgCopyCount();
+  showModal('mo-mg-copy');
+}
+function mgCopyAll(on) { document.querySelectorAll('.mgc-bot').forEach(c=>c.checked=on); mgCopyCount(); }
+function mgCopyCount() {
+  document.getElementById('mgc-cnt').textContent = `выбрано: ${document.querySelectorAll('.mgc-bot:checked').length}`;
+}
+async function mgRunCopy() {
+  const botId = mgBotId();
+  const err = document.getElementById('mgc-err');
+  const langs = [...document.querySelectorAll('.mgc-lang:checked')].map(c=>c.value);
+  const bots = [...document.querySelectorAll('.mgc-bot:checked')].map(c=>Number(c.value));
+  if (!langs.length) { err.textContent='Отметьте хотя бы один язык'; return; }
+  if (!bots.length) { err.textContent='Отметьте хотя бы один бот'; return; }
+  if (!await askConfirm(`Записать ${langs.length} языковых профилей ботам: ${bots.length} шт.?\nТекущие профили этих языков у них заменятся. Откат — в карточке операции.`)) return;
+  err.textContent='';
+  const btn = document.getElementById('mgc-go'); btn.disabled = true;
+  try {
+    const r = await api(`/api/miniapp/bot/${botId}/multigeo/copy`, {method:'POST', body:JSON.stringify({langs, bot_ids: bots})});
+    closeModal('mo-mg-copy');
+    const sk = (r.skipped||[]).length ? ` Пропущено (пустые): ${r.skipped.join(', ')}.` : '';
+    toast(`📤 Запущено операций: ${(r.ops||[]).length} · ботов: ${r.bots}.${sk}`);
+    if ((r.ops||[]).length===1) { try { openOpDetail(r.ops[0].op_id); } catch(_) {} }
+  } catch(e) { err.textContent = errRu(e); }
+  finally { btn.disabled = false; }
 }
 
 // ── Content Cloner ─────────────────────────────────────
