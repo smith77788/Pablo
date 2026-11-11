@@ -5758,37 +5758,107 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌿 Агент роста</div>
   </div>
+  <div class="seg" id="growthTabs" role="tablist" aria-label="Разделы агента роста">
+    <div class="seg-opt on" data-v="promo" onclick="growthTab('promo')" role="tab" tabindex="0">Продвижение</div>
+    <div class="seg-opt" data-v="comment" onclick="growthTab('comment')" role="tab" tabindex="0">Комментинг</div>
+    <div class="seg-opt" data-v="history" onclick="growthTab('history')" role="tab" tabindex="0">История</div>
+  </div>
   <div class="sub-sb">
-    <div class="sec">Продвижение в нише</div>
-    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Агент найдёт группы по нише, вступит и опубликует ваш текст (до 5 групп за запуск, с паузами для безопасности).</div>
-    <div style="padding:8px 16px">
-      <div class="field"><label>Ниша / тематика</label><input type="text" id="growthNiche" placeholder="например: крипта, маркетинг, фитнес"></div>
-      <div class="field"><label>Гео / город (опционально)</label><input type="text" id="growthGeo" placeholder="например: Москва, СПб"></div>
-      <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
-      <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="growthAccCount" min="1" max="10" value="3"></div>
-      <div class="field-err" id="growthErr"></div>
-      <button class="btn btn-p" data-main id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
-    </div>
-    <div class="sec" style="margin-top:14px">💬 ИИ-комментинг</div>
-    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Под постами указанных каналов бот оставит КОНТЕКСТНЫЙ комментарий, сгенерированный ИИ по тексту поста (нужны ключи ИИ). Естественно, по теме, на языке поста.</div>
-    <div style="padding:8px 16px">
-      <div class="field"><label>Каналы (по одному на строку или через запятую)</label><textarea id="aicChannels" rows="4" placeholder="@channel1&#10;@channel2" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
-      <div class="field"><label>Тематика (опционально, контекст для ИИ)</label><input type="text" id="aicNiche" placeholder="например: крипта, фитнес"></div>
-      <div class="field"><label>Тон</label>
-        <select id="aicTone" class="sel">
-          <option value="neutral">Нейтральный</option>
-          <option value="friendly">Дружелюбный</option>
-          <option value="expert">Экспертный</option>
-          <option value="question">Вопрос по теме</option>
-          <option value="support">Поддержка</option>
-        </select>
+    <!-- ── Продвижение в нише ── -->
+    <div id="growthPanePromo">
+      <div style="padding:4px 16px 8px;color:var(--hint);font-size:12px;line-height:1.45">Агент подберёт поисковые запросы под нишу и город, найдёт открытые группы, вступит в них с ваших аккаунтов и опубликует текст. Между действиями — долгие паузы, аккаунты под риском пропускаются.</div>
+      <div style="padding:0 16px 8px">
+        <div class="field"><label>Ниша / тематика</label><input type="text" id="growthNiche" maxlength="200" placeholder="например: фитнес, ремонт квартир, крипта" oninput="growthUpdateSummary()"></div>
+        <div class="field"><label>Город / регион (необязательно)</label><input type="text" id="growthGeo" maxlength="60" placeholder="например: Москва" oninput="growthUpdateSummary()"><div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">Если указать, ищем группы именно этого города.</div></div>
+        <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" maxlength="4096" placeholder="Текст, который будет опубликован в группах…" oninput="growthUpdateSummary()" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea>
+          <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4"><span id="growthPromoLen">0</span>/4096 · Чтобы тексты в группах не совпадали, пишите варианты так: <code>{Привет|Здравствуйте}</code> — каждая группа получит свой.</div></div>
+        <div class="field"><label>Сколько групп за запуск</label>
+          <div class="seg" id="growthGroupsSeg" style="margin:4px 0">
+            <div class="seg-opt" data-v="3" onclick="growthSeg(this)">3</div>
+            <div class="seg-opt on" data-v="5" onclick="growthSeg(this)">5</div>
+            <div class="seg-opt" data-v="7" onclick="growthSeg(this)">7</div>
+            <div class="seg-opt" data-v="10" onclick="growthSeg(this)">10</div>
+          </div></div>
+        <div class="field"><label>Темп</label>
+          <div class="seg" id="growthPaceSeg" style="margin:4px 0">
+            <div class="seg-opt on" data-v="standard" onclick="growthSeg(this)">Стандартный</div>
+            <div class="seg-opt" data-v="careful" onclick="growthSeg(this)">🛡 Бережный</div>
+          </div>
+          <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4" id="growthPaceHint"></div></div>
+        <div class="field"><label>Аккаунтов задействовать (1–10)</label><input type="number" id="growthAccCount" min="1" max="10" value="3" oninput="growthUpdateSummary()"></div>
+        <details id="growthMore" style="margin:2px 0 10px">
+          <summary style="font-size:13px;font-weight:600;cursor:pointer;padding:8px 0">⚙️ Тонкая настройка поиска</summary>
+          <div class="field"><label>Свои поисковые запросы (необязательно)</label><textarea id="growthKeywords" rows="3" placeholder="фитнес москва&#10;тренировки чат" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea><div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">По одному на строку. Если пусто — запросы подберёт ИИ.</div></div>
+          <div style="display:flex;gap:10px">
+            <div class="field" style="flex:1"><label>Участников от</label><input type="number" id="growthMinMembers" min="0" value="50"></div>
+            <div class="field" style="flex:1"><label>Участников до</label><input type="number" id="growthMaxMembers" min="0" value="0"></div>
+          </div>
+          <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4" style="margin-top:-6px">«До» = 0 — без верхней границы. Крупные чаты строже модерируют рекламу.</div>
+          <div class="field" style="margin-top:8px"><label>Пропускать группы со словами в названии</label><input type="text" id="growthExclude" placeholder="например: барахолка, вакансии, обмен"><div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">Через запятую.</div></div>
+        </details>
+        <div class="card" id="growthSummary" style="font-size:13px;line-height:1.5;margin:0 0 10px"></div>
+        <div class="field-err" id="growthErr"></div>
+        <button class="btn" id="growthPreviewBtn" onclick="submitGrowth(true)" style="width:100%;margin-bottom:8px">🔍 Сначала посмотреть группы</button>
+        <button class="btn btn-p" data-main id="growthBtn" onclick="submitGrowth(false)" style="width:100%">🌿 Запустить продвижение</button>
+        <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4" style="text-align:center;margin-top:6px">Просмотр ничего не публикует: список групп появится в истории.</div>
       </div>
-      <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="aicAccCount" min="1" max="10" value="3"></div>
-      <div class="field-err" id="aicErr"></div>
-      <button class="btn btn-p" data-main id="aicBtn" onclick="submitAiComment()" style="width:100%">💬 Запустить ИИ-комментинг</button>
     </div>
-    <div class="sec" style="margin-top:8px">История</div>
-    <div class="lst" id="growthHistory"></div>
+    <!-- ── ИИ-комментинг ── -->
+    <div id="growthPaneComment" style="display:none">
+      <div style="padding:4px 16px 8px;color:var(--hint);font-size:12px;line-height:1.45">Под свежими постами каналов аккаунты оставят комментарий, который ИИ напишет по тексту поста: по теме и на языке поста. Нужны ключи ИИ. Под одним постом мы не пишем дважды.</div>
+      <div style="padding:0 16px 8px">
+        <div class="field"><label>Каналы</label><textarea id="aicChannels" rows="4" placeholder="@channel1&#10;https://t.me/channel2" oninput="aicUpdateSummary()" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea><div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">По одному на строку или через запятую, до 50. У каналов должны быть включены комментарии.</div></div>
+        <div class="field"><label>Тематика (необязательно, подсказка для ИИ)</label><input type="text" id="aicNiche" maxlength="200" placeholder="например: крипта, фитнес"></div>
+        <div class="field"><label>Тон</label>
+          <select id="aicTone" class="sel">
+            <option value="neutral">Нейтральный</option>
+            <option value="friendly">Дружелюбный</option>
+            <option value="expert">Экспертный</option>
+            <option value="question">Вопрос по теме</option>
+            <option value="support">Поддержка</option>
+          </select>
+        </div>
+        <div class="field"><label>Комментариев под канал</label>
+          <div class="seg" id="aicPostsSeg" style="margin:4px 0">
+            <div class="seg-opt on" data-v="1" onclick="growthSeg(this)">1</div>
+            <div class="seg-opt" data-v="2" onclick="growthSeg(this)">2</div>
+            <div class="seg-opt" data-v="3" onclick="growthSeg(this)">3</div>
+          </div><div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.4">Каждый — под своим постом.</div></div>
+        <div class="field"><label>Какие посты</label>
+          <div class="seg" id="aicPickSeg" style="margin:4px 0">
+            <div class="seg-opt on" data-v="random" onclick="growthSeg(this)">Случайные из свежих</div>
+            <div class="seg-opt" data-v="latest" onclick="growthSeg(this)">Самые новые</div>
+          </div></div>
+        <div class="field"><label>Аккаунтов задействовать (1–10)</label><input type="number" id="aicAccCount" min="1" max="10" value="3" oninput="aicUpdateSummary()"></div>
+        <details id="aicMore" style="margin:2px 0 10px">
+          <summary style="font-size:13px;font-weight:600;cursor:pointer;padding:8px 0">⚙️ Дополнительно</summary>
+          <div class="field"><label>Длина</label>
+            <div class="seg" id="aicLenSeg" style="margin:4px 0">
+              <div class="seg-opt on" data-v="short" onclick="growthSeg(this)">Короткий</div>
+              <div class="seg-opt" data-v="medium" onclick="growthSeg(this)">Развёрнутый</div>
+            </div></div>
+          <div class="field"><label>Только посты не старше</label>
+            <select id="aicMaxAge" class="sel">
+              <option value="0">Любые свежие</option>
+              <option value="6">6 часов</option>
+              <option value="24">Суток</option>
+              <option value="72">3 дней</option>
+              <option value="168">Недели</option>
+            </select></div>
+          <div class="field"><label>Пожелание к стилю (необязательно)</label><input type="text" id="aicExtra" maxlength="300" placeholder="например: пиши на «ты», без смайликов"></div>
+          <label style="display:flex;gap:8px;align-items:center;font-size:14px;padding:6px 0"><input type="checkbox" id="aicJoin" checked> Вступать в обсуждение, если без этого нельзя писать</label>
+          <label style="display:flex;gap:8px;align-items:center;font-size:14px;padding:6px 0"><input type="checkbox" id="aicSkipDone" checked> Не писать под постом, где мы уже комментировали</label>
+        </details>
+        <div class="card" id="aicSummary" style="font-size:13px;line-height:1.5;margin:0 0 10px"></div>
+        <div class="field-err" id="aicErr"></div>
+        <button class="btn btn-p" data-main id="aicBtn" onclick="submitAiComment()" style="width:100%">💬 Запустить ИИ-комментинг</button>
+      </div>
+    </div>
+    <!-- ── История ── -->
+    <div id="growthPaneHistory" style="display:none">
+      <div class="sec">Запуски</div>
+      <div class="lst" id="growthHistory"></div>
+    </div>
   </div>
 </div>
 
@@ -18757,64 +18827,181 @@ async function openGrowthHub() {
   }
 }
 // ── Growth Agent ─────────────────────────────────────────
+// ── Агент роста: продвижение в нише + ИИ-комментинг ─────────────────────────
+// Настройки формы помнятся между заходами (localStorage): владелец запускает
+// одну и ту же нишу сериями, и вбивать всё заново — главный повод бросить.
+const GROWTH_FORM_KEY = 'growthForm.v2';
+const GROWTH_FIELDS = ['growthNiche','growthGeo','growthPromo','growthAccCount','growthKeywords',
+  'growthMinMembers','growthMaxMembers','growthExclude','aicChannels','aicNiche','aicTone',
+  'aicAccCount','aicMaxAge','aicExtra'];
+const GROWTH_SEGS = ['growthGroupsSeg','growthPaceSeg','aicPostsSeg','aicPickSeg','aicLenSeg'];
+const GROWTH_CHECKS = ['aicJoin','aicSkipDone'];
+// Паузы темпа в минутах — те же числа, что в growth_agent_settings.GROWTH_PACES.
+const GROWTH_PACE_MIN = {standard:{jp:[3,8], bw:[10,20]}, careful:{jp:[6,15], bw:[20,40]}};
+let _growthTab = 'promo';
+
+function _gv(id) { const e=document.getElementById(id); return e ? e.value : ''; }
+function growthSegVal(id) {
+  const on = document.querySelector('#'+id+' .seg-opt.on');
+  return on ? on.dataset.v : '';
+}
+function growthSeg(el) {
+  el.parentElement.querySelectorAll('.seg-opt').forEach(x=>x.classList.toggle('on', x===el));
+  growthUpdateSummary(); aicUpdateSummary();
+}
+function growthTab(t) {
+  _growthTab = t;
+  document.querySelectorAll('#growthTabs .seg-opt').forEach(x=>x.classList.toggle('on', x.dataset.v===t));
+  const show = {promo:'growthPanePromo', comment:'growthPaneComment', history:'growthPaneHistory'};
+  Object.entries(show).forEach(([k,id])=>{ const e=document.getElementById(id); if(e) e.style.display = k===t ? '' : 'none'; });
+  if (t==='history') loadGrowthHistory();
+}
+function _growthSave() {
+  try {
+    const st = {f:{}, s:{}, c:{}};
+    GROWTH_FIELDS.forEach(id=>{ st.f[id]=_gv(id); });
+    GROWTH_SEGS.forEach(id=>{ st.s[id]=growthSegVal(id); });
+    GROWTH_CHECKS.forEach(id=>{ const e=document.getElementById(id); if(e) st.c[id]=e.checked; });
+    localStorage.setItem(GROWTH_FORM_KEY, JSON.stringify(st));
+  } catch(e) { /* приватный режим — просто не помним */ }
+}
+function _growthRestore() {
+  let st = null;
+  try { st = JSON.parse(localStorage.getItem(GROWTH_FORM_KEY)||'null'); } catch(e) { st = null; }
+  if (!st) return;
+  Object.entries(st.f||{}).forEach(([id,v])=>{ const e=document.getElementById(id); if(e && v!=null && v!=='') e.value=v; });
+  Object.entries(st.s||{}).forEach(([id,v])=>{
+    document.querySelectorAll('#'+id+' .seg-opt').forEach(x=>x.classList.toggle('on', x.dataset.v===String(v)));
+  });
+  Object.entries(st.c||{}).forEach(([id,v])=>{ const e=document.getElementById(id); if(e) e.checked=!!v; });
+}
+function _growthEta(groups, pace) {
+  const p = GROWTH_PACE_MIN[pace] || GROWTH_PACE_MIN.standard;
+  const lo = groups*p.jp[0] + Math.max(0,groups-1)*p.bw[0];
+  const hi = groups*p.jp[1] + Math.max(0,groups-1)*p.bw[1];
+  const f = m => m>=90 ? (Math.round(m/6)/10).toString().replace('.',',')+' ч' : m+' мин';
+  return f(lo)+' – '+f(hi);
+}
+function _aicList() {
+  return _gv('aicChannels').split(/[\s,]+/).map(x=>x.trim()
+    .replace(/^https?:\/\/(www\.)?t(elegram)?\.me\//i,'').replace(/^@/,'').replace(/\/.*$/,''))
+    .filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);
+}
+function growthUpdateSummary() {
+  const len = _gv('growthPromo').length;
+  const l = document.getElementById('growthPromoLen'); if (l) l.textContent = num(len);
+  const groups = parseInt(growthSegVal('growthGroupsSeg'))||5;
+  const pace = growthSegVal('growthPaceSeg')||'standard';
+  const p = GROWTH_PACE_MIN[pace];
+  const ph = document.getElementById('growthPaceHint');
+  if (ph) ph.textContent = `Пауза после вступления ${p.jp[0]}–${p.jp[1]} мин, между группами ${p.bw[0]}–${p.bw[1]} мин.`
+    + (pace==='careful' ? ' Для новых и недавно прогретых аккаунтов.' : '');
+  const acc = Math.max(1, Math.min(10, parseInt(_gv('growthAccCount'))||3));
+  const niche = _gv('growthNiche').trim(), geo = _gv('growthGeo').trim();
+  const box = document.getElementById('growthSummary');
+  if (box) box.innerHTML = niche
+    ? `Найдём до <b>${groups}</b> ${plural(groups,'группы','групп','групп')} по теме «${esc(niche)}»${geo?` в регионе «${esc(geo)}»`:''}, `
+      + `вступим и опубликуем текст с ${num(acc)} ${plural(acc,'аккаунта','аккаунтов','аккаунтов')}. `
+      + `Займёт примерно <b>${_growthEta(groups,pace)}</b>. Группы, где вы уже публиковались, пропускаются.`
+    : 'Укажите нишу — здесь появится, что именно сделает агент.';
+  _growthSave();
+}
+function aicUpdateSummary() {
+  const list = _aicList();
+  const n = parseInt(growthSegVal('aicPostsSeg'))||1;
+  const acc = Math.max(1, Math.min(10, parseInt(_gv('aicAccCount'))||3));
+  const box = document.getElementById('aicSummary');
+  if (box) box.innerHTML = list.length
+    ? `${num(list.length)} ${plural(list.length,'канал','канала','каналов')} × до ${n} ${plural(n,'комментария','комментариев','комментариев')}, `
+      + `с ${num(acc)} ${plural(acc,'аккаунта','аккаунтов','аккаунтов')} по очереди. Пауза между каналами 20–45 сек.`
+    : 'Добавьте каналы — здесь появится, что именно будет сделано.';
+  _growthSave();
+}
 async function openGrowth() {
   push('s-growth');
-  const e=document.getElementById('growthErr'); if(e) e.textContent='';
+  ['growthErr','aicErr'].forEach(id=>{ const e=document.getElementById(id); if(e) e.textContent=''; });
+  _growthRestore();
+  growthUpdateSummary(); aicUpdateSummary();
+  growthTab(_growthTab);
+}
+async function loadGrowthHistory() {
   txt('growthHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     // Фильтр по типу считает сервер: раньше брали общую страницу очереди и
     // отбирали свои операции здесь — стоило другим вытеснить последнюю, и
-    // экран писал «истории нет», хотя она была.
-    const d = await api('/api/miniapp/operations?op_type=niche_growth_post&limit=10&offset=0');
+    // экран писал «истории нет», хотя она была. Комментинг запускается с
+    // этого же экрана, поэтому и в истории он свой.
+    const d = await api('/api/miniapp/operations?op_type=niche_growth_post,ai_comment&limit=20&offset=0');
     const ops = d.operations||[];
-    txt('growthHistory', ops.length ? ops.map(o=>`
+    txt('growthHistory', ops.length ? ops.map(o=>{
+      const isC = o.op_type==='ai_comment';
+      return `
       <div class="row tap" onclick="openOpDetail(${Number(o.id)})" role="button" tabindex="0">
-        <div class="row-ico" style="background:var(--bg-green-16)">🌿</div>
+        <div class="row-ico" style="background:var(--bg-green-16)">${isC?'💬':'🌿'}</div>
         <div class="row-body">
-          <div class="row-name">${esc(o.label||'Продвижение')}</div>
+          <div class="row-name">${esc(o.label||(isC?'ИИ-комментинг':'Продвижение'))}</div>
           <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)}</div>
         </div><span class="chev">›</span>
-      </div>
-    `).join('') : empty('🌿','Продвижений ещё не было','Запустите первое продвижение'));
+      </div>`;}).join('') : empty('🌿','Запусков ещё не было','Продвижение и комментинг появятся здесь'));
   } catch(e) {
-    txt('growthHistory', errHtml(errRu(e), 'openGrowth()'));
+    txt('growthHistory', errHtml(errRu(e), 'loadGrowthHistory()'));
   }
 }
-async function submitGrowth() {
+async function submitGrowth(dryRun) {
   const errEl=document.getElementById('growthErr'); errEl.textContent='';
-  const niche=document.getElementById('growthNiche').value.trim();
-  const geo=document.getElementById('growthGeo').value.trim();
-  const promo_text=document.getElementById('growthPromo').value.trim();
-  const acc_count=parseInt(document.getElementById('growthAccCount').value)||3;
+  const niche=_gv('growthNiche').trim();
+  const geo=_gv('growthGeo').trim();
+  const promo_text=_gv('growthPromo').trim();
+  const acc_count=Math.max(1, Math.min(10, parseInt(_gv('growthAccCount'))||3));
+  const max_groups=parseInt(growthSegVal('growthGroupsSeg'))||5;
+  const pace=growthSegVal('growthPaceSeg')||'standard';
+  const minM=parseInt(_gv('growthMinMembers')); const maxM=parseInt(_gv('growthMaxMembers'));
   if(!niche){ errEl.textContent='Укажите нишу'; return; }
-  if(!promo_text){ errEl.textContent='Укажите рекламный текст'; return; }
-  const btn=document.getElementById('growthBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  if(!dryRun && !promo_text){ errEl.textContent='Укажите рекламный текст'; return; }
+  if(maxM>0 && minM>maxM){ errEl.textContent='«Участников от» больше, чем «до»'; return; }
+  const body = {niche, geo, promo_text, acc_count, max_groups, pace, dry_run: !!dryRun,
+    min_members: isNaN(minM)?50:minM, max_members: isNaN(maxM)?0:maxM,
+    keywords: _gv('growthKeywords'), exclude_words: _gv('growthExclude')};
+  // Пост в чужие группы видят посторонние, и он ложится в риск бана аккаунта:
+  // масштаб и длительность называем до запуска.
+  if (!dryRun && !await askConfirm(
+      `Опубликовать текст в ${num(max_groups)} ${plural(max_groups,'группе','группах','группах')} `
+      + `с ${num(acc_count)} ${plural(acc_count,'аккаунта','аккаунтов','аккаунтов')}?\n\n`
+      + `Займёт примерно ${_growthEta(max_groups,pace)}. Посты увидят участники групп, а аккаунты берут на себя риск бана.`)) return;
+  const btn=document.getElementById(dryRun?'growthPreviewBtn':'growthBtn'); const label=btn.textContent;
+  btn.disabled=true; btn.textContent=dryRun?'Ищу группы…':'Запускаю…';
   try {
-    const r=await api('/api/miniapp/growth',{method:'POST',body:JSON.stringify({niche,geo,promo_text,acc_count})});
-    toast(`🌿 Запущено (#${r.op_id})`);
-    openGrowth();
+    const r=await api('/api/miniapp/growth',{method:'POST',body:JSON.stringify(body)});
+    toast(dryRun ? `🔍 Ищу группы (#${r.op_id}) — список будет в истории` : `🌿 Продвижение запущено (#${r.op_id})`);
+    growthTab('history');
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; btn.textContent='🌿 Запустить'; }
+  finally { btn.disabled=false; btn.textContent=label; }
 }
 async function submitAiComment() {
   const errEl=document.getElementById('aicErr'); errEl.textContent='';
-  const channels=document.getElementById('aicChannels').value.trim();
-  const niche=document.getElementById('aicNiche').value.trim();
-  const tone=document.getElementById('aicTone').value;
-  const acc_count=parseInt(document.getElementById('aicAccCount').value)||3;
-  const list=channels.split(/[\s,]+/).map(s=>s.trim().replace(/^@/,'')).filter(Boolean);
+  const niche=_gv('aicNiche').trim();
+  const tone=_gv('aicTone');
+  const acc_count=Math.max(1, Math.min(10, parseInt(_gv('aicAccCount'))||3));
+  const list=_aicList();
   if(!list.length){ errEl.textContent='Укажите хотя бы один канал'; return; }
+  if(list.length>50){ errEl.textContent='Не больше 50 каналов за запуск'; return; }
+  const posts=parseInt(growthSegVal('aicPostsSeg'))||1;
   // Комментарии пишут ЖИВЫЕ аккаунты в чужих каналах: это видно посторонним и
   // ложится в риск бана, поэтому масштаб называем до запуска.
   if (!await askConfirm(
       `Комментировать в ${num(list.length)} ${plural(list.length,'канале','каналах','каналах')} `
-      + `с ${num(acc_count)} ${plural(acc_count,'аккаунта','аккаунтов','аккаунтов')}?\n\n`
+      + `(до ${posts} под каждым) с ${num(acc_count)} ${plural(acc_count,'аккаунта','аккаунтов','аккаунтов')}?\n\n`
       + 'Комментарии увидят посторонние, а аккаунты берут на себя риск бана.')) return;
   const btn=document.getElementById('aicBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const r=await api('/api/miniapp/ai_comment',{method:'POST',body:JSON.stringify({channels:list,niche,tone,acc_count})});
+    const r=await api('/api/miniapp/ai_comment',{method:'POST',body:JSON.stringify({
+      channels:list, niche, tone, acc_count, posts_per_channel: posts,
+      post_pick: growthSegVal('aicPickSeg')||'random', length: growthSegVal('aicLenSeg')||'short',
+      max_post_age_hours: parseInt(_gv('aicMaxAge'))||0, extra_instruction: _gv('aicExtra').trim(),
+      join_discussion: !!(document.getElementById('aicJoin')||{}).checked,
+      skip_commented: !!(document.getElementById('aicSkipDone')||{}).checked})});
     toast(`💬 ИИ-комментинг запущен: ${r.channels||list.length} каналов (#${r.op_id})`);
-    openGrowth();
+    growthTab('history');
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='💬 Запустить ИИ-комментинг'; }
 }

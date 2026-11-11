@@ -22916,20 +22916,30 @@ async def _exec_ai_comment(
     """AI Commenting: под каждым целевым каналом (его группой обсуждений) постит
     контекстный AI-комментарий к недавнему посту. Round-robin по аккаунтам,
     задержки, обработка FloodWait, content_safety-гард на нишу.
-    params: {channels: [ref...], niche, tone, acc_count, per_channel_delay}
+    params: {channels: [ref...], niche, tone, acc_count} + настройки
+    `growth_agent_settings.comment_settings` (posts_per_channel, post_pick,
+    max_post_age_hours, length, extra_instruction, join_discussion,
+    skip_commented). Отсутствующее = прежнее поведение.
+
+    Повтор под тем же ПОСТОМ закрыт таблицей `ai_comment_posts`: отметка
+    ставится до отправки и переживает операцию, то есть второй запуск по тем
+    же каналам не пишет второй комментарий под тот же пост.
     """
     from services import ai_comment_engine, account_manager, content_safety
+    from services.growth_agent_settings import comment_settings
 
     channels = [str(c).strip() for c in (params.get("channels") or []) if str(c).strip()]
     niche = (params.get("niche") or "").strip()
     tone = (params.get("tone") or "neutral").strip()
-    acc_count = max(1, min(int(params.get("acc_count") or 3), 10))
+    cfg = comment_settings(params)
+    acc_count = cfg["acc_count"]
     if not channels:
         return {"status": "failed", "summary": "⚠️ Не указаны каналы"}
 
     # Гард безопасности контента (ниша — единственный пользовательский текст;
     # сам коммент генерит LLM под постом, но нишу проверяем как контекст-инструкцию).
-    verdict = await content_safety.enforce(pool, owner_id, niche or "comment", "", surface="ai_comment")
+    verdict = await content_safety.enforce(
+        pool, owner_id, niche or "comment", cfg["extra_instruction"], surface="ai_comment")
     if verdict.blocked:
         return {"status": "failed", "summary": "⚠️ Контент заблокирован политикой платформы"}
 
@@ -22964,7 +22974,20 @@ async def _exec_ai_comment(
         log.info("ai_comment op=%d: повтор — под %d каналами комментарий уже есть, пропускаем",
                  op_id, len(_already_commented))
 
-    ok_count, fail_count = 0, 0
+    async def _mark_post(channel_id: int, post_id: int) -> bool:
+        """Отметка поста — цена комментария. Не легла — комментария нет."""
+        res = await _safe_execute(
+            pool,
+            "INSERT INTO ai_comment_posts(owner_id, channel_id, post_id, op_id) "
+            "VALUES($1,$2,$3,$4) ON CONFLICT (owner_id, channel_id, post_id) DO NOTHING",
+            owner_id, channel_id, post_id, op_id,
+            log_ctx=f"[ai_comment_mark op={op_id}]")
+        if res == "ERROR":
+            return False  # отметка не легла — комментария не будет
+        inserted = str(res or "").endswith(" 1")
+        return inserted or not cfg["skip_commented"]
+
+    ok_count, fail_count, comments_total = 0, 0, 0
     total = len(channels)
     for idx, ref in enumerate(channels, 1):
         if await _is_cancelled(pool, op_id):
@@ -22979,9 +23002,14 @@ async def _exec_ai_comment(
         acc = accounts[idx % len(accounts)]
         try:
             res = await ai_comment_engine.post_ai_comment(
-                acc["session_str"], dict(acc), ref, niche=niche, tone=tone)
+                acc["session_str"], dict(acc), ref, niche=niche, tone=tone,
+                posts=cfg["posts_per_channel"], pick=cfg["post_pick"],
+                max_age_hours=cfg["max_post_age_hours"], length=cfg["length"],
+                extra_instruction=cfg["extra_instruction"],
+                join_discussion=cfg["join_discussion"], mark=_mark_post)
             if res.get("ok"):
                 ok_count += 1
+                comments_total += len(res.get("comments") or []) or 1
                 # _safe_execute, а не pool.execute: комментарий уже опубликован,
                 # и ронять операцию из-за сбоя записи в журнал нельзя. Ценой
                 # служит возможный повтор по этому каналу при возобновлении —
@@ -23010,9 +23038,12 @@ async def _exec_ai_comment(
                 pool, op_id, random.uniform(20, 45),
                 "ai_comment_pace")  # органическая пауза между каналами
 
-    summary = (f"💬 AI-комментинг\n✅ Успешно: {ok_count}/{total}"
-               + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
-    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+    summary = (f"💬 ИИ-комментинг\n✅ Каналов с комментарием: {ok_count}/{total}"
+               f"\n💬 Комментариев: {comments_total}"
+               + (f"\n⚠️ Без комментария: {fail_count} (причины — в журнале)"
+                  if fail_count else ""))
+    return {"status": "done", "ok": ok_count, "failed": fail_count,
+            "comments": comments_total, "summary": summary}
 
 
 async def _exec_niche_scan(
@@ -23407,12 +23438,19 @@ async def _exec_niche_growth_post(
     """Growth Agent: ищет группы в нише → вступает → постит рекламный текст.
 
     Безопасный режим:
-    - Не более 5 групп за один запуск (снижает риск бана)
-    - 3-8 минут между вступлением и постом (имитирует органическое поведение)
-    - 10-20 минут между группами (Telegram не замечает паттерн спама)
+    - Не более 10 групп за один запуск (по умолчанию 5)
+    - Темп «стандартный»: 3-8 минут между вступлением и постом, 10-20 минут
+      между группами; «бережный» — вдвое дольше. Быстрее стандартного нельзя.
     - Round-robin по аккаунтам с обработкой FloodWait
+
+    Настройки (все необязательны, отсутствующее = прежнее поведение) —
+    `growth_agent_settings.growth_settings`: max_groups, min_members,
+    max_members, keywords (свои запросы вместо подбора), exclude_words
+    (стоп-слова в названии), pace, dry_run («только найти группы»: без
+    вступления и постов, найденное ложится в журнал операции).
     """
     from services import niche_searcher, account_manager
+    from services.growth_agent_settings import GROWTH_PACES, growth_settings
     # Anti-detection: свой вариант рекламного текста в каждую группу (spintax; no-op
     # без него) — иначе один и тот же promo_text в 5 групп = сигнатура координации.
     from services.dm_engine import expand_spintax as _expand_spintax
@@ -23420,17 +23458,21 @@ async def _exec_niche_growth_post(
     niche: str = params.get("niche", "")
     geo: str = (params.get("geo") or "").strip()
     promo_text: str = params.get("promo_text", "")
-    # Безопасный лимит: не более 5 групп за запуск во избежание блокировки
-    max_groups: int = min(int(params.get("max_groups") or 5), 5)
+    cfg = growth_settings(params)
+    # Безопасный лимит групп за запуск (по умолчанию 5, потолок 10)
+    max_groups: int = cfg["max_groups"]
     # Сколько аккаунтов задействовать (0/не задано → безопасный дефолт 3)
-    acc_count: int = max(1, min(int(params.get("acc_count") or 3), 10))
+    acc_count: int = cfg["acc_count"]
+    dry_run: bool = cfg["dry_run"]
+    pace = GROWTH_PACES[cfg["pace"]]
     # Гео дописывается к нише как доп. контекст для генерации ключевых слов —
     # search_niche_groups сам не умеет фильтровать по гео (Telegram SearchRequest
     # глобальный), но "фитнес Москва" вместо "фитнес" даёт более локальные ключи.
     search_description = f"{niche} {geo}".strip() if geo else niche
 
-    if not niche or not promo_text:
-        return {"status": "failed", "reason": "Нет ниши или рекламного текста"}
+    if not niche or (not promo_text and not dry_run):
+        return {"status": "failed", "reason": "Нет ниши или рекламного текста",
+                "summary": "⚠️ Не указана ниша или рекламный текст"}
 
     # Universal content-safety backstop — Growth Agent searches for and joins
     # groups matching `niche`, then posts `promo_text` into them, so both fields
@@ -23473,13 +23515,21 @@ async def _exec_niche_growth_post(
 
     try:
 
-        # Генерируем ключевые слова для ниши (+ гео, если задан)
-        try:
-            keywords = await niche_searcher.generate_keywords(search_description)
-            log.info("niche_growth_post op_id=%d: keywords=%s", op_id, keywords)
-        except Exception as exc:
-            log.warning("niche_growth_post: keyword gen failed: %s", exc)
-            keywords = [search_description]
+        # Ключевые слова: свои запросы владельца — как есть; иначе подбор ИИ
+        # с учётом гео (раньше ИИ не включался никогда, а гео шло отдельным
+        # запросом и находило все чаты города подряд).
+        if cfg["keywords"]:
+            keywords = list(cfg["keywords"])
+        else:
+            try:
+                keywords = await niche_searcher.generate_keywords(
+                    niche, geo=geo, use_ai=True)
+            except Exception as exc:
+                log.warning("niche_growth_post: keyword gen failed: %s", exc)
+                keywords = []
+            if not keywords:
+                keywords = [search_description]
+        log.info("niche_growth_post op_id=%d: keywords=%s", op_id, keywords)
 
         # Группы, в которые этот владелец уже заходил через Growth Agent раньше —
         # исключаем, чтобы повторные запуски не заходили и не постили повторно в
@@ -23517,8 +23567,8 @@ async def _exec_niche_growth_post(
             groups = await niche_searcher.search_niche_groups(
                 session_str,
                 keywords,
-                min_members=50,
-                max_per_keyword=5,
+                min_members=cfg["min_members"],
+                max_per_keyword=5 if not dry_run else 10,
                 exclude_ids=exclude_ids,
                 _acc=search_acc,
             )
@@ -23529,6 +23579,10 @@ async def _exec_niche_growth_post(
                 "reason": f"Поиск групп не удался: {exc}",
                 "summary": "❌ Не удалось найти группы в нише",
             }
+
+        groups = niche_searcher.filter_groups(
+            groups or [], max_members=cfg["max_members"],
+            exclude_words=cfg["exclude_words"])
 
         if not groups:
             # Correct total_items down from the submitted placeholder (bot handler
@@ -23542,7 +23596,38 @@ async def _exec_niche_growth_post(
                 "status": "done",
                 "ok": 0,
                 "fail": 0,
-                "summary": "⚠️ Групп по нише не найдено. Попробуйте уточнить описание.",
+                "summary": "⚠️ Групп по нише не найдено. Попробуйте уточнить нишу, "
+                           "свои запросы или снизить порог участников.",
+                "keywords": keywords[:15],
+            }
+
+        if dry_run:
+            # «Только найти группы»: ни вступления, ни поста. Список ложится
+            # в журнал операции, чтобы владелец увидел, куда пошёл бы текст,
+            # и поправил настройки ДО настоящего запуска.
+            groups = groups[:30]
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET total_items=$1, done_items=$1 "
+                      "WHERE id=$2", len(groups), op_id)
+            for i, g in enumerate(groups, 1):
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)", op_id, i,
+                    g.get("join_ref") or str(g.get("id") or ""),
+                    (f"найдена: {g.get('title') or ''} · участников: {int(g.get('members') or 0)}")[:200],
+                    log_ctx=f" op={op_id}", where="niche_growth_preview")
+            lines = [f"• {g.get('title') or g.get('join_ref')} ({g.get('join_ref')}, "
+                     f"{int(g.get('members') or 0)} уч.)" for g in groups[:15]]
+            return {
+                "status": "done",
+                "ok": len(groups),
+                "fail": 0,
+                "groups_found": len(groups),
+                "keywords": keywords[:15],
+                "summary": (f"🔍 Найдено групп: {len(groups)} (публикаций не было)\n"
+                            f"Запросы: {', '.join(keywords[:8])}\n\n"
+                            + "\n".join(lines)),
             }
 
         # Перемешиваем и берём только безопасный лимит
@@ -23555,6 +23640,7 @@ async def _exec_niche_growth_post(
         ok_count = 0
         err_count = 0
         acc_idx = 0
+        posted_titles: list[str] = []
 
         for idx, grp in enumerate(groups):
             if await _is_cancelled(pool, op_id):
@@ -23586,7 +23672,14 @@ async def _exec_niche_growth_post(
                         join_ref, join_result.get("error"),
                     )
                     err_count += 1
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'error',$4)", op_id, idx + 1, join_ref,
+                        (f"не удалось вступить: {join_result.get('error')}")[:200],
+                        log_ctx=f" op={op_id}", where="niche_growth_join")
+                    await _safe_execute(
+                        pool,
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                     )
                     continue
@@ -23645,7 +23738,7 @@ async def _exec_niche_growth_post(
                 continue
 
             # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
-            join_to_post_delay = random.uniform(180, 480)
+            join_to_post_delay = random.uniform(*pace["join_to_post"])
             log.debug("niche_growth_post: waiting %.0fs before posting to grp=%s", join_to_post_delay, join_ref)
             await _pause_watching_for_cancel(
                 pool, op_id, join_to_post_delay,
@@ -23676,12 +23769,24 @@ async def _exec_niche_growth_post(
                         join_ref, grp_title, post_result.get("error"),
                     )
                     err_count += 1
+                    await _journal_write(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'error',$4)", op_id, idx + 1, join_ref,
+                        (f"{grp_title}: публикация не прошла — "
+                         f"{post_result.get('error')}")[:200],
+                        log_ctx=f" op={op_id}", where="niche_growth_post")
                 else:
                     ok_count += 1
+                    posted_titles.append(grp_title or join_ref)
                     log.info(
                         "niche_growth_post: posted to grp=%s title=%r msg_id=%s",
                         join_ref, grp_title, post_result.get("msg_id"),
                     )
+                    await _journal_done(
+                        pool, op_id, idx + 1, join_ref,
+                        (f"{grp_title}: опубликовано "
+                         f"(аккаунт {acc.get('phone') or acc.get('id')})")[:200])
             except Exception as exc:
                 exc_str = str(exc).lower()
                 if "floodwait" in exc_str or "flood" in exc_str:
@@ -23703,7 +23808,7 @@ async def _exec_niche_growth_post(
             # (множитель ≥1 — спокойный флот не ускоряем, рисковый — тормозим).
             if idx < total - 1:
                 between_groups_delay = await _governed_delay(
-                    pool, owner_id, random.uniform(600, 1200))
+                    pool, owner_id, random.uniform(*pace["between"]))
                 log.debug(
                     "niche_growth_post: waiting %.0fs before next group (%d/%d done)",
                     between_groups_delay, idx + 1, total,
@@ -23712,7 +23817,10 @@ async def _exec_niche_growth_post(
                     pool, op_id, between_groups_delay,
                     "niche_growth_between_groups")
 
-        summary = f"🌱 Growth Agent: ✅ {ok_count} ❌ {err_count} из {total} групп"
+        summary = (f"🌿 Агент роста: опубликовано {ok_count} из {total}"
+                   + (f", ошибок {err_count}" if err_count else ""))
+        if posted_titles:
+            summary += "\n" + "\n".join(f"• {t}" for t in posted_titles[:10])
         return {
             "status": "done",
             "ok": ok_count,

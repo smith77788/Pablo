@@ -33,7 +33,7 @@ SCREENS = [
     # функция экрана, элемент истории, тип(ы) операций, русская подпись
     ("openReporter", "reporterHistory", "report_peer", "Жалоба"),
     ("openBoost", "boostHistory", "boost_views,boost_reactions", "Накрутка"),
-    ("openGrowth", "growthHistory", "niche_growth_post", "Продвижение"),
+    ("loadGrowthHistory", "growthHistory", "niche_growth_post,ai_comment", "Продвижение"),
     ("openPhoneChecker", "phoneCheckHistory", "phone_check", "Проверка номеров"),
 ]
 

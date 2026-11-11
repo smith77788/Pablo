@@ -3652,14 +3652,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         tone = (body.get("tone") or "neutral").strip()
         if tone not in COMMENT_TONES:
             tone = "neutral"
-        try:
-            acc_count = max(1, min(validate_integer(body.get("acc_count") or 3, min_val=1, max_val=10) or 3, 10))
-        except (TypeError, ValueError):
-            acc_count = 3
+        from services.growth_agent_settings import comment_settings
+        cfg = comment_settings(body)
+        acc_count = cfg["acc_count"]
         if not channels:
             return _err("Укажите хотя бы один канал", 400)
         from services import content_safety
-        _v = await content_safety.enforce(pool, uid, niche or "comment", "", surface="ai_comment")
+        _v = await content_safety.enforce(
+            pool, uid, niche or "comment", cfg["extra_instruction"], surface="ai_comment")
         if _v.blocked:
             return _err("Контент заблокирован политикой платформы", 403)
         has_acc = await _safe_count(pool,
@@ -3671,7 +3671,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             label = f"AI-комментинг: {len(channels)} каналов"
             op_id = await _obus.submit(
                 pool, uid, "ai_comment",
-                {"channels": channels, "niche": niche, "tone": tone, "acc_count": acc_count},
+                {"channels": channels, "niche": niche, "tone": tone, **cfg,
+                 "acc_count": acc_count},
                 total_items=len(channels), label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "channels": len(channels)})
         except PermissionError as exc:
