@@ -840,9 +840,14 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор", 400)
         try:
-            bot_id, err = await _own_memory_bot(request, uid)
-            if err:
-                return err
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор бота", 400)
+        try:
+            owner = await pool.fetchval(
+                "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
+            if owner != uid:
+                return _err("Это не ваш ресурс", 403)
             from services import semantic_memory as _sm
             person = await pool.fetchrow(
                 "SELECT first_name, last_name, username FROM bot_users "

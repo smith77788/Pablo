@@ -82,17 +82,18 @@ def setup_routes(app: web.Application, pool) -> None:
                 kind = ""
             like = "%" + q.replace("\\", "").replace("%", "").replace("_", "") + "%"
             tag = q.lower().lstrip("#")
-            where = ("owner_id=$1 AND ($2 = '' OR kind = $2) AND ($3 = '' OR "
-                     "title ILIKE $4 OR body ILIKE $4 OR $5 = ANY(tags))")
             rows = await pool.fetch(
                 "SELECT id, kind, title, body, tags, pinned, source, created_at, updated_at "
-                "FROM botmother_memory WHERE " + where +
-                " ORDER BY pinned DESC, updated_at DESC, id DESC LIMIT $6 OFFSET $7",
+                "FROM botmother_memory WHERE owner_id=$1 AND ($2 = '' OR kind = $2) "
+                "AND ($3 = '' OR title ILIKE $4 OR body ILIKE $4 OR $5 = ANY(tags)) "
+                "ORDER BY pinned DESC, updated_at DESC, id DESC LIMIT $6 OFFSET $7",
                 uid, kind, q, like, tag,
                 _list_limit(request, 50, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
-                "SELECT COUNT(*) FROM botmother_memory WHERE " + where,
+                "SELECT COUNT(*) FROM botmother_memory WHERE owner_id=$1 "
+                "AND ($2 = '' OR kind = $2) "
+                "AND ($3 = '' OR title ILIKE $4 OR body ILIKE $4 OR $5 = ANY(tags))",
                 uid, kind, q, like, tag)
             pinned_total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM botmother_memory WHERE owner_id=$1 AND pinned", uid)

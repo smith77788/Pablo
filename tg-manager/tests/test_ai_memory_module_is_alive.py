@@ -170,10 +170,13 @@ def test_new_routes_are_registered_and_scoped():
     content = _src("services/mini_app_content.py")
     own = _func(content, "_own_memory_bot")
     assert "SELECT added_by FROM managed_bots WHERE bot_id=$1" in own
-    for h in ("semantic_memory_person", "semantic_memory_fact_set",
+    for h in ("semantic_memory_fact_set",
               "semantic_memory_fact_delete", "semantic_memory_settings"):
         assert "_own_memory_bot(request, uid)" in _func(content, h), (
             f"{h}: чужого бота можно читать/править по номеру")
+    person = _func(content, "semantic_memory_person")
+    assert "SELECT added_by FROM managed_bots WHERE bot_id=$1" in person and (
+        "if owner != uid" in person), "карточку человека отдают по чужому боту"
     upd = _func(_src("services/mini_app_workspace.py"), "ai_memory_update")
     assert upd.count("owner_id=$2") >= 2, "правка записи не ограничена владельцем"
 
