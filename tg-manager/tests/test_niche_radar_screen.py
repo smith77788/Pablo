@@ -94,12 +94,8 @@ def test_a_found_chat_can_be_warmed_up_by_the_fleet():
     только ГРУППАМ: в канал флоту писать негде.
     """
     src = (ROOT / "mini_app" / "screens" / "niche.js").read_text(encoding="utf-8")
-    assert "nrWarmup(" in src and "🔥 Прогрев флотом" in src
+    assert "startChatWarmup(" in src and "🔥 Прогрев флотом" in src
     assert "a.kind === 'group' ?" in src, "кнопка предлагается и каналам"
-    f = js_function("nrWarmup")
-    assert "/api/miniapp/chatwarmup/session" in f, "кнопка ничего не запускает"
-    assert "askConfirm(" in f and f.index("askConfirm(") < f.index("chatwarmup/session")
-    assert "openChatWarmup()" in f, "после запуска не видно, куда смотреть"
 
 
 def test_chat_warmup_has_a_tile_in_the_catalogue():
@@ -115,3 +111,19 @@ def test_chat_warmup_has_a_tile_in_the_catalogue():
     from services import task_sections
     accounts = next(s for s in task_sections.SECTIONS if s.key == "accounts")
     assert "Разогрев чата" in accounts.tiles
+
+
+def test_any_own_chat_can_be_warmed_up_in_one_tap():
+    """Просьба владельца (11.11.2026): быстрый запуск разогрева у ЛЮБОГО своего
+    чата, не только у находок радара. Запуск один на все места — иначе второй
+    экран рано или поздно разойдётся с первым.
+    """
+    html = miniapp_html()
+    assert "🔥 Разогрев флотом" in html, "в карточке чата нет кнопки разогрева"
+    assert "startChatWarmup(" in html
+    # Каналу разогрев не предлагается: флоту там писать негде.
+    assert "c.type==='channel' ? '' :" in html
+    f = js_function("startChatWarmup")
+    assert "/api/miniapp/chatwarmup/session" in f, "кнопка ничего не запускает"
+    assert "askConfirm(" in f and f.index("askConfirm(") < f.index("chatwarmup/session")
+    assert "openChatWarmup()" in f, "после запуска не видно, куда смотреть"
