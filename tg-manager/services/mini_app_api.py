@@ -527,6 +527,34 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
     "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS tags TEXT",
     "CREATE INDEX IF NOT EXISTS idx_short_links_owner ON short_links(owner_id, created_at DESC)",
+    # Центр восстановления аккаунтов: история шагов, настройки владельца, дата
+    # снятия от @SpamBot и счётчик повторных блоков (services/account_rehab).
+    # Здесь, а не отдельным schema_vN.sql: хвост истории после снимка упёрся
+    # в порог свёртки (tests/test_schema_baseline.py), а пересъёмка снимка —
+    # общий для всех веток шаг. Тот же список повторён в main.py.
+    "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS release_at TIMESTAMPTZ",
+    "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS relapses INTEGER NOT NULL DEFAULT 0",
+    """CREATE TABLE IF NOT EXISTS account_rehab_events (
+        id        BIGSERIAL PRIMARY KEY,
+        acc_id    BIGINT NOT NULL,
+        owner_id  BIGINT NOT NULL,
+        at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        step      TEXT NOT NULL,
+        outcome   TEXT,
+        detail    TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_rehab_events_acc ON account_rehab_events(acc_id, at DESC)",
+    """CREATE TABLE IF NOT EXISTS rehab_settings (
+        owner_id      BIGINT PRIMARY KEY,
+        paused        BOOLEAN NOT NULL DEFAULT FALSE,
+        auto_appeal   BOOLEAN NOT NULL DEFAULT TRUE,
+        pace          TEXT NOT NULL DEFAULT 'normal',
+        max_rechecks  INTEGER NOT NULL DEFAULT 8,
+        rest_hours    INTEGER NOT NULL DEFAULT 24,
+        notify_freed  BOOLEAN NOT NULL DEFAULT TRUE,
+        notify_stuck  BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 

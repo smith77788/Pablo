@@ -949,7 +949,7 @@ async def main() -> None:
         # выборка уведомлений падает и итог восстановления снова становится
         # немым — то есть ровно то, что эта колонка и лечит.
         "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS notified_phase TEXT",
-        # Центр восстановления (schema_v318): история шагов, настройки
+        # Центр восстановления (тот же список — в INLINE_MIGRATIONS mini_app_api): история шагов, настройки
         # владельца, дата снятия и повторные блоки. Без них заведение и шаги
         # цикла падали бы целиком при лаге миграции.
         "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS release_at TIMESTAMPTZ",
