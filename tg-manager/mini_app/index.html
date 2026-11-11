@@ -6836,15 +6836,77 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🩹 Восстановление аккаунтов</div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Настройки восстановления" onclick="openRehabSettings()">⚙️</div>
   </div>
   <div class="sub-sb">
     <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
       Аккаунт со спам-блоком не выбрасывается: система сама просит снятия у @SpamBot,
       держит аккаунт живым только пассивными действиями и перепроверяет статус.
-      Ничего никому не рассылается.
+      Если Telegram назвал дату снятия — перепроверка встаёт сразу после неё.
+      После снятия аккаунт отдыхает, чтобы блок не вернулся. Ничего никому не рассылается.
     </div>
+    <div id="rehabBanner"></div>
     <div id="rehabStats" class="kpi-row" style="padding:0 16px 10px"></div>
+    <div id="rehabFacts" style="font-size:12px;color:var(--hint);padding:0 16px 8px;line-height:1.45"></div>
+    <div class="seg" id="rehabSeg">
+      <div class="seg-opt on" data-v="all" onclick="rehabView('all')" role="button" tabindex="0">Все</div>
+      <div class="seg-opt" data-v="active" onclick="rehabView('active')" role="button" tabindex="0">В работе</div>
+      <div class="seg-opt" data-v="attention" onclick="rehabView('attention')" role="button" tabindex="0">Нужны вы</div>
+      <div class="seg-opt" data-v="freed" onclick="rehabView('freed')" role="button" tabindex="0">Возвращены</div>
+      <div class="seg-opt" data-v="closed" onclick="rehabView('closed')" role="button" tabindex="0">Закрыты</div>
+    </div>
+    <div id="rehabBulk"></div>
     <div class="lst" id="rehabList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="mbg" id="mo-rehab-detail" onclick="if(event.target===this)closeModal('mo-rehab-detail')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-rehab-detail')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div id="rehabDetailBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="mbg" id="mo-rehab-settings" onclick="if(event.target===this)closeModal('mo-rehab-settings')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-rehab-settings')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">⚙️ Настройки восстановления</div>
+    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px">
+      <span>⏸ Поставить всё восстановление на паузу<br><span style="font-size:11px;color:var(--hint)">Аккаунты остаются в списке, но автоматика ничего с ними не делает</span></span>
+      <input type="checkbox" id="rhsPaused">
+    </label>
+    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px;border-top:1px solid var(--sep)">
+      <span>📨 Самой просить снятия у @SpamBot<br><span style="font-size:11px;color:var(--hint)">Нажимает «Это ошибка» и на вопрос про спам всегда отвечает «Нет». Выключите, если хотите обжаловать сами</span></span>
+      <input type="checkbox" id="rhsAppeal">
+    </label>
+    <div style="padding:10px 0;border-top:1px solid var(--sep)">
+      <div style="font-size:14px;margin-bottom:6px">🐢 Темп</div>
+      <select id="rhsPace" class="inp" style="width:100%"></select>
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Чаще, чем раз в 3 часа, @SpamBot не спрашивается ни в одном темпе</div>
+    </div>
+    <div style="padding:10px 0;border-top:1px solid var(--sep)">
+      <div style="font-size:14px;margin-bottom:6px">🔍 Перепроверок до передачи вам: <b id="rhsMaxVal"></b></div>
+      <input type="range" id="rhsMax" min="3" max="16" step="1" style="width:100%" oninput="txt('rhsMaxVal',this.value)">
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Пока не наступила дата снятия, которую назвал Telegram, попытки не кончаются</div>
+    </div>
+    <div style="padding:10px 0;border-top:1px solid var(--sep)">
+      <div style="font-size:14px;margin-bottom:6px">😴 Отдых после снятия: <b id="rhsRestVal"></b></div>
+      <input type="range" id="rhsRest" min="0" max="168" step="6" style="width:100%" oninput="txt('rhsRestVal',rehabRestLabel(this.value))">
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Всё это время операции аккаунт не берут — так блок не возвращается сразу</div>
+    </div>
+    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px;border-top:1px solid var(--sep)">
+      <span>✅ Сообщать, когда аккаунт вернулся</span>
+      <input type="checkbox" id="rhsNotifyFreed">
+    </label>
+    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px;border-top:1px solid var(--sep)">
+      <span>🛠 Сообщать, когда нужен ваш разбор</span>
+      <input type="checkbox" id="rhsNotifyStuck">
+    </label>
+    <div id="rhsErr" style="color:var(--red,#ef4444);font-size:12px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-o" style="flex:1" onclick="rehabSettingsDefaults()">По умолчанию</button>
+      <button class="btn btn-s" style="flex:2" id="rhsSave" onclick="saveRehabSettings()">Сохранить</button>
+    </div>
   </div>
 </div>
 
@@ -25820,10 +25882,38 @@ const REHAB_COLOR = {appeal:'var(--blue,#3b82f6)', warming:'var(--green)',
 // Кнопки ⏩/⏹/🔁 живут в строке: при волне блокировок аккаунт за сотым нельзя
 // было ни поторопить, ни остановить, а плитка сверху при этом честно писала
 // «Восстанавливаются: 143» над списком из ста.
-let RHB_ROWS = [], RHB_OFFSET = 0, RHB_TOTAL = 0;
+let RHB_ROWS = [], RHB_OFFSET = 0, RHB_TOTAL = 0, RHB_VIEW = 'all', RHB_SET = null, RHB_PACES = {};
 async function rehabLoadMore() {
   RHB_OFFSET = RHB_ROWS.length;
   await openRehab(true);
+}
+// Срезы списка живут на самом экране: «Нужен разбор» раньше уводил в список
+// аккаунтов со спам-блоком, где вперемешку и те, кого система ещё
+// вытаскивает, и замороженные — то есть не туда, куда звал счётчик.
+function rehabView(v) {
+  RHB_VIEW = v || 'all';
+  document.querySelectorAll('#rehabSeg .seg-opt').forEach(o =>
+    o.classList.toggle('on', o.dataset.v === RHB_VIEW));
+  RHB_ROWS = []; RHB_OFFSET = 0;
+  txt('rehabList','<div class="spin-wrap"><div class="spin"></div></div>');
+  openRehab(true);
+}
+function rehabRestLabel(h) {
+  h = Number(h)||0;
+  if (!h) return 'без отдыха';
+  return h % 24 ? `${h} ч` : `${h/24} ${plural(h/24,'сутки','суток','суток')}`;
+}
+function rehabWhen(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}); }
+  catch(_) { return ''; }
+}
+function rehabFlow(s) {
+  // Под строкой — самое важное «когда»: дата от Telegram, отдых, следующий шаг.
+  if (s.release_in_seconds!=null) return `📅 Telegram снимет ограничение ${esc(rehabWhen(s.release_at))} · через ${esc(humanDur(s.release_in_seconds))}`;
+  if (s.rest_in_seconds!=null) return `😴 Отдыхает ещё ${esc(humanDur(s.rest_in_seconds))}, потом вернётся в операции`;
+  if (s.next_in_seconds!=null && s.active) return s.next_in_seconds<60 ? 'следующий шаг вот-вот' : 'следующий шаг через '+esc(humanDur(s.next_in_seconds));
+  return '';
 }
 async function openRehab(keep) {
   if (!keep) {
@@ -25833,40 +25923,59 @@ async function openRehab(keep) {
     RHB_ROWS = []; RHB_OFFSET = 0; RHB_TOTAL = 0;
   }
   try {
-    const d = await api('/api/miniapp/rehab?limit=100&offset=' + RHB_OFFSET);
-    // «Возвращены» и «Нужен разбор» — это срезы списка аккаунтов, а не просто
-    // цифры. «Восстанавливаются» никуда не ведёт нарочно: их список прямо ниже.
+    const d = await api('/api/miniapp/rehab?limit=100&view=' + encodeURIComponent(RHB_VIEW) + '&offset=' + RHB_OFFSET);
+    RHB_SET = d.settings || null; RHB_PACES = d.pace_labels || {};
+    // Счётчики — это срезы списка ниже, а не просто цифры: нажатие
+    // переключает срез на этом же экране.
     txt('rehabStats',`
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--blue,#3b82f6)">${num(d.in_progress||0)}</div><div class="kpi-lbl">Восстанавливаются</div></div>
-      <div class="kpi-card tap-card" onclick="healthGoAccounts('active','')" role="button" tabindex="0"><div class="kpi-val" style="${kpiTone(d.freed,'green')}">${num(d.freed||0)}</div><div class="kpi-lbl">Возвращены ›</div></div>
-      <div class="kpi-card tap-card" onclick="healthGoAccounts('spamblock','')" role="button" tabindex="0"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(d.stuck||0)}</div><div class="kpi-lbl">Нужен разбор ›</div></div>
+      <div class="kpi-card tap-card" onclick="rehabView('active')" role="button" tabindex="0"><div class="kpi-val" style="color:var(--blue,#3b82f6)">${num(d.in_progress||0)}</div><div class="kpi-lbl">Восстанавливаются ›</div></div>
+      <div class="kpi-card tap-card" onclick="rehabView('freed')" role="button" tabindex="0"><div class="kpi-val" style="${kpiTone(d.freed,'green')}">${num(d.freed||0)}</div><div class="kpi-lbl">Возвращены ›</div></div>
+      <div class="kpi-card tap-card" onclick="rehabView('attention')" role="button" tabindex="0"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(d.stuck||0)}</div><div class="kpi-lbl">Нужен разбор ›</div></div>
     `);
+    const facts = [];
+    if (d.success_pct!=null) facts.push(`Успешно возвращено <b>${d.success_pct}%</b> из завершённых`);
+    if (d.avg_hours_to_free!=null) facts.push(`в среднем за <b>${esc(humanDur(Math.round(d.avg_hours_to_free*3600)))}</b>`);
+    if (d.waiting_release) facts.push(`ждут даты от Telegram: <b>${num(d.waiting_release)}</b>`);
+    if (d.frozen) facts.push(`заморожены, нужна ваша апелляция: <b>${num(d.frozen)}</b>`);
+    if (d.relapses) facts.push(`повторных блоков: <b>${num(d.relapses)}</b>`);
+    txt('rehabFacts', facts.join(' · '));
+    const paused = !!(RHB_SET && RHB_SET.paused);
+    txt('rehabBanner', paused ? `<div style="margin:0 16px 10px;background:var(--bg2);border-left:3px solid var(--orange,#f59e0b);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.4">
+        ⏸ <b>Восстановление на паузе.</b> Автоматика ничего не делает с аккаунтами, пока вы не продолжите.
+        <button class="btn btn-g" style="width:100%;margin-top:8px" onclick="rehabBulk('resume')">▶ Продолжить восстановление</button></div>` : '');
+    const stuckBtn = (d.stuck||0) > (d.frozen||0)
+      ? `<button class="btn btn-o" style="flex:1" onclick="rehabBulk('restart_stuck')">🔁 Ещё попытка всем застрявшим</button>` : '';
+    const pauseBtn = (!paused && (d.in_progress||0)) ? `<button class="btn btn-o" style="flex:1" onclick="rehabBulk('pause')">⏸ Пауза</button>` : '';
+    txt('rehabBulk', (stuckBtn||pauseBtn) ? `<div style="display:flex;gap:8px;padding:0 16px 10px">${stuckBtn}${pauseBtn}</div>` : '');
     txt('m-rehab-val', (d.in_progress||0) ? `${d.in_progress} в работе${(d.stuck||0)?' · '+d.stuck+' ⚠️':''}` : ((d.stuck||0)?`${d.stuck} ждут разбора`:'нет ограниченных'));
     const _page = listOf(d, 'accounts');
     RHB_ROWS = RHB_OFFSET ? RHB_ROWS.concat(_page) : _page;
     RHB_TOTAL = totalOf(d, RHB_ROWS);
     const accs = RHB_ROWS;
-    if (!accs.length) { txt('rehabList', empty('🩹','Восстанавливать некого',
-      'Ни один аккаунт не под спам-блоком — это хорошая новость',
-      {label:'📱 К аккаунтам', fn:"healthGoAccounts('all','')"})); return; }
+    if (!accs.length) {
+      txt('rehabList', RHB_VIEW === 'all'
+        ? empty('🩹','Восстанавливать некого', 'Ни один аккаунт не под спам-блоком — это хорошая новость',
+            {label:'📱 К аккаунтам', fn:"healthGoAccounts('all','')"})
+        : empty('🩹','В этом срезе пусто','Посмотрите другие вкладки', {label:'Все', fn:"rehabView('all')"}));
+      return;
+    }
     txt('rehabList', accs.map(a=>{
       const s = a.state||{};
       const col = REHAB_COLOR[s.phase] || 'var(--hint)';
-      const wait = (s.next_in_seconds!=null && s.active)
-        ? (s.next_in_seconds<60 ? 'следующий шаг вот-вот' : 'следующий шаг через '+humanDur(s.next_in_seconds)) : '';
+      const flow = rehabFlow(s);
       return `
       <div class="row" style="border-left:3px solid ${col}">
         <div class="row-ico" style="background:var(--bg2)">${s.attention?'🛠':'🩹'}</div>
-        <div class="row-body" onclick="openAccount(${Number(a.acc_id)})" role="button" tabindex="0" style="cursor:pointer">
+        <div class="row-body" onclick="rehabDetail(${Number(a.acc_id)})" role="button" tabindex="0" style="cursor:pointer">
           <div class="row-name">${esc(a.first_name||a.phone||('#'+a.acc_id))} ›</div>
-          <div class="row-val">${esc(s.label||'')}${s.attempts?` · попытка ${s.attempts}/${s.max_attempts}`:''}</div>
-          ${wait?`<div style="font-size:11px;color:var(--hint);margin-top:2px">${esc(wait)}</div>`:''}
+          <div class="row-val">${esc(s.label||'')}${s.attempts?` · попытка ${s.attempts}/${s.max_attempts}`:''}${s.relapses?` · 🔁 ${s.relapses}`:''}</div>
+          ${flow?`<div style="font-size:11px;color:var(--hint);margin-top:2px">${flow}</div>`:''}
           ${s.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(s.hint)}</div>`:''}
         </div>
         <div class="row-right" style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
-          ${s.active?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'now')" aria-label="Пропустить шаг">⏩</button>`:''}
+          ${s.active?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'now')" aria-label="Сделать шаг сейчас">⏩</button>`:''}
           ${s.active?`<button class="btn btn-o" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'off')" aria-label="Остановить">⏹</button>`:''}
-          ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')" aria-label="Повторить шаг">🔁</button>`:''}
+          ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')" aria-label="Запустить заново">🔁</button>`:''}
         </div>
       </div>`;
     }).join('') + moreBtn(accs.length, RHB_TOTAL, 'rehabLoadMore()'));
@@ -25875,6 +25984,52 @@ async function openRehab(keep) {
     txt('rehabList', errHtml(errRu(e), 'openRehab()'));
   }
 }
+// Карточка восстановления: всё, что автоматика делала с аккаунтом, по шагам.
+// Раньше была одна строка «заметка», которую затирал каждый следующий шаг.
+async function rehabDetail(accId) {
+  showModal('mo-rehab-detail');
+  txt('rehabDetailBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/rehab/${Number(accId)}/history`);
+    const a = d.account||{}, s = a.state||{}, ev = d.events||[];
+    const col = REHAB_COLOR[s.phase] || 'var(--hint)';
+    const flow = rehabFlow(s);
+    const facts = [];
+    if (a.first_seen) facts.push(`На восстановлении с ${esc(rehabWhen(a.first_seen))}`);
+    facts.push(`запросов снятия: ${num(a.appeal_count||0)}`);
+    facts.push(`перепроверок: ${num(a.attempts||0)} из ${num(s.max_attempts||0)}`);
+    if (a.warm_actions) facts.push(`тихих действий: ${num(a.warm_actions)}`);
+    if (a.kind) facts.push(a.kind==='temp' ? 'блок временный' : 'похоже на постоянный блок');
+    const btns = [];
+    if (s.active) btns.push(`<button class="btn btn-g" style="flex:1" onclick="rehabAct(${Number(accId)},'now')">⏩ Шаг сейчас</button>`);
+    if (s.active) btns.push(`<button class="btn btn-o" style="flex:1" onclick="rehabAct(${Number(accId)},'off')">⏹ Остановить</button>`);
+    if (s.restartable) btns.push(`<button class="btn btn-g" style="flex:1" onclick="rehabAct(${Number(accId)},'restart')">🔁 Запустить заново</button>`);
+    if (s.active || (s.attention && !s.frozen)) btns.push(`<button class="btn btn-o" style="flex:1" onclick="rehabAppealNow(${Number(accId)})">🛡 Обжаловать сейчас</button>`);
+    txt('rehabDetailBody', `
+      <div class="modal-title">🩹 ${esc(a.first_name||a.phone||('#'+accId))}</div>
+      <div style="background:var(--bg);border-left:3px solid ${col};border-radius:8px;padding:10px 12px">
+        <div style="font-weight:600;font-size:14px">${esc(s.label||'')}</div>
+        ${flow?`<div style="font-size:12px;margin-top:4px">${flow}</div>`:''}
+        ${s.hint?`<div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.4">${esc(s.hint)}</div>`:''}
+        <div style="font-size:11px;color:var(--hint);margin-top:6px;line-height:1.4">${facts.join(' · ')}</div>
+      </div>
+      ${btns.length?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${btns.join('')}</div>`:''}
+      <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="closeModal('mo-rehab-detail');openAccount(${Number(accId)})">📱 Карточка аккаунта</button>
+      <div class="sec" style="padding-left:0">История шагов</div>
+      ${ev.length ? ev.map(e=>`<div style="display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--sep);font-size:13px">
+          <div style="flex:1;line-height:1.35">${esc(e.label||e.step)}${e.detail?`<div style="font-size:11px;color:var(--hint)">${esc(e.detail)}</div>`:''}</div>
+          <div style="font-size:11px;color:var(--hint);white-space:nowrap">${esc(ago(e.at))}</div></div>`).join('')
+        : '<div style="font-size:12px;color:var(--hint);padding:6px 0">Шагов пока не записано — история ведётся с этого обновления</div>'}
+      ${d.capped?'<div style="font-size:11px;color:var(--hint);padding-top:6px">Показаны последние шаги</div>':''}`);
+  } catch(e) {
+    txt('rehabDetailBody', errHtml(errRu(e), `rehabDetail(${Number(accId)})`));
+  }
+}
+async function rehabAppealNow(accId) {
+  closeModal('mo-rehab-detail');
+  await appealSpamblock(accId);
+  openRehab(true);
+}
 async function rehabAct(accId, action) {
   if (action==='off' && !await askConfirm('Выключить авто-восстановление для этого аккаунта?\nСистема перестанет пытаться снять с него ограничение.')) return;
   if (action==='restart' && !await askConfirm('Запустить восстановление заново?\nПопытки обнулятся, аккаунт снова пройдёт аппеляцию и тихий прогрев.')) return;
@@ -25882,8 +26037,61 @@ async function rehabAct(accId, action) {
     await api(`/api/miniapp/rehab/${accId}/${action}`, {method:'POST'});
     tg.HapticFeedback?.notificationOccurred('success');
     toast({now:'⏩ Шаг будет сделан в ближайшем цикле', off:'⏹ Восстановление выключено', restart:'🔁 Восстановление перезапущено'}[action]||'Готово');
-    openRehab();
+    closeModal('mo-rehab-detail');
+    openRehab(true);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
+}
+async function rehabBulk(action) {
+  if (action==='restart_stuck' && !await askConfirm('Дать ещё одну попытку всем, кого автоматика отдала на разбор?\nЗамороженные аккаунты не затрагиваются — их обжалуете вы. Аккаунты стартуют вразнобой в течение часа.')) return;
+  if (action==='pause' && !await askConfirm('Поставить всё восстановление на паузу?\nАккаунты останутся в списке, но автоматика ничего с ними не будет делать.')) return;
+  try {
+    const r = await api(`/api/miniapp/rehab_bulk/${action}`, {method:'POST'});
+    toast({restart_stuck:`🔁 Перезапущено: ${num(r.count||0)}`, pause:'⏸ Восстановление на паузе', resume:'▶ Восстановление продолжается'}[action]||'Готово');
+    openRehab(true);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
+}
+function rehabFillSettings(s) {
+  const sel = document.getElementById('rhsPace');
+  sel.innerHTML = Object.entries(RHB_PACES).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('');
+  sel.value = s.pace || 'normal';
+  document.getElementById('rhsPaused').checked = !!s.paused;
+  document.getElementById('rhsAppeal').checked = s.auto_appeal !== false;
+  document.getElementById('rhsNotifyFreed').checked = s.notify_freed !== false;
+  document.getElementById('rhsNotifyStuck').checked = s.notify_stuck !== false;
+  document.getElementById('rhsMax').value = s.max_rechecks || 8; txt('rhsMaxVal', String(s.max_rechecks || 8));
+  document.getElementById('rhsRest').value = s.rest_hours ?? 24; txt('rhsRestVal', rehabRestLabel(s.rest_hours ?? 24));
+}
+let RHB_DEFAULTS = null;
+async function openRehabSettings() {
+  txt('rhsErr','');
+  showModal('mo-rehab-settings');
+  try {
+    const d = await api('/api/miniapp/rehab/settings');
+    RHB_PACES = d.pace_labels || RHB_PACES; RHB_DEFAULTS = d.defaults || null;
+    rehabFillSettings(d.settings || {});
+  } catch(e) { txt('rhsErr', esc(errRu(e,'Не удалось загрузить настройки'))); }
+}
+function rehabSettingsDefaults() { if (RHB_DEFAULTS) rehabFillSettings(RHB_DEFAULTS); }
+async function saveRehabSettings() {
+  const btn = document.getElementById('rhsSave'); btn.disabled = true;
+  txt('rhsErr','');
+  try {
+    const body = {
+      paused: document.getElementById('rhsPaused').checked,
+      auto_appeal: document.getElementById('rhsAppeal').checked,
+      pace: document.getElementById('rhsPace').value,
+      max_rechecks: Number(document.getElementById('rhsMax').value),
+      rest_hours: Number(document.getElementById('rhsRest').value),
+      notify_freed: document.getElementById('rhsNotifyFreed').checked,
+      notify_stuck: document.getElementById('rhsNotifyStuck').checked,
+    };
+    await api('/api/miniapp/rehab/settings', {method:'POST', body: JSON.stringify(body)});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Настройки восстановления сохранены');
+    closeModal('mo-rehab-settings');
+    openRehab(true);
+  } catch(e) { txt('rhsErr', esc(errRu(e,'Не удалось сохранить'))); }
+  finally { btn.disabled = false; }
 }
 // Журнал прогрева: показывает, что аккаунт делал на самом деле. Раньше эти
 // записи копились в базе и не были видны нигде — на вопрос «он греется?»

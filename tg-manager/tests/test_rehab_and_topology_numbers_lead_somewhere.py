@@ -70,21 +70,31 @@ def test_both_screens_still_show_those_numbers():
 
 
 def test_rehab_counters_open_their_slices():
+    """Счётчик открывает свой срез на этом же экране.
+
+    Раньше «Нужен разбор» уводил в список аккаунтов со спам-блоком — там
+    вперемешку и те, кого система ещё вытаскивает, то есть не тот срез, а
+    «Возвращены» — во ВСЕ активные аккаунты флота."""
     body = _js_func("openRehab")
-    assert "healthGoAccounts('active','')" in body, "«Возвращены» никуда не ведёт"
-    assert "healthGoAccounts('spamblock','')" in body, "«Нужен разбор» никуда не ведёт"
+    assert "rehabView('freed')" in body, "«Возвращены» никуда не ведёт"
+    assert "rehabView('attention')" in body, "«Нужен разбор» никуда не ведёт"
+    assert "rehabView('active')" in body
+    view = _js_func("rehabView")
+    assert "openRehab(" in view, "срез не перезагружает список"
 
 
 def test_rehab_row_opens_the_account():
+    """Строка открывает карточку восстановления, а из неё — карточку аккаунта."""
     body = _js_func("openRehab")
-    assert "openAccount(" in body, "строка восстановления не открывает аккаунт"
+    assert 'class="row-body" onclick="rehabDetail(' in body
+    assert "openAccount(" in _js_func("rehabDetail"), "из восстановления не попасть в аккаунт"
 
 
 def test_rehab_row_buttons_still_work_separately():
-    """Строка открывает аккаунт — кнопки шага не должны открывать его заодно."""
+    """Строка открывает карточку — кнопки шага не должны открывать её заодно."""
     body = _js_func("openRehab")
     # переход висит на теле строки, а не на всей строке с кнопками
-    assert 'class="row-body" onclick="openAccount(' in body, (
+    assert 'class="row-body" onclick="rehabDetail(' in body, (
         "переход повешен на всю строку — он перехватит нажатия ⏩/⏹/🔁"
     )
     for act in ("'now'", "'off'", "'restart'"):
