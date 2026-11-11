@@ -18419,7 +18419,7 @@ async function previewProfileSetter() {
   try {
     const d = await api('/api/miniapp/profile_setter/preview', {method:'POST', body:JSON.stringify(body)});
     if (SETTER_OP==='username') {
-      box.innerHTML = `<div class="card" style="font-size:13px">${(d.usernames||[]).map(u=>'@'+esc(u)).join('<br>')}</div>`;
+      txt('setterPreview', `<div class="card" style="font-size:13px">${(d.usernames||[]).map(u=>'@'+esc(u)).join('<br>')}</div>`);
       return;
     }
     const rows = (d.samples||[]).map(s=>`<div class="row"><div class="row-ico">👤</div><div class="row-body"><div class="row-name">${esc([s.first_name,s.last_name].filter(Boolean).join(' ')||'— имя не меняется —')}</div><div class="row-val">${esc(s.about||'')}</div></div></div>`).join('');
@@ -18427,7 +18427,7 @@ async function previewProfileSetter() {
       ? '<div style="color:var(--orange);font-size:12px;margin-top:4px">⚠️ У всех аккаунтов выйдет одно и то же — добавьте варианты {а|б}</div>' : '';
     const long = (d.too_long||[]).length
       ? `<div style="color:var(--orange);font-size:12px;margin-top:4px">✂️ Обрежется по лимиту Telegram: ${esc(d.too_long.join(', '))}</div>` : '';
-    box.innerHTML = `<div class="lst">${rows}</div>${same}${long}`;
+    txt('setterPreview', `<div class="lst">${rows}</div>${same}${long}`);
   } catch(e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось показать примеры'))}</div>`; }
 }
 function setterPickMode(mode) {
