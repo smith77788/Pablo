@@ -99,3 +99,13 @@ def test_diag_tab_leads_to_the_funnel():
     h = _html()
     i = h.index('id="s-diag"')
     assert "openFleetDoctor()" in h[i:h.index("</div>\n</div>", i)]
+
+
+def test_proxy_down_list_and_tile_use_one_condition():
+    """Список выписывает условие текстом (его сторожит другой тест) — оно
+    обязано совпадать с тем, которым считает плитка «Здоровья»."""
+    from services.mini_app_api import _PROXY_DOWN_SQL
+    from tests.miniapp_source import api_function
+    body = api_function("_accounts_where")
+    flat = re.sub(r'"\s*\n\s*"', "", body)
+    assert _PROXY_DOWN_SQL in flat
