@@ -165,3 +165,48 @@ probe only after user confirmation.
 `web_app_open_link` has, letting a Mini App open arbitrary `tg://` links without user interaction.
 Low impact (borders on nuisance); mention only as a hardening note alongside Report 1, not as a
 separate submission.
+
+---
+
+## Report 5 — Intent Scheme Hijacking in Telegram Android in-app browser (arbitrary exported Activity launch)
+
+**Attack surface:** Telegram Android — in-app browser / external-app launching
+(`TMessagesProj/src/main/java/org/telegram/messenger/browser/Browser.java`,
+`.../ui/web/BotWebViewContainer.java`).
+
+**Severity (CVSS v3.1):** 7.5 — `AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:H/A:N` (High).
+
+**Description:**
+When the in-app browser navigates, `shouldOverrideUrlLoading(WebView, String)`
+(`BotWebViewContainer.java:4256`) calls `Browser.openInExternalApp(context, url, allowIntent=true)`
+(`:4275`). For an `intent://` URL, `openInExternalApp` (`Browser.java:551–584`) does:
+```java
+final Intent intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME);
+// no intent.setComponent(null) / setSelector(null) / setPackage(null)
+// FLAG_ACTIVITY_REQUIRE_NON_BROWSER + addCategory(BROWSABLE) are applied only when !isIntentScheme
+context.startActivity(intent);
+```
+The page-supplied intent is launched without stripping the attacker-controlled `component`/`selector`/
+`package` and without requiring the target to be a BROWSABLE/browser activity — the known "Intent Scheme
+Hijacking" class (documented by Google). Because the handler is the deprecated String overload, it has no
+`hasGesture()` and cannot distinguish a user click from a JS redirect, so the launch fires with no extra
+click. A second sink with the same unsanitized `parseUri` is `Browser.openInExternalBrowser:503–518`.
+
+**Steps to reproduce (test environment only):**
+1. Host an attacker page that on load runs
+   `location.href = "intent://x#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;component=com.android.calculator2/.Calculator;end";`
+   (use any app/component present on the test device as a harmless PoC, e.g. the system calculator).
+2. Send yourself (test account) an https link to that page and open it in Telegram (loads in the in-app
+   browser).
+3. Observe the targeted Activity launches with no confirmation and no additional tap.
+
+**Impact:** Any attacker web page opened in Telegram's in-app browser can launch an arbitrary **exported**
+Activity of any installed app on one link open (UI redress / confused-deputy into other apps' exported
+deep links). It cannot install APKs, run native code in Telegram, or read other apps' private data —
+so this is High, not the "run any malware / hack any Android" some public posts claimed.
+
+**Additional details:** Fix per Google guidance — for the intent-scheme branch call
+`intent.setComponent(null); intent.setSelector(null); intent.setPackage(null);
+intent.addCategory(Intent.CATEGORY_BROWSABLE);` before `startActivity`, and apply the same to
+`openInExternalBrowser`. Not reproduced on macOS/iOS/Desktop (no intent-scheme launching;
+iOS `UIApplication.shared.open` call on the audited path uses a hardcoded `t.me` URL).
