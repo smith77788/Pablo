@@ -82,16 +82,22 @@ def test_fact_keys_are_translated_on_screen():
         "ключ факта уезжает владельцу английским, как пришёл из промпта")
 
 
-def test_constant_confidence_is_not_shown_as_data():
-    """0.9 на вставке и на конфликте — одно и то же число всегда."""
-    assert SM.count("confidence = 0.9") + SM.count("0.9)") >= 1
-    others = [m for m in re.finditer(r"INSERT INTO bot_user_facts", SM)]
-    assert len(others) == 1, (
-        "у таблицы появился второй писатель — проверьте, не стала ли "
-        "уверенность настоящей величиной")
+def test_confidence_says_who_wrote_the_fact_not_a_fake_percent():
+    """Уверенность — это «кто записал»: 0.9 — ИИ, 1.0 — владелец руками.
+
+    Раньше рядом с фактом стояло «(90%)», хотя писатель был один и число всегда
+    одинаковое. Теперь писатель по-прежнему один (_upsert_fact), но уверенность
+    различает правку владельца и извлечение ИИ, и экран показывает именно это.
+    """
+    assert len(re.findall(r"INSERT INTO bot_user_facts", SM)) == 1, (
+        "у таблицы появился второй писатель — правило «ИИ не затирает правку "
+        "владельца» держится только в одном месте")
+    assert "CONF_EXTRACTED = 0.9" in SM and "CONF_OWNER = 1.0" in SM
+    assert "WHERE EXCLUDED.confidence >= bot_user_facts.confidence" in SM, (
+        "извлечение ИИ снова может перезаписать факт, поправленный владельцем")
     f = _fn("openSemFacts")
-    assert "f.confidence" not in f, (
-        "вернулся процент уверенности, который всегда одинаковый")
+    assert "f.confidence" not in f, "вернулся процент уверенности"
+    assert "f.by_owner" in f, "не видно, какой факт записал владелец"
 
 
 def test_forgetting_a_person_is_reachable_and_scoped():

@@ -25,6 +25,31 @@ from __future__ import annotations
 
 from aiohttp import web
 
+# Типы записей ИИ-памяти. Ассистент видит тип рядом с текстом записи
+# (ai_memory.format_for_prompt), поэтому «правило» и «заметка» для него разные.
+_MEM_KINDS = ("note", "instruction", "fact", "rule")
+
+
+def _memory_fields(body: dict) -> tuple[dict, str | None]:
+    """Проверить и привести поля записи; вторым — текст ошибки для экрана."""
+    from services.ai_memory import _normalize_tags
+    mem_body = str(body.get("body") or "").strip()
+    if not mem_body:
+        return {}, "Заполните содержимое"
+    if len(mem_body) > 8000:
+        return {}, "Слишком длинно: не больше 8000 знаков"
+    title = str(body.get("title") or "").strip()
+    if len(title) > 180:
+        return {}, "Заголовок длиннее 180 знаков"
+    kind = str(body.get("kind") or "note").strip()
+    if kind not in _MEM_KINDS:
+        return {}, "Неизвестный тип записи"
+    tags = body.get("tags")
+    if not isinstance(tags, (list, str)) and tags is not None:
+        tags = None
+    return {"body": mem_body, "title": title, "kind": kind,
+            "tags": _normalize_tags(tags), "pinned": bool(body.get("pinned"))}, None
+
 
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты пространств, папок чатов и памяти ассистента."""
@@ -49,16 +74,30 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            # Поиск по заголовку, тексту и тегам и фильтр по типу. Итог считается
+            # тем же фильтром, что и страница, — иначе «Показать ещё» врёт.
+            q = (request.query.get("q") or "").strip()[:100]
+            kind = (request.query.get("kind") or "").strip()
+            if kind and kind not in _MEM_KINDS:
+                kind = ""
+            like = "%" + q.replace("\\", "").replace("%", "").replace("_", "") + "%"
+            tag = q.lower().lstrip("#")
             rows = await pool.fetch(
-                """SELECT id, kind, title, body, tags, pinned, created_at, updated_at
-                   FROM botmother_memory WHERE owner_id=$1
-                   ORDER BY pinned DESC, updated_at DESC, id DESC
-                   LIMIT $2 OFFSET $3""",
-                uid, _list_limit(request, 50, 1000), _list_offset(request),
+                "SELECT id, kind, title, body, tags, pinned, source, created_at, updated_at "
+                "FROM botmother_memory WHERE owner_id=$1 AND ($2 = '' OR kind = $2) "
+                "AND ($3 = '' OR title ILIKE $4 OR body ILIKE $4 OR $5 = ANY(tags)) "
+                "ORDER BY pinned DESC, updated_at DESC, id DESC LIMIT $6 OFFSET $7",
+                uid, kind, q, like, tag,
+                _list_limit(request, 50, 1000), _list_offset(request),
             )
             total = await _safe_count(pool,
-                "SELECT COUNT(*) FROM botmother_memory WHERE owner_id=$1", uid)
-            return _json_resp({"total": total, "memories": [
+                "SELECT COUNT(*) FROM botmother_memory WHERE owner_id=$1 "
+                "AND ($2 = '' OR kind = $2) "
+                "AND ($3 = '' OR title ILIKE $4 OR body ILIKE $4 OR $5 = ANY(tags))",
+                uid, kind, q, like, tag)
+            pinned_total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM botmother_memory WHERE owner_id=$1 AND pinned", uid)
+            return _json_resp({"total": total, "pinned_total": pinned_total, "memories": [
                 {
                     **dict(r),
                     "tags": list(r["tags"] or []),
@@ -79,19 +118,54 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
-        title = (body.get("title") or "").strip()
-        mem_body = (body.get("body") or "").strip()
-        if not mem_body:
-            return _err("Заполните содержимое", 400)
+        fields, err = _memory_fields(body if isinstance(body, dict) else {})
+        if err:
+            return _err(err, 400)
         try:
-            row = await pool.fetchrow(
-                """INSERT INTO botmother_memory(owner_id, kind, title, body, source)
-                   VALUES($1,'note',$2,$3,'miniapp') RETURNING id""",
-                uid, title, mem_body,
-            )
-            return _json_resp({"id": row["id"]})
+            from services import ai_memory as _aim
+            item = await _aim.remember(
+                pool, uid, fields["body"], title=fields["title"], kind=fields["kind"],
+                tags=fields["tags"], source="miniapp", pinned=fields["pinned"])
+            return _json_resp({"id": item.id})
         except Exception:
             log.exception("ai_memory_create uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def ai_memory_update(request: web.Request) -> web.Response:
+        """Правка записи. Раньше запись можно было только удалить и написать
+        заново — опечатка в инструкции ассистенту стоила потери закрепления."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            mem_id = int(request.match_info["mem_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор записи", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        body = body if isinstance(body, dict) else {}
+        try:
+            cur = await pool.fetchrow(
+                "SELECT kind, title, body, tags, pinned FROM botmother_memory "
+                "WHERE id=$1 AND owner_id=$2", mem_id, uid)
+            if not cur:
+                return _err("Запись не найдена", 404)
+            merged = {"kind": cur["kind"], "title": cur["title"], "body": cur["body"],
+                      "tags": list(cur["tags"] or []), "pinned": cur["pinned"]}
+            merged.update({k: v for k, v in body.items() if k in merged})
+            fields, err = _memory_fields(merged)
+            if err:
+                return _err(err, 400)
+            await pool.execute(
+                "UPDATE botmother_memory SET kind=$3, title=$4, body=$5, tags=$6, "
+                "pinned=$7, updated_at=NOW() WHERE id=$1 AND owner_id=$2",
+                mem_id, uid, fields["kind"], fields["title"], fields["body"],
+                fields["tags"], fields["pinned"])
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("ai_memory_update uid=%d mem=%d", uid, mem_id)
             return _err(_INTERNAL_ERROR, 500)
 
     async def ai_memory_delete(request: web.Request) -> web.Response:
@@ -101,7 +175,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             mem_id = int(request.match_info["mem_id"])
         except (KeyError, ValueError):
-            return _err("Неверный идентификатор участника", 400)
+            return _err("Неверный идентификатор записи", 400)
         try:
             await pool.execute(
                 "DELETE FROM botmother_memory WHERE id=$1 AND owner_id=$2", mem_id, uid
@@ -450,3 +524,4 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/ai_memory", ai_memory_list)
     app.router.add_post("/api/miniapp/ai_memory", ai_memory_create)
     app.router.add_delete("/api/miniapp/ai_memory/{mem_id}", ai_memory_delete)
+    app.router.add_put("/api/miniapp/ai_memory/{mem_id}", ai_memory_update)
