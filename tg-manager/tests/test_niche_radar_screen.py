@@ -84,3 +84,34 @@ def test_a_repeat_run_does_not_act_in_the_same_chat_twice():
     assert "if str(aid) in _settled:" in body, "закрытая цель не пропускается"
     assert body.count("_journal_done(") >= 3, "успех цели не попадает в журнал"
     assert "'skip'" in body, "окончательный отказ не закрывает цель"
+
+
+def test_a_found_chat_can_be_warmed_up_by_the_fleet():
+    """У найденного чата должна быть видимая кнопка прогрева флотом.
+
+    Просьба владельца (11.11.2026): «для чатов должна быть возможность прогрева
+    флотом, и кнопка должна быть явно видимой и рабочей». Прогрев предлагается
+    только ГРУППАМ: в канал флоту писать негде.
+    """
+    src = (ROOT / "mini_app" / "screens" / "niche.js").read_text(encoding="utf-8")
+    assert "nrWarmup(" in src and "🔥 Прогрев флотом" in src
+    assert "a.kind === 'group' ?" in src, "кнопка предлагается и каналам"
+    f = js_function("nrWarmup")
+    assert "/api/miniapp/chatwarmup/session" in f, "кнопка ничего не запускает"
+    assert "askConfirm(" in f and f.index("askConfirm(") < f.index("chatwarmup/session")
+    assert "openChatWarmup()" in f, "после запуска не видно, куда смотреть"
+
+
+def test_chat_warmup_has_a_tile_in_the_catalogue():
+    """Экран жил одной кнопкой среди десятка на вкладке «Аккаунты».
+
+    Каталог «Все функции» и боковое меню строятся из ПЛИТОК экрана «Разделы»:
+    без плитки экран не показывается нигде (CLAUDE.md).
+    """
+    html = miniapp_html()
+    assert '<div class="mgmt-tile-lbl">Разогрев чата</div>' in html
+    i = html.index('<div class="mgmt-tile-lbl">Разогрев чата</div>')
+    assert 'onclick="openChatWarmup()"' in html[i - 300:i]
+    from services import task_sections
+    accounts = next(s for s in task_sections.SECTIONS if s.key == "accounts")
+    assert "Разогрев чата" in accounts.tiles
