@@ -15862,25 +15862,52 @@ async def _exec_check_accounts_health(
     }
 
 
-def _restriction_access_candidates(ent, obs_by_id, observers, dead):
-    """Аккаунты-кандидаты на резолв сущности: пары (аккаунт, access_hash для НЕГО).
+def _restriction_access_candidates(ent, obs_by_id, observers, dead, *,
+                                   pool=None, rr_start=0):
+    """Аккаунты-кандидаты на резолв сущности: пары (аккаунт, access_hash), в
+    порядке перебора.
 
-    Вынесено на модульный уровень, чтобы проверять регрессом (баг «приватная не
-    проверяется, хотя управляющий аккаунт подключён»). Правила — в докстринге
-    замыкания `_access_candidates` внутри `_exec_check_owned_restrictions`.
-    Коротко: управляющий (preferred_acc) первым со своим записанным access_hash;
-    остальные живые — следом с access_hash=0 (резолв по участию). Приватную
-    не-участник не откроет и даст «нечем проверить», а не ложный негатив, поэтому
-    перебор безопасен и для приватной.
+    РАСПРЕДЕЛЕНИЕ НАГРУЗКИ (жалоба владельца: «проверку всех сущностей тянут 1–2
+    аккаунта, и они ловят спамблок / просадку траста»):
+      * ПУБЛИЧНУЮ сущность (@username) резолвит ЛЮБОЙ аккаунт, поэтому НЕ грузим
+        управляющего (иначе один аккаунт резолвил бы все свои сотни каналов
+        подряд — прямой путь в спамблок). Идём round-robin по пулу наблюдателей:
+        каждая следующая сущность — со следующего аккаунта, нагрузка размазана.
+      * ПРИВАТНУЮ (без @username) открывает только участник, поэтому управляющий
+        (preferred_acc) с его access_hash — первым, остальные живые — фолбэком
+        (резолв по участию, hash=0). Не-участник даёт «нечем проверить»
+        (probe_error), а не ложный негатив, так что перебор безопасен.
+
+    pool — ограниченный ротационный пул (бережёт и аккаунты от перегруза, и флот
+    от монополизации); на промахе добираем остальных наблюдателей. rr_start —
+    смещение round-robin (индекс сущности).
     """
     pref = ent.get("preferred_acc")
+    is_private = bool(ent.get("is_private"))
+    live = [a for a in observers if int(a["id"]) not in dead]
+    base = [a for a in (pool if pool is not None else observers)
+            if int(a["id"]) not in dead]
+    base_ids = {int(a["id"]) for a in base}
+    rest = [a for a in live if int(a["id"]) not in base_ids]
+
+    def _rot(seq):
+        if not seq:
+            return []
+        s = rr_start % len(seq)
+        return seq[s:] + seq[:s]
+
+    ordered = _rot(base) + rest
     out: list[tuple[dict, int]] = []
-    if pref and pref in obs_by_id and pref not in dead:
-        out.append((obs_by_id[pref], int(ent.get("access_hash") or 0)))
-    for a in observers:
-        aid = int(a["id"])
-        if aid in dead or (pref and aid == pref):
-            continue
+    if is_private:
+        if pref and pref in obs_by_id and pref not in dead:
+            out.append((obs_by_id[pref], int(ent.get("access_hash") or 0)))
+        for a in ordered:
+            if pref and int(a["id"]) == pref:
+                continue
+            out.append((a, 0))
+        return out
+    # Публичная: round-robin по пулу, без приоритета управляющего.
+    for a in ordered:
         out.append((a, 0))
     return out
 
@@ -16019,6 +16046,23 @@ async def _exec_check_owned_restrictions(
     await _safe_execute(
         pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2", n, op_id)
 
+    # ── Пул наблюдателей для РАСПРЕДЕЛЕНИЯ нагрузки ───────────────────────────
+    # Проверку всех сущностей раньше тянули 1–2 аккаунта (управляющий резолвил все
+    # свои каналы, один аккаунт искал все) — и ловили спамблок/просадку траста.
+    # Размазываем: round-robin по ограниченному пулу. Размер пула держит нагрузку
+    # на аккаунт ниже безопасного порога (≈ _SAFE_TOUCHES_PER_ACCOUNT резолвов+
+    # поисков за прогон) и при этом НЕ забирает весь флот (оставляет резерв под
+    # действия владельца). Старт пула сдвигаем по op_id — разные прогоны берут
+    # разные аккаунты, риск не копится на одной и той же горстке.
+    _SAFE_TOUCHES_PER_ACCOUNT = 40
+    if observers:
+        _target_pool = max(2, -(-2 * max(1, n) // _SAFE_TOUCHES_PER_ACCOUNT))  # ceil(2n/safe)
+        _pool_size = min(len(observers), _target_pool)
+        _pstart = (int(op_id) or 0) % len(observers)
+        _pool = (observers[_pstart:] + observers[:_pstart])[:_pool_size]
+    else:
+        _pool = []
+
     # ── 3. Проход с переиспользованием коннекта наблюдателя ───────────────────
     _clients: dict[int, object] = {}       # acc_id -> подключённый client
     _dead: set[int] = set()                # acc_id, которые не удалось подключить
@@ -16065,35 +16109,32 @@ async def _exec_check_owned_restrictions(
             log.debug("check_owned_restrictions op=%d: get_dialogs acc=%s не удался: %s",
                       op_id, aid, e)
 
-    def _access_candidates(ent: dict):
-        # Кандидаты на РЕЗОЛВ+флаги: пары (аккаунт, access_hash для НЕГО).
-        # Приватную сущность (нет @username) открывает только аккаунт-участник.
-        # Раньше пробовали лишь записанный управляющий (managed_channels.acc_id),
-        # и если он занят другой операцией, в карантине или устарел (владелец
-        # переподключил аккаунт под новым id, либо участник — ДРУГОЙ его аккаунт),
-        # приватная падала в «нет управляющего аккаунта», хотя доступ у владельца
-        # есть. Добрать остальных безопасно: не-участник приватную не резолвит и
-        # даёт «нечем проверить» (probe_error), а НЕ ложное «ограничена/недоступна»
-        # (entity_restriction_check.resolve_flags: приватная без @username на
-        # ошибке доступа → probe_error, не resolved=False) — поэтому перебор только
-        # помогает. access_hash у каждого аккаунта свой: записанный валиден лишь для
-        # управляющего, остальным даём 0 — они резолвят по участию (скан диалогов).
-        # Чистая логика вынесена в _restriction_access_candidates (под регрессом).
-        return _restriction_access_candidates(ent, _obs_by_id, observers, _dead)
+    def _access_candidates(ent: dict, idx: int):
+        # Кандидаты на РЕЗОЛВ+флаги: пары (аккаунт, access_hash для НЕГО), в
+        # порядке перебора. Round-robin по пулу (idx — индекс сущности)
+        # размазывает нагрузку: публичную резолвит следующий аккаунт пула, а не
+        # всегда управляющий. Приватную по-прежнему открывает участник
+        # (управляющий первым, остальные фолбэком) — перебор безопасен, не-участник
+        # даёт probe_error, а не ложный негатив. Чистая логика и правила — в
+        # _restriction_access_candidates (под регрессом).
+        return _restriction_access_candidates(
+            ent, _obs_by_id, observers, _dead, pool=_pool, rr_start=idx)
 
-    def _pick_search(ent: dict):
+    def _pick_search(ent: dict, idx: int):
         # ВНЕШНИЙ аккаунт для проверки видимости: НЕ управляющий этой сущностью
         # (у управляющего она в диалогах и найдётся всегда — ложно-зелёный
-        # теневой бан). Любой живой аккаунт с id != управляющего.
+        # теневой бан). Round-robin по пулу → поиск тоже размазан по флоту, а не
+        # висит на первом аккаунте. На промахе пула добираем любого живого.
         pref = ent.get("preferred_acc")
-        for a in observers:
+
+        def _ok(a):
             aid = int(a["id"])
-            if aid in _dead:
-                continue
-            if pref and aid == pref:
-                continue
-            return a
-        return None
+            return aid not in _dead and not (pref and aid == pref)
+
+        live = [a for a in _pool if _ok(a)] or [a for a in observers if _ok(a)]
+        if not live:
+            return None
+        return live[idx % len(live)]
 
     counts: dict[str, int] = {}
     findings: list[dict] = []
@@ -16121,7 +16162,7 @@ async def _exec_check_owned_restrictions(
             # сущность (от того, каким аккаунтом резолвим доступ, не зависит).
             search_client = None
             if ent.get("username"):
-                _s = _pick_search(ent)
+                _s = _pick_search(ent, idx)
                 if _s is not None:
                     search_client = await _client_for(_s)
                 if search_client is None:
@@ -16132,7 +16173,7 @@ async def _exec_check_owned_restrictions(
             # следующего, прежде чем сдаться. Публичную резолвит первый же живой.
             _is_private = bool(ent.get("is_private"))
             verdict = None
-            for cand, chash in _access_candidates(ent):
+            for cand, chash in _access_candidates(ent, idx):
                 client = await _client_for(cand)
                 if client is None:
                     continue
