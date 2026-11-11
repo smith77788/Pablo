@@ -26901,8 +26901,9 @@ async function openAdIntel(tab) {
     `);
     txt('m-adintel-val',`${d.total_channels||0} каналов · ${d.total_placements||0} размещений`);
     const notes = [];
-    if (d.failed_channels) notes.push(`⚠️ ${d.failed_channels} ${plural(d.failed_channels,'канал','канала','каналов')} не удалось обновить — причина в карточке канала`);
-    if (d.suspicious_channels) notes.push(`🚩 У ${d.suspicious_channels} ${plural(d.suspicious_channels,'канала','каналов','каналов')} есть признаки накрутки`);
+    const failed = d.failed_channels||0, sus = d.suspicious_channels||0;
+    if (failed) notes.push(`⚠️ ${failed} ${plural(failed,'канал','канала','каналов')} не удалось обновить — причина в карточке канала`);
+    if (sus) notes.push(`🚩 У ${sus} ${plural(sus,'канала','каналов','каналов')} есть признаки накрутки`);
     // Кто сейчас рекламируется активнее всех — быстрый вход в карточку.
     const leaders = (d.top_advertisers ? d.top_advertisers.map(a =>
       `<span class="chip tap" role="button" tabindex="0" onclick="openAdAdvertiser('${escJs(a.username)}')">${esc((a.kind==='site'||a.kind==='invite') ? a.username : '@'+a.username)} · ${num(a.placements||0)} в ${num(a.channels||0)} ${plural(a.channels||0,'канале','каналах','каналах')}</span>`) : []).slice(0,5).join('');

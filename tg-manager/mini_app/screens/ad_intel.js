@@ -48,7 +48,8 @@ function adIntelShowTab(tab) {
   if (sel) {
     const opts = ADI_SORTS[tab] || [];
     if (!opts.some(o => o[0] === _adi.sort)) _adi.sort = opts.length ? opts[0][0] : '';
-    sel.innerHTML = opts.map(([k,l]) => `<option value="${esc(k)}"${k===_adi.sort?' selected':''}>${esc(l)}</option>`).join('');
+    sel.innerHTML = '';
+    opts.forEach(([k,l]) => sel.add(new Option(l, k, false, k === _adi.sort)));
     sel.style.display = opts.length > 1 ? '' : 'none';
   }
   const q = document.getElementById('adIntelQ');
