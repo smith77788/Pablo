@@ -21,8 +21,10 @@ HTML = os.path.join(ROOT, "mini_app", "index.html")
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
-    with open(HTML, encoding="utf-8") as f:
-        return f.read()
+    # Весь фронт, а не index.html: топология переехала в screens/infra.js.
+    from tests.miniapp_source import miniapp_source
+
+    return miniapp_source()
 
 
 def _js_func(name: str) -> str:
@@ -101,10 +103,14 @@ def test_topology_counters_open_their_tabs():
 
 
 def test_topology_counters_without_a_list_are_not_fake_buttons():
-    """У «Связей» и «Подписчиков» сводного списка нет — кнопки быть не должно."""
+    """У «Людей в ботах» сводного списка нет — кнопки быть не должно.
+
+    (Счётчик «Связей (вступ)» убран 10.11.2026: он всегда равнялся числу
+    каналов — каждый канал в каталоге привязан к аккаунту, — то есть повторял
+    соседнюю цифру под непонятной подписью.)"""
     body = _js_func("openTopology")
-    m = re.search(r"Связей \(вступ\)", body)
-    assert m, "счётчик связей пропал"
+    m = re.search(r"Людей в ботах", body)
+    assert m, "счётчик подписчиков ботов пропал"
     card = body[max(0, m.start() - 220):m.start()]
     assert "tap-card" not in card, "«Связей» притворяется кнопкой, которая ведёт не туда"
 

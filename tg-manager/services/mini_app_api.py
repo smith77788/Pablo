@@ -3164,76 +3164,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Infra Analytics ────────────────────────────────────────────────────────
 
-    async def infra_analytics_overview(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            active_accs = await pool.fetchval(
-                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
-            )
-        except Exception as e:
-            log.warning("infra_analytics active_accs uid=%d: %s", uid, e)
-            active_accs = 0
-        try:
-            flood_24h = await pool.fetchval(
-                """SELECT COUNT(*) FROM account_flood_log fl
-                   JOIN tg_accounts ta ON ta.id=fl.account_id
-                   WHERE ta.owner_id=$1 AND fl.created_at > NOW()-INTERVAL '24h'""",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics flood_24h uid=%d: %s", uid, e)
-            flood_24h = 0
-        try:
-            ops_24h = await pool.fetchval(
-                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW()-INTERVAL '24h'",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics ops_24h uid=%d: %s", uid, e)
-            ops_24h = 0
-        try:
-            warmup_active = await pool.fetchval(
-                """SELECT COUNT(*) FROM account_warmup_plans wp
-                   WHERE wp.owner_id=$1 AND wp.status='active'""",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics warmup uid=%d: %s", uid, e)
-            warmup_active = 0
-        try:
-            pools = await pool.fetch(
-                """SELECT pool, COUNT(*) AS cnt FROM tg_accounts
-                   WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL
-                   GROUP BY pool ORDER BY cnt DESC LIMIT 10""",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics pools uid=%d: %s", uid, e)
-            pools = []
-        try:
-            audit_rows = await pool.fetch(
-                """SELECT action, target, result, occurred_at
-                   FROM operation_audit WHERE owner_id=$1
-                   ORDER BY occurred_at DESC LIMIT 10""",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics audit uid=%d: %s", uid, e)
-            audit_rows = []
-        return _json_resp({
-            "active_accounts": int(active_accs or 0),
-            "flood_24h": int(flood_24h or 0),
-            "ops_24h": int(ops_24h or 0),
-            "warmup_active": int(warmup_active or 0),
-            "pools": [dict(p) for p in pools],
-            "audit": [
-                {**dict(a), "occurred_at": a["occurred_at"].isoformat() if a["occurred_at"] else None}
-                for a in audit_rows
-            ],
-        })
-
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
     async def new_users(request: web.Request) -> web.Response:
@@ -8413,6 +8343,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     from services import mini_app_saved_views
     mini_app_saved_views.setup_routes(app, pool)
     mini_app_fleet.setup_routes(app, pool)
+    from services import mini_app_infra
+    mini_app_infra.setup_routes(app, pool)
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_crm.setup_routes(app, pool)
@@ -8571,7 +8503,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
     # Infra Analytics
-    app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
     app.router.add_get("/api/miniapp/diag", diag)
     app.router.add_get("/api/miniapp/new_users", new_users)

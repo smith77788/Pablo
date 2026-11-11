@@ -38,6 +38,10 @@ from aiohttp import web
 MASS_CAP = 20000
 
 
+# Значение среза «пул», означающее «аккаунты без пула».
+UNPOOLED = "__none__"
+
+
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
     from services.mini_app_api import (
@@ -124,7 +128,11 @@ def setup_routes(app: web.Application, pool) -> None:
         # Пул — то, чем владелец делит флот на группы. На экране «Инфраструктура»
         # он был виден числом («Пул europe — 42 акк») и ничем больше: открыть
         # эти 42 аккаунта было нечем, среза под пул не существовало.
-        if acc_pool:
+        if acc_pool == UNPOOLED:
+            # «Без пула» — отдельный срез: строка «Без пула» на экране пулов
+            # открывала ВЕСЬ флот (пустой пул = нет фильтра).
+            clauses.append("(pool IS NULL OR pool = '')")
+        elif acc_pool:
             args.append(acc_pool)
             clauses.append(f"pool = ${len(args)}")
         # Страна аккаунта = страна его прокси (так же считает geo_router). На
@@ -362,7 +370,8 @@ def setup_routes(app: web.Application, pool) -> None:
                           is_active, added_at, last_used,
                           ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          status_reason, cooldown_until, cluster, stage, proxy_id
+                          status_reason, cooldown_until, cluster, stage, proxy_id,
+                          pool
                    FROM tg_accounts WHERE id=$1""", acc_id)
         else:
             acc = await _safe_fetchrow(pool,
@@ -370,7 +379,8 @@ def setup_routes(app: web.Application, pool) -> None:
                           is_active, added_at, last_used,
                           ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          status_reason, cooldown_until, cluster, stage, proxy_id
+                          status_reason, cooldown_until, cluster, stage, proxy_id,
+                          pool
                    FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Аккаунт не найден", 404)
@@ -693,6 +703,24 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Аккаунты не найдены", 404)
         n = len(ids)
         try:
+            if op == "set_pool":
+                # Пул выбранным аккаунтам (или всему срезу). Раньше назначить
+                # пул из мини-аппа было нечем — только из бота, хотя пустой
+                # экран пулов отправлял «назначить на карточке аккаунта».
+                from services import infra_hub as _ih
+                raw_pool = body.get("value")
+                if raw_pool in (None, ""):
+                    new_pool = None
+                else:
+                    try:
+                        new_pool = _ih.normalize_pool_name(raw_pool)
+                    except _ih.PoolNameError as e:
+                        return _err(str(e), 400)
+                if admin:
+                    return _err("Пул назначается только своим аккаунтам", 400)
+                changed = await _ih.assign_pool(pool, uid, new_pool, account_ids=ids)
+                return _json_resp({"ok": True, "count": changed, "pool": new_pool,
+                                   "label": _ih.pool_label(new_pool), "capped": capped})
             if op in ("add_tag", "remove_tag"):
                 tag = _norm_tag(body.get("value") or body.get("tag_value"))
                 if not tag:

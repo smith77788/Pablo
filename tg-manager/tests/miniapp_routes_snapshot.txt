@@ -213,6 +213,9 @@ GET /api/miniapp/host_server/status
 GET /api/miniapp/inbox
 GET /api/miniapp/inbox/{peer_user_id}
 GET /api/miniapp/infra
+GET /api/miniapp/infra/audit
+GET /api/miniapp/infra/pools
+GET /api/miniapp/infra/pools/rebalance
 GET /api/miniapp/infra_health
 GET /api/miniapp/integrations
 GET /api/miniapp/invite/account/{acc_id}
@@ -557,6 +560,9 @@ HEAD /api/miniapp/host_server/status
 HEAD /api/miniapp/inbox
 HEAD /api/miniapp/inbox/{peer_user_id}
 HEAD /api/miniapp/infra
+HEAD /api/miniapp/infra/audit
+HEAD /api/miniapp/infra/pools
+HEAD /api/miniapp/infra/pools/rebalance
 HEAD /api/miniapp/infra_health
 HEAD /api/miniapp/integrations
 HEAD /api/miniapp/invite/account/{acc_id}
@@ -941,6 +947,10 @@ POST /api/miniapp/inbox/{peer_user_id}/ai-draft
 POST /api/miniapp/inbox/{peer_user_id}/ai-summary
 POST /api/miniapp/inbox/{peer_user_id}/read
 POST /api/miniapp/inbox/{peer_user_id}/reply
+POST /api/miniapp/infra/pools/assign
+POST /api/miniapp/infra/pools/dissolve
+POST /api/miniapp/infra/pools/rebalance
+POST /api/miniapp/infra/pools/rename
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
 POST /api/miniapp/infra_health/mute/{anomaly_type}
 POST /api/miniapp/infra_health/resolve_all
