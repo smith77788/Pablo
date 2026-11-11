@@ -143,6 +143,7 @@ GET /api/miniapp/check_owned_restrictions/targets
 GET /api/miniapp/circuit_breaker
 GET /api/miniapp/cleaner/accounts
 GET /api/miniapp/clone_adapt/history
+GET /api/miniapp/clone_adapt/profile
 GET /api/miniapp/cloud/file/{file_id}/download
 GET /api/miniapp/cloud/files
 GET /api/miniapp/cloud/status
@@ -485,6 +486,7 @@ HEAD /api/miniapp/check_owned_restrictions/targets
 HEAD /api/miniapp/circuit_breaker
 HEAD /api/miniapp/cleaner/accounts
 HEAD /api/miniapp/clone_adapt/history
+HEAD /api/miniapp/clone_adapt/profile
 HEAD /api/miniapp/cloud/file/{file_id}/download
 HEAD /api/miniapp/cloud/files
 HEAD /api/miniapp/cloud/status
@@ -862,6 +864,8 @@ POST /api/miniapp/chatwarmup/session/{sid}/status
 POST /api/miniapp/check_bot_geoban
 POST /api/miniapp/check_owned_restrictions
 POST /api/miniapp/cleaner/submit
+POST /api/miniapp/clone_adapt/preview
+POST /api/miniapp/clone_adapt/rollback
 POST /api/miniapp/clone_adapt/submit
 POST /api/miniapp/cloud/file/{file_id}/delete
 POST /api/miniapp/cloud/file/{file_id}/heal

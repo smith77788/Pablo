@@ -5465,6 +5465,7 @@ def _build_dispatch() -> dict:
         "ai_comment": _exec_ai_comment,
         "content_clone": _exec_content_clone,
         "clone_adapt": _exec_clone_adapt,
+        "clone_adapt_rollback": _exec_bulk_bot_profile_rollback,
         "niche_growth_post": _exec_niche_growth_post,
         "niche_scan": _exec_niche_scan,
         "niche_presence": _exec_niche_presence,
@@ -7233,8 +7234,8 @@ async def _exec_bulk_bot_profile_rollback(
         pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(snaps), op_id)
     already = await completed_targets(pool, op_id)
 
-    _METHOD = {"name": "setMyName", "description": "setMyDescription",
-               "short_description": "setMyShortDescription"}
+    from services.clone_adapt_engine import restore_calls as _ca_restore_calls
+    from services.clone_adapt_engine import restored_label as _ca_restored_label
     ok_count = 0
     fail_count = 0
     async with aiohttp.ClientSession() as sess:
@@ -7262,20 +7263,22 @@ async def _exec_bulk_bot_profile_rollback(
             if token is None:
                 reasons.append("бот не найден")
             else:
-                for field, method in _METHOD.items():
-                    if field not in before:
-                        continue
+                # Имя/описания/команды/кнопка меню/права — общий список вызовов
+                # из движка клона: снимки «Клона и адаптации» лежат в той же
+                # таблице и откатываются этой же операцией (в том числе
+                # переводы на другие языки — ключи вида «name:en»).
+                for _lbl, method, _params in _ca_restore_calls(before):
                     try:
-                        data = await bot_api._call(
-                            sess, token, method, **{field: before.get(field) or ""})
+                        data = await bot_api._call(sess, token, method, **_params)
                     except Exception as e:  # noqa: BLE001
-                        reasons.append(bot_health._LABEL[bot_health.OTHER])
+                        reasons.append(f"{_lbl}: {bot_health._LABEL[bot_health.OTHER]}")
                         log.warning("rollback profile: bot=%s %s error=%s", bid, method, e)
                         continue
                     if not data.get("ok"):
                         _kind = bot_health.classify_error(
                             data.get("description", ""), data.get("error_code"))
-                        reasons.append(bot_health._LABEL.get(_kind, bot_health._LABEL[bot_health.OTHER]))
+                        reasons.append(f"{_lbl}: " + bot_health._LABEL.get(
+                            _kind, bot_health._LABEL[bot_health.OTHER]))
                 if "greeting" in before:
                     try:
                         async with pool.acquire() as conn:
@@ -7301,6 +7304,7 @@ async def _exec_bulk_bot_profile_rollback(
                 # боту — в сообщении: в логе владелец видит бота, не номер.
                 _restored = "; ".join(
                     f"{_BP_FIELD_LABEL.get(k, k)}: «{_bp_short(v)}»"
+                    if k in _BP_FIELD_LABEL else _ca_restored_label(k, v)
                     for k, v in before.items())
                 await _journal_done(
                     pool, op_id, ok_count + fail_count, target,
@@ -25249,87 +25253,208 @@ async def _exec_run_broadcast(
 async def _exec_clone_adapt(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Клонирование профиля бота: имя/описание/фото/команды.
-    params: {source_bot_id: int, target_bot_id: int, fields: str (comma-sep)}
+    """«Клон и адаптация»: профиль бота-источника → на один или много ботов.
+
+    params: source_bot_id, target_bot_ids (список; старый формат —
+    target_bot_id), fields (список или строка через запятую), settings
+    (шаблон имени, замены, подмена упоминаний, языки, «только разница») —
+    см. `services/clone_adapt_engine.py`.
+
+    Раньше исполнитель читал токены из базы КАК ЕСТЬ, а они зашифрованы
+    (token_vault): каждый вызов Telegram уходил с мусорным токеном, и клон из
+    мини-аппа не срабатывал никогда. Теперь токены — через `fetch_bots`.
+
+    По каждой цели: снимок «как было» (только тех полей, что изменятся) в
+    bulk_edit_snapshots ДО изменения — на нём работает откат; затем поле за
+    полем; итог — строка журнала операции (по ней повтор пропускает
+    сделанных) и строка истории с «было → стало» по каждому полю.
     """
-    import aiohttp as _aio
-    from services import bot_api as _bapi
+    from services import bot_api, bot_health
+    from services import clone_adapt_engine as _ca
+    from database.db import fetch_bots as _fetch_bots_ca
 
-    source_bot_id = params.get("source_bot_id")
-    target_bot_id = params.get("target_bot_id")
-    fields_str = str(params.get("fields", "name,desc"))
-    fields = [f.strip() for f in fields_str.split(",") if f.strip()]
+    try:
+        source_bot_id = int(params.get("source_bot_id") or 0)
+    except (TypeError, ValueError):
+        source_bot_id = 0
+    raw_targets = params.get("target_bot_ids")
+    if raw_targets is None and params.get("target_bot_id"):
+        raw_targets = [params.get("target_bot_id")]
+    target_ids: list[int] = []
+    for x in raw_targets or []:
+        try:
+            tid = int(x)
+        except (TypeError, ValueError):
+            continue
+        if tid and tid != source_bot_id and tid not in target_ids:
+            target_ids.append(tid)
+    fields = _ca.normalize_fields(params.get("fields", "name,desc"))
+    settings = _ca.normalize_settings(params.get("settings"))
+    # Бот ставил суффикс к имени отдельным параметром — это шаблон «{name}…».
+    if params.get("name_suffix") and settings["name_template"] == _ca.DEFAULT_NAME_TEMPLATE:
+        settings["name_template"] = "{name}" + str(params["name_suffix"])[:32]
 
-    if not source_bot_id or not target_bot_id or not fields:
-        return {"status": "failed", "summary": "⚠️ Неверные параметры clone_adapt"}
+    if not source_bot_id or not target_ids or not fields:
+        return {"status": "failed",
+                "summary": "⚠️ Клон: не выбран источник, цели или поля"}
 
-    src_row = await _safe_fetchrow(
-            pool,
-        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        int(source_bot_id), owner_id,
+    src_rows = await _fetch_bots_ca(
+        pool,
+        "SELECT bot_id, token, username, first_name FROM managed_bots "
+        "WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        source_bot_id, owner_id,
     )
-    tgt_row = await _safe_fetchrow(
-            pool,
-        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        int(target_bot_id), owner_id,
+    if not src_rows:
+        return {"status": "failed", "summary": "⚠️ Клон: бот-источник не найден"}
+    src = src_rows[0]
+    tgt_rows = await _fetch_bots_ca(
+        pool,
+        "SELECT bot_id, token, username, first_name FROM managed_bots "
+        "WHERE added_by=$1 AND is_active=TRUE AND bot_id = ANY($2::bigint[])",
+        owner_id, target_ids,
     )
-    if not src_row:
-        return {"status": "failed", "summary": "⚠️ Исходный бот не найден"}
-    if not tgt_row:
-        return {"status": "failed", "summary": "⚠️ Целевой бот не найден"}
-
-    src_token = src_row["token"]
-    tgt_token = tgt_row["token"]
-    src_name = src_row["username"] or src_row["first_name"] or f"id{source_bot_id}"
-    tgt_name = tgt_row["username"] or tgt_row["first_name"] or f"id{target_bot_id}"
-
-    errors = []
-    ok_count = 0
-
-    async with _aio.ClientSession() as http:
-        if "name" in fields:
-            me = await _bapi.get_my_name(http, src_token)
-            src_display_name = me.get("name", "") if me else ""
-            if src_display_name and await _bapi.set_name(http, tgt_token, src_display_name):
-                ok_count += 1
-            else:
-                errors.append("имя")
-
-        if "desc" in fields:
-            d = await _bapi.get_my_description(http, src_token)
-            src_desc = d.get("description", "") if d else ""
-            if await _bapi.set_description(http, tgt_token, src_desc):
-                ok_count += 1
-            else:
-                errors.append("описание")
-
-        if "short" in fields:
-            d = await _bapi.get_my_short_description(http, src_token)
-            src_short = d.get("short_description", "") if d else ""
-            if await _bapi.set_short_description(http, tgt_token, src_short):
-                ok_count += 1
-            else:
-                errors.append("краткое описание")
-
-        if "commands" in fields:
-            cmds = await _bapi.get_my_commands(http, src_token)
-            if cmds is not None and await _bapi.set_my_commands(http, tgt_token, cmds):
-                ok_count += 1
-            else:
-                errors.append("команды")
-
-    detail = f"Ошибки: {', '.join(errors)}" if errors else f"OK ({ok_count} полей)"
-    status = "failed" if errors and ok_count == 0 else "done"
+    by_id = {int(r["bot_id"]): r for r in tgt_rows}
+    targets = [by_id[t] for t in target_ids if t in by_id]
+    if not targets:
+        return {"status": "failed", "summary": "⚠️ Клон: боты-цели не найдены"}
 
     await _safe_execute(
-            pool,
-        """INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, fields, status, details)
-           VALUES ($1, $2, $3, $4, $5, $6)""",
-        owner_id, int(source_bot_id), int(target_bot_id),
-        fields_str, "ok" if status == "done" else "error", detail,
-    )
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(targets), op_id)
+    already = await completed_targets(pool, op_id)
+    src_label = _bp_bot_label(src)
+    settings_json = json.dumps({"fields": fields, **settings}, ensure_ascii=False)
 
-    return {
-        "status": status,
-        "summary": f"🔄 Клон @{src_name} → @{tgt_name}: {detail}",
-    }
+    ok_count = fail_count = same_count = prev_ok = 0
+    async with aiohttp.ClientSession() as sess:
+        source = await _ca.read_profile(sess, src["token"], fields, settings["langs"],
+                                        username=src.get("username") or "")
+        photo = None
+        if "photo" in fields:
+            photo = await _ca.read_photo(sess, src["token"])
+            source["has_photo"] = bool(photo)
+        # Языки цели читаем ровно те, что переносим.
+        langs = [lc for lc in _ca.effective_langs(settings, source) if lc]
+
+        for step_no, t in enumerate(targets, start=1):
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled", "ok": prev_ok + ok_count, "failed": fail_count,
+                        "summary": f"Отменено. Готово: {prev_ok + ok_count}, "
+                                   f"ошибок: {fail_count}"}
+            label = _bp_bot_label(t)
+            if label in already:
+                prev_ok += 1
+                await _mark_progress(pool, op_id, step_no)
+                continue
+
+            target = await _ca.read_profile(sess, t["token"], fields, langs,
+                                            username=t.get("username") or "")
+            plan = _ca.build_plan(source, target, fields, settings, index=step_no)
+
+            before = _ca.snapshot_before(plan)
+            if before:
+                try:
+                    await pool.execute(
+                        "INSERT INTO bulk_edit_snapshots(owner_id, op_id, entity_type, "
+                        "target_id, before) VALUES($1,$2,'bot',$3,$4::jsonb)",
+                        owner_id, op_id, int(t["bot_id"]),
+                        json.dumps(before, ensure_ascii=False))
+                except Exception as _se:  # noqa: BLE001 — снимок best-effort
+                    log.warning("clone_adapt: снимок для отката не снят bot=%s: %s",
+                                t.get("bot_id"), _se)
+
+            changes: list[dict] = []
+            errors = 0
+            applied = 0
+            for st in plan:
+                row = _ca.public_step(st)
+                if st["same"]:
+                    row["result"] = "same"
+                    changes.append(row)
+                    continue
+                try:
+                    data = await _ca.apply_step(sess, t["token"], st, photo)
+                    # setMy* лимитированы сильнее прочих методов: короткий флуд
+                    # отсыпаем и пробуем поле ещё раз.
+                    if not data.get("ok") and bot_health.classify_error(
+                            data.get("description", ""),
+                            data.get("error_code")) == bot_health.FLOOD:
+                        _ra = bot_api.retry_after_of(data) or 5
+                        if _ra <= 30:
+                            await cancellable_pause(pool, op_id, _ra + 1, where="clone_adapt")
+                            data = await _ca.apply_step(sess, t["token"], st, photo)
+                except Exception as e:  # noqa: BLE001 — провал поля, не всей операции
+                    data = None
+                    row["result"] = "error"
+                    row["reason"] = _bp_reason(st["label"], exc=e)
+                    errors += 1
+                if data is not None:
+                    if data.get("ok"):
+                        row["result"] = "ok"
+                        applied += 1
+                    else:
+                        row["result"] = "error"
+                        row["reason"] = _bp_reason(st["label"], data)
+                        errors += 1
+                changes.append(row)
+
+            if errors and not applied:
+                status = "error"
+            elif errors:
+                status = "partial"
+            elif applied:
+                status = "ok"
+            else:
+                status = "same"
+            summary_line = (
+                f"{src_label} → {label}: изменено {applied}, совпадало "
+                f"{sum(1 for c in changes if c['result'] == 'same')}"
+                + (f", ошибок {errors}" if errors else ""))
+
+            try:
+                await pool.execute(
+                    "INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, "
+                    "fields, status, details, op_id, changes, settings) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb)",
+                    owner_id, source_bot_id, int(t["bot_id"]), ",".join(fields), status,
+                    summary_line[:500], op_id, json.dumps(changes, ensure_ascii=False),
+                    settings_json)
+            except Exception as _he:  # noqa: BLE001 — история не стоит клона
+                log.warning("clone_adapt: история не записана bot=%s: %s",
+                            t.get("bot_id"), _he)
+
+            if status in ("ok", "same"):
+                if status == "ok":
+                    ok_count += 1
+                else:
+                    same_count += 1
+                await _journal_done(pool, op_id, step_no, label, summary_line[:900])
+            else:
+                fail_count += 1
+                reasons = "; ".join(c.get("reason", "") for c in changes if c.get("reason"))
+                # Ошибка прошлого прогона по этой же цели устарела.
+                await _safe_execute(
+                    pool, "DELETE FROM operation_log WHERE op_id=$1 AND target=$2 "
+                    "AND status='error'", op_id, label, log_ctx=f" clone_adapt op={op_id}")
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, step_no, label, f"{summary_line}. {reasons}"[:900],
+                    log_ctx=f" clone_adapt op={op_id}")
+            await _mark_progress(pool, op_id, step_no)
+            # Пауза между ботами бережёт лимиты Bot API на setMy*; отмену
+            # замечает и посреди паузы.
+            if step_no < len(targets):
+                await cancellable_pause(pool, op_id, 1, where="clone_adapt")
+
+    done = prev_ok + ok_count + same_count
+    _prev = f" (из них {prev_ok} — в прошлых прогонах)" if prev_ok else ""
+    _same = f", уже совпадало у {same_count}" if same_count else ""
+    if fail_count:
+        summary = (f"🔄 Клон {src_label}: готово {done} из {len(targets)}{_prev}{_same}, "
+                   f"с ошибками: {fail_count} — причины в истории модуля")
+    else:
+        summary = f"🔄 Клон {src_label}: готово {done} из {len(targets)}{_prev}{_same}"
+    return {"status": "done" if done else "failed",
+            "ok": prev_ok + ok_count + same_count, "failed": fail_count,
+            "summary": summary}
