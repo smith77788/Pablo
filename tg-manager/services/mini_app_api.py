@@ -6102,13 +6102,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
+        if not isinstance(data, dict):
+            return _err("Не удалось разобрать запрос")
+        from services import account_shield as _sh
         fields = {}
-        for key in ("risk_threshold", "ban_prob_threshold"):
+        for key in ("risk_threshold", "ban_prob_threshold",
+                    "pause_risk_threshold", "pause_ban_threshold"):
             if key in data and data[key] is not None:
                 try:
                     v = float(data[key])
                 except (TypeError, ValueError):
-                    return _err(f"Некорректное значение: {key}")
+                    return _err("Некорректное значение порога")
                 if not 0.0 <= v <= 1.0:
                     return _err("Порог должен быть от 0 до 1")
                 fields[key] = v
@@ -6117,68 +6121,174 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if hours is None:
                 return _err("Пауза — от 1 до 168 часов")
             fields["cool_duration_hours"] = hours
+        if "cool_hours" in data and data["cool_hours"] is not None:
+            hours = validate_integer(data["cool_hours"], min_val=1, max_val=48)
+            if hours is None:
+                return _err("Охлаждение — от 1 до 48 часов")
+            fields["cool_hours"] = hours
         for key in ("auto_pause", "notify_admin"):
             if key in data and data[key] is not None:
                 fields[key] = bool(data[key])
+        if data.get("response_mode") is not None:
+            if data["response_mode"] not in _sh.RESPONSE_MODES:
+                return _err("Неизвестная реакция щита")
+            fields["response_mode"] = data["response_mode"]
+        if data.get("preset") is not None:
+            if data["preset"] not in _sh.PRESETS:
+                return _err("Неизвестный профиль защиты")
+            fields["preset"] = data["preset"]
+        if "exempt_account_ids" in data and data["exempt_account_ids"] is not None:
+            raw = data["exempt_account_ids"]
+            if not isinstance(raw, list) or len(raw) > 5000:
+                return _err("Список исключений не разобран")
+            try:
+                ids = sorted({int(x) for x in raw})
+            except (TypeError, ValueError):
+                return _err("Список исключений не разобран")
+            if ids:
+                # Только свои аккаунты: чужой id в списке ничего не даёт, но
+                # и лежать у владельца не должен.
+                own = await pool.fetch(
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::int[])",
+                    uid, ids)
+                ids = sorted(int(r["id"]) for r in own)
+            fields["exempt_account_ids"] = ids
         if not fields:
             return _err("Нечего сохранять")
         try:
-            from services.account_shield import save_shield_config
-            cfg = await save_shield_config(pool, uid, **fields)
+            cfg = await _sh.save_shield_config(pool, uid, **fields)
         except Exception:
             log.exception("shield_config_save uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "config": {
-            "risk_threshold": cfg.risk_threshold,
-            "ban_prob_threshold": cfg.ban_prob_threshold,
-            "auto_pause": cfg.auto_pause,
-            "notify_admin": cfg.notify_admin,
-            "cool_duration_hours": cfg.cool_duration_hours,
-        }})
+        return _json_resp({"ok": True, "config": cfg.as_dict()})
+
+    async def shield_resume(request: web.Request) -> web.Response:
+        """Вернуть аккаунт из паузы/охлаждения щита досрочно."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            acc_id = int(data.get("account_id"))
+        except Exception:
+            return _err("Неверный идентификатор аккаунта")
+        try:
+            from services import account_shield as _sh
+            ok = await _sh.resume_now(pool, uid, acc_id)
+        except Exception:
+            log.exception("shield_resume uid=%d acc=%d", uid, acc_id)
+            return _err(_INTERNAL_ERROR, 500)
+        if not ok:
+            return _err("Этот аккаунт щит не останавливал", 404)
+        return _json_resp({"ok": True})
+
+    async def shield_run_now(request: web.Request) -> web.Response:
+        """Проверить флот щитом сейчас, не дожидаясь 30-минутного цикла."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import account_shield as _sh
+            # Без бота: итог проверки владелец видит на экране сразу, а
+            # уведомления о паузах шлёт фоновый цикл.
+            res = await _sh.run_owner(pool, uid, None)
+        except Exception:
+            log.exception("shield_run_now uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, **res})
 
     async def shield_summary(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        action_filter = (request.rel_url.query.get("action") or "").strip()
+        if action_filter not in ("", "warn", "cool", "pause", "resume"):
+            action_filter = ""
         try:
+            from services import account_shield as _sh
+            cfg_obj = await _sh.get_shield_config(pool, uid)
+            # Пороги — ВЛАДЕЛЬЦА, а не зашитые 0.7/0.5: плитки «Высокий риск»
+            # и «Под защитой» должны значить то же, что значат решения щита.
             row = await pool.fetchrow(
                 """SELECT
                    COUNT(*) FILTER (WHERE a.is_active = TRUE) AS total_active,
-                   COUNT(*) FILTER (WHERE a.is_active = FALSE AND a.cooldown_until > NOW()) AS cooling,
-                   COUNT(*) FILTER (WHERE r.risk_score >= 0.7) AS threatened,
-                   COUNT(*) FILTER (WHERE r.ban_probability >= 0.5) AS high_ban,
-                   COUNT(*) FILTER (WHERE r.risk_score < 0.7 AND (r.ban_probability < 0.5 OR r.ban_probability IS NULL)) AS ok_count
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND a.cooldown_until > NOW()) AS cooling,
+                   COUNT(*) FILTER (WHERE a.is_active = FALSE AND a.shield_paused_until > NOW()) AS paused,
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND (r.risk_score >= $2 OR r.ban_probability >= $3)) AS threatened,
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND r.ban_probability >= $3) AS high_ban,
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND COALESCE(r.risk_score, 0) < $2
+                                      AND COALESCE(r.ban_probability, 0) < $3) AS ok_count,
+                   AVG(r.risk_score) FILTER (WHERE a.is_active = TRUE) AS avg_risk
                    FROM tg_accounts a
                    LEFT JOIN account_risk_scores r ON r.account_id = a.id
                    WHERE a.owner_id = $1""",
+                uid, cfg_obj.risk_threshold, cfg_obj.ban_prob_threshold,
+            )
+            # Кого щит держит прямо сейчас — с кнопкой «Вернуть».
+            held = await pool.fetch(
+                """SELECT a.id, a.first_name, a.username, a.phone, a.is_active,
+                          a.shield_paused_until, a.cooldown_until, a.status_reason
+                   FROM tg_accounts a
+                   WHERE a.owner_id=$1
+                     AND ((a.is_active = FALSE AND a.shield_paused_until > NOW())
+                       OR (a.is_active = TRUE AND a.cooldown_until > NOW()
+                           AND a.status_reason LIKE 'Охлаждение на %'))
+                   ORDER BY COALESCE(a.shield_paused_until, a.cooldown_until) DESC
+                   LIMIT 50""",
                 uid,
             )
             # account_id — чтобы строка истории открывала карточку аккаунта.
             history = await pool.fetch(
                 """SELECT a.id AS account_id, sa.action, sa.risk_score,
-                          sa.ban_probability, sa.created_at, a.phone, a.first_name
+                          sa.ban_probability, sa.created_at, sa.note,
+                          a.phone, a.first_name
                    FROM shield_actions sa
                    JOIN tg_accounts a ON a.id = sa.account_id
-                   WHERE sa.owner_id=$1 ORDER BY sa.created_at DESC LIMIT 20""",
-                uid,
+                   WHERE sa.owner_id=$1 AND ($2 = '' OR sa.action = $2)
+                   ORDER BY sa.created_at DESC LIMIT 30""",
+                uid, action_filter,
             )
             history_total = await pool.fetchval(
-                "SELECT COUNT(*) FROM shield_actions WHERE owner_id=$1", uid)
-            cfg = await pool.fetchrow(
-                "SELECT * FROM shield_configs WHERE owner_id=$1", uid
-            )
+                "SELECT COUNT(*) FROM shield_actions WHERE owner_id=$1 AND ($2 = '' OR action = $2)",
+                uid, action_filter)
+            counts = await pool.fetch(
+                """SELECT action, COUNT(*) AS n FROM shield_actions
+                   WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '7 days'
+                   GROUP BY action""",
+                uid)
+            exempt = []
+            if cfg_obj.exempt_account_ids:
+                exempt = await pool.fetch(
+                    """SELECT id, first_name, username, phone FROM tg_accounts
+                       WHERE owner_id=$1 AND id = ANY($2::int[]) ORDER BY id""",
+                    uid, list(cfg_obj.exempt_account_ids))
         except Exception:
             log.exception("shield_summary uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+
+        def _nm(r):
+            return r["first_name"] or (("@" + r["username"]) if r.get("username") else "") or r["phone"] or ""
+
+        stats = {k: int(row[k] or 0) for k in
+                 ("total_active", "cooling", "paused", "threatened", "high_ban", "ok_count")} if row else {}
+        if row is not None:
+            stats["avg_risk"] = round(float(row["avg_risk"] or 0), 4)
         return _json_resp({
-            "stats": {k: int(row[k] or 0) for k in ("total_active","cooling","threatened","high_ban","ok_count")} if row else {},
-            "config": {
-                "risk_threshold": float(cfg["risk_threshold"]) if cfg else 0.7,
-                "ban_prob_threshold": float(cfg["ban_prob_threshold"]) if cfg else 0.5,
-                "auto_pause": bool(cfg["auto_pause"]) if cfg else True,
-                "notify_admin": bool(cfg["notify_admin"]) if cfg else True,
-                "cool_duration_hours": int(cfg["cool_duration_hours"]) if cfg else 24,
-            },
+            "stats": stats,
+            "week": {r["action"]: int(r["n"] or 0) for r in counts},
+            "config": cfg_obj.as_dict(),
+            "presets": _sh.PRESETS,
+            "held": [
+                {
+                    "account_id": r["id"], "name": _nm(r),
+                    "state": "pause" if not r["is_active"] else "cool",
+                    "until": (r["shield_paused_until"] if not r["is_active"] else r["cooldown_until"]).isoformat()
+                             if (r["shield_paused_until"] if not r["is_active"] else r["cooldown_until"]) else None,
+                    "reason": r["status_reason"] or "",
+                }
+                for r in held
+            ],
+            "exempt": [{"account_id": r["id"], "name": _nm(r)} for r in exempt],
             "history_total": history_total or 0,
             "history": [
                 {
@@ -6186,13 +6296,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "action": r["action"], "risk": float(r["risk_score"] or 0),
                     "ban_prob": float(r["ban_probability"] or 0),
                     "name": r["first_name"] or r["phone"] or "",
+                    "note": r["note"] or "",
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 }
                 for r in history
             ],
         })
-
-    # ── Ad Intelligence ────────────────────────────────────────────────────────
 
     async def ad_intel_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -7677,16 +7786,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """
                 SELECT ars.account_id, ta.phone, ta.username, ta.first_name,
                        ars.risk_score, ars.ban_probability, ars.flood_rate_1h,
-                       ars.ops_24h, ars.last_flood_at, ars.computed_at
+                       ars.ops_24h, ars.last_flood_at, ars.computed_at,
+                       ars.factors, ta.is_active, ta.shield_paused_until
                 FROM account_risk_scores ars
                 JOIN tg_accounts ta ON ta.id = ars.account_id
                 WHERE ta.owner_id = $1
-                ORDER BY ars.risk_score DESC NULLS LAST
-                LIMIT 30
+                ORDER BY ars.risk_score DESC NULLS LAST, ta.id
+                LIMIT 500
                 """,
                 uid,
             )
-            return _json_resp([dict(r) for r in rows])
+            from services.physics_engine import _parse_factors
+            out = []
+            for r in rows:
+                d = dict(r)
+                # jsonb приходит строкой — экрану нужен список факторов.
+                d["factors"] = _parse_factors(d.get("factors"))
+                out.append(d)
+            return _json_resp(out)
         except Exception:
             log.exception("physics_overview uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -8395,6 +8512,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Account Shield
     app.router.add_get("/api/miniapp/shield", shield_summary)
     app.router.add_post("/api/miniapp/shield/config", shield_config_save)
+    app.router.add_post("/api/miniapp/shield/resume", shield_resume)
+    app.router.add_post("/api/miniapp/shield/run", shield_run_now)
     # Ad Intelligence
     app.router.add_get("/api/miniapp/ad_intel", ad_intel_overview)
     app.router.add_post("/api/miniapp/ad_intel/channel", ad_intel_add_channel)

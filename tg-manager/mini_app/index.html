@@ -3523,7 +3523,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🛡 Защита аккаунтов</div></div>
   <div class="filter-chips mod-tabs" data-module="shield" data-tab="habits" role="tablist" aria-label="Вкладки модуля «Защита аккаунтов»"></div>
   <div class="sub-sb">
-    <div class="sec">Риски аккаунтов</div>
+    <div id="physicsStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 8px"></div>
+    <div style="font-size:12px;color:var(--hint);padding:0 16px 8px;line-height:1.45">Риск складывается из факторов: ограничения и спам-блок Telegram, FloodWait, неудачные операции, нагрузка, возраст аккаунта, доверие и прокси. Нажмите на аккаунт — покажем, из чего сложилось его число.</div>
+    <div style="display:flex;gap:8px;padding:0 16px 8px">
+      <button class="btn btn-s" style="flex:1 1 auto" id="physicsRecalcBtn" onclick="physicsRecalc()">🔄 Пересчитать сейчас</button>
+    </div>
+    <div class="filter-chips" id="physicsFilter" style="padding:4px 16px 8px;flex-wrap:wrap"></div>
     <div class="lst" id="physicsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -7090,9 +7095,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="filter-chips mod-tabs" data-module="shield" data-tab="accounts" role="tablist" aria-label="Вкладки модуля «Защита аккаунтов»"></div>
   <div class="sub-sb">
     <div id="shieldStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
-    <div class="sec">Конфигурация</div>
+    <div style="font-size:12px;color:var(--hint);padding:0 16px 8px;line-height:1.45">Каждые 30 минут щит оценивает риск каждого аккаунта и по вашим порогам охлаждает его или ставит на паузу. Пауза заканчивается сама, вернуть аккаунт раньше можно кнопкой.</div>
+    <div style="display:flex;gap:8px;padding:0 16px 10px">
+      <button class="btn btn-p" style="flex:1 1 auto" id="shieldRunBtn" onclick="shieldRunNow()">🔍 Проверить сейчас</button>
+      <button class="btn btn-s" style="flex:1 1 auto" onclick="openPhysics()">⚛️ Риск по аккаунтам</button>
+    </div>
+    <div class="sec">Профиль защиты</div>
+    <div class="filter-chips" id="shieldPresets" style="padding:4px 16px 8px;flex-wrap:wrap"></div>
+    <div class="sec">Настройки</div>
     <div class="lst" id="shieldConfig"></div>
+    <div id="shieldHeldWrap" style="display:none">
+      <div class="sec" style="margin-top:8px">Сейчас щит держит</div>
+      <div class="lst" id="shieldHeld"></div>
+    </div>
     <div class="sec" style="margin-top:8px">История действий</div>
+    <div class="filter-chips" id="shieldHistFilter" style="padding:4px 16px 8px;flex-wrap:wrap"></div>
     <div class="lst" id="shieldHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -26331,46 +26348,69 @@ async function openHealth() {
 }
 
 // ── Account Shield ─────────────────────────────────────
-const SHIELD_CFG_LABELS = {
-  risk_threshold: '🎯 Порог риска (0–1)',
-  ban_prob_threshold: '🚫 Порог вероятности бана (0–1)',
-  auto_pause: '⏸ Авто-пауза при высоком риске',
-  notify_admin: '🔔 Уведомлять в Telegram'
-};
-// Щит пишет в shield_actions ровно четыре значения — ok/warn/cool/pause
-// (`account_shield._decide`). Словарь же переводил auto_pause/ban_detect/
-// rotate/cooldown/restore, которых он не пишет никогда, поэтому владелец
-// видел в истории сырое английское «pause». Переводим то, что бывает на самом
-// деле; старые ключи оставлены на случай записей из прошлых версий.
+// Щит пишет в shield_actions ровно пять значений — ok/warn/cool/pause/resume
+// (`account_shield.decide` и возврат из паузы). Старые ключи оставлены на
+// случай записей из прошлых версий.
 const SHIELD_ACTIONS = {
-  pause:'⏸ Убран из работы', cool:'❄️ Охлаждение', warn:'⚠️ Предупреждение',
-  ok:'✅ Норма',
+  pause:'⏸ Пауза', cool:'❄️ Охлаждение', warn:'⚠️ Предупреждение',
+  ok:'✅ Норма', resume:'▶️ Возвращён в работу', exempt:'🙈 Исключён',
   auto_pause:'⏸ Авто-пауза', ban_detect:'🚨 Обнаружен бан',
   rotate:'🔄 Ротация аккаунта', cooldown:'❄️ Кулдаун',
   restore:'✅ Восстановление'
 };
-const SHIELD_ICONS = {pause:'⏸', cool:'❄️', warn:'⚠️', ok:'🛡', ban_detect:'🚨', rotate:'🔄'};
-// Настройки щита показывались, но менять их было нечем: у таблицы
-// shield_configs вообще не было писателя со стороны мини-аппа. Теперь каждая
-// строка настройки открывается и сохраняется, а строка истории ведёт в
-// карточку аккаунта.
+const SHIELD_ICONS = {pause:'⏸', cool:'❄️', warn:'⚠️', ok:'🛡', resume:'▶️', ban_detect:'🚨', rotate:'🔄'};
 let SHIELD_CFG = {};
+let SHIELD_HIST_FILTER = '';
 
+// Пороги показываются процентами — так же, как риск в истории и на вкладке
+// «Риск бана». Раньше порог был «0.7», а риск рядом — «50%».
 const SHIELD_RISK_STEPS = [
-  ['0.5', 'Осторожный · 0.5', 'срабатывает рано, ложных тревог больше'],
-  ['0.6', 'Ниже среднего · 0.6', ''],
-  ['0.7', 'Обычный · 0.7', 'значение по умолчанию'],
-  ['0.8', 'Терпимый · 0.8', ''],
-  ['0.9', 'Только явная угроза · 0.9', 'поздно, зато без ложных тревог'],
+  ['0.5', '50% · Осторожный', 'срабатывает рано, ложных тревог больше'],
+  ['0.6', '60% · Ниже среднего', ''],
+  ['0.7', '70% · Обычный', 'значение по умолчанию'],
+  ['0.8', '80% · Терпимый', ''],
+  ['0.9', '90% · Только явная угроза', 'поздно, зато без ложных тревог'],
+];
+const SHIELD_PAUSE_STEPS = [
+  ['0.75', '75% · Осторожный', 'пауза уже при сильном риске'],
+  ['0.85', '85% · Ниже среднего', ''],
+  ['0.9', '90% · Обычный', 'значение по умолчанию'],
+  ['0.95', '95% · Только критический риск', ''],
 ];
 const SHIELD_BAN_STEPS = [
-  ['0.3', 'Осторожный · 0.3', 'вмешиваемся при трети вероятности'],
-  ['0.4', 'Ниже среднего · 0.4', ''],
-  ['0.5', 'Обычный · 0.5', 'значение по умолчанию'],
-  ['0.6', 'Терпимый · 0.6', ''],
-  ['0.7', 'Только явная угроза · 0.7', ''],
+  ['0.3', '30% · Осторожный', 'вмешиваемся при трети вероятности'],
+  ['0.4', '40% · Ниже среднего', ''],
+  ['0.5', '50% · Обычный', 'значение по умолчанию'],
+  ['0.6', '60% · Терпимый', ''],
+  ['0.7', '70% · Только явная угроза', ''],
+];
+const SHIELD_PAUSE_BAN_STEPS = [
+  ['0.6', '60% · Осторожный', ''],
+  ['0.7', '70% · Ниже среднего', ''],
+  ['0.8', '80% · Обычный', 'значение по умолчанию'],
+  ['0.9', '90% · Только явная угроза', ''],
 ];
 const SHIELD_HOURS = [['6','6 часов',''],['12','12 часов',''],['24','24 часа','по умолчанию'],['48','48 часов',''],['72','3 суток','']];
+const SHIELD_COOL_HOURS = [['1','1 час',''],['2','2 часа','по умолчанию'],['4','4 часа',''],['8','8 часов',''],['12','12 часов','']];
+const SHIELD_PRESET_LABELS = {
+  careful:  ['🐢 Осторожный', 'раньше охлаждает, пауза 48 ч'],
+  balanced: ['⚖️ Сбалансированный', 'по умолчанию'],
+  bold:     ['🚀 Смелый', 'вмешивается только при явной угрозе'],
+  custom:   ['🛠 Свой', 'пороги настроены вручную'],
+};
+const SHIELD_MODES = [
+  ['pause', '🛡 Охлаждать и ставить на паузу', 'полная защита — по умолчанию'],
+  ['cool',  '❄️ Только охлаждать', 'аккаунт не снимается с работы, но отдыхает между действиями'],
+  ['warn',  '⚠️ Только предупреждать', 'щит ничего не меняет, только пишет в историю'],
+];
+const SHIELD_MODE_SHORT = {pause:'Пауза и охлаждение', cool:'Только охлаждение', warn:'Только предупреждения'};
+
+function shieldPct(v) { return Math.round((Number(v)||0)*100) + '%'; }
+function shieldWhen(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }
+  catch(_) { return ''; }
+}
 
 async function shieldSave(patch, okMsg) {
   try {
@@ -26391,56 +26431,169 @@ function shieldToggle(field) {
   shieldSave({[field]: !SHIELD_CFG[field]}, SHIELD_CFG[field] ? 'Выключено' : 'Включено');
 }
 
+async function shieldPickMode(field) {
+  const v = await askChoice('Что щиту можно делать с опасным аккаунтом?',
+    SHIELD_MODES.map(([value,label,sub]) => ({value,label,sub})));
+  if (v === null) return;
+  shieldSave({[field || 'response_mode']: v}, 'Реакция щита сохранена');
+}
+
+function shieldPreset(name) {
+  if (name === 'custom') { toast('Свой профиль — меняйте пороги в настройках ниже'); return; }
+  shieldSave({preset: name}, 'Профиль «' + SHIELD_PRESET_LABELS[name][0].replace(/^\S+\s/,'') + '» включён');
+}
+
+async function shieldRunNow() {
+  const btn = document.getElementById('shieldRunBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Проверяю…'; }
+  try {
+    const r = await api('/api/miniapp/shield/run', {method:'POST', body:'{}'});
+    const parts = [];
+    if (r.paused) parts.push('на паузе: ' + r.paused);
+    if (r.cooled) parts.push('охлаждено: ' + r.cooled);
+    if (r.warned) parts.push('предупреждений: ' + r.warned);
+    if (r.resumed) parts.push('возвращено: ' + r.resumed);
+    if (r.failed) parts.push('не применилось: ' + r.failed);
+    toast('🛡 Проверено ' + (r.checked||0) + ' акк.' + (parts.length ? ' · ' + parts.join(', ') : ' · угроз нет'));
+    openShield();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔍 Проверить сейчас'; } }
+}
+
+async function shieldResume(accId, _el) {
+  try {
+    await api('/api/miniapp/shield/resume', {method:'POST', body:JSON.stringify({account_id:Number(accId)})});
+    toast('▶️ Аккаунт снова в работе');
+    openShield();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+// Исключения: аккаунты, которых щит не трогает (личный, тестовый, уже
+// прогретый «тяжеловес»). Мультивыбор из своих аккаунтов.
+async function shieldPickExempt() {
+  let accs = [];
+  try {
+    const d = await api('/api/miniapp/accounts?filter=all&limit=500');
+    accs = (d.accounts||[]);
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось загрузить аккаунты')); return; }
+  if (!accs.length) { toast('Аккаунтов пока нет'); return; }
+  const pre = new Set((SHIELD_CFG.exempt_account_ids||[]).map(Number));
+  const picked = await new Promise(res => {
+    const bg = document.createElement('div');
+    bg.className = 'mbg show';
+    bg.style.zIndex = '9999';
+    const rows = accs.map(a => {
+      const nm = a.first_name || (a.username ? '@'+a.username : '') || a.phone || ('#'+a.id);
+      return '<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--bg2)">'
+        + '<input type="checkbox" class="_sxe" value="' + Number(a.id) + '"' + (pre.has(Number(a.id)) ? ' checked' : '') + '>'
+        + '<span>' + esc(nm) + (a.username ? ' <span style="color:var(--hint)">@' + esc(a.username) + '</span>' : '') + '</span></label>';
+    }).join('');
+    bg.innerHTML = '<div class="modal"><div class="modal-title">Кого щит не трогает</div>'
+      + '<div style="font-size:12px;color:var(--hint);margin:4px 0 6px">Риск этих аккаунтов считается, но щит их не охлаждает и не ставит на паузу.</div>'
+      + '<div style="max-height:52vh;overflow-y:auto">' + rows + '</div>'
+      + '<div style="display:flex;gap:8px;margin-top:10px">'
+      + '<button class="btn btn-d" id="_sxc" style="flex:1 1 auto">Отмена</button>'
+      + '<button class="btn btn-p" id="_sxo" style="flex:1 1 auto">Сохранить</button></div></div>';
+    document.body.appendChild(bg);
+    const done = v => { try { document.body.removeChild(bg); } catch(_) {} res(v); };
+    bg.querySelector('#_sxo').onclick = () => done(Array.from(bg.querySelectorAll('._sxe:checked')).map(x => Number(x.value)));
+    bg.querySelector('#_sxc').onclick = () => done(null);
+    bg.onclick = e => { if (e.target === bg) done(null); };
+  });
+  if (picked === null) return;
+  shieldSave({exempt_account_ids: picked}, picked.length ? 'Исключений: ' + picked.length : 'Исключений нет');
+}
+
+function shieldHistFilter(f) { SHIELD_HIST_FILTER = f; openShield(); }
+
 async function openShield() {
   push('s-shield');
   txt('shieldStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('shieldConfig','');
   txt('shieldHistory','');
   try {
-    const d = await api('/api/miniapp/shield');
+    const d = await api('/api/miniapp/shield' + (SHIELD_HIST_FILTER ? '?action=' + encodeURIComponent(SHIELD_HIST_FILTER) : ''));
     const st = d.stats||{};
     const threatened = st.threatened||0;
     const total = st.total_active||0;
+    const held = (st.paused||0) + (st.cooling||0);
     const riskColor = threatened>0?'var(--red)':'var(--green)';
-    const card = (val, lbl, style, filter) => filter
-      ? `<div class="kpi-card tap-card" onclick="healthGoAccounts('${filter}')" role="button" tabindex="0"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl} ›</div></div>`
+    const card = (val, lbl, style, onclick) => onclick
+      ? `<div class="kpi-card tap-card" onclick="${onclick}" role="button" tabindex="0"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl} ›</div></div>`
       : `<div class="kpi-card"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl}</div></div>`;
     txt('shieldStats',
-        card(threatened>0?'⚠️ Угроза':'✅ Норма', 'Уровень риска', 'color:'+riskColor)
-      + card(total, 'Аккаунтов', '', 'active')
-      + card(threatened, 'Высокий риск', 'color:var(--red)')
-      + card(st.ok_count||0, 'Под защитой'));
+        card(threatened>0?'⚠️ Угроза':'✅ Норма', 'Уровень риска · средний ' + shieldPct(st.avg_risk), 'color:'+riskColor, 'openPhysics()')
+      + card(total, 'Аккаунтов в работе', '', "healthGoAccounts('active')")
+      + card(threatened, 'Выше вашего порога', kpiTone(threatened,'red'), 'openPhysics()')
+      + card(held, 'Щит держит сейчас', kpiTone(held,'orange')));
     txt('m-shield-val', `${threatened} под угрозой · ${total} аккаунтов`);
     const cfg = d.config||{};
     SHIELD_CFG = cfg;
-    const row = (name, val, hint, onclick) =>
-      `<div class="row" onclick="${onclick}" role="button" tabindex="0">
+    const preset = cfg.preset || 'balanced';
+    txt('shieldPresets', Object.keys(SHIELD_PRESET_LABELS).filter(k => k !== 'custom' || preset === 'custom').map(k =>
+      `<div class="chip${k===preset?' on':''}" onclick="shieldPreset('${k}')" role="button" tabindex="0" title="${esc(SHIELD_PRESET_LABELS[k][1])}">${SHIELD_PRESET_LABELS[k][0]}</div>`).join(''));
+    const mode = cfg.response_mode || 'pause';
+    const row = (name, val, hint, onclick, dim) =>
+      `<div class="row" onclick="${onclick}" role="button" tabindex="0"${dim?' style="opacity:.55"':''}>
         <div class="row-body"><div class="row-name">${name}</div><div class="row-val">${hint}</div></div>
         <div class="row-right" style="color:var(--accent);font-weight:600">${val} ›</div></div>`;
+    const ex = (cfg.exempt_account_ids||[]).length;
     txt('shieldConfig',
-        row('🎯 Порог риска', cfg.risk_threshold ?? 0.7,
-            'Аккаунт считается опасным, начиная с этого значения',
-            "shieldPick('risk_threshold',SHIELD_RISK_STEPS,'С какого риска вмешиваться?')")
-      + row('🚫 Порог бана', cfg.ban_prob_threshold ?? 0.5,
-            'При такой вероятности бана щит действует',
-            "shieldPick('ban_prob_threshold',SHIELD_BAN_STEPS,'При какой вероятности бана действовать?')")
-      + row('❄️ Пауза аккаунта', (cfg.cool_duration_hours ?? 24) + ' ч',
-            'На столько щит убирает рискованный аккаунт из работы',
-            "shieldPick('cool_duration_hours',SHIELD_HOURS,'На сколько ставить на паузу?')")
-      + row('⏸ Авто-пауза', cfg.auto_pause?'✅ Вкл':'❌ Выкл',
-            'Сам убирает рискованные аккаунты из работы',
-            "shieldToggle('auto_pause')")
+        row('🎛 Реакция щита', SHIELD_MODE_SHORT[mode]||mode,
+            'Что щиту можно делать с опасным аккаунтом',
+            "shieldPickMode('response_mode')")
+      + row('❄️ Охлаждать с риска', shieldPct(cfg.risk_threshold ?? 0.7),
+            'Аккаунт отдыхает между действиями, но остаётся в работе',
+            "shieldPick('risk_threshold',SHIELD_RISK_STEPS,'С какого риска охлаждать?')", mode==='warn')
+      + row('⏱ Охлаждение', (cfg.cool_hours ?? 2) + ' ч',
+            'На сколько отодвигать следующее действие',
+            "shieldPick('cool_hours',SHIELD_COOL_HOURS,'На сколько охлаждать?')", mode==='warn')
+      + row('⏸ Ставить на паузу с риска', shieldPct(cfg.pause_risk_threshold ?? 0.9),
+            mode==='pause' ? 'Аккаунт снимается с работы целиком' : 'Сейчас пауза выключена реакцией щита',
+            "shieldPick('pause_risk_threshold',SHIELD_PAUSE_STEPS,'С какого риска ставить на паузу?')", mode!=='pause')
+      + row('🕒 Пауза аккаунта', (cfg.cool_duration_hours ?? 24) + ' ч',
+            'Потом щит сам вернёт аккаунт в работу',
+            "shieldPick('cool_duration_hours',SHIELD_HOURS,'На сколько ставить на паузу?')", mode!=='pause')
+      + row('🚫 Вероятность бана: охлаждать', shieldPct(cfg.ban_prob_threshold ?? 0.5),
+            'Второй сигнал рядом с риском: срабатывает любой из двух',
+            "shieldPick('ban_prob_threshold',SHIELD_BAN_STEPS,'При какой вероятности бана охлаждать?')", mode==='warn')
+      + row('🚫 Вероятность бана: пауза', shieldPct(cfg.pause_ban_threshold ?? 0.8),
+            'При такой вероятности бана аккаунт снимается с работы',
+            "shieldPick('pause_ban_threshold',SHIELD_PAUSE_BAN_STEPS,'При какой вероятности бана ставить на паузу?')", mode!=='pause')
+      + row('🙈 Исключения', ex ? ex + ' акк.' : 'Нет',
+            'Аккаунты, которых щит не трогает',
+            'shieldPickExempt()')
       + row('🔔 Уведомления', cfg.notify_admin?'✅ Вкл':'❌ Выкл',
-            'Пишет в Telegram, когда находит угрозу',
+            'Пишет в Telegram, когда ставит аккаунт на паузу',
             "shieldToggle('notify_admin')"));
+
+    const heldRows = d.held||[];
+    document.getElementById('shieldHeldWrap').style.display = heldRows.length ? '' : 'none';
+    txt('shieldHeld', heldRows.map(h => `
+      <div class="row">
+        <div class="row-ico" style="background:var(--bg-blue-16)">${h.state==='pause'?'⏸':'❄️'}</div>
+        <div class="row-body" onclick="openAccount(${Number(h.account_id)})" role="button" tabindex="0">
+          <div class="row-name">${esc(h.name||'Аккаунт')}</div>
+          <div class="row-val">${h.state==='pause'?'Пауза до ':'Охлаждение до '}${shieldWhen(h.until)}</div>
+          ${h.reason?`<div class="row-val" style="color:var(--hint)">${esc(h.reason)}</div>`:''}
+        </div>
+        ${h.state==='pause'?`<button class="btn btn-s" style="font-size:12px;padding:6px 10px" onclick="shieldResume(${Number(h.account_id)}, this)">▶️ Вернуть</button>`:''}
+      </div>`).join(''));
+
+    const wk = d.week||{};
+    const fchip = (f, lbl, n) => `<div class="chip${SHIELD_HIST_FILTER===f?' on':''}" onclick="shieldHistFilter('${f}')" role="button" tabindex="0">${lbl}${n?' · '+n:''}</div>`;
+    txt('shieldHistFilter',
+        fchip('', 'Все', 0) + fchip('pause', '⏸ Паузы', wk.pause) + fchip('cool', '❄️ Охлаждения', wk.cool)
+      + fchip('warn', '⚠️ Предупреждения', wk.warn) + fchip('resume', '▶️ Возвраты', wk.resume));
     const hist = d.history||[];
-    if (!hist.length) { txt('shieldHistory', empty('📋','Щит пока не вмешивался','Здесь появятся аккаунты, которые он убрал из работы')); return; }
+    if (!hist.length) { txt('shieldHistory', empty('📋', SHIELD_HIST_FILTER ? 'Таких записей нет' : 'Щит пока не вмешивался', 'Здесь появятся аккаунты, которые он предупредил, охладил или убрал из работы')); return; }
     let html = hist.map(h=>`
       <div class="row" ${h.account_id?`onclick="openAccount(${Number(h.account_id)})" role="button" tabindex="0"`:''}>
         <div class="row-ico" style="background:var(--bg-blue-16)">${SHIELD_ICONS[h.action]||'🛡'}</div>
         <div class="row-body">
           <div class="row-name">${esc(h.name||'Аккаунт')} · ${SHIELD_ACTIONS[h.action]||esc(h.action||'—')}</div>
-          <div class="row-val">Риск ${((h.risk||0)*100).toFixed(0)}% · бан ${((h.ban_prob||0)*100).toFixed(0)}% · ${h.created_at?ago(h.created_at):''}</div>
+          ${h.note?`<div class="row-val">${esc(h.note)}</div>`:''}
+          <div class="row-val" style="color:var(--hint)">${h.action==='resume'?'':'Риск '+shieldPct(h.risk)+' · бан '+shieldPct(h.ban_prob)+' · '}${h.created_at?ago(h.created_at):''}</div>
         </div>
         ${h.account_id?'<div class="row-right"><span class="chev">›</span></div>':''}
       </div>`).join('');
@@ -29301,30 +29454,100 @@ async function checkChannelRanks() {
 }
 
 // ── Physics Hub ────────────────────────────────────────
+// Вкладка «Риск бана»: риск каждого аккаунта и ИЗ ЧЕГО он сложился. Раньше
+// здесь стояли одинаковые «Риск 0% · Бан-вер. 5% · Ops/24h 0» у всего флота:
+// оценка смотрела в один журнал и ждала исход, которого никто не пишет.
+let PHYS_ROWS = [];
+let PHYS_FILTER = 'all';
+// Полосы — те же, что у бота (`physics_engine.risk_label`).
+function physBand(r) {
+  r = Number(r)||0;
+  if (r >= 0.75) return ['🔴 Критический', 'var(--red)'];
+  if (r >= 0.5) return ['🟠 Высокий', 'var(--orange,#f59e0b)'];
+  if (r >= 0.25) return ['🟡 Умеренный', 'var(--yellow,#eab308)'];
+  return ['🟢 Низкий', 'var(--green)'];
+}
+function physToggle(id) {
+  const el = document.getElementById('phx-' + id);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function physSetFilter(f) { PHYS_FILTER = f; physRender(); }
+async function physicsRecalc() {
+  const btn = document.getElementById('physicsRecalcBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Считаю…'; }
+  try {
+    // Проход щита пересчитывает риск всего флота и сразу применяет политику.
+    await api('/api/miniapp/shield/run', {method:'POST', body:'{}'});
+    toast('✅ Риск пересчитан');
+    openPhysics();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔄 Пересчитать сейчас'; } }
+}
+function physRender() {
+  const rows = PHYS_ROWS;
+  const n = rows.length;
+  const crit = rows.filter(r => (r.risk_score||0) >= 0.75).length;
+  const high = rows.filter(r => (r.risk_score||0) >= 0.5 && (r.risk_score||0) < 0.75).length;
+  const avg = n ? rows.reduce((a, r) => a + (Number(r.risk_score)||0), 0) / n : 0;
+  const withF = rows.filter(r => (r.factors||[]).length).length;
+  const kc = (val, lbl, style) => `<div class="kpi-card"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl}</div></div>`;
+  txt('physicsStats',
+      kc(shieldPct(avg), 'Средний риск флота', 'color:' + physBand(avg)[1])
+    + kc(crit, 'Критический риск', kpiTone(crit,'red'))
+    + kc(high, 'Высокий риск', kpiTone(high,'orange'))
+    + kc(n - withF, 'Без факторов риска', kpiTone(n - withF,'green')));
+  const fchip = (f, lbl, cnt) => `<div class="chip${PHYS_FILTER===f?' on':''}" onclick="physSetFilter('${f}')" role="button" tabindex="0">${lbl} · ${cnt}</div>`;
+  txt('physicsFilter',
+      fchip('all', 'Все', n) + fchip('risk', '⚠️ Под угрозой', crit + high)
+    + fchip('factors', '🔎 С факторами', withF));
+  const shown = rows.filter(r => PHYS_FILTER === 'all' ? true
+    : PHYS_FILTER === 'risk' ? (r.risk_score||0) >= 0.5
+    : (r.factors||[]).length > 0);
+  if (!shown.length) {
+    txt('physicsList', empty('✅', 'Таких аккаунтов нет', 'Смените фильтр, чтобы увидеть остальные'));
+    return;
+  }
+  txt('physicsList', shown.map(r => {
+    const id = Number(r.account_id);
+    const [lbl, col] = physBand(r.risk_score);
+    const f = r.factors || [];
+    const top = f.length ? `${esc(f[0].label)}${f[0].detail?' — '+esc(f[0].detail):''}${f.length>1?' и ещё '+(f.length-1):''}` : 'факторов риска нет';
+    const paused = r.is_active === false && r.shield_paused_until;
+    const detail = f.length ? f.map(x => {
+      const w = Math.max(3, Math.round((Number(x.impact)||0)*100));
+      return `<div style="margin:6px 0">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px"><span>${esc(x.label)}${x.detail?` <span style="color:var(--hint)">· ${esc(x.detail)}</span>`:''}</span><b>+${shieldPct(x.impact)}</b></div>
+        <div style="height:5px;border-radius:3px;background:var(--bg2);margin-top:3px"><div style="height:5px;border-radius:3px;width:${w}%;background:${col}"></div></div></div>`;
+    }).join('') : '<div style="font-size:12px;color:var(--hint)">Ни один фактор риска сейчас не выражен.</div>';
+    return `
+      <div class="row tap" onclick="physToggle(${id})" role="button" tabindex="0" style="flex-wrap:wrap">
+        <div class="row-ico" style="background:var(--bg-red-16)">📱</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.first_name||r.phone||'Аккаунт')} ${r.username?'@'+esc(r.username):''}${paused?' · ⏸ на паузе':''}</div>
+          <div class="row-val"><span style="color:${col}">${lbl}</span> · риск ${shieldPct(r.risk_score)} · бан ${shieldPct(r.ban_probability)}</div>
+          <div class="row-val" style="color:var(--hint)">${top}</div>
+        </div>
+        <div class="row-right chev">⌄</div>
+        <div id="phx-${id}" style="display:none;flex-basis:100%;padding:6px 4px 2px" onclick="event.stopPropagation()">
+          ${detail}
+          <div style="font-size:11px;color:var(--hint);margin-top:6px">Действий за сутки: ${num(r.ops_24h||0)} · пересчитано ${r.computed_at?ago(r.computed_at):'—'}</div>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 10px" onclick="openAccount(${id})">Открыть аккаунт ›</button>
+        </div>
+      </div>`;
+  }).join(''));
+}
 async function openPhysics() {
   push('s-physics');
+  txt('physicsStats', '');
+  txt('physicsFilter', '');
   txt('physicsList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/physics');
-    if (!rows.length) { txt('physicsList', empty('⚛️','Риск ещё не считался',
-      'Оценка появляется после первых операций с аккаунтов',
-      {label:'⚙️ К операциям', fn:'openOps()'})); return; }
-    const riskLabel = r => r>=0.8?'🔴 Критический':r>=0.5?'🟠 Высокий':r>=0.3?'🟡 Средний':'🟢 Низкий';
-    // account_id сервер отдавал с самого начала, а строка никуда не вела:
-    // «риск 91%» — и всё, аккаунт приходилось искать руками в списке.
-    txt('physicsList', rows.map(r => `
-      <div class="row${r.account_id?' tap':''}"${r.account_id?` onclick="openAccount(${Number(r.account_id)})" role="button" tabindex="0"`:''}>
-        <div class="row-ico" style="background:var(--bg-red-16)">📱</div>
-        <div class="row-body">
-          <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
-          <div class="row-val">${riskLabel(r.risk_score||0)} · Риск: ${((r.risk_score||0)*100).toFixed(0)}%</div>
-          <div class="row-val">Бан-вер.: ${((r.ban_probability||0)*100).toFixed(0)}% · Ops/24h: ${r.ops_24h||0}</div>
-          ${r.flood_rate_1h?`<div class="row-val" style="color:var(--orange)">Флуд за час: ${(r.flood_rate_1h).toFixed(1).replace('.',',')}</div>`:''}
-          <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
-        </div>
-        ${r.account_id?'<div class="row-right chev">›</div>':''}
-      </div>
-    `).join(''));
+    PHYS_ROWS = Array.isArray(rows) ? rows : [];
+    if (!PHYS_ROWS.length) { txt('physicsList', empty('⚛️','Риск ещё не считался',
+      'Нажмите «Пересчитать сейчас» — оценка посчитается по всем аккаунтам с сессией',
+      {label:'🔄 Пересчитать', fn:'physicsRecalc()'})); return; }
+    physRender();
   } catch(e) { txt('physicsList', errHtml(errRu(e), 'openPhysics()')); }
 }
 
