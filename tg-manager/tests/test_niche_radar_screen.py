@@ -127,3 +127,13 @@ def test_any_own_chat_can_be_warmed_up_in_one_tap():
     assert "/api/miniapp/chatwarmup/session" in f, "кнопка ничего не запускает"
     assert "askConfirm(" in f and f.index("askConfirm(") < f.index("chatwarmup/session")
     assert "openChatWarmup()" in f, "после запуска не видно, куда смотреть"
+
+    # И «быстро» — это не «девятой кнопкой в ряду из тринадцати одинаковых
+    # серых»: владелец её там не нашёл (11.11.2026). Кнопка идёт ПЕРВОЙ в ряду
+    # действий карточки и во всю ширину, то есть видна без разглядывания.
+    row = html[html.index('<div class="actions"', html.index("function buildChDetail")):]
+    row = row[:row.index("</div>\n    <div id=\"chdAutoposts\"")]
+    assert row.index("🔥 Разогрев флотом") < row.index("📝 Опубликовать"), (
+        "разогрев стоит после других действий — владелец его не найдёт")
+    assert "flex:1 1 100%" in row.split("🔥 Разогрев флотом")[0].rsplit("<button", 1)[1], (
+        "кнопка разогрева не во всю ширину ряда")
