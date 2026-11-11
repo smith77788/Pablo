@@ -285,11 +285,11 @@ def build_levers(ctx: dict) -> list[dict]:
     if not facts:
         facts.append("ещё не запускались")
     out.append({
-        "key": "growth_agent", "title": "Посты в нишевых группах и ИИ-комментарии",
+        "key": "growth_agent", "title": "Радар ниши: чужие чаты и каналы по теме",
         "ready": accounts > 0, "facts": facts, "estimate": None,
         "estimate_note": "без оценки: отклик зависит от ниши и текста — смотрите прирост после запуска",
         "missing": "" if accounts else "Нужны рабочие аккаунты.",
-        "action": {"kind": "growth_agent" if accounts else "accounts"}})
+        "action": {"kind": "niche" if accounts else "accounts"}})
 
     # 5. Поиск Telegram.
     kw = int(ctx.get("keywords") or 0)
@@ -362,8 +362,9 @@ def today_tasks(p: dict, levers: list[dict]) -> list[dict]:
         if lv["missing"] and lv["key"] in ("self_promo", "invite", "content"):
             tasks.append({"text": lv["missing"], "action": lv["action"]})
     if not tasks:
-        tasks.append({"text": "Запустите посты в нишевых группах — это приток новой аудитории.",
-                      "action": {"kind": "growth_agent"}})
+        tasks.append({"text": "Найдите чужие чаты по вашей теме и начните в них присутствие — "
+                              "это приток новой аудитории.",
+                      "action": {"kind": "niche"}})
     return tasks[:3]
 
 

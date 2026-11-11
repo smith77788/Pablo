@@ -32,7 +32,7 @@ def test_every_action_the_server_can_name_is_opened_by_the_screen():
     server = (ROOT / "services" / "growth_plan.py").read_text(encoding="utf-8")
     named = set(re.findall(r'"kind":\s*"([a-z_]+)"', server))
     named |= set(re.findall(r'"kind":\s*"[a-z_]+"\s+if\s+\w+\s+else\s+"([a-z_]+)"', server))
-    assert {"self_promo", "invite", "accounts", "parser", "va", "growth_agent", "seo",
+    assert {"self_promo", "invite", "accounts", "parser", "va", "niche", "seo",
             "boost", "edit_goal", "new_goal"} <= named, named
     handled = set(re.findall(r"case '([a-z_]+)'", js_function("gpAct")))
     assert named <= handled, f"экран не умеет открыть: {sorted(named - handled)}"
