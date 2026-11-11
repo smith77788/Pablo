@@ -95,9 +95,18 @@ Or, alternatively, show the user confirmation **before** issuing the fetch, allo
 
 ---
 
-## Finding 2 — CONFIRMED · LOW-MEDIUM
+## Finding 2 — CONFIRMED · LOW-MEDIUM (кросс-платформенно)
 
 ### `web_app_open_tg_link`: Missing User Interaction Gate
+
+**Кросс-платформенная сверка (подтверждено):** асимметрия гейтов одинакова на macOS и iOS —
+`web_app_open_link` требует недавний touch (iOS `WebAppController.swift:1405`
+`lastTouchTimestamp + 10.0`), а `web_app_open_tg_link` **НЕ требует** (iOS `:1330–1336`
+`controller.openUrl(... )` без touch-проверки; macOS `:1917` без `clickCount`). Значит мини-апп может
+без взаимодействия пользователя навести его на любую `t.me/<path>`-цель. Цели с собственным
+подтверждением (`t.me/socks`, `t.me/proxy` → `showProxyAlert`; `joinchat` → preview) загейтированы на
+своём слое, но открытие произвольного бота/канала/`start`-параметра происходит без согласия. Severity
+остаётся LOW-MEDIUM (навигация/нуисанс, не прямой слив), но дефект присутствует на обеих Swift-платформах.
 
 **File:** `packages/WebAppUI/Sources/WebAppUI/WebpageModalController.swift:1892, 1917`
 
