@@ -6665,6 +6665,114 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("check_owned_restrictions uid=%d", uid)
             return _err("Не удалось поставить проверку в очередь", 500)
 
+    async def restrictions_dead(request: web.Request) -> web.Response:
+        """Сущности, которые последняя проверка нашла НЕДОСТУПНЫМИ снаружи
+        (Telegram их удалил/заблокировал/скрыл) и которые ВСЁ ЕЩЁ в списке
+        владельца. По ним мини-апп предлагает быструю уборку мёртвых карточек.
+
+        Источник — результат последней завершённой проверки (её findings несут
+        id сущности). Перекрёстная сверка с managed_channels/managed_bots: не
+        предлагаем убрать то, что уже убрано.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        row = await _safe_fetchrow(
+            pool,
+            "SELECT result FROM operation_queue "
+            "WHERE owner_id=$1 AND op_type='check_owned_restrictions' "
+            "AND status IN ('done','partial') AND result IS NOT NULL "
+            "ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1",
+            uid)
+        if not row or not row.get("result"):
+            return _json_resp({"ok": True, "dead": [], "checked_at": None})
+        res = row["result"]
+        if isinstance(res, str):
+            try:
+                res = _json.loads(res)
+            except (ValueError, TypeError):
+                res = {}
+        findings = res.get("findings") if isinstance(res, dict) else None
+        if not isinstance(findings, list):
+            findings = []
+        # «Мёртвые» = недоступные снаружи (удалён/заблокирован/скрыт от чужого
+        # аккаунта). Официально ограниченные (restricted) ЖИВЫ — их не трогаем.
+        dead_ch: dict[int, dict] = {}
+        dead_bot: dict[int, dict] = {}
+        for f in findings:
+            if not isinstance(f, dict) or f.get("status") != "unreachable":
+                continue
+            kind = f.get("kind")
+            try:
+                ent_id = int(f.get("id"))
+            except (TypeError, ValueError):
+                continue
+            item = {"kind": kind, "id": ent_id,
+                    "title": str(f.get("title") or ent_id)[:120],
+                    "reason": str(f.get("reason") or "")[:160]}
+            if kind == "bot":
+                dead_bot[ent_id] = item
+            else:
+                dead_ch[ent_id] = item
+        # Сверяем, что ещё в списке владельца (scope: каналы — owner_id, боты —
+        # added_by). Убранные ранее не показываем.
+        out: list[dict] = []
+        if dead_ch:
+            rows = await _safe_fetch(
+                pool, "SELECT channel_id FROM managed_channels "
+                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+                uid, list(dead_ch))
+            for r in rows or []:
+                out.append(dead_ch[int(r["channel_id"])])
+        if dead_bot:
+            rows = await _safe_fetch(
+                pool, "SELECT bot_id FROM managed_bots "
+                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+                uid, list(dead_bot))
+            for r in rows or []:
+                out.append(dead_bot[int(r["bot_id"])])
+        return _json_resp({"ok": True, "dead": out, "total": len(out),
+                           "checked_at": (res.get("checked_at") if isinstance(res, dict) else None)})
+
+    async def restrictions_remove_dead(request: web.Request) -> web.Response:
+        """Убрать из списка владельца недоступные сущности (Telegram их уже
+        удалил/заблокировал). Это снятие с учёта в НАШЕЙ базе, а не удаление в
+        Telegram — сами сущности там уже мертвы. Scope строго по владельцу.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        channel_ids = [int(x) for x in (data.get("channel_ids") or [])
+                       if str(x).lstrip("-").isdigit()]
+        bot_ids = [int(x) for x in (data.get("bot_ids") or [])
+                   if str(x).lstrip("-").isdigit()]
+        if not channel_ids and not bot_ids:
+            return _err("Не выбрано ни одной сущности для удаления", 400)
+        removed_ch = removed_bot = 0
+        if channel_ids:
+            v = await _safe_fetchval(
+                pool,
+                "WITH d AS (DELETE FROM managed_channels "
+                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[]) RETURNING 1) "
+                "SELECT COUNT(*) FROM d",
+                uid, channel_ids)
+            removed_ch = int(v or 0)
+        if bot_ids:
+            v = await _safe_fetchval(
+                pool,
+                "WITH d AS (DELETE FROM managed_bots "
+                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[]) RETURNING 1) "
+                "SELECT COUNT(*) FROM d",
+                uid, bot_ids)
+            removed_bot = int(v or 0)
+        return _json_resp({"ok": True, "removed_channels": removed_ch,
+                           "removed_bots": removed_bot,
+                           "removed": removed_ch + removed_bot})
+
     async def check_bot_geoban_targets(request: web.Request) -> web.Response:
         """Сколько ПУБЛИЧНЫХ ресурсов (каналов, чатов, ботов с @username) можно
         проверить на гео-доступность, и в скольких различимых странах есть
@@ -8114,6 +8222,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/mass_publish", mass_publish)
     app.router.add_get("/api/miniapp/check_owned_restrictions/targets", check_owned_restrictions_targets)
     app.router.add_post("/api/miniapp/check_owned_restrictions", check_owned_restrictions)
+    app.router.add_get("/api/miniapp/restrictions/dead", restrictions_dead)
+    app.router.add_post("/api/miniapp/restrictions/remove_dead", restrictions_remove_dead)
     app.router.add_get("/api/miniapp/check_bot_geoban/targets", check_bot_geoban_targets)
     app.router.add_post("/api/miniapp/check_bot_geoban", check_bot_geoban)
     app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)

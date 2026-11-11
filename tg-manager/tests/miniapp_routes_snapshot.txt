@@ -295,6 +295,7 @@ GET /api/miniapp/reg_check/history
 GET /api/miniapp/rehab
 GET /api/miniapp/relay/session/{session_id}/messages
 GET /api/miniapp/report_channels
+GET /api/miniapp/restrictions/dead
 GET /api/miniapp/sales/ai-journal
 GET /api/miniapp/sales/ai-quality
 GET /api/miniapp/sales/ai-usage
@@ -633,6 +634,7 @@ HEAD /api/miniapp/reg_check/history
 HEAD /api/miniapp/rehab
 HEAD /api/miniapp/relay/session/{session_id}/messages
 HEAD /api/miniapp/report_channels
+HEAD /api/miniapp/restrictions/dead
 HEAD /api/miniapp/sales/ai-journal
 HEAD /api/miniapp/sales/ai-quality
 HEAD /api/miniapp/sales/ai-usage
@@ -1011,6 +1013,7 @@ POST /api/miniapp/ranking/untrack
 POST /api/miniapp/reg_check
 POST /api/miniapp/rehab/{acc_id}/{action}
 POST /api/miniapp/reporter
+POST /api/miniapp/restrictions/remove_dead
 POST /api/miniapp/sales/ai-journal/{rid}/rate
 POST /api/miniapp/sales/persona
 POST /api/miniapp/sales/persona/{pid}/assign

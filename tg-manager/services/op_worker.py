@@ -2049,6 +2049,27 @@ async def try_claim_account(acc_id: int) -> bool:
     return bool(claimed)
 
 
+async def claim_account_for_op(op_id: int, acc_id: int) -> bool:
+    """Лениво захватить ОДИН аккаунт ПОД ОПЕРАЦИЮ и привязать к её уборке.
+
+    Для read-only проверок, подключающих наблюдателей по мере нужды: вместо
+    захвата всего флота заранее (и его простоя на всю длительность проверки)
+    держим только реально используемые сессии, а остальной флот остаётся
+    свободным для действий (strike/жалобы иначе берут один аккаунт из всего
+    флота — проверка на 25 минут забрала остальные). Арбитр тот же
+    (try_claim_accounts → _db_claim), поэтому одна сессия не уходит двум
+    операциям (защита от AUTH_KEY_DUPLICATED сохраняется). Привязка к
+    _operation_account_locks[op_id] — чтобы освобождение шло той же дверью, что
+    у пакетного захвата: release_operation_accounts(op_id) в finally _run_op_task.
+    """
+    claimed = await try_claim_accounts([int(acc_id)])
+    if not claimed:
+        return False
+    async with _accounts_lock:
+        _operation_account_locks.setdefault(op_id, set()).add(int(acc_id))
+    return True
+
+
 async def release_operation_accounts(op_id: int) -> None:
     """Release every account claimed by an operation after executor errors.
 
@@ -15967,11 +15988,6 @@ async def _exec_check_owned_restrictions(
         return {"status": "failed",
                 "summary": "⚠️ Нет активного аккаунта для проверки. Подключите хотя бы один аккаунт."}
 
-    observers = await _claim_available_accounts(op_id, observers, owner_id)
-    if not observers:
-        return {"status": "requeue",
-                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
-
     # Карантинные аккаунты не используем как наблюдателей (fail-open: пульс мог не
     # ответить — тогда аккаунт остаётся кандидатом, это осознанный fail-open).
     try:
@@ -15986,6 +16002,18 @@ async def _exec_check_owned_restrictions(
                 "summary": "⏳ Свободные аккаунты сейчас в карантине — попробуйте позже"}
     observers = healthy
     _obs_by_id = {int(a["id"]): a for a in observers}
+
+    # ЛЕНИВЫЙ ЗАХВАТ ФЛОТА. Раньше здесь был upfront-захват ВСЕГО флота
+    # (_claim_available_accounts) на всю длительность проверки. Проверка
+    # read-only и реально подключает лишь несколько наблюдателей (управляющий
+    # сущностью + один внешний на видимость), но держала весь флот 20–30 минут —
+    # и параллельные ДЕЙСТВИЯ владельца голодали: strike брал один аккаунт из
+    # всего флота, «Проверка статуса аккаунтов» не стартовала 21 минуту и падала
+    # «флот занят». Теперь аккаунт захватывается лениво, в _client_for, только
+    # когда его реально подключают, и остальной флот свободен для действий.
+    # _claim_state["any"] — был ли захвачен хоть один: если весь флот занят
+    # (ни одного не дали), ведём себя как прежний upfront-путь — requeue.
+    _claim_state = {"any": False}
 
     n = len(entities)
     await _safe_execute(
@@ -16002,6 +16030,13 @@ async def _exec_check_owned_restrictions(
             return _clients[aid]
         if aid in _dead:
             return None
+        # Ленивый захват: держим только реально подключаемую сессию, остальной
+        # флот остаётся свободным для действий. Занятый другой операцией аккаунт
+        # пропускаем (тот же арбитр, что у действий, — двойной сессии не будет).
+        if not await claim_account_for_op(op_id, aid):
+            _dead.add(aid)
+            return None
+        _claim_state["any"] = True
         try:
             c = await account_manager.connect_client(
                 acc.get("session_str") or "", device=acc, action_type="op",
@@ -16074,6 +16109,14 @@ async def _exec_check_owned_restrictions(
                                + _erc.build_summary(counts, n, checked=idx),
                 }
 
+            # Весь флот занят другими операциями: за первую сущность перебрали ВСЕХ
+            # наблюдателей и ни одного не захватили (все помечены _dead через
+            # занятость) — ведём себя как прежний upfront-путь: возвращаем в
+            # очередь, а не заваливаем журнал 300 строками «нет аккаунта».
+            if not _claim_state["any"] and _dead and len(_dead) >= len(observers):
+                return {"status": "requeue",
+                        "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
             # Внешний аккаунт для видимости — только публичным сущностям и один на
             # сущность (от того, каким аккаунтом резолвим доступ, не зависит).
             search_client = None
@@ -16139,7 +16182,10 @@ async def _exec_check_owned_restrictions(
             # Реальное ограничение сущности — в общий пульс (restriction_events),
             # чтобы shadowban_monitor/get_account_health его видели.
             if _erc.is_problem(status):
+                # id/bot_id — чтобы итог проверки был ДЕЙСТВЕННЫМ: по нему мини-апп
+                # предлагает убрать из списка те, что Telegram уже удалил/заблокировал.
                 findings.append({"kind": ent["kind"], "title": _title,
+                                 "id": ent["id"], "bot_id": ent.get("bot_id"),
                                  "status": status, "reason": verdict["reason_ru"]})
                 try:
                     await _sbm._record_event(
