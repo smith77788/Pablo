@@ -535,8 +535,10 @@ kSecAttrAccount: "bot_id_\(botPeer.id.toInt64())"   // ← только botId, �
 3. `web_app_biometry_request_auth` (к тому же без `accessGranted`, см. выше) читает `bot_id_<X>` →
    возвращает **токен аккаунта A** в мини-апп, работающий под аккаунтом B.
 
-**Асимметрия с iOS (эталон):** iOS использует keyId `A<accountId>WebBot<botId>`
-(`WebAppController.swift:2620, 2695`) — scoped по аккаунту. Значит macOS — упущение, не замысел.
+**Асимметрия с iOS И Android (эталоны):** iOS использует keyId `A<accountId>WebBot<botId>`
+(`WebAppController.swift:2620, 2695`); Android хранит токен в `getSharedPreferences(PREF + currentAccount)`
+(`BotBiometry.java:95`) — **обе платформы scoped по аккаунту**, причём Android ещё и гейтит запись
+биометрией (CryptoObject cipher). macOS — единственный, кто не привязывает к аккаунту → упущение, не замысел.
 Device storage (`setBotStorageValue`) и secure storage (`WebAppSecureStorage`, uuid per-account) на
 macOS **scoped** через postbox/uuid — дыра именно в биометрии.
 
