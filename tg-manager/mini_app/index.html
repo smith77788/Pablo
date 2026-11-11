@@ -7181,15 +7181,45 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📡 Разведка рекламы</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Канал</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Каналы</button></div>
   </div>
   <div class="sub-sb">
+    <div class="field-note" style="padding:4px 16px 0">Добавьте чужие каналы — разведка найдёт их рекламу и рекламодателей, оценит охват, вовлечённость и цену поста и будет обновлять данные раз в сутки.</div>
     <div id="adIntelStats" class="kpi-row" style="padding:8px 16px 10px"></div>
-    <div class="sec">Топ каналов по качеству</div>
+    <div id="adIntelAlert"></div>
+    <div class="filter-chips" id="adIntelTabs" role="tablist" aria-label="Разделы разведки" style="padding:0 16px 8px">
+      <span class="chip on" role="tab" data-tab="channels" onclick="adIntelTab('channels')">📺 Каналы</span>
+      <span class="chip" role="tab" data-tab="advertisers" onclick="adIntelTab('advertisers')">🏢 Рекламодатели</span>
+      <span class="chip" role="tab" data-tab="ads" onclick="adIntelTab('ads')">📰 Объявления</span>
+    </div>
+    <div style="display:flex;gap:8px;padding:0 16px 8px">
+      <input type="search" id="adIntelQ" class="inp" style="flex:1 1 auto" placeholder="Поиск по имени или тексту" oninput="adIntelSearch()">
+      <select id="adIntelSort" class="inp" style="flex:0 0 auto;max-width:46%" onchange="adIntelReload()" aria-label="Сортировка"></select>
+    </div>
+    <div class="filter-chips" id="adIntelFilters" style="padding:0 16px 8px"></div>
     <div class="lst" id="adIntelChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:8px">Топ рекламодателей</div>
-    <div class="lst" id="adIntelAdv"></div>
+    <div class="lst" id="adIntelAdv" style="display:none"></div>
+    <div class="lst" id="adIntelAds" style="display:none"></div>
+    <div id="adIntelMore" style="padding:8px 16px 16px"></div>
   </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: AD INTEL — КАРТОЧКА КАНАЛА ══════════════════════ -->
+<div class="screen" id="s-adchan">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title" id="adChanTitle">📺 Канал</div>
+  </div>
+  <div class="sub-sb" id="adChanBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ SCREEN: AD INTEL — КАРТОЧКА РЕКЛАМОДАТЕЛЯ ══════════════════════ -->
+<div class="screen" id="s-adadv">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title" id="adAdvTitle">🏢 Рекламодатель</div>
+  </div>
+  <div class="sub-sb" id="adAdvBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ SCREEN: NETWORK OVERVIEW ══════════════════════ -->
@@ -8203,9 +8233,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="adIntelMbg" onclick="if(event.target===this)closeAdIntelModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeAdIntelModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">📡 Добавить канал для анализа</div>
-    <div class="field"><label>Username канала (без @)</label><input type="text" id="adIntelCh" placeholder="target_channel"></div>
-    <div class="field-note">ИИ просканирует рекламу в канале и оценит качество аудитории</div>
+    <div class="modal-title">📡 Каналы на разведку</div>
+    <div class="field"><label for="adIntelCh">Каналы — по одному в строке, до 20 за раз</label>
+      <textarea id="adIntelCh" class="inp" rows="4" placeholder="@durov&#10;t.me/telegram&#10;https://t.me/s/tginfo"></textarea>
+      <div class="field-note">Подойдут @имя, имя или ссылка t.me/имя. Закрытые каналы по ссылке-приглашению не сканируются. Каждый канал — отдельная операция: аккаунт только читает последние 100 постов, ничего не отправляет.</div>
+    </div>
     <div class="field-err" id="adIntelErr"></div>
     <button class="btn btn-p" data-main id="adIntelBtn" onclick="submitAdIntelChannel()" style="width:100%">🚀 Запустить сканирование</button>
   </div>
@@ -26816,9 +26848,13 @@ async function openShield() {
   }
 }
 
-// ── Ad Intelligence ─────────────────────────────────────
-function openAdIntelModal() {
-  document.getElementById('adIntelCh').value='';
+// ── Разведка рекламы ─────────────────────────────────────
+// Экран: KPI и вкладки здесь, списки и карточки — screens/ad_intel.js.
+// Состояние экрана — глобальное (классические скрипты делят область).
+let _adi = {tab:'channels', q:'', sort:'', niche:'', kind:'', clean:false, erid:false, days:0, offset:0};
+let _adiSearchT = null;
+function openAdIntelModal(prefill) {
+  document.getElementById('adIntelCh').value = prefill ? String(prefill) : '';
   document.getElementById('adIntelErr').textContent='';
   document.getElementById('adIntelBtn').disabled=false;
   document.getElementById('adIntelBtn').textContent='🚀 Запустить сканирование';
@@ -26828,79 +26864,67 @@ function closeAdIntelModal() {
   document.getElementById('adIntelMbg').classList.remove('show');
 }
 async function submitAdIntelChannel() {
-  const ch = document.getElementById('adIntelCh').value.trim().replace(/^@/,'');
+  const raw = document.getElementById('adIntelCh').value.trim();
   const errEl = document.getElementById('adIntelErr');
-  if (!ch) { errEl.textContent='Введите username канала'; return; }
+  if (!raw) { errEl.textContent='Укажите хотя бы один канал'; return; }
   const btn = document.getElementById('adIntelBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
-    const r = await api('/api/miniapp/ad_intel/channel',{method:'POST',body:JSON.stringify({channel:ch})});
-    toast(`📡 Сканирование запущено (#${r.op_id})`);
-    if(r.op_id) pollOpResult(r.op_id, 'Ad Intelligence');
-    closeAdIntelModal();
+    const r = await api('/api/miniapp/ad_intel/channel',{method:'POST',body:JSON.stringify({channels:raw})});
+    const q = r.queued||[], rej = r.rejected||[];
+    toast(q.length>1 ? `📡 Поставлено на разведку: ${q.length} ${plural(q.length,'канал','канала','каналов')}`
+                     : `📡 Сканирование запущено (#${r.op_id})`);
+    if (q.length===1 && r.op_id) pollOpResult(r.op_id, 'Разведка рекламы');
+    if (rej.length) {
+      errEl.textContent = 'Не приняты: ' + rej.map(x=>x.input).join(', ') + ' — ' + rej[0].reason;
+      document.getElementById('adIntelCh').value = rej.map(x=>x.input).join('\n');
+    } else {
+      closeAdIntelModal();
+    }
     openAdIntel();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить сканирование'; }
 }
-async function openAdIntel() {
+async function openAdIntel(tab) {
   push('s-adintel');
+  if (tab) _adi.tab = tab;
   txt('adIntelStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('adIntelChannels','');
-  txt('adIntelAdv','');
+  txt('adIntelAlert','');
   try {
     const d = await api('/api/miniapp/ad_intel');
+    const q = Number(d.avg_quality)||0;
     txt('adIntelStats',`
-      <div class="kpi-card"><div class="kpi-val">${d.total_channels||0}</div><div class="kpi-lbl">Каналов</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.total_advertisers||0}</div><div class="kpi-lbl">Рекламодателей</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.total_placements||0}</div><div class="kpi-lbl">Размещений</div></div>
+      <div class="kpi-card tap" role="button" tabindex="0" onclick="adIntelTab('channels')"><div class="kpi-val">${num(d.total_channels||0)}</div><div class="kpi-lbl">Каналов</div></div>
+      <div class="kpi-card tap" role="button" tabindex="0" onclick="adIntelTab('advertisers')"><div class="kpi-val">${num(d.total_advertisers||0)}</div><div class="kpi-lbl">Рекламодателей</div></div>
+      <div class="kpi-card tap" role="button" tabindex="0" onclick="adIntelTab('ads')"><div class="kpi-val">${num(d.ads_7d||0)}</div><div class="kpi-lbl">Объявлений за 7 дней</div></div>
+      <div class="kpi-card"><div class="kpi-val">${q.toFixed(0)}<span style="font-size:12px;color:var(--hint)">/100</span></div><div class="kpi-lbl">Среднее качество</div></div>
     `);
     txt('m-adintel-val',`${d.total_channels||0} каналов · ${d.total_placements||0} размещений`);
-    const chs = d.top_channels||[];
-    // Имена полей — РОВНО те, что отдаёт /api/miniapp/ad_intel. Раньше здесь
-    // читались channel_username/placements_count/avg_er и advertiser_name/
-    // total_placements/avg_spend — ни одного такого ключа в ответе нет, поэтому
-    // строка вечно показывала «@undefined · 0 размещений · ER 0.0%». Совпадала
-    // одна quality_score из пяти. Заодно показываем то, что бэкенд слал, а UI
-    // выбрасывал: заголовок, подписчиков, оценку цены, давность размещения.
-    if (!chs.length) {
+    const notes = [];
+    const failed = d.failed_channels||0, sus = d.suspicious_channels||0;
+    if (failed) notes.push(`⚠️ ${failed} ${plural(failed,'канал','канала','каналов')} не удалось обновить — причина в карточке канала`);
+    if (sus) notes.push(`🚩 У ${sus} ${plural(sus,'канала','каналов','каналов')} есть признаки накрутки`);
+    // Кто сейчас рекламируется активнее всех — быстрый вход в карточку.
+    const leaders = (d.top_advertisers ? d.top_advertisers.map(a =>
+      `<span class="chip tap" role="button" tabindex="0" onclick="openAdAdvertiser('${escJs(a.username)}')">${esc((a.kind==='site'||a.kind==='invite') ? a.username : '@'+a.username)} · ${num(a.placements||0)} в ${num(a.channels||0)} ${plural(a.channels||0,'канале','каналах','каналах')}</span>`) : []).slice(0,5).join('');
+    const lead = leaders ? `<div class="field-note" style="padding:0 16px 4px">Активнее всех рекламируются:</div><div class="filter-chips" style="padding:0 16px 8px">${leaders}</div>` : '';
+    txt('adIntelAlert', (notes.length ? `<div class="card" style="margin:0 16px 8px;font-size:13px">${notes.map(esc).join('<br>')}</div>` : '') + lead);
+    if (!d.total_channels) {
+      // Пусто: вкладки и поиск ни к чему — одна понятная дверь.
+      adIntelShowTab('channels');
       txt('adIntelChannels', empty('📡','Каналов на разведке нет',
-        'Добавьте чужой канал — система соберёт по нему рекламодателей, цену размещения и вовлечённость',
-        {label:'➕ Добавить канал', fn:'openAdIntelModal()'}));
-    } else {
-      txt('adIntelChannels', chs.map(c=>{
-        const nm = c.title || (c.username ? '@'+c.username : 'Канал');
-        return `
-      <div class="row${c.username?' tap':''}" ${c.username?`role="button" tabindex="0" onclick="openTgUser('${escJs(c.username)}')"`:''}>
-        <div class="row-ico" style="background:var(--bg-yellow-16)">📺</div>
-        <div class="row-body">
-          <div class="row-name">${esc(nm)}</div>
-          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${num(c.subscribers||0)} подписчиков · ER ${(Number(c.er_rate)||0).toFixed(1).replace('.',',')}%${c.ad_price_est?' · размещение ~'+num(c.ad_price_est)+' ⭐':''}</div>
-        </div>
-        <div class="row-right" style="display:flex;align-items:center;gap:5px"><span style="color:var(--orange);font-size:13px">${(Number(c.quality_score)||0).toFixed(0)}⭐</span>${c.username?'<span class="chev">›</span>':''}</div>
-      </div>`;
-      }).join(''));
+        'Добавьте чужие каналы — система соберёт по ним рекламодателей, цену размещения, охват и вовлечённость',
+        {label:'➕ Добавить каналы', fn:'openAdIntelModal()'}));
+      txt('adIntelMore','');
+      return;
     }
-    const advs = d.top_advertisers||[];
-    if (!advs.length) {
-      txt('adIntelAdv', empty('🏢','Рекламодателей пока нет',
-        chs.length ? 'По добавленным каналам реклама ещё не попадалась — разведка смотрит новые посты и дополнит список сама'
-                   : 'Сначала добавьте канал на разведку — рекламодатели берутся из его постов',
-        chs.length ? null : {label:'➕ Добавить канал', fn:'openAdIntelModal()'}));
-    } else {
-      txt('adIntelAdv', advs.map(a=>`
-      <div class="row${a.username?' tap':''}" ${a.username?`role="button" tabindex="0" onclick="openTgUser('${escJs(a.username)}')"`:''}>
-        <div class="row-ico" style="background:var(--bg-violet-16)">🏢</div>
-        <div class="row-body">
-          <div class="row-name">${a.username?'@'+esc(a.username):'Рекламодатель'}</div>
-          <div class="row-val">${num(a.placements||0)} размещений</div>
-        </div>
-        <div class="row-right" style="display:flex;align-items:center;gap:5px"><span style="color:var(--hint);font-size:13px">${a.last_seen?ago(a.last_seen):''}</span>${a.username?'<span class="chev">›</span>':''}</div>
-      </div>`).join(''));
-    }
+    adIntelReload();
   } catch(e) {
     txt('adIntelStats','');
     txt('adIntelChannels', errHtml(errRu(e), 'openAdIntel()'));
     txt('adIntelAdv','');
+    txt('adIntelAds','');
+    txt('adIntelMore','');
   }
 }
 
@@ -34901,6 +34925,7 @@ function renderAudSegChart(segments) {
 <script src="screens/va_admin.js"></script>
 <script src="screens/channel_manage.js"></script>
 <script src="screens/shield_check.js"></script>
+<script src="screens/ad_intel.js"></script>
 <script src="screens/account_login.js"></script>
 <script src="screens/integrations.js"></script>
 <script src="screens/mailboxes.js"></script>

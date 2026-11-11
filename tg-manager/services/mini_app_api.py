@@ -6439,14 +6439,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             top = await pool.fetch(
-                """SELECT channel_username, channel_title, subscribers, quality_score, er_rate, ad_price_est
+                """SELECT channel_username, channel_title, subscribers, quality_score,
+                          COALESCE(NULLIF(reach_rate, 0), er_rate) AS reach_rate,
+                          engagement_rate, ad_price_rub, ads_per_week, fraud_flags
                    FROM ad_placements WHERE owner_id=$1 ORDER BY quality_score DESC LIMIT 10""",
                 uid,
             )
             total = await pool.fetchval("SELECT COUNT(*) FROM ad_placements WHERE owner_id=$1", uid)
+            agg = await pool.fetchrow(
+                """SELECT AVG(quality_score) AS q,
+                          COUNT(*) FILTER (WHERE last_error IS NOT NULL) AS failed,
+                          COUNT(*) FILTER (WHERE COALESCE(array_length(fraud_flags,1),0) > 0) AS suspicious,
+                          MAX(last_scanned_at) AS last_scan
+                   FROM ad_placements WHERE owner_id=$1""",
+                uid,
+            )
+            ads_7d = await pool.fetchval(
+                """SELECT COUNT(*) FROM ad_posts_log WHERE owner_id=$1
+                   AND COALESCE(post_date, detected_at) >= NOW() - INTERVAL '7 days'""",
+                uid,
+            )
             advertisers = await pool.fetch(
-                """SELECT advertiser_username, placements_count, last_seen_at
-                   FROM ad_advertisers WHERE owner_id=$1 ORDER BY last_seen_at DESC LIMIT 10""",
+                """SELECT advertiser_username, placements_count, channels_count, kind, last_seen_at
+                   FROM ad_advertisers WHERE owner_id=$1 AND placements_count > 0
+                   ORDER BY placements_count DESC, last_seen_at DESC LIMIT 10""",
                 uid,
             )
             # Итоги по ВСЕМ рекламодателям, а не по top-10: фронт рисует ими KPI-плитки
@@ -6461,20 +6477,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("ad_intel_overview uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        avg_score = sum(r["quality_score"] or 0 for r in top) / max(len(top), 1)
+        _agg = agg or {}
         return _json_resp({
             "total_channels": int(total or 0),
             "total_advertisers": int((adv_totals or {}).get("advertisers") or 0),
             "total_placements": int((adv_totals or {}).get("placements") or 0),
-            "avg_quality": round(avg_score, 1),
+            # Среднее по ВСЕМ каналам, а не по десятке лучших (было завышено).
+            "avg_quality": round(float(_agg.get("q") or 0), 1),
+            "ads_7d": int(ads_7d or 0),
+            "failed_channels": int(_agg.get("failed") or 0),
+            "suspicious_channels": int(_agg.get("suspicious") or 0),
+            "last_scan": _agg["last_scan"].isoformat() if _agg.get("last_scan") else None,
             "top_channels": [
                 {
                     "username": r["channel_username"] or "",
                     "title": r["channel_title"] or "",
                     "subscribers": r["subscribers"] or 0,
                     "quality_score": round(float(r["quality_score"] or 0), 1),
-                    "er_rate": round(float(r["er_rate"] or 0), 2),
-                    "ad_price_est": r["ad_price_est"] or 0,
+                    # Доли, а не проценты: 0.35 = охват 35%. er_rate — прежнее
+                    # имя охвата для старых клиентов.
+                    "er_rate": round(float(r["reach_rate"] or 0), 4),
+                    "reach_rate": round(float(r["reach_rate"] or 0), 4),
+                    "engagement_rate": round(float(r["engagement_rate"] or 0), 4),
+                    "ad_price_rub": r["ad_price_rub"] or 0,
+                    "ads_per_week": round(float(r["ads_per_week"] or 0), 1),
+                    "fraud_flags": list(r["fraud_flags"] or []),
                 }
                 for r in top
             ],
@@ -6482,11 +6509,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {
                     "username": r["advertiser_username"] or "",
                     "placements": r["placements_count"] or 0,
+                    "channels": r["channels_count"] or 0,
+                    "kind": r["kind"] or "",
                     "last_seen": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
                 }
                 for r in advertisers
             ],
         })
+
+    # Сколько каналов можно поставить на разведку одним запросом.
+    _AD_INTEL_BATCH = 20
+
+    def _ad_intel_inputs(body: dict) -> list[str]:
+        """Каналы из тела: `channel` (строка) и/или `channels` (список или
+        текст — по строке, через запятую или пробел)."""
+        raw: list[str] = []
+        one = body.get("channel")
+        if one:
+            raw.append(str(one))
+        many = body.get("channels")
+        if isinstance(many, str):
+            raw.extend(re.split(r"[\s,;]+", many))
+        elif isinstance(many, list):
+            raw.extend(str(x) for x in many)
+        seen, out = set(), []
+        for x in raw:
+            x = x.strip()
+            if x and x.lower() not in seen:
+                seen.add(x.lower())
+                out.append(x)
+        return out
 
     async def ad_intel_add_channel(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -6494,30 +6546,191 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            _given = str(body.get("channel", "")).strip()
+            if not isinstance(body, dict):
+                raise ValueError
         except Exception:
             return _err("Неверное тело запроса", 400)
-        if not _given:
+        inputs = _ad_intel_inputs(body)
+        if not inputs:
             return _err("Укажите канал", 400)
+        if len(inputs) > _AD_INTEL_BATCH:
+            return _err(f"За раз — не больше {_AD_INTEL_BATCH} каналов", 400)
         from services.ad_intelligence import channel_username_from
-        channel = channel_username_from(_given)
-        if not channel:
+        rejected, channels = [], []
+        for given in inputs:
+            ch = channel_username_from(given)
+            if not ch:
+                rejected.append({"input": given[:80], "reason": (
+                    "нужен публичный канал: @имя или ссылка t.me/имя; закрытые "
+                    "каналы по ссылке-приглашению не сканируются")})
+            elif ch.lower() not in {c.lower() for c in channels}:
+                channels.append(ch)
+        if not channels:
             # Отказ сразу, а не сорванная операция через минуту.
             return _err("Нужен публичный канал: @имя или ссылка t.me/имя. "
                         "Закрытые каналы по ссылке-приглашению не сканируются", 400)
-        label = f"Разведка рекламы @{channel}"
+        queued = []
         try:
-            op_id = await _obus.submit(
-                pool, uid, "ad_intel_scan", {"channel": channel},
-                total_items=1, label=label)
-            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+            for ch in channels:
+                label = f"Разведка рекламы @{ch}"
+                op_id = await _obus.submit(
+                    pool, uid, "ad_intel_scan", {"channel": ch},
+                    total_items=1, label=label)
+                queued.append({"channel": ch, "op_id": op_id})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
+            if not queued:
+                return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("ad_intel_add_channel uid=%d", uid)
+            if not queued:
+                return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({
+            "ok": True, "op_id": queued[0]["op_id"],
+            "label": f"Разведка рекламы @{queued[0]['channel']}",
+            "queued": queued, "rejected": rejected,
+        })
+
+    def _q_int(request: web.Request, key: str, default: int = 0) -> int:
+        try:
+            return int(request.query.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    async def ad_intel_channels(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        qy = request.query
+        try:
+            data = await _ai.list_channels(
+                pool, uid, q=qy.get("q", ""), niche=qy.get("niche", "")[:64],
+                sort=qy.get("sort", "quality"), only_clean=qy.get("clean") == "1",
+                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
+        except Exception:
+            log.exception("ad_intel_channels uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+        return _json_resp(data)
+
+    async def ad_intel_channel_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        try:
+            data = await _ai.channel_detail(pool, uid, request.match_info["username"])
+        except Exception:
+            log.exception("ad_intel_channel_detail uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not data:
+            return _err("Канала нет на разведке", 404)
+        return _json_resp(data)
+
+    async def ad_intel_channel_rescan(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        ch = _ai.channel_username_from(request.match_info["username"])
+        if not ch:
+            return _err("Нужен публичный канал", 400)
+        try:
+            if not await pool.fetchval(
+                    "SELECT 1 FROM ad_placements WHERE owner_id=$1 "
+                    "AND lower(channel_username)=lower($2)", uid, ch):
+                return _err("Канала нет на разведке", 404)
+            label = f"Разведка рекламы @{ch}"
+            op_id = await _obus.submit(pool, uid, "ad_intel_scan", {"channel": ch},
+                                       total_items=1, label=label)
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("ad_intel_channel_rescan uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "op_id": op_id, "label": label})
+
+    async def ad_intel_channel_auto(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            on = bool(body.get("on")) if isinstance(body, dict) else None
+        except Exception:
+            on = None
+        if on is None:
+            return _err("Неверное тело запроса", 400)
+        from services import ad_intelligence as _ai
+        try:
+            ok = await _ai.set_auto_rescan(pool, uid, request.match_info["username"], on)
+        except Exception:
+            log.exception("ad_intel_channel_auto uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not ok:
+            return _err("Канала нет на разведке", 404)
+        return _json_resp({"ok": True, "auto_rescan": on})
+
+    async def ad_intel_channel_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        try:
+            ok = await _ai.delete_channel(pool, uid, request.match_info["username"])
+        except Exception:
+            log.exception("ad_intel_channel_delete uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not ok:
+            return _err("Канала нет на разведке", 404)
+        return _json_resp({"ok": True})
+
+    async def ad_intel_advertisers(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        qy = request.query
+        try:
+            data = await _ai.list_advertisers(
+                pool, uid, q=qy.get("q", ""), kind=qy.get("kind", ""),
+                sort=qy.get("sort", "placements"),
+                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
+        except Exception:
+            log.exception("ad_intel_advertisers uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp(data)
+
+    async def ad_intel_advertiser_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        try:
+            data = await _ai.advertiser_detail(pool, uid, request.match_info["username"])
+        except Exception:
+            log.exception("ad_intel_advertiser_detail uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not data:
+            return _err("Такого рекламодателя в разведке нет", 404)
+        return _json_resp(data)
+
+    async def ad_intel_ads(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        qy = request.query
+        try:
+            data = await _ai.list_ads(
+                pool, uid, q=qy.get("q", ""), erid_only=qy.get("erid") == "1",
+                days=_q_int(request, "days", 0),
+                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
+        except Exception:
+            log.exception("ad_intel_ads uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp(data)
 
     # ── Network / Cluster Overview ─────────────────────────────────────────────
 
@@ -8647,6 +8860,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Ad Intelligence
     app.router.add_get("/api/miniapp/ad_intel", ad_intel_overview)
     app.router.add_post("/api/miniapp/ad_intel/channel", ad_intel_add_channel)
+    app.router.add_get("/api/miniapp/ad_intel/channels", ad_intel_channels)
+    app.router.add_get("/api/miniapp/ad_intel/channel/{username}", ad_intel_channel_detail)
+    app.router.add_post("/api/miniapp/ad_intel/channel/{username}/rescan", ad_intel_channel_rescan)
+    app.router.add_post("/api/miniapp/ad_intel/channel/{username}/auto", ad_intel_channel_auto)
+    app.router.add_delete("/api/miniapp/ad_intel/channel/{username}", ad_intel_channel_delete)
+    app.router.add_get("/api/miniapp/ad_intel/advertisers", ad_intel_advertisers)
+    app.router.add_get("/api/miniapp/ad_intel/advertiser/{username}", ad_intel_advertiser_detail)
+    app.router.add_get("/api/miniapp/ad_intel/ads", ad_intel_ads)
     # Network / Cluster
     # Relay (Inbox)
     app.router.add_get("/api/miniapp/relay/session/{session_id}/messages", relay_session_messages)
