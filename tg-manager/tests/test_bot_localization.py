@@ -151,18 +151,23 @@ async def test_translate_trims_to_telegram_limits():
 
 # ── Перенос на другие боты: операция с языком ──────────────────────────────
 
-def test_bulk_bot_profile_carries_language_into_set_snapshot_and_rollback():
+def test_bulk_bot_profile_carries_language_into_set_and_snapshot():
     from services import op_worker
     src = inspect.getsource(op_worker._exec_bulk_bot_profile)
     assert 'params.get("language_code")' in src
     assert "**_lc_kw" in src, "запись поля обязана нести язык"
-    assert '_before["language_code"] = language_code' in src, "снимок обязан помнить язык"
     for getter in ("get_my_name", "get_my_description", "get_my_short_description"):
         assert re.search(getter + r"\(\s*sess, b\[\"token\"\], language_code\)", src), \
             f"снимок «как было» читает {getter} не того языка"
-    rb = inspect.getsource(op_worker._exec_bulk_bot_profile_rollback)
-    assert 'before.get("language_code")' in rb and "**_rb_kw" in rb, \
-        "откат обязан вернуть профиль того же языка"
+
+
+def test_language_snapshot_rolls_back_the_same_language():
+    """Снимок профиля языка пишется ключами «name:de»: общий откат вернёт
+    именно немецкий профиль, а не перезапишет профиль по умолчанию."""
+    from services.clone_adapt_engine import restore_calls
+    calls = restore_calls({"name:de": "Alt", "description:de": ""})
+    assert {m for _l, m, _p in calls} == {"setMyName", "setMyDescription"}
+    assert all(p.get("language_code") == "de" for _l, _m, p in calls)
 
 
 class _Pool:
@@ -234,7 +239,8 @@ async def test_bulk_bot_profile_with_language_sets_that_language():
     assert all(p.get("language_code") == "de" for _, p in sets)
     assert all(p["language_code"] == "de" for m, p in calls if m == "get")
     snap = [a for sql, a in pool.executed if "bulk_edit_snapshots" in sql]
-    assert snap and json.loads(snap[0][3])["language_code"] == "de"
+    before = json.loads(snap[0][3]) if snap else {}
+    assert set(before) == {"name:de", "description:de"}, before
     assert not any("auto_replies" in sql for sql, _ in pool.executed), \
         "приветствие — правило без языка, при переносе языка его не трогаем"
     assert "Немецкий" in res["summary"]
