@@ -70,3 +70,14 @@ node run.js
 
 Keep this repository private until fixes ship. Report to security@telegram.org
 (drafts in `../telegram-bugbounty-drafts.md`).
+
+## inject-test.js — sendEvent sink injection (dynamic negative result)
+
+`node inject-test.js` builds the EXACT macOS sink string
+`window.TelegramGameProxy.receiveEvent("<name>", <data>)` where `data` is the
+`JSONSerialization`-style encoding of `{value: <attacker>}`, and evaluates it in
+Chromium against adversarial values (quotes, backslashes, `</script>`,
+U+2028/U+2029, object-literal breakout attempts). Result: **no breakout and no
+syntax error for any payload** — `"` and `\` are escaped and U+2028/2029 are
+valid in modern-WebKit string literals. So `sendEvent`/`receiveEvent` is not
+JS-injectable even with attacker-stored storage values. Confirmed dynamically.
