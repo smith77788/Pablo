@@ -11106,6 +11106,29 @@ async function openDigest() {
   } catch(e) { el.innerHTML = errHtml(errRu(e),'openDigest()'); }
 }
 
+// Быстрый запуск разогрева по ссылке на чат — из карточки чата, каталога ниши
+// и любого другого места, где чат уже открыт. Своей формы не просит: настройки
+// (темп, часы, лимиты) правятся на экране разогрева, куда мы и уводим.
+async function startChatWarmup(ref, btn) {
+  const chat = String(ref || '').trim();
+  if (!chat) { toast('⚠️ У чата нет ссылки — откройте «Разогрев чата» и укажите её вручную'); return; }
+  const shown = chat.startsWith('#') ? chat : '@' + chat.replace(/^@/, '');
+  if (!await askConfirm(`Запустить разогрев чата ${shown} флотом?\n\n`
+      + 'Аккаунты вступят в чат и будут вести в нём осмысленный диалог: между собой и с участниками. '
+      + 'Темп, часы работы и лимиты можно поправить на экране «Разогрев чата».')) return;
+  if (btn) btn.disabled = true;
+  try {
+    const d = await api('/api/miniapp/chatwarmup/session', {method:'POST', body:JSON.stringify({
+      chat_ref: chat.startsWith('#') ? chat.slice(1) : '@' + chat.replace(/^@/, ''),
+      mode:'mixed', intensity:'normal'})});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🔥 Разогрев запущен' + (d && d.accounts ? ` · аккаунтов: ${num(d.accounts)}` : ''));
+    openChatWarmup();
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось запустить разогрев'));
+  } finally { if (btn) btn.disabled = false; }
+}
+
 // 💬 Разогрев чата флотом с осмысленным диалогом.
 let CW_MODE='mixed', CW_INT='normal';
 const CW_MODE_HINT={
@@ -13870,6 +13893,7 @@ function buildChDetail(d) {
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👑 Админы</button>
       <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👥 Инвайтинг</button>
       <button class="btn btn-s" onclick="openParserForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📊 Собрать аудиторию</button>
+      ${c.type==='channel' ? '' : `<button class="btn btn-s" onclick="startChatWarmup('${escJs(c.username||('#'+c.channel_id))}')" style="flex:1 1 auto;min-width:88px" title="Флот вступит в чат и будет вести в нём живой диалог">🔥 Разогрев флотом</button>`}
       <button class="btn btn-s" onclick="openChAutopost([${c.channel_id}])" style="flex:1 1 auto;min-width:88px">🔁 Автопостинг</button>
       <button class="btn btn-s" onclick="openChDestructive('clear',[${c.channel_id}])" style="flex:1 1 auto;min-width:88px">🧹 Очистить посты</button>
       ${c.role==='member'

@@ -197,7 +197,7 @@ async function nrOpenAssets(id, status) {
       </div>
       <div style="display:flex;gap:6px;width:100%;margin-top:6px">
         <button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="openTgLink('https://t.me/${esc(a.username)}')">Открыть</button>
-        ${a.kind === 'group' ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="nrWarmup('${esc(a.username)}', this)">🔥 Прогрев флотом</button>` : ''}
+        ${a.kind === 'group' ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="startChatWarmup('${esc(a.username)}', this)">🔥 Прогрев флотом</button>` : ''}
         ${a.status !== 'skipped' ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="nrSkip(${Number(a.id)}, this)">Не наше</button>` : ''}
       </div>
     </div>`).join('') + (d.has_more ? `<div class="field-note" style="padding:8px 4px">Показаны первые ${esc(String(items.length))} из ${esc(_nrNum(d.total))} — остальные в работе у присутствия.</div>` : '')
@@ -263,27 +263,5 @@ async function nrOpenLog() {
       : empty('📝', 'Действий ещё не было', 'Запустите присутствие — здесь появится, что и где сделали.');
   } catch (e) {
     box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить журнал'), 'nrOpenLog()');
-  }
-}
-
-// Прогрев чата флотом прямо из каталога: аккаунты вступают в чат и ведут в нём
-// живой ИИ-диалог. Та же сессия, что на экране «💬 Разогрев чата», — туда и
-// уводим, чтобы владелец видел ход и мог поправить настройки.
-async function nrWarmup(username, btn) {
-  const ref = '@' + String(username || '').replace(/^@/, '');
-  if (!await askConfirm(`Запустить прогрев чата ${ref} флотом?\n\n`
-      + 'Аккаунты вступят в чат и будут вести в нём осмысленный диалог: между собой и с участниками. '
-      + 'Темп, часы работы и лимиты можно поправить на экране «Разогрев чата».')) return;
-  if (btn) btn.disabled = true;
-  try {
-    const d = await api('/api/miniapp/chatwarmup/session', {method: 'POST', body: JSON.stringify({
-      chat_ref: ref, mode: 'mixed', intensity: 'normal'})});
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('🔥 Прогрев запущен' + (d && d.accounts ? ` · аккаунтов: ${_nrNum(d.accounts)}` : ''));
-    openChatWarmup();
-  } catch (e) {
-    toast('⚠️ ' + errRu(e, 'Не удалось запустить прогрев'));
-  } finally {
-    if (btn) btn.disabled = false;
   }
 }
