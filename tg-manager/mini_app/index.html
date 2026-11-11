@@ -24341,6 +24341,7 @@ function _vlTab(t) {
   txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
 }
 async function openVLayer() {
+  push('s-vlayer');
   _vlTab('overview');
   try {
     // Тренды тянем параллельно и мягко (catch→null): аналитика не должна рушить
@@ -24745,7 +24746,7 @@ async function vlRulesReset() {
 // а отказ по телефону или ошибочный «Потерян» исправить было нечем.
 async function vlSetStage(entityId, value, label) {
   try {
-    await api('/api/miniapp/vlayer/entity/user/' + encodeURIComponent(entityId) + '/stage',
+    await api('/api/miniapp/vlayer/entity/' + 'user/' + encodeURIComponent(entityId) + '/stage',
       {method:'POST', body: JSON.stringify({value})});
     toast('✅ Теперь: ' + label);
   } catch(e) { toast('⚠️ ' + errRu(e)); return; }

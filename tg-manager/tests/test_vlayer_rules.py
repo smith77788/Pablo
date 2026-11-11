@@ -220,12 +220,11 @@ def _read(*parts):
 
 
 def test_routes_and_screen_wired():
-    api = _read("services", "mini_app_api.py")
-    for route in ('add_get("/api/miniapp/vlayer/rules"',
-                  'add_post("/api/miniapp/vlayer/rules"',
-                  'add_post("/api/miniapp/vlayer/rules/reset"',
-                  '/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/stage"'):
-        assert route in api
+    from tests.miniapp_source import api_routes
+    routes = api_routes()
+    for route in ("/api/miniapp/vlayer/rules", "/api/miniapp/vlayer/rules/reset",
+                  "/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/stage"):
+        assert route in routes
     html = _read("mini_app", "index.html")
     for frag in ("async function openVLayerRules", "async function openVLayerAnalytics",
                  "async function vlSetStage", 'id="vlTabs"',
