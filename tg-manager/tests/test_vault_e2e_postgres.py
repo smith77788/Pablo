@@ -180,7 +180,8 @@ def test_list_chats_and_search(pool):
     _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
     _run(v.archive_message(pool, _msg(50, 1, 50, "яблоко"), OWNER, CONN))
     _run(v.archive_message(pool, _msg(60, 1, 60, "апельсин"), OWNER, CONN))
-    chats = _run(v.list_chats(pool, OWNER))
+    from services import vault_dialogs as vd
+    chats = _run(vd.dialogs(pool, OWNER))["chats"]
     assert {c["chat_id"] for c in chats} == {50, 60}
     found = _run(v.search_messages(pool, OWNER, "яблок"))["results"]
     assert len(found) == 1 and found[0]["chat_id"] == 50
@@ -192,7 +193,8 @@ def test_owner_scope_isolation(pool):
     _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
     _run(v.archive_message(pool, _msg(50, 1, 50, "только мои"), OWNER, CONN))
     # другой владелец не видит чужой архив
-    assert _run(v.list_chats(pool, OWNER2)) == []
+    from services import vault_dialogs as vd
+    assert _run(vd.dialogs(pool, OWNER2))["chats"] == []
     assert _run(v.list_messages(pool, OWNER2, 50))["messages"] == []
     assert _run(v.search_messages(pool, OWNER2, "мои"))["results"] == []
 

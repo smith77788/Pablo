@@ -375,12 +375,19 @@ function accPoolBanner() {
   const host = document.getElementById('accList');
   const old = document.getElementById('accPoolBanner');
   if (old) old.remove();
-  if ((!ACC_POOL_FILTER && !ACC_GEO_FILTER) || !host || !host.parentNode) return;
+  // У срезов «Низкий траст» и «Флуд за 7 дней» своей плитки на вкладке нет:
+  // они приходят с экрана «Здоровье», и без баннера список был бы просто
+  // короче без объяснения.
+  const hidden = accHiddenFilterLabel(ACC_FILTER);
+  if ((!ACC_POOL_FILTER && !ACC_GEO_FILTER && !hidden) || !host || !host.parentNode) return;
   const el = document.createElement('div');
   el.id = 'accPoolBanner';
   el.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin:0 16px 8px;padding:8px 12px;'
     + 'border-radius:10px;background:var(--bg-blue-16);font-size:13px';
   let rows = '';
+  if (hidden) rows += '<div style="display:flex;align-items:center;gap:8px">'
+    + '<span style="flex:1">Срез: <b>' + esc(hidden) + '</b></span>'
+    + '<span class="icon-tap" onclick="accHiddenFilterClear()" role="button" tabindex="0">Снять \u2715</span></div>';
   if (ACC_POOL_FILTER) rows += '<div style="display:flex;align-items:center;gap:8px">'
     + '<span style="flex:1">Пул: <b>' + esc(typeof infraPoolLabel === 'function'
         ? (ACC_POOL_FILTER === '__none__' ? 'Без пула' : infraPoolLabel(ACC_POOL_FILTER))
@@ -391,6 +398,18 @@ function accPoolBanner() {
     + '<span class="icon-tap" onclick="accGeoClear()" role="button" tabindex="0">Снять \u2715</span></div>';
   el.innerHTML = rows;
   host.parentNode.insertBefore(el, host);
+}
+
+function accHiddenFilterLabel(f) {
+  return ({low_trust: 'Низкое доверие', flooded: 'Ловили флуд за 7 дней'})[f] || '';
+}
+function accHiddenFilterClear() {
+  ACC_FILTER = 'all';
+  document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x => {
+    x.classList.toggle('on', x.getAttribute('data-filter') === 'all');
+  });
+  accPoolBanner();
+  reloadAccounts();
 }
 
 function accPoolClear() {

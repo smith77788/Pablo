@@ -3,7 +3,8 @@
 Вынесено из `services/mini_app_api.py`: 18 маршрутов четырёх блоков, которые
 владелец видит как одну работу «понять, что даёт рост, и повторить».
 
-* `/api/miniapp/growth*` — сводка роста, план и заявка на рост.
+* `/api/miniapp/growth*` — сводка роста и заявка на рост (цели и план —
+  `services/mini_app_growth_plan.py`).
 * `/api/miniapp/seo*` — разбор, применение подсказок к одному боту, ко всем
   сразу и к выбранному.
 * `/api/miniapp/experiment*` — эксперименты: список, карточка, создание,
@@ -90,35 +91,6 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.debug("growth_overview: channel growth failed uid=%s", uid)
         return _json_resp({"days": days, "summary": summary, "channels": channels})
-
-    async def growth_plan(request: web.Request) -> web.Response:
-        """Цель «+N подписчиков к сроку» → раскладка по инструментам роста.
-
-        Ёмкость флота считается как в campaign_planner.plan (аккаунты + суточные
-        лимиты), затем чистый growth_center.recommend_plan раскладывает цель."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            goal = validate_integer(request.query.get("goal"), min_val=1, max_val=10_000_000) or 1000
-            days = validate_integer(request.query.get("days"), min_val=1, max_val=365) or 14
-        except (TypeError, ValueError):
-            goal, days = 1000, 14
-        accs = await _safe_fetch(pool,
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
-            "AND session_str IS NOT NULL", uid)
-        acc_ids = [int(r["id"]) for r in (accs or [])]
-        daily = 0
-        try:
-            from services import flood_engine
-            for aid in acc_ids:
-                d = await flood_engine.recommended_daily_limit(pool, aid)
-                daily += int(d.get("limit", 0) or 0)
-        except Exception:
-            log.debug("growth_plan: capacity calc failed uid=%s", uid)
-        from services import growth_center
-        return _json_resp(growth_center.recommend_plan(
-            int(goal), int(days), len(acc_ids), daily))
 
     async def growth_submit(request: web.Request) -> web.Response:
         """Growth Agent: постинг промо-текста в нишевых группах."""
@@ -624,7 +596,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/experiment/{exp_id}/winner", experiment_set_winner)
     app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_get("/api/miniapp/growth/overview", growth_overview)
-    app.router.add_get("/api/miniapp/growth/plan", growth_plan)
     app.router.add_get("/api/miniapp/seo", seo_overview)
     app.router.add_post("/api/miniapp/seo/apply", seo_apply)
     app.router.add_post("/api/miniapp/seo/apply_all", seo_apply_all)

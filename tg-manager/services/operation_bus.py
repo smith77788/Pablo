@@ -704,6 +704,21 @@ OP_REGISTRY: dict[str, dict] = {
         # Повтор после таймаута клиента выполнил бы её второй раз: посты копируются в канал.
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
+    "niche_scan": {
+        "description": "Радар ниши — поиск ресурсов по нише",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🔭",
+    },
+    "niche_presence": {
+        # Действия по живым чужим чатам: вступление, комментарий, реакция.
+        # Повтор после таймаута клиента сделал бы их второй раз.
+        "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
+        "description": "Присутствие в нише — вступление, комментарии, реакции",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🤝",
+    },
     "niche_growth_post": {
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Growth Agent — постинг промо-контента в нишевых группах",
@@ -825,6 +840,15 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "🧬",
         # Повтор после таймаута клиента выполнил бы её второй раз: посты копируются в канал.
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
+    },
+    # Откат клона — тот же исполнитель, что откат массовой правки профиля
+    # (снимки в одной таблице), но на тарифе самого клона: иначе владелец
+    # «starter» клонировать может, а вернуть как было — нет.
+    "clone_adapt_rollback": {
+        "description": "Откат клонирования профиля ботов",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "↩️",
     },
     "ad_intel_scan": {
         "description": "Разведка рекламы конкурентов",

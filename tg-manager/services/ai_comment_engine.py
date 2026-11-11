@@ -121,3 +121,68 @@ async def post_ai_comment(
             await client.disconnect()
         except Exception:
             pass
+
+
+async def post_ai_comment_anywhere(
+    session_string: str,
+    _acc: dict | None,
+    ref: str,
+    niche: str = "",
+    tone: str = "neutral",
+    low_risk: bool = False,
+) -> dict:
+    """Комментарий и в канал, и в ГРУППУ — один вход для радара ниши.
+
+    `post_ai_comment` умеет только канал: он ищет привязанный чат обсуждений и
+    без него отказывает («не канал»). Но в нише групп находится больше, чем
+    каналов, и в группе комментируют не через обсуждения, а прямо в ней —
+    ответом на свежее сообщение. Без этой ветки присутствие молча отказывало
+    бы на большинстве найденного.
+    """
+    from services.account_manager import _make_client
+
+    client = _make_client(session_string, _acc, low_risk=low_risk)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
+    except Exception as exc:
+        try:
+            await client.disconnect()
+        except Exception:
+            log.debug("post_ai_comment_anywhere: disconnect", exc_info=True)
+        return {"ok": False, "comment": None, "error": str(exc)[:150]}
+    is_channel = bool(getattr(entity, "broadcast", False))
+    if is_channel:
+        # У канала свой путь: найти чат обсуждений и ответить в нём на пост.
+        try:
+            await client.disconnect()
+        except Exception:
+            log.debug("post_ai_comment_anywhere: disconnect", exc_info=True)
+        return await post_ai_comment(session_string, _acc, ref, niche=niche, tone=tone,
+                                     low_risk=low_risk)
+    try:
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=25),
+                                      timeout=_ACTION_TIMEOUT)
+        # Отвечаем на ЧУЖОЕ осмысленное сообщение: ответ на собственное или на
+        # служебное выглядит как разговор с самим собой.
+        candidates = [m for m in (msgs or [])
+                      if (getattr(m, "message", "") or "").strip()
+                      and len((getattr(m, "message", "") or "").strip()) > 25
+                      and not getattr(m, "out", False)]
+        if not candidates:
+            return {"ok": False, "comment": None, "error": "в чате нет свежих сообщений по теме"}
+        post = random.choice(candidates[:8])
+        comment = await generate_comment(getattr(post, "message", "") or "", niche, tone)
+        if not comment:
+            return {"ok": False, "comment": None,
+                    "error": "LLM не дал комментарий (проверьте AI-ключи)"}
+        await asyncio.wait_for(client.send_message(entity, comment, reply_to=post.id),
+                               timeout=_ACTION_TIMEOUT)
+        return {"ok": True, "comment": comment, "error": None}
+    except Exception as exc:
+        return {"ok": False, "comment": None, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log.debug("post_ai_comment_anywhere: disconnect", exc_info=True)

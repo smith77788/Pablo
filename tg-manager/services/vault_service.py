@@ -349,49 +349,6 @@ async def recent_activity(pool, owner_id: int, kind: str = "deleted",
 
 # ── Чтение архива (для мини-аппа), строго owner-scoped ───────────────────────
 
-async def list_chats(pool, owner_id: int, limit: int = 100) -> list[dict]:
-    """Список чатов в хранилище с последним сообщением и счётчиками.
-
-    ОДИН запрос: агрегаты + последнее сообщение через DISTINCT ON (раньше был
-    N+1 — отдельный запрос за последним сообщением на КАЖДЫЙ чат)."""
-    rows = await pool.fetch(
-        """WITH agg AS (
-               SELECT chat_id,
-                      MAX(peer_name)     AS peer_name,
-                      MAX(peer_username) AS peer_username,
-                      COUNT(*)           AS total,
-                      COUNT(*) FILTER (WHERE is_deleted) AS deleted,
-                      MAX(msg_date)      AS last_date
-               FROM vault_messages WHERE owner_id=$1 GROUP BY chat_id
-           ),
-           last AS (
-               SELECT DISTINCT ON (chat_id) chat_id, text_enc, media_type, is_deleted,
-                      direction
-               FROM vault_messages WHERE owner_id=$1
-               ORDER BY chat_id, msg_date DESC NULLS LAST, msg_id DESC
-           )
-           SELECT a.chat_id, a.peer_name, a.peer_username, a.total, a.deleted, a.last_date,
-                  l.text_enc, l.media_type, l.direction AS last_direction
-           FROM agg a LEFT JOIN last l USING (chat_id)
-           ORDER BY a.last_date DESC NULLS LAST LIMIT $2""",
-        owner_id, limit)
-    out = []
-    for r in rows:
-        out.append({
-            "chat_id": r["chat_id"],
-            "peer_name": r["peer_name"] or (f"@{r['peer_username']}" if r["peer_username"] else str(r["chat_id"])),
-            "peer_username": r["peer_username"],
-            "total": int(r["total"] or 0),
-            "deleted": int(r["deleted"] or 0),
-            "last_date": r["last_date"].isoformat() if r["last_date"] else None,
-            "last_preview": _preview(r),
-            "last_direction": r["last_direction"],
-            # Ждёт ответа: последнее сообщение — от собеседника (входящее).
-            "awaiting_reply": (r["last_direction"] == "in"),
-        })
-    return out
-
-
 async def list_messages(pool, owner_id: int, chat_id: int,
                         limit: int = 200, offset: int = 0,
                         filters: dict | None = None,

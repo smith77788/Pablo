@@ -72,12 +72,17 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
         now = _t.time()
     muted = active_snoozes(snoozed, now)
 
-    def add(sid, sev, title, why, action):
+    def add(sid, sev, title, why, action, subjects=None):
         # dismissed — отклонено навсегда; muted — заглушено до срока.
         if sid in dismissed or sid in muted:
             return
-        out.append({"id": sid, "severity": sev, "title": title,
-                    "why": why, "action": action})
+        item = {"id": sid, "severity": sev, "title": title,
+                "why": why, "action": action}
+        # subjects — про КОГО подсказка. По ним сердцебиение понимает, что про
+        # этих же людей уже говорило, и не повторяет одно и то же каждые 6 ч.
+        if subjects:
+            item["subjects"] = [str(x) for x in subjects]
+        out.append(item)
 
     vh = vault.get("health")
     # Один id на оба случая — чтобы уже заглушённое/отклонённое «Хранилище»
@@ -97,11 +102,25 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             "(нужен Telegram Premium).", {"kind": "vault"})
     wr = vault.get("waiting_reply", 0)
     if wr > 0 and vh not in ("disabled", "never"):
-        add("vault_waiting", "warn", f"{wr} клиентов ждут ответа",
-            "Люди написали в ваш Telegram и остались без ответа (переписка "
-            "сохранена в разделе «Хранилище»). Нажмите «Открыть» — прочитаете и "
-            "ответите прямо в приложении, пока лид тёплый.",
-            {"kind": "vault"})
+        waiting = vault.get("waiting") or []
+        names = [str(w.get("name") or "") for w in waiting[:3] if w.get("name")]
+        who = ""
+        if names:
+            who = ": " + ", ".join(names) + (f" и ещё {wr - len(names)}"
+                                             if wr > len(names) else "")
+        # Один ждущий — «Открыть» ведёт прямо в его переписку, несколько — в
+        # папку «Ждут ответа», а не в общий архив.
+        target = (waiting[0].get("chat_id") if wr == 1 and waiting else "waiting")
+        add("vault_waiting", "warn",
+            f"{wr} {_plural(wr, 'клиент ждёт', 'клиента ждут', 'клиентов ждут')} ответа",
+            f"Последнее слово за клиентом{who}. После его сообщения вы не "
+            "писали и не отмечали диалог отвеченным; «спасибо» и купивших "
+            "здесь нет. Нажмите «Открыть» — прочитаете и ответите прямо в "
+            "приложении, пока лид тёплый.",
+            {"kind": "vault", "op_id": target},
+            # Отпечаток — чат и время его последнего входящего: новое сообщение
+            # того же клиента — новый повод, а тот же самый висящий — нет.
+            subjects=[f"{w.get('chat_id')}@{w.get('since')}" for w in waiting])
     if vh == "stale":
         d = vault.get("stale_days")
         add("vault_stale", "warn", "Хранилище молчит",
@@ -148,12 +167,15 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
     # «Заходил и уходил» — не интерес, а привычка смотреть и не покупать.
     # Такого события Telegram не шлёт: оно видно только по истории переходов.
     if vl.get("bouncing", 0) >= 3:
+        _nb = vl["bouncing"]
         add("vlayer_bouncing", "warn",
-            f"{vl['bouncing']} ходят по кругу",
+            f"{_nb} {_plural(_nb, 'человек ходит', 'человека ходят', 'человек ходят')} по кругу",
             "Эти люди уже несколько раз подходили к решению и отходили. "
             "Ещё одно такое же письмо даст тот же круг: им нужно другое "
-            "предложение, живой разговор или честное «не сейчас».",
-            {"kind": "vlayer"})
+            "предложение, живой разговор или честное «не сейчас». Купивших и "
+            "тех, с кем вы уже переписываетесь, здесь нет.",
+            {"kind": "vlayer"},
+            subjects=vl.get("bouncing_ids") or None)
 
     # Где именно греется: каскад «бот ← люди» уже посчитал температуру, но
     # подсказки по ней не было — владелец видел цифру и не знал, что с ней.

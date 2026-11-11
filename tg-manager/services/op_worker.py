@@ -5465,7 +5465,10 @@ def _build_dispatch() -> dict:
         "ai_comment": _exec_ai_comment,
         "content_clone": _exec_content_clone,
         "clone_adapt": _exec_clone_adapt,
+        "clone_adapt_rollback": _exec_bulk_bot_profile_rollback,
         "niche_growth_post": _exec_niche_growth_post,
+        "niche_scan": _exec_niche_scan,
+        "niche_presence": _exec_niche_presence,
         # quick_post переиспользует mass_publish: тот уже умеет явный channel_ids.
         "quick_post": _exec_mass_publish,
         # ── Разведка, жалобы, подарки ─────────────────────────────────────────
@@ -7003,6 +7006,19 @@ async def _exec_bulk_bot_profile(
     description = (params.get("description") or "").strip()
     short_description = (params.get("short_description") or "").strip()
     greeting = (params.get("greeting") or "").strip()
+    # Язык профиля (вкладка «Языки бота» переносит профиль языка на другие
+    # боты). '' — профиль по умолчанию, как было всегда. Код проверяется: в
+    # Telegram уходят только две латинские буквы, иначе операция отказывается,
+    # а не правит профиль по умолчанию вместо языка.
+    language_code = str(params.get("language_code") or "").strip().lower()
+    if language_code and not (len(language_code) == 2 and language_code.isascii()
+                              and language_code.isalpha()):
+        return {"status": "failed",
+                "summary": f"⚠️ Неверный код языка «{language_code[:10]}» — профиль не меняли"}
+    if language_code and greeting:
+        # Приветствие — локальное правило без языка; с языком его не смешиваем.
+        greeting = ""
+    _lc_kw = {"language_code": language_code} if language_code else {}
 
     # Поля для Bot API: (метод, имя-параметра, значение). Приветствие — отдельно,
     # это не вызов Telegram, а локальное правило.
@@ -7081,13 +7097,20 @@ async def _exec_bulk_bot_profile(
             # (этот бот просто не попадёт в откат), но это логируем.
             _before: dict = {}
             try:
+                # Профиль языка снимается ключами «name:de» — тот же формат, что
+                # у «Клона и адаптации»: общий откат (clone_adapt_engine.
+                # restore_calls) вернёт профиль ТОГО ЖЕ языка, а не по умолчанию.
+                _sfx = f":{language_code}" if language_code else ""
                 if name:
-                    _before["name"] = await bot_api.get_my_name(sess, b["token"])
+                    _before["name" + _sfx] = await bot_api.get_my_name(
+                        sess, b["token"], language_code)
                 if description:
-                    _before["description"] = await bot_api.get_my_description(sess, b["token"])
+                    _before["description" + _sfx] = await bot_api.get_my_description(
+                        sess, b["token"], language_code)
                 if short_description:
-                    _before["short_description"] = await bot_api.get_my_short_description(
-                        sess, b["token"])
+                    _before["short_description" + _sfx] = (
+                        await bot_api.get_my_short_description(
+                            sess, b["token"], language_code))
                 if greeting:
                     _before["greeting"] = await pool.fetchval(
                         "SELECT response_text FROM auto_replies WHERE bot_id=$1 "
@@ -7104,7 +7127,7 @@ async def _exec_bulk_bot_profile(
             for method, pkey, val in api_fields:
                 _field = _BP_METHOD_LABEL.get(method, method)
                 try:
-                    data = await bot_api._call(sess, b["token"], method, **{pkey: val})
+                    data = await bot_api._call(sess, b["token"], method, **{pkey: val}, **_lc_kw)
                     # Короткий флуд Telegram (setMy* лимитирован сильнее
                     # прочих методов) — отсыпаем и пробуем поле ещё раз, а не
                     # записываем бота в ошибки, которые потом добивать вручную.
@@ -7115,7 +7138,7 @@ async def _exec_bulk_bot_profile(
                         if _ra <= 30:
                             await asyncio.sleep(_ra + 1)
                             data = await bot_api._call(
-                                sess, b["token"], method, **{pkey: val})
+                                sess, b["token"], method, **{pkey: val}, **_lc_kw)
                 except Exception as e:  # noqa: BLE001 — любая ошибка = провал поля, не всей операции
                     reasons.append(_bp_reason(_field, exc=e))
                     log.warning("bulk_bot_profile: bot=%s %s error=%r", b.get("bot_id"), method, e)
@@ -7145,7 +7168,8 @@ async def _exec_bulk_bot_profile(
                 # заставила бы повтор изменить этого бота второй раз.
                 await _journal_done(
                     pool, op_id, step, target,
-                    _bp_diff(_before, {"name": name, "description": description,
+                    _bp_diff({k.partition(":")[0]: v for k, v in _before.items()},
+                             {"name": name, "description": description,
                                        "short_description": short_description,
                                        "greeting": greeting})[:900])
             else:
@@ -7175,6 +7199,9 @@ async def _exec_bulk_bot_profile(
         lbl for lbl, on in (("имя", bool(name)), ("описание", bool(description)),
                             ("короткое описание", bool(short_description)),
                             ("приветствие", bool(greeting))) if on)
+    if language_code:
+        from services.bot_localization import lang_label as _bl_label
+        _changed = f"{_changed}; язык: {_bl_label(language_code)}"
     total_ok = prev_ok + ok_count
     _prev = f" (из них {prev_ok} — в прошлых прогонах)" if prev_ok else ""
     if fail_count:
@@ -7231,8 +7258,8 @@ async def _exec_bulk_bot_profile_rollback(
         pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(snaps), op_id)
     already = await completed_targets(pool, op_id)
 
-    _METHOD = {"name": "setMyName", "description": "setMyDescription",
-               "short_description": "setMyShortDescription"}
+    from services.clone_adapt_engine import restore_calls as _ca_restore_calls
+    from services.clone_adapt_engine import restored_label as _ca_restored_label
     ok_count = 0
     fail_count = 0
     async with aiohttp.ClientSession() as sess:
@@ -7260,20 +7287,22 @@ async def _exec_bulk_bot_profile_rollback(
             if token is None:
                 reasons.append("бот не найден")
             else:
-                for field, method in _METHOD.items():
-                    if field not in before:
-                        continue
+                # Имя/описания/команды/кнопка меню/права — общий список вызовов
+                # из движка клона: снимки «Клона и адаптации» лежат в той же
+                # таблице и откатываются этой же операцией (в том числе
+                # переводы на другие языки — ключи вида «name:en»).
+                for _lbl, method, _params in _ca_restore_calls(before):
                     try:
-                        data = await bot_api._call(
-                            sess, token, method, **{field: before.get(field) or ""})
+                        data = await bot_api._call(sess, token, method, **_params)
                     except Exception as e:  # noqa: BLE001
-                        reasons.append(bot_health._LABEL[bot_health.OTHER])
+                        reasons.append(f"{_lbl}: {bot_health._LABEL[bot_health.OTHER]}")
                         log.warning("rollback profile: bot=%s %s error=%s", bid, method, e)
                         continue
                     if not data.get("ok"):
                         _kind = bot_health.classify_error(
                             data.get("description", ""), data.get("error_code"))
-                        reasons.append(bot_health._LABEL.get(_kind, bot_health._LABEL[bot_health.OTHER]))
+                        reasons.append(f"{_lbl}: " + bot_health._LABEL.get(
+                            _kind, bot_health._LABEL[bot_health.OTHER]))
                 if "greeting" in before:
                     try:
                         async with pool.acquire() as conn:
@@ -7299,6 +7328,7 @@ async def _exec_bulk_bot_profile_rollback(
                 # боту — в сообщении: в логе владелец видит бота, не номер.
                 _restored = "; ".join(
                     f"{_BP_FIELD_LABEL.get(k, k)}: «{_bp_short(v)}»"
+                    if k in _BP_FIELD_LABEL else _ca_restored_label(k, v)
                     for k, v in before.items())
                 await _journal_done(
                     pool, op_id, ok_count + fail_count, target,
@@ -12657,6 +12687,11 @@ async def _exec_strike(
 
     summary_text = format_strike_summary(results)
     total_reported = sum(getattr(r, "peer_reported", 0) for r in results)
+    total_emails = sum(getattr(r, "emails_sent", 0) for r in results)
+    # Исход по ФАКТУ: не ушло НИ ОДНОЙ жалобы и НИ ОДНОГО письма = провал, а не
+    # «выполнено». (Крах staggered_strike уже отдаёт failed выше по except.)
+    # Письма учитываем отдельно: legal-only заход (без флота) шлёт только их.
+    _strike_did_anything = bool(total_reported or total_emails)
 
     # ── Настойчивая эскалация: переповтор, пока цель не снята ──────────────────
     # Реальные тейкдауны идут во времени: площадка/модерация реагирует не мгновенно.
@@ -12705,12 +12740,18 @@ async def _exec_strike(
             )
 
     return {
-        "status": "done",
+        "status": "done" if _strike_did_anything else "failed",
         "target": target,
         "waves_planned": num_waves,
         "accounts_used": len(viable),
         "total_reported": total_reported,
-        "summary": summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}",
+        "emails_sent": total_emails,
+        "summary": (
+            (summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}")
+            if _strike_did_anything else
+            f"⚠️ Strike по {target}: не отправлено ни одной жалобы и ни одного письма (0). "
+            "Операция не выполнена."
+        ),
     }
 
 
@@ -22677,13 +22718,24 @@ async def _exec_mass_report(
 
     from services.reporter_engine import REPORT_REASONS
     reason_label = REPORT_REASONS.get(reason, ("?", ""))[0]
+    # Исход — по ФАКТУ (счётчикам), а не по намерению. Ни одной отправленной
+    # жалобы = провал; часть не прошла = partial. Иначе операция, не отправившая
+    # ничего, показывала бы «выполнено» (ложный успех).
+    if ok_count == 0 and total > 0:
+        status = "failed"
+    elif fail_count > 0:
+        status = "partial"
+    else:
+        status = "done"
+    head = (f"✅ Отправлено: {ok_count}/{total}" if ok_count
+            else f"⚠️ Не отправлено ни одной жалобы: 0/{total}")
     summary = (
         f"🚨 Жалобы на {target} [{reason_label}]\n"
-        f"✅ Отправлено: {ok_count}/{total}"
+        f"{head}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
         + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
     )
-    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+    return {"status": status, "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
 # ── Content Clone executor ──────────────────────────────────────────────────
@@ -22961,6 +23013,297 @@ async def _exec_ai_comment(
     summary = (f"💬 AI-комментинг\n✅ Успешно: {ok_count}/{total}"
                + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+async def _exec_niche_scan(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Радар ниши: найти в Telegram МАКСИМУМ ресурсов по нише и пополнить каталог.
+
+    Пять источников (services/niche_radar.py): поиск по словам, поиск по
+    сообщениям, похожие каналы, чаты обсуждений каналов. Ищет ОДИН аккаунт:
+    поиск расходует его лимиты, а каталог всё равно общий для владельца.
+    params: {campaign_id, deep}
+    """
+    from services import niche_radar
+
+    campaign = await niche_radar.get_campaign(pool, owner_id, params.get("campaign_id"))
+    if not campaign:
+        return {"status": "failed", "summary": "⚠️ Кампания ниши не найдена"}
+
+    accounts = await resource_selector.select_accounts(
+        pool, owner_id, 1, action_type="parse")
+    if not accounts:
+        return {"status": "failed",
+                "summary": "⚠️ Нет свободного аккаунта для поиска — добавьте или разгрузите флот"}
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+    if not accounts:
+        return {"status": "requeue", "summary": "⏳ Аккаунты на карантине — повторим позже"}
+    claimed = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed:
+        return {"status": "requeue", "summary": "⏳ Аккаунт занят другой операцией"}
+    acc = next(a for a in accounts if int(a["id"]) in set(claimed))
+    if not acc.get("session_str"):
+        return {"status": "failed", "summary": "⚠️ У аккаунта нет сессии"}
+
+    keywords = list(campaign["keywords"] or [])
+    ai_words = await niche_radar.ai_keywords(campaign["niche"], campaign["geo"])
+    keywords = niche_radar.expand_keywords(campaign["niche"], campaign["geo"],
+                                           keywords + ai_words)
+    known = await niche_radar.known_ids(pool, owner_id)
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(keywords), op_id)
+
+    async def _progress(found: int, spent: int) -> None:
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+            min(spent, len(keywords)), op_id)
+
+    async def _stop() -> bool:
+        return await _is_cancelled(pool, op_id)
+
+    try:
+        assets = await niche_radar.scan(
+            acc["session_str"], dict(acc), keywords,
+            min_members=int(campaign["min_members"] or 0), known=known,
+            deep=params.get("deep") is not False,
+            on_progress=_progress, should_stop=_stop)
+    except Exception as exc:
+        log.warning("niche_scan op=%d: поиск не удался: %s", op_id, exc)
+        return {"status": "failed", "summary": f"⚠️ Поиск не удался: {str(exc)[:120]}"}
+
+    saved = await niche_radar.save_assets(pool, owner_id, int(campaign["id"]), assets)
+    await _safe_execute(
+        pool, "UPDATE niche_campaigns SET last_scan_at=NOW() WHERE id=$1", int(campaign["id"]))
+    stats = await niche_radar.campaign_stats(pool, owner_id, int(campaign["id"]))
+    if await _is_cancelled(pool, op_id):
+        return {"status": "cancelled",
+                "summary": f"🛑 Поиск остановлен, успели найти {saved}"}
+    groups = sum(1 for a in assets if a["kind"] == "group")
+    return {
+        "status": "done", "ok": saved,
+        "summary": (f"🔭 Радар ниши: найдено {saved} новых "
+                    f"({groups} чатов, {len(assets) - groups} каналов). "
+                    f"Всего в каталоге: {stats.get('found', 0)}."),
+    }
+
+
+# Сколько действий за один проход присутствия делает ОДИН аккаунт. Выше —
+# сигнатура: живой человек не комментирует десять чужих чатов подряд.
+_NICHE_PER_ACCOUNT = 4
+_NICHE_COOLDOWN_H = 48
+_NICHE_REACTIONS = ("👍", "🔥", "❤️", "👏", "🤔", "⚡")
+
+
+async def _exec_niche_presence(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Присутствие в нише: флот вступает в найденные ресурсы и действует в них.
+
+    Действия: вступление, контекстный ИИ-комментарий под свежим постом (в чате
+    обсуждений канала или в самой группе) и реакция. Очередь считает чистая
+    `niche_radar.plan_round`: ресурс не трогаем чаще раза в двое суток, у
+    аккаунта не больше нескольких действий за проход, аккаунты идут по кругу.
+    params: {campaign_id, acc_count, actions: [join|comment|reaction], limit}
+    """
+    import random as _random
+    from datetime import datetime, timezone
+
+    from services import ai_comment_engine, account_manager, boost_engine, content_safety
+    from services import niche_radar
+
+    campaign = await niche_radar.get_campaign(pool, owner_id, params.get("campaign_id"))
+    if not campaign:
+        return {"status": "failed", "summary": "⚠️ Кампания ниши не найдена"}
+    wanted = [a for a in (params.get("actions") or ["join", "comment", "reaction"])
+              if a in ("join", "comment", "reaction")]
+    if not wanted:
+        return {"status": "failed", "summary": "⚠️ Не выбрано ни одного действия"}
+    acc_count = max(1, min(int(params.get("acc_count") or 3), 10))
+
+    verdict = await content_safety.enforce(
+        pool, owner_id, campaign["niche"], campaign["promo_text"] or "", surface="niche_presence")
+    if verdict.blocked:
+        return {"status": "failed", "summary": "⚠️ Контент заблокирован политикой платформы"}
+
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, action_type="comment", respect_cooldown=True)
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue", "summary": "⏳ Все аккаунты заняты — повторим позже"}
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+    accounts = accounts[:acc_count]
+    if not accounts:
+        return {"status": "requeue", "summary": "⏳ Аккаунты на карантине — повторим позже"}
+    by_id = {int(a["id"]): a for a in accounts}
+
+    # Вступление идёт первым: без него комментировать негде.
+    rows = await pool.fetch(
+        """SELECT * FROM niche_assets
+            WHERE owner_id=$1 AND campaign_id=$2 AND status IN ('found', 'joined')
+            ORDER BY (status='found') DESC, score DESC, members DESC LIMIT 200""",
+        owner_id, int(campaign["id"]))
+    assets = [dict(r) for r in rows]
+    if not assets:
+        return {"status": "done",
+                "summary": "🔭 В каталоге нет ресурсов — сначала запустите поиск"}
+
+    # Повтор операции (сетевой сбой, воскрешение после рестарта, ручной) ведёт
+    # по тому же списку сначала. Без журнала целей аккаунт вступил бы в тот же
+    # чат и написал бы туда второй комментарий — а это та самая сигнатура, от
+    # которой защищают паузы. Цель — id ресурса; вопрос по ней закрыт и
+    # успехом, и окончательным отказом (забанен, приватный).
+    _settled = await settled_targets(pool, op_id)
+    if _settled:
+        log.info("niche_presence op=%d: повтор — по %d ресурсам вопрос уже закрыт",
+                 op_id, len(_settled))
+
+    limit = max(1, min(int(params.get("limit") or _NICHE_PER_ACCOUNT * len(accounts)), 60))
+    plan = niche_radar.plan_round(
+        assets, accounts=list(by_id), per_account=max(1, limit // max(1, len(accounts))),
+        cooldown_hours=_NICHE_COOLDOWN_H, now=datetime.now(timezone.utc))
+    if not plan:
+        return {"status": "done",
+                "summary": "🕒 Все ресурсы трогали недавно — присутствие вернётся позже"}
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(plan), op_id)
+
+    joined = comments = reactions = failed = 0
+    cancelled = False
+    for idx, (acc_id, asset) in enumerate(plan, 1):
+        if await _is_cancelled(pool, op_id):
+            cancelled = True
+            break
+        acc = by_id[acc_id]
+        ref = "@" + asset["username"]
+        aid = int(asset["id"])
+        if str(aid) in _settled:
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
+        try:
+            if asset["status"] == "found":
+                if "join" not in wanted:
+                    continue
+                res = await account_manager.join_channel(acc["session_str"], ref, dict(acc))
+                if res.get("error"):
+                    err = str(res["error"])
+                    bad = any(w in err.lower() for w in
+                              ("banned", "private", "invalid", "not found", "forbidden"))
+                    await pool.execute(
+                        "UPDATE niche_assets SET status=$2, skip_reason=$3 WHERE id=$1",
+                        aid, "banned" if bad else "failed", err[:200])
+                    await niche_radar.log_action(pool, owner_id, aid, op_id=op_id, acc_id=acc_id,
+                                                 kind="join", status="error", detail=err)
+                    if bad:
+                        # Забанен или приватный — повтор ничего не изменит.
+                        await _journal_write(
+                            pool,
+                            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                            "VALUES($1,$2,$3,'skip',$4)", op_id, idx, str(aid), err[:200])
+                    failed += 1
+                    if "flood" in err.lower():
+                        await _pause_watching_for_cancel(pool, op_id, 60, "niche_join_flood")
+                else:
+                    await pool.execute(
+                        "UPDATE niche_assets SET status='joined', joined_acc_id=$2, joined_at=NOW()"
+                        " WHERE id=$1", aid, acc_id)
+                    await niche_radar.log_action(pool, owner_id, aid, op_id=op_id, acc_id=acc_id,
+                                                 kind="join")
+                    await _journal_done(pool, op_id, idx, str(aid), ref)
+                    joined += 1
+            else:
+                kind = "comment" if "comment" in wanted else "reaction"
+                if kind == "reaction" and "reaction" not in wanted:
+                    continue
+                if kind == "comment":
+                    # Один вход и для канала (чат обсуждений), и для группы
+                    # (ответ в ней самой): в нише групп больше, чем каналов.
+                    res = await ai_comment_engine.post_ai_comment_anywhere(
+                        acc["session_str"], dict(acc), ref,
+                        niche=campaign["niche"], tone=campaign["tone"])
+                    if res.get("ok"):
+                        comments += 1
+                        await niche_radar.log_action(
+                            pool, owner_id, aid, op_id=op_id, acc_id=acc_id, kind="comment",
+                            detail=(res.get("comment") or "")[:200])
+                        await _journal_done(pool, op_id, idx, str(aid),
+                                            (res.get("comment") or "")[:200])
+                    else:
+                        failed += 1
+                        err = str(res.get("error") or "")
+                        await niche_radar.log_action(pool, owner_id, aid, op_id=op_id,
+                                                     acc_id=acc_id, kind="comment",
+                                                     status="error", detail=err)
+                        if "flood" in err.lower():
+                            await _pause_watching_for_cancel(pool, op_id, 60, "niche_comment_flood")
+                elif "reaction" in wanted:
+                    msg_id = await _niche_recent_msg(acc, ref)
+                    if msg_id:
+                        rr = await boost_engine.boost_reaction(
+                            acc["session_str"], dict(acc), ref, msg_id,
+                            _random.choice(_NICHE_REACTIONS))
+                        if rr.get("ok"):
+                            reactions += 1
+                            await niche_radar.log_action(pool, owner_id, aid, op_id=op_id,
+                                                         acc_id=acc_id, kind="reaction")
+                            await _journal_done(pool, op_id, idx, str(aid), "реакция")
+                        else:
+                            failed += 1
+                            await niche_radar.log_action(
+                                pool, owner_id, aid, op_id=op_id, acc_id=acc_id, kind="reaction",
+                                status="error", detail=str(rr.get("error") or ""))
+        except Exception as exc:
+            failed += 1
+            log.warning("niche_presence op=%d asset=%s: %s", op_id, aid, exc)
+            await niche_radar.log_action(pool, owner_id, aid, op_id=op_id, acc_id=acc_id,
+                                         kind="error", status="error", detail=str(exc)[:200])
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < len(plan):
+            # Органическая пауза: ровный темп по чужим чатам — та же сигнатура.
+            await _pause_watching_for_cancel(
+                pool, op_id, _random.uniform(45, 110), "niche_presence_pace")
+
+    done = joined + comments + reactions
+    parts = []
+    if joined:
+        parts.append(f"вступили в {joined}")
+    if comments:
+        parts.append(f"комментариев {comments}")
+    if reactions:
+        parts.append(f"реакций {reactions}")
+    summary = "🤝 Присутствие в нише: " + (", ".join(parts) if parts else "действий не вышло")
+    if failed:
+        summary += f"\n⚠️ Не удалось: {failed}"
+    if cancelled:
+        return {"status": "cancelled", "ok": done, "failed": failed,
+                "summary": "🛑 Остановлено. " + summary}
+    if done == 0 and failed:
+        return {"status": "failed", "ok": 0, "failed": failed, "summary": summary}
+    return {"status": "done", "ok": done, "failed": failed, "summary": summary}
+
+
+async def _niche_recent_msg(acc: dict, ref: str) -> int | None:
+    """id свежего сообщения ресурса — цель для реакции. None — не достали."""
+    from services.account_manager import _make_client
+
+    client = _make_client(acc.get("session_str") or "", dict(acc))
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15.0)
+        msgs = await asyncio.wait_for(client.get_messages(ref, limit=5), timeout=20.0)
+        ids = [int(m.id) for m in (msgs or []) if getattr(m, "id", None)]
+        return ids[0] if ids else None
+    except Exception as exc:
+        log.debug("niche_recent_msg %s: %s", ref, str(exc)[:120])
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log.debug("niche_recent_msg: disconnect", exc_info=True)
 
 
 async def _exec_compliance_scan(
@@ -24934,87 +25277,208 @@ async def _exec_run_broadcast(
 async def _exec_clone_adapt(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Клонирование профиля бота: имя/описание/фото/команды.
-    params: {source_bot_id: int, target_bot_id: int, fields: str (comma-sep)}
+    """«Клон и адаптация»: профиль бота-источника → на один или много ботов.
+
+    params: source_bot_id, target_bot_ids (список; старый формат —
+    target_bot_id), fields (список или строка через запятую), settings
+    (шаблон имени, замены, подмена упоминаний, языки, «только разница») —
+    см. `services/clone_adapt_engine.py`.
+
+    Раньше исполнитель читал токены из базы КАК ЕСТЬ, а они зашифрованы
+    (token_vault): каждый вызов Telegram уходил с мусорным токеном, и клон из
+    мини-аппа не срабатывал никогда. Теперь токены — через `fetch_bots`.
+
+    По каждой цели: снимок «как было» (только тех полей, что изменятся) в
+    bulk_edit_snapshots ДО изменения — на нём работает откат; затем поле за
+    полем; итог — строка журнала операции (по ней повтор пропускает
+    сделанных) и строка истории с «было → стало» по каждому полю.
     """
-    import aiohttp as _aio
-    from services import bot_api as _bapi
+    from services import bot_api, bot_health
+    from services import clone_adapt_engine as _ca
+    from database.db import fetch_bots as _fetch_bots_ca
 
-    source_bot_id = params.get("source_bot_id")
-    target_bot_id = params.get("target_bot_id")
-    fields_str = str(params.get("fields", "name,desc"))
-    fields = [f.strip() for f in fields_str.split(",") if f.strip()]
+    try:
+        source_bot_id = int(params.get("source_bot_id") or 0)
+    except (TypeError, ValueError):
+        source_bot_id = 0
+    raw_targets = params.get("target_bot_ids")
+    if raw_targets is None and params.get("target_bot_id"):
+        raw_targets = [params.get("target_bot_id")]
+    target_ids: list[int] = []
+    for x in raw_targets or []:
+        try:
+            tid = int(x)
+        except (TypeError, ValueError):
+            continue
+        if tid and tid != source_bot_id and tid not in target_ids:
+            target_ids.append(tid)
+    fields = _ca.normalize_fields(params.get("fields", "name,desc"))
+    settings = _ca.normalize_settings(params.get("settings"))
+    # Бот ставил суффикс к имени отдельным параметром — это шаблон «{name}…».
+    if params.get("name_suffix") and settings["name_template"] == _ca.DEFAULT_NAME_TEMPLATE:
+        settings["name_template"] = "{name}" + str(params["name_suffix"])[:32]
 
-    if not source_bot_id or not target_bot_id or not fields:
-        return {"status": "failed", "summary": "⚠️ Неверные параметры clone_adapt"}
+    if not source_bot_id or not target_ids or not fields:
+        return {"status": "failed",
+                "summary": "⚠️ Клон: не выбран источник, цели или поля"}
 
-    src_row = await _safe_fetchrow(
-            pool,
-        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        int(source_bot_id), owner_id,
+    src_rows = await _fetch_bots_ca(
+        pool,
+        "SELECT bot_id, token, username, first_name FROM managed_bots "
+        "WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        source_bot_id, owner_id,
     )
-    tgt_row = await _safe_fetchrow(
-            pool,
-        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        int(target_bot_id), owner_id,
+    if not src_rows:
+        return {"status": "failed", "summary": "⚠️ Клон: бот-источник не найден"}
+    src = src_rows[0]
+    tgt_rows = await _fetch_bots_ca(
+        pool,
+        "SELECT bot_id, token, username, first_name FROM managed_bots "
+        "WHERE added_by=$1 AND is_active=TRUE AND bot_id = ANY($2::bigint[])",
+        owner_id, target_ids,
     )
-    if not src_row:
-        return {"status": "failed", "summary": "⚠️ Исходный бот не найден"}
-    if not tgt_row:
-        return {"status": "failed", "summary": "⚠️ Целевой бот не найден"}
-
-    src_token = src_row["token"]
-    tgt_token = tgt_row["token"]
-    src_name = src_row["username"] or src_row["first_name"] or f"id{source_bot_id}"
-    tgt_name = tgt_row["username"] or tgt_row["first_name"] or f"id{target_bot_id}"
-
-    errors = []
-    ok_count = 0
-
-    async with _aio.ClientSession() as http:
-        if "name" in fields:
-            me = await _bapi.get_my_name(http, src_token)
-            src_display_name = me.get("name", "") if me else ""
-            if src_display_name and await _bapi.set_name(http, tgt_token, src_display_name):
-                ok_count += 1
-            else:
-                errors.append("имя")
-
-        if "desc" in fields:
-            d = await _bapi.get_my_description(http, src_token)
-            src_desc = d.get("description", "") if d else ""
-            if await _bapi.set_description(http, tgt_token, src_desc):
-                ok_count += 1
-            else:
-                errors.append("описание")
-
-        if "short" in fields:
-            d = await _bapi.get_my_short_description(http, src_token)
-            src_short = d.get("short_description", "") if d else ""
-            if await _bapi.set_short_description(http, tgt_token, src_short):
-                ok_count += 1
-            else:
-                errors.append("краткое описание")
-
-        if "commands" in fields:
-            cmds = await _bapi.get_my_commands(http, src_token)
-            if cmds is not None and await _bapi.set_my_commands(http, tgt_token, cmds):
-                ok_count += 1
-            else:
-                errors.append("команды")
-
-    detail = f"Ошибки: {', '.join(errors)}" if errors else f"OK ({ok_count} полей)"
-    status = "failed" if errors and ok_count == 0 else "done"
+    by_id = {int(r["bot_id"]): r for r in tgt_rows}
+    targets = [by_id[t] for t in target_ids if t in by_id]
+    if not targets:
+        return {"status": "failed", "summary": "⚠️ Клон: боты-цели не найдены"}
 
     await _safe_execute(
-            pool,
-        """INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, fields, status, details)
-           VALUES ($1, $2, $3, $4, $5, $6)""",
-        owner_id, int(source_bot_id), int(target_bot_id),
-        fields_str, "ok" if status == "done" else "error", detail,
-    )
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(targets), op_id)
+    already = await completed_targets(pool, op_id)
+    src_label = _bp_bot_label(src)
+    settings_json = json.dumps({"fields": fields, **settings}, ensure_ascii=False)
 
-    return {
-        "status": status,
-        "summary": f"🔄 Клон @{src_name} → @{tgt_name}: {detail}",
-    }
+    ok_count = fail_count = same_count = prev_ok = 0
+    async with aiohttp.ClientSession() as sess:
+        source = await _ca.read_profile(sess, src["token"], fields, settings["langs"],
+                                        username=src.get("username") or "")
+        photo = None
+        if "photo" in fields:
+            photo = await _ca.read_photo(sess, src["token"])
+            source["has_photo"] = bool(photo)
+        # Языки цели читаем ровно те, что переносим.
+        langs = [lc for lc in _ca.effective_langs(settings, source) if lc]
+
+        for step_no, t in enumerate(targets, start=1):
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled", "ok": prev_ok + ok_count, "failed": fail_count,
+                        "summary": f"Отменено. Готово: {prev_ok + ok_count}, "
+                                   f"ошибок: {fail_count}"}
+            label = _bp_bot_label(t)
+            if label in already:
+                prev_ok += 1
+                await _mark_progress(pool, op_id, step_no)
+                continue
+
+            target = await _ca.read_profile(sess, t["token"], fields, langs,
+                                            username=t.get("username") or "")
+            plan = _ca.build_plan(source, target, fields, settings, index=step_no)
+
+            before = _ca.snapshot_before(plan)
+            if before:
+                try:
+                    await pool.execute(
+                        "INSERT INTO bulk_edit_snapshots(owner_id, op_id, entity_type, "
+                        "target_id, before) VALUES($1,$2,'bot',$3,$4::jsonb)",
+                        owner_id, op_id, int(t["bot_id"]),
+                        json.dumps(before, ensure_ascii=False))
+                except Exception as _se:  # noqa: BLE001 — снимок best-effort
+                    log.warning("clone_adapt: снимок для отката не снят bot=%s: %s",
+                                t.get("bot_id"), _se)
+
+            changes: list[dict] = []
+            errors = 0
+            applied = 0
+            for st in plan:
+                row = _ca.public_step(st)
+                if st["same"]:
+                    row["result"] = "same"
+                    changes.append(row)
+                    continue
+                try:
+                    data = await _ca.apply_step(sess, t["token"], st, photo)
+                    # setMy* лимитированы сильнее прочих методов: короткий флуд
+                    # отсыпаем и пробуем поле ещё раз.
+                    if not data.get("ok") and bot_health.classify_error(
+                            data.get("description", ""),
+                            data.get("error_code")) == bot_health.FLOOD:
+                        _ra = bot_api.retry_after_of(data) or 5
+                        if _ra <= 30:
+                            await cancellable_pause(pool, op_id, _ra + 1, where="clone_adapt")
+                            data = await _ca.apply_step(sess, t["token"], st, photo)
+                except Exception as e:  # noqa: BLE001 — провал поля, не всей операции
+                    data = None
+                    row["result"] = "error"
+                    row["reason"] = _bp_reason(st["label"], exc=e)
+                    errors += 1
+                if data is not None:
+                    if data.get("ok"):
+                        row["result"] = "ok"
+                        applied += 1
+                    else:
+                        row["result"] = "error"
+                        row["reason"] = _bp_reason(st["label"], data)
+                        errors += 1
+                changes.append(row)
+
+            if errors and not applied:
+                status = "error"
+            elif errors:
+                status = "partial"
+            elif applied:
+                status = "ok"
+            else:
+                status = "same"
+            summary_line = (
+                f"{src_label} → {label}: изменено {applied}, совпадало "
+                f"{sum(1 for c in changes if c['result'] == 'same')}"
+                + (f", ошибок {errors}" if errors else ""))
+
+            try:
+                await pool.execute(
+                    "INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, "
+                    "fields, status, details, op_id, changes, settings) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb)",
+                    owner_id, source_bot_id, int(t["bot_id"]), ",".join(fields), status,
+                    summary_line[:500], op_id, json.dumps(changes, ensure_ascii=False),
+                    settings_json)
+            except Exception as _he:  # noqa: BLE001 — история не стоит клона
+                log.warning("clone_adapt: история не записана bot=%s: %s",
+                            t.get("bot_id"), _he)
+
+            if status in ("ok", "same"):
+                if status == "ok":
+                    ok_count += 1
+                else:
+                    same_count += 1
+                await _journal_done(pool, op_id, step_no, label, summary_line[:900])
+            else:
+                fail_count += 1
+                reasons = "; ".join(c.get("reason", "") for c in changes if c.get("reason"))
+                # Ошибка прошлого прогона по этой же цели устарела.
+                await _safe_execute(
+                    pool, "DELETE FROM operation_log WHERE op_id=$1 AND target=$2 "
+                    "AND status='error'", op_id, label, log_ctx=f" clone_adapt op={op_id}")
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, step_no, label, f"{summary_line}. {reasons}"[:900],
+                    log_ctx=f" clone_adapt op={op_id}")
+            await _mark_progress(pool, op_id, step_no)
+            # Пауза между ботами бережёт лимиты Bot API на setMy*; отмену
+            # замечает и посреди паузы.
+            if step_no < len(targets):
+                await cancellable_pause(pool, op_id, 1, where="clone_adapt")
+
+    done = prev_ok + ok_count + same_count
+    _prev = f" (из них {prev_ok} — в прошлых прогонах)" if prev_ok else ""
+    _same = f", уже совпадало у {same_count}" if same_count else ""
+    if fail_count:
+        summary = (f"🔄 Клон {src_label}: готово {done} из {len(targets)}{_prev}{_same}, "
+                   f"с ошибками: {fail_count} — причины в истории модуля")
+    else:
+        summary = f"🔄 Клон {src_label}: готово {done} из {len(targets)}{_prev}{_same}"
+    return {"status": "done" if done else "failed",
+            "ok": prev_ok + ok_count + same_count, "failed": fail_count,
+            "summary": summary}

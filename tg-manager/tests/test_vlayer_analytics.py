@@ -113,7 +113,9 @@ def test_analytics_fail_open_on_broken_pool():
         async def fetchrow(self, q, *a):
             raise RuntimeError("база лежит")
     out = asyncio.run(V.analytics(_Boom(), 7))
-    assert out == {"conversion": [], "momentum": None, "by_source": []}
+    assert out == {"days": None, "conversion": [], "overall_pct": None,
+                   "momentum": None, "by_source": [], "time_to": None,
+                   "leaks": [], "drivers": []}
 
 
 # ── проводка: маршрут, экран ──────────────────────────────────────────────────
@@ -122,7 +124,7 @@ def test_analytics_route_and_handler_wired():
     from tests.miniapp_source import api_source
     api = api_source()
     assert 'add_get("/api/miniapp/vlayer/analytics"' in api
-    assert "await _vl.analytics(pool, uid)" in api
+    assert "await _vl.analytics(pool, uid, days=days)" in api
 
 
 def test_screen_renders_trends_section():
