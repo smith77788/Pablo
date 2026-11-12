@@ -172,6 +172,10 @@ _ALLOWED: dict[str, str] = {
     "services/account_health.py::_spambot_check_one":
         "«сессия подтверждённо мертва» — статус ПЛЮС auth_error от Telegram; "
         "spamblock сессию не убивает, деактивировать по нему нельзя",
+    "services/account_manager.py::_check_all_sessions":
+        "какие переходы статуса обход флота сообщает владельцу как «аккаунт "
+        "выпал» (session_watch.notify_lost) — frozen/spamblock не выпадение, "
+        "их снимает апелляция",
     "services/account_manager.py::<module>":
         "_VERIFIED_RESTRICTION_STATUSES — что умеет подтвердить ответ @SpamBot, "
         "а не кого не берут операции",

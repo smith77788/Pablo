@@ -92,13 +92,16 @@ def pool():
                                id SERIAL PRIMARY KEY, acc_id INTEGER,
                                new_status TEXT, reason TEXT, source TEXT,
                                context JSONB, processed_at TIMESTAMPTZ)""")
-        # Ровно та миграция, что уезжает в прод.
-        with open(os.path.join(ROOT, "schema_v185.sql"), encoding="utf-8") as f:
-            for chunk in f.read().split(";"):
-                body = "\n".join(ln for ln in chunk.split("\n")
-                                 if not ln.strip().startswith("--")).strip()
-                if body:
-                    await p.execute(body)
+        # Ровно те миграции, что уезжают в прод: конфликт сессии (v185),
+        # пароль 2FA (v331) и дозор флота (v340) — обход читает их колонки.
+        for mig in ("schema_v185.sql", "schema_v331_account_twofa.sql",
+                    "schema_v340_fleet_watch.sql"):
+            with open(os.path.join(ROOT, mig), encoding="utf-8") as f:
+                for chunk in f.read().split(";"):
+                    body = "\n".join(ln for ln in chunk.split("\n")
+                                     if not ln.strip().startswith("--")).strip()
+                    if body:
+                        await p.execute(body)
         return p
 
     p = _run(_mk())
@@ -140,7 +143,7 @@ def _check_all(pool, result, monkeypatch):
     """Прогнать монитор, подсунув заданный ответ проверки аккаунта."""
     from services import account_manager as am
 
-    async def _fake(_session, _acc=None, check_spambot=False):
+    async def _fake(_session, _acc=None, check_spambot=False, **_kw):
         return dict(result)
 
     monkeypatch.setattr(am, "check_account_status_full", _fake)

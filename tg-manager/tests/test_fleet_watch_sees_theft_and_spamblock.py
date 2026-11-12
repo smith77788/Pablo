@@ -342,6 +342,9 @@ def test_live_spambot_cycle_picks_due_accounts_and_marks_them(pool, monkeypatch)
     monkeypatch.setattr(op_worker, "release_accounts", _release)
     monkeypatch.setattr(am, "check_account_status_full", _check)
     monkeypatch.setattr(ah.asyncio, "sleep", _nosleep)
+    # Общая база прогона полна чужих аккаунтов: круг шире всех, чтобы проверка
+    # смотрела на выбор по отметке, а не на то, кто первым влез в лимит.
+    monkeypatch.setattr(ah, "spambot_batch_size", lambda n: 100000)
     _run(ah._run_spambot_check_cycle(pool))
     mine = {fresh, checked_yesterday, checked_now}
     assert set(seen) & mine == {fresh, checked_yesterday}
