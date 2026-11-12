@@ -5414,7 +5414,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div id="setter2faFields" style="display:none;padding:0 16px">
       <div class="field-note" style="margin-bottom:8px">Пароль сохраняется у каждого аккаунта <b>зашифрованным</b> — его можно посмотреть здесь же, а следующая смена пароля не потребует вводить текущий.</div>
-      <label class="field" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="setter2faRandom" onchange="document.getElementById('setter2faNewWrap').style.display=this.checked?'none':''" style="margin-top:3px"><span>🎲 <b>Свой случайный пароль каждому аккаунту</b> — один утёкший пароль не откроет весь флот. Пароли знает только система, посмотреть их можно здесь же.</span></label>
+      <label class="field chk-row" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="setter2faRandom" onchange="document.getElementById('setter2faNewWrap').style.display=this.checked?'none':''" style="margin-top:3px"><span>🎲 <b>Свой случайный пароль каждому аккаунту</b> — один утёкший пароль не откроет весь флот. Пароли знает только система, посмотреть их можно здесь же.</span></label>
       <div class="field" id="setter2faNewWrap"><label>Новый пароль (минимум 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
       <div class="field"><label>Текущий пароль (если стоит и ставили не здесь)</label><input type="password" id="setter2faCur" maxlength="64" placeholder="Оставьте пустым, если не установлен"></div>
       <div class="field"><label>Подсказка (необязательно)</label><input type="text" id="setter2faHint" maxlength="64" placeholder="Подсказка"></div>
@@ -6205,7 +6205,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="field-note">Лучший способ задать голос: ИИ берёт манеру, но фразы не копирует.</div>
       </div>
       <div class="field">
-        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pMemory" checked> 🧠 Помнить сказанное</label>
+        <label class="chk-row" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pMemory" checked> 🧠 Помнить сказанное</label>
         <div class="field-note">Персона помнит, что рассказала о себе, не повторяется и не противоречит себе в разных чатах.</div>
       </div>
       <div class="field">
@@ -23216,7 +23216,7 @@ async function openPersonaMemory(id) {
       <button class="btn btn-o" style="width:100%;margin-top:6px;font-size:13px;padding:8px" onclick="txt('personaMemory','')">Скрыть</button>
     </div>`;
     if (box.scrollIntoView) box.scrollIntoView({behavior:'smooth'});
-  } catch(e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Память не открылась'))}</div>`; }
+  } catch(e) { box.innerHTML = errHtml(errRu(e,'Память не открылась'), `openPersonaMemory(${Number(id)})`); }
 }
 async function savePersonaFacts(id, btn) {
   const facts = ((document.getElementById('pmFacts')||{}).value||'').trim();
