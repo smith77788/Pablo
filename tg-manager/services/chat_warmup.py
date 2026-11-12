@@ -1234,6 +1234,35 @@ def addressed_sender(recent: list[dict], target_id) -> int | None:
     return int(orig.get("sender_id") or 0) or None
 
 
+def peer_of(recent: list[dict], msg_id) -> tuple[int, str] | None:
+    """(Telegram-id, имя) живого человека — автора сообщения `msg_id`; None —
+    это флот или автора не видно. ЧИСТАЯ."""
+    for m in recent or []:
+        if int(m.get("id") or 0) == int(msg_id or 0):
+            sid = int(m.get("sender_id") or 0)
+            if sid > 0 and not m.get("is_fleet") and not m.get("is_self"):
+                return sid, str(m.get("sender_name") or "")
+            return None
+    return None
+
+
+def chat_peers(recent: list[dict], target_id=None, limit: int = 4) -> list[tuple[int, str]]:
+    """Живые люди в разговоре: автор сообщения, на которое отвечаем, первым,
+    дальше — недавние авторы, новые раньше. Без флота и без повторов. ЧИСТАЯ."""
+    out: list[tuple[int, str]] = []
+    first = peer_of(recent, target_id) if target_id else None
+    if first:
+        out.append(first)
+    for m in reversed((recent or [])[-12:]):
+        sid = int(m.get("sender_id") or 0)
+        if sid <= 0 or m.get("is_fleet") or m.get("is_self"):
+            continue
+        if any(sid == x for x, _ in out):
+            continue
+        out.append((sid, str(m.get("sender_name") or "")))
+    return out[:limit]
+
+
 def prefer_addressed(queue: list[int], addressed) -> list[int]:
     """Очередь говорящих, где тот, к кому обратились, — первый. ЧИСТАЯ."""
     try:
@@ -1596,9 +1625,13 @@ async def _process_session(pool, session: dict) -> None:
             from services import persona_engine, persona_voice
             _ctx = " ".join([(target or {}).get("text") or ""]
                             + [m.get("text") or "" for m in recent[-3:]])
+            # Знакомые: люди в разговоре, которых персона уже встречала, —
+            # она их узнаёт, а не знакомится заново.
+            _peers = chat_peers(recent, plan.get("reply_to_id"))
             voice = await persona_voice.load(pool, speaker,
                                              fallback=_fallback_persona(speaker),
-                                             context=_ctx)
+                                             context=_ctx,
+                                             peers=[x for x, _ in _peers])
             # «Мотор» персоны: выбранная модель и смелость; «лучшее» — три
             # варианта параллельно и ИИ-судья, который видит образ и память.
             _p = voice.persona
@@ -1665,6 +1698,14 @@ async def _process_session(pool, session: dict) -> None:
                     await persona_voice.remember(
                         pool, voice, "chat", reply,
                         entity=str(session.get("chat_ref") or ""), owner_id=owner_id)
+                    # Ответили живому человеку — запомнить его и обмен с ним.
+                    _peer = (peer_of(recent, plan["reply_to_id"])
+                             if plan["kind"] == "reply" and plan.get("reply_to_id") else None)
+                    if _peer:
+                        await persona_voice.note_peer(
+                            pool, voice, _peer[0], _peer[1], plan.get("reply_to_text") or "",
+                            reply, where=str(session.get("chat_ref") or ""),
+                            owner_id=owner_id)
                     await _log(pool, session, "ok", kind=plan["kind"], text=reply,
                                account_id=speaker,
                                reply_to=_excerpt(plan.get("reply_to_sender"),

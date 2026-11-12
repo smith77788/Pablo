@@ -32,6 +32,7 @@ DELETE /api/miniapp/node/{node_id}
 DELETE /api/miniapp/notary/{watch_id}
 DELETE /api/miniapp/persona/{persona_id}
 DELETE /api/miniapp/persona/{persona_id}/memory
+DELETE /api/miniapp/persona/{persona_id}/peer/{peer_id}
 DELETE /api/miniapp/presence_pack/{pack_id}
 DELETE /api/miniapp/proxy/{proxy_id}
 DELETE /api/miniapp/sales/delivery/{did}
@@ -1235,6 +1236,7 @@ PUT /api/miniapp/ghost/{profile_id}
 PUT /api/miniapp/ghost/{profile_id}/toggle
 PUT /api/miniapp/persona/{persona_id}
 PUT /api/miniapp/persona/{persona_id}/memory
+PUT /api/miniapp/persona/{persona_id}/peer/{peer_id}
 PUT /api/miniapp/persona/{persona_id}/toggle
 PUT /api/miniapp/presence_pack/{pack_id}/config
 PUT /api/miniapp/self_promo/{tpl_id}/toggle
