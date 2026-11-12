@@ -10249,8 +10249,14 @@ function modernizeIcons(root) {
 }
 // Глобальный проход: покрыть ВСЕ статичные модульные сетки (они уже в DOM,
 // даже если их экран скрыт), плюс подстраховка для динамически дорисованных.
+// Ленивая разметка (services/miniapp_lazy.py): экраны и окна, не нужные
+// старту, приходят пустыми каркасами и наполняются при первом обращении.
+// Проход по всей странице их содержимого не видит и не должен вытаскивать
+// его целиком (__lzQuiet) — иконки контейнера приводятся в момент его
+// наполнения (lz:fill), то есть до того, как его кто-то увидит.
+document.addEventListener('lz:fill', e => { try { modernizeIcons(e.target); } catch(_) {} });
 (function(){
-  function _all(){ try{ modernizeIcons(document); }catch(_){} }
+  function _all(){ try{ window.__lzQuiet ? __lzQuiet(() => modernizeIcons(document)) : modernizeIcons(document); }catch(_){} }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _all);
   else _all();
   setTimeout(_all, 800); setTimeout(_all, 2500);
@@ -10943,8 +10949,12 @@ function openAudienceHub(tab) { modTab('audience', tab || 'segments'); }
 function openShieldHub(tab) { modTab('shield', tab || 'accounts'); }
 function openBotNet(tab) { modTab('botnet', tab || 'bots'); }
 
-function _renderModuleTabs() {
-  document.querySelectorAll('.mod-tabs[data-module]').forEach(el => {
+function _renderModuleTabs(root) {
+  // root — контейнер, только что наполненный ленивой разметкой (lz:fill);
+  // без него (или с событием DOMContentLoaded) — вся страница, тихо: её
+  // ленивые контейнеры получат полоски сами, когда наполнятся.
+  const scope = root && root.querySelectorAll ? root : document;
+  const run = () => scope.querySelectorAll('.mod-tabs[data-module]').forEach(el => {
     const m = SCREEN_MODULES[el.dataset.module];
     if (!m) return;
     el.innerHTML = m.tabs.map(t => {
@@ -10954,7 +10964,9 @@ function _renderModuleTabs() {
         + ` onkeydown="if(event.key==='Enter')modTab('${el.dataset.module}','${t.key}')">${esc(t.label)}</div>`;
     }).join('');
   });
+  if (scope === document && window.__lzQuiet) __lzQuiet(run); else run();
 }
+document.addEventListener('lz:fill', e => _renderModuleTabs(e.target));
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _renderModuleTabs);
 else _renderModuleTabs();
 

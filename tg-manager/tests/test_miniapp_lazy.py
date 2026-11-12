@@ -139,6 +139,45 @@ def test_loader_comes_before_every_cut_script_and_screen_residue_is_inline():
     assert 'src="screens/x.js"' not in sp.html
 
 
+def test_markup_containers_become_empty_shells():
+    filler = "<p>" + "x" * 300 + "</p>"
+    html = ("<body><div id=\"app\">"
+            f"<div class=\"screen show\" id=\"s-start\">{filler}</div>"
+            f"<div class=\"screen\" id=\"s-home\">{filler}</div>"
+            f"<div class=\"screen\" id=\"s-a\"><div><input id=\"aIn\" class=\"fld\"></div>{filler}"
+            f"<div class=\"mbg\" id=\"inner-modal\">{filler}</div></div>"
+            f"<div class=\"mbg\" id=\"m-b\"><span data-key=\"k1\">{filler}</span></div>"
+            f"<div class=\"screen\" id=\"s-script\"><script>var q = '<div>';</script>{filler}</div>"
+            "<div class=\"screen\" id=\"s-tiny\"><b>1</b></div>"
+            "</div></body>")
+    page, inner, ids, words = lz.defer_markup(html, {"s-home"})
+    assert set(inner) == {"s-a", "m-b"}          # показанный, оставленный, со скриптом, пустой — на месте
+    assert '<div class="screen" id="s-a" data-lz="1"></div>' in page
+    assert '<div class="mbg" id="m-b" data-lz="1"></div>' in page
+    assert "inner-modal" in inner["s-a"] and "inner-modal" not in page
+    assert ids["s-a"] == ["aIn", "inner-modal"]
+    assert {"input", "fld", "span", "data-key", "k1", "p"} <= words
+    assert "screen" not in words                 # класс каркаса остаётся в странице
+    # Вынули и вставили назад — та же страница.
+    back = page
+    for cid, part in inner.items():
+        back = back.replace(f'id="{cid}" data-lz="1">', f'id="{cid}">' + part, 1)
+    assert back == html
+
+
+def test_markup_chunk_is_a_script_that_registers_html():
+    sp = _split("function a() {}\n")
+    filler = "<i>" + "y" * 300 + "</i>"
+    html = (f"<body><div class=\"screen\" id=\"s-x\">{filler}</div>"
+            "<script>function a() {}\nfunction b() {}\nb();\n</script></body>")
+    sp = lz.split_page(html, lambda _r: None, lambda t, _l: t, min_inline=0)
+    assert sp.deferred == 1 and len(sp.markup) == 1
+    body = sp.markup[0].body
+    assert body.startswith("__lzHtml(") and body.endswith(");")
+    assert json.loads(body[len("__lzHtml("):-2])["s-x"] == filler
+    assert sp.html.index('data-lz="1"') < sp.html.index("__lzHtml")   # загрузчик — после разметки
+
+
 # ── Настоящий мини-апп ────────────────────────────────────────────────────
 
 def _read(rel):
@@ -203,7 +242,7 @@ def test_function_set_matches_typescript(tmp_path, real):
 def test_residue_and_chunks_parse_and_keep_every_function(tmp_path, real):
     html, sp = real
     items = [(f"page#{k}", m.group(1)) for k, m in enumerate(lz._SCRIPT_TAG.finditer(sp.html))]
-    items += [(c.url, c.body) for c in sp.chunks]
+    items += [(c.url, c.body) for c in sp.chunks + sp.markup]
     ts = _ts_run(tmp_path, items)
     assert all(v["errors"] == 0 for v in ts.values()), {k: v["errors"] for k, v in ts.items() if v["errors"]}
     before = []
@@ -222,14 +261,14 @@ def ts_names_of(src):
 def test_first_open_budget(real):
     """Бюджет первого открытия С ленивой загрузкой: страница, SDK Telegram и
     стили — то, что качается до главного экрана (gzip, как минимум у любого
-    клиента). Было 660 КБ (всё сразу), стало ~170 КБ. Код новых разделов в
+    клиента). Было 660 КБ (всё сразу), стало ~150 КБ. Код и разметка новых разделов в
     этот бюджет не попадает — он уходит в куски сам; растёт бюджет только от
     разметки и того, что зовёт старт."""
     _html, sp = real
     total = len(gzip.compress(sp.html.encode(), 6))
     for rel in ("telegram-web-app.js", "ui_kit.css"):
         total += len(gzip.compress(_read(rel).encode(), 6))
-    assert total < 240 * 1024, f"первое открытие {total // 1024} КБ — больше бюджета 240 КБ"
+    assert total < 170 * 1024, f"первое открытие {total // 1024} КБ — больше бюджета 170 КБ"
 
 
 # ── Сервер ────────────────────────────────────────────────────────────────

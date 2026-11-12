@@ -124,10 +124,17 @@ if (want('boot') || args.includes('--write-boot')) {
     await ctx.close(); lz.server.close();
     rounds.push(trace);
     if (!trace.length || !args.includes('--write-boot')) break;
+    if (round && trace.join() === rounds[round - 1].join()) break;   // список не помогает
     const have = fs.existsSync(bootFile) ? fs.readFileSync(bootFile, 'utf8') : '';
-    const names = new Set(have.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#')));
-    trace.forEach(n => names.add(n));
-    const head = have.split('\n').filter(s => s.startsWith('#')).join('\n');
+    const names = new Set(have.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('# ')));
+    // '@id' — контейнер разметки, тронутый на старте: остаётся в странице
+    // ('#id' в списке). '@селектор' — запрос по всей странице: его список
+    // не лечит, такой запрос надо заворачивать в __lzQuiet (см. modernizeIcons).
+    trace.forEach(n => {
+      if (n[0] !== '@') names.add(n);
+      else if (/^@[\w-]+$/.test(n) && !['@*', '@idle', '@class', '@name'].includes(n)) names.add('#' + n.slice(1));
+    });
+    const head = have.split('\n').filter(s => s.startsWith('# ')).join('\n');
     fs.writeFileSync(bootFile, (head ? head + '\n' : '') + [...names].sort().join('\n') + '\n');
   }
   report.boot = { rounds: rounds.map(r => r.length), last: rounds[rounds.length - 1] };
@@ -148,16 +155,28 @@ if (want('parity')) {
         if (typeof v === 'function' && !/\{\s*\[native code\]\s*\}$/.test(Function.prototype.toString.call(v)))
           out[k] = Function.prototype.toString.call(v);
       }
-      return out;
+      // Разметка: тело страницы без скриптов. У ленивой — после наполнения
+      // всех контейнеров; должна совпасть с полной один в один.
+      const b = document.body.cloneNode(true);
+      b.querySelectorAll('script').forEach(x => x.remove());
+      return { out, dom: b.innerHTML };
     }, loadAll);
     await ctx.close();
-    return { fns, errors };
+    return { fns: fns.out, dom: fns.dom, errors };
   };
   const a = await collect(full.base, false), b = await collect(lz.base, true);
   const missing = Object.keys(a.fns).filter(k => !(k in b.fns));
-  const extra = Object.keys(b.fns).filter(k => !(k in a.fns) && !k.startsWith('__lazy'));
+  const extra = Object.keys(b.fns).filter(k => !(k in a.fns) && !k.startsWith('__lazy') && !k.startsWith('__lz'));
   const changed = Object.keys(a.fns).filter(k => k in b.fns && a.fns[k] !== b.fns[k]);
-  report.parity = { functions: Object.keys(a.fns).length, missing, extra, changed: changed.slice(0, 20),
+  let domDiff = null;
+  if (a.dom !== b.dom) {
+    let i = 0; while (i < a.dom.length && a.dom[i] === b.dom[i]) i++;
+    domDiff = { at: i, full: a.dom.slice(Math.max(0, i - 120), i + 200), lazy: b.dom.slice(Math.max(0, i - 120), i + 200),
+      len_full: a.dom.length, len_lazy: b.dom.length };
+    bad = true;
+  }
+  report.parity = { functions: Object.keys(a.fns).length, dom_equal: a.dom === b.dom, dom_diff: domDiff,
+    missing, extra, changed: changed.slice(0, 20),
     boot_errors_full: a.errors, boot_errors_lazy: b.errors };
   if (missing.length || extra.length || changed.length || b.errors.length > a.errors.length) bad = true;
 }
@@ -167,7 +186,7 @@ if (want('smoke')) {
     const { ctx, page, errors } = await open(base);
     const screens = await page.evaluate(() => Object.getOwnPropertyNames(window)
       .filter(k => /^open[A-Z]/.test(k) && typeof window[k] === 'function' && window[k].length === 0).sort());
-    const fails = {};
+    const fails = {}, shown = {};
     for (const fn of screens) {
       for (const pass of [1, 2]) {
         errors.length = 0;
@@ -178,16 +197,28 @@ if (want('smoke')) {
         const found = [...new Set(errors)];
         if (thrown) found.unshift(thrown);
         if (found.length) { fails[fn] = found.slice(0, 2); break; }
+        // Что показал экран — сверяется с полной страницей. Разметка экрана
+        // в ленивой странице пришла только что, через заглушку.
+        if (pass === 1) shown[fn] = await page.evaluate(() => {
+          const s = [...document.querySelectorAll('.screen.show, .mbg.show')];
+          // mb-mirrored ставит таймер главной кнопки Telegram раз в 300 мс
+          // (screens/main_button.js) — это время, а не разметка.
+          return s.map(x => x.id + ':' + x.innerHTML.replace(/ mb-mirrored/g, '').length + ':' + x.textContent.replace(/\d{1,2}:\d{2}(:\d{2})?/g, '').length).join('|');
+        });
         await page.evaluate(() => { try { if (typeof back === 'function') back(); } catch {} });
         await page.waitForTimeout(40);
       }
     }
     const trace = await page.evaluate(() => (window.__lzTrace || []).length);
+    // Закрыть всё и вернуться на главную — следующий экран с чистого места.
     await ctx.close();
-    return { screens: screens.length, fails, syncLoads: trace };
+    return { screens: screens.length, fails, syncLoads: trace, shown };
   };
   const a = await smoke(full.base), b = await smoke(lz.base);
   const fresh = Object.keys(b.fails).filter(k => !(k in a.fails));
+  const differs = Object.keys(a.shown).filter(k => a.shown[k] !== b.shown[k]);
+  if (differs.length) bad = true;
+  report.smoke_differs = Object.fromEntries(differs.slice(0, 15).map(k => [k, [a.shown[k], b.shown[k]]]));
   report.smoke = { screens_full: a.screens, screens_lazy: b.screens, failing_full: Object.keys(a.fails).length,
     failing_lazy: Object.keys(b.fails).length, new_failures: Object.fromEntries(fresh.map(k => [k, b.fails[k]])),
     sync_loads: b.syncLoads };

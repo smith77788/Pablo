@@ -450,6 +450,8 @@ class Split:
     lazy_names: int
     kept: dict[str, str]            # имя → почему осталось
     boot_kept: int
+    markup: list = field(default_factory=list)   # куски разметки
+    deferred: int = 0                            # сколько контейнеров отложено
 
 
 _TARGET = 128 * 1024    # ~128 КБ исходника на кусок: ~25 КБ brotli
@@ -494,23 +496,176 @@ def _group(label: str, strict: bool, gone: list[tuple[str, str]]) -> list[Chunk]
     return out
 
 
-_LOADER = r"""(function(){
-var W=window,M=__LZM__,B=__LZB__,S={},Q=[],F=0;
-function inject(c,t){var s=document.createElement('script');s.text=t+'\n//# sourceURL='+B+M[c][0];(document.head||document.documentElement).appendChild(s);s.remove()}
-function fail(c,e){try{if(sessionStorage.getItem('__lz_fail')){throw e}sessionStorage.setItem('__lz_fail','1')}catch(_){}
-var u=location.href.replace(/([?&])full=1(&|$)/,'$1');location.replace(u+(u.indexOf('?')<0?'?':'&')+'full=1');throw e}
-function load(c,n){if(S[c]===2)return;(W.__lzTrace=W.__lzTrace||[]).push(n);var x=new XMLHttpRequest();x.open('GET',B+M[c][0],false);
-try{x.send(null)}catch(e){fail(c,e)}if(x.status!==200){fail(c,new Error('lazy '+x.status))}S[c]=2;inject(c,x.responseText)}
-function stub(c,n,st,l){var f=st?function(){'use strict';if(W[n]===f){load(c,n);if(W[n]===f)fail(c,new Error('lazy '+n))}return W[n].apply(this,arguments)}
-:function(){if(W[n]===f){load(c,n);if(W[n]===f)fail(c,new Error('lazy '+n))}return W[n].apply(this,arguments)};
-try{Object.defineProperty(f,'name',{value:n});Object.defineProperty(f,'length',{value:l})}catch(_){}W[n]=f}
-for(var c in M){var e=M[c];for(var i=2;i<e.length;i++){var p=e[i].split('/');stub(c,p[0],e[1],+(p[1]||0))}Q.push(c)}
-function next(){if(!Q.length)return;var c=Q.shift();if(S[c]){next();return}S[c]=1;var s=document.createElement('script');s.src=B+M[c][0];s.async=true;
-s.onload=function(){S[c]=2;idle(next)};s.onerror=function(){S[c]=0;F++;if(F<3){Q.push(c)}idle(next)};document.head.appendChild(s)}
-function idle(f){(W.requestIdleCallback||function(g){setTimeout(g,60)})(f,{timeout:2000})}
-W.__lazyLoadAll=function(){for(var c in M)load(c,'*')};
-W.__lazyState=function(){var r={total:Q.length,pending:Q.length,loaded:0};for(var c in M)if(S[c]===2)r.loaded++;r.total=Object.keys(M).length;return r};
-W.addEventListener('load',function(){if(!W.__lzNoIdle)setTimeout(function(){idle(next)},__LZD__)});
+_LOADER_SRC = r"""(function () {
+  var W = window, D = document;
+  var M = __LZM__;   // кусок кода → [адрес, строгий, имя[/длина]…]
+  var H = __LZH__;   // кусок разметки → [адрес, id контейнера…]
+  var I = __LZI__;   // id контейнера → [id внутри…]
+  var T = __LZT__;   // слова селекторов, встречающиеся только в отложенной разметке
+  var S = {}, HS = {}, Q = [], F = 0;
+  var HTML = {}, SHELL = {}, IDS = {}, TOK = {}, left = 0;
+
+  function trace(n) { (W.__lzTrace = W.__lzTrace || []).push(n); }
+  function inject(t, url) {
+    var s = D.createElement('script');
+    s.text = t + '\n//# sourceURL=' + url;
+    (D.head || D.documentElement).appendChild(s);
+    s.remove();
+  }
+  // Кусок не пришёл: страница перезагружает себя полной (?full=1) — один раз
+  // за сессию, чтобы не уйти в петлю, если сервер полную не отдаёт.
+  function fail(e) {
+    try {
+      if (sessionStorage.getItem('__lz_fail')) throw e;
+      sessionStorage.setItem('__lz_fail', '1');
+    } catch (_) { throw e; }
+    var u = location.href.replace(/([?&])full=1(&|$)/, '$1');
+    location.replace(u + (u.indexOf('?') < 0 ? '?' : '&') + 'full=1');
+    throw e;
+  }
+  function getSync(url) {
+    var x = new XMLHttpRequest();
+    x.open('GET', url, false);
+    try { x.send(null); } catch (e) { fail(e); }
+    if (x.status !== 200) fail(new Error('lazy ' + x.status + ' ' + url));
+    return x.responseText;
+  }
+
+  // ── Код: синхронные заглушки ──
+  function load(c, n) {
+    if (S[c] === 2) return;
+    trace(n);
+    var t = getSync(M[c][0]);
+    S[c] = 2;
+    inject(t, M[c][0]);
+  }
+  function stub(c, n, st, l) {
+    var f = st
+      ? function () { 'use strict'; if (W[n] === f) { load(c, n); if (W[n] === f) fail(new Error('lazy ' + n)); } return W[n].apply(this, arguments); }
+      : function () { if (W[n] === f) { load(c, n); if (W[n] === f) fail(new Error('lazy ' + n)); } return W[n].apply(this, arguments); };
+    try { Object.defineProperty(f, 'name', { value: n }); Object.defineProperty(f, 'length', { value: l }); } catch (_) {}
+    W[n] = f;
+  }
+  for (var c in M) {
+    for (var i = 2; i < M[c].length; i++) { var p = M[c][i].split('/'); stub(c, p[0], M[c][1], +(p[1] || 0)); }
+    Q.push(c);
+  }
+
+  // ── Разметка: экраны и окна приходят при первом обращении ──
+  W.__lzHtml = function (o) { for (var k in o) HTML[k] = o[k]; };
+  for (var h in H) for (var j = 1; j < H[h].length; j++) { SHELL[H[h][j]] = h; IDS[H[h][j]] = H[h][j]; left++; }
+  for (var sid in I) for (var k = 0; k < I[sid].length; k++) if (!(I[sid][k] in IDS)) IDS[I[sid][k]] = sid;
+  for (var t = 0; t < T.length; t++) TOK[T[t]] = 1;
+  var DP = Document.prototype, EP = Element.prototype, orig = [];
+  var gid = DP.getElementById, qs = EP.querySelector;
+  function loadHtml(h, why) {
+    if (HS[h] === 2) return;
+    trace('@' + why);
+    inject(getSync(H[h][0]), H[h][0]);
+    HS[h] = 2;
+  }
+  function mat(id, why) {
+    var h = SHELL[id];
+    if (h === undefined) return;
+    if (!(id in HTML)) loadHtml(h, why || id);
+    delete SHELL[id];
+    var el = gid.call(D, id);
+    var html = HTML[id];
+    delete HTML[id];
+    if (el && el.hasAttribute('data-lz')) {
+      el.innerHTML = html;
+      el.removeAttribute('data-lz');
+      try { el.dispatchEvent(new CustomEvent('lz:fill', { bubbles: true })); } catch (_) {}
+    }
+    if (!--left) unpatch();
+  }
+  function matAll(why) { for (var id in SHELL) mat(id, why); }
+  // Запрос «по всей странице», который сам доходит до каждого контейнера
+  // при его наполнении (событие lz:fill), наполнять всё не должен.
+  var quiet = 0;
+  W.__lzQuiet = function (f) { quiet++; try { return f(); } finally { quiet--; } };
+  function touch(root, sel) {
+    if (!left || quiet) return;
+    if (root && root !== D && root.nodeType === 1) {
+      if (root.hasAttribute('data-lz')) { mat(root.id); return; }
+      if (!qs.call(root, '[data-lz]')) return;
+    }
+    if (sel == null) { matAll('*'); return; }
+    var w = String(sel).match(/[A-Za-z_][\w-]*/g) || [];
+    for (var i = 0; i < w.length; i++) {
+      if (TOK[w[i]]) { matAll(String(sel)); return; }
+      if (IDS[w[i]] !== undefined) mat(IDS[w[i]]);
+    }
+  }
+  function wrap(proto, name, how) {
+    var f = proto[name];
+    if (!f) return;
+    orig.push([proto, name, f]);
+    proto[name] = function (a) { how(this, a); return f.apply(this, arguments); };
+  }
+  function unpatch() {
+    for (var i = 0; i < orig.length; i++) orig[i][0][orig[i][1]] = orig[i][2];
+    orig = [];
+    if (mo) mo.disconnect();
+  }
+  var mo = null;
+  if (left) {
+    wrap(DP, 'getElementById', function (_r, id) { var s = IDS[id]; if (s !== undefined) mat(s); });
+    ['querySelector', 'querySelectorAll', 'getElementsByClassName', 'getElementsByTagName'].forEach(function (n) {
+      wrap(DP, n, touch); wrap(EP, n, touch);
+    });
+    wrap(DP, 'getElementsByName', function () { matAll('name'); });
+    // Сетка безопасности: контейнер показали в обход getElementById
+    // (класс show на элементе из querySelectorAll('.screen')) — наполняем
+    // до отрисовки.
+    try {
+      mo = new MutationObserver(function (rs) {
+        for (var i = 0; i < rs.length; i++) { var el = rs[i].target; if (el.hasAttribute && el.hasAttribute('data-lz')) mat(el.id, 'class'); }
+      });
+      mo.observe(D.body || D.documentElement, { subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+    } catch (_) {}
+  }
+
+  // ── Докачка в простое: код, потом разметка ──
+  var HQ = Object.keys(H);
+  function idle(f) { (W.requestIdleCallback || function (g) { setTimeout(g, 60); })(f, { timeout: 2000 }); }
+  function add(url, ok, bad) {
+    var s = D.createElement('script');
+    s.src = url; s.async = true; s.onload = ok; s.onerror = bad;
+    D.head.appendChild(s);
+  }
+  function next() {
+    if (Q.length) {
+      var c = Q.shift();
+      if (S[c]) { next(); return; }
+      S[c] = 1;
+      add(M[c][0], function () { S[c] = 2; idle(next); },
+        function () { S[c] = 0; if (++F < 3) Q.push(c); idle(next); });
+      return;
+    }
+    if (HQ.length) {
+      var h = HQ.shift();
+      if (HS[h]) { idle(next); return; }
+      HS[h] = 1;
+      add(H[h][0], function () {
+        HS[h] = 2;
+        var ids = H[h].slice(1);
+        (function step() {
+          var t0 = Date.now();
+          while (ids.length && Date.now() - t0 < 8) mat(ids.shift(), 'idle');
+          if (ids.length) idle(step); else idle(next);
+        })();
+      }, function () { HS[h] = 0; if (++F < 3) HQ.push(h); idle(next); });
+    }
+  }
+  W.__lazyLoadAll = function () { for (var c in M) load(c, '*'); matAll('*'); };
+  W.__lazyState = function () {
+    var r = { total: 0, loaded: 0, markup_left: left };
+    for (var c in M) { r.total++; if (S[c] === 2) r.loaded++; }
+    r.total++; if (!left) r.loaded++;
+    return r;
+  };
+  W.addEventListener('load', function () { if (!W.__lzNoIdle) setTimeout(function () { idle(next); }, __LZD__); });
 })();"""
 
 # Через сколько после load начинать докачку: главный экран в это время тянет
@@ -518,12 +673,106 @@ W.addEventListener('load',function(){if(!W.__lzNoIdle)setTimeout(function(){idle
 IDLE_DELAY_MS = 1500
 
 
-def _loader(chunks: list[Chunk], boot: set[str]) -> str:
+def _loader_text() -> str:
+    from services import miniapp_minify as mm
+    return mm.strip_js(_LOADER_SRC)
+
+
+def _loader(chunks: list[Chunk], markup: list["Chunk"], ids: dict, toks: list[str]) -> str:
+    j = lambda o: json.dumps(o, ensure_ascii=False, separators=(",", ":"))  # noqa: E731
     m = {str(i): [c.url, 1 if c.strict else 0] + [
         nm + ("/" + str(c.lengths[nm]) if c.lengths.get(nm) else "") for nm in c.names]
         for i, c in enumerate(chunks)}
-    return (_LOADER.replace("__LZM__", json.dumps(m, ensure_ascii=False, separators=(",", ":")))
-            .replace("__LZB__", "''").replace("__LZD__", str(IDLE_DELAY_MS)))
+    h = {"h" + str(i): [c.url] + c.names for i, c in enumerate(markup)}
+    return (_loader_text().replace("__LZM__", j(m)).replace("__LZH__", j(h))
+            .replace("__LZI__", j(ids)).replace("__LZT__", j(toks))
+            .replace("__LZD__", str(IDLE_DELAY_MS)))
+
+
+# ── Отложенная разметка ───────────────────────────────────────────────────
+
+_CONTAINER = re.compile(r'<div class="(screen|mbg)(?: [^"]*)?" id="([^"]+)"')
+_DIV = re.compile(r"<div\b|</div>")
+_TAG = re.compile(r"<([a-zA-Z][\w-]*)((?:[^>\"']|\"[^\"]*\"|'[^']*')*)>")
+_ATTR = re.compile(r"([^\s=/>\"']+)(?:\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+))?")
+_ID_ATTR = re.compile(r"""\bid=["']([^"']+)["']""")
+
+# Вкладки и главный экран — нужны сразу.
+EAGER_CONTAINERS = {"s-home", "s-bots", "s-accounts", "s-broadcasts", "s-more"}
+
+
+def _mask_scripts(html: str) -> str:
+    """Скрипты и стили — пробелами той же длины: «<div» в строке JS не тег."""
+    return re.sub(r"<(script|style)\b.*?</\1>", lambda m: " " * len(m.group(0)), html, flags=re.S)
+
+
+def _words(markup: str) -> tuple[set[str], set[str]]:
+    """(слова, по которым селектор может найти что-то в разметке, id)."""
+    words: set[str] = set()
+    ids: set[str] = set()
+    for m in _TAG.finditer(markup):
+        words.add(m.group(1).lower())
+        for a in _ATTR.finditer(m.group(2)):
+            name = a.group(1).lower()
+            words.add(name)
+            val = (a.group(2) or "").strip("\"'")
+            if name == "id":
+                ids.add(val)
+            elif name == "class":
+                words.update(val.split())
+            elif name == "name" or name.startswith("data-") or name in ("type", "role", "for"):
+                words.update(re.findall(r"[A-Za-z_][\w-]*", val))
+    return words, ids
+
+
+def defer_markup(html: str, keep: set[str]) -> tuple[str, dict[str, str], dict[str, list[str]], set[str]]:
+    """Вынуть содержимое экранов и окон, кроме keep и показанных.
+
+    Возвращает (страница с пустыми контейнерами data-lz, {id: содержимое},
+    {id: [id внутри]}, слова). Слова — всё, по чему селектор может найти
+    элемент в вынутой разметке (теги, атрибуты, классы): запрос с таким
+    словом сначала наполняет все контейнеры, иначе он не нашёл бы то, что
+    нашёл бы на полной странице.
+    """
+    masked = _mask_scripts(html)
+    taken: list[tuple[int, int, str]] = []     # (начало содержимого, конец, id)
+    pos = 0
+    for m in _CONTAINER.finditer(masked):
+        if m.start() < pos:
+            continue                            # вложен в уже вынутый
+        open_end = masked.index(">", m.end()) + 1
+        d, end = 0, None
+        for t in _DIV.finditer(masked, m.start()):
+            d += 1 if t.group(0) == "<div" else -1
+            if d == 0:
+                end = t.start()
+                break
+        if end is None:
+            raise ValueError(f"незакрытый контейнер {m.group(2)}")
+        pos = end
+        cid = m.group(2)
+        tag = masked[m.start():open_end]
+        if cid in keep or " show" in tag.split('"')[1] or html[open_end:end] != masked[open_end:end]:
+            continue                            # нужен сразу или со скриптом внутри
+        if end - open_end < 200:
+            continue                            # пустой каркас — нечего выносить
+        taken.append((open_end, end, cid))
+    out: list[str] = []
+    inner: dict[str, str] = {}
+    inner_ids: dict[str, list[str]] = {}
+    words: set[str] = set()
+    pos = 0
+    for start, end, cid in taken:
+        # Каркас остаётся: id, класс и место в документе; содержимое — потом.
+        out.append(html[pos:start - 1] + ' data-lz="1">')
+        part = html[start:end]
+        inner[cid] = part
+        w, ids = _words(part)
+        words |= w
+        inner_ids[cid] = sorted(ids)
+        pos = end
+    out.append(html[pos:])
+    return "".join(out), inner, inner_ids, words
 
 
 _SCRIPT_TAG = re.compile(r"<script>(.*?)</script>", re.S)
@@ -531,7 +780,7 @@ _SRC_TAG = re.compile(r'<script src="(screens/[A-Za-z0-9_\-]+\.js)"></script>')
 
 
 def split_page(html: str, read_file, minify_js, boot: set[str] | None = None,
-               min_inline: int = 20000) -> Split:
+               min_inline: int = 20000, markup: bool = True) -> Split:
     """Разрезать уже очищенную страницу.
 
     read_file(rel) → текст файла экрана (или None); minify_js(text, label) →
@@ -568,7 +817,7 @@ def split_page(html: str, read_file, minify_js, boot: set[str] | None = None,
 
     # Тексты вне разрезаемых скриптов: разметка с обработчиками и мелкие
     # встроенные скрипты в <head>.
-    extra = [_SCRIPT_TAG.sub(lambda mm: mm.group(0) if len(mm.group(1)) < min_inline else "",
+    extra = [_SCRIPT_TAG.sub(lambda m_: m_.group(0) if len(m_.group(1)) < min_inline else "",
                              _SRC_TAG.sub("", html))]
     lazy, why = _safe_refs(scripts, extra)
     for nm in boot & lazy:
@@ -594,23 +843,72 @@ def split_page(html: str, read_file, minify_js, boot: set[str] | None = None,
         c.hash = hashlib.sha256(c.body.encode()).hexdigest()[:16]
         c.lengths = {nm: lengths[nm] for nm in c.names}
 
+    # Разметка экранов и окон: на месте остаются пустые каркасы.
+    keep = EAGER_CONTAINERS | {b[1:] for b in boot if b.startswith("#")}
+    if markup:
+        html, inner, inner_ids, words = defer_markup(html, keep)
+        slots = _reslot(html, slots)
+    else:
+        inner, inner_ids, words = {}, {}, set()
+    mchunks = _group_markup(inner)
+
     out: list[str] = []
     pos = 0
     loader_done = False
-    for start, end, s, is_src in sorted(slots, key=lambda t: t[0]):
+    for start, end, s, _is_src in sorted(slots, key=lambda t: t[0]):
         out.append(html[pos:start])
         if not loader_done:
-            out.append("<script>" + _loader(chunks, boot) + "</script>")
+            out.append("<script>" + _loader(chunks, mchunks, inner_ids, sorted(words)) + "</script>")
             loader_done = True
         # Экран с остатком — встроенным скриптом на том же месте: отдельный
         # <script> сохраняет и порядок, и изоляцию ошибок, и строгий режим.
-        rest = rests[id(s)]
-        out.append("<script>" + rest.replace("</script", "<\\/script") + "</script>"
-                   if is_src or True else "")
+        out.append("<script>" + rests[id(s)].replace("</script", "<\\/script") + "</script>")
         pos = end
     out.append(html[pos:])
     page = "".join(out)
-    return Split(page, chunks, len(lazy), why, len(boot))
+    sp = Split(page, chunks, len(lazy), why, len(boot))
+    sp.markup = mchunks
+    sp.deferred = len(inner)
+    return sp
+
+
+def _reslot(html: str, slots):
+    """Позиции скриптов после выноса разметки (она стоит раньше них)."""
+    tags = [m for m in _SCRIPT_TAG.finditer(html)] + [m for m in _SRC_TAG.finditer(html)]
+    by_body = {}
+    for m in tags:
+        by_body.setdefault(m.group(0), []).append((m.start(), m.end()))
+    out = []
+    for start, end, s, is_src in slots:
+        key = (f'<script src="{s.label}"></script>' if is_src else "<script>" + s.src + "</script>")
+        out.append(by_body[key].pop(0) + (s, is_src))
+    return out
+
+
+_MARKUP_TARGET = 48 * 1024
+
+
+def _group_markup(inner: dict[str, str]) -> list[Chunk]:
+    out: list[Chunk] = []
+    cur: dict[str, str] = {}
+    size = 0
+
+    def flush():
+        body = "__lzHtml(" + json.dumps(cur, ensure_ascii=False, separators=(",", ":")) \
+            .replace("</", "<\\/") + ");"
+        c = Chunk("markup", False, list(cur), body)
+        c.hash = hashlib.sha256(body.encode()).hexdigest()[:16]
+        out.append(c)
+
+    for cid, part in inner.items():
+        cur[cid] = part
+        size += len(part)
+        if size >= _MARKUP_TARGET and _chunk_key(cid) % 3 == 0:
+            flush()
+            cur, size = {}, 0
+    if cur:
+        flush()
+    return out
 
 
 # ── Список функций старта ─────────────────────────────────────────────────
@@ -621,7 +919,9 @@ BOOT_FILE = "lazy_boot.txt"
 def read_boot(static_dir: str) -> set[str]:
     try:
         with open(os.path.join(static_dir, BOOT_FILE), encoding="utf-8") as f:
-            return {ln.strip() for ln in f if ln.strip() and not ln.startswith("#")}
+            # «# текст» — комментарий; «#id» — контейнер разметки, нужный на старте.
+            return {ln.strip() for ln in f
+                    if ln.strip() and not (ln.startswith("# ") or ln.strip() == "#")}
     except OSError:
         return set()
 
@@ -692,14 +992,14 @@ class LazyCache:
 
     def _store(self, version: str, sp: Split) -> None:
         self.pages[version] = sp
-        for c in sp.chunks:
+        for c in sp.chunks + sp.markup:
             self.chunks[c.hash] = c.body
             self.owner[c.hash] = version
         while len(self.pages) > self.KEEP_PAGES:
             old = next(iter(self.pages))
             del self.pages[old]
             for h in [h for h, v in self.owner.items() if v == old]:
-                if not any(c.hash == h for p in self.pages.values() if p for c in p.chunks):
+                if not any(c.hash == h for p in self.pages.values() if p for c in p.chunks + p.markup):
                     self.chunks.pop(h, None)
                     self.gz.pop(h, None)
                     self.owner.pop(h, None)
@@ -752,7 +1052,7 @@ def build_dir(static_dir: str, out_dir: str, lazy: bool = True, boot: set[str] |
                         boot=read_boot(static_dir) if boot is None else boot)
         html = sp.html
         os.makedirs(os.path.join(out_dir, "lazy"), exist_ok=True)
-        for c in sp.chunks:
+        for c in sp.chunks + sp.markup:
             with open(os.path.join(out_dir, c.url), "w", encoding="utf-8") as f:
                 f.write(c.body)
     with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8") as f:
@@ -767,4 +1067,5 @@ if __name__ == "__main__":  # python -m services.miniapp_lazy <out> [--full] [--
                     boot=set() if "--no-boot" in sys.argv else None)
     if _sp:
         print(json.dumps({"chunks": len(_sp.chunks), "lazy": _sp.lazy_names,
+                          "markup_chunks": len(_sp.markup), "deferred": _sp.deferred,
                           "kept": len(_sp.kept)}, ensure_ascii=False))

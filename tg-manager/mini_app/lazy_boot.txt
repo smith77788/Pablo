@@ -2,6 +2,13 @@
 # странице, а не в ленивых кусках (services/miniapp_lazy.py). Список строит
 # node deploy/scripts/lazy_check.mjs boot --write-boot; устаревший список не
 # ломает ничего — старт просто догрузит недостающее синхронно.
+#bcastMbg
+#chPostMbg
+#cmpMbg
+#mo-wf-step
+#netbcMbg
+#s-masspub
+#tplMbg
 _apiRaw
 _freqLoad
 _fxSortState
