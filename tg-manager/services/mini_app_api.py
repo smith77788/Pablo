@@ -537,9 +537,8 @@ INLINE_MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_short_links_owner ON short_links(owner_id, created_at DESC)",
     # Центр восстановления аккаунтов: история шагов, настройки владельца, дата
     # снятия от @SpamBot и счётчик повторных блоков (services/account_rehab).
-    # Здесь, а не отдельным schema_vN.sql: хвост истории после снимка упёрся
-    # в порог свёртки (tests/test_schema_baseline.py), а пересъёмка снимка —
-    # общий для всех веток шаг. Тот же список повторён в main.py.
+    # Источник правды — schema_v344_rehab_center.sql; здесь и в main.py тот же
+    # идемпотентный DDL на случай лага миграции.
     "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS release_at TIMESTAMPTZ",
     "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS relapses INTEGER NOT NULL DEFAULT 0",
     """CREATE TABLE IF NOT EXISTS account_rehab_events (
