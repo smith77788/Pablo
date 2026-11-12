@@ -337,6 +337,16 @@ async def create_pool() -> asyncpg.Pool:
         DATABASE_URL,
         **pool_config,
     )
+    # Ожидание соединения пула — в метрики в момент, когда оно случается
+    # (database/pool_metrics.py). Сбой обёртки не мешает старту.
+    try:
+        from database import pool_metrics as _pool_metrics
+
+        if not _pool_metrics.instrument(pool):
+            log.warning("pool_metrics: замер ожидания пула не встал — "
+                        "в asyncpg нет Pool._acquire")
+    except Exception:
+        log_exc_swallow(log, "pool_metrics: замер ожидания пула")
     async with pool.acquire() as conn:
         # ── ПОТОЛОК ОЖИДАНИЯ БЛОКИРОВКИ ──────────────────────────────────────
         # Без него DDL миграции ждёт блокировку БЕСКОНЕЧНО, и это кладёт продукт

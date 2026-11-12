@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -626,6 +627,10 @@ _REVIVE_AFTER_SILENCE = (
     "Операция не подавала признаков работы дольше {mins} мин — возвращена в "
     "очередь и запустится заново."
 )
+_REVIVE_AFTER_DEATH = (
+    "Процесс, который выполнял операцию, остановился — операция возвращена в "
+    "очередь и продолжится на другом (уже сделанное не повторится)."
+)
 
 
 async def _ensure_acct_wait_column(pool: "asyncpg.Pool") -> None:
@@ -688,6 +693,20 @@ async def _ensure_pause_requested_column(pool: "asyncpg.Pool") -> None:
         log_exc_swallow(log, f"op_worker: ensure pause_requested column failed: {e}")
 
 
+async def _ensure_claimed_by_column(pool: "asyncpg.Pool") -> None:
+    """Досоздать operation_queue.claimed_by (schema_v346), если миграция не доехала.
+
+    Цена та же, что у pause_requested, только хуже: колонку ПИШЕТ отбор
+    операций, и без неё `_safe_fetch` вернул бы пустой список — очередь
+    молча встала бы целиком.
+    """
+    try:
+        await pool.execute(
+            "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS claimed_by TEXT")
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: ensure claimed_by column failed: {e}")
+
+
 
 # Реестр аккаунтов, занятых активными операциями op_worker.
 # account_warmer проверяет этот реестр перед использованием аккаунта.
@@ -718,6 +737,81 @@ _WORKER_ID = _rguard.WORKER_ID
 # Упал процесс — аренда истекает сама, и аккаунты возвращаются в оборот без
 # 60-минутного сторожа.
 _LEASE_TTL_S = 900
+
+
+# ── Горизонтальный исполнитель (шардированная очередь) ──────────────────────
+# По умолчанию очередь разбирает ОДИН процесс — держатель аренды исполнителя
+# (`replica_guard`). Это потолок продукта: все операции всех клиентов, все
+# клиенты Telethon и ~70 фоновых циклов в одном цикле событий одного ядра.
+#
+# OP_SHARDED_EXECUTOR=1 снимает потолок: операции разбирают ВСЕ процессы с
+# ролью worker/all, каждый до OP_MAX_PARALLEL. Держатель аренды остаётся
+# ЛИДЕРОМ — только он гоняет сторожей очереди и фоновые циклы (main.py), а
+# остальные только исполняют. Что делает это безопасным:
+#   * у каждой запущенной операции есть хозяин — `operation_queue.claimed_by`
+#     (worker_id процесса), и сторожа лидера трогают только СВОИ, бесхозные
+#     (строки до этой правки) и операции УМЕРШИХ процессов — тех, чей хартбит
+#     (`process_heartbeats`) молчит дольше _EXECUTOR_DEAD_S;
+#   * операции умершего процесса возвращаются в очередь сразу, а не через
+#     60 минут сторожа зависших (`_sweep_dead_executor_ops`);
+#   * процесс, у которого операцию забрали (его посчитали мёртвым, пока цикл
+#     стоял), гасит свою задачу сам (`_fence_lost_ops`) — второго прогона той
+#     же операции нет;
+#   * аренды аккаунтов, темп флота, предохранитель и лимит на владельца и так
+#     живут в Postgres (лимит держит запрос отбора с FOR UPDATE SKIP LOCKED).
+_EXECUTOR_DEAD_S = _int_env("OP_EXECUTOR_DEAD_SEC", 300, 120, 3600)
+
+
+# Режим особого прохода сторожа зависших: (scope, возраст в мин., метка).
+# ContextVar, а не аргумент: сигнатуру `_watchdog_stale(pool, bot=None)` держат
+# сторожа набора, а значение живёт ровно в пределах одного вызова.
+_stale_mode: "contextvars.ContextVar[tuple | None]" = contextvars.ContextVar(
+    "op_worker_stale_mode", default=None)
+
+
+def sharded_mode() -> bool:
+    """Включён ли горизонтальный исполнитель — один источник правды в replica_guard."""
+    return _rguard.sharded_executor()
+
+
+# Предикат «эту запущенную операцию вправе чинить сторож этого процесса».
+# Подставляется в WHERE по operation_queue; $self — worker_id процесса,
+# $dead — окно молчания хартбита в секундах. Текст — константы, не ввод.
+_DEAD_OWNER_SQL = (
+    "NOT EXISTS (SELECT 1 FROM process_heartbeats ph "
+    "WHERE ph.worker_id = operation_queue.claimed_by "
+    "AND ph.last_seen > now() - make_interval(secs => {dead}))"
+)
+
+
+def _repair_scope_sql(scope: "str | None", self_ph: str, dead_ph: str) -> str:
+    """SQL-условие по хозяину операции для сторожа.
+
+    None     — без условия (одиночный исполнитель, поведение как раньше);
+    'leader' — свои, бесхозные и операции умерших процессов;
+    'others' — бесхозные и операции умерших процессов, но не свои;
+    'mine'   — только свои (сторож процесса-исполнителя без лидерства);
+    'dead'   — только чужие операции умерших процессов.
+    """
+    dead = _DEAD_OWNER_SQL.format(dead=dead_ph)
+    if scope is None:
+        return "TRUE"
+    if scope == "leader":
+        return (f"(claimed_by IS NULL OR claimed_by = {self_ph} OR {dead})")
+    if scope == "others":
+        # Уборка на старте лидера: свои операции этого процесса живы по
+        # определению (worker_id новый на каждый процесс), а у процесса,
+        # ставшего лидером не на старте, они прямо сейчас выполняются.
+        return (f"((claimed_by IS NULL OR claimed_by <> {self_ph}) "
+                f"AND (claimed_by IS NULL OR {dead}))")
+    if scope == "mine":
+        # Окно хартбита здесь не нужно, но параметр в запросе есть всегда:
+        # Postgres не принимает запрос с неиспользованным параметром.
+        return f"(claimed_by = {self_ph} AND {dead_ph}::float8 >= 0)"
+    if scope == "dead":
+        return (f"(claimed_by IS NOT NULL AND claimed_by <> {self_ph} "
+                f"AND {dead})")
+    raise ValueError(f"неизвестный scope сторожа: {scope!r}")
 
 
 def init_op_worker_pool(pool: "asyncpg.Pool") -> None:
@@ -3393,6 +3487,13 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
     # RETURNING: гашение атомарно одним UPDATE, но закрыть операцию до конца
     # (результат, подпись, слово владельцу) можно только по строкам — см.
     # _finish_poisoned_op.
+    # Горизонтальный исполнитель: на старте лидер чинит только бесхозные и
+    # операции умерших процессов — живые операции соседей (и свои, если
+    # лидерство пришло не на старте процесса) не его.
+    scope = "others" if sharded_mode() else None
+    _scope_args: tuple = ()
+    if scope is not None:
+        _scope_args = (_WORKER_ID, float(_EXECUTOR_DEAD_S))
     poisoned_rows = await _safe_fetch(
         pool,
         """UPDATE operation_queue
@@ -3402,6 +3503,7 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
                error_msg = COALESCE(error_msg,
                    CASE WHEN COALESCE(revive_count, 0) >= $1 THEN $2 ELSE $4 END)
            WHERE status = 'running'
+             AND """ + _repair_scope_sql(scope, "$5", "$6") + """
              AND (COALESCE(revive_count, 0) >= $1
                   OR (COALESCE(revive_total, 0) >= $3
                       AND COALESCE(revive_mark, 0)
@@ -3412,6 +3514,7 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
         _POISON_ERROR.format(n=_MAX_REVIVES),
         _MAX_REVIVES_TOTAL,
         _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
+        *_scope_args,
         log_ctx="[reset_stale_poison]",
     )
     poisoned_n = len(poisoned_rows)
@@ -3457,8 +3560,10 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
                -- копился бы поверх прошлого прогона — класс «34/17»).
                done_items = 0,
                last_error = $1
-           WHERE status = 'running'""",
+           WHERE status = 'running'
+             AND """ + _repair_scope_sql(scope, "$2", "$3"),
         _REVIVE_AFTER_RESTART,
+        *_scope_args,
         log_ctx="[reset_stale_revive]",
     )
     # asyncpg возвращает строку вида "UPDATE N"
@@ -3517,7 +3622,19 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
 
     Исключает операции, которые реально выполняются в памяти (_active_op_ids),
     чтобы не перезапустить strike/bulk-op пока первый прогон ещё идёт.
+
+    При горизонтальном исполнителе — чьи операции чинить (`_repair_scope_sql`):
+    лидер — свои, бесхозные и умерших процессов. Два особых прохода ставят
+    режим через `_stale_mode` (сигнатура общая, её держат сторожа набора):
+    `_watchdog_stale_mine` — только свои, `_sweep_dead_executor_ops` —
+    операции умерших процессов без ожидания 60 минут.
     """
+    scope, min_age_min, source = _stale_mode.get() or (
+        ("leader" if sharded_mode() else None), None, "watchdog")
+    _age = _STALE_RUNNING_TIMEOUT_MIN if min_age_min is None else int(min_age_min)
+    _scope_args: tuple = ()
+    if scope is not None:
+        _scope_args = (_WORKER_ID, float(_EXECUTOR_DEAD_S))
     try:
         async with _active_lock:
             active_now: frozenset[int] = frozenset(_active_op_ids)
@@ -3542,18 +3659,20 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
+                  AND """ + _repair_scope_sql(scope, "$7", "$8") + """
                   AND (COALESCE(revive_count, 0) >= $3
                        OR (COALESCE(revive_total, 0) >= $5
                            AND COALESCE(revive_mark, 0)
                                <= COALESCE(revive_total, 0)))
              RETURNING id, owner_id, op_type, params, done_items, total_items,
                        revive_count, revive_total""",
-            _STALE_RUNNING_TIMEOUT_MIN,
+            _age,
             active_ids_list,
             _MAX_REVIVES,
             _POISON_ERROR.format(n=_MAX_REVIVES),
             _MAX_REVIVES_TOTAL,
             _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
+            *_scope_args,
         )
         poisoned_n = len(poisoned_rows)
         if poisoned_n:
@@ -3561,7 +3680,10 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 "op_worker watchdog: %d hung ops exceeded revive budget (%d) → failed",
                 poisoned_n, _MAX_REVIVES,
             )
-            _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
+            if source == "dead_executor":
+                _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="dead_executor")
+            else:
+                _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
             for _poisoned in poisoned_rows:
                 # В своей защите — по той же причине, что на старте: ниже
                 # стоит общий возврат зависших операций в очередь, и одно
@@ -3569,7 +3691,7 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 await _maintenance_step(
                     f"finish_poisoned_op:{(_poisoned or {}).get('id')}",
                     lambda r=_poisoned: _finish_poisoned_op(
-                        pool, r, source="watchdog", bot=bot))
+                        pool, r, source=source, bot=bot))
 
         result = await pool.execute(
             # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с
@@ -3589,17 +3711,88 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                     last_error = $3
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
-                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
-            _STALE_RUNNING_TIMEOUT_MIN,
+                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
+                  AND """ + _repair_scope_sql(scope, "$4", "$5"),
+            _age,
             active_ids_list,
-            _REVIVE_AFTER_SILENCE.format(mins=_STALE_RUNNING_TIMEOUT_MIN),
+            (_REVIVE_AFTER_DEATH if source == "dead_executor"
+             else _REVIVE_AFTER_SILENCE.format(mins=_STALE_RUNNING_TIMEOUT_MIN)),
+            *_scope_args,
         )
         count = int((result or "UPDATE 0").split()[-1])
         if count:
             log.warning("op_worker watchdog: reset %d stale running ops → pending", count)
-            _reliability_metric("infragram_op_revives_total", count, source="watchdog")
+            if source == "dead_executor":
+                _reliability_metric("infragram_op_revives_total", count, source="dead_executor")
+            else:
+                _reliability_metric("infragram_op_revives_total", count, source="watchdog")
     except Exception as e:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
+
+
+async def _sweep_dead_executor_ops(pool: asyncpg.Pool, bot=None) -> None:
+    """Горизонтальный исполнитель: вернуть в очередь операции умерших процессов.
+
+    Процесс-исполнитель умер (OOM, SIGKILL, потеря узла) — его операции
+    остаются 'running' с его worker_id в `claimed_by`. Ждать для них 60 минут
+    общего сторожа незачем: смерть видна по хартбиту за _EXECUTOR_DEAD_S, а
+    аренды его аккаунтов истекают сами (`_LEASE_TTL_S`). Бюджет живучести
+    списывается как за падение — так и есть.
+    """
+    tok = _stale_mode.set(("dead", 0, "dead_executor"))
+    try:
+        await _watchdog_stale(pool, bot)
+    finally:
+        _stale_mode.reset(tok)
+
+
+async def _watchdog_stale_mine(pool: asyncpg.Pool, bot=None) -> None:
+    """Сторож зависших исполнителя без лидерства: только свои операции."""
+    tok = _stale_mode.set(("mine", None, "watchdog"))
+    try:
+        await _watchdog_stale(pool, bot)
+    finally:
+        _stale_mode.reset(tok)
+
+
+async def _fence_lost_ops(pool: asyncpg.Pool) -> list[int]:
+    """Погасить свои задачи, чьи операции уже числятся за другим процессом.
+
+    Так бывает, только если этот процесс посчитали умершим: цикл событий
+    стоял дольше _EXECUTOR_DEAD_S, хартбит молчал, лидер вернул операцию в
+    очередь, и её взял другой исполнитель. Наша задача про это не знает и
+    продолжила бы те же реальные действия вторым прогоном. Гасим её тем же
+    способом, что и при сдаче аренды (`_stand_down_after_lease_loss`): отмена
+    задачи, её finally отпускает свои аккаунты.
+
+    Возвращает id погашенных операций. Сбой запроса — ничего не гасим: блип
+    базы не повод останавливать живую работу.
+    """
+    async with _active_lock:
+        active = sorted(_active_op_ids)
+        tasks = {t.get_name(): t for t in _active_op_tasks if not t.done()}
+    if not active:
+        return []
+    try:
+        rows = await pool.fetch(
+            "SELECT id FROM operation_queue WHERE id = ANY($1::int[]) "
+            "AND status = 'running' AND claimed_by IS DISTINCT FROM $2",
+            active, _WORKER_ID)
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: проверка хозяина операций: {e}")
+        return []
+    lost = [int(r["id"]) for r in rows]
+    for op_id in lost:
+        t = tasks.get(f"op:{op_id}")
+        if t is not None:
+            t.cancel()
+    if lost:
+        log.error(
+            "op_worker: операции %s уже выполняет другой процесс (этот считали "
+            "умершим — цикл событий стоял) — свои задачи по ним погашены, "
+            "чтобы не было второго прогона.", lost)
+        _reliability_metric("infragram_executor_fenced_ops_total", len(lost))
+    return lost
 
 
 # Сколько ждать, прежде чем считать отменённую операцию брошенной. Запас нужен
@@ -3646,6 +3839,7 @@ async def _watchdog_cancelled_orphans(pool: asyncpg.Pool, bot=None) -> int:
     Возвращает число закрытых операций. Никогда не бросает.
     """
     closed = 0
+    scope = "leader" if sharded_mode() else None
     try:
         async with _active_lock:
             active_now: frozenset[int] = frozenset(_active_op_ids)
@@ -3657,11 +3851,15 @@ async def _watchdog_cancelled_orphans(pool: asyncpg.Pool, bot=None) -> int:
                   AND result IS NULL
                   AND finished_at < now() - make_interval(mins => $1::int)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
+                  -- горизонтальный исполнитель: отмену, которую сворачивает
+                  -- живой сосед, закроет он сам
+                  AND """ + _repair_scope_sql(scope, "$4", "$5") + """
                 ORDER BY id
                 LIMIT $3::int""",
             _CANCEL_ORPHAN_GRACE_MIN,
             (list(active_now) or None),
             _CANCEL_ORPHAN_BATCH,
+            *((_WORKER_ID, float(_EXECUTOR_DEAD_S)) if scope is not None else ()),
             log_ctx="[watchdog_cancel_orphans]",
         )
         for row in rows:
@@ -4474,6 +4672,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     except Exception:
         log_exc_swallow(log, "op_worker: проверка получателя защитных алертов")
     _role = (os.getenv("INFRAGRAM_ROLE") or "all").strip().lower()
+    await _ensure_claimed_by_column(pool)
+    # Хартбит ДО первого отбора: при горизонтальном исполнителе лидер судит о
+    # живости хозяина операции по нему, и операция, взятая процессом без
+    # хартбита, выглядела бы брошенной.
+    await _rguard.beat(pool, _WORKER_ID, _role)
     _did_startup_reset = False
     _lease_denied_log_at = 0.0
     # База отсчёта для счётчиков защитных записей — локальная, не модульная.
@@ -4484,6 +4687,14 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         # останавливал бы и сторожей, которые в этот момент нужнее всего.
         _watchdog_tick += 1
         if not await _rguard.acquire_executor_lease(pool, _WORKER_ID, _role):
+            if sharded_mode():
+                # ГОРИЗОНТАЛЬНЫЙ ИСПОЛНИТЕЛЬ: без лидерства операции всё равно
+                # разбираем — у каждой есть хозяин (claimed_by), и сторожа
+                # лидера живые операции этого процесса не трогают. Сторожей
+                # очереди и уборку на старте ведёт лидер; здесь только свои.
+                await _follower_round(pool, bot, _watchdog_tick, _protective_seen)
+                await asyncio.sleep(_POLL_INTERVAL)
+                continue
             _reliability_metric("infragram_executor_lease_denied_total")
             _now = time.monotonic()
             if _now - _lease_denied_log_at > 60:
@@ -4533,6 +4744,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # и исключение в раннем стороже забирало весь остаток круга — в
             # том числе последний, которым владелец узнаёт о сбое защитных
             # записей. См. _maintenance_step.
+            if sharded_mode():
+                # Свои операции, которые уже числятся за другим процессом, —
+                # погасить (см. _fence_lost_ops).
+                await _maintenance_step(
+                    "fence_lost_ops", lambda: _fence_lost_ops(pool))
             if _watchdog_tick % 3 == 0:
                 await _maintenance_step("renew_leases", renew_leases)
                 # Признак жизни самого поллера: единственный способ узнать
@@ -4545,6 +4761,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             if _watchdog_tick % 6 == 0:
                 await _maintenance_step(
                     "watchdog_stale", lambda: _watchdog_stale(pool, bot))
+                if sharded_mode():
+                    # Операции умерших исполнителей — сразу, а не через час.
+                    await _maintenance_step(
+                        "sweep_dead_executor_ops",
+                        lambda: _sweep_dead_executor_ops(pool, bot))
                 # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
                 # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
                 await _maintenance_step(
@@ -4584,6 +4805,41 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         except Exception as e:
             log.exception("op_worker watchdog cycle error: %s", e)
         await asyncio.sleep(_POLL_INTERVAL)
+
+
+async def _follower_round(
+    pool: asyncpg.Pool, bot: Bot, tick: int, protective_seen: dict,
+) -> None:
+    """Один круг исполнителя без лидерства (OP_SHARDED_EXECUTOR=1).
+
+    Разбирает очередь и обслуживает ТОЛЬКО своё: гасит операции, которые уже
+    числятся за другим процессом, продлевает свои аренды, отмечает живость
+    поллера, чинит свои сироты и доносит свои защитные счётчики (они живут в
+    памяти каждого процесса). Сторожа всей очереди и уборку на старте ведёт
+    лидер — со своими условиями по хозяину операции.
+
+    Каждый шаг в своей защите (`_maintenance_step`), как в круге лидера.
+    """
+    await _maintenance_step("fence_lost_ops", lambda: _fence_lost_ops(pool))
+    try:
+        await _process_pending(pool, bot)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.exception("op_worker error: %s", e)
+    if tick % 3 == 0:
+        await _maintenance_step("renew_leases", renew_leases)
+        await _maintenance_step(
+            "poller_alive", lambda: _obus_reg.mark_poller_alive(pool, _WORKER_ID))
+    if tick % 6 == 0:
+        await _maintenance_step(
+            "watchdog_stale_mine", lambda: _watchdog_stale_mine(pool, bot))
+        await _maintenance_step(
+            "reconcile_in_operation", lambda: _reconcile_in_operation(pool))
+    if tick % 360 == 0:
+        await _maintenance_step(
+            "watchdog_protective_failures",
+            lambda: _watchdog_protective_failures(pool, bot, protective_seen))
 
 
 async def _stand_down_after_lease_loss(
@@ -5274,8 +5530,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     # владельца. Цена — полный проход по ожидающим на каждый тик; замер на живой
     # базе: 50 000 ожидающих в 500 владельцах — 37 мс против 22 мс у старого
     # запроса, при тике раз в 10 секунд.
-    rows = await _safe_fetch(
-        pool,
+    _claim_sql = (
         """WITH owner_running AS (
                SELECT owner_id, COUNT(*)::int AS running_count
                FROM operation_queue
@@ -5326,20 +5581,31 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
                FOR UPDATE OF oq SKIP LOCKED
            )
            UPDATE operation_queue
-           SET status = 'running', started_at = now()
+           SET status = 'running', started_at = now(), claimed_by = $5
            WHERE id IN (SELECT id FROM picked)
-           RETURNING id, owner_id, op_type, params""",
+           RETURNING id, owner_id, op_type, params""")
+    _claim_args = (
         available_slots,
         _MAX_PARALLEL_PER_OWNER,
         candidate_window,
         (list(active_now) or None),
+        _WORKER_ID,
     )
+    # Несколько исполнителей (OP_SHARDED_EXECUTOR) отбирают одним и тем же
+    # запросом. Лимит на владельца при этом не превышается и без отдельной
+    # блокировки: одновременные отборы видят одни и те же первые N ожидающих
+    # владельца, и FOR UPDATE SKIP LOCKED отдаёт каждую строку одному из них
+    # (проверено на живой базе: test_sharded_executor_postgres).
+    rows = await _safe_fetch(pool, _claim_sql, *_claim_args)
 
     for row in rows:
         op_id = row["id"]
         async with _active_lock:
             _active_op_ids.add(op_id)
-        _op_task = asyncio.create_task(_run_op_task_guarded(pool, bot, dict(row)))
+        # Имя задачи — op:<id>: по нему `_fence_lost_ops` находит задачу
+        # операции, которую забрал другой исполнитель.
+        _op_task = asyncio.create_task(
+            _run_op_task_guarded(pool, bot, dict(row)), name=f"op:{op_id}")
         _active_op_tasks.add(_op_task)
         _op_task.add_done_callback(_active_op_tasks.discard)
 
@@ -15926,7 +16192,9 @@ async def _exec_check_accounts_health(
     try:
         from services import account_health as _ah
         await _ah.load_from_db(pool, owner_id)
-        await _ah._persist_health_snapshots(pool)
+        # Только этого владельца: кеш общий на процесс, и без фильтра
+        # проверка одного клиента переписывала историю всего флота.
+        await _ah._persist_health_snapshots(pool, owner_id)
     except Exception as _he:
         log.debug("_exec_check_accounts_health: health snapshot persist failed: %s", _he)
 
