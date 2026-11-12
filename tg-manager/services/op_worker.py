@@ -2060,6 +2060,27 @@ async def try_claim_account(acc_id: int) -> bool:
     return bool(claimed)
 
 
+async def claim_account_for_op(op_id: int, acc_id: int) -> bool:
+    """Лениво захватить ОДИН аккаунт ПОД ОПЕРАЦИЮ и привязать к её уборке.
+
+    Для read-only проверок, подключающих наблюдателей по мере нужды: вместо
+    захвата всего флота заранее (и его простоя на всю длительность проверки)
+    держим только реально используемые сессии, а остальной флот остаётся
+    свободным для действий (strike/жалобы иначе берут один аккаунт из всего
+    флота — проверка на 25 минут забрала остальные). Арбитр тот же
+    (try_claim_accounts → _db_claim), поэтому одна сессия не уходит двум
+    операциям (защита от AUTH_KEY_DUPLICATED сохраняется). Привязка к
+    _operation_account_locks[op_id] — чтобы освобождение шло той же дверью, что
+    у пакетного захвата: release_operation_accounts(op_id) в finally _run_op_task.
+    """
+    claimed = await try_claim_accounts([int(acc_id)])
+    if not claimed:
+        return False
+    async with _accounts_lock:
+        _operation_account_locks.setdefault(op_id, set()).add(int(acc_id))
+    return True
+
+
 async def release_operation_accounts(op_id: int) -> None:
     """Release every account claimed by an operation after executor errors.
 
@@ -15918,25 +15939,52 @@ async def _exec_check_accounts_health(
     }
 
 
-def _restriction_access_candidates(ent, obs_by_id, observers, dead):
-    """Аккаунты-кандидаты на резолв сущности: пары (аккаунт, access_hash для НЕГО).
+def _restriction_access_candidates(ent, obs_by_id, observers, dead, *,
+                                   pool=None, rr_start=0):
+    """Аккаунты-кандидаты на резолв сущности: пары (аккаунт, access_hash), в
+    порядке перебора.
 
-    Вынесено на модульный уровень, чтобы проверять регрессом (баг «приватная не
-    проверяется, хотя управляющий аккаунт подключён»). Правила — в докстринге
-    замыкания `_access_candidates` внутри `_exec_check_owned_restrictions`.
-    Коротко: управляющий (preferred_acc) первым со своим записанным access_hash;
-    остальные живые — следом с access_hash=0 (резолв по участию). Приватную
-    не-участник не откроет и даст «нечем проверить», а не ложный негатив, поэтому
-    перебор безопасен и для приватной.
+    РАСПРЕДЕЛЕНИЕ НАГРУЗКИ (жалоба владельца: «проверку всех сущностей тянут 1–2
+    аккаунта, и они ловят спамблок / просадку траста»):
+      * ПУБЛИЧНУЮ сущность (@username) резолвит ЛЮБОЙ аккаунт, поэтому НЕ грузим
+        управляющего (иначе один аккаунт резолвил бы все свои сотни каналов
+        подряд — прямой путь в спамблок). Идём round-robin по пулу наблюдателей:
+        каждая следующая сущность — со следующего аккаунта, нагрузка размазана.
+      * ПРИВАТНУЮ (без @username) открывает только участник, поэтому управляющий
+        (preferred_acc) с его access_hash — первым, остальные живые — фолбэком
+        (резолв по участию, hash=0). Не-участник даёт «нечем проверить»
+        (probe_error), а не ложный негатив, так что перебор безопасен.
+
+    pool — ограниченный ротационный пул (бережёт и аккаунты от перегруза, и флот
+    от монополизации); на промахе добираем остальных наблюдателей. rr_start —
+    смещение round-robin (индекс сущности).
     """
     pref = ent.get("preferred_acc")
+    is_private = bool(ent.get("is_private"))
+    live = [a for a in observers if int(a["id"]) not in dead]
+    base = [a for a in (pool if pool is not None else observers)
+            if int(a["id"]) not in dead]
+    base_ids = {int(a["id"]) for a in base}
+    rest = [a for a in live if int(a["id"]) not in base_ids]
+
+    def _rot(seq):
+        if not seq:
+            return []
+        s = rr_start % len(seq)
+        return seq[s:] + seq[:s]
+
+    ordered = _rot(base) + rest
     out: list[tuple[dict, int]] = []
-    if pref and pref in obs_by_id and pref not in dead:
-        out.append((obs_by_id[pref], int(ent.get("access_hash") or 0)))
-    for a in observers:
-        aid = int(a["id"])
-        if aid in dead or (pref and aid == pref):
-            continue
+    if is_private:
+        if pref and pref in obs_by_id and pref not in dead:
+            out.append((obs_by_id[pref], int(ent.get("access_hash") or 0)))
+        for a in ordered:
+            if pref and int(a["id"]) == pref:
+                continue
+            out.append((a, 0))
+        return out
+    # Публичная: round-robin по пулу, без приоритета управляющего.
+    for a in ordered:
         out.append((a, 0))
     return out
 
@@ -16044,11 +16092,6 @@ async def _exec_check_owned_restrictions(
         return {"status": "failed",
                 "summary": "⚠️ Нет активного аккаунта для проверки. Подключите хотя бы один аккаунт."}
 
-    observers = await _claim_available_accounts(op_id, observers, owner_id)
-    if not observers:
-        return {"status": "requeue",
-                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
-
     # Карантинные аккаунты не используем как наблюдателей (fail-open: пульс мог не
     # ответить — тогда аккаунт остаётся кандидатом, это осознанный fail-open).
     try:
@@ -16064,9 +16107,38 @@ async def _exec_check_owned_restrictions(
     observers = healthy
     _obs_by_id = {int(a["id"]): a for a in observers}
 
+    # ЛЕНИВЫЙ ЗАХВАТ ФЛОТА. Раньше здесь был upfront-захват ВСЕГО флота
+    # (_claim_available_accounts) на всю длительность проверки. Проверка
+    # read-only и реально подключает лишь несколько наблюдателей (управляющий
+    # сущностью + один внешний на видимость), но держала весь флот 20–30 минут —
+    # и параллельные ДЕЙСТВИЯ владельца голодали: strike брал один аккаунт из
+    # всего флота, «Проверка статуса аккаунтов» не стартовала 21 минуту и падала
+    # «флот занят». Теперь аккаунт захватывается лениво, в _client_for, только
+    # когда его реально подключают, и остальной флот свободен для действий.
+    # _claim_state["any"] — был ли захвачен хоть один: если весь флот занят
+    # (ни одного не дали), ведём себя как прежний upfront-путь — requeue.
+    _claim_state = {"any": False}
+
     n = len(entities)
     await _safe_execute(
         pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2", n, op_id)
+
+    # ── Пул наблюдателей для РАСПРЕДЕЛЕНИЯ нагрузки ───────────────────────────
+    # Проверку всех сущностей раньше тянули 1–2 аккаунта (управляющий резолвил все
+    # свои каналы, один аккаунт искал все) — и ловили спамблок/просадку траста.
+    # Размазываем: round-robin по ограниченному пулу. Размер пула держит нагрузку
+    # на аккаунт ниже безопасного порога (≈ _SAFE_TOUCHES_PER_ACCOUNT резолвов+
+    # поисков за прогон) и при этом НЕ забирает весь флот (оставляет резерв под
+    # действия владельца). Старт пула сдвигаем по op_id — разные прогоны берут
+    # разные аккаунты, риск не копится на одной и той же горстке.
+    _SAFE_TOUCHES_PER_ACCOUNT = 40
+    if observers:
+        _target_pool = max(2, -(-2 * max(1, n) // _SAFE_TOUCHES_PER_ACCOUNT))  # ceil(2n/safe)
+        _pool_size = min(len(observers), _target_pool)
+        _pstart = (int(op_id) or 0) % len(observers)
+        _pool = (observers[_pstart:] + observers[:_pstart])[:_pool_size]
+    else:
+        _pool = []
 
     # ── 3. Проход с переиспользованием коннекта наблюдателя ───────────────────
     _clients: dict[int, object] = {}       # acc_id -> подключённый client
@@ -16079,6 +16151,13 @@ async def _exec_check_owned_restrictions(
             return _clients[aid]
         if aid in _dead:
             return None
+        # Ленивый захват: держим только реально подключаемую сессию, остальной
+        # флот остаётся свободным для действий. Занятый другой операцией аккаунт
+        # пропускаем (тот же арбитр, что у действий, — двойной сессии не будет).
+        if not await claim_account_for_op(op_id, aid):
+            _dead.add(aid)
+            return None
+        _claim_state["any"] = True
         try:
             c = await account_manager.connect_client(
                 acc.get("session_str") or "", device=acc, action_type="op",
@@ -16107,35 +16186,32 @@ async def _exec_check_owned_restrictions(
             log.debug("check_owned_restrictions op=%d: get_dialogs acc=%s не удался: %s",
                       op_id, aid, e)
 
-    def _access_candidates(ent: dict):
-        # Кандидаты на РЕЗОЛВ+флаги: пары (аккаунт, access_hash для НЕГО).
-        # Приватную сущность (нет @username) открывает только аккаунт-участник.
-        # Раньше пробовали лишь записанный управляющий (managed_channels.acc_id),
-        # и если он занят другой операцией, в карантине или устарел (владелец
-        # переподключил аккаунт под новым id, либо участник — ДРУГОЙ его аккаунт),
-        # приватная падала в «нет управляющего аккаунта», хотя доступ у владельца
-        # есть. Добрать остальных безопасно: не-участник приватную не резолвит и
-        # даёт «нечем проверить» (probe_error), а НЕ ложное «ограничена/недоступна»
-        # (entity_restriction_check.resolve_flags: приватная без @username на
-        # ошибке доступа → probe_error, не resolved=False) — поэтому перебор только
-        # помогает. access_hash у каждого аккаунта свой: записанный валиден лишь для
-        # управляющего, остальным даём 0 — они резолвят по участию (скан диалогов).
-        # Чистая логика вынесена в _restriction_access_candidates (под регрессом).
-        return _restriction_access_candidates(ent, _obs_by_id, observers, _dead)
+    def _access_candidates(ent: dict, idx: int):
+        # Кандидаты на РЕЗОЛВ+флаги: пары (аккаунт, access_hash для НЕГО), в
+        # порядке перебора. Round-robin по пулу (idx — индекс сущности)
+        # размазывает нагрузку: публичную резолвит следующий аккаунт пула, а не
+        # всегда управляющий. Приватную по-прежнему открывает участник
+        # (управляющий первым, остальные фолбэком) — перебор безопасен, не-участник
+        # даёт probe_error, а не ложный негатив. Чистая логика и правила — в
+        # _restriction_access_candidates (под регрессом).
+        return _restriction_access_candidates(
+            ent, _obs_by_id, observers, _dead, pool=_pool, rr_start=idx)
 
-    def _pick_search(ent: dict):
+    def _pick_search(ent: dict, idx: int):
         # ВНЕШНИЙ аккаунт для проверки видимости: НЕ управляющий этой сущностью
         # (у управляющего она в диалогах и найдётся всегда — ложно-зелёный
-        # теневой бан). Любой живой аккаунт с id != управляющего.
+        # теневой бан). Round-robin по пулу → поиск тоже размазан по флоту, а не
+        # висит на первом аккаунте. На промахе пула добираем любого живого.
         pref = ent.get("preferred_acc")
-        for a in observers:
+
+        def _ok(a):
             aid = int(a["id"])
-            if aid in _dead:
-                continue
-            if pref and aid == pref:
-                continue
-            return a
-        return None
+            return aid not in _dead and not (pref and aid == pref)
+
+        live = [a for a in _pool if _ok(a)] or [a for a in observers if _ok(a)]
+        if not live:
+            return None
+        return live[idx % len(live)]
 
     counts: dict[str, int] = {}
     findings: list[dict] = []
@@ -16151,11 +16227,19 @@ async def _exec_check_owned_restrictions(
                                + _erc.build_summary(counts, n, checked=idx),
                 }
 
+            # Весь флот занят другими операциями: за первую сущность перебрали ВСЕХ
+            # наблюдателей и ни одного не захватили (все помечены _dead через
+            # занятость) — ведём себя как прежний upfront-путь: возвращаем в
+            # очередь, а не заваливаем журнал 300 строками «нет аккаунта».
+            if not _claim_state["any"] and _dead and len(_dead) >= len(observers):
+                return {"status": "requeue",
+                        "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
             # Внешний аккаунт для видимости — только публичным сущностям и один на
             # сущность (от того, каким аккаунтом резолвим доступ, не зависит).
             search_client = None
             if ent.get("username"):
-                _s = _pick_search(ent)
+                _s = _pick_search(ent, idx)
                 if _s is not None:
                     search_client = await _client_for(_s)
                 if search_client is None:
@@ -16166,7 +16250,7 @@ async def _exec_check_owned_restrictions(
             # следующего, прежде чем сдаться. Публичную резолвит первый же живой.
             _is_private = bool(ent.get("is_private"))
             verdict = None
-            for cand, chash in _access_candidates(ent):
+            for cand, chash in _access_candidates(ent, idx):
                 client = await _client_for(cand)
                 if client is None:
                     continue
@@ -16216,7 +16300,10 @@ async def _exec_check_owned_restrictions(
             # Реальное ограничение сущности — в общий пульс (restriction_events),
             # чтобы shadowban_monitor/get_account_health его видели.
             if _erc.is_problem(status):
+                # id/bot_id — чтобы итог проверки был ДЕЙСТВЕННЫМ: по нему мини-апп
+                # предлагает убрать из списка те, что Telegram уже удалил/заблокировал.
                 findings.append({"kind": ent["kind"], "title": _title,
+                                 "id": ent["id"], "bot_id": ent.get("bot_id"),
                                  "status": status, "reason": verdict["reason_ru"]})
                 try:
                     await _sbm._record_event(
@@ -22783,10 +22870,16 @@ async def _exec_mass_report(
     # которые в этот момент ведут другую операцию или прогрев — две сессии
     # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
     # Освобождение — централизованно в finally _run_op_task по op_id.
+    # Сколько доступных было ДО захвата: если захват вернёт меньше, часть
+    # выбранных аккаунтов занята другой операцией/прогревом. Владелец видел
+    # «Аккаунтов: 1» без объяснения — теперь скажем это прямо в сводке, а не
+    # оставим его гадать, почему из выбранного среза пошёл один.
+    _available_cnt = len(accounts)
     accounts = await _claim_available_accounts(op_id, accounts, owner_id)
     if not accounts:
         return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+    _busy_cnt = _available_cnt - len(accounts)
 
     # Риск-пульс: жалоба с аккаунта под недавним серьёзным ограничением = быстрый бан
     # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
@@ -22876,9 +22969,13 @@ async def _exec_mass_report(
         f"🚨 Жалобы на {target} [{reason_label}]\n"
         f"{head}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+        # «Занято» объясняет, почему из выбранного среза в работу пошло меньше:
+        # эти аккаунты в этот момент вела другая операция/прогрев (аренда сессии).
+        + (f"\n⏳ Занято другими операциями: {_busy_cnt}" if _busy_cnt else "")
         + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
     )
-    return {"status": status, "ok": ok_count, "failed": fail_count, "summary": summary}
+    return {"status": status, "ok": ok_count, "failed": fail_count,
+            "busy": _busy_cnt, "summary": summary}
 
 
 # ── Content Clone executor ──────────────────────────────────────────────────

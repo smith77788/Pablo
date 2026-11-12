@@ -162,6 +162,7 @@ GET /api/miniapp/community/node/{node_id}/invite_link
 GET /api/miniapp/community/node/{node_id}/members
 GET /api/miniapp/community/nodes
 GET /api/miniapp/competitors
+GET /api/miniapp/complaint/history
 GET /api/miniapp/compliance
 GET /api/miniapp/compliance/export
 GET /api/miniapp/config
@@ -313,6 +314,7 @@ GET /api/miniapp/rehab/settings
 GET /api/miniapp/rehab/{acc_id}/history
 GET /api/miniapp/relay/session/{session_id}/messages
 GET /api/miniapp/report_channels
+GET /api/miniapp/restrictions/dead
 GET /api/miniapp/sales/ai-journal
 GET /api/miniapp/sales/ai-quality
 GET /api/miniapp/sales/ai-usage
@@ -517,6 +519,7 @@ HEAD /api/miniapp/community/node/{node_id}/invite_link
 HEAD /api/miniapp/community/node/{node_id}/members
 HEAD /api/miniapp/community/nodes
 HEAD /api/miniapp/competitors
+HEAD /api/miniapp/complaint/history
 HEAD /api/miniapp/compliance
 HEAD /api/miniapp/compliance/export
 HEAD /api/miniapp/config
@@ -668,6 +671,7 @@ HEAD /api/miniapp/rehab/settings
 HEAD /api/miniapp/rehab/{acc_id}/history
 HEAD /api/miniapp/relay/session/{session_id}/messages
 HEAD /api/miniapp/report_channels
+HEAD /api/miniapp/restrictions/dead
 HEAD /api/miniapp/sales/ai-journal
 HEAD /api/miniapp/sales/ai-quality
 HEAD /api/miniapp/sales/ai-usage
@@ -909,6 +913,7 @@ POST /api/miniapp/community/node/{node_id}/channels
 POST /api/miniapp/community/node/{node_id}/liven
 POST /api/miniapp/community/node/{node_id}/staff
 POST /api/miniapp/competitor
+POST /api/miniapp/complaint/submit
 POST /api/miniapp/compliance_scan
 POST /api/miniapp/content_cloner/submit
 POST /api/miniapp/content_mesh
@@ -1074,6 +1079,7 @@ POST /api/miniapp/rehab/settings
 POST /api/miniapp/rehab/{acc_id}/{action}
 POST /api/miniapp/rehab_bulk/{action}
 POST /api/miniapp/reporter
+POST /api/miniapp/restrictions/remove_dead
 POST /api/miniapp/sales/ai-journal/{rid}/rate
 POST /api/miniapp/sales/persona
 POST /api/miniapp/sales/persona/{pid}/assign
