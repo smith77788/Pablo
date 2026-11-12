@@ -1740,6 +1740,12 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     from telethon.sessions import StringSession
     from telethon.network.connection.tcpobfuscated import ConnectionTcpObfuscated
     from services.token_vault import decrypt_token
+    from services import telethon_crypto
+
+    # Обфускация шифрует каждый байт AES-CTR; у Telethon он на чистом Python
+    # (0.4 МБ/с на весь процесс). Подмена на нативный — до первого соединения
+    # и идемпотентно, чтобы её не обошёл ни один путь создания клиента.
+    telethon_crypto.install()
 
     # Единственная точка потребления сессии → здесь же расшифровываем.
     # decrypt_token — passthrough для legacy-plaintext, поэтому старые строки
