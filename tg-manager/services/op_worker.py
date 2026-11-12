@@ -24214,6 +24214,16 @@ async def _exec_niche_growth_post(
                 join_result = await account_manager.join_channel(
                     acc["session_str"], join_ref, _acc=acc
                 )
+                if join_result.get("flood_wait"):
+                    # Флуд — ответ Telegram АККАУНТУ, а не группе: следующая
+                    # попытка вступить сразу же продлевает его. Раньше это
+                    # считалось «не удалось вступить» и цикл шёл к следующей
+                    # группе без паузы. Группа ещё не отмечена — повтор её найдёт.
+                    _why = (f"Telegram попросил паузу на вступления — Агент роста "
+                            f"продолжит позже. Опубликовано в этот заход: {ok_count}")
+                    return {"status": "requeue",
+                            "defer_s": int(join_result["flood_wait"]) + random.randint(60, 300),
+                            "defer_cause": "flood", "reason": _why, "summary": _why}
                 if "error" in join_result and not join_result.get("already_member"):
                     log.info(
                         "niche_growth_post: join failed grp=%s: %s",
@@ -24320,6 +24330,20 @@ async def _exec_niche_growth_post(
                     username=username,
                     _acc=acc,
                 )
+                if post_result.get("flood_wait"):
+                    # Telegram пост не рассматривал: метка снимается (иначе
+                    # группа сгорела бы навсегда без поста, а флуд записался бы
+                    # в обучение как «здесь не публикуют» и отсеял бы запрос).
+                    await _safe_execute(
+                        pool, "DELETE FROM niche_growth_targets WHERE owner_id=$1 "
+                              "AND group_id=$2 AND outcome='marked'",
+                        owner_id, int(grp_id),
+                        log_ctx=f"[niche_growth_unmark op={op_id}]")
+                    _why = (f"Telegram попросил паузу на публикации — Агент роста "
+                            f"продолжит позже. Опубликовано в этот заход: {ok_count}")
+                    return {"status": "requeue",
+                            "defer_s": int(post_result["flood_wait"]) + random.randint(60, 300),
+                            "defer_cause": "flood", "reason": _why, "summary": _why}
                 if "error" in post_result:
                     log.info(
                         "niche_growth_post: post failed grp=%s title=%r: %s",
