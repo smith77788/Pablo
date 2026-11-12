@@ -124,6 +124,9 @@ class ShieldConfig:
     # владелец не включит: оба действия меняют аккаунт.
     guard_sessions: bool = False
     guard_twofa: bool = False
+    # Запасной ключ (v347): второй наш сеанс, на котором флот поднимает
+    # аккаунт, когда основной умер.
+    guard_reserve: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -140,6 +143,7 @@ class ShieldConfig:
             "exempt_account_ids": list(self.exempt_account_ids),
             "guard_sessions": self.guard_sessions,
             "guard_twofa": self.guard_twofa,
+            "guard_reserve": self.guard_reserve,
         }
 
 
@@ -200,6 +204,7 @@ async def get_shield_config(pool: asyncpg.Pool, owner_id: int) -> ShieldConfig:
                 exempt_account_ids=sorted({int(x) for x in (_row_get(row, "exempt_account_ids", []) or [])}),
                 guard_sessions=bool(_row_get(row, "guard_sessions", False)),
                 guard_twofa=bool(_row_get(row, "guard_twofa", False)),
+                guard_reserve=bool(_row_get(row, "guard_reserve", False)),
             )
             cfg.preset = _detect_preset(cfg)
             return cfg
@@ -222,6 +227,7 @@ _SHIELD_FIELDS = {
     "exempt_account_ids": "ids",
     "guard_sessions": None,
     "guard_twofa": None,
+    "guard_reserve": None,
 }
 _INT_FIELDS = ("cool_duration_hours", "cool_hours")
 

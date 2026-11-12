@@ -6858,7 +6858,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if hours is None:
                 return _err("Охлаждение — от 1 до 48 часов")
             fields["cool_hours"] = hours
-        for key in ("auto_pause", "notify_admin", "guard_sessions", "guard_twofa"):
+        for key in ("auto_pause", "notify_admin", "guard_sessions", "guard_twofa",
+                    "guard_reserve"):
             if key in data and data[key] is not None:
                 fields[key] = bool(data[key])
         if data.get("response_mode") is not None:

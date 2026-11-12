@@ -27622,7 +27622,10 @@ async function openShield() {
             "shieldToggle('guard_sessions')")
       + row('🔐 Автозащита: пароль 2FA', cfg.guard_twofa?'✅ Вкл':'❌ Выкл',
             'Ставит аккаунтам без пароля свой случайный пароль 2FA и хранит его в «Профили → Пароли 2FA»',
-            "shieldToggle('guard_twofa')"));
+            "shieldToggle('guard_twofa')")
+      + row('🗝 Автозащита: запасной ключ', cfg.guard_reserve?'✅ Вкл':'❌ Выкл',
+            'Заводит второй свой сеанс без SMS: если основная сессия умрёт, флот поднимет аккаунт сам',
+            "shieldToggle('guard_reserve')"));
 
     const heldRows = d.held||[];
     document.getElementById('shieldHeldWrap').style.display = heldRows.length ? '' : 'none';
