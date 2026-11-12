@@ -5002,7 +5002,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "SELECT id, self_facts FROM persona_profiles WHERE id=$1 AND owner_id=$2",
                     pid, uid)
                 if saved:
-                    voice.recent = await _pv._recent_statements(pool, pid)
+                    voice.recent = await _pv.recent_statements(pool, pid, limit=_pv.RECENT_IN_PROMPT)
                     mem = _pv.memory_block(saved["self_facts"] or "", voice.recent)
                     if mem:
                         voice.prompt += "\n\n" + mem
@@ -5046,7 +5046,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return err
         from services import persona_voice as _pv
         try:
-            view = await _pv.memory_view(pool, pid, uid)
+            view = await _pv.memory_view(pool, pid, uid, limit=50)
         except Exception:
             log.exception("persona_memory_get uid=%d persona=%d", uid, pid)
             return _err(_INTERNAL_ERROR, 500)

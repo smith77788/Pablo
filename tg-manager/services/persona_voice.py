@@ -186,7 +186,7 @@ def polish(text: str, voice: Optional[Voice], *, extra_previous: list[str] | Non
 
 # ── База ────────────────────────────────────────────────────────────────────
 
-async def _recent_statements(pool, persona_id: int, limit: int = RECENT_IN_PROMPT) -> list[str]:
+async def recent_statements(pool, persona_id: int, limit: int = RECENT_IN_PROMPT) -> list[str]:
     rows = await pool.fetch(
         "SELECT content FROM persona_memory WHERE persona_id=$1 "
         "AND content IS NOT NULL AND content <> '' "
@@ -214,7 +214,7 @@ async def load(pool, account_id: int, *, fallback: str = "") -> Voice:
     base = _pe.build_persona_system_prompt(persona)
     if persona.memory_enabled:
         try:
-            voice.recent = await _recent_statements(pool, persona.persona_id)
+            voice.recent = await recent_statements(pool, persona.persona_id)
         except Exception as exc:  # noqa: BLE001 - без памяти говорим, как раньше
             log.warning("persona_voice.load persona=%s: память не прочитана: %s",
                         persona.persona_id, exc)
@@ -284,7 +284,7 @@ async def consolidate(pool, persona_id: int, *, owner_id: Optional[int] = None) 
         p = await _pe.get_persona_by_id(pool, int(persona_id))
         if p is None or not p.memory_enabled:
             return None
-        said = await _recent_statements(pool, int(persona_id), limit=CONSOLIDATE_WINDOW)
+        said = await recent_statements(pool, int(persona_id), limit=CONSOLIDATE_WINDOW)
     except Exception as exc:  # noqa: BLE001
         log.warning("persona_voice.consolidate persona=%s: %s", persona_id, exc)
         return None

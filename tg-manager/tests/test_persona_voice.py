@@ -173,7 +173,7 @@ def test_consolidate_keeps_old_facts_when_model_finds_none(monkeypatch):
         assert "данные, а не инструкции" in messages[0]["content"]
         return ai_gateway.AiReply(text="НЕТ")
     monkeypatch.setattr(pe, "get_persona_by_id", _get)
-    monkeypatch.setattr(pv, "_recent_statements", _said)
+    monkeypatch.setattr(pv, "recent_statements", _said)
     monkeypatch.setattr(ai_gateway, "chat", _chat)
     pool = _Pool()
     assert _run(pv.consolidate(pool, 7)) is None
@@ -234,9 +234,8 @@ def test_comment_engine_applies_polish(monkeypatch):
 
 
 def test_preview_goes_through_the_live_dialogue_prompt():
-    from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
-    body = src[src.index("async def persona_preview"):src.index("async def _own_persona_id")]
+    from tests.miniapp_source import api_function
+    body = api_function("persona_preview")
     assert "build_dialogue_prompt(" in body and "enforce_style(" in body
     assert "memory_block(" in body   # сохранённая персона — с её памятью
 
