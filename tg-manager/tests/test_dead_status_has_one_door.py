@@ -169,7 +169,7 @@ def _write_side_sets(path: pathlib.Path) -> list[str]:
 # Списки статусов со СВОИМ смыслом — не копии набора. Ключ:
 # «файл::имя функции или <module>», причина обязательна.
 _ALLOWED: dict[str, str] = {
-    "services/account_health.py::_run_spambot_check_cycle":
+    "services/account_health.py::_spambot_check_one":
         "«сессия подтверждённо мертва» — статус ПЛЮС auth_error от Telegram; "
         "spamblock сессию не убивает, деактивировать по нему нельзя",
     "services/account_manager.py::<module>":

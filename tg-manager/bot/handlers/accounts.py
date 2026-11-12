@@ -1022,6 +1022,7 @@ async def _qr_wait_task(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
+            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         try:
@@ -1125,6 +1126,7 @@ async def handle_qr_2fa(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
+            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         await message.answer(
@@ -1294,6 +1296,7 @@ async def _finalize_login(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
+            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         await message.answer(

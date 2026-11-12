@@ -280,6 +280,20 @@ async def set_2fa_password(
 
 # ── Безопасность: закрыть сторонние сессии ────────────────────────────────────
 
+def close_sessions_error_ru(exc: BaseException) -> str:
+    """Отказ «закрыть чужие сеансы» — по-русски и с тем, что делать.
+
+    Главный отказ — правило Telegram: из сеанса моложе суток чужие сеансы не
+    закрываются (FRESH_RESET_AUTHORISATION_FORBIDDEN). Владелец видел его
+    английским кодом и не понимал, что это не сбой, а «повторите завтра».
+    """
+    raw = f"{type(exc).__name__} {exc}".upper().replace("_", "")
+    if "FRESHRESETAUTHORISATIONFORBIDDEN" in raw:
+        return ("Telegram не даёт закрывать чужие сеансы из сеанса моложе "
+                "суток. Повторите через 24 часа после входа аккаунта в Infragram.")
+    return str(exc)[:150]
+
+
 async def close_other_sessions(session_string: str, _acc: dict | None) -> dict[str, Any]:
     """Завершить ВСЕ прочие авторизации аккаунта (кроме текущей).
     Аналог «Закрыть сторонние сессии» — защита угнанных/прогретых аккаунтов."""
@@ -294,7 +308,7 @@ async def close_other_sessions(session_string: str, _acc: dict | None) -> dict[s
         return {"ok": True, "error": None}
     except Exception as exc:
         log.warning('profile_setter error: %s', exc)
-        return {"ok": False, "error": str(exc)[:150]}
+        return {"ok": False, "error": close_sessions_error_ru(exc)}
     finally:
         try:
             await _safe_disconnect(client)
@@ -711,7 +725,12 @@ def build_setter_params(op: str, body: dict) -> dict:
         params["avatar_urls"] = urls
     elif op == "2fa":
         new_pass = str(body.get("new_password") or "").strip()
-        if len(new_pass) < 4:
+        if body.get("random_password"):
+            # Свой случайный пароль каждому аккаунту — генерирует исполнитель
+            # (op_worker._exec_bulk_set_profile) и сохраняет до установки.
+            params["random_password"] = True
+            new_pass = ""
+        elif len(new_pass) < 4:
             raise ValueError("Пароль — минимум 4 символа")
         params["new_password"] = new_pass[:64]
         params["current_password"] = str(body.get("current_password") or "").strip()[:64]

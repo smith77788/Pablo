@@ -108,7 +108,7 @@ ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "re
 # флоту вместо тех пяти. Список сверяется с ветками билдера тестом
 # tests/test_account_filter_is_not_silently_widened.py.
 ACCOUNT_FILTERS = ("all", "active", "cooldown", "banned", "spamblock",
-                   "proxy_down", "dead", "low_trust", "flooded")
+                   "proxy_down", "dead", "low_trust", "flooded", "foreign")
 
 # Статусы operation_queue, которые вправе прийти фильтром с фронта. Колонка —
 # обычный TEXT без CHECK, поэтому список живёт здесь и его сторожит тест
@@ -149,6 +149,8 @@ _cache: dict[str, tuple[float, Any]] = {}
 # ним же. Раньше у «Низкого траста» и «Флуда» списка не было вовсе: число на
 # экране было, а посмотреть, кто это, — нечем.
 _LOW_TRUST_SQL = "trust_score IS NOT NULL AND trust_score < 0.4"
+# В аккаунт вошёл кто-то ещё (дозор угона, services/session_watch).
+_FOREIGN_SQL = "COALESCE(foreign_sessions, 0) > 0"
 _FLOODED_SQL = (
     "EXISTS (SELECT 1 FROM account_flood_log l WHERE l.account_id = tg_accounts.id "
     "AND l.created_at > now() - interval '7 days')")
@@ -189,6 +191,12 @@ def fleet_verdict(c: dict, alerts: list[dict] | None = None) -> dict:
     add("alerts_crit", "crit", len(crit_alerts), "Критичные оповещения",
         "Детектор видит сбой прямо сейчас — откройте, там сказано, что делать.",
         open_="infra")
+    # Угон дороже бана: бан снимается апелляцией, а аккаунт, из которого
+    # выкинули наш сеанс, не вернуть ничем. Поэтому — критично и первым.
+    add("foreign", "crit", c.get("foreign"), "В аккаунты вошли с других устройств",
+        "Закройте чужие сеансы («Профили → Очистка и сеансы») и поставьте "
+        "пароль 2FA — иначе тот, кто вошёл, может забрать аккаунт.",
+        filter_="foreign")
     add("proxy_down", "warn", c.get("proxy_down"), "Прокси не отвечает",
         "Сами аккаунты целы, но их операции падают по сети. Замените прокси.",
         filter_="proxy_down")
@@ -6411,7 +6419,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        SELECT 1 FROM account_flood_log l
                         WHERE l.account_id = tg_accounts.id
                           AND l.created_at > now() - interval '24 hours')) AS flooded_24h,
-                   COUNT(*) FILTER (WHERE {_PROXY_DOWN_SQL}) AS proxy_down
+                   COUNT(*) FILTER (WHERE {_PROXY_DOWN_SQL}) AS proxy_down,
+                   COUNT(*) FILTER (WHERE {_FOREIGN_SQL}) AS foreign
                    FROM tg_accounts WHERE owner_id=$1""",
                 uid,
             )
@@ -6470,7 +6479,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             counts = {k: int(stats[k] or 0) for k in (
                 "total", "active", "banned", "dead", "spamblock", "cooling",
-                "low_trust", "flooded_7d", "flooded_24h", "proxy_down")}
+                "low_trust", "flooded_7d", "flooded_24h", "proxy_down", "foreign")}
             return _json_resp({
                 **counts,
                 "flood_7d": flood_7d,

@@ -22632,17 +22632,56 @@ async def _exec_bulk_set_profile(
                 _stored = await _stored_twofa(pool, owner_id, int(acc["id"]))
                 if _stored:
                     _p = {**params, "current_password": _stored}
+            _restore_enc: list = []
+            if op == "2fa" and params.get("random_password"):
+                # Свой случайный пароль каждому аккаунту: один утёкший пароль
+                # больше не открывает весь флот. Пароль, который знает только
+                # система, записывается ДО того, как ставится, — обрыв между
+                # «поставили» и «записали» оставил бы аккаунт под паролем,
+                # которого не знает никто. Не записался — не ставим вовсе.
+                import secrets as _secrets
+                _gen = _secrets.token_urlsafe(12)
+                try:
+                    _restore_enc.append(await pool.fetchval(
+                        "SELECT twofa_enc FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                        int(acc["id"]), owner_id))
+                except Exception:
+                    _restore_enc.clear()
+                if not _restore_enc or not await db.remember_account_twofa(
+                        pool, owner_id, int(acc["id"]), _gen):
+                    fail_count += 1
+                    await _journal_write(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                        op_id, idx, _key, "Пароль не удалось сохранить — ставить его не стали",
+                        log_ctx=f" op={op_id}", where="bulk_set_profile",
+                    )
+                    await _safe_execute(
+                        pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                    continue
+                _p = {**_p, "new_password": _gen}
             # Единый диспетчер op→движок (та же реализация, что инлайн-путь). Спинтакс
             # раскрывается внутри apply_op — для каждого аккаунта отдельно.
-            res = await pse.apply_op(acc["session_str"], dict(acc), op, _p, slot=idx - 1)
+            try:
+                res = await pse.apply_op(acc["session_str"], dict(acc), op, _p, slot=idx - 1)
+            except Exception:
+                if _restore_enc:
+                    await _restore_twofa_enc(pool, owner_id, int(acc["id"]), _restore_enc[0])
+                raise
+            if not res["ok"] and _restore_enc:
+                # Пароль не встал — у аккаунта остался прежний: его и вернуть.
+                await _restore_twofa_enc(pool, owner_id, int(acc["id"]), _restore_enc[0])
 
             if res["ok"]:
                 ok_count += 1
                 if op == "2fa":
                     await _remember_twofa(pool, owner_id, int(acc["id"]),
-                                          params.get("new_password") or "")
+                                          _p.get("new_password") or "")
                 elif op == "reset_2fa":
                     await _remember_twofa(pool, owner_id, int(acc["id"]), "")
+                elif op == "close_sessions":
+                    from services import session_watch as _sw
+                    await _sw.forget(pool, owner_id, int(acc["id"]))
                 # «Проверка» — фиксируем сам вердикт в лог, чтобы был виден результат
                 _msg = (pse.format_restriction_verdict(res)[:200]
                         if op == "check_restriction" else None)
@@ -22679,6 +22718,18 @@ async def _exec_bulk_set_profile(
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
+async def _restore_twofa_enc(pool, owner_id: int, account_id: int, enc) -> None:
+    """Вернуть прежнюю запись пароля 2FA как есть (зашифрованную или NULL)."""
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET twofa_enc=$1 WHERE id=$2 AND owner_id=$3",
+                enc, account_id, owner_id)
+            return
+        except Exception:
+            log_exc_swallow(log, f"_restore_twofa_enc acc={account_id} attempt={_attempt}")
+
+
 async def _stored_twofa(pool, owner_id: int, account_id: int) -> str:
     """Сохранённый пароль 2FA аккаунта (расшифрованный) или ''. Сбой чтения —
     '' : тогда Telegram честно ответит «нужен пароль», а не операция упадёт."""
@@ -22702,16 +22753,7 @@ async def _remember_twofa(pool, owner_id: int, account_id: int, password: str) -
     владелец потеряет при первом же перелогине. Пишем повторно: потеря этой
     записи стоит доступа к аккаунту.
     """
-    from services.token_vault import encrypt_plaintext_token
-    enc = encrypt_plaintext_token(password) if password else None
-    for _attempt in (1, 2):
-        try:
-            await pool.execute(
-                "UPDATE tg_accounts SET twofa_enc=$1 WHERE id=$2 AND owner_id=$3",
-                enc, account_id, owner_id)
-            return
-        except Exception:
-            log_exc_swallow(log, f"_remember_twofa acc={account_id} attempt={_attempt}")
+    await db.remember_account_twofa(pool, owner_id, account_id, password)
 
 
 # ── Репортер ──────────────────────────────────────────────────────────────────
@@ -24861,12 +24903,22 @@ async def _exec_auto_register(
 
     ok_n = len(res.get("ok", []))
     fail_n = len(res.get("failed", []))
+    stopped = str(res.get("stopped") or "")
     await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", ok_n + fail_n, op_id)
+    if stopped.startswith("⏹"):
+        status = "cancelled"
+    else:
+        status = "done" if ok_n else "failed"
+    # Первая причина пропуска — в итог: «0/10» без причины не говорит владельцу,
+    # что делать (пополнить сервис номеров, сменить страну, ждать).
+    first_fail = (res.get("failed") or [""])[0]
     return {
-        "status": "done" if ok_n else "failed",
+        "status": status,
         "ok": ok_n,
         "failed": fail_n,
-        "summary": f"📱 Авторег {country}: ✅ {ok_n}/{cnt}" + (f" ⚠️ {fail_n}" if fail_n else ""),
+        "summary": (f"📱 Авторег {country}: ✅ {ok_n}/{cnt}" + (f" ⚠️ {fail_n}" if fail_n else "")
+                    + (f"\n{stopped}" if stopped
+                       else (f"\nПервая причина: {first_fail}" if fail_n and first_fail else ""))),
         # Связка модулей: новые аккаунты сразу в прогрев/проверку (services/op_chain).
         "handoff": {"account_ids": list(res.get("account_ids") or [])},
     }

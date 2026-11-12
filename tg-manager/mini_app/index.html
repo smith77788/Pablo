@@ -5414,7 +5414,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div id="setter2faFields" style="display:none;padding:0 16px">
       <div class="field-note" style="margin-bottom:8px">Пароль сохраняется у каждого аккаунта <b>зашифрованным</b> — его можно посмотреть здесь же, а следующая смена пароля не потребует вводить текущий.</div>
-      <div class="field"><label>Новый пароль (минимум 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
+      <label class="field" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="setter2faRandom" onchange="document.getElementById('setter2faNewWrap').style.display=this.checked?'none':''" style="margin-top:3px"><span>🎲 <b>Свой случайный пароль каждому аккаунту</b> — один утёкший пароль не откроет весь флот. Пароли знает только система, посмотреть их можно здесь же.</span></label>
+      <div class="field" id="setter2faNewWrap"><label>Новый пароль (минимум 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
       <div class="field"><label>Текущий пароль (если стоит и ставили не здесь)</label><input type="password" id="setter2faCur" maxlength="64" placeholder="Оставьте пустым, если не установлен"></div>
       <div class="field"><label>Подсказка (необязательно)</label><input type="text" id="setter2faHint" maxlength="64" placeholder="Подсказка"></div>
     </div>
@@ -18671,10 +18672,11 @@ async function submitProfileSetter(canary) {
     body.username = v('setterUsername');
     if (!body.username) { errEl.textContent='Укажите шаблон юзернейма'; return; }
   } else if (op==='2fa') {
-    body.new_password = v('setter2faNew');
+    body.random_password = !!(document.getElementById('setter2faRandom')||{}).checked;
+    body.new_password = body.random_password ? '' : v('setter2faNew');
     body.current_password = v('setter2faCur');
     body.hint = v('setter2faHint');
-    if (!body.new_password) { errEl.textContent='Введите новый пароль'; return; }
+    if (!body.random_password && !body.new_password) { errEl.textContent='Введите новый пароль'; return; }
   } else if (op==='privacy') {
     body.privacy_key = v('setterPrivKey');
     body.privacy_allow = v('setterPrivAllow')==='1';
@@ -26956,6 +26958,7 @@ async function openHealth() {
       + go('flooded', d.flooded_7d||0, 'Ловили флуд 7д', kpiTone(d.flooded_7d,'orange'))
       + go('low_trust', d.low_trust||0, 'Низкое доверие', kpiTone(d.low_trust,'red'))
       + go('banned', d.banned||0, 'Забанено', kpiTone(d.banned,'red'))
+      + go('foreign', d.foreign||0, 'Чужие сеансы', kpiTone(d.foreign,'red'))
       + go('', d.warmup_active||0, 'На прогреве', '', 'openWarmup()'));
     txt('m-health-val',`${d.banned||0} забанено · ${d.flooded_7d||0} с флудом`);
     const events = d.events||[];

@@ -2113,6 +2113,46 @@ async def connect_client(session_string: str = "", device: dict | None = None,
         raise
 
 
+# ── Квота запросов кода входа на владельца ──────────────────────────────────
+#
+# Каждый send_code_request уходит от ключей приложения платформы
+# (TG_API_ID/TG_API_HASH), общих для ВСЕХ владельцев. Telegram ограничивает
+# ключи целиком: поток запросов кода на чужие номера (SMS-бомбинг через наш
+# вход, перебор номеров, сорвавшийся скрипт) заканчивается
+# API_ID_PUBLISHED_FLOOD — и вход новых аккаунтов, авторег и перелогин
+# умирают у всей платформы разом. Общий лимитер HTTP этого не держит: 120
+# запросов в минуту — это тысячи кодов в час с одного владельца, а авторег из
+# воркера через HTTP не идёт вовсе. Поэтому квота стоит в единственной двери
+# всех входов по номеру — здесь.
+_SEND_CODE_WINDOW_S = 3600
+_SEND_CODE_PER_OWNER = max(1, int(_os.getenv("SEND_CODE_PER_OWNER_HOUR", "60") or 60))
+_send_code_log: dict[int, list[float]] = {}
+_send_code_lock = threading.Lock()
+
+
+class SendCodeQuotaError(ValueError):
+    """Владелец исчерпал часовую квоту запросов кода входа."""
+
+
+def _take_send_code_slot(owner_id: int | None, now: float | None = None) -> None:
+    """Занять слот квоты или бросить SendCodeQuotaError (текст — владельцу)."""
+    if owner_id is None:
+        return
+    now = time.monotonic() if now is None else now
+    with _send_code_lock:
+        stamps = [t for t in _send_code_log.get(int(owner_id), ()) if now - t < _SEND_CODE_WINDOW_S]
+        if len(stamps) >= _SEND_CODE_PER_OWNER:
+            wait_min = max(1, int((_SEND_CODE_WINDOW_S - (now - stamps[0])) // 60) + 1)
+            _send_code_log[int(owner_id)] = stamps
+            raise SendCodeQuotaError(
+                f"За последний час запрошено {len(stamps)} кодов входа — это предел "
+                f"({_SEND_CODE_PER_OWNER} в час). Ключи приложения общие для всей "
+                f"платформы, и поток запросов кода Telegram наказывает блокировкой "
+                f"входа для всех. Повторите через {wait_min} мин.")
+        stamps.append(now)
+        _send_code_log[int(owner_id)] = stamps
+
+
 async def start_login(
     phone: str,
     proxy_url: str | None = None,
@@ -2140,6 +2180,7 @@ async def start_login(
         raise ValueError(
             "TG_API_ID / TG_API_HASH не настроены. Укажите в переменных среды."
         )
+    _take_send_code_slot(owner_id)
     device = generate_device_fingerprint(
         country_code_from_phone(phone), manufacturer=manufacturer, app_version=app_version
     )
@@ -2279,6 +2320,8 @@ def login_error_ru(exc) -> str:
     тупик, из которого владелец не может выйти сам. Английскую формулировку
     telethon наружу тоже не пускаем: владелец её не читает.
     """
+    if isinstance(exc, SendCodeQuotaError):
+        return str(exc)
     for key in _login_error_keys(exc):
         known = LOGIN_ERROR_RU.get(key)
         if known:
@@ -2360,9 +2403,14 @@ async def confirm_2fa(phone: str, password: str):
         raise ValueError("Сессия истекла — начните заново.")
     try:
         await client.sign_in(password=password)
-        return client
     except PasswordHashInvalidError:
         raise ValueError("Неверный пароль 2FA.")
+    # Пароль, которым только что вошли, уходит в info входа
+    # (get_client_info_and_session) и сохраняется у аккаунта зашифрованным
+    # (`upsert_tg_account(twofa_password=…)`). Раньше он не сохранялся нигде:
+    # сессия умерла — аккаунт с паролем, который никто не помнит, потерян.
+    _pending_device.setdefault(phone, {})["twofa_password"] = password
+    return client
 
 
 async def get_session_string(client) -> str:
@@ -3097,6 +3145,8 @@ async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
         "first_name": getattr(me, "first_name", "") or "",
         "username": getattr(me, "username", "") or "",
         **device,
+        # Сохраняется у аккаунта зашифрованным (см. confirm_2fa).
+        "twofa_password": password,
     }
     return session_str, info
 
@@ -4194,12 +4244,67 @@ def effective_account_status(
     return normalized
 
 
+async def foreign_authorizations(client) -> list[dict] | None:
+    """Чужие авторизации аккаунта — все, кроме нашей. None — узнать не удалось.
+
+    Продавец купленного аккаунта, угонщик или забытый старый вход видны здесь
+    раньше, чем они выкинут наш сеанс или сменят пароль: до этого флот узнавал
+    об угоне только по умершей сессии, когда вернуть аккаунт уже нечем.
+    Один запрос на уже открытом соединении: официальные клиенты делают его
+    при каждом открытии экрана «Устройства».
+    """
+    from telethon.tl.functions.account import GetAuthorizationsRequest
+    try:
+        res = await asyncio.wait_for(client(GetAuthorizationsRequest()), timeout=_OP_TIMEOUT)
+    except Exception as exc:
+        log.debug("foreign_authorizations: %s", exc)
+        return None
+    auths = getattr(res, "authorizations", None)
+    if not isinstance(auths, (list, tuple)):
+        return None
+
+    def _ts(v) -> int:
+        try:
+            return int(v.timestamp()) if hasattr(v, "timestamp") else int(v or 0)
+        except (TypeError, ValueError, OverflowError, OSError):
+            return 0
+
+    out: list[dict] = []
+    for a in auths:
+        if getattr(a, "current", False):
+            continue
+        try:
+            h = int(getattr(a, "hash", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if not h:
+            continue
+        app = " ".join(str(x) for x in (getattr(a, "app_name", ""), getattr(a, "app_version", ""))
+                       if x).strip()
+        out.append({
+            "hash": h,
+            "device": str(getattr(a, "device_model", "") or "")[:64],
+            "platform": str(getattr(a, "platform", "") or "")[:32],
+            "app": app[:64],
+            "official": bool(getattr(a, "official_app", False)),
+            "ip": str(getattr(a, "ip", "") or "")[:45],
+            "country": str(getattr(a, "country", "") or "")[:48],
+            "created": _ts(getattr(a, "date_created", 0)),
+            "active": _ts(getattr(a, "date_active", 0)),
+        })
+    return out
+
+
 async def check_account_status_full(
     session_string: str,
     _acc: dict | None = None,
     check_spambot: bool = True,
+    check_sessions: bool = False,
 ) -> dict:
     """Детальная проверка состояния аккаунта.
+
+    check_sessions=True — заодно снять чужие авторизации аккаунта
+    (`profile["authorizations"]`: список или None, если узнать не удалось).
 
     Возвращает {
         "status": "active"|"cooldown"|"spamblock"|"banned"|"deactivated"|"session_expired",
@@ -4259,6 +4364,8 @@ async def check_account_status_full(
             "is_premium": bool(getattr(me, "premium", False)),
             "has_photo": getattr(me, "photo", None) is not None,
         }
+        if check_sessions:
+            profile["authorizations"] = await foreign_authorizations(client)
 
         if not check_spambot:
             # Без @SpamBot видно только, что сессия жива. Спам-блок и заморозку
@@ -4482,18 +4589,21 @@ async def check_account_status_full(
 # Автоматическая проверка сессий и обновление статусов в БД.
 # Запускается как фоновый сервис каждые 6 часов.
 
-async def run_session_health_monitor(pool: "asyncpg.Pool") -> None:
-    """Фоновый сервис: проверяет все активные сессии и обновляет статусы."""
+async def run_session_health_monitor(pool: "asyncpg.Pool", bot=None) -> None:
+    """Фоновый сервис: проверяет все активные сессии и обновляет статусы.
+
+    bot — для тревоги о чужом сеансе (services/session_watch); без него
+    сеансы всё равно записываются, только без сообщения владельцу."""
     log.info("session_health_monitor: starting")
     while True:
         try:
-            await _check_all_sessions(pool)
+            await _check_all_sessions(pool, bot)
         except Exception as e:
             log.error("session_health_monitor: error: %s", e)
         await asyncio.sleep(6 * 3600)  # каждые 6 часов
 
 
-async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
+async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
     """Проверить все активные сессии и обновить статусы."""
     from database import db as _db
     
@@ -4511,7 +4621,8 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
         _tq(
             """a.is_active = TRUE AND a.session_str IS NOT NULL
                AND COALESCE(a.in_operation, FALSE) = FALSE""",
-            extra_cols="a.session_conflict_at",
+            extra_cols=("a.session_conflict_at, a.foreign_session_hashes, a.username, "
+                        "(a.twofa_enc IS NOT NULL) AS twofa_saved"),
         )
     )
     if not accounts:
@@ -4539,9 +4650,15 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
             continue
         try:
             result = await check_account_status_full(
-                acc["session_str"], _acc=dict(acc), check_spambot=False
+                acc["session_str"], _acc=dict(acc), check_spambot=False,
+                check_sessions=True,
             )
             new_status = result["status"]
+            # Чужие сеансы — тем же соединением (services/session_watch).
+            _auths = (result.get("profile") or {}).get("authorizations")
+            if _auths is not None:
+                from services import session_watch as _sw
+                await _sw.record(pool, dict(acc), _auths, bot=bot)
             old_status = acc["acc_status"] or "active"
 
             # ── РАЗОВЫЙ конфликт сессии не паркует аккаунт ───────────────────
@@ -4607,6 +4724,13 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
                     acc["id"], acc.get("phone"), old_status, new_status,
                     result.get("reason", "")[:80],
                 )
+                # Обход флота раз в 6 часов находит умершие сессии первым, а
+                # владельцу о них сообщал только частый монитор — по пять
+                # аккаунтов в час на всю платформу, то есть через дни. Ключ
+                # тот же, что у монитора: одно сообщение, а не два.
+                if new_status in ("session_expired", "banned", "deactivated"):
+                    from services import session_watch as _sw
+                    await _sw.notify_lost(pool, dict(acc), new_status, bot=bot)
             checked += 1
         except Exception as e:
             failed += 1

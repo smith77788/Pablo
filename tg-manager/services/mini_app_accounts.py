@@ -45,7 +45,7 @@ UNPOOLED = "__none__"
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
     from services.mini_app_api import (
-        _FLOODED_SQL, _LOW_TRUST_SQL,
+        _FLOODED_SQL, _FOREIGN_SQL, _LOW_TRUST_SQL,
         ACCOUNT_FILTERS, ACCOUNT_STAGES, ACTIVE_ACC_SQL, _INTERNAL_ERROR,
         _body_wants_platform_scope, _csv_resp, _err, _geo_code, _get_uid,
         _json_resp, _obus, _proxy_display_host, _safe_count, _safe_fetch,
@@ -106,6 +106,9 @@ def setup_routes(app: web.Application, pool) -> None:
         elif flt == "flooded":
             # Ловили флуд-ожидание за 7 дней — плитка «Флуд 7д» на «Здоровье».
             clauses.append(_FLOODED_SQL)
+        elif flt == "foreign":
+            # Чужие сеансы — плитка «Чужие сеансы» на «Здоровье».
+            clauses.append(_FOREIGN_SQL)
         elif flt == "dead":
             # Невоскрешаемые: забанен / удалён-деактивирован / сессия отозвана.
             # Именно их массово удаляют «в один тап». Конфликт двух IP (cooldown)
@@ -193,6 +196,8 @@ def setup_routes(app: web.Application, pool) -> None:
                       ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
                       cooldown_until, cluster, stage, pool,
+                      -- Чужие сеансы аккаунта (дозор угона, services/session_watch).
+                      COALESCE(foreign_sessions, 0) AS foreign_sessions,
                       -- Без сессии аккаунт не берёт ни одна операция (условие
                       -- двери выбора). Строке это тоже нужно: иначе экран
                       -- показывает «Активен» там, где работать нечем.
@@ -907,6 +912,19 @@ def setup_routes(app: web.Application, pool) -> None:
             res = await asyncio.wait_for(
                 pse.apply_op(acc["session_str"], dict(acc), op, params), timeout=45)
             if res.get("ok"):
+                # То же, что делает очередь (op_worker._exec_bulk_set_profile):
+                # пароль 2FA, поставленный с карточки аккаунта, раньше не
+                # сохранялся нигде — тот же дефект, что закрывала v331 для
+                # массового пути; закрытые чужие сеансы обнуляют дозор.
+                from database import db as _db
+                if op == "2fa":
+                    await _db.remember_account_twofa(
+                        pool, uid, acc_id, params.get("new_password") or "")
+                elif op == "reset_2fa":
+                    await _db.remember_account_twofa(pool, uid, acc_id, "")
+                elif op == "close_sessions":
+                    from services import session_watch as _sw
+                    await _sw.forget(pool, uid, acc_id)
                 return _json_resp({"ok": True, "result": res, "label": label})
             return _err(res.get("error") or "Операция не выполнена", 400)
         except asyncio.TimeoutError:
@@ -1889,6 +1907,7 @@ def setup_routes(app: web.Application, pool) -> None:
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
             proxy_id=pid, override_proxy=bool(pid), auto_proxy=True,
+            twofa_password=info.get("twofa_password"),
         )
         return acc_id
 
