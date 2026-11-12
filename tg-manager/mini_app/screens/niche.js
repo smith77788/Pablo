@@ -196,7 +196,8 @@ async function nrOpenAssets(id, status) {
         <div class="row-val" style="color:var(--hint)">${esc(a.source_ru)}${a.keyword ? ' · «' + esc(a.keyword) + '»' : ''}${a.actions_done ? ' · действий: ' + esc(_nrNum(a.actions_done)) : ''}</div>
       </div>
       <div style="display:flex;gap:6px;width:100%;margin-top:6px">
-        <button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="openTgLink('https://t.me/${esc(a.username)}')">Открыть</button>
+        <button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="openTgLink('https://t.me/${escJs(a.username)}')">Открыть</button>
+        ${a.kind === 'group' ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="startChatWarmup('${escJs(a.username)}', this)">🔥 Прогрев флотом</button>` : ''}
         ${a.status !== 'skipped' ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="nrSkip(${Number(a.id)}, this)">Не наше</button>` : ''}
       </div>
     </div>`).join('') + (d.has_more ? `<div class="field-note" style="padding:8px 4px">Показаны первые ${esc(String(items.length))} из ${esc(_nrNum(d.total))} — остальные в работе у присутствия.</div>` : '')

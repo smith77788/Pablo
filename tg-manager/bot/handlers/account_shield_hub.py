@@ -204,13 +204,9 @@ async def cb_shield_toggle_ap(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     cfg = await account_shield.get_shield_config(pool, owner_id)
     new_val = not cfg.auto_pause
     try:
-        await pool.execute(
-            """INSERT INTO shield_configs (owner_id, auto_pause)
-               VALUES ($1, $2)
-               ON CONFLICT (owner_id) DO UPDATE SET auto_pause=$2, updated_at=NOW()""",
-            owner_id,
-            new_val,
-        )
+        # Через общую дверь: флажок и реакция щита (response_mode) пишутся
+        # вместе, иначе реакция из мини-аппа перекрывала бы этот флажок.
+        await account_shield.save_shield_config(pool, owner_id, auto_pause=new_val)
     except Exception as exc:
         log.debug("shield_hub.toggle_ap: %s", exc)
     await _show_settings(callback, pool)

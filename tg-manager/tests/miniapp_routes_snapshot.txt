@@ -1,4 +1,5 @@
 DELETE /api/miniapp/account/{acc_id}
+DELETE /api/miniapp/ad_intel/channel/{username}
 DELETE /api/miniapp/ai_memory/{mem_id}
 DELETE /api/miniapp/api_key/{key_id}
 DELETE /api/miniapp/asset_template/{tpl_id}
@@ -73,6 +74,11 @@ GET /api/miniapp/accounts/health
 GET /api/miniapp/accounts/survival
 GET /api/miniapp/accounts/tags
 GET /api/miniapp/ad_intel
+GET /api/miniapp/ad_intel/ads
+GET /api/miniapp/ad_intel/advertiser/{username}
+GET /api/miniapp/ad_intel/advertisers
+GET /api/miniapp/ad_intel/channel/{username}
+GET /api/miniapp/ad_intel/channels
 GET /api/miniapp/admin/actions
 GET /api/miniapp/admin/audit
 GET /api/miniapp/admin/broadcast/recent
@@ -213,6 +219,9 @@ GET /api/miniapp/host_server/status
 GET /api/miniapp/inbox
 GET /api/miniapp/inbox/{peer_user_id}
 GET /api/miniapp/infra
+GET /api/miniapp/infra/audit
+GET /api/miniapp/infra/pools
+GET /api/miniapp/infra/pools/rebalance
 GET /api/miniapp/infra_health
 GET /api/miniapp/integrations
 GET /api/miniapp/invite/account/{acc_id}
@@ -298,6 +307,8 @@ GET /api/miniapp/referral
 GET /api/miniapp/referral/detail
 GET /api/miniapp/reg_check/history
 GET /api/miniapp/rehab
+GET /api/miniapp/rehab/settings
+GET /api/miniapp/rehab/{acc_id}/history
 GET /api/miniapp/relay/session/{session_id}/messages
 GET /api/miniapp/report_channels
 GET /api/miniapp/sales/ai-journal
@@ -417,6 +428,11 @@ HEAD /api/miniapp/accounts/health
 HEAD /api/miniapp/accounts/survival
 HEAD /api/miniapp/accounts/tags
 HEAD /api/miniapp/ad_intel
+HEAD /api/miniapp/ad_intel/ads
+HEAD /api/miniapp/ad_intel/advertiser/{username}
+HEAD /api/miniapp/ad_intel/advertisers
+HEAD /api/miniapp/ad_intel/channel/{username}
+HEAD /api/miniapp/ad_intel/channels
 HEAD /api/miniapp/admin/actions
 HEAD /api/miniapp/admin/audit
 HEAD /api/miniapp/admin/broadcast/recent
@@ -557,6 +573,9 @@ HEAD /api/miniapp/host_server/status
 HEAD /api/miniapp/inbox
 HEAD /api/miniapp/inbox/{peer_user_id}
 HEAD /api/miniapp/infra
+HEAD /api/miniapp/infra/audit
+HEAD /api/miniapp/infra/pools
+HEAD /api/miniapp/infra/pools/rebalance
 HEAD /api/miniapp/infra_health
 HEAD /api/miniapp/integrations
 HEAD /api/miniapp/invite/account/{acc_id}
@@ -642,6 +661,8 @@ HEAD /api/miniapp/referral
 HEAD /api/miniapp/referral/detail
 HEAD /api/miniapp/reg_check/history
 HEAD /api/miniapp/rehab
+HEAD /api/miniapp/rehab/settings
+HEAD /api/miniapp/rehab/{acc_id}/history
 HEAD /api/miniapp/relay/session/{session_id}/messages
 HEAD /api/miniapp/report_channels
 HEAD /api/miniapp/sales/ai-journal
@@ -789,6 +810,8 @@ POST /api/miniapp/accounts/check_all
 POST /api/miniapp/accounts/mass
 POST /api/miniapp/accounts/revive
 POST /api/miniapp/ad_intel/channel
+POST /api/miniapp/ad_intel/channel/{username}/auto
+POST /api/miniapp/ad_intel/channel/{username}/rescan
 POST /api/miniapp/admin/broadcast
 POST /api/miniapp/admin/report/{report_id}/status
 POST /api/miniapp/admin/user/{user_id}/ban
@@ -941,6 +964,10 @@ POST /api/miniapp/inbox/{peer_user_id}/ai-draft
 POST /api/miniapp/inbox/{peer_user_id}/ai-summary
 POST /api/miniapp/inbox/{peer_user_id}/read
 POST /api/miniapp/inbox/{peer_user_id}/reply
+POST /api/miniapp/infra/pools/assign
+POST /api/miniapp/infra/pools/dissolve
+POST /api/miniapp/infra/pools/rebalance
+POST /api/miniapp/infra/pools/rename
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
 POST /api/miniapp/infra_health/mute/{anomaly_type}
 POST /api/miniapp/infra_health/resolve_all
@@ -1039,7 +1066,9 @@ POST /api/miniapp/ranking/reopt_setting
 POST /api/miniapp/ranking/track
 POST /api/miniapp/ranking/untrack
 POST /api/miniapp/reg_check
+POST /api/miniapp/rehab/settings
 POST /api/miniapp/rehab/{acc_id}/{action}
+POST /api/miniapp/rehab_bulk/{action}
 POST /api/miniapp/reporter
 POST /api/miniapp/sales/ai-journal/{rid}/rate
 POST /api/miniapp/sales/persona
@@ -1072,6 +1101,8 @@ POST /api/miniapp/sheets/connect
 POST /api/miniapp/sheets/disconnect
 POST /api/miniapp/sheets/export
 POST /api/miniapp/shield/config
+POST /api/miniapp/shield/resume
+POST /api/miniapp/shield/run
 POST /api/miniapp/spintax/expand
 POST /api/miniapp/spintax/generate
 POST /api/miniapp/stars/experiment

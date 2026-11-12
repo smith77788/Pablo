@@ -67,27 +67,44 @@ def test_graph_overlap_pairs_can_be_opened():
 
 # ── Разведка рекламы ─────────────────────────────────────────────────────────
 
-def test_ad_intel_rows_open_the_channel():
-    body = _no_comments(_fn("openAdIntel"))
-    assert body.count("openTgUser(") == 2, "ни канал, ни рекламодатель не открываются"
-    assert "c.username?' tap'" in body or "c.username ? ' tap'" in body
+def test_ad_intel_rows_open_cards_and_cards_open_telegram():
+    """Строка канала ведёт в карточку канала, строка рекламодателя — в его
+    карточку; из карточки канал открывается в Telegram."""
+    assert "openAdChannel(" in _no_comments(_fn("adIntelChannelRow"))
+    assert "openAdAdvertiser(" in _no_comments(_fn("adIntelAdvRow"))
+    card = _no_comments(_fn("openAdChannel"))
+    assert "openTgUser(" in card
+    for action in ("adChannelRescan(", "adChannelDelete(", "adChannelAuto("):
+        assert action in card, action
+    adv = _no_comments(_fn("openAdAdvertiser"))
+    assert "openAdChannel(" in adv, "из рекламодателя не попасть в канал, где он размещался"
+    assert "openAdIntelModal(" in adv, "канал-рекламодателя нельзя поставить на разведку"
 
 
 def test_ad_intel_empty_states_are_not_dead_ends():
     body = _no_comments(_fn("openAdIntel"))
     assert "Каналов на разведке нет" in body
     assert "openAdIntelModal()" in body
-    assert "Рекламодателей пока нет" in body
-    # Два разных случая: каналов нет вовсе и реклама ещё не попадалась.
-    assert "chs.length ?" in body
+    load = _no_comments(_fn("adIntelLoad"))
+    assert "Рекламодателей пока нет" in load
+    assert "Ничего не найдено" in load, "пустой поиск не должен выглядеть как пустая база"
+    assert "openAdIntelModal()" in load
 
 
-def test_ad_intel_error_clears_both_lists():
+def test_ad_intel_error_clears_all_lists():
     """Ошибка оставляла список рекламодателей со старыми строками."""
     body = _no_comments(_fn("openAdIntel"))
     tail = body[body.rindex("catch"):]
     assert "errHtml" in tail
-    assert "adIntelAdv" in tail
+    for box in ("adIntelAdv", "adIntelAds"):
+        assert box in tail, box
+
+
+def test_ad_intel_shares_are_printed_as_percent():
+    """Охват 35% печатался как «ER 0,4%»: доля шла на экран без умножения."""
+    assert "* 100" in _no_comments(_fn("adiPct"))
+    row = _no_comments(_fn("adIntelChannelRow"))
+    assert "adiPct(c.reach_rate)" in row and "adiPct(c.engagement_rate)" in row
 
 
 # ── Сеть ботов ───────────────────────────────────────────────────────────────
@@ -128,9 +145,7 @@ def test_all_targets_exist():
         assert re.search(r"(?:async )?function %s\s*\(" % name, HTML), f"нет {name}"
 
 def test_ad_price_says_its_unit():
-    """Цена размещения считается в Telegram Stars, а показывалась голым числом:
-    «~15,0К» читается как рубли и завышает смету в разы."""
-    body = _no_comments(_fn("openAdIntel"))
-    assert "размещение ~" in body and "⭐" in body
+    """Цена размещения — оценка в рублях (CPM ниши), и экран пишет единицу."""
+    assert "₽" in _no_comments(_fn("adiRub"))
     est = open(os.path.join(ROOT, "services", "ad_intelligence.py"), encoding="utf-8").read()
-    assert "в Stars" in est, "единица измерения цены изменилась — проверьте подпись в UI"
+    assert "NICHE_CPM_RUB" in est, "единица измерения цены изменилась — проверьте подпись в UI"

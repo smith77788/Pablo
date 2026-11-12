@@ -527,6 +527,34 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
     "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS tags TEXT",
     "CREATE INDEX IF NOT EXISTS idx_short_links_owner ON short_links(owner_id, created_at DESC)",
+    # Центр восстановления аккаунтов: история шагов, настройки владельца, дата
+    # снятия от @SpamBot и счётчик повторных блоков (services/account_rehab).
+    # Здесь, а не отдельным schema_vN.sql: хвост истории после снимка упёрся
+    # в порог свёртки (tests/test_schema_baseline.py), а пересъёмка снимка —
+    # общий для всех веток шаг. Тот же список повторён в main.py.
+    "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS release_at TIMESTAMPTZ",
+    "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS relapses INTEGER NOT NULL DEFAULT 0",
+    """CREATE TABLE IF NOT EXISTS account_rehab_events (
+        id        BIGSERIAL PRIMARY KEY,
+        acc_id    BIGINT NOT NULL,
+        owner_id  BIGINT NOT NULL,
+        at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        step      TEXT NOT NULL,
+        outcome   TEXT,
+        detail    TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_rehab_events_acc ON account_rehab_events(acc_id, at DESC)",
+    """CREATE TABLE IF NOT EXISTS rehab_settings (
+        owner_id      BIGINT PRIMARY KEY,
+        paused        BOOLEAN NOT NULL DEFAULT FALSE,
+        auto_appeal   BOOLEAN NOT NULL DEFAULT TRUE,
+        pace          TEXT NOT NULL DEFAULT 'normal',
+        max_rechecks  INTEGER NOT NULL DEFAULT 8,
+        rest_hours    INTEGER NOT NULL DEFAULT 24,
+        notify_freed  BOOLEAN NOT NULL DEFAULT TRUE,
+        notify_stuck  BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 
@@ -3237,76 +3265,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
     # ── Infra Analytics ────────────────────────────────────────────────────────
-
-    async def infra_analytics_overview(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            active_accs = await pool.fetchval(
-                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
-            )
-        except Exception as e:
-            log.warning("infra_analytics active_accs uid=%d: %s", uid, e)
-            active_accs = 0
-        try:
-            flood_24h = await pool.fetchval(
-                """SELECT COUNT(*) FROM account_flood_log fl
-                   JOIN tg_accounts ta ON ta.id=fl.account_id
-                   WHERE ta.owner_id=$1 AND fl.created_at > NOW()-INTERVAL '24h'""",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics flood_24h uid=%d: %s", uid, e)
-            flood_24h = 0
-        try:
-            ops_24h = await pool.fetchval(
-                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW()-INTERVAL '24h'",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics ops_24h uid=%d: %s", uid, e)
-            ops_24h = 0
-        try:
-            warmup_active = await pool.fetchval(
-                """SELECT COUNT(*) FROM account_warmup_plans wp
-                   WHERE wp.owner_id=$1 AND wp.status='active'""",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics warmup uid=%d: %s", uid, e)
-            warmup_active = 0
-        try:
-            pools = await pool.fetch(
-                """SELECT pool, COUNT(*) AS cnt FROM tg_accounts
-                   WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL
-                   GROUP BY pool ORDER BY cnt DESC LIMIT 10""",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics pools uid=%d: %s", uid, e)
-            pools = []
-        try:
-            audit_rows = await pool.fetch(
-                """SELECT action, target, result, occurred_at
-                   FROM operation_audit WHERE owner_id=$1
-                   ORDER BY occurred_at DESC LIMIT 10""",
-                uid,
-            )
-        except Exception as e:
-            log.warning("infra_analytics audit uid=%d: %s", uid, e)
-            audit_rows = []
-        return _json_resp({
-            "active_accounts": int(active_accs or 0),
-            "flood_24h": int(flood_24h or 0),
-            "ops_24h": int(ops_24h or 0),
-            "warmup_active": int(warmup_active or 0),
-            "pools": [dict(p) for p in pools],
-            "audit": [
-                {**dict(a), "occurred_at": a["occurred_at"].isoformat() if a["occurred_at"] else None}
-                for a in audit_rows
-            ],
-        })
 
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
@@ -6264,14 +6222,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             counts = {"in_progress": 0, "freed": 0, "stuck": 0, "gone": 0, "by_phase": {}}
         lim = _list_limit(request, 100, 500)
         off = _list_offset(request)
-        accounts = await _rh.list_for_owner(pool, uid, limit=lim, offset=off)
+        view = (request.query.get("view") or "all").strip().lower()
+        if view not in _rh.VIEWS:
+            view = "all"
+        settings = await _rh.get_settings(pool, uid)
+        accounts = await _rh.list_for_owner(pool, uid, limit=lim, offset=off,
+                                            view=view, settings=settings)
         # Итог берём из той же сводки, что и плитки сверху — лишнего запроса не
         # нужно: `by_phase` считает ВСЕ строки реабилитации. Если сводка не
-        # получилась, итог не меньше того, что уже на экране.
-        total = max(sum(int(v) for v in (counts.get("by_phase") or {}).values()),
-                    off + len(accounts))
+        # получилась, итог не меньше того, что уже на экране. Для среза —
+        # сумма его фаз.
+        bp = counts.get("by_phase") or {}
+        view_phases = {"active": ("appeal", "warming", "recheck"),
+                       "attention": ("stuck",), "freed": ("freed",),
+                       "closed": ("gone", "off")}.get(view)
+        view_total = (sum(int(v) for v in bp.values()) if view_phases is None
+                      else sum(int(bp.get(p, 0)) for p in view_phases))
+        total = max(view_total, off + len(accounts))
         return _json_resp({"ok": True, **counts, "accounts": accounts,
-                           "total": total,
+                           "total": total, "view": view,
+                           "settings": settings,
+                           "pace_labels": _rh.PACE_LABEL,
                            "page": {"limit": lim, "offset": off,
                                     "has_more": off + len(accounts) < total}})
 
@@ -6306,9 +6277,98 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "phase": "appeal" if action == "restart" else "off"})
         return _err("Неизвестное действие", 400)
 
+    async def rehab_history_ep(request: web.Request) -> web.Response:
+        """Что автоматика делала с одним аккаунтом — по шагам, новые сверху."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор аккаунта", 400)
+        from services import account_rehab as _rh
 
+        row = await pool.fetchrow(
+            """SELECT r.acc_id, r.phase, r.kind, r.attempts, r.appeal_count,
+                      r.warm_cycles, r.warm_actions, r.note, r.first_seen,
+                      r.last_action_at, r.next_action_at, r.freed_at,
+                      r.release_at, r.relapses,
+                      a.phone, a.first_name, a.username, a.acc_status,
+                      a.cooldown_until
+                 FROM account_rehab_state r
+                 JOIN tg_accounts a ON a.id = r.acc_id
+                WHERE r.acc_id=$1 AND r.owner_id=$2""", acc_id, uid)
+        if not row:
+            return _err("Аккаунт не найден в восстановлении", 404)
+        settings = await _rh.get_settings(pool, uid)
+        acc = dict(row)
+        acc["state"] = _rh.describe(acc, settings=settings)
+        for k in ("first_seen", "last_action_at", "next_action_at", "freed_at",
+                  "release_at", "cooldown_until"):
+            acc[k] = acc[k].isoformat() if acc.get(k) else None
+        lim = _list_limit(request, 100, 500)
+        try:
+            events = await _rh.history(pool, uid, acc_id, limit=lim)
+        except Exception:
+            log.warning("rehab_history uid=%s acc=%s", uid, acc_id, exc_info=True)
+            events = []
+        return _json_resp({"ok": True, "account": acc, "events": events,
+                           "capped": len(events) >= lim})
 
+    async def rehab_settings_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import account_rehab as _rh
 
+        return _json_resp({"ok": True, "settings": await _rh.get_settings(pool, uid),
+                           "pace_labels": _rh.PACE_LABEL,
+                           "defaults": _rh.DEFAULT_SETTINGS})
+
+    async def rehab_settings_save(request: web.Request) -> web.Response:
+        """Темп, лимит перепроверок, отдых после снятия, аппеляция, пауза,
+        уведомления — всё, что раньше было зашито в код."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный формат запроса", 400)
+        if not isinstance(body, dict):
+            return _err("Неверный формат запроса", 400)
+        from services import account_rehab as _rh
+
+        try:
+            s = await _rh.save_settings(pool, uid, body)
+        except Exception:
+            log.exception("rehab_settings_save uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "settings": s})
+
+    async def rehab_bulk(request: web.Request) -> web.Response:
+        """Действия над всем восстановлением сразу.
+
+        `restart_stuck` — ещё попытка всем, кого автоматика отдала на разбор
+        (кроме замороженных); `pause` / `resume` — пауза всего восстановления.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        action = (request.match_info.get("action") or "").lower()
+        from services import account_rehab as _rh
+
+        if action == "restart_stuck":
+            try:
+                n = await _rh.restart_all_stuck(pool, uid)
+            except Exception:
+                log.exception("rehab_bulk restart uid=%s", uid)
+                return _err(_INTERNAL_ERROR, 500)
+            return _json_resp({"ok": True, "count": n})
+        if action in ("pause", "resume"):
+            s = await _rh.save_settings(pool, uid, {"paused": action == "pause"})
+            return _json_resp({"ok": True, "settings": s})
+        return _err("Неизвестное действие", 400)
 
 
 
@@ -6436,13 +6496,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
+        if not isinstance(data, dict):
+            return _err("Не удалось разобрать запрос")
+        from services import account_shield as _sh
         fields = {}
-        for key in ("risk_threshold", "ban_prob_threshold"):
+        for key in ("risk_threshold", "ban_prob_threshold",
+                    "pause_risk_threshold", "pause_ban_threshold"):
             if key in data and data[key] is not None:
                 try:
                     v = float(data[key])
                 except (TypeError, ValueError):
-                    return _err(f"Некорректное значение: {key}")
+                    return _err("Некорректное значение порога")
                 if not 0.0 <= v <= 1.0:
                     return _err("Порог должен быть от 0 до 1")
                 fields[key] = v
@@ -6451,68 +6515,174 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if hours is None:
                 return _err("Пауза — от 1 до 168 часов")
             fields["cool_duration_hours"] = hours
+        if "cool_hours" in data and data["cool_hours"] is not None:
+            hours = validate_integer(data["cool_hours"], min_val=1, max_val=48)
+            if hours is None:
+                return _err("Охлаждение — от 1 до 48 часов")
+            fields["cool_hours"] = hours
         for key in ("auto_pause", "notify_admin"):
             if key in data and data[key] is not None:
                 fields[key] = bool(data[key])
+        if data.get("response_mode") is not None:
+            if data["response_mode"] not in _sh.RESPONSE_MODES:
+                return _err("Неизвестная реакция щита")
+            fields["response_mode"] = data["response_mode"]
+        if data.get("preset") is not None:
+            if data["preset"] not in _sh.PRESETS:
+                return _err("Неизвестный профиль защиты")
+            fields["preset"] = data["preset"]
+        if "exempt_account_ids" in data and data["exempt_account_ids"] is not None:
+            raw = data["exempt_account_ids"]
+            if not isinstance(raw, list) or len(raw) > 5000:
+                return _err("Список исключений не разобран")
+            try:
+                ids = sorted({int(x) for x in raw})
+            except (TypeError, ValueError):
+                return _err("Список исключений не разобран")
+            if ids:
+                # Только свои аккаунты: чужой id в списке ничего не даёт, но
+                # и лежать у владельца не должен.
+                own = await pool.fetch(
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::int[])",
+                    uid, ids)
+                ids = sorted(int(r["id"]) for r in own)
+            fields["exempt_account_ids"] = ids
         if not fields:
             return _err("Нечего сохранять")
         try:
-            from services.account_shield import save_shield_config
-            cfg = await save_shield_config(pool, uid, **fields)
+            cfg = await _sh.save_shield_config(pool, uid, **fields)
         except Exception:
             log.exception("shield_config_save uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "config": {
-            "risk_threshold": cfg.risk_threshold,
-            "ban_prob_threshold": cfg.ban_prob_threshold,
-            "auto_pause": cfg.auto_pause,
-            "notify_admin": cfg.notify_admin,
-            "cool_duration_hours": cfg.cool_duration_hours,
-        }})
+        return _json_resp({"ok": True, "config": cfg.as_dict()})
+
+    async def shield_resume(request: web.Request) -> web.Response:
+        """Вернуть аккаунт из паузы/охлаждения щита досрочно."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            acc_id = int(data.get("account_id"))
+        except Exception:
+            return _err("Неверный идентификатор аккаунта")
+        try:
+            from services import account_shield as _sh
+            ok = await _sh.resume_now(pool, uid, acc_id)
+        except Exception:
+            log.exception("shield_resume uid=%d acc=%d", uid, acc_id)
+            return _err(_INTERNAL_ERROR, 500)
+        if not ok:
+            return _err("Этот аккаунт щит не останавливал", 404)
+        return _json_resp({"ok": True})
+
+    async def shield_run_now(request: web.Request) -> web.Response:
+        """Проверить флот щитом сейчас, не дожидаясь 30-минутного цикла."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import account_shield as _sh
+            # Без бота: итог проверки владелец видит на экране сразу, а
+            # уведомления о паузах шлёт фоновый цикл.
+            res = await _sh.run_owner(pool, uid, None)
+        except Exception:
+            log.exception("shield_run_now uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, **res})
 
     async def shield_summary(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        action_filter = (request.rel_url.query.get("action") or "").strip()
+        if action_filter not in ("", "warn", "cool", "pause", "resume"):
+            action_filter = ""
         try:
+            from services import account_shield as _sh
+            cfg_obj = await _sh.get_shield_config(pool, uid)
+            # Пороги — ВЛАДЕЛЬЦА, а не зашитые 0.7/0.5: плитки «Высокий риск»
+            # и «Под защитой» должны значить то же, что значат решения щита.
             row = await pool.fetchrow(
                 """SELECT
                    COUNT(*) FILTER (WHERE a.is_active = TRUE) AS total_active,
-                   COUNT(*) FILTER (WHERE a.is_active = FALSE AND a.cooldown_until > NOW()) AS cooling,
-                   COUNT(*) FILTER (WHERE r.risk_score >= 0.7) AS threatened,
-                   COUNT(*) FILTER (WHERE r.ban_probability >= 0.5) AS high_ban,
-                   COUNT(*) FILTER (WHERE r.risk_score < 0.7 AND (r.ban_probability < 0.5 OR r.ban_probability IS NULL)) AS ok_count
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND a.cooldown_until > NOW()) AS cooling,
+                   COUNT(*) FILTER (WHERE a.is_active = FALSE AND a.shield_paused_until > NOW()) AS paused,
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND (r.risk_score >= $2 OR r.ban_probability >= $3)) AS threatened,
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND r.ban_probability >= $3) AS high_ban,
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND COALESCE(r.risk_score, 0) < $2
+                                      AND COALESCE(r.ban_probability, 0) < $3) AS ok_count,
+                   AVG(r.risk_score) FILTER (WHERE a.is_active = TRUE) AS avg_risk
                    FROM tg_accounts a
                    LEFT JOIN account_risk_scores r ON r.account_id = a.id
                    WHERE a.owner_id = $1""",
+                uid, cfg_obj.risk_threshold, cfg_obj.ban_prob_threshold,
+            )
+            # Кого щит держит прямо сейчас — с кнопкой «Вернуть».
+            held = await pool.fetch(
+                """SELECT a.id, a.first_name, a.username, a.phone, a.is_active,
+                          a.shield_paused_until, a.cooldown_until, a.status_reason
+                   FROM tg_accounts a
+                   WHERE a.owner_id=$1
+                     AND ((a.is_active = FALSE AND a.shield_paused_until > NOW())
+                       OR (a.is_active = TRUE AND a.cooldown_until > NOW()
+                           AND a.status_reason LIKE 'Охлаждение на %'))
+                   ORDER BY COALESCE(a.shield_paused_until, a.cooldown_until) DESC
+                   LIMIT 50""",
                 uid,
             )
             # account_id — чтобы строка истории открывала карточку аккаунта.
             history = await pool.fetch(
                 """SELECT a.id AS account_id, sa.action, sa.risk_score,
-                          sa.ban_probability, sa.created_at, a.phone, a.first_name
+                          sa.ban_probability, sa.created_at, sa.note,
+                          a.phone, a.first_name
                    FROM shield_actions sa
                    JOIN tg_accounts a ON a.id = sa.account_id
-                   WHERE sa.owner_id=$1 ORDER BY sa.created_at DESC LIMIT 20""",
-                uid,
+                   WHERE sa.owner_id=$1 AND ($2 = '' OR sa.action = $2)
+                   ORDER BY sa.created_at DESC LIMIT 30""",
+                uid, action_filter,
             )
             history_total = await pool.fetchval(
-                "SELECT COUNT(*) FROM shield_actions WHERE owner_id=$1", uid)
-            cfg = await pool.fetchrow(
-                "SELECT * FROM shield_configs WHERE owner_id=$1", uid
-            )
+                "SELECT COUNT(*) FROM shield_actions WHERE owner_id=$1 AND ($2 = '' OR action = $2)",
+                uid, action_filter)
+            counts = await pool.fetch(
+                """SELECT action, COUNT(*) AS n FROM shield_actions
+                   WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '7 days'
+                   GROUP BY action""",
+                uid)
+            exempt = []
+            if cfg_obj.exempt_account_ids:
+                exempt = await pool.fetch(
+                    """SELECT id, first_name, username, phone FROM tg_accounts
+                       WHERE owner_id=$1 AND id = ANY($2::int[]) ORDER BY id""",
+                    uid, list(cfg_obj.exempt_account_ids))
         except Exception:
             log.exception("shield_summary uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+
+        def _nm(r):
+            return r["first_name"] or (("@" + r["username"]) if r.get("username") else "") or r["phone"] or ""
+
+        stats = {k: int(row[k] or 0) for k in
+                 ("total_active", "cooling", "paused", "threatened", "high_ban", "ok_count")} if row else {}
+        if row is not None:
+            stats["avg_risk"] = round(float(row["avg_risk"] or 0), 4)
         return _json_resp({
-            "stats": {k: int(row[k] or 0) for k in ("total_active","cooling","threatened","high_ban","ok_count")} if row else {},
-            "config": {
-                "risk_threshold": float(cfg["risk_threshold"]) if cfg else 0.7,
-                "ban_prob_threshold": float(cfg["ban_prob_threshold"]) if cfg else 0.5,
-                "auto_pause": bool(cfg["auto_pause"]) if cfg else True,
-                "notify_admin": bool(cfg["notify_admin"]) if cfg else True,
-                "cool_duration_hours": int(cfg["cool_duration_hours"]) if cfg else 24,
-            },
+            "stats": stats,
+            "week": {r["action"]: int(r["n"] or 0) for r in counts},
+            "config": cfg_obj.as_dict(),
+            "presets": _sh.PRESETS,
+            "held": [
+                {
+                    "account_id": r["id"], "name": _nm(r),
+                    "state": "pause" if not r["is_active"] else "cool",
+                    "until": (r["shield_paused_until"] if not r["is_active"] else r["cooldown_until"]).isoformat()
+                             if (r["shield_paused_until"] if not r["is_active"] else r["cooldown_until"]) else None,
+                    "reason": r["status_reason"] or "",
+                }
+                for r in held
+            ],
+            "exempt": [{"account_id": r["id"], "name": _nm(r)} for r in exempt],
             "history_total": history_total or 0,
             "history": [
                 {
@@ -6520,13 +6690,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "action": r["action"], "risk": float(r["risk_score"] or 0),
                     "ban_prob": float(r["ban_probability"] or 0),
                     "name": r["first_name"] or r["phone"] or "",
+                    "note": r["note"] or "",
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 }
                 for r in history
             ],
         })
-
-    # ── Ad Intelligence ────────────────────────────────────────────────────────
 
     async def ad_intel_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -6534,14 +6703,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             top = await pool.fetch(
-                """SELECT channel_username, channel_title, subscribers, quality_score, er_rate, ad_price_est
+                """SELECT channel_username, channel_title, subscribers, quality_score,
+                          COALESCE(NULLIF(reach_rate, 0), er_rate) AS reach_rate,
+                          engagement_rate, ad_price_rub, ads_per_week, fraud_flags
                    FROM ad_placements WHERE owner_id=$1 ORDER BY quality_score DESC LIMIT 10""",
                 uid,
             )
             total = await pool.fetchval("SELECT COUNT(*) FROM ad_placements WHERE owner_id=$1", uid)
+            agg = await pool.fetchrow(
+                """SELECT AVG(quality_score) AS q,
+                          COUNT(*) FILTER (WHERE last_error IS NOT NULL) AS failed,
+                          COUNT(*) FILTER (WHERE COALESCE(array_length(fraud_flags,1),0) > 0) AS suspicious,
+                          MAX(last_scanned_at) AS last_scan
+                   FROM ad_placements WHERE owner_id=$1""",
+                uid,
+            )
+            ads_7d = await pool.fetchval(
+                """SELECT COUNT(*) FROM ad_posts_log WHERE owner_id=$1
+                   AND COALESCE(post_date, detected_at) >= NOW() - INTERVAL '7 days'""",
+                uid,
+            )
             advertisers = await pool.fetch(
-                """SELECT advertiser_username, placements_count, last_seen_at
-                   FROM ad_advertisers WHERE owner_id=$1 ORDER BY last_seen_at DESC LIMIT 10""",
+                """SELECT advertiser_username, placements_count, channels_count, kind, last_seen_at
+                   FROM ad_advertisers WHERE owner_id=$1 AND placements_count > 0
+                   ORDER BY placements_count DESC, last_seen_at DESC LIMIT 10""",
                 uid,
             )
             # Итоги по ВСЕМ рекламодателям, а не по top-10: фронт рисует ими KPI-плитки
@@ -6556,20 +6741,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("ad_intel_overview uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        avg_score = sum(r["quality_score"] or 0 for r in top) / max(len(top), 1)
+        _agg = agg or {}
         return _json_resp({
             "total_channels": int(total or 0),
             "total_advertisers": int((adv_totals or {}).get("advertisers") or 0),
             "total_placements": int((adv_totals or {}).get("placements") or 0),
-            "avg_quality": round(avg_score, 1),
+            # Среднее по ВСЕМ каналам, а не по десятке лучших (было завышено).
+            "avg_quality": round(float(_agg.get("q") or 0), 1),
+            "ads_7d": int(ads_7d or 0),
+            "failed_channels": int(_agg.get("failed") or 0),
+            "suspicious_channels": int(_agg.get("suspicious") or 0),
+            "last_scan": _agg["last_scan"].isoformat() if _agg.get("last_scan") else None,
             "top_channels": [
                 {
                     "username": r["channel_username"] or "",
                     "title": r["channel_title"] or "",
                     "subscribers": r["subscribers"] or 0,
                     "quality_score": round(float(r["quality_score"] or 0), 1),
-                    "er_rate": round(float(r["er_rate"] or 0), 2),
-                    "ad_price_est": r["ad_price_est"] or 0,
+                    # Доли, а не проценты: 0.35 = охват 35%. er_rate — прежнее
+                    # имя охвата для старых клиентов.
+                    "er_rate": round(float(r["reach_rate"] or 0), 4),
+                    "reach_rate": round(float(r["reach_rate"] or 0), 4),
+                    "engagement_rate": round(float(r["engagement_rate"] or 0), 4),
+                    "ad_price_rub": r["ad_price_rub"] or 0,
+                    "ads_per_week": round(float(r["ads_per_week"] or 0), 1),
+                    "fraud_flags": list(r["fraud_flags"] or []),
                 }
                 for r in top
             ],
@@ -6577,11 +6773,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {
                     "username": r["advertiser_username"] or "",
                     "placements": r["placements_count"] or 0,
+                    "channels": r["channels_count"] or 0,
+                    "kind": r["kind"] or "",
                     "last_seen": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
                 }
                 for r in advertisers
             ],
         })
+
+    # Сколько каналов можно поставить на разведку одним запросом.
+    _AD_INTEL_BATCH = 20
+
+    def _ad_intel_inputs(body: dict) -> list[str]:
+        """Каналы из тела: `channel` (строка) и/или `channels` (список или
+        текст — по строке, через запятую или пробел)."""
+        raw: list[str] = []
+        one = body.get("channel")
+        if one:
+            raw.append(str(one))
+        many = body.get("channels")
+        if isinstance(many, str):
+            raw.extend(re.split(r"[\s,;]+", many))
+        elif isinstance(many, list):
+            raw.extend(str(x) for x in many)
+        seen, out = set(), []
+        for x in raw:
+            x = x.strip()
+            if x and x.lower() not in seen:
+                seen.add(x.lower())
+                out.append(x)
+        return out
 
     async def ad_intel_add_channel(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -6589,30 +6810,191 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            _given = str(body.get("channel", "")).strip()
+            if not isinstance(body, dict):
+                raise ValueError
         except Exception:
             return _err("Неверное тело запроса", 400)
-        if not _given:
+        inputs = _ad_intel_inputs(body)
+        if not inputs:
             return _err("Укажите канал", 400)
+        if len(inputs) > _AD_INTEL_BATCH:
+            return _err(f"За раз — не больше {_AD_INTEL_BATCH} каналов", 400)
         from services.ad_intelligence import channel_username_from
-        channel = channel_username_from(_given)
-        if not channel:
+        rejected, channels = [], []
+        for given in inputs:
+            ch = channel_username_from(given)
+            if not ch:
+                rejected.append({"input": given[:80], "reason": (
+                    "нужен публичный канал: @имя или ссылка t.me/имя; закрытые "
+                    "каналы по ссылке-приглашению не сканируются")})
+            elif ch.lower() not in {c.lower() for c in channels}:
+                channels.append(ch)
+        if not channels:
             # Отказ сразу, а не сорванная операция через минуту.
             return _err("Нужен публичный канал: @имя или ссылка t.me/имя. "
                         "Закрытые каналы по ссылке-приглашению не сканируются", 400)
-        label = f"Разведка рекламы @{channel}"
+        queued = []
         try:
-            op_id = await _obus.submit(
-                pool, uid, "ad_intel_scan", {"channel": channel},
-                total_items=1, label=label)
-            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+            for ch in channels:
+                label = f"Разведка рекламы @{ch}"
+                op_id = await _obus.submit(
+                    pool, uid, "ad_intel_scan", {"channel": ch},
+                    total_items=1, label=label)
+                queued.append({"channel": ch, "op_id": op_id})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
+            if not queued:
+                return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("ad_intel_add_channel uid=%d", uid)
+            if not queued:
+                return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({
+            "ok": True, "op_id": queued[0]["op_id"],
+            "label": f"Разведка рекламы @{queued[0]['channel']}",
+            "queued": queued, "rejected": rejected,
+        })
+
+    def _q_int(request: web.Request, key: str, default: int = 0) -> int:
+        try:
+            return int(request.query.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    async def ad_intel_channels(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        qy = request.query
+        try:
+            data = await _ai.list_channels(
+                pool, uid, q=qy.get("q", ""), niche=qy.get("niche", "")[:64],
+                sort=qy.get("sort", "quality"), only_clean=qy.get("clean") == "1",
+                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
+        except Exception:
+            log.exception("ad_intel_channels uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+        return _json_resp(data)
+
+    async def ad_intel_channel_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        try:
+            data = await _ai.channel_detail(pool, uid, request.match_info["username"])
+        except Exception:
+            log.exception("ad_intel_channel_detail uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not data:
+            return _err("Канала нет на разведке", 404)
+        return _json_resp(data)
+
+    async def ad_intel_channel_rescan(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        ch = _ai.channel_username_from(request.match_info["username"])
+        if not ch:
+            return _err("Нужен публичный канал", 400)
+        try:
+            if not await pool.fetchval(
+                    "SELECT 1 FROM ad_placements WHERE owner_id=$1 "
+                    "AND lower(channel_username)=lower($2)", uid, ch):
+                return _err("Канала нет на разведке", 404)
+            label = f"Разведка рекламы @{ch}"
+            op_id = await _obus.submit(pool, uid, "ad_intel_scan", {"channel": ch},
+                                       total_items=1, label=label)
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("ad_intel_channel_rescan uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "op_id": op_id, "label": label})
+
+    async def ad_intel_channel_auto(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            on = bool(body.get("on")) if isinstance(body, dict) else None
+        except Exception:
+            on = None
+        if on is None:
+            return _err("Неверное тело запроса", 400)
+        from services import ad_intelligence as _ai
+        try:
+            ok = await _ai.set_auto_rescan(pool, uid, request.match_info["username"], on)
+        except Exception:
+            log.exception("ad_intel_channel_auto uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not ok:
+            return _err("Канала нет на разведке", 404)
+        return _json_resp({"ok": True, "auto_rescan": on})
+
+    async def ad_intel_channel_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        try:
+            ok = await _ai.delete_channel(pool, uid, request.match_info["username"])
+        except Exception:
+            log.exception("ad_intel_channel_delete uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not ok:
+            return _err("Канала нет на разведке", 404)
+        return _json_resp({"ok": True})
+
+    async def ad_intel_advertisers(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        qy = request.query
+        try:
+            data = await _ai.list_advertisers(
+                pool, uid, q=qy.get("q", ""), kind=qy.get("kind", ""),
+                sort=qy.get("sort", "placements"),
+                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
+        except Exception:
+            log.exception("ad_intel_advertisers uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp(data)
+
+    async def ad_intel_advertiser_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        try:
+            data = await _ai.advertiser_detail(pool, uid, request.match_info["username"])
+        except Exception:
+            log.exception("ad_intel_advertiser_detail uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not data:
+            return _err("Такого рекламодателя в разведке нет", 404)
+        return _json_resp(data)
+
+    async def ad_intel_ads(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import ad_intelligence as _ai
+        qy = request.query
+        try:
+            data = await _ai.list_ads(
+                pool, uid, q=qy.get("q", ""), erid_only=qy.get("erid") == "1",
+                days=_q_int(request, "days", 0),
+                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
+        except Exception:
+            log.exception("ad_intel_ads uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp(data)
 
     # ── Network / Cluster Overview ─────────────────────────────────────────────
 
@@ -8011,16 +8393,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """
                 SELECT ars.account_id, ta.phone, ta.username, ta.first_name,
                        ars.risk_score, ars.ban_probability, ars.flood_rate_1h,
-                       ars.ops_24h, ars.last_flood_at, ars.computed_at
+                       ars.ops_24h, ars.last_flood_at, ars.computed_at,
+                       ars.factors, ta.is_active, ta.shield_paused_until
                 FROM account_risk_scores ars
                 JOIN tg_accounts ta ON ta.id = ars.account_id
                 WHERE ta.owner_id = $1
-                ORDER BY ars.risk_score DESC NULLS LAST
-                LIMIT 30
+                ORDER BY ars.risk_score DESC NULLS LAST, ta.id
+                LIMIT 500
                 """,
                 uid,
             )
-            return _json_resp([dict(r) for r in rows])
+            from services.physics_engine import _parse_factors
+            out = []
+            for r in rows:
+                d = dict(r)
+                # jsonb приходит строкой — экрану нужен список факторов.
+                d["factors"] = _parse_factors(d.get("factors"))
+                out.append(d)
+            return _json_resp(out)
         except Exception:
             log.exception("physics_overview uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -8677,6 +9067,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     from services import mini_app_saved_views
     mini_app_saved_views.setup_routes(app, pool)
     mini_app_fleet.setup_routes(app, pool)
+    from services import mini_app_infra
+    mini_app_infra.setup_routes(app, pool)
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_crm.setup_routes(app, pool)
@@ -8729,9 +9121,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Account Shield
     app.router.add_get("/api/miniapp/shield", shield_summary)
     app.router.add_post("/api/miniapp/shield/config", shield_config_save)
+    app.router.add_post("/api/miniapp/shield/resume", shield_resume)
+    app.router.add_post("/api/miniapp/shield/run", shield_run_now)
     # Ad Intelligence
     app.router.add_get("/api/miniapp/ad_intel", ad_intel_overview)
     app.router.add_post("/api/miniapp/ad_intel/channel", ad_intel_add_channel)
+    app.router.add_get("/api/miniapp/ad_intel/channels", ad_intel_channels)
+    app.router.add_get("/api/miniapp/ad_intel/channel/{username}", ad_intel_channel_detail)
+    app.router.add_post("/api/miniapp/ad_intel/channel/{username}/rescan", ad_intel_channel_rescan)
+    app.router.add_post("/api/miniapp/ad_intel/channel/{username}/auto", ad_intel_channel_auto)
+    app.router.add_delete("/api/miniapp/ad_intel/channel/{username}", ad_intel_channel_delete)
+    app.router.add_get("/api/miniapp/ad_intel/advertisers", ad_intel_advertisers)
+    app.router.add_get("/api/miniapp/ad_intel/advertiser/{username}", ad_intel_advertiser_detail)
+    app.router.add_get("/api/miniapp/ad_intel/ads", ad_intel_ads)
     # Network / Cluster
     # Relay (Inbox)
     app.router.add_get("/api/miniapp/relay/session/{session_id}/messages", relay_session_messages)
@@ -8772,6 +9174,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/stage",
                         vlayer_set_stage)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
+    app.router.add_get("/api/miniapp/rehab/settings", rehab_settings_get)
+    app.router.add_post("/api/miniapp/rehab/settings", rehab_settings_save)
+    app.router.add_post("/api/miniapp/rehab_bulk/{action}", rehab_bulk)
+    app.router.add_get("/api/miniapp/rehab/{acc_id}/history", rehab_history_ep)
     app.router.add_post("/api/miniapp/rehab/{acc_id}/{action}", rehab_action)
     # A/B Experiments
     # Health Dashboard
@@ -8837,7 +9243,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
     # Infra Analytics
-    app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
     app.router.add_get("/api/miniapp/diag", diag)
     app.router.add_get("/api/miniapp/new_users", new_users)

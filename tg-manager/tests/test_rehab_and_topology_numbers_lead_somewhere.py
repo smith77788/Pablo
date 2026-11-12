@@ -21,8 +21,10 @@ HTML = os.path.join(ROOT, "mini_app", "index.html")
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
-    with open(HTML, encoding="utf-8") as f:
-        return f.read()
+    # Весь фронт, а не index.html: топология переехала в screens/infra.js.
+    from tests.miniapp_source import miniapp_source
+
+    return miniapp_source()
 
 
 def _js_func(name: str) -> str:
@@ -68,21 +70,31 @@ def test_both_screens_still_show_those_numbers():
 
 
 def test_rehab_counters_open_their_slices():
+    """Счётчик открывает свой срез на этом же экране.
+
+    Раньше «Нужен разбор» уводил в список аккаунтов со спам-блоком — там
+    вперемешку и те, кого система ещё вытаскивает, то есть не тот срез, а
+    «Возвращены» — во ВСЕ активные аккаунты флота."""
     body = _js_func("openRehab")
-    assert "healthGoAccounts('active','')" in body, "«Возвращены» никуда не ведёт"
-    assert "healthGoAccounts('spamblock','')" in body, "«Нужен разбор» никуда не ведёт"
+    assert "rehabView('freed')" in body, "«Возвращены» никуда не ведёт"
+    assert "rehabView('attention')" in body, "«Нужен разбор» никуда не ведёт"
+    assert "rehabView('active')" in body
+    view = _js_func("rehabView")
+    assert "openRehab(" in view, "срез не перезагружает список"
 
 
 def test_rehab_row_opens_the_account():
+    """Строка открывает карточку восстановления, а из неё — карточку аккаунта."""
     body = _js_func("openRehab")
-    assert "openAccount(" in body, "строка восстановления не открывает аккаунт"
+    assert 'class="row-body" onclick="rehabDetail(' in body
+    assert "openAccount(" in _js_func("rehabDetail"), "из восстановления не попасть в аккаунт"
 
 
 def test_rehab_row_buttons_still_work_separately():
-    """Строка открывает аккаунт — кнопки шага не должны открывать его заодно."""
+    """Строка открывает карточку — кнопки шага не должны открывать её заодно."""
     body = _js_func("openRehab")
     # переход висит на теле строки, а не на всей строке с кнопками
-    assert 'class="row-body" onclick="openAccount(' in body, (
+    assert 'class="row-body" onclick="rehabDetail(' in body, (
         "переход повешен на всю строку — он перехватит нажатия ⏩/⏹/🔁"
     )
     for act in ("'now'", "'off'", "'restart'"):
@@ -101,10 +113,14 @@ def test_topology_counters_open_their_tabs():
 
 
 def test_topology_counters_without_a_list_are_not_fake_buttons():
-    """У «Связей» и «Подписчиков» сводного списка нет — кнопки быть не должно."""
+    """У «Людей в ботах» сводного списка нет — кнопки быть не должно.
+
+    (Счётчик «Связей (вступ)» убран 10.11.2026: он всегда равнялся числу
+    каналов — каждый канал в каталоге привязан к аккаунту, — то есть повторял
+    соседнюю цифру под непонятной подписью.)"""
     body = _js_func("openTopology")
-    m = re.search(r"Связей \(вступ\)", body)
-    assert m, "счётчик связей пропал"
+    m = re.search(r"Людей в ботах", body)
+    assert m, "счётчик подписчиков ботов пропал"
     card = body[max(0, m.start() - 220):m.start()]
     assert "tap-card" not in card, "«Связей» притворяется кнопкой, которая ведёт не туда"
 

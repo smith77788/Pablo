@@ -4110,14 +4110,16 @@ async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dic
             last_text = msg.text or ""
             status = classify_spambot_reply(last_text)
             if status == "active":
-                return {"ok": True, "status": "free", "reply": last_text[:200], "steps": steps}
+                return {"ok": True, "status": "free", "reply": last_text[:200], "steps": steps,
+                        "full_reply": last_text[:1000]}
             if status in ("frozen", "banned"):
                 # Ни одной кнопки. У заморозки кнопка «This is a mistake» —
                 # вход в анкету (ФИО, почта, причина) и капчу «подтвердите, что
                 # вы человек»: её проходит сам владелец, автоматика туда не
                 # ходит. Нажать и бросить на полпути — хуже, чем не нажимать.
                 # У бана снимать нечего. Вызывающий получает честный статус.
-                return {"ok": True, "status": status, "reply": last_text[:200], "steps": steps}
+                return {"ok": True, "status": status, "reply": last_text[:200], "steps": steps,
+                        "full_reply": last_text[:1000]}
             btn_text = _pick_appeal_button(msg)
             if not btn_text:
                 break  # кнопок аппеляции нет — дальше нажимать нечего
@@ -4132,10 +4134,13 @@ async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dic
         # Финальная переоценка статуса по последнему ответу.
         final = classify_spambot_reply(last_text)
         if final == "active":
-            return {"ok": True, "status": "free", "reply": last_text[:200], "steps": steps}
+            return {"ok": True, "status": "free", "reply": last_text[:200], "steps": steps,
+                        "full_reply": last_text[:1000]}
         if steps > 0:
-            return {"ok": True, "status": "appeal_sent", "reply": last_text[:200], "steps": steps}
-        return {"ok": True, "status": "still_blocked", "reply": last_text[:200], "steps": steps}
+            return {"ok": True, "status": "appeal_sent", "reply": last_text[:200], "steps": steps,
+                        "full_reply": last_text[:1000]}
+        return {"ok": True, "status": "still_blocked", "reply": last_text[:200], "steps": steps,
+                        "full_reply": last_text[:1000]}
     except asyncio.TimeoutError:
         return {"ok": False, "status": "error", "reply": "таймаут @SpamBot", "steps": steps}
     except Exception as exc:
@@ -4329,6 +4334,9 @@ async def check_account_status_full(
                     return {
                         "status": "spamblock",
                         "spamblock_kind": kind,
+                        # Полный ответ: дата снятия у временного блока стоит
+                        # в конце текста, за обрезкой `reason`.
+                        "spambot_reply": reply_text[:1000],
                         "reason": f"SpamBot: {reply_text[:120]}",
                         "display_name": display_name,
                         "profile": profile,

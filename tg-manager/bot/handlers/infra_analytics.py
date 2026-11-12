@@ -322,6 +322,9 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_infra_audit(
     callback: CallbackQuery, callback_data: InfraCb, pool: asyncpg.Pool
 ) -> None:
+    # Журнал печатал внутреннее имя действия латиницей («warmup», «day 8»).
+    from services.infra_hub import action_ru as _action_ru, target_ru as _target_ru
+
     await safe_answer(callback)
     page = callback_data.page
     uid = callback.from_user.id
@@ -397,11 +400,11 @@ async def cb_infra_audit(
             r["result"], "❓"
         )
         acc_label = html.escape(r.get("first_name") or r.get("phone") or "?")
-        target = html.escape((r.get("target") or "")[:20])
+        target = html.escape(_target_ru(r.get("target"))[:20])
         t = r["occurred_at"].strftime("%m-%d %H:%M") if r["occurred_at"] else "?"
         dur = f" {r['duration_ms']}ms" if r.get("duration_ms") else ""
         lines.append(
-            f"{icon} [{t}] <code>{r['action']}</code> {target} [{acc_label}]{dur}"
+            f"{icon} [{t}] {html.escape(_action_ru(r['action']))} {target} [{acc_label}]{dur}"
         )
 
     kb = InlineKeyboardBuilder()
@@ -808,18 +811,11 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 
 def _classify_account(acc: dict) -> str | None:
-    """Определить целевой пул для аккаунта на основе его состояния."""
-    trust = float(acc.get("trust_score") or 0.5)
-    warnings = acc.get("warnings") or []
-    on_cooldown = acc.get("on_cooldown", False)
+    """Определить целевой пул для аккаунта. Правило одно на бот и мини-апп —
+    `services.infra_hub.classify_account`."""
+    from services.infra_hub import classify_account
 
-    if on_cooldown:
-        return "cooldown"
-    if trust >= 0.75 and not warnings:
-        return "primary"
-    if trust < 0.3 or len(warnings) > 0:
-        return "monitoring"
-    return None  # не менять
+    return classify_account(acc)
 
 
 @router.callback_query(InfraCb.filter(F.action == "rebalance_preview"))

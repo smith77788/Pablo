@@ -38,6 +38,10 @@ from aiohttp import web
 MASS_CAP = 20000
 
 
+# Значение среза «пул», означающее «аккаунты без пула».
+UNPOOLED = "__none__"
+
+
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
     from services.mini_app_api import (
@@ -124,7 +128,11 @@ def setup_routes(app: web.Application, pool) -> None:
         # Пул — то, чем владелец делит флот на группы. На экране «Инфраструктура»
         # он был виден числом («Пул europe — 42 акк») и ничем больше: открыть
         # эти 42 аккаунта было нечем, среза под пул не существовало.
-        if acc_pool:
+        if acc_pool == UNPOOLED:
+            # «Без пула» — отдельный срез: строка «Без пула» на экране пулов
+            # открывала ВЕСЬ флот (пустой пул = нет фильтра).
+            clauses.append("(pool IS NULL OR pool = '')")
+        elif acc_pool:
             args.append(acc_pool)
             clauses.append(f"pool = ${len(args)}")
         # Страна аккаунта = страна его прокси (так же считает geo_router). На
@@ -362,7 +370,8 @@ def setup_routes(app: web.Application, pool) -> None:
                           is_active, added_at, last_used,
                           ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          status_reason, cooldown_until, cluster, stage, proxy_id
+                          status_reason, cooldown_until, cluster, stage, proxy_id,
+                          pool
                    FROM tg_accounts WHERE id=$1""", acc_id)
         else:
             acc = await _safe_fetchrow(pool,
@@ -370,7 +379,8 @@ def setup_routes(app: web.Application, pool) -> None:
                           is_active, added_at, last_used,
                           ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          status_reason, cooldown_until, cluster, stage, proxy_id
+                          status_reason, cooldown_until, cluster, stage, proxy_id,
+                          pool
                    FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Аккаунт не найден", 404)
@@ -389,8 +399,11 @@ def setup_routes(app: web.Application, pool) -> None:
         # решения человека).
         rehab = None
         _rh_row = await _safe_fetchrow(pool,
-            """SELECT phase, note, attempts, next_action_at
-                 FROM account_rehab_state WHERE acc_id=$1""", acc_id)
+            """SELECT r.phase, r.note, r.attempts, r.next_action_at,
+                      r.release_at, r.relapses, a.acc_status, a.cooldown_until
+                 FROM account_rehab_state r
+                 JOIN tg_accounts a ON a.id = r.acc_id
+                WHERE r.acc_id=$1""", acc_id)
         if _rh_row:
             try:
                 from services import account_rehab as _rh
@@ -693,6 +706,24 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Аккаунты не найдены", 404)
         n = len(ids)
         try:
+            if op == "set_pool":
+                # Пул выбранным аккаунтам (или всему срезу). Раньше назначить
+                # пул из мини-аппа было нечем — только из бота, хотя пустой
+                # экран пулов отправлял «назначить на карточке аккаунта».
+                from services import infra_hub as _ih
+                raw_pool = body.get("value")
+                if raw_pool in (None, ""):
+                    new_pool = None
+                else:
+                    try:
+                        new_pool = _ih.normalize_pool_name(raw_pool)
+                    except _ih.PoolNameError as e:
+                        return _err(str(e), 400)
+                if admin:
+                    return _err("Пул назначается только своим аккаунтам", 400)
+                changed = await _ih.assign_pool(pool, uid, new_pool, account_ids=ids)
+                return _json_resp({"ok": True, "count": changed, "pool": new_pool,
+                                   "label": _ih.pool_label(new_pool), "capped": capped})
             if op in ("add_tag", "remove_tag"):
                 tag = _norm_tag(body.get("value") or body.get("tag_value"))
                 if not tag:
@@ -1006,7 +1037,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Аккаунт не найден", 404)
             new_state = not bool(row["is_active"])
             await pool.execute(
-                "UPDATE tg_accounts SET is_active=$1 WHERE id=$2 AND owner_id=$3",
+                # Ручное переключение снимает метку паузы щита: иначе щит по
+                # истечении срока включил бы аккаунт, выключенный владельцем.
+                "UPDATE tg_accounts SET is_active=$1, shield_paused_until=NULL "
+                "WHERE id=$2 AND owner_id=$3",
                 new_state, acc_id, uid)
             return _json_resp({"ok": True, "is_active": new_state})
         except Exception:
@@ -1671,6 +1705,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 # аккаунт, и защищает здесь именно SQL, а не снимок.
                 """UPDATE tg_accounts
                    SET is_active=TRUE,
+                       shield_paused_until=NULL,
                        acc_status='active',
                        status_reason=NULL,
                        in_operation=FALSE,

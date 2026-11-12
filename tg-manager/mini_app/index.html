@@ -1794,6 +1794,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="mini-btn" onclick="openMassStage()">📂 В статус</button>
         <button class="mini-btn" onclick="runAccTag('add_tag')">🏷 Поставить тег</button>
         <button class="mini-btn" onclick="runAccTag('remove_tag')">🏷 Снять тег</button>
+        <button class="mini-btn" onclick="runAccPool()" title="Положить выбранные аккаунты в пул">🗂 В пул</button>
         <button class="mini-btn" onclick="runAccMass('detach_proxy')" title="Снять прокси — работать напрямую">🔌 Снять прокси</button>
         <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
         <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.18)" onclick="runAccMass('delete')" title="Удалить выбранные аккаунты безвозвратно">🗑 Удалить</button>
@@ -1826,7 +1827,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="achat-title">Чат</div>
-    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="reloadAccountChat()" title="Обновить" aria-label="Обновить">🔄</span></div>
+    <div class="hdr-meta"><span class="icon-btn" id="achat-warm" style="display:none" role="button" tabindex="0" onclick="startChatWarmup(ACC_CHAT_USER)" title="Разогрев флотом: аккаунты вступят и будут вести здесь живой диалог" aria-label="Разогрев флотом">🔥</span><span class="icon-btn" role="button" tabindex="0" onclick="reloadAccountChat()" title="Обновить" aria-label="Обновить">🔄</span></div>
   </div>
   <div class="sub-sb" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
     <div id="achatBody" style="flex:1;overflow-y:auto;padding:8px 12px"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2656,6 +2657,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">📱</div>
         <div class="mgmt-tile-lbl">Аккаунты</div>
         <div class="mgmt-tile-val" id="m-acc-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openChatWarmup()">
+        <div class="mgmt-tile-ico">💬</div>
+        <div class="mgmt-tile-lbl">Разогрев чата</div>
+        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openWarmup()">
         <div class="mgmt-tile-ico">🌱</div>
@@ -3522,7 +3528,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🛡 Защита аккаунтов</div></div>
   <div class="filter-chips mod-tabs" data-module="shield" data-tab="habits" role="tablist" aria-label="Вкладки модуля «Защита аккаунтов»"></div>
   <div class="sub-sb">
-    <div class="sec">Риски аккаунтов</div>
+    <div id="physicsStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 8px"></div>
+    <div style="font-size:12px;color:var(--hint);padding:0 16px 8px;line-height:1.45">Риск складывается из факторов: ограничения и спам-блок Telegram, FloodWait, неудачные операции, нагрузка, возраст аккаунта, доверие и прокси. Нажмите на аккаунт — покажем, из чего сложилось его число.</div>
+    <div style="display:flex;gap:8px;padding:0 16px 8px">
+      <button class="btn btn-s" style="flex:1 1 auto" id="physicsRecalcBtn" onclick="physicsRecalc()">🔄 Пересчитать сейчас</button>
+    </div>
+    <div class="filter-chips" id="physicsFilter" style="padding:4px 16px 8px;flex-wrap:wrap"></div>
     <div class="lst" id="physicsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -5503,8 +5514,23 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="infraStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Пулы аккаунтов</div>
     <div class="lst" id="infraPools"></div>
-    <div class="sec" style="margin-top:8px">Последние операции (аудит)</div>
+    <div class="sec" style="margin-top:8px">Последние действия (аудит) · нажмите строку — подробности</div>
     <div class="lst" id="infraAudit"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: INFRA AUDIT JOURNAL ══════════════════════ -->
+<div class="screen" id="s-infraaudit">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">📋 Журнал аудита</div>
+  </div>
+  <div class="sub-sb">
+    <div id="iaFilters"></div>
+    <div style="padding:4px 16px 8px"><input class="input-l" id="iaSearch" placeholder="Поиск: аккаунт, объект, текст ошибки" oninput="iaSearch(this.value)"></div>
+    <div id="iaSummary"></div>
+    <div class="sec">Записи</div>
+    <div class="lst" id="iaList"></div>
   </div>
 </div>
 
@@ -6913,15 +6939,77 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🩹 Восстановление аккаунтов</div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Настройки восстановления" onclick="openRehabSettings()">⚙️</div>
   </div>
   <div class="sub-sb">
     <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
       Аккаунт со спам-блоком не выбрасывается: система сама просит снятия у @SpamBot,
       держит аккаунт живым только пассивными действиями и перепроверяет статус.
-      Ничего никому не рассылается.
+      Если Telegram назвал дату снятия — перепроверка встаёт сразу после неё.
+      После снятия аккаунт отдыхает, чтобы блок не вернулся. Ничего никому не рассылается.
     </div>
+    <div id="rehabBanner"></div>
     <div id="rehabStats" class="kpi-row" style="padding:0 16px 10px"></div>
+    <div id="rehabFacts" style="font-size:12px;color:var(--hint);padding:0 16px 8px;line-height:1.45"></div>
+    <div class="seg" id="rehabSeg">
+      <div class="seg-opt on" data-v="all" onclick="rehabView('all')" role="button" tabindex="0">Все</div>
+      <div class="seg-opt" data-v="active" onclick="rehabView('active')" role="button" tabindex="0">В работе</div>
+      <div class="seg-opt" data-v="attention" onclick="rehabView('attention')" role="button" tabindex="0">Нужны вы</div>
+      <div class="seg-opt" data-v="freed" onclick="rehabView('freed')" role="button" tabindex="0">Возвращены</div>
+      <div class="seg-opt" data-v="closed" onclick="rehabView('closed')" role="button" tabindex="0">Закрыты</div>
+    </div>
+    <div id="rehabBulk"></div>
     <div class="lst" id="rehabList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="mbg" id="mo-rehab-detail" onclick="if(event.target===this)closeModal('mo-rehab-detail')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-rehab-detail')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div id="rehabDetailBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="mbg" id="mo-rehab-settings" onclick="if(event.target===this)closeModal('mo-rehab-settings')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-rehab-settings')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">⚙️ Настройки восстановления</div>
+    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px">
+      <span>⏸ Поставить всё восстановление на паузу<br><span style="font-size:11px;color:var(--hint)">Аккаунты остаются в списке, но автоматика ничего с ними не делает</span></span>
+      <input type="checkbox" id="rhsPaused">
+    </label>
+    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px;border-top:1px solid var(--sep)">
+      <span>📨 Самой просить снятия у @SpamBot<br><span style="font-size:11px;color:var(--hint)">Нажимает «Это ошибка» и на вопрос про спам всегда отвечает «Нет». Выключите, если хотите обжаловать сами</span></span>
+      <input type="checkbox" id="rhsAppeal">
+    </label>
+    <div style="padding:10px 0;border-top:1px solid var(--sep)">
+      <div style="font-size:14px;margin-bottom:6px">🐢 Темп</div>
+      <select id="rhsPace" class="inp" style="width:100%"></select>
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Чаще, чем раз в 3 часа, @SpamBot не спрашивается ни в одном темпе</div>
+    </div>
+    <div style="padding:10px 0;border-top:1px solid var(--sep)">
+      <div style="font-size:14px;margin-bottom:6px">🔍 Перепроверок до передачи вам: <b id="rhsMaxVal"></b></div>
+      <input type="range" id="rhsMax" min="3" max="16" step="1" style="width:100%" oninput="txt('rhsMaxVal',this.value)">
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Пока не наступила дата снятия, которую назвал Telegram, попытки не кончаются</div>
+    </div>
+    <div style="padding:10px 0;border-top:1px solid var(--sep)">
+      <div style="font-size:14px;margin-bottom:6px">😴 Отдых после снятия: <b id="rhsRestVal"></b></div>
+      <input type="range" id="rhsRest" min="0" max="168" step="6" style="width:100%" oninput="txt('rhsRestVal',rehabRestLabel(this.value))">
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Всё это время операции аккаунт не берут — так блок не возвращается сразу</div>
+    </div>
+    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px;border-top:1px solid var(--sep)">
+      <span>✅ Сообщать, когда аккаунт вернулся</span>
+      <input type="checkbox" id="rhsNotifyFreed">
+    </label>
+    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px;border-top:1px solid var(--sep)">
+      <span>🛠 Сообщать, когда нужен ваш разбор</span>
+      <input type="checkbox" id="rhsNotifyStuck">
+    </label>
+    <div id="rhsErr" style="color:var(--red,#ef4444);font-size:12px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-o" style="flex:1" onclick="rehabSettingsDefaults()">По умолчанию</button>
+      <button class="btn btn-s" style="flex:2" id="rhsSave" onclick="saveRehabSettings()">Сохранить</button>
+    </div>
   </div>
 </div>
 
@@ -7172,9 +7260,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="filter-chips mod-tabs" data-module="shield" data-tab="accounts" role="tablist" aria-label="Вкладки модуля «Защита аккаунтов»"></div>
   <div class="sub-sb">
     <div id="shieldStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
-    <div class="sec">Конфигурация</div>
+    <div style="font-size:12px;color:var(--hint);padding:0 16px 8px;line-height:1.45">Каждые 30 минут щит оценивает риск каждого аккаунта и по вашим порогам охлаждает его или ставит на паузу. Пауза заканчивается сама, вернуть аккаунт раньше можно кнопкой.</div>
+    <div style="display:flex;gap:8px;padding:0 16px 10px">
+      <button class="btn btn-p" style="flex:1 1 auto" id="shieldRunBtn" onclick="shieldRunNow()">🔍 Проверить сейчас</button>
+      <button class="btn btn-s" style="flex:1 1 auto" onclick="openPhysics()">⚛️ Риск по аккаунтам</button>
+    </div>
+    <div class="sec">Профиль защиты</div>
+    <div class="filter-chips" id="shieldPresets" style="padding:4px 16px 8px;flex-wrap:wrap"></div>
+    <div class="sec">Настройки</div>
     <div class="lst" id="shieldConfig"></div>
+    <div id="shieldHeldWrap" style="display:none">
+      <div class="sec" style="margin-top:8px">Сейчас щит держит</div>
+      <div class="lst" id="shieldHeld"></div>
+    </div>
     <div class="sec" style="margin-top:8px">История действий</div>
+    <div class="filter-chips" id="shieldHistFilter" style="padding:4px 16px 8px;flex-wrap:wrap"></div>
     <div class="lst" id="shieldHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -7184,15 +7284,45 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📡 Разведка рекламы</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Канал</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Каналы</button></div>
   </div>
   <div class="sub-sb">
+    <div class="field-note" style="padding:4px 16px 0">Добавьте чужие каналы — разведка найдёт их рекламу и рекламодателей, оценит охват, вовлечённость и цену поста и будет обновлять данные раз в сутки.</div>
     <div id="adIntelStats" class="kpi-row" style="padding:8px 16px 10px"></div>
-    <div class="sec">Топ каналов по качеству</div>
+    <div id="adIntelAlert"></div>
+    <div class="filter-chips" id="adIntelTabs" role="tablist" aria-label="Разделы разведки" style="padding:0 16px 8px">
+      <span class="chip on" role="tab" data-tab="channels" onclick="adIntelTab('channels')">📺 Каналы</span>
+      <span class="chip" role="tab" data-tab="advertisers" onclick="adIntelTab('advertisers')">🏢 Рекламодатели</span>
+      <span class="chip" role="tab" data-tab="ads" onclick="adIntelTab('ads')">📰 Объявления</span>
+    </div>
+    <div style="display:flex;gap:8px;padding:0 16px 8px">
+      <input type="search" id="adIntelQ" class="inp" style="flex:1 1 auto" placeholder="Поиск по имени или тексту" oninput="adIntelSearch()">
+      <select id="adIntelSort" class="inp" style="flex:0 0 auto;max-width:46%" onchange="adIntelReload()" aria-label="Сортировка"></select>
+    </div>
+    <div class="filter-chips" id="adIntelFilters" style="padding:0 16px 8px"></div>
     <div class="lst" id="adIntelChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:8px">Топ рекламодателей</div>
-    <div class="lst" id="adIntelAdv"></div>
+    <div class="lst" id="adIntelAdv" style="display:none"></div>
+    <div class="lst" id="adIntelAds" style="display:none"></div>
+    <div id="adIntelMore" style="padding:8px 16px 16px"></div>
   </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: AD INTEL — КАРТОЧКА КАНАЛА ══════════════════════ -->
+<div class="screen" id="s-adchan">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title" id="adChanTitle">📺 Канал</div>
+  </div>
+  <div class="sub-sb" id="adChanBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ SCREEN: AD INTEL — КАРТОЧКА РЕКЛАМОДАТЕЛЯ ══════════════════════ -->
+<div class="screen" id="s-adadv">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title" id="adAdvTitle">🏢 Рекламодатель</div>
+  </div>
+  <div class="sub-sb" id="adAdvBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ SCREEN: NETWORK OVERVIEW ══════════════════════ -->
@@ -8206,9 +8336,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="adIntelMbg" onclick="if(event.target===this)closeAdIntelModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeAdIntelModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">📡 Добавить канал для анализа</div>
-    <div class="field"><label>Username канала (без @)</label><input type="text" id="adIntelCh" placeholder="target_channel"></div>
-    <div class="field-note">ИИ просканирует рекламу в канале и оценит качество аудитории</div>
+    <div class="modal-title">📡 Каналы на разведку</div>
+    <div class="field"><label for="adIntelCh">Каналы — по одному в строке, до 20 за раз</label>
+      <textarea id="adIntelCh" class="inp" rows="4" placeholder="@durov&#10;t.me/telegram&#10;https://t.me/s/tginfo"></textarea>
+      <div class="field-note">Подойдут @имя, имя или ссылка t.me/имя. Закрытые каналы по ссылке-приглашению не сканируются. Каждый канал — отдельная операция: аккаунт только читает последние 100 постов, ничего не отправляет.</div>
+    </div>
     <div class="field-err" id="adIntelErr"></div>
     <button class="btn btn-p" data-main id="adIntelBtn" onclick="submitAdIntelChannel()" style="width:100%">🚀 Запустить сканирование</button>
   </div>
@@ -10083,6 +10215,7 @@ const MODULE_KEYWORDS = {
   'Поиск по нику':'osint осинт найти человека аккаунты соцсети ник username почта email профили пробить blackbird',
   'Рассылки':'спам рассылка сообщения дм dm broadcast массовая отправка публикация в каналы единая кампания всё сразу campaign сеть ботов всем подписчикам расписание отложенная a/b тест эксперимент',
   'Прогрев':'разогреть отлежать нагулять антибан антидетект warmup',
+  'Разогрев чата':'разогрев чат флот диалог оживить группу беседа ии комментарии',
   'Прокси':'ip адрес socks5 http изоляция подсеть',
   'Клонер контента':'скопировать спарсить посты копия клон сеть контента репост автоматически постоянно меш пересылка',
   'Клон и адаптация':'скопировать клон профиль двойник копия',
@@ -10205,7 +10338,7 @@ const MODULE_DESCS = {
   'Аналитика аудитории':'Сегменты, инсайты, активность и ДНК аудитории','Статистика':'Метрики аудитории и операций',
   'Сценарии':'Сценарии и авто-воронки: бот сам ведёт человека по шагам',
   'Гео-сеть':'Новые каналы, группы и боты по многим городам с местными названиями, и профиль бота на разных языках','Массовые жалобы':'Массовые жалобы по целям (снос ресурсов)','Комплаенс':'Проверка ресурсов на запрещёнку',
-  'Прогрев':'Разогрев новых аккаунтов под живое поведение','Очистка':'Чистка аккаунтов: контакты, диалоги','Дубликаты':'Поиск дублей контактов','Конфликты':'Поиск конфликтов данных',
+  'Прогрев':'Разогрев новых аккаунтов под живое поведение','Разогрев чата':'Флот вступает в чат и ведёт в нём живой диалог','Очистка':'Чистка аккаунтов: контакты, диалоги','Дубликаты':'Поиск дублей контактов','Конфликты':'Поиск конфликтов данных',
   'Синхронизация':'Синхронизация контактов и данных','Клонер контента':'Посты из канала-источника в ваши каналы: разово или постоянно (сеть контента)','Клон и адаптация':'Клон профиля/контента с адаптацией',
   // Семь «сетей» описывались почти одинаково («Управление сетями ресурсов»,
   // «Сети ресурсов», «Карта связей ресурсов») — и различить их было нельзя.
@@ -11069,6 +11202,36 @@ async function openDigest() {
     }
     el.innerHTML = h;
   } catch(e) { el.innerHTML = errHtml(errRu(e),'openDigest()'); }
+}
+
+// Быстрый запуск разогрева по ссылке на чат — из карточки чата, каталога ниши
+// и любого другого места, где чат уже открыт. Своей формы не просит: настройки
+// (темп, часы, лимиты) правятся на экране разогрева, куда мы и уводим.
+async function startChatWarmup(ref, btn) {
+  const chat = String(ref || '').trim().replace(/^@/, '');
+  // Вступить в чат флот может только по публичной ссылке или инвайту: по
+  // внутреннему id чужой аккаунт чат даже не найдёт. Поэтому без @ника —
+  // не молчаливый отказ и не тупик, а экран разогрева с объяснением.
+  if (!chat) {
+    toast('⚠️ У этого чата нет публичной ссылки — вставьте инвайт-ссылку вручную');
+    openChatWarmup();
+    return;
+  }
+  const shown = '@' + chat;
+  if (!await askConfirm(`Запустить разогрев чата ${shown} флотом?\n\n`
+      + 'Аккаунты вступят в чат и будут вести в нём осмысленный диалог: между собой и с участниками. '
+      + 'Темп, часы работы и лимиты можно поправить на экране «Разогрев чата».')) return;
+  if (btn) btn.disabled = true;
+  try {
+    const d = await api('/api/miniapp/chatwarmup/session', {method:'POST', body:JSON.stringify({
+      chat_ref: '@' + chat,
+      mode:'mixed', intensity:'normal'})});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🔥 Разогрев запущен' + (d && d.accounts ? ` · аккаунтов: ${num(d.accounts)}` : ''));
+    openChatWarmup();
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось запустить разогрев'));
+  } finally { if (btn) btn.disabled = false; }
 }
 
 // 💬 Разогрев чата флотом с осмысленным диалогом.
@@ -12989,6 +13152,9 @@ let ACC_CHAT_NAME = '';
 let ACC_CHAT_HASH = null;    // access_hash открытого собеседника (для резолва без общего чата)
 let ACC_DIALOGS = {};        // peer id → имя (чтобы не тащить имя через onclick)
 let ACC_DIALOG_HASH = {};    // peer id → access_hash
+let ACC_DIALOG_KIND = {};    // peer id → kind (user/bot/group/channel)
+let ACC_DIALOG_USER = {};    // peer id → @ник чата (разогрев флотом только по нему)
+let ACC_CHAT_USER = '';      // @ник открытого чата, '' у лички и приватных групп
 let ACC_CONTACTS = [];
 let ACC_CONT_SEL = null;     // Set выбранных user_id (режим множественного выбора) или null
 
@@ -13000,7 +13166,10 @@ async function openAccountDialogs(accId) {
     const d = await api('/api/miniapp/account/'+accId+'/dialogs');
     const list = d.dialogs || [];
     ACC_DIALOGS = {}; ACC_DIALOG_HASH = {};
-    list.forEach(dg => { ACC_DIALOGS[dg.id] = dg.name; ACC_DIALOG_HASH[dg.id] = dg.access_hash; });
+    list.forEach(dg => {
+      ACC_DIALOGS[dg.id] = dg.name; ACC_DIALOG_HASH[dg.id] = dg.access_hash;
+      ACC_DIALOG_KIND[dg.id] = dg.kind || ''; ACC_DIALOG_USER[dg.id] = dg.username || '';
+    });
     if (!list.length) { txt('adlgList', empty('💬','Нет диалогов','У аккаунта пока нет переписок')); return; }
     txt('adlgList', list.map(dg => {
       const ico = {user:'👤',bot:'🤖',group:'👥',channel:'📡'}[dg.kind] || '💬';
@@ -13026,6 +13195,12 @@ async function openAccountChat(accId, peer, name, accessHash) {
   ACC_CHAT_HASH = (accessHash != null && accessHash !== '') ? accessHash
                   : (ACC_DIALOG_HASH[peer] != null ? ACC_DIALOG_HASH[peer] : null);
   txt('achat-title', esc(ACC_CHAT_NAME));
+  // Разогрев предлагаем только там, где он возможен: группа или канал, а не
+  // личка и не бот. Кнопку прячем, а не показываем мёртвой.
+  ACC_CHAT_USER = ACC_DIALOG_USER[peer] || '';
+  const _warmBtn = document.getElementById('achat-warm');
+  const _kind = ACC_DIALOG_KIND[peer] || '';
+  if (_warmBtn) _warmBtn.style.display = (_kind === 'group' || _kind === 'channel') ? '' : 'none';
   push('s-accchat');
   await reloadAccountChat();
 }
@@ -13479,6 +13654,7 @@ function buildAccDetail(d) {
     ${capsHtml}
     ${limitsHtml}
     ${rehabHtml}
+    ${typeof accPoolRowHtml === 'function' ? accPoolRowHtml(a) : ''}
     ${warmupHtml}
     ${recentOpsHtml}
     <div style="height:16px"></div>`;
@@ -13826,6 +14002,7 @@ function buildChDetail(d) {
     </div>
 
     <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
+      ${c.type==='channel' ? '' : `<button class="btn btn-p" onclick="startChatWarmup('${escJs(c.username||'')}', this)" style="flex:1 1 100%" title="Флот вступит в чат и будет вести в нём живой диалог">🔥 Разогрев флотом</button>`}
       ${c.username?`<button class="btn btn-s" onclick="openTgUser('${escJs(c.username)}')" style="flex:1 1 auto;min-width:88px" title="Открыть канал в Telegram">↗ Открыть в Telegram</button>`:''}
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📝 Опубликовать</button>
       <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>
@@ -18537,129 +18714,7 @@ async function submitProfileSetter(canary) {
   finally { btn.disabled=false; btn.textContent=label; }
 }
 
-// ── Topology Map ────────────────────────────────────────
-async function openTopology() {
-  push('s-topology');
-  txt('topoStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('topoBody','');
-  try {
-    const d = await api('/api/miniapp/topology');
-    // Пять чисел подряд, и ни одно не открывало свой список.
-    // «Связей» и «Подписчиков» сводного списка не имеют — они остаются числами,
-    // а не притворяются кнопками.
-    txt('topoStats',`
-      <div class="kpi-card tap-card" onclick="healthGoAccounts('all','')" role="button" tabindex="0"><div class="kpi-val">${num(d.accounts||0)}</div><div class="kpi-lbl">Аккаунтов ›</div></div>
-      <div class="kpi-card tap-card" onclick="goTab('channels')" role="button" tabindex="0"><div class="kpi-val">${num(d.channels||0)}</div><div class="kpi-lbl">Каналов ›</div></div>
-      <div class="kpi-card tap-card" onclick="goTab('bots')" role="button" tabindex="0"><div class="kpi-val">${num(d.bots||0)}</div><div class="kpi-lbl">Ботов ›</div></div>
-      <div class="kpi-card"><div class="kpi-val">${num(d.channel_links||0)}</div><div class="kpi-lbl">Связей (вступ)</div></div>
-      <div class="kpi-card"><div class="kpi-val">${num(d.bot_users_total||0)}</div><div class="kpi-lbl">Подп. ботов</div></div>
-    `);
-    txt('topoBody',`
-      <div class="lst">
-        <div class="row"><div class="row-ico" style="background:var(--bg-blue-16)">📊</div><div class="row-body"><div class="row-name">Сложность инфраструктуры</div><div class="row-val">${d.accounts||0} аккаунтов → ${d.channels||0} каналов / ${d.bots||0} ботов</div></div></div>
-        <div class="row"><div class="row-ico" style="background:var(--bg-green-16)">🔗</div><div class="row-body"><div class="row-name">Межаккаунтные связи</div><div class="row-val">${d.channel_links||0} аккаунт↔канал · ${d.bot_users_total||0} пользователей ботов</div></div></div>
-      </div>
-      <div class="sec">Карта связей</div>
-      <div class="lst" id="topoLinks"><div class="spin-wrap"><div class="spin"></div></div></div>
-    `);
-    const links = await api('/api/miniapp/topology/links');
-    const accs = (links.accounts||[]).filter(a => a.channels && a.channels.length);
-    const bots = links.bots||[];
-    if (!accs.length && !bots.length) {
-      txt('topoLinks', empty('🗺','Связей пока нет',
-        'Связь появляется, когда аккаунт вступает в канал или пользователь приходит в бота',
-        {label:'📢 К каналам', fn:"goTab('channels')"}));
-      return;
-    }
-    txt('topoLinks', `
-      ${accs.map(a => `
-        <div class="row">
-          <div class="row-ico" style="background:var(--bg-blue-16)">📱</div>
-          <div class="row-body">
-            <div class="row-name">${esc(a.label)}</div>
-            <div class="row-val">${a.channels.map(c=>esc(c.username?'@'+c.username:c.title||('#'+c.channel_id))).join(', ')}</div>
-          </div>
-        </div>
-      `).join('')}
-      ${bots.map(b => `
-        <div class="row">
-          <div class="row-ico" style="background:var(--bg-purple-16)">🤖</div>
-          <div class="row-body">
-            <div class="row-name">${esc(b.label)}</div>
-            <div class="row-val">${num(b.subscribers||0)} подписчиков</div>
-          </div>
-        </div>
-      `).join('')}
-    `);
-  } catch(e) {
-    txt('topoStats','');
-    txt('topoBody', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openTopology')}));
-  }
-}
-
-// ── Infra Analytics ─────────────────────────────────────
-// В operation_audit.action попадает не только тип операции (его переводит
-// opRu), но и шесть собственных действий воркера: они вылезали на экран
-// латиницей — «gp_create_bot», «join», «publish».
-const AUDIT_RU = {
-  gp_create_bot:     'создан бот',
-  gp_create_group:   'создана группа',
-  gp_create_channel: 'создан канал',
-  join:              'вступление',
-  leave:             'выход',
-  publish:           'публикация',
-  view:              'просмотры',
-  reaction:          'реакции',
-};
-function auditRu(a) { return AUDIT_RU[String(a || '').toLowerCase()] || opRu(a); }
-
-async function openInfra() {
-  push('s-infra');
-  txt('infraStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('infraPools','');
-  txt('infraAudit','');
-  try {
-    const d = await api('/api/miniapp/infra');
-    // Четыре числа и ничего больше — ровно то, на что жаловался владелец.
-    // Каждое из них считает конкретный список, который есть в приложении.
-    const iCard = (val, lbl, style, go) =>
-      `<div class="kpi-card tap-card" onclick="${go}" role="button" tabindex="0">`
-      + `<div class="kpi-val"${style?` style="${style}"`:''}>${val}</div>`
-      + `<div class="kpi-lbl">${lbl} \u203a</div></div>`;
-    txt('infraStats',
-        iCard(d.active_accounts||0, 'Активных акк', kpiTone(d.active_accounts,'green'), "healthGoAccounts('active','')")
-      + iCard(d.flood_24h||0, 'Флуд 24ч', kpiTone(d.flood_24h,'orange'), 'openHealth()')
-      + iCard(d.ops_24h||0, 'Операций 24ч', '', 'openOps()')
-      + iCard(d.warmup_active||0, 'На прогреве', '', 'openWarmup()'));
-    txt('m-infra-val',`${d.active_accounts||0} акк · ${d.flood_24h||0} флуд`);
-    const pools = d.pools||[];
-    // «Пул europe — 42 акк» было числом без продолжения: открыть эти 42
-    // аккаунта было нечем, среза под пул на сервере не существовало.
-    txt('infraPools', pools.length ? pools.map(p=>{
-      const name = p.pool || 'default';
-      return `<div class="row tap" onclick="healthGoAccounts('all','','${escJs(name)}')" role="button" tabindex="0">
-        <div class="row-body"><div class="row-name">Пул: ${esc(name)}</div></div>
-        <div class="row-right">${num(p.cnt)} ${plural(p.cnt,'аккаунт','аккаунта','аккаунтов')} \u203a</div></div>`;
-    }).join('') : empty('📦','Пулы не заданы','Пул — это группа аккаунтов: назначается на карточке аккаунта и делит флот по назначению',
-        {label:'📱 К аккаунтам', fn:"goTab('accounts')"}));
-    const audit = d.audit||[];
-    // operation_audit.result у успешных операций = 'success' (не 'ok'); также
-    // считаем зелёными 'ok'/'done'. Иначе успешные показывались красным ❌.
-    const _auditOk = r => r==='success' || r==='ok' || r==='done';
-    txt('infraAudit', audit.length ? audit.map(a=>`
-      <div class="row">
-        <div class="row-ico" style="background:rgba(${_auditOk(a.result)?'52,211,153':'248,113,113'},.16)">${_auditOk(a.result)?'✅':'❌'}</div>
-        <div class="row-body">
-          <div class="row-name">${esc(auditRu(a.action))}</div>
-          <div class="row-val">${esc(a.target||'')} · ${a.occurred_at?new Date(a.occurred_at).toLocaleString('ru-RU'):''}</div>
-        </div>
-      </div>
-    `).join('') : empty('📋','Записей пока нет','Здесь появятся последние действия над аккаунтами и операциями'));
-  } catch(e) {
-    txt('infraStats','');
-    txt('infraAudit', errHtml(errRu(e), 'openInfra()'));
-  }
-}
+// Топология, «Пулы и аудит» и журнал аудита — в screens/infra.js.
 
 // ── Reporter ─────────────────────────────────────────────
 async function openReporter() {
@@ -26264,10 +26319,38 @@ const REHAB_COLOR = {appeal:'var(--blue,#3b82f6)', warming:'var(--green)',
 // Кнопки ⏩/⏹/🔁 живут в строке: при волне блокировок аккаунт за сотым нельзя
 // было ни поторопить, ни остановить, а плитка сверху при этом честно писала
 // «Восстанавливаются: 143» над списком из ста.
-let RHB_ROWS = [], RHB_OFFSET = 0, RHB_TOTAL = 0;
+let RHB_ROWS = [], RHB_OFFSET = 0, RHB_TOTAL = 0, RHB_VIEW = 'all', RHB_SET = null, RHB_PACES = {};
 async function rehabLoadMore() {
   RHB_OFFSET = RHB_ROWS.length;
   await openRehab(true);
+}
+// Срезы списка живут на самом экране: «Нужен разбор» раньше уводил в список
+// аккаунтов со спам-блоком, где вперемешку и те, кого система ещё
+// вытаскивает, и замороженные — то есть не туда, куда звал счётчик.
+function rehabView(v) {
+  RHB_VIEW = v || 'all';
+  document.querySelectorAll('#rehabSeg .seg-opt').forEach(o =>
+    o.classList.toggle('on', o.dataset.v === RHB_VIEW));
+  RHB_ROWS = []; RHB_OFFSET = 0;
+  txt('rehabList','<div class="spin-wrap"><div class="spin"></div></div>');
+  openRehab(true);
+}
+function rehabRestLabel(h) {
+  h = Number(h)||0;
+  if (!h) return 'без отдыха';
+  return h % 24 ? `${h} ч` : `${h/24} ${plural(h/24,'сутки','суток','суток')}`;
+}
+function rehabWhen(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}); }
+  catch(_) { return ''; }
+}
+function rehabFlow(s) {
+  // Под строкой — самое важное «когда»: дата от Telegram, отдых, следующий шаг.
+  if (s.release_in_seconds!=null) return `📅 Telegram снимет ограничение ${esc(rehabWhen(s.release_at))} · через ${esc(humanDur(s.release_in_seconds))}`;
+  if (s.rest_in_seconds!=null) return `😴 Отдыхает ещё ${esc(humanDur(s.rest_in_seconds))}, потом вернётся в операции`;
+  if (s.next_in_seconds!=null && s.active) return s.next_in_seconds<60 ? 'следующий шаг вот-вот' : 'следующий шаг через '+esc(humanDur(s.next_in_seconds));
+  return '';
 }
 async function openRehab(keep) {
   if (!keep) {
@@ -26277,40 +26360,59 @@ async function openRehab(keep) {
     RHB_ROWS = []; RHB_OFFSET = 0; RHB_TOTAL = 0;
   }
   try {
-    const d = await api('/api/miniapp/rehab?limit=100&offset=' + RHB_OFFSET);
-    // «Возвращены» и «Нужен разбор» — это срезы списка аккаунтов, а не просто
-    // цифры. «Восстанавливаются» никуда не ведёт нарочно: их список прямо ниже.
+    const d = await api('/api/miniapp/rehab?limit=100&view=' + encodeURIComponent(RHB_VIEW) + '&offset=' + RHB_OFFSET);
+    RHB_SET = d.settings || null; RHB_PACES = d.pace_labels || {};
+    // Счётчики — это срезы списка ниже, а не просто цифры: нажатие
+    // переключает срез на этом же экране.
     txt('rehabStats',`
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--blue,#3b82f6)">${num(d.in_progress||0)}</div><div class="kpi-lbl">Восстанавливаются</div></div>
-      <div class="kpi-card tap-card" onclick="healthGoAccounts('active','')" role="button" tabindex="0"><div class="kpi-val" style="${kpiTone(d.freed,'green')}">${num(d.freed||0)}</div><div class="kpi-lbl">Возвращены ›</div></div>
-      <div class="kpi-card tap-card" onclick="healthGoAccounts('spamblock','')" role="button" tabindex="0"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(d.stuck||0)}</div><div class="kpi-lbl">Нужен разбор ›</div></div>
+      <div class="kpi-card tap-card" onclick="rehabView('active')" role="button" tabindex="0"><div class="kpi-val" style="color:var(--blue,#3b82f6)">${num(d.in_progress||0)}</div><div class="kpi-lbl">Восстанавливаются ›</div></div>
+      <div class="kpi-card tap-card" onclick="rehabView('freed')" role="button" tabindex="0"><div class="kpi-val" style="${kpiTone(d.freed,'green')}">${num(d.freed||0)}</div><div class="kpi-lbl">Возвращены ›</div></div>
+      <div class="kpi-card tap-card" onclick="rehabView('attention')" role="button" tabindex="0"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(d.stuck||0)}</div><div class="kpi-lbl">Нужен разбор ›</div></div>
     `);
+    const facts = [];
+    if (d.success_pct!=null) facts.push(`Успешно возвращено <b>${d.success_pct}%</b> из завершённых`);
+    if (d.avg_hours_to_free!=null) facts.push(`в среднем за <b>${esc(humanDur(Math.round(d.avg_hours_to_free*3600)))}</b>`);
+    if (d.waiting_release) facts.push(`ждут даты от Telegram: <b>${num(d.waiting_release)}</b>`);
+    if (d.frozen) facts.push(`заморожены, нужна ваша апелляция: <b>${num(d.frozen)}</b>`);
+    if (d.relapses) facts.push(`повторных блоков: <b>${num(d.relapses)}</b>`);
+    txt('rehabFacts', facts.join(' · '));
+    const paused = !!(RHB_SET && RHB_SET.paused);
+    txt('rehabBanner', paused ? `<div style="margin:0 16px 10px;background:var(--bg2);border-left:3px solid var(--orange,#f59e0b);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.4">
+        ⏸ <b>Восстановление на паузе.</b> Автоматика ничего не делает с аккаунтами, пока вы не продолжите.
+        <button class="btn btn-g" style="width:100%;margin-top:8px" onclick="rehabBulk('resume')">▶ Продолжить восстановление</button></div>` : '');
+    const stuckBtn = (d.stuck||0) > (d.frozen||0)
+      ? `<button class="btn btn-o" style="flex:1" onclick="rehabBulk('restart_stuck')">🔁 Ещё попытка всем застрявшим</button>` : '';
+    const pauseBtn = (!paused && (d.in_progress||0)) ? `<button class="btn btn-o" style="flex:1" onclick="rehabBulk('pause')">⏸ Пауза</button>` : '';
+    txt('rehabBulk', (stuckBtn||pauseBtn) ? `<div style="display:flex;gap:8px;padding:0 16px 10px">${stuckBtn}${pauseBtn}</div>` : '');
     txt('m-rehab-val', (d.in_progress||0) ? `${d.in_progress} в работе${(d.stuck||0)?' · '+d.stuck+' ⚠️':''}` : ((d.stuck||0)?`${d.stuck} ждут разбора`:'нет ограниченных'));
     const _page = listOf(d, 'accounts');
     RHB_ROWS = RHB_OFFSET ? RHB_ROWS.concat(_page) : _page;
     RHB_TOTAL = totalOf(d, RHB_ROWS);
     const accs = RHB_ROWS;
-    if (!accs.length) { txt('rehabList', empty('🩹','Восстанавливать некого',
-      'Ни один аккаунт не под спам-блоком — это хорошая новость',
-      {label:'📱 К аккаунтам', fn:"healthGoAccounts('all','')"})); return; }
+    if (!accs.length) {
+      txt('rehabList', RHB_VIEW === 'all'
+        ? empty('🩹','Восстанавливать некого', 'Ни один аккаунт не под спам-блоком — это хорошая новость',
+            {label:'📱 К аккаунтам', fn:"healthGoAccounts('all','')"})
+        : empty('🩹','В этом срезе пусто','Посмотрите другие вкладки', {label:'Все', fn:"rehabView('all')"}));
+      return;
+    }
     txt('rehabList', accs.map(a=>{
       const s = a.state||{};
       const col = REHAB_COLOR[s.phase] || 'var(--hint)';
-      const wait = (s.next_in_seconds!=null && s.active)
-        ? (s.next_in_seconds<60 ? 'следующий шаг вот-вот' : 'следующий шаг через '+humanDur(s.next_in_seconds)) : '';
+      const flow = rehabFlow(s);
       return `
       <div class="row" style="border-left:3px solid ${col}">
         <div class="row-ico" style="background:var(--bg2)">${s.attention?'🛠':'🩹'}</div>
-        <div class="row-body" onclick="openAccount(${Number(a.acc_id)})" role="button" tabindex="0" style="cursor:pointer">
+        <div class="row-body" onclick="rehabDetail(${Number(a.acc_id)})" role="button" tabindex="0" style="cursor:pointer">
           <div class="row-name">${esc(a.first_name||a.phone||('#'+a.acc_id))} ›</div>
-          <div class="row-val">${esc(s.label||'')}${s.attempts?` · попытка ${s.attempts}/${s.max_attempts}`:''}</div>
-          ${wait?`<div style="font-size:11px;color:var(--hint);margin-top:2px">${esc(wait)}</div>`:''}
+          <div class="row-val">${esc(s.label||'')}${s.attempts?` · попытка ${s.attempts}/${s.max_attempts}`:''}${s.relapses?` · 🔁 ${s.relapses}`:''}</div>
+          ${flow?`<div style="font-size:11px;color:var(--hint);margin-top:2px">${flow}</div>`:''}
           ${s.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(s.hint)}</div>`:''}
         </div>
         <div class="row-right" style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
-          ${s.active?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'now')" aria-label="Пропустить шаг">⏩</button>`:''}
+          ${s.active?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'now')" aria-label="Сделать шаг сейчас">⏩</button>`:''}
           ${s.active?`<button class="btn btn-o" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'off')" aria-label="Остановить">⏹</button>`:''}
-          ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')" aria-label="Повторить шаг">🔁</button>`:''}
+          ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')" aria-label="Запустить заново">🔁</button>`:''}
         </div>
       </div>`;
     }).join('') + moreBtn(accs.length, RHB_TOTAL, 'rehabLoadMore()'));
@@ -26319,6 +26421,52 @@ async function openRehab(keep) {
     txt('rehabList', errHtml(errRu(e), 'openRehab()'));
   }
 }
+// Карточка восстановления: всё, что автоматика делала с аккаунтом, по шагам.
+// Раньше была одна строка «заметка», которую затирал каждый следующий шаг.
+async function rehabDetail(accId) {
+  showModal('mo-rehab-detail');
+  txt('rehabDetailBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/rehab/${Number(accId)}/history`);
+    const a = d.account||{}, s = a.state||{}, ev = d.events||[];
+    const col = REHAB_COLOR[s.phase] || 'var(--hint)';
+    const flow = rehabFlow(s);
+    const facts = [];
+    if (a.first_seen) facts.push(`На восстановлении с ${esc(rehabWhen(a.first_seen))}`);
+    facts.push(`запросов снятия: ${num(a.appeal_count||0)}`);
+    facts.push(`перепроверок: ${num(a.attempts||0)} из ${num(s.max_attempts||0)}`);
+    if (a.warm_actions) facts.push(`тихих действий: ${num(a.warm_actions)}`);
+    if (a.kind) facts.push(a.kind==='temp' ? 'блок временный' : 'похоже на постоянный блок');
+    const btns = [];
+    if (s.active) btns.push(`<button class="btn btn-g" style="flex:1" onclick="rehabAct(${Number(accId)},'now')">⏩ Шаг сейчас</button>`);
+    if (s.active) btns.push(`<button class="btn btn-o" style="flex:1" onclick="rehabAct(${Number(accId)},'off')">⏹ Остановить</button>`);
+    if (s.restartable) btns.push(`<button class="btn btn-g" style="flex:1" onclick="rehabAct(${Number(accId)},'restart')">🔁 Запустить заново</button>`);
+    if (s.active || (s.attention && !s.frozen)) btns.push(`<button class="btn btn-o" style="flex:1" onclick="rehabAppealNow(${Number(accId)})">🛡 Обжаловать сейчас</button>`);
+    txt('rehabDetailBody', `
+      <div class="modal-title">🩹 ${esc(a.first_name||a.phone||('#'+accId))}</div>
+      <div style="background:var(--bg);border-left:3px solid ${col};border-radius:8px;padding:10px 12px">
+        <div style="font-weight:600;font-size:14px">${esc(s.label||'')}</div>
+        ${flow?`<div style="font-size:12px;margin-top:4px">${flow}</div>`:''}
+        ${s.hint?`<div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.4">${esc(s.hint)}</div>`:''}
+        <div style="font-size:11px;color:var(--hint);margin-top:6px;line-height:1.4">${facts.join(' · ')}</div>
+      </div>
+      ${btns.length?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${btns.join('')}</div>`:''}
+      <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="closeModal('mo-rehab-detail');openAccount(${Number(accId)})">📱 Карточка аккаунта</button>
+      <div class="sec" style="padding-left:0">История шагов</div>
+      ${ev.length ? ev.map(e=>`<div style="display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--sep);font-size:13px">
+          <div style="flex:1;line-height:1.35">${esc(e.label||e.step)}${e.detail?`<div style="font-size:11px;color:var(--hint)">${esc(e.detail)}</div>`:''}</div>
+          <div style="font-size:11px;color:var(--hint);white-space:nowrap">${esc(ago(e.at))}</div></div>`).join('')
+        : '<div style="font-size:12px;color:var(--hint);padding:6px 0">Шагов пока не записано — история ведётся с этого обновления</div>'}
+      ${d.capped?'<div style="font-size:11px;color:var(--hint);padding-top:6px">Показаны последние шаги</div>':''}`);
+  } catch(e) {
+    txt('rehabDetailBody', errHtml(errRu(e), `rehabDetail(${Number(accId)})`));
+  }
+}
+async function rehabAppealNow(accId) {
+  closeModal('mo-rehab-detail');
+  await appealSpamblock(accId);
+  openRehab(true);
+}
 async function rehabAct(accId, action) {
   if (action==='off' && !await askConfirm('Выключить авто-восстановление для этого аккаунта?\nСистема перестанет пытаться снять с него ограничение.')) return;
   if (action==='restart' && !await askConfirm('Запустить восстановление заново?\nПопытки обнулятся, аккаунт снова пройдёт аппеляцию и тихий прогрев.')) return;
@@ -26326,8 +26474,61 @@ async function rehabAct(accId, action) {
     await api(`/api/miniapp/rehab/${accId}/${action}`, {method:'POST'});
     tg.HapticFeedback?.notificationOccurred('success');
     toast({now:'⏩ Шаг будет сделан в ближайшем цикле', off:'⏹ Восстановление выключено', restart:'🔁 Восстановление перезапущено'}[action]||'Готово');
-    openRehab();
+    closeModal('mo-rehab-detail');
+    openRehab(true);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
+}
+async function rehabBulk(action) {
+  if (action==='restart_stuck' && !await askConfirm('Дать ещё одну попытку всем, кого автоматика отдала на разбор?\nЗамороженные аккаунты не затрагиваются — их обжалуете вы. Аккаунты стартуют вразнобой в течение часа.')) return;
+  if (action==='pause' && !await askConfirm('Поставить всё восстановление на паузу?\nАккаунты останутся в списке, но автоматика ничего с ними не будет делать.')) return;
+  try {
+    const r = await api(`/api/miniapp/rehab_bulk/${action}`, {method:'POST'});
+    toast({restart_stuck:`🔁 Перезапущено: ${num(r.count||0)}`, pause:'⏸ Восстановление на паузе', resume:'▶ Восстановление продолжается'}[action]||'Готово');
+    openRehab(true);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
+}
+function rehabFillSettings(s) {
+  const sel = document.getElementById('rhsPace');
+  sel.innerHTML = Object.entries(RHB_PACES).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('');
+  sel.value = s.pace || 'normal';
+  document.getElementById('rhsPaused').checked = !!s.paused;
+  document.getElementById('rhsAppeal').checked = s.auto_appeal !== false;
+  document.getElementById('rhsNotifyFreed').checked = s.notify_freed !== false;
+  document.getElementById('rhsNotifyStuck').checked = s.notify_stuck !== false;
+  document.getElementById('rhsMax').value = s.max_rechecks || 8; txt('rhsMaxVal', String(s.max_rechecks || 8));
+  document.getElementById('rhsRest').value = s.rest_hours ?? 24; txt('rhsRestVal', rehabRestLabel(s.rest_hours ?? 24));
+}
+let RHB_DEFAULTS = null;
+async function openRehabSettings() {
+  txt('rhsErr','');
+  showModal('mo-rehab-settings');
+  try {
+    const d = await api('/api/miniapp/rehab/settings');
+    RHB_PACES = d.pace_labels || RHB_PACES; RHB_DEFAULTS = d.defaults || null;
+    rehabFillSettings(d.settings || {});
+  } catch(e) { txt('rhsErr', esc(errRu(e,'Не удалось загрузить настройки'))); }
+}
+function rehabSettingsDefaults() { if (RHB_DEFAULTS) rehabFillSettings(RHB_DEFAULTS); }
+async function saveRehabSettings() {
+  const btn = document.getElementById('rhsSave'); btn.disabled = true;
+  txt('rhsErr','');
+  try {
+    const body = {
+      paused: document.getElementById('rhsPaused').checked,
+      auto_appeal: document.getElementById('rhsAppeal').checked,
+      pace: document.getElementById('rhsPace').value,
+      max_rechecks: Number(document.getElementById('rhsMax').value),
+      rest_hours: Number(document.getElementById('rhsRest').value),
+      notify_freed: document.getElementById('rhsNotifyFreed').checked,
+      notify_stuck: document.getElementById('rhsNotifyStuck').checked,
+    };
+    await api('/api/miniapp/rehab/settings', {method:'POST', body: JSON.stringify(body)});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Настройки восстановления сохранены');
+    closeModal('mo-rehab-settings');
+    openRehab(true);
+  } catch(e) { txt('rhsErr', esc(errRu(e,'Не удалось сохранить'))); }
+  finally { btn.disabled = false; }
 }
 // Журнал прогрева: показывает, что аккаунт делал на самом деле. Раньше эти
 // записи копились в базе и не были видны нигде — на вопрос «он греется?»
@@ -26792,46 +26993,69 @@ async function openHealth() {
 }
 
 // ── Account Shield ─────────────────────────────────────
-const SHIELD_CFG_LABELS = {
-  risk_threshold: '🎯 Порог риска (0–1)',
-  ban_prob_threshold: '🚫 Порог вероятности бана (0–1)',
-  auto_pause: '⏸ Авто-пауза при высоком риске',
-  notify_admin: '🔔 Уведомлять в Telegram'
-};
-// Щит пишет в shield_actions ровно четыре значения — ok/warn/cool/pause
-// (`account_shield._decide`). Словарь же переводил auto_pause/ban_detect/
-// rotate/cooldown/restore, которых он не пишет никогда, поэтому владелец
-// видел в истории сырое английское «pause». Переводим то, что бывает на самом
-// деле; старые ключи оставлены на случай записей из прошлых версий.
+// Щит пишет в shield_actions ровно пять значений — ok/warn/cool/pause/resume
+// (`account_shield.decide` и возврат из паузы). Старые ключи оставлены на
+// случай записей из прошлых версий.
 const SHIELD_ACTIONS = {
-  pause:'⏸ Убран из работы', cool:'❄️ Охлаждение', warn:'⚠️ Предупреждение',
-  ok:'✅ Норма',
+  pause:'⏸ Пауза', cool:'❄️ Охлаждение', warn:'⚠️ Предупреждение',
+  ok:'✅ Норма', resume:'▶️ Возвращён в работу', exempt:'🙈 Исключён',
   auto_pause:'⏸ Авто-пауза', ban_detect:'🚨 Обнаружен бан',
   rotate:'🔄 Ротация аккаунта', cooldown:'❄️ Кулдаун',
   restore:'✅ Восстановление'
 };
-const SHIELD_ICONS = {pause:'⏸', cool:'❄️', warn:'⚠️', ok:'🛡', ban_detect:'🚨', rotate:'🔄'};
-// Настройки щита показывались, но менять их было нечем: у таблицы
-// shield_configs вообще не было писателя со стороны мини-аппа. Теперь каждая
-// строка настройки открывается и сохраняется, а строка истории ведёт в
-// карточку аккаунта.
+const SHIELD_ICONS = {pause:'⏸', cool:'❄️', warn:'⚠️', ok:'🛡', resume:'▶️', ban_detect:'🚨', rotate:'🔄'};
 let SHIELD_CFG = {};
+let SHIELD_HIST_FILTER = '';
 
+// Пороги показываются процентами — так же, как риск в истории и на вкладке
+// «Риск бана». Раньше порог был «0.7», а риск рядом — «50%».
 const SHIELD_RISK_STEPS = [
-  ['0.5', 'Осторожный · 0.5', 'срабатывает рано, ложных тревог больше'],
-  ['0.6', 'Ниже среднего · 0.6', ''],
-  ['0.7', 'Обычный · 0.7', 'значение по умолчанию'],
-  ['0.8', 'Терпимый · 0.8', ''],
-  ['0.9', 'Только явная угроза · 0.9', 'поздно, зато без ложных тревог'],
+  ['0.5', '50% · Осторожный', 'срабатывает рано, ложных тревог больше'],
+  ['0.6', '60% · Ниже среднего', ''],
+  ['0.7', '70% · Обычный', 'значение по умолчанию'],
+  ['0.8', '80% · Терпимый', ''],
+  ['0.9', '90% · Только явная угроза', 'поздно, зато без ложных тревог'],
+];
+const SHIELD_PAUSE_STEPS = [
+  ['0.75', '75% · Осторожный', 'пауза уже при сильном риске'],
+  ['0.85', '85% · Ниже среднего', ''],
+  ['0.9', '90% · Обычный', 'значение по умолчанию'],
+  ['0.95', '95% · Только критический риск', ''],
 ];
 const SHIELD_BAN_STEPS = [
-  ['0.3', 'Осторожный · 0.3', 'вмешиваемся при трети вероятности'],
-  ['0.4', 'Ниже среднего · 0.4', ''],
-  ['0.5', 'Обычный · 0.5', 'значение по умолчанию'],
-  ['0.6', 'Терпимый · 0.6', ''],
-  ['0.7', 'Только явная угроза · 0.7', ''],
+  ['0.3', '30% · Осторожный', 'вмешиваемся при трети вероятности'],
+  ['0.4', '40% · Ниже среднего', ''],
+  ['0.5', '50% · Обычный', 'значение по умолчанию'],
+  ['0.6', '60% · Терпимый', ''],
+  ['0.7', '70% · Только явная угроза', ''],
+];
+const SHIELD_PAUSE_BAN_STEPS = [
+  ['0.6', '60% · Осторожный', ''],
+  ['0.7', '70% · Ниже среднего', ''],
+  ['0.8', '80% · Обычный', 'значение по умолчанию'],
+  ['0.9', '90% · Только явная угроза', ''],
 ];
 const SHIELD_HOURS = [['6','6 часов',''],['12','12 часов',''],['24','24 часа','по умолчанию'],['48','48 часов',''],['72','3 суток','']];
+const SHIELD_COOL_HOURS = [['1','1 час',''],['2','2 часа','по умолчанию'],['4','4 часа',''],['8','8 часов',''],['12','12 часов','']];
+const SHIELD_PRESET_LABELS = {
+  careful:  ['🐢 Осторожный', 'раньше охлаждает, пауза 48 ч'],
+  balanced: ['⚖️ Сбалансированный', 'по умолчанию'],
+  bold:     ['🚀 Смелый', 'вмешивается только при явной угрозе'],
+  custom:   ['🛠 Свой', 'пороги настроены вручную'],
+};
+const SHIELD_MODES = [
+  ['pause', '🛡 Охлаждать и ставить на паузу', 'полная защита — по умолчанию'],
+  ['cool',  '❄️ Только охлаждать', 'аккаунт не снимается с работы, но отдыхает между действиями'],
+  ['warn',  '⚠️ Только предупреждать', 'щит ничего не меняет, только пишет в историю'],
+];
+const SHIELD_MODE_SHORT = {pause:'Пауза и охлаждение', cool:'Только охлаждение', warn:'Только предупреждения'};
+
+function shieldPct(v) { return Math.round((Number(v)||0)*100) + '%'; }
+function shieldWhen(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }
+  catch(_) { return ''; }
+}
 
 async function shieldSave(patch, okMsg) {
   try {
@@ -26852,56 +27076,169 @@ function shieldToggle(field) {
   shieldSave({[field]: !SHIELD_CFG[field]}, SHIELD_CFG[field] ? 'Выключено' : 'Включено');
 }
 
+async function shieldPickMode(field) {
+  const v = await askChoice('Что щиту можно делать с опасным аккаунтом?',
+    SHIELD_MODES.map(([value,label,sub]) => ({value,label,sub})));
+  if (v === null) return;
+  shieldSave({[field || 'response_mode']: v}, 'Реакция щита сохранена');
+}
+
+function shieldPreset(name) {
+  if (name === 'custom') { toast('Свой профиль — меняйте пороги в настройках ниже'); return; }
+  shieldSave({preset: name}, 'Профиль «' + SHIELD_PRESET_LABELS[name][0].replace(/^\S+\s/,'') + '» включён');
+}
+
+async function shieldRunNow() {
+  const btn = document.getElementById('shieldRunBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Проверяю…'; }
+  try {
+    const r = await api('/api/miniapp/shield/run', {method:'POST', body:'{}'});
+    const parts = [];
+    if (r.paused) parts.push('на паузе: ' + r.paused);
+    if (r.cooled) parts.push('охлаждено: ' + r.cooled);
+    if (r.warned) parts.push('предупреждений: ' + r.warned);
+    if (r.resumed) parts.push('возвращено: ' + r.resumed);
+    if (r.failed) parts.push('не применилось: ' + r.failed);
+    toast('🛡 Проверено ' + (r.checked||0) + ' акк.' + (parts.length ? ' · ' + parts.join(', ') : ' · угроз нет'));
+    openShield();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔍 Проверить сейчас'; } }
+}
+
+async function shieldResume(accId, _el) {
+  try {
+    await api('/api/miniapp/shield/resume', {method:'POST', body:JSON.stringify({account_id:Number(accId)})});
+    toast('▶️ Аккаунт снова в работе');
+    openShield();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+// Исключения: аккаунты, которых щит не трогает (личный, тестовый, уже
+// прогретый «тяжеловес»). Мультивыбор из своих аккаунтов.
+async function shieldPickExempt() {
+  let accs = [];
+  try {
+    const d = await api('/api/miniapp/accounts?filter=all&limit=500');
+    accs = (d.accounts||[]);
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось загрузить аккаунты')); return; }
+  if (!accs.length) { toast('Аккаунтов пока нет'); return; }
+  const pre = new Set((SHIELD_CFG.exempt_account_ids||[]).map(Number));
+  const picked = await new Promise(res => {
+    const bg = document.createElement('div');
+    bg.className = 'mbg show';
+    bg.style.zIndex = '9999';
+    const rows = accs.map(a => {
+      const nm = a.first_name || (a.username ? '@'+a.username : '') || a.phone || ('#'+a.id);
+      return '<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--bg2)">'
+        + '<input type="checkbox" class="_sxe" value="' + Number(a.id) + '"' + (pre.has(Number(a.id)) ? ' checked' : '') + '>'
+        + '<span>' + esc(nm) + (a.username ? ' <span style="color:var(--hint)">@' + esc(a.username) + '</span>' : '') + '</span></label>';
+    }).join('');
+    bg.innerHTML = '<div class="modal"><div class="modal-title">Кого щит не трогает</div>'
+      + '<div style="font-size:12px;color:var(--hint);margin:4px 0 6px">Риск этих аккаунтов считается, но щит их не охлаждает и не ставит на паузу.</div>'
+      + '<div style="max-height:52vh;overflow-y:auto">' + rows + '</div>'
+      + '<div style="display:flex;gap:8px;margin-top:10px">'
+      + '<button class="btn btn-d" id="_sxc" style="flex:1 1 auto">Отмена</button>'
+      + '<button class="btn btn-p" id="_sxo" style="flex:1 1 auto">Сохранить</button></div></div>';
+    document.body.appendChild(bg);
+    const done = v => { try { document.body.removeChild(bg); } catch(_) {} res(v); };
+    bg.querySelector('#_sxo').onclick = () => done(Array.from(bg.querySelectorAll('._sxe:checked')).map(x => Number(x.value)));
+    bg.querySelector('#_sxc').onclick = () => done(null);
+    bg.onclick = e => { if (e.target === bg) done(null); };
+  });
+  if (picked === null) return;
+  shieldSave({exempt_account_ids: picked}, picked.length ? 'Исключений: ' + picked.length : 'Исключений нет');
+}
+
+function shieldHistFilter(f) { SHIELD_HIST_FILTER = f; openShield(); }
+
 async function openShield() {
   push('s-shield');
   txt('shieldStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('shieldConfig','');
   txt('shieldHistory','');
   try {
-    const d = await api('/api/miniapp/shield');
+    const d = await api('/api/miniapp/shield' + (SHIELD_HIST_FILTER ? '?action=' + encodeURIComponent(SHIELD_HIST_FILTER) : ''));
     const st = d.stats||{};
     const threatened = st.threatened||0;
     const total = st.total_active||0;
+    const held = (st.paused||0) + (st.cooling||0);
     const riskColor = threatened>0?'var(--red)':'var(--green)';
-    const card = (val, lbl, style, filter) => filter
-      ? `<div class="kpi-card tap-card" onclick="healthGoAccounts('${filter}')" role="button" tabindex="0"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl} ›</div></div>`
+    const card = (val, lbl, style, onclick) => onclick
+      ? `<div class="kpi-card tap-card" onclick="${onclick}" role="button" tabindex="0"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl} ›</div></div>`
       : `<div class="kpi-card"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl}</div></div>`;
     txt('shieldStats',
-        card(threatened>0?'⚠️ Угроза':'✅ Норма', 'Уровень риска', 'color:'+riskColor)
-      + card(total, 'Аккаунтов', '', 'active')
-      + card(threatened, 'Высокий риск', 'color:var(--red)')
-      + card(st.ok_count||0, 'Под защитой'));
+        card(threatened>0?'⚠️ Угроза':'✅ Норма', 'Уровень риска · средний ' + shieldPct(st.avg_risk), 'color:'+riskColor, 'openPhysics()')
+      + card(total, 'Аккаунтов в работе', '', "healthGoAccounts('active')")
+      + card(threatened, 'Выше вашего порога', kpiTone(threatened,'red'), 'openPhysics()')
+      + card(held, 'Щит держит сейчас', kpiTone(held,'orange')));
     txt('m-shield-val', `${threatened} под угрозой · ${total} аккаунтов`);
     const cfg = d.config||{};
     SHIELD_CFG = cfg;
-    const row = (name, val, hint, onclick) =>
-      `<div class="row" onclick="${onclick}" role="button" tabindex="0">
+    const preset = cfg.preset || 'balanced';
+    txt('shieldPresets', Object.keys(SHIELD_PRESET_LABELS).filter(k => k !== 'custom' || preset === 'custom').map(k =>
+      `<div class="chip${k===preset?' on':''}" onclick="shieldPreset('${k}')" role="button" tabindex="0" title="${esc(SHIELD_PRESET_LABELS[k][1])}">${SHIELD_PRESET_LABELS[k][0]}</div>`).join(''));
+    const mode = cfg.response_mode || 'pause';
+    const row = (name, val, hint, onclick, dim) =>
+      `<div class="row" onclick="${onclick}" role="button" tabindex="0"${dim?' style="opacity:.55"':''}>
         <div class="row-body"><div class="row-name">${name}</div><div class="row-val">${hint}</div></div>
         <div class="row-right" style="color:var(--accent);font-weight:600">${val} ›</div></div>`;
+    const ex = (cfg.exempt_account_ids||[]).length;
     txt('shieldConfig',
-        row('🎯 Порог риска', cfg.risk_threshold ?? 0.7,
-            'Аккаунт считается опасным, начиная с этого значения',
-            "shieldPick('risk_threshold',SHIELD_RISK_STEPS,'С какого риска вмешиваться?')")
-      + row('🚫 Порог бана', cfg.ban_prob_threshold ?? 0.5,
-            'При такой вероятности бана щит действует',
-            "shieldPick('ban_prob_threshold',SHIELD_BAN_STEPS,'При какой вероятности бана действовать?')")
-      + row('❄️ Пауза аккаунта', (cfg.cool_duration_hours ?? 24) + ' ч',
-            'На столько щит убирает рискованный аккаунт из работы',
-            "shieldPick('cool_duration_hours',SHIELD_HOURS,'На сколько ставить на паузу?')")
-      + row('⏸ Авто-пауза', cfg.auto_pause?'✅ Вкл':'❌ Выкл',
-            'Сам убирает рискованные аккаунты из работы',
-            "shieldToggle('auto_pause')")
+        row('🎛 Реакция щита', SHIELD_MODE_SHORT[mode]||mode,
+            'Что щиту можно делать с опасным аккаунтом',
+            "shieldPickMode('response_mode')")
+      + row('❄️ Охлаждать с риска', shieldPct(cfg.risk_threshold ?? 0.7),
+            'Аккаунт отдыхает между действиями, но остаётся в работе',
+            "shieldPick('risk_threshold',SHIELD_RISK_STEPS,'С какого риска охлаждать?')", mode==='warn')
+      + row('⏱ Охлаждение', (cfg.cool_hours ?? 2) + ' ч',
+            'На сколько отодвигать следующее действие',
+            "shieldPick('cool_hours',SHIELD_COOL_HOURS,'На сколько охлаждать?')", mode==='warn')
+      + row('⏸ Ставить на паузу с риска', shieldPct(cfg.pause_risk_threshold ?? 0.9),
+            mode==='pause' ? 'Аккаунт снимается с работы целиком' : 'Сейчас пауза выключена реакцией щита',
+            "shieldPick('pause_risk_threshold',SHIELD_PAUSE_STEPS,'С какого риска ставить на паузу?')", mode!=='pause')
+      + row('🕒 Пауза аккаунта', (cfg.cool_duration_hours ?? 24) + ' ч',
+            'Потом щит сам вернёт аккаунт в работу',
+            "shieldPick('cool_duration_hours',SHIELD_HOURS,'На сколько ставить на паузу?')", mode!=='pause')
+      + row('🚫 Вероятность бана: охлаждать', shieldPct(cfg.ban_prob_threshold ?? 0.5),
+            'Второй сигнал рядом с риском: срабатывает любой из двух',
+            "shieldPick('ban_prob_threshold',SHIELD_BAN_STEPS,'При какой вероятности бана охлаждать?')", mode==='warn')
+      + row('🚫 Вероятность бана: пауза', shieldPct(cfg.pause_ban_threshold ?? 0.8),
+            'При такой вероятности бана аккаунт снимается с работы',
+            "shieldPick('pause_ban_threshold',SHIELD_PAUSE_BAN_STEPS,'При какой вероятности бана ставить на паузу?')", mode!=='pause')
+      + row('🙈 Исключения', ex ? ex + ' акк.' : 'Нет',
+            'Аккаунты, которых щит не трогает',
+            'shieldPickExempt()')
       + row('🔔 Уведомления', cfg.notify_admin?'✅ Вкл':'❌ Выкл',
-            'Пишет в Telegram, когда находит угрозу',
+            'Пишет в Telegram, когда ставит аккаунт на паузу',
             "shieldToggle('notify_admin')"));
+
+    const heldRows = d.held||[];
+    document.getElementById('shieldHeldWrap').style.display = heldRows.length ? '' : 'none';
+    txt('shieldHeld', heldRows.map(h => `
+      <div class="row">
+        <div class="row-ico" style="background:var(--bg-blue-16)">${h.state==='pause'?'⏸':'❄️'}</div>
+        <div class="row-body" onclick="openAccount(${Number(h.account_id)})" role="button" tabindex="0">
+          <div class="row-name">${esc(h.name||'Аккаунт')}</div>
+          <div class="row-val">${h.state==='pause'?'Пауза до ':'Охлаждение до '}${shieldWhen(h.until)}</div>
+          ${h.reason?`<div class="row-val" style="color:var(--hint)">${esc(h.reason)}</div>`:''}
+        </div>
+        ${h.state==='pause'?`<button class="btn btn-s" style="font-size:12px;padding:6px 10px" onclick="shieldResume(${Number(h.account_id)}, this)">▶️ Вернуть</button>`:''}
+      </div>`).join(''));
+
+    const wk = d.week||{};
+    const fchip = (f, lbl, n) => `<div class="chip${SHIELD_HIST_FILTER===f?' on':''}" onclick="shieldHistFilter('${f}')" role="button" tabindex="0">${lbl}${n?' · '+n:''}</div>`;
+    txt('shieldHistFilter',
+        fchip('', 'Все', 0) + fchip('pause', '⏸ Паузы', wk.pause) + fchip('cool', '❄️ Охлаждения', wk.cool)
+      + fchip('warn', '⚠️ Предупреждения', wk.warn) + fchip('resume', '▶️ Возвраты', wk.resume));
     const hist = d.history||[];
-    if (!hist.length) { txt('shieldHistory', empty('📋','Щит пока не вмешивался','Здесь появятся аккаунты, которые он убрал из работы')); return; }
+    if (!hist.length) { txt('shieldHistory', empty('📋', SHIELD_HIST_FILTER ? 'Таких записей нет' : 'Щит пока не вмешивался', 'Здесь появятся аккаунты, которые он предупредил, охладил или убрал из работы')); return; }
     let html = hist.map(h=>`
       <div class="row" ${h.account_id?`onclick="openAccount(${Number(h.account_id)})" role="button" tabindex="0"`:''}>
         <div class="row-ico" style="background:var(--bg-blue-16)">${SHIELD_ICONS[h.action]||'🛡'}</div>
         <div class="row-body">
           <div class="row-name">${esc(h.name||'Аккаунт')} · ${SHIELD_ACTIONS[h.action]||esc(h.action||'—')}</div>
-          <div class="row-val">Риск ${((h.risk||0)*100).toFixed(0)}% · бан ${((h.ban_prob||0)*100).toFixed(0)}% · ${h.created_at?ago(h.created_at):''}</div>
+          ${h.note?`<div class="row-val">${esc(h.note)}</div>`:''}
+          <div class="row-val" style="color:var(--hint)">${h.action==='resume'?'':'Риск '+shieldPct(h.risk)+' · бан '+shieldPct(h.ban_prob)+' · '}${h.created_at?ago(h.created_at):''}</div>
         </div>
         ${h.account_id?'<div class="row-right"><span class="chev">›</span></div>':''}
       </div>`).join('');
@@ -26916,9 +27253,13 @@ async function openShield() {
   }
 }
 
-// ── Ad Intelligence ─────────────────────────────────────
-function openAdIntelModal() {
-  document.getElementById('adIntelCh').value='';
+// ── Разведка рекламы ─────────────────────────────────────
+// Экран: KPI и вкладки здесь, списки и карточки — screens/ad_intel.js.
+// Состояние экрана — глобальное (классические скрипты делят область).
+let _adi = {tab:'channels', q:'', sort:'', niche:'', kind:'', clean:false, erid:false, days:0, offset:0};
+let _adiSearchT = null;
+function openAdIntelModal(prefill) {
+  document.getElementById('adIntelCh').value = prefill ? String(prefill) : '';
   document.getElementById('adIntelErr').textContent='';
   document.getElementById('adIntelBtn').disabled=false;
   document.getElementById('adIntelBtn').textContent='🚀 Запустить сканирование';
@@ -26928,79 +27269,67 @@ function closeAdIntelModal() {
   document.getElementById('adIntelMbg').classList.remove('show');
 }
 async function submitAdIntelChannel() {
-  const ch = document.getElementById('adIntelCh').value.trim().replace(/^@/,'');
+  const raw = document.getElementById('adIntelCh').value.trim();
   const errEl = document.getElementById('adIntelErr');
-  if (!ch) { errEl.textContent='Введите username канала'; return; }
+  if (!raw) { errEl.textContent='Укажите хотя бы один канал'; return; }
   const btn = document.getElementById('adIntelBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
-    const r = await api('/api/miniapp/ad_intel/channel',{method:'POST',body:JSON.stringify({channel:ch})});
-    toast(`📡 Сканирование запущено (#${r.op_id})`);
-    if(r.op_id) pollOpResult(r.op_id, 'Ad Intelligence');
-    closeAdIntelModal();
+    const r = await api('/api/miniapp/ad_intel/channel',{method:'POST',body:JSON.stringify({channels:raw})});
+    const q = r.queued||[], rej = r.rejected||[];
+    toast(q.length>1 ? `📡 Поставлено на разведку: ${q.length} ${plural(q.length,'канал','канала','каналов')}`
+                     : `📡 Сканирование запущено (#${r.op_id})`);
+    if (q.length===1 && r.op_id) pollOpResult(r.op_id, 'Разведка рекламы');
+    if (rej.length) {
+      errEl.textContent = 'Не приняты: ' + rej.map(x=>x.input).join(', ') + ' — ' + rej[0].reason;
+      document.getElementById('adIntelCh').value = rej.map(x=>x.input).join('\n');
+    } else {
+      closeAdIntelModal();
+    }
     openAdIntel();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить сканирование'; }
 }
-async function openAdIntel() {
+async function openAdIntel(tab) {
   push('s-adintel');
+  if (tab) _adi.tab = tab;
   txt('adIntelStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('adIntelChannels','');
-  txt('adIntelAdv','');
+  txt('adIntelAlert','');
   try {
     const d = await api('/api/miniapp/ad_intel');
+    const q = Number(d.avg_quality)||0;
     txt('adIntelStats',`
-      <div class="kpi-card"><div class="kpi-val">${d.total_channels||0}</div><div class="kpi-lbl">Каналов</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.total_advertisers||0}</div><div class="kpi-lbl">Рекламодателей</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.total_placements||0}</div><div class="kpi-lbl">Размещений</div></div>
+      <div class="kpi-card tap" role="button" tabindex="0" onclick="adIntelTab('channels')"><div class="kpi-val">${num(d.total_channels||0)}</div><div class="kpi-lbl">Каналов</div></div>
+      <div class="kpi-card tap" role="button" tabindex="0" onclick="adIntelTab('advertisers')"><div class="kpi-val">${num(d.total_advertisers||0)}</div><div class="kpi-lbl">Рекламодателей</div></div>
+      <div class="kpi-card tap" role="button" tabindex="0" onclick="adIntelTab('ads')"><div class="kpi-val">${num(d.ads_7d||0)}</div><div class="kpi-lbl">Объявлений за 7 дней</div></div>
+      <div class="kpi-card"><div class="kpi-val">${q.toFixed(0)}<span style="font-size:12px;color:var(--hint)">/100</span></div><div class="kpi-lbl">Среднее качество</div></div>
     `);
     txt('m-adintel-val',`${d.total_channels||0} каналов · ${d.total_placements||0} размещений`);
-    const chs = d.top_channels||[];
-    // Имена полей — РОВНО те, что отдаёт /api/miniapp/ad_intel. Раньше здесь
-    // читались channel_username/placements_count/avg_er и advertiser_name/
-    // total_placements/avg_spend — ни одного такого ключа в ответе нет, поэтому
-    // строка вечно показывала «@undefined · 0 размещений · ER 0.0%». Совпадала
-    // одна quality_score из пяти. Заодно показываем то, что бэкенд слал, а UI
-    // выбрасывал: заголовок, подписчиков, оценку цены, давность размещения.
-    if (!chs.length) {
+    const notes = [];
+    const failed = d.failed_channels||0, sus = d.suspicious_channels||0;
+    if (failed) notes.push(`⚠️ ${failed} ${plural(failed,'канал','канала','каналов')} не удалось обновить — причина в карточке канала`);
+    if (sus) notes.push(`🚩 У ${sus} ${plural(sus,'канала','каналов','каналов')} есть признаки накрутки`);
+    // Кто сейчас рекламируется активнее всех — быстрый вход в карточку.
+    const leaders = (d.top_advertisers ? d.top_advertisers.map(a =>
+      `<span class="chip tap" role="button" tabindex="0" onclick="openAdAdvertiser('${escJs(a.username)}')">${esc((a.kind==='site'||a.kind==='invite') ? a.username : '@'+a.username)} · ${num(a.placements||0)} в ${num(a.channels||0)} ${plural(a.channels||0,'канале','каналах','каналах')}</span>`) : []).slice(0,5).join('');
+    const lead = leaders ? `<div class="field-note" style="padding:0 16px 4px">Активнее всех рекламируются:</div><div class="filter-chips" style="padding:0 16px 8px">${leaders}</div>` : '';
+    txt('adIntelAlert', (notes.length ? `<div class="card" style="margin:0 16px 8px;font-size:13px">${notes.map(esc).join('<br>')}</div>` : '') + lead);
+    if (!d.total_channels) {
+      // Пусто: вкладки и поиск ни к чему — одна понятная дверь.
+      adIntelShowTab('channels');
       txt('adIntelChannels', empty('📡','Каналов на разведке нет',
-        'Добавьте чужой канал — система соберёт по нему рекламодателей, цену размещения и вовлечённость',
-        {label:'➕ Добавить канал', fn:'openAdIntelModal()'}));
-    } else {
-      txt('adIntelChannels', chs.map(c=>{
-        const nm = c.title || (c.username ? '@'+c.username : 'Канал');
-        return `
-      <div class="row${c.username?' tap':''}" ${c.username?`role="button" tabindex="0" onclick="openTgUser('${escJs(c.username)}')"`:''}>
-        <div class="row-ico" style="background:var(--bg-yellow-16)">📺</div>
-        <div class="row-body">
-          <div class="row-name">${esc(nm)}</div>
-          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${num(c.subscribers||0)} подписчиков · ER ${(Number(c.er_rate)||0).toFixed(1).replace('.',',')}%${c.ad_price_est?' · размещение ~'+num(c.ad_price_est)+' ⭐':''}</div>
-        </div>
-        <div class="row-right" style="display:flex;align-items:center;gap:5px"><span style="color:var(--orange);font-size:13px">${(Number(c.quality_score)||0).toFixed(0)}⭐</span>${c.username?'<span class="chev">›</span>':''}</div>
-      </div>`;
-      }).join(''));
+        'Добавьте чужие каналы — система соберёт по ним рекламодателей, цену размещения, охват и вовлечённость',
+        {label:'➕ Добавить каналы', fn:'openAdIntelModal()'}));
+      txt('adIntelMore','');
+      return;
     }
-    const advs = d.top_advertisers||[];
-    if (!advs.length) {
-      txt('adIntelAdv', empty('🏢','Рекламодателей пока нет',
-        chs.length ? 'По добавленным каналам реклама ещё не попадалась — разведка смотрит новые посты и дополнит список сама'
-                   : 'Сначала добавьте канал на разведку — рекламодатели берутся из его постов',
-        chs.length ? null : {label:'➕ Добавить канал', fn:'openAdIntelModal()'}));
-    } else {
-      txt('adIntelAdv', advs.map(a=>`
-      <div class="row${a.username?' tap':''}" ${a.username?`role="button" tabindex="0" onclick="openTgUser('${escJs(a.username)}')"`:''}>
-        <div class="row-ico" style="background:var(--bg-violet-16)">🏢</div>
-        <div class="row-body">
-          <div class="row-name">${a.username?'@'+esc(a.username):'Рекламодатель'}</div>
-          <div class="row-val">${num(a.placements||0)} размещений</div>
-        </div>
-        <div class="row-right" style="display:flex;align-items:center;gap:5px"><span style="color:var(--hint);font-size:13px">${a.last_seen?ago(a.last_seen):''}</span>${a.username?'<span class="chev">›</span>':''}</div>
-      </div>`).join(''));
-    }
+    adIntelReload();
   } catch(e) {
     txt('adIntelStats','');
     txt('adIntelChannels', errHtml(errRu(e), 'openAdIntel()'));
     txt('adIntelAdv','');
+    txt('adIntelAds','');
+    txt('adIntelMore','');
   }
 }
 
@@ -29762,30 +30091,100 @@ async function checkChannelRanks() {
 }
 
 // ── Physics Hub ────────────────────────────────────────
+// Вкладка «Риск бана»: риск каждого аккаунта и ИЗ ЧЕГО он сложился. Раньше
+// здесь стояли одинаковые «Риск 0% · Бан-вер. 5% · Ops/24h 0» у всего флота:
+// оценка смотрела в один журнал и ждала исход, которого никто не пишет.
+let PHYS_ROWS = [];
+let PHYS_FILTER = 'all';
+// Полосы — те же, что у бота (`physics_engine.risk_label`).
+function physBand(r) {
+  r = Number(r)||0;
+  if (r >= 0.75) return ['🔴 Критический', 'var(--red)'];
+  if (r >= 0.5) return ['🟠 Высокий', 'var(--orange,#f59e0b)'];
+  if (r >= 0.25) return ['🟡 Умеренный', 'var(--yellow,#eab308)'];
+  return ['🟢 Низкий', 'var(--green)'];
+}
+function physToggle(id) {
+  const el = document.getElementById('phx-' + id);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function physSetFilter(f) { PHYS_FILTER = f; physRender(); }
+async function physicsRecalc() {
+  const btn = document.getElementById('physicsRecalcBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Считаю…'; }
+  try {
+    // Проход щита пересчитывает риск всего флота и сразу применяет политику.
+    await api('/api/miniapp/shield/run', {method:'POST', body:'{}'});
+    toast('✅ Риск пересчитан');
+    openPhysics();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔄 Пересчитать сейчас'; } }
+}
+function physRender() {
+  const rows = PHYS_ROWS;
+  const n = rows.length;
+  const crit = rows.filter(r => (r.risk_score||0) >= 0.75).length;
+  const high = rows.filter(r => (r.risk_score||0) >= 0.5 && (r.risk_score||0) < 0.75).length;
+  const avg = n ? rows.reduce((a, r) => a + (Number(r.risk_score)||0), 0) / n : 0;
+  const withF = rows.filter(r => (r.factors||[]).length).length;
+  const kc = (val, lbl, style) => `<div class="kpi-card"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl}</div></div>`;
+  txt('physicsStats',
+      kc(shieldPct(avg), 'Средний риск флота', 'color:' + physBand(avg)[1])
+    + kc(crit, 'Критический риск', kpiTone(crit,'red'))
+    + kc(high, 'Высокий риск', kpiTone(high,'orange'))
+    + kc(n - withF, 'Без факторов риска', kpiTone(n - withF,'green')));
+  const fchip = (f, lbl, cnt) => `<div class="chip${PHYS_FILTER===f?' on':''}" onclick="physSetFilter('${f}')" role="button" tabindex="0">${lbl} · ${cnt}</div>`;
+  txt('physicsFilter',
+      fchip('all', 'Все', n) + fchip('risk', '⚠️ Под угрозой', crit + high)
+    + fchip('factors', '🔎 С факторами', withF));
+  const shown = rows.filter(r => PHYS_FILTER === 'all' ? true
+    : PHYS_FILTER === 'risk' ? (r.risk_score||0) >= 0.5
+    : (r.factors||[]).length > 0);
+  if (!shown.length) {
+    txt('physicsList', empty('✅', 'Таких аккаунтов нет', 'Смените фильтр, чтобы увидеть остальные'));
+    return;
+  }
+  txt('physicsList', shown.map(r => {
+    const id = Number(r.account_id);
+    const [lbl, col] = physBand(r.risk_score);
+    const f = r.factors || [];
+    const top = f.length ? `${esc(f[0].label)}${f[0].detail?' — '+esc(f[0].detail):''}${f.length>1?' и ещё '+(f.length-1):''}` : 'факторов риска нет';
+    const paused = r.is_active === false && r.shield_paused_until;
+    const detail = f.length ? f.map(x => {
+      const w = Math.max(3, Math.round((Number(x.impact)||0)*100));
+      return `<div style="margin:6px 0">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px"><span>${esc(x.label)}${x.detail?` <span style="color:var(--hint)">· ${esc(x.detail)}</span>`:''}</span><b>+${shieldPct(x.impact)}</b></div>
+        <div style="height:5px;border-radius:3px;background:var(--bg2);margin-top:3px"><div style="height:5px;border-radius:3px;width:${w}%;background:${col}"></div></div></div>`;
+    }).join('') : '<div style="font-size:12px;color:var(--hint)">Ни один фактор риска сейчас не выражен.</div>';
+    return `
+      <div class="row tap" onclick="physToggle(${id})" role="button" tabindex="0" style="flex-wrap:wrap">
+        <div class="row-ico" style="background:var(--bg-red-16)">📱</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.first_name||r.phone||'Аккаунт')} ${r.username?'@'+esc(r.username):''}${paused?' · ⏸ на паузе':''}</div>
+          <div class="row-val"><span style="color:${col}">${lbl}</span> · риск ${shieldPct(r.risk_score)} · бан ${shieldPct(r.ban_probability)}</div>
+          <div class="row-val" style="color:var(--hint)">${top}</div>
+        </div>
+        <div class="row-right chev">⌄</div>
+        <div id="phx-${id}" style="display:none;flex-basis:100%;padding:6px 4px 2px" onclick="event.stopPropagation()">
+          ${detail}
+          <div style="font-size:11px;color:var(--hint);margin-top:6px">Действий за сутки: ${num(r.ops_24h||0)} · пересчитано ${r.computed_at?ago(r.computed_at):'—'}</div>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 10px" onclick="openAccount(${id})">Открыть аккаунт ›</button>
+        </div>
+      </div>`;
+  }).join(''));
+}
 async function openPhysics() {
   push('s-physics');
+  txt('physicsStats', '');
+  txt('physicsFilter', '');
   txt('physicsList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/physics');
-    if (!rows.length) { txt('physicsList', empty('⚛️','Риск ещё не считался',
-      'Оценка появляется после первых операций с аккаунтов',
-      {label:'⚙️ К операциям', fn:'openOps()'})); return; }
-    const riskLabel = r => r>=0.8?'🔴 Критический':r>=0.5?'🟠 Высокий':r>=0.3?'🟡 Средний':'🟢 Низкий';
-    // account_id сервер отдавал с самого начала, а строка никуда не вела:
-    // «риск 91%» — и всё, аккаунт приходилось искать руками в списке.
-    txt('physicsList', rows.map(r => `
-      <div class="row${r.account_id?' tap':''}"${r.account_id?` onclick="openAccount(${Number(r.account_id)})" role="button" tabindex="0"`:''}>
-        <div class="row-ico" style="background:var(--bg-red-16)">📱</div>
-        <div class="row-body">
-          <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
-          <div class="row-val">${riskLabel(r.risk_score||0)} · Риск: ${((r.risk_score||0)*100).toFixed(0)}%</div>
-          <div class="row-val">Бан-вер.: ${((r.ban_probability||0)*100).toFixed(0)}% · Ops/24h: ${r.ops_24h||0}</div>
-          ${r.flood_rate_1h?`<div class="row-val" style="color:var(--orange)">Флуд за час: ${(r.flood_rate_1h).toFixed(1).replace('.',',')}</div>`:''}
-          <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
-        </div>
-        ${r.account_id?'<div class="row-right chev">›</div>':''}
-      </div>
-    `).join(''));
+    PHYS_ROWS = Array.isArray(rows) ? rows : [];
+    if (!PHYS_ROWS.length) { txt('physicsList', empty('⚛️','Риск ещё не считался',
+      'Нажмите «Пересчитать сейчас» — оценка посчитается по всем аккаунтам с сессией',
+      {label:'🔄 Пересчитать', fn:'physicsRecalc()'})); return; }
+    physRender();
   } catch(e) { txt('physicsList', errHtml(errRu(e), 'openPhysics()')); }
 }
 
@@ -34931,6 +35330,7 @@ function renderAudSegChart(segments) {
 <script src="screens/va_admin.js"></script>
 <script src="screens/channel_manage.js"></script>
 <script src="screens/shield_check.js"></script>
+<script src="screens/ad_intel.js"></script>
 <script src="screens/account_login.js"></script>
 <script src="screens/integrations.js"></script>
 <script src="screens/mailboxes.js"></script>
@@ -34955,6 +35355,7 @@ function renderAudSegChart(segments) {
 <script src="screens/desktop.js"></script>
 <script src="screens/main_button.js"></script>
 <script src="screens/fleet_tools.js"></script>
+<script src="screens/infra.js"></script>
 <script src="screens/clone_adapt.js"></script>
 </body>
 </html>

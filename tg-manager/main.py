@@ -949,6 +949,21 @@ async def main() -> None:
         # выборка уведомлений падает и итог восстановления снова становится
         # немым — то есть ровно то, что эта колонка и лечит.
         "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS notified_phase TEXT",
+        # Центр восстановления (тот же список — в INLINE_MIGRATIONS mini_app_api): история шагов, настройки
+        # владельца, дата снятия и повторные блоки. Без них заведение и шаги
+        # цикла падали бы целиком при лаге миграции.
+        "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS release_at TIMESTAMPTZ",
+        "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS relapses INTEGER NOT NULL DEFAULT 0",
+        "CREATE TABLE IF NOT EXISTS account_rehab_events ("
+        "id BIGSERIAL PRIMARY KEY, acc_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
+        "at TIMESTAMPTZ NOT NULL DEFAULT now(), step TEXT NOT NULL, outcome TEXT, detail TEXT)",
+        "CREATE INDEX IF NOT EXISTS idx_rehab_events_acc ON account_rehab_events(acc_id, at DESC)",
+        "CREATE TABLE IF NOT EXISTS rehab_settings ("
+        "owner_id BIGINT PRIMARY KEY, paused BOOLEAN NOT NULL DEFAULT FALSE, "
+        "auto_appeal BOOLEAN NOT NULL DEFAULT TRUE, pace TEXT NOT NULL DEFAULT 'normal', "
+        "max_rechecks INTEGER NOT NULL DEFAULT 8, rest_hours INTEGER NOT NULL DEFAULT 24, "
+        "notify_freed BOOLEAN NOT NULL DEFAULT TRUE, notify_stuck BOOLEAN NOT NULL DEFAULT TRUE, "
+        "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())",
         # Починка CHECK плана подписки (schema_v189): код перешёл на тариф 'paid',
         # а базовая схема разрешала только старые 'starter'/'pro'/'enterprise' —
         # из-за чего ВСЯ выдача 'paid' (мини-апп, billing, восстановление подписок)
@@ -1358,6 +1373,9 @@ async def main() -> None:
         # Сводка за тихие часы: придержанное ночью уходит одним сообщением.
         from services import quiet_hours as _quiet_hours
         _spawn(_resilient("quiet_hours", _quiet_hours.run, pool, bot))
+        # Разведка рекламы: каналы на разведке пересканируются раз в сутки.
+        from services import ad_intel_refresher as _ad_intel_refresher
+        _spawn(_resilient("ad_intel_refresher", _ad_intel_refresher.run, pool, bot))
         # Новая версия Bot API — сразу админам: HTML-виджеты (HTMLBubbles) уже
         # в приложениях, но API для их отправки ещё не опубликован.
         from services import telegram_updates_watch as _tg_updates
