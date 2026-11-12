@@ -54,6 +54,80 @@ async function _shLoadBody() {
   try { mon = await api('/api/miniapp/monitor/status'); } catch (e) { mon = null; }
   body.innerHTML = _shRender(t) + _shGeoRender(g) + _shMonRender(mon);
   loadShieldOps();
+  loadDeadEntities();
+}
+
+// Быстрая уборка мёртвых карточек: сущности, которые последняя проверка нашла
+// НЕДОСТУПНЫМИ снаружи (Telegram их удалил/заблокировал/скрыл) и которые ещё в
+// списке владельца. Снимаем их с учёта в нашей базе (в Telegram они уже мертвы).
+async function loadDeadEntities() {
+  const box = document.getElementById('shDeadBox');
+  if (!box) return;
+  let d;
+  try {
+    d = await api('/api/miniapp/restrictions/dead');
+  } catch (e) { box.innerHTML = ''; return; }
+  const dead = (d && d.dead) || [];
+  if (!dead.length) { box.innerHTML = ''; return; }
+  const kindIco = { channel: '📡', group: '💬', bot: '🤖' };
+  const rows = dead.map(function (x) {
+    const ico = kindIco[x.kind] || '🔗';
+    return '<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--sep);font-size:14px">' +
+      '<input type="checkbox" class="sh-dead-cb" checked value="' + esc(String(x.id)) + '" data-kind="' + esc(x.kind || '') + '">' +
+      '<div style="flex:1 1 auto;min-width:0">' +
+        '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ico + ' ' + esc(x.title || x.id) + '</div>' +
+        '<div style="font-size:12px;color:var(--hint)">' + esc(x.reason || 'недоступен снаружи') + '</div>' +
+      '</div></label>';
+  }).join('');
+  box.innerHTML =
+    '<div class="sec">🗑 Недоступные сущности</div>' +
+    '<div class="lst" style="padding:14px">' +
+      '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin-bottom:8px">' +
+        'Последняя проверка нашла <b>' + dead.length + '</b> ' + _shPlural(dead.length) +
+        ', недоступных снаружи (Telegram их удалил, заблокировал или скрыл). ' +
+        'Можно убрать их из списка — в Telegram они уже мертвы, удаляется только карточка у вас.' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+        '<button class="btn btn-s" onclick="shDeadSelectAll(true)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">✅ Все</button>' +
+        '<button class="btn btn-s" onclick="shDeadSelectAll(false)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">⬜ Снять</button>' +
+      '</div>' +
+      rows +
+      '<button class="btn btn-d" onclick="removeDeadEntities()" style="width:100%;margin-top:10px">🗑 Убрать выбранные из списка</button>' +
+      '<div id="shDeadErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>' +
+    '</div>';
+}
+
+function shDeadSelectAll(on) {
+  document.querySelectorAll('.sh-dead-cb').forEach(function (cb) { cb.checked = !!on; });
+}
+
+async function removeDeadEntities() {
+  const errEl = document.getElementById('shDeadErr');
+  if (errEl) errEl.textContent = '';
+  const checked = [].slice.call(document.querySelectorAll('.sh-dead-cb:checked'));
+  const channel_ids = [], bot_ids = [];
+  checked.forEach(function (cb) {
+    const id = parseInt(cb.value, 10);
+    if (!Number.isFinite(id)) return;
+    if (cb.getAttribute('data-kind') === 'bot') bot_ids.push(id); else channel_ids.push(id);
+  });
+  const n = channel_ids.length + bot_ids.length;
+  if (!n) { if (errEl) errEl.textContent = 'Отметьте хотя бы одну сущность'; return; }
+  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nЭто снятие с учёта в вашей базе — сами сущности в Telegram уже недоступны. Действие не трогает Telegram.')) return;
+  // Ключ шлём, только если в нём есть цели: пустой список сервер отбивает как
+  // ошибку выбора, а не принимает за «ничего».
+  const payload = {};
+  if (channel_ids.length) payload.channel_ids = channel_ids;
+  if (bot_ids.length) payload.bot_ids = bot_ids;
+  try {
+    const r = await api('/api/miniapp/restrictions/remove_dead', { method: 'POST', body: JSON.stringify(payload) });
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🗑 Убрано из списка: ' + (r.removed || 0));
+    loadDeadEntities();
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    if (errEl) errEl.textContent = (e && e.message) || 'Не удалось убрать';
+  }
 }
 
 // Авто-мониторинг флота: периодические фоновые проверки (здоровье, ограничения,
@@ -231,6 +305,8 @@ function _shRender(t) {
         : '<button class="btn btn-p" id="shRunBtn" onclick="runShieldCheck()" style="width:100%"' + disabled + '>' +
             '🛡 Проверить ' + total + ' ' + _shPlural(total) + '</button>') +
     '</div>' +
+    // Быстрая уборка мёртвых карточек после проверки (заполняется loadDeadEntities).
+    '<div id="shDeadBox"></div>' +
     '<div class="sec">Последние проверки</div>' +
     '<div class="lst" id="shOpsList"><div class="spin-wrap"><div class="spin"></div></div></div>';
 }
