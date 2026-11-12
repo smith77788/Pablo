@@ -11228,6 +11228,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services import miniapp_brotli as _mb
             h = request.match_info.get("h", "")
             gz = _LAZY.chunk_gz(h)
+            if gz is None and _LAZY.wants_warmup():
+                # Процесс только поднялся (деплой) или страницу отдала другая
+                # реплика: нарезки здесь ещё нет. Нарезка детерминирована —
+                # запускаем её для текущей версии и ждём, а не отвечаем 404
+                # (404 стоит странице перезагрузки).
+                import asyncio as _aio
+                await serve_index(request.clone(rel_url="/miniapp"))
+                if _LAZY._tasks:
+                    await _aio.wait(list(_LAZY._tasks), timeout=20)
+                gz = _LAZY.chunk_gz(h)
             if gz is None:
                 raise web.HTTPNotFound()
             etag = f'"{h}"'

@@ -1004,6 +1004,10 @@ class LazyCache:
                     self.gz.pop(h, None)
                     self.owner.pop(h, None)
 
+    def wants_warmup(self) -> bool:
+        """Ни одной готовой нарезки: кусок просят раньше, чем её запустили."""
+        return not any(self.pages.values())
+
     def chunk_gz(self, h: str) -> bytes | None:
         body = self.chunks.get(h)
         if body is None:

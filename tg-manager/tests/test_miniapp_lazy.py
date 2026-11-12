@@ -337,3 +337,24 @@ async def test_broken_split_falls_back_to_full(client, monkeypatch):
     r = await client.get("/miniapp", headers={"Accept-Encoding": "gzip"})
     assert r.status == 200
     assert "__lazyLoadAll" not in gzip.decompress(await r.read()).decode()
+
+
+async def test_chunk_before_any_page_warms_up_instead_of_404(monkeypatch):
+    """Свежий процесс (деплой, другая реплика): страницу отдал не он, а кусок
+    просят у него. Нарезка детерминирована — он режет сам и отдаёт кусок."""
+    monkeypatch.delenv("MINIAPP_LAZY", raising=False)
+    a = TestClient(TestServer(_build_app()), auto_decompress=False)
+    await a.start_server()
+    try:
+        _r, body = await _lazy_page(a)
+    finally:
+        await a.close()
+    url = re.findall(r'"(lazy/[0-9a-f]{16}\.js)"', body)[0]
+    b = TestClient(TestServer(_build_app()), auto_decompress=False)
+    await b.start_server()
+    try:
+        r = await b.get("/miniapp/" + url, headers={"Accept-Encoding": "gzip"})
+        assert r.status == 200
+        assert "function " in gzip.decompress(await r.read()).decode()
+    finally:
+        await b.close()
