@@ -306,6 +306,9 @@ def build_dialogue_prompt(persona_desc: str, recent: list[dict], target: dict | 
         parts.append(
             f"Ответь по смыслу на последнее сообщение от «{(target.get('sender_name') or 'участник')[:32]}»: "
             f"«{(target.get('text') or '').strip()[:300]}».")
+        if target.get("to_you"):
+            parts.append("Это ответ на ТВОЁ сообщение: человек обратился к тебе — "
+                         "продолжи свою мысль, а не начинай заново.")
     elif topics_txt:
         parts.append(f"Продолжи живую беседу на одну из тем: {topics_txt}. "
                      "Не открывай тему формально — вклинься естественно.")
@@ -1146,6 +1149,27 @@ async def _fleet_tg_ids(pool, account_ids: list[int]) -> set[int]:
         return set()
 
 
+async def _account_by_tg(pool, account_ids: list[int], tg_user_id) -> int | None:
+    """Аккаунт сессии по его Telegram-id. None — не наш или база не ответила."""
+    try:
+        v = await pool.fetchval(
+            "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[]) AND tg_user_id = $2",
+            [int(a) for a in account_ids], int(tg_user_id))
+        return int(v) if v else None
+    except Exception:
+        log.debug("chat_warmup: аккаунт по tg-id не найден", exc_info=True)
+        return None
+
+
+async def _set_addressed(pool, sid: int, account_id) -> None:
+    try:
+        await pool.execute(
+            "UPDATE chat_warmup_sessions SET addressed_acc=$2 WHERE id=$1",
+            int(sid), int(account_id) if account_id else None)
+    except Exception:
+        log.debug("chat_warmup s=%s: адресат не записан", sid, exc_info=True)
+
+
 def _sender_name(msg) -> str:
     s = getattr(msg, "sender", None)
     if s is not None:
@@ -1169,7 +1193,46 @@ def _msg_to_dict(msg, own_tg_ids: set[int]) -> dict:
         # видит свои прошлые реплики как чужие — спорит сама с собой и
         # повторяет уже сказанное.
         "is_self": getattr(msg, "out", False) is True,
+        # На какое сообщение это ответ: по нему видно, к кому из флота
+        # обратился человек (addressed_sender).
+        "reply_to": _reply_to_id(msg),
     }
+
+
+def _reply_to_id(msg) -> int:
+    v = getattr(msg, "reply_to_msg_id", None)
+    return v if isinstance(v, int) and not isinstance(v, bool) else 0
+
+
+def addressed_sender(recent: list[dict], target_id) -> int | None:
+    """Telegram-id аккаунта флота, которому ответил человек сообщением
+    `target_id`, или None — сообщение никому из флота не адресовано. ЧИСТАЯ."""
+    by_id = {int(m.get("id") or 0): m for m in recent or []}
+    tgt = by_id.get(int(target_id or 0))
+    if not tgt or not tgt.get("reply_to"):
+        return None
+    orig = by_id.get(int(tgt["reply_to"]))
+    if not orig or not orig.get("is_fleet"):
+        return None
+    return int(orig.get("sender_id") or 0) or None
+
+
+def prefer_addressed(queue: list[int], addressed) -> list[int]:
+    """Очередь говорящих, где тот, к кому обратились, — первый. ЧИСТАЯ."""
+    try:
+        a = int(addressed or 0)
+    except (TypeError, ValueError):
+        return list(queue)
+    if not a or a not in queue:
+        return list(queue)
+    return [a] + [i for i in queue if i != a]
+
+
+def typing_seconds(text: str) -> float:
+    """Сколько «набирать» реплику: живой человек пишет ~5–7 знаков в секунду,
+    и короткое «ага» не набирают шесть секунд, а абзац — не две. ЧИСТАЯ."""
+    n = len(text or "")
+    return max(1.5, min(14.0, 1.0 + n / random.uniform(5.0, 7.0)))
 
 
 async def _resolve_and_join(client, chat_ref: str):
@@ -1309,6 +1372,8 @@ async def _process_session(pool, session: dict) -> None:
     _queue = [i for i in _speaker_order(account_ids, session.get("last_speaker"),
                                         _avail)
               if i not in _hopeless and i not in _capped]
+    # Человек ответил конкретному аккаунту — ход за ним, если он может говорить.
+    _queue = prefer_addressed(_queue, session.get("addressed_acc"))
     if not _queue:
         # Причина у каждого своя, и действия у владельца разные: «перезалейте
         # сессию» против «дайте права в чате» против «подождите паузу».
@@ -1430,6 +1495,27 @@ async def _process_session(pool, session: dict) -> None:
                         account_id=speaker)
             return
 
+        # К кому обратился человек. Ответ другого аккаунта на вопрос, заданный
+        # этому, выдаёт флот сразу; поэтому ход один раз откладывается в пользу
+        # адресата. Второй раз подряд не откладываем: адресат мог выпасть
+        # (пауза, карантин), а человек без ответа хуже чужого голоса.
+        _to_you = False
+        if plan["kind"] == "reply" and plan.get("reply_to_id"):
+            _tg = addressed_sender(recent, plan["reply_to_id"])
+            _addr = await _account_by_tg(pool, account_ids, _tg) if _tg else None
+            _prev = int(session.get("addressed_acc") or 0)
+            if _addr and _addr != speaker and _prev != _addr:
+                # Ход заканчивается без отметки «прочитано»: сообщение
+                # человека остаётся неотвеченным и достанется адресату.
+                await _set_addressed(pool, sid, _addr)
+                await _skip(pool, session,
+                            f"Человек ответил аккаунту #{_addr} — ход отдан ему",
+                            account_id=speaker)
+                return
+            _to_you = bool(_addr) and _addr == speaker
+            if _prev:
+                await _set_addressed(pool, sid, None)
+
         _react_pct = session.get("react_pct")
         if should_react(plan["kind"], bool(plan.get("reply_to_id")),
                         chance=(None if _react_pct is None else int(_react_pct) / 100)):
@@ -1457,7 +1543,8 @@ async def _process_session(pool, session: dict) -> None:
         else:
             target = None
             if plan["kind"] == "reply" and plan.get("reply_to_id"):
-                target = {"text": plan["reply_to_text"], "sender_name": plan["reply_to_sender"]}
+                target = {"text": plan["reply_to_text"], "sender_name": plan["reply_to_sender"],
+                          "to_you": _to_you}
             # Голос аккаунта: персона + её память о себе (persona_voice). Без
             # персоны — устойчивый запасной характер, как раньше.
             from services import persona_voice
@@ -1471,7 +1558,9 @@ async def _process_session(pool, session: dict) -> None:
                 # (в памяти персоны или прямо в этом чате) — пропуск хода: флот,
                 # который говорит одними фразами, виден за версту.
                 _styled = persona_voice.enforce_style(reply, voice.persona)
-                _own_here = [m["text"] for m in recent if m.get("is_self") and m.get("text")]
+                # Повтором считается и чужая фраза флота в этом чате: два
+                # аккаунта одного владельца одними словами — подпись накрутки.
+                _own_here = [m["text"] for m in recent if m.get("is_fleet") and m.get("text")]
                 if not _styled:
                     reply, _why = None, "После правки манеры от реплики ничего не осталось — ход пропущен"
                 elif persona_voice.too_similar(_styled, voice.recent + _own_here):
@@ -1487,7 +1576,7 @@ async def _process_session(pool, session: dict) -> None:
                                account_id=speaker, kind=plan["kind"])
                 else:
                     import asyncio as _a
-                    await _a.sleep(random.uniform(2.0, 6.0))  # имитация набора
+                    await _a.sleep(typing_seconds(reply))  # набор по длине реплики
                     reply_to = plan["reply_to_id"] if plan["kind"] == "reply" else None
                     await asyncio.wait_for(client.send_message(entity, reply, reply_to=reply_to), timeout=_TG_TIMEOUT)
                     sent = True
