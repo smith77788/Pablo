@@ -27,6 +27,19 @@ class PersonaProfile:
     niche: str
     backstory: str
     created_at: datetime
+    # Черты, которые обязаны совпадать во всех чатах персоны (schema_v341).
+    # Значения по умолчанию — прежнее поведение: старые вызовы и записи без
+    # этих колонок дают ту же персону, что и раньше.
+    gender: str = ""
+    city: str = ""
+    occupation: str = ""
+    emoji_level: str = "rare"
+    literacy: str = "casual"
+    taboo_topics: str = ""
+    sample_messages: list[str] = field(default_factory=list)
+    memory_enabled: bool = True
+    self_facts: str = ""
+    owner_id: int | None = None
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -75,14 +88,17 @@ async def create_persona(
     return persona_id
 
 
-async def get_persona(pool: asyncpg.Pool, account_id: int) -> PersonaProfile | None:
-    """Return the PersonaProfile for a given account_id, or None."""
-    row = await pool.fetchrow(
-        "SELECT * FROM persona_profiles WHERE account_id = $1 AND is_active = TRUE",
-        account_id,
-    )
-    if not row:
-        return None
+def _row_get(row, key, default=None):
+    try:
+        v = row[key]
+    except (KeyError, IndexError):
+        return default
+    return default if v is None else v
+
+
+def persona_from_row(row) -> PersonaProfile:
+    """Запись persona_profiles → PersonaProfile. Колонки schema_v341 читаются
+    мягко: база без миграции даёт прежнюю персону, а не KeyError."""
     return PersonaProfile(
         persona_id=row["id"],
         account_id=row["account_id"],
@@ -95,7 +111,26 @@ async def get_persona(pool: asyncpg.Pool, account_id: int) -> PersonaProfile | N
         niche=row["niche"] or "",
         backstory=row["backstory"] or "",
         created_at=row["created_at"],
+        gender=_row_get(row, "gender", "") or "",
+        city=_row_get(row, "city", "") or "",
+        occupation=_row_get(row, "occupation", "") or "",
+        emoji_level=_row_get(row, "emoji_level", "rare") or "rare",
+        literacy=_row_get(row, "literacy", "casual") or "casual",
+        taboo_topics=_row_get(row, "taboo_topics", "") or "",
+        sample_messages=list(_row_get(row, "sample_messages", []) or []),
+        memory_enabled=bool(_row_get(row, "memory_enabled", True)),
+        self_facts=_row_get(row, "self_facts", "") or "",
+        owner_id=_row_get(row, "owner_id", None),
     )
+
+
+async def get_persona(pool: asyncpg.Pool, account_id: int) -> PersonaProfile | None:
+    """Return the PersonaProfile for a given account_id, or None."""
+    row = await pool.fetchrow(
+        "SELECT * FROM persona_profiles WHERE account_id = $1 AND is_active = TRUE",
+        account_id,
+    )
+    return persona_from_row(row) if row else None
 
 
 async def get_persona_by_id(pool: asyncpg.Pool, persona_id: int) -> PersonaProfile | None:
@@ -104,21 +139,7 @@ async def get_persona_by_id(pool: asyncpg.Pool, persona_id: int) -> PersonaProfi
         "SELECT * FROM persona_profiles WHERE id = $1",
         persona_id,
     )
-    if not row:
-        return None
-    return PersonaProfile(
-        persona_id=row["id"],
-        account_id=row["account_id"],
-        name=row["persona_name"],
-        bio=row["bio"] or "",
-        age=row["age"] or 25,
-        interests=list(row["interests"] or []),
-        speech_style=row["speech_style"] or "neutral",
-        tone=row["tone"] or "positive",
-        niche=row["niche"] or "",
-        backstory=row["backstory"] or "",
-        created_at=row["created_at"],
-    )
+    return persona_from_row(row) if row else None
 
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
@@ -157,12 +178,38 @@ TONE_PROMPTS = {
 }
 
 
+GENDER_LABELS = {"m": "мужской", "f": "женский"}
+GENDER_PROMPTS = {
+    "m": "Ты мужчина: о себе говоришь только в мужском роде («я пошёл», «я рад»).",
+    "f": "Ты женщина: о себе говоришь только в женском роде («я пошла», «я рада»).",
+}
+EMOJI_LABELS = {"none": "никогда", "rare": "редко", "often": "часто"}
+EMOJI_PROMPTS = {
+    "none": "Эмодзи и смайлики не ставишь никогда.",
+    "rare": "Эмодзи ставишь редко: в большинстве сообщений их нет, и не больше одного.",
+    "often": "Эмодзи любишь и ставишь часто, но разные и к месту.",
+}
+LITERACY_LABELS = {"careful": "грамотно", "casual": "как в мессенджере", "sloppy": "небрежно"}
+LITERACY_PROMPTS = {
+    "careful": "Пишешь грамотно: с заглавной буквы и со знаками препинания.",
+    "casual": "Пишешь как в мессенджере: точку в конце сообщения обычно не ставишь.",
+    "sloppy": "Пишешь небрежно: строчными буквами, почти без запятых, сокращаешь "
+              "слова (щас, норм, спс).",
+}
+SAMPLES_MAX = 5
+SAMPLE_LEN = 200
+
+
 def build_persona_system_prompt(persona: PersonaProfile) -> str:
     """Системный промпт, который держит модель в образе персоны.
 
     Внешний текст (биография и предыстория — их пишет владелец) идёт в промпт
     как описание характера; правило «ты живой человек, не ИИ» стоит в конце,
     чтобы его не перебила предыстория.
+
+    Черты, которые люди сверяют между сообщениями (пол, город, занятие),
+    задаются здесь ЯВНО: без них модель выдумывала их заново в каждой реплике,
+    и одна и та же персона в одном чате «пошёл», а в другом «пошла».
     """
     interests_str = ", ".join(persona.interests) if persona.interests else "общие темы"
     bio_text = (persona.bio or "").strip()
@@ -170,15 +217,29 @@ def build_persona_system_prompt(persona: PersonaProfile) -> str:
         bio_text += "."
     parts = [
         f"Ты {persona.name}, {persona.age} лет.",
+        GENDER_PROMPTS.get(persona.gender or "", ""),
+        f"Живёшь в городе {persona.city.strip()}." if (persona.city or "").strip() else "",
+        f"Чем занимаешься: {persona.occupation.strip()}."
+        if (persona.occupation or "").strip() else "",
         bio_text,
         f"Твои интересы: {interests_str}.",
         STYLE_PROMPTS.get(persona.speech_style, STYLE_PROMPTS["neutral"]),
         TONE_PROMPTS.get(persona.tone or "", ""),
+        LITERACY_PROMPTS.get(persona.literacy or "", ""),
+        EMOJI_PROMPTS.get(persona.emoji_level or "", ""),
     ]
     if persona.niche:
         parts.append(f"Разбираешься в теме: {persona.niche}.")
     if persona.backstory:
         parts.append(persona.backstory.strip())
+    taboo = " ".join((persona.taboo_topics or "").split())[:400]
+    if taboo:
+        parts.append(f"Темы, которых ты не касаешься (мягко уходишь от них): {taboo}.")
+    samples = [" ".join(str(x).split())[:SAMPLE_LEN]
+               for x in (persona.sample_messages or []) if str(x).strip()][:SAMPLES_MAX]
+    if samples:
+        parts.append("Так ты обычно пишешь — это образцы манеры, дословно их не "
+                     "повторяй: " + " | ".join(f"«{x}»" for x in samples) + ".")
     parts.append("Отвечай всегда в этом образе, как живой человек; "
                  "не упоминай, что ты ИИ или бот.")
     return " ".join(p for p in parts if p)

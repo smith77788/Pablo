@@ -4710,6 +4710,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # одном диалоге — список выглядел рабочим, а голос флота был прежним.
     _PERSONA_STYLES = {"formal", "casual", "expert", "friendly", "sarcastic", "neutral"}
     _PERSONA_TONES = {"positive", "neutral", "skeptical", "enthusiastic"}
+    _PERSONA_GENDERS = {"", "m", "f"}
+    _PERSONA_EMOJI = {"none", "rare", "often"}
+    _PERSONA_LITERACY = {"careful", "casual", "sloppy"}
+    # Черты голоса (schema_v341) — одним списком для вставки и правки.
+    _PERSONA_VOICE_COLS = ("gender", "city", "occupation", "emoji_level", "literacy",
+                           "taboo_topics", "sample_messages", "memory_enabled")
 
     def _persona_fields(body: dict) -> dict:
         """Поля персоны из тела запроса — проверенные и обрезанные."""
@@ -4721,6 +4727,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         interests = [v for v in (validate_string(i, max_len=50) or "" for i in items) if v][:20]
         style = validate_string(body.get("speech_style"), max_len=20) or "casual"
         tone = validate_string(body.get("tone"), max_len=20) or "positive"
+        gender = str(body.get("gender") or "").strip()
+        emoji = str(body.get("emoji_level") or "rare").strip()
+        literacy = str(body.get("literacy") or "casual").strip()
+        samples_raw = body.get("sample_messages") or []
+        if not isinstance(samples_raw, list):
+            # С экрана образцы приходят текстом: одна строка — одно сообщение.
+            samples_raw = str(samples_raw).splitlines()
+        samples = [" ".join(str(x).split())[:200] for x in samples_raw if str(x).strip()][:5]
         return {
             "persona_name": (validate_string(body.get("persona_name"), max_len=64) or "").strip(),
             "bio": (str(body.get("bio") or "").strip()[:1000]) or None,
@@ -4730,6 +4744,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "tone": tone if tone in _PERSONA_TONES else "positive",
             "niche": (str(body.get("niche") or "").strip()[:64]) or None,
             "backstory": (str(body.get("backstory") or "").strip()[:2000]) or None,
+            "gender": gender if gender in _PERSONA_GENDERS else "",
+            "city": (str(body.get("city") or "").strip()[:64]) or None,
+            "occupation": (str(body.get("occupation") or "").strip()[:96]) or None,
+            "emoji_level": emoji if emoji in _PERSONA_EMOJI else "rare",
+            "literacy": literacy if literacy in _PERSONA_LITERACY else "casual",
+            "taboo_topics": (str(body.get("taboo_topics") or "").strip()[:400]) or None,
+            "sample_messages": samples,
+            "memory_enabled": body.get("memory_enabled", True) not in (False, 0, "0", "false"),
         }
 
     async def _persona_account(uid: int, raw, exclude_persona: int | None = None):
@@ -4777,6 +4799,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """SELECT pp.id, pp.persona_name, pp.bio, pp.age, pp.speech_style,
                           pp.tone, pp.niche, pp.backstory, pp.is_active, pp.created_at,
                           pp.interests, pp.account_id,
+                          pp.gender, pp.city, pp.occupation, pp.emoji_level, pp.literacy,
+                          pp.taboo_topics, pp.sample_messages, pp.memory_enabled,
+                          pp.self_facts,
                           ta.phone, ta.first_name, ta.username,
                           (SELECT COUNT(*) FROM persona_memory pm WHERE pm.persona_id=pp.id) AS memory_n
                    FROM persona_profiles pp
@@ -4797,6 +4822,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     {
                         **dict(r),
                         "interests": list(r.get("interests") or []),
+                        "sample_messages": list(r.get("sample_messages") or []),
                         "memory_n": int(r.get("memory_n") or 0),
                         "style_label": _pe.STYLE_LABELS.get(r["speech_style"] or "", ""),
                         "tone_label": _pe.TONE_LABELS.get(r["tone"] or "", ""),
@@ -4807,6 +4833,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "accounts": [dict(a) for a in accs],
                 "styles": _pe.STYLE_LABELS,
                 "tones": _pe.TONE_LABELS,
+                "genders": _pe.GENDER_LABELS,
+                "emoji_levels": _pe.EMOJI_LABELS,
+                "literacy": _pe.LITERACY_LABELS,
             })
         except Exception:
             log.exception("persona_list uid=%d", uid)
@@ -4871,11 +4900,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             row = await pool.fetchrow(
                 """INSERT INTO persona_profiles
                    (owner_id, account_id, persona_name, bio, age, interests, speech_style,
-                    tone, niche, backstory, is_active)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE)
+                    tone, niche, backstory, is_active,
+                    gender, city, occupation, emoji_level, literacy, taboo_topics,
+                    sample_messages, memory_enabled)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE,
+                           $11,$12,$13,$14,$15,$16,$17,$18)
                    RETURNING id, persona_name, account_id, is_active""",
                 uid, account_id, f["persona_name"], f["bio"], f["age"], f["interests"],
                 f["speech_style"], f["tone"], f["niche"], f["backstory"],
+                *(f[c] for c in _PERSONA_VOICE_COLS),
             )
             return _json_resp({"ok": True, "persona": dict(row)})
         except asyncpg.UniqueViolationError:
@@ -4907,11 +4940,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             row = await pool.fetchrow(
                 """UPDATE persona_profiles SET account_id=$3, persona_name=$4, bio=$5,
                        age=$6, interests=$7, speech_style=$8, tone=$9, niche=$10,
-                       backstory=$11, updated_at=NOW()
+                       backstory=$11, gender=$12, city=$13, occupation=$14,
+                       emoji_level=$15, literacy=$16, taboo_topics=$17,
+                       sample_messages=$18, memory_enabled=$19, updated_at=NOW()
                    WHERE id=$1 AND owner_id=$2
                    RETURNING id, persona_name, account_id, is_active""",
                 persona_id, uid, account_id, f["persona_name"], f["bio"], f["age"],
                 f["interests"], f["speech_style"], f["tone"], f["niche"], f["backstory"],
+                *(f[c] for c in _PERSONA_VOICE_COLS),
             )
             if not row:
                 return _err("Не найдено", 404)
@@ -4940,18 +4976,47 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Сначала укажите имя персоны", 400)
         message = (str(body.get("message") or "").strip()[:500]
                    or "Привет! Как тебе последние новости в твоей теме?")
+        from services import chat_warmup as _cw
         from services import persona_engine as _pe
+        from services import persona_voice as _pv
         persona = _pe.PersonaProfile(
             persona_id=0, account_id=0, name=f["persona_name"], bio=f["bio"] or "",
             age=f["age"], interests=f["interests"], speech_style=f["speech_style"],
             tone=f["tone"], niche=f["niche"] or "", backstory=f["backstory"] or "",
-            created_at=None,
+            created_at=None, gender=f["gender"], city=f["city"] or "",
+            occupation=f["occupation"] or "", emoji_level=f["emoji_level"],
+            literacy=f["literacy"], taboo_topics=f["taboo_topics"] or "",
+            sample_messages=f["sample_messages"], memory_enabled=f["memory_enabled"],
         )
+        # Правка сохранённой персоны — с её памятью: предпросмотр обязан
+        # показывать тот голос, которым она заговорит, а говорит она с памятью.
+        voice = _pv.Voice(account_id=0, persona=persona,
+                          prompt=_pe.build_persona_system_prompt(persona))
+        try:
+            pid = int(body.get("persona_id") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid and f["memory_enabled"]:
+            try:
+                saved = await pool.fetchrow(
+                    "SELECT id, self_facts FROM persona_profiles WHERE id=$1 AND owner_id=$2",
+                    pid, uid)
+                if saved:
+                    voice.recent = await _pv.recent_statements(pool, pid, limit=_pv.RECENT_IN_PROMPT)
+                    mem = _pv.memory_block(saved["self_facts"] or "", voice.recent)
+                    if mem:
+                        voice.prompt += "\n\n" + mem
+            except Exception:
+                log.warning("persona_preview uid=%d: память персоны не прочитана", uid)
+        # Тот же промпт и та же доводка, что у живой реплики в чате.
+        asked = {"id": 1, "sender_name": "Собеседник", "text": message, "is_fleet": False}
+        system, user = _cw.build_dialogue_prompt(
+            voice.prompt, [asked], asked, "", "engage", lang="ru", reply_len="short")
         try:
             from services import ai_gateway
             r = await ai_gateway.chat(
-                [{"role": "system", "content": _pe.build_persona_system_prompt(persona)},
-                 {"role": "user", "content": message}],
+                [{"role": "system", "content": system},
+                 {"role": "user", "content": user}],
                 task=ai_gateway.TASK_ASSISTANT, owner_id=uid, max_tokens=200,
             )
         except Exception:
@@ -4959,7 +5024,94 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("ИИ сейчас недоступен — попробуйте позже", 503)
         if not r.text:
             return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 503)
-        return _json_resp({"reply": r.text.strip()[:1000], "asked": message})
+        reply = _pv.enforce_style(_cw.sanitize_reply(r.text), persona)
+        if not reply:
+            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 503)
+        return _json_resp({"reply": reply[:1000], "asked": message})
+
+    async def _own_persona_id(request):
+        uid = _get_uid(request)
+        if not uid:
+            return None, None, _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["persona_id"])
+        except (KeyError, ValueError):
+            return None, None, _err("Неверный идентификатор персоны", 400)
+        return uid, pid, None
+
+    async def persona_memory_get(request: web.Request) -> web.Response:
+        """Что персона помнит: факты о себе и последние сказанные фразы."""
+        uid, pid, err = await _own_persona_id(request)
+        if err is not None:
+            return err
+        from services import persona_voice as _pv
+        try:
+            view = await _pv.memory_view(pool, pid, uid, limit=50)
+        except Exception:
+            log.exception("persona_memory_get uid=%d persona=%d", uid, pid)
+            return _err(_INTERNAL_ERROR, 500)
+        if view is None:
+            return _err("Не найдено", 404)
+        return _json_resp(view)
+
+    async def persona_memory_facts(request: web.Request) -> web.Response:
+        """Владелец правит «факты о себе» руками: модель могла записать лишнее."""
+        uid, pid, err = await _own_persona_id(request)
+        if err is not None:
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        facts = " ".join(str(body.get("self_facts") or "").split())[:900] or None
+        try:
+            row = await pool.fetchrow(
+                "UPDATE persona_profiles SET self_facts=$3, self_facts_at=NOW(), "
+                "updated_at=NOW() WHERE id=$1 AND owner_id=$2 RETURNING id",
+                pid, uid, facts)
+        except Exception:
+            log.exception("persona_memory_facts uid=%d persona=%d", uid, pid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not row:
+            return _err("Не найдено", 404)
+        return _json_resp({"ok": True, "self_facts": facts or ""})
+
+    async def persona_memory_forget(request: web.Request) -> web.Response:
+        """Забыть всё: сказанное и факты о себе. Персона говорит с чистого листа."""
+        uid, pid, err = await _own_persona_id(request)
+        if err is not None:
+            return err
+        try:
+            row = await pool.fetchrow(
+                "UPDATE persona_profiles SET self_facts=NULL, self_facts_at=NULL, "
+                "updated_at=NOW() WHERE id=$1 AND owner_id=$2 RETURNING id", pid, uid)
+            if not row:
+                return _err("Не найдено", 404)
+            res = await pool.execute(
+                "DELETE FROM persona_memory WHERE persona_id=$1 AND owner_id=$2", pid, uid)
+        except Exception:
+            log.exception("persona_memory_forget uid=%d persona=%d", uid, pid)
+            return _err(_INTERNAL_ERROR, 500)
+        try:
+            n = int(str(res).split()[-1])
+        except (ValueError, IndexError):
+            n = 0
+        return _json_resp({"ok": True, "deleted": n})
+
+    async def persona_memory_rebuild(request: web.Request) -> web.Response:
+        """Пересобрать «факты о себе» из сказанного сейчас, не дожидаясь десятой фразы."""
+        uid, pid, err = await _own_persona_id(request)
+        if err is not None:
+            return err
+        own = await pool.fetchval(
+            "SELECT 1 FROM persona_profiles WHERE id=$1 AND owner_id=$2", pid, uid)
+        if not own:
+            return _err("Не найдено", 404)
+        from services import persona_voice as _pv
+        facts = await _pv.consolidate(pool, pid, owner_id=uid)
+        return _json_resp({"ok": True, "self_facts": facts or "",
+                           "note": "" if facts else
+                           "Пока нечего сжимать: персона ещё не рассказывала о себе"})
 
     async def persona_apply_profile(request: web.Request) -> web.Response:
         """Оформить аккаунт персоны под неё: имя и описание из персоны.
@@ -9295,6 +9447,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/persona/{persona_id}", persona_update)
     app.router.add_post("/api/miniapp/persona/preview", persona_preview)
     app.router.add_post("/api/miniapp/persona/{persona_id}/apply_profile", persona_apply_profile)
+    app.router.add_get("/api/miniapp/persona/{persona_id}/memory", persona_memory_get)
+    app.router.add_put("/api/miniapp/persona/{persona_id}/memory", persona_memory_facts)
+    app.router.add_delete("/api/miniapp/persona/{persona_id}/memory", persona_memory_forget)
+    app.router.add_post("/api/miniapp/persona/{persona_id}/memory/rebuild", persona_memory_rebuild)
     # Auto Registrar
     app.router.add_get("/api/miniapp/autoreg", autoreg_status)
     app.router.add_post("/api/miniapp/autoreg", autoreg_submit)

@@ -159,6 +159,7 @@ async def post_ai_comment(
     join_discussion: bool = True,
     mark: Callable[[int, int], Awaitable[bool]] | None = None,
     persona: str = "",
+    polish: Callable[[str], str] | None = None,
 ) -> dict:
     """Подключиться, найти привязанную к каналу группу обсуждений, выбрать
     посты, сгенерировать AI-комментарий к каждому и опубликовать его как ответ.
@@ -167,6 +168,10 @@ async def post_ai_comment(
     False — под этим постом мы уже писали (или отметка не легла), комментария
     не будет. Так повтор операции и следующий запуск не пишут второй
     комментарий под тот же пост.
+
+    `polish(text)` — голос персоны после модели (persona_voice.polish): манера
+    доводится, а повтор уже сказанного превращается в '' — такой комментарий
+    не уходит.
 
     Возвращает {ok, comment, comments: [{post_id, text}], skipped, error}."""
     from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
@@ -206,6 +211,11 @@ async def post_ai_comment(
                 getattr(post, "message", "") or "", niche, tone,
                 length=length, extra_instruction=extra_instruction,
                 persona=persona)
+            if comment and polish is not None:
+                comment = polish(comment)
+                if not comment:
+                    last_err = "комментарий повторял уже сказанное персоной — не отправлен"
+                    continue
             if not comment:
                 last_err = "ИИ не дал комментарий (проверьте ключи ИИ)"
                 continue
@@ -252,6 +262,9 @@ async def post_ai_comment_anywhere(
     niche: str = "",
     tone: str = "neutral",
     low_risk: bool = False,
+    *,
+    persona: str = "",
+    polish: Callable[[str], str] | None = None,
 ) -> dict:
     """Комментарий и в канал, и в ГРУППУ — один вход для радара ниши.
 
@@ -281,7 +294,7 @@ async def post_ai_comment_anywhere(
         except Exception:
             log.debug("post_ai_comment_anywhere: disconnect", exc_info=True)
         return await post_ai_comment(session_string, _acc, ref, niche=niche, tone=tone,
-                                     low_risk=low_risk)
+                                     low_risk=low_risk, persona=persona, polish=polish)
     try:
         msgs = await asyncio.wait_for(client.get_messages(entity, limit=25),
                                       timeout=_ACTION_TIMEOUT)
@@ -294,7 +307,13 @@ async def post_ai_comment_anywhere(
         if not candidates:
             return {"ok": False, "comment": None, "error": "в чате нет свежих сообщений по теме"}
         post = random.choice(candidates[:8])
-        comment = await generate_comment(getattr(post, "message", "") or "", niche, tone)
+        comment = await generate_comment(getattr(post, "message", "") or "", niche, tone,
+                                         persona=persona)
+        if comment and polish is not None:
+            comment = polish(comment)
+            if not comment:
+                return {"ok": False, "comment": None,
+                        "error": "комментарий повторял уже сказанное персоной — не отправлен"}
         if not comment:
             return {"ok": False, "comment": None,
                     "error": "LLM не дал комментарий (проверьте AI-ключи)"}

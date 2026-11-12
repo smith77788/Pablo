@@ -126,19 +126,45 @@ async def classify(messages: list[dict], *, owner_id: Optional[int] = None) -> d
     return {"intent": intent, "label": intent_label(intent), "by": by}
 
 
+def reply_account_id(messages: list[dict]) -> Optional[int]:
+    """Аккаунт флота, на который человек написал последним. ЧИСТАЯ.
+
+    Отвечать ему будут этим же аккаунтом, значит и черновик — его голосом."""
+    for m in reversed(messages or []):
+        if m.get("direction") == "in" and m.get("account_id"):
+            try:
+                return int(m["account_id"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 async def draft_reply(messages: list[dict], *, owner_id: Optional[int] = None,
-                      business: str = "") -> dict:
-    """Черновик ответа оператору. {draft|None, reason, provider, model}."""
+                      business: str = "", persona: str = "",
+                      strategy: str = "") -> dict:
+    """Черновик ответа оператору. {draft|None, reason, provider, model}.
+
+    `persona` — голос персоны аккаунта, на который написал человек
+    (persona_voice): человек уже знает этот аккаунт по его манере, и ответ
+    «от оператора» другим голосом выдаёт подмену. `strategy` — что значит
+    состояние человека в «Модели поведения» и что с ним делать сейчас."""
     if not _last_incoming(messages):
         return {"draft": None, "reason": "В разговоре нет сообщения клиента, на которое отвечать"}
+    who = ("Пиши от первого лица в образе ниже — это аккаунт, которому человек "
+           "написал; манера образа важнее вежливых шаблонов. "
+           if persona.strip() else "")
     system = (
         "Ты помогаешь оператору ответить клиенту в Telegram. Напиши ОДИН "
         "черновик ответа от лица оператора: по-русски, коротко (1–4 предложения), "
         "вежливо и по делу, на последнее сообщение клиента с учётом разговора. "
+        + who +
         "Не выдумывай цены, сроки, наличие и обещания, которых нет в разговоре: "
         "если их не знаешь — напиши, что уточнишь. Только текст ответа, без "
         "пояснений и кавычек.\n" + _DATA_NOTE
-        + (f"\nО бизнесе: {business.strip()[:500]}" if business.strip() else ""))
+        + (f"\nО бизнесе: {business.strip()[:500]}" if business.strip() else "")
+        + (f"\nСостояние клиента: {strategy.strip()[:300]}" if strategy.strip() else ""))
+    if persona.strip():
+        system = f"Твой образ: {persona.strip()[:3000]}\n\n" + system
     r = await ai_gateway.chat(
         [{"role": "system", "content": system},
          {"role": "user", "content": "Разговор:\n" + _transcript(messages)}],
@@ -176,6 +202,41 @@ def _reason(r: ai_gateway.AiReply) -> str:
     return "Модель сейчас не ответила — попробуйте ещё раз через минуту"
 
 
+async def _reply_context(pool, owner_id: int, thread: dict):
+    """(голос аккаунта | None, стратегия, подпись состояния) для черновика.
+
+    Связка трёх модулей в одном ответе: голос — из «Профилей» (персона
+    аккаунта, на который написал человек, с её памятью), стратегия — из
+    «Модели поведения» (состояние человека и что с ним делать). Всё fail-open:
+    без них черновик пишется, как раньше."""
+    voice = None
+    acc = reply_account_id(thread.get("messages") or [])
+    if acc:
+        try:
+            from services import persona_voice as _pv
+            v = await _pv.load(pool, acc)
+            voice = v if v.persona is not None else None
+        except Exception:  # noqa: BLE001
+            log.warning("inbox draft: голос аккаунта %s не прочитан", acc)
+    strategy = label = ""
+    cid = thread.get("contact_id")
+    if cid:
+        try:
+            from services import virtual_layer as _vl
+            st = await _vl.get_state(pool, int(owner_id), _vl.USER, cid)
+            if st:
+                eff = _vl.effective(st)
+                value = (eff or {}).get("value") if isinstance(eff, dict) else None
+                value = value or st.get("value")
+                g = _vl.state_guide(value)
+                if g.get("meaning"):
+                    strategy = f"{g['meaning']} {g.get('action') or ''}".strip()
+                    label = _vl.VALUE_LABEL.get(value, "") or ""
+        except Exception:  # noqa: BLE001
+            log.warning("inbox draft: состояние контакта %s не прочитано", cid)
+    return voice, strategy, label
+
+
 def setup_routes(app, pool) -> None:
     """POST /api/miniapp/inbox/{peer}/ai-draft и /ai-summary.
 
@@ -207,7 +268,17 @@ def setup_routes(app, pool) -> None:
             if err is not None:
                 return err
             msgs = thread.get("messages") or []
-            out = await draft_reply(msgs, owner_id=uid)
+            voice, strategy, state = await _reply_context(pool, uid, thread)
+            out = await draft_reply(msgs, owner_id=uid,
+                                    persona=voice.prompt if voice else "",
+                                    strategy=strategy)
+            if out.get("draft") and voice is not None and voice.persona is not None:
+                from services import persona_voice as _pv
+                out["draft"] = _pv.enforce_style(out["draft"], voice.persona) or out["draft"]
+            if voice is not None and voice.persona is not None:
+                out["persona"] = voice.persona.name
+            if state:
+                out["state"] = state
             out["intent"] = await classify(msgs, owner_id=uid)
             return _json_resp(out)
         except Exception:

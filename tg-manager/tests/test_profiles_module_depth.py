@@ -180,4 +180,4 @@ def test_ai_comment_takes_the_account_persona():
     assert system.rstrip().endswith("Только текст комментария.")
     import inspect
     from services import op_worker
-    assert "persona_prompt_for_account" in inspect.getsource(op_worker._exec_ai_comment)
+    assert "persona_voice.load" in inspect.getsource(op_worker._exec_ai_comment)

@@ -6098,10 +6098,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="filter-chips mod-tabs" data-module="profiles" data-tab="personas" role="tablist" aria-label="Вкладки модуля «Профили»"></div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px;line-height:1.5">
-      Персона — характер аккаунта: как он пишет в прогреве чатов и в ИИ-комментариях. Работает только у персоны, <b>привязанной к аккаунту</b>; у аккаунтов без персоны свой случайный стиль.
+      Персона — характер аккаунта: как он пишет в прогреве чатов, в ИИ-комментариях и радаре ниши, и каким голосом ИИ готовит черновик ответа во «Входящих». Персона помнит, что уже сказала, и не противоречит себе. Работает только у персоны, <b>привязанной к аккаунту</b>; у аккаунтов без персоны свой случайный стиль.
     </div>
     <div id="personaStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="personaMemory"></div>
     <div class="sec" style="margin-top:12px" id="pFormTitle">Создать персону</div>
     <div style="padding:8px 16px">
       <input type="hidden" id="pEditId" value="">
@@ -6159,6 +6160,53 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field">
         <label>Возраст</label>
         <input type="number" id="pAge" value="25" min="18" max="80" class="inp">
+      </div>
+      <div class="field">
+        <label>Пол — от него зависит «пошёл» или «пошла»</label>
+        <select id="pGender" class="sel">
+          <option value="">— не задан —</option>
+          <option value="m">👨 Мужской</option>
+          <option value="f">👩 Женский</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Город</label>
+        <input type="text" id="pCity" maxlength="64" placeholder="Казань" class="inp">
+        <div class="field-note">Пол, город и занятие персона называет одинаково во всех чатах.</div>
+      </div>
+      <div class="field">
+        <label>Чем занимается</label>
+        <input type="text" id="pOccupation" maxlength="96" placeholder="Бариста, учится на дизайнера" class="inp">
+      </div>
+      <div class="field">
+        <label>Эмодзи</label>
+        <select id="pEmoji" class="sel">
+          <option value="none">🚫 Никогда</option>
+          <option value="rare" selected>🙂 Редко — не больше одного</option>
+          <option value="often">😄 Часто</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Как пишет</label>
+        <select id="pLiteracy" class="sel">
+          <option value="careful">✍️ Грамотно: с заглавной и с точками</option>
+          <option value="casual" selected>💬 Как в мессенджере: без точки в конце</option>
+          <option value="sloppy">🤙 Небрежно: строчными, «щас», «норм»</option>
+        </select>
+        <div class="field-note">Эмодзи и манеру движок доводит сам после ИИ — не только просит.</div>
+      </div>
+      <div class="field">
+        <label>Темы, которых персона не касается</label>
+        <input type="text" id="pTaboo" maxlength="400" placeholder="политика, религия, конкуренты" class="inp">
+      </div>
+      <div class="field">
+        <label>Образцы речи — по одному сообщению в строке (до 5)</label>
+        <textarea id="pSamples" rows="3" placeholder="ну хз, мне зашло&#10;кто пробовал? норм вообще?" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+        <div class="field-note">Лучший способ задать голос: ИИ берёт манеру, но фразы не копирует.</div>
+      </div>
+      <div class="field">
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pMemory" checked> 🧠 Помнить сказанное</label>
+        <div class="field-note">Персона помнит, что рассказала о себе, не повторяется и не противоречит себе в разных чатах.</div>
       </div>
       <div class="field">
         <label>Проверить голос: реплика собеседника</label>
@@ -23005,13 +23053,13 @@ const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'😊 Непр�
 let PERSONAS = [];
 let PERSONA_ACCS = [];
 const PERSONA_TEMPLATES = {
-  expert: {style:'expert', tone:'neutral', age:34, niche:'инвестиции', interests:'рынки, аналитика, технологии',
+  expert: {style:'expert', tone:'neutral', age:34, gender:'m', emoji:'none', literacy:'careful', niche:'инвестиции', interests:'рынки, аналитика, технологии',
            bio:'Аналитик, 10 лет на рынке.', backstory:'Пишет по делу, приводит цифры, не любит хайп и обещания быстрых денег.'},
-  friend: {style:'casual', tone:'positive', age:27, niche:'', interests:'спорт, музыка, путешествия',
+  friend: {style:'casual', tone:'positive', age:27, gender:'m', emoji:'rare', literacy:'sloppy', niche:'', interests:'спорт, музыка, путешествия',
            bio:'Обычный парень, люблю движ.', backstory:'Пишет коротко, иногда строчными, шутит, смайлики ставит редко.'},
-  skeptic: {style:'neutral', tone:'skeptical', age:41, niche:'', interests:'новости, техника, рыбалка',
+  skeptic: {style:'neutral', tone:'skeptical', age:41, gender:'m', emoji:'none', literacy:'casual', niche:'', interests:'новости, техника, рыбалка',
             bio:'Верю фактам, а не обещаниям.', backstory:'Переспрашивает, просит пруфы, но без грубости.'},
-  girl: {style:'friendly', tone:'enthusiastic', age:24, niche:'лайфстайл', interests:'красота, кофе, путешествия, фото',
+  girl: {style:'friendly', tone:'enthusiastic', age:24, gender:'f', emoji:'often', literacy:'casual', niche:'лайфстайл', interests:'красота, кофе, путешествия, фото',
          bio:'Пишу о том, что вдохновляет ✨', backstory:'Тёплая, эмоциональная, делится впечатлениями, задаёт вопросы.'},
 };
 async function openPersonas() {
@@ -23044,11 +23092,12 @@ async function openPersonas() {
         <div class="row-body" style="min-width:0">
           <div class="row-name">${esc(p.persona_name)} · ${PERSONA_STYLE[p.speech_style]||esc(p.style_label||'')}</div>
           <div class="row-val">${acc}</div>
-          <div class="row-val">${esc(p.niche||'без ниши')} · ${p.age||'?'} лет${p.tone_label?' · '+esc(p.tone_label):''}${mem}</div>
+          <div class="row-val">${esc(p.niche||'без ниши')} · ${p.age||'?'} лет${p.city?' · '+esc(p.city):''}${p.tone_label?' · '+esc(p.tone_label):''}${mem}${p.memory_enabled===false?' · память выкл':''}</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn ${p.is_active?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="togglePersona(${p.id},${p.is_active})">${p.is_active?'Выкл':'Вкл'}</button>
           <button class="icon-btn sm" onclick="editPersona(${p.id})" aria-label="Изменить" title="Изменить">✏️</button>
+          <button class="icon-btn sm" onclick="openPersonaMemory(${p.id})" aria-label="Память" title="Что персона помнит">🧠</button>
           ${p.account_id?`<button class="icon-btn sm" onclick="applyPersonaProfile(${p.id}, this)" aria-label="Оформить аккаунт" title="Поставить имя и описание персоны в профиль аккаунта">🎨</button>`:''}
           <button class="icon-btn sm danger" onclick="deletePersona(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
@@ -23075,6 +23124,7 @@ function personaTemplate(k) {
   const set = (id,v) => { const el=document.getElementById(id); if (el) el.value = v; };
   set('pStyle', t.style); set('pTone', t.tone); set('pAge', t.age); set('pNiche', t.niche);
   set('pInterests', t.interests); set('pBio', t.bio); set('pBackstory', t.backstory);
+  set('pGender', t.gender||''); set('pEmoji', t.emoji||'rare'); set('pLiteracy', t.literacy||'casual');
   const n = document.getElementById('pName'); if (n && !n.value.trim()) n.focus();
 }
 function _personaBody() {
@@ -23089,6 +23139,15 @@ function _personaBody() {
     backstory: v('pBackstory'),
     interests: v('pInterests'),
     age: parseInt(v('pAge')||'25'),
+    gender: v('pGender'),
+    city: v('pCity'),
+    occupation: v('pOccupation'),
+    emoji_level: v('pEmoji')||'rare',
+    literacy: v('pLiteracy')||'casual',
+    taboo_topics: v('pTaboo'),
+    sample_messages: v('pSamples').split('\n').map(x=>x.trim()).filter(Boolean).slice(0,5),
+    memory_enabled: !!(document.getElementById('pMemory')||{}).checked,
+    persona_id: parseInt(v('pEditId'))||0,
   };
 }
 function editPersona(id) {
@@ -23097,6 +23156,10 @@ function editPersona(id) {
   set('pEditId', p.id); set('pName', p.persona_name); set('pStyle', p.speech_style||'casual');
   set('pTone', p.tone||'positive'); set('pNiche', p.niche); set('pBio', p.bio); set('pBackstory', p.backstory);
   set('pInterests', (p.interests||[]).join(', ')); set('pAge', p.age||25);
+  set('pGender', p.gender||''); set('pCity', p.city); set('pOccupation', p.occupation);
+  set('pEmoji', p.emoji_level||'rare'); set('pLiteracy', p.literacy||'casual');
+  set('pTaboo', p.taboo_topics); set('pSamples', (p.sample_messages||[]).join('\n'));
+  { const m = document.getElementById('pMemory'); if (m) m.checked = p.memory_enabled !== false; }
   fillPersonaAccounts(p.account_id ? String(p.account_id) : '');
   txt('pFormTitle', `Изменить персону «${esc(p.persona_name)}»`);
   txt('pSubmit', '💾 Сохранить');
@@ -23104,8 +23167,11 @@ function editPersona(id) {
   const t = document.getElementById('pFormTitle'); if (t && t.scrollIntoView) t.scrollIntoView({behavior:'smooth'});
 }
 function resetPersonaForm() {
-  ['pEditId','pName','pNiche','pBio','pBackstory','pInterests','pTryMsg'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['pEditId','pName','pNiche','pBio','pBackstory','pInterests','pTryMsg','pGender','pCity','pOccupation','pTaboo','pSamples'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   const a = document.getElementById('pAge'); if (a) a.value='25';
+  { const e = document.getElementById('pEmoji'); if (e) e.value='rare'; }
+  { const l = document.getElementById('pLiteracy'); if (l) l.value='casual'; }
+  { const m = document.getElementById('pMemory'); if (m) m.checked = true; }
   txt('pFormTitle','Создать персону'); txt('pSubmit','🎭 Создать персону'); txt('pTryOut',''); txt('pErr','');
   const c = document.getElementById('pCancelEdit'); if (c) c.style.display = 'none';
   fillPersonaAccounts('auto');
@@ -23121,6 +23187,61 @@ async function previewPersona(btn) {
     txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.asked||'')}</div><div style="margin-top:4px">🎭 ${esc(d.reply||'')}</div></div>`);
   } catch(e) { txt('pTryOut', `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось получить ответ'))}</div>`); }
   finally { btn.disabled = false; btn.textContent = label; }
+}
+// Память персоны: что она рассказала о себе и что говорила. Владелец видит,
+// правит факты (модель могла записать лишнее) и может стереть всё.
+async function openPersonaMemory(id) {
+  const box = document.getElementById('personaMemory'); if (!box) return;
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api(`/api/miniapp/persona/${id}/memory`);
+    const items = (d.items||[]).map(x=>`<div class="row"><div class="row-body" style="min-width:0">
+        <div class="row-val">${esc(x.kind_label||x.kind||'')}${x.where?' · '+esc(x.where):''}${x.at?' · '+esc(ago(x.at)):''}</div>
+        <div class="row-name" style="white-space:normal;font-weight:400">${esc(x.text)}</div></div></div>`).join('');
+    box.innerHTML = `<div class="card" style="margin:10px 0">
+      <div class="sec" style="padding:0 0 6px">🧠 Память «${esc(d.persona_name)}»${d.memory_enabled?'':' — выключена'}</div>
+      <div class="field"><label>Что персона рассказала о себе</label>
+        <textarea id="pmFacts" rows="3" maxlength="900" placeholder="Пока пусто: факты появятся, когда персона наговорит о себе" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical">${esc(d.self_facts||'')}</textarea>
+        <div class="field-note">Персона держится этих фактов во всех чатах. Модель могла записать лишнее — поправьте.</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn btn-s" style="flex:1;font-size:13px;padding:8px" onclick="savePersonaFacts(${id}, this)">💾 Сохранить факты</button>
+        <button class="btn btn-o" style="flex:1;font-size:13px;padding:8px" onclick="rebuildPersonaFacts(${id}, this)">♻️ Собрать из сказанного</button>
+        <button class="btn btn-d" style="flex:1;font-size:13px;padding:8px" onclick="forgetPersona(${id}, this)">🧽 Забыть всё</button>
+      </div>
+      <div class="field-note">Сказано: ${num(d.total||0)} ${plural(d.total||0,'сообщение','сообщения','сообщений')}</div>
+      <div class="lst">${items || empty('🧠','Пока ничего','Персона ещё не говорила в прогреве и комментариях')}</div>
+      <button class="btn btn-o" style="width:100%;margin-top:6px;font-size:13px;padding:8px" onclick="txt('personaMemory','')">Скрыть</button>
+    </div>`;
+    if (box.scrollIntoView) box.scrollIntoView({behavior:'smooth'});
+  } catch(e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Память не открылась'))}</div>`; }
+}
+async function savePersonaFacts(id, btn) {
+  const facts = ((document.getElementById('pmFacts')||{}).value||'').trim();
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/api/miniapp/persona/${id}/memory`, {method:'PUT', body:JSON.stringify({self_facts:facts})});
+    toast('💾 Факты сохранены');
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
+  finally { if (btn) btn.disabled = false; }
+}
+async function rebuildPersonaFacts(id, btn) {
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Собираю…'; }
+  try {
+    const d = await api(`/api/miniapp/persona/${id}/memory/rebuild`, {method:'POST', body:'{}'});
+    toast(d.self_facts ? '♻️ Факты собраны' : ('ℹ️ '+(d.note||'Нечего собирать')));
+    openPersonaMemory(id);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
+}
+async function forgetPersona(id, el) {
+  if (!await askConfirm('Стереть всё, что персона помнит: сказанное и факты о себе? Это не отменить.')) return;
+  try {
+    const d = await api(`/api/miniapp/persona/${id}/memory`, {method:'DELETE'});
+    toast(`🧽 Забыто: ${num(d.deleted||0)}`);
+    openPersonaMemory(id);
+    openPersonas();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
 }
 async function applyPersonaProfile(id, el) {
   const p = PERSONAS.find(x=>x.id===id); if (!p) return;
