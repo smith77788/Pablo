@@ -6472,11 +6472,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         lim = _list_limit(request, 100, 500)
         try:
             events = await _rh.history(pool, uid, acc_id, limit=lim)
+            events_total = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM account_rehab_events WHERE acc_id=$1 AND owner_id=$2",
+                acc_id, uid) or 0)
         except Exception:
             log.warning("rehab_history uid=%s acc=%s", uid, acc_id, exc_info=True)
-            events = []
+            events, events_total = [], 0
+        events_total = max(events_total, len(events))
         return _json_resp({"ok": True, "account": acc, "events": events,
-                           "capped": len(events) >= lim})
+                           "events_total": events_total,
+                           "capped": events_total > len(events)})
 
     async def rehab_settings_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)
