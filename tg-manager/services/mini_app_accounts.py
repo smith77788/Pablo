@@ -45,7 +45,7 @@ UNPOOLED = "__none__"
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
     from services.mini_app_api import (
-        _FLOODED_SQL, _FOREIGN_SQL, _LOW_TRUST_SQL,
+        _FLOODED_SQL, _FOREIGN_SQL, _LOW_TRUST_SQL, _NO2FA_SQL,
         ACCOUNT_FILTERS, ACCOUNT_STAGES, ACTIVE_ACC_SQL, _INTERNAL_ERROR,
         _body_wants_platform_scope, _csv_resp, _err, _geo_code, _get_uid,
         _json_resp, _obus, _proxy_display_host, _safe_count, _safe_fetch,
@@ -109,6 +109,9 @@ def setup_routes(app: web.Application, pool) -> None:
         elif flt == "foreign":
             # Чужие сеансы — плитка «Чужие сеансы» на «Здоровье».
             clauses.append(_FOREIGN_SQL)
+        elif flt == "no2fa":
+            # Без пароля 2FA — плитка «Без 2FA» на «Здоровье».
+            clauses.append(_NO2FA_SQL)
         elif flt == "dead":
             # Невоскрешаемые: забанен / удалён-деактивирован / сессия отозвана.
             # Именно их массово удаляют «в один тап». Конфликт двух IP (cooldown)

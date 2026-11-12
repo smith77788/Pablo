@@ -119,6 +119,11 @@ class ShieldConfig:
     response_mode: str = "pause"
     preset: str = "balanced"
     exempt_account_ids: list = field(default_factory=list)
+    # Автозащита (v346, services/session_watch.guard): закрывать новые чужие
+    # сеансы и ставить свой пароль 2FA аккаунтам без него. Выключено, пока
+    # владелец не включит: оба действия меняют аккаунт.
+    guard_sessions: bool = False
+    guard_twofa: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -133,6 +138,8 @@ class ShieldConfig:
             "response_mode": self.response_mode,
             "preset": self.preset,
             "exempt_account_ids": list(self.exempt_account_ids),
+            "guard_sessions": self.guard_sessions,
+            "guard_twofa": self.guard_twofa,
         }
 
 
@@ -191,6 +198,8 @@ async def get_shield_config(pool: asyncpg.Pool, owner_id: int) -> ShieldConfig:
                 cool_hours=int(_row_get(row, "cool_hours", 2)),
                 response_mode=mode,
                 exempt_account_ids=sorted({int(x) for x in (_row_get(row, "exempt_account_ids", []) or [])}),
+                guard_sessions=bool(_row_get(row, "guard_sessions", False)),
+                guard_twofa=bool(_row_get(row, "guard_twofa", False)),
             )
             cfg.preset = _detect_preset(cfg)
             return cfg
@@ -211,6 +220,8 @@ _SHIELD_FIELDS = {
     "notify_admin": None,
     "response_mode": "mode",
     "exempt_account_ids": "ids",
+    "guard_sessions": None,
+    "guard_twofa": None,
 }
 _INT_FIELDS = ("cool_duration_hours", "cool_hours")
 

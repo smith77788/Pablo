@@ -27,8 +27,11 @@ account.getAuthorizations задолго до того, как наша сесс
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
+import secrets
+import time
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
@@ -82,12 +85,22 @@ def build_alert(label: str, new: list[dict], total: int) -> str:
     return "\n".join(lines)
 
 
-async def record(pool, acc: dict, foreign: list[dict] | None, bot=None) -> dict:
+async def record(pool, acc: dict, foreign: list[dict] | None, bot=None, *,
+                 unsettled=None, twofa_on: bool | None = None,
+                 own_created: int = 0) -> dict:
     """Записать чужие сеансы аккаунта и предупредить о новых. Не бросает.
 
     foreign=None — список узнать не удалось: ничего не трогаем (иначе сбой
     запроса обнулил бы счётчик и стёр отпечатки, и следующий же реальный
     сеанс снова считался бы «новым»).
+
+    unsettled — отпечатки сеансов, которые автозащита закроет, но пока не
+    может (наш сеанс моложе суток). Они не запоминаются как «уже показанные»:
+    иначе на следующем проходе они перестали бы быть новыми, и автозащита их
+    уже не тронула бы.
+
+    twofa_on / own_created — факты того же соединения (есть ли пароль 2FA,
+    когда создан наш сеанс); None/0 — не знаем, прежнее значение не трогаем.
     """
     if foreign is None:
         return {"skipped": True}
@@ -96,12 +109,21 @@ async def record(pool, acc: dict, foreign: list[dict] | None, bot=None) -> dict:
     except (KeyError, TypeError, ValueError):
         return {"skipped": True}
     new = new_sessions(foreign, acc.get("foreign_session_hashes"))
-    hashes = sorted({int(f["hash"]) for f in foreign if f.get("hash")})
+    _hold = {int(h) for h in (unsettled or ())}
+    hashes = sorted({int(f["hash"]) for f in foreign
+                     if f.get("hash") and int(f["hash"]) not in _hold})
+    own_at = None
+    if own_created:
+        try:
+            own_at = datetime.fromtimestamp(int(own_created), tz=timezone.utc)
+        except (TypeError, ValueError, OverflowError, OSError):
+            own_at = None
     try:
         await pool.execute(
             "UPDATE tg_accounts SET foreign_sessions=$1, foreign_session_hashes=$2, "
-            "sessions_checked_at=now() WHERE id=$3",
-            len(foreign), hashes, acc_id)
+            "sessions_checked_at=now(), twofa_on=COALESCE($4, twofa_on), "
+            "own_session_at=COALESCE($5, own_session_at) WHERE id=$3",
+            len(foreign), hashes, acc_id, twofa_on, own_at)
     except Exception as exc:
         # Без записи отпечатков тревога повторилась бы на каждом проходе —
         # не шлём её, пока запись не пройдёт.
@@ -123,6 +145,165 @@ async def record(pool, acc: dict, foreign: list[dict] | None, bot=None) -> dict:
         except Exception as exc:
             log.warning("session_watch: тревога acc=%d не ушла: %s", acc_id, exc)
     return {"foreign": len(foreign), "new": len(new), "written": True}
+
+
+# ── Автозащита ───────────────────────────────────────────────────────────────
+#
+# Дозор выше только предупреждает, а угонщику, получившему код, хватает минут:
+# он входит, ставит свой пароль и закрывает наш сеанс, пока владелец читает
+# сообщение. Автозащита (включает владелец: «Щит → Автозащита») делает то же,
+# что владелец сделал бы руками, — на том же соединении, что и обход флота:
+#
+# * закрывает НОВЫЕ чужие сеансы по одному (account.resetAuthorization), а не
+#   все сразу: сеансы, которые владелец уже видел и оставил, — его решение;
+# * ставит аккаунту без пароля 2FA свой случайный пароль; пароль сначала
+#   ложится в базу (`db.remember_account_twofa`) и только потом ставится —
+#   пароль, который никто не знает, хуже, чем никакого.
+#
+# Telegram разрешает и то и другое только из сеанса старше суток
+# (FRESH_RESET_AUTHORISATION_FORBIDDEN). Пароль на свежем сеансе формально
+# поставить можно, но смена пароля сразу после входа — признак угона для
+# самой Telegram, поэтому тот же порог держим и для него.
+
+_FRESH_S = 24 * 3600 + 15 * 60          # сутки и запас на расхождение часов
+_TWOFA_PER_OWNER_SWEEP = 10             # паролей за проход на владельца
+_GUARD_TIMEOUT = 20.0
+
+
+def session_old_enough(own_created: int, now: float | None = None) -> bool:
+    """Старше ли наш сеанс суток (по данным Telegram). 0 — не знаем: нет."""
+    if not own_created:
+        return False
+    return (now if now is not None else time.time()) - int(own_created) >= _FRESH_S
+
+
+async def _close_one(client, h: int) -> None:
+    from telethon.tl.functions.account import ResetAuthorizationRequest
+    await asyncio.wait_for(client(ResetAuthorizationRequest(hash=int(h))),
+                           timeout=_GUARD_TIMEOUT)
+
+
+async def _set_twofa(pool, client, owner: int, acc_id: int) -> str | None:
+    """Поставить свой пароль 2FA. → None, если встал, иначе причина по-русски."""
+    from database import db
+    prev = None
+    try:
+        prev = await pool.fetchval(
+            "SELECT twofa_enc FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, owner)
+    except Exception as exc:
+        log.warning("session_watch.guard: прежний пароль acc=%d не прочитан: %s", acc_id, exc)
+        return "не удалось прочитать прежнюю запись пароля"
+    pw = secrets.token_urlsafe(12)
+    if not await db.remember_account_twofa(pool, owner, acc_id, pw):
+        return "пароль не сохранился — ставить не стали"
+    try:
+        await asyncio.wait_for(client.edit_2fa(new_password=pw), timeout=_GUARD_TIMEOUT)
+        return None
+    except Exception as exc:
+        # Ответ мог потеряться ПОСЛЕ того, как пароль встал: тогда запись
+        # обязана остаться, иначе аккаунт с паролем, которого никто не знает.
+        from services import account_manager as _am
+        if await _am.twofa_enabled(client) is True:
+            return None
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET twofa_enc=$1 WHERE id=$2 AND owner_id=$3",
+                prev, acc_id, owner)
+        except Exception as exc2:
+            log.warning("session_watch.guard: откат записи пароля acc=%d: %s", acc_id, exc2)
+        log.warning("session_watch.guard: 2FA acc=%d не встал: %s", acc_id, exc)
+        return "Telegram не принял пароль"
+
+
+async def guard(pool, client, acc: dict, profile: dict, cfg, budget: dict) -> dict:
+    """Автозащита одного аккаунта на открытом соединении. Не бросает.
+
+    Меняет profile: закрытые сеансы убираются из `authorizations`, после
+    поставленного пароля `twofa_on` = True. Возвращает, что сделано:
+    {"closed": [...], "unsettled": {hash, ...}, "twofa": "set"|"<причина>"|None}.
+    budget — общий на проход обхода: {owner_id: паролей уже поставлено}.
+    """
+    out: dict = {"closed": [], "unsettled": set(), "twofa": None}
+    try:
+        acc_id, owner = int(acc["id"]), int(acc["owner_id"])
+    except (KeyError, TypeError, ValueError):
+        return out
+    if cfg is None or acc_id in {int(x) for x in (getattr(cfg, "exempt_account_ids", None) or [])}:
+        return out
+    old_enough = session_old_enough(int(profile.get("own_session_created") or 0))
+    foreign = profile.get("authorizations")
+    if getattr(cfg, "guard_sessions", False) and foreign:
+        new = new_sessions(foreign, acc.get("foreign_session_hashes"))
+        if new and not old_enough:
+            out["unsettled"] = {int(s["hash"]) for s in new}
+        for s in (new if old_enough else []):
+            try:
+                await _close_one(client, int(s["hash"]))
+                out["closed"].append(s)
+            except Exception as exc:
+                log.warning("session_watch.guard: сеанс acc=%d не закрылся: %s", acc_id, exc)
+        if out["closed"]:
+            gone = {int(s["hash"]) for s in out["closed"]}
+            profile["authorizations"] = [f for f in foreign if int(f["hash"]) not in gone]
+    if (getattr(cfg, "guard_twofa", False) and profile.get("twofa_on") is False
+            and old_enough and budget.get(owner, 0) < _TWOFA_PER_OWNER_SWEEP):
+        budget[owner] = budget.get(owner, 0) + 1
+        try:
+            why = await _set_twofa(pool, client, owner, acc_id)
+        except Exception as exc:
+            log.warning("session_watch.guard: 2FA acc=%d: %s", acc_id, exc)
+            why = "сбой при установке пароля"
+        out["twofa"] = "set" if why is None else why
+        if why is None:
+            profile["twofa_on"] = True
+    return out
+
+
+def acc_label(acc: dict) -> str:
+    return (f"@{acc['username']}" if acc.get("username")
+            else (acc.get("first_name") or acc.get("phone") or f"#{acc.get('id')}"))
+
+
+def build_guard_report(rows: list[tuple[str, dict]]) -> str | None:
+    """Одно сообщение владельцу за проход: что автозащита сделала. None — нечего."""
+    closed = [(lbl, r) for lbl, r in rows if r.get("closed")]
+    twofa = [(lbl, r) for lbl, r in rows if r.get("twofa") == "set"]
+    failed = [(lbl, r) for lbl, r in rows if r.get("twofa") not in (None, "set")]
+    if not (closed or twofa or failed):
+        return None
+    lines = ["🛡 <b>Автозащита флота</b>", ""]
+    if closed:
+        n = sum(len(r["closed"]) for _l, r in closed)
+        lines.append(f"Закрыто чужих сеансов: <b>{n}</b> на {len(closed)} акк.")
+        for lbl, r in closed[:_MAX_LISTED]:
+            lines.append(f"• {html.escape(lbl)}: " + html.escape(describe_session(r["closed"][0]))
+                         + (f" и ещё {len(r['closed']) - 1}" if len(r["closed"]) > 1 else ""))
+        if len(closed) > _MAX_LISTED:
+            lines.append(f"• …и ещё {len(closed) - _MAX_LISTED} акк.")
+        lines.append("")
+    if twofa:
+        lines.append(f"Поставлен пароль 2FA: <b>{len(twofa)}</b> акк. — у каждого свой, "
+                     "они в «Профили → Пароли 2FA».")
+        lines.append("")
+    if failed:
+        lines.append(f"Пароль не встал: {len(failed)} акк.")
+        for lbl, r in failed[:_MAX_LISTED]:
+            lines.append(f"• {html.escape(lbl)}: {html.escape(str(r['twofa']))}")
+        lines.append("")
+    lines.append("<i>Выключить: «Щит → Автозащита».</i>")
+    return "\n".join(lines)
+
+
+async def send_guard_report(pool, bot, owner_id: int, rows: list[tuple[str, dict]]) -> None:
+    text = build_guard_report(rows)
+    if not text or bot is None:
+        return
+    try:
+        from database import db
+        await db.notify_if_enabled(pool, bot, int(owner_id), "restriction", text,
+                                   dedup_key=f"guard:{int(time.time())}")
+    except Exception as exc:
+        log.warning("session_watch: отчёт автозащиты owner=%s не ушёл: %s", owner_id, exc)
 
 
 async def forget(pool, owner_id: int, account_id: int) -> None:
