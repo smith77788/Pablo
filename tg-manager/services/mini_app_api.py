@@ -4991,7 +4991,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("ИИ сейчас недоступен — попробуйте позже", 503)
         if not r.text:
             return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 503)
-        return _json_resp({"reply": r.text.strip()[:1000], "message": message})
+        return _json_resp({"reply": r.text.strip()[:1000], "asked": message})
 
     async def persona_apply_profile(request: web.Request) -> web.Response:
         """Оформить аккаунт персоны под неё: имя и описание из персоны.

@@ -22944,7 +22944,7 @@ function bfSetMode(mode) {
 
 
 // ── Persona Hub ─────────────────────────────────────────
-const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'💬 Разговорный',expert:'🔬 Экспертный',friendly:'😊 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
+const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'😊 Непринуждённый',expert:'🔬 Эксперт',friendly:'🤗 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
 let PERSONAS = [];
 let PERSONA_ACCS = [];
 const PERSONA_TEMPLATES = {
@@ -23061,7 +23061,7 @@ async function previewPersona(btn) {
   const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Думает…';
   try {
     const d = await api('/api/miniapp/persona/preview', {method:'POST', body:JSON.stringify(body)});
-    txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.message||'')}</div><div style="margin-top:4px">🎭 ${esc(d.reply||'')}</div></div>`);
+    txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.asked||'')}</div><div style="margin-top:4px">🎭 ${esc(d.reply||'')}</div></div>`);
   } catch(e) { txt('pTryOut', `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось получить ответ'))}</div>`); }
   finally { btn.disabled = false; btn.textContent = label; }
 }
