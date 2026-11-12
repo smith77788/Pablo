@@ -221,7 +221,118 @@ function _dkRender() {
           'Показать ещё · ' + num(shown) + ' из ' + num(total) + '</button>' : '') +
       '</div>' +
     '</div>';
-  }).join('') + '</div>';
+  }).join('') + '</div>' +
+  // Аналитика воронки — по кнопке, а не сразу: доска нужна каждый день,
+  // отчёт — когда владелец разбирается, где теряются сделки.
+  '<div style="padding:0 16px 16px"><button class="btn btn-s" style="width:100%" onclick="dkAnalytics(' + (_DK_AN_DAYS) + ')">' +
+    '📈 Аналитика воронки</button></div><div id="dkAn"></div>';
+}
+
+// ── Аналитика воронки (GET /api/miniapp/crm/funnel_analytics) ───────────────
+// Конверсия между стадиями, время в стадии, доля выигранных с интервалом,
+// застрявшие сделки и прогноз выручки. Все числа и пороги считает сервер
+// (services/crm_funnel_analytics.py); экран только показывает и называет,
+// где данных мало.
+let _DK_AN_DAYS = 90;
+
+// Застрявшая сделка может лежать за пределами загруженной страницы колонки:
+// карточку клиента открываем напрямую, простую сделку — если она на доске.
+function dkOpenStuck(kind, key) {
+  if (kind === 'contact' && DK_UUID.test(key)) { openContactDetail(key); return; }
+  const id = parseInt(key, 10);
+  if (kind === 'deal' && id > 0) {
+    if (_dkFindDeal(id)) { dkOpenDeal(id); return; }
+    toast('Сделка в колонке «' + _dkLabel((_DK_STUCK_STAGE[key] || '')) + '» — нажмите «Показать ещё»');
+  }
+}
+let _DK_STUCK_STAGE = {};
+
+function _dkPct(v) { return v == null ? '—' : Math.round(Number(v) * 100) + '%'; }
+function _dkDays(v) { return v == null ? '—' : (Number(v) < 1 ? 'меньше дня' : num(Math.round(Number(v))) + ' дн'); }
+
+async function dkAnalytics(days) {
+  _DK_AN_DAYS = days || 90;
+  const box = document.getElementById('dkAn');
+  if (!box) return;
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  let a;
+  try {
+    a = await api('/api/miniapp/crm/funnel_analytics?days=' + _DK_AN_DAYS);
+  } catch (e) {
+    box.innerHTML = errHtml(errRu(e), 'dkAnalytics(' + _DK_AN_DAYS + ')');
+    return;
+  }
+  const chips = [30, 90, 180, 365].map(function (d) {
+    return '<div class="chip' + (d === _DK_AN_DAYS ? ' on' : '') + '" role="button" tabindex="0" onclick="dkAnalytics(' + d + ')">' +
+      num(d) + ' дн</div>';
+  }).join('');
+  let h = '<div class="sec-hdr" style="padding:4px 16px">📈 Аналитика воронки</div>' +
+    '<div class="filter-chips" style="padding:0 16px 8px">' + chips + '</div>';
+  if (a.history_since) {
+    h += '<div class="field-note" style="padding:0 16px 8px">История переходов ведётся с ' +
+      esc(new Date(a.history_since).toLocaleDateString('ru-RU')) +
+      '. Время в стадиях для более ранних сделок неизвестно и в расчёт не входит.</div>';
+  } else {
+    h += '<div class="field-note" style="padding:0 16px 8px">История переходов только начала вестись: ' +
+      'время в стадиях и «застрявшие» появятся после первых смен стадий.</div>';
+  }
+  const won = a.won || 0, lost = a.lost || 0;
+  const ci = a.win_rate_ci ? ' (' + _dkPct(a.win_rate_ci[0]) + '–' + _dkPct(a.win_rate_ci[1]) + ')' : '';
+  h += '<div class="kpi-row">' +
+    '<div class="kpi-card"><div class="kpi-val">' + _dkPct(a.win_rate) + '</div><div class="kpi-lbl">Выиграно' +
+      (won + lost ? ' · ' + num(won) + ' из ' + num(won + lost) : '') + '</div></div>' +
+    '<div class="kpi-card"><div class="kpi-val">' + _dkDays(a.cycle_days_median) + '</div><div class="kpi-lbl">До оплаты (медиана)</div></div>' +
+    '<div class="kpi-card"><div class="kpi-val" style="' + (a.stuck_total ? 'color:var(--orange)' : '') + '">' +
+      num(a.stuck_total || 0) + '</div><div class="kpi-lbl">Застряли</div></div>' +
+  '</div>';
+  if (ci) h += '<div class="field-note" style="padding:0 16px 8px">Доля выигранных с 95% интервалом: ' +
+    _dkPct(a.win_rate) + esc(ci) + '. Чем меньше закрытых сделок, тем шире интервал.</div>';
+  // Конверсия и время в стадии
+  h += '<div style="padding:0 16px 8px">';
+  (a.stages || []).forEach(function (s) {
+    const bar = a.cohort ? Math.round(100 * s.reached / a.cohort) : 0;
+    h += '<div class="li" style="margin-bottom:6px;display:block">' +
+      '<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600">' +
+        '<span>' + esc(s.label) + '</span><span>' + num(s.reached) + '</span></div>' +
+      '<div style="height:6px;background:var(--bg-input);border-radius:3px;margin:5px 0">' +
+        '<div style="height:6px;width:' + bar + '%;background:var(--accent);border-radius:3px"></div></div>' +
+      '<div class="li-sub">' +
+        (s.to_next != null ? 'дальше проходит ' + _dkPct(s.to_next) : '') +
+        (s.win_probability != null ? ' · выигрывается ' + _dkPct(s.win_probability) : '') +
+        (s.days_median != null ? ' · в стадии обычно ' + _dkDays(s.days_median) : '') +
+      '</div></div>';
+  });
+  h += '</div>';
+  // Прогноз
+  const fc = Object.entries(a.forecast_by_currency || {}).filter(function (p) { return Number(p[1]) > 0; });
+  if (fc.length) {
+    const pipe = a.pipeline_by_currency || {};
+    h += '<div class="sec-hdr" style="padding:4px 16px">💰 Прогноз по сделкам в работе</div><div style="padding:0 16px 8px">' +
+      fc.map(function (p) {
+        return '<div class="li-sub">' + num(Math.round(p[1])) + ' ' + esc(p[0]) + ' из ' +
+          num(Math.round(pipe[p[0]] || 0)) + ' ' + esc(p[0]) + ' в работе</div>';
+      }).join('') +
+      '<div class="field-note" style="padding-top:4px">Сумма каждой сделки умножена на долю выигранных из её стадии — по вашей истории, а не по шаблону.</div></div>';
+  }
+  // Застрявшие
+  _DK_STUCK_STAGE = {};
+  (a.stuck || []).forEach(function (x) { _DK_STUCK_STAGE[x.deal_key] = x.stage; });
+  if ((a.stuck || []).length) {
+    h += '<div class="sec-hdr" style="padding:4px 16px">⏳ Застряли</div><div style="padding:0 16px 16px">' +
+      a.stuck.map(function (x) {
+        const open = x.deal_kind === 'contact' && DK_UUID.test(x.deal_key)
+          ? 'dkOpenStuck(\'contact\',\'' + x.deal_key + '\')'
+          : (x.deal_kind === 'deal' && /^\d+$/.test(x.deal_key) ? 'dkOpenStuck(\'deal\',\'' + x.deal_key + '\')' : '');
+        return '<div class="li" style="margin-bottom:6px"' + (open ? ' role="button" tabindex="0" onclick="' + open + '"' : '') + '>' +
+          '<div class="li-body"><div class="li-name">' + esc(x.name || 'Без имени') + '</div>' +
+          '<div class="li-sub">' + esc(x.stage_label || x.stage) + ' · ' + _dkDays(x.days) +
+            ' (обычно до ' + _dkDays(x.limit_days) + (x.threshold_own ? '' : ', порог по умолчанию') + ')' +
+            (x.value ? ' · ' + num(Math.round(x.value)) + ' ' + esc(x.currency) : '') + '</div></div></div>';
+      }).join('') +
+      (a.stuck_total > a.stuck.length ? '<div class="field-note">Показаны ' + num(a.stuck.length) + ' из ' + num(a.stuck_total) + '</div>' : '') +
+      '</div>';
+  }
+  box.innerHTML = h;
 }
 
 // «Показать ещё» в колонке добирает оба вида карточек: у контактов и у

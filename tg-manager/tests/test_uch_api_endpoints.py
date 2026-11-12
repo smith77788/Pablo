@@ -535,8 +535,13 @@ class TestMergeEngine:
         assert result["status"] == "merged"
         assert result["primary_id"] == "primary-id"
         assert result["removed_id"] == "secondary-id"
-        # 2x fetchrow (ownership) + 3x execute (2 UPDATE + 1 DELETE)
-        assert len(pool._calls) == 5
+        # Сначала проверка владения ОБОИМИ контактами, последним — удаление
+        # второго. Между ними перенос всего, что висит на втором (сделка,
+        # касания, группы, теги…: merge_engine.rehome_dependents), — их число
+        # не фиксируем, проверяем порядок.
+        assert [c[0] for c in pool._calls[:2]] == ["fetchrow", "fetchrow"]
+        assert pool._calls[-1][0] == "execute"
+        assert pool._calls[-1][1].startswith("DELETE FROM unified_contacts")
 
     @pytest.mark.asyncio
     async def test_manual_merge_rejects_foreign_primary(self):
@@ -735,7 +740,7 @@ class TestTrustEngine:
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": ["+79991234567"],
              "first_name": "A", "last_name": "", "company": ""}
-        b = {"telegram_user_id": 2, "username": "b", "phones": ["+79991234567"],
+        b = {"telegram_user_id": None, "username": "b", "phones": ["+79991234567"],
              "first_name": "B", "last_name": "", "company": ""}
         result = compute_merge_confidence(a, b)
         assert "same_phone" in result["reasons"]
@@ -745,7 +750,7 @@ class TestTrustEngine:
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "ivan", "phones": [],
              "first_name": "A", "last_name": "", "company": ""}
-        b = {"telegram_user_id": 2, "username": "ivan", "phones": [],
+        b = {"telegram_user_id": None, "username": "ivan", "phones": [],
              "first_name": "B", "last_name": "", "company": ""}
         result = compute_merge_confidence(a, b)
         assert "same_username" in result["reasons"]
@@ -754,7 +759,7 @@ class TestTrustEngine:
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": [],
              "first_name": "Ivan", "last_name": "Ivanov", "company": ""}
-        b = {"telegram_user_id": 2, "username": "b", "phones": [],
+        b = {"telegram_user_id": None, "username": "b", "phones": [],
              "first_name": "Ivan", "last_name": "Ivanov", "company": ""}
         result = compute_merge_confidence(a, b)
         assert "same_name" in result["reasons"]
@@ -763,7 +768,7 @@ class TestTrustEngine:
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": [],
              "first_name": "Ivan", "last_name": "Petrov", "company": ""}
-        b = {"telegram_user_id": 2, "username": "b", "phones": [],
+        b = {"telegram_user_id": None, "username": "b", "phones": [],
              "first_name": "Ivan", "last_name": "Sidorov", "company": ""}
         result = compute_merge_confidence(a, b)
         assert "same_first_name" in result["reasons"]
@@ -772,7 +777,7 @@ class TestTrustEngine:
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": [],
              "first_name": "A", "last_name": "", "company": "Acme"}
-        b = {"telegram_user_id": 2, "username": "b", "phones": [],
+        b = {"telegram_user_id": None, "username": "b", "phones": [],
              "first_name": "B", "last_name": "", "company": "Acme"}
         result = compute_merge_confidence(a, b)
         assert "same_company" in result["reasons"]
@@ -781,7 +786,7 @@ class TestTrustEngine:
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": ["+111"],
              "first_name": "A", "last_name": "X", "company": "C1"}
-        b = {"telegram_user_id": 2, "username": "b", "phones": ["+222"],
+        b = {"telegram_user_id": None, "username": "b", "phones": ["+222"],
              "first_name": "B", "last_name": "Y", "company": "C2"}
         result = compute_merge_confidence(a, b)
         assert result["confidence"] < 0.5

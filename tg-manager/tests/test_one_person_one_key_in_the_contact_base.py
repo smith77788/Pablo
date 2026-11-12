@@ -72,7 +72,9 @@ def test_username_key(raw):
 def test_one_number_in_different_spellings_is_one_phone():
     a = {"telegram_user_id": 1, "phones": '["+79991234567"]',
          "first_name": "Иван", "last_name": "Петров"}
-    b = {"telegram_user_id": 2, "phones": '["8 (999) 123-45-67"]',
+    # второй — запись без Telegram ID (импорт, ручной ввод): два РАЗНЫХ
+    # Telegram ID дублями не считаются вовсе (см. test_dedup_and_merge_keep_people_whole)
+    b = {"telegram_user_id": None, "phones": '["8 (999) 123-45-67"]',
          "first_name": "Иван", "last_name": "Петров"}
     r = compute_merge_confidence(a, b)
     assert "same_phone" in r["reasons"], r
@@ -82,7 +84,9 @@ def test_one_number_in_different_spellings_is_one_phone():
 def test_at_sign_and_case_do_not_make_two_people():
     a = {"telegram_user_id": 1, "username": "@Ivan_Petrov",
          "first_name": "Иван", "last_name": "Петров", "company": "acme"}
-    b = {"telegram_user_id": 2, "username": "ivan_petrov",
+    # второй — запись без Telegram ID (импорт, ручной ввод): два РАЗНЫХ
+    # Telegram ID дублями не считаются вовсе (см. test_dedup_and_merge_keep_people_whole)
+    b = {"telegram_user_id": None, "username": "ivan_petrov",
          "first_name": "Иван", "last_name": "Петров", "company": "acme"}
     r = compute_merge_confidence(a, b)
     assert "same_username" in r["reasons"], r
@@ -92,7 +96,9 @@ def test_at_sign_and_case_do_not_make_two_people():
 def test_different_numbers_still_differ():
     a = {"telegram_user_id": 1, "phones": ["+79991234567"],
          "first_name": "Иван", "last_name": "Петров"}
-    b = {"telegram_user_id": 2, "phones": ["89991234568"],
+    # второй — запись без Telegram ID (импорт, ручной ввод): два РАЗНЫХ
+    # Telegram ID дублями не считаются вовсе (см. test_dedup_and_merge_keep_people_whole)
+    b = {"telegram_user_id": None, "phones": ["89991234568"],
          "first_name": "Иван", "last_name": "Петров"}
     assert "same_phone" not in compute_merge_confidence(a, b)["reasons"]
 

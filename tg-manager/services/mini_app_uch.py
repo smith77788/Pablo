@@ -1464,7 +1464,9 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.merge_engine import merge_preview
             res = await merge_preview(pool, primary_id, secondary_id, uid)
             if 'error' in res:
-                return _err("Контакт не найден", 404)
+                from services.contacts_hub.merge_engine import MERGE_ERRORS
+                return _err(MERGE_ERRORS.get(res['error'], "Контакт не найден"),
+                            409 if res['error'] == 'different_telegram_accounts' else 404)
             return _json_resp(res)
         except Exception:
             log.exception("uch_merge_preview")
@@ -1481,6 +1483,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Нужны основной и дополнительный идентификаторы", 400)
             from services.contacts_hub.merge_engine import manual_merge
             result = await manual_merge(pool, primary_id, secondary_id, uid)
+            # Отказ — не 200. Экран на любой 200 писал «✅ Объединены», то есть
+            # пара, которая не слилась (уже слитая, чужая, два разных аккаунта
+            # Telegram), выглядела объединённой.
+            if result.get('status') == 'error':
+                return _err(result.get('message') or "Не удалось объединить",
+                            409 if result.get('error') == 'different_telegram_accounts' else 404)
             return _json_resp(result)
         except Exception as exc:
             _bad = bad_body_response(request, exc)
