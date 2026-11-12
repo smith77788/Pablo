@@ -225,6 +225,7 @@ class FuncDecl:
     start: int       # позиция в исходнике (с async)
     end: int         # после закрывающей }
     name_tok: int    # индекс токена имени
+    length: int = 0  # Function.length: параметры до первого со значением по умолчанию
 
 
 # Токен перед `function`, после которого это ВЫРАЖЕНИЕ, а не объявление.
@@ -244,6 +245,25 @@ def _match(toks: list[Tok], k: int, open_: str, close: str) -> int:
         if t.kind == "p" and t.val == close and t.depth == d:
             return j
     raise ValueError("нет парной скобки")
+
+
+def _fn_length(toks: list[Tok], open_k: int, close_k: int) -> int:
+    """Function.length по токенам списка параметров."""
+    d = toks[open_k].depth + 1
+    n, cur_simple, any_tok = 0, True, False
+    for t in toks[open_k + 1:close_k]:
+        if t.depth == d and t.kind == "p" and t.val == ",":
+            if not cur_simple:
+                return n
+            n += 1
+            any_tok = False
+            continue
+        if t.depth == d and t.kind == "p" and t.val in ("=", "..."):
+            cur_simple = False
+        any_tok = True
+    if any_tok and cur_simple:
+        n += 1
+    return n
 
 
 def top_level_functions(toks: list[Tok]) -> list[FuncDecl]:
@@ -275,7 +295,8 @@ def top_level_functions(toks: list[Tok]) -> list[FuncDecl]:
         if close_par + 1 >= n or toks[close_par + 1].val != "{":
             raise ValueError(f"функция {toks[j].val}: нет тела")
         close_body = _match(toks, close_par + 1, "{", "}")
-        out.append(FuncDecl(toks[name_k].val, toks[first].start, toks[close_body].end, name_k))
+        out.append(FuncDecl(toks[name_k].val, toks[first].start, toks[close_body].end, name_k,
+                            _fn_length(toks, j + 1, close_par)))
         k = close_body + 1
     return out
 
@@ -307,6 +328,30 @@ _USE_STRICT = re.compile(r"""^\s*(?:'use strict'|"use strict")""")
 
 def _strict(src: str) -> bool:
     return bool(_USE_STRICT.match(src))
+
+
+_GLOBAL_OBJ = {"window", "globalThis", "self"}
+
+
+def _forbid_dynamic_globals(s: "Script") -> None:
+    """`window[k] = ...`, Object.assign(window, …), defineProperty(window, …):
+    имя не видно лексеру, а подменить можно любую функцию. Такой код — отказ от
+    нарезки целиком (страница уходит полной), а не угадывание."""
+    toks = s.toks
+    for k, t in enumerate(toks):
+        if t.kind != "id" or t.val not in _GLOBAL_OBJ:
+            continue
+        nxt = toks[k + 1] if k + 1 < len(toks) else None
+        if nxt is not None and nxt.val == "[":
+            close = _match(toks, k + 1, "[", "]")
+            after = toks[close + 1] if close + 1 < len(toks) else None
+            if after is not None and after.kind == "p" and after.val.endswith("=") \
+                    and after.val not in ("==", "===", "!=", "!==", "<=", ">=", "=>"):
+                raise ValueError(f"{s.label}: присваивание {t.val}[…] — нарезка небезопасна")
+        prev = toks[k - 1] if k else None
+        pp = toks[k - 2] if k >= 2 else None
+        if prev is not None and prev.val == "(" and pp is not None and pp.val in ("assign", "defineProperty", "defineProperties"):
+            raise ValueError(f"{s.label}: {pp.val}({t.val}, …) — нарезка небезопасна")
 
 
 def _safe_refs(scripts: list[Script], extra_text: list[str]) -> tuple[set[str], dict[str, str]]:
@@ -344,7 +389,12 @@ def _safe_refs(scripts: list[Script], extra_text: list[str]) -> tuple[set[str], 
             prev = toks[k - 1] if k else None
             nxt = toks[k + 1] if k + 1 < n else None
             if prev is not None and prev.kind == "p" and prev.val in (".", "?."):
-                continue                      # obj.имя — свойство, не наша функция
+                # obj.имя — чужое свойство, не наша функция. Но window.имя —
+                # она самая: `window.goTab = обёртка` (screens/desktop.js)
+                # подменяет функцию, и кусок затёр бы обёртку.
+                if not (k >= 2 and toks[k - 2].kind == "id" and toks[k - 2].val in _GLOBAL_OBJ):
+                    continue
+                prev = toks[k - 3] if k >= 3 else None
             if prev is not None and prev.kind == "id" and prev.val == "typeof":
                 continue
             if prev is not None and prev.kind == "id" and prev.val in ("new", "function"):
@@ -386,6 +436,7 @@ class Chunk:
     names: list[str]
     body: str
     hash: str = ""
+    lengths: dict = field(default_factory=dict)
 
     @property
     def url(self) -> str:
@@ -401,8 +452,8 @@ class Split:
     boot_kept: int
 
 
-_TARGET = 40 * 1024     # ~40 КБ исходника на кусок: 6–9 КБ brotli
-_MAX = 96 * 1024
+_TARGET = 128 * 1024    # ~128 КБ исходника на кусок: ~25 КБ brotli
+_MAX = 256 * 1024
 
 
 def _cut(script: Script, lazy: set[str]) -> tuple[str, list[tuple[str, str]]]:
@@ -448,18 +499,18 @@ var W=window,M=__LZM__,B=__LZB__,S={},Q=[],F=0;
 function inject(c,t){var s=document.createElement('script');s.text=t+'\n//# sourceURL='+B+M[c][0];(document.head||document.documentElement).appendChild(s);s.remove()}
 function fail(c,e){try{if(sessionStorage.getItem('__lz_fail')){throw e}sessionStorage.setItem('__lz_fail','1')}catch(_){}
 var u=location.href.replace(/([?&])full=1(&|$)/,'$1');location.replace(u+(u.indexOf('?')<0?'?':'&')+'full=1');throw e}
-function load(c){if(S[c]===2)return;var x=new XMLHttpRequest();x.open('GET',B+M[c][0],false);
+function load(c,n){if(S[c]===2)return;(W.__lzTrace=W.__lzTrace||[]).push(n);var x=new XMLHttpRequest();x.open('GET',B+M[c][0],false);
 try{x.send(null)}catch(e){fail(c,e)}if(x.status!==200){fail(c,new Error('lazy '+x.status))}S[c]=2;inject(c,x.responseText)}
-function stub(c,n,st){var f=st?function(){'use strict';if(W[n]===f){load(c);if(W[n]===f)fail(c,new Error('lazy '+n))}return W[n].apply(this,arguments)}
-:function(){if(W[n]===f){load(c);if(W[n]===f)fail(c,new Error('lazy '+n))}return W[n].apply(this,arguments)};W[n]=f}
-for(var c in M){var e=M[c];for(var i=2;i<e.length;i++)stub(c,e[i],e[1]);Q.push(c)}
+function stub(c,n,st,l){var f=st?function(){'use strict';if(W[n]===f){load(c,n);if(W[n]===f)fail(c,new Error('lazy '+n))}return W[n].apply(this,arguments)}
+:function(){if(W[n]===f){load(c,n);if(W[n]===f)fail(c,new Error('lazy '+n))}return W[n].apply(this,arguments)};
+try{Object.defineProperty(f,'name',{value:n});Object.defineProperty(f,'length',{value:l})}catch(_){}W[n]=f}
+for(var c in M){var e=M[c];for(var i=2;i<e.length;i++){var p=e[i].split('/');stub(c,p[0],e[1],+(p[1]||0))}Q.push(c)}
 function next(){if(!Q.length)return;var c=Q.shift();if(S[c]){next();return}S[c]=1;var s=document.createElement('script');s.src=B+M[c][0];s.async=true;
 s.onload=function(){S[c]=2;idle(next)};s.onerror=function(){S[c]=0;F++;if(F<3){Q.push(c)}idle(next)};document.head.appendChild(s)}
 function idle(f){(W.requestIdleCallback||function(g){setTimeout(g,60)})(f,{timeout:2000})}
-W.__lazyLoadAll=function(){for(var c in M)load(c)};
+W.__lazyLoadAll=function(){for(var c in M)load(c,'*')};
 W.__lazyState=function(){var r={total:Q.length,pending:Q.length,loaded:0};for(var c in M)if(S[c]===2)r.loaded++;r.total=Object.keys(M).length;return r};
-W.addEventListener('load',function(){setTimeout(function(){idle(next)},__LZD__)});
-try{sessionStorage.removeItem('__lz_fail')}catch(_){}
+W.addEventListener('load',function(){if(!W.__lzNoIdle)setTimeout(function(){idle(next)},__LZD__)});
 })();"""
 
 # Через сколько после load начинать докачку: главный экран в это время тянет
@@ -468,7 +519,9 @@ IDLE_DELAY_MS = 1500
 
 
 def _loader(chunks: list[Chunk], boot: set[str]) -> str:
-    m = {str(i): [c.url, 1 if c.strict else 0] + c.names for i, c in enumerate(chunks)}
+    m = {str(i): [c.url, 1 if c.strict else 0] + [
+        nm + ("/" + str(c.lengths[nm]) if c.lengths.get(nm) else "") for nm in c.names]
+        for i, c in enumerate(chunks)}
     return (_LOADER.replace("__LZM__", json.dumps(m, ensure_ascii=False, separators=(",", ":")))
             .replace("__LZB__", "''").replace("__LZD__", str(IDLE_DELAY_MS)))
 
@@ -511,6 +564,7 @@ def split_page(html: str, read_file, minify_js, boot: set[str] | None = None,
     for s in scripts:
         s.toks = tokenize(s.src)
         s.funcs = top_level_functions(s.toks)
+        _forbid_dynamic_globals(s)
 
     # Тексты вне разрезаемых скриптов: разметка с обработчиками и мелкие
     # встроенные скрипты в <head>.
@@ -521,16 +575,24 @@ def split_page(html: str, read_file, minify_js, boot: set[str] | None = None,
         why[nm] = "нужна на старте"
     lazy -= boot
 
+    # Два потока по строгому режиму: в одном куске режим один на всех, а
+    # мелкие экраны склеиваются с соседями — 40 запросов по 3 КБ жмутся хуже
+    # и стоят дороже, чем десяток по 30 КБ.
+    lengths = {f.name: f.length for s in scripts for f in s.funcs}
     chunks: list[Chunk] = []
     rests: dict[int, str] = {}
+    streams: dict[bool, list[tuple[str, str]]] = {True: [], False: []}
     for s in scripts:
         rest, gone = _cut(s, lazy)
         rests[id(s)] = rest
-        chunks += _group(s.label, s.strict, gone)
+        streams[s.strict] += gone
+    for strict in (True, False):
+        chunks += _group("strict" if strict else "sloppy", strict, streams[strict])
     for c in chunks:
         if c.strict:
             c.body = '"use strict";\n' + c.body
         c.hash = hashlib.sha256(c.body.encode()).hexdigest()[:16]
+        c.lengths = {nm: lengths[nm] for nm in c.names}
 
     out: list[str] = []
     pos = 0
@@ -564,5 +626,145 @@ def read_boot(static_dir: str) -> set[str]:
         return set()
 
 
+class LazyCache:
+    """Нарезка для сервера: одна на версию страницы, в фоне, с кусками в памяти.
+
+    Нарезка стоит ~5 с CPU, поэтому идёт в потоке и ОДИН раз на версию; пока
+    она не готова, отдаётся полная страница — как раньше. Куски прошлых версий
+    держатся ещё два деплоя: открытая до деплоя страница догружает свои куски,
+    а не получает 404 посреди работы.
+    """
+
+    KEEP_PAGES = 3
+
+    def __init__(self) -> None:
+        self.pages: dict[str, Split | None] = {}     # версия → нарезка (None — сбой)
+        self.chunks: dict[str, str] = {}             # хэш → текст
+        self.owner: dict[str, str] = {}              # хэш → версия
+        self.gz: dict[str, bytes] = {}
+        self._pending: set[str] = set()
+        self._tasks: set = set()
+
+    def page(self, version: str, html: str, static_dir: str, minify_js) -> Split | None:
+        if version in self.pages:
+            return self.pages[version]
+        if version in self._pending:
+            return None
+        try:
+            import asyncio
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        self._pending.add(version)
+
+        def rf(rel: str) -> str | None:
+            root = os.path.realpath(static_dir)
+            full = os.path.realpath(os.path.join(root, rel))
+            if not full.startswith(root + os.sep):
+                return None
+            try:
+                with open(full, encoding="utf-8") as fh:
+                    return fh.read()
+            except OSError:
+                return None
+
+        def work() -> Split:
+            return split_page(html, rf, minify_js, boot=read_boot(static_dir))
+
+        async def run() -> None:
+            import asyncio
+            try:
+                sp = await asyncio.to_thread(work)
+                self._store(version, sp)
+                log.info("miniapp_lazy: %d функций в %d кусках, страница %d КБ",
+                         sp.lazy_names, len(sp.chunks), len(sp.html) // 1024)
+            except Exception:
+                log.warning("miniapp_lazy: нарезка не удалась — отдаём полную страницу",
+                            exc_info=True)
+                self.pages[version] = None
+            finally:
+                self._pending.discard(version)
+
+        task = loop.create_task(run())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return None
+
+    def _store(self, version: str, sp: Split) -> None:
+        self.pages[version] = sp
+        for c in sp.chunks:
+            self.chunks[c.hash] = c.body
+            self.owner[c.hash] = version
+        while len(self.pages) > self.KEEP_PAGES:
+            old = next(iter(self.pages))
+            del self.pages[old]
+            for h in [h for h, v in self.owner.items() if v == old]:
+                if not any(c.hash == h for p in self.pages.values() if p for c in p.chunks):
+                    self.chunks.pop(h, None)
+                    self.gz.pop(h, None)
+                    self.owner.pop(h, None)
+
+    def chunk_gz(self, h: str) -> bytes | None:
+        body = self.chunks.get(h)
+        if body is None:
+            return None
+        if h not in self.gz:
+            import gzip
+            self.gz[h] = gzip.compress(body.encode("utf-8"), 6)
+        return self.gz[h]
+
+
 def enabled() -> bool:
     return os.getenv("MINIAPP_LAZY", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+# ── Сборка в каталог (замеры и обход в Chromium) ──────────────────────────
+
+def build_dir(static_dir: str, out_dir: str, lazy: bool = True, boot: set[str] | None = None) -> Split | None:
+    """Записать в out_dir страницу так, как её отдаёт сервер: очищенную и (если
+    lazy) разрезанную, с куском в lazy/<хэш>.js. Остальные файлы — копией
+    (экраны — очищенными). Для deploy/scripts/lazy_check.mjs и cold_start.mjs."""
+    import shutil
+
+    from services import miniapp_minify as mm
+    os.makedirs(out_dir, exist_ok=True)
+    for name in os.listdir(static_dir):
+        src = os.path.join(static_dir, name)
+        if os.path.isfile(src) and name != "index.html":
+            shutil.copy(src, os.path.join(out_dir, name))
+    os.makedirs(os.path.join(out_dir, "screens"), exist_ok=True)
+    for name in os.listdir(os.path.join(static_dir, "screens")):
+        with open(os.path.join(static_dir, "screens", name), encoding="utf-8") as f:
+            body = mm.strip_js(f.read())
+        with open(os.path.join(out_dir, "screens", name), "w", encoding="utf-8") as f:
+            f.write(body)
+    with open(os.path.join(static_dir, "index.html"), encoding="utf-8") as f:
+        html = mm.minify_html(f.read())
+    sp = None
+    if lazy:
+        def rf(rel):
+            try:
+                with open(os.path.join(static_dir, rel), encoding="utf-8") as fh:
+                    return fh.read()
+            except OSError:
+                return None
+        sp = split_page(html, rf, lambda t, _l: mm.strip_js(t),
+                        boot=read_boot(static_dir) if boot is None else boot)
+        html = sp.html
+        os.makedirs(os.path.join(out_dir, "lazy"), exist_ok=True)
+        for c in sp.chunks:
+            with open(os.path.join(out_dir, c.url), "w", encoding="utf-8") as f:
+                f.write(c.body)
+    with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8") as f:
+        f.write(html)
+    return sp
+
+
+if __name__ == "__main__":  # python -m services.miniapp_lazy <out> [--full] [--no-boot]
+    import sys
+    _root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mini_app")
+    _sp = build_dir(_root, sys.argv[1], lazy="--full" not in sys.argv,
+                    boot=set() if "--no-boot" in sys.argv else None)
+    if _sp:
+        print(json.dumps({"chunks": len(_sp.chunks), "lazy": _sp.lazy_names,
+                          "kept": len(_sp.kept)}, ensure_ascii=False))

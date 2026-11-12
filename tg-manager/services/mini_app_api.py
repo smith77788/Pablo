@@ -11059,6 +11059,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Сжатый мини-апп в памяти: {"key": (mtime, size), "body": bytes}.
     # Пересобирается сам, когда файл меняется (деплой) — ключ перестаёт совпадать.
     _MINIAPP_GZ: dict = {}
+    from services.miniapp_lazy import LazyCache as _LazyCache
+    _LAZY = _LazyCache()
     if os.path.isdir(_static_dir):
         async def serve_index(request: web.Request) -> web.Response:
             """Отдать мини-апп сжатым, с ETag на повторное открытие.
@@ -11076,9 +11078,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return web.FileResponse(_index_path)   # пусть aiohttp отдаст 404
             from services import miniapp_assets as _ma
             key = (int(st.st_mtime), int(st.st_size))
+            from services import miniapp_minify as _mm
             if _MINIAPP_GZ.get("key") != key or not _MINIAPP_GZ.get("html"):
                 try:
-                    from services import miniapp_minify as _mm
                     with open(_index_path, "rb") as _f:
                         _raw = _f.read().decode("utf-8")
                     # Без комментариев и отступов: −25% сжатого размера на
@@ -11100,16 +11102,33 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     versions[_rel] = _tok
             etag = _ma.page_etag(key, versions)
 
+            # Ленивая страница (services/miniapp_lazy.py): код разделов — в
+            # кусках по требованию, на старте только нужное старту. Пока
+            # нарезка этой версии не готова (идёт в фоне) — полная, как раньше.
+            # `?full=1` — полная всегда: ею страница лечит себя, если кусок
+            # не загрузился.
+            from services import miniapp_lazy as _ml
+            _page_html, _variant = _MINIAPP_GZ["html"], "full"
+            if _ml.enabled() and request.query.get("full") != "1":
+                _sp = _LAZY.page(etag, _MINIAPP_GZ["html"], _static_dir,
+                                 lambda _t, _l: _mm.safe(_mm.strip_js, _t, _l))
+                if _sp is not None:
+                    _page_html, _variant = _sp.html, "lazy"
+                    etag = etag[:-1] + '-lz"'
+
             # Повторное открытие: браузер прислал тот же ETag — тело не гоним.
             if request.headers.get("If-None-Match") == etag:
                 return web.Response(status=304, headers={"ETag": etag,
                                                          "Cache-Control": "no-cache"})
 
-            if _MINIAPP_GZ.get("etag") != etag or not _MINIAPP_GZ.get("body"):
+            _bodies = _MINIAPP_GZ.setdefault("bodies", {})
+            if etag not in _bodies:
                 import gzip as _gzip
-                _MINIAPP_GZ["body"] = _gzip.compress(
-                    _ma.stamp_versions(_MINIAPP_GZ["html"], versions).encode("utf-8"), 6)
-                _MINIAPP_GZ["etag"] = etag
+                _bodies[etag] = _gzip.compress(
+                    _ma.stamp_versions(_page_html, versions).encode("utf-8"), 6)
+                while len(_bodies) > 4:
+                    del _bodies[next(iter(_bodies))]
+            _page_gz = _bodies[etag]
 
             headers = {
                 "ETag": etag,
@@ -11124,17 +11143,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if _mb.accepts(request.headers.get("Accept-Encoding")):
                 import gzip as _gz_br
                 _br = _mb.get_or_schedule(
-                    "index.html", etag, lambda: _gz_br.decompress(_MINIAPP_GZ["body"]))
+                    "index.html#" + _variant, etag, lambda: _gz_br.decompress(_page_gz))
                 if _br is not None:
                     headers["Content-Encoding"] = "br"
                     return web.Response(body=_br, headers=headers,
                                         content_type="text/html", charset="utf-8")
             if "gzip" in (request.headers.get("Accept-Encoding") or ""):
                 headers["Content-Encoding"] = "gzip"
-                return web.Response(body=_MINIAPP_GZ["body"], headers=headers,
+                return web.Response(body=_page_gz, headers=headers,
                                     content_type="text/html", charset="utf-8")
             import gzip as _gzip_mod   # клиент без gzip — та же очищенная страница
-            return web.Response(body=_gzip_mod.decompress(_MINIAPP_GZ["body"]),
+            return web.Response(body=_gzip_mod.decompress(_page_gz),
                                 headers=headers, content_type="text/html", charset="utf-8")
 
         # Скрипты экранов и стили — тем же путём, что index.html: сжатыми один
@@ -11200,6 +11219,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return web.Response(body=hit[1], headers=headers, content_type=ctype,
                                 charset="utf-8")
 
+        async def serve_lazy_chunk(request: web.Request) -> web.Response:
+            """Ленивый кусок кода по хэшу содержимого: адрес не меняется
+            никогда, поэтому кэшируется навсегда. Кусок прошлой версии
+            страницы ещё живёт два деплоя; совсем старый — 404, и страница
+            перезагружает себя полной (services/miniapp_lazy.py)."""
+            from services import miniapp_assets as _ma
+            from services import miniapp_brotli as _mb
+            h = request.match_info.get("h", "")
+            gz = _LAZY.chunk_gz(h)
+            if gz is None:
+                raise web.HTTPNotFound()
+            etag = f'"{h}"'
+            headers = {"ETag": etag, "Cache-Control": _ma.IMMUTABLE, "Vary": "Accept-Encoding"}
+            if request.headers.get("If-None-Match") == etag:
+                return web.Response(status=304, headers=headers)
+            ae = request.headers.get("Accept-Encoding")
+            if _mb.accepts(ae):
+                _br = _mb.get_or_schedule("lazy/" + h, h, lambda: _LAZY.chunks[h].encode("utf-8"))
+                if _br is not None:
+                    headers["Content-Encoding"] = "br"
+                    return web.Response(body=_br, headers=headers,
+                                        content_type="application/javascript", charset="utf-8")
+            if "gzip" in (ae or ""):
+                headers["Content-Encoding"] = "gzip"
+                return web.Response(body=gz, headers=headers,
+                                    content_type="application/javascript", charset="utf-8")
+            return web.Response(text=_LAZY.chunks[h], headers=headers,
+                                content_type="application/javascript", charset="utf-8")
+
         async def assetlinks(request: web.Request) -> web.Response:
             """Digital Asset Links для Android-приложения (TWA): связывает домен с
             APK по отпечатку ключа подписи, чтобы приложение открывалось БЕЗ
@@ -11216,6 +11264,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Раньше add_static: точный обработчик должен поймать .js/.css первым.
         # Шаблон в переменной: скобки регулярки внутри вызова add_get сбивают
         # статический скан регистраций (test_uch_bulk_routes_registered).
+        _lazy_pattern = r"/miniapp/lazy/{h:[0-9a-f]{16}}.js"
+        app.router.add_get(_lazy_pattern, serve_lazy_chunk)
         _asset_pattern = r"/miniapp/{path:[A-Za-z0-9_\-/.]+\.(?:js|css)}"
         app.router.add_get(_asset_pattern, serve_asset)
         app.router.add_static("/miniapp", _static_dir, show_index=False)
