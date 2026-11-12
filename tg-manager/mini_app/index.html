@@ -6269,9 +6269,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="text" id="pTaboo" maxlength="400" placeholder="политика, религия, конкуренты" class="inp">
       </div>
       <div class="field">
-        <label>Образцы речи — по одному сообщению в строке (до 5)</label>
+        <label>Образцы речи — по одному сообщению в строке (до 30)</label>
         <textarea id="pSamples" rows="3" placeholder="ну хз, мне зашло&#10;кто пробовал? норм вообще?" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
-        <div class="field-note">Лучший способ задать голос: ИИ берёт манеру, но фразы не копирует.</div>
+        <div class="field-note">Лучший способ задать голос: с трёх образцов манера замеряется (длина, строчная буква, точка в конце, смайлики, словечки), и персона держится этих цифр. Фразы не копируются.</div>
+        <button type="button" class="btn btn-o" style="width:100%;margin-top:6px;font-size:13px;padding:8px" onclick="samplesFromMyChats(this)">✍️ Взять мою манеру из моих переписок</button>
+        <div class="field-note" id="pSamplesNote"></div>
       </div>
       <div class="sec" style="padding:10px 0 4px">⚙️ Как работает ИИ персоны</div>
       <div class="field">
@@ -23385,7 +23387,7 @@ function _personaBody() {
     emoji_level: v('pEmoji')||'rare',
     literacy: v('pLiteracy')||'casual',
     taboo_topics: v('pTaboo'),
-    sample_messages: v('pSamples').split('\n').map(x=>x.trim()).filter(Boolean).slice(0,5),
+    sample_messages: v('pSamples').split('\n').map(x=>x.trim()).filter(Boolean).slice(0,30),
     memory_enabled: !!(document.getElementById('pMemory')||{}).checked,
     persona_id: parseInt(v('pEditId'))||0,
     ai_provider: (v('pModel').split('|')[0]||''),
@@ -23416,7 +23418,7 @@ function editPersona(id) {
   set('pInterests', (p.interests||[]).join(', ')); set('pAge', p.age||25);
   set('pGender', p.gender||''); set('pCity', p.city); set('pOccupation', p.occupation);
   set('pEmoji', p.emoji_level||'rare'); set('pLiteracy', p.literacy||'casual');
-  set('pTaboo', p.taboo_topics); set('pSamples', (p.sample_messages||[]).join('\n'));
+  set('pTaboo', p.taboo_topics); set('pSamples', (p.sample_messages||[]).join('\n')); txt('pSamplesNote', esc(p.style_summary||''));
   { const m = document.getElementById('pMemory'); if (m) m.checked = p.memory_enabled !== false; }
   fillPersonaModels(p.ai_provider ? `${p.ai_provider}|${p.ai_model||''}` : '');
   set('pCreativity', p.creativity==null?60:p.creativity); txt('pCreativityVal', String(p.creativity==null?60:p.creativity));
@@ -23430,7 +23432,7 @@ function editPersona(id) {
   const t = document.getElementById('pFormTitle'); if (t && t.scrollIntoView) t.scrollIntoView({behavior:'smooth'});
 }
 function resetPersonaForm() {
-  ['pEditId','pName','pNiche','pBio','pBackstory','pInterests','pTryMsg','pGender','pCity','pOccupation','pTaboo','pSamples'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['pEditId','pName','pNiche','pBio','pBackstory','pInterests','pTryMsg','pGender','pCity','pOccupation','pTaboo','pSamples'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';}); txt('pSamplesNote','');
   const a = document.getElementById('pAge'); if (a) a.value='25';
   { const e = document.getElementById('pEmoji'); if (e) e.value='rare'; }
   { const l = document.getElementById('pLiteracy'); if (l) l.value='casual'; }
@@ -23458,9 +23460,21 @@ async function previewPersona(btn) {
       ? `<div class="field-note" style="margin-top:6px">Выбрано из ${d.candidates.length} ${d.picked_by==='judge'?'ИИ-судьёй':'по приметам живой речи'}${d.why?': '+esc(d.why):''}</div>`
         + (others.length?`<div class="field-note">Отклонены: ${others.map(c=>'«'+esc(c)+'»').join(' · ')}</div>`:'')
       : '';
-    txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.asked||'')}</div>${parts}${how}${d.model?`<div class="field-note">Модель: ${esc(d.model)}</div>`:''}</div>`);
+    txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.asked||'')}</div>${parts}${how}${d.model?`<div class="field-note">Модель: ${esc(d.model)}</div>`:''}${d.style?`<div class="field-note">Манера: ${esc(d.style)}</div>`:''}</div>`);
   } catch(e) { txt('pTryOut', `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось получить ответ'))}</div>`); }
   finally { btn.disabled = false; btn.textContent = label; }
+}
+async function samplesFromMyChats(btn) {
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Читаю ваши сообщения…'; }
+  try {
+    const d = await api('/api/miniapp/persona/style_from_my_chats');
+    if (!(d.samples||[]).length) { toast('ℹ️ '+(d.note||'Своих сообщений не нашлось')); return; }
+    const el = document.getElementById('pSamples'); if (el) el.value = d.samples.join('\n');
+    txt('pSamplesNote', esc(d.summary || d.note || ''));
+    toast(`✍️ Взято ${num(d.samples.length)} образцов — проверьте и сохраните персону`);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
 }
 // Память персоны: что она рассказала о себе и что говорила. Владелец видит,
 // правит факты (модель могла записать лишнее) и может стереть всё.
@@ -23484,6 +23498,7 @@ async function openPersonaMemory(id) {
       </div>
       <div class="field-note">Сказано: ${num(d.total||0)} ${plural(d.total||0,'сообщение','сообщения','сообщений')}</div>
       <div class="lst">${items || empty('🧠','Пока ничего','Персона ещё не говорила в прогреве и комментариях')}</div>
+      ${typeof personaPeersHtml === 'function' ? personaPeersHtml(id, d) : ''}
       <button class="btn btn-o" style="width:100%;margin-top:6px;font-size:13px;padding:8px" onclick="txt('personaMemory','')">Скрыть</button>
     </div>`;
     if (box.scrollIntoView) box.scrollIntoView({behavior:'smooth'});
@@ -23509,7 +23524,7 @@ async function rebuildPersonaFacts(id, btn) {
   finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
 }
 async function forgetPersona(id, el) {
-  if (!await askConfirm('Стереть всё, что персона помнит: сказанное и факты о себе? Это не отменить.')) return;
+  if (!await askConfirm('Стереть всё, что персона помнит: сказанное, факты о себе и знакомых? Это не отменить.')) return;
   try {
     const d = await api(`/api/miniapp/persona/${id}/memory`, {method:'DELETE'});
     toast(`🧽 Забыто: ${num(d.deleted||0)}`);
@@ -27360,6 +27375,7 @@ async function openHealth() {
       + go('low_trust', d.low_trust||0, 'Низкое доверие', kpiTone(d.low_trust,'red'))
       + go('banned', d.banned||0, 'Забанено', kpiTone(d.banned,'red'))
       + go('foreign', d.foreign||0, 'Чужие сеансы', kpiTone(d.foreign,'red'))
+      + go('no2fa', d.no2fa||0, 'Без 2FA', kpiTone(d.no2fa,'orange'))
       + go('', d.warmup_active||0, 'На прогреве', '', 'openWarmup()'));
     txt('m-health-val',`${d.banned||0} забанено · ${d.flooded_7d||0} с флудом`);
     const events = d.events||[];
@@ -27614,7 +27630,16 @@ async function openShield() {
             'shieldPickExempt()')
       + row('🔔 Уведомления', cfg.notify_admin?'✅ Вкл':'❌ Выкл',
             'Пишет в Telegram, когда ставит аккаунт на паузу',
-            "shieldToggle('notify_admin')"));
+            "shieldToggle('notify_admin')")
+      + row('🚪 Автозащита: чужие сеансы', cfg.guard_sessions?'✅ Вкл':'❌ Выкл',
+            'Сам закрывает новый чужой вход в аккаунт, как только его увидит (Telegram разрешает это из сеанса старше суток)',
+            "shieldToggle('guard_sessions')")
+      + row('🔐 Автозащита: пароль 2FA', cfg.guard_twofa?'✅ Вкл':'❌ Выкл',
+            'Ставит аккаунтам без пароля свой случайный пароль 2FA и хранит его в «Профили → Пароли 2FA»',
+            "shieldToggle('guard_twofa')")
+      + row('🗝 Автозащита: запасной ключ', cfg.guard_reserve?'✅ Вкл':'❌ Выкл',
+            'Заводит второй свой сеанс без SMS: если основная сессия умрёт, флот поднимет аккаунт сам',
+            "shieldToggle('guard_reserve')"));
 
     const heldRows = d.held||[];
     document.getElementById('shieldHeldWrap').style.display = heldRows.length ? '' : 'none';
@@ -35770,5 +35795,6 @@ function renderAudSegChart(segments) {
 <script src="screens/fleet_tools.js"></script>
 <script src="screens/infra.js"></script>
 <script src="screens/clone_adapt.js"></script>
+<script src="screens/persona_peers.js"></script>
 </body>
 </html>

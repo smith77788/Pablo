@@ -4250,7 +4250,14 @@ def effective_account_status(
     return normalized
 
 
-async def foreign_authorizations(client) -> list[dict] | None:
+async def authorizations_snapshot(client) -> tuple[list[dict], int] | None:
+    """Чужие авторизации и время создания НАШЕЙ — одним запросом.
+
+    Время нашей нужно автозащите: Telegram не даёт закрывать чужие сеансы из
+    сеанса моложе суток (FRESH_RESET_AUTHORISATION_FORBIDDEN), и считать эти
+    сутки от записи в базе нельзя — сеанс мог быть импортирован уже старым.
+    None — узнать не удалось.
+    """
     """Чужие авторизации аккаунта — все, кроме нашей. None — узнать не удалось.
 
     Продавец купленного аккаунта, угонщик или забытый старый вход видны здесь
@@ -4263,7 +4270,7 @@ async def foreign_authorizations(client) -> list[dict] | None:
     try:
         res = await asyncio.wait_for(client(GetAuthorizationsRequest()), timeout=_OP_TIMEOUT)
     except Exception as exc:
-        log.debug("foreign_authorizations: %s", exc)
+        log.debug("authorizations_snapshot: %s", exc)
         return None
     auths = getattr(res, "authorizations", None)
     if not isinstance(auths, (list, tuple)):
@@ -4276,8 +4283,10 @@ async def foreign_authorizations(client) -> list[dict] | None:
             return 0
 
     out: list[dict] = []
+    own_created = 0
     for a in auths:
         if getattr(a, "current", False):
+            own_created = _ts(getattr(a, "date_created", 0))
             continue
         try:
             h = int(getattr(a, "hash", 0) or 0)
@@ -4298,7 +4307,106 @@ async def foreign_authorizations(client) -> list[dict] | None:
             "created": _ts(getattr(a, "date_created", 0)),
             "active": _ts(getattr(a, "date_active", 0)),
         })
-    return out
+    return out, own_created
+
+
+async def foreign_authorizations(client) -> list[dict] | None:
+    """Чужие авторизации аккаунта — все, кроме нашей. None — узнать не удалось."""
+    snap = await authorizations_snapshot(client)
+    return None if snap is None else snap[0]
+
+
+class ReserveKeyError(RuntimeError):
+    """Запасной ключ не завёлся; текст — по-русски, для владельца."""
+
+
+async def mint_reserve_session(main_client, acc: dict, password: str | None = None,
+                               *, new_client=None, timeout: float = 25.0) -> tuple[str, int]:
+    """Завести запасной ключ аккаунта — второй НАШ сеанс, без SMS.
+
+    Живой сеанс сам подтверждает вход нового: новый клиент берёт токен входа
+    (auth.exportLoginToken, то же, что QR в официальном приложении), основной
+    его принимает (auth.acceptLoginToken). Ключ у нового сеанса свой, поэтому
+    гибель основного (AUTH_KEY_DUPLICATED, отзыв ключа) его не задевает.
+
+    → (строка сессии, отпечаток запасного сеанса в списке авторизаций).
+    Отпечаток обязателен: без него дозор считал бы запасной сеанс чужим, а
+    автозащита закрыла бы его на следующем проходе. Не нашли отпечаток —
+    запасной сеанс сразу закрывается сам (log_out) и ключ не заводится.
+
+    new_client — для тестов; по умолчанию клиент с тем же устройством и тем же
+    выходом в сеть, что у аккаунта (второй адрес у одного аккаунта — лишний
+    след). Бросает ReserveKeyError.
+    """
+    from telethon.errors import SessionPasswordNeededError
+    from telethon.tl.functions.auth import AcceptLoginTokenRequest
+
+    before = await authorizations_snapshot(main_client)
+    if before is None:
+        raise ReserveKeyError("не удалось прочитать список сеансов аккаунта")
+    known = {int(s["hash"]) for s in before[0]}
+    try:
+        me_main = await asyncio.wait_for(main_client.get_me(), timeout=_OP_TIMEOUT)
+    except Exception as exc:
+        raise ReserveKeyError("основной сеанс не ответил") from exc
+
+    client = new_client if new_client is not None else _make_client("", dict(acc),
+                                                                    _mutex_managed=True)
+    accepted = False
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        qr = await asyncio.wait_for(client.qr_login(), timeout=_OP_TIMEOUT)
+        await asyncio.wait_for(main_client(AcceptLoginTokenRequest(token=qr.token)),
+                               timeout=_OP_TIMEOUT)
+        accepted = True
+        try:
+            await asyncio.wait_for(qr.wait(timeout), timeout=timeout + 5)
+        except SessionPasswordNeededError:
+            if not password:
+                raise ReserveKeyError("на аккаунте пароль 2FA, а сохранённого пароля нет")
+            await asyncio.wait_for(client.sign_in(password=password), timeout=_OP_TIMEOUT)
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
+        if me is None or getattr(me, "id", None) != getattr(me_main, "id", object()):
+            raise ReserveKeyError("запасной сеанс вошёл не в тот аккаунт")
+        after = await authorizations_snapshot(main_client)
+        fresh = [] if after is None else [int(s["hash"]) for s in after[0]
+                                          if int(s["hash"]) not in known]
+        if len(fresh) != 1:
+            raise ReserveKeyError("не удалось опознать запасной сеанс в списке сеансов")
+        return client.session.save(), fresh[0]
+    except BaseException as exc:
+        if accepted:
+            # Сеанс уже существует: не оставляем безымянный вход в аккаунте.
+            try:
+                await asyncio.wait_for(client.log_out(), timeout=_OP_TIMEOUT)
+            except BaseException:
+                log_exc_swallow(log, "mint_reserve_session: log_out после сбоя")
+        if isinstance(exc, ReserveKeyError) or not isinstance(exc, Exception):
+            raise
+        log.warning("mint_reserve_session acc=%s: %s", acc.get("id"), exc)
+        raise ReserveKeyError("Telegram не подтвердил вход запасного сеанса") from exc
+    finally:
+        try:
+            await safe_disconnect(client)
+        except BaseException:
+            log_exc_swallow(log, "mint_reserve_session: disconnect")
+
+
+async def twofa_enabled(client) -> bool | None:
+    """Стоит ли на аккаунте пароль 2FA. None — узнать не удалось.
+
+    Аккаунт без пароля угоняется одним кодом из SMS или с другого устройства:
+    кто получил код, тот входит и выкидывает наш сеанс. Флот этого не знал
+    ни про один аккаунт — пароль видели только у тех, где его ставили сами.
+    """
+    from telethon.tl.functions.account import GetPasswordRequest
+    try:
+        res = await asyncio.wait_for(client(GetPasswordRequest()), timeout=_OP_TIMEOUT)
+    except Exception as exc:
+        log.debug("twofa_enabled: %s", exc)
+        return None
+    has = getattr(res, "has_password", None)
+    return bool(has) if isinstance(has, bool) else None
 
 
 async def check_account_status_full(
@@ -4306,11 +4414,19 @@ async def check_account_status_full(
     _acc: dict | None = None,
     check_spambot: bool = True,
     check_sessions: bool = False,
+    on_alive=None,
 ) -> dict:
     """Детальная проверка состояния аккаунта.
 
     check_sessions=True — заодно снять чужие авторизации аккаунта
-    (`profile["authorizations"]`: список или None, если узнать не удалось).
+    (`profile["authorizations"]`: список или None, если узнать не удалось),
+    время создания нашего сеанса (`profile["own_session_created"]`, unix-время,
+    0 — неизвестно) и наличие пароля 2FA (`profile["twofa_on"]`).
+
+    on_alive(client, profile) — позвать на живом соединении, пока оно открыто
+    (автозащита закрывает чужие сеансы и ставит 2FA тем же коннектом, а не
+    вторым: второй коннект той же сессии — лишний след). Сбой крючка проверку
+    не роняет.
 
     Возвращает {
         "status": "active"|"cooldown"|"spamblock"|"banned"|"deactivated"|"session_expired",
@@ -4371,7 +4487,15 @@ async def check_account_status_full(
             "has_photo": getattr(me, "photo", None) is not None,
         }
         if check_sessions:
-            profile["authorizations"] = await foreign_authorizations(client)
+            _snap = await authorizations_snapshot(client)
+            profile["authorizations"] = None if _snap is None else _snap[0]
+            profile["own_session_created"] = 0 if _snap is None else _snap[1]
+            profile["twofa_on"] = await twofa_enabled(client)
+        if on_alive is not None:
+            try:
+                await on_alive(client, profile)
+            except Exception as exc:
+                log.warning("check_account_status_full: on_alive: %s", exc)
 
         if not check_spambot:
             # Без @SpamBot видно только, что сессия жива. Спам-блок и заморозку
@@ -4628,7 +4752,8 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
             """a.is_active = TRUE AND a.session_str IS NOT NULL
                AND COALESCE(a.in_operation, FALSE) = FALSE""",
             extra_cols=("a.session_conflict_at, a.foreign_session_hashes, a.username, "
-                        "(a.twofa_enc IS NOT NULL) AS twofa_saved"),
+                        "(a.twofa_enc IS NOT NULL) AS twofa_saved, a.reserve_auth_hash, "
+                        "(a.reserve_session_enc IS NOT NULL) AS has_reserve"),
         )
     )
     if not accounts:
@@ -4636,6 +4761,11 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
     
     checked = 0
     failed = 0
+    # Автозащита (session_watch.guard): политика владельца читается раз за
+    # проход, отчёт уходит одним сообщением на владельца в конце.
+    _guard_cfg: dict = {}
+    _guard_budget: dict = {}
+    _guard_rows: dict = {}
     for acc in accounts:
         if not acc["session_str"]:
             continue
@@ -4655,16 +4785,40 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
         if not _leased:
             continue
         try:
+            from services import session_watch as _sw
+            _owner = int(acc["owner_id"]) if acc.get("owner_id") else 0
+            if _owner and _owner not in _guard_cfg:
+                try:
+                    from services import account_shield as _shield
+                    _guard_cfg[_owner] = await _shield.get_shield_config(pool, _owner)
+                except Exception as exc:
+                    log.debug("session_health: политика щита owner=%s: %s", _owner, exc)
+                    _guard_cfg[_owner] = None
+            _cfg = _guard_cfg.get(_owner)
+            _guarded: dict = {}
+
+            async def _on_alive(client, profile, _acc=dict(acc), _cfg=_cfg, _out=_guarded):
+                _sw.drop_own_reserve(profile, _acc)
+                if _cfg is not None and (_cfg.guard_sessions or _cfg.guard_twofa
+                                         or _cfg.guard_reserve):
+                    _out.update(await _sw.guard(pool, client, _acc, profile, _cfg,
+                                                _guard_budget))
+
             result = await check_account_status_full(
                 acc["session_str"], _acc=dict(acc), check_spambot=False,
-                check_sessions=True,
+                check_sessions=True, on_alive=_on_alive,
             )
             new_status = result["status"]
             # Чужие сеансы — тем же соединением (services/session_watch).
-            _auths = (result.get("profile") or {}).get("authorizations")
+            _prof = result.get("profile") or {}
+            _auths = _prof.get("authorizations")
             if _auths is not None:
-                from services import session_watch as _sw
-                await _sw.record(pool, dict(acc), _auths, bot=bot)
+                await _sw.record(pool, dict(acc), _auths, bot=bot,
+                                 unsettled=_guarded.get("unsettled"),
+                                 twofa_on=_prof.get("twofa_on"),
+                                 own_created=int(_prof.get("own_session_created") or 0))
+            if _guarded.get("closed") or _guarded.get("twofa") or _guarded.get("reserve"):
+                _guard_rows.setdefault(_owner, []).append((_sw.acc_label(dict(acc)), _guarded))
             old_status = acc["acc_status"] or "active"
 
             # ── РАЗОВЫЙ конфликт сессии не паркует аккаунт ───────────────────
@@ -4734,7 +4888,10 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
                 # владельцу о них сообщал только частый монитор — по пять
                 # аккаунтов в час на всю платформу, то есть через дни. Ключ
                 # тот же, что у монитора: одно сообщение, а не два.
-                if new_status in ("session_expired", "banned", "deactivated"):
+                # С запасным ключом сессия поднимется сама (session_watch.
+                # run_reserve_keeper) — «аккаунт выпал» тогда было бы ложной тревогой.
+                if (new_status in ("session_expired", "banned", "deactivated")
+                        and not (new_status == "session_expired" and acc.get("has_reserve"))):
                     from services import session_watch as _sw
                     await _sw.notify_lost(pool, dict(acc), new_status, bot=bot)
             checked += 1
@@ -4748,6 +4905,10 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
                 except Exception:
                     log.debug("session_health: release acc=%d failed", acc["id"])
 
+    if _guard_rows:
+        from services import session_watch as _sw
+        for _owner, _rows in _guard_rows.items():
+            await _sw.send_guard_report(pool, bot, _owner, _rows)
     log.info("session_health_monitor: checked=%d failed=%d total=%d", checked, failed, len(accounts))
 
 

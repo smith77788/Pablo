@@ -694,7 +694,7 @@ async def _ensure_pause_requested_column(pool: "asyncpg.Pool") -> None:
 
 
 async def _ensure_claimed_by_column(pool: "asyncpg.Pool") -> None:
-    """Досоздать operation_queue.claimed_by (schema_v346), если миграция не доехала.
+    """Досоздать operation_queue.claimed_by (schema_v370), если миграция не доехала.
 
     Цена та же, что у pause_requested, только хуже: колонку ПИШЕТ отбор
     операций, и без неё `_safe_fetch` вернул бы пустой список — очередь
@@ -14086,6 +14086,40 @@ async def _exec_group_import_all(
         await release_accounts(claimed_ids)
 
 
+# Суточный потолок объявлений в группы с ОДНОГО аккаунта. Раньше его не было
+# вовсе: объявление уходило во ВСЕ группы аккаунта подряд с паузой в три
+# секунды — сотня одинаковых постов за пять минут, то есть ровно та
+# сигнатура, за которую Telegram ставит флуд и спам-флаг, а админы групп
+# банят. Темп и потолок — как у живого человека, который рекламирует себя.
+GROUP_ANNOUNCE_DAILY_CAP = 30
+GROUP_ANNOUNCE_DAILY_CAP_MAX = 80
+GROUP_ANNOUNCE_GAP_S = (25.0, 60.0)
+_GA_SENDING = "отправляется"
+
+
+def group_announce_cap(raw) -> int:
+    """Потолок владельца (params.per_day) с безопасным дефолтом и потолком."""
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = 0
+    if n <= 0:
+        return GROUP_ANNOUNCE_DAILY_CAP
+    return min(n, GROUP_ANNOUNCE_DAILY_CAP_MAX)
+
+
+async def _group_announces_today(pool, owner_id: int, acc_id: int) -> int:
+    """Сколько объявлений этот аккаунт уже отправил в группы за сутки (по часам
+    базы), всеми рассылками владельца. Бросает на сбое: без счёта потолок не
+    держится, и операция уходит на повтор, а не шлёт вслепую."""
+    return int(await pool.fetchval(
+        "SELECT count(*) FROM operation_log l JOIN operation_queue q ON q.id = l.op_id "
+        "WHERE q.owner_id=$1 AND q.op_type='group_announce' "
+        "AND q.params->>'acc_id' = $2::text AND l.status='ok' "
+        "AND l.created_at >= date_trunc('day', now())",
+        owner_id, str(int(acc_id))) or 0)
+
+
 async def _exec_group_announce(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -14171,25 +14205,42 @@ async def _exec_group_announce(
         ok_count = 0
         err_count = 0
 
-            # Повтор операции (автоматический после сетевого сбоя/флуда, сброс
-            # зависшей, ручной) запускает исполнителя заново с done_items=0, и он
-            # идёт по ВСЕМУ списку сначала. Без журнала целей это вторая
-            # публикация туда, где пост уже стоит: дубль у подписчиков, сожжённый
-            # дневной лимит аккаунта и лишний повод для флуда.
-        async def _log_grp(step: int, key: str, ok: bool, msg: str = "") -> None:
-            await _journal_write(
-                pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                "VALUES($1,$2,$3,$4,$5)",
-                op_id, step, key, "ok" if ok else "error", (msg or None),
-                log_ctx=f"[group_announce_log op={op_id}]",
-            )
-
+        # Повтор операции (автоматический после сетевого сбоя/флуда, сброс
+        # зависшей, ручной) запускает исполнителя заново с done_items=0, и он
+        # идёт по ВСЕМУ списку сначала. Без журнала целей это вторая
+        # публикация туда, где пост уже стоит: дубль у подписчиков, сожжённый
+        # дневной лимит аккаунта и лишний повод для флуда.
         _already = await completed_targets(pool, op_id)
         if _already:
             log.info("group_announce op=%d: повтор — %d групп уже получили объявление",
                      op_id, len(_already))
 
+        from services import dm_engine as _dme
+        _cap = group_announce_cap(params.get("per_day"))
+        try:
+            _sent_today = await _group_announces_today(pool, owner_id, int(acc["id"]))
+        except Exception as e:
+            log.warning("group_announce op=%d: счёт за сутки не прочитался: %s", op_id, e)
+            _why = "Не удалось прочитать, сколько объявлений уже ушло сегодня — повторим позже"
+            return {"status": "requeue", "defer_s": 300, "defer_cause": "limit_unreadable",
+                    "reason": _why, "summary": _why}
+
+        async def _unmark(key: str) -> None:
+            # Telegram цель не рассматривал (флуд, мёртвая сессия, сеть):
+            # метка «отправляется» снимается, повтор отправит сюда снова.
+            await _safe_execute(
+                pool, "DELETE FROM operation_log WHERE op_id=$1 AND target=$2 "
+                      "AND status='ok' AND message=$3",
+                op_id, key, _GA_SENDING, log_ctx=f"[group_announce_unmark op={op_id}]")
+
+        async def _settle(key: str, ok: bool, msg: str = "") -> None:
+            await _safe_execute(
+                pool, "UPDATE operation_log SET status=$3, message=$4 "
+                      "WHERE op_id=$1 AND target=$2 AND status='ok' AND message=$5",
+                op_id, key, "ok" if ok else "error", (msg or None), _GA_SENDING,
+                log_ctx=f"[group_announce_settle op={op_id}]")
+
+        _posted_now = 0
         for idx, grp in enumerate(groups):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -14204,31 +14255,76 @@ async def _exec_group_announce(
                 await _safe_execute(
                         pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
+            if _sent_today >= _cap:
+                # Потолок суток: та же операция продолжит завтра с этого места
+                # (журнал целей не даст повторить уже отправленное).
+                _why = (f"Суточный потолок аккаунта ({_cap} объявлений в группы) "
+                        f"выбран — продолжим завтра. Отправлено в этот заход: {ok_count}")
+                return {"status": "requeue", "defer_s": await _dme.seconds_until_next_day(pool),
+                        "defer_cause": "daily_cap", "ok": ok_count, "fail": err_count,
+                        "reason": _why, "summary": _why}
+            if _posted_now:
+                # Пауза между группами — ДО следующего поста, а не после
+                # последнего; под губернатором флота и с отменой владельца.
+                await cancellable_pause(
+                    pool, op_id,
+                    await _governed_delay(pool, owner_id, random.uniform(*GROUP_ANNOUNCE_GAP_S)),
+                    "group_announce_gap")
+                if await _is_cancelled(pool, op_id):
+                    continue
+            # НЕОБРАТИМОЕ ОТМЕЧАЕТСЯ ДО НЕГО: метка в журнале — цена поста.
+            # Обрыв между постом и записью (деплой, SIGTERM) раньше давал
+            # второе такое же объявление в ту же группу на повторе.
+            if await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,$4,$5)", op_id, idx, _key, "ok", _GA_SENDING,
+                    log_ctx=f"[group_announce_mark op={op_id}]",
+                    where="group_announce_mark") == "ERROR":
+                err_count += 1
+                await _safe_execute(
+                        pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
             access_hash = grp.get("access_hash", 0) or 0
             _ann = _expand_spintax(text)  # свой вариант объявления в эту группу
+            _posted_now += 1
+            _sent_today += 1
             try:
                 result = await account_manager.post_to_channel(
                     acc["session_str"], grp["id"], _ann, access_hash=access_hash, _acc=acc
                 )
-                if "error" in result or result.get("banned"):
-                    err_count += 1
-                    await _log_grp(idx, _key, False,
-                                   str(result.get("error") or "banned")[:200])
-                else:
-                    ok_count += 1
-                    await _log_grp(idx, _key, True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 log_exc_swallow(log, "group_announce: post_to_channel grp=%s: %s", grp.get("id"), exc)
+                result = {"error": str(exc)[:200]}
+            _kind = _dme.classify_send_result(
+                result if "error" in result or result.get("banned") else {"ok": True})
+            if _kind == "sent":
+                ok_count += 1
+                await _settle(_key, True)
+            elif _kind == "flood" or result.get("flood_wait"):
+                await _unmark(_key)
+                _wait = int(result.get("flood_wait") or 600) + random.randint(30, 180)
+                _why = (f"Telegram попросил паузу (флуд-лимит) — объявления "
+                        f"продолжатся позже. Отправлено в этот заход: {ok_count}")
+                return {"status": "requeue", "defer_s": _wait, "defer_cause": "flood",
+                        "ok": ok_count, "fail": err_count, "reason": _why, "summary": _why}
+            elif _kind == "auth":
+                await _unmark(_key)
+                return {"status": "failed", "ok": ok_count, "fail": err_count,
+                        "reason": "Сессия аккаунта недействительна — переподключите аккаунт",
+                        "summary": (f"❌ Сессия аккаунта недействительна. Отправлено: "
+                                    f"{ok_count} из {total}")}
+            elif result.get("proxy_error"):
+                await _unmark(_key)
                 err_count += 1
-                await _log_grp(idx, _key, False, str(exc)[:200])
+            else:
+                err_count += 1
+                await _settle(_key, False, str(result.get("error") or "banned")[:200])
 
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            if idx < total - 1:
-                # межцелевой темп анонса в группы под губернатором
-                await asyncio.sleep(await _governed_delay(pool, owner_id, 3.0))
 
         return {
             "status": "done",
@@ -24386,6 +24482,16 @@ async def _exec_niche_growth_post(
                 join_result = await account_manager.join_channel(
                     acc["session_str"], join_ref, _acc=acc
                 )
+                if join_result.get("flood_wait"):
+                    # Флуд — ответ Telegram АККАУНТУ, а не группе: следующая
+                    # попытка вступить сразу же продлевает его. Раньше это
+                    # считалось «не удалось вступить» и цикл шёл к следующей
+                    # группе без паузы. Группа ещё не отмечена — повтор её найдёт.
+                    _why = (f"Telegram попросил паузу на вступления — Агент роста "
+                            f"продолжит позже. Опубликовано в этот заход: {ok_count}")
+                    return {"status": "requeue",
+                            "defer_s": int(join_result["flood_wait"]) + random.randint(60, 300),
+                            "defer_cause": "flood", "reason": _why, "summary": _why}
                 if "error" in join_result and not join_result.get("already_member"):
                     log.info(
                         "niche_growth_post: join failed grp=%s: %s",
@@ -24492,6 +24598,20 @@ async def _exec_niche_growth_post(
                     username=username,
                     _acc=acc,
                 )
+                if post_result.get("flood_wait"):
+                    # Telegram пост не рассматривал: метка снимается (иначе
+                    # группа сгорела бы навсегда без поста, а флуд записался бы
+                    # в обучение как «здесь не публикуют» и отсеял бы запрос).
+                    await _safe_execute(
+                        pool, "DELETE FROM niche_growth_targets WHERE owner_id=$1 "
+                              "AND group_id=$2 AND outcome='marked'",
+                        owner_id, int(grp_id),
+                        log_ctx=f"[niche_growth_unmark op={op_id}]")
+                    _why = (f"Telegram попросил паузу на публикации — Агент роста "
+                            f"продолжит позже. Опубликовано в этот заход: {ok_count}")
+                    return {"status": "requeue",
+                            "defer_s": int(post_result["flood_wait"]) + random.randint(60, 300),
+                            "defer_cause": "flood", "reason": _why, "summary": _why}
                 if "error" in post_result:
                     log.info(
                         "niche_growth_post: post failed grp=%s title=%r: %s",

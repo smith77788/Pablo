@@ -108,7 +108,7 @@ ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "re
 # флоту вместо тех пяти. Список сверяется с ветками билдера тестом
 # tests/test_account_filter_is_not_silently_widened.py.
 ACCOUNT_FILTERS = ("all", "active", "cooldown", "banned", "spamblock",
-                   "proxy_down", "dead", "low_trust", "flooded", "foreign")
+                   "proxy_down", "dead", "low_trust", "flooded", "foreign", "no2fa")
 
 # Статусы operation_queue, которые вправе прийти фильтром с фронта. Колонка —
 # обычный TEXT без CHECK, поэтому список живёт здесь и его сторожит тест
@@ -151,6 +151,17 @@ _cache: dict[str, tuple[float, Any]] = {}
 _LOW_TRUST_SQL = "trust_score IS NOT NULL AND trust_score < 0.4"
 # В аккаунт вошёл кто-то ещё (дозор угона, services/session_watch).
 _FOREIGN_SQL = "COALESCE(foreign_sessions, 0) > 0"
+# Живой аккаунт без пароля 2FA (обход флота спрашивает Telegram, v346):
+# угоняется одним кодом входа. Мёртвые не считаем — защищать там нечего.
+# Ограниченные (спам-блок, заморозка) считаем: их снимают, и угнать их можно.
+# Потерянные и с отозванной сессией — нет: поставить пароль там нечем.
+def _no2fa_sql() -> str:
+    from services.account_status import LOST_STATUSES, SESSION_STATUSES, sql_status_list
+    return ("twofa_on IS FALSE AND COALESCE(acc_status, 'active') NOT IN ("
+            + sql_status_list(LOST_STATUSES | SESSION_STATUSES) + ")")
+
+
+_NO2FA_SQL = _no2fa_sql()
 _FLOODED_SQL = (
     "EXISTS (SELECT 1 FROM account_flood_log l WHERE l.account_id = tg_accounts.id "
     "AND l.created_at > now() - interval '7 days')")
@@ -197,6 +208,10 @@ def fleet_verdict(c: dict, alerts: list[dict] | None = None) -> dict:
         "Закройте чужие сеансы («Профили → Очистка и сеансы») и поставьте "
         "пароль 2FA — иначе тот, кто вошёл, может забрать аккаунт.",
         filter_="foreign")
+    add("no2fa", "warn", c.get("no2fa"), "Аккаунты без пароля 2FA",
+        "Такой аккаунт забирают одним кодом входа. Включите «Щит → Автозащита» "
+        "— каждому поставится свой пароль, — или задайте его в «Профили → 2FA».",
+        filter_="no2fa")
     add("proxy_down", "warn", c.get("proxy_down"), "Прокси не отвечает",
         "Сами аккаунты целы, но их операции падают по сети. Замените прокси.",
         filter_="proxy_down")
@@ -4730,6 +4745,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return None
         return n if lo <= n <= hi else None
 
+    def _style_summary(samples) -> str:
+        from services import persona_style as _ps
+        return _ps.summary(_ps.fingerprint(list(samples or [])))
+
     def _creativity(v) -> int:
         """Креативность 0–100: за краями — до края, нечисло — 60 (как в схеме)."""
         try:
@@ -4754,7 +4773,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not isinstance(samples_raw, list):
             # С экрана образцы приходят текстом: одна строка — одно сообщение.
             samples_raw = str(samples_raw).splitlines()
-        samples = [" ".join(str(x).split())[:200] for x in samples_raw if str(x).strip()][:5]
+        from services import persona_style as _ps
+        samples = [" ".join(str(x).split())[:_ps.SAMPLE_LEN]
+                   for x in samples_raw if str(x).strip()][:_ps.SAMPLES_KEEP]
         provider = str(body.get("ai_provider") or "").strip().lower()
         quality = str(body.get("quality") or "fast").strip()
         return {
@@ -4894,6 +4915,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         **dict(r),
                         "interests": list(r.get("interests") or []),
                         "sample_messages": list(r.get("sample_messages") or []),
+                        "style_summary": _style_summary(r.get("sample_messages")),
                         "memory_n": int(r.get("memory_n") or 0),
                         "style_label": _pe.STYLE_LABELS.get(r["speech_style"] or "", ""),
                         "tone_label": _pe.TONE_LABELS.get(r["tone"] or "", ""),
@@ -5109,14 +5131,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ) for _ in range(n)])
         except Exception:
             log.exception("persona_preview uid=%d", uid)
-            return _err("ИИ сейчас недоступен — попробуйте позже", 503)
+            return _err("ИИ сейчас недоступен — попробуйте позже", 422)
         cands = [_pv.enforce_style(_cw.sanitize_reply(r.text), persona)
                  for r in outs if r.text]
         cands = [c for c in cands if c]
         if not cands:
             if not any(r.text for r in outs):
-                return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 503)
-            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 503)
+                return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 422)
+            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 422)
         reply, info = await _pv.pick_best(cands, voice, context=f"Собеседник: {message}",
                                           owner_id=uid, use_judge=len(cands) > 1)
         parts = _pv.split_reply(reply, persona, 0.0)
@@ -5125,7 +5147,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                            "parts": [x[:1000] for x in parts],
                            "candidates": [c[:1000] for c in dict.fromkeys(cands)],
                            "picked_by": info.get("by"), "why": info.get("why") or "",
-                           "model": model or ""})
+                           "model": model or "",
+                           "style": _style_summary(persona.sample_messages)})
 
     async def _own_persona_id(request):
         uid = _get_uid(request)
@@ -5175,7 +5198,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "self_facts": facts or ""})
 
     async def persona_memory_forget(request: web.Request) -> web.Response:
-        """Забыть всё: сказанное и факты о себе. Персона говорит с чистого листа."""
+        """Забыть всё: сказанное, факты о себе и знакомых. Персона говорит с
+        чистого листа."""
         uid, pid, err = await _own_persona_id(request)
         if err is not None:
             return err
@@ -5187,6 +5211,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             res = await pool.execute(
                 "DELETE FROM persona_memory WHERE persona_id=$1 AND owner_id=$2", pid, uid)
+            await pool.execute(
+                "DELETE FROM persona_peers WHERE persona_id=$1 AND owner_id=$2", pid, uid)
         except Exception:
             log.exception("persona_memory_forget uid=%d persona=%d", uid, pid)
             return _err(_INTERNAL_ERROR, 500)
@@ -5195,6 +5221,85 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (ValueError, IndexError):
             n = 0
         return _json_resp({"ok": True, "deleted": n})
+
+    def _peer_tg_id(request):
+        try:
+            v = int(request.match_info["peer_id"])
+        except (KeyError, ValueError):
+            return None
+        return v if v > 0 else None
+
+    async def persona_peer_notes(request: web.Request) -> web.Response:
+        """Владелец правит заметку о собеседнике: модель могла понять не так."""
+        uid, pid, err = await _own_persona_id(request)
+        if err is not None:
+            return err
+        peer = _peer_tg_id(request)
+        if not peer:
+            return _err("Неверный собеседник", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        notes = " ".join(str((body or {}).get("notes") or "").split())[:600]
+        try:
+            row = await pool.fetchrow(
+                "UPDATE persona_peers SET notes=$4, notes_at=NOW(), "
+                "notes_exchanges=exchanges "
+                "WHERE persona_id=$1 AND owner_id=$2 AND peer_tg_id=$3 RETURNING id",
+                pid, uid, peer, notes)
+        except Exception:
+            log.exception("persona_peer_notes uid=%d persona=%d", uid, pid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not row:
+            return _err("Не найдено", 404)
+        return _json_resp({"ok": True, "notes": notes})
+
+    async def persona_peer_forget(request: web.Request) -> web.Response:
+        """Забыть одного собеседника: при следующей встрече персона его не узнает."""
+        uid, pid, err = await _own_persona_id(request)
+        if err is not None:
+            return err
+        peer = _peer_tg_id(request)
+        if not peer:
+            return _err("Неверный собеседник", 400)
+        try:
+            row = await pool.fetchrow(
+                "DELETE FROM persona_peers WHERE persona_id=$1 AND owner_id=$2 "
+                "AND peer_tg_id=$3 RETURNING id", pid, uid, peer)
+        except Exception:
+            log.exception("persona_peer_forget uid=%d persona=%d", uid, pid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not row:
+            return _err("Не найдено", 404)
+        return _json_resp({"ok": True})
+
+    async def persona_style_from_my_chats(request: web.Request) -> web.Response:
+        """Образцы манеры из СВОИХ переписок владельца (Telegram Business):
+        живой человек пишет так, как пишет он, а не как описано словами.
+        Ничего не сохраняет — экран кладёт образцы в поле, владелец смотрит
+        и сохраняет сам."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import persona_style as _ps
+        from services.unified_inbox import _decrypt
+        try:
+            rows = await pool.fetch(
+                "SELECT text_enc FROM vault_messages WHERE owner_id=$1 AND direction='out' "
+                "AND NOT is_deleted AND text_enc IS NOT NULL "
+                "ORDER BY COALESCE(msg_date, created_at) DESC LIMIT $2", uid, 600)
+        except Exception:
+            log.exception("persona_style_from_my_chats uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        samples = _ps.pick_samples([_decrypt(r["text_enc"]) for r in rows],
+                                   limit=_ps.SAMPLES_KEEP)
+        fp = _ps.fingerprint(samples)
+        return _json_resp({
+            "samples": samples, "seen": len(rows), "summary": _ps.summary(fp),
+            "note": "" if fp else
+            ("Своих сообщений в Хранилище пока мало: подключите Telegram Business "
+             "или впишите образцы руками")})
 
     async def persona_memory_rebuild(request: web.Request) -> web.Response:
         """Пересобрать «факты о себе» из сказанного сейчас, не дожидаясь десятой фразы."""
@@ -6675,7 +6780,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         WHERE l.account_id = tg_accounts.id
                           AND l.created_at > now() - interval '24 hours')) AS flooded_24h,
                    COUNT(*) FILTER (WHERE {_PROXY_DOWN_SQL}) AS proxy_down,
-                   COUNT(*) FILTER (WHERE {_FOREIGN_SQL}) AS foreign
+                   COUNT(*) FILTER (WHERE {_FOREIGN_SQL}) AS foreign,
+                   COUNT(*) FILTER (WHERE {_NO2FA_SQL}) AS no2fa
                    FROM tg_accounts WHERE owner_id=$1""",
                 uid,
             )
@@ -6734,7 +6840,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             counts = {k: int(stats[k] or 0) for k in (
                 "total", "active", "banned", "dead", "spamblock", "cooling",
-                "low_trust", "flooded_7d", "flooded_24h", "proxy_down", "foreign")}
+                "low_trust", "flooded_7d", "flooded_24h", "proxy_down", "foreign",
+                "no2fa")}
             return _json_resp({
                 **counts,
                 "flood_7d": flood_7d,
@@ -6786,7 +6893,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if hours is None:
                 return _err("Охлаждение — от 1 до 48 часов")
             fields["cool_hours"] = hours
-        for key in ("auto_pause", "notify_admin"):
+        for key in ("auto_pause", "notify_admin", "guard_sessions", "guard_twofa",
+                    "guard_reserve"):
             if key in data and data[key] is not None:
                 fields[key] = bool(data[key])
         if data.get("response_mode") is not None:
@@ -9667,6 +9775,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/persona/{persona_id}/memory", persona_memory_facts)
     app.router.add_delete("/api/miniapp/persona/{persona_id}/memory", persona_memory_forget)
     app.router.add_post("/api/miniapp/persona/{persona_id}/memory/rebuild", persona_memory_rebuild)
+    app.router.add_get("/api/miniapp/persona/style_from_my_chats", persona_style_from_my_chats)
+    app.router.add_put("/api/miniapp/persona/{persona_id}/peer/{peer_id}", persona_peer_notes)
+    app.router.add_delete("/api/miniapp/persona/{persona_id}/peer/{peer_id}", persona_peer_forget)
     # Auto Registrar
     app.router.add_get("/api/miniapp/autoreg", autoreg_status)
     app.router.add_post("/api/miniapp/autoreg", autoreg_submit)

@@ -55,7 +55,7 @@ async def _poll(conn, slots, per_owner, window, exclude=None):
     Postgres, которого в CI не было, поэтому расхождение никто не видел.
 
     Пятый — worker_id, который отбор пишет в `claimed_by` (хозяин запущенной
-    операции для горизонтального исполнителя, schema_v346).
+    операции для горизонтального исполнителя, schema_v370).
     """
     return await conn.fetch(_poller_sql(), slots, per_owner, window, exclude,
                             "test-poller:0:0000")

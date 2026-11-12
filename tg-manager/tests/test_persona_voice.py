@@ -277,7 +277,8 @@ def test_draft_speaks_with_persona_and_knows_the_state(monkeypatch):
 def test_reply_context_joins_profiles_and_behavior_model(monkeypatch):
     from services import ai_inbox_assist as aia, virtual_layer as vl
 
-    async def _load(pool, acc, fallback="", context=""):
+    async def _load(pool, acc, fallback="", context="", peers=None):
+        assert peers == [555]           # черновик знает, кому пишет
         return pv.Voice(account_id=acc, persona=_persona(), prompt="ГОЛОС")
 
     async def _state(pool, owner, etype, eid, state_key="funnel"):
@@ -287,7 +288,7 @@ def test_reply_context_joins_profiles_and_behavior_model(monkeypatch):
     monkeypatch.setattr(vl, "get_state", _state)
     thread = {"contact_id": "c-1",
               "messages": [{"direction": "in", "account_id": 70, "text": "беру"}]}
-    voice, strategy, label = _run(aia._reply_context(object(), 1, thread))
+    voice, strategy, label = _run(aia._reply_context(object(), 1, thread, 555))
     assert voice.prompt == "ГОЛОС"
     assert "Готов купить" in strategy and "Дожимайте" in strategy
     assert label == vl.VALUE_LABEL["ready"]

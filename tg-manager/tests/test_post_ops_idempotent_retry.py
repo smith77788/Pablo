@@ -51,6 +51,9 @@ class _FakePool:
                     "lang_code": "", "system_lang_code": "", "proxy_url": None}
         return None
 
+    async def fetchval(self, query, *args):
+        return 0  # объявлений за сутки ещё не было
+
     async def execute(self, query, *args):
         if "INSERT INTO operation_log" in query:
             self.logged.append((args[2], args[3]))

@@ -177,6 +177,12 @@ async def _show_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"⏸ Авто-пауза: {'<b>вкл</b>' if cfg.auto_pause else '<b>выкл</b>'}",
         f"🔔 Уведомления: {'<b>вкл</b>' if cfg.notify_admin else '<b>выкл</b>'}",
         f"⏱ Длительность паузы: <b>{cfg.cool_duration_hours}ч</b>",
+        "",
+        "🛡 <b>Автозащита</b> (обход флота раз в 6 часов):",
+        f"🚪 Закрывать новые чужие сеансы: {'<b>вкл</b>' if cfg.guard_sessions else '<b>выкл</b>'}",
+        f"🔐 Ставить свой пароль 2FA, где его нет: {'<b>вкл</b>' if cfg.guard_twofa else '<b>выкл</b>'}",
+        f"🗝 Заводить запасной ключ (второй свой сеанс): {'<b>вкл</b>' if cfg.guard_reserve else '<b>выкл</b>'}",
+        "<i>Telegram разрешает и то и другое из сеанса старше суток.</i>",
     ]
     text = "\n".join(lines)
 
@@ -185,6 +191,12 @@ async def _show_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     na_label = "🔔 Уведомления: ВЫКЛ" if cfg.notify_admin else "🔔 Уведомления: ВКЛ"
     kb.button(text=ap_label, callback_data=ShieldCb(action="toggle_ap"))
     kb.button(text=na_label, callback_data=ShieldCb(action="toggle_na"))
+    kb.button(text=("🚪 Чужие сеансы: ВЫКЛ" if cfg.guard_sessions else "🚪 Чужие сеансы: ВКЛ"),
+              callback_data=ShieldCb(action="toggle_gs"))
+    kb.button(text=("🔐 Пароль 2FA: ВЫКЛ" if cfg.guard_twofa else "🔐 Пароль 2FA: ВКЛ"),
+              callback_data=ShieldCb(action="toggle_g2"))
+    kb.button(text=("🗝 Запасной ключ: ВЫКЛ" if cfg.guard_reserve else "🗝 Запасной ключ: ВКЛ"),
+              callback_data=ShieldCb(action="toggle_gr"))
     kb.button(text="◀️ Назад", callback_data=ShieldCb(action="menu"))
     kb.adjust(1)
 
@@ -209,6 +221,23 @@ async def cb_shield_toggle_ap(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         await account_shield.save_shield_config(pool, owner_id, auto_pause=new_val)
     except Exception as exc:
         log.debug("shield_hub.toggle_ap: %s", exc)
+    await _show_settings(callback, pool)
+
+
+@router.callback_query(ShieldCb.filter(F.action.in_({"toggle_gs", "toggle_g2", "toggle_gr"})))
+async def cb_shield_toggle_guard(callback: CallbackQuery, callback_data: ShieldCb,
+                                 pool: asyncpg.Pool) -> None:
+    """Автозащита: закрывать чужие сеансы / ставить 2FA (session_watch.guard)."""
+    await safe_answer(callback)
+    owner_id = callback.from_user.id
+    cfg = await account_shield.get_shield_config(pool, owner_id)
+    field = {"toggle_gs": "guard_sessions", "toggle_g2": "guard_twofa",
+             "toggle_gr": "guard_reserve"}[callback_data.action]
+    try:
+        await account_shield.save_shield_config(
+            pool, owner_id, **{field: not getattr(cfg, field)})
+    except Exception as exc:
+        log.debug("shield_hub.toggle_guard: %s", exc)
     await _show_settings(callback, pool)
 
 

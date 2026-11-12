@@ -32,6 +32,7 @@ DELETE /api/miniapp/node/{node_id}
 DELETE /api/miniapp/notary/{watch_id}
 DELETE /api/miniapp/persona/{persona_id}
 DELETE /api/miniapp/persona/{persona_id}/memory
+DELETE /api/miniapp/persona/{persona_id}/peer/{peer_id}
 DELETE /api/miniapp/presence_pack/{pack_id}
 DELETE /api/miniapp/proxy/{proxy_id}
 DELETE /api/miniapp/sales/delivery/{did}
@@ -285,6 +286,7 @@ GET /api/miniapp/parser/audience
 GET /api/miniapp/parser/audience/export
 GET /api/miniapp/parser/runs
 GET /api/miniapp/payments
+GET /api/miniapp/persona/style_from_my_chats
 GET /api/miniapp/persona/{persona_id}/memory
 GET /api/miniapp/personas
 GET /api/miniapp/physics
@@ -642,6 +644,7 @@ HEAD /api/miniapp/parser/audience
 HEAD /api/miniapp/parser/audience/export
 HEAD /api/miniapp/parser/runs
 HEAD /api/miniapp/payments
+HEAD /api/miniapp/persona/style_from_my_chats
 HEAD /api/miniapp/persona/{persona_id}/memory
 HEAD /api/miniapp/personas
 HEAD /api/miniapp/physics
@@ -1235,6 +1238,7 @@ PUT /api/miniapp/ghost/{profile_id}
 PUT /api/miniapp/ghost/{profile_id}/toggle
 PUT /api/miniapp/persona/{persona_id}
 PUT /api/miniapp/persona/{persona_id}/memory
+PUT /api/miniapp/persona/{persona_id}/peer/{peer_id}
 PUT /api/miniapp/persona/{persona_id}/toggle
 PUT /api/miniapp/presence_pack/{pack_id}/config
 PUT /api/miniapp/self_promo/{tpl_id}/toggle
