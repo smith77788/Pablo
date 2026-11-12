@@ -52,7 +52,7 @@ def test_default_is_conservative_for_cold_dms():
     assert dm_engine.DM_DAILY_CAP_MAX <= 200
 
 
-N_TARGETS = dm_engine.DM_DAILY_CAP_DEFAULT + 7
+N_TARGETS = dm_engine.DM_ADAPTIVE_MAX + 7
 
 
 @pytest.fixture
@@ -97,9 +97,11 @@ async def _seed(p, params: dict | None = None) -> tuple[int, int]:
 
 
 def test_campaign_without_a_cap_stops_at_the_default_postgres(pool, telegram):
-    cid, _acc = _run(_seed(pool))
+    cid, acc = _run(_seed(pool))
+    expected = _run(dm_engine.dm_caps_for(pool, OWNER, [acc], None))[acc]
+    assert dm_engine.DM_ADAPTIVE_MIN <= expected <= dm_engine.DM_DAILY_CAP_DEFAULT
     stopped_by = _run(dm_engine.run_campaign(pool, None, cid))
-    assert len(telegram) == dm_engine.DM_DAILY_CAP_DEFAULT, (
+    assert len(telegram) == expected, (
         f"кампания без заданного лимита отправила {len(telegram)} ЛС с одного "
         "аккаунта за день — «без лимита» снова значит «до PeerFlood»")
     assert stopped_by == dm_engine.CAMPAIGN_DAILY_CAP
@@ -147,3 +149,42 @@ def test_unreadable_count_holds_the_campaign(monkeypatch, pool, telegram):
     stopped_by = _run(dm_engine.run_campaign(pool, None, cid))
     assert stopped_by == dm_engine.CAMPAIGN_LIMIT_UNREADABLE
     assert telegram == [], "без счёта за сегодня ЛС уходить не должны"
+
+
+# ── Адаптивный лимит: у каждого аккаунта свой ─────────────────────────────────
+#
+# НАХОДКА. Одно число (30) на всех ошибалось в обе стороны: годовалый
+# Premium-аккаунт с чистой неделей мог больше, а аккаунт, который вчера словил
+# PeerFlood или зарегистрирован неделю назад, — сильно меньше. Обратный
+# контроль: вернуть effective_daily_cap вместо dm_caps_for в run_campaign ->
+# красный test_peer_flood_yesterday_cuts_today_postgres.
+
+def test_adaptive_cap_moves_with_history_and_account():
+    base = dm_engine.adaptive_dm_cap(1.0, 0, 0, 0)
+    assert base == dm_engine.DM_DAILY_CAP_DEFAULT
+    assert dm_engine.adaptive_dm_cap(1.0, 200, 0, 0) > base, "чистая неделя с объёмом не растит"
+    assert dm_engine.adaptive_dm_cap(1.0, 200, 2, 0) < base, "флуды не режут"
+    assert (dm_engine.adaptive_dm_cap(1.3, 500, 0, 1)
+            <= dm_engine.adaptive_dm_cap(1.3, 0, 0, 0) / 4 + 1), "PeerFlood не режет вчетверо"
+    assert dm_engine.adaptive_dm_cap(0.2, 0, 0, 1) == dm_engine.DM_ADAPTIVE_MIN
+    assert dm_engine.adaptive_dm_cap(1.3, 10_000, 0, 0) <= dm_engine.DM_ADAPTIVE_MAX
+
+
+def test_explicit_owner_cap_is_shared_and_clamped():
+    caps = _run(dm_engine.dm_caps_for(None, OWNER, [1, 2], 500))
+    assert caps == {1: dm_engine.DM_DAILY_CAP_MAX, 2: dm_engine.DM_DAILY_CAP_MAX}
+
+
+def test_unreadable_history_falls_back_to_default():
+    caps = _run(dm_engine.dm_caps_for(None, OWNER, [1], None))
+    assert caps == {1: dm_engine.DM_DAILY_CAP_DEFAULT}
+
+
+def test_peer_flood_yesterday_cuts_today_postgres(pool, telegram):
+    cid, acc = _run(_seed(pool))
+    _run(pool.execute(
+        "INSERT INTO operation_audit(owner_id, account_id, action, result, occurred_at) "
+        "VALUES($1,$2,'dm','peer_flood', now() - interval '1 day')", OWNER, acc))
+    _run(dm_engine.run_campaign(pool, None, cid))
+    assert len(telegram) <= dm_engine.DM_DAILY_CAP_DEFAULT // 4 + 1, (
+        f"вчера был PeerFlood, а сегодня аккаунт отправил {len(telegram)} ЛС")

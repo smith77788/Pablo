@@ -14019,8 +14019,7 @@ async def _exec_bulk_dm_adhoc(
     # не заданный — безопасный дефолт, а уже отправленное сегодня другими
     # рассылками и кампаниями засчитывается ниже. Прежний «потолок на эту
     # рассылку» давал полный лимит каждой новой рассылке того же дня.
-    from services.dm_engine import effective_daily_cap as _dm_daily_cap
-    per_acc_cap = _dm_daily_cap(params.get("per_account_cap"))
+    _explicit_cap = params.get("per_account_cap")
 
     # Медиа (опц.): файл лежит на диске контейнера, читаем один раз. С медиа
     # текст становится ПОДПИСЬЮ и может быть пустым.
@@ -14117,6 +14116,10 @@ async def _exec_bulk_dm_adhoc(
         flood_wait_total = 0.0
         acc_idx = 0
         from services import dm_engine as _dme
+        # Лимит у каждого аккаунта свой: явный владельца — общий, без него —
+        # по возрасту, профилю и неделе истории ЛС (dm_engine.dm_caps_for).
+        per_acc_cap = await _dme.dm_caps_for(
+            pool, owner_id, [a["id"] for a in active_accounts], _explicit_cap)
         try:
             sent_by_acc: dict[int, int] = await _dme.dm_sent_today(pool, owner_id)
         except _dme.DailyCountUnreadable:
@@ -14229,10 +14232,11 @@ async def _exec_bulk_dm_adhoc(
                 # второй раз, а строки на неотправленных здесь НЕ пишутся —
                 # иначе повтор счёл бы их закрытыми.
                 _left = total - i
-                log.info("bulk_dm_adhoc op=%d: суточный лимит %d на аккаунт исчерпан, "
+                log.info("bulk_dm_adhoc op=%d: суточный лимит %s исчерпан, "
                          "осталось %d — продолжим завтра", op_id, per_acc_cap, _left)
-                _why = (f"Аккаунты отправили сегодня свой лимит ЛС ({per_acc_cap} с "
-                        f"аккаунта). Отправлено в этот заход: {ok_count}, осталось "
+                _why = (f"Аккаунты отправили сегодня свой лимит ЛС "
+                        f"({sum(per_acc_cap.values())} на весь флот). "
+                        f"Отправлено в этот заход: {ok_count}, осталось "
                         f"{_left} — рассылка продолжится завтра сама")
                 return {"status": "requeue",
                         "defer_s": await _dme.seconds_until_next_day(pool),

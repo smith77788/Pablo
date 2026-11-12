@@ -3354,8 +3354,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · спинтакс обязателен · <b>1 = максимально быстро</b> (риск бана; защита от флуда работает)</div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="daPerAcc" min="1" max="200" placeholder="30" title="Максимум ЛС с одного аккаунта в сутки — по всем рассылкам и кампаниям" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
-        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">ЛС с одного аккаунта в сутки · защита от бана (пусто — 30). Выбрали лимит все — рассылка продолжится завтра сама</div>
+        <input type="number" id="daPerAcc" min="1" max="200" placeholder="авто" title="Максимум ЛС с одного аккаунта в сутки — по всем рассылкам и кампаниям. Пусто — свой у каждого аккаунта" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">ЛС с одного аккаунта в сутки · защита от бана (пусто — свой у каждого аккаунта, 5–60). Выбрали лимит все — рассылка продолжится завтра сама</div>
       </div>
       <div id="daPreview" style="margin-bottom:8px"></div>
       <div style="display:flex;gap:8px">
@@ -8634,8 +8634,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Лимит на аккаунт в день</label>
-      <input type="number" id="cmpPerAcc" min="1" max="200" placeholder="30 по умолчанию (1–200)">
-      <div class="field-note">Аккаунт, достигший лимита, выбывает до следующего дня; когда лимит выбрали все, кампания сама продолжится завтра. Пусто — 30 в день, безопасно для холодных ЛС</div>
+      <input type="number" id="cmpPerAcc" min="1" max="200" placeholder="авто по аккаунту (1–200)">
+      <div class="field-note">Аккаунт, достигший лимита, выбывает до следующего дня; когда лимит выбрали все, кампания сама продолжится завтра. Пусто — свой у каждого аккаунта: 5–60 в день по возрасту, профилю и истории ЛС за неделю</div>
     </div>
     <div class="field">
       <label class="chk-row" style="display:flex;align-items:center;gap:8px;cursor:pointer">
