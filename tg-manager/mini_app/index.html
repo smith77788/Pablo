@@ -21736,7 +21736,15 @@ async function mergeContacts(primary, secondary) {
     ? 'Переедет ' + num(moving.length) + ' ' + plural(moving.length,'поле','поля','полей') + ':\n\n'
       + moving.map(c => '• ' + c.label + ': ' + verVal(c.to)).join('\n')
     : 'Переносить нечего: всё, что есть во второй записи, уже есть в первой.';
-  if (!await askConfirm('Объединить два контакта в один?\n\n' + what
+  // Кроме полей на второй записи висят сделка, касания и группы. Раньше
+  // слияние их молча удаляло; теперь они переезжают — и об этом надо сказать.
+  const at = (prev && prev.attached) || {};
+  const extra = [];
+  if (at.deal) extra.push('сделка CRM');
+  if (at.touches) extra.push('касаний: ' + num(at.touches));
+  if (at.groups) extra.push('групп: ' + num(at.groups));
+  const extraTxt = extra.length ? '\n\nТакже переедет: ' + extra.join(', ') + '.' : '';
+  if (!await askConfirm('Объединить два контакта в один?\n\n' + what + extraTxt
       + '\n\nВторая запись будет удалена. Заполненные поля первой не изменятся.'
       + '\n\nСостояние первой записи сохранится версией — слияние можно откатить в «Версиях».')) return;
   try {

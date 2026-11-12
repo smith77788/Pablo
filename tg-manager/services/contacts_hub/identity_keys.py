@@ -123,3 +123,72 @@ def merge_emails(existing, incoming) -> list:
         seen.add(k)
         out.append(e)
     return out
+
+
+# ── Имя ────────────────────────────────────────────────────────────────────
+#
+# Имя сравнивалось строкой в нижнем регистре, поэтому для поиска дублей
+# «Иван Петров» (книга аккаунта), «Ivan Petrov» (профиль Telegram латиницей),
+# «Петров Иван» (импорт из таблицы: фамилия первой) и «Пётр»/«Петр» были
+# четырьмя разными людьми. Ключ имени приводит все эти написания к одному:
+# транслитерация в латиницу, затем свёртка вариантов латинского написания
+# (y/j → i, x → ks, kh → h, w → v), без мягкого и твёрдого знака, без
+# удвоенных букв; порядок слов не важен.
+#
+# Имя — СЛАБЫЙ признак (вес 0.15 в compute_merge_confidence): сам по себе
+# порога дубля не берёт, поэтому более широкое совпадение имени не может
+# вывести на экран пару без общего телефона, почты, ника или Telegram ID, и
+# точность отбора по группам (trust_engine.detect_smart_duplicates) не
+# меняется.
+
+_CYR = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "i", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
+    "ъ": "", "ы": "i", "ь": "", "э": "e", "ю": "iu", "я": "ia",
+    # украинские и белорусские буквы
+    "є": "e", "і": "i", "ї": "i", "ґ": "g", "ў": "u",
+}
+
+_FOLD = (("kh", "h"), ("x", "ks"), ("ph", "f"), ("w", "v"), ("y", "i"),
+         ("j", "i"), ("q", "k"), ("tch", "ch"), ("sch", "sh"), ("shch", "sh"),
+         ("ck", "k"), ("ts", "c"), ("tz", "c"))
+
+
+def _fold_token(tok: str) -> str:
+    out = "".join(_CYR.get(ch, ch) for ch in tok)
+    out = "".join(ch for ch in out if "a" <= ch <= "z")
+    for a, b in _FOLD:
+        out = out.replace(a, b)
+    # удвоенные буквы: «Алла»/«Ala», «Филипп»/«Filip»
+    dedup = []
+    for ch in out:
+        if not dedup or dedup[-1] != ch:
+            dedup.append(ch)
+    return "".join(dedup)
+
+
+def name_tokens(first, last=None) -> list[str]:
+    """Слова имени в сравнимом виде, в исходном порядке (пустые отброшены)."""
+    raw = f"{first or ''} {last or ''}".lower().replace("-", " ")
+    return [t for t in (_fold_token(w) for w in raw.split()) if t]
+
+
+def name_key(first, last=None) -> str:
+    """Полное имя без учёта порядка слов: «Петров Иван» == «Ivan Petrov»."""
+    return " ".join(sorted(name_tokens(first, last)))
+
+
+_LEGAL_FORMS = {"ооо", "оао", "зао", "пао", "ао", "ип", "нко", "ано", "llc",
+                "inc", "ltd", "gmbh", "corp", "co", "company", "компания"}
+
+
+def company_key(raw) -> str:
+    """Компания без кавычек и организационно-правовой формы:
+    «ООО "Ромашка"», «Ромашка» и «romashka LLC» — одна компания."""
+    s = str(raw or "").lower()
+    for ch in "\"'«»“”„.,()":
+        s = s.replace(ch, " ")
+    words = [w for w in s.split() if w not in _LEGAL_FORMS]
+    return " ".join(sorted(t for t in (_fold_token(w) for w in words) if t))

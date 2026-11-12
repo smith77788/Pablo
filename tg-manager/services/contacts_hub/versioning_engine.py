@@ -56,6 +56,18 @@ FIELD_LABELS = {
     'importance_level': 'важность',
     'user_rating': 'оценка',
     'custom_fields': 'свои поля',
+    # Поля личности, которые переносит слияние (merge_engine._absorb_identity).
+    # В правке с экрана их нет, но предпросмотр слияния обязан их назвать.
+    'telegram_user_id': 'Telegram ID',
+    'patronymic': 'отчество',
+    'gender': 'пол',
+    'registered_estimate': 'дата регистрации (оценка)',
+    'is_mutual': 'взаимный контакт',
+    'is_verified': 'подтверждён',
+    'excluded': 'не писать (исключён из рассылок)',
+    'last_seen_at': 'был в сети',
+    'last_active_at': 'последняя активность',
+    'discovered_at': 'впервые найден',
 }
 
 _JSONB = ('phones', 'emails', 'websites', 'addresses', 'custom_fields')

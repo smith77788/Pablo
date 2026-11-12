@@ -282,4 +282,22 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("crm_board uid=%s stage=%s", uid, stage or "-")
             return _err(_INTERNAL_ERROR, 500)
 
+    async def crm_funnel_analytics(request: web.Request) -> web.Response:
+        """Аналитика воронки: конверсия, время в стадии, застрявшие, прогноз
+        (services/crm_funnel_analytics). Окно — 30/90/180/365 дней."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        raw = (request.query.get("days") or "").strip()
+        try:
+            from services import crm_funnel_analytics as fa
+            days = int(raw) if raw.isdigit() else fa.DEFAULT_WINDOW
+            if days not in fa.WINDOWS:
+                return _err("Окно отчёта — 30, 90, 180 или 365 дней", 400)
+            return _json_resp(await fa.report(pool, uid, days))
+        except Exception:
+            log.exception("crm_funnel_analytics uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     app.router.add_get("/api/miniapp/crm/board", crm_board)
+    app.router.add_get("/api/miniapp/crm/funnel_analytics", crm_funnel_analytics)

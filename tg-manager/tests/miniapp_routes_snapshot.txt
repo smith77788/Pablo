@@ -174,6 +174,7 @@ GET /api/miniapp/content_meshes
 GET /api/miniapp/crm/board
 GET /api/miniapp/crm/contacts
 GET /api/miniapp/crm/deals
+GET /api/miniapp/crm/funnel_analytics
 GET /api/miniapp/crm_connections/{wh_id}
 GET /api/miniapp/crosspost/links
 GET /api/miniapp/dashboard
@@ -531,6 +532,7 @@ HEAD /api/miniapp/content_meshes
 HEAD /api/miniapp/crm/board
 HEAD /api/miniapp/crm/contacts
 HEAD /api/miniapp/crm/deals
+HEAD /api/miniapp/crm/funnel_analytics
 HEAD /api/miniapp/crm_connections/{wh_id}
 HEAD /api/miniapp/crosspost/links
 HEAD /api/miniapp/dashboard
