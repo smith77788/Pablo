@@ -4,7 +4,7 @@ import logging
 
 import asyncpg
 
-from services.contacts_hub.identity_keys import merge_phones
+from services.contacts_hub.identity_keys import merge_emails, merge_phones
 from services.contacts_hub.repository import EDITABLE_FIELDS
 
 log = logging.getLogger(__name__)
@@ -57,6 +57,8 @@ def absorbed_fields(primary: dict, secondary: dict) -> dict:
                 # номер: строкой их сравнивать нельзя, иначе после слияния в
                 # карточке три записи одного телефона (identity_keys).
                 merged = merge_phones(a, b)
+            elif field == 'emails':
+                merged = merge_emails(a, b)
             else:
                 merged = list(a)
                 for item in b:
