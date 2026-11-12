@@ -25996,7 +25996,7 @@ async function vlRulesSave() {
 }
 
 async function vlRulesReset() {
-  if (!confirm('Вернуть стандартные правила модели? Ваши настройки будут сброшены.')) return;
+  if (!await askConfirm('Вернуть стандартные правила модели? Ваши настройки будут сброшены.')) return;
   try {
     const d = await api('/api/miniapp/vlayer/rules/reset', {method:'POST', body:'{}'});
     VL_RULES = d;

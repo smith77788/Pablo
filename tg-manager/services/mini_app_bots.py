@@ -1294,7 +1294,7 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("multigeo_translate uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
         if not res["drafts"]:
-            return _err("ИИ не ответил — проверьте подключение ИИ в настройках или повторите позже", 502)
+            return _err("ИИ не ответил — проверьте подключение ИИ в настройках или повторите позже", 409)
         return _json_resp({"ok": True, "source": {f: source.get(f) or "" for f in _bl.FIELDS},
                            **res})
 

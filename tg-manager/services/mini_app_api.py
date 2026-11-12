@@ -3039,8 +3039,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Какие аккаунты годятся для оформления: живые, с сессией, не в паузе.
     # Одно условие на статус, выбор и отправку — иначе экран обещал бы одно
     # число, а операция ушла бы на другое.
+    # Владелец ($1) стоит в самих запросах ниже, а не здесь: так его видит
+    # сторож скоупа (tests/test_miniapp_path_param_scope_ratchet.py).
     _SETTER_ELIGIBLE = (
-        "owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+        "is_active=TRUE AND session_str IS NOT NULL "
         "AND (cooldown_until IS NULL OR cooldown_until < NOW())"
     )
 
@@ -3129,7 +3131,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # чужой или выбывший id просто не попадёт в выборку.
             if want_ids:
                 rows = await pool.fetch(
-                    "SELECT id FROM tg_accounts WHERE " + _SETTER_ELIGIBLE
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND " + _SETTER_ELIGIBLE
                     + " AND id = ANY($2::bigint[])",
                     uid, want_ids,
                 )
@@ -3137,7 +3139,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 account_ids = [i for i in want_ids if i in got]
             else:
                 rows = await pool.fetch(
-                    "SELECT id FROM tg_accounts WHERE " + _SETTER_ELIGIBLE + " "
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND " + _SETTER_ELIGIBLE + " "
                     "ORDER BY trust_score DESC NULLS LAST, id LIMIT $2",
                     uid, acc_count if acc_count > 0 else 500,
                 )
@@ -5020,12 +5022,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
         except Exception:
             log.exception("persona_preview uid=%d", uid)
-            return _err("ИИ сейчас недоступен — попробуйте позже", 503)
+            return _err("ИИ сейчас недоступен — попробуйте позже", 409)
         if not r.text:
-            return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 503)
+            return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 409)
         reply = _pv.enforce_style(_cw.sanitize_reply(r.text), persona)
         if not reply:
-            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 503)
+            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 409)
         return _json_resp({"reply": reply[:1000], "asked": message})
 
     async def _own_persona_id(request):
@@ -5300,7 +5302,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except ValueError as exc:
             return _err(str(exc), 400)
         if not _osint.is_available():
-            return _err("Поиск по нику пока не установлен на сервере", 503)
+            return _err("Поиск по нику пока не установлен на сервере", 409)
         try:
             what = "нику" if kind == "username" else "почте"
             label = f"Поиск по {what}: {query}"[:120]
