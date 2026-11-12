@@ -20,7 +20,7 @@ const CLA_ST = {
 };
 
 function claBotLabel(b) {
-  return b.username ? '@' + b.username : (b.first_name || ('бот ' + b.bot_id));
+  return b.username ? '@' + b.username : (b.first_name || (b.bot_id ? 'бот ' + b.bot_id : 'бот'));
 }
 
 // ── История ────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ async function openCloneAdapt(keep, stay) {
 
 function claGroupHtml(g) {
   const first = g.rows[0];
-  const src = first.source_uname ? '@' + first.source_uname : (first.source_name || ('бот ' + first.source_bot_id));
+  const src = first.source_uname ? '@' + first.source_uname : (first.source_name || (first.source_bot_id ? 'бот ' + first.source_bot_id : 'исходный бот'));
   const cnt = {ok: 0, same: 0, problem: 0};
   g.rows.forEach(r => {
     if (r.status === 'ok') cnt.ok++; else if (r.status === 'same') cnt.same++; else cnt.problem++;
@@ -105,7 +105,7 @@ function claGroupHtml(g) {
 }
 
 function claRowHtml(r) {
-  const tgt = r.target_uname ? '@' + r.target_uname : (r.target_name || ('бот ' + r.target_bot_id));
+  const tgt = r.target_uname ? '@' + r.target_uname : (r.target_name || (r.target_bot_id ? 'бот ' + r.target_bot_id : 'бот'));
   const [cls, lbl] = CLA_ST[r.status] || stb(r.status);
   const ch = Array.isArray(r.changes) ? r.changes : [];
   const det = ch.length ? `<div id="claDet${Number(r.id)}" style="display:none;margin-top:6px">${ch.map(c => {
@@ -344,7 +344,7 @@ async function claPreview() {
         ${t.steps.filter(s => s.same && s.note).map(s => `<div style="font-size:12px;color:var(--hint)">${esc(s.label)}: ${esc(s.note)}</div>`).join('')}
       </div>`).join(''));
     CLA.previewOk = true;
-  } catch (e) { txt('claPreview', `<div style="color:var(--red);font-size:13px;margin-top:6px">${esc(errRu(e, 'Предпросмотр не получился'))}</div>`); }
+  } catch (e) { txt('claPreview', errHtml(errRu(e, 'Предпросмотр не получился'), 'claPreview()')); }
 }
 
 async function submitCloneAdapt() {
