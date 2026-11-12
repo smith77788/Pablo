@@ -195,6 +195,16 @@ configure_root_logger(
 )
 log = get_logger(__name__)
 
+# Шифрование трафика флота — нативное, до первого клиента Telethon. Без этого
+# обфускация шла на чистом Python (0.4 МБ/с на весь процесс) и каждая загрузка
+# медиа замораживала цикл событий. См. services/telethon_crypto.py.
+try:
+    from services import telethon_crypto as _tg_crypto
+
+    _tg_crypto.install_and_report()
+except Exception:
+    log_exc_swallow(log, "telethon_crypto: подмена шифрования не встала")
+
 
 # ── Фоновые задачи: держим на них ссылки ─────────────────────────────────────
 # Event loop держит задачу только СЛАБОЙ ссылкой (это прямо оговорено в
