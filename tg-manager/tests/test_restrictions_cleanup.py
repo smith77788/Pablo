@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OPW = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+sys.path.insert(0, str(ROOT / "tests"))
+from miniapp_source import api_function  # noqa: E402  (ручка в любом модуле API-слоя)
 JS = (ROOT / "mini_app" / "screens" / "shield_check.js").read_text(encoding="utf-8")
 
 
@@ -38,7 +40,7 @@ def test_check_findings_carry_entity_id():
 
 
 def test_dead_list_takes_only_unreachable_not_restricted():
-    src = _fn_src(API, "restrictions_dead")
+    src = api_function("restrictions_dead")
     assert "'unreachable'" in src or '"unreachable"' in src, (
         "список мёртвых должен брать именно недоступные снаружи")
     # перекрёстная сверка со списком владельца (не предлагаем убрать убранное)
@@ -47,7 +49,7 @@ def test_dead_list_takes_only_unreachable_not_restricted():
 
 
 def test_remove_dead_is_owner_scoped_and_only_our_base():
-    src = _fn_src(API, "restrictions_remove_dead")
+    src = api_function("restrictions_remove_dead")
     assert "DELETE FROM managed_channels" in src and "owner_id=$1" in src, (
         "удаление каналов обязано скоупиться по владельцу")
     assert "DELETE FROM managed_bots" in src and "added_by=$1" in src, (
@@ -55,13 +57,13 @@ def test_remove_dead_is_owner_scoped_and_only_our_base():
 
 
 def test_remove_dead_requires_a_selection():
-    src = _fn_src(API, "restrictions_remove_dead")
+    src = api_function("restrictions_remove_dead")
     assert "не выбрано" in src.lower() or "не выбрана" in src.lower()
 
 
 def test_screen_confirms_before_removing():
     # Удаление — необратимое действие: экран обязан спросить подтверждение.
-    assert "askConfirm(" in JS
+    assert "confirmDelete(" in JS or "askConfirm(" in JS
     assert "restrictions/remove_dead" in JS and "restrictions/dead" in JS
     # Явно сказано, что это снятие с учёта, а не удаление в Telegram.
     assert "Telegram" in JS

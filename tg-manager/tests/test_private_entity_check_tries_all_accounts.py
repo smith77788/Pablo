@@ -54,12 +54,20 @@ def test_dead_accounts_excluded_without_dupes():
     assert ids == [1, 3]                       # 2 мёртв — пропущен; preferred без дубля
 
 
-def test_public_keeps_manager_first_then_others():
+def test_public_goes_round_robin_not_manager_first():
+    """Публичную (@username) резолвит любой аккаунт, поэтому управляющего
+    вперёд НЕ ставим: иначе один аккаунт резолвил бы все свои каналы подряд и
+    ловил спамблок (#90). Перебор — по кругу, со сдвигом rr_start, и все живые
+    в нём есть."""
     obs_by_id, observers = _obs(5, 6)
     ent = {"preferred_acc": 6, "access_hash": 0, "is_private": False, "username": "pub"}
-    cands = _restriction_access_candidates(ent, obs_by_id, observers, dead=set())
-    ids = [int(a["id"]) for a, _h in cands]
-    assert ids[0] == 6 and sorted(ids) == [5, 6]
+    first = [int(a["id"]) for a, _h in _restriction_access_candidates(
+        ent, obs_by_id, observers, dead=set(), rr_start=0)]
+    second = [int(a["id"]) for a, _h in _restriction_access_candidates(
+        ent, obs_by_id, observers, dead=set(), rr_start=1)]
+    assert sorted(first) == [5, 6] and sorted(second) == [5, 6]
+    assert first[0] != second[0], "следующая сущность берёт следующий аккаунт"
+    assert first[0] == 5, "управляющий не ставится первым у публичной"
 
 
 def test_no_preferred_still_lists_all_live():

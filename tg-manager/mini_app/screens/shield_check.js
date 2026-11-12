@@ -114,8 +114,13 @@ async function removeDeadEntities() {
   const n = channel_ids.length + bot_ids.length;
   if (!n) { if (errEl) errEl.textContent = 'Отметьте хотя бы одну сущность'; return; }
   if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nЭто снятие с учёта в вашей базе — сами сущности в Telegram уже недоступны. Действие не трогает Telegram.')) return;
+  // Ключ шлём, только если в нём есть цели: пустой список сервер отбивает как
+  // ошибку выбора, а не принимает за «ничего».
+  const payload = {};
+  if (channel_ids.length) payload.channel_ids = channel_ids;
+  if (bot_ids.length) payload.bot_ids = bot_ids;
   try {
-    const r = await api('/api/miniapp/restrictions/remove_dead', { method: 'POST', body: JSON.stringify({ channel_ids: channel_ids, bot_ids: bot_ids }) });
+    const r = await api('/api/miniapp/restrictions/remove_dead', { method: 'POST', body: JSON.stringify(payload) });
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🗑 Убрано из списка: ' + (r.removed || 0));
     loadDeadEntities();

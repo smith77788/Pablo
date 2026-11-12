@@ -7799,10 +7799,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
-        channel_ids = [int(x) for x in (data.get("channel_ids") or [])
-                       if str(x).lstrip("-").isdigit()]
-        bot_ids = [int(x) for x in (data.get("bot_ids") or [])
-                   if str(x).lstrip("-").isdigit()]
+        # Удаление: отсутствующий ключ — «этого вида не трогать» (а не «все»),
+        # пустой или битый список — ошибка выбора.
+        channel_ids, _e1 = selection_ids(data, "channel_ids", what="канал", cap=1000)
+        bot_ids, _e2 = selection_ids(data, "bot_ids", what="бот", cap=1000)
+        if _e1 or _e2:
+            return _err(_e1 or _e2, 400)
+        channel_ids, bot_ids = channel_ids or [], bot_ids or []
         if not channel_ids and not bot_ids:
             return _err("Не выбрано ни одной сущности для удаления", 400)
         removed_ch = removed_bot = 0
