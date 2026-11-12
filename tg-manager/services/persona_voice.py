@@ -190,6 +190,12 @@ def enforce_style(text: str, persona: Optional[_pe.PersonaProfile]) -> str:
             t = t[:-1].rstrip()
         if lit == "sloppy":
             t = _first_alpha_lower(t)
+    # Замер по образцам сильнее слов: длина, строчная, точка, смайлики — как
+    # у живого человека, с которого снята манера (persona_style).
+    from services import persona_style as _ps
+    fp = _ps.fingerprint(list(persona.sample_messages or []))
+    if fp:
+        t = _ps.conform(t, fp) or t
     return t.strip()
 
 

@@ -286,6 +286,7 @@ GET /api/miniapp/parser/audience
 GET /api/miniapp/parser/audience/export
 GET /api/miniapp/parser/runs
 GET /api/miniapp/payments
+GET /api/miniapp/persona/style_from_my_chats
 GET /api/miniapp/persona/{persona_id}/memory
 GET /api/miniapp/personas
 GET /api/miniapp/physics
@@ -643,6 +644,7 @@ HEAD /api/miniapp/parser/audience
 HEAD /api/miniapp/parser/audience/export
 HEAD /api/miniapp/parser/runs
 HEAD /api/miniapp/payments
+HEAD /api/miniapp/persona/style_from_my_chats
 HEAD /api/miniapp/persona/{persona_id}/memory
 HEAD /api/miniapp/personas
 HEAD /api/miniapp/physics
