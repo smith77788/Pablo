@@ -6273,6 +6273,37 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <textarea id="pSamples" rows="3" placeholder="ну хз, мне зашло&#10;кто пробовал? норм вообще?" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
         <div class="field-note">Лучший способ задать голос: ИИ берёт манеру, но фразы не копирует.</div>
       </div>
+      <div class="sec" style="padding:10px 0 4px">⚙️ Как работает ИИ персоны</div>
+      <div class="field">
+        <label>Модель</label>
+        <select id="pModel" class="sel"><option value="">Авто — лучшая доступная</option></select>
+        <div class="field-note">Только модели, ключи которых заданы на платформе. Если выбранная не ответит, сработает запасная.</div>
+      </div>
+      <div class="field">
+        <label>Смелость: <span id="pCreativityVal">60</span></label>
+        <input type="range" id="pCreativity" min="0" max="100" step="5" value="60" style="width:100%" oninput="txt('pCreativityVal', this.value)">
+        <div class="field-note">0 — сдержанно и предсказуемо, 100 — смело и неожиданно.</div>
+      </div>
+      <div class="field">
+        <label>Тщательность</label>
+        <select id="pQuality" class="sel">
+          <option value="fast">⚡ Быстро — одна реплика</option>
+          <option value="best">🏆 Лучшее — три варианта, ИИ-судья выбирает</option>
+        </select>
+        <div class="field-note">«Лучшее» тратит примерно вчетверо больше обращений к ИИ.</div>
+      </div>
+      <div class="field">
+        <label class="chk-row" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pSplit" checked> ✉️ Иногда писать мысль двумя сообщениями</label>
+      </div>
+      <div class="field">
+        <label>Спит (по своему времени)</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span>с</span><input type="number" id="pSleepFrom" min="0" max="23" placeholder="1" class="inp" style="flex:1;min-width:0">
+          <span>до</span><input type="number" id="pSleepTo" min="0" max="23" placeholder="8" class="inp" style="flex:1;min-width:0">
+          <span>UTC</span><input type="number" id="pUtcOffset" min="-12" max="14" placeholder="3" class="inp" style="flex:1;min-width:0">
+        </div>
+        <div class="field-note">Во сне персона не пишет. Пусто в «UTC» — ваш часовой пояс.</div>
+      </div>
       <div class="field">
         <label class="chk-row" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pMemory" checked> 🧠 Помнить сказанное</label>
         <div class="field-note">Персона помнит, что рассказала о себе, не повторяется и не противоречит себе в разных чатах.</div>
@@ -23278,6 +23309,8 @@ async function openPersonas() {
     const personas = d.personas||[];
     PERSONAS = personas;
     PERSONA_ACCS = d.accounts||[];
+    PERSONA_PROVIDERS = d.providers||[];
+    fillPersonaModels();
     const active = personas.filter(p=>p.is_active).length;
     const bound = personas.filter(p=>p.account_id).length;
     txt('personaStats',`
@@ -23355,7 +23388,25 @@ function _personaBody() {
     sample_messages: v('pSamples').split('\n').map(x=>x.trim()).filter(Boolean).slice(0,5),
     memory_enabled: !!(document.getElementById('pMemory')||{}).checked,
     persona_id: parseInt(v('pEditId'))||0,
+    ai_provider: (v('pModel').split('|')[0]||''),
+    ai_model: (v('pModel').split('|')[1]||''),
+    creativity: parseInt(v('pCreativity')||'60'),
+    quality: v('pQuality')||'fast',
+    split_messages: !!(document.getElementById('pSplit')||{}).checked,
+    sleep_from: v('pSleepFrom'),
+    sleep_to: v('pSleepTo'),
+    utc_offset: v('pUtcOffset'),
   };
+}
+// Модели, которые можно выбрать персоне: только настроенные на платформе.
+let PERSONA_PROVIDERS = [];
+function fillPersonaModels(selected) {
+  const sel = document.getElementById('pModel'); if (!sel) return;
+  const cur = selected !== undefined ? selected : sel.value;
+  sel.innerHTML = '<option value="">Авто — лучшая доступная</option>' + PERSONA_PROVIDERS.map(p =>
+    `<optgroup label="${esc(p.label||p.name)}">` + (p.models||[]).map(m =>
+      `<option value="${esc(p.name)}|${esc(m)}">${esc(m)}</option>`).join('') + '</optgroup>').join('');
+  sel.value = [...sel.options].some(o=>o.value===cur) ? cur : '';
 }
 function editPersona(id) {
   const p = PERSONAS.find(x=>x.id===id); if (!p) return;
@@ -23367,6 +23418,11 @@ function editPersona(id) {
   set('pEmoji', p.emoji_level||'rare'); set('pLiteracy', p.literacy||'casual');
   set('pTaboo', p.taboo_topics); set('pSamples', (p.sample_messages||[]).join('\n'));
   { const m = document.getElementById('pMemory'); if (m) m.checked = p.memory_enabled !== false; }
+  fillPersonaModels(p.ai_provider ? `${p.ai_provider}|${p.ai_model||''}` : '');
+  set('pCreativity', p.creativity==null?60:p.creativity); txt('pCreativityVal', String(p.creativity==null?60:p.creativity));
+  set('pQuality', p.quality||'fast');
+  { const sp = document.getElementById('pSplit'); if (sp) sp.checked = p.split_messages !== false; }
+  set('pSleepFrom', p.sleep_from); set('pSleepTo', p.sleep_to); set('pUtcOffset', p.utc_offset);
   fillPersonaAccounts(p.account_id ? String(p.account_id) : '');
   txt('pFormTitle', `Изменить персону «${esc(p.persona_name)}»`);
   txt('pSubmit', '💾 Сохранить');
@@ -23379,6 +23435,11 @@ function resetPersonaForm() {
   { const e = document.getElementById('pEmoji'); if (e) e.value='rare'; }
   { const l = document.getElementById('pLiteracy'); if (l) l.value='casual'; }
   { const m = document.getElementById('pMemory'); if (m) m.checked = true; }
+  ['pSleepFrom','pSleepTo','pUtcOffset'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  { const c = document.getElementById('pCreativity'); if (c) c.value='60'; txt('pCreativityVal','60'); }
+  { const q = document.getElementById('pQuality'); if (q) q.value='fast'; }
+  { const sp = document.getElementById('pSplit'); if (sp) sp.checked = true; }
+  fillPersonaModels('');
   txt('pFormTitle','Создать персону'); txt('pSubmit','🎭 Создать персону'); txt('pTryOut',''); txt('pErr','');
   const c = document.getElementById('pCancelEdit'); if (c) c.style.display = 'none';
   fillPersonaAccounts('auto');
@@ -23391,7 +23452,13 @@ async function previewPersona(btn) {
   const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Думает…';
   try {
     const d = await api('/api/miniapp/persona/preview', {method:'POST', body:JSON.stringify(body)});
-    txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.asked||'')}</div><div style="margin-top:4px">🎭 ${esc(d.reply||'')}</div></div>`);
+    const parts = (d.parts&&d.parts.length ? d.parts : [d.reply||'']).map(x=>`<div style="margin-top:4px">🎭 ${esc(x)}</div>`).join('');
+    const others = (d.candidates||[]).filter(c=>c!==d.reply);
+    const how = (d.candidates||[]).length > 1
+      ? `<div class="field-note" style="margin-top:6px">Выбрано из ${d.candidates.length} ${d.picked_by==='judge'?'ИИ-судьёй':'по приметам живой речи'}${d.why?': '+esc(d.why):''}</div>`
+        + (others.length?`<div class="field-note">Отклонены: ${others.map(c=>'«'+esc(c)+'»').join(' · ')}</div>`:'')
+      : '';
+    txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.asked||'')}</div>${parts}${how}${d.model?`<div class="field-note">Модель: ${esc(d.model)}</div>`:''}</div>`);
   } catch(e) { txt('pTryOut', `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось получить ответ'))}</div>`); }
   finally { btn.disabled = false; btn.textContent = label; }
 }

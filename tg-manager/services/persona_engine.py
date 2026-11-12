@@ -40,6 +40,15 @@ class PersonaProfile:
     memory_enabled: bool = True
     self_facts: str = ""
     owner_id: int | None = None
+    # «Мотор» персоны (schema_v345): модель, смелость, тщательность, подача, сон.
+    ai_provider: str = ""
+    ai_model: str = ""
+    creativity: int = 60
+    quality: str = "fast"
+    split_messages: bool = True
+    sleep_from: int | None = None
+    sleep_to: int | None = None
+    utc_offset: int | None = None
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -121,6 +130,14 @@ def persona_from_row(row) -> PersonaProfile:
         memory_enabled=bool(_row_get(row, "memory_enabled", True)),
         self_facts=_row_get(row, "self_facts", "") or "",
         owner_id=_row_get(row, "owner_id", None),
+        ai_provider=_row_get(row, "ai_provider", "") or "",
+        ai_model=_row_get(row, "ai_model", "") or "",
+        creativity=int(_row_get(row, "creativity", 60) if _row_get(row, "creativity", 60) is not None else 60),
+        quality=_row_get(row, "quality", "fast") or "fast",
+        split_messages=bool(_row_get(row, "split_messages", True)),
+        sleep_from=_row_get(row, "sleep_from", None),
+        sleep_to=_row_get(row, "sleep_to", None),
+        utc_offset=_row_get(row, "utc_offset", None),
     )
 
 
@@ -196,6 +213,16 @@ LITERACY_PROMPTS = {
     "sloppy": "Пишешь небрежно: строчными буквами, почти без запятых, сокращаешь "
               "слова (щас, норм, спс).",
 }
+QUALITY_LABELS = {"fast": "быстро: одна реплика",
+                  "best": "лучшее: три варианта, ИИ-судья выбирает"}
+
+
+def temperature_for(persona: "PersonaProfile | None") -> float:
+    """Смелость персоны (0..100) → температура модели (0.3..1.2)."""
+    c = 60 if persona is None else max(0, min(100, int(persona.creativity or 0)))
+    return round(0.3 + 0.9 * c / 100, 2)
+
+
 SAMPLES_MAX = 5
 SAMPLE_LEN = 200
 
