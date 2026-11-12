@@ -4427,13 +4427,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # губернатор флота стретчит её МУЛЬТИПЛИКАТИВНО (base × mult), и при 0 он
         # уже ничего не затормозит. FloodWait/карантин тормозят независимо.
         delay = min(max(validate_integer(data.get("delay", 30), min_val=1, max_val=600) or 30, 1), 600)
-        # Потолок сообщений с одного аккаунта за эту рассылку. Раньше его не
-        # было вовсе: 1000 получателей на двух аккаунтах = по 500 ЛС с каждого.
+        # Суточный потолок ЛС с одного аккаунта. Пусто — безопасный дефолт
+        # исполнителя (dm_engine.effective_daily_cap), сверху — тот же предел.
+        from services.dm_engine import DM_DAILY_CAP_MAX as _dm_cap_max
         per_account_cap = None
         if data.get("per_account_cap") not in (None, "", 0):
             per_account_cap = min(max(
-                validate_integer(data.get("per_account_cap"), min_val=1, max_val=500) or 1,
-                1), 500)
+                validate_integer(data.get("per_account_cap"), min_val=1,
+                                 max_val=_dm_cap_max) or 1,
+                1), _dm_cap_max)
 
         acc_ids = await _alive_accounts(
             uid, [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()])
@@ -6741,6 +6743,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("ad_intel_overview uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+        # Следующий слой рынка — подсказка, не основа экрана: её сбой не
+        # должен ронять сводку.
+        try:
+            from services.ad_intelligence import discovery_candidates
+            discover = await discovery_candidates(pool, uid)
+        except Exception:
+            log.warning("ad_intel_overview: discovery failed uid=%d", uid, exc_info=True)
+            discover = []
         _agg = agg or {}
         return _json_resp({
             "total_channels": int(total or 0),
@@ -6779,6 +6789,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }
                 for r in advertisers
             ],
+            "discover": discover,
         })
 
     # Сколько каналов можно поставить на разведку одним запросом.

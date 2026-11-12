@@ -1113,6 +1113,50 @@ async def list_ads(pool, owner_id: int, *, q: str = "", erid_only: bool = False,
             "has_more": offset + len(rows) < int(total or 0)}
 
 
+DISCOVERY_LIMIT = 10
+
+
+async def discovery_candidates(pool, owner_id: int, *,
+                               limit: int = DISCOVERY_LIMIT) -> list[dict]:
+    """Следующий слой рынка: каналы, которые РЕКЛАМИРУЮТСЯ в разведанных, но
+    сами ещё не разведаны.
+
+    Рекламодатель-канал покупает рекламу — значит, сам продаёт её или держит
+    аудиторию той же ниши; его рекламодатели — это ещё один круг рынка. Раньше
+    поставить его на разведку можно было только по одному, открыв карточку
+    рекламодателя, и никто не подсказывал, с кого начать. Порядок: чем в
+    большем числе каналов и чаще он рекламируется, тем он важнее для ниши.
+
+    Закрытые каналы, боты и сайты сюда не попадают: их не сканировать.
+    """
+    limit = max(1, min(int(limit or DISCOVERY_LIMIT), 50))
+    rows = await pool.fetch(
+        "SELECT a.advertiser_username, a.placements_count, a.channels_count, "
+        "a.total_views, a.last_seen_at FROM ad_advertisers a "
+        "WHERE a.owner_id=$1 AND a.placements_count > 0 "
+        "AND COALESCE(a.kind, 'channel') = 'channel' "
+        "AND NOT EXISTS (SELECT 1 FROM ad_placements p WHERE p.owner_id=a.owner_id "
+        "                AND lower(p.channel_username)=lower(a.advertiser_username)) "
+        "ORDER BY a.channels_count DESC NULLS LAST, a.placements_count DESC, "
+        "a.total_views DESC NULLS LAST, a.last_seen_at DESC NULLS LAST "
+        "LIMIT $2", owner_id, limit * 2)
+    out: list[dict] = []
+    for r in rows:
+        name = channel_username_from(r["advertiser_username"] or "")
+        if not name:
+            continue
+        out.append({
+            "username": name,
+            "placements": int(r["placements_count"] or 0),
+            "channels": int(r["channels_count"] or 0),
+            "views": int(r["total_views"] or 0),
+            "last_seen": _iso(r["last_seen_at"]),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def delete_channel(pool, owner_id: int, username: str) -> bool:
     """Снять канал с разведки: его посты уходят, рекламодатели пересчитываются."""
     name = channel_username_from(username)

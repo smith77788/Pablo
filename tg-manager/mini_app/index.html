@@ -3349,8 +3349,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · спинтакс обязателен · <b>1 = максимально быстро</b> (риск бана; защита от флуда работает)</div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="daPerAcc" min="1" max="500" placeholder="—" title="Максимум сообщений с одного аккаунта за эту рассылку" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
-        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">макс. с одного аккаунта за рассылку · защита от бана (пусто — без лимита)</div>
+        <input type="number" id="daPerAcc" min="1" max="200" placeholder="30" title="Максимум ЛС с одного аккаунта в сутки — по всем рассылкам и кампаниям" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">ЛС с одного аккаунта в сутки · защита от бана (пусто — 30). Выбрали лимит все — рассылка продолжится завтра сама</div>
       </div>
       <div id="daPreview" style="margin-bottom:8px"></div>
       <div style="display:flex;gap:8px">
@@ -8516,8 +8516,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Лимит на аккаунт в день</label>
-      <input type="number" id="cmpPerAcc" min="1" max="200" placeholder="без лимита (1–200)">
-      <div class="field-note">Аккаунт, достигший лимита, выбывает до следующего дня. Защита от бана</div>
+      <input type="number" id="cmpPerAcc" min="1" max="200" placeholder="30 по умолчанию (1–200)">
+      <div class="field-note">Аккаунт, достигший лимита, выбывает до следующего дня; когда лимит выбрали все, кампания сама продолжится завтра. Пусто — 30 в день, безопасно для холодных ЛС</div>
     </div>
     <div class="field">
       <label class="chk-row" style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -27313,7 +27313,14 @@ async function openAdIntel(tab) {
     const leaders = (d.top_advertisers ? d.top_advertisers.map(a =>
       `<span class="chip tap" role="button" tabindex="0" onclick="openAdAdvertiser('${escJs(a.username)}')">${esc((a.kind==='site'||a.kind==='invite') ? a.username : '@'+a.username)} · ${num(a.placements||0)} в ${num(a.channels||0)} ${plural(a.channels||0,'канале','каналах','каналах')}</span>`) : []).slice(0,5).join('');
     const lead = leaders ? `<div class="field-note" style="padding:0 16px 4px">Активнее всех рекламируются:</div><div class="filter-chips" style="padding:0 16px 8px">${leaders}</div>` : '';
-    txt('adIntelAlert', (notes.length ? `<div class="card" style="margin:0 16px 8px;font-size:13px">${notes.map(esc).join('<br>')}</div>` : '') + lead);
+    // Следующий слой рынка: каналы, которые рекламируются у разведанных, но
+    // сами ещё не разведаны. Одна кнопка ставит на разведку всех сразу.
+    const disc = d.discover || [];
+    const discHtml = disc.length ? `<div class="field-note" style="padding:0 16px 4px">🔭 Следующий слой рынка — рекламируются у ваших, но ещё не разведаны:</div>
+      <div class="filter-chips" style="padding:0 16px 4px">${disc.slice(0,8).map(a =>
+        `<span class="chip tap" role="button" tabindex="0" onclick="openAdAdvertiser('${escJs(a.username)}')">@${esc(a.username)} · в ${num(a.channels||0)} ${plural(a.channels||0,'канале','каналах','каналах')}</span>`).join('')}</div>
+      <div style="padding:0 16px 8px"><button class="btn btn-s" onclick="openAdIntelModal('${escJs(disc.map(a=>'@'+a.username).join(' '))}')">📡 Разведать все (${disc.length})</button></div>` : '';
+    txt('adIntelAlert', (notes.length ? `<div class="card" style="margin:0 16px 8px;font-size:13px">${notes.map(esc).join('<br>')}</div>` : '') + lead + discHtml);
     if (!d.total_channels) {
       // Пусто: вкладки и поиск ни к чему — одна понятная дверь.
       adIntelShowTab('channels');

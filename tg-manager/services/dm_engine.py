@@ -421,6 +421,99 @@ def filter_opted_out_refs(refs: list, opted_out: set[str]) -> tuple[list, int]:
     return remaining, len(refs) - len(remaining)
 
 
+# ── Суточный потолок ЛС на аккаунт ───────────────────────────────────────────
+#
+# ПОЧЕМУ ПОТОЛОК ЕСТЬ ВСЕГДА. Лимит `per_account_daily` у кампании и
+# `per_account_cap` у разовой рассылки были НЕОБЯЗАТЕЛЬНЫМИ: не заданный
+# владельцем лимит означал «без лимита», и кампания на тысячу человек с двумя
+# аккаунтами слала с каждого по пятьсот холодных ЛС за день. Telegram ставит
+# PeerFlood (запрет писать незнакомым) задолго до этого, а исполнитель узнаёт о
+# нём только после того, как флаг уже стоит, — то есть «без лимита» значило
+# «до флага». Теперь не заданный лимит — это безопасный дефолт, а заданный
+# зажат сверху. Владелец может поставить больше дефолта, но не бесконечность.
+DM_DAILY_CAP_DEFAULT = 30
+DM_DAILY_CAP_MAX = 200
+
+# Что run_campaign возвращает исполнителю, когда остановилась САМА, а не по
+# воле владельца (None — завершилась, на паузе владельца или удалена).
+CAMPAIGN_DAILY_CAP = "daily_cap"
+CAMPAIGN_LIMIT_UNREADABLE = "limit_unreadable"
+
+
+def effective_daily_cap(raw) -> int:
+    """Суточный потолок ЛС с одного аккаунта: заданный (1..MAX) или дефолт."""
+    try:
+        n = int(raw or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n <= 0:
+        return DM_DAILY_CAP_DEFAULT
+    return min(n, DM_DAILY_CAP_MAX)
+
+
+class DailyCountUnreadable(RuntimeError):
+    """Счёт ЛС за сегодня не прочитался — считать аккаунты свободными нельзя."""
+
+
+async def dm_sent_today(pool, owner_id: int) -> dict[int, int]:
+    """Сколько ЛС каждый аккаунт владельца уже отправил СЕГОДНЯ (все пути).
+
+    Два источника: журнал кампаний и построчный журнал operation_audit, куда
+    пишут и кампании, и разовые рассылки. Берётся БОЛЬШЕЕ из двух, а не сумма:
+    отправка кампании лежит в обоих.
+
+    Чтение строгое: пустой счёт означал бы «сегодня не отправлено ничего» и
+    полный лимит каждому аккаунту заново — ровно то, от чего лимит защищает.
+    После одного повтора — `DailyCountUnreadable`, и рассылка ждёт.
+    """
+    out: dict[int, int] = {}
+    for _attempt in (1, 2):
+        try:
+            rows_c = await pool.fetch(
+                """SELECT l.account_id, COUNT(*) AS c
+                   FROM dm_campaign_log l
+                   JOIN dm_campaigns c ON c.id = l.campaign_id
+                   WHERE c.owner_id=$1 AND l.status='sent'
+                     AND l.sent_at >= date_trunc('day', now())
+                   GROUP BY l.account_id""",
+                owner_id,
+            )
+            rows_a = await pool.fetch(
+                """SELECT account_id, COUNT(*) AS c FROM operation_audit
+                   WHERE owner_id=$1 AND action='dm' AND result='sent'
+                     AND occurred_at >= date_trunc('day', now())
+                   GROUP BY account_id""",
+                owner_id,
+            )
+        except Exception:
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+                continue
+            log.error("dm_engine: счёт ЛС за сегодня не прочитан (owner=%s) — "
+                      "рассылка подождёт", owner_id, exc_info=True)
+            raise DailyCountUnreadable("счёт ЛС за сегодня недоступен")
+        for r in list(rows_c) + list(rows_a):
+            if r["account_id"] is None:
+                continue
+            aid = int(r["account_id"])
+            out[aid] = max(out.get(aid, 0), int(r["c"]))
+        return out
+    return out
+
+
+async def seconds_until_next_day(pool) -> int:
+    """Секунд до начала следующих суток по часам БАЗЫ (по ним же считается
+    «сегодня» в dm_sent_today) плюс случайный разброс 20–90 минут: флот не
+    должен просыпаться всем составом в полночь секунда в секунду."""
+    try:
+        left = float(await pool.fetchval(
+            "SELECT EXTRACT(EPOCH FROM (date_trunc('day', now()) "
+            "+ interval '1 day' - now()))") or 0)
+    except Exception:
+        left = 6 * 3600.0
+    return int(max(60.0, left) + random.uniform(20 * 60, 90 * 60))
+
+
 def pick_account_under_cap(acc_cycle: list, start_idx: int, sent_by_acc: dict, cap):
     """Выбирает следующий аккаунт из ротации, пропуская достигших дневного лимита.
 
@@ -1146,8 +1239,11 @@ async def run_campaign(
     bot: Bot,
     campaign_id: int,
     op_id: int | None = None,
-) -> None:
-    """Запустить или продолжить DM-кампанию. Вызывается из operation_queue."""
+) -> str | None:
+    """Запустить или продолжить DM-кампанию. Вызывается из operation_queue.
+
+    Возвращает CAMPAIGN_DAILY_CAP / CAMPAIGN_LIMIT_UNREADABLE, когда кампания
+    встала САМА и должна продолжиться без владельца; иначе None."""
     campaign = await pool.fetchrow(
         "SELECT * FROM dm_campaigns WHERE id=$1", campaign_id
     )
@@ -1359,48 +1455,20 @@ async def run_campaign(
     except Exception as e:
         log.warning('dm_engine: pace_multiplier load failed: %s', e)
 
-    # Лимит отправок на аккаунт В ДЕНЬ (params.per_account_daily). Считаем честно:
-    # префиллим уже отправленное сегодня по всем кампаниям владельца, дальше
-    # доучитываем в этом прогоне. Аккаунт, достигший лимита, выбывает из ротации —
-    # ключевая защита аккаунтов от массовой рассылки одним аккаунтом.
+    # Лимит отправок на аккаунт В ДЕНЬ (params.per_account_daily). Есть ВСЕГДА
+    # (см. effective_daily_cap): не заданный владельцем — безопасный дефолт.
+    # Считаем честно: префиллим уже отправленное сегодня по всем путям ЛС
+    # владельца, дальше доучитываем в этом прогоне. Аккаунт, достигший лимита,
+    # выбывает из ротации — ключевая защита аккаунтов от массовой рассылки.
+    _per_acc_cap = effective_daily_cap((_cp or {}).get("per_account_daily"))
     try:
-        _per_acc_cap = int((_cp or {}).get("per_account_daily") or 0) or None
-    except (TypeError, ValueError):
-        _per_acc_cap = None
-    _sent_by_acc: dict[int, int] = {}
-    if _per_acc_cap:
-        try:
-            _rows_today = await pool.fetch(
-                """SELECT l.account_id, COUNT(*) AS c
-                   FROM dm_campaign_log l
-                   JOIN dm_campaigns c ON c.id = l.campaign_id
-                   WHERE c.owner_id=$1 AND l.status='sent'
-                     AND l.sent_at >= date_trunc('day', now())
-                   GROUP BY l.account_id""",
-                owner_id,
-            )
-            for r in _rows_today:
-                if r["account_id"] is not None:
-                    _sent_by_acc[int(r["account_id"])] = int(r["c"])
-        except Exception:
-            log_exc_swallow(log, "dm_engine: per-account daily preload failed")
-        # Разовые рассылки (bulk_dm_adhoc) в журнал кампаний не пишут, и
-        # дневной лимит кампании их не видел: аккаунт, разославший утром 50 ЛС
-        # разово, получал в кампании ещё полный лимит. Их учёт — operation_audit.
-        try:
-            _rows_adhoc = await pool.fetch(
-                """SELECT account_id, COUNT(*) AS c FROM operation_audit
-                   WHERE owner_id=$1 AND action='dm' AND result='sent'
-                     AND occurred_at >= date_trunc('day', now())
-                   GROUP BY account_id""",
-                owner_id,
-            )
-            for r in _rows_adhoc:
-                if r["account_id"] is not None:
-                    _aid = int(r["account_id"])
-                    _sent_by_acc[_aid] = max(_sent_by_acc.get(_aid, 0), int(r["c"]))
-        except Exception:
-            log_exc_swallow(log, "dm_engine: per-account daily audit preload failed")
+        _sent_by_acc: dict[int, int] = await dm_sent_today(pool, owner_id)
+    except DailyCountUnreadable:
+        # Без счёта за сегодня лимит перестаёт существовать: кампания встаёт
+        # на паузу, исполнитель вернёт операцию в очередь ненадолго.
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id)
+        return CAMPAIGN_LIMIT_UNREADABLE
 
     acc_cycle = list(accounts)
     # Риск-пульс (Волна S/1B + M, fail-open): DM с флагнутого аккаунта = быстрый бан.
@@ -1523,7 +1591,11 @@ async def run_campaign(
             await pool.execute(
                 "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
             )
-            return
+            # Пауза дневного лимита — НЕ пауза владельца: исполнитель отложит
+            # ту же операцию до следующих суток, и кампания продолжится сама.
+            # Раньше здесь был голый return, и кампания стояла, пока владелец
+            # не нажмёт «Продолжить», хотя комментарий обещал «до завтра».
+            return CAMPAIGN_DAILY_CAP
 
         # Персонализация ДО spintax: иначе spintax-движок увидит `{name}` как
         # группу из одного варианта и подставит голое слово «name».
