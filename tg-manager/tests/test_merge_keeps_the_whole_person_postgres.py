@@ -257,6 +257,6 @@ def test_preview_names_what_hangs_on_the_second_record(pool):
         OWNER, b))
     p = _run(merge_preview(pool, a, b, OWNER))
     labels = [t["label"] for t in p["taken"]]
-    assert "Telegram ID" in labels, labels
+    assert "аккаунт Telegram (ID)" in labels, labels
     assert p["attached"]["deal"] == 1
     json.dumps(p)  # ответ экрану обязан сериализоваться

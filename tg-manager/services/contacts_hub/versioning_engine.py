@@ -58,7 +58,7 @@ FIELD_LABELS = {
     'custom_fields': 'свои поля',
     # Поля личности, которые переносит слияние (merge_engine._absorb_identity).
     # В правке с экрана их нет, но предпросмотр слияния обязан их назвать.
-    'telegram_user_id': 'Telegram ID',
+    'telegram_user_id': 'аккаунт Telegram (ID)',
     'patronymic': 'отчество',
     'gender': 'пол',
     'registered_estimate': 'дата регистрации (оценка)',
