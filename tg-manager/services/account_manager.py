@@ -5324,6 +5324,42 @@ async def fetch_chat_messages(
             log_exc_swallow(log, "fetch_chat_messages disconnect")
 
 
+async def get_message_status(
+    session_string: str,
+    chat_ref,
+    msg_ids: list[int],
+    _acc: dict | None = None,
+) -> dict[int, dict] | None:
+    """Живы ли свои сообщения в чате и сколько у них просмотров.
+
+    Один GetMessages на пачку id (read-only, низкий риск). Удалённое Telegram
+    отдаёт как None/MessageEmpty — это `alive: False`. Возвращает
+    {msg_id: {"alive": bool, "views": int}} или None, если спросить не вышло
+    (сеть, аккаунт выкинут из группы) — «не знаем» не равно «удалено».
+    """
+    ids = [int(i) for i in msg_ids if i]
+    if not ids:
+        return {}
+    client = await connect_client(session_string, _acc, "read", low_risk=True)
+    try:
+        msgs = await asyncio.wait_for(client.get_messages(chat_ref, ids=ids), timeout=20.0)
+        out: dict[int, dict] = {}
+        for mid, msg in zip(ids, list(msgs or [])):
+            alive = bool(msg is not None and type(msg).__name__ != "MessageEmpty"
+                         and getattr(msg, "id", None))
+            out[mid] = {"alive": alive,
+                        "views": int(getattr(msg, "views", 0) or 0) if alive else 0}
+        return out
+    except Exception as e:
+        log.warning("get_message_status chat=%s: %s", chat_ref, e)
+        return None
+    finally:
+        try:
+            await safe_disconnect(client)
+        except Exception:
+            log_exc_swallow(log, "get_message_status disconnect")
+
+
 async def search_global_ranked(
     session_string: str, query: str, limit: int = 20, _acc: dict | None = None
 ) -> list[dict]:
