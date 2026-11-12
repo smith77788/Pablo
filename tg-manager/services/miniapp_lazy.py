@@ -57,6 +57,7 @@ _NUM = re.compile(r"\d[\w.]*|\.\d[\w.]*")
 _PUNCT = ("...", ">>>=", "===", "!==", "**=", "<<=", ">>=", ">>>", "&&=", "||=", "??=",
           "=>", "==", "!=", "<=", ">=", "&&", "||", "??", "?.", "++", "--", "+=", "-=",
           "*=", "/=", "%=", "&=", "|=", "^=", "**", "<<", ">>")
+_PUNCT_RE = re.compile("|".join(re.escape(p) for p in _PUNCT))
 _RE_AFTER_PUNCT = set("(,=:[!&|?{};+-*%<>~^")
 _RE_AFTER_WORDS = {"return", "typeof", "case", "in", "of", "new", "delete", "void",
                    "throw", "else", "do", "yield", "await", "instanceof"}
@@ -190,11 +191,8 @@ def tokenize(src: str) -> list[Tok]:
                 push("re", src[i:j], i, j)
                 i = j
                 continue
-        for p in _PUNCT:
-            if src.startswith(p, i):
-                break
-        else:
-            p = c
+        m = _PUNCT_RE.match(src, i)
+        p = m.group(0) if m else c
         if p in ("(", "[", "{"):
             push("p", p, i, i + 1)
             depth += 1
@@ -331,6 +329,7 @@ def _strict(src: str) -> bool:
 
 
 _GLOBAL_OBJ = {"window", "globalThis", "self"}
+_WORD_AFTER = re.compile(r"(?<![\w$.])([A-Za-z_$][\w$]*)\s*(.?)")
 
 
 def _forbid_dynamic_globals(s: "Script") -> None:
@@ -413,10 +412,12 @@ def _safe_refs(scripts: list[Script], extra_text: list[str]) -> tuple[set[str], 
     # `имя.` или `имя =` в строке — уже не вызов.
     if cand:
         blob = "\n".join(extra_text)
-        pat = re.compile(r"(?<![\w$.])(" + "|".join(sorted(map(re.escape, cand), key=len,
-                                                            reverse=True)) + r")(?![\w$])\s*(.?)")
-        for m in pat.finditer(blob):
+        # Одно регулярное на все слова и проверка по множеству: чередование
+        # из двух тысяч имён стоило четыре секунды на каждой нарезке.
+        for m in _WORD_AFTER.finditer(blob):
             nm, after = m.group(1), m.group(2)
+            if nm not in cand:
+                continue
             if after in ("=", "."):
                 nxt2 = blob[m.end(): m.end() + 1]
                 if after == "=" and nxt2 in ("=", ">"):
