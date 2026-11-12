@@ -23762,6 +23762,55 @@ async def _growth_check_posts_due(pool, owner_id: int, accounts: list) -> int:
     return checked
 
 
+async def _growth_proven_groups(pool, owner_id: int, niche: str, keywords: list,
+                                limit: int) -> list[dict]:
+    """Доказанные группы, куда пора повторить пост (growth_learning).
+
+    Пост прошёл, проверка нашла его живым и с просмотрами, прошло не меньше
+    REPOST_AFTER_DAYS. Та же ниша или тот же запрос — чужая тема не годится.
+    Только с публичным ником: пост идёт по нику, access_hash не хранится.
+    Fail-soft: сбой чтения = без повторов, то есть прежнее поведение (новых
+    групп это не касается — их дедуп читается строго выше)."""
+    from services.growth_learning import REPOST_AFTER_DAYS
+
+    if limit <= 0:
+        return []
+    rows = await _safe_fetch(
+        pool,
+        "SELECT group_id, title, username, members, keyword FROM niche_growth_targets "
+        "WHERE owner_id=$1 AND outcome='posted' AND alive AND COALESCE(views,0) > 0 "
+        "AND username IS NOT NULL AND username <> '' "
+        "AND posted_at < now() - make_interval(days => $2) "
+        "AND (lower(niche) = lower($3) OR lower(keyword) = ANY($4::text[])) "
+        "ORDER BY views DESC, posted_at LIMIT $5",
+        owner_id, REPOST_AFTER_DAYS, niche or "",
+        [str(k or "").lower() for k in keywords or []], int(limit),
+        log_ctx=f"[niche_growth_proven owner={owner_id}]")
+    return [{"id": int(r["group_id"]), "title": r["title"] or "",
+             "username": r["username"], "join_ref": f"@{r['username']}",
+             "members": int(r["members"] or 0), "keyword": r["keyword"],
+             "access_hash": 0, "proven": True} for r in rows or []]
+
+
+async def _growth_claim_proven(pool, owner_id: int, group_id: int, acc_id: int) -> bool:
+    """Занять доказанную группу под повтор — атомарно и ДО поста.
+
+    Условный UPDATE проходит ровно у одного запуска: строка уходит из
+    'posted' в 'marked', и второй (параллельный или повтор после обрыва) её
+    уже не видит доказанной. Сбой записи = поста нет, как и у новой группы."""
+    from services.growth_learning import REPOST_AFTER_DAYS
+
+    res = await _safe_execute(
+        pool,
+        "UPDATE niche_growth_targets SET outcome='marked', acc_id=$3, msg_id=NULL, "
+        "posted_at=NULL, checked_at=NULL, alive=NULL, views=NULL, outcome_note=NULL "
+        "WHERE owner_id=$1 AND group_id=$2 AND outcome='posted' AND alive "
+        "AND posted_at < now() - make_interval(days => $4)",
+        owner_id, int(group_id), int(acc_id), REPOST_AFTER_DAYS,
+        log_ctx=f"[niche_growth_claim_proven owner={owner_id}]")
+    return res == "UPDATE 1"
+
+
 async def _exec_niche_growth_post(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -23950,6 +23999,17 @@ async def _exec_niche_growth_post(
         # Сперва самые тематичные — и для превью, и для настоящего запуска.
         groups = niche_searcher.rank_groups(groups, keywords, geo=geo)
 
+        # Повтор в ДОКАЗАННЫХ группах (пост жил и читался) — впереди новых, но
+        # не больше доли запуска: охват растёт там, где он уже подтверждён, а
+        # разведка новых групп не останавливается.
+        _proven: list[dict] = []
+        if not dry_run:
+            from services.growth_learning import repost_slots
+            _proven = await _growth_proven_groups(
+                pool, owner_id, niche, keywords, repost_slots(max_groups))
+            _pids = {g["id"] for g in _proven}
+            groups = _proven + [g for g in groups if int(g.get("id") or 0) not in _pids]
+
         if not groups:
             # Correct total_items down from the submitted placeholder (bot handler
             # submits total_items=50 regardless of the real 5-group cap) so the
@@ -24013,6 +24073,7 @@ async def _exec_niche_growth_post(
         err_count = 0
         acc_idx = 0
         posted_titles: list[str] = []
+        _reposted = 0
 
         for idx, grp in enumerate(groups):
             if await _is_cancelled(pool, op_id):
@@ -24104,7 +24165,11 @@ async def _exec_niche_growth_post(
             # id неотметима в принципе, поэтому поста для неё тоже нет:
             # вступление обратимо и дёшево, второй промо-пост — нет.
             _marked = False
-            if grp_id:
+            if grp_id and grp.get("proven"):
+                _marked = await _growth_claim_proven(pool, owner_id, grp_id, int(acc["id"]))
+            elif grp_id:
+                # «INSERT 0 0» — строку уже поставил другой запуск: группа
+                # занята им, второй пост отсюда был бы тем самым дублем.
                 _marked = await _safe_execute(
                     pool,
                     "INSERT INTO niche_growth_targets(owner_id, group_id, title, "
@@ -24116,7 +24181,7 @@ async def _exec_niche_growth_post(
                     (username or None), int(grp.get("members") or 0),
                     int(acc["id"]),
                     log_ctx=f"[niche_growth_mark op={op_id}]",
-                ) != "ERROR"
+                ) == "INSERT 0 1"
             if not _marked:
                 log.error(
                     "niche_growth_post op=%d: группа %s (%r) не записалась в "
@@ -24178,6 +24243,8 @@ async def _exec_niche_growth_post(
                 else:
                     ok_count += 1
                     posted_titles.append(grp_title or join_ref)
+                    if grp.get("proven"):
+                        _reposted += 1
                     await _growth_record_outcome(
                         pool, owner_id, grp_id, "posted",
                         msg_id=post_result.get("msg_id"))
@@ -24226,6 +24293,9 @@ async def _exec_niche_growth_post(
                         f"отдачи: {', '.join(_dropped_kws[:5])}")
         if _checked_posts:
             summary += f"\nПроверена судьба прошлых постов: {_checked_posts}"
+        if _reposted:
+            summary += (f"\nПовтор в группах, где прошлый пост жил и читался: "
+                        f"{_reposted}")
         if posted_titles:
             summary += "\n" + "\n".join(f"• {t}" for t in posted_titles[:10])
         return {
