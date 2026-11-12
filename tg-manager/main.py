@@ -1539,6 +1539,9 @@ async def main() -> None:
         # Session Health Monitor — проверка сессий каждые 6 часов
         from services.account_manager import run_session_health_monitor
         _spawn(_resilient("session_health_monitor", run_session_health_monitor, pool, bot))
+        # Запасной ключ: поднять аккаунт, чей основной сеанс умер (session_watch).
+        from services.session_watch import run_reserve_keeper
+        _spawn(_resilient("reserve_keeper", run_reserve_keeper, pool, bot))
         # Pool Monitor — проверка пула соединений каждые 5 минут
         from database.db import run_pool_monitor
         _spawn(_resilient("pool_monitor", run_pool_monitor, pool))

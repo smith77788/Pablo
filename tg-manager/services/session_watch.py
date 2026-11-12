@@ -223,7 +223,7 @@ async def guard(pool, client, acc: dict, profile: dict, cfg, budget: dict) -> di
     {"closed": [...], "unsettled": {hash, ...}, "twofa": "set"|"<причина>"|None}.
     budget — общий на проход обхода: {owner_id: паролей уже поставлено}.
     """
-    out: dict = {"closed": [], "unsettled": set(), "twofa": None}
+    out: dict = {"closed": [], "unsettled": set(), "twofa": None, "reserve": None}
     try:
         acc_id, owner = int(acc["id"]), int(acc["owner_id"])
     except (KeyError, TypeError, ValueError):
@@ -256,7 +256,65 @@ async def guard(pool, client, acc: dict, profile: dict, cfg, budget: dict) -> di
         out["twofa"] = "set" if why is None else why
         if why is None:
             profile["twofa_on"] = True
+    # Запасной ключ — после пароля: только что поставленный пароль уже в базе,
+    # и новый сеанс войдёт с ним.
+    if (getattr(cfg, "guard_reserve", False) and not acc.get("has_reserve") and old_enough
+            and budget.get(("reserve", owner), 0) < _RESERVE_PER_OWNER_SWEEP):
+        budget[("reserve", owner)] = budget.get(("reserve", owner), 0) + 1
+        try:
+            out["reserve"] = await _make_reserve(pool, client, acc, profile, owner, acc_id)
+        except Exception as exc:
+            log.warning("session_watch.guard: запасной ключ acc=%d: %s", acc_id, exc)
+            out["reserve"] = "сбой при заведении ключа"
     return out
+
+
+def drop_own_reserve(profile: dict, acc: dict) -> None:
+    """Запасной ключ — НАШ сеанс: из списка чужих он убирается до всего
+    остального, иначе дозор тревожил бы о нём, а автозащита его закрыла бы."""
+    h = acc.get("reserve_auth_hash")
+    auths = profile.get("authorizations")
+    if h and auths:
+        profile["authorizations"] = [f for f in auths if int(f.get("hash") or 0) != int(h)]
+
+
+_RESERVE_PER_OWNER_SWEEP = 10
+
+
+async def _make_reserve(pool, client, acc: dict, profile: dict, owner: int, acc_id: int) -> str:
+    """Завести и записать запасной ключ. → "made" или причина по-русски."""
+    from services import account_manager as am
+    from services.token_vault import decrypt_token, encrypt_plaintext_token
+    pw = None
+    if profile.get("twofa_on") is not False:
+        try:
+            enc = await pool.fetchval(
+                "SELECT twofa_enc FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, owner)
+            pw = decrypt_token(enc) if enc else None
+        except Exception as exc:
+            log.warning("session_watch: пароль 2FA acc=%d не прочитан: %s", acc_id, exc)
+    try:
+        sess, h = await am.mint_reserve_session(client, acc, pw)
+    except am.ReserveKeyError as exc:
+        return str(exc)
+    enc = encrypt_plaintext_token(sess)
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET reserve_session_enc=$1, reserve_auth_hash=$2, "
+                "reserve_made_at=now(), reserve_checked_at=now() WHERE id=$3 AND owner_id=$4",
+                enc, int(h), acc_id, owner)
+            return "made"
+        except Exception as exc:
+            log.warning("session_watch: запасной ключ acc=%d не записан (%d): %s",
+                        acc_id, _attempt, exc)
+    # Незаписанный ключ — безымянный вход в аккаунт: закрываем его сами.
+    try:
+        await _close_one(client, int(h))
+    except Exception as exc:
+        log.warning("session_watch: незаписанный запасной сеанс acc=%d не закрыт: %s",
+                    acc_id, exc)
+    return "ключ не записался в базу — сеанс закрыт"
 
 
 def acc_label(acc: dict) -> str:
@@ -269,7 +327,9 @@ def build_guard_report(rows: list[tuple[str, dict]]) -> str | None:
     closed = [(lbl, r) for lbl, r in rows if r.get("closed")]
     twofa = [(lbl, r) for lbl, r in rows if r.get("twofa") == "set"]
     failed = [(lbl, r) for lbl, r in rows if r.get("twofa") not in (None, "set")]
-    if not (closed or twofa or failed):
+    reserve = [(lbl, r) for lbl, r in rows if r.get("reserve") == "made"]
+    no_reserve = [(lbl, r) for lbl, r in rows if r.get("reserve") not in (None, "made")]
+    if not (closed or twofa or failed or reserve or no_reserve):
         return None
     lines = ["🛡 <b>Автозащита флота</b>", ""]
     if closed:
@@ -289,6 +349,15 @@ def build_guard_report(rows: list[tuple[str, dict]]) -> str | None:
         lines.append(f"Пароль не встал: {len(failed)} акк.")
         for lbl, r in failed[:_MAX_LISTED]:
             lines.append(f"• {html.escape(lbl)}: {html.escape(str(r['twofa']))}")
+        lines.append("")
+    if reserve:
+        lines.append(f"Заведён запасной ключ: <b>{len(reserve)}</b> акк. — если основная "
+                     "сессия умрёт, флот поднимет аккаунт сам.")
+        lines.append("")
+    if no_reserve:
+        lines.append(f"Запасной ключ не завёлся: {len(no_reserve)} акк.")
+        for lbl, r in no_reserve[:_MAX_LISTED]:
+            lines.append(f"• {html.escape(lbl)}: {html.escape(str(r['reserve']))}")
         lines.append("")
     lines.append("<i>Выключить: «Щит → Автозащита».</i>")
     return "\n".join(lines)
@@ -363,3 +432,141 @@ async def notify_lost(pool, acc: dict, status: str, bot=None) -> None:
             await db.notify_dedup_forget(pool, owner, key)
     except Exception as exc:
         log.warning("session_watch.notify_lost acc=%s: %s", acc.get("id"), exc)
+
+
+# ── Запасной ключ: поднять аккаунт, чей основной сеанс умер ──────────────────
+
+_KEEPER_PERIOD_S = 600
+_KEEPER_BATCH = 20
+_RESERVE_RECHECK_DAYS = 7
+
+
+def build_revived_alert(label: str) -> str:
+    return "\n".join([
+        "♻️ <b>Аккаунт поднят из запасного ключа</b>",
+        "",
+        f"Аккаунт: <b>{html.escape(label)}</b>",
+        "Основная сессия умерла, аккаунт вернулся в работу на запасной. Новый "
+        "запасной ключ автозащита заведёт на ближайшем обходе.",
+    ])
+
+
+async def _clear_reserve(pool, acc_id: int, enc: str) -> None:
+    try:
+        await pool.execute(
+            "UPDATE tg_accounts SET reserve_session_enc=NULL, reserve_auth_hash=NULL, "
+            "reserve_made_at=NULL, reserve_checked_at=NULL "
+            "WHERE id=$1 AND reserve_session_enc=$2", acc_id, enc)
+    except Exception as exc:
+        log.warning("session_watch: запасной ключ acc=%d не снят: %s", acc_id, exc)
+
+
+async def revive_from_reserve(pool, acc: dict, bot=None) -> str:
+    """Проверить запасной ключ аккаунта и, если основной сеанс мёртв, поднять.
+
+    → "revived" | "alive" (ключ жив, основной тоже) | "dead" (ключ умер — снят)
+    | "skip" (ничего не известно). Не бросает.
+    """
+    from services import account_manager as am
+    try:
+        acc_id = int(acc["id"])
+        enc = acc["reserve_session_enc"]
+    except (KeyError, TypeError, ValueError):
+        return "skip"
+    if not enc:
+        return "skip"
+    try:
+        res = await am.check_account_status_full(enc, _acc=dict(acc), check_spambot=False)
+    except Exception as exc:
+        log.warning("session_watch: проверка запасного ключа acc=%d: %s", acc_id, exc)
+        return "skip"
+    st = res.get("status")
+    if st == "session_expired":
+        await _clear_reserve(pool, acc_id, enc)
+        return "dead"
+    if st != "active" or res.get("session_busy"):
+        return "skip"
+    if str(acc.get("acc_status") or "") != "session_expired":
+        try:
+            await pool.execute("UPDATE tg_accounts SET reserve_checked_at=now() "
+                               "WHERE id=$1 AND reserve_session_enc=$2", acc_id, enc)
+        except Exception as exc:
+            log.warning("session_watch: отметка запасного ключа acc=%d: %s", acc_id, exc)
+        return "alive"
+    from services.token_vault import session_fingerprint
+    try:
+        row = await pool.fetchrow(
+            "UPDATE tg_accounts SET session_str=reserve_session_enc, session_fp=$3, "
+            "own_session_at=reserve_made_at, reserve_session_enc=NULL, "
+            "reserve_auth_hash=NULL, reserve_made_at=NULL, reserve_checked_at=NULL, "
+            "session_conflict_at=NULL, is_active=TRUE "
+            "WHERE id=$1 AND reserve_session_enc=$2 AND acc_status='session_expired' "
+            "RETURNING id", acc_id, enc, session_fingerprint(enc))
+    except Exception as exc:
+        log.warning("session_watch: подъём acc=%d не записан: %s", acc_id, exc)
+        return "skip"
+    if not row:
+        return "skip"
+    from services import account_status as _st
+    await _st.set_status(pool, acc_id, "active",
+                         reason="Основная сессия умерла — аккаунт поднят из запасного ключа",
+                         source="reserve_key")
+    log.info("session_watch: acc=%d поднят из запасного ключа", acc_id)
+    if bot is not None and acc.get("owner_id"):
+        try:
+            from database import db
+            await db.notify_if_enabled(pool, bot, int(acc["owner_id"]), "restriction",
+                                       build_revived_alert(acc_label(acc)),
+                                       dedup_key=f"revived:{acc_id}:{int(time.time())}")
+        except Exception as exc:
+            log.warning("session_watch: сообщение о подъёме acc=%d: %s", acc_id, exc)
+    return "revived"
+
+
+async def keep_reserves(pool, bot=None) -> dict:
+    """Один круг: поднять умершие аккаунты с запасным ключом и проверить
+    давно не проверенные ключи живых. Аккаунт берётся в аренду у op_worker,
+    как при любом коннекте."""
+    from database.db import telethon_accounts_query as _tq
+    extra = "a.reserve_session_enc"
+    dead = await pool.fetch(
+        _tq("a.acc_status = 'session_expired' AND a.reserve_session_enc IS NOT NULL "
+            "ORDER BY a.id LIMIT $1", extra_cols=extra), _KEEPER_BATCH)
+    stale = await pool.fetch(
+        _tq("a.reserve_session_enc IS NOT NULL "
+            "AND COALESCE(a.acc_status, 'active') <> 'session_expired' "
+            "AND COALESCE(a.reserve_checked_at, 'epoch') < now() - make_interval(days => $2) "
+            "ORDER BY a.reserve_checked_at NULLS FIRST LIMIT $1", extra_cols=extra),
+        _KEEPER_BATCH, _RESERVE_RECHECK_DAYS)
+    tally: dict = {}
+    for acc in list(dead) + list(stale):
+        try:
+            from services import op_worker as _opw
+            leased = await _opw.try_claim_account(int(acc["id"]))
+        except Exception:
+            _opw, leased = None, True
+        if not leased:
+            continue
+        try:
+            r = await revive_from_reserve(pool, dict(acc), bot=bot)
+            tally[r] = tally.get(r, 0) + 1
+        finally:
+            if _opw is not None:
+                try:
+                    await _opw.release_accounts([int(acc["id"])])
+                except Exception:
+                    log.debug("reserve_keeper: release acc=%s", acc["id"])
+    return tally
+
+
+async def run_reserve_keeper(pool, bot=None) -> None:
+    """Фоновый круг запасных ключей: раз в 10 минут."""
+    await asyncio.sleep(120)
+    while True:
+        try:
+            tally = await keep_reserves(pool, bot)
+            if tally:
+                log.info("reserve_keeper: %s", tally)
+        except Exception as exc:
+            log.error("reserve_keeper: %s", exc)
+        await asyncio.sleep(_KEEPER_PERIOD_S)

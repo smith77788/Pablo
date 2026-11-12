@@ -181,6 +181,7 @@ async def _show_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "🛡 <b>Автозащита</b> (обход флота раз в 6 часов):",
         f"🚪 Закрывать новые чужие сеансы: {'<b>вкл</b>' if cfg.guard_sessions else '<b>выкл</b>'}",
         f"🔐 Ставить свой пароль 2FA, где его нет: {'<b>вкл</b>' if cfg.guard_twofa else '<b>выкл</b>'}",
+        f"🗝 Заводить запасной ключ (второй свой сеанс): {'<b>вкл</b>' if cfg.guard_reserve else '<b>выкл</b>'}",
         "<i>Telegram разрешает и то и другое из сеанса старше суток.</i>",
     ]
     text = "\n".join(lines)
@@ -194,6 +195,8 @@ async def _show_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
               callback_data=ShieldCb(action="toggle_gs"))
     kb.button(text=("🔐 Пароль 2FA: ВЫКЛ" if cfg.guard_twofa else "🔐 Пароль 2FA: ВКЛ"),
               callback_data=ShieldCb(action="toggle_g2"))
+    kb.button(text=("🗝 Запасной ключ: ВЫКЛ" if cfg.guard_reserve else "🗝 Запасной ключ: ВКЛ"),
+              callback_data=ShieldCb(action="toggle_gr"))
     kb.button(text="◀️ Назад", callback_data=ShieldCb(action="menu"))
     kb.adjust(1)
 
@@ -221,14 +224,15 @@ async def cb_shield_toggle_ap(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     await _show_settings(callback, pool)
 
 
-@router.callback_query(ShieldCb.filter(F.action.in_({"toggle_gs", "toggle_g2"})))
+@router.callback_query(ShieldCb.filter(F.action.in_({"toggle_gs", "toggle_g2", "toggle_gr"})))
 async def cb_shield_toggle_guard(callback: CallbackQuery, callback_data: ShieldCb,
                                  pool: asyncpg.Pool) -> None:
     """Автозащита: закрывать чужие сеансы / ставить 2FA (session_watch.guard)."""
     await safe_answer(callback)
     owner_id = callback.from_user.id
     cfg = await account_shield.get_shield_config(pool, owner_id)
-    field = "guard_sessions" if callback_data.action == "toggle_gs" else "guard_twofa"
+    field = {"toggle_gs": "guard_sessions", "toggle_g2": "guard_twofa",
+             "toggle_gr": "guard_reserve"}[callback_data.action]
     try:
         await account_shield.save_shield_config(
             pool, owner_id, **{field: not getattr(cfg, field)})

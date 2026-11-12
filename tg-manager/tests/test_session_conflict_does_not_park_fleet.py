@@ -92,10 +92,13 @@ def pool():
                                id SERIAL PRIMARY KEY, acc_id INTEGER,
                                new_status TEXT, reason TEXT, source TEXT,
                                context JSONB, processed_at TIMESTAMPTZ)""")
+        # Запасной ключ (v347) дописывает колонку и в настройки щита.
+        await p.execute("CREATE TABLE IF NOT EXISTS shield_configs (owner_id BIGINT PRIMARY KEY)")
         # Ровно те миграции, что уезжают в прод: конфликт сессии (v185),
-        # пароль 2FA (v331) и дозор флота (v340) — обход читает их колонки.
+        # пароль 2FA (v331), дозор флота (v340) и запасной ключ (v347) —
+        # обход читает их колонки.
         for mig in ("schema_v185.sql", "schema_v331_account_twofa.sql",
-                    "schema_v340_fleet_watch.sql"):
+                    "schema_v340_fleet_watch.sql", "schema_v347_reserve_key.sql"):
             with open(os.path.join(ROOT, mig), encoding="utf-8") as f:
                 for chunk in f.read().split(";"):
                     body = "\n".join(ln for ln in chunk.split("\n")
@@ -106,7 +109,7 @@ def pool():
 
     p = _run(_mk())
     yield p
-    for t in ("account_status_events", "user_proxies", "tg_accounts"):
+    for t in ("account_status_events", "user_proxies", "tg_accounts", "shield_configs"):
         _run(p.execute(f"DROP TABLE IF EXISTS {t} CASCADE"))
     _run(p.close())
 
