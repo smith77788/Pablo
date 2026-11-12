@@ -23068,7 +23068,7 @@ async def _exec_ai_comment(
     ставится до отправки и переживает операцию, то есть второй запуск по тем
     же каналам не пишет второй комментарий под тот же пост.
     """
-    from services import ai_comment_engine, account_manager, content_safety, persona_engine
+    from services import ai_comment_engine, account_manager, content_safety, persona_voice
     from services.growth_agent_settings import comment_settings
 
     channels = [str(c).strip() for c in (params.get("channels") or []) if str(c).strip()]
@@ -23145,15 +23145,22 @@ async def _exec_ai_comment(
         acc = accounts[idx % len(accounts)]
         try:
             # Персона аккаунта (экран «Профили → Персоны») задаёт голос
-            # комментария: без неё весь флот пишет одним голосом.
-            _persona = await persona_engine.persona_prompt_for_account(pool, int(acc["id"]))
+            # комментария: без неё весь флот пишет одним голосом. Голос несёт
+            # и память персоны — что она уже говорила о себе — и после модели
+            # доводит её манеру, а повтор сказанного не отправляет.
+            _voice = await persona_voice.load(pool, int(acc["id"]))
+            _persona = _voice.prompt
             res = await ai_comment_engine.post_ai_comment(
                 acc["session_str"], dict(acc), ref, niche=niche, tone=tone,
                 posts=cfg["posts_per_channel"], pick=cfg["post_pick"],
                 max_age_hours=cfg["max_post_age_hours"], length=cfg["length"],
                 extra_instruction=cfg["extra_instruction"],
                 join_discussion=cfg["join_discussion"], mark=_mark_post,
-                persona=_persona)
+                persona=_persona,
+                polish=lambda t, _v=_voice: persona_voice.polish(t, _v))
+            for _c in res.get("comments") or []:
+                await persona_voice.remember(pool, _voice, "comment", _c.get("text") or "",
+                                             entity=str(ref), owner_id=owner_id)
             if res.get("ok"):
                 ok_count += 1
                 comments_total += len(res.get("comments") or []) or 1
@@ -23399,11 +23406,21 @@ async def _exec_niche_presence(
                 if kind == "comment":
                     # Один вход и для канала (чат обсуждений), и для группы
                     # (ответ в ней самой): в нише групп больше, чем каналов.
+                    # Голос персоны аккаунта и здесь: без него радар ниши
+                    # писал безликим «живым участником», хотя тот же аккаунт
+                    # в прогреве и в комментинге говорит своим характером.
+                    from services import persona_voice
+                    _voice = await persona_voice.load(pool, int(acc_id))
                     res = await ai_comment_engine.post_ai_comment_anywhere(
                         acc["session_str"], dict(acc), ref,
-                        niche=campaign["niche"], tone=campaign["tone"])
+                        niche=campaign["niche"], tone=campaign["tone"],
+                        persona=_voice.prompt,
+                        polish=lambda t, _v=_voice: persona_voice.polish(t, _v))
                     if res.get("ok"):
                         comments += 1
+                        await persona_voice.remember(
+                            pool, _voice, "comment", res.get("comment") or "",
+                            entity=str(ref), owner_id=owner_id)
                         await niche_radar.log_action(
                             pool, owner_id, aid, op_id=op_id, acc_id=acc_id, kind="comment",
                             detail=(res.get("comment") or "")[:200])

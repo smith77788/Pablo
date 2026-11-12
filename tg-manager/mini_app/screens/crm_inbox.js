@@ -206,6 +206,15 @@ function _ibAiIntent(x) {
     esc(x.label) + (x.by === 'rules' ? ' · по фразам' : '') + '</div>';
 }
 
+// Чем черновик собран: голосом какой персоны и с каким состоянием человека
+// из «Модели поведения». Оператор должен видеть, почему ответ звучит так.
+function _ibAiBasis(d) {
+  const bits = [];
+  if (d && d.persona) bits.push('🎭 голосом персоны «' + esc(d.persona) + '»');
+  if (d && d.state) bits.push('🧠 клиент: ' + esc(d.state));
+  return bits.length ? '<div style="font-size:11px;color:var(--hint);padding:2px 0 4px">' + bits.join(' · ') + '</div>' : '';
+}
+
 async function inboxAiDraft() {
   const t = _ibPeer;
   const box = _ibEl('ibAiOut');
@@ -220,9 +229,9 @@ async function inboxAiDraft() {
     const ta = _ibEl('ibReplyText');
     if (ta) {
       ta.value = d.draft;
-      box.innerHTML = _ibAiIntent(d.intent) + '<div style="font-size:12px;color:var(--hint);padding:6px 0">Черновик в поле ответа — проверьте и отправьте сами.</div>';
+      box.innerHTML = _ibAiIntent(d.intent) + _ibAiBasis(d) + '<div style="font-size:12px;color:var(--hint);padding:6px 0">Черновик в поле ответа — проверьте и отправьте сами.</div>';
     } else {
-      box.innerHTML = _ibAiIntent(d.intent) +
+      box.innerHTML = _ibAiIntent(d.intent) + _ibAiBasis(d) +
         '<div style="font-size:13px;white-space:pre-wrap;background:var(--bg2);border-radius:10px;padding:8px 10px">' + esc(d.draft) + '</div>' +
         '<div style="font-size:11px;color:var(--hint);padding:6px 0">Скопируйте и отправьте из Telegram.</div>';
     }
