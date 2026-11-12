@@ -67,9 +67,7 @@ def test_next_market_layer_on_live_db():
 
 
 def test_overview_and_screen_carry_the_layer():
-    import pathlib
-    root = pathlib.Path(__file__).resolve().parents[1]
-    api = (root / "services" / "mini_app_api.py").read_text(encoding="utf-8")
-    assert '"discover": discover' in api
-    ui = (root / "mini_app" / "index.html").read_text(encoding="utf-8")
+    from tests.miniapp_source import api_function, miniapp_html
+    assert '"discover": discover' in api_function("ad_intel_overview")
+    ui = miniapp_html()
     assert "d.discover" in ui and "Разведать все" in ui

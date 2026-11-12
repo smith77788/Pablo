@@ -6747,7 +6747,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # должен ронять сводку.
         try:
             from services.ad_intelligence import discovery_candidates
-            discover = await discovery_candidates(pool, uid)
+            # Подсказка на экране — не список: восемь чипов и кнопка «Разведать
+            # все» (не больше пакета ручки добавления каналов).
+            discover = await discovery_candidates(pool, uid, limit=10)
         except Exception:
             log.warning("ad_intel_overview: discovery failed uid=%d", uid, exc_info=True)
             discover = []
