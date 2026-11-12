@@ -210,7 +210,7 @@ def test_warmup_turn_speaks_with_voice_and_remembers_after_send():
     src = inspect.getsource(cw._process_session)
     assert "persona_voice.load(" in src and "voice.prompt" in src
     assert "enforce_style(" in src and "too_similar(" in src
-    send = src.index("client.send_message(entity, reply")
+    send = src.index("client.send_message(entity, _part")
     assert send < src.index("persona_voice.remember(")
 
 

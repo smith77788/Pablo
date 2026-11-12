@@ -368,8 +368,13 @@ async def generate_reply(persona_desc: str, recent: list[dict], target: dict | N
 async def generate_reply_detailed(persona_desc: str, recent: list[dict],
                                   target: dict | None, topics: str,
                                   mode: str, *, lang: str | None = None,
-                                  reply_len: str | None = None) -> tuple[str | None, str]:
+                                  reply_len: str | None = None,
+                                  engine: dict | None = None) -> tuple[str | None, str]:
     """То же самое, но вместе с ПРИЧИНОЙ, если реплики нет.
+
+    `engine` — «мотор» персоны: {provider, model, temperature, owner_id}. Если
+    владелец выбрал персоне модель, она идёт ПЕРВОЙ через единый шлюз (учёт
+    расхода на владельца, паузы лимитов), а общий каскад — в запас.
 
     Зачем отдельная функция. Каскад провайдеров глотал ошибки каждого: ключ
     неверный, квота кончилась, провайдер не отвечает — снаружи всё это
@@ -390,8 +395,20 @@ async def generate_reply_detailed(persona_desc: str, recent: list[dict],
         system, user = build_dialogue_prompt(persona_desc, recent, target, topics, mode,
                                              lang=lang, reply_len=reply_len)
         raw = None
+        eng = engine or {}
+        # 0) Модель, выбранная персоне владельцем.
+        if eng.get("provider"):
+            from services import ai_gateway
+            r = await ai_gateway.chat(
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                task=ai_gateway.TASK_CUSTOMER, owner_id=eng.get("owner_id"),
+                max_tokens=300, temperature=float(eng.get("temperature") or 0.9),
+                prefer_provider=str(eng["provider"]), prefer_model=str(eng.get("model") or ""))
+            raw = r.text
+            if not raw and r.errors:
+                errors.append("Модель персоны: " + "; ".join(r.errors)[:160])
         # 1) Claude Opus — предпочтительный путь.
-        if ai_claude.enabled():
+        if not (raw and raw.strip()) and ai_claude.enabled():
             try:
                 raw = await ai_claude.complete(system, user, timeout=60.0)
             except Exception as e:
@@ -1390,6 +1407,19 @@ async def _process_session(pool, session: dict) -> None:
               if i not in _hopeless and i not in _capped]
     # Человек ответил конкретному аккаунту — ход за ним, если он может говорить.
     _queue = prefer_addressed(_queue, session.get("addressed_acc"))
+    # Персона, которая по своему времени спит, не пишет: сообщение в три ночи
+    # по её городу выдаёт её так же, как одинаковые фразы.
+    if _queue:
+        from services import persona_voice as _pv_sleep
+        _sleeping = await _pv_sleep.sleeping_accounts(
+            pool, _queue, utc_hour=_now.hour, owner_tz=await _owner_tz(pool, owner_id))
+        if _sleeping:
+            _queue = [i for i in _queue if i not in _sleeping]
+            if not _queue:
+                await _skip(pool, session,
+                            f"Все персоны сессии сейчас спят по своему времени "
+                            f"({len(_sleeping)}) — ждём утра")
+                return
     if not _queue:
         # Причина у каждого своя, и действия у владельца разные: «перезалейте
         # сессию» против «дайте права в чате» против «подождите паузу».
@@ -1563,29 +1593,52 @@ async def _process_session(pool, session: dict) -> None:
                           "to_you": _to_you}
             # Голос аккаунта: персона + её память о себе (persona_voice). Без
             # персоны — устойчивый запасной характер, как раньше.
-            from services import persona_voice
+            from services import persona_engine, persona_voice
             _ctx = " ".join([(target or {}).get("text") or ""]
                             + [m.get("text") or "" for m in recent[-3:]])
             voice = await persona_voice.load(pool, speaker,
                                              fallback=_fallback_persona(speaker),
                                              context=_ctx)
-            reply, _why = await generate_reply_detailed(
-                voice.prompt, recent, target, session.get("topics") or "", mode,
-                lang=session.get("lang"), reply_len=session.get("reply_len"))
-            if reply:
-                # Манера персоны доводится после модели, а повтор уже сказанного
-                # (в памяти персоны или прямо в этом чате) — пропуск хода: флот,
-                # который говорит одними фразами, виден за версту.
-                _styled = persona_voice.enforce_style(reply, voice.persona)
-                # Повтором считается и чужая фраза флота в этом чате: два
-                # аккаунта одного владельца одними словами — подпись накрутки.
-                _own_here = [m["text"] for m in recent if m.get("is_fleet") and m.get("text")]
+            # «Мотор» персоны: выбранная модель и смелость; «лучшее» — три
+            # варианта параллельно и ИИ-судья, который видит образ и память.
+            _p = voice.persona
+            _engine = ({"provider": _p.ai_provider, "model": _p.ai_model,
+                        "temperature": persona_engine.temperature_for(_p),
+                        "owner_id": owner_id} if _p is not None else None)
+            _n = 3 if (_p is not None and _p.quality == "best") else 1
+            _outs = await asyncio.gather(*[
+                generate_reply_detailed(
+                    voice.prompt, recent, target, session.get("topics") or "", mode,
+                    lang=session.get("lang"), reply_len=session.get("reply_len"),
+                    engine=_engine)
+                for _ in range(_n)])
+            # Манера персоны доводится после модели, а повтор уже сказанного
+            # (в памяти персоны или прямо в этом чате) отсеивается: флот,
+            # который говорит одними фразами, виден за версту. Повтором
+            # считается и чужая фраза флота в этом чате: два аккаунта одного
+            # владельца одними словами — подпись накрутки.
+            _own_here = [m["text"] for m in recent if m.get("is_fleet") and m.get("text")]
+            _cands: list[str] = []
+            _why = ""
+            for _txt, _w in _outs:
+                if not _txt:
+                    _why = _why or _w
+                    continue
+                _styled = persona_voice.enforce_style(_txt, _p)
                 if not _styled:
-                    reply, _why = None, "После правки манеры от реплики ничего не осталось — ход пропущен"
+                    _why = _why or "После правки манеры от реплики ничего не осталось — ход пропущен"
                 elif persona_voice.too_similar(_styled, voice.recent + _own_here):
-                    reply, _why = None, "Реплика повторяла уже сказанное — ход пропущен"
+                    _why = _why or "Реплика повторяла уже сказанное — ход пропущен"
                 else:
-                    reply = _styled
+                    _cands.append(_styled)
+            reply = None
+            if _cands:
+                _ctx_lines = "\n".join(
+                    f"{'Ты' if m.get('is_self') else (m.get('sender_name') or 'Кто-то')}: "
+                    f"{(m.get('text') or '')[:200]}" for m in recent[-12:])
+                reply, _pick = await persona_voice.pick_best(
+                    _cands, voice, context=_ctx_lines, owner_id=owner_id,
+                    use_judge=len(_cands) > 1)
             if reply:
                 from services import content_safety
                 if content_safety.scan_text(reply).blocked:
@@ -1594,10 +1647,20 @@ async def _process_session(pool, session: dict) -> None:
                                "Ответ отклонён проверкой контента — ход пропущен",
                                account_id=speaker, kind=plan["kind"])
                 else:
-                    await _typing(client, entity, typing_seconds(reply))
                     reply_to = plan["reply_to_id"] if plan["kind"] == "reply" else None
-                    await asyncio.wait_for(client.send_message(entity, reply, reply_to=reply_to), timeout=_TG_TIMEOUT)
-                    sent = True
+                    # Подача как у человека: мысль иногда уходит двумя короткими
+                    # сообщениями, у небрежной манеры изредка бывает опечатка.
+                    _parts = persona_voice.split_reply(reply, _p, random.random())
+                    _parts = [persona_voice.enforce_style(x, _p) or x for x in _parts] or [reply]
+                    _parts[-1] = persona_voice.add_typo(_parts[-1], _p, random.random(),
+                                                        random.random())
+                    for _i, _part in enumerate(_parts):
+                        await _typing(client, entity, typing_seconds(_part))
+                        await asyncio.wait_for(
+                            client.send_message(entity, _part,
+                                                reply_to=reply_to if _i == 0 else None),
+                            timeout=_TG_TIMEOUT)
+                        sent = True
                     # Память — о том, что люди действительно прочли: после отправки.
                     await persona_voice.remember(
                         pool, voice, "chat", reply,

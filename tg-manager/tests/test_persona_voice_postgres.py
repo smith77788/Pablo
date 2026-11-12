@@ -183,3 +183,43 @@ def test_old_statement_on_the_topic_comes_back_from_the_base():
         topical = await pv.load(pool, acc, context="а ты из какого города? Казань?")
         assert "«я вообще из Казани»" in topical.prompt
     _run(body)
+
+
+@live
+def test_engine_settings_are_saved_validated_and_sleep_reads_them():
+    """Мотор персоны (schema_v345): модель, креативность, качество, разбивка, сон —
+    сохраняются, мусор отбивается на границе, а «кто спит» читается из базы."""
+    from services import persona_voice as pv
+
+    async def body(client, pool, acc):
+        form = {**_FORM, "account_id": acc, "ai_provider": "нет-такого",
+                "ai_model": "x", "creativity": 250, "quality": "best",
+                "split_messages": True, "sleep_from": 1, "sleep_to": 8,
+                "utc_offset": 3}
+        r = await client.post("/api/miniapp/persona", json=form)
+        assert r.status == 200, await r.text()
+        pid = (await r.json())["persona"]["id"]
+        row = await pool.fetchrow("SELECT * FROM persona_profiles WHERE id=$1", pid)
+        assert row["ai_provider"] == "" and row["ai_model"] == ""   # неизвестный → по умолчанию
+        assert row["creativity"] == 100 and row["quality"] == "best"
+        assert row["split_messages"] is True
+        assert (row["sleep_from"], row["sleep_to"], row["utc_offset"]) == (1, 8, 3)
+
+        lst = await (await client.get("/api/miniapp/personas")).json()
+        p = next(x for x in lst["personas"] if x["id"] == pid)
+        assert p["quality"] == "best" and p["sleep_from"] == 1
+        assert "best" in lst["qualities"]
+
+        # 01–08 по UTC+3: в 23:00 UTC там 02:00 — спит; в 12:00 UTC (15:00) — нет
+        assert await pv.sleeping_accounts(pool, [acc], utc_hour=23) == {acc}
+        assert await pv.sleeping_accounts(pool, [acc], utc_hour=12) == set()
+
+        r = await client.put(f"/api/miniapp/persona/{pid}",
+                             json={**form, "quality": "чепуха", "sleep_from": 99,
+                                   "creativity": -5})
+        assert r.status == 200, await r.text()
+        row = await pool.fetchrow("SELECT * FROM persona_profiles WHERE id=$1", pid)
+        assert row["quality"] == "fast" and row["creativity"] == 0
+        assert row["sleep_from"] is None
+        assert await pv.sleeping_accounts(pool, [acc], utc_hour=23) == set()
+    _run(body)

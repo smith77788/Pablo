@@ -4716,7 +4716,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     _PERSONA_LITERACY = {"careful", "casual", "sloppy"}
     # Черты голоса (schema_v341) — одним списком для вставки и правки.
     _PERSONA_VOICE_COLS = ("gender", "city", "occupation", "emoji_level", "literacy",
-                           "taboo_topics", "sample_messages", "memory_enabled")
+                           "taboo_topics", "sample_messages", "memory_enabled",
+                           "ai_provider", "ai_model", "creativity", "quality",
+                           "split_messages", "sleep_from", "sleep_to", "utc_offset")
+    _PERSONA_QUALITY = {"fast", "best"}
+
+    def _hour_or_none(v, lo: int, hi: int):
+        if v in (None, ""):
+            return None
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return None
+        return n if lo <= n <= hi else None
+
+    def _creativity(v) -> int:
+        """Креативность 0–100: за краями — до края, нечисло — 60 (как в схеме)."""
+        try:
+            return max(0, min(100, int(float(v))))
+        except (TypeError, ValueError):
+            return 60
 
     def _persona_fields(body: dict) -> dict:
         """Поля персоны из тела запроса — проверенные и обрезанные."""
@@ -4736,6 +4755,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # С экрана образцы приходят текстом: одна строка — одно сообщение.
             samples_raw = str(samples_raw).splitlines()
         samples = [" ".join(str(x).split())[:200] for x in samples_raw if str(x).strip()][:5]
+        provider = str(body.get("ai_provider") or "").strip().lower()
+        quality = str(body.get("quality") or "fast").strip()
         return {
             "persona_name": (validate_string(body.get("persona_name"), max_len=64) or "").strip(),
             "bio": (str(body.get("bio") or "").strip()[:1000]) or None,
@@ -4753,7 +4774,54 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "taboo_topics": (str(body.get("taboo_topics") or "").strip()[:400]) or None,
             "sample_messages": samples,
             "memory_enabled": body.get("memory_enabled", True) not in (False, 0, "0", "false"),
+            # «Мотор» персоны (schema_v345). Провайдер — только из настроенных
+            # на платформе: имя чужого провайдера молча не сработало бы никогда.
+            "ai_provider": provider if provider in _configured_provider_names() else "",
+            "ai_model": (str(body.get("ai_model") or "").strip()[:96]
+                         if provider in _configured_provider_names() else ""),
+            "creativity": _creativity(body.get("creativity")),
+            "quality": quality if quality in _PERSONA_QUALITY else "fast",
+            "split_messages": body.get("split_messages", True) not in (False, 0, "0", "false"),
+            "sleep_from": _hour_or_none(body.get("sleep_from"), 0, 23),
+            "sleep_to": _hour_or_none(body.get("sleep_to"), 0, 23),
+            "utc_offset": _hour_or_none(body.get("utc_offset"), -12, 14),
         }
+
+    def _configured_provider_names() -> set[str]:
+        names = set()
+        try:
+            from services import ai_claude as _ac
+            if _ac.enabled():
+                names.add("anthropic")
+        except Exception:
+            log.debug("persona: Claude не проверен", exc_info=True)
+        try:
+            from services.ai_providers import configured_providers
+            names.update(p.name for p in configured_providers())
+        except Exception:
+            log.debug("persona: провайдеры не прочитаны", exc_info=True)
+        return names
+
+    def _provider_catalog() -> list[dict]:
+        """Провайдеры и модели, которые можно выбрать персоне — только настроенные."""
+        out = []
+        try:
+            from services import ai_claude as _ac
+            if _ac.enabled():
+                out.append({"name": "anthropic", "label": "Claude",
+                            "models": [_ac.CHAT_MODEL]})
+        except Exception:
+            log.debug("persona: Claude не проверен", exc_info=True)
+        labels = {"openai": "OpenAI", "groq": "Groq", "openrouter": "OpenRouter",
+                  "gemini": "Gemini", "ollama": "Ollama (свой сервер)"}
+        try:
+            from services.ai_providers import configured_providers
+            for p in configured_providers():
+                out.append({"name": p.name, "label": labels.get(p.name, p.name),
+                            "models": list(p.models or [])[:12]})
+        except Exception:
+            log.debug("persona: провайдеры не прочитаны", exc_info=True)
+        return out
 
     async def _persona_account(uid: int, raw, exclude_persona: int | None = None):
         """Аккаунт для персоны: (account_id | None, ошибка | None).
@@ -4802,7 +4870,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           pp.interests, pp.account_id,
                           pp.gender, pp.city, pp.occupation, pp.emoji_level, pp.literacy,
                           pp.taboo_topics, pp.sample_messages, pp.memory_enabled,
-                          pp.self_facts,
+                          pp.self_facts, pp.ai_provider, pp.ai_model, pp.creativity,
+                          pp.quality, pp.split_messages, pp.sleep_from, pp.sleep_to,
+                          pp.utc_offset,
                           ta.phone, ta.first_name, ta.username,
                           (SELECT COUNT(*) FROM persona_memory pm WHERE pm.persona_id=pp.id) AS memory_n
                    FROM persona_profiles pp
@@ -4837,6 +4907,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "genders": _pe.GENDER_LABELS,
                 "emoji_levels": _pe.EMOJI_LABELS,
                 "literacy": _pe.LITERACY_LABELS,
+                "qualities": _pe.QUALITY_LABELS,
+                "providers": _provider_catalog(),
             })
         except Exception:
             log.exception("persona_list uid=%d", uid)
@@ -4903,9 +4975,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    (owner_id, account_id, persona_name, bio, age, interests, speech_style,
                     tone, niche, backstory, is_active,
                     gender, city, occupation, emoji_level, literacy, taboo_topics,
-                    sample_messages, memory_enabled)
+                    sample_messages, memory_enabled,
+                    ai_provider, ai_model, creativity, quality, split_messages,
+                    sleep_from, sleep_to, utc_offset)
                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE,
-                           $11,$12,$13,$14,$15,$16,$17,$18)
+                           $11,$12,$13,$14,$15,$16,$17,$18,
+                           $19,$20,$21,$22,$23,$24,$25,$26)
                    RETURNING id, persona_name, account_id, is_active""",
                 uid, account_id, f["persona_name"], f["bio"], f["age"], f["interests"],
                 f["speech_style"], f["tone"], f["niche"], f["backstory"],
@@ -4943,7 +5018,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        age=$6, interests=$7, speech_style=$8, tone=$9, niche=$10,
                        backstory=$11, gender=$12, city=$13, occupation=$14,
                        emoji_level=$15, literacy=$16, taboo_topics=$17,
-                       sample_messages=$18, memory_enabled=$19, updated_at=NOW()
+                       sample_messages=$18, memory_enabled=$19,
+                       ai_provider=$20, ai_model=$21, creativity=$22, quality=$23,
+                       split_messages=$24, sleep_from=$25, sleep_to=$26, utc_offset=$27,
+                       updated_at=NOW()
                    WHERE id=$1 AND owner_id=$2
                    RETURNING id, persona_name, account_id, is_active""",
                 persona_id, uid, account_id, f["persona_name"], f["bio"], f["age"],
@@ -4988,6 +5066,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             occupation=f["occupation"] or "", emoji_level=f["emoji_level"],
             literacy=f["literacy"], taboo_topics=f["taboo_topics"] or "",
             sample_messages=f["sample_messages"], memory_enabled=f["memory_enabled"],
+            ai_provider=f["ai_provider"], ai_model=f["ai_model"],
+            creativity=f["creativity"], quality=f["quality"],
+            split_messages=f["split_messages"],
         )
         # Правка сохранённой персоны — с её памятью: предпросмотр обязан
         # показывать тот голос, которым она заговорит, а говорит она с памятью.
@@ -5013,22 +5094,38 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         asked = {"id": 1, "sender_name": "Собеседник", "text": message, "is_fleet": False}
         system, user = _cw.build_dialogue_prompt(
             voice.prompt, [asked], asked, "", "engage", lang="ru", reply_len="short")
+        # Тот же «мотор», что у живой реплики: выбранная модель, смелость, и
+        # для «лучшего» — три варианта и судья. Владелец видит и варианты, и
+        # почему выбран этот: так настраивают голос, а не гадают.
+        from services import ai_gateway
+        n = 3 if f["quality"] == "best" else 1
         try:
-            from services import ai_gateway
-            r = await ai_gateway.chat(
+            outs = await asyncio.gather(*[ai_gateway.chat(
                 [{"role": "system", "content": system},
                  {"role": "user", "content": user}],
                 task=ai_gateway.TASK_ASSISTANT, owner_id=uid, max_tokens=200,
-            )
+                temperature=_pe.temperature_for(persona),
+                prefer_provider=f["ai_provider"], prefer_model=f["ai_model"],
+            ) for _ in range(n)])
         except Exception:
             log.exception("persona_preview uid=%d", uid)
-            return _err("ИИ сейчас недоступен — попробуйте позже", 409)
-        if not r.text:
-            return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 409)
-        reply = _pv.enforce_style(_cw.sanitize_reply(r.text), persona)
-        if not reply:
-            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 409)
-        return _json_resp({"reply": reply[:1000], "asked": message})
+            return _err("ИИ сейчас недоступен — попробуйте позже", 503)
+        cands = [_pv.enforce_style(_cw.sanitize_reply(r.text), persona)
+                 for r in outs if r.text]
+        cands = [c for c in cands if c]
+        if not cands:
+            if not any(r.text for r in outs):
+                return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 503)
+            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 503)
+        reply, info = await _pv.pick_best(cands, voice, context=f"Собеседник: {message}",
+                                          owner_id=uid, use_judge=len(cands) > 1)
+        parts = _pv.split_reply(reply, persona, 0.0)
+        model = next((r.model for r in outs if r.text), None)
+        return _json_resp({"reply": reply[:1000], "asked": message,
+                           "parts": [x[:1000] for x in parts],
+                           "candidates": [c[:1000] for c in dict.fromkeys(cands)],
+                           "picked_by": info.get("by"), "why": info.get("why") or "",
+                           "model": model or ""})
 
     async def _own_persona_id(request):
         uid = _get_uid(request)
