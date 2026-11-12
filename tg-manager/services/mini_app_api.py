@@ -108,7 +108,7 @@ ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "re
 # флоту вместо тех пяти. Список сверяется с ветками билдера тестом
 # tests/test_account_filter_is_not_silently_widened.py.
 ACCOUNT_FILTERS = ("all", "active", "cooldown", "banned", "spamblock",
-                   "proxy_down", "dead", "low_trust", "flooded", "foreign")
+                   "proxy_down", "dead", "low_trust", "flooded", "foreign", "no2fa")
 
 # Статусы operation_queue, которые вправе прийти фильтром с фронта. Колонка —
 # обычный TEXT без CHECK, поэтому список живёт здесь и его сторожит тест
@@ -151,6 +151,17 @@ _cache: dict[str, tuple[float, Any]] = {}
 _LOW_TRUST_SQL = "trust_score IS NOT NULL AND trust_score < 0.4"
 # В аккаунт вошёл кто-то ещё (дозор угона, services/session_watch).
 _FOREIGN_SQL = "COALESCE(foreign_sessions, 0) > 0"
+# Живой аккаунт без пароля 2FA (обход флота спрашивает Telegram, v346):
+# угоняется одним кодом входа. Мёртвые не считаем — защищать там нечего.
+# Ограниченные (спам-блок, заморозка) считаем: их снимают, и угнать их можно.
+# Потерянные и с отозванной сессией — нет: поставить пароль там нечем.
+def _no2fa_sql() -> str:
+    from services.account_status import LOST_STATUSES, SESSION_STATUSES, sql_status_list
+    return ("twofa_on IS FALSE AND COALESCE(acc_status, 'active') NOT IN ("
+            + sql_status_list(LOST_STATUSES | SESSION_STATUSES) + ")")
+
+
+_NO2FA_SQL = _no2fa_sql()
 _FLOODED_SQL = (
     "EXISTS (SELECT 1 FROM account_flood_log l WHERE l.account_id = tg_accounts.id "
     "AND l.created_at > now() - interval '7 days')")
@@ -197,6 +208,10 @@ def fleet_verdict(c: dict, alerts: list[dict] | None = None) -> dict:
         "Закройте чужие сеансы («Профили → Очистка и сеансы») и поставьте "
         "пароль 2FA — иначе тот, кто вошёл, может забрать аккаунт.",
         filter_="foreign")
+    add("no2fa", "warn", c.get("no2fa"), "Аккаунты без пароля 2FA",
+        "Такой аккаунт забирают одним кодом входа. Включите «Щит → Автозащита» "
+        "— каждому поставится свой пароль, — или задайте его в «Профили → 2FA».",
+        filter_="no2fa")
     add("proxy_down", "warn", c.get("proxy_down"), "Прокси не отвечает",
         "Сами аккаунты целы, но их операции падают по сети. Замените прокси.",
         filter_="proxy_down")
@@ -6675,7 +6690,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         WHERE l.account_id = tg_accounts.id
                           AND l.created_at > now() - interval '24 hours')) AS flooded_24h,
                    COUNT(*) FILTER (WHERE {_PROXY_DOWN_SQL}) AS proxy_down,
-                   COUNT(*) FILTER (WHERE {_FOREIGN_SQL}) AS foreign
+                   COUNT(*) FILTER (WHERE {_FOREIGN_SQL}) AS foreign,
+                   COUNT(*) FILTER (WHERE {_NO2FA_SQL}) AS no2fa
                    FROM tg_accounts WHERE owner_id=$1""",
                 uid,
             )
@@ -6734,7 +6750,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             counts = {k: int(stats[k] or 0) for k in (
                 "total", "active", "banned", "dead", "spamblock", "cooling",
-                "low_trust", "flooded_7d", "flooded_24h", "proxy_down", "foreign")}
+                "low_trust", "flooded_7d", "flooded_24h", "proxy_down", "foreign",
+                "no2fa")}
             return _json_resp({
                 **counts,
                 "flood_7d": flood_7d,
@@ -6786,7 +6803,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if hours is None:
                 return _err("Охлаждение — от 1 до 48 часов")
             fields["cool_hours"] = hours
-        for key in ("auto_pause", "notify_admin"):
+        for key in ("auto_pause", "notify_admin", "guard_sessions", "guard_twofa"):
             if key in data and data[key] is not None:
                 fields[key] = bool(data[key])
         if data.get("response_mode") is not None:

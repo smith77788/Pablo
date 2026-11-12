@@ -407,7 +407,8 @@ function accPoolBanner() {
 }
 
 function accHiddenFilterLabel(f) {
-  return ({low_trust: 'Низкое доверие', flooded: 'Ловили флуд за 7 дней'})[f] || '';
+  return ({low_trust: 'Низкое доверие', flooded: 'Ловили флуд за 7 дней',
+           foreign: 'Чужие сеансы', no2fa: 'Без пароля 2FA'})[f] || '';
 }
 function accHiddenFilterClear() {
   ACC_FILTER = 'all';
