@@ -655,7 +655,19 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
+        if not isinstance(body, dict):
+            return _err("Неверный запрос", 400)
         op = body.get("op")
+        target_stage = None
+        if op == "set_stage":
+            if body.get("select_all_filtered") and "target_stage" not in body:
+                return _err("Укажите новый статус для выбранного среза", 400)
+            raw_stage = body.get("target_stage", body.get("stage"))
+            if raw_stage is not None and not isinstance(raw_stage, str):
+                return _err("Неизвестный статус", 400)
+            target_stage = (raw_stage or "").strip().lower() or None
+            if target_stage is not None and target_stage not in ACCOUNT_STAGES:
+                return _err("Неизвестный статус", 400)
         # По умолчанию масс-операция идёт по СВОИМ аккаунтам (даже у админа) —
         # чтобы админ случайно не оперировал над чужими. Платформенный срез —
         # только явным {"scope":"platform"} в теле.
@@ -667,10 +679,13 @@ def setup_routes(app: web.Application, pool) -> None:
         if body.get("select_all_filtered"):
             flt = body.get("filter", "all")
             if flt not in ACCOUNT_FILTERS:
-                flt = "all"
+                return _err("Неизвестный фильтр аккаунтов", 400)
+            if any(body.get(key) is not None and not isinstance(body[key], str)
+                   for key in ("stage", "q", "pool", "geo", "tag")):
+                return _err("Неверный формат фильтра аккаунтов", 400)
             stage = (body.get("stage") or "").strip().lower()
             if stage and stage not in ACCOUNT_STAGES:
-                stage = ""
+                return _err("Неизвестный статус в фильтре", 400)
             qterm = (body.get("q") or "").strip()[:64]
             # Срез по пулу обязан доехать и сюда: иначе «применить ко всему
             # срезу» взяло бы аккаунты вне показанного пула — операция ушла бы
@@ -679,6 +694,8 @@ def setup_routes(app: web.Application, pool) -> None:
             # То же и про срез по стране: иначе «применить ко всему срезу»
             # ушло бы по всему флоту, а владелец видел одну страну.
             bgeo = _geo_code(body.get("geo"))
+            if (body.get("geo") or "").strip() and not bgeo:
+                return _err("Неизвестная страна в фильтре", 400)
             btag = _norm_tag(body.get("tag"))
             where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin,
                                            acc_pool=bpool, geo=bgeo, tag=btag)
@@ -763,14 +780,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _json_resp({"ok": True, "op_id": op_id, "count": n, "capped": capped})
             if op == "set_stage":
                 # Пере­мещение в CRM-статус — чистое DB-действие, без очереди/Telethon.
-                raw = body.get("stage")
-                stage = (str(raw).strip().lower() or None) if raw is not None else None
-                if stage is not None and stage not in ACCOUNT_STAGES:
-                    return _err("Неизвестный статус", 400)
-                await pool.execute(
+                result = await pool.execute(
                     "UPDATE tg_accounts SET stage=$1 WHERE owner_id=$2 AND id=ANY($3::bigint[])",
-                    stage, uid, ids)
-                return _json_resp({"ok": True, "count": n, "stage": stage, "capped": capped})
+                    target_stage, uid, ids)
+                changed = int(result.split()[-1])
+                return _json_resp({"ok": True, "count": changed, "stage": target_stage,
+                                   "capped": capped})
             if op == "detach_proxy":
                 # Снять прокси у выбранных аккаунтов — чтобы работать БЕЗ прокси
                 # (прямое соединение). Чистое DB-действие. После этого аккаунт

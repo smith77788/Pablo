@@ -12801,9 +12801,9 @@ async function submitMassStage() {
   if(!_massSelCount()){ err.textContent='Не выбраны аккаунты'; return; }
   const btn=document.getElementById('msBtn'); btn.disabled=true; btn.textContent='Применяю…';
   try {
-    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', stage, ..._massSel()})});
+    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', target_stage:stage, ..._massSel()})});
     const nm = stage ? (ACC_STAGES[stage]?ACC_STAGES[stage].label:stage) : 'без статуса';
-    toast(`✅ Перемещено в «${nm}»: ${r.count||_massSelCount()}`);
+    toast(`✅ Перемещено в «${nm}»: ${r.count}`);
     closeModal('mo-acc-stage'); toggleAccSelMode(); loadAccounts();
   } catch(e){ err.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='Применить'; }

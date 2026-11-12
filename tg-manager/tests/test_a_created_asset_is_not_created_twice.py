@@ -156,3 +156,34 @@ def test_the_stake_is_still_the_stake():
     assert "result_asset_id IS NULL" in body and "status='pending'" in body, (
         "расклинивание больше не возвращает в очередь цели с пустой отметкой — "
         "перечитайте причину двери в докстринге этого модуля")
+
+
+@pytest.mark.parametrize("command_tag,expected", [("UPDATE 1", True), ("UPDATE 0", False),
+                                                 ("ERROR", None)])
+def test_gp_requires_a_confirmed_claim(monkeypatch, command_tag, expected):
+    from unittest.mock import AsyncMock
+
+    from services import op_worker
+
+    pool = object()
+    execute = AsyncMock(return_value=command_tag)
+    monkeypatch.setattr(op_worker, "_safe_execute", execute)
+    if expected is None:
+        with pytest.raises(RuntimeError, match="Не удалось занять цель"):
+            _run(op_worker._claim_gp_target(pool, 12))
+    else:
+        assert _run(op_worker._claim_gp_target(pool, 12)) is expected
+    assert execute.await_args.args[0] is pool
+    assert "status='pending'" in execute.await_args.args[1]
+    assert execute.await_args.args[2] == 12
+
+
+@pytest.mark.parametrize(("executor", "create"), [
+    ("_exec_global_presence_channel", "create_channel"),
+    ("_exec_global_presence_bot", "create_bot_via_botfather"),
+])
+def test_gp_checks_claim_before_telegram_create(executor, create):
+    body = ast.unparse(_fn(executor))
+    claim = 'if not await _claim_gp_target(pool, target[\'id\']):'
+    assert claim in body
+    assert body.index(claim) < body.index(f"await account_manager.{create}(")

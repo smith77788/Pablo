@@ -9682,6 +9682,21 @@ async def _mark_gp_asset(pool, target_id: int, asset_id: int, kind: str) -> bool
     return False
 
 
+async def _claim_gp_target(pool: asyncpg.Pool, target_id: int) -> bool:
+    """Создание в Telegram допустимо только после подтверждённой записи в базе."""
+    claimed = await _safe_execute(
+        pool,
+        "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
+        target_id,
+        log_ctx=f"[gp_claim target={target_id}]",
+    )
+    if claimed == "UPDATE 1":
+        return True
+    if claimed == "UPDATE 0":
+        return False
+    raise RuntimeError(f"Не удалось занять цель Global Presence №{target_id}")
+
+
 async def _revive_abandoned_gp_targets(pool: asyncpg.Pool, plan_id: int, what: str) -> None:
     """Расклинить цели плана Global Presence, брошенные прошлым прогоном.
 
@@ -9928,13 +9943,7 @@ async def _exec_global_presence_channel(
 
                 acc = alt_acc
 
-            # Atomic claim: only proceed if target is still 'pending' to prevent duplicate processing
-            claimed = await _safe_execute(
-                    pool,
-                "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
-                target["id"],
-            )
-            if claimed == "UPDATE 0":
+            if not await _claim_gp_target(pool, target["id"]):
                 log.info(
                     "op_worker gp: target %d already claimed by another worker, skipping",
                     target["id"],
@@ -10993,13 +11002,7 @@ async def _exec_global_presence_bot(
             if bot_username and not bot_username.lower().endswith("bot"):
                 bot_username = bot_username + "_bot"
 
-            # Atomic claim: skip if already claimed by another worker
-            claimed = await _safe_execute(
-                    pool,
-                "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
-                target["id"],
-            )
-            if claimed == "UPDATE 0":
+            if not await _claim_gp_target(pool, target["id"]):
                 log.info(
                     "op_worker gp_bot: target %d already claimed, skipping", target["id"]
                 )
