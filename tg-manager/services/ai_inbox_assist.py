@@ -214,7 +214,9 @@ async def _reply_context(pool, owner_id: int, thread: dict):
     if acc:
         try:
             from services import persona_voice as _pv
-            v = await _pv.load(pool, acc)
+            last_in = next((m.get("text") or "" for m in reversed(thread.get("messages") or [])
+                            if m.get("direction") == "in"), "")
+            v = await _pv.load(pool, acc, context=last_in)
             voice = v if v.persona is not None else None
         except Exception:  # noqa: BLE001
             log.warning("inbox draft: голос аккаунта %s не прочитан", acc)

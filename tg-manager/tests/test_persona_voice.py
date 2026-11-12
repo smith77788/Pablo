@@ -277,7 +277,7 @@ def test_draft_speaks_with_persona_and_knows_the_state(monkeypatch):
 def test_reply_context_joins_profiles_and_behavior_model(monkeypatch):
     from services import ai_inbox_assist as aia, virtual_layer as vl
 
-    async def _load(pool, acc, fallback=""):
+    async def _load(pool, acc, fallback="", context=""):
         return pv.Voice(account_id=acc, persona=_persona(), prompt="ГОЛОС")
 
     async def _state(pool, owner, etype, eid, state_key="funnel"):
@@ -291,3 +291,45 @@ def test_reply_context_joins_profiles_and_behavior_model(monkeypatch):
     assert voice.prompt == "ГОЛОС"
     assert "Готов купить" in strategy and "Дожимайте" in strategy
     assert label == vl.VALUE_LABEL["ready"]
+
+
+# ── Память по теме разговора ───────────────────────────────────────────────
+
+def test_old_statements_on_the_topic_come_back():
+    said = ["я из Казани, тут норм", "вчера купил эфир", "кофе пью без сахара",
+            "в Казани сегодня дождь"]
+    got = pv.relevant(said, "а ты где живёшь, в Казани?", k=3)
+    assert got == ["в Казани сегодня дождь", "я из Казани, тут норм"]
+    assert pv.relevant(said, "это вообще когда?") == []        # одни служебные слова
+    assert pv.relevant(said, "Казань", exclude=["в Казани сегодня дождь"]) == [
+        "я из Казани, тут норм"]
+
+
+def test_topic_memory_reaches_the_prompt():
+    m = pv.memory_block("", [], ["я из Казани"])
+    assert "на эту тему" in m and "«я из Казани»" in m
+
+
+def test_typing_status_is_shown_and_its_failure_is_harmless():
+    from services import chat_warmup as cw
+    seen = []
+
+    class _Act:
+        async def __aenter__(self):
+            seen.append("typing")
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Client:
+        def action(self, entity, kind):
+            assert kind == "typing"
+            return _Act()
+
+    _run(cw._typing(_Client(), object(), 0.01))
+    assert seen == ["typing"]
+
+    class _Broken:
+        def action(self, entity, kind):
+            raise RuntimeError("нет статуса")
+    _run(cw._typing(_Broken(), object(), 0.01))   # не кидает
