@@ -23216,7 +23216,7 @@ async function openPersonaMemory(id) {
       <button class="btn btn-o" style="width:100%;margin-top:6px;font-size:13px;padding:8px" onclick="txt('personaMemory','')">Скрыть</button>
     </div>`;
     if (box.scrollIntoView) box.scrollIntoView({behavior:'smooth'});
-  } catch(e) { box.innerHTML = errHtml(errRu(e,'Память не открылась'), `openPersonaMemory(${Number(id)})`); }
+  } catch(e) { box.innerHTML = errHtml(errRu(e,'Память не открылась'), 'openPersonaMemory(' + Number(id) + ')'); }
 }
 async function savePersonaFacts(id, btn) {
   const facts = ((document.getElementById('pmFacts')||{}).value||'').trim();
