@@ -5376,35 +5376,95 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="profiles" data-tab="set" role="tablist" aria-label="Вкладки модуля «Профили»"></div>
   <div class="sub-sb">
-    <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
-      Массовое оформление аккаунтов: имя, фото, 2FA.<br>
+    <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px;line-height:1.5">
+      Массовое оформление аккаунтов: каждый получает свой вариант имени, описания и фото, чтобы флот не выглядел одинаковым.<br>
       Доступно аккаунтов: <b id="setterAvail">—</b>
+      <span id="setterTwofaLine" style="display:none"> · 🔐 сохранено паролей 2FA: <b id="setterTwofaN">0</b> <span style="color:var(--accent);cursor:pointer;text-decoration:underline" role="button" tabindex="0" onclick="showSetterTwofa(this)">показать</span></span>
     </div>
-    <div class="sec">Тип операции</div>
+    <div class="sec">1. Что меняем</div>
     <div id="setterTabs" style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 16px 10px">
-      <button class="btn btn-p" onclick="selectSetterOp('name')" id="setterTab-name">📝 Имя/Bio</button>
+      <button class="btn btn-p" onclick="selectSetterOp('name')" id="setterTab-name">📝 Имя и описание</button>
       <button class="btn btn-s" onclick="selectSetterOp('avatar')" id="setterTab-avatar">🖼 Аватар</button>
+      <button class="btn btn-s" onclick="selectSetterOp('username')" id="setterTab-username">🔤 Юзернейм</button>
       <button class="btn btn-s" onclick="selectSetterOp('2fa')" id="setterTab-2fa">🔑 2FA</button>
+      <button class="btn btn-s" onclick="selectSetterOp('privacy')" id="setterTab-privacy">🙈 Приватность</button>
+      <button class="btn btn-s" onclick="selectSetterOp('cleanup')" id="setterTab-cleanup">🧹 Очистка и сеансы</button>
     </div>
     <div id="setterNameFields" style="padding:0 16px">
-      <div class="field"><label>Имя (спинтакс: {Алекс|Макс})</label><input type="text" id="setterFirstName" maxlength="64" placeholder="Имя"></div>
-      <div class="field"><label>Фамилия</label><input type="text" id="setterLastName" maxlength="64" placeholder="Фамилия"></div>
-      <div class="field"><label>Bio (до 70 симв.)</label><input type="text" id="setterAbout" maxlength="70" placeholder="Предприниматель"></div>
+      <div class="field-note" style="margin-bottom:8px">Варианты через <b>{Алекс|Макс|Иван}</b> — каждому аккаунту выпадет свой. Пустое поле <b>не меняется</b>.</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <span class="chip" role="button" tabindex="0" onclick="setterNamePool('m')">👨 Мужские имена</span>
+        <span class="chip" role="button" tabindex="0" onclick="setterNamePool('f')">👩 Женские имена</span>
+        <span class="chip" role="button" tabindex="0" onclick="setterNamePool('bio')">💬 Описания</span>
+      </div>
+      <div class="field"><label>Имя</label><input type="text" id="setterFirstName" maxlength="512" placeholder="{Алексей|Максим|Иван}" oninput="setterPreviewStale()"></div>
+      <div class="field"><label>Фамилия</label><input type="text" id="setterLastName" maxlength="512" placeholder="{Смирнов|Кузнецов} — пусто: не менять" oninput="setterPreviewStale()"></div>
+      <div class="field"><label>Описание «О себе» (до 70 символов)</label><input type="text" id="setterAbout" maxlength="512" placeholder="{Предприниматель|Люблю путешествия}" oninput="setterPreviewStale()"></div>
     </div>
     <div id="setterAvatarFields" style="display:none;padding:0 16px">
-      <div class="field"><label>URL изображения</label><input type="url" id="setterAvatarUrl" placeholder="https://example.com/photo.jpg"><button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="pickMediaInto('setterAvatarUrl', this, 'image/*')">📎 Загрузить с устройства</button></div>
+      <div class="field-note" style="margin-bottom:8px">Добавьте несколько фото — они раздаются <b>по кругу</b>, у соседних аккаунтов разные лица. Каждое фото ещё и незаметно уникализируется.</div>
+      <div class="field"><label>Ссылки на картинки (по одной на строке)</label><textarea id="setterAvatarUrls" rows="4" placeholder="https://example.com/1.jpg&#10;https://example.com/2.jpg" oninput="renderSetterAvatars()" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical"></textarea>
+        <button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="pickSetterAvatars(this)">📎 Загрузить фото с устройства (можно несколько)</button>
+      </div>
+      <div id="setterAvatarThumbs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+    </div>
+    <div id="setterUsernameFields" style="display:none;padding:0 16px">
+      <div class="field-note" style="margin-bottom:8px">Юзернейм уникален во всём Telegram, поэтому в шаблоне нужен <b>{rand}</b> (4 случайные цифры), <b>{n}</b> (номер аккаунта) или варианты <b>{a|b}</b>.</div>
+      <div class="field"><label>Шаблон юзернейма</label><input type="text" id="setterUsername" maxlength="200" placeholder="alex_{rand}" oninput="setterPreviewStale()"></div>
     </div>
     <div id="setter2faFields" style="display:none;padding:0 16px">
-      <div class="field"><label>Новый пароль (мин 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
-      <div class="field"><label>Текущий пароль (если уже стоит)</label><input type="password" id="setter2faCur" maxlength="64" placeholder="Оставьте пустым если не установлен"></div>
+      <div class="field-note" style="margin-bottom:8px">Пароль сохраняется у каждого аккаунта <b>зашифрованным</b> — его можно посмотреть здесь же, а следующая смена пароля не потребует вводить текущий.</div>
+      <div class="field"><label>Новый пароль (минимум 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
+      <div class="field"><label>Текущий пароль (если стоит и ставили не здесь)</label><input type="password" id="setter2faCur" maxlength="64" placeholder="Оставьте пустым, если не установлен"></div>
       <div class="field"><label>Подсказка (необязательно)</label><input type="text" id="setter2faHint" maxlength="64" placeholder="Подсказка"></div>
     </div>
-    <div class="field">
-      <label>Кол-во аккаунтов (0 = все)</label>
+    <div id="setterPrivacyFields" style="display:none;padding:0 16px">
+      <div class="field"><label>Что настроить</label><select id="setterPrivKey" class="sel">
+        <option value="phone">📞 Номер телефона</option>
+        <option value="lastseen">🕒 Время «был в сети»</option>
+        <option value="invite">👥 Кто может добавлять в группы</option>
+      </select></div>
+      <div class="field"><label>Кому видно / доступно</label><select id="setterPrivAllow" class="sel">
+        <option value="0">🙈 Никому — скрыть</option>
+        <option value="1">👀 Всем — открыть</option>
+      </select></div>
+    </div>
+    <div id="setterCleanupFields" style="display:none;padding:0 16px">
+      <div class="field"><label>Действие</label><select id="setterCleanOp" class="sel" onchange="setterCleanChanged()">
+        <option value="close_sessions">🛡 Закрыть все чужие сеансы (выкинуть другие устройства)</option>
+        <option value="remove_avatar">🖼 Удалить все фото профиля</option>
+        <option value="clear_bio">💬 Очистить описание «О себе»</option>
+        <option value="reset_2fa">🔓 Снять пароль 2FA</option>
+      </select></div>
+      <div class="field" id="setterResetPassWrap" style="display:none"><label>Текущий пароль 2FA (пусто — взять сохранённый)</label><input type="password" id="setterResetPass" maxlength="64" placeholder="Сохранённый пароль подставится сам"></div>
+    </div>
+    <div id="setterPreviewWrap" style="padding:0 16px">
+      <button type="button" class="btn btn-s" style="width:100%;font-size:13px;padding:8px" onclick="previewProfileSetter()">👁 Показать, как это будет выглядеть</button>
+      <div id="setterPreview" style="margin-top:8px"></div>
+    </div>
+    <div class="sec" style="margin-top:6px">2. На каких аккаунтах</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 16px 8px">
+      <button class="btn btn-p" id="setterPick-top" onclick="setterPickMode('top')">⭐ Самые надёжные</button>
+      <button class="btn btn-s" id="setterPick-manual" onclick="setterPickMode('manual')">☑️ Выбрать вручную</button>
+    </div>
+    <div class="field" id="setterCountWrap">
+      <label>Сколько аккаунтов (0 = все доступные)</label>
       <input type="number" id="setterCount" min="0" value="0">
     </div>
-    <div id="setterErr" style="color:var(--red);font-size:13px;margin:6px 0"></div>
-    <button class="btn btn-p" data-main id="setterBtn" onclick="submitProfileSetter()" style="width:100%">🚀 Запустить</button>
+    <div id="setterManualWrap" style="display:none;padding:0 16px">
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <input type="text" id="setterAccSearch" placeholder="Поиск: номер, имя, @ник" oninput="renderSetterAccounts()" style="flex:1">
+        <button type="button" class="btn btn-s" style="padding:6px 10px;font-size:12px;min-width:0" onclick="setterSelectAll(true)">Все</button>
+        <button type="button" class="btn btn-s" style="padding:6px 10px;font-size:12px;min-width:0" onclick="setterSelectAll(false)">Никого</button>
+      </div>
+      <div class="lst" id="setterAccList" style="max-height:320px;overflow:auto"></div>
+      <div class="field-note" id="setterPickedN" style="margin:6px 0">Выбрано: 0</div>
+    </div>
+    <div id="setterErr" style="color:var(--red);font-size:13px;margin:6px 16px"></div>
+    <div style="display:flex;gap:8px;padding:0 16px 16px">
+      <button class="btn btn-s" id="setterCanaryBtn" onclick="submitProfileSetter(true)" style="flex:1" title="Сначала на одном аккаунте — проверить результат, потом на всех">🧪 Сначала на одном</button>
+      <button class="btn btn-p" data-main id="setterBtn" onclick="submitProfileSetter()" style="flex:1">🚀 Запустить</button>
+    </div>
   </div>
 </div>
 
@@ -6036,13 +6096,28 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="profiles" data-tab="personas" role="tablist" aria-label="Вкладки модуля «Профили»"></div>
   <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px;line-height:1.5">
+      Персона — характер аккаунта: как он пишет в прогреве чатов и в ИИ-комментариях. Работает только у персоны, <b>привязанной к аккаунту</b>; у аккаунтов без персоны свой случайный стиль.
+    </div>
     <div id="personaStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:12px">Создать персону</div>
+    <div class="sec" style="margin-top:12px" id="pFormTitle">Создать персону</div>
     <div style="padding:8px 16px">
+      <input type="hidden" id="pEditId" value="">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <span class="chip" role="button" tabindex="0" onclick="personaTemplate('expert')">🔬 Эксперт</span>
+        <span class="chip" role="button" tabindex="0" onclick="personaTemplate('friend')">😊 Свой парень</span>
+        <span class="chip" role="button" tabindex="0" onclick="personaTemplate('skeptic')">🤨 Скептик</span>
+        <span class="chip" role="button" tabindex="0" onclick="personaTemplate('girl')">🌸 Девушка-блогер</span>
+      </div>
       <div class="field">
         <label>Имя персоны *</label>
-        <input type="text" id="pName" placeholder="Например: Алексей" class="inp">
+        <input type="text" id="pName" maxlength="64" placeholder="Например: Алексей Смирнов" class="inp">
+      </div>
+      <div class="field">
+        <label>Аккаунт, которым она говорит</label>
+        <select id="pAccount" class="sel"></select>
+        <div class="field-note">Без аккаунта персона ни в одном диалоге не участвует.</div>
       </div>
       <div class="field">
         <label>Стиль речи</label>
@@ -6051,16 +6126,30 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <option value="formal">🎩 Формальный</option>
           <option value="expert">🔬 Экспертный</option>
           <option value="friendly">😊 Дружелюбный</option>
-          <option value="sarcastic">😏 Саркастический</option>
+          <option value="sarcastic">😏 Саркастичный</option>
+          <option value="neutral">😐 Нейтральный</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Настрой</label>
+        <select id="pTone" class="sel">
+          <option value="positive">🙂 Позитивный</option>
+          <option value="neutral">😐 Ровный</option>
+          <option value="skeptical">🤨 Скептичный</option>
+          <option value="enthusiastic">🤩 Восторженный</option>
         </select>
       </div>
       <div class="field">
         <label>Ниша / тема</label>
-        <input type="text" id="pNiche" placeholder="Крипто, инвестиции, IT…" class="inp">
+        <input type="text" id="pNiche" maxlength="64" placeholder="Крипто, инвестиции, IT…" class="inp">
       </div>
       <div class="field">
-        <label>Биография (кратко)</label>
-        <textarea id="pBio" rows="2" placeholder="Краткое описание персонажа…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
+        <label>Биография (её же можно поставить в «О себе»)</label>
+        <textarea id="pBio" rows="2" maxlength="1000" placeholder="Краткое описание персонажа…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      </div>
+      <div class="field">
+        <label>Предыстория и манера (необязательно)</label>
+        <textarea id="pBackstory" rows="2" maxlength="2000" placeholder="Работает в банке, по вечерам торгует. Пишет коротко, без смайликов…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
       </div>
       <div class="field">
         <label>Интересы (через запятую)</label>
@@ -6070,8 +6159,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <label>Возраст</label>
         <input type="number" id="pAge" value="25" min="18" max="80" class="inp">
       </div>
+      <div class="field">
+        <label>Проверить голос: реплика собеседника</label>
+        <input type="text" id="pTryMsg" maxlength="500" placeholder="Привет! Как тебе последние новости в твоей теме?" class="inp">
+        <button type="button" class="btn btn-s" style="margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="previewPersona(this)">🗣 Как ответит персона</button>
+        <div id="pTryOut" style="margin-top:6px"></div>
+      </div>
       <div class="field-err" id="pErr"></div>
-      <button class="btn btn-p" data-main onclick="submitPersona()" style="width:100%">🎭 Создать персону</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" id="pCancelEdit" style="display:none;flex:1" onclick="resetPersonaForm()">Отмена</button>
+        <button class="btn btn-p" data-main id="pSubmit" onclick="submitPersona()" style="flex:2">🎭 Создать персону</button>
+      </div>
     </div>
   </div>
 </div>
@@ -18373,15 +18471,36 @@ function bstatsGo(where) {
 }
 
 // ── Profile Setter ─────────────────────────────────────
+// Экран «Оформление»: что меняем (вкладка операции) → на каких аккаунтах →
+// проба на одном → запуск. Шаблоны раскрываются у КАЖДОГО аккаунта отдельно.
 let SETTER_OP = 'name';
+let SETTER_ACCS = [];
+let SETTER_PICKED = new Set();
+let SETTER_PICK_MODE = 'top';
+const SETTER_POOLS = {
+  m: {first: '{Алексей|Максим|Иван|Дмитрий|Артём|Никита|Михаил|Егор|Андрей|Илья|Кирилл|Роман|Сергей|Павел|Денис}',
+      last: '{Смирнов|Кузнецов|Попов|Волков|Соколов|Лебедев|Козлов|Новиков|Морозов|Павлов|Фёдоров|Орлов|Зайцев|Белов}'},
+  f: {first: '{Анна|Мария|Елена|Дарья|Алина|Ирина|Екатерина|Ольга|Полина|Виктория|Юлия|Ксения|Софья|Наталья|Алёна}',
+      last: '{Смирнова|Кузнецова|Попова|Волкова|Соколова|Лебедева|Козлова|Новикова|Морозова|Павлова|Фёдорова|Орлова|Зайцева}'},
+  bio: '{Люблю путешествия|Предприниматель|Живу в моменте|Кофе и книги|Спорт и саморазвитие|Фотограф-любитель|Учусь новому каждый день|Музыка и кино}',
+};
 async function openProfileSetter() {
   push('s-profilesetter');
-  selectSetterOp('name');
+  selectSetterOp(SETTER_OP || 'name');
+  setterPickMode(SETTER_PICK_MODE || 'top');
   document.getElementById('setterAvail').textContent='…';
   document.getElementById('setterErr').textContent='';
   try {
     const d = await api('/api/miniapp/profile_setter/status');
     document.getElementById('setterAvail').textContent = d.available_accounts;
+    SETTER_ACCS = d.accounts || [];
+    const ids = new Set(SETTER_ACCS.map(a=>a.id));
+    SETTER_PICKED = new Set([...SETTER_PICKED].filter(i=>ids.has(i)));
+    const n2 = d.twofa_saved || 0;
+    const line = document.getElementById('setterTwofaLine');
+    if (line) line.style.display = n2 ? '' : 'none';
+    txt('setterTwofaN', String(n2));
+    renderSetterAccounts();
   } catch(e) {
     // «?» вместо числа — не сообщение: экран выглядит рабочим, а дальше
     // владелец заказывает массовое оформление, не зная, на сколько аккаунтов
@@ -18397,56 +18516,202 @@ async function openProfileSetter() {
 }
 function selectSetterOp(op) {
   SETTER_OP = op;
-  ['name','avatar','2fa'].forEach(o=>{
+  ['name','avatar','username','2fa','privacy','cleanup'].forEach(o=>{
     const btn = document.getElementById('setterTab-'+o);
     if (btn) btn.className = o===op ? 'btn btn-p' : 'btn btn-s';
   });
-  document.getElementById('setterNameFields').style.display = op==='name'?'':'none';
-  document.getElementById('setterAvatarFields').style.display = op==='avatar'?'':'none';
-  document.getElementById('setter2faFields').style.display = op==='2fa'?'':'none';
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('setterNameFields', op==='name');
+  show('setterAvatarFields', op==='avatar');
+  show('setterUsernameFields', op==='username');
+  show('setter2faFields', op==='2fa');
+  show('setterPrivacyFields', op==='privacy');
+  show('setterCleanupFields', op==='cleanup');
+  // Предпросмотр есть только у того, что раскрывается по шаблону.
+  show('setterPreviewWrap', op==='name' || op==='username');
+  txt('setterPreview', '');
+  if (op==='avatar') renderSetterAvatars();
 }
-async function submitProfileSetter() {
+function setterCleanChanged() {
+  const v = (document.getElementById('setterCleanOp')||{}).value;
+  const w = document.getElementById('setterResetPassWrap');
+  if (w) w.style.display = v==='reset_2fa' ? '' : 'none';
+}
+function setterNamePool(kind) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  if (kind==='bio') set('setterAbout', SETTER_POOLS.bio);
+  else { set('setterFirstName', SETTER_POOLS[kind].first); set('setterLastName', SETTER_POOLS[kind].last); }
+  previewProfileSetter();
+}
+function setterPreviewStale() { txt('setterPreview', ''); }
+function _setterAvatarList() {
+  return ((document.getElementById('setterAvatarUrls')||{}).value||'')
+    .split('\n').map(s=>s.trim()).filter(Boolean);
+}
+function renderSetterAvatars() {
+  const urls = _setterAvatarList();
+  txt('setterAvatarThumbs', urls.slice(0,50).map((u,i)=>
+    `<div style="position:relative"><img src="${esc(u)}" alt="" loading="lazy" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:var(--bg2)" onerror="this.style.opacity=.3"><span style="position:absolute;right:-2px;bottom:-2px;font-size:10px;background:var(--bg2);border-radius:8px;padding:0 4px">${i+1}</span></div>`
+  ).join('') + (urls.length ? `<div class="field-note" style="width:100%">${num(urls.length)} ${plural(urls.length,'фото','фото','фото')} в наборе</div>` : ''));
+}
+function pickSetterAvatars(btn) {
+  const picker = document.createElement('input');
+  picker.type = 'file'; picker.accept = 'image/*'; picker.multiple = true;
+  picker.style.display = 'none';
+  picker.onchange = async () => {
+    const files = [...(picker.files||[])];
+    picker.remove();
+    if (!files.length) return;
+    const label = btn.textContent;
+    btn.disabled = true;
+    const ta = document.getElementById('setterAvatarUrls');
+    let ok = 0;
+    for (let i=0; i<files.length; i++) {
+      const file = files[i];
+      btn.textContent = `⏳ Загружаю ${i+1} из ${files.length}…`;
+      if (file.size > MEDIA_UPLOAD_MAX) { toast('⚠️ Файл больше 20 МБ пропущен'); continue; }
+      try {
+        const fd = new FormData();
+        fd.append('file', file, file.name || 'avatar.jpg');
+        const d = await api('/api/miniapp/media/upload', { method:'POST', body:fd, timeoutMs:120000 });
+        if (d.url && ta) { ta.value = (ta.value.trim() ? ta.value.trim()+'\n' : '') + d.url; ok++; }
+      } catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось загрузить')); }
+    }
+    btn.disabled = false; btn.textContent = label;
+    renderSetterAvatars();
+    if (ok) toast(`✅ Загружено фото: ${num(ok)}`);
+  };
+  document.body.appendChild(picker);
+  picker.click();
+}
+async function previewProfileSetter() {
+  const box = document.getElementById('setterPreview');
+  if (!box) return;
+  const v = id => (document.getElementById(id)||{}).value||'';
+  const body = SETTER_OP==='username'
+    ? {username: v('setterUsername').trim()}
+    : {first_name: v('setterFirstName'), last_name: v('setterLastName'), about: v('setterAbout')};
+  if (!Object.values(body).some(x=>x.trim())) { box.innerHTML = '<div class="field-note">Заполните поля — покажем примеры</div>'; return; }
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/profile_setter/preview', {method:'POST', body:JSON.stringify(body)});
+    if (SETTER_OP==='username') {
+      txt('setterPreview', `<div class="card" style="font-size:13px">${(d.usernames||[]).map(u=>'@'+esc(u)).join('<br>')}</div>`);
+      return;
+    }
+    const rows = (d.samples||[]).map(s=>`<div class="row"><div class="row-ico">👤</div><div class="row-body"><div class="row-name">${esc([s.first_name,s.last_name].filter(Boolean).join(' ')||'— имя не меняется —')}</div><div class="row-val">${esc(s.about||'')}</div></div></div>`).join('');
+    const same = d.distinct <= 1
+      ? '<div style="color:var(--orange);font-size:12px;margin-top:4px">⚠️ У всех аккаунтов выйдет одно и то же — добавьте варианты {а|б}</div>' : '';
+    const long = (d.too_long||[]).length
+      ? `<div style="color:var(--orange);font-size:12px;margin-top:4px">✂️ Обрежется по лимиту Telegram: ${esc(d.too_long.join(', '))}</div>` : '';
+    txt('setterPreview', `<div class="lst">${rows}</div>${same}${long}`);
+  } catch(e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось показать примеры'))}</div>`; }
+}
+function setterPickMode(mode) {
+  SETTER_PICK_MODE = mode;
+  ['top','manual'].forEach(m=>{
+    const b = document.getElementById('setterPick-'+m);
+    if (b) b.className = m===mode ? 'btn btn-p' : 'btn btn-s';
+  });
+  const cw = document.getElementById('setterCountWrap'), mw = document.getElementById('setterManualWrap');
+  if (cw) cw.style.display = mode==='top' ? '' : 'none';
+  if (mw) mw.style.display = mode==='manual' ? '' : 'none';
+}
+function renderSetterAccounts() {
+  const q = ((document.getElementById('setterAccSearch')||{}).value||'').trim().toLowerCase();
+  const list = SETTER_ACCS.filter(a => !q || [a.phone,a.first_name,a.username,a.persona].join(' ').toLowerCase().includes(q));
+  txt('setterAccList', list.length ? list.map(a=>`
+    <label class="row" style="cursor:pointer">
+      <input type="checkbox" ${SETTER_PICKED.has(a.id)?'checked':''} onchange="setterToggleAcc(${a.id}, this.checked)" style="width:20px;height:20px;margin-right:10px">
+      <div class="row-body"><div class="row-name">${esc(a.first_name||a.phone||('#'+a.id))}${a.username?' · @'+esc(a.username):''}</div>
+      <div class="row-val">${esc(a.phone||'')}${a.persona?' · 🎭 '+esc(a.persona):''}${a.twofa_saved?' · 🔐':''}</div></div>
+    </label>`).join('') : empty('📱','Нет аккаунтов', q ? 'Поиск ничего не нашёл' : 'Нет живых аккаунтов с сессией'));
+  txt('setterPickedN', `Выбрано: ${num(SETTER_PICKED.size)} из ${num(SETTER_ACCS.length)}`);
+}
+function setterToggleAcc(id, on) {
+  if (on) SETTER_PICKED.add(id); else SETTER_PICKED.delete(id);
+  txt('setterPickedN', `Выбрано: ${num(SETTER_PICKED.size)} из ${num(SETTER_ACCS.length)}`);
+}
+function setterSelectAll(on) {
+  const q = ((document.getElementById('setterAccSearch')||{}).value||'').trim().toLowerCase();
+  SETTER_ACCS.filter(a => !q || [a.phone,a.first_name,a.username,a.persona].join(' ').toLowerCase().includes(q))
+    .forEach(a => on ? SETTER_PICKED.add(a.id) : SETTER_PICKED.delete(a.id));
+  renderSetterAccounts();
+}
+async function showSetterTwofa(el) {
+  if (!await askConfirm('Показать сохранённые пароли 2FA? Не открывайте их при посторонних.')) return;
+  try {
+    const d = await api('/api/miniapp/profile_setter/twofa', {method:'POST', body:'{}'});
+    const items = d.items||[];
+    const text = items.map(i=>`${i.phone||('#'+i.id)}${i.name?' ('+i.name+')':''}: ${i.twofa}`).join('\n');
+    txt('setterPreview', `<div class="card" style="font-size:12px"><div style="font-weight:600;margin-bottom:6px">🔐 Пароли 2FA (${num(items.length)})</div><pre style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin:0">${esc(text)}</pre><button class="btn btn-s" style="width:100%;margin-top:8px;font-size:13px" onclick="copyText(this.previousElementSibling.textContent)">📋 Скопировать</button></div>`);
+    const w = document.getElementById('setterPreviewWrap'); if (w) w.style.display = '';
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось получить пароли')); }
+}
+async function submitProfileSetter(canary) {
   const errEl = document.getElementById('setterErr');
   errEl.textContent='';
   const acc_count = parseInt(document.getElementById('setterCount').value)||0;
-  const body = {op: SETTER_OP, acc_count};
-  if (SETTER_OP==='name') {
-    body.first_name = document.getElementById('setterFirstName').value.trim();
-    body.last_name = document.getElementById('setterLastName').value.trim();
-    body.about = document.getElementById('setterAbout').value.trim();
+  const op = SETTER_OP==='cleanup' ? ((document.getElementById('setterCleanOp')||{}).value||'close_sessions') : SETTER_OP;
+  const body = {op, acc_count, canary: !!canary};
+  if (SETTER_PICK_MODE==='manual') {
+    if (!SETTER_PICKED.size) { errEl.textContent='Отметьте аккаунты в списке'; return; }
+    body.account_ids = SETTER_ACCS.map(a=>a.id).filter(i=>SETTER_PICKED.has(i));
+  }
+  const v = id => ((document.getElementById(id)||{}).value||'').trim();
+  if (op==='name') {
+    body.first_name = v('setterFirstName');
+    body.last_name = v('setterLastName');
+    body.about = v('setterAbout');
     if (!body.first_name && !body.last_name && !body.about) { errEl.textContent='Заполните хотя бы одно поле'; return; }
-  } else if (SETTER_OP==='avatar') {
-    body.avatar_url = document.getElementById('setterAvatarUrl').value.trim();
-    if (!body.avatar_url) { errEl.textContent='Введите URL'; return; }
-  } else {
-    body.new_password = document.getElementById('setter2faNew').value.trim();
-    body.current_password = document.getElementById('setter2faCur').value.trim();
-    body.hint = document.getElementById('setter2faHint').value.trim();
+  } else if (op==='avatar') {
+    body.avatar_urls = _setterAvatarList();
+    if (!body.avatar_urls.length) { errEl.textContent='Добавьте хотя бы одну картинку'; return; }
+  } else if (op==='username') {
+    body.username = v('setterUsername');
+    if (!body.username) { errEl.textContent='Укажите шаблон юзернейма'; return; }
+  } else if (op==='2fa') {
+    body.new_password = v('setter2faNew');
+    body.current_password = v('setter2faCur');
+    body.hint = v('setter2faHint');
     if (!body.new_password) { errEl.textContent='Введите новый пароль'; return; }
+  } else if (op==='privacy') {
+    body.privacy_key = v('setterPrivKey');
+    body.privacy_allow = v('setterPrivAllow')==='1';
+  } else if (op==='reset_2fa') {
+    body.current_password = v('setterResetPass');
   }
   // Операция идёт по нескольким аккаунтам сразу и не откатывается. Отдельно
   // про 2FA: пароль ставится НА аккаунты, и если он потеряется, потеряются и
   // они — это единственное действие здесь, которое нельзя исправить повтором.
-  const _setterN = acc_count > 0 ? acc_count : 0;
+  const _setterN = canary ? 1 : (body.account_ids ? body.account_ids.length : (acc_count > 0 ? acc_count : 0));
   // Предложный падеж: «на 40 аккаунтах», а не «на 40 аккаунтов».
   const _setterScale = _setterN
     ? `${num(_setterN)} ${plural(_setterN,'аккаунте','аккаунтах','аккаунтах')}`
     : 'всех подходящих аккаунтах';
-  const _setterWhat = SETTER_OP==='name' ? 'Сменить имя и описание'
-                    : SETTER_OP==='avatar' ? 'Сменить аватар'
-                    : 'Поставить пароль двухфакторной защиты';
+  const _setterWhat = {name:'Сменить имя и описание', avatar:'Сменить аватар', username:'Сменить юзернейм',
+    '2fa':'Поставить пароль двухфакторной защиты', privacy:'Изменить приватность',
+    close_sessions:'Закрыть все чужие сеансы', remove_avatar:'Удалить все фото профиля',
+    clear_bio:'Очистить описание', reset_2fa:'Снять пароль двухфакторной защиты'}[op] || 'Изменить оформление';
   const _setterWarn = SETTER_OP==='2fa'
-    ? '\n\n⚠️ Запишите пароль. Потеряете его — потеряете доступ к этим аккаунтам, восстановить его нечем.'
-    : '';
-  if (!await askConfirm(`${_setterWhat} на ${_setterScale}?${_setterWarn}`)) return;
-  const btn = document.getElementById('setterBtn');
+    ? '\n\n⚠️ Запишите пароль. Потеряете его — потеряете доступ к этим аккаунтам, восстановить его нечем. Он сохранится у аккаунтов зашифрованным — посмотреть можно на этом экране.'
+    : (op==='close_sessions' ? '\n\n⚠️ Все остальные устройства и программы, где открыты эти аккаунты, будут отключены.' : '');
+  const _setterTry = canary ? '\n\n🧪 Это проба: сначала один аккаунт. Проверьте результат и запускайте на всех.' : '';
+  if (!await askConfirm(`${_setterWhat} на ${_setterScale}?${_setterWarn}${_setterTry}`)) return;
+  const btn = document.getElementById(canary ? 'setterCanaryBtn' : 'setterBtn');
+  const label = btn.textContent;
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
     const r = await api('/api/miniapp/profile_setter', {method:'POST', body:JSON.stringify(body)});
-    toast(`✅ ${r.label} — поставлено в очередь (#${r.op_id})`);
-    back();
+    if (canary) {
+      toast(`🧪 Проба запущена (#${r.op_id}) — проверьте аккаунт и жмите «Запустить»`);
+      openOpDetail(r.op_id);
+    } else {
+      toast(`✅ ${r.label} — поставлено в очередь (#${r.op_id})`);
+      back();
+    }
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+  finally { btn.disabled=false; btn.textContent=label; }
 }
 
 // Топология, «Пулы и аудит» и журнал аудита — в screens/infra.js.
@@ -22735,6 +23000,18 @@ function bfSetMode(mode) {
 
 // ── Persona Hub ─────────────────────────────────────────
 const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'😊 Непринуждённый',expert:'🔬 Эксперт',friendly:'🤗 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
+let PERSONAS = [];
+let PERSONA_ACCS = [];
+const PERSONA_TEMPLATES = {
+  expert: {style:'expert', tone:'neutral', age:34, niche:'инвестиции', interests:'рынки, аналитика, технологии',
+           bio:'Аналитик, 10 лет на рынке.', backstory:'Пишет по делу, приводит цифры, не любит хайп и обещания быстрых денег.'},
+  friend: {style:'casual', tone:'positive', age:27, niche:'', interests:'спорт, музыка, путешествия',
+           bio:'Обычный парень, люблю движ.', backstory:'Пишет коротко, иногда строчными, шутит, смайлики ставит редко.'},
+  skeptic: {style:'neutral', tone:'skeptical', age:41, niche:'', interests:'новости, техника, рыбалка',
+            bio:'Верю фактам, а не обещаниям.', backstory:'Переспрашивает, просит пруфы, но без грубости.'},
+  girl: {style:'friendly', tone:'enthusiastic', age:24, niche:'лайфстайл', interests:'красота, кофе, путешествия, фото',
+         bio:'Пишу о том, что вдохновляет ✨', backstory:'Тёплая, эмоциональная, делится впечатлениями, задаёт вопросы.'},
+};
 async function openPersonas() {
   push('s-personas');
   txt('personaStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -22742,30 +23019,115 @@ async function openPersonas() {
   try {
     const d = await api('/api/miniapp/personas');
     const personas = d.personas||[];
+    PERSONAS = personas;
+    PERSONA_ACCS = d.accounts||[];
     const active = personas.filter(p=>p.is_active).length;
+    const bound = personas.filter(p=>p.account_id).length;
     txt('personaStats',`
       <div class="kpi-card"><div class="kpi-val">${personas.length}</div><div class="kpi-lbl">Персон</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${active}</div><div class="kpi-lbl">Активных</div></div>
+      <div class="kpi-card"><div class="kpi-val">${bound}</div><div class="kpi-lbl">С аккаунтом</div></div>
     `);
     txt('m-persona-val',`${active} активных · ${personas.length} ${plural(personas.length,'персона','персоны','персон')}`);
-    if (!personas.length) { txt('personaList', empty('🎭','Нет персон','Заполните форму ниже и нажмите «Создать персону»')); return; }
-    txt('personaList', personas.map(p=>`
-      <div class="row">
+    fillPersonaAccounts();
+    if (!personas.length) { txt('personaList', empty('🎭','Нет персон','Выберите шаблон ниже или заполните форму и нажмите «Создать персону»')); return; }
+    txt('personaList', personas.map(p=>{
+      const acc = p.account_id
+        ? `📱 ${esc(p.first_name||p.phone||('#'+p.account_id))}${p.username?' · @'+esc(p.username):''}`
+        : '<span style="color:var(--orange)">⚠️ без аккаунта — в диалогах не участвует</span>';
+      const mem = p.memory_n ? ` · 🧠 ${num(p.memory_n)}` : '';
+      return `
+      <div class="row" style="flex-wrap:wrap">
         <div class="row-ico" style="background:var(--bg-purple-16)">${p.is_active?'🟢':'⚫'}</div>
-        <div class="row-body">
-          <div class="row-name">${esc(p.persona_name)} ${PERSONA_STYLE[p.speech_style]||p.speech_style||''}</div>
-          <div class="row-val">${esc(p.first_name||p.phone||'')} · ${esc(p.niche||'')} · ${p.age||'?'} лет</div>
+        <div class="row-body" style="min-width:0">
+          <div class="row-name">${esc(p.persona_name)} · ${PERSONA_STYLE[p.speech_style]||esc(p.style_label||'')}</div>
+          <div class="row-val">${acc}</div>
+          <div class="row-val">${esc(p.niche||'без ниши')} · ${p.age||'?'} лет${p.tone_label?' · '+esc(p.tone_label):''}${mem}</div>
         </div>
-        <div class="row-right" style="display:flex;gap:6px">
+        <div class="row-right" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn ${p.is_active?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="togglePersona(${p.id},${p.is_active})">${p.is_active?'Выкл':'Вкл'}</button>
+          <button class="icon-btn sm" onclick="editPersona(${p.id})" aria-label="Изменить" title="Изменить">✏️</button>
+          ${p.account_id?`<button class="icon-btn sm" onclick="applyPersonaProfile(${p.id}, this)" aria-label="Оформить аккаунт" title="Поставить имя и описание персоны в профиль аккаунта">🎨</button>`:''}
           <button class="icon-btn sm danger" onclick="deletePersona(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
-      </div>
-    `).join(''));
+      </div>`;}).join(''));
   } catch(e) {
     txt('personaStats','');
     txt('personaList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openPersonas')}));
   }
+}
+function fillPersonaAccounts(selected) {
+  const sel = document.getElementById('pAccount');
+  if (!sel) return;
+  const editId = parseInt((document.getElementById('pEditId')||{}).value)||0;
+  const mine = editId ? (PERSONAS.find(p=>p.id===editId)||{}).account_id : null;
+  const cur = selected !== undefined ? selected : (sel.value || 'auto');
+  const free = PERSONA_ACCS.filter(a=>!a.persona || a.id===mine);
+  sel.innerHTML = `<option value="auto">✨ Свободный аккаунт автоматически</option>`
+    + `<option value="">— без аккаунта —</option>`
+    + free.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||('#'+a.id))}${a.username?' · @'+esc(a.username):''}</option>`).join('');
+  sel.value = [...sel.options].some(o=>o.value===String(cur)) ? String(cur) : 'auto';
+}
+function personaTemplate(k) {
+  const t = PERSONA_TEMPLATES[k]; if (!t) return;
+  const set = (id,v) => { const el=document.getElementById(id); if (el) el.value = v; };
+  set('pStyle', t.style); set('pTone', t.tone); set('pAge', t.age); set('pNiche', t.niche);
+  set('pInterests', t.interests); set('pBio', t.bio); set('pBackstory', t.backstory);
+  const n = document.getElementById('pName'); if (n && !n.value.trim()) n.focus();
+}
+function _personaBody() {
+  const v = id => ((document.getElementById(id)||{}).value||'').trim();
+  return {
+    persona_name: v('pName'),
+    account_id: v('pAccount'),
+    speech_style: v('pStyle')||'casual',
+    tone: v('pTone')||'positive',
+    niche: v('pNiche'),
+    bio: v('pBio'),
+    backstory: v('pBackstory'),
+    interests: v('pInterests'),
+    age: parseInt(v('pAge')||'25'),
+  };
+}
+function editPersona(id) {
+  const p = PERSONAS.find(x=>x.id===id); if (!p) return;
+  const set = (k,v) => { const el=document.getElementById(k); if (el) el.value = v==null?'':v; };
+  set('pEditId', p.id); set('pName', p.persona_name); set('pStyle', p.speech_style||'casual');
+  set('pTone', p.tone||'positive'); set('pNiche', p.niche); set('pBio', p.bio); set('pBackstory', p.backstory);
+  set('pInterests', (p.interests||[]).join(', ')); set('pAge', p.age||25);
+  fillPersonaAccounts(p.account_id ? String(p.account_id) : '');
+  txt('pFormTitle', `Изменить персону «${esc(p.persona_name)}»`);
+  txt('pSubmit', '💾 Сохранить');
+  const c = document.getElementById('pCancelEdit'); if (c) c.style.display = '';
+  const t = document.getElementById('pFormTitle'); if (t && t.scrollIntoView) t.scrollIntoView({behavior:'smooth'});
+}
+function resetPersonaForm() {
+  ['pEditId','pName','pNiche','pBio','pBackstory','pInterests','pTryMsg'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  const a = document.getElementById('pAge'); if (a) a.value='25';
+  txt('pFormTitle','Создать персону'); txt('pSubmit','🎭 Создать персону'); txt('pTryOut',''); txt('pErr','');
+  const c = document.getElementById('pCancelEdit'); if (c) c.style.display = 'none';
+  fillPersonaAccounts('auto');
+}
+async function previewPersona(btn) {
+  const body = _personaBody();
+  if (!body.persona_name) { txt('pErr','Сначала укажите имя персоны'); return; }
+  txt('pErr','');
+  body.message = ((document.getElementById('pTryMsg')||{}).value||'').trim();
+  const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Думает…';
+  try {
+    const d = await api('/api/miniapp/persona/preview', {method:'POST', body:JSON.stringify(body)});
+    txt('pTryOut', `<div class="card" style="font-size:13px"><div class="field-note">Собеседник: ${esc(d.asked||'')}</div><div style="margin-top:4px">🎭 ${esc(d.reply||'')}</div></div>`);
+  } catch(e) { txt('pTryOut', `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось получить ответ'))}</div>`); }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+async function applyPersonaProfile(id, el) {
+  const p = PERSONAS.find(x=>x.id===id); if (!p) return;
+  const about = (p.bio||'').slice(0,70);
+  if (!await askConfirm(`Поставить в профиль аккаунта имя «${p.persona_name}»${about?' и описание «'+about+'»':''}?`)) return;
+  try {
+    const r = await api(`/api/miniapp/persona/${id}/apply_profile`, {method:'POST', body:'{}'});
+    toast(`🎨 Оформление поставлено в очередь (#${r.op_id})`);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
 }
 async function togglePersona(id, active) {
   try {
@@ -22779,38 +23141,32 @@ async function deletePersona(id, _el) {
   try {
     await api(`/api/miniapp/persona/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
+    if (parseInt((document.getElementById('pEditId')||{}).value)===id) resetPersonaForm();
     openPersonas();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
 async function submitPersona() {
-  const name = (document.getElementById('pName')||{}).value?.trim();
+  const body = _personaBody();
   const errEl = document.getElementById('pErr');
-  if (!name) { if(errEl) errEl.textContent='Укажите имя персоны'; return; }
+  if (!body.persona_name) { if(errEl) errEl.textContent='Укажите имя персоны'; return; }
   if(errEl) errEl.textContent='';
-  const btn = document.querySelector('#s-personas .btn-p');
-  if(btn) { btn.disabled=true; btn.textContent='Создание...'; }
+  const editId = parseInt((document.getElementById('pEditId')||{}).value)||0;
+  const btn = document.getElementById('pSubmit');
+  if(btn) { btn.disabled=true; btn.textContent= editId ? 'Сохраняю…' : 'Создание...'; }
   try {
-    await api('/api/miniapp/persona', {
-      method:'POST',
+    await api(editId ? `/api/miniapp/persona/${editId}` : '/api/miniapp/persona', {
+      method: editId ? 'PUT' : 'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        persona_name: name,
-        speech_style: document.getElementById('pStyle')?.value||'casual',
-        niche: document.getElementById('pNiche')?.value?.trim()||'',
-        bio: document.getElementById('pBio')?.value?.trim()||'',
-        interests: document.getElementById('pInterests')?.value?.trim()||'',
-        age: parseInt(document.getElementById('pAge')?.value||'25')
-      })
+      body: JSON.stringify(body)
     });
-    toast('🎭 Персона создана!');
-    ['pName','pNiche','pBio','pInterests'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-    document.getElementById('pAge').value='25';
+    toast(editId ? '💾 Персона сохранена' : '🎭 Персона создана!');
+    resetPersonaForm();
     openPersonas();
   } catch(e) {
     if(errEl) errEl.textContent='Ошибка: '+errRu(e);
-    toast('⚠️ Ошибка создания');
+    toast(editId ? '⚠️ Ошибка сохранения' : '⚠️ Ошибка создания');
   } finally {
-    if(btn) { btn.disabled=false; btn.textContent='🎭 Создать персону'; }
+    if(btn) { btn.disabled=false; btn.textContent = (parseInt((document.getElementById('pEditId')||{}).value)||0) ? '💾 Сохранить' : '🎭 Создать персону'; }
   }
 }
 

@@ -22527,7 +22527,8 @@ async def _exec_mass_invite(
 async def _exec_bulk_set_profile(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Массовое оформление аккаунтов: имя/bio, аватар, 2FA."""
+    """Массовое оформление аккаунтов: имя/описание, аватар (набор), юзернейм,
+    2FA, приватность, закрытие чужих сеансов, очистка."""
     from services import profile_setter_engine as pse
 
     op = params.get("op", "")
@@ -22537,6 +22538,10 @@ async def _exec_bulk_set_profile(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+    # Порядок прогона — порядок выбора на экране: по нему раздаются аватары из
+    # набора и номера {n} в юзернейме, и повтор раздаёт их так же.
+    _order = {aid: i for i, aid in enumerate(account_ids)}
+    accounts = sorted(accounts, key=lambda a: _order.get(int(a["id"]), len(_order)))
 
     # Захват под живые сессии: без него операция подключала бы аккаунты,
     # которые в этот момент ведут другую операцию или прогрев — две сессии
@@ -22549,44 +22554,58 @@ async def _exec_bulk_set_profile(
 
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
-    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+    accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
 
-    ok_count, fail_count = 0, 0
+    # Идемпотентность повтора. Аватар ДОБАВЛЯЕТ фото в историю профиля, а не
+    # заменяет его: повтор прогона (после сетевого сбоя, на деплое) давал
+    # аккаунту второе и третье фото. Смена 2FA на повторе падала с «неверный
+    # пароль» — текущий пароль уже новый — и честно отработанный аккаунт
+    # попадал в ошибки. Ключ журнала — acc#<id>.
+    _already = await completed_targets(pool, op_id)
+
+    ok_count, fail_count, skipped_done = 0, 0, 0
     total = len(accounts)
 
     for idx, acc in enumerate(accounts, 1):
         if await _is_cancelled(pool, op_id):
             break
+        _key = f"acc#{acc['id']}"
+        if _key in _already:
+            ok_count += 1
+            skipped_done += 1
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
         try:
+            _p = params
+            if op in ("2fa", "reset_2fa") and not (params.get("current_password") or ""):
+                # Пароль, который ставили мы сами, известен: без него смена и
+                # снятие 2FA на уже защищённом аккаунте невозможны, а владелец
+                # не обязан помнить пароль каждого из сотни аккаунтов.
+                _stored = await _stored_twofa(pool, owner_id, int(acc["id"]))
+                if _stored:
+                    _p = {**params, "current_password": _stored}
             # Единый диспетчер op→движок (та же реализация, что инлайн-путь). Спинтакс
             # раскрывается внутри apply_op — для каждого аккаунта отдельно.
-            res = await pse.apply_op(acc["session_str"], dict(acc), op, params)
+            res = await pse.apply_op(acc["session_str"], dict(acc), op, _p, slot=idx - 1)
 
             if res["ok"]:
                 ok_count += 1
+                if op == "2fa":
+                    await _remember_twofa(pool, owner_id, int(acc["id"]),
+                                          params.get("new_password") or "")
+                elif op == "reset_2fa":
+                    await _remember_twofa(pool, owner_id, int(acc["id"]), "")
                 # «Проверка» — фиксируем сам вердикт в лог, чтобы был виден результат
-                if op == "check_restriction":
-                    verdict = pse.format_restriction_verdict(res)
-                    await _journal_write(
-                        pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                        "VALUES($1,$2,$3,'ok',$4)",
-                        op_id, idx, f"acc#{acc['id']}", verdict[:200],
-                        log_ctx=f" op={op_id}", where="bulk_set_profile",
-                    )
-                else:
-                    await _journal_write(
-                        pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                        op_id, idx, f"acc#{acc['id']}",
-                        log_ctx=f" op={op_id}", where="bulk_set_profile",
-                    )
+                _msg = (pse.format_restriction_verdict(res)[:200]
+                        if op == "check_restriction" else None)
+                await _journal_done(pool, op_id, idx, _key, _msg)
             else:
                 fail_count += 1
                 await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    op_id, idx, _key, (res.get("error") or "")[:200],
                     log_ctx=f" op={op_id}", where="bulk_set_profile",
                 )
         except Exception as exc:
@@ -22599,18 +22618,53 @@ async def _exec_bulk_set_profile(
             # межцелевой темп под губернатором (давление флота тормозит)
             await asyncio.sleep(await _governed_delay(pool, owner_id, 2.0))
 
-    op_labels = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль",
-                 "username": "Username", "bio": "Bio", "close_sessions": "Закрыть сессии",
-                 "privacy": "Приватность",
-                 "clear_bio": "Очистить bio", "remove_username": "Снять username",
-                 "remove_avatar": "Удалить фото", "reset_2fa": "Снять 2FA",
+    op_labels = {**pse.SETTER_OPS, "bio": "Описание", "remove_username": "Снять юзернейм",
                  "set_online": "В сети", "check_restriction": "Проверка ограничений"}
     summary = (
-        f"🎨 Сеттер: {op_labels.get(op, op)}\n"
+        f"🎨 Оформление: {op_labels.get(op, op)}\n"
         f"✅ Успешно: {ok_count}/{total}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+        + (f"\n↩️ Уже сделано прошлым прогоном: {skipped_done}" if skipped_done else "")
+        + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
+        + ("\n🔐 Пароль сохранён у аккаунтов — смотрите «Пароли 2FA» на экране оформления"
+           if op == "2fa" and ok_count else "")
     )
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+async def _stored_twofa(pool, owner_id: int, account_id: int) -> str:
+    """Сохранённый пароль 2FA аккаунта (расшифрованный) или ''. Сбой чтения —
+    '' : тогда Telegram честно ответит «нужен пароль», а не операция упадёт."""
+    try:
+        enc = await pool.fetchval(
+            "SELECT twofa_enc FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            account_id, owner_id)
+    except Exception:
+        log_exc_swallow(log, f"_stored_twofa acc={account_id}")
+        return ""
+    if not enc:
+        return ""
+    from services.token_vault import decrypt_token
+    return decrypt_token(enc) or ""
+
+
+async def _remember_twofa(pool, owner_id: int, account_id: int, password: str) -> None:
+    """Запомнить пароль 2FA аккаунта зашифрованным (пустой — забыть).
+
+    Пароль, поставленный массово и нигде не сохранённый, — это флот, который
+    владелец потеряет при первом же перелогине. Пишем повторно: потеря этой
+    записи стоит доступа к аккаунту.
+    """
+    from services.token_vault import encrypt_plaintext_token
+    enc = encrypt_plaintext_token(password) if password else None
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET twofa_enc=$1 WHERE id=$2 AND owner_id=$3",
+                enc, account_id, owner_id)
+            return
+        except Exception:
+            log_exc_swallow(log, f"_remember_twofa acc={account_id} attempt={_attempt}")
 
 
 # ── Репортер ──────────────────────────────────────────────────────────────────
@@ -22925,7 +22979,7 @@ async def _exec_ai_comment(
     ставится до отправки и переживает операцию, то есть второй запуск по тем
     же каналам не пишет второй комментарий под тот же пост.
     """
-    from services import ai_comment_engine, account_manager, content_safety
+    from services import ai_comment_engine, account_manager, content_safety, persona_engine
     from services.growth_agent_settings import comment_settings
 
     channels = [str(c).strip() for c in (params.get("channels") or []) if str(c).strip()]
@@ -23001,12 +23055,16 @@ async def _exec_ai_comment(
             continue
         acc = accounts[idx % len(accounts)]
         try:
+            # Персона аккаунта (экран «Профили → Персоны») задаёт голос
+            # комментария: без неё весь флот пишет одним голосом.
+            _persona = await persona_engine.persona_prompt_for_account(pool, int(acc["id"]))
             res = await ai_comment_engine.post_ai_comment(
                 acc["session_str"], dict(acc), ref, niche=niche, tone=tone,
                 posts=cfg["posts_per_channel"], pick=cfg["post_pick"],
                 max_age_hours=cfg["max_post_age_hours"], length=cfg["length"],
                 extra_instruction=cfg["extra_instruction"],
-                join_discussion=cfg["join_discussion"], mark=_mark_post)
+                join_discussion=cfg["join_discussion"], mark=_mark_post,
+                persona=_persona)
             if res.get("ok"):
                 ok_count += 1
                 comments_total += len(res.get("comments") or []) or 1

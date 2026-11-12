@@ -3029,21 +3029,72 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Profile Setter ─────────────────────────────────────────────────────────
 
+    # Какие аккаунты годятся для оформления: живые, с сессией, не в паузе.
+    # Одно условие на статус, выбор и отправку — иначе экран обещал бы одно
+    # число, а операция ушла бы на другое.
+    _SETTER_ELIGIBLE = (
+        "owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+        "AND (cooldown_until IS NULL OR cooldown_until < NOW())"
+    )
+
     async def profile_setter_status(request: web.Request) -> web.Response:
+        """Сколько аккаунтов можно оформить и какие именно (для выбора)."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            total = await pool.fetchval(
-                "SELECT COUNT(*) FROM tg_accounts "
-                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-                "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
+            rows = await pool.fetch(
+                "SELECT a.id, a.phone, a.first_name, a.username, "
+                "(a.twofa_enc IS NOT NULL) AS twofa_saved, "
+                "pp.persona_name "
+                "FROM tg_accounts a "
+                "LEFT JOIN persona_profiles pp ON pp.account_id=a.id AND pp.owner_id=a.owner_id "
+                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
+                "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+                "ORDER BY a.trust_score DESC NULLS LAST, a.id LIMIT 500",
                 uid,
             )
         except Exception:
             log.exception("profile_setter_status uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"available_accounts": int(total or 0)})
+        accounts = [{
+            "id": r["id"],
+            "phone": r["phone"] or "",
+            "first_name": r["first_name"] or "",
+            "username": r["username"] or "",
+            "twofa_saved": bool(r["twofa_saved"]),
+            "persona": r["persona_name"] or "",
+        } for r in rows]
+        return _json_resp({
+            "available_accounts": len(accounts),
+            "accounts": accounts,
+            "twofa_saved": sum(1 for a in accounts if a["twofa_saved"]),
+        })
+
+    async def profile_setter_preview(request: web.Request) -> web.Response:
+        """Как будут выглядеть профили после оформления.
+
+        Рендер — ТЕМИ ЖЕ функциями движка, что и у исполнителя, иначе
+        предпросмотр стал бы вторым источником правды.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        from services import profile_setter_engine as _pse
+        fields = {k: str(body.get(k) or "")[:512]
+                  for k in ("first_name", "last_name", "about")}
+        un = str(body.get("username") or "").strip().lstrip("@")[:200]
+        try:
+            out = _pse.render_preview(fields)
+            if un:
+                out["usernames"] = [_pse.render_username(un, i) for i in range(3)]
+        except Exception as exc:
+            return _err(f"Шаблон не разворачивается: {str(exc)[:100]}", 400)
+        return _json_resp(out)
 
     async def profile_setter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3051,61 +3102,52 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            op = validate_string(body.get("op"), max_len=20)
+            op = validate_string(body.get("op"), max_len=20) or ""
             acc_count = validate_integer(body.get("acc_count", 0), min_val=0) or 0
         except Exception:
             return _err("Неверное тело запроса", 400)
-        if op not in ("name", "avatar", "2fa"):
-            return _err("Операция: имя, аватар или двухфакторная защита", 400)
-        if acc_count < 0:
-            return _err("Число аккаунтов не может быть отрицательным", 400)
+        from services import profile_setter_engine as _pse
         try:
-            total = await pool.fetchval(
-                "SELECT COUNT(*) FROM tg_accounts "
-                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-                "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
-                uid,
-            )
-        except Exception:
-            log.exception("profile_setter_submit fetchval uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        total = int(total or 0)
-        use = min(acc_count, total) if acc_count > 0 else total
-        if use == 0:
-            return _err("Нет доступных аккаунтов", 400)
+            params = _pse.build_setter_params(op, body)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        want_ids: list[int] = []
+        for raw in (body.get("account_ids") or [])[:500]:
+            try:
+                want_ids.append(int(raw))
+            except (TypeError, ValueError):
+                return _err("Неверный список аккаунтов", 400)
         try:
-            rows = await pool.fetch(
-                "SELECT id FROM tg_accounts "
-                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-                "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
-                "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
-                uid, use,
-            )
+            # Явный выбор проверяется тем же условием и тем же владельцем:
+            # чужой или выбывший id просто не попадёт в выборку.
+            if want_ids:
+                rows = await pool.fetch(
+                    "SELECT id FROM tg_accounts WHERE " + _SETTER_ELIGIBLE
+                    + " AND id = ANY($2::bigint[])",
+                    uid, want_ids,
+                )
+                got = {r["id"] for r in rows}
+                account_ids = [i for i in want_ids if i in got]
+            else:
+                rows = await pool.fetch(
+                    "SELECT id FROM tg_accounts WHERE " + _SETTER_ELIGIBLE + " "
+                    "ORDER BY trust_score DESC NULLS LAST, id LIMIT $2",
+                    uid, acc_count if acc_count > 0 else 500,
+                )
+                account_ids = [r["id"] for r in rows]
         except Exception:
             log.exception("profile_setter_submit fetch uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        account_ids = [r["id"] for r in rows]
-        params: dict = {"op": op, "account_ids": account_ids}
-        if op == "name":
-            params["name_data"] = {
-                "first_name": str(body.get("first_name", "")).strip()[:64],
-                "last_name": str(body.get("last_name", "")).strip()[:64],
-                "about": str(body.get("about", "")).strip()[:70],
-            }
-        elif op == "avatar":
-            url = str(body.get("avatar_url", "")).strip()
-            if not url.startswith("http"):
-                return _err("Ссылка на аватар должна начинаться с http", 400)
-            params["avatar_url"] = url
-        elif op == "2fa":
-            new_pass = str(body.get("new_password", "")).strip()
-            if len(new_pass) < 4:
-                return _err("Пароль минимум 4 символа", 400)
-            params["new_password"] = new_pass
-            params["current_password"] = str(body.get("current_password", "")).strip()
-            params["hint"] = str(body.get("hint", "")).strip()
-        label_map = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
-        label = f"Сеттер: {label_map.get(op, op)} × {len(account_ids)} акк."
+        if not account_ids:
+            return _err("Нет доступных аккаунтов", 400)
+        # Канарейка: сначала один аккаунт — владелец смотрит результат и только
+        # потом раскатывает на флот. Ошибка в шаблоне стоит одного профиля.
+        if body.get("canary"):
+            account_ids = account_ids[:1]
+        params["account_ids"] = account_ids
+        label = _pse.setter_label(op, params, len(account_ids))
+        if body.get("canary"):
+            label = "🧪 Проба · " + label
         try:
             op_id = await _obus.submit(
                 pool, uid, "bulk_set_profile", params,
@@ -3117,7 +3159,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("profile_setter_submit insert uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(account_ids)})
+        return _json_resp({"ok": True, "op_id": op_id, "label": label,
+                           "count": len(account_ids), "account_ids": account_ids})
+
+    async def profile_setter_twofa(request: web.Request) -> web.Response:
+        """Сохранённые пароли 2FA своих аккаунтов — чтобы владелец мог их
+        записать. Только свои аккаунты (owner_id в запросе), только POST:
+        GET оседает в истории и логах прокси."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                "SELECT id, phone, first_name, username, twofa_enc FROM tg_accounts "
+                "WHERE owner_id=$1 AND twofa_enc IS NOT NULL ORDER BY id",
+                uid,
+            )
+        except Exception:
+            log.exception("profile_setter_twofa uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        from services.token_vault import decrypt_token
+        items = [{
+            "id": r["id"],
+            "phone": r["phone"] or "",
+            "name": r["first_name"] or (("@" + r["username"]) if r["username"] else ""),
+            # Ключ не «password»: тот последний барьер _json_resp гасит
+            # целиком, а здесь владелец НАРОЧНО открывает пароли своих
+            # аккаунтов, чтобы записать их, — как с экспортом своей сессии
+            # (ключ «session», см. services/secret_masking.py).
+            "twofa": decrypt_token(r["twofa_enc"]) or "",
+        } for r in rows]
+        # Факт показа — в журнал (без самих паролей): кто и сколько открыл.
+        log.info("profile_setter_twofa reveal uid=%d accounts=%d", uid, len(items))
+        return _json_resp({"items": items})
 
     # ── Account Cleaner ────────────────────────────────────────────────────────
 
@@ -4620,6 +4694,70 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Persona Hub ───────────────────────────────────────────────────────────
 
+    # Персона работает ТОЛЬКО через аккаунт: прогрев чатов и ИИ-комментинг
+    # берут характер по account_id (persona_engine.get_persona). Экран
+    # создавал персоны без аккаунта, и ни одна из них не участвовала ни в
+    # одном диалоге — список выглядел рабочим, а голос флота был прежним.
+    _PERSONA_STYLES = {"formal", "casual", "expert", "friendly", "sarcastic", "neutral"}
+    _PERSONA_TONES = {"positive", "neutral", "skeptical", "enthusiastic"}
+
+    def _persona_fields(body: dict) -> dict:
+        """Поля персоны из тела запроса — проверенные и обрезанные."""
+        interests_raw = body.get("interests", "")
+        if isinstance(interests_raw, list):
+            items = interests_raw
+        else:
+            items = str(interests_raw or "").split(",")
+        interests = [v for v in (validate_string(i, max_len=50) or "" for i in items) if v][:20]
+        style = validate_string(body.get("speech_style"), max_len=20) or "casual"
+        tone = validate_string(body.get("tone"), max_len=20) or "positive"
+        return {
+            "persona_name": (validate_string(body.get("persona_name"), max_len=64) or "").strip(),
+            "bio": (str(body.get("bio") or "").strip()[:1000]) or None,
+            "age": validate_integer(body.get("age") or 25, min_val=18, max_val=80) or 25,
+            "interests": interests,
+            "speech_style": style if style in _PERSONA_STYLES else "casual",
+            "tone": tone if tone in _PERSONA_TONES else "positive",
+            "niche": (str(body.get("niche") or "").strip()[:64]) or None,
+            "backstory": (str(body.get("backstory") or "").strip()[:2000]) or None,
+        }
+
+    async def _persona_account(uid: int, raw, exclude_persona: int | None = None):
+        """Аккаунт для персоны: (account_id | None, ошибка | None).
+
+        ``"auto"`` — первый свой живой аккаунт без персоны; число — свой аккаунт,
+        не занятый ДРУГОЙ персоной; пусто — без аккаунта.
+        """
+        if raw in (None, "", 0, "0"):
+            return None, None
+        if raw == "auto":
+            aid = await pool.fetchval(
+                "SELECT a.id FROM tg_accounts a WHERE a.owner_id=$1 AND a.is_active=TRUE "
+                "AND a.session_str IS NOT NULL AND NOT EXISTS ("
+                "SELECT 1 FROM persona_profiles pp WHERE pp.account_id=a.id) "
+                "ORDER BY a.trust_score DESC NULLS LAST, a.id LIMIT 1",
+                uid,
+            )
+            if not aid:
+                return None, "Свободных аккаунтов нет: у каждого уже есть персона"
+            return int(aid), None
+        try:
+            aid = int(raw)
+        except (TypeError, ValueError):
+            return None, "Неверный аккаунт"
+        own = await pool.fetchval(
+            "SELECT 1 FROM tg_accounts WHERE id=$1 AND owner_id=$2", aid, uid)
+        if not own:
+            return None, "Аккаунт не найден"
+        busy = await pool.fetchval(
+            "SELECT persona_name FROM persona_profiles WHERE account_id=$1 "
+            "AND id IS DISTINCT FROM $2",
+            aid, exclude_persona,
+        )
+        if busy:
+            return None, f"У этого аккаунта уже есть персона «{busy}»"
+        return aid, None
+
     async def persona_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -4627,21 +4765,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 """SELECT pp.id, pp.persona_name, pp.bio, pp.age, pp.speech_style,
-                          pp.tone, pp.niche, pp.is_active, pp.created_at, pp.interests,
-                          ta.phone, ta.first_name, ta.username
+                          pp.tone, pp.niche, pp.backstory, pp.is_active, pp.created_at,
+                          pp.interests, pp.account_id,
+                          ta.phone, ta.first_name, ta.username,
+                          (SELECT COUNT(*) FROM persona_memory pm WHERE pm.persona_id=pp.id) AS memory_n
                    FROM persona_profiles pp
-                   LEFT JOIN tg_accounts ta ON ta.id=pp.account_id
+                   LEFT JOIN tg_accounts ta ON ta.id=pp.account_id AND ta.owner_id=pp.owner_id
                    WHERE pp.owner_id=$1 ORDER BY pp.created_at DESC""",
                 uid,
             )
-            return _json_resp({"personas": [
-                {
-                    **dict(r),
-                    "interests": list(r.get("interests") or []),
-                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                }
-                for r in rows
-            ]})
+            accs = await pool.fetch(
+                "SELECT a.id, a.phone, a.first_name, a.username, "
+                "(SELECT pp.persona_name FROM persona_profiles pp WHERE pp.account_id=a.id) AS persona "
+                "FROM tg_accounts a WHERE a.owner_id=$1 AND a.is_active=TRUE "
+                "AND a.session_str IS NOT NULL ORDER BY a.trust_score DESC NULLS LAST, a.id LIMIT 500",
+                uid,
+            )
+            from services import persona_engine as _pe
+            return _json_resp({
+                "personas": [
+                    {
+                        **dict(r),
+                        "interests": list(r.get("interests") or []),
+                        "memory_n": int(r.get("memory_n") or 0),
+                        "style_label": _pe.STYLE_LABELS.get(r["speech_style"] or "", ""),
+                        "tone_label": _pe.TONE_LABELS.get(r["tone"] or "", ""),
+                        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                    }
+                    for r in rows
+                ],
+                "accounts": [dict(a) for a in accs],
+                "styles": _pe.STYLE_LABELS,
+                "tones": _pe.TONE_LABELS,
+            })
         except Exception:
             log.exception("persona_list uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -4662,7 +4818,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             new_val = not row["is_active"]
             await pool.execute(
-                "UPDATE persona_profiles SET is_active=$1 WHERE id=$2 AND owner_id=$3", new_val, persona_id, uid
+                "UPDATE persona_profiles SET is_active=$1, updated_at=NOW() "
+                "WHERE id=$2 AND owner_id=$3", new_val, persona_id, uid
             )
             return _json_resp({"is_active": new_val})
         except Exception:
@@ -4694,40 +4851,147 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
-        name = validate_string(body.get("persona_name"), max_len=100)
-        if not name:
+        f = _persona_fields(body)
+        if not f["persona_name"]:
             return _err("Имя персоны обязательно", 400)
-        VALID_STYLES = {"formal", "casual", "expert", "friendly", "sarcastic", "neutral"}
-        speech_style = validate_string(body.get("speech_style"), max_len=20) or "casual"
-        if speech_style not in VALID_STYLES:
-            speech_style = "casual"
         try:
-            interests_raw = body.get("interests", "")
-            if isinstance(interests_raw, list):
-                interests = [validate_string(i, max_len=50) or "" for i in interests_raw]
-                interests = [i for i in interests if i]
-            else:
-                interests = [validate_string(t, max_len=50) or "" for t in str(interests_raw).split(",")]
-                interests = [i for i in interests if i]
-            age = validate_integer(body.get("age") or 25, min_val=18, max_val=80) or 25
+            account_id, why = await _persona_account(uid, body.get("account_id"))
+            if why:
+                return _err(why, 409 if "уже есть" in why else 400)
             row = await pool.fetchrow(
                 """INSERT INTO persona_profiles
-                   (owner_id, persona_name, bio, age, interests, speech_style, tone, niche, backstory, is_active)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)
-                   RETURNING id, persona_name, is_active""",
-                uid, name,
-                (body.get("bio") or "").strip() or None,
-                age,
-                interests,
-                speech_style,
-                (body.get("tone") or "positive").strip(),
-                (body.get("niche") or "").strip() or None,
-                (body.get("backstory") or "").strip() or None,
+                   (owner_id, account_id, persona_name, bio, age, interests, speech_style,
+                    tone, niche, backstory, is_active)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE)
+                   RETURNING id, persona_name, account_id, is_active""",
+                uid, account_id, f["persona_name"], f["bio"], f["age"], f["interests"],
+                f["speech_style"], f["tone"], f["niche"], f["backstory"],
             )
             return _json_resp({"ok": True, "persona": dict(row)})
+        except asyncpg.UniqueViolationError:
+            return _err("У этого аккаунта уже есть персона", 409)
         except Exception:
             log.exception("persona_create uid=%d", uid)
             return _err("Ошибка создания персоны", 500)
+
+    async def persona_update(request: web.Request) -> web.Response:
+        """Правка персоны целиком, включая привязку к аккаунту."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            persona_id = int(request.match_info["persona_id"])
+            body = await request.json()
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор персоны", 400)
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        f = _persona_fields(body)
+        if not f["persona_name"]:
+            return _err("Имя персоны обязательно", 400)
+        try:
+            account_id, why = await _persona_account(uid, body.get("account_id"),
+                                                     exclude_persona=persona_id)
+            if why:
+                return _err(why, 409 if "уже есть" in why else 400)
+            row = await pool.fetchrow(
+                """UPDATE persona_profiles SET account_id=$3, persona_name=$4, bio=$5,
+                       age=$6, interests=$7, speech_style=$8, tone=$9, niche=$10,
+                       backstory=$11, updated_at=NOW()
+                   WHERE id=$1 AND owner_id=$2
+                   RETURNING id, persona_name, account_id, is_active""",
+                persona_id, uid, account_id, f["persona_name"], f["bio"], f["age"],
+                f["interests"], f["speech_style"], f["tone"], f["niche"], f["backstory"],
+            )
+            if not row:
+                return _err("Не найдено", 404)
+            return _json_resp({"ok": True, "persona": dict(row)})
+        except asyncpg.UniqueViolationError:
+            return _err("У этого аккаунта уже есть персона", 409)
+        except Exception:
+            log.exception("persona_update uid=%d persona=%d", uid, persona_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def persona_preview(request: web.Request) -> web.Response:
+        """Как персона ответит на реплику — до того, как она заговорит в чатах.
+
+        Данные формы, а не сохранённая запись: владелец подбирает характер и
+        сразу видит голос. Ответ модели — только показ, наружу не уходит.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        f = _persona_fields(body)
+        if not f["persona_name"]:
+            return _err("Сначала укажите имя персоны", 400)
+        message = (str(body.get("message") or "").strip()[:500]
+                   or "Привет! Как тебе последние новости в твоей теме?")
+        from services import persona_engine as _pe
+        persona = _pe.PersonaProfile(
+            persona_id=0, account_id=0, name=f["persona_name"], bio=f["bio"] or "",
+            age=f["age"], interests=f["interests"], speech_style=f["speech_style"],
+            tone=f["tone"], niche=f["niche"] or "", backstory=f["backstory"] or "",
+            created_at=None,
+        )
+        try:
+            from services import ai_gateway
+            r = await ai_gateway.chat(
+                [{"role": "system", "content": _pe.build_persona_system_prompt(persona)},
+                 {"role": "user", "content": message}],
+                task=ai_gateway.TASK_ASSISTANT, owner_id=uid, max_tokens=200,
+            )
+        except Exception:
+            log.exception("persona_preview uid=%d", uid)
+            return _err("ИИ сейчас недоступен — попробуйте позже", 503)
+        if not r.text:
+            return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 503)
+        return _json_resp({"reply": r.text.strip()[:1000], "asked": message})
+
+    async def persona_apply_profile(request: web.Request) -> web.Response:
+        """Оформить аккаунт персоны под неё: имя и описание из персоны.
+
+        Идёт той же массовой операцией оформления (bulk_set_profile) на один
+        аккаунт — со всеми её защитами (аренда сессии, карантин, журнал).
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            persona_id = int(request.match_info["persona_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор персоны", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT persona_name, bio, account_id FROM persona_profiles "
+                "WHERE id=$1 AND owner_id=$2", persona_id, uid)
+        except Exception:
+            log.exception("persona_apply_profile uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not row:
+            return _err("Не найдено", 404)
+        if not row["account_id"]:
+            return _err("Сначала привяжите персону к аккаунту", 400)
+        name = (row["persona_name"] or "").strip()
+        first, _, last = name.partition(" ")
+        params = {
+            "op": "name", "keep_empty": True, "account_ids": [int(row["account_id"])],
+            "name_data": {"first_name": first[:64], "last_name": last.strip()[:64],
+                          "about": (row["bio"] or "").strip()[:70]},
+        }
+        label = f"Оформление: профиль по персоне «{name[:40]}»"
+        try:
+            op_id = await _obus.submit(pool, uid, "bulk_set_profile", params,
+                                       total_items=1, label=label)
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("persona_apply_profile submit uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
     # ── Auto Registrar ─────────────────────────────────────────────────────────
 
@@ -8850,6 +9114,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Profile Setter
     app.router.add_get("/api/miniapp/profile_setter/status", profile_setter_status)
     app.router.add_post("/api/miniapp/profile_setter", profile_setter_submit)
+    app.router.add_post("/api/miniapp/profile_setter/preview", profile_setter_preview)
+    app.router.add_post("/api/miniapp/profile_setter/twofa", profile_setter_twofa)
     # Bot Notes
     # Bot Commands
     # Account Shield
@@ -9004,6 +9270,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/persona", persona_create)
     app.router.add_put("/api/miniapp/persona/{persona_id}/toggle", persona_toggle)
     app.router.add_delete("/api/miniapp/persona/{persona_id}", persona_delete)
+    app.router.add_put("/api/miniapp/persona/{persona_id}", persona_update)
+    app.router.add_post("/api/miniapp/persona/preview", persona_preview)
+    app.router.add_post("/api/miniapp/persona/{persona_id}/apply_profile", persona_apply_profile)
     # Auto Registrar
     app.router.add_get("/api/miniapp/autoreg", autoreg_status)
     app.router.add_post("/api/miniapp/autoreg", autoreg_submit)
