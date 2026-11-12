@@ -4745,6 +4745,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return None
         return n if lo <= n <= hi else None
 
+    def _style_summary(samples) -> str:
+        from services import persona_style as _ps
+        return _ps.summary(_ps.fingerprint(list(samples or [])))
+
     def _creativity(v) -> int:
         """Креативность 0–100: за краями — до края, нечисло — 60 (как в схеме)."""
         try:
@@ -4769,7 +4773,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not isinstance(samples_raw, list):
             # С экрана образцы приходят текстом: одна строка — одно сообщение.
             samples_raw = str(samples_raw).splitlines()
-        samples = [" ".join(str(x).split())[:200] for x in samples_raw if str(x).strip()][:5]
+        from services import persona_style as _ps
+        samples = [" ".join(str(x).split())[:_ps.SAMPLE_LEN]
+                   for x in samples_raw if str(x).strip()][:_ps.SAMPLES_KEEP]
         provider = str(body.get("ai_provider") or "").strip().lower()
         quality = str(body.get("quality") or "fast").strip()
         return {
@@ -4909,6 +4915,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         **dict(r),
                         "interests": list(r.get("interests") or []),
                         "sample_messages": list(r.get("sample_messages") or []),
+                        "style_summary": _style_summary(r.get("sample_messages")),
                         "memory_n": int(r.get("memory_n") or 0),
                         "style_label": _pe.STYLE_LABELS.get(r["speech_style"] or "", ""),
                         "tone_label": _pe.TONE_LABELS.get(r["tone"] or "", ""),
@@ -5124,14 +5131,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ) for _ in range(n)])
         except Exception:
             log.exception("persona_preview uid=%d", uid)
-            return _err("ИИ сейчас недоступен — попробуйте позже", 503)
+            return _err("ИИ сейчас недоступен — попробуйте позже", 422)
         cands = [_pv.enforce_style(_cw.sanitize_reply(r.text), persona)
                  for r in outs if r.text]
         cands = [c for c in cands if c]
         if not cands:
             if not any(r.text for r in outs):
-                return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 503)
-            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 503)
+                return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 422)
+            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 422)
         reply, info = await _pv.pick_best(cands, voice, context=f"Собеседник: {message}",
                                           owner_id=uid, use_judge=len(cands) > 1)
         parts = _pv.split_reply(reply, persona, 0.0)
@@ -5140,7 +5147,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                            "parts": [x[:1000] for x in parts],
                            "candidates": [c[:1000] for c in dict.fromkeys(cands)],
                            "picked_by": info.get("by"), "why": info.get("why") or "",
-                           "model": model or ""})
+                           "model": model or "",
+                           "style": _style_summary(persona.sample_messages)})
 
     async def _own_persona_id(request):
         uid = _get_uid(request)
@@ -5265,6 +5273,33 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not row:
             return _err("Не найдено", 404)
         return _json_resp({"ok": True})
+
+    async def persona_style_from_my_chats(request: web.Request) -> web.Response:
+        """Образцы манеры из СВОИХ переписок владельца (Telegram Business):
+        живой человек пишет так, как пишет он, а не как описано словами.
+        Ничего не сохраняет — экран кладёт образцы в поле, владелец смотрит
+        и сохраняет сам."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import persona_style as _ps
+        from services.unified_inbox import _decrypt
+        try:
+            rows = await pool.fetch(
+                "SELECT text_enc FROM vault_messages WHERE owner_id=$1 AND direction='out' "
+                "AND NOT is_deleted AND text_enc IS NOT NULL "
+                "ORDER BY COALESCE(msg_date, created_at) DESC LIMIT $2", uid, 600)
+        except Exception:
+            log.exception("persona_style_from_my_chats uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        samples = _ps.pick_samples([_decrypt(r["text_enc"]) for r in rows],
+                                   limit=_ps.SAMPLES_KEEP)
+        fp = _ps.fingerprint(samples)
+        return _json_resp({
+            "samples": samples, "seen": len(rows), "summary": _ps.summary(fp),
+            "note": "" if fp else
+            ("Своих сообщений в Хранилище пока мало: подключите Telegram Business "
+             "или впишите образцы руками")})
 
     async def persona_memory_rebuild(request: web.Request) -> web.Response:
         """Пересобрать «факты о себе» из сказанного сейчас, не дожидаясь десятой фразы."""
@@ -9740,6 +9775,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/persona/{persona_id}/memory", persona_memory_facts)
     app.router.add_delete("/api/miniapp/persona/{persona_id}/memory", persona_memory_forget)
     app.router.add_post("/api/miniapp/persona/{persona_id}/memory/rebuild", persona_memory_rebuild)
+    app.router.add_get("/api/miniapp/persona/style_from_my_chats", persona_style_from_my_chats)
     app.router.add_put("/api/miniapp/persona/{persona_id}/peer/{peer_id}", persona_peer_notes)
     app.router.add_delete("/api/miniapp/persona/{persona_id}/peer/{peer_id}", persona_peer_forget)
     # Auto Registrar
