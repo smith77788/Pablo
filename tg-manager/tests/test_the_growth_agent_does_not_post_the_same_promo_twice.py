@@ -42,6 +42,8 @@ class _Pool:
         self.marked: list[int] = []
 
     async def fetch(self, query: str, *args):
+        if "outcome='posted' AND alive" in query:
+            return []  # доказанных групп нет — см. test_growth_agent_reposts_where_it_worked
         if "niche_growth_targets" in query:
             if self.fail_read:
                 raise RuntimeError("база недоступна")

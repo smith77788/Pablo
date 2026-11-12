@@ -76,3 +76,20 @@ def order_keywords(keywords: list[str], stats: dict[str, dict]) -> tuple[list[st
         dead = back[need:]
     alive.sort(key=lambda k: keyword_score(stats.get(_kw(k))), reverse=True)
     return alive, dead
+
+
+# ── Повтор в доказанных группах ──────────────────────────────────────────────
+#
+# Раньше группа отрабатывалась один раз навсегда: даже там, где пост живёт
+# неделями и набирает просмотры (админы не против, аудитория читает), второго
+# поста не было никогда, и охват каждого запуска держался только на новых, то
+# есть непроверенных группах. Доказанная группа — пост прошёл, проверка через
+# CHECK_AFTER_HOURS нашла его живым и с просмотрами. Повтор — не раньше чем
+# через REPOST_AFTER_DAYS и не больше REPOST_SHARE запуска, остальное — разведка.
+REPOST_AFTER_DAYS = 14
+REPOST_SHARE = 0.5
+
+
+def repost_slots(max_groups: int) -> int:
+    """Сколько мест запуска можно отдать повтору (остальное — новым группам)."""
+    return max(0, int(int(max_groups or 0) * REPOST_SHARE))
