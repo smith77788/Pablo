@@ -90,6 +90,7 @@ def harness(monkeypatch):
     """Исполнитель с заглушенным окружением: наружу ходит только _Telegram."""
     import services
     from services import op_worker
+    from services import niche_searcher as _real_ns
     from services.niche_searcher import filter_groups as _real_filter
 
     tg = _Telegram()
@@ -113,7 +114,10 @@ def harness(monkeypatch):
         ("niche_searcher", _module("services.niche_searcher",
                                    generate_keywords=_keywords,
                                    search_niche_groups=_search,
-                                   filter_groups=_real_filter)),
+                                   filter_groups=_real_filter,
+                                   text_has_links=_real_ns.text_has_links,
+                                   postable=_real_ns.postable,
+                                   rank_groups=_real_ns.rank_groups)),
         ("account_manager", _module("services.account_manager",
                                     join_channel=tg.join_channel,
                                     post_to_channel=tg.post_to_channel)),

@@ -235,8 +235,135 @@ async def _search_one_keyword(
             "access_hash": getattr(chat, "access_hash", 0) or 0,
             "members":     members,
             "join_ref":    join_ref,
+            "keyword":     keyword,
+            **posting_rights(chat),
         })
     return groups
+
+
+def posting_rights(chat: Any) -> dict[str, bool]:
+    """Что участник группы сможет сделать после вступления — по самому объекту
+    чата из поиска, без лишнего запроса к Telegram.
+
+    ЗАЧЕМ. Агент роста вступал в каждую найденную группу и только ПОСЛЕ паузы
+    в 3–8 минут узнавал, что писать там нельзя: у группы закрыт чат для
+    участников (`default_banned_rights.send_messages`), запрещены ссылки, а
+    промо со ссылкой, или вступление идёт через заявку админу. Каждое такое
+    вступление — пустой след аккаунта (вступил и молчит), потерянный слот из
+    5 групп запуска и 10–20 минут паузы впустую.
+
+    Неизвестное (поле не пришло) — не запрет: лучше одно лишнее вступление,
+    чем пустой результат на группах, которые Telegram отдал без прав.
+    """
+    rights = getattr(chat, "default_banned_rights", None)
+
+    def _banned(name: str) -> bool:
+        return bool(rights is not None and getattr(rights, name, False))
+
+    return {
+        "send_blocked": _banned("send_messages") or _banned("send_plain"),
+        "links_blocked": _banned("embed_links"),
+        "join_request": bool(getattr(chat, "join_request", False)),
+    }
+
+
+_LINK_RE = re.compile(r"(?:https?://|www\.|t\.me/|telegram\.me/|@[A-Za-z]\w{3,})",
+                      re.IGNORECASE)
+
+
+def text_has_links(text: str) -> bool:
+    """Есть ли в промо ссылка или @упоминание — то, что режет запрет ссылок."""
+    return bool(_LINK_RE.search(text or ""))
+
+
+def postable(group: dict, *, promo_has_links: bool = False) -> str:
+    """Почему в группу НЕ получится опубликовать промо ('' — получится)."""
+    if group.get("send_blocked"):
+        return "участникам запрещено писать"
+    if group.get("join_request"):
+        return "вступление через заявку админу"
+    if promo_has_links and group.get("links_blocked"):
+        return "ссылки запрещены, а в тексте ссылка"
+    return ""
+
+
+_WORD_RE = re.compile(r"[0-9a-zа-яё]{3,}", re.IGNORECASE)
+
+
+def _stem(word: str) -> str:
+    """Грубая основа слова: «фитнесу»/«фитнес», «москвы»/«москва» сравнимы."""
+    w = word.lower().replace("ё", "е")
+    return w[:max(4, len(w) - 2)] if len(w) > 5 else w
+
+
+def relevance(group: dict, keywords: list[str], geo: str = "") -> float:
+    """Насколько группа про нишу (0..1): название/ник против слов запросов.
+
+    Telegram отдаёт по запросу и случайное («фитнес» находит барахолку, где
+    однажды продали гантели): поиск глобальный и ищет по всему подряд.
+    Складывается из полноты лучшего совпавшего запроса (70%) и доли запросов,
+    совпавших хоть словом (30%): группа, которую находят несколько разных
+    запросов ниши, тематичнее той, что совпала с одним.
+
+    Слова `geo` в тематичность не идут: запросы строятся как «ниша + город»,
+    и без этого «Барахолка Москва» набирала половину тематичности одним
+    городом. Город учитывается в rank_groups отдельно, как местность."""
+    hay = {_stem(w) for w in _WORD_RE.findall(
+        f"{group.get('title') or ''} {group.get('username') or ''}")}
+    if not hay:
+        return 0.0
+    geo_words = {_stem(w) for w in _WORD_RE.findall(geo or "")}
+    best = 0.0
+    matched = 0
+    counted = 0
+    for kw in keywords or []:
+        words = {_stem(w) for w in _WORD_RE.findall(kw or "")} - geo_words
+        if not words:
+            continue
+        counted += 1
+        hit = sum(1 for w in words if any(h.startswith(w) or w.startswith(h)
+                                          for h in hay))
+        if hit:
+            matched += 1
+        best = max(best, hit / len(words))
+    if not counted:
+        return 0.0
+    return 0.7 * best + 0.3 * (matched / counted)
+
+
+def _is_local(group: dict, geo: str) -> bool:
+    geo_words = {_stem(w) for w in _WORD_RE.findall(geo or "")}
+    if not geo_words:
+        return False
+    hay = {_stem(w) for w in _WORD_RE.findall(
+        f"{group.get('title') or ''} {group.get('username') or ''}")}
+    return any(h.startswith(w) or w.startswith(h) for w in geo_words for h in hay)
+
+
+def rank_groups(groups: list[dict], keywords: list[str],
+                *, geo: str = "", rng: Any = None) -> list[dict]:
+    """Порядок, в котором Агент роста идёт по группам: сперва самые
+    тематичные, внутри равной тематичности — живые по размеру (логарифм
+    участников, чтобы гигант на 500 тысяч не забивал всё), с небольшим
+    разбросом, чтобы повторные запуски не шли по одному и тому же порядку.
+
+    Раньше порядок был случайным (`random.shuffle`), и из 30 найденных групп
+    5 публикаций уходили куда попало — в том числе в случайно найденные
+    нетематичные, хотя тематичные стояли в том же списке."""
+    import math
+    import random as _random
+
+    r = rng or _random
+    scored = []
+    for g in groups:
+        m = max(0, int(g.get("members") or 0))
+        score = (relevance(g, keywords, geo) * 10.0
+                 + (1.0 if _is_local(g, geo) else 0.0)
+                 + min(math.log10(m + 1), 5.0)
+                 + r.uniform(0, 0.8))
+        scored.append((score, g))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [g for _, g in scored]
 
 
 # ── Утилита: уже вступленные группы ──────────────────────────────────────────
@@ -269,16 +396,23 @@ def filter_groups(
     *,
     max_members: int = 0,
     exclude_words: list[str] | None = None,
+    promo_has_links: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Отсеять группы по верхнему порогу участников и стоп-словам в названии.
 
     Чистая функция. `max_members=0` — без верхнего порога. Стоп-слова
     сравниваются без регистра как подстрока названия или @username: владелец
     пишет «барахолка», а группа зовётся «Барахолка Москва».
+
+    `promo_has_links` не None — ещё и группы, где промо опубликовать не
+    выйдет (`postable`): вступать туда — пустой след аккаунта.
     """
     words = [w.strip().lower() for w in (exclude_words or []) if w and w.strip()]
     out = []
     for g in groups:
+        if promo_has_links is not None and postable(
+                g, promo_has_links=promo_has_links):
+            continue
         members = int(g.get("members") or 0)
         if max_members and members > max_members:
             continue

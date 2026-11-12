@@ -183,11 +183,15 @@ def test_adhoc_reuses_tested_rotator_not_a_second_homegrown_one():
 
 
 def test_exhausted_cap_is_reported_not_counted_as_errors():
-    """Исчерпанный лимит — штатная защита, а не сбой отправки."""
+    """Исчерпанный суточный лимит — штатная защита, а не сбой отправки и не
+    конец рассылки: операция откладывается до завтра, остаток НЕ списывается
+    строками журнала (иначе повтор счёл бы этих людей закрытыми)."""
     src = _adhoc_source()
     seg = src[src.index("_pick_acc("):]
-    seg = seg[:900]
-    assert "skip_count" in seg and "лимит" in seg
+    seg = seg[:seg.index("_msg = _expand_spintax")]
+    assert "seconds_until_next_day" in seg and '"requeue"' in seg
+    assert "_log_step(" not in seg.split("if acc is None:")[1]
+    assert "err_count" not in seg.split("if acc is None:")[1]
 
 
 def test_cap_counts_only_successful_sends():
@@ -200,7 +204,7 @@ def test_cap_counts_only_successful_sends():
 def test_api_validates_and_forwards_cap():
     body = _endpoint_source()
     assert "per_account_cap" in body
-    assert "min_val=1, max_val=500" in body
+    assert "max_val=_dm_cap_max" in body
 
 
 def test_ui_exposes_cap():

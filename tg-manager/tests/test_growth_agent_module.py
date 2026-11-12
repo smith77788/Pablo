@@ -187,6 +187,9 @@ def growth(monkeypatch):
     ns.generate_keywords = _keywords
     ns.search_niche_groups = _search
     ns.filter_groups = niche_searcher.filter_groups
+    # Чистые помощники отбора — настоящие: заглушается только поиск.
+    for _fn in ("text_has_links", "postable", "rank_groups"):
+        setattr(ns, _fn, getattr(niche_searcher, _fn))
     for name, mod in (
         ("niche_searcher", ns),
         ("account_manager", types.SimpleNamespace(join_channel=_join, post_to_channel=_post)),

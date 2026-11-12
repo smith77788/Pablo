@@ -1781,9 +1781,13 @@ async def _finish_fleet_starved_op(
 
 async def _defer_op_for_flood(
     pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = "",
-    bot=None, owner_id: int | None = None,
+    bot=None, owner_id: int | None = None, cause: str = "flood",
 ) -> None:
     """Отложить операцию до конца длинной флуд-паузы, освободив слот и флот.
+
+    `cause` != "flood" — паузу назначил не Telegram, а наш собственный лимит
+    (например, суточный потолок ЛС): механика та же, но владельцу пишется
+    настоящая причина из `reason`, а не «Telegram попросил паузу».
 
     Отдельно от _requeue_op_no_accounts: там отсчитывается _ACCT_WAIT_MAX_MIN от
     СОЗДАНИЯ операции и по его истечении операция проваливается. Для ожидания
@@ -1833,12 +1837,19 @@ async def _defer_op_for_flood(
     if delay >= _DEFER_NOTIFY_MIN_S:
         _hours, _mins = divmod(delay // 60, 60)
         _when = f"{_hours} ч {_mins} мин" if _hours else f"{_mins} мин"
+        if cause != "flood":
+            import html as _html
+            _text = (f"⏸ <b>Операция #{op_id}</b> отложена на {_when}."
+                     + (f"\n\n{_html.escape(reason[:300])}" if reason else "")
+                     + "\n\nОна продолжится сама, отменять и запускать заново "
+                       "не нужно.")
+        else:
+            _text = (f"⏸ <b>Операция #{op_id}</b> отложена на {_when}: Telegram попросил "
+                     f"паузу.\n\nОна продолжится сама, отменять и запускать заново не "
+                     f"нужно — повторный запуск только добавит ограничений."
+                     + (f"\n\n<i>{reason[:200]}</i>" if reason else ""))
         await _notify_owner_about_op(
-            pool, bot, owner_id,
-            f"⏸ <b>Операция #{op_id}</b> отложена на {_when}: Telegram попросил "
-            f"паузу.\n\nОна продолжится сама, отменять и запускать заново не "
-            f"нужно — повторный запуск только добавит ограничений."
-            + (f"\n\n<i>{reason[:200]}</i>" if reason else ""),
+            pool, bot, owner_id, _text,
             dedup_key=f"flood-defer:{op_id}",
         )
 
@@ -6158,7 +6169,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 if _defer_s:
                     await _defer_op_for_flood(
                         pool, op_id, int(_defer_s), result.get("reason") or "",
-                        bot=bot, owner_id=owner_id)
+                        bot=bot, owner_id=owner_id,
+                        cause=str(result.get("defer_cause") or "flood"))
                 else:
                     await _requeue_op_no_accounts(
                         pool, op_id, bot=bot, owner_id=owner_id,
@@ -7391,10 +7403,11 @@ async def _exec_dm_campaign(
         )
         return {"status": "cancelled", "summary": "Operation cancelled before start"}
 
+    from services import dm_engine as _dme
     from services.dm_engine import run_campaign
 
     try:
-        await run_campaign(pool, bot, campaign_id, op_id=op_id)
+        _stopped_by = await run_campaign(pool, bot, campaign_id, op_id=op_id)
     except asyncio.CancelledError:
         # op_worker cancelled this asyncio task — mark campaign paused
         try:
@@ -7404,6 +7417,22 @@ async def _exec_dm_campaign(
         except Exception as e:
             log.warning("dm_campaign pause on cancel failed for campaign %d: %s", campaign_id, e)
         raise
+
+    # Кампания встала САМА — дневной лимит флота исчерпан или счёт за сегодня
+    # не прочитался. Это не конец рассылки и не пауза владельца: та же
+    # операция откладывается (до следующих суток или на пять минут) и
+    # продолжит с того же места — журнал кампании не даст написать дважды.
+    if _stopped_by in (_dme.CAMPAIGN_DAILY_CAP, _dme.CAMPAIGN_LIMIT_UNREADABLE):
+        if _stopped_by == _dme.CAMPAIGN_DAILY_CAP:
+            _wait = await _dme.seconds_until_next_day(pool)
+            _why = ("Все аккаунты отправили сегодня свой лимит ЛС — кампания "
+                    "продолжится завтра сама")
+        else:
+            _wait = 300
+            _why = ("Не прочитался счёт ЛС за сегодня — кампания продолжится "
+                    "через 5 минут, чтобы не превысить лимит")
+        return {"status": "requeue", "defer_s": _wait, "defer_cause": _stopped_by,
+                "reason": _why, "summary": _why}
 
     # Read final counts from dm_campaigns for the completion summary
     final = await _safe_fetchrow(
@@ -13965,10 +13994,12 @@ async def _exec_bulk_dm_adhoc(
     # Потолок сообщений с ОДНОГО аккаунта за эту рассылку. У кампаний дневной
     # лимит есть давно, у разовой рассылки не было ничего: 1000 получателей на
     # двух аккаунтах — это по 500 ЛС с каждого и почти верный бан.
-    try:
-        per_acc_cap = int(params.get("per_account_cap") or 0) or None
-    except (TypeError, ValueError):
-        per_acc_cap = None
+    # Теперь это СУТОЧНЫЙ потолок и он есть всегда (dm_engine.effective_daily_cap):
+    # не заданный — безопасный дефолт, а уже отправленное сегодня другими
+    # рассылками и кампаниями засчитывается ниже. Прежний «потолок на эту
+    # рассылку» давал полный лимит каждой новой рассылке того же дня.
+    from services.dm_engine import effective_daily_cap as _dm_daily_cap
+    per_acc_cap = _dm_daily_cap(params.get("per_account_cap"))
 
     # Медиа (опц.): файл лежит на диске контейнера, читаем один раз. С медиа
     # текст становится ПОДПИСЬЮ и может быть пустым.
@@ -14064,7 +14095,15 @@ async def _exec_bulk_dm_adhoc(
         skip_count = 0     # получатель недостижим (приватность/блок/удалён) — не наша ошибка
         flood_wait_total = 0.0
         acc_idx = 0
-        sent_by_acc: dict[int, int] = {}
+        from services import dm_engine as _dme
+        try:
+            sent_by_acc: dict[int, int] = await _dme.dm_sent_today(pool, owner_id)
+        except _dme.DailyCountUnreadable:
+            _why = ("Не прочитался счёт ЛС за сегодня — рассылка продолжится "
+                    "через 5 минут, чтобы не превысить суточный лимит")
+            return {"status": "requeue", "defer_s": 300,
+                    "defer_cause": _dme.CAMPAIGN_LIMIT_UNREADABLE,
+                    "reason": _why, "summary": _why}
         _last_rebalance = time.monotonic()
 
         # Повтор операции (автоматический после сетевого сбоя, сброс зависшей,
@@ -14161,15 +14200,23 @@ async def _exec_bulk_dm_adhoc(
             # оставшиеся аккаунты и грузил одни сильнее других.
             acc, acc_idx = _pick_acc(active_accounts, acc_idx, sent_by_acc, per_acc_cap)
             if acc is None:
-                # Все аккаунты выбрали лимит на эту рассылку — это защита, а не
-                # ошибка: честно сообщаем и не дожимаем флот.
+                # Все аккаунты выбрали суточный лимит — это защита, а не ошибка,
+                # и не конец рассылки. Раньше остаток списывался в «пропущено»
+                # строкой журнала, то есть эти люди не получали сообщения уже
+                # никогда. Теперь операция откладывается до следующих суток и
+                # продолжит с этого места: отправленным журнал не даст написать
+                # второй раз, а строки на неотправленных здесь НЕ пишутся —
+                # иначе повтор счёл бы их закрытыми.
                 _left = total - i
-                skip_count += _left
-                await _log_step(i + 1, username, "skip",
-                                f"лимит {per_acc_cap} на аккаунт исчерпан")
-                log.info("bulk_dm_adhoc op=%d: лимит на аккаунт исчерпан, не отправлено %d",
-                         op_id, _left)
-                break
+                log.info("bulk_dm_adhoc op=%d: суточный лимит %d на аккаунт исчерпан, "
+                         "осталось %d — продолжим завтра", op_id, per_acc_cap, _left)
+                _why = (f"Аккаунты отправили сегодня свой лимит ЛС ({per_acc_cap} с "
+                        f"аккаунта). Отправлено в этот заход: {ok_count}, осталось "
+                        f"{_left} — рассылка продолжится завтра сама")
+                return {"status": "requeue",
+                        "defer_s": await _dme.seconds_until_next_day(pool),
+                        "defer_cause": _dme.CAMPAIGN_DAILY_CAP,
+                        "reason": _why, "summary": _why}
             _msg = _expand_spintax(text)  # свой вариант текста этому получателю
 
             try:
@@ -23638,9 +23685,17 @@ async def _exec_niche_growth_post(
                 "summary": "❌ Не удалось найти группы в нише",
             }
 
+        # Группы, где писать нельзя (закрытый чат, заявка, запрет ссылок при
+        # ссылке в промо), отсеиваются ДО вступления: см. posting_rights.
+        _has_links = niche_searcher.text_has_links(promo_text)
+        _found_n = len(groups or [])
+        _closed_n = sum(1 for g in (groups or [])
+                        if niche_searcher.postable(g, promo_has_links=_has_links))
         groups = niche_searcher.filter_groups(
             groups or [], max_members=cfg["max_members"],
-            exclude_words=cfg["exclude_words"])
+            exclude_words=cfg["exclude_words"], promo_has_links=_has_links)
+        # Сперва самые тематичные — и для превью, и для настоящего запуска.
+        groups = niche_searcher.rank_groups(groups, keywords, geo=geo)
 
         if not groups:
             # Correct total_items down from the submitted placeholder (bot handler
@@ -23654,8 +23709,12 @@ async def _exec_niche_growth_post(
                 "status": "done",
                 "ok": 0,
                 "fail": 0,
-                "summary": "⚠️ Групп по нише не найдено. Попробуйте уточнить нишу, "
-                           "свои запросы или снизить порог участников.",
+                "summary": (f"⚠️ Найдено {_found_n} групп, но писать участникам "
+                            "нельзя ни в одной (закрытый чат, вступление по заявке "
+                            "или запрет ссылок). Попробуйте другие запросы или "
+                            "текст без ссылки." if _closed_n and _closed_n == _found_n else
+                            "⚠️ Групп по нише не найдено. Попробуйте уточнить нишу, "
+                            "свои запросы или снизить порог участников."),
                 "keywords": keywords[:15],
             }
 
@@ -23683,13 +23742,15 @@ async def _exec_niche_growth_post(
                 "fail": 0,
                 "groups_found": len(groups),
                 "keywords": keywords[:15],
+                "closed_skipped": _closed_n,
                 "summary": (f"🔍 Найдено групп: {len(groups)} (публикаций не было)\n"
-                            f"Запросы: {', '.join(keywords[:8])}\n\n"
+                            + (f"Отсеяно, где писать нельзя: {_closed_n}\n"
+                               if _closed_n else "")
+                            + f"Запросы: {', '.join(keywords[:8])}\n\n"
                             + "\n".join(lines)),
             }
 
-        # Перемешиваем и берём только безопасный лимит
-        random.shuffle(groups)
+        # Самые тематичные в пределах безопасного лимита (порядок — rank_groups).
         groups = groups[:max_groups]
         total = len(groups)
         await _safe_execute(

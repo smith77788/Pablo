@@ -129,6 +129,13 @@ def test_bulk_dm_adhoc_reports_skipped_quarantine(monkeypatch):
     monkeypatch.setattr(_coo_stub, "load_opted_out", _no_opt_out)
     monkeypatch.setattr(op_worker._infra_mem, "quarantined_accounts", _quar)
     monkeypatch.setattr(op_worker, "_is_cancelled", _not_cancelled)
+    # Счёт ЛС за сегодня читается строго (суточный потолок есть всегда);
+    # тест про карантин, БД нет — сегодня не отправлено ничего.
+    from services import dm_engine as _dme
+
+    async def _nothing_today(_pool, _owner):
+        return {}
+    monkeypatch.setattr(_dme, "dm_sent_today", _nothing_today)
 
     used = []
     async def _send_dm(session, username, msg, _acc=None):
