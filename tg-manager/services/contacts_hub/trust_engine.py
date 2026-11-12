@@ -5,6 +5,8 @@ from typing import Optional
 
 import asyncpg
 
+from services.contacts_hub.identity_keys import phone_keys, username_key
+
 log = logging.getLogger(__name__)
 
 
@@ -62,8 +64,11 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
         score += 0.5
         reasons.append('same_telegram_id')
 
-    phones_a = {str(x) for x in _as_list(contact_a.get('phones')) if x}
-    phones_b = {str(x) for x in _as_list(contact_b.get('phones')) if x}
+    # Номер сравнивается КЛЮЧОМ (identity_keys.phone_key), а не строкой:
+    # `+79991234567` и `8 999 123-45-67` — один номер. Тот же ключ стоит в
+    # группировке detect_smart_duplicates, иначе отбор перестал бы быть точным.
+    phones_a = phone_keys(_as_list(contact_a.get('phones')))
+    phones_b = phone_keys(_as_list(contact_b.get('phones')))
     if phones_a and phones_b and phones_a & phones_b:
         # 0.4, а не 0.3. Пока телефоны сравнивались как наборы символов, вес
         # не имел значения: признак стоял почти на каждой паре. Когда признак
@@ -75,8 +80,8 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
         score += 0.4
         reasons.append('same_phone')
 
-    username_a = (contact_a.get('username') or '').lower()
-    username_b = (contact_b.get('username') or '').lower()
+    username_a = username_key(contact_a.get('username'))
+    username_b = username_key(contact_b.get('username'))
     if username_a and username_b and username_a == username_b:
         score += 0.25
         reasons.append('same_username')
@@ -159,17 +164,11 @@ async def detect_smart_duplicates(pool, owner_id: int) -> dict:
         keys = set()
         if c.get('telegram_user_id'):
             keys.add(('tg', str(c['telegram_user_id'])))
-        if c.get('username'):
-            keys.add(('un', str(c['username']).lower()))
-        phones = c.get('phones') or []
-        if isinstance(phones, str):
-            try:
-                phones = json.loads(phones)
-            except Exception:
-                phones = []
-        for ph in (phones or []):
-            if ph:
-                keys.add(('ph', str(ph)))
+        if username_key(c.get('username')):
+            keys.add(('un', username_key(c['username'])))
+        # Тот же ключ, что в compute_merge_confidence (см. identity_keys).
+        for ph in phone_keys(_as_list(c.get('phones'))):
+            keys.add(('ph', ph))
         for k in keys:
             groups.setdefault(k, []).append(i)
 
