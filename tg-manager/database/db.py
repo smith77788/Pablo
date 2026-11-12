@@ -3874,6 +3874,7 @@ async def upsert_tg_account(
     proxy_id: int | None = None,
     override_proxy: bool = False,
     auto_proxy: bool = False,
+    twofa_password: str | None = None,
 ) -> tuple[int, bool, int | None]:
     """Единственная запись аккаунта в базу. → (id, создан_ли, proxy_id).
 
@@ -4007,6 +4008,12 @@ async def upsert_tg_account(
                 bool(override_proxy),
             )
     acc_id = row["id"]
+    # Пароль 2FA, которым вошли, — у аккаунта, зашифрованным (twofa_enc, v331).
+    # Без него умершая сессия = потерянный аккаунт: войти заново можно только
+    # с паролем, а его владелец ввёл один раз и не записал. Пустой пароль не
+    # затирает сохранённый.
+    if twofa_password:
+        await remember_account_twofa(pool, owner_id, acc_id, twofa_password)
     # След в журнале действий: подключение и переподключение аккаунта раньше
     # не оставляли ничего — на вопрос «откуда этот аккаунт и когда ему сменили
     # сессию» ответа в системе не было. Не бросает.
@@ -4060,6 +4067,7 @@ async def add_tg_account(
     app_version: str | None = None,
     lang_code: str | None = None,
     system_lang_code: str | None = None,
+    twofa_password: str | None = None,
 ) -> int:
     """Записать аккаунт (вход по телефону, QR, `.session`, tdata). → id.
 
@@ -4071,9 +4079,30 @@ async def add_tg_account(
     acc_id, _created, _proxy = await upsert_tg_account(
         pool, owner_id, phone, session_str, tg_user_id, first_name, username,
         device_model, system_version, app_version, lang_code, system_lang_code,
-        auto_proxy=True,
+        auto_proxy=True, twofa_password=twofa_password,
     )
     return acc_id
+
+
+async def remember_account_twofa(pool: asyncpg.Pool, owner_id: int,
+                                 account_id: int, password: str | None) -> bool:
+    """Запомнить пароль 2FA аккаунта зашифрованным (пустой — забыть). → записан ли.
+
+    Общая дверь: ею пользуются вход (`upsert_tg_account`) и оформление,
+    которое ставит/меняет 2FA массово. Пишем повторно: потеря этой записи
+    стоит доступа к аккаунту при следующем перелогине.
+    """
+    from services.token_vault import encrypt_plaintext_token
+    enc = encrypt_plaintext_token(password) if password else None
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET twofa_enc=$1 WHERE id=$2 AND owner_id=$3",
+                enc, account_id, owner_id)
+            return True
+        except Exception:
+            log_exc_swallow(log, f"remember_account_twofa acc={account_id} attempt={_attempt}")
+    return False
 
 
 async def record_manual_action(

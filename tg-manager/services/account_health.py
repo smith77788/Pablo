@@ -459,15 +459,48 @@ async def _cleanup_old_health_history(pool: asyncpg.Pool) -> int:
         return 0
 
 
+# Охват проверки через @SpamBot. Раньше: 10 аккаунтов раз в 6 часов на ВСЮ
+# платформу (40 в сутки), и выборка шла по last_real_check_at, который каждые
+# 3–6 часов освежает пинг живости сессии, — то есть спам-проверка видела только
+# аккаунты, до которых пинг не дошёл. Флот из 500 аккаунтов проверялся на
+# спам-блок и заморозку раз в недели, и ограниченный аккаунт всё это время
+# брали в работу. Теперь: своя отметка (v340), сутки на аккаунт, размер круга
+# — по флоту, несколько проверок параллельно (разные аккаунты, разные прокси).
+_SPAMBOT_PERIOD_H = 24        # каждый аккаунт — раз в сутки, не чаще
+_SPAMBOT_CYCLE_H = 1          # цикл здоровья — раз в час
+_SPAMBOT_MIN_BATCH = 10
+_SPAMBOT_MAX_BATCH = 150      # потолок круга: даже огромный флот не душит цикл
+_SPAMBOT_CONCURRENCY = 4
+
+
+def spambot_batch_size(active_accounts: int) -> int:
+    """Сколько аккаунтов проверить за круг, чтобы флот укладывался в сутки."""
+    try:
+        n = int(active_accounts or 0)
+    except (TypeError, ValueError):
+        n = 0
+    cycles = max(1, _SPAMBOT_PERIOD_H // _SPAMBOT_CYCLE_H)
+    need = -(-n // cycles)
+    return max(_SPAMBOT_MIN_BATCH, min(_SPAMBOT_MAX_BATCH, need))
+
+
 async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
-    """Периодическая проверка acc_status через SpamBot (раз в 6 часов на аккаунт).
+    """Периодическая проверка acc_status через SpamBot (раз в сутки на аккаунт).
 
     Обновляет acc_status, trust_score в DB. При обнаружении spamblock — снижает trust.
     Не уведомляет — уведомления идут из account_monitor.
     """
     from services.account_manager import check_account_status_full
 
-    # Аккаунты с session_str, не проверявшиеся более 6 часов
+    try:
+        active = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE is_active=TRUE "
+            "AND session_str IS NOT NULL AND session_str != ''")
+    except Exception:
+        active = 0
+    batch = spambot_batch_size(active)
+
+    # Аккаунты с session_str, не проверявшиеся @SpamBot больше суток.
     # Важно: JOIN user_proxies для получения proxy_url — иначе проверка идёт
     # без прокси и вызывает AUTH_KEY collision.
     accounts = await pool.fetch(
@@ -480,99 +513,129 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
              AND a.session_str IS NOT NULL AND a.session_str != ''
              -- НЕ трогаем занятые операцией: параллельный коннект одной сессии
              -- проверкой и операцией = AUTH_KEY_DUPLICATED (свежий флот с
-             -- last_real_check_at IS NULL монитор берёт первым).
+             -- last_spambot_check_at IS NULL проверка берёт первым).
              AND COALESCE(a.in_operation, FALSE) = FALSE
-             AND (a.last_real_check_at IS NULL
-                  OR a.last_real_check_at < NOW() - INTERVAL '6 hours')
-           ORDER BY COALESCE(a.last_real_check_at, '2000-01-01') ASC
-           LIMIT 10""",
+             AND (a.last_spambot_check_at IS NULL
+                  OR a.last_spambot_check_at < NOW() - make_interval(hours => $2))
+           ORDER BY COALESCE(a.last_spambot_check_at, '2000-01-01') ASC
+           LIMIT $1""",
+        batch, _SPAMBOT_PERIOD_H,
     )
     if not accounts:
         return
 
     log.info(
-        "account_health: spambot check cycle — %d accounts to check", len(accounts)
+        "account_health: spambot check cycle — %d accounts to check (fleet %s)",
+        len(accounts), active,
     )
+    sem = asyncio.Semaphore(_SPAMBOT_CONCURRENCY)
 
-    for acc in accounts:
-        # Атомарный захват у арбитра op_worker ПЕРЕД коннектом: check_account_
-        # status_full открывает ЖИВУЮ сессию. Снимок is_account_in_use оставлял
-        # окно гонки — операция захватывала аккаунт между проверкой и коннектом →
-        # одна сессия с двух IP = AUTH_KEY_DUPLICATED (особенно свежий флот).
+    async def _one(acc) -> None:
+        async with sem:
+            await _spambot_check_one(pool, acc, check_account_status_full)
+            await asyncio.sleep(3)  # небольшая пауза между аккаунтами слота
+
+    await asyncio.gather(*(_one(acc) for acc in accounts), return_exceptions=True)
+
+
+async def _retry_spambot_later(pool: asyncpg.Pool, acc_id: int) -> None:
+    """Проверка не удалась (таймаут, сбой) — повторить через ~6 часов.
+
+    Без отметки неудавшийся аккаунт оставался самым «старым» и занимал голову
+    очереди каждый круг: сотня аккаунтов на мёртвых прокси навсегда закрывала
+    проверку остальному флоту.
+    """
+    try:
+        await pool.execute(
+            "UPDATE tg_accounts SET last_spambot_check_at = now() - make_interval(hours => $2) "
+            "WHERE id=$1", acc_id, max(0, _SPAMBOT_PERIOD_H - 6))
+    except Exception:
+        log_exc_swallow(log, "account_health: retry mark acc=%d", acc_id)
+
+
+async def _spambot_check_one(pool: asyncpg.Pool, acc, check_account_status_full) -> None:
+    """Проверка одного аккаунта через @SpamBot (тело прежнего цикла)."""
+    # Атомарный захват у арбитра op_worker ПЕРЕД коннектом: check_account_
+    # status_full открывает ЖИВУЮ сессию. Снимок is_account_in_use оставлял
+    # окно гонки — операция захватывала аккаунт между проверкой и коннектом →
+    # одна сессия с двух IP = AUTH_KEY_DUPLICATED (особенно свежий флот).
+    _opw = None
+    _leased = True
+    try:
+        from services import op_worker as _opw_mod
+        _opw = _opw_mod
+        _leased = await _opw.try_claim_account(int(acc["id"]))
+    except Exception:
         _opw = None
         _leased = True
-        try:
-            from services import op_worker as _opw_mod
-            _opw = _opw_mod
-            _leased = await _opw.try_claim_account(int(acc["id"]))
-        except Exception:
-            _opw = None
-            _leased = True
-        if not _leased:
-            continue
-        try:
-            result = await asyncio.wait_for(
-                check_account_status_full(
-                    acc["session_str"], dict(acc), check_spambot=True
-                ),
-                timeout=30.0,
-            )
-            status = result.get("status", "active")
-            auth_error = result.get("auth_error", False)
+    if not _leased:
+        return
+    try:
+        result = await asyncio.wait_for(
+            check_account_status_full(
+                acc["session_str"], dict(acc), check_spambot=True
+            ),
+            timeout=30.0,
+        )
+        status = result.get("status", "active")
+        auth_error = result.get("auth_error", False)
 
-            # Не обновляем acc_status для no_session — аккаунт просто не импортирован
-            if result.get("no_session"):
-                continue
+        # Не обновляем acc_status для no_session — аккаунт просто не импортирован
+        if result.get("no_session"):
+            return
 
-            # Только подтверждённые статусы пишем в БД — session_expired без auth_error игнорируем
-            if should_persist_account_status(
+        # Только подтверждённые статусы пишем в БД — session_expired без auth_error игнорируем
+        if should_persist_account_status(
+            status,
+            auth_error=auth_error,
+            has_session=not result.get("no_session", False),
+            restriction_checked=result.get("restriction_checked", True),
+        ):
+            await pool.execute(
+                "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), "
+                "last_spambot_check_at=now() WHERE id=$2",
                 status,
-                auth_error=auth_error,
-                has_session=not result.get("no_session", False),
-                restriction_checked=result.get("restriction_checked", True),
-            ):
-                await pool.execute(
-                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
-                    status,
-                    acc["id"],
-                )
-            else:
-                # Любой спорный статус — только обновляем время проверки, не меняем acc_status
-                await pool.execute(
-                    "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$1",
-                    acc["id"],
-                )
-
-            if status == "spamblock":
-                await pool.execute(
-                    "UPDATE tg_accounts SET trust_score=LEAST(COALESCE(trust_score,1.0), 0.3) WHERE id=$1",
-                    acc["id"],
-                )
-                log.warning("account_health: spamblock detected acc=%d", acc["id"])
-            elif status in ("banned", "deactivated", "session_expired") and auth_error:
-                # Деактивируем только при явном auth_error от Telegram
-                await pool.execute(
-                    "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"]
-                )
-                log.warning(
-                    "account_health: acc=%d deactivated status=%s (auth_error)",
-                    acc["id"],
-                    status,
-                )
-        except asyncio.TimeoutError:
-            log.debug("account_health: spambot check timeout acc=%d", acc["id"])
-        except Exception as e:
-            log_exc_swallow(
-                log, "account_health spambot check acc=%d: %s", acc["id"], e
+                acc["id"],
             )
-        finally:
-            if _opw and _leased:
-                try:
-                    await _opw.release_accounts([int(acc["id"])])
-                except Exception:
-                    log_exc_swallow(log, "account_health: release acc=%d", acc["id"])
+        else:
+            # Любой спорный статус — только обновляем время проверки, не меняем acc_status
+            await pool.execute(
+                "UPDATE tg_accounts SET last_real_check_at=now(), "
+                "last_spambot_check_at=now() WHERE id=$1",
+                acc["id"],
+            )
 
-        await asyncio.sleep(3)  # небольшая пауза между аккаунтами
+        if status == "spamblock":
+            await pool.execute(
+                "UPDATE tg_accounts SET trust_score=LEAST(COALESCE(trust_score,1.0), 0.3) WHERE id=$1",
+                acc["id"],
+            )
+            log.warning("account_health: spamblock detected acc=%d", acc["id"])
+        elif status in ("banned", "deactivated", "session_expired") and auth_error:
+            # Деактивируем только при явном auth_error от Telegram
+            await pool.execute(
+                "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"]
+            )
+            log.warning(
+                "account_health: acc=%d deactivated status=%s (auth_error)",
+                acc["id"],
+                status,
+            )
+    except asyncio.TimeoutError:
+        log.debug("account_health: spambot check timeout acc=%d", acc["id"])
+        await _retry_spambot_later(pool, acc["id"])
+    except Exception as e:
+        log_exc_swallow(
+            log, "account_health spambot check acc=%d: %s", acc["id"], e
+        )
+        await _retry_spambot_later(pool, acc["id"])
+    finally:
+        if _opw and _leased:
+            try:
+                await _opw.release_accounts([int(acc["id"])])
+            except Exception:
+                log_exc_swallow(log, "account_health: release acc=%d", acc["id"])
+
 
 
 async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> None:
@@ -608,12 +671,12 @@ async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> N
                 if cleaned:
                     log.debug("account_health: cleaned %d old snapshots", cleaned)
 
-            # SpamBot проверка: каждые 6 часов проверяем аккаунты через реальный Telegram
-            if cycle % 6 == 0:
-                try:
-                    await _run_spambot_check_cycle(pool)
-                except Exception:
-                    log_exc_swallow(log, "account_health: spambot check cycle failed")
+            # SpamBot проверка — каждый круг; темп держит сама выборка
+            # (сутки на аккаунт, размер круга по флоту — spambot_batch_size).
+            try:
+                await _run_spambot_check_cycle(pool)
+            except Exception:
+                log_exc_swallow(log, "account_health: spambot check cycle failed")
 
             cycle += 1
         except asyncio.CancelledError:

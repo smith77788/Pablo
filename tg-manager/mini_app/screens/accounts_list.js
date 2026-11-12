@@ -244,6 +244,11 @@ function accRowHtml(a) {
     const pulseNote = a.verdict ? verdictNote : (a.health_reason && (a.health_status==='quarantine' || a.health_status==='at_risk'))
       ? `<div class="acc-phone" style="color:var(--${a.health_status==='quarantine'?'red':'orange'})">${esc(a.health_reason)}</div>`
       : '';
+    // Чужие сеансы (дозор угона, services/session_watch): кто-то ещё вошёл в
+    // аккаунт и может выкинуть наш сеанс. Видно всегда, поверх вердикта.
+    const theftNote = (a.foreign_sessions > 0)
+      ? `<div class="acc-phone" style="color:var(--red)">🚨 Чужих сеансов: ${Number(a.foreign_sessions)} — закройте в «Профили → Очистка и сеансы»</div>`
+      : '';
     const sel = ACC_SEL.has(a.id);
     const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id},event)` : `openAccount(${a.id})`;
     const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
@@ -259,6 +264,7 @@ function accRowHtml(a) {
         <div class="acc-name">${esc(name)} ${stageBadge(a.stage)}</div>
         <div class="acc-phone">${esc(phone)}</div>
         ${(a.tags||[]).length ? `<div class="fx-tags">${accTagsHtml(a)}</div>` : ''}
+        ${theftNote}
         ${proxyNote}
         ${pulseNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>

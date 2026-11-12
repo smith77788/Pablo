@@ -110,6 +110,7 @@ async def _save_account(
         lang_code=info.get("lang_code", "ru"),
         system_lang_code=info.get("system_lang_code", "ru-RU"),
         proxy_id=proxy_id,
+        twofa_password=info.get("twofa_password"),
     )
     return acc_id
 
@@ -127,6 +128,54 @@ def _format_acc(info: dict, phone: str) -> str:
     uname = info.get("username", "")
     uname_str = f" (@{html.escape(uname)})" if uname else ""
     return f"📱 <code>{html.escape(phone)}</code> — {name}{uname_str}"
+
+
+# Отказы Telegram, после которых следующий номер пакета упадёт так же: пакет
+# останавливается, а не покупает номера дальше. Ключи — как у
+# `account_manager.login_error_ru` (имя класса без «Error», только буквы).
+_STOP_BATCH_KEYS = {
+    "PHONENUMBERUNOCCUPIED": (
+        "На купленном номере нет аккаунта Telegram, а регистрировать новые "
+        "аккаунты Telegram сторонним приложениям не даёт: такой номер "
+        "аккаунтом не станет."),
+    "APIIDINVALID": None,
+    "APIIDPUBLISHEDFLOOD": None,
+    "FLOODWAIT": None,
+    # Квота запросов кода владельца (account_manager._take_send_code_slot).
+    "SENDCODEQUOTA": None,
+}
+
+
+def classify_login_failure(exc: BaseException) -> dict:
+    """Что случилось с номером пакета: текст по-русски, стоп ли всему пакету
+    и заблокирован ли сам номер (тогда сервису номеров уходит «ban» — у 5sim
+    это возврат денег, а не просто отмена).
+
+    Раньше владелец видел английский текст telethon («The phone number is not
+    yet being used…»), а пакет шёл дальше и покупал следующие номера с тем же
+    исходом.
+    """
+    from services.account_manager import _login_error_keys, login_error_ru
+    keys = _login_error_keys(exc)
+    text = login_error_ru(exc)
+    stop = False
+    for k in keys:
+        if k in _STOP_BATCH_KEYS:
+            stop = True
+            text = _STOP_BATCH_KEYS[k] or text
+            break
+    return {"text": text, "stop": stop, "banned_number": "PHONENUMBERBANNED" in keys}
+
+
+async def _finish_order(sms_client, order_id: str) -> None:
+    """Закрыть заказ номера после удачной регистрации (fail-soft)."""
+    fin = getattr(sms_client, "finish_order", None)
+    if fin is None or not order_id:
+        return
+    try:
+        await fin(order_id)
+    except Exception:
+        log_exc_swallow(log, "autoreg: finish_order failed")
 
 
 # ── Главное меню ──────────────────────────────────────────────────────────────
@@ -575,9 +624,13 @@ async def _start_single_register(
             timeout=20,
         )
     except Exception as exc:
-        await sms_client.cancel_order(order_id)
+        verdict = classify_login_failure(exc)
+        if verdict["banned_number"] and hasattr(sms_client, "report_banned"):
+            await sms_client.report_banned(order_id)
+        else:
+            await sms_client.cancel_order(order_id)
         await cb.message.edit_text(
-            f"❌ Ошибка запроса кода: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка запроса кода: {html.escape(verdict['text'][:300])}",
             parse_mode="HTML", reply_markup=_menu_kb(),
         )
         return
@@ -648,9 +701,13 @@ async def _wait_and_confirm(
     except Exception as exc:
         await sms_client.cancel_order(order_id)
         await cleanup_pending(phone)
+        # ValueError — наш собственный русский текст (неверный/истёкший код);
+        # остальное — отказ Telegram, его переводим (в т.ч. «на номере нет
+        # аккаунта», который раньше показывался как «Неверный код» по-английски).
+        reason = str(exc) if isinstance(exc, ValueError) else classify_login_failure(exc)["text"]
         try:
             await status_msg.edit_text(
-                f"❌ Неверный код: <code>{html.escape(str(exc)[:200])}</code>",
+                f"❌ Код не принят: {html.escape(reason[:300])}",
                 parse_mode="HTML", reply_markup=_menu_kb(),
             )
         except Exception:
@@ -699,6 +756,7 @@ async def _wait_and_confirm(
         await cleanup_pending(phone)
 
     acc_id = await _save_account(pool, owner_id, phone, session_str, info, proxy_id=proxy_id)
+    await _finish_order(sms_client, order_id)
     try:
         await status_msg.edit_text(
             f"✅ <b>Аккаунт зарегистрирован!</b>\n\n"
@@ -831,7 +889,10 @@ async def _do_batch_register(
 ) -> dict:
     """Регистрирует cnt аккаунтов последовательно. 2FA-номера пропускаются.
     status_msg может быть None (headless-вызов из воркера). progress_cb(i, ok, failed)
-    — необязательный колбэк прогресса. Возвращает {'ok': [...], 'failed': [...]}."""
+    — необязательный колбэк прогресса; если он вернул False, пакет
+    останавливается ДО покупки следующего номера (так исполнитель операции
+    доносит «Отменить» владельца). Возвращает {'ok': [...], 'failed': [...],
+    'account_ids': [...], 'stopped': причина-или-''}."""
     from services.account_manager import (
         start_login, confirm_code, get_client_info_and_session, cleanup_pending,
         country_code_from_phone, pick_registration_proxy,
@@ -840,12 +901,13 @@ async def _do_batch_register(
     ok_accs: list[str] = []
     ok_ids: list[int] = []   # tg_accounts.id созданных — вход следующего шага (op_chain)
     failed: list[str] = []
+    stopped = ""
     dev_profile = await db.get_autoreg_device_profile(pool, owner_id) or {}
 
     for i in range(1, cnt + 1):
         if status_msg is not None:
             progress = (
-                f"📦 <b>Батч-регистрация</b> · {country}\n\n"
+                f"📦 <b>Батч-регистрация</b> · {html.escape(str(country))}\n\n"
                 f"⏳ Аккаунт <b>{i}/{cnt}</b>…\n"
                 + (f"✅ Готово: {len(ok_accs)}\n" if ok_accs else "")
                 + (f"⚠️ Пропущено: {len(failed)}\n" if failed else "")
@@ -856,20 +918,38 @@ async def _do_batch_register(
                 log_exc_swallow(log, "_do_batch_register: progress edit failed")
         if progress_cb is not None:
             try:
-                await progress_cb(i, len(ok_accs), len(failed))
+                go_on = await progress_cb(i, len(ok_accs), len(failed))
             except Exception:
                 log_exc_swallow(log, "_do_batch_register: progress_cb failed")
+                go_on = True
+            # Колбэк возвращает «продолжать ли». Раньше ответ выбрасывался, и
+            # «Отменить» на операции авторега не останавливала ничего: пакет
+            # докупал номера до конца, а каждый номер — это деньги владельца.
+            # None (колбэк ничего не вернул) — продолжать, только явное False — стоп.
+            if go_on is False:
+                stopped = "⏹ Остановлено владельцем — новые номера больше не покупались."
+                break
 
         phone = ""
         order_id = ""
+        stage = "buy"
         try:
-            # Заказываем номер
-            order = await asyncio.wait_for(sms_client.buy_number(country), timeout=20)
+            # Заказываем номер. Отказ сервиса номеров (нет баланса, нет
+            # номеров, неверный ключ или страна) за время пакета не пройдёт:
+            # стоп сразу, а не cnt одинаковых отказов подряд.
+            try:
+                order = await asyncio.wait_for(sms_client.buy_number(country), timeout=20)
+            except Exception as exc:
+                stopped = ("⛔ Сервис номеров отказал в покупке номера: "
+                           f"{str(exc)[:120]} — пакет остановлен.")
+                log.warning("autoreg batch buy failed i=%d: %s", i, exc)
+                break
             phone = order["phone"]
             order_id = order["id"]
 
             # Запрашиваем код в TG — своя прокси и локаль под страну номера
             # на каждую регистрацию, чтобы батч не сидел весь на одном IP.
+            stage = "send_code"
             cc = country_code_from_phone(phone)
             picked = await pick_registration_proxy(pool, owner_id, cc)
             proxy_id, proxy_url = picked if picked else (None, None)
@@ -884,6 +964,7 @@ async def _do_batch_register(
             )
 
             # Ждём SMS
+            stage = "sms"
             code = await sms_client.get_sms(order_id, timeout_sec=_SMS_WAIT_SEC)
             if not code:
                 await sms_client.cancel_order(order_id)
@@ -892,6 +973,7 @@ async def _do_batch_register(
                 continue
 
             # Подтверждаем
+            stage = "confirm"
             result = await confirm_code(phone, code, phone_code_hash)
             if result == "need_2fa":
                 await cleanup_pending(phone)
@@ -900,18 +982,24 @@ async def _do_batch_register(
                 continue
 
             # Сохраняем
+            stage = "save"
             session_str, info = await get_client_info_and_session(phone)
             await cleanup_pending(phone)
             acc_id = await _save_account(pool, owner_id, phone, session_str, info, proxy_id=proxy_id)
             ok_accs.append(f"{phone} → id{acc_id}")
             if acc_id:
                 ok_ids.append(int(acc_id))
+            await _finish_order(sms_client, order_id)
 
         except Exception as exc:
-            log.warning("autoreg batch i=%d phone=%s: %s", i, phone, exc)
+            log.warning("autoreg batch i=%d phone=%s stage=%s: %s", i, phone, stage, exc)
+            verdict = classify_login_failure(exc)
             if order_id:
                 try:
-                    await sms_client.cancel_order(order_id)
+                    if verdict["banned_number"] and hasattr(sms_client, "report_banned"):
+                        await sms_client.report_banned(order_id)
+                    else:
+                        await sms_client.cancel_order(order_id)
                 except Exception:
                     log_exc_swallow(log, "_do_batch_register: cancel_order failed")
             if phone:
@@ -920,19 +1008,23 @@ async def _do_batch_register(
                     await _cp(phone)
                 except Exception:
                     log_exc_swallow(log, "_do_batch_register: cleanup_pending failed")
-            failed.append(f"{phone or '?'} — {str(exc)[:60]}")
+            failed.append(f"{phone or '?'} — {verdict['text'][:160]}")
+            if verdict["stop"]:
+                stopped = "⛔ " + verdict["text"] + " Пакет остановлен, чтобы не покупать следующие номера впустую."
+                break
 
         if i < cnt:
             await asyncio.sleep(_INTER_REG_DELAY)
 
     # Итоговый отчёт
-    ok_lines = "\n".join(f"✅ {a}" for a in ok_accs) or "—"
-    fail_lines = "\n".join(f"⚠️ {f}" for f in failed) or "—"
+    ok_lines = "\n".join(f"✅ {html.escape(a)}" for a in ok_accs) or "—"
+    fail_lines = "\n".join(f"⚠️ {html.escape(f)}" for f in failed) or "—"
     report = (
         f"📦 <b>Батч-регистрация завершена</b>\n\n"
         f"<b>Зарегистрировано: {len(ok_accs)}/{cnt}</b>\n\n"
         f"{ok_lines}\n\n"
         + (f"<b>Пропущено:</b>\n{fail_lines}" if failed else "")
+        + (f"\n\n{html.escape(stopped)}" if stopped else "")
     )
     if status_msg is not None:
         try:
@@ -946,7 +1038,7 @@ async def _do_batch_register(
             )
         except Exception:
             log_exc_swallow(log, "_do_batch_register: report edit failed")
-    return {"ok": ok_accs, "failed": failed, "account_ids": ok_ids}
+    return {"ok": ok_accs, "failed": failed, "account_ids": ok_ids, "stopped": stopped}
 
 
 # ── Пакетная регистрация с расписанием ──────────────────────────────────────
