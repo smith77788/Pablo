@@ -971,6 +971,28 @@ def _coerce_scheduled_for(value):
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
 
+_PRESENCE_CREATION_TYPES = (
+    "global_presence_channel", "global_presence_group", "global_presence_bot",
+    "global_presence_package", "global_presence_full_package",
+)
+
+
+async def _active_presence_launch(conn, owner_id: int, plan_id: str) -> int | None:
+    from services.op_status import IN_FLIGHT
+
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        f"global-presence|{owner_id}|{plan_id}",
+    )
+    return await conn.fetchval(
+        """SELECT id FROM operation_queue
+           WHERE owner_id=$1 AND params->>'plan_id'=$2
+             AND op_type=ANY($3::text[]) AND status=ANY($4::text[])
+           ORDER BY id LIMIT 1""",
+        owner_id, plan_id, list(_PRESENCE_CREATION_TYPES), sorted(IN_FLIGHT),
+    )
+
+
 async def submit(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -1082,7 +1104,14 @@ async def submit(
         reused = False
         async with pool.acquire() as conn:
             async with conn.transaction():
-                if dedup_window_sec and dedup_window_sec > 0:
+                # Один активный запуск на план, независимо от входа и возраста
+                # операции. Параметры бота и Mini App могут отличаться.
+                if op_type in _PRESENCE_CREATION_TYPES and params.get("plan_id"):
+                    active = await _active_presence_launch(conn, owner_id, str(params["plan_id"]))
+                    if active is not None:
+                        op_id = int(active)
+                        reused = True
+                if not reused and dedup_window_sec and dedup_window_sec > 0:
                     dedup_identity = sensitive_params_fp or dedup_params_json
                     _dedup_statuses = _dedup_status_sql()
                     await conn.execute(

@@ -1122,11 +1122,12 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
 
 
 async def get_bot(
-    pool: asyncpg.Pool, bot_id: int, added_by: int
+    pool: asyncpg.Pool, bot_id: int, added_by: int, *, owner_only: bool = False
 ) -> dict | None:
     row = await pool.fetchrow(
         """SELECT * FROM managed_bots
            WHERE bot_id=$1 AND is_active=TRUE AND deleted_at IS NULL
+              AND (NOT $3::boolean OR added_by=$2)
               AND (added_by=$2
                    OR bot_id IN (
                        SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
@@ -1142,6 +1143,7 @@ async def get_bot(
                    ))""",
         bot_id,
         added_by,
+        owner_only,
     )
     if row is None:
         return None

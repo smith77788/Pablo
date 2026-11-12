@@ -217,9 +217,8 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        owns = await _user_can_use_bot(pool, uid, bot_id)
-        if not owns:
-            return _err("Бот не найден", 404)
+        if not isinstance(body, dict):
+            return _err("Неверный запрос", 400)
         trigger_type = body.get("trigger_type", "keyword")
         keyword = body.get("keyword", "").strip()
         response_text = body.get("response_text", "").strip()
@@ -257,9 +256,14 @@ def setup_routes(app: web.Application, pool) -> None:
                 """INSERT INTO auto_replies
                        (bot_id, trigger_type, keyword, response_text, is_active,
                         match_mode, buttons, priority, reply_delay_sec)
-                   VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7,$8) RETURNING id""",
+                   SELECT $1,$2,$3,$4,TRUE,$5,$6,$7,$8
+                   FROM managed_bots
+                   WHERE bot_id=$1 AND added_by=$9 AND deleted_at IS NULL
+                   RETURNING id""",
                 bot_id, trigger_type, keyword or None, response_text, match_mode,
-                buttons_json, priority, reply_delay_sec)
+                buttons_json, priority, reply_delay_sec, uid)
+            if row is None:
+                return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)

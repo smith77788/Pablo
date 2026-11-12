@@ -23,7 +23,7 @@ def _cancel_edit_kb(bot_id: int) -> InlineKeyboardMarkup:
 
 
 async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | None:
-    row = await db.get_bot(pool, bot_id, user_id)
+    row = await db.get_bot(pool, bot_id, user_id, owner_only=True)
     return row["token"] if row else None
 
 
@@ -38,7 +38,7 @@ async def cb_edit_menu(
     state: FSMContext,
 ) -> None:
     await state.clear()
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id, owner_only=True)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -220,7 +220,7 @@ async def cb_del_photo(
     http: aiohttp.ClientSession,
 ) -> None:
 
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id, owner_only=True)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -306,7 +306,7 @@ async def cb_health(
     http: aiohttp.ClientSession,
 ) -> None:
 
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id, owner_only=True)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
