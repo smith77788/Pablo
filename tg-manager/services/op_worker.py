@@ -24023,9 +24023,28 @@ async def _exec_niche_growth_post(
                     "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
                 }
 
-            # Round-robin по аккаунтам
-            acc = accounts[acc_idx % len(accounts)]
-            acc_idx += 1
+            # Round-robin по аккаунтам — среди тех, у кого сейчас НЕ местная
+            # ночь. Вступление и промо в 3 часа ночи по времени аккаунта —
+            # бот-сигнал, а пост в спящей группе к утру уйдёт под десятки
+            # новых сообщений: охвата нет, риск есть. Ночь у всех — операция
+            # откладывается до местного утра и продолжит с того же места
+            # (отработанные группы уже в niche_growth_targets).
+            from services import geo_tempo as _gt
+            acc = None
+            for _k in range(len(accounts)):
+                _cand = accounts[(acc_idx + _k) % len(accounts)]
+                if not _gt.is_local_night(_cand.get("geo_country")):
+                    acc = _cand
+                    acc_idx += _k + 1
+                    break
+            if acc is None:
+                _waits = [w for w in (_gt.seconds_until_local_morning(a.get("geo_country"))
+                                      for a in accounts) if w]
+                _wait = int(min(_waits) if _waits else 6 * 3600) + random.randint(300, 2400)
+                _why = (f"У всех аккаунтов сейчас местная ночь — Агент роста "
+                        f"продолжит утром. Опубликовано в этот заход: {ok_count}")
+                return {"status": "requeue", "defer_s": _wait,
+                        "defer_cause": "local_night", "reason": _why, "summary": _why}
 
             join_ref = grp.get("join_ref", "")
             grp_id = grp.get("id", 0)

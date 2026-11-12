@@ -168,3 +168,23 @@ def is_local_night(country_code: str | None,
     if h is None:
         return False
     return h >= 23 or h <= 6
+
+
+def seconds_until_local_morning(country_code: str | None,
+                                now: _dt.datetime | None = None,
+                                morning_hour: int = 8) -> int | None:
+    """Секунд до ближайших `morning_hour`:00 по местному времени страны.
+    None — гео неизвестно (решать по нему нельзя)."""
+    tz = timezone_for(country_code)
+    zi = _zoneinfo(tz) if tz else None
+    if zi is None:
+        return None
+    if now is None:
+        now = _dt.datetime.now(_dt.timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=_dt.timezone.utc)
+    local = now.astimezone(zi)
+    target = local.replace(hour=morning_hour, minute=0, second=0, microsecond=0)
+    if target <= local:
+        target += _dt.timedelta(days=1)
+    return int((target - local).total_seconds())
