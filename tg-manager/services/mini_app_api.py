@@ -5190,7 +5190,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "self_facts": facts or ""})
 
     async def persona_memory_forget(request: web.Request) -> web.Response:
-        """Забыть всё: сказанное и факты о себе. Персона говорит с чистого листа."""
+        """Забыть всё: сказанное, факты о себе и знакомых. Персона говорит с
+        чистого листа."""
         uid, pid, err = await _own_persona_id(request)
         if err is not None:
             return err
@@ -5202,6 +5203,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             res = await pool.execute(
                 "DELETE FROM persona_memory WHERE persona_id=$1 AND owner_id=$2", pid, uid)
+            await pool.execute(
+                "DELETE FROM persona_peers WHERE persona_id=$1 AND owner_id=$2", pid, uid)
         except Exception:
             log.exception("persona_memory_forget uid=%d persona=%d", uid, pid)
             return _err(_INTERNAL_ERROR, 500)
@@ -5210,6 +5213,58 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (ValueError, IndexError):
             n = 0
         return _json_resp({"ok": True, "deleted": n})
+
+    def _peer_tg_id(request):
+        try:
+            v = int(request.match_info["peer_id"])
+        except (KeyError, ValueError):
+            return None
+        return v if v > 0 else None
+
+    async def persona_peer_notes(request: web.Request) -> web.Response:
+        """Владелец правит заметку о собеседнике: модель могла понять не так."""
+        uid, pid, err = await _own_persona_id(request)
+        if err is not None:
+            return err
+        peer = _peer_tg_id(request)
+        if not peer:
+            return _err("Неверный собеседник", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        notes = " ".join(str((body or {}).get("notes") or "").split())[:600]
+        try:
+            row = await pool.fetchrow(
+                "UPDATE persona_peers SET notes=$4, notes_at=NOW(), "
+                "notes_exchanges=exchanges "
+                "WHERE persona_id=$1 AND owner_id=$2 AND peer_tg_id=$3 RETURNING id",
+                pid, uid, peer, notes)
+        except Exception:
+            log.exception("persona_peer_notes uid=%d persona=%d", uid, pid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not row:
+            return _err("Не найдено", 404)
+        return _json_resp({"ok": True, "notes": notes})
+
+    async def persona_peer_forget(request: web.Request) -> web.Response:
+        """Забыть одного собеседника: при следующей встрече персона его не узнает."""
+        uid, pid, err = await _own_persona_id(request)
+        if err is not None:
+            return err
+        peer = _peer_tg_id(request)
+        if not peer:
+            return _err("Неверный собеседник", 400)
+        try:
+            row = await pool.fetchrow(
+                "DELETE FROM persona_peers WHERE persona_id=$1 AND owner_id=$2 "
+                "AND peer_tg_id=$3 RETURNING id", pid, uid, peer)
+        except Exception:
+            log.exception("persona_peer_forget uid=%d persona=%d", uid, pid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not row:
+            return _err("Не найдено", 404)
+        return _json_resp({"ok": True})
 
     async def persona_memory_rebuild(request: web.Request) -> web.Response:
         """Пересобрать «факты о себе» из сказанного сейчас, не дожидаясь десятой фразы."""
@@ -9684,6 +9739,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/persona/{persona_id}/memory", persona_memory_facts)
     app.router.add_delete("/api/miniapp/persona/{persona_id}/memory", persona_memory_forget)
     app.router.add_post("/api/miniapp/persona/{persona_id}/memory/rebuild", persona_memory_rebuild)
+    app.router.add_put("/api/miniapp/persona/{persona_id}/peer/{peer_id}", persona_peer_notes)
+    app.router.add_delete("/api/miniapp/persona/{persona_id}/peer/{peer_id}", persona_peer_forget)
     # Auto Registrar
     app.router.add_get("/api/miniapp/autoreg", autoreg_status)
     app.router.add_post("/api/miniapp/autoreg", autoreg_submit)

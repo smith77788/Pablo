@@ -23484,6 +23484,7 @@ async function openPersonaMemory(id) {
       </div>
       <div class="field-note">Сказано: ${num(d.total||0)} ${plural(d.total||0,'сообщение','сообщения','сообщений')}</div>
       <div class="lst">${items || empty('🧠','Пока ничего','Персона ещё не говорила в прогреве и комментариях')}</div>
+      ${typeof personaPeersHtml === 'function' ? personaPeersHtml(id, d) : ''}
       <button class="btn btn-o" style="width:100%;margin-top:6px;font-size:13px;padding:8px" onclick="txt('personaMemory','')">Скрыть</button>
     </div>`;
     if (box.scrollIntoView) box.scrollIntoView({behavior:'smooth'});
@@ -23509,7 +23510,7 @@ async function rebuildPersonaFacts(id, btn) {
   finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
 }
 async function forgetPersona(id, el) {
-  if (!await askConfirm('Стереть всё, что персона помнит: сказанное и факты о себе? Это не отменить.')) return;
+  if (!await askConfirm('Стереть всё, что персона помнит: сказанное, факты о себе и знакомых? Это не отменить.')) return;
   try {
     const d = await api(`/api/miniapp/persona/${id}/memory`, {method:'DELETE'});
     toast(`🧽 Забыто: ${num(d.deleted||0)}`);
@@ -35777,5 +35778,6 @@ function renderAudSegChart(segments) {
 <script src="screens/fleet_tools.js"></script>
 <script src="screens/infra.js"></script>
 <script src="screens/clone_adapt.js"></script>
+<script src="screens/persona_peers.js"></script>
 </body>
 </html>

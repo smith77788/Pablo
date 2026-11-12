@@ -202,13 +202,16 @@ def _reason(r: ai_gateway.AiReply) -> str:
     return "Модель сейчас не ответила — попробуйте ещё раз через минуту"
 
 
-async def _reply_context(pool, owner_id: int, thread: dict):
+async def _reply_context(pool, owner_id: int, thread: dict, peer_id: Optional[int] = None):
     """(голос аккаунта | None, стратегия, подпись состояния) для черновика.
 
     Связка трёх модулей в одном ответе: голос — из «Профилей» (персона
     аккаунта, на который написал человек, с её памятью), стратегия — из
     «Модели поведения» (состояние человека и что с ним делать). Всё fail-open:
-    без них черновик пишется, как раньше."""
+    без них черновик пишется, как раньше.
+
+    `peer_id` — Telegram-id человека: если персона уже говорила с ним (в
+    чатах прогрева), черновик пишется как знакомому (persona_peers)."""
     voice = None
     acc = reply_account_id(thread.get("messages") or [])
     if acc:
@@ -216,7 +219,8 @@ async def _reply_context(pool, owner_id: int, thread: dict):
             from services import persona_voice as _pv
             last_in = next((m.get("text") or "" for m in reversed(thread.get("messages") or [])
                             if m.get("direction") == "in"), "")
-            v = await _pv.load(pool, acc, context=last_in)
+            v = await _pv.load(pool, acc, context=last_in,
+                               peers=[int(peer_id)] if peer_id else None)
             voice = v if v.persona is not None else None
         except Exception:  # noqa: BLE001
             log.warning("inbox draft: голос аккаунта %s не прочитан", acc)
@@ -270,7 +274,7 @@ def setup_routes(app, pool) -> None:
             if err is not None:
                 return err
             msgs = thread.get("messages") or []
-            voice, strategy, state = await _reply_context(pool, uid, thread)
+            voice, strategy, state = await _reply_context(pool, uid, thread, _peer(request))
             out = await draft_reply(msgs, owner_id=uid,
                                     persona=voice.prompt if voice else "",
                                     strategy=strategy)
