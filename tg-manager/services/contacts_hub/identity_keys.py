@@ -83,3 +83,43 @@ def merge_phones(existing, incoming) -> list:
         seen.add(k)
         out.append(p)
     return out
+
+
+def email_key(raw) -> str:
+    """Почта в сравнимом виде: нижний регистр, без пробелов; у gmail точки и
+    «+метка» в имени не значат ничего (ivan.petrov+shop@gmail.com — тот же
+    ящик, что ivanpetrov@gmail.com). Не почта (нет «@» или домена) → ''."""
+    s = str(raw or "").strip().lower().replace("mailto:", "")
+    if s.count("@") != 1:
+        return ""
+    local, domain = s.split("@")
+    if not local or "." not in domain:
+        return ""
+    if domain in ("gmail.com", "googlemail.com"):
+        local = local.split("+", 1)[0].replace(".", "")
+        domain = "gmail.com"
+    return f"{local}@{domain}"
+
+
+def email_keys(emails) -> set[str]:
+    out: set[str] = set()
+    for e in emails or []:
+        k = email_key(e)
+        if k:
+            out.add(k)
+    return out
+
+
+def merge_emails(existing, incoming) -> list:
+    """Объединить списки почт без повторов одного ящика (см. email_key)."""
+    out = list(existing or [])
+    seen = {email_key(e) or str(e) for e in out}
+    for e in incoming or []:
+        if e in (None, ""):
+            continue
+        k = email_key(e) or str(e)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(e)
+    return out

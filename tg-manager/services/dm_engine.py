@@ -514,11 +514,96 @@ async def seconds_until_next_day(pool) -> int:
     return int(max(60.0, left) + random.uniform(20 * 60, 90 * 60))
 
 
+# Адаптивный лимит: границы, в которых ходит лимит аккаунта без явного
+# лимита владельца. Нижняя — чтобы молодой аккаунт всё же работал, верхняя —
+# выше этого объём холодных ЛС с обычного аккаунта не безопасен никогда.
+DM_ADAPTIVE_MIN = 5
+DM_ADAPTIVE_MAX = 60
+
+
+def adaptive_dm_cap(risk_mult: float, sent_7d: int, floods_7d: int,
+                    peer_floods_7d: int) -> int:
+    """Суточный лимит ЛС для ОДНОГО аккаунта по его свойствам и истории.
+
+    Чистая функция. Одно число на всех (30) было ошибкой в обе стороны:
+    годовалый Premium-аккаунт с чистой неделей мог больше, а аккаунт, который
+    вчера словил PeerFlood или зарегистрирован неделю назад, — сильно меньше.
+      * `risk_mult` — flood_engine.account_risk_factors (возраст, профиль,
+        прогрев, Premium, согласованность отпечатка), 0.2..1.3;
+      * чистая неделя с заметным объёмом (≥ 3 дневных лимитов) — рост ×1.5;
+      * каждый FloodWait за неделю срезает: лимит ÷ (1 + 0.5·n);
+      * PeerFlood за неделю — Telegram уже запрещал писать незнакомым: лимит
+        вчетверо ниже, сколько бы ни было остального.
+    """
+    cap = float(DM_DAILY_CAP_DEFAULT) * max(0.2, min(float(risk_mult or 1.0), 1.3))
+    if peer_floods_7d > 0:
+        cap /= 4.0
+    elif floods_7d > 0:
+        cap /= (1.0 + 0.5 * floods_7d)
+    elif sent_7d >= 3 * DM_DAILY_CAP_DEFAULT:
+        cap *= 1.5
+    return int(max(DM_ADAPTIVE_MIN, min(round(cap), DM_ADAPTIVE_MAX)))
+
+
+async def dm_caps_for(pool, owner_id: int, account_ids, explicit) -> dict[int, int]:
+    """Суточный лимит ЛС по каждому аккаунту.
+
+    Явный лимит владельца — общий для всех (зажат DM_DAILY_CAP_MAX): владелец
+    решил сам. Без него — адаптивный по аккаунту (adaptive_dm_cap). Сбой
+    чтения истории или свойств — дефолт, а не рост: адаптивность не имеет
+    права сделать лимит опаснее.
+    """
+    ids = [int(a) for a in (account_ids or [])]
+    try:
+        n = int(explicit or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n > 0:
+        cap = min(n, DM_DAILY_CAP_MAX)
+        return {i: cap for i in ids}
+    hist: dict[int, dict] = {}
+    try:
+        rows = await pool.fetch(
+            """SELECT account_id,
+                      COUNT(*) FILTER (WHERE result='sent')       AS sent,
+                      COUNT(*) FILTER (WHERE result='flood')      AS floods,
+                      COUNT(*) FILTER (WHERE result='peer_flood') AS peer
+               FROM operation_audit
+               WHERE owner_id=$1 AND action='dm' AND account_id = ANY($2::bigint[])
+                 AND occurred_at >= now() - interval '7 days'
+               GROUP BY account_id""", owner_id, ids)
+        hist = {int(r["account_id"]): dict(r) for r in rows if r["account_id"] is not None}
+    except Exception:
+        log.warning("dm_engine: история ЛС за неделю не прочиталась — дефолтный лимит",
+                    exc_info=True)
+        return {i: DM_DAILY_CAP_DEFAULT for i in ids}
+    out: dict[int, int] = {}
+    try:
+        from services.flood_engine import account_risk_factors
+    except Exception:
+        account_risk_factors = None
+    for i in ids:
+        mult = 1.0
+        if account_risk_factors is not None:
+            try:
+                mult = float((await account_risk_factors(pool, i)).get("multiplier") or 1.0)
+            except Exception:
+                mult = 1.0
+        h = hist.get(i) or {}
+        cap = adaptive_dm_cap(mult, int(h.get("sent") or 0), int(h.get("floods") or 0),
+                              int(h.get("peer") or 0))
+        # Без истории рост не положен: адаптивность растит лимит только тем,
+        # кто его уже честно отработал.
+        out[i] = min(cap, DM_DAILY_CAP_DEFAULT) if not h else cap
+    return out
+
+
 def pick_account_under_cap(acc_cycle: list, start_idx: int, sent_by_acc: dict, cap):
     """Выбирает следующий аккаунт из ротации, пропуская достигших дневного лимита.
 
     Возвращает (acc_dict | None, new_idx). None — если все аккаунты исчерпали cap.
-    Чистая функция (без БД) — тестируема отдельно от send-цикла. cap=None/0 → без лимита.
+    Чистая функция (без БД) — тестируема отдельно от send-цикла. cap=None/0 → без лимита;
+    cap-словарь {id аккаунта: лимит} — лимит у каждого свой (dm_caps_for).
     """
     if not acc_cycle:
         return None, start_idx
@@ -526,7 +611,8 @@ def pick_account_under_cap(acc_cycle: list, start_idx: int, sent_by_acc: dict, c
     for _ in range(len(acc_cycle)):
         cand = dict(acc_cycle[idx % len(acc_cycle)])
         idx += 1
-        if cap and sent_by_acc.get(int(cand["id"]), 0) >= cap:
+        _cap = cap.get(int(cand["id"]), DM_DAILY_CAP_DEFAULT) if isinstance(cap, dict) else cap
+        if _cap and sent_by_acc.get(int(cand["id"]), 0) >= _cap:
             continue
         return cand, idx
     return None, idx
@@ -1460,7 +1546,11 @@ async def run_campaign(
     # Считаем честно: префиллим уже отправленное сегодня по всем путям ЛС
     # владельца, дальше доучитываем в этом прогоне. Аккаунт, достигший лимита,
     # выбывает из ротации — ключевая защита аккаунтов от массовой рассылки.
-    _per_acc_cap = effective_daily_cap((_cp or {}).get("per_account_daily"))
+    # Лимит у КАЖДОГО аккаунта свой (dm_caps_for): явный лимит владельца —
+    # общий, без него — по возрасту, профилю и истории ЛС аккаунта за неделю.
+    _per_acc_cap = await dm_caps_for(
+        pool, owner_id, [a["id"] for a in accounts],
+        (_cp or {}).get("per_account_daily"))
     try:
         _sent_by_acc: dict[int, int] = await dm_sent_today(pool, owner_id)
     except DailyCountUnreadable:

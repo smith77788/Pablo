@@ -14019,8 +14019,7 @@ async def _exec_bulk_dm_adhoc(
     # не заданный — безопасный дефолт, а уже отправленное сегодня другими
     # рассылками и кампаниями засчитывается ниже. Прежний «потолок на эту
     # рассылку» давал полный лимит каждой новой рассылке того же дня.
-    from services.dm_engine import effective_daily_cap as _dm_daily_cap
-    per_acc_cap = _dm_daily_cap(params.get("per_account_cap"))
+    _explicit_cap = params.get("per_account_cap")
 
     # Медиа (опц.): файл лежит на диске контейнера, читаем один раз. С медиа
     # текст становится ПОДПИСЬЮ и может быть пустым.
@@ -14117,6 +14116,10 @@ async def _exec_bulk_dm_adhoc(
         flood_wait_total = 0.0
         acc_idx = 0
         from services import dm_engine as _dme
+        # Лимит у каждого аккаунта свой: явный владельца — общий, без него —
+        # по возрасту, профилю и неделе истории ЛС (dm_engine.dm_caps_for).
+        per_acc_cap = await _dme.dm_caps_for(
+            pool, owner_id, [a["id"] for a in active_accounts], _explicit_cap)
         try:
             sent_by_acc: dict[int, int] = await _dme.dm_sent_today(pool, owner_id)
         except _dme.DailyCountUnreadable:
@@ -14229,10 +14232,11 @@ async def _exec_bulk_dm_adhoc(
                 # второй раз, а строки на неотправленных здесь НЕ пишутся —
                 # иначе повтор счёл бы их закрытыми.
                 _left = total - i
-                log.info("bulk_dm_adhoc op=%d: суточный лимит %d на аккаунт исчерпан, "
+                log.info("bulk_dm_adhoc op=%d: суточный лимит %s исчерпан, "
                          "осталось %d — продолжим завтра", op_id, per_acc_cap, _left)
-                _why = (f"Аккаунты отправили сегодня свой лимит ЛС ({per_acc_cap} с "
-                        f"аккаунта). Отправлено в этот заход: {ok_count}, осталось "
+                _why = (f"Аккаунты отправили сегодня свой лимит ЛС "
+                        f"({sum(per_acc_cap.values())} на весь флот). "
+                        f"Отправлено в этот заход: {ok_count}, осталось "
                         f"{_left} — рассылка продолжится завтра сама")
                 return {"status": "requeue",
                         "defer_s": await _dme.seconds_until_next_day(pool),
@@ -23697,6 +23701,67 @@ async def _exec_compliance_scan(
             "failed": err_count, "summary": head}
 
 
+async def _growth_record_outcome(pool, owner_id: int, group_id, outcome: str,
+                                 *, msg_id=None, note: str = "") -> None:
+    """Исход публикации Агента роста — в журнал обучения. Fail-soft: строка
+    дедупа уже стоит (её поставили ДО поста), здесь только знание об исходе."""
+    if not group_id:
+        return
+    await _safe_execute(
+        pool,
+        "UPDATE niche_growth_targets SET outcome=$3, msg_id=$4, outcome_note=$5, "
+        "posted_at = CASE WHEN $3='posted' THEN now() ELSE posted_at END "
+        "WHERE owner_id=$1 AND group_id=$2",
+        owner_id, int(group_id), outcome,
+        int(msg_id) if msg_id else None, (note or "")[:300] or None,
+        log_ctx=f"[niche_growth_outcome owner={owner_id}]")
+
+
+async def _growth_check_posts_due(pool, owner_id: int, accounts: list) -> int:
+    """Узнать судьбу прошлых постов Агента роста: жив ли, просмотры.
+
+    Пост, удалённый админами через пару часов, — самый честный сигнал, что
+    здесь (и по этому запросу) промо считают спамом; раньше система о нём не
+    узнавала никогда. Спрашиваем тем аккаунтом, который публиковал, и только
+    если он сейчас в руках этого запуска (захвачен им): чужую сессию не
+    трогаем. «Не смогли спросить» — не «удалён»: строку оставляем на потом.
+    Возвращает, сколько постов проверено."""
+    from services import account_manager
+    from services.growth_learning import CHECK_AFTER_HOURS, CHECK_BATCH
+
+    by_id = {int(a["id"]): a for a in accounts or []}
+    if not by_id:
+        return 0
+    rows = await _safe_fetch(
+        pool,
+        "SELECT group_id, username, msg_id, acc_id FROM niche_growth_targets "
+        "WHERE owner_id=$1 AND outcome='posted' AND msg_id IS NOT NULL "
+        "AND checked_at IS NULL AND acc_id = ANY($2::bigint[]) "
+        "AND posted_at < now() - make_interval(hours => $3) "
+        "ORDER BY posted_at LIMIT $4",
+        owner_id, list(by_id), CHECK_AFTER_HOURS, CHECK_BATCH)
+    checked = 0
+    for r in rows or []:
+        acc = by_id.get(int(r["acc_id"]))
+        ref = f"@{r['username']}" if r["username"] else int(r["group_id"])
+        if not acc or not acc.get("session_str"):
+            continue
+        st = await account_manager.get_message_status(
+            acc["session_str"], ref, [int(r["msg_id"])], _acc=acc)
+        if st is None:
+            continue
+        info = st.get(int(r["msg_id"])) or {"alive": False, "views": 0}
+        await _safe_execute(
+            pool,
+            "UPDATE niche_growth_targets SET checked_at=now(), alive=$3, views=$4 "
+            "WHERE owner_id=$1 AND group_id=$2",
+            owner_id, int(r["group_id"]), bool(info["alive"]), int(info["views"] or 0),
+            log_ctx=f"[niche_growth_check owner={owner_id}]")
+        checked += 1
+        await asyncio.sleep(random.uniform(1.5, 3.0))
+    return checked
+
+
 async def _exec_niche_growth_post(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -23827,6 +23892,34 @@ async def _exec_niche_growth_post(
                           "повторим позже, чтобы не отправить промо дважды",
             }
 
+        # ОБУЧЕНИЕ НА ИСХОДАХ (services/growth_learning). Сначала — судьба
+        # прошлых постов: жив ли, сколько просмотров (аккаунтом, который
+        # публиковал, если он в этом запуске). Потом — порядок запросов по их
+        # отдаче: запрос, по которому трижды не вышло ни одной живой
+        # публикации, больше не пробуется (кроме своих запросов владельца —
+        # их только переупорядочиваем). Всё fail-soft: обучение — надстройка,
+        # сбой не должен отменять запуск.
+        _dropped_kws: list[str] = []
+        _checked_posts = 0
+        try:
+            _checked_posts = await _growth_check_posts_due(pool, owner_id, accounts)
+            from services import growth_learning as _gl
+            _hist = await pool.fetch(
+                "SELECT keyword, outcome, alive FROM niche_growth_targets "
+                "WHERE owner_id=$1 AND keyword IS NOT NULL", owner_id)
+            _stats = _gl.keyword_stats([dict(r) for r in _hist])
+            if _stats:
+                _ordered, _dead = _gl.order_keywords(keywords, _stats)
+                if cfg["keywords"]:
+                    keywords = _ordered + _dead
+                else:
+                    keywords, _dropped_kws = _ordered, _dead
+                if _dropped_kws:
+                    log.info("niche_growth_post op=%d: по опыту отсеяны запросы %s",
+                             op_id, _dropped_kws)
+        except Exception:
+            log_exc_swallow(log, f"niche_growth_post op={op_id}: обучение недоступно")
+
         # Ищем группы
         try:
             groups = await niche_searcher.search_niche_groups(
@@ -23930,9 +24023,28 @@ async def _exec_niche_growth_post(
                     "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
                 }
 
-            # Round-robin по аккаунтам
-            acc = accounts[acc_idx % len(accounts)]
-            acc_idx += 1
+            # Round-robin по аккаунтам — среди тех, у кого сейчас НЕ местная
+            # ночь. Вступление и промо в 3 часа ночи по времени аккаунта —
+            # бот-сигнал, а пост в спящей группе к утру уйдёт под десятки
+            # новых сообщений: охвата нет, риск есть. Ночь у всех — операция
+            # откладывается до местного утра и продолжит с того же места
+            # (отработанные группы уже в niche_growth_targets).
+            from services import geo_tempo as _gt
+            acc = None
+            for _k in range(len(accounts)):
+                _cand = accounts[(acc_idx + _k) % len(accounts)]
+                if not _gt.is_local_night(_cand.get("geo_country")):
+                    acc = _cand
+                    acc_idx += _k + 1
+                    break
+            if acc is None:
+                _waits = [w for w in (_gt.seconds_until_local_morning(a.get("geo_country"))
+                                      for a in accounts) if w]
+                _wait = int(min(_waits) if _waits else 6 * 3600) + random.randint(300, 2400)
+                _why = (f"У всех аккаунтов сейчас местная ночь — Агент роста "
+                        f"продолжит утром. Опубликовано в этот заход: {ok_count}")
+                return {"status": "requeue", "defer_s": _wait,
+                        "defer_cause": "local_night", "reason": _why, "summary": _why}
 
             join_ref = grp.get("join_ref", "")
             grp_id = grp.get("id", 0)
@@ -23995,9 +24107,14 @@ async def _exec_niche_growth_post(
             if grp_id:
                 _marked = await _safe_execute(
                     pool,
-                    "INSERT INTO niche_growth_targets(owner_id, group_id, title) "
-                    "VALUES($1,$2,$3) ON CONFLICT (owner_id, group_id) DO NOTHING",
+                    "INSERT INTO niche_growth_targets(owner_id, group_id, title, "
+                    "keyword, niche, username, members, acc_id, outcome) "
+                    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,'marked') "
+                    "ON CONFLICT (owner_id, group_id) DO NOTHING",
                     owner_id, grp_id, grp_title,
+                    (grp.get("keyword") or None), (niche or None)[:200] if niche else None,
+                    (username or None), int(grp.get("members") or 0),
+                    int(acc["id"]),
                     log_ctx=f"[niche_growth_mark op={op_id}]",
                 ) != "ERROR"
             if not _marked:
@@ -24047,6 +24164,9 @@ async def _exec_niche_growth_post(
                         "niche_growth_post: post failed grp=%s title=%r: %s",
                         join_ref, grp_title, post_result.get("error"),
                     )
+                    await _growth_record_outcome(
+                        pool, owner_id, grp_id, "post_failed",
+                        note=str(post_result.get("error") or ""))
                     err_count += 1
                     await _journal_write(
                         pool,
@@ -24058,6 +24178,9 @@ async def _exec_niche_growth_post(
                 else:
                     ok_count += 1
                     posted_titles.append(grp_title or join_ref)
+                    await _growth_record_outcome(
+                        pool, owner_id, grp_id, "posted",
+                        msg_id=post_result.get("msg_id"))
                     log.info(
                         "niche_growth_post: posted to grp=%s title=%r msg_id=%s",
                         join_ref, grp_title, post_result.get("msg_id"),
@@ -24098,6 +24221,11 @@ async def _exec_niche_growth_post(
 
         summary = (f"🌿 Агент роста: опубликовано {ok_count} из {total}"
                    + (f", ошибок {err_count}" if err_count else ""))
+        if _dropped_kws:
+            summary += (f"\nПо опыту прошлых запусков не пробовались запросы без "
+                        f"отдачи: {', '.join(_dropped_kws[:5])}")
+        if _checked_posts:
+            summary += f"\nПроверена судьба прошлых постов: {_checked_posts}"
         if posted_titles:
             summary += "\n" + "\n".join(f"• {t}" for t in posted_titles[:10])
         return {

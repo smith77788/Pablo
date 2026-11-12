@@ -650,14 +650,28 @@ async def scan_channel_ads(
                     if sig.advertiser:
                         touched.add(sig.advertiser)
                 # Посты, которые разбор больше рекламой не считает, уходят из
-                # журнала, иначе прежние ложные находки жили бы вечно.
+                # журнала, иначе прежние ложные находки жили бы вечно. Но
+                # ТОЛЬКО те, что в выдаче есть: пост, которого в выдаче нет,
+                # удалён каналом — и это не ошибка разбора, а формат
+                # размещения («1/24»: отстоял сутки и исчез). Раньше удалялись
+                # и они, и журнал терял ровно такие размещения.
                 if messages:
+                    _seen_ids = [int(x.id) for x in messages]
+                    _ad_ids = [int(msg.id) for msg, _ in ads]
                     await conn.execute(
                         "DELETE FROM ad_posts_log WHERE placement_id=$1 "
+                        "AND msg_id = ANY($2::bigint[]) AND NOT (msg_id = ANY($3::bigint[]))",
+                        placement_id, _seen_ids, _ad_ids)
+                    await conn.execute(
+                        "UPDATE ad_posts_log SET deleted_at = now() "
+                        "WHERE placement_id=$1 AND deleted_at IS NULL "
                         "AND msg_id >= $2 AND NOT (msg_id = ANY($3::bigint[]))",
-                        placement_id,
-                        min(int(x.id) for x in messages),
-                        [int(msg.id) for msg, _ in ads])
+                        placement_id, min(_seen_ids), _seen_ids)
+                    # Вернулся (был скрыт и снова виден) — снова живой.
+                    await conn.execute(
+                        "UPDATE ad_posts_log SET deleted_at = NULL "
+                        "WHERE placement_id=$1 AND deleted_at IS NOT NULL "
+                        "AND msg_id = ANY($2::bigint[])", placement_id, _ad_ids)
                 await refresh_advertisers(conn, owner_id, touched,
                                           niches[0] if niches else "")
                 await conn.execute(
@@ -1005,7 +1019,49 @@ async def channel_detail(pool, owner_id: int, username: str) -> Optional[dict]:
         "username": a["advertiser_username"], "kind": a["kind"] or "",
         "kind_label": KIND_LABELS.get(a["kind"] or "", ""),
         "posts": int(a["posts"]), "views": int(a["views"]), "last_seen": _iso(a["last"]),
+        "repeat": int(a["posts"]) >= 2,
     } for a in advs]
+    life = await pool.fetchrow(
+        "SELECT COUNT(*) AS total, COUNT(deleted_at) AS deleted, "
+        "percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM "
+        "  (deleted_at - COALESCE(post_date, detected_at))) / 3600.0) "
+        "  FILTER (WHERE deleted_at IS NOT NULL) AS median_h "
+        "FROM ad_posts_log WHERE owner_id=$1 AND placement_id=$2", owner_id, r["id"])
+    out.update(placement_signals(
+        [int(a["posts"]) for a in advs],
+        int((life or {}).get("total") or 0), int((life or {}).get("deleted") or 0),
+        (life or {}).get("median_h")))
+    return out
+
+
+def placement_signals(posts_per_advertiser: list[int], ads_total: int,
+                      ads_deleted: int, median_life_h) -> dict:
+    """Сигналы «площадка работает» поверх охвата и вовлечённости.
+
+    * Повторные закупки — главный честный сигнал: рекламодатель, вернувшийся
+      в тот же канал второй раз, увидел там результат. Охват и ER это лишь
+      обещают, повтор — подтверждает деньгами.
+    * Срок жизни рекламы — формат размещения: удаление через ~24 ч — «1/24»,
+      через ~48 ч — «2/48», не удаляется — «навсегда». Цена разных форматов
+      различается в разы, и сравнивать каналы без этого нельзя.
+    Чистая функция."""
+    advs = [p for p in posts_per_advertiser if p > 0]
+    repeat = sum(1 for p in advs if p >= 2)
+    out = {
+        "repeat_advertisers": repeat,
+        "repeat_share": round(repeat / len(advs), 3) if advs else 0.0,
+        "ads_deleted": int(ads_deleted),
+        "ad_life_median_h": round(float(median_life_h), 1) if median_life_h is not None else None,
+        "ad_format": "",
+    }
+    if ads_total >= 3:
+        share_deleted = ads_deleted / ads_total
+        if share_deleted < 0.3:
+            out["ad_format"] = "навсегда"
+        elif median_life_h is not None:
+            h = float(median_life_h)
+            out["ad_format"] = ("1/24" if h <= 36 else "2/48" if h <= 60
+                                else "3/72" if h <= 90 else "на срок")
     return out
 
 

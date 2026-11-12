@@ -187,3 +187,41 @@ def test_sync_keeps_phones_the_owner_added_postgres(pool, monkeypatch):
         "SELECT phones::text FROM unified_contacts "
         "WHERE owner_id=$1 AND telegram_user_id=55601", OWNER))
     assert phones == '["8 916 000-11-22"]', phones
+
+
+# ── Почта: тоже ключ опознания ──────────────────────────────────────────────
+# НАХОДКА. Почта в сравнении дублей не участвовала вовсе: две записи одного
+# клиента из CRM и импорта с одной почтой дублями не считались. Обратный
+# контроль: убрать ('em', …) из группировки -> красный
+# test_the_screen_finds_twins_by_email.
+
+from services.contacts_hub.identity_keys import email_key  # noqa: E402
+
+
+@pytest.mark.parametrize("raw", ["Ivan.Petrov+shop@gmail.com", " ivanpetrov@GMAIL.com ",
+                                 "mailto:ivan.petrov@googlemail.com"])
+def test_gmail_spellings_share_one_key(raw):
+    assert email_key(raw) == "ivanpetrov@gmail.com"
+
+
+def test_other_domains_keep_dots_and_plus():
+    assert email_key("a.b+c@yandex.ru") == "a.b+c@yandex.ru"
+    assert email_key("not-an-email") == ""
+    assert email_key("x@localhost") == ""
+
+
+def test_the_screen_finds_twins_by_email():
+    rows = [
+        _contact(10, emails='["Ivan.Petrov@gmail.com"]', first_name="Иван", last_name="Петров"),
+        _contact(11, emails='["ivanpetrov+crm@gmail.com"]', first_name="Иван", last_name="Петров"),
+    ]
+    res = _run(trust_engine.detect_smart_duplicates(_RowsPool(rows), 1))
+    assert len(res["duplicates"]) == 1, res
+    assert "same_email" in res["duplicates"][0]["reasons"]
+    assert "одна почта" in res["duplicates"][0]["reason_labels"]
+
+
+def test_merge_does_not_double_one_mailbox():
+    taken = absorbed_fields({"emails": '["Ivan.Petrov@gmail.com"]'},
+                            {"emails": '["ivanpetrov@gmail.com", "i@ya.ru"]'})
+    assert taken["emails"] == ["Ivan.Petrov@gmail.com", "i@ya.ru"]

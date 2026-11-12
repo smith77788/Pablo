@@ -5,7 +5,7 @@ from typing import Optional
 
 import asyncpg
 
-from services.contacts_hub.identity_keys import phone_keys, username_key
+from services.contacts_hub.identity_keys import email_keys, phone_keys, username_key
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +80,16 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
         score += 0.4
         reasons.append('same_phone')
 
+    # Почта опознаёт человека так же, как номер: тот же вес, тот же ключ в
+    # группировке detect_smart_duplicates (иначе отбор перестал бы быть
+    # точным). Раньше почта в сравнении не участвовала вовсе: две записи
+    # одного клиента из CRM и из импорта с одной почтой дублями не считались.
+    emails_a = email_keys(_as_list(contact_a.get('emails')))
+    emails_b = email_keys(_as_list(contact_b.get('emails')))
+    if emails_a and emails_b and emails_a & emails_b:
+        score += 0.4
+        reasons.append('same_email')
+
     username_a = username_key(contact_a.get('username'))
     username_b = username_key(contact_b.get('username'))
     if username_a and username_b and username_a == username_b:
@@ -113,6 +123,7 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
 REASON_LABELS = {
     'same_telegram_id': 'один Telegram ID',
     'same_phone': 'один телефон',
+    'same_email': 'одна почта',
     'same_username': 'один @ник',
     'same_name': 'одинаковое имя',
     'same_first_name': 'одинаковое имя (без фамилии)',
@@ -155,7 +166,7 @@ async def detect_smart_duplicates(pool, owner_id: int) -> dict:
     ответа. Молча срезанный список дублей читается как «больше дублей нет».
     """
     contacts = await pool.fetch(
-        '''SELECT id, telegram_user_id, username, first_name, last_name, phones, company
+        '''SELECT id, telegram_user_id, username, first_name, last_name, phones, emails, company
            FROM unified_contacts WHERE owner_id=$1''', owner_id)
     rows = [dict(c) for c in contacts]
 
@@ -169,6 +180,8 @@ async def detect_smart_duplicates(pool, owner_id: int) -> dict:
         # Тот же ключ, что в compute_merge_confidence (см. identity_keys).
         for ph in phone_keys(_as_list(c.get('phones'))):
             keys.add(('ph', ph))
+        for em in email_keys(_as_list(c.get('emails'))):
+            keys.add(('em', em))
         for k in keys:
             groups.setdefault(k, []).append(i)
 
