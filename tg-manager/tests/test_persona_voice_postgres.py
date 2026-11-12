@@ -165,3 +165,21 @@ def test_owner_sees_edits_and_forgets_memory_strangers_do_not():
         mem = await (await client.get(f"/api/miniapp/persona/{pid}/memory")).json()
         assert mem["total"] == 0 and mem["self_facts"] == ""
     _run(body)
+
+
+@live
+def test_old_statement_on_the_topic_comes_back_from_the_base():
+    from services import persona_voice as pv
+
+    async def body(client, pool, acc):
+        r = await client.post("/api/miniapp/persona", json={**_FORM, "account_id": acc})
+        assert r.status == 200
+        v = await pv.load(pool, acc)
+        await pv.remember(pool, v, "chat", "я вообще из Казани", owner_id=OWNER)
+        for i in range(pv.RECENT_IN_PROMPT + 2):
+            await pv.remember(pool, v, "chat", f"про рынок номер {i}", owner_id=OWNER)
+        plain = await pv.load(pool, acc)
+        assert "из Казани" not in plain.prompt, "старая фраза не должна висеть всегда"
+        topical = await pv.load(pool, acc, context="а ты из какого города? Казань?")
+        assert "«я вообще из Казани»" in topical.prompt
+    _run(body)

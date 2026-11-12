@@ -1228,6 +1228,22 @@ def prefer_addressed(queue: list[int], addressed) -> list[int]:
     return [a] + [i for i in queue if i != a]
 
 
+async def _typing(client, entity, seconds: float) -> None:
+    """«Печатает…» в чате на время набора — как у живого человека. Сообщение,
+    появившееся без статуса набора, участники видят как вставленное. Сбой
+    статуса не мешает реплике: остаётся простая пауза той же длины."""
+    async def _with_status():
+        async with client.action(entity, "typing"):
+            await asyncio.sleep(seconds)
+    try:
+        await asyncio.wait_for(_with_status(), timeout=seconds + _TG_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.debug("chat_warmup: статус набора не поставлен", exc_info=True)
+        await asyncio.sleep(seconds)
+
+
 def typing_seconds(text: str) -> float:
     """Сколько «набирать» реплику: живой человек пишет ~5–7 знаков в секунду,
     и короткое «ага» не набирают шесть секунд, а абзац — не две. ЧИСТАЯ."""
@@ -1548,8 +1564,11 @@ async def _process_session(pool, session: dict) -> None:
             # Голос аккаунта: персона + её память о себе (persona_voice). Без
             # персоны — устойчивый запасной характер, как раньше.
             from services import persona_voice
+            _ctx = " ".join([(target or {}).get("text") or ""]
+                            + [m.get("text") or "" for m in recent[-3:]])
             voice = await persona_voice.load(pool, speaker,
-                                             fallback=_fallback_persona(speaker))
+                                             fallback=_fallback_persona(speaker),
+                                             context=_ctx)
             reply, _why = await generate_reply_detailed(
                 voice.prompt, recent, target, session.get("topics") or "", mode,
                 lang=session.get("lang"), reply_len=session.get("reply_len"))
@@ -1575,8 +1594,7 @@ async def _process_session(pool, session: dict) -> None:
                                "Ответ отклонён проверкой контента — ход пропущен",
                                account_id=speaker, kind=plan["kind"])
                 else:
-                    import asyncio as _a
-                    await _a.sleep(typing_seconds(reply))  # набор по длине реплики
+                    await _typing(client, entity, typing_seconds(reply))
                     reply_to = plan["reply_to_id"] if plan["kind"] == "reply" else None
                     await asyncio.wait_for(client.send_message(entity, reply, reply_to=reply_to), timeout=_TG_TIMEOUT)
                     sent = True

@@ -83,7 +83,42 @@ class Voice:
 
 # ── Чистое ядро ─────────────────────────────────────────────────────────────
 
-def memory_block(self_facts: str, recent: list[str]) -> str:
+_STOP = frozenset(
+    "это этот эта эти тоже только когда тогда потом если чтобы очень просто всё всех "
+    "есть было были будет может можно нужно надо вообще кстати сейчас здесь там "
+    "который которая которые какой какая какие почему зачем сколько".split())
+
+
+def _stems(text: str) -> set[str]:
+    """Основы значимых слов: первые пять букв слов от четырёх букв. Грубо, но
+    «Казань»/«Казани»/«казанский» сходятся, а служебные слова — нет."""
+    words = re.findall(r"[a-zа-яё]{4,}", (text or "").lower().replace("ё", "е"))
+    return {w[:5] for w in words if w not in _STOP}
+
+
+def relevant(statements: list[str], context: str, *, k: int = 3,
+             exclude: list[str] | None = None) -> list[str]:
+    """Сказанное раньше, что относится к теме разговора. ЧИСТАЯ.
+
+    Последние фразы помнят «что было вчера», но не «что я говорил про
+    Казань месяц назад». Здесь — лексическое совпадение основ: без внешних
+    моделей и без задержки; самые свежие при равенстве — первыми."""
+    ctx = _stems(context)
+    if not ctx:
+        return []
+    skip = {_norm(x) for x in (exclude or [])}
+    scored = []
+    for idx, st in enumerate(statements or []):
+        if _norm(st) in skip:
+            continue
+        overlap = len(ctx & _stems(st))
+        if overlap:
+            scored.append((overlap, idx, st))
+    scored.sort(key=lambda x: (-x[0], -x[1]))
+    return [st for _, _, st in scored[:k]]
+
+
+def memory_block(self_facts: str, recent: list[str], on_topic: list[str] | None = None) -> str:
     """Память персоны для промпта. ЧИСТАЯ. Пустая память — пустая строка.
 
     Фразы — сказанное самой персоной, но рождённое из чужого контекста
@@ -97,6 +132,10 @@ def memory_block(self_facts: str, recent: list[str]) -> str:
     if lines:
         parts.append("Твои последние сообщения (не повторяй их и их обороты, "
                      "говори по-новому): " + " | ".join(f"«{t}»" for t in lines))
+    topic = [" ".join(str(t).split())[:200] for t in (on_topic or []) if str(t).strip()]
+    if topic:
+        parts.append("Что ты раньше говорил на эту тему — держись этого, но не "
+                     "повторяй дословно: " + " | ".join(f"«{t}»" for t in topic))
     return "\n".join(parts)
 
 
@@ -196,8 +235,15 @@ async def recent_statements(pool, persona_id: int, limit: int = RECENT_IN_PROMPT
     return [str(r["content"]) for r in reversed(rows)]
 
 
-async def load(pool, account_id: int, *, fallback: str = "") -> Voice:
+# Сколько старых фраз перебирать в поиске по теме.
+TOPIC_WINDOW = 300
+
+
+async def load(pool, account_id: int, *, fallback: str = "", context: str = "") -> Voice:
     """Голос аккаунта: персона + память. Без персоны — `fallback`.
+
+    `context` — о чём сейчас разговор (сообщение, на которое отвечаем): по
+    нему из старой памяти поднимается сказанное на эту тему.
 
     Никогда не кидает: без базы голос — запасной характер, как и раньше."""
     voice = Voice(account_id=int(account_id or 0), prompt=fallback or "")
@@ -218,7 +264,15 @@ async def load(pool, account_id: int, *, fallback: str = "") -> Voice:
         except Exception as exc:  # noqa: BLE001 - без памяти говорим, как раньше
             log.warning("persona_voice.load persona=%s: память не прочитана: %s",
                         persona.persona_id, exc)
-        mem = memory_block(persona.self_facts, voice.recent)
+        on_topic: list[str] = []
+        if (context or "").strip():
+            try:
+                older = await recent_statements(pool, persona.persona_id, limit=TOPIC_WINDOW)
+                on_topic = relevant(older, context, exclude=voice.recent)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("persona_voice.load persona=%s: поиск по теме: %s",
+                            persona.persona_id, exc)
+        mem = memory_block(persona.self_facts, voice.recent, on_topic)
         voice.prompt = base + ("\n\n" + mem if mem else "")
     else:
         voice.prompt = base
