@@ -263,7 +263,7 @@ async function runAccPool() {
     try {
       const d = await api('/api/miniapp/infra/pools');
       INFRA_POOLS = d.pools || [];
-    } catch (_) {}
+    } catch (e) { toast('⚠️ Список пулов не загрузился: ' + errRu(e)); }
     const opts = INFRA_POOLS.map(p => ({value: 'p:' + p.pool, label: '🗂 ' + (p.label || infraPoolLabel(p.pool)),
       sub: `${num(p.total)} ${plural(p.total, 'аккаунт', 'аккаунта', 'аккаунтов')}`}));
     opts.push({value: 'new', label: '➕ Новый пул…'});
@@ -304,7 +304,8 @@ function accPoolRowHtml(a) {
 }
 async function accSetPool(accId) {
   let pools = [];
-  try { pools = (await api('/api/miniapp/infra/pools')).pools || []; } catch (_) {}
+  try { pools = (await api('/api/miniapp/infra/pools')).pools || []; }
+  catch (e) { toast('⚠️ Список пулов не загрузился: ' + errRu(e)); }
   const opts = pools.map(p => ({value: 'p:' + p.pool, label: '🗂 ' + (p.label || infraPoolLabel(p.pool))}));
   opts.push({value: 'new', label: '➕ Новый пул…'});
   opts.push({value: 'none', label: '✖ Без пула'});

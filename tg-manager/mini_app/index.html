@@ -1575,7 +1575,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="openSelfPromo()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📣 Самопиар</button>
       <button class="btn btn-s" onclick="openBotFactory()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
-    <div style="display:flex;gap:8px;padding:0 0 10px">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:0 0 10px">
       <button class="btn btn-s" id="botSelToggle" onclick="toggleBotSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
       <!-- Инвентаризация флота: боты, созданные с аккаунтов, скану ресурсов
            не видны (бот — не канал), и раньше их нельзя было найти вовсе. -->
@@ -1751,7 +1751,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Быстрое удаление невоскрешаемых (появляется, когда есть мёртвые) -->
     <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(248,113,113,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
     <!-- Массовые действия по аккаунтам -->
-    <div style="display:flex;gap:8px;padding:4px 0 8px">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0 8px">
       <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
       <button class="btn btn-s" onclick="openMassOps()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🕓 История</button>
       <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
@@ -5414,7 +5414,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div id="setter2faFields" style="display:none;padding:0 16px">
       <div class="field-note" style="margin-bottom:8px">Пароль сохраняется у каждого аккаунта <b>зашифрованным</b> — его можно посмотреть здесь же, а следующая смена пароля не потребует вводить текущий.</div>
-      <label class="field" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="setter2faRandom" onchange="document.getElementById('setter2faNewWrap').style.display=this.checked?'none':''" style="margin-top:3px"><span>🎲 <b>Свой случайный пароль каждому аккаунту</b> — один утёкший пароль не откроет весь флот. Пароли знает только система, посмотреть их можно здесь же.</span></label>
+      <label class="field chk-row" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="setter2faRandom" onchange="document.getElementById('setter2faNewWrap').style.display=this.checked?'none':''" style="margin-top:3px"><span>🎲 <b>Свой случайный пароль каждому аккаунту</b> — один утёкший пароль не откроет весь флот. Пароли знает только система, посмотреть их можно здесь же.</span></label>
       <div class="field" id="setter2faNewWrap"><label>Новый пароль (минимум 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
       <div class="field"><label>Текущий пароль (если стоит и ставили не здесь)</label><input type="password" id="setter2faCur" maxlength="64" placeholder="Оставьте пустым, если не установлен"></div>
       <div class="field"><label>Подсказка (необязательно)</label><input type="text" id="setter2faHint" maxlength="64" placeholder="Подсказка"></div>
@@ -5933,8 +5933,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
               <option value="168">Недели</option>
             </select></div>
           <div class="field"><label>Пожелание к стилю (необязательно)</label><input type="text" id="aicExtra" maxlength="300" placeholder="например: пиши на «ты», без смайликов"></div>
-          <label style="display:flex;gap:8px;align-items:center;font-size:14px;padding:6px 0"><input type="checkbox" id="aicJoin" checked> Вступать в обсуждение, если без этого нельзя писать</label>
-          <label style="display:flex;gap:8px;align-items:center;font-size:14px;padding:6px 0"><input type="checkbox" id="aicSkipDone" checked> Не писать под постом, где мы уже комментировали</label>
+          <label class="chk-row" style="display:flex;gap:8px;align-items:center;font-size:14px;padding:6px 0"><input type="checkbox" id="aicJoin" checked> Вступать в обсуждение, если без этого нельзя писать</label>
+          <label class="chk-row" style="display:flex;gap:8px;align-items:center;font-size:14px;padding:6px 0"><input type="checkbox" id="aicSkipDone" checked> Не писать под постом, где мы уже комментировали</label>
         </details>
         <div class="card" id="aicSummary" style="font-size:13px;line-height:1.5;margin:0 0 10px"></div>
         <div class="field-err" id="aicErr"></div>
@@ -6205,7 +6205,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="field-note">Лучший способ задать голос: ИИ берёт манеру, но фразы не копирует.</div>
       </div>
       <div class="field">
-        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pMemory" checked> 🧠 Помнить сказанное</label>
+        <label class="chk-row" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pMemory" checked> 🧠 Помнить сказанное</label>
         <div class="field-note">Персона помнит, что рассказала о себе, не повторяется и не противоречит себе в разных чатах.</div>
       </div>
       <div class="field">
@@ -8302,7 +8302,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Заголовок (необязательно)</label><input type="text" id="aiMemTitle" maxlength="180" placeholder="Краткое описание"></div>
     <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="5" maxlength="8000" placeholder="Например: «Наш основной канал — @brand, публикуем в 10:00 и 19:00 по Москве»" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field"><label>Теги (через запятую, необязательно)</label><input type="text" id="aiMemTags" placeholder="канал, рассылки, цены"></div>
-    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:4px 0 10px;cursor:pointer">
+    <label class="chk-row" style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:4px 0 10px;cursor:pointer">
       <input type="checkbox" id="aiMemPinned" style="margin-top:2px">
       <span>📌 Закрепить — ассистент учитывает запись в каждом ответе, а не только при совпадении слов</span>
     </label>
@@ -11272,11 +11272,14 @@ async function startChatWarmup(ref, btn) {
       + 'Темп, часы работы и лимиты можно поправить на экране «Разогрев чата».')) return;
   if (btn) btn.disabled = true;
   try {
-    const d = await api('/api/miniapp/chatwarmup/session', {method:'POST', body:JSON.stringify({
+    const r = await api('/api/miniapp/chatwarmup/session', {method:'POST', body:JSON.stringify({
       chat_ref: '@' + chat,
-      mode:'mixed', intensity:'normal'})});
+      mode:'mixed', intensity:'normal'})}) || {};
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('🔥 Разогрев запущен' + (d && d.accounts ? ` · аккаунтов: ${num(d.accounts)}` : ''));
+    // Как и на экране разогрева: потолок флота на чат не срабатывает молча.
+    const od = (r.omitted_detail||[]).map(x => `${x.reason} — ${x.count}`).join('; ');
+    toast('🔥 Разогрев запущен' + (r.accounts ? ` · аккаунтов: ${num(r.accounts)}` : '')
+      + (r.omitted > 0 ? ` · не вошли ${num(r.omitted)}${od ? `: ${od}` : ''}` : ''));
     openChatWarmup();
   } catch (e) {
     toast('⚠️ ' + errRu(e, 'Не удалось запустить разогрев'));
@@ -18654,7 +18657,7 @@ async function previewProfileSetter() {
     const long = (d.too_long||[]).length
       ? `<div style="color:var(--orange);font-size:12px;margin-top:4px">✂️ Обрежется по лимиту Telegram: ${esc(d.too_long.join(', '))}</div>` : '';
     txt('setterPreview', `<div class="lst">${rows}</div>${same}${long}`);
-  } catch(e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Не удалось показать примеры'))}</div>`; }
+  } catch(e) { box.innerHTML = errHtml(errRu(e,'Не удалось показать примеры'), 'previewProfileSetter()'); }
 }
 function setterPickMode(mode) {
   SETTER_PICK_MODE = mode;
@@ -18670,7 +18673,7 @@ function renderSetterAccounts() {
   const q = ((document.getElementById('setterAccSearch')||{}).value||'').trim().toLowerCase();
   const list = SETTER_ACCS.filter(a => !q || [a.phone,a.first_name,a.username,a.persona].join(' ').toLowerCase().includes(q));
   txt('setterAccList', list.length ? list.map(a=>`
-    <label class="row" style="cursor:pointer">
+    <label class="row chk-row" style="cursor:pointer">
       <input type="checkbox" ${SETTER_PICKED.has(a.id)?'checked':''} onchange="setterToggleAcc(${a.id}, this.checked)" style="width:20px;height:20px;margin-right:10px">
       <div class="row-body"><div class="row-name">${esc(a.first_name||a.phone||('#'+a.id))}${a.username?' · @'+esc(a.username):''}</div>
       <div class="row-val">${esc(a.phone||'')}${a.persona?' · 🎭 '+esc(a.persona):''}${a.twofa_saved?' · 🔐':''}</div></div>
@@ -20893,7 +20896,7 @@ async function openIntentHits(ruleId) {
   const box = document.getElementById('intentRules');
   box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/uch/intent/hits' + (ruleId ? ('?rule_id='+ruleId) : ''));
+    const d = await api(`/api/miniapp/uch/intent/hits?rule_id=${ruleId ? Number(ruleId) : ''}`);
     const hits = d.hits || [];
     const back = `<div style="padding:6px 2px"><span class="sec-btn" onclick="loadIntentRules()">← К правилам</span></div>`;
     if (!hits.length) {
@@ -23213,7 +23216,7 @@ async function openPersonaMemory(id) {
       <button class="btn btn-o" style="width:100%;margin-top:6px;font-size:13px;padding:8px" onclick="txt('personaMemory','')">Скрыть</button>
     </div>`;
     if (box.scrollIntoView) box.scrollIntoView({behavior:'smooth'});
-  } catch(e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Память не открылась'))}</div>`; }
+  } catch(e) { box.innerHTML = errHtml(errRu(e,'Память не открылась'), 'openPersonaMemory(' + Number(id) + ')'); }
 }
 async function savePersonaFacts(id, btn) {
   const facts = ((document.getElementById('pmFacts')||{}).value||'').trim();
@@ -25923,6 +25926,12 @@ async function openVLayerRules() {
 }
 
 function _vlRulesHtml(d) {
+  // Неполный ответ (старый сервер посреди деплоя, сбой части полей) — честная
+  // ошибка с повтором, а не экран из «undefined» и не TypeError.
+  if (!d || !d.rules || !d.defaults || !d.limits || !Array.isArray(d.targets) || !Array.isArray(d.hot_at)
+      || !d.rules.signal_target || !d.defaults.signal_target || !d.rules.ttl_hours
+      || !d.rules.audience || !d.rules.bot || !d.defaults.audience || !d.defaults.bot)
+    return errHtml('Правила модели не загрузились целиком', 'openVLayerRules()');
   const r = d.rules, def = d.defaults;
   const opt = (list, cur) => list.map(t => `<option value="${esc(t.value)}"${t.value === cur ? ' selected' : ''}>${esc(t.label)}</option>`).join('');
   let h = `<div style="font-size:12px;color:var(--hint);padding:2px 16px 8px;line-height:1.5">
@@ -25996,7 +26005,7 @@ async function vlRulesSave() {
 }
 
 async function vlRulesReset() {
-  if (!confirm('Вернуть стандартные правила модели? Ваши настройки будут сброшены.')) return;
+  if (!await askConfirm('Вернуть стандартные правила модели? Ваши настройки будут сброшены.')) return;
   try {
     const d = await api('/api/miniapp/vlayer/rules/reset', {method:'POST', body:'{}'});
     VL_RULES = d;
@@ -26580,7 +26589,7 @@ async function rehabDetail(accId) {
           <div style="flex:1;line-height:1.35">${esc(e.label||e.step)}${e.detail?`<div style="font-size:11px;color:var(--hint)">${esc(e.detail)}</div>`:''}</div>
           <div style="font-size:11px;color:var(--hint);white-space:nowrap">${esc(ago(e.at))}</div></div>`).join('')
         : '<div style="font-size:12px;color:var(--hint);padding:6px 0">Шагов пока не записано — история ведётся с этого обновления</div>'}
-      ${d.capped?'<div style="font-size:11px;color:var(--hint);padding-top:6px">Показаны последние шаги</div>':''}`);
+      ${d.capped?`<div style="font-size:11px;color:var(--hint);padding-top:6px">Показаны последние ${num(ev.length)} из ${num(d.events_total||0)} шагов</div>`:''}`);
   } catch(e) {
     txt('rehabDetailBody', errHtml(errRu(e), `rehabDetail(${Number(accId)})`));
   }
@@ -27281,7 +27290,7 @@ async function openShield() {
   txt('shieldConfig','');
   txt('shieldHistory','');
   try {
-    const d = await api('/api/miniapp/shield' + (SHIELD_HIST_FILTER ? '?action=' + encodeURIComponent(SHIELD_HIST_FILTER) : ''));
+    const d = await api(`/api/miniapp/shield?action=${encodeURIComponent(SHIELD_HIST_FILTER || '')}`);
     const st = d.stats||{};
     const threatened = st.threatened||0;
     const total = st.total_active||0;
@@ -31647,8 +31656,9 @@ async function openSemanticMemory() {
   push('s-semantic');
   txt('semList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const rows = await api('/api/miniapp/semantic_memory');
-    SEM_BOTS = new Map((rows||[]).map(r => [Number(r.bot_id), r]));
+    const _r = await api('/api/miniapp/semantic_memory');
+    const rows = Array.isArray(_r) ? _r : [];
+    SEM_BOTS = new Map(rows.map(r => [Number(r.bot_id), r]));
     if (!rows.length) { txt('semList', empty('🧬','Память пока пуста',
       'Бот запоминает факты о собеседнике по ходу диалогов — как только они пойдут, они появятся здесь',
       {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
@@ -31676,11 +31686,11 @@ function renderSemSettings(botId) {
   if (!opts.includes(days)) opts.push(days);
   txt('semSettings', `<div class="card" style="font-size:13px;line-height:1.5">
     <div style="font-weight:600;margin-bottom:6px">⚙️ Настройки памяти</div>
-    <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer">
+    <label class="chk-row" style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer">
       <input type="checkbox" ${on?'checked':''} onchange="saveSemSettings({enabled:this.checked}, this)" style="margin-top:2px">
       <span><b>Память включена</b><br><span style="color:var(--hint)">Бот записывает диалоги и учитывает их в ИИ-ответах. Выключите — новые сообщения не запоминаются, а то, что уже есть, бот перестаёт использовать.</span></span>
     </label>
-    <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer">
+    <label class="chk-row" style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer">
       <input type="checkbox" ${ex?'checked':''} ${on?'':'disabled'} onchange="saveSemSettings({auto_extract_facts:this.checked}, this)" style="margin-top:2px">
       <span><b>Сам выделять факты</b><br><span style="color:var(--hint)">ИИ выписывает из переписки имя, город, интересы, цели — на первом сообщении человека и дальше раз в четыре реплики. Факты, которые вы поправили сами, он не трогает.</span></span>
     </label>
@@ -31875,8 +31885,9 @@ async function deleteSemFact(key, el) {
 async function forgetSemPerson(el) {
   if (!_SEMF_ARGS || !SEMP_USER) return;
   const n = ((SEMP_DATA||{}).facts||[]).length;
-  if (!await confirmDelete('Забыть собеседника', el,
-      `Сотрутся ${n} ${plural(n,'факт','факта','фактов')} и вся переписка, которую бот о нём помнит. Вернуть нельзя.`)) return;
+  const note = `Сотрутся ${n} ${plural(n,'факт','факта','фактов')}`
+    + ' и вся переписка, которую бот о нём помнит. Вернуть нельзя.';
+  if (!await confirmDelete('Забыть собеседника', el, note)) return;
   try {
     await api(`/api/miniapp/semantic_memory/${_SEMF_ARGS[0]}/user/${SEMP_USER}`, {method:'DELETE'});
     toast('🗑 Собеседник забыт');

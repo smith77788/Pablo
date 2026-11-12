@@ -537,9 +537,8 @@ INLINE_MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_short_links_owner ON short_links(owner_id, created_at DESC)",
     # Центр восстановления аккаунтов: история шагов, настройки владельца, дата
     # снятия от @SpamBot и счётчик повторных блоков (services/account_rehab).
-    # Здесь, а не отдельным schema_vN.sql: хвост истории после снимка упёрся
-    # в порог свёртки (tests/test_schema_baseline.py), а пересъёмка снимка —
-    # общий для всех веток шаг. Тот же список повторён в main.py.
+    # Источник правды — schema_v344_rehab_center.sql; здесь и в main.py тот же
+    # идемпотентный DDL на случай лага миграции.
     "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS release_at TIMESTAMPTZ",
     "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS relapses INTEGER NOT NULL DEFAULT 0",
     """CREATE TABLE IF NOT EXISTS account_rehab_events (
@@ -3040,8 +3039,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Какие аккаунты годятся для оформления: живые, с сессией, не в паузе.
     # Одно условие на статус, выбор и отправку — иначе экран обещал бы одно
     # число, а операция ушла бы на другое.
+    # Владелец ($1) стоит в самих запросах ниже, а не здесь: так его видит
+    # сторож скоупа (tests/test_miniapp_path_param_scope_ratchet.py).
     _SETTER_ELIGIBLE = (
-        "owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+        "is_active=TRUE AND session_str IS NOT NULL "
         "AND (cooldown_until IS NULL OR cooldown_until < NOW())"
     )
 
@@ -3130,7 +3131,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # чужой или выбывший id просто не попадёт в выборку.
             if want_ids:
                 rows = await pool.fetch(
-                    "SELECT id FROM tg_accounts WHERE " + _SETTER_ELIGIBLE
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND " + _SETTER_ELIGIBLE
                     + " AND id = ANY($2::bigint[])",
                     uid, want_ids,
                 )
@@ -3138,7 +3139,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 account_ids = [i for i in want_ids if i in got]
             else:
                 rows = await pool.fetch(
-                    "SELECT id FROM tg_accounts WHERE " + _SETTER_ELIGIBLE + " "
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND " + _SETTER_ELIGIBLE + " "
                     "ORDER BY trust_score DESC NULLS LAST, id LIMIT $2",
                     uid, acc_count if acc_count > 0 else 500,
                 )
@@ -5021,12 +5022,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
         except Exception:
             log.exception("persona_preview uid=%d", uid)
-            return _err("ИИ сейчас недоступен — попробуйте позже", 503)
+            return _err("ИИ сейчас недоступен — попробуйте позже", 409)
         if not r.text:
-            return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 503)
+            return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 409)
         reply = _pv.enforce_style(_cw.sanitize_reply(r.text), persona)
         if not reply:
-            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 503)
+            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 409)
         return _json_resp({"reply": reply[:1000], "asked": message})
 
     async def _own_persona_id(request):
@@ -5301,7 +5302,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except ValueError as exc:
             return _err(str(exc), 400)
         if not _osint.is_available():
-            return _err("Поиск по нику пока не установлен на сервере", 503)
+            return _err("Поиск по нику пока не установлен на сервере", 409)
         try:
             what = "нику" if kind == "username" else "почте"
             label = f"Поиск по {what}: {query}"[:120]
@@ -6471,11 +6472,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         lim = _list_limit(request, 100, 500)
         try:
             events = await _rh.history(pool, uid, acc_id, limit=lim)
+            events_total = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM account_rehab_events WHERE acc_id=$1 AND owner_id=$2",
+                acc_id, uid) or 0)
         except Exception:
             log.warning("rehab_history uid=%s acc=%s", uid, acc_id, exc_info=True)
-            events = []
+            events, events_total = [], 0
+        events_total = max(events_total, len(events))
         return _json_resp({"ok": True, "account": acc, "events": events,
-                           "capped": len(events) >= lim})
+                           "events_total": events_total,
+                           "capped": events_total > len(events)})
 
     async def rehab_settings_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)

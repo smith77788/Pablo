@@ -104,7 +104,9 @@ def test_retry_names_its_own_screen(fn):
 
 def test_risk_row_opens_the_account():
     """account_id сервер отдавал всегда — строка «риск 91%» никуда не вела."""
-    body = _js_func("openPhysics")
+    # Строки рисует physRender (модуль «Защита аккаунтов» вынес отрисовку из
+    # openPhysics ради фильтров) — смотрим обе функции.
+    body = _js_func("openPhysics") + _js_func("physRender")
     assert "openAccount(" in body and "r.account_id" in body
 
 

@@ -23224,10 +23224,14 @@ async def _exec_niche_scan(
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
     if not accounts:
         return {"status": "requeue", "summary": "⏳ Аккаунты на карантине — повторим позже"}
-    claimed = await try_claim_accounts([int(a["id"]) for a in accounts])
+    # Захват через _claim_available_accounts: он привязывает аккаунт к op_id,
+    # и освобождение идёт в finally _run_op_task. Прежний голый низкоуровневый захват
+    # держал аккаунт «занятым» до перезапуска процесса — и после удачного
+    # поиска тоже (освобождения не было ни на одном пути).
+    claimed = await _claim_available_accounts(op_id, accounts, owner_id)
     if not claimed:
         return {"status": "requeue", "summary": "⏳ Аккаунт занят другой операцией"}
-    acc = next(a for a in accounts if int(a["id"]) in set(claimed))
+    acc = claimed[0]
     if not acc.get("session_str"):
         return {"status": "failed", "summary": "⚠️ У аккаунта нет сессии"}
 

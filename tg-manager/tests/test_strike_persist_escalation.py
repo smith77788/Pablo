@@ -110,7 +110,7 @@ async def test_legal_only_persist_continues_without_accounts(monkeypatch):
 
     async def _fake_stag(plan, **k):
         # legal-only: писем отправили, но проверить снятие некому → None
-        return [StrikeResult(target="@bad", verified_down=None)]
+        return [StrikeResult(target="@bad", verified_down=None, emails_sent=1)]
     monkeypatch.setattr("services.strike_engine.staggered_strike", _fake_stag)
 
     cont = {}
@@ -144,7 +144,7 @@ async def test_with_accounts_unverified_does_not_continue_blind(monkeypatch):
     monkeypatch.setattr(op_worker, "_filter_quarantined_accounts", _passthrough_quar)
 
     async def _fake_stag(plan, **k):
-        return [StrikeResult(target="@bad", verified_down=None)]
+        return [StrikeResult(target="@bad", verified_down=None, emails_sent=1)]
     monkeypatch.setattr("services.strike_engine.staggered_strike", _fake_stag)
 
     cont = {}

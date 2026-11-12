@@ -219,7 +219,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 offset=_list_offset(request), limit=_list_limit(request, 30, 200))
             if qs.get("summary") == "1":
                 page["summary"] = await _ih.audit_summary(pool, uid, period)
-            return _json_resp(page)
+            # Итог журнала — явным ключом: листание и подпись «показаны N из M»
+            # держатся на нём (сторож tests/test_a_capped_list_says_it_is_capped.py).
+            return _json_resp({**page, "total": int(page.get("total") or 0)})
         except Exception:
             log.exception("infra_audit uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)

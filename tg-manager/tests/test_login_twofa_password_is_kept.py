@@ -109,7 +109,11 @@ def pool():
     import asyncpg
 
     async def _boot():
-        conn = await asyncpg.connect(DSN)
+        # Потолок ожидания блокировки: в наборе схему уже накатили, а чужой
+        # тест мог оставить соединение с открытой транзакцией на той же
+        # таблице. Без потолка DDL ждёт его вечно, и часть набора висит до
+        # таймаута CI (поймано 12.11.2026 на op_telemetry, schema_v113).
+        conn = await asyncpg.connect(DSN, server_settings={"lock_timeout": "3000"})
         files = ["schema.sql"] + sorted(
             glob.glob(os.path.join(ROOT, "schema_v*.sql")),
             key=lambda p: int(re.search(r"schema_v(\d+)", p).group(1)))

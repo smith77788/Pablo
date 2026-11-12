@@ -105,7 +105,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 photo = await ca.read_photo(sess, b["token"])
         except Exception:
             log.exception("clone_adapt_profile uid=%d bot=%d", uid, bot_id)
-            return _err("Не удалось прочитать профиль бота из Telegram", 502)
+            return _err("Не удалось прочитать профиль бота из Telegram", 409)
         base = prof["langs"].get("", {})
         langs = sorted({lc for lc in prof["langs"] if lc}
                        | {lc for lc, c in prof["commands"].items() if lc and c})
@@ -166,7 +166,7 @@ def setup_routes(app: web.Application, pool) -> None:
                                 "steps": [ca.public_step(s) for s in plan]})
         except Exception:
             log.exception("clone_adapt_preview uid=%d", uid)
-            return _err("Не удалось прочитать профили из Telegram", 502)
+            return _err("Не удалось прочитать профили из Telegram", 409)
         return _json_resp({
             "source": _bot_label(src),
             "total": len(targets),
