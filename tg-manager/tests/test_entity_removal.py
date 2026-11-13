@@ -187,12 +187,12 @@ class _ChanConn:
         self.log.append((q, a))
         if q.startswith("DELETE FROM managed_channels"):
             row = self.rows.pop(a[1], None)
-            return row
+            return {**row, "catalog_metadata": None} if row else None
         if q.startswith("DELETE FROM removed_channels"):
             if a[1] in self.removed:
                 del self.removed[a[1]]
                 return {"acc_id": 5, "title": "T", "username": "u",
-                        "type": "channel", "access_hash": 9}
+                        "type": "channel", "access_hash": 9, "catalog_metadata": None}
         return None
 
     async def execute(self, q, *a):
@@ -255,18 +255,20 @@ def test_channel_seen_again_in_dialogs_is_no_longer_marked_gone():
     assert written == [3]
 
 
-def test_filter_failure_never_loses_the_import():
+def test_filter_failure_prevents_writing_the_import():
     class _NoFetch(_ChanConn):
         async def fetch(self, q, *a):
             raise RuntimeError("relation removed_channels does not exist")
 
     pool = _NoFetch()
-    assert _run(db.add_managed_channels(pool, 1, 10, _chs(1, 2))) == 2
+    with pytest.raises(RuntimeError, match="relation removed_channels"):
+        _run(db.add_managed_channels(pool, 1, 10, _chs(1, 2)))
+    assert not any(q.startswith("INSERT INTO managed_channels") for q, _ in pool.log)
 
 
 def test_remove_channel_records_reason_and_stops_its_admin():
     pool = _ChanConn(rows={100: {"acc_id": 5, "title": "T", "username": "u",
-                                 "type": "channel", "access_hash": 9}})
+                                 "type": "channel", "access_hash": 9, "catalog_metadata": None}})
     assert _run(db.remove_managed_channel(pool, 1, 100)) is True
     assert pool.removed == {100: "owner"}
     sql = " | ".join(q for q, _ in pool.log)
@@ -309,7 +311,7 @@ def test_explicit_add_clears_the_old_removal():
     from services import op_worker
 
     src = inspect.getsource(op_worker._exec_channel_add)
-    assert "forget_removed_channels(" in src
+    assert "add_managed_channels(" in src and "reconnect=True" in src
 
 
 # ── Канал/чат: проверка живости ───────────────────────────────────────────────

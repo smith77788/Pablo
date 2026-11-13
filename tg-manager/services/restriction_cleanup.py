@@ -183,6 +183,8 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
         if any(kind != "bot" for kind, _ in keys):
             # Захват публикации не должен совпасть с проверкой привязок.
             await conn.execute("LOCK TABLE operation_queue IN SHARE ROW EXCLUSIVE MODE")
+            if action == "disable":
+                await db.lock_managed_channel_catalog(conn, owner_id)
     if lock and action == "disable" and any(kind == "bot" for kind, _ in keys):
         # Старт нового прогона или активация сценария между проверкой и
         # выключением бота должны дождаться завершения этой транзакции.

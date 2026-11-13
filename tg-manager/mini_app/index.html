@@ -11029,7 +11029,7 @@ function _fleetSweepHtml(d, cleaned) {
   const b = d.bots||{}, a = d.accounts||{}, c = d.channels||{};
   const del = (x) => (cleaned && x.deleted!=null) ? ` · 🗑 удалено ${x.deleted}` : '';
   return [
-    `🤖 Боты: всего ${b.total||0} · 🔴 мёртвых ${b.dead||0} · ⚪ не ответили ${b.unknown||0}${del(b)}`,
+    `🤖 Боты: всего ${b.total||0} · 🔴 мёртвых ${b.dead||0} · ⚪ не ответили ${b.unknown||0}${del(b)}${b.changed_since_check ? ` · изменились за время проверки: ${b.changed_since_check}` : ''}`,
     `📱 Аккаунты: 🔴 мёртвых ${a.dead||0}${del(a)}`,
     `📡 Каналы: ${c.total||0} · проверка доступности скоро`,
   ].map(r=>`<div>${r}</div>`).join('');
@@ -11056,7 +11056,7 @@ async function fleetCleanupAll() {
   const n = d.dead_total||0;
   if (!n) { toast('✅ Мёртвого во флоте не найдено 👍'); return; }
   const b=d.bots||{}, a=d.accounts||{};
-  if (!await askConfirm(`Удалить мёртвое по всему флоту?\n\n🤖 Ботов (токен отозван): ${b.dead||0}\n📱 Аккаунтов (бан / деактивация / удалён): ${a.dead||0}\n\nБезвозвратно, только из Infragram. Восстановимое (спам-блок, отозванная сессия, кулдаун) и «не ответившие» не трогаем.`)) return;
+  if (!await askConfirm(`Удалить мёртвое по всему флоту?\n\n🤖 Ботов (токен отозван): ${b.dead||0}\n📱 Аккаунтов (бан / деактивация / удалён): ${a.dead||0}\n\nУ ботов сохранятся подписчики и история. Потерянные аккаунты удаляются из Infragram без возможности восстановления.`)) return;
   const btn=document.getElementById('fleetCleanBtn');
   if(btn){btn.disabled=true;btn.textContent='Чищу…';}
   try {
@@ -12706,13 +12706,14 @@ async function openRemovedChannels() {
     const rows = d.channels || [];
     if (!rows.length) { box.innerHTML = empty('✅','Пусто','Удалённых и недоступных каналов нет'); return; }
     box.innerHTML = rows.map(c => {
+      const id = String(c.channel_id_text ?? c.channel_id);
       const name = c.title || (c.username ? '@'+c.username : 'Канал #'+c.channel_id);
       const why = c.reason === 'gone'
         ? '<span class="badge b-rd">⛔ Недоступен в Telegram</span>'
         : '<span class="badge b-gy">🗑 Удалён вами</span>';
       const hint = c.reason === 'gone' && c.detail ? `<div class="li-sub">${esc(c.detail)}</div>` : '';
       return `<div class="li" style="cursor:default"><div class="li-body"><div class="li-name">${esc(name)}</div>${why}${hint}</div>
-        <button class="btn btn-s" style="padding:6px 10px;min-width:0;font-size:12px" onclick="restoreRemovedChannel(${c.channel_id}, this)">↩️ Вернуть</button></div>`;
+        <button class="btn btn-s" style="padding:6px 10px;min-width:0;font-size:12px" data-restore-channel="${esc(id)}" onclick="restoreRemovedChannel(this.dataset.restoreChannel, this)">↩️ Вернуть</button></div>`;
     }).join('');
   } catch(e) { box.innerHTML = errHtml(errRu(e), retryCall('openRemovedChannels')); }
 }

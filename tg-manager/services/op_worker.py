@@ -14042,6 +14042,7 @@ async def _exec_group_import_all(
     try:
 
         total_imported = 0
+        total_disabled = 0
         total_foreign = 0  # группы, где аккаунт лишь участник — чужие, не тянем
         errors: list[str] = []
         n = len(accounts)
@@ -14069,8 +14070,9 @@ async def _exec_group_import_all(
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
                     # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
                     # ВСЕ ранее сохранённые каналы/группы аккаунта перед вставкой этого среза.
-                    await add_managed_channels(pool, owner_id, acc["id"], groups)
-                    total_imported += len(groups)
+                    imported = await add_managed_channels(pool, owner_id, acc["id"], groups)
+                    total_imported += imported
+                    total_disabled += len(groups) - imported
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -14085,12 +14087,14 @@ async def _exec_group_import_all(
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
         foreign_hint = f"\n🚫 Пропущено чужих (только участник): {total_foreign}" if total_foreign else ""
+        disabled_hint = f"\nОтключены в Infragram: {total_disabled}" if total_disabled else ""
         return {
             "status": "done",
             "imported": total_imported,
+            "disabled_skipped": total_disabled,
             "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{err_hint}",
+            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{disabled_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
@@ -15833,6 +15837,7 @@ async def _exec_channel_import_all(
                 pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
         total_imported = 0
+        total_disabled = 0
         total_foreign = 0  # чужие каналы (аккаунт — лишь подписчик), их не тянем
         errors: list[str] = []
 
@@ -15856,8 +15861,9 @@ async def _exec_channel_import_all(
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
                     # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
                     # ВСЕ ранее сохранённые каналы аккаунта перед вставкой этого среза.
-                    await add_managed_channels(pool, owner_id, acc["id"], channels)
-                    total_imported += len(channels)
+                    imported = await add_managed_channels(pool, owner_id, acc["id"], channels)
+                    total_imported += imported
+                    total_disabled += len(channels) - imported
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -15872,12 +15878,14 @@ async def _exec_channel_import_all(
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
         foreign_hint = f"\n🚫 Пропущено чужих (только подписка): {total_foreign}" if total_foreign else ""
+        disabled_hint = f"\nОтключены в Infragram: {total_disabled}" if total_disabled else ""
         return {
             "status": "done",
             "imported": total_imported,
+            "disabled_skipped": total_disabled,
             "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{err_hint}",
+            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{disabled_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
@@ -15907,26 +15915,16 @@ async def _exec_channel_add(
         if "error" in res:
             return {"status": "failed", "summary": f"❌ {res['error']}"}
         title = res.get("title") or link
-        # Точечный upsert одной строки — НЕ upsert_managed_channels(), т.к. та
-        # функция удаляет ВСЕ существующие каналы аккаунта перед вставкой
-        # (рассчитана на полный ре-импорт, а не на добавление одного канала).
-        await pool.execute(
-            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, members_count)
-               VALUES($1, $2, $3, $4, $5, $6, $7, $8)
-               ON CONFLICT (owner_id, channel_id) DO UPDATE
-               SET title=EXCLUDED.title, username=EXCLUDED.username,
-                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
-                   type=EXCLUDED.type,
-                   members_count=CASE WHEN EXCLUDED.members_count > 0
-                                       THEN EXCLUDED.members_count
-                                       ELSE managed_channels.members_count END""",
-            owner_id, int(acc["id"]), res["channel_id"], title,
-            res.get("username") or "", res.get("access_hash") or 0,
-            res.get("type") or "channel", int(res.get("members") or 0),
+        # Явное подключение снимает отметку отключения в той же транзакции.
+        from database.db import add_managed_channels
+
+        await add_managed_channels(
+            pool, owner_id, int(acc["id"]), [{
+                "id": res["channel_id"], "title": title,
+                "username": res.get("username") or "", "access_hash": res.get("access_hash") or 0,
+                "type": res.get("type") or "channel", "members": res.get("members") or 0,
+            }], reconnect=True,
         )
-        # Владелец явно добавил канал — прежнее удаление больше не действует.
-        from database.db import forget_removed_channels
-        await forget_removed_channels(pool, owner_id, [res["channel_id"]])
         return {
             "status": "done",
             "channel_id": res["channel_id"],

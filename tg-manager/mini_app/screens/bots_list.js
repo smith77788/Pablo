@@ -347,10 +347,8 @@ function updateBotSelBar() {
   if (el) el.textContent = 'Выбрано: '+BOT_SEL.size;
 }
 
-// ── Проверка живости и полное удаление ботов ───────────────────────────────
-// «Полное удаление» ≠ «убрать из работы» (is_active=FALSE): здесь удаляется
-// сама строка бота. «Мёртвый» = отозванный токен (getMe → 401). Статусы
-// обязаны совпадать со services/bot_api.py.
+// ── Проверка живости и удаление из списка ─────────────────────────────────
+// «Мёртвый» означает отозванный токен. Статусы совпадают с services/bot_api.py.
 const BOT_STATUS_ALIVE = 'alive', BOT_STATUS_DEAD = 'dead', BOT_STATUS_UNKNOWN = 'unknown';
 
 async function checkAllBots() {
@@ -369,7 +367,7 @@ async function checkAllBots() {
 async function bulkDeleteBots() {
   const ids = [...BOT_SEL];
   if (!ids.length) { toast('❗ Выберите хотя бы одного бота'); return; }
-  if (!await askConfirm(`Удалить ПОЛНОСТЬЮ ${ids.length} ${plural(ids.length,'бота','ботов','ботов')}?\n\nЭто не «убрать из работы»: боты и их данные удаляются из системы без возврата.`)) return;
+  if (!await askConfirm(`Убрать из Infragram ${ids.length} ${plural(ids.length,'бота','ботов','ботов')}?\n\nПодписчики и история сохранятся. Чтобы вернуть бота, добавьте его действующий токен.`)) return;
   try {
     const r = await api('/api/miniapp/bots/bulk_delete', {method:'POST', body:JSON.stringify({bot_ids:ids})});
     toast(`🗑 Удалено: ${r.deleted||0} из ${r.requested||ids.length}`);
@@ -379,12 +377,12 @@ async function bulkDeleteBots() {
 }
 
 async function cleanupDeadBots() {
-  if (!await askConfirm('Проверить всех ботов и удалить тех, у кого отозван токен?\n\nБоты, до которых Telegram сейчас не достучался, затронуты не будут.')) return;
+  if (!await askConfirm('Проверить ботов и убрать из Infragram тех, у кого отозван токен?\n\nПодписчики и история сохранятся.')) return;
   const btn = document.getElementById('botCleanupBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Проверяю…'; }
   try {
     const r = await api('/api/miniapp/bots/cleanup_dead', {method:'POST', body:'{}'});
-    toast(`🧹 Проверено: ${r.checked||0} · удалено мёртвых: ${r.deleted||0} · не ответили: ${r.unknown||0}`);
+    toast(`🧹 Проверено: ${r.checked||0} · удалено мёртвых: ${r.deleted||0} · не ответили: ${r.unknown||0}` + (r.changed_since_check ? ` · изменились за время проверки: ${r.changed_since_check}` : ''));
     BOT_CHECK = {};
     await loadBots();
   } catch(e) { toast('⚠️ '+errRu(e,'Не удалось очистить')); }

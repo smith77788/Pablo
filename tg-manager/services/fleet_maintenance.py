@@ -16,10 +16,8 @@
     аккаунта — отдельная операция движка), поэтому их только считаем и честно
     помечаем, что проверка не выполнялась.
 
-Удаление — только Infragram-side (строку убираем, в Telegram ничего не
-трогаем), по owner-скоупу и идемпотентно. Удаляется ТОЛЬКО то, что точно
-мёртвое: при сомнении (бот не ответил — статус unknown) строку не трогаем
-(fail-open, как is_account_quarantined).
+Очистка действует в Infragram и ограничена владельцем. У ботов сохраняются
+аудитория и история. Подтверждённо потерянные аккаунты удаляются из базы.
 """
 from __future__ import annotations
 
@@ -40,29 +38,27 @@ def _deleted_count(res) -> int:
         return 0
 
 
-async def _scan_bots(pool, uid: int) -> dict:
-    """Живость ботов владельца через getMe. Возвращает счётчики и id мёртвых."""
+async def _scan_bots(pool, uid: int) -> tuple[dict, dict[int, str]]:
+    """Вернуть сводку и снимок отозванных токенов для сравнения при записи."""
     rows = await pool.fetch(
-        "SELECT bot_id, token FROM managed_bots WHERE added_by=$1", uid)
-    rows = rows or []
+        "SELECT bot_id, token FROM managed_bots WHERE added_by=$1 "
+        "AND deleted_at IS NULL AND NOT cleanup_paused ORDER BY bot_id", uid)
     out = {"total": len(rows), "alive": 0, "dead": 0, "unknown": 0, "dead_ids": []}
     if not rows:
-        return out
+        return out, {}
     import aiohttp
 
     from services import bot_api
     tokens = [r["token"] for r in rows]
     async with aiohttp.ClientSession() as sess:
         statuses = await bot_api.batch_check_alive(sess, tokens)
-    for r, st in zip(rows, statuses):
-        if st == bot_api.BOT_DEAD:
-            out["dead"] += 1
-            out["dead_ids"].append(int(r["bot_id"]))
-        elif st == bot_api.BOT_UNKNOWN:
-            out["unknown"] += 1
-        else:
-            out["alive"] += 1
-    return out
+    if len(rows) != len(statuses):
+        raise ValueError("Проверка вернула неполный результат")
+    checked_tokens = {row["bot_id"]: row["token"] for row, status in zip(rows, statuses)
+                      if status == bot_api.BOT_DEAD}
+    out.update(alive=statuses.count(bot_api.BOT_ALIVE), unknown=statuses.count(bot_api.BOT_UNKNOWN),
+               dead=len(checked_tokens), dead_ids=list(checked_tokens))
+    return out, checked_tokens
 
 
 async def _scan_accounts(pool, uid: int) -> dict:
@@ -105,35 +101,37 @@ async def sweep_fleet(pool, uid: int, *, delete: bool, preview: bool) -> dict:
         _scan_bots(pool, uid), _scan_accounts(pool, uid), _scan_channels(pool, uid),
         return_exceptions=True,
     )
+    if isinstance(bots, Exception):
+        # Исключение Bot API может включать URL с токеном.
+        log.warning("sweep_fleet bots uid=%d error=%s", uid, type(bots).__name__)
+        bot_summary, checked_tokens = {"error": "Не удалось проверить ботов"}, {}
+    else:
+        bot_summary, checked_tokens = bots
     result = {
         "ok": True,
         "deleted": bool(delete and not preview),
         "preview": bool(delete and preview),
-        "bots": bots if not isinstance(bots, Exception) else {"error": str(bots)},
+        "bots": bot_summary,
         "accounts": accounts if not isinstance(accounts, Exception) else {"error": str(accounts)},
         "channels": channels if not isinstance(channels, Exception) else {"error": str(channels)},
     }
-    if isinstance(bots, Exception):
-        log.exception("sweep_fleet bots uid=%d", uid, exc_info=bots)
     if isinstance(accounts, Exception):
         log.exception("sweep_fleet accounts uid=%d", uid, exc_info=accounts)
 
-    bot_ids = result["bots"].get("dead_ids", []) if isinstance(bots, dict) else []
     acc_ids = result["accounts"].get("dead_ids", []) if isinstance(accounts, dict) else []
-    result["dead_total"] = len(bot_ids) + len(acc_ids)
+    result["dead_total"] = len(checked_tokens) + len(acc_ids)
 
     if not delete or preview:
         result["deleted_total"] = 0
         return result
 
-    # Удаляем мёртвое параллельно, каждый тип своим owner-скоупным DELETE.
     async def _del_bots() -> int:
-        if not bot_ids:
+        if not checked_tokens:
             return 0
-        res = await pool.execute(
-            "DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2",
-            bot_ids, uid)
-        return _deleted_count(res)
+        from database.db import delete_bots
+
+        removed = await delete_bots(pool, uid, list(checked_tokens), checked_tokens=checked_tokens)
+        return len(removed)
 
     async def _del_accounts() -> int:
         if not acc_ids:
@@ -145,6 +143,7 @@ async def sweep_fleet(pool, uid: int, *, delete: bool, preview: bool) -> dict:
 
     bots_del, accs_del = await asyncio.gather(_del_bots(), _del_accounts())
     result["bots"]["deleted"] = bots_del
+    result["bots"]["changed_since_check"] = len(checked_tokens) - bots_del
     result["accounts"]["deleted"] = accs_del
     result["deleted_total"] = bots_del + accs_del
 

@@ -62,3 +62,35 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
                 OWNER, op_id) == 1
 
     asyncio.run(_run(scenario))
+
+
+def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from bot.utils import subscription
+    from database import db
+    from services import mini_app_channels
+
+    secret = "123456:synthetic-channel-restore-only"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setattr(subscription, "get_channel_limit", AsyncMock(return_value=10))
+    monkeypatch.setattr(subscription, "get_effective_channel_count", AsyncMock(return_value=0))
+
+    async def scenario(pool, op_id):
+        assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        app = web.Application()
+        mini_app_channels.setup_routes(app, pool)
+        owner = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        other = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+        async with TestClient(TestServer(app)) as client:
+            removed = await client.get("/api/miniapp/channels/removed", headers=owner)
+            item = (await removed.json())["channels"][0]
+            assert item["channel_id"] == CHANNEL and item["channel_id_text"] == str(CHANNEL)
+            assert "catalog_metadata" not in item and "access_hash" not in item
+            path = f"/api/miniapp/channel/{item['channel_id_text']}/restore"
+            assert (await client.post(path, headers=other)).status == 404
+            response = await client.post(path, headers=owner)
+            assert response.status == 200, await response.text()
+            assert (await client.post(path, headers=owner)).status == 404
+
+    asyncio.run(_run(scenario))

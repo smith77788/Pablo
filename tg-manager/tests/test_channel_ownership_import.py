@@ -29,6 +29,10 @@ class _FakeConn:
     def __init__(self, log):
         self._log = log
 
+    async def fetch(self, query, *args):
+        assert "FROM removed_channels" in query
+        return []
+
     async def execute(self, query, *args):
         self._log.append((query, args))
         return "OK"

@@ -4,12 +4,12 @@
 каналам сразу и возвращает общую сводку. Проверяем на живом Postgres:
   • режим проверки (delete=false) ничего не удаляет;
   • preview (delete=true, preview=true) считает, но не удаляет;
-  • удаление сносит ТОЛЬКО мёртвое — бота с отозванным токеном и аккаунт с
+  • очистка скрывает бота с отозванным токеном и удаляет аккаунт с
     терминальным статусом; бот «не ответил» (unknown), живой бот, рабочий
     аккаунт и каналы остаются; чужое не трогается.
 
 Живой Postgres обязателен: заглушка пула не проверит ни связывание
-ANY($1::bigint[]), ни owner-скоуп параллельных DELETE.
+параметров UPDATE и DELETE, ни ограничения по владельцу.
 """
 from __future__ import annotations
 
@@ -63,11 +63,16 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
             return bot_api.BOT_UNKNOWN
         return bot_api.BOT_ALIVE
 
+    rotate = None
+
     async def _fake_batch(session, tokens):
+        if rotate is not None:
+            await rotate()
         return [_status_for(t) for t in tokens]
     monkeypatch.setattr(bot_api, "batch_check_alive", _fake_batch)
 
     async def go():
+        nonlocal rotate
         conn = await asyncpg.connect(DSN)
         await _load_schema(conn)
         await conn.close()
@@ -84,10 +89,12 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
             # Боты владельца: жив, мёртв, не ответил. Плюс чужой мёртвый.
             for bid, tok, owner in [
                 (301, "t_alive_301", OWNER), (302, "t_dead_302", OWNER),
-                (303, "t_unknown_303", OWNER), (401, "t_dead_401", OTHER)]:
+                (303, "t_unknown_303", OWNER), (304, "t_dead_304", OWNER),
+                (401, "t_dead_401", OTHER)]:
                 await pool.execute(
                     "INSERT INTO managed_bots(bot_id, token, username, is_active, added_by) "
                     "VALUES($1,$2,$3,TRUE,$4)", bid, tok, f"b{bid}", owner)
+            await pool.execute("INSERT INTO bot_users(bot_id,user_id) VALUES(302,602)")
             # Аккаунты владельца: рабочий, забанен и деактивирован (LOST —
             # удалять), кулдаун и session_expired (восстановимо — НЕ удалять).
             # Плюс чужой забаненный. Проверяем, что session_expired переживает
@@ -117,34 +124,43 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
                                       json={"delete": False})
                 assert r.status == 200, await r.text()
                 d = await r.json()
-                assert d["bots"]["total"] == 3 and d["bots"]["dead"] == 1, d["bots"]
+                assert d["bots"]["total"] == 4 and d["bots"]["dead"] == 2, d["bots"]
                 assert d["bots"]["alive"] == 1 and d["bots"]["unknown"] == 1, d["bots"]
                 assert d["accounts"]["dead"] == 2, d["accounts"]   # banned + session_expired
                 assert d["channels"]["total"] == 2, d["channels"]
                 assert d["deleted"] is False and d["deleted_total"] == 0
                 assert await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", OWNER) == 3
+                    "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", OWNER) == 4
 
                 # 2) Preview: та же сводка, но ничего не удалено.
                 r = await client.post("/api/miniapp/fleet/sweep", headers=hdr,
                                       json={"delete": True, "preview": True})
                 d = await r.json()
                 assert d["preview"] is True and d["deleted"] is False
-                assert d["dead_total"] == 3, d   # 1 бот + 2 аккаунта (LOST)
+                assert d["dead_total"] == 4, d   # 2 бота + 2 аккаунта (LOST)
+                assert "t_dead" not in str(d)
                 assert await pool.fetchval(
                     "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", OWNER) == 5
 
-                # 3) Удаление: только мёртвое, параллельно по типам.
+                async def rotate_token():
+                    assert await _db.replace_bot_token(pool, OWNER, 304, "t_alive_rotated_304")
+
+                # Автоочистка проверяет снимок ещё раз при записи.
+                rotate = rotate_token
                 r = await client.post("/api/miniapp/fleet/sweep", headers=hdr,
                                       json={"delete": True, "preview": False})
+                rotate = None
                 d = await r.json()
                 assert d["deleted"] is True, d
                 assert d["bots"]["deleted"] == 1 and d["accounts"]["deleted"] == 2, d
                 assert d["deleted_total"] == 3, d
 
+                assert d["bots"]["changed_since_check"] == 1
                 bots_left = {r["bot_id"] for r in await pool.fetch(
-                    "SELECT bot_id FROM managed_bots WHERE added_by=$1", OWNER)}
-                assert bots_left == {301, 303}, f"удалён не тот бот: {bots_left}"
+                    "SELECT bot_id FROM managed_bots WHERE added_by=$1 AND deleted_at IS NULL", OWNER)}
+                assert bots_left == {301, 303, 304}
+                assert await pool.fetchval("SELECT count(*) FROM bot_users WHERE bot_id=302") == 1
+                assert await pool.fetchval("SELECT NOT is_active FROM managed_bots WHERE bot_id=302")
                 accs_left = {r["id"] for r in await pool.fetch(
                     "SELECT id FROM tg_accounts WHERE owner_id=$1", OWNER)}
                 # 99501 рабочий, 99504 кулдаун, 99505 session_expired — все восстановимы.

@@ -36,7 +36,8 @@ async def _clear(pool):
 
 async def _run(scenario):
     async with asyncpg.create_pool(DSN, min_size=1, max_size=4) as pool:
-        await pool.execute(Path("schema_v371_restriction_cleanup.sql").read_text(encoding="utf-8"))
+        for name in ("schema_v371_restriction_cleanup.sql", "schema_v372_removed_channel_metadata.sql"):
+            await pool.execute(Path(name).read_text(encoding="utf-8"))
         await _clear(pool)
         try:
             await pool.execute(
@@ -224,5 +225,144 @@ def test_295_findings_and_parallel_confirmation_preserve_other_projects():
         assert old["legacy"] and len(old["findings"]) == 50
         with pytest.raises(cleanup.CleanupError, match="нет в результатах"):
             await cleanup.plan(pool, OWNER, op_id, [targets[-1]], "disable")
+
+    asyncio.run(_run(scenario))
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_overlapping_import_cannot_reactivate_disabled_channel(complete, monkeypatch):
+    async def scenario(pool, op_id):
+        entered = asyncio.Event()
+        original_lock = db.lock_managed_channel_catalog
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await original_lock(conn, OWNER)
+
+                async def observe_lock(connection, owner_id):
+                    entered.set()
+                    await original_lock(connection, owner_id)
+
+                monkeypatch.setattr(db, "lock_managed_channel_catalog", observe_lock)
+                importing = asyncio.create_task(db.upsert_managed_channels(
+                    pool, OWNER, 111, [{"id": CHANNEL, "title": "Результат скана"},
+                                       {"id": 123, "title": "Другой канал"}], complete=complete))
+                try:
+                    await asyncio.wait_for(entered.wait(), 3)
+                    assert not importing.done()
+                    assert await db.remove_managed_channel_on_connection(
+                        conn, OWNER, CHANNEL, reason=db.REMOVED_BY_OWNER, detail="Отключение")
+                except BaseException:
+                    importing.cancel()
+                    await asyncio.gather(importing, return_exceptions=True)
+                    raise
+            assert await asyncio.wait_for(importing, 3) == 1
+
+        rows = await pool.fetch(
+            "SELECT channel_id FROM managed_channels WHERE owner_id=$1", OWNER)
+        assert [row["channel_id"] for row in rows] == [123]
+        assert (await db.list_removed_channels(pool, OWNER))[0]["channel_id"] == CHANNEL
+
+    asyncio.run(_run(scenario))
+
+
+def test_restore_preserves_catalog_identity_roles_and_statistics():
+    async def scenario(pool, op_id):
+        columns = "id, added_at, access_hash, about, last_drift_check, members_count, avg_views, influence, is_admin, is_creator"
+        before = await pool.fetchrow(
+            f"""UPDATE managed_channels SET access_hash=991, about='Описание',
+                      last_drift_check=now(), members_count=412, avg_views=200,
+                      influence=5.25, is_admin=TRUE, is_creator=FALSE
+                 WHERE owner_id=$1 AND channel_id=$2 RETURNING {columns}""", OWNER, CHANNEL)
+        assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        assert not await db.restore_removed_channel(pool, OWNER + 1, CHANNEL)
+        assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
+        after = await pool.fetchrow(
+            f"SELECT {columns} FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL)
+        assert dict(after) == dict(before)
+
+        await pool.execute(
+            """INSERT INTO removed_channels(owner_id, channel_id, reason, acc_id, title)
+               VALUES($1, 42, 'owner', 111, 'Старый канал')""", OWNER)
+        assert await db.restore_removed_channel(pool, OWNER, 42)
+        old = await pool.fetchrow(
+            "SELECT id, title, members_count, added_at FROM managed_channels WHERE owner_id=$1 AND channel_id=42",
+            OWNER)
+        assert old["id"] != before["id"] and old["title"] == "Старый канал"
+        assert old["members_count"] == 0 and old["added_at"] is not None
+
+    asyncio.run(_run(scenario))
+
+
+def test_reconnect_keeps_tombstone_on_write_failure():
+    async def scenario(pool, op_id):
+        assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        with pytest.raises(asyncpg.DataError):
+            await db.add_managed_channels(
+                pool, OWNER, 2**40, [{"id": CHANNEL, "title": "Явное подключение"}], reconnect=True)
+        assert await db.add_managed_channels(pool, OWNER, 111, [{"id": CHANNEL}]) == 0
+        assert await db.add_managed_channels(
+            pool, OWNER, 111, [{"id": CHANNEL, "title": "Явное подключение"}], reconnect=True) == 1
+        assert await db.list_removed_channels(pool, OWNER) == []
+
+    asyncio.run(_run(scenario))
+
+
+@pytest.mark.parametrize("kind,worker_name", [
+    ("channel", "_exec_channel_import_all"), ("megagroup", "_exec_group_import_all"),
+])
+def test_import_worker_reports_only_saved_channels(kind, worker_name, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from services import account_manager, op_worker
+
+    async def scenario(pool, op_id):
+        await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        dialogs = [
+            {"id": CHANNEL, "type": kind, "is_admin": True},
+            {"id": 456, "type": kind, "is_creator": True},
+            {"id": 789, "type": kind, "is_admin": False},
+        ]
+        monkeypatch.setattr(op_worker.resource_selector, "select_all_active",
+                            AsyncMock(return_value=[{"id": 111, "session_str": "synthetic"}]))
+        monkeypatch.setattr(op_worker, "try_claim_accounts", AsyncMock(return_value=[111]))
+        monkeypatch.setattr(op_worker, "release_accounts", AsyncMock())
+        monkeypatch.setattr(op_worker, "_is_cancelled", AsyncMock(return_value=False))
+        monkeypatch.setattr(account_manager, "get_dialogs", AsyncMock(return_value=dialogs))
+        result = await getattr(op_worker, worker_name)(pool, None, op_id, OWNER, {"account_ids": [111]})
+        assert result["imported"] == result["disabled_skipped"] == result["foreign_skipped"] == 1
+        assert "Отключены в Infragram: 1" in result["summary"]
+        assert await pool.fetchval("SELECT channel_id FROM managed_channels WHERE owner_id=$1", OWNER) == 456
+
+    asyncio.run(_run(scenario))
+
+
+def test_native_scan_uses_the_same_catalog_guard(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.handlers import accounts
+    from bot.utils import subscription
+
+    async def scenario(pool, op_id):
+        await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        monkeypatch.setattr(db, "get_tg_account", AsyncMock(return_value={"session_str": "synthetic"}))
+        monkeypatch.setattr(accounts, "scan_owned_assets", AsyncMock(return_value={
+            "channels": [{"id": CHANNEL, "title": "Отключённый канал"}],
+            "groups": [{"id": 456, "title": "Группа", "type": "megagroup"}],
+        }))
+        monkeypatch.setattr(subscription, "get_channel_limit", AsyncMock(return_value=100))
+        monkeypatch.setattr(subscription, "get_effective_channel_count", AsyncMock(return_value=0))
+        keyboard = MagicMock()
+        monkeypatch.setattr(accounts, "InlineKeyboardBuilder", lambda: keyboard)
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=OWNER), answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+        await accounts.cb_scan_connect(
+            callback, SimpleNamespace(acc_id=111, action="scan_connect_all"), pool)
+        assert "Подключено: 1" in callback.message.edit_text.await_args.args[0]
+        row = await pool.fetchrow("SELECT channel_id, type FROM managed_channels WHERE owner_id=$1", OWNER)
+        assert (row["channel_id"], row["type"]) == (456, "megagroup")
+        db.get_tg_account.assert_awaited_once_with(pool, 111, OWNER)
 
     asyncio.run(_run(scenario))
