@@ -1369,6 +1369,16 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(var(--accent-rgb),.12);border-color:var(--accent)}
 input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 .nav-item.on{background:rgba(var(--accent-rgb),.10);color:var(--accent)}
+
+.resource-actions{box-sizing:border-box;width:min(440px,calc(100% - 24px));max-height:80dvh;padding:16px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg2);color:var(--text)}
+.resource-actions::backdrop{background:rgba(0,0,0,.48)}
+.resource-actions-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.resource-actions-head h2{font-size:16px;margin:0;overflow-wrap:anywhere}
+.resource-actions-list{display:grid;gap:6px}
+.resource-actions .btn,.resource-actions summary,.resource-actions-trigger{min-height:44px}
+.resource-actions-list .btn{text-align:left;white-space:normal}
+.resource-actions summary{display:list-item;align-content:center}
+@media(pointer:coarse){.resource-actions{margin:auto auto max(12px,env(safe-area-inset-bottom))}}
 </style>
 <script>
   /* PWA: регистрируем service worker после загрузки — не мешаем запуску
@@ -8850,6 +8860,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<dialog id="resourceActions" class="resource-actions" aria-labelledby="resourceActionsTitle">
+  <form method="dialog" class="resource-actions-head">
+    <h2 id="resourceActionsTitle"></h2>
+    <button class="btn btn-s" aria-label="Закрыть">✕</button>
+  </form>
+  <div id="resourceActionsPrimary" class="resource-actions-list"></div>
+  <details id="resourceActionsMore">
+    <summary>Все действия</summary>
+    <div id="resourceActionsSecondary" class="resource-actions-list"></div>
+  </details>
+</dialog>
+
 <!-- ══════════════════════ MODAL: CREATE NETWORK ══════════════════════ -->
 <div class="mbg" id="mo-net-create" onclick="if(event.target===this)closeModal('mo-net-create')">
   <div class="modal">
@@ -10735,6 +10757,8 @@ function push(sid) {
 }
 
 function back() {
+  const resourceMenu = document.getElementById('resourceActions');
+  if (resourceMenu?.open) { resourceMenu.close(); return; }
   closeAllModals();
   if (!STACK.length) return;
   const id = STACK.pop();
@@ -34507,12 +34531,17 @@ async function selectNetwork(netId) {
   publish.hidden = true;
   const el = document.getElementById('netTopologyNodes');
   el.style.display = 'block';
-  document.getElementById('netTopologyEmpty').style.display = 'none';
+  const placeholder = document.getElementById('netTopologyEmpty');
+  if (placeholder) placeholder.hidden = true;
+  window._lastNetData = null;
   txt('netDeployPlan','');
+  txt('netNodesList','');
+  txt('netEdgesList','');
   try {
     const d = await api('/api/miniapp/networks/' + netId);
     if (_currentNetId !== netId) return;
     publish.hidden = !d.project_pilot;
+    window._lastNetData = d;
     renderNetTopology(d);
     renderNetNodesEdges(d);
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
@@ -34522,8 +34551,8 @@ function renderNetTopology(d) {
   const canvas = document.getElementById('netTopologyCanvas');
   const nodes = d.nodes || [];
   const edges = d.edges || [];
+  canvas.replaceChildren();
   if (!nodes.length) return;
-  canvas.innerHTML = '';
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', '100%');
   svg.setAttribute('height', '180');
@@ -34575,23 +34604,31 @@ function renderNetNodesEdges(d) {
   const nodes = d.nodes || [];
   const edges = d.edges || [];
   const icoMap = { bot: '🤖', channel: '📡', group: '👥', account: '📱' };
+  const pilot = d.project_pilot === true;
 
   // Узел шаблона ещё не привязан к объекту: object_id у него пуст. Печатать
   // «ID: null» нельзя — это читается как поломка, а не как «создадим при
   // развёртывании».
-  txt('netNodesList', nodes.map(n => `<div class="li">
+  txt('netNodesList', nodes.map(n => `<div class="li"${pilot ? ` data-resource-node="${Number(n.id)}"` : ''}>
     <div class="ava ava-blue">${icoMap[n.type] || '⚫'}</div>
     <div class="li-body">
       <div class="li-name">${esc(n.label || objRu(n.type))}</div>
-      <div class="li-sub">${esc(objRu(n.type))} · ${n.object_id ? 'ID: ' + n.object_id : 'создастся при развёртывании'}</div>
+      <div class="li-sub">${esc(objRu(n.type))} · ${n.object_id ? 'ID: ' + esc(n.object_id) : 'создастся при развёртывании'}</div>
     </div>
-    <div class="li-right"><span class="icon-tap" style="font-size:16px" onclick="removeNetNode(${n.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
+    <div class="li-right">${pilot
+      ? '<button type="button" class="btn btn-s resource-actions-trigger" data-resource-menu aria-label="Действия">⋯</button>'
+      : `<button type="button" class="btn btn-s" onclick="removeNetNode(${Number(n.id)}, this)" aria-label="Убрать из проекта">🗑</button>`}</div>
   </div>`).join('') || '<div class="empty-inline">Нет узлов</div>');
+
+  if (pilot) bindResourceActionRows(document.getElementById('netNodesList'), (nodeId, trigger) => {
+    const node = nodes.find(item => Number(item.id) === nodeId);
+    if (node) openProjectResourceActions(node, trigger);
+  });
 
   txt('netEdgesList', edges.map(e => `<div class="li">
     <div class="ava ava-green">🔗</div>
     <div class="li-body">
-      <div class="li-name">${e.from_label || '#'} → ${e.to_label || '#'}</div>
+      <div class="li-name">${esc(e.from_label || '#')} → ${esc(e.to_label || '#')}</div>
       <div class="li-sub">${esc(objRu(e.type || 'forward'))}</div>
     </div>
     <div class="li-right"><span class="icon-tap" style="font-size:16px" onclick="removeNetEdge(${e.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
@@ -34666,10 +34703,10 @@ async function submitNetAddNode() {
 }
 
 async function removeNetNode(nodeId, _el) {
-  if (!await confirmDelete('Удалить узел', _el)) return;
+  if (!await confirmDelete('Убрать из проекта', _el, 'Ресурс останется в Telegram.')) return;
   try {
     await api(`/api/miniapp/networks/nodes/${nodeId}`, { method: 'DELETE' });
-    toast('🗑 Узел удалён');
+    toast('Ресурс убран из проекта');
     selectNetwork(_currentNetId);
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
 }
@@ -35846,6 +35883,7 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/vault_dialogs.js"></script>
+<script src="screens/resource_actions.js"></script>
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>
 <script src="screens/deals_board.js"></script>
