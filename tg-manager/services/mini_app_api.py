@@ -7992,6 +7992,95 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "dead": out, "total": len(out),
                            "checked_at": (res.get("checked_at") if isinstance(res, dict) else None)})
 
+    async def restrictions_problems(request: web.Request) -> web.Response:
+        """ВСЕ проблемные ресурсы последней (или указанной) проверки: ограничен,
+        в теневом бане ИЛИ недоступен — чтобы их можно было быстро убрать из
+        списка прямо по итогу проверки.
+
+        Отличие от /restrictions/dead: тот отдаёт только недоступные
+        (`unreachable`). Владелец просил убирать и заблокированные (`restricted`),
+        и скрытые из поиска (`hidden`). Эти ресурсы в Telegram ЖИВЫ — удаление
+        снимает их только с учёта у нас, Telegram не трогает; поэтому в выдаче у
+        каждого есть статус, а решение владелец принимает по нему.
+
+        op_id (необязательно) — разобрать конкретную проверку (ту, что открыта);
+        без него берётся последняя завершённая. Сверка с managed_channels/bots:
+        не предлагаем убрать то, что уже убрано.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import entity_restriction_check as _erc
+        q = request.rel_url.query
+        _where = ("WHERE owner_id=$1 AND op_type='check_owned_restrictions' "
+                  "AND status IN ('done','partial') AND result IS NOT NULL")
+        _args: list = [uid]
+        try:
+            _oid = int(q.get("op_id")) if q.get("op_id") else 0
+        except (TypeError, ValueError):
+            _oid = 0
+        if _oid:
+            _where += " AND id=$2"
+            _args.append(_oid)
+        row = await _safe_fetchrow(
+            pool,
+            f"SELECT result FROM operation_queue {_where} "
+            "ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1",
+            *_args)
+        if not row or not row.get("result"):
+            return _json_resp({"ok": True, "problems": [], "total": 0, "checked_at": None})
+        res = row["result"]
+        if isinstance(res, str):
+            try:
+                res = _json.loads(res)
+            except (ValueError, TypeError):
+                res = {}
+        findings = res.get("findings") if isinstance(res, dict) else None
+        if not isinstance(findings, list):
+            findings = []
+        prob_ch: dict[int, dict] = {}
+        prob_bot: dict[int, dict] = {}
+        for f in findings:
+            if not isinstance(f, dict) or not _erc.is_problem(f.get("status")):
+                continue
+            kind = f.get("kind")
+            try:
+                ent_id = int(f.get("id"))
+            except (TypeError, ValueError):
+                continue
+            st = f.get("status")
+            item = {"kind": kind, "id": ent_id,
+                    "title": str(f.get("title") or ent_id)[:120],
+                    "status": st, "status_label": _erc.status_label(st),
+                    "reason": str(f.get("reason") or "")[:160],
+                    # Недоступные в Telegram уже мертвы — их отмечаем по умолчанию;
+                    # ограниченные/скрытые живы, их владелец выбирает сам.
+                    "dead": st == _erc.STATUS_UNREACHABLE}
+            if kind == "bot":
+                prob_bot[ent_id] = item
+            else:
+                prob_ch[ent_id] = item
+        out: list[dict] = []
+        if prob_ch:
+            rows = await _safe_fetch(
+                pool, "SELECT channel_id FROM managed_channels "
+                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+                uid, list(prob_ch))
+            for r in rows or []:
+                out.append(prob_ch[int(r["channel_id"])])
+        if prob_bot:
+            rows = await _safe_fetch(
+                pool, "SELECT bot_id FROM managed_bots "
+                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+                uid, list(prob_bot))
+            for r in rows or []:
+                out.append(prob_bot[int(r["bot_id"])])
+        # Худшее — выше: ограничение, затем недоступность, затем теневой бан.
+        _rank = {_erc.STATUS_RESTRICTED: 0, _erc.STATUS_UNREACHABLE: 1, _erc.STATUS_HIDDEN: 2}
+        out.sort(key=lambda x: _rank.get(x.get("status"), 9))
+        return _json_resp({"ok": True, "problems": out, "total": len(out),
+                           "checked_at": (res.get("checked_at") if isinstance(res, dict) else None)})
+
     async def restrictions_remove_dead(request: web.Request) -> web.Response:
         """Убрать из списка владельца недоступные сущности (Telegram их уже
         удалил/заблокировал). Это снятие с учёта в НАШЕЙ базе, а не удаление в
@@ -9541,6 +9630,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/check_owned_restrictions/targets", check_owned_restrictions_targets)
     app.router.add_post("/api/miniapp/check_owned_restrictions", check_owned_restrictions)
     app.router.add_get("/api/miniapp/restrictions/dead", restrictions_dead)
+    app.router.add_get("/api/miniapp/restrictions/problems", restrictions_problems)
     app.router.add_post("/api/miniapp/restrictions/remove_dead", restrictions_remove_dead)
     app.router.add_get("/api/miniapp/check_bot_geoban/targets", check_bot_geoban_targets)
     app.router.add_post("/api/miniapp/check_bot_geoban", check_bot_geoban)

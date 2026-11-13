@@ -316,6 +316,66 @@ async def close_other_sessions(session_string: str, _acc: dict | None) -> dict[s
             log.warning('profile_setter: close_other_sessions disconnect failed: %s', e)
 
 
+async def list_sessions(session_string: str, _acc: dict | None) -> dict[str, Any]:
+    """Живой список чужих сеансов аккаунта + время входа НАШЕГО сеанса.
+
+    Один запрос к Telegram на открытом соединении — то же, что делает
+    официальный клиент на экране «Устройства». Нужен карточке аккаунта: закрыть
+    или пометить своим конкретный сеанс, а не только «все сразу».
+    """
+    from services import account_manager as _am
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
+    try:
+        snap = await _am.authorizations_snapshot(client)
+        if snap is None:
+            return {"ok": False, "error": "Telegram не отдал список сеансов — повторите позже"}
+        foreign, own_created = snap
+        return {"ok": True, "error": None, "sessions": foreign,
+                "own_created": int(own_created or 0)}
+    except Exception as exc:
+        log.warning('profile_setter: list_sessions error: %s', exc)
+        return {"ok": False, "error": str(exc)[:150]}
+    finally:
+        try:
+            await _safe_disconnect(client)
+        except Exception as e:
+            log.warning('profile_setter: list_sessions disconnect failed: %s', e)
+
+
+async def close_one_session(session_string: str, _acc: dict | None, auth_hash: int) -> dict[str, Any]:
+    """Завершить ОДИН чужой сеанс по его отпечатку (account.resetAuthorization).
+
+    То же ограничение Telegram, что и у «закрыть все»: из сеанса моложе суток
+    чужие не закрываются (FRESH_RESET_AUTHORISATION_FORBIDDEN) — текст объясняет
+    это по-русски.
+    """
+    from telethon.tl.functions.account import ResetAuthorizationRequest
+    try:
+        h = int(auth_hash)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Неверный идентификатор сеанса"}
+    if not h:
+        return {"ok": False, "error": "Неверный идентификатор сеанса"}
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
+    try:
+        await asyncio.wait_for(client(ResetAuthorizationRequest(hash=h)), timeout=_ACTION_TIMEOUT)
+        return {"ok": True, "error": None}
+    except Exception as exc:
+        log.warning('profile_setter: close_one_session error: %s', exc)
+        return {"ok": False, "error": close_sessions_error_ru(exc)}
+    finally:
+        try:
+            await _safe_disconnect(client)
+        except Exception as e:
+            log.warning('profile_setter: close_one_session disconnect failed: %s', e)
+
+
 # ── Настройки приватности ─────────────────────────────────────────────────────
 
 # key → (PrivacyKey, разрешено/запрещено). value=True = «открыть/показать всем»,

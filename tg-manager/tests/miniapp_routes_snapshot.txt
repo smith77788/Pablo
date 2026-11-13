@@ -69,6 +69,7 @@ GET /api/miniapp/account/{acc_id}/channels
 GET /api/miniapp/account/{acc_id}/contacts
 GET /api/miniapp/account/{acc_id}/dialog/{peer}/history
 GET /api/miniapp/account/{acc_id}/dialogs
+GET /api/miniapp/account/{acc_id}/sessions
 GET /api/miniapp/accounts
 GET /api/miniapp/accounts/export
 GET /api/miniapp/accounts/export_json
@@ -317,6 +318,7 @@ GET /api/miniapp/rehab/{acc_id}/history
 GET /api/miniapp/relay/session/{session_id}/messages
 GET /api/miniapp/report_channels
 GET /api/miniapp/restrictions/dead
+GET /api/miniapp/restrictions/problems
 GET /api/miniapp/sales/ai-journal
 GET /api/miniapp/sales/ai-quality
 GET /api/miniapp/sales/ai-usage
@@ -428,6 +430,7 @@ HEAD /api/miniapp/account/{acc_id}/channels
 HEAD /api/miniapp/account/{acc_id}/contacts
 HEAD /api/miniapp/account/{acc_id}/dialog/{peer}/history
 HEAD /api/miniapp/account/{acc_id}/dialogs
+HEAD /api/miniapp/account/{acc_id}/sessions
 HEAD /api/miniapp/accounts
 HEAD /api/miniapp/accounts/export
 HEAD /api/miniapp/accounts/export_json
@@ -676,6 +679,7 @@ HEAD /api/miniapp/rehab/{acc_id}/history
 HEAD /api/miniapp/relay/session/{session_id}/messages
 HEAD /api/miniapp/report_channels
 HEAD /api/miniapp/restrictions/dead
+HEAD /api/miniapp/restrictions/problems
 HEAD /api/miniapp/sales/ai-journal
 HEAD /api/miniapp/sales/ai-quality
 HEAD /api/miniapp/sales/ai-usage
@@ -812,6 +816,8 @@ POST /api/miniapp/account/{acc_id}/note
 POST /api/miniapp/account/{acc_id}/post_story
 POST /api/miniapp/account/{acc_id}/profile
 POST /api/miniapp/account/{acc_id}/proxy
+POST /api/miniapp/account/{acc_id}/session/close
+POST /api/miniapp/account/{acc_id}/session/trust
 POST /api/miniapp/account/{acc_id}/spamblock_appeal
 POST /api/miniapp/account/{acc_id}/toggle
 POST /api/miniapp/account/{acc_id}/warmup/pause

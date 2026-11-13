@@ -4751,7 +4751,8 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
         _tq(
             """a.is_active = TRUE AND a.session_str IS NOT NULL
                AND COALESCE(a.in_operation, FALSE) = FALSE""",
-            extra_cols=("a.session_conflict_at, a.foreign_session_hashes, a.username, "
+            extra_cols=("a.session_conflict_at, a.foreign_session_hashes, "
+                        "a.trusted_session_hashes, a.username, "
                         "(a.twofa_enc IS NOT NULL) AS twofa_saved, a.reserve_auth_hash, "
                         "(a.reserve_session_enc IS NOT NULL) AS has_reserve"),
         )

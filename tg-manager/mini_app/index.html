@@ -1590,9 +1590,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          убрать мёртвых. «Мёртвый» = отозванный токен (401). «Неизвестные»
          (Telegram не ответил) не удаляются — сносим только то, про что точно
          известно, что токен отозван. -->
-    <div style="display:flex;gap:8px;padding:0 0 10px">
+    <div style="display:flex;gap:8px;padding:0 0 10px;flex-wrap:wrap">
       <button class="btn btn-s" id="botCheckBtn" onclick="checkAllBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Проверить, жив ли токен каждого бота">🩺 Проверить все</button>
       <button class="btn btn-s" id="botCleanupBtn" onclick="cleanupDeadBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Удалить всех ботов с отозванным токеном">🧹 Удалить мёртвых</button>
+      <button class="btn btn-s" onclick="openRestrictionCleanup(0)" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="По итогу проверки на ограничения: убрать заблокированных, в теневом бане и недоступных">🛡 Проблемные</button>
     </div>
     <!-- Поиск и срезы по списку. Раньше список рисовался целиком и без единого
          фильтра: после «Фабрики ботов» это сотни карточек, и найти нужного бота
@@ -1810,6 +1811,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title" id="acd-name">Аккаунт</div>
   </div>
   <div class="sub-sb" id="acd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════ СЕАНСЫ АККАУНТА (устройства, вошедшие в аккаунт) ══════════ -->
+<div class="screen" id="s-accsessions">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔐 Сеансы аккаунта</div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="openAccSessions(ACC_SESS_ID)" title="Обновить" aria-label="Обновить">🔄</span></div>
+  </div>
+  <div class="sub-sb" id="accsess-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════ КОНСОЛЬ АККАУНТА: ДИАЛОГИ ══════════ -->
@@ -13313,6 +13324,7 @@ function openMassProfile() {
 // Живой просмотр диалогов ВЫБРАННОГО аккаунта через его сессию: открыть чат,
 // увидеть историю, ответить. Тексты/имена — внешние данные, всегда через esc().
 let ACC_CONSOLE_ID = null;   // аккаунт, чью консоль сейчас смотрим
+let ACC_SESS_ID = 0;         // аккаунт, чьи сеансы (устройства) сейчас открыты
 let ACC_CHAT_PEER = null;    // id/@username открытого собеседника
 let ACC_CHAT_NAME = '';
 let ACC_CHAT_HASH = null;    // access_hash открытого собеседника (для резолва без общего чата)
@@ -13777,6 +13789,9 @@ function buildAccDetail(d) {
     <div style="display:flex;gap:8px;padding:2px 0 4px">
       <button class="btn btn-s" onclick="openAccountChannels(${a.id})" style="flex:1 1 auto;font-size:14px;padding:13px 6px">📡 Каналы и чаты</button>
       <button class="btn btn-s" onclick="openAccountBots(${a.id})" style="flex:1 1 auto;font-size:14px;padding:13px 6px">🤖 Боты</button>
+    </div>
+    <div style="display:flex;gap:8px;padding:2px 0 4px">
+      <button class="btn ${a.foreign_sessions>0?'btn-o':'btn-s'}" onclick="openAccSessions(${a.id})" style="flex:1 1 auto;font-size:14px;padding:13px 6px">🔐 Сеансы (устройства)${a.foreign_sessions>0?` · 🚨 чужих: ${Number(a.foreign_sessions)}`:''}</button>
     </div>
 
     <details class="acc-actions" style="margin:6px 0;background:var(--bg2);border-radius:12px">
@@ -30026,12 +30041,14 @@ async function chMoreActions() {
     {value: 'imp_gr', label: '📥 Импорт групп', sub: 'Найти группы, где состоят ваши аккаунты, и завести их сюда'},
     {value: 'refresh', label: '🔄 Обновить данные из Telegram', sub: 'Имя, ссылка и число участников. Ничего не удаляет'},
     {value: 'mine', label: '🧹 Только мои (убрать чужие)', sub: 'Проверить роль аккаунта в каждом канале и убрать те, где он только подписчик'},
+    {value: 'problems', label: '🛡 Убрать проблемные', sub: 'По итогу проверки: заблокированные, в теневом бане и недоступные — убрать из списка'},
     {value: 'removed', label: '🗑 Удалённые и недоступные', sub: 'Что вы удалили и что пропало в Telegram'},
   ]);
   if (v === 'imp_ch') return importAllResources('channels');
   if (v === 'imp_gr') return importAllResources('groups');
   if (v === 'refresh') return refreshChannelsMeta();
   if (v === 'mine') return reclassifyChannels();
+  if (v === 'problems') return openRestrictionCleanup(0);
   if (v === 'removed') return openRemovedChannels();
 }
 async function reclassifyChannels() {
