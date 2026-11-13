@@ -1444,6 +1444,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          видел сначала стену нулей, а выбор цели — за нижним краем экрана
          (обход 08.11.2026). -->
     <div id="onboardCard" style="margin:12px 16px 12px;display:none"></div>
+    <section id="homeProjects" hidden aria-label="Проекты"></section>
     <div id="summaryWrap"></div>
     <div id="homeDataStatus" role="status" aria-live="polite" class="home-data-status"></div>
     <!-- Operation Progress -->
@@ -11076,6 +11077,7 @@ async function fleetCleanupAll() {
 async function loadHome() {
   if (loadHome.pending) return;
   loadHome.pending = true;
+  if (typeof loadHomeProjects === 'function') loadHomeProjects();
   modernizeIcons(document.getElementById('s-home'));
   const cached = loadHome.lastData || getCached('infragram_cache_home');
   if (cached && !loadHome.lastData) { renderCards(cached); renderAct(cached.recent_activity||[]); }
@@ -34498,10 +34500,16 @@ async function submitRankingAdd() {
 // ══════════════════════════════════════════════════════════════════════
 let _currentNetId = null;
 
-async function openNetworkBuilder() {
+async function openNetworkBuilder(projectId) {
   push('s-network-builder');
   loadNetworkBuilder();
   loadCrosspost();
+  if (Number.isSafeInteger(projectId) && projectId > 0) {
+    await selectNetwork(projectId);
+    if (_currentNetId === projectId && STACK.at(-1) === 's-network-builder') {
+      document.getElementById('netTopologyCanvas').scrollIntoView({block: 'start'});
+    }
+  }
 }
 async function loadCrosspost() {
   const el = document.getElementById('crosspostList');
@@ -36067,6 +36075,7 @@ function renderAudSegChart(segments) {
 <script src="screens/growth_plan.js"></script>
 <script src="screens/niche.js"></script>
 <script src="screens/home_screen.js"></script>
+<script src="screens/project_overview.js"></script>
 <script src="screens/find_mine.js"></script>
 <script src="screens/osint_search.js"></script>
 <script src="screens/workflow_map.js"></script>

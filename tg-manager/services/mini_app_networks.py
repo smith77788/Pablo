@@ -323,6 +323,27 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("ecosystem_overlaps")
             return _err(_INTERNAL_ERROR, 500)
 
+    async def network_project_overview(request: web.Request) -> web.Response:
+        from services import network_builder as nb
+
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not nb.project_pilot_enabled(uid):
+            return _json_resp({"enabled": False})
+        limit = validate_integer(request.query.get("limit", "5"), min_val=1, max_val=20)
+        if limit is None:
+            return _err("Неверный размер списка", 400)
+        try:
+            projects = await nb.project_overview(pool, uid, limit=limit)
+        except (asyncpg.PostgresError, TimeoutError):
+            log.exception("network_project_overview uid=%s", uid)
+            return _err("Не удалось загрузить проекты", 500)
+        total = projects[0]["total"] if projects else 0
+        for project in projects:
+            project.pop("total")
+        return _json_resp({"enabled": True, "projects": projects, "total": total, "issue_days": 7})
+
     async def networks_list(request: web.Request) -> web.Response:
         """Network Builder — список сеток владельца (форма экрана s-network-builder)."""
         uid = _get_uid(request)
@@ -478,7 +499,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     try:
                         plan["approval"] = approval.issue_deployment(uid, params)
                     except approval.ApprovalError:
-                        return _err("Сервис подтверждения временно недоступен", 503)
+                        return _err("Сервис подтверждения временно недоступен", 500)
                 return _json_resp({**plan, "executor": dict(executor)})
             if not isinstance(token, str) or not token or len(token) > 1024:
                 return _err("Подтвердите предпросмотр развёртывания", 400)
@@ -756,6 +777,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/networks", network_create_plural)
     app.router.add_delete("/api/miniapp/networks/nodes/{node_id}", network_delete_node)
     app.router.add_delete("/api/miniapp/networks/edges/{edge_id}", network_delete_edge)
+    app.router.add_get("/api/miniapp/networks/project_overview", network_project_overview)
     app.router.add_get("/api/miniapp/networks/{net_id}", network_detail_plural)
     app.router.add_get("/api/miniapp/networks/{net_id}/catalog", network_catalog)
     app.router.add_get("/api/miniapp/networks/{net_id}/deploy_plan", network_deploy_plan)

@@ -101,9 +101,9 @@ def setup_routes(app: web.Application, pool) -> None:
         return str(project_id), None
 
     def project_predicate(prefix):
-        # Сети уже сохраняли instance_id до появления публикаций проекта.
-        return (f" AND ({prefix}params->>'project_id'=$2 OR "
-                f"({prefix}op_type='deploy_network' AND {prefix}params->>'instance_id'=$2))")
+        from services.network_builder import project_operation_keys
+
+        return f" AND $2 IN ({project_operation_keys(prefix)})"
 
     async def operations(request: web.Request) -> web.Response:
         uid = _get_uid(request)

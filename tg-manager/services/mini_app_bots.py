@@ -1719,7 +1719,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 async with _aio.ClientSession() as sess:
                     statuses = await bot_api.batch_check_alive(sess, [r["token"] for r in rows])
             if len(rows) != len(statuses):
-                return _err("Проверка вернула неполный результат", 502)
+                return _err("Проверка вернула неполный результат. Повторите проверку.", 409)
 
             checked_tokens = {row["bot_id"]: row["token"] for row, status in zip(rows, statuses)
                               if status == bot_api.BOT_DEAD}

@@ -248,6 +248,60 @@ PROJECT_RESOURCES = {
 }
 
 
+def project_operation_keys(prefix: str) -> str:
+    """Общее определение принадлежности операции для журнала и обзора."""
+    return (f"{prefix}params->>'project_id', CASE WHEN {prefix}op_type='deploy_network' "
+            f"THEN {prefix}params->>'instance_id' END")
+
+
+async def project_overview(pool, owner_id: int, *, limit: int):
+    from services import op_status
+
+    # Имена таблиц и условия доступны только из реестра каталога.
+    available = " ".join(
+        f"WHEN '{kind}' THEN EXISTS (SELECT 1 FROM {table} r "
+        f"WHERE r.{owner}=$1 AND r.{key}=n.ref_id AND ({eligible}))"
+        for kind, (table, key, owner, _, eligible) in PROJECT_RESOURCES.items()
+    )
+    rows = await pool.fetch(
+        f"""WITH projects AS (
+              SELECT id, name, created_at FROM network_instances WHERE owner_id=$1
+            ), resources AS (
+              SELECT n.instance_id, count(*) AS node_count,
+                     count(*) FILTER (WHERE n.ref_id IS NOT NULL AND NOT (
+                       CASE (CASE WHEN n.node_type='chat' THEN 'group' ELSE n.node_type END)
+                         {available} ELSE TRUE END
+                     )) AS unavailable
+              FROM network_nodes n JOIN projects p ON p.id=n.instance_id
+              GROUP BY n.instance_id
+            ), activity AS (
+              SELECT p.id, count(*) FILTER (WHERE oq.status=ANY($2::text[])) AS in_flight,
+                     count(*) FILTER (WHERE oq.status=ANY($3::text[])) AS failed,
+                     max(oq.id) FILTER (WHERE oq.status=ANY($3::text[])) AS issue_id
+              FROM operation_queue oq
+              CROSS JOIN LATERAL (
+                SELECT DISTINCT unnest(ARRAY[{project_operation_keys('oq.')}]) AS project_id
+              ) scope
+              JOIN projects p ON p.id::text=scope.project_id
+              WHERE oq.owner_id=$1 AND (
+                oq.status=ANY($2::text[]) OR (oq.status=ANY($3::text[]) AND
+                  COALESCE(oq.finished_at,oq.created_at) >= NOW()-INTERVAL '7 days'))
+              GROUP BY p.id
+            )
+            SELECT p.id, p.name, COALESCE(r.node_count,0) AS node_count,
+                   COALESCE(r.unavailable,0) AS unavailable,
+                   COALESCE(a.in_flight,0) AS in_flight,
+                   COALESCE(a.failed,0) AS failed, a.issue_id::text AS issue_id,
+                   count(*) OVER () AS total
+            FROM projects p LEFT JOIN resources r ON r.instance_id=p.id
+            LEFT JOIN activity a ON a.id=p.id
+            ORDER BY (COALESCE(a.failed,0) + COALESCE(r.unavailable,0) > 0) DESC,
+                     p.created_at DESC, p.id DESC LIMIT $4""",
+        owner_id, sorted(op_status.IN_FLIGHT), sorted(op_status.UNFINISHED), limit,
+    )
+    return [dict(row) for row in rows]
+
+
 async def project_catalog(pool, owner_id: int, kind: str, *, search="", ids=None, limit=31):
     table, key, owner, title, eligible = PROJECT_RESOURCES[kind]
     return await pool.fetch(
