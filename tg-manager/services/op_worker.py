@@ -14305,6 +14305,8 @@ async def _exec_group_announce(
                 await _settle(_key, True)
             elif _kind == "flood" or result.get("flood_wait"):
                 await _unmark(_key)
+                await _note_flood_penalty(pool, int(acc["id"]),
+                                          int(result.get("flood_wait") or 600), "post", op_id)
                 _wait = int(result.get("flood_wait") or 600) + random.randint(30, 180)
                 _why = (f"Telegram попросил паузу (флуд-лимит) — объявления "
                         f"продолжатся позже. Отправлено в этот заход: {ok_count}")
@@ -24487,6 +24489,8 @@ async def _exec_niche_growth_post(
                     # попытка вступить сразу же продлевает его. Раньше это
                     # считалось «не удалось вступить» и цикл шёл к следующей
                     # группе без паузы. Группа ещё не отмечена — повтор её найдёт.
+                    await _note_flood_penalty(pool, int(acc["id"]),
+                                              int(join_result["flood_wait"]), "join", op_id)
                     _why = (f"Telegram попросил паузу на вступления — Агент роста "
                             f"продолжит позже. Опубликовано в этот заход: {ok_count}")
                     return {"status": "requeue",
@@ -24607,6 +24611,8 @@ async def _exec_niche_growth_post(
                               "AND group_id=$2 AND outcome='marked'",
                         owner_id, int(grp_id),
                         log_ctx=f"[niche_growth_unmark op={op_id}]")
+                    await _note_flood_penalty(pool, int(acc["id"]),
+                                              int(post_result["flood_wait"]), "post", op_id)
                     _why = (f"Telegram попросил паузу на публикации — Агент роста "
                             f"продолжит позже. Опубликовано в этот заход: {ok_count}")
                     return {"status": "requeue",
