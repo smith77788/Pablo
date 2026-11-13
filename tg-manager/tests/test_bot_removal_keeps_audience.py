@@ -41,7 +41,7 @@ class _Pool:
 
     async def execute(self, q, *a):
         self.statements.append((" ".join(q.split()), a))
-        return self.execute_result
+        return "DELETE 1" if q.startswith("DELETE FROM managed_bots") else self.execute_result
 
     async def fetchrow(self, q, *a):
         self.statements.append((" ".join(q.split()), a))

@@ -619,10 +619,6 @@ _POISON_ERROR_TOTAL = (
 # МОЛЧА: в интерфейсе она откатывалась на нулевой прогресс без единого слова, и
 # владелец видел ровно то, что выглядит как потерянная работа. Про соседние
 # случаи (флуд-пауза, исчерпанный бюджет живучести) ему пишут — здесь пробел.
-_REVIVE_AFTER_RESTART = (
-    "Процесс операций перезапустился, пока операция шла — она возвращена в "
-    "очередь и запустится заново."
-)
 _REVIVE_AFTER_SILENCE = (
     "Операция не подавала признаков работы дольше {mins} мин — возвращена в "
     "очередь и запустится заново."
@@ -2551,6 +2547,8 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
 # op_worker._classify_op_error / _FATAL_ERRORS / _normalize_result и т.п.
 # остались доступны как раньше (публичный/приватный контракт не изменился).
 from services import op_status
+
+_REVIVE_AFTER_RESTART = op_status.REVIVE_AFTER_RESTART
 from services.op_errors import (  # noqa: E402,F401
     _RETRYABLE_ERRORS,
     _FATAL_ERRORS,
@@ -5077,7 +5075,7 @@ async def shutdown(
                       last_error=$2
                 WHERE id = ANY($1::bigint[]) AND status='running'""",
             [int(i) for i in op_ids],
-            "Сервис перезапускался — операция продолжится автоматически с места остановки (уже сделанное не повторится)",
+            op_status.REQUEUE_ON_SHUTDOWN,
             log_ctx="[shutdown_requeue]",
         )
         try:
@@ -16397,13 +16395,14 @@ async def _exec_check_owned_restrictions(
 
     only_channels = [int(x) for x in (params.get("channel_ids") or [])]
     only_bots = [int(x) for x in (params.get("bot_ids") or [])]
+    exact = params.get("selection_mode") == "exact"
 
     # ── 1. Сущности владельца ────────────────────────────────────────────────
     # Каналы/чаты: scope по owner_id. DISTINCT ON — один канал может вестись
     # несколькими аккаунтами (строка на acc_id), берём одну с её управляющим acc.
     _ch_where = "WHERE owner_id=$1"
     _ch_args: list = [owner_id]
-    if only_channels:
+    if only_channels or exact:
         _ch_where += " AND channel_id = ANY($2::bigint[])"
         _ch_args.append(only_channels)
     ch_rows = await _safe_fetch(
@@ -16413,9 +16412,9 @@ async def _exec_check_owned_restrictions(
         *_ch_args,
     )
     # Боты: scope по added_by (НЕ owner_id — такой колонки на managed_bots нет).
-    _bot_where = "WHERE added_by=$1"
+    _bot_where = "WHERE added_by=$1 AND is_active AND deleted_at IS NULL"
     _bot_args: list = [owner_id]
-    if only_bots:
+    if only_bots or exact:
         _bot_where += " AND bot_id = ANY($2::bigint[])"
         _bot_args.append(only_bots)
     bot_rows = await _safe_fetch(
@@ -16704,14 +16703,13 @@ async def _exec_check_owned_restrictions(
                 "error" if _erc.is_problem(status) else "ok", _log_msg[:200],
             )
 
-            # Реальное ограничение сущности — в общий пульс (restriction_events),
-            # чтобы shadowban_monitor/get_account_health его видели.
-            if _erc.is_problem(status):
-                # id/bot_id — чтобы итог проверки был ДЕЙСТВЕННЫМ: по нему мини-апп
-                # предлагает убрать из списка те, что Telegram уже удалил/заблокировал.
+            # Для карточки сохраняем и неудавшиеся проверки со стабильным ID.
+            if status != _erc.STATUS_CLEAN:
                 findings.append({"kind": ent["kind"], "title": _title,
                                  "id": ent["id"], "bot_id": ent.get("bot_id"),
                                  "status": status, "reason": verdict["reason_ru"]})
+            # В пульс ограничений попадают только выявленные проблемы.
+            if _erc.is_problem(status):
                 try:
                     await _sbm._record_event(
                         pool, owner_id,
@@ -16756,7 +16754,8 @@ async def _exec_check_owned_restrictions(
         "status": "done",
         "checked": n,
         "counts": counts,
-        "findings": findings[:50],
+        "findings": findings,
+        "findings_version": 2,
         "visibility_unmeasured": vis_unmeasured,
         "summary": summary,
     }

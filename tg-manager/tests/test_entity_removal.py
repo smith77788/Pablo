@@ -94,8 +94,10 @@ def test_pause_cannot_resurrect_a_deleted_bot():
 
     src = inspect.getsource(mini_app_bots.setup_routes)
     toggle = src[src.index("async def toggle_bot"):src.index("async def create_funnel")]
-    assert "deleted_at IS NULL" in toggle, "«Вернуть в работу» поднимает удалённого бота"
-    assert "COALESCE($3::boolean, NOT is_active)" in toggle, (
+    assert "set_managed_bot_active(pool, bot_id, uid, want)" in toggle
+    toggle_sql = inspect.getsource(db.set_managed_bot_active)
+    assert "deleted_at IS NULL" in toggle_sql, "«Вернуть в работу» поднимает удалённого бота"
+    assert "COALESCE($3::boolean, NOT is_active)" in toggle_sql, (
         "пауза не принимает явное состояние")
 
 

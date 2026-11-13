@@ -27,6 +27,7 @@ tdata).
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import re
 
 from aiohttp import web
@@ -489,8 +490,11 @@ def setup_routes(app: web.Application, pool) -> None:
             else:
                 transport = {"kind": "shared", "unique": False,
                              "title": "Без своего прокси — общий CF-relay/прямое (НЕ уникальный IP)"}
+        from services.network_builder import project_pilot_enabled
+
         return _json_resp({
             "account": acc,
+            "public_channel_capacity_available": not admin and bool(acc["is_active"]) and project_pilot_enabled(uid),
             "capabilities": caps,
             "warmup": warmup,
             "rehab": rehab,
@@ -1128,6 +1132,37 @@ def setup_routes(app: web.Application, pool) -> None:
         from services import session_watch as _sw
         await _sw.set_trust(pool, uid, acc_id, h, on)
         return _json_resp({"ok": True, "trusted": on})
+    async def account_public_channel_capacity(request: web.Request) -> web.Response:
+        from services.account_manager import probe_public_channel_capacity
+        from services.network_builder import project_pilot_enabled
+        from services.op_worker import release_accounts, try_claim_account
+        from services.security import validate_integer
+
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not project_pilot_enabled(uid):
+            return _err("Недоступно", 403)
+        acc_id = validate_integer(request.match_info["acc_id"], min_val=1)
+        if acc_id is None:
+            return _err("Неверный идентификатор аккаунта", 400)
+        acc = await _console_account(uid, acc_id)
+        if not acc:
+            return _err("Аккаунт не найден или отключён", 404)
+        if not await try_claim_account(acc_id):
+            return _json_resp({"ok": True, "status": "unknown", "reason": "busy"})
+        try:
+            result = await asyncio.wait_for(
+                probe_public_channel_capacity(acc.get("session_str"), dict(acc)), timeout=45)
+        except TimeoutError:
+            result = {"status": "unknown", "reason": "telegram_unavailable"}
+        finally:
+            await release_accounts([acc_id])
+        return _json_resp({
+            "ok": True, "status": result["status"], "reason": result.get("reason"),
+            "retry_after": result.get("retry_after"),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        })
 
     async def accounts_export_json(request: web.Request) -> web.Response:
         """Экспорт МЕТАДАННЫХ аккаунтов пользователя в JSON (аналог «РАБОТА С JSON»).
@@ -2341,6 +2376,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/account/{acc_id}/sessions", account_sessions)
     app.router.add_post("/api/miniapp/account/{acc_id}/session/close", account_session_close)
     app.router.add_post("/api/miniapp/account/{acc_id}/session/trust", account_session_trust)
+    app.router.add_post("/api/miniapp/account/{acc_id}/public_channel_capacity", account_public_channel_capacity)
     app.router.add_get("/api/miniapp/accounts/export_json", accounts_export_json)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)

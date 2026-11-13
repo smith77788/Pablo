@@ -1,10 +1,6 @@
-# Контрольные суммы миграций. Проверяет tests/test_migrations_are_frozen.py.
 #
-# Уже применённый schema_vN.sql править нельзя: прод пропустит его по журналу
-# schema_migrations, и схема прода разойдётся со схемой кода. Нужна правка —
+#
 # заводится новый файл schema_vN+1.sql (только вперёд, ADD COLUMN).
-#
-# Добавили миграцию — впишите её сюда:
 #     python deploy/scripts/lock_migrations.py
 7e81e9fa8b068c2182a40c3cd91ffa1f4b1b002387b7742d51fbb75802cb8453  schema.sql
 c1e9f39e64b3d3639bec6043331ae774e06c1cab97a06635dc0aac415c4910a9  schema_v10.sql
@@ -272,6 +268,7 @@ c6125a8906aaec67c284a28e1667c88dd8fa411628e69257fdb80f69021af040  schema_v361_ad
 50dd1849ced9438ed3bf35817343424d9b3a7a7f3dbfa4003bebb667b00ccd61  schema_v362_persona_peers.sql
 5602c71a8bb915692139c0c5ce673e6bf58ae07db8f574580d21697f68cc3eea  schema_v37.sql
 d5ce7381db3769df5380f9c8bdec06c79abfa29e2f01bc3f3ff2e359a2bf0002  schema_v370_op_claimed_by.sql
+dd453c7544776c78e6874d603a2b39ab8d4846cb7b4a664955eb4f2da3709b2e  schema_v371_restriction_cleanup.sql
 6dc37d799bc632d5897452aacb9e56583165f1580720679785d393d7eb9cf49d  schema_v371_trusted_sessions.sql
 adfa2a3eae9013504cbb928f3d861ad75804fe4953763807b26997e919162ce4  schema_v38.sql
 1f3a5ede311ca90c4ce3cdce5093da8ddcd4983814572141459c04290e631a81  schema_v39.sql
@@ -341,3 +338,7 @@ e90f3be8d01a30d4a5cc03c12c226760b43875e3f02952c73c90f12e07ef642c  schema_v95.sql
 98affde74a89d64ff66ca5c294b6be9915b708fedc337465330a026d6ee51811  schema_v97.sql
 75c0e4e8f6f0999c52b79c995eb3b40f2be62a59f69f9c924247ba1476317f64  schema_v98.sql
 194609a686211a8c57e864a6a630828926a82057aeea300bf8407f7a091ae501  schema_v99.sql
+# Контрольные суммы миграций. Проверяет tests/test_migrations_are_frozen.py.
+# Уже применённый schema_vN.sql править нельзя: прод пропустит его по журналу
+# Добавили миграцию — впишите её сюда:
+# schema_migrations, и схема прода разойдётся со схемой кода. Нужна правка —

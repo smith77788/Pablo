@@ -13618,6 +13618,26 @@ async function submitAccContMsg() {
 
 
 
+async function checkAccPublicChannelCapacity(accId, button) {
+  const result = button.parentElement.querySelector('[role="status"]');
+  button.disabled = true;
+  result.textContent = 'Проверяем в Telegram…';
+  try {
+    const data = await api(`/api/miniapp/account/${accId}/public_channel_capacity`, {method:'POST'});
+    const text = {available:'Доступно', limit_reached:'Достигнут лимит'}[data.status]
+      || {busy:'Аккаунт занят. Повторите позже.', flood_wait:'Telegram отложил проверку.'}[data.reason]
+      || 'Не удалось проверить';
+    const checked = data.checked_at ? ' · ' + new Date(data.checked_at).toLocaleString('ru-RU') : '';
+    const wait = data.reason === 'flood_wait' && Number(data.retry_after) > 0
+      ? ' Повторите через ' + humanDur(Number(data.retry_after)) + '.' : '';
+    result.textContent = text + wait + checked;
+  } catch (error) {
+    result.textContent = errRu(error, 'Не удалось проверить');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function buildAccDetail(d) {
   const a = d.account||{};
   const caps = d.capabilities||{};
@@ -13860,6 +13880,12 @@ function buildAccDetail(d) {
     </div>
 
     ${capsHtml}
+    ${d.public_channel_capacity_available ? `<div class="lst" style="margin-top:8px;padding:12px">
+      <div class="row-name">Публичные юзернеймы каналов и супергрупп</div>
+      <div class="row-val" role="status" style="white-space:normal">Проверка ещё не запускалась</div>
+      <button type="button" class="btn btn-s" style="margin-top:8px"
+        onclick="checkAccPublicChannelCapacity(${a.id},this)">Проверить доступность</button>
+    </div>` : ''}
     ${limitsHtml}
     ${rehabHtml}
     ${typeof accPoolRowHtml === 'function' ? accPoolRowHtml(a) : ''}
@@ -15160,6 +15186,9 @@ async function openOpDetail(opId) {
     // хотят выпустить ещё раз с другим текстом.
     if (['done','partial','failed','cancelled'].includes(o.status)) {
       html += `<div style="padding:8px 16px 0"><button class="btn btn-s" onclick="openOpClone(${Number(o.id)})" style="width:100%">✏️ Повторить с правками</button></div>`;
+    }
+    if (o.cleanup_available) {
+      html += `<div style="padding:8px 16px 0"><button class="btn btn-s" onclick="${retryCall('openOperationCleanup', String(opId))}" style="width:100%">Уборка по итогам проверки</button></div>`;
     }
     // Быстрые действия по итогу — с объяснением, ПОЧЕМУ это предложено.
     // На экране деталей места хватает, поэтому показываем все, а не первые две.
@@ -35913,6 +35942,7 @@ function renderAudSegChart(segments) {
 <script src="screens/va_admin.js"></script>
 <script src="screens/channel_manage.js"></script>
 <script src="screens/shield_check.js"></script>
+<script src="screens/op_cleanup.js"></script>
 <script src="screens/ad_intel.js"></script>
 <script src="screens/account_login.js"></script>
 <script src="screens/integrations.js"></script>

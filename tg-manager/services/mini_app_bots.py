@@ -1452,12 +1452,9 @@ def setup_routes(app: web.Application, pool) -> None:
             if isinstance(body, dict) and isinstance(body.get("active"), bool):
                 want = body["active"]
         try:
-            row = await pool.fetchrow(
-                """UPDATE managed_bots
-                      SET is_active = COALESCE($3::boolean, NOT is_active)
-                    WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL
-                RETURNING bot_id, is_active""",
-                bot_id, uid, want)
+            from database.db import set_managed_bot_active
+
+            row = await set_managed_bot_active(pool, bot_id, uid, want)
             if not row:
                 return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})

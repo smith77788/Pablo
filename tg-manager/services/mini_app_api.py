@@ -80,6 +80,7 @@ from services.security import (
     validate_integer,
     validate_string,
     selection_ids,
+    tg_id,
     sanitize_search_query,
     check_sql_suspicious,
     escape_html,
@@ -7915,7 +7916,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         channels = await _safe_count(pool,
             "SELECT COUNT(DISTINCT channel_id) FROM managed_channels WHERE owner_id=$1", uid)
         bots = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
+            "AND is_active AND deleted_at IS NULL", uid)
         return _json_resp({"ok": True, "channels": int(channels or 0),
                            "bots": int(bots or 0),
                            "total": int(channels or 0) + int(bots or 0)})
@@ -7926,32 +7928,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-        except Exception:
-            body = {}
-        # Необязательные списки: проверить только выбранные сущности. Пусто = все.
-        channel_ids = body.get("channel_ids")
-        bot_ids = body.get("bot_ids")
+        except Exception as exc:
+            bad = bad_body_response(request, exc)
+            return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
+        if not isinstance(body, dict):
+            return _err("Неверные параметры проверки", 400)
+        selected = {}
+        for key, label in (("channel_ids", "канал"), ("bot_ids", "бот")):
+            if key not in body:
+                continue
+            ids, error = selection_ids(body, key, what=label, cap=1000)
+            if error or not ids or any(tg_id(i, positive=(key == "bot_ids")) is None for i in ids):
+                return _err(error or f"Неверный выбор: {label}", 400)
+            selected[key] = ids
         params: dict = {"owner_id": uid}
-        if channel_ids:
-            try:
-                params["channel_ids"] = [int(x) for x in channel_ids
-                                         if str(x).lstrip("-").isdigit()]
-            except (TypeError, ValueError):
-                return _err("Неверные идентификаторы каналов", 400)
-        if bot_ids:
-            try:
-                params["bot_ids"] = [int(x) for x in bot_ids
-                                     if str(x).lstrip("-").isdigit()]
-            except (TypeError, ValueError):
-                return _err("Неверные идентификаторы ботов", 400)
-        # Число сущностей = total операции (для честного счётчика прогресса).
-        if params.get("channel_ids") is not None or params.get("bot_ids") is not None:
-            total = len(params.get("channel_ids") or []) + len(params.get("bot_ids") or [])
+        if selected:
+            params.update(selected)
+            params["selection_mode"] = "exact"
+            total = sum(len(ids) for ids in selected.values())
         else:
             ch = await _safe_count(pool,
                 "SELECT COUNT(DISTINCT channel_id) FROM managed_channels WHERE owner_id=$1", uid)
             bt = await _safe_count(pool,
-                "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+                "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
+                "AND is_active AND deleted_at IS NULL", uid)
             total = int(ch or 0) + int(bt or 0)
         if total == 0:
             return _err("Нет каналов/чатов/ботов для проверки")
@@ -7967,20 +7967,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось поставить проверку в очередь", 500)
 
     async def restrictions_dead(request: web.Request) -> web.Response:
-        """Сущности, которые последняя проверка нашла НЕДОСТУПНЫМИ снаружи
-        (Telegram их удалил/заблокировал/скрыл) и которые ВСЁ ЕЩЁ в списке
-        владельца. По ним мини-апп предлагает быструю уборку мёртвых карточек.
+        """Недоступные при последней проверке ресурсы владельца и ID проверки."""
+        from services.network_builder import project_pilot_enabled
 
-        Источник — результат последней завершённой проверки (её findings несут
-        id сущности). Перекрёстная сверка с managed_channels/managed_bots: не
-        предлагаем убрать то, что уже убрано.
-        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         row = await _safe_fetchrow(
             pool,
-            "SELECT result FROM operation_queue "
+            "SELECT id, result FROM operation_queue "
             "WHERE owner_id=$1 AND op_type='check_owned_restrictions' "
             "AND status IN ('done','partial') AND result IS NOT NULL "
             "ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1",
@@ -8004,6 +7999,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not isinstance(f, dict) or f.get("status") != "unreachable":
                 continue
             kind = f.get("kind")
+            if kind not in ("channel", "group", "bot"):
+                continue
             try:
                 ent_id = int(f.get("id"))
             except (TypeError, ValueError):
@@ -8028,12 +8025,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if dead_bot:
             rows = await _safe_fetch(
                 pool, "SELECT bot_id FROM managed_bots "
-                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[]) "
+                "AND is_active AND deleted_at IS NULL",
                 uid, list(dead_bot))
             for r in rows or []:
                 out.append(dead_bot[int(r["bot_id"])])
         return _json_resp({"ok": True, "dead": out, "total": len(out),
-                           "checked_at": (res.get("checked_at") if isinstance(res, dict) else None)})
+                           "checked_at": (res.get("checked_at") if isinstance(res, dict) else None),
+                           "op_id": str(row["id"]), "cleanup_available": project_pilot_enabled(uid)})
 
     async def restrictions_problems(request: web.Request) -> web.Response:
         """ВСЕ проблемные ресурсы последней (или указанной) проверки: ограничен,
@@ -8125,10 +8124,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                            "checked_at": (res.get("checked_at") if isinstance(res, dict) else None)})
 
     async def restrictions_remove_dead(request: web.Request) -> web.Response:
-        """Убрать из списка владельца недоступные сущности (Telegram их уже
-        удалил/заблокировал). Это снятие с учёта в НАШЕЙ базе, а не удаление в
-        Telegram — сами сущности там уже мертвы. Scope строго по владельцу.
-        """
+        """Совместимый маршрут отключения ресурсов, недоступных при проверке."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -8145,26 +8141,43 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         channel_ids, bot_ids = channel_ids or [], bot_ids or []
         if not channel_ids and not bot_ids:
             return _err("Не выбрано ни одной сущности для удаления", 400)
-        removed_ch = removed_bot = 0
-        if channel_ids:
-            v = await _safe_fetchval(
-                pool,
-                "WITH d AS (DELETE FROM managed_channels "
-                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[]) RETURNING 1) "
-                "SELECT COUNT(*) FROM d",
-                uid, channel_ids)
-            removed_ch = int(v or 0)
-        if bot_ids:
-            v = await _safe_fetchval(
-                pool,
-                "WITH d AS (DELETE FROM managed_bots "
-                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[]) RETURNING 1) "
-                "SELECT COUNT(*) FROM d",
-                uid, bot_ids)
-            removed_bot = int(v or 0)
-        return _json_resp({"ok": True, "removed_channels": removed_ch,
-                           "removed_bots": removed_bot,
-                           "removed": removed_ch + removed_bot})
+        # Старый клиент передаёт только ID. Он может отключить лишь цели из
+        # последней проверки с тем же вердиктом и с теми же ограничениями,
+        # что действуют в новом предпросмотре.
+        from services import restriction_cleanup as cleanup
+
+        op_id = await _safe_fetchval(
+            pool, "SELECT id FROM operation_queue WHERE owner_id=$1 "
+            "AND op_type='check_owned_restrictions' AND status IN ('done','partial') "
+            "AND result IS NOT NULL ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1", uid)
+        if not op_id:
+            return _err("Нет завершённой проверки", 409)
+        try:
+            current = await cleanup.findings(pool, uid, op_id)
+            target_map = {
+                ("bot" if f["kind"] == "bot" else "channel", f["id"]): f["kind"]
+                for f in current["findings"] if f["status"] == "unreachable"
+            }
+            targets = []
+            for kind, ids in (("channel", channel_ids), ("bot", bot_ids)):
+                for entity_id in ids:
+                    actual_kind = target_map.get((kind, str(entity_id)))
+                    if actual_kind is None:
+                        return _err("Список недоступных ресурсов изменился. Обновите его.", 409)
+                    targets.append({"kind": actual_kind, "id": str(entity_id)})
+            plan = await cleanup.plan(pool, uid, op_id, targets, "disable")
+
+            def verify(current_plan):
+                if current_plan != plan:
+                    raise cleanup.CleanupError("Список изменился. Обновите проверку.", 409)
+
+            result = await cleanup.apply(pool, uid, op_id, targets, "disable", verify=verify)
+        except cleanup.CleanupError as exc:
+            return _err(str(exc), exc.status)
+        changed = result["changed"]
+        removed_bot = sum(item["kind"] == "bot" for item in changed)
+        return _json_resp({"ok": True, "removed_channels": len(changed) - removed_bot,
+                           "removed_bots": removed_bot, "removed": len(changed)})
 
     async def check_bot_geoban_targets(request: web.Request) -> web.Response:
         """Сколько ПУБЛИЧНЫХ ресурсов (каналов, чатов, ботов с @username) можно

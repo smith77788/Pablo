@@ -248,6 +248,16 @@ def classify_final(
     return DONE
 
 
+REVIVE_AFTER_RESTART = (
+    "Процесс операций перезапустился, пока операция шла — она возвращена в "
+    "очередь и запустится заново."
+)
+REQUEUE_ON_SHUTDOWN = (
+    "Сервис перезапускался — операция продолжится автоматически с места "
+    "остановки (уже сделанное не повторится)"
+)
+
+
 def sql_error_reason(alias: str = "") -> str:
     """SQL-выражение «почему операция не идёт» — по ОБЕИМ колонкам причины.
 
@@ -281,12 +291,18 @@ def sql_error_reason(alias: str = "") -> str:
     ОЖИДАНИЯ (last_error: флуд-пауза, «продолжим завтра») остаётся видимой,
     пока операция ещё 'pending' и реально ждёт, — её и ради неё писали.
 
+    После завершения известные сообщения о возврате в очередь при рестарте
+    больше не описывают состояние операции. Остальные причины сохраняются.
+
     `alias` — префикс таблицы вместе с точкой, например "oq.".
     """
     a = alias or ""
     return (
         f"CASE WHEN {a}status = 'running' THEN NULL ELSE "
-        f"COALESCE(NULLIF({a}error_msg, ''), NULLIF({a}last_error, ''), "
+        f"COALESCE(NULLIF({a}error_msg, ''), "
+        f"NULLIF(CASE WHEN {a}status IN {sql_terminal_list()} "
+        f"AND {a}last_error IN ('{REVIVE_AFTER_RESTART}', '{REQUEUE_ON_SHUTDOWN}') "
+        f"THEN NULL ELSE {a}last_error END, ''), "
         f"{a}result->>'reason') END"
     )
 

@@ -48,12 +48,11 @@ def test_dead_list_takes_only_unreachable_not_restricted():
     assert "owner_id=$1" in src and "added_by=$1" in src
 
 
-def test_remove_dead_is_owner_scoped_and_only_our_base():
+def test_remove_dead_reuses_scoped_local_disable():
     src = api_function("restrictions_remove_dead")
-    assert "DELETE FROM managed_channels" in src and "owner_id=$1" in src, (
-        "удаление каналов обязано скоупиться по владельцу")
-    assert "DELETE FROM managed_bots" in src and "added_by=$1" in src, (
-        "удаление ботов обязано скоупиться по владельцу")
+    assert "owner_id=$1" in src and "cleanup.apply(pool, uid, op_id" in src
+    assert "DELETE FROM" not in src
+    assert "unreachable" in src
 
 
 def test_remove_dead_requires_a_selection():
@@ -61,9 +60,7 @@ def test_remove_dead_requires_a_selection():
     assert "не выбрано" in src.lower() or "не выбрана" in src.lower()
 
 
-def test_screen_confirms_before_removing():
-    # Удаление — необратимое действие: экран обязан спросить подтверждение.
-    assert "confirmDelete(" in JS or "askConfirm(" in JS
-    assert "restrictions/remove_dead" in JS and "restrictions/dead" in JS
-    # Явно сказано, что это снятие с учёта, а не удаление в Telegram.
-    assert "Telegram" in JS
+def test_shield_links_to_operation_instead_of_direct_mutation():
+    assert "restrictions/dead" in JS
+    assert "restrictions/remove_dead" not in JS
+    assert "d.op_id" in JS and "openOpDetail" in JS

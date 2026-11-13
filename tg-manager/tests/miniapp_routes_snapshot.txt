@@ -281,6 +281,7 @@ GET /api/miniapp/operation/{op_id}/log
 GET /api/miniapp/operation/{op_id}/log.csv
 GET /api/miniapp/operations
 GET /api/miniapp/operations/export
+GET /api/miniapp/operations/{op_id}/cleanup
 GET /api/miniapp/organism/digest
 GET /api/miniapp/organism/pulse
 GET /api/miniapp/parser/audience
@@ -642,6 +643,7 @@ HEAD /api/miniapp/operation/{op_id}/log
 HEAD /api/miniapp/operation/{op_id}/log.csv
 HEAD /api/miniapp/operations
 HEAD /api/miniapp/operations/export
+HEAD /api/miniapp/operations/{op_id}/cleanup
 HEAD /api/miniapp/organism/digest
 HEAD /api/miniapp/organism/pulse
 HEAD /api/miniapp/parser/audience
@@ -818,6 +820,7 @@ POST /api/miniapp/account/{acc_id}/profile
 POST /api/miniapp/account/{acc_id}/proxy
 POST /api/miniapp/account/{acc_id}/session/close
 POST /api/miniapp/account/{acc_id}/session/trust
+POST /api/miniapp/account/{acc_id}/public_channel_capacity
 POST /api/miniapp/account/{acc_id}/spamblock_appeal
 POST /api/miniapp/account/{acc_id}/toggle
 POST /api/miniapp/account/{acc_id}/warmup/pause
@@ -1049,6 +1052,7 @@ POST /api/miniapp/operations/clear
 POST /api/miniapp/operations/pause
 POST /api/miniapp/operations/resume
 POST /api/miniapp/operations/retry_failed
+POST /api/miniapp/operations/{op_id}/cleanup
 POST /api/miniapp/organism/dismiss
 POST /api/miniapp/organism/pending_open
 POST /api/miniapp/osint_search

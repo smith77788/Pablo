@@ -6252,7 +6252,7 @@ async def set_channel_username(
 def _normalize_channel_id(channel_ref: int | str) -> int:
     cid = abs(int(channel_ref))
     raw = str(cid)
-    if raw.startswith("100") and len(raw) > 10:
+    if int(channel_ref) < 0 and raw.startswith("100") and len(raw) > 10:
         return int(raw[3:])
     return cid
 
@@ -6573,7 +6573,14 @@ async def destroy_channel(
             await asyncio.wait_for(
                 client(DeleteChatRequest(chat_id=abs(int(channel_id)))), timeout=_OP_TIMEOUT)
             return {"ok": True}
-        entity = await _resolve_managed_channel(client, channel_id, access_hash, username)
+        from telethon.utils import get_input_channel
+
+        target_id = _normalize_channel_id(channel_id)
+        # Username может сменить владельца. Не используем его как адрес
+        # необратимого запроса, даже если он был в записи на момент проверки.
+        entity = get_input_channel(await _resolve_channel_peer(client, target_id, access_hash))
+        if entity.channel_id != target_id:
+            return {"ok": False, "error": "Telegram вернул другой ID канала"}
         await asyncio.wait_for(client(DeleteChannelRequest(channel=entity)), timeout=_OP_TIMEOUT)
         return {"ok": True}
     except Exception as e:
@@ -6588,6 +6595,32 @@ async def destroy_channel(
             await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в destroy_channel")
+
+
+async def probe_public_channel_capacity(session_string: str, _acc: dict | None = None) -> dict:
+    """Официальная проверка лимита публичных каналов и супергрупп сессии."""
+    from telethon.errors import ChannelsAdminPublicTooMuchError, FloodWaitError
+    from telethon.tl.functions.channels import GetAdminedPublicChannelsRequest
+
+    if not session_string:
+        return {"status": "unknown", "reason": "no_session"}
+
+    client = None
+    try:
+        client = _make_client(session_string, _acc)
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await asyncio.wait_for(
+            client(GetAdminedPublicChannelsRequest(check_limit=True)), timeout=_OP_TIMEOUT)
+        return {"status": "available"}
+    except ChannelsAdminPublicTooMuchError:
+        return {"status": "limit_reached"}
+    except FloodWaitError as exc:
+        return {"status": "unknown", "reason": "flood_wait", "retry_after": exc.seconds}
+    except Exception:
+        return {"status": "unknown", "reason": "telegram_unavailable"}
+    finally:
+        if client is not None:
+            await safe_disconnect(client)
 
 
 async def _delete_ids(client, peer, ids: list[int]) -> int:

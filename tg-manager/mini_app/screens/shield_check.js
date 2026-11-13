@@ -57,176 +57,25 @@ async function _shLoadBody() {
   loadDeadEntities();
 }
 
-// Быстрая уборка мёртвых карточек: сущности, которые последняя проверка нашла
-// НЕДОСТУПНЫМИ снаружи (Telegram их удалил/заблокировал/скрыл) и которые ещё в
-// списке владельца. Снимаем их с учёта в нашей базе (в Telegram они уже мертвы).
+// Переход из «Защиты» в карточку конкретной проверки с её сохранённым результатом.
 async function loadDeadEntities() {
   const box = document.getElementById('shDeadBox');
   if (!box) return;
-  let d;
   try {
-    d = await api('/api/miniapp/restrictions/dead');
-  } catch (e) { box.innerHTML = ''; return; }
-  const dead = (d && d.dead) || [];
-  if (!dead.length) { box.innerHTML = ''; return; }
-  const kindIco = { channel: '📡', group: '💬', bot: '🤖' };
-  const rows = dead.map(function (x) {
-    const ico = kindIco[x.kind] || '🔗';
-    return '<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--sep);font-size:14px">' +
-      '<input type="checkbox" class="sh-dead-cb" checked value="' + esc(String(x.id)) + '" data-kind="' + esc(x.kind || '') + '">' +
-      '<div style="flex:1 1 auto;min-width:0">' +
-        '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ico + ' ' + esc(x.title || x.id) + '</div>' +
-        '<div style="font-size:12px;color:var(--hint)">' + esc(x.reason || 'недоступен снаружи') + '</div>' +
-      '</div></label>';
-  }).join('');
-  box.innerHTML =
-    '<div class="sec">🗑 Недоступные сущности</div>' +
-    '<div class="lst" style="padding:14px">' +
-      '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin-bottom:8px">' +
-        'Последняя проверка нашла <b>' + dead.length + '</b> ' + _shPlural(dead.length) +
-        ', недоступных снаружи (Telegram их удалил, заблокировал или скрыл). ' +
-        'Можно убрать их из списка — в Telegram они уже мертвы, удаляется только карточка у вас.' +
-      '</div>' +
-      '<div style="display:flex;gap:8px;margin-bottom:8px">' +
-        '<button class="btn btn-s" onclick="shDeadSelectAll(true)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">✅ Все</button>' +
-        '<button class="btn btn-s" onclick="shDeadSelectAll(false)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">⬜ Снять</button>' +
-      '</div>' +
-      rows +
-      '<button class="btn btn-d" onclick="removeDeadEntities()" style="width:100%;margin-top:10px">🗑 Убрать выбранные из списка</button>' +
-      '<div id="shDeadErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>' +
-    '</div>';
-}
-
-function shDeadSelectAll(on) {
-  document.querySelectorAll('.sh-dead-cb').forEach(function (cb) { cb.checked = !!on; });
-}
-
-// ── Уборка проблемных ресурсов по итогу проверки ─────────────────────────────
-// Прямой путь из карточки операции «Проверка каналов/чатов/ботов»: убрать из
-// списка заблокированные, в теневом бане и недоступные. Берёт findings ТОЙ
-// проверки (op_id), а не только последней, и покрывает ВСЕ проблемные статусы,
-// а не только недоступные (как быстрая уборка на экране «Защита»).
-let _restrCleanupOp = 0;
-
-function _restrScreen() {
-  let el = document.getElementById('s-restrcleanup');
-  if (el) return el;
-  el = document.createElement('div');
-  el.className = 'screen';
-  el.id = 's-restrcleanup';
-  el.innerHTML =
-    '<div class="hdr">' +
-      '<div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>' +
-      '<div class="hdr-title">🧹 Убрать проблемные</div>' +
-    '</div>' +
-    '<div class="sub-sb" id="s-restrcleanup-body"><div class="spin-wrap"><div class="spin"></div></div></div>';
-  document.body.appendChild(el);
-  return el;
-}
-
-async function openRestrictionCleanup(opId) {
-  _restrCleanupOp = Number(opId) || 0;
-  _restrScreen();
-  push('s-restrcleanup');
-  const body = document.getElementById('s-restrcleanup-body');
-  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
-  try {
-    const u = '/api/miniapp/restrictions/problems' + (_restrCleanupOp ? ('?op_id=' + _restrCleanupOp) : '');
-    const d = await api(u);
-    body.innerHTML = _restrCleanupRender((d && d.problems) || []);
-  } catch (e) {
-    body.innerHTML = errHtml(errRu(e, 'Не удалось получить список'), retryCall('openRestrictionCleanup', _restrCleanupOp));
-  }
-}
-
-function _restrCleanupRender(list) {
-  if (!list.length) {
-    return '<div style="padding:8px 0">' + empty('✅', 'Проблемных ресурсов нет', 'Последняя проверка не нашла заблокированных, скрытых или недоступных — убирать нечего') + '</div>';
-  }
-  const kindIco = { channel: '📡', group: '💬', bot: '🤖' };
-  const rows = list.map(function (x) {
-    const ico = kindIco[x.kind] || '🔗';
-    const stColor = x.status === 'restricted' ? 'var(--red)' : x.status === 'unreachable' ? 'var(--red)' : 'var(--orange)';
-    return '<label class="chk-row" style="display:flex;align-items:flex-start;gap:8px;padding:9px 0;border-top:1px solid var(--sep);font-size:14px">' +
-      '<input type="checkbox" class="restr-cb" ' + (x.dead ? 'checked' : '') + ' value="' + esc(String(x.id)) + '" data-kind="' + esc(x.kind || '') + '" style="margin-top:3px">' +
-      '<div style="flex:1 1 auto;min-width:0">' +
-        '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ico + ' ' + esc(x.title || x.id) + '</div>' +
-        '<div style="font-size:12px;margin-top:2px"><span style="color:' + stColor + '">' + esc(x.status_label || '') + '</span>' + (x.reason ? ('<span style="color:var(--hint)"> · ' + esc(x.reason) + '</span>') : '') + '</div>' +
-      '</div></label>';
-  }).join('');
-  return '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin:12px 14px 6px">' +
-      'Проверка нашла <b>' + list.length + '</b> ' + _shPlural(list.length) + ' с проблемами. ' +
-      'Отметьте, что убрать из вашего списка. <b>Недоступные</b> в Telegram уже мертвы — отмечены сразу. ' +
-      '<b>Заблокированные</b> и <b>в теневом бане</b> ещё живы: удаление снимает их только с учёта у вас, в Telegram не трогает.' +
-    '</div>' +
-    '<div style="display:flex;gap:8px;margin:0 14px 8px">' +
-      '<button class="btn btn-s" onclick="restrCleanupSelectAll(true)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">✅ Все</button>' +
-      '<button class="btn btn-s" onclick="restrCleanupSelectAll(false)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">⬜ Снять</button>' +
-    '</div>' +
-    '<div class="lst" style="margin:0 14px">' + rows + '</div>' +
-    '<div class="actions" style="padding:10px 14px 4px">' +
-      '<button class="btn btn-d" onclick="restrCleanupRemove()" style="width:100%">🗑 Убрать выбранные из списка</button>' +
-    '</div>' +
-    '<div id="restrCleanupErr" style="color:var(--red);font-size:13px;margin:6px 14px"></div>';
-}
-
-function restrCleanupSelectAll(on) {
-  document.querySelectorAll('.restr-cb').forEach(function (cb) { cb.checked = !!on; });
-}
-
-async function restrCleanupRemove() {
-  const errEl = document.getElementById('restrCleanupErr');
-  if (errEl) errEl.textContent = '';
-  const checked = [].slice.call(document.querySelectorAll('.restr-cb:checked'));
-  const channel_ids = [], bot_ids = [];
-  checked.forEach(function (cb) {
-    const id = parseInt(cb.value, 10);
-    if (!Number.isFinite(id)) return;
-    if (cb.getAttribute('data-kind') === 'bot') bot_ids.push(id); else channel_ids.push(id);
-  });
-  const n = channel_ids.length + bot_ids.length;
-  if (!n) { if (errEl) errEl.textContent = 'Отметьте хотя бы один ресурс'; return; }
-  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nЭто снятие с учёта в вашей базе. Telegram не трогается: недоступные там уже мертвы, а заблокированные и скрытые останутся в Telegram, просто уйдут из вашего каталога.')) return;
-  const payload = {};
-  if (channel_ids.length) payload.channel_ids = channel_ids;
-  if (bot_ids.length) payload.bot_ids = bot_ids;
-  try {
-    const r = await api('/api/miniapp/restrictions/remove_dead', { method: 'POST', body: JSON.stringify(payload) });
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('🗑 Убрано из списка: ' + (r.removed || 0));
-    openRestrictionCleanup(_restrCleanupOp);
-  } catch (e) {
-    tg.HapticFeedback?.notificationOccurred('error');
-    if (errEl) errEl.textContent = errRu(e, 'Не удалось убрать');
-  }
-}
-
-async function removeDeadEntities() {
-  const errEl = document.getElementById('shDeadErr');
-  if (errEl) errEl.textContent = '';
-  const checked = [].slice.call(document.querySelectorAll('.sh-dead-cb:checked'));
-  const channel_ids = [], bot_ids = [];
-  checked.forEach(function (cb) {
-    const id = parseInt(cb.value, 10);
-    if (!Number.isFinite(id)) return;
-    if (cb.getAttribute('data-kind') === 'bot') bot_ids.push(id); else channel_ids.push(id);
-  });
-  const n = channel_ids.length + bot_ids.length;
-  if (!n) { if (errEl) errEl.textContent = 'Отметьте хотя бы одну сущность'; return; }
-  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nЭто снятие с учёта в вашей базе — сами сущности в Telegram уже недоступны. Действие не трогает Telegram.')) return;
-  // Ключ шлём, только если в нём есть цели: пустой список сервер отбивает как
-  // ошибку выбора, а не принимает за «ничего».
-  const payload = {};
-  if (channel_ids.length) payload.channel_ids = channel_ids;
-  if (bot_ids.length) payload.bot_ids = bot_ids;
-  try {
-    const r = await api('/api/miniapp/restrictions/remove_dead', { method: 'POST', body: JSON.stringify(payload) });
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('🗑 Убрано из списка: ' + (r.removed || 0));
-    loadDeadEntities();
-  } catch (e) {
-    tg.HapticFeedback?.notificationOccurred('error');
-    if (errEl) errEl.textContent = (e && e.message) || 'Не удалось убрать';
+    const result = await api('/api/miniapp/restrictions/dead');
+    box.innerHTML = '';
+    if (!result.op_id) return;
+    const unavailable = Array.isArray(result.dead) ? result.dead : [];
+    const rows = result.cleanup_available ? '' : unavailable.map(item =>
+      '<div class="row"><div class="row-body"><div class="row-name">'
+      + esc(item.title || item.id) + '</div><div class="row-val">'
+      + esc(item.reason || 'Недоступен снаружи') + '</div></div></div>').join('');
+    box.innerHTML = '<div class="sec">Результат последней проверки</div>'
+      + '<div class="lst" style="padding:14px">' + rows
+      + '<button type="button" class="btn btn-s" style="width:100%">Открыть карточку проверки</button></div>';
+    box.querySelector('button').onclick = () => openOpDetail(String(result.op_id));
+  } catch (_) {
+    box.innerHTML = '';
   }
 }
 
@@ -478,3 +327,105 @@ async function loadShieldOps() {
     box.innerHTML = errHtml('Не удалось загрузить проверки: ' + ((e && e.message) || ''), 'loadShieldOps()');
   }
 }
+
+let _restrCleanupOp = "";
+function _restrScreen() {
+  let el = document.getElementById('s-restrcleanup');
+  if (el) return el;
+  el = document.createElement('div');
+  el.className = 'screen';
+  el.id = 's-restrcleanup';
+  el.innerHTML =
+    '<div class="hdr">' +
+      '<div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>' +
+      '<div class="hdr-title">🧹 Убрать проблемные</div>' +
+    '</div>' +
+    '<div class="sub-sb" id="s-restrcleanup-body"><div class="spin-wrap"><div class="spin"></div></div></div>';
+  document.body.appendChild(el);
+  return el;
+}
+
+async function openRestrictionCleanup(opId) {
+  _restrCleanupOp = String(opId || '');
+  if (_restrCleanupOp && _restrCleanupOp !== '0') return openOpDetail(_restrCleanupOp);
+  _restrCleanupOp = '';
+  _restrScreen();
+  push('s-restrcleanup');
+  const body = document.getElementById('s-restrcleanup-body');
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const report = await api('/api/miniapp/restrictions/dead');
+    if (report.cleanup_available && report.op_id) {
+      body.innerHTML = '<button type="button" class="btn btn-s">Открыть карточку проверки</button>';
+      body.querySelector('button').onclick = () => openOpDetail(String(report.op_id));
+      return;
+    }
+    const d = await api('/api/miniapp/restrictions/problems');
+    body.innerHTML = _restrCleanupRender((d && d.problems) || []);
+  } catch (e) {
+    body.innerHTML = errHtml(errRu(e, 'Не удалось получить список'), retryCall('openRestrictionCleanup', _restrCleanupOp));
+  }
+}
+
+function _restrCleanupRender(list) {
+  if (!list.length) {
+    return '<div style="padding:8px 0">' + empty('✅', 'Проблемных ресурсов нет', 'Последняя проверка не нашла заблокированных, скрытых или недоступных — убирать нечего') + '</div>';
+  }
+  const kindIco = { channel: '📡', group: '💬', bot: '🤖' };
+  const rows = list.map(function (x) {
+    const ico = kindIco[x.kind] || '🔗';
+    const stColor = x.status === 'restricted' ? 'var(--red)' : x.status === 'unreachable' ? 'var(--red)' : 'var(--orange)';
+    return '<label class="chk-row" style="display:flex;align-items:flex-start;gap:8px;padding:9px 0;border-top:1px solid var(--sep);font-size:14px">' +
+      '<input type="checkbox" class="restr-cb" ' + (x.dead ? '' : 'disabled') + ' value="' + esc(String(x.id)) + '" data-kind="' + esc(x.kind || '') + '" style="margin-top:3px">' +
+      '<div style="flex:1 1 auto;min-width:0">' +
+        '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ico + ' ' + esc(x.title || x.id) + '</div>' +
+        '<div style="font-size:12px;margin-top:2px"><span style="color:' + stColor + '">' + esc(x.status_label || '') + '</span>' + (x.reason ? ('<span style="color:var(--hint)"> · ' + esc(x.reason) + '</span>') : '') + '</div>' +
+      '</div></label>';
+  }).join('');
+  return '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin:12px 14px 6px">' +
+      'Проверка нашла <b>' + list.length + '</b> ' + _shPlural(list.length) + ' с проблемами. ' +
+      'Можно выбрать недоступные ресурсы для отключения в Infragram. ' +
+      'Ограниченные и скрытые ресурсы показаны для справки.' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;margin:0 14px 8px">' +
+      '<button class="btn btn-s" onclick="restrCleanupSelectAll(true)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">✅ Все</button>' +
+      '<button class="btn btn-s" onclick="restrCleanupSelectAll(false)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">⬜ Снять</button>' +
+    '</div>' +
+    '<div class="lst" style="margin:0 14px">' + rows + '</div>' +
+    '<div class="actions" style="padding:10px 14px 4px">' +
+      '<button class="btn btn-d" onclick="restrCleanupRemove()" style="width:100%">🗑 Убрать выбранные из списка</button>' +
+    '</div>' +
+    '<div id="restrCleanupErr" style="color:var(--red);font-size:13px;margin:6px 14px"></div>';
+}
+
+function restrCleanupSelectAll(on) {
+  document.querySelectorAll('.restr-cb').forEach(function (cb) { cb.checked = !!on && !cb.disabled; });
+}
+
+async function restrCleanupRemove() {
+  const errEl = document.getElementById('restrCleanupErr');
+  if (errEl) errEl.textContent = '';
+  const checked = [].slice.call(document.querySelectorAll('.restr-cb:checked'));
+  const channel_ids = [], bot_ids = [];
+  checked.forEach(function (cb) {
+    const id = cb.value;
+    if (!/^-?[1-9]\d*$/.test(id)) return;
+    if (cb.getAttribute('data-kind') === 'bot') bot_ids.push(id); else channel_ids.push(id);
+  });
+  const n = channel_ids.length + bot_ids.length;
+  if (!n) { if (errEl) errEl.textContent = 'Отметьте хотя бы один ресурс'; return; }
+  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nЭто снятие с учёта в вашей базе. Telegram не трогается: недоступные там уже мертвы, а заблокированные и скрытые останутся в Telegram, просто уйдут из вашего каталога.')) return;
+  const payload = {};
+  if (channel_ids.length) payload.channel_ids = channel_ids;
+  if (bot_ids.length) payload.bot_ids = bot_ids;
+  try {
+    const r = await api('/api/miniapp/restrictions/remove_dead', { method: 'POST', body: JSON.stringify(payload) });
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🗑 Убрано из списка: ' + (r.removed || 0));
+    openRestrictionCleanup(_restrCleanupOp);
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    if (errEl) errEl.textContent = errRu(e, 'Не удалось убрать');
+  }
+}
+

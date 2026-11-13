@@ -226,8 +226,16 @@ class _Client:
 def _patch_client(monkeypatch, client):
     monkeypatch.setattr(account_manager, "_make_client", lambda s, a=None: client)
 
-    async def _peer(c, ref, h=0): return ("peer", ref, h)
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    utils = import_module("telethon.utils")
+
+    async def _peer(c, ref, h=0):
+        return SimpleNamespace(channel_id=int(ref), access_hash=h)
+
     monkeypatch.setattr(account_manager, "_resolve_channel_peer", _peer)
+    monkeypatch.setattr(utils, "get_input_channel", lambda peer: peer)
 
 
 def test_clear_all_posts_in_batches_of_100(monkeypatch):
@@ -265,6 +273,62 @@ def test_destroy_names_the_reason(monkeypatch):
     _patch_client(monkeypatch, _C(0))
     r = asyncio.run(account_manager.destroy_channel("s", 111, access_hash=9))
     assert r["ok"] is False and "создатель" in r["error"]
+
+
+def test_destroy_uses_confirmed_id_even_if_username_exists(monkeypatch):
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    channels = import_module("telethon.tl.functions.channels")
+
+    monkeypatch.setattr(channels, "DeleteChannelRequest", SimpleNamespace)
+
+    class Client(_Client):
+        async def __call__(self, request):
+            assert request.channel.channel_id == 111
+
+    client = Client(0)
+    _patch_client(monkeypatch, client)
+    result = asyncio.run(account_manager.destroy_channel("s", 111, access_hash=9, username="old"))
+    assert result == {"ok": True}
+
+    async def wrong_peer(*args):
+        return SimpleNamespace(channel_id=222, access_hash=9)
+
+    monkeypatch.setattr(account_manager, "_resolve_channel_peer", wrong_peer)
+    result = asyncio.run(account_manager.destroy_channel("s", 111, username="old"))
+    assert result["ok"] is False and "другой ID" in result["error"]
+
+
+def test_probe_public_channel_capacity_reports_telegram_outcome(monkeypatch):
+    from telethon.errors import ChannelsAdminPublicTooMuchError, FloodWaitError
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    channels = import_module("telethon.tl.functions.channels")
+
+    monkeypatch.setattr(channels, "GetAdminedPublicChannelsRequest", SimpleNamespace)
+
+    class Client(_Client):
+        error = None
+
+        async def __call__(self, request):
+            assert request.check_limit is True
+            if self.error:
+                raise self.error
+
+    client = Client(0)
+    _patch_client(monkeypatch, client)
+    probe = account_manager.probe_public_channel_capacity
+    assert asyncio.run(probe("s")) == {"status": "available"}
+    client.error = ChannelsAdminPublicTooMuchError(None)
+    assert asyncio.run(probe("s")) == {"status": "limit_reached"}
+    client.error = FloodWaitError(None)
+    client.error.seconds = 25
+    assert asyncio.run(probe("s")) == {
+        "status": "unknown", "reason": "flood_wait", "retry_after": 25}
+    client.error = TimeoutError()
+    assert asyncio.run(probe("s")) == {"status": "unknown", "reason": "telegram_unavailable"}
 
 
 # ── Маршруты мини-аппа ────────────────────────────────────────────────────

@@ -28,6 +28,62 @@ def setup_routes(app: web.Application, pool) -> None:
     )
     from services.security import validate_integer
 
+    async def restriction_cleanup(request: web.Request) -> web.Response:
+        from services import channel_change_approval as approval
+        from services import restriction_cleanup as cleanup
+        from services.network_builder import project_pilot_enabled
+
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not project_pilot_enabled(uid):
+            return _err("Недоступно", 403)
+        op_id = validate_integer(request.match_info["op_id"], min_val=1)
+        if op_id is None:
+            return _err("Неверный идентификатор операции", 400)
+        try:
+            if request.method in ("GET", "HEAD"):
+                return _json_resp({"ok": True, **await cleanup.findings(pool, uid, op_id)})
+            try:
+                data = await request.json()
+            except Exception as exc:
+                bad = bad_body_response(request, exc)
+                return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
+            if not isinstance(data, dict):
+                return _err("Неверные параметры очистки", 400)
+            project = data.get("project_id")
+            project_id = None
+            if project is not None:
+                project_id = validate_integer(str(project), min_val=1)
+                if project_id is None:
+                    return _err("Неверный проект", 400)
+            args = (pool, uid, op_id, data.get("targets"), data.get("action"))
+            token = data.get("token")
+            if data.get("preview") is True and token is None:
+                plan = await cleanup.plan(*args, project_id=project_id)
+                try:
+                    token = approval.issue_cleanup(uid, plan)
+                except approval.ApprovalError:
+                    log.error("Не настроено подтверждение очистки op_id=%s", op_id)
+                    return _err("Сервис подтверждения временно недоступен", 500)
+                return _json_resp({"ok": True, **plan, "token": token})
+            if not isinstance(token, str) or not token or len(token) > 1024:
+                return _err("Сначала подтвердите предпросмотр очистки", 400)
+
+            def verify(current):
+                approval.verify_cleanup(token, uid, current)
+
+            verify(await cleanup.plan(*args, project_id=project_id))
+            result = await cleanup.apply(*args, project_id=project_id, verify=verify)
+            return _json_resp(result)
+        except cleanup.CleanupError as exc:
+            return _err(str(exc), exc.status)
+        except approval.ApprovalError as exc:
+            return _err(str(exc), 409)
+        except Exception:
+            log.exception("Ошибка очистки по результату проверки op_id=%s uid=%s", op_id, uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def project_scope(request, uid):
         if "project_id" not in request.query:
             return None, None
@@ -235,6 +291,10 @@ def setup_routes(app: web.Application, pool) -> None:
         if not row:
             return _err("Операция не найдена", 404)
         d = dict(row)
+        if d.get("op_type") == "check_owned_restrictions" and op_status.is_productive(d.get("status")):
+            from services.network_builder import project_pilot_enabled
+
+            d["cleanup_available"] = project_pilot_enabled(uid)
         # Быстрые действия по ИТОГУ: раньше сводка советовала словами
         # («назначьте прокси», «проверьте права», «повторите позже»), а кнопки
         # рядом не было — совет уходил в пустоту.
@@ -1192,3 +1252,5 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/operations/resume", resume_operations)
     app.router.add_post("/api/miniapp/operations/retry_failed", operations_retry_failed)
     app.router.add_get("/api/miniapp/operations/export", operation_export)
+    app.router.add_get("/api/miniapp/operations/{op_id}/cleanup", restriction_cleanup)
+    app.router.add_post("/api/miniapp/operations/{op_id}/cleanup", restriction_cleanup)

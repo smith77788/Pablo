@@ -983,7 +983,7 @@ async def replace_bot_token(
               SET token=$3,
                   username=COALESCE(NULLIF($4,''), username),
                   first_name=COALESCE(NULLIF($5,''), first_name),
-                  is_active=TRUE, deleted_at=NULL,
+                  is_active=TRUE, deleted_at=NULL, cleanup_paused=FALSE,
                   fail_streak=0, last_error=NULL, dead_notified_at=NULL
             WHERE bot_id=$1 AND added_by=$2
         RETURNING bot_id""",
@@ -1028,16 +1028,16 @@ async def add_bot(
             # после мёртвого токена. Раньше здесь тоже отвечали «уже добавлен»,
             # и бот было не вернуть в принципе — тупик на ровном месте.
             # Поднимаем ту же строку: аудитория, воронки и история на месте.
-            await pool.execute(
+            updated = await pool.execute(
                 """UPDATE managed_bots
                       SET token=$3,
                           username=COALESCE(NULLIF($4,''), username),
                           first_name=COALESCE(NULLIF($5,''), first_name),
                           is_active=TRUE, deleted_at=NULL,
                           fail_streak=0, last_error=NULL, dead_notified_at=NULL
-                    WHERE bot_id=$1 AND added_by=$2""",
+                    WHERE bot_id=$1 AND added_by=$2 AND NOT cleanup_paused""",
                 bot_id, added_by, _enc_tok(token), username or "", first_name or "")
-            return True
+            return updated == "UPDATE 1"
         if existing["is_active"]:
             return "taken"
         # Прежний владелец бота у себя убрал, а токен есть у нового. Строку
@@ -1045,7 +1045,13 @@ async def add_bot(
         # больше не относятся, и достаться новому хозяину не должны. Здесь
         # каскад срабатывает намеренно — это единственное место, где данные
         # действительно стираются.
-        await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", bot_id)
+        released = await pool.execute(
+            "DELETE FROM managed_bots WHERE bot_id=$1 AND added_by=$2 "
+            "AND NOT is_active AND NOT cleanup_paused",
+            bot_id, existing["added_by"],
+        )
+        if released != "DELETE 1":
+            return "taken"
 
     try:
         await pool.execute(
@@ -1150,6 +1156,20 @@ async def get_bot(
     return _dec_bot_rows([row])[0]
 
 
+async def set_managed_bot_active(conn, bot_id: int, owner_id: int, active: bool | None,
+                                 *, cleanup_pause: bool = False):
+    """Пауза сохраняет бота и данные. Явное включение снимает паузу очистки."""
+    return await conn.fetchrow(
+        """UPDATE managed_bots
+              SET is_active = COALESCE($3::boolean, NOT is_active),
+                  cleanup_paused = $4 OR
+                      (cleanup_paused AND NOT COALESCE($3::boolean, NOT is_active))
+            WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL
+        RETURNING bot_id, is_active""",
+        bot_id, owner_id, active, cleanup_pause,
+    )
+
+
 async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
     """Удалить бота из системы. Строка остаётся, аудитория не теряется.
 
@@ -1176,7 +1196,7 @@ async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
     должна достаться новому хозяину.
     """
     result = await pool.execute(
-        "UPDATE managed_bots SET is_active=FALSE, deleted_at=now() "
+        "UPDATE managed_bots SET is_active=FALSE, deleted_at=now(), cleanup_paused=FALSE "
         "WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
         bot_id,
         added_by,
@@ -4645,33 +4665,42 @@ async def remove_managed_channel(
         raise ValueError(f"неизвестная причина удаления канала: {reason!r}")
     async with pool.acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow(
-                """DELETE FROM managed_channels
-                    WHERE owner_id=$1 AND channel_id=$2
-                RETURNING acc_id, title, username, type, access_hash""",
-                owner_id, channel_id,
+            return await remove_managed_channel_on_connection(
+                conn, owner_id, channel_id, reason=reason, detail=detail,
             )
-            if not row:
-                return False
-            await conn.execute(
-                """INSERT INTO removed_channels
-                       (owner_id, channel_id, reason, detail, acc_id, title,
-                        username, type, access_hash)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 0))
-                   ON CONFLICT (owner_id, channel_id) DO UPDATE
-                   SET reason=EXCLUDED.reason, detail=EXCLUDED.detail,
-                       acc_id=EXCLUDED.acc_id, title=EXCLUDED.title,
-                       username=EXCLUDED.username, type=EXCLUDED.type,
-                       access_hash=EXCLUDED.access_hash, removed_at=now()""",
-                owner_id, channel_id, reason, (detail or "")[:300],
-                row["acc_id"], row["title"], row["username"], row["type"],
-                row["access_hash"],
-            )
-            await conn.execute(
-                "UPDATE va_channel_admin SET enabled=FALSE "
-                "WHERE owner_id=$1 AND channel_id=$2 AND enabled",
-                owner_id, channel_id,
-            )
+
+
+async def remove_managed_channel_on_connection(
+    conn, owner_id: int, channel_id: int, *, reason: str, detail: str,
+) -> bool:
+    """Общий путь удаления для вызывающего кода с открытой транзакцией."""
+    row = await conn.fetchrow(
+        """DELETE FROM managed_channels
+            WHERE owner_id=$1 AND channel_id=$2
+        RETURNING acc_id, title, username, type, access_hash""",
+        owner_id, channel_id,
+    )
+    if not row:
+        return False
+    await conn.execute(
+        """INSERT INTO removed_channels
+               (owner_id, channel_id, reason, detail, acc_id, title,
+                username, type, access_hash)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 0))
+           ON CONFLICT (owner_id, channel_id) DO UPDATE
+           SET reason=EXCLUDED.reason, detail=EXCLUDED.detail,
+               acc_id=EXCLUDED.acc_id, title=EXCLUDED.title,
+               username=EXCLUDED.username, type=EXCLUDED.type,
+               access_hash=EXCLUDED.access_hash, removed_at=now()""",
+        owner_id, channel_id, reason, (detail or "")[:300],
+        row["acc_id"], row["title"], row["username"], row["type"],
+        row["access_hash"],
+    )
+    await conn.execute(
+        "UPDATE va_channel_admin SET enabled=FALSE "
+        "WHERE owner_id=$1 AND channel_id=$2 AND enabled",
+        owner_id, channel_id,
+    )
     return True
 
 

@@ -49,9 +49,16 @@ async def _reasons() -> dict[str, str | None]:
               -- Ждёт флуд-паузу: причина ОЖИДАНИЯ должна остаться видимой.
               ('pending_flood',       'pending', NULL::text, 'Отложено Telegram на час'::text, NULL::jsonb),
               -- Терминальный провал: причина должна остаться видимой.
-              ('failed_terminal',     'failed',  'Нет активных аккаунтов'::text, NULL::text, NULL::jsonb)
+              ('failed_terminal',     'failed',  'Нет активных аккаунтов'::text, NULL::text, NULL::jsonb),
+              ('done_restart',        'done',    NULL::text, $1::text, NULL::jsonb),
+              ('partial_shutdown',   'partial', NULL::text, $2::text, '{{"reason":"Часть целей пропущена"}}'::jsonb),
+              ('failed_shutdown',    'failed',  'Реальный отказ'::text, $2::text, NULL::jsonb),
+              ('pending_shutdown',   'pending', NULL::text, $2::text, NULL::jsonb),
+              ('cancelled_note',      'cancelled', NULL::text, 'Последняя причина'::text, NULL::jsonb)
             ) AS t(tag, status, error_msg, last_error, result)
-            """
+            """,
+            op_status.REVIVE_AFTER_RESTART,
+            op_status.REQUEUE_ON_SHUTDOWN,
         )
         return {r["tag"]: r["reason"] for r in rows}
     finally:
@@ -76,3 +83,14 @@ async def test_waiting_and_terminal_reasons_stay_visible():
     # показывается — ожидание (флуд-пауза) и терминальный провал.
     assert by["pending_flood"] == "Отложено Telegram на час"
     assert by["failed_terminal"] == "Нет активных аккаунтов"
+
+
+async def test_terminal_operation_suppresses_only_known_restart_messages():
+    from services import op_status
+
+    by = await _reasons()
+    assert by["done_restart"] is None
+    assert by["partial_shutdown"] == "Часть целей пропущена"
+    assert by["failed_shutdown"] == "Реальный отказ"
+    assert by["pending_shutdown"] == op_status.REQUEUE_ON_SHUTDOWN
+    assert by["cancelled_note"] == "Последняя причина"
