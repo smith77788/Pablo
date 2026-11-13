@@ -23264,7 +23264,7 @@ async def _remember_twofa(pool, owner_id: int, account_id: int, password: str) -
 # ── Репортер ──────────────────────────────────────────────────────────────────
 
 async def _diagnose_unused_accounts(
-    pool, owner_id: int, requested_ids: list[int], used_ids: set[int],
+    pool, owner_id: int, requested_ids: list[int] | None, used_ids: set[int],
 ) -> tuple[str, dict]:
     """Объяснить, ПОЧЕМУ выбранные аккаунты не пошли в работу.
 
@@ -23275,12 +23275,21 @@ async def _diagnose_unused_accounts(
     по причинам одним запросом — чтобы сводка операции была честной и
     действенной (ждать снятия кулдауна / прогреть / освободить флот).
 
+    requested_ids=None — взять ВЕСЬ флот владельца (для операций без явного
+    списка, напр. report_peer по числу аккаунтов). Чтение tg_accounts держим
+    ЗДЕСЬ, в помощнике, а не в теле исполнителя: выбор аккаунтов исполнителем —
+    только через resource_selector (сторож test_op_worker_single_door_scans).
+
     Возвращает (готовая строка для сводки, счётчики по причинам).
     """
+    if requested_ids is None:
+        _fleet = await _safe_fetch(
+            pool, "SELECT id FROM tg_accounts WHERE owner_id=$1", owner_id,
+            log_ctx=f"[diagnose_fleet owner={owner_id}]")
+        requested_ids = [int(r["id"]) for r in (_fleet or [])]
     dropped = [int(a) for a in requested_ids if int(a) not in used_ids]
     if not dropped:
         return "", {}
-    from services import account_status as _acc_status
     rows = await _safe_fetch(
         pool,
         "SELECT id, is_active, (session_str IS NOT NULL) AS has_sess, "
@@ -25691,17 +25700,14 @@ async def _exec_report_peer(
 
     # Запрошено acc_count аккаунтов, в работу пошло len(accounts). Если меньше —
     # раскладываем ПОЧЕМУ по всему флоту владельца (кулдаун/спамблок/риск-пульс/
-    # занятость), чтобы «1 вместо 10» перестало быть загадкой.
+    # занятость), чтобы «1 вместо 10» перестало быть загадкой. Весь флот берёт
+    # сам помощник (requested_ids=None): чтение tg_accounts — не в исполнителе.
     _why_frag = ""
     if len(accounts) < acc_count:
         try:
-            _all = await _safe_fetch(
-                pool, "SELECT id FROM tg_accounts WHERE owner_id=$1", owner_id,
-                log_ctx=f"[report_peer_fleet op={op_id}]")
-            _all_ids = [int(r["id"]) for r in (_all or [])]
             _used = {int(a["id"]) for a in accounts}
             _why_frag, _ = await _diagnose_unused_accounts(
-                pool, owner_id, _all_ids, _used)
+                pool, owner_id, None, _used)
         except Exception:
             log_exc_swallow(log, f"report_peer diagnose op={op_id}")
     return {

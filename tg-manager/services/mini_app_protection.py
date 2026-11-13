@@ -734,7 +734,14 @@ def setup_routes(app: web.Application, pool) -> None:
                                   "dropped": dropped_counts,
                                   "dropped_note": dropped_note}
                     except PermissionError as exc:
-                        in_app = {"error": str(exc) or "Требуется подписка"}
+                        # Отказ по тарифу (operation_bus.PlanRequiredError) — НЕ
+                        # ошибка сервера. Если in-app — единственный вектор,
+                        # отдаём честный 403 с причиной; если выбрана и почта,
+                        # причину кладём в in_app.error, а письмо всё равно уйдёт.
+                        _reason = str(exc) or "Требуется подписка"
+                        if not mailbox_ids:
+                            return _err(_reason, 403)
+                        in_app = {"error": _reason}
                     except Exception:
                         log.exception("complaint_submit mass_report uid=%d", uid)
                         in_app = {"error": "Не удалось поставить in-app жалобу"}
