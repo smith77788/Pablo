@@ -213,6 +213,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # рядом не было — совет уходил в пустоту.
         _res_raw = d.pop("_result", None)
         _prm_raw = d.pop("_params", None)
+        _res = {}
         try:
             import json as _json_qa
             from services import op_quick_actions as _qa
@@ -234,6 +235,13 @@ def setup_routes(app: web.Application, pool) -> None:
             from services import op_params_view as _pv
             _p = _prm_raw if isinstance(_prm_raw, dict) else _json_pv.loads(_prm_raw or "{}")
             d["params_view"] = _pv.describe(d.get("op_type"), _p)
+            if d.get("op_type") == "strike":
+                _count = _res.get("accounts_used") if isinstance(_res, dict) else None
+                if type(_count) is int and _count >= 0:
+                    d["params_view"].append({
+                        "label": "Передано исполнителю",
+                        "value": str(_count),
+                    })
         except Exception:
             d["params_view"] = []
         # Длительность — от старта до конца (или до сейчас, пока идёт).

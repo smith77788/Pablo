@@ -185,6 +185,8 @@ def describe(op_type: str | None, params: Any) -> list[dict]:
     for key, label, kind in _FIELDS:
         if key not in params or key in _INTERNAL or _secret(key):
             continue
+        if op_type == "strike" and key == "account_ids":
+            label = "Выбрано при запуске"
         val = _fmt(kind, params.get(key))
         if val is None:
             continue

@@ -14991,6 +14991,13 @@ function renderOps() {
   }
 }
 
+function opSummaryHtml(text, opType) {
+  const escaped = esc(text);
+  if (opType !== 'strike') return escaped;
+  // Из Telegram-отчёта восстанавливаем только теги без атрибутов.
+  return escaped.replace(/&lt;(\/?(?:b|i|code))&gt;/g, '<$1>');
+}
+
 async function openOpDetail(opId) {
   push('s-opdetail');
   txt('opdetTitle','Операция #'+opId);
@@ -15028,8 +15035,8 @@ async function openOpDetail(opId) {
         ${o.started_at?`<div class="row"><div class="row-body"><div class="row-name">Начато</div><div class="row-val">${new Date(o.started_at).toLocaleString('ru-RU')}</div></div></div>`:''}
         ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru-RU')}</div></div></div>`:''}
         ${(o.duration_s!=null)?`<div class="row"><div class="row-body"><div class="row-name">${o.finished_at?'Длительность':'Идёт уже'}</div><div class="row-val">${esc(_opDuration(o.duration_s))}${(o.duration_s>0&&dDone>0)?' · '+esc(_opSpeed(dDone,o.duration_s)):''}</div></div></div>`:''}
-        ${(o.summary&&o.summary!==o.error_msg)?`<div class="row"><div class="row-body"><div class="row-name">Итог</div><div class="row-val" style="white-space:pre-line">${esc(o.summary)}</div></div></div>`:''}
-        ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">${o.status==='failed'?'Причина ошибки':o.status==='partial'?'Итог':(o.status==='pending'||o.status==='running')?'Последнее событие':'Ошибка'}</div><div class="row-val" style="color:${o.status==='partial'?'var(--orange,#e0a040)':(o.status==='pending'||o.status==='running')?'var(--hint)':'var(--red)'};white-space:pre-line">${esc(o.error_msg)}</div></div></div>`:''}
+        ${(o.summary&&o.summary!==o.error_msg)?`<div class="row"><div class="row-body"><div class="row-name">Итог</div><div class="row-val" style="white-space:pre-line">${opSummaryHtml(o.summary,o.op_type)}</div></div></div>`:''}
+        ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">${o.status==='failed'?'Причина ошибки':o.status==='partial'?'Итог':(o.status==='pending'||o.status==='running')?'Последнее событие':'Ошибка'}</div><div class="row-val" style="color:${o.status==='partial'?'var(--orange,#e0a040)':(o.status==='pending'||o.status==='running')?'var(--hint)':'var(--red)'};white-space:pre-line">${o.error_msg===o.summary?opSummaryHtml(o.error_msg,o.op_type):esc(o.error_msg)}</div></div></div>`:''}
       </div>
     `;
     if (o.status==='running') {
