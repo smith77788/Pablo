@@ -7738,6 +7738,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        if "project_id" in request.query:
+            from services import network_builder as _nb
+
+            if not _nb.project_pilot_enabled(uid):
+                return _err("Недоступно", 403)
+            project_id = validate_integer(request.query["project_id"], min_val=1, max_val=2147483647)
+            if project_id is None:
+                return _err("Неверный проект", 400)
+            channels = await _nb.project_publish_channels(pool, uid, project_id)
+            return _json_resp({"ok": True, "total": len(channels), "sample": channels})
         try:
             sample_limit = min(validate_integer(request.query.get("sample", "12"),
                                                 min_val=0, max_val=100) or 0, 100)
@@ -7773,6 +7783,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос", 400)
         text = validate_string(body.get("text"), max_len=4096)
         delay = validate_integer(body.get("delay", 30), min_val=-1, max_val=300) or 30
         # Ключа нет — все каналы; список передан, но пуст или с мусором — отказ.
@@ -7781,6 +7793,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         channel_ids, _sel_err = selection_ids(body, "channel_ids", what="канал")
         if _sel_err:
             return _err(_sel_err, 400)
+        project_id = None
+        if "project_id" in body:
+            from services import network_builder as _nb
+
+            if not _nb.project_pilot_enabled(uid):
+                return _err("Недоступно", 403)
+            project_id = validate_integer(body["project_id"], min_val=1, max_val=2147483647)
+            if project_id is None or not channel_ids:
+                return _err("Подтвердите список каналов проекта", 400)
+            channels = await _nb.project_publish_channels(pool, uid, project_id)
+            if set(channel_ids) != {row["channel_id"] for row in channels}:
+                return _err("Список каналов проекта изменился. Обновите предпросмотр", 409)
         if not text:
             return _err("Нужен текст")
         from services import postbot as _postbot
@@ -7820,6 +7844,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # каналы» исполнителя: автопостинг из карточки шлёт target=all.
             if body.get("target") in ("all", "channels", "groups"):
                 params["target"] = body["target"]
+        if project_id is not None:
+            params["project_id"] = project_id
+            params["target"] = "channels"
         # Рекуррентная публикация (0 = разовая). Умел её только «Быстрый пост»,
         # слитый в этот экран; при слиянии повтор потерялся, хотя воркер его
         # поддерживает — после успешного прогона сам ставит следующий запуск.

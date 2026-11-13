@@ -7864,6 +7864,15 @@ async def _exec_mass_publish(
             and not explicit_channel_ids:
         return {"status": "failed",
                 "summary": "⚠️ Не выбран ни один канал — публикацию не запускали"}
+    if params.get("project_id") is not None:
+        from services.network_builder import project_publish_channels
+
+        channels = await project_publish_channels(pool, owner_id, int(params["project_id"]))
+        if not explicit_channel_ids or not set(explicit_channel_ids).issubset(
+            {row["channel_id"] for row in channels}
+        ):
+            return {"status": "failed",
+                    "summary": "Каналы больше не доступны в проекте. Подтвердите новый список."}
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None

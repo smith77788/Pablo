@@ -79,3 +79,15 @@ def test_gates_live_in_the_one_executor():
     body = src[start:src.index("\nasync def ", start + 10)]
     assert "content_safety.scan_text" in body
     assert "autonomous_block" in body
+
+
+def test_project_publish_requires_exact_reviewed_targets():
+    from tests.miniapp_source import api_function, js_function
+
+    submit = api_function("mass_publish")
+    assert 'if project_id is None or not channel_ids:' in submit
+    assert 'if set(channel_ids) != {row["channel_id"] for row in channels}:' in submit
+    assert submit.index("project_publish_channels(") < submit.index("await submit(")
+    send = js_function("sendMassPublish")
+    assert "payload.project_id = projectId" in send
+    assert "projectTargets.map(channel => channel.channel_id)" in send

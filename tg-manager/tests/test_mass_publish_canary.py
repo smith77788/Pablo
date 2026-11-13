@@ -71,7 +71,7 @@ def test_send_uses_canary_and_confirms_full_blast():
 
 def test_open_resets_canary():
     html = _index()
-    m = re.search(r"function openMassPub\(\)\s*\{(.*?)\n\}", html, re.DOTALL)
+    m = re.search(r"function openMassPub\(projectId\)\s*\{(.*?)\n\}", html, re.DOTALL)
     assert m and "mpCanary" in m.group(1) and "'0'" in m.group(1), (
         "openMassPub должен сбрасывать канарейку в 0"
     )

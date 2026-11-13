@@ -410,6 +410,7 @@ def setup_routes(app: web.Application, pool) -> None:
         return _json_resp({"id": nid, "name": inst.get("name"),
                            "status": inst.get("status"),
                            "description": inst.get("description") or "",
+                           "project_pilot": _nb.project_pilot_enabled(uid),
                            "nodes": nodes, "edges": edges})
 
     async def network_deploy_plan(request: web.Request) -> web.Response:

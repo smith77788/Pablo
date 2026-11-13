@@ -5128,6 +5128,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <select id="mpScope" onchange="mpScopeToggle()">
           <option value="all" selected>Во все мои каналы</option>
           <option value="pick">Выбрать вручную</option>
+          <option value="project" id="mpProjectOption" hidden disabled>Каналы проекта</option>
         </select>
       </div>
       <div class="field" id="mpPickWrap" style="display:none;margin-bottom:12px">
@@ -8839,6 +8840,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="btn btn-s" onclick="openNetAddEdgeModal()" style="flex:1 1 auto;font-size:13px;padding:8px 6px">+ Ребро</button>
         <button class="btn btn-p" onclick="showNetDeployPlan()" style="flex:1 1 auto;font-size:13px;padding:8px 6px">🚀 План</button>
       </div>
+      <button id="netPublishProject" class="btn btn-s" style="margin:8px 16px" hidden onclick="openMassPub(_currentNetId)">Публикация в каналы проекта</button>
       <div id="netDeployPlan" style="padding:0 16px"></div>
       <div class="lst" id="netNodesList"></div>
       <div class="lst" id="netEdgesList" style="margin-top:8px"></div>
@@ -16529,7 +16531,13 @@ async function lnkDelete(code) {
 let MP_TOTAL = null;
 let MP_SAMPLE = [];
 
-function openMassPub() {
+let MP_PROJECT_ID = null;
+function openMassPub(projectId) {
+  projectId = Number.isSafeInteger(projectId) && projectId > 0 ? projectId : null;
+  MP_PROJECT_ID = projectId;
+  const option = document.getElementById('mpProjectOption');
+  option.hidden = !projectId;
+  option.disabled = !projectId;
   document.getElementById('mpText').value='';
   document.getElementById('mpLen').textContent='0';
   { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
@@ -16540,7 +16548,7 @@ function openMassPub() {
   document.getElementById('mpBtn').disabled=false;
   // Сброс выбора каналов (режим «Выбрать»): начинаем со «Все», picker свёрнут.
   MP_PICKED = new Set();
-  { const _sc=document.getElementById('mpScope'); if(_sc) _sc.value='all'; }
+  { const _sc=document.getElementById('mpScope'); if(_sc){ _sc.value=projectId?'project':'all'; _sc.disabled=Boolean(projectId); } }
   { const _pc=document.getElementById('mpPickCount'); if(_pc) _pc.textContent='0'; }
   { const _mc=document.getElementById('mpChannels'); if(_mc) _mc.dataset.loaded=''; }
   if (typeof mpScopeToggle === 'function') mpScopeToggle();
@@ -16600,18 +16608,22 @@ async function loadMpTargets() {
   MP_TOTAL = null; MP_SAMPLE = [];
   txt('mpTargets', '<span style="opacity:.7">Считаю, сколько каналов получат пост…</span>');
   renderMpBtn();
+  const projectId = MP_PROJECT_ID;
   try {
-    const d = await api('/api/miniapp/mass_publish/targets?sample=12');
+    const query = projectId ? 'project_id='+encodeURIComponent(projectId) : 'sample=12';
+    const d = await api('/api/miniapp/mass_publish/targets?'+query);
+    if (projectId !== MP_PROJECT_ID) return;
     MP_TOTAL = Number(d.total || 0);
     MP_SAMPLE = d.sample || [];
     if (!MP_TOTAL) {
-      txt('mpTargets', empty('📡','Публиковать некуда','Ни одного канала, принадлежащего вам, не найдено',
+      txt('mpTargets', projectId ? 'В проекте нет доступных каналов' : empty('📡','Публиковать некуда','Ни одного канала, принадлежащего вам, не найдено',
           {label:'📡 Фабрика каналов', fn:'openChannelFactory()'}));
     } else {
       const who = MP_SAMPLE.length ? '<br><span style="opacity:.7">'+esc(_mpChList(MP_SAMPLE, 4))+'</span>' : '';
       txt('mpTargets', '📡 Пост получат <b>'+String(MP_TOTAL)+'</b> '+plural(MP_TOTAL,'канал','канала','каналов')+who);
     }
   } catch(e) {
+    if (projectId !== MP_PROJECT_ID) return;
     // Не тупик: публиковать по-прежнему можно, но подтверждение честно скажет,
     // что число адресатов неизвестно.
     txt('mpTargets', errHtml('Не удалось узнать число каналов: '+errRu(e,''), 'loadMpTargets()'));
@@ -16626,7 +16638,9 @@ function renderMpBtn() {
   const btn = document.getElementById('mpBtn');
   if (!btn) return;
   const canary = Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0);
-  if (MP_TOTAL === 0) {
+  if (MP_PROJECT_ID && MP_TOTAL == null) {
+    btn.textContent = '📡 Загрузите список каналов проекта';
+  } else if (MP_TOTAL === 0) {
     // Ноль каналов — это знание, а не незнание: кнопка не должна обещать
     // публикацию, которой не во что уйти.
     btn.textContent = '📡 Нет каналов для публикации';
@@ -16713,7 +16727,7 @@ function mpScopeToggle() {
     loadMpChannelPicker();
   } else {
     if (wrap) wrap.style.display = 'none';
-    if (canaryField) canaryField.style.display = '';
+    if (canaryField) canaryField.style.display = scope === 'project' ? 'none' : '';
   }
 }
 async function loadMpChannelPicker() {
@@ -16746,7 +16760,8 @@ async function sendMassPublish() {
   const text = document.getElementById('mpText').value.trim();
   const delay = parseInt(document.getElementById('mpDelay').value);
   const scope = document.getElementById('mpScope') ? document.getElementById('mpScope').value : 'all';
-  const canary = scope === 'pick' ? 0 : Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0);
+  const projectId = scope === 'project' ? MP_PROJECT_ID : null;
+  const canary = scope === 'all' ? Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0) : 0;
   const errEl = document.getElementById('mpErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
@@ -16754,6 +16769,12 @@ async function sendMassPublish() {
   if (scope === 'pick') {
     pickedIds = [...MP_PICKED];
     if (!pickedIds.length) { errEl.textContent='Отметьте хотя бы один канал'; errEl.style.display='block'; return; }
+  }
+  const projectTargets = scope === 'project' ? [...MP_SAMPLE] : [];
+  if (scope === 'project' && (!projectId || !projectTargets.length)) {
+    errEl.textContent='Загрузите список каналов проекта';
+    errEl.style.display='block';
+    return;
   }
   if (scope !== 'pick' && MP_TOTAL === 0) {
     errEl.textContent='Публиковать некуда: ни одного вашего канала не найдено. Создайте канал в «Фабрике каналов» или импортируйте существующие.';
@@ -16802,7 +16823,12 @@ async function sendMassPublish() {
   // назвать число адресатов. Раньше оно спрашивало «во ВСЕ ваши каналы?», и
   // человек подтверждал, не зная, три их или триста.
   let channel_ids = null;
-  if (scope === 'pick') {
+  if (projectId) {
+    const when = scheduled_for ? '\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU') : '';
+    if (!(await askConfirm(edNote+'Опубликовать в каналах проекта ('+projectTargets.length+')?\n\n'
+        + _mpChList(projectTargets, 12) + when + _repNote))) return;
+    channel_ids = projectTargets.map(channel => channel.channel_id);
+  } else if (scope === 'pick') {
     // Ручной выбор каналов (поглощённый «Быстрый пост»): публикуем ровно в
     // отмеченные. Канарейка тут не нужна — набор и так ограничен вручную.
     const when = scheduled_for
@@ -16851,6 +16877,7 @@ async function sendMassPublish() {
   try {
     const payload = {text, delay};
     if (channel_ids) payload.channel_ids = channel_ids;
+    if (projectId) payload.project_id = projectId;
     { const _p=document.getElementById('mpPillar'); if (_p && _p.value) payload.pillar = _p.value; }
     if (scheduled_for) payload.scheduled_for = scheduled_for;
     if (_repMin > 0) payload.repeat_interval_min = _repMin;
@@ -34476,12 +34503,16 @@ async function folderFromNet() {
 }
 async function selectNetwork(netId) {
   _currentNetId = netId;
+  const publish = document.getElementById('netPublishProject');
+  publish.hidden = true;
   const el = document.getElementById('netTopologyNodes');
   el.style.display = 'block';
   document.getElementById('netTopologyEmpty').style.display = 'none';
   txt('netDeployPlan','');
   try {
     const d = await api('/api/miniapp/networks/' + netId);
+    if (_currentNetId !== netId) return;
+    publish.hidden = !d.project_pilot;
     renderNetTopology(d);
     renderNetNodesEdges(d);
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }

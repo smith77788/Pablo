@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -193,6 +194,26 @@ async def get_instance_detail(pool: asyncpg.Pool, owner_id: int,
     except Exception as e:
         log.warning("get_instance_detail error: %s", e)
         return None
+
+
+def project_pilot_enabled(owner_id: int) -> bool:
+    allowed = os.getenv("INFRAGRAM_PROJECT_PILOT_IDS", "").split(",")
+    return str(owner_id) in {value.strip() for value in allowed}
+
+
+async def project_publish_channels(pool, owner_id: int, instance_id: int) -> list[dict]:
+    """Каналы из проекта, которыми владелец управляет в Infragram."""
+    rows = await pool.fetch(
+        """SELECT DISTINCT mc.channel_id, mc.title, mc.username
+             FROM network_instances ni
+             JOIN network_nodes nn ON nn.instance_id=ni.id
+             JOIN managed_channels mc ON mc.channel_id=nn.ref_id AND mc.owner_id=ni.owner_id
+            WHERE ni.id=$1 AND ni.owner_id=$2 AND nn.node_type='channel'
+              AND (mc.type='channel' OR mc.type IS NULL)
+            ORDER BY mc.channel_id""",
+        instance_id, owner_id,
+    )
+    return [dict(row) for row in rows]
 
 
 async def add_node(pool: asyncpg.Pool, instance_id: int, node_type: str,
