@@ -28,10 +28,36 @@ def setup_routes(app: web.Application, pool) -> None:
     )
     from services.security import validate_integer
 
+    async def project_scope(request, uid):
+        if "project_id" not in request.query:
+            return None, None
+        from services.network_builder import project_pilot_enabled
+
+        if not project_pilot_enabled(uid):
+            return None, _err("Недоступно", 403)
+        project_id = validate_integer(request.query["project_id"], min_val=1)
+        if project_id is None:
+            return None, _err("Неверный проект", 400)
+        exists = await pool.fetchval(
+            "SELECT 1 FROM network_instances WHERE id=$1 AND owner_id=$2", project_id, uid)
+        if not exists:
+            return None, _err("Проект не найден", 404)
+        return str(project_id), None
+
+    def project_predicate(prefix):
+        # Сети уже сохраняли instance_id до появления публикаций проекта.
+        return (f" AND ({prefix}params->>'project_id'=$2 OR "
+                f"({prefix}op_type='deploy_network' AND {prefix}params->>'instance_id'=$2))")
+
     async def operations(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        project_id, scope_error = await project_scope(request, uid)
+        if scope_error is not None:
+            return scope_error
+        project_args = [uid, project_id] if project_id else [uid]
+        project_sql = project_predicate("") if project_id else ""
         status_filter = request.query.get("status")
         # 'paused' обязан быть в списке: «Пауза» переводит pending → paused, и без
         # него фильтр по приостановленным молча отдавал ВСЮ очередь — человек
@@ -113,13 +139,14 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             for r in await pool.fetch(
                     "SELECT op_type, COUNT(*) AS n FROM operation_queue "
-                    "WHERE owner_id=$1 GROUP BY op_type ORDER BY 2 DESC, 1 LIMIT 60", uid):
+                    f"WHERE owner_id=$1{project_sql} GROUP BY op_type ORDER BY 2 DESC, 1 LIMIT 60",
+                    *project_args):
                 types.append({"op_type": r["op_type"], "n": int(r["n"] or 0)})
         except Exception:
             log.debug("operations: список типов недоступен uid=%s", uid)
         counts: dict = {}
-        _cwhere = "owner_id=$1"
-        _cargs: list = [uid]
+        _cwhere = "owner_id=$1" + project_sql
+        _cargs = project_args.copy()
         if days:
             _cargs.append(days)
             _cwhere += f" AND created_at >= now() - make_interval(days => ${len(_cargs)})"
@@ -142,8 +169,8 @@ def setup_routes(app: web.Application, pool) -> None:
                           {op_status.sql_error_reason("oq.")} AS error_msg,
                           oq.created_at, oq.started_at, oq.finished_at,
                           oq.scheduled_for, {_err_sub}"""
-        _where = "oq.owner_id=$1"
-        _wargs: list = [uid]
+        _where = "oq.owner_id=$1" + (project_predicate("oq.") if project_id else "")
+        _wargs = project_args.copy()
         if days:
             _wargs.append(days)
             _where += f" AND oq.created_at >= now() - make_interval(days => ${len(_wargs)})"
@@ -979,6 +1006,11 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        project_id, scope_error = await project_scope(request, uid)
+        if scope_error is not None:
+            return scope_error
+        args = [uid, project_id] if project_id else [uid]
+        where = "owner_id=$1" + (project_predicate("") if project_id else "")
         fmt = request.query.get("format", "csv")
         try:
             # Потолок — предохранитель от выгрузки на миллион строк, а не
@@ -991,15 +1023,15 @@ def setup_routes(app: web.Application, pool) -> None:
             rows = await pool.fetch(
                 # Колонки err_cnt нет — экспорт падал всегда. Число неудачных
                 # попыток в этой схеме — retry_count.
-                """SELECT id, op_type, label, status, total_items, done_items,
+                f"""SELECT id, op_type, label, status, total_items, done_items,
                           COALESCE(retry_count, 0) AS err_cnt, created_at, finished_at
-                   FROM operation_queue WHERE owner_id=$1
-                   ORDER BY created_at DESC, id DESC LIMIT $2""",
-                uid, cap,
+                   FROM operation_queue WHERE {where}
+                   ORDER BY created_at DESC, id DESC LIMIT ${len(args) + 1}""",
+                *args, cap,
             )
             if fmt == "json":
                 total = await _safe_count(pool,
-                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", uid)
+                    f"SELECT COUNT(*) FROM operation_queue WHERE {where}", *args)
                 return _json_resp({"operations": [dict(r) for r in rows],
                                    "total": total,
                                    "truncated": len(rows) >= cap})

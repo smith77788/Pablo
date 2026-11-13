@@ -4578,7 +4578,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚙️ Операции</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="opsTitle">⚙️ Операции</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="exportOpsCSV()" title="Экспорт CSV" aria-label="Экспорт CSV">📥</span>
       <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openOpCreate()">+ Создать</button>
@@ -8851,6 +8851,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="btn btn-p" onclick="showNetDeployPlan()" style="flex:1 1 auto;font-size:13px;padding:8px 6px">🚀 План</button>
       </div>
       <button id="netPublishProject" class="btn btn-s" style="margin:8px 16px" hidden onclick="openMassPub(_currentNetId)">Публикация в каналы проекта</button>
+      <button id="netProjectOps" class="btn btn-s" style="margin:8px 16px" hidden onclick="openOps(_currentNetId)">Журнал проекта</button>
       <div id="netDeployPlan" style="padding:0 16px"></div>
       <div class="lst" id="netNodesList"></div>
       <div class="lst" id="netEdgesList" style="margin-top:8px"></div>
@@ -14729,7 +14730,21 @@ const OPS_STATUS_LABELS = {pending:'ожидают', running:'работают',
                            done:'готово', partial:'недоведены',
                            failed:'ошибки', cancelled:'отменены'};
 function OPS_STATUS_RU(s) { return OPS_STATUS_LABELS[s] || s; }
-function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>'); push('s-ops'); loadOps(); }
+let OPS_PROJECT_ID = null;
+function openOps(projectId) {
+  const nextProject = Number.isSafeInteger(projectId) && projectId > 0 ? projectId : null;
+  const changed = OPS_PROJECT_ID !== nextProject;
+  OPS_PROJECT_ID = nextProject;
+  document.getElementById('opsTitle').textContent = nextProject ? 'Журнал проекта #' + nextProject : '⚙️ Операции';
+  push('s-ops');
+  if (changed) {
+    OPS_SEL.clear();
+    resetOpsFilters();
+  } else {
+    txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>');
+    loadOps();
+  }
+}
 
 // ── Создать операцию: категорийный лаунчер ──────────────
 const OP_CREATE_CATS = [
@@ -14794,10 +14809,12 @@ let OPS_ROWS = [];
 let OPS_TOTAL = 0;
 let OPS_OFFSET = 0;
 let OPS_LOADING = false;
+let OPS_LOAD_REVISION = 0;
 
 const OPS_MAX = 200;            // потолок одной выдачи на сервере
 function _opsQuery(offset, limit) {
   const p = new URLSearchParams();
+  if (OPS_PROJECT_ID) p.set('project_id', OPS_PROJECT_ID);
   if (OPS_FILTER) p.set('status', OPS_FILTER);
   // Поиск считает СЕРВЕР. Фильтровать загруженную страницу бессмысленно: на
   // экране тридцать операций из двух сотен, и «ничего не найдено» означало бы
@@ -14894,6 +14911,9 @@ function onOpsSearch(v) {
 // Пульс-отчёте («Ошибок за 24ч: 7») вело ровно к тем строкам, которые его дали,
 // а не на общий список, где этот срез надо искать руками.
 function opsGo(status) {
+  if (OPS_PROJECT_ID !== null) OPS_SEL.clear();
+  OPS_PROJECT_ID = null;
+  document.getElementById('opsTitle').textContent = '⚙️ Операции';
   OPS_SEARCH = ''; OPS_FILTER = status || null;
   const i = document.getElementById('opsSearch'); if (i) i.value = '';
   const want = status ? ("filterOps('" + status + "'") : 'filterOps(null';
@@ -14929,8 +14949,11 @@ async function loadMoreOps() {
   OPS_LOADING = true;
   const box = document.getElementById('opsLoadMore');
   if (box) box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
+  const revision = OPS_LOAD_REVISION;
+  const query = _opsQuery(OPS_OFFSET, OPS_PAGE);
   try {
-    const d = await api(_opsQuery(OPS_OFFSET, OPS_PAGE));
+    const d = await api(query);
+    if (revision !== OPS_LOAD_REVISION || query !== _opsQuery(OPS_OFFSET, OPS_PAGE)) return;
     const more = d.operations||[];
     if (!more.length) { OPS_TOTAL = OPS_ROWS.length; }
     else {
@@ -14941,19 +14964,24 @@ async function loadMoreOps() {
     }
     renderOps();
   } catch(e) {
+    if (revision !== OPS_LOAD_REVISION || query !== _opsQuery(OPS_OFFSET, OPS_PAGE)) return;
     toast('⚠️ '+(errRu(e,'Ошибка').substring(0,60)));
     if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreOps()" style="width:100%;font-size:13px;padding:10px">↺ Повторить загрузку</button>';
-  } finally { OPS_LOADING = false; }
+  } finally { if (revision === OPS_LOAD_REVISION) OPS_LOADING = false; }
 }
 
 async function loadOps() {
-  try {
+  const revision = ++OPS_LOAD_REVISION;
+  OPS_LOADING = false;
     // Обновление после действия (отмена, пауза, повтор) не должно съедать уже
     // подгруженную историю: человек раскрыл девяносто операций, отменил одну —
     // и список схлопывался обратно к тридцати. Перечитываем столько же, сколько
     // было на экране.
-    const want = Math.min(Math.max(OPS_PAGE, OPS_ROWS.length), OPS_MAX);
-    const d = await api(_opsQuery(0, want));
+  const want = Math.min(Math.max(OPS_PAGE, OPS_ROWS.length), OPS_MAX);
+  const query = _opsQuery(0, want);
+  try {
+    const d = await api(query);
+    if (revision !== OPS_LOAD_REVISION || query !== _opsQuery(0, want)) return;
     OPS_ROWS = d.operations||[];
     OPS_OFFSET = OPS_ROWS.length;
     OPS_TOTAL = (d.total != null ? d.total : OPS_ROWS.length);
@@ -14976,7 +15004,9 @@ async function loadOps() {
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--red)">${num(failed)}</div><div class="kpi-lbl">Ошибки</div></div>
     `);
     renderOps();
-  } catch(e) { txt('opsList', errHtml(errRu(e),'loadOps()')); }
+  } catch(e) {
+    if (revision === OPS_LOAD_REVISION && query === _opsQuery(0, want)) txt('opsList', errHtml(errRu(e),'loadOps()'));
+  }
 }
 
 function renderOps() {
@@ -14994,7 +15024,7 @@ function renderOps() {
     txt('opsList', (OPS_SEARCH || OPS_FILTER || OPS_TYPE || OPS_DAYS)
       ? empty('🔍','Ничего не найдено', _why.join(' и '),
               {label:'✖️ Сбросить поиск и фильтр', fn:'resetOpsFilters()'})
-      : empty('⚙️','Нет операций','Запущенные задачи появятся здесь'));
+      : empty('⚙️','Нет операций',OPS_PROJECT_ID ? 'Здесь появятся операции этого проекта' : 'Запущенные задачи появятся здесь'));
     renderOpsLoadMore();
     return;
   }
@@ -16710,12 +16740,15 @@ document.getElementById('mpText').addEventListener('input', function(){
 });
 
 async function loadMpOps() {
+  const projectId = MP_PROJECT_ID;
   try {
     // Раньше брали общую страницу очереди (30 строк) и отбирали публикации уже
     // здесь: стоило запустить тридцать инвайтов после последней публикации — и
     // экран писал «Нет операций публикации», хотя они были. Фильтр по типу
     // теперь считает сервер, так что пустой ответ действительно значит «нет».
-    const d = await api('/api/miniapp/operations?op_type=mass_publish&limit=5&offset=0');
+    const scope = projectId ? '&project_id='+projectId : '';
+    const d = await api('/api/miniapp/operations?op_type=mass_publish&limit=5&offset=0'+scope);
+    if (projectId !== MP_PROJECT_ID) return;
     const ops = d.operations||[];
     const opsTotal = (d.total != null) ? d.total : ops.length;
     if (!ops.length) { txt('mpOpsList', empty('📡','Нет операций публикации','Здесь появятся ваши массовые публикации')); return; }
@@ -16734,7 +16767,7 @@ async function loadMpOps() {
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
       </div>`;
     }).join('') + (opsTotal > ops.length
-      ? `<div class="li tap" onclick="openOps()"><div class="li-body"><div class="li-name">Вся история публикаций — ${opsTotal}</div></div><span class="chev">›</span></div>`
+      ? `<div class="li tap" onclick="openOps(MP_PROJECT_ID)"><div class="li-body"><div class="li-name">Вся история публикаций — ${opsTotal}</div></div><span class="chev">›</span></div>`
       : ''));
   } catch(e) {
     // Молча обнулять список нельзя: пустая область читается как «публикаций
@@ -19309,7 +19342,7 @@ async function exportOpsCSV() {
   // времени завершения в разметке нет вовсе, хотя бэкенд их отдаёт. Владелец
   // получал файл с правильной шапкой и почти пустым телом — это хуже отказа,
   // потому что по такому отчёту принимают решения.
-  exportCSV('/api/miniapp/operations/export');
+  exportCSV('/api/miniapp/operations/export' + (OPS_PROJECT_ID ? '?project_id='+OPS_PROJECT_ID : ''));
 }
 
 function nuSwitch(which) {
@@ -34535,7 +34568,8 @@ async function folderFromNet() {
 async function selectNetwork(netId) {
   _currentNetId = netId;
   const publish = document.getElementById('netPublishProject');
-  publish.hidden = true;
+  const journal = document.getElementById('netProjectOps');
+  journal.hidden = publish.hidden = true;
   const el = document.getElementById('netTopologyNodes');
   el.style.display = 'block';
   const placeholder = document.getElementById('netTopologyEmpty');
@@ -34547,7 +34581,7 @@ async function selectNetwork(netId) {
   try {
     const d = await api('/api/miniapp/networks/' + netId);
     if (_currentNetId !== netId) return;
-    publish.hidden = !d.project_pilot;
+    journal.hidden = publish.hidden = !d.project_pilot;
     window._lastNetData = d;
     renderNetTopology(d);
     renderNetNodesEdges(d);

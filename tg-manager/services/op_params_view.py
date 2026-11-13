@@ -182,6 +182,11 @@ def describe(op_type: str | None, params: Any) -> list[dict]:
         return []
     out: list[dict] = []
     seen_labels: set[str] = set()
+    project_id = params.get("project_id")
+    if project_id is None and op_type == "deploy_network":
+        project_id = params.get("instance_id")
+    if type(project_id) is int and project_id > 0:
+        out.append({"label": "Проект", "value": f"#{project_id}"})
     for key, label, kind in _FIELDS:
         if key not in params or key in _INTERNAL or _secret(key):
             continue
