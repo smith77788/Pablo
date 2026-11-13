@@ -5628,8 +5628,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
 
     <div style="padding:0 16px 10px">
-      <div class="field-err" id="cmpErr"></div>
-      <button class="btn btn-d" data-main id="cmpBtn" onclick="submitComplaint()" style="width:100%">🚨 Подать жалобу</button>
+      <div class="field-err" id="complaintErr"></div>
+      <button class="btn btn-d" data-main id="complaintBtn" onclick="submitComplaint()" style="width:100%">🚨 Подать жалобу</button>
       <div id="cmpResult" style="margin-top:10px"></div>
     </div>
 
@@ -19002,7 +19002,7 @@ async function _loadComplaintHistory() {
 }
 
 async function submitComplaint() {
-  const errEl = document.getElementById('cmpErr');
+  const errEl = document.getElementById('complaintErr');
   const resEl = document.getElementById('cmpResult');
   errEl.textContent=''; resEl.innerHTML='';
   const target = (document.getElementById('cmpTarget').value||'').trim();
@@ -19022,7 +19022,7 @@ async function submitComplaint() {
   if (accIds.length) parts.push(`${accIds.length} ${plural(accIds.length,'аккаунта','аккаунтов','аккаунтов')} флота (in-app жалоба)`);
   if (mboxIds.length) parts.push(`${mboxIds.length} ${plural(mboxIds.length,'ящик','ящика','ящиков')} (письмо в органы)`);
   if (!await askConfirm(`Подать жалобу на «${target}»?\n\n${parts.join('\n')}\n\nОтменить отправленные жалобы и письма нельзя.`)) return;
-  const btn = document.getElementById('cmpBtn');
+  const btn = document.getElementById('complaintBtn');
   btn.disabled=true; btn.textContent='Подаю…';
   try {
     const r = await api('/api/miniapp/complaint/submit', {method:'POST', body:JSON.stringify({
