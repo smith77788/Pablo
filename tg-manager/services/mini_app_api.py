@@ -7724,6 +7724,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Mass Publish ─────────────────────────────────────────────────────────
 
+    def _project_channel_id(value):
+        # Telegram IDs can be signed, but zero and non-integer values are invalid.
+        return validate_integer(str(value), min_val=-(2**63), max_val=2**63 - 1) or None
+
     async def mass_publish_targets(request: web.Request) -> web.Response:
         """Сколько каналов реально получат массовую публикацию — и какие именно.
 
@@ -7746,7 +7750,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             project_id = validate_integer(request.query["project_id"], min_val=1, max_val=2147483647)
             if project_id is None:
                 return _err("Неверный проект", 400)
-            channels = await _nb.project_publish_channels(pool, uid, project_id)
+            channel_id = None
+            if "project_channel_id" in request.query:
+                channel_id = _project_channel_id(request.query["project_channel_id"])
+                if channel_id is None:
+                    return _err("Неверный канал проекта", 400)
+            channels = await _nb.project_publish_channels(pool, uid, project_id, channel_id)
             return _json_resp({"ok": True, "total": len(channels), "sample": channels})
         try:
             sample_limit = min(validate_integer(request.query.get("sample", "12"),
@@ -7794,6 +7803,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if _sel_err:
             return _err(_sel_err, 400)
         project_id = None
+        if "project_channel_id" in body and "project_id" not in body:
+            return _err("Укажите проект", 400)
         if "project_id" in body:
             from services import network_builder as _nb
 
@@ -7802,7 +7813,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             project_id = validate_integer(body["project_id"], min_val=1, max_val=2147483647)
             if project_id is None or not channel_ids:
                 return _err("Подтвердите список каналов проекта", 400)
-            channels = await _nb.project_publish_channels(pool, uid, project_id)
+            channel_id = None
+            if "project_channel_id" in body:
+                channel_id = _project_channel_id(body["project_channel_id"])
+                if channel_id is None:
+                    return _err("Неверный канал проекта", 400)
+            channels = await _nb.project_publish_channels(pool, uid, project_id, channel_id)
             if set(channel_ids) != {row["channel_id"] for row in channels}:
                 return _err("Список каналов проекта изменился. Обновите предпросмотр", 409)
         if not text:

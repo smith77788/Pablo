@@ -17,6 +17,7 @@ const calls = [];
 const openAccount = id => calls.push(['account', id]);
 const openBot = id => calls.push(['bot', id]);
 const openChannel = id => calls.push(['channel', id]);
+const openMassPub = (projectId, id) => calls.push(['publish', projectId, id]);
 const openAccountDialogs = id => calls.push(['dialogs', id]);
 const openBotCommands = id => calls.push(['commands', id]);
 const copyText = value => calls.push(['copy', value]);
@@ -33,6 +34,10 @@ for (const [type, action] of [['account', 'dialogs'], ['bot', 'commands']]) {
   projectResourceActions({id: 7, type, object_id: 52}, trigger).secondary[0][1]();
   assert.deepEqual(calls.pop(), [action, 52]);
 }
+const channel = projectResourceActions({id: 7, type: 'channel', object_id: 52}, trigger, 13);
+channel.primary[1][1]();
+assert.deepEqual(calls.pop(), ['publish', 13, 52]);
+assert.equal(projectResourceActions({id: 7, type: 'group', object_id: 52}, trigger, 13).primary.length, 2);
 const unbound = projectResourceActions({id: 7, type: 'channel', object_id: null}, trigger);
 assert.deepEqual(unbound.primary, []);
 unbound.secondary[0][1]();

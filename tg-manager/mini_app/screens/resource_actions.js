@@ -1,7 +1,7 @@
 'use strict';
 
 // Действия открывают штатные карточки и используют их проверки доступа.
-function projectResourceActions(node, trigger) {
+function projectResourceActions(node, trigger, projectId) {
   const id = Number(node.object_id);
   const primary = [];
   const secondary = [];
@@ -16,6 +16,9 @@ function projectResourceActions(node, trigger) {
     if (Object.hasOwn(openers, node.type)) {
       primary.push(['Открыть карточку', openers[node.type]]);
     }
+    if (node.type === 'channel' && Number.isSafeInteger(projectId) && projectId > 0) {
+      primary.push(['Подготовить публикацию', () => openMassPub(projectId, id)]);
+    }
     primary.push(['Копировать ID', () => copyText(String(node.object_id))]);
     if (node.type === 'account') secondary.push(['Диалоги профиля', () => openAccountDialogs(id)]);
     if (node.type === 'bot') secondary.push(['Команды бота', () => openBotCommands(id)]);
@@ -24,10 +27,10 @@ function projectResourceActions(node, trigger) {
   return {primary, secondary};
 }
 
-function openProjectResourceActions(node, trigger) {
+function openProjectResourceActions(node, trigger, projectId) {
   const dialog = document.getElementById('resourceActions');
   if (!dialog || dialog.open) return;
-  const actions = projectResourceActions(node, trigger);
+  const actions = projectResourceActions(node, trigger, projectId);
   document.getElementById('resourceActionsTitle').textContent = node.label || objRu(node.type);
   const more = document.getElementById('resourceActionsMore');
   more.open = !actions.primary.length;

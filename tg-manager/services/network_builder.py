@@ -201,7 +201,9 @@ def project_pilot_enabled(owner_id: int) -> bool:
     return str(owner_id) in {value.strip() for value in allowed}
 
 
-async def project_publish_channels(pool, owner_id: int, instance_id: int) -> list[dict]:
+async def project_publish_channels(
+    pool, owner_id: int, instance_id: int, channel_id: int | None = None
+) -> list[dict]:
     """Каналы из проекта, которыми владелец управляет в Infragram."""
     rows = await pool.fetch(
         """SELECT DISTINCT mc.channel_id, mc.title, mc.username
@@ -210,8 +212,9 @@ async def project_publish_channels(pool, owner_id: int, instance_id: int) -> lis
              JOIN managed_channels mc ON mc.channel_id=nn.ref_id AND mc.owner_id=ni.owner_id
             WHERE ni.id=$1 AND ni.owner_id=$2 AND nn.node_type='channel'
               AND (mc.type='channel' OR mc.type IS NULL)
+              AND ($3::bigint IS NULL OR mc.channel_id=$3)
             ORDER BY mc.channel_id""",
-        instance_id, owner_id,
+        instance_id, owner_id, channel_id,
     )
     return [dict(row) for row in rows]
 

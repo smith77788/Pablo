@@ -16556,12 +16556,15 @@ let MP_TOTAL = null;
 let MP_SAMPLE = [];
 
 let MP_PROJECT_ID = null;
-function openMassPub(projectId) {
+let MP_PROJECT_CHANNEL_ID = null;
+function openMassPub(projectId, channelId) {
   projectId = Number.isSafeInteger(projectId) && projectId > 0 ? projectId : null;
   MP_PROJECT_ID = projectId;
+  MP_PROJECT_CHANNEL_ID = projectId && Number.isSafeInteger(channelId) && channelId !== 0 ? channelId : null;
   const option = document.getElementById('mpProjectOption');
   option.hidden = !projectId;
   option.disabled = !projectId;
+  option.textContent = MP_PROJECT_CHANNEL_ID ? 'Выбранный канал проекта' : 'Каналы проекта';
   document.getElementById('mpText').value='';
   document.getElementById('mpLen').textContent='0';
   { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
@@ -16633,21 +16636,23 @@ async function loadMpTargets() {
   txt('mpTargets', '<span style="opacity:.7">Считаю, сколько каналов получат пост…</span>');
   renderMpBtn();
   const projectId = MP_PROJECT_ID;
+  const channelId = MP_PROJECT_CHANNEL_ID;
   try {
-    const query = projectId ? 'project_id='+encodeURIComponent(projectId) : 'sample=12';
+    const query = projectId ? 'project_id='+encodeURIComponent(projectId)
+      +(channelId === null ? '' : '&project_channel_id='+encodeURIComponent(channelId)) : 'sample=12';
     const d = await api('/api/miniapp/mass_publish/targets?'+query);
-    if (projectId !== MP_PROJECT_ID) return;
+    if (projectId !== MP_PROJECT_ID || channelId !== MP_PROJECT_CHANNEL_ID) return;
     MP_TOTAL = Number(d.total || 0);
     MP_SAMPLE = d.sample || [];
     if (!MP_TOTAL) {
-      txt('mpTargets', projectId ? 'В проекте нет доступных каналов' : empty('📡','Публиковать некуда','Ни одного канала, принадлежащего вам, не найдено',
+      txt('mpTargets', projectId ? (channelId === null ? 'В проекте нет доступных каналов' : 'Канал больше не доступен в проекте') : empty('📡','Публиковать некуда','Ни одного канала, принадлежащего вам, не найдено',
           {label:'📡 Фабрика каналов', fn:'openChannelFactory()'}));
     } else {
       const who = MP_SAMPLE.length ? '<br><span style="opacity:.7">'+esc(_mpChList(MP_SAMPLE, 4))+'</span>' : '';
       txt('mpTargets', '📡 Пост получат <b>'+String(MP_TOTAL)+'</b> '+plural(MP_TOTAL,'канал','канала','каналов')+who);
     }
   } catch(e) {
-    if (projectId !== MP_PROJECT_ID) return;
+    if (projectId !== MP_PROJECT_ID || channelId !== MP_PROJECT_CHANNEL_ID) return;
     // Не тупик: публиковать по-прежнему можно, но подтверждение честно скажет,
     // что число адресатов неизвестно.
     txt('mpTargets', errHtml('Не удалось узнать число каналов: '+errRu(e,''), 'loadMpTargets()'));
@@ -16785,6 +16790,7 @@ async function sendMassPublish() {
   const delay = parseInt(document.getElementById('mpDelay').value);
   const scope = document.getElementById('mpScope') ? document.getElementById('mpScope').value : 'all';
   const projectId = scope === 'project' ? MP_PROJECT_ID : null;
+  const projectChannelId = projectId ? MP_PROJECT_CHANNEL_ID : null;
   const canary = scope === 'all' ? Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0) : 0;
   const errEl = document.getElementById('mpErr');
   errEl.style.display='none';
@@ -16902,6 +16908,7 @@ async function sendMassPublish() {
     const payload = {text, delay};
     if (channel_ids) payload.channel_ids = channel_ids;
     if (projectId) payload.project_id = projectId;
+    if (projectChannelId !== null) payload.project_channel_id = projectChannelId;
     { const _p=document.getElementById('mpPillar'); if (_p && _p.value) payload.pillar = _p.value; }
     if (scheduled_for) payload.scheduled_for = scheduled_for;
     if (_repMin > 0) payload.repeat_interval_min = _repMin;
@@ -34622,7 +34629,7 @@ function renderNetNodesEdges(d) {
 
   if (pilot) bindResourceActionRows(document.getElementById('netNodesList'), (nodeId, trigger) => {
     const node = nodes.find(item => Number(item.id) === nodeId);
-    if (node) openProjectResourceActions(node, trigger);
+    if (node) openProjectResourceActions(node, trigger, Number(d.id));
   });
 
   txt('netEdgesList', edges.map(e => `<div class="li">
