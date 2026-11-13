@@ -35,13 +35,17 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             payload = await findings.json()
             assert {item["id"] for item in payload["findings"]} == {str(BOT), str(CHANNEL)}
             assert "12345:restriction-cleanup-test" not in str(payload)
+            assert payload["history"] == []
+            assert not any("revisions" in item or "bindings" in item for item in payload["findings"])
             assert (await client.post(path, json=action, headers=headers)).status == 400
             for targets in ([], [{"kind": "bot", "id": True}], [BOT_TARGET, BOT_TARGET]):
                 invalid = {"action": "disable", "targets": targets, "preview": True}
                 assert (await client.post(path, json=invalid, headers=headers)).status == 400
             preview = await client.post(path, json={**action, "preview": True}, headers=headers)
             assert preview.status == 200
-            token = (await preview.json())["token"]
+            preview_body = await preview.json()
+            assert "revisions" not in preview_body["items"][0]
+            token = preview_body["token"]
             assert secret not in token
             changed = {**action, "targets": [CHANNEL_TARGET], "token": token}
             assert (await client.post(path, json=changed, headers=headers)).status == 409
@@ -53,6 +57,14 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             assert response.status == 200, await response.text()
             outcome = (await response.json())["items"][0]
             assert outcome["id"] == str(BOT) and outcome["outcome"] in ("applied", "disabled")
+            assert "revisions" not in outcome
+            reread = await (await client.get(path, headers=headers)).json()
+            assert [(entry["action"], entry["target"]) for entry in reread["history"]] == [
+                ("disable", f"bot:{BOT}")]
+            assert reread["history"][0]["occurred_at"]
+            assert reread["history_has_more"] is False
+            monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+            assert (await client.get(path, headers=wrong)).status == 404
             assert not await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
             assert (await client.post(path, json=confirmation, headers=headers)).status == 409
             await pool.execute("UPDATE managed_bots SET is_active=TRUE WHERE bot_id=$1", BOT)
@@ -60,6 +72,25 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             assert await pool.fetchval(
                 "SELECT count(*) FROM operation_audit WHERE owner_id=$1 AND operation_id=$2",
                 OWNER, op_id) == 1
+            await pool.execute(
+                """INSERT INTO operation_audit(owner_id, operation_id, action, target, result, occurred_at)
+                   SELECT $1, $2, 'restriction_cleanup_detach', 'channel:' || n, 'success',
+                          now() + n * interval '1 second'
+                     FROM generate_series(1, 55) n""", OWNER, op_id)
+            try:
+                await pool.execute(
+                    """INSERT INTO operation_audit(owner_id, operation_id, action, target, result)
+                       VALUES($1, $2, 'restriction_cleanup_disable', 'foreign', 'success'),
+                             ($3, $2, 'other_action', 'unrelated', 'success')""", OWNER + 1, op_id, OWNER)
+                capped = await (await client.get(path, headers=headers)).json()
+                assert capped["history_has_more"] is True
+                assert len(capped["history"]) == 50
+                assert capped["history"][0]["target"] == "channel:55"
+                assert capped["history"][-1]["target"] == "channel:6"
+            finally:
+                await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1 AND operation_id=$2",
+                                   OWNER + 1, op_id)
+
 
     asyncio.run(_run(scenario))
 

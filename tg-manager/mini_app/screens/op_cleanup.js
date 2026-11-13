@@ -18,6 +18,14 @@ async function openOperationCleanup(opId) {
   };
   overlay.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !close.disabled) close.click();
+    if (event.key !== 'Tab') return;
+    const controls = [...overlay.querySelectorAll('button,select,input,summary')].filter(
+      control => !control.disabled && !control.closest('[hidden]'));
+    const edge = event.shiftKey ? controls[0] : controls.at(-1);
+    if (!controls.includes(document.activeElement) || document.activeElement === edge) {
+      event.preventDefault();
+      (event.shiftKey ? controls.at(-1) : controls[0])?.focus();
+    }
   });
   document.body.appendChild(overlay);
   close.focus();
@@ -44,6 +52,24 @@ async function openOperationCleanup(opId) {
       if (!overlay.isConnected) return;
       findings = Array.isArray(result.findings) ? result.findings : [];
       const maxTargets = Number(result.max_targets) || defaultTargetLimit;
+      const history = Array.isArray(result.history) ? result.history : [];
+      const renderHistory = () => {
+        if (!history.length) return;
+        const block = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'История изменений' + (result.history_has_more ? ' · последние 50' : '');
+        block.append(summary);
+        const list = document.createElement('ul');
+        list.style.cssText = listStyle;
+        for (const entry of history) {
+          const line = document.createElement('li');
+          const time = entry.occurred_at ? new Date(entry.occurred_at).toLocaleString('ru-RU') : '';
+          line.textContent = [actionText[entry.action], entry.target, time].filter(Boolean).join(' · ');
+          list.append(line);
+        }
+        block.append(list);
+        body.append(block);
+      };
       const projects = new Map();
       findings.forEach(item => (item.projects || []).forEach(project => {
         projects.set(String(project.id), project.name);
@@ -53,6 +79,7 @@ async function openOperationCleanup(opId) {
         : '';
       if (!findings.length) {
         body.innerHTML = legacy + '<div class="field-note">В сохранённом результате нет ресурсов для уборки.</div>';
+        renderHistory();
         return;
       }
       body.innerHTML = legacy
@@ -83,14 +110,17 @@ async function openOperationCleanup(opId) {
         action.value = 'disable';
         action.options[0].disabled = true;
       }
+      const selected = new Set();
       const refreshSelection = () => {
-        const count = list.querySelectorAll('input:checked').length;
-        const available = list.querySelectorAll('input:not(:disabled)').length;
-        button.disabled = count === 0 || count > maxTargets;
-        selectAll.disabled = !available || count >= Math.min(available, maxTargets);
+        const count = selected.size;
+        const visible = list.querySelectorAll('input:checked').length;
+        const remaining = maxTargets - count;
+        button.disabled = !count;
+        selectAll.disabled = remaining <= 0 || !list.querySelector('input:not(:disabled):not(:checked)');
         clear.disabled = !count;
-        notice.textContent = count > maxTargets ? 'За один раз можно выбрать до ' + maxTargets + ' ресурсов.'
-          : count ? 'Выбрано: ' + count + (available > maxTargets ? ' из ' + available + ' доступных' : '') : '';
+        const hidden = count - visible;
+        notice.textContent = count ? 'Выбрано: ' + count + (hidden ? ' · вне фильтра: ' + hidden : '') : '';
+        if (!remaining) notice.textContent += ' · достигнут предел ' + maxTargets;
       };
       const renderFindings = () => {
         projectField.hidden = action.value !== 'detach';
@@ -106,8 +136,8 @@ async function openOperationCleanup(opId) {
             action.value === 'detach' ? (item.projects || []).map(p => p.name).filter(Boolean).join(', ') : '',
             action.value === 'disable' && !eligible ? item.disable_reason : '',
           ].filter(Boolean).join(' · ');
-          return `<label class="row" style="cursor:${eligible ? 'pointer' : 'default'}">
-            <input type="checkbox" data-cleanup-target value="${index}" ${eligible ? '' : 'disabled'}>
+          return `<label class="row chk-row" style="cursor:${eligible ? 'pointer' : 'default'}">
+            <input type="checkbox" data-cleanup-target value="${esc(index)}" ${eligible ? '' : 'disabled'} ${selected.has(index) ? 'checked' : ''}>
             <span class="row-body"><span class="row-name" style="display:block;overflow-wrap:anywhere">${esc(title(item))}</span>
             <span class="row-val" style="display:block;white-space:normal">${esc(details)}</span></span></label>`;
         }).join('');
@@ -115,23 +145,37 @@ async function openOperationCleanup(opId) {
         refreshSelection();
       };
       selectAll.onclick = () => {
-        [...list.querySelectorAll('input:not(:disabled)')].forEach((input, index) => {
-          input.checked = index < maxTargets;
-        });
+        for (const input of list.querySelectorAll('input:not(:disabled):not(:checked)')) {
+          if (selected.size >= maxTargets) break;
+          selected.add(Number(input.value));
+          input.checked = true;
+        }
         refreshSelection();
       };
       clear.onclick = () => {
-        list.querySelectorAll('input:checked').forEach(input => { input.checked = false; });
+        selected.clear();
+        renderFindings();
+      };
+      list.onchange = event => {
+        const input = event.target;
+        if (!input.matches('[data-cleanup-target]') || input.disabled) return;
+        const index = Number(input.value);
+        if (!input.checked) selected.delete(index);
+        else if (selected.size < maxTargets) selected.add(index);
+        else input.checked = false;
         refreshSelection();
       };
-      list.onchange = refreshSelection;
-      action.onchange = renderFindings;
-      project.onchange = renderFindings;
+      const resetScope = () => {
+        selected.clear();
+        renderFindings();
+      };
+      action.onchange = resetScope;
+      project.onchange = resetScope;
       status.onchange = renderFindings;
       if (projects.size === 1) project.selectedIndex = 1;
       button.onclick = async () => {
-        const targets = [...list.querySelectorAll('input:checked')].map(input => {
-          const {kind, id} = findings[Number(input.value)];
+        const targets = [...selected].map(index => {
+          const {kind, id} = findings[index];
           return {kind, id: String(id)};
         });
         if (!targets.length || targets.length > maxTargets) return;
@@ -150,6 +194,7 @@ async function openOperationCleanup(opId) {
         }
       };
       renderFindings();
+      renderHistory();
     } catch (e) {
       body.innerHTML = '<button type="button" class="btn btn-s" style="width:100%">Повторить загрузку</button>';
       body.querySelector('button').onclick = load;
@@ -163,7 +208,7 @@ async function openOperationCleanup(opId) {
     notice.textContent = '';
     const project = items.flatMap(item => item.projects || []).find(p => String(p.id) === payload.project_id);
     const scope = project ? ' · ' + (project.name || '#' + project.id) : '';
-    body.innerHTML = `<div class="field-note">${esc(actionText[payload.action] + scope)} · ${readyCount} к применению</div>`
+    body.innerHTML = `<div class="field-note">${esc(actionText[payload.action] + scope)} · ${esc(readyCount)} к применению</div>`
       + (items.length ? `<div class="lst" style="${listStyle}">` + items.map(item => {
         const planned = payload.action === 'detach'
           ? 'Отвязать от проекта · связей: ' + (item.edge_ids || []).length : actionText.disable;
@@ -174,6 +219,7 @@ async function openOperationCleanup(opId) {
     const reload = body.querySelector('[data-cleanup-reload]');
     reload.onclick = load;
     const apply = body.querySelector('[data-cleanup-apply]');
+    (apply || reload).focus();
     if (!apply) return;
     apply.onclick = async () => {
       apply.disabled = true;
@@ -189,10 +235,12 @@ async function openOperationCleanup(opId) {
             : '<div class="field-note">Сервер не вернул результаты по ресурсам.</div>')
           + '<button type="button" class="btn btn-s" style="width:100%;margin-top:12px">Обновить список</button>';
         body.querySelector('button').onclick = load;
+        body.querySelector('button').focus();
         notice.textContent = '';
       } catch (e) {
         apply.remove();
         reload.disabled = false;
+        reload.focus();
         notice.textContent = errRu(e, 'Не удалось подтвердить результат') + '. Обновите список перед новой попыткой.';
       } finally {
         close.disabled = false;

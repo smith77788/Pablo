@@ -16,7 +16,8 @@ try {
       outcome:'skipped', reason:'Изменились права' };
     window.cleanupCalls = [];
     window.api = async (path, options) => {
-      if (!options) return {findings:[item, skipped], legacy:true, max_targets:2};
+      if (!options) return {findings:[item, skipped], legacy:true, max_targets:2,
+        history:[{action:'detach', target:'bot:9007199254740993 project:7'}]};
       const body = JSON.parse(options.body);
       window.cleanupCalls.push({path, body});
       return body.preview ? {items:[{...item, edge_ids:[1,2], outcome:'ready'}, skipped], token:'подтверждение'}
@@ -29,6 +30,9 @@ try {
   await page.addScriptTag({ path: fileURLToPath(new URL('../../mini_app/screens/op_cleanup.js', import.meta.url)) });
   await page.evaluate(() => openOperationCleanup('42'));
   assert.equal(await page.getByText('Проверка сохранена в старом формате.', {exact:false}).count(), 1);
+  assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-cleanup-close')), true);
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-cleanup-action')), true);
   const target = page.locator('[data-cleanup-target]').first();
   const preview = page.getByRole('button', { name: 'Проверить план' });
   assert.equal(await target.isChecked(), false);
@@ -41,6 +45,12 @@ try {
   assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 2);
   await page.getByRole('button', {name:'Снять выбор'}).click();
   assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 0);
+  await page.getByText('История изменений', {exact:true}).click();
+  await page.getByText('Убрать из проекта · bot:9007199254740993 project:7').waitFor();
+  await page.locator('#opCleanupStatus').selectOption('hidden');
+  await page.getByRole('button', {name:'Выбрать доступные'}).click();
+  await page.locator('#opCleanupStatus').selectOption('check_failed');
+  await page.getByText('Выбрано: 1 · вне фильтра: 1').waitFor();
   await page.getByRole('button', {name:'Выбрать доступные'}).click();
   await preview.click();
   await page.getByText('Отвязать от проекта · связей: 2').waitFor();

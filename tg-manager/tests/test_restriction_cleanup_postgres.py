@@ -221,8 +221,11 @@ def test_295_findings_and_parallel_confirmation_preserve_other_projects():
 
         await pool.execute("UPDATE operation_queue SET result=$2::jsonb WHERE id=$1", op_id,
                            json.dumps({"findings": findings[:50]}))
-        old = await cleanup.findings(pool, OWNER, op_id)
+        old = await cleanup.findings(pool, OWNER, op_id, include_history=True)
         assert old["legacy"] and len(old["findings"]) == 50
+        assert {item["target"] for item in old["history"]} == {
+            f"channel:3 project:{project}", f"channel:295 project:{project}"}
+        assert all(item["action"] == "detach" for item in old["history"])
         with pytest.raises(cleanup.CleanupError, match="нет в результатах"):
             await cleanup.plan(pool, OWNER, op_id, [targets[-1]], "disable")
 

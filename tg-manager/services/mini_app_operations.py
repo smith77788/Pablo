@@ -43,7 +43,9 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор операции", 400)
         try:
             if request.method in ("GET", "HEAD"):
-                return _json_resp({"ok": True, **await cleanup.findings(pool, uid, op_id)})
+                report = await cleanup.findings(pool, uid, op_id, include_history=True)
+                report["findings"] = cleanup.public_items(report["findings"])
+                return _json_resp({"ok": True, **report})
             try:
                 data = await request.json()
             except Exception as exc:
@@ -66,7 +68,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 except approval.ApprovalError:
                     log.error("Не настроено подтверждение очистки op_id=%s", op_id)
                     return _err("Сервис подтверждения временно недоступен", 500)
-                return _json_resp({"ok": True, **plan, "token": token})
+                return _json_resp({"ok": True, **plan, "items": cleanup.public_items(plan["items"]), "token": token})
             if not isinstance(token, str) or not token or len(token) > 1024:
                 return _err("Сначала подтвердите предпросмотр очистки", 400)
 
@@ -75,6 +77,7 @@ def setup_routes(app: web.Application, pool) -> None:
 
             verify(await cleanup.plan(*args, project_id=project_id))
             result = await cleanup.apply(*args, project_id=project_id, verify=verify)
+            result["items"] = cleanup.public_items(result["items"])
             return _json_resp(result)
         except cleanup.CleanupError as exc:
             return _err(str(exc), exc.status)
