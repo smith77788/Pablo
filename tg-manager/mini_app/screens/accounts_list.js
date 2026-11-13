@@ -246,8 +246,12 @@ function accRowHtml(a) {
       : '';
     // Чужие сеансы (дозор угона, services/session_watch): кто-то ещё вошёл в
     // аккаунт и может выкинуть наш сеанс. Видно всегда, поверх вердикта.
+    // Тап по предупреждению ведёт прямо в сеансы аккаунта: там каждый сеанс
+    // можно пометить своим («это я») или закрыть по одному. Раньше текст слал в
+    // старый массовый экран «Профили → Очистка и сеансы», где только «закрыть
+    // все» — и свой же сеанс со второго устройства закрылся бы вместе с чужими.
     const theftNote = (a.foreign_sessions > 0)
-      ? `<div class="acc-phone" style="color:var(--red)">🚨 Чужих сеансов: ${Number(a.foreign_sessions)} — закройте в «Профили → Очистка и сеансы»</div>`
+      ? `<div class="acc-phone" style="color:var(--red);cursor:pointer" onclick="event.stopPropagation();openAccSessions(${a.id})" role="button" tabindex="0">🚨 Чужих сеансов: ${Number(a.foreign_sessions)} — разобрать ›</div>`
       : '';
     const sel = ACC_SEL.has(a.id);
     const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id},event)` : `openAccount(${a.id})`;
