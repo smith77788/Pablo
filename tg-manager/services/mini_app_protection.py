@@ -671,14 +671,19 @@ def setup_routes(app: web.Application, pool) -> None:
             except Exception:
                 log.exception("complaint_submit alive_accounts uid=%d", uid)
                 alive = []
+            # force_all: владелец осознанно шлёт СО ВСЕХ выбранных, игнорируя
+            # защиту (кулдаун/риск-пульс) — выше риск бана, но это его решение.
+            force_all = bool(data.get("force_all"))
             # Реально пригодный набор — ТЕМИ ЖЕ фильтрами, что и операция
             # (кулдаун, риск-пульс, мёртвый прокси), а не только is_active+сессия.
             # Иначе пикер показывает «active», владелец выбирает 10, а в работу
             # идёт 1 — без объяснения. Считаем честно и раскладываем остаток.
+            # В force-режиме фильтры ослаблены (кулдаун/карантин не отсеиваем).
             try:
                 from services import resource_selector as _rsel
                 usable = await _rsel.select_all_active(
-                    pool, uid, include_ids=alive, min_trust_score=0.0)
+                    pool, uid, include_ids=alive, min_trust_score=0.0,
+                    respect_cooldown=not force_all, respect_quarantine=not force_all)
                 usable_ids = [int(a["id"]) for a in usable]
             except Exception:
                 log.warning("complaint_submit: select_all_active failed", exc_info=True)
@@ -718,7 +723,7 @@ def setup_routes(app: web.Application, pool) -> None:
                             pool, uid, "mass_report",
                             {"mode": mode, "target": target, "reason": tg_reason,
                              "report_text": report_text, "msg_ids": msg_ids,
-                             "account_ids": usable_ids},
+                             "account_ids": usable_ids, "force": force_all},
                             total_items=len(usable_ids),
                             label=f"Жалоба: {target} [{category}] × {len(usable_ids)} акк.",
                         )

@@ -77,6 +77,20 @@ def test_no_fragment_when_all_used():
     assert frag == "" and counts == {}
 
 
+def test_force_mode_relaxes_protective_filters_on_owner_request():
+    """force (владелец осознанно): кулдаун/риск-пульс НЕ отсеиваем — в работу
+    идёт весь выбор (кроме физически мёртвых). Дефолт — защита."""
+    import inspect
+    src = inspect.getsource(op_worker._exec_mass_report)
+    assert "_force = bool(params.get(\"force\"))" in src, (
+        "mass_report должен читать флаг force из params")
+    # select_all_active вызывается с ослабленными фильтрами при force
+    assert "respect_cooldown=not _force" in src
+    assert "respect_quarantine=not _force" in src
+    # карантин-фильтр пропускается в force-режиме
+    assert "if _force:" in src and "_skipped_quar = 0" in src
+
+
 def test_mass_report_summary_wires_the_breakdown():
     """Сводка исполнителя реально зовёт диагностику и показывает причины."""
     import ast

@@ -23342,8 +23342,13 @@ async def _exec_mass_report(
     if not target or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры mass_report"}
 
+    # force: владелец осознанно шлёт СО ВСЕХ выбранных, игнорируя защиту (кулдаун
+    # после FloodWait и риск-пульс). Мёртвые (бан/деактивация/отозванная сессия)
+    # не включаем даже так — они физически не отправят. Дефолт — защита (force=off).
+    _force = bool(params.get("force"))
     accounts = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0,
+        respect_cooldown=not _force, respect_quarantine=not _force)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -23364,7 +23369,11 @@ async def _exec_mass_report(
 
     # Риск-пульс: жалоба с аккаунта под недавним серьёзным ограничением = быстрый бан
     # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
-    accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+    # В force-режиме НЕ отсеиваем — владелец осознанно принял риск.
+    if _force:
+        _skipped_quar = 0
+    else:
+        accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
 
     # Идемпотентность повтора. Повтор — и автоматический (_maybe_requeue после
     # сетевой ошибки, сброс зависшей операции, воскрешение после перезапуска
