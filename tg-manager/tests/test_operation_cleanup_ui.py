@@ -19,6 +19,14 @@ def test_cleanup_opens_from_the_operation_card_and_shield_links_to_the_card():
     assert "/restrictions/remove_dead" not in shield
 
 
+def test_cleanup_recovery_uses_existing_screens_and_exact_bot_id():
+    source = js_function("openOperationCleanup")
+    assert "openRemovedChannels()" in source
+    assert "openBot(String(item.id))" in source
+    assert "appendRecovery(body, applied.filter(item => item.outcome === 'applied'))" in source
+    assert "item.active === false" in source
+
+
 def test_cleanup_confirms_exact_targets_in_chromium():
     node = shutil.which("node")
     if not node:

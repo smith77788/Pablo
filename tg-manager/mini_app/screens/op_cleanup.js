@@ -44,6 +44,26 @@ async function openOperationCleanup(opId) {
     unchanged:'Без изменений', skipped:'Пропущено', failed:'Ошибка', stale:'Состояние изменилось', not_found:'Не найден'};
   let findings = [];
 
+  function appendRecovery(container, items) {
+    const bots = items.filter(item => item.kind === 'bot');
+    if (items.some(item => item.kind === 'channel' || item.kind === 'group')) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-s';
+      button.textContent = 'Открыть список восстановления каналов и групп';
+      button.onclick = () => { close.click(); openRemovedChannels(); };
+      container.append(button);
+    }
+    for (const item of bots) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-s';
+      button.textContent = 'Открыть настройки бота · ' + title(item);
+      button.onclick = () => { close.click(); openBot(String(item.id)); };
+      container.append(button);
+    }
+  }
+
   async function load() {
     notice.textContent = '';
     body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
@@ -195,6 +215,8 @@ async function openOperationCleanup(opId) {
       };
       renderFindings();
       renderHistory();
+      const disabledChannels = findings.filter(item => item.active === false && item.kind !== 'bot');
+      appendRecovery(body, disabledChannels);
     } catch (e) {
       body.innerHTML = '<button type="button" class="btn btn-s" style="width:100%">Повторить загрузку</button>';
       body.querySelector('button').onclick = load;
@@ -236,6 +258,9 @@ async function openOperationCleanup(opId) {
           + '<button type="button" class="btn btn-s" style="width:100%;margin-top:12px">Обновить список</button>';
         body.querySelector('button').onclick = load;
         body.querySelector('button').focus();
+        if (payload.action === 'disable') {
+          appendRecovery(body, applied.filter(item => item.outcome === 'applied'));
+        }
         notice.textContent = '';
       } catch (e) {
         apply.remove();

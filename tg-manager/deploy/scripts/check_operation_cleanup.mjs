@@ -15,8 +15,11 @@ try {
       status:'check_failed', projects:[{id:7,name:'Проект'}], can_disable:false,
       outcome:'skipped', reason:'Изменились права' };
     window.cleanupCalls = [];
+    window.openRemovedChannels = () => { window.cleanupRecovery = 'channels'; };
     window.api = async (path, options) => {
-      if (!options) return {findings:[item, skipped], legacy:true, max_targets:2,
+      if (!options) return {findings:[item, skipped, {kind:'channel', id:'9007199254740995',
+        title:'Отключённый канал', status:'restricted', active:false, can_disable:false,
+        disable_reason:'Ресурс уже отключён в Infragram'}], legacy:true, max_targets:2,
         history:[{action:'detach', target:'bot:9007199254740993 project:7'}]};
       const body = JSON.parse(options.body);
       window.cleanupCalls.push({path, body});
@@ -66,6 +69,10 @@ try {
   assert.deepEqual(await page.evaluate(() => window.cleanupCalls), [
     {path, body:{...base, preview:true}}, {path, body:{...base, token:'подтверждение'}},
   ]);
+  await page.getByRole('button', {name:'Обновить список'}).click();
+  await page.getByRole('button', {name:'Открыть список восстановления каналов и групп'}).click();
+  assert.equal(await page.evaluate(() => window.cleanupRecovery), 'channels');
+  assert.equal(await page.getByRole('dialog').count(), 0);
 } finally {
   await browser.close();
 }
