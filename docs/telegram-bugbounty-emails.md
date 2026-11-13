@@ -279,9 +279,21 @@ This engine is embedded natively (not as WASM) in:
 - **iOS:** `widget-sandbox/packages/ios/Sources/CQuickJS` — compiled into the widget-sandbox framework.
 - **Android:** `widget-sandbox/packages/android` — native widget sandbox package.
 
-The JS content of a bot widget reaches this engine. `trusted_validator.cpp` (the only content filter
-found in the widget sandbox source) validates CSS selectors, animations, and queries — not the JavaScript
-language. No block on generator functions was found.
+The JS content of a bot widget reaches this engine **raw**, confirmed by reading the widget-sandbox
+source. A widget's inline `<script>` is fed directly to native `JS_Eval` with no JavaScript-source
+language filter on all three native platforms, and the engine submodule is pinned at the exact commit
+above:
+- `.gitmodules` pins `packages/ios/Sources/CQuickJS/quickjs` @ `b526a817…` (same commit as the ASan repro).
+- Desktop: `sandbox_engine.cpp:902` `callTw("nextScript")` → `:914` `evalScript(code)` → `:897`
+  `js_->evaluate(code)` → `quickjs_context.cpp:144` `qjs_eval(context_, code.c_str(), …)`.
+- iOS: `CQuickJS/shim/qjs_shim.c:36` `JS_Eval(ctx, code, len, …)`.
+- Android: `SandboxEngine.kt:962` `callTw("nextScript")` → `:953` `ctx.evaluate(code, filename, asModule)`.
+
+`trusted_validator.cpp` validates the **output ops** (elements, attributes, CSS, URLs) the widget
+produces — not the input JS. `profile.json` explicitly declares `js.eval` ("eval / new Function inside
+QuickJS", status `in`) and async/microtasks as supported, so arbitrary runtime code generation is a
+documented feature; `eval("function* g(){…}")` would defeat any hypothetical static subset. No block on
+generator functions exists. The #1910 generator UAF is therefore reachable verbatim from a bot widget.
 
 **Steps to reproduce (test environment only):**
 1. Create a bot via @BotFather in the Telegram test DC; enable widget / Mini App.

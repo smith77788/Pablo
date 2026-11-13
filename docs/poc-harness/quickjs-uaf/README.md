@@ -74,8 +74,33 @@ during a later GC mark. Confirmed on Telegram's fork.
   engine runs untrusted bot JS → native UAF). Report to Telegram for the
   exposure regardless of payout; they maintain the fork and should rebase/fix.
 
-## Still to confirm before claiming full RCE on a real client
-1. That the widget-sandbox actually dispatches a bot widget's arbitrary JS to
-   this engine with generators enabled (vs a restricted subset).
-2. The sandbox process/thread isolation (whether a native UAF in the engine
-   thread reaches the host process, or is contained to a sandboxed child).
+## Reachability — CONFIRMED from `TelegramMessenger/widget-sandbox` source
+Item 1 below is now resolved by reading the widget-sandbox source: a widget's
+inline `<script>` is fed raw to native `JS_Eval` with **no JS-source language
+filter** on all three native platforms, and the engine submodule is pinned at
+the exact commit this PoC reproduces on.
+
+- **Submodule pin matches this build:** `.gitmodules` →
+  `packages/ios/Sources/CQuickJS/quickjs` @ `b526a817…` (the same commit as above).
+- **Desktop:** `sandbox_engine.cpp:902` `callTw("nextScript")` → `:914`
+  `evalScript(code)` → `:897` `js_->evaluate(code)` → `quickjs_context.cpp:144`
+  `qjs_eval(context_, code.c_str(), …)` (raw `JS_Eval`).
+- **iOS:** `CQuickJS/shim/qjs_shim.c:36` `JS_Eval(ctx, code, len, …)`.
+- **Android:** `SandboxEngine.kt:962` `callTw("nextScript")` → `:953`
+  `ctx.evaluate(code, filename, asModule)` (JNI → native `JS_Eval`).
+- **No source subset; eval is explicitly allowed:** `profile.json` lists
+  `js.eval` ("eval / new Function inside QuickJS", status **in**) and
+  `js.microtasks` (Promise/async, in). `trusted_validator.cpp` validates the
+  **output ops** (elements/attrs/CSS/URLs), not the input JS. The only input
+  filter in `pumpScripts` skips `src` (external) scripts; inline `code` runs raw.
+  Generators have no block, and `eval("function* g(){…}")` would defeat any
+  hypothetical static subset anyway.
+
+→ The #1910 generator UAF PoC is reachable verbatim from a bot widget on
+Desktop, iOS, and Android.
+
+## Still to confirm (severity, not reachability)
+- The sandbox process/thread isolation on iOS/Android (whether a native UAF in
+  the engine thread reaches the host process, or is contained to a sandboxed
+  child). On Desktop (Win/Lin) there is no sandbox process, so the UAF is in
+  Telegram's own address space. Controlled exploitation was not attempted.

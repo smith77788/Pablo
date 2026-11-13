@@ -1189,8 +1189,9 @@ freed by thread T0:
    клиент загружает JavaScript виджета и передаёт его нативному движку QuickJS
    (`tdesktop/Telegram/SourceFiles/tgw/tgw_runtime.cpp` → `tgw_widget_sandbox.cpp`).
 
-3. **Выполнение PoC-кода.** Виджет выполняет PoC выше. `trusted_validator.cpp` проверяет только CSS-
-   селекторы/анимации — **JS-язык (включая генераторы) не блокируется**. Генератор-объект создан,
+3. **Выполнение PoC-кода.** Виджет выполняет PoC выше. `trusted_validator.cpp` проверяет только
+   **выходные ops** (элементы/атрибуты/CSS/URL), **не JS-источник**. Inline-`<script>` виджета идёт
+   сырым в нативный `JS_Eval` (цепочка доказана по исходникам, см. ниже). Генератор-объект создан,
    GC запущен, 112-байтный heap-регион освобождён и прочитан повторно.
 
 4. **UAF-примитив → RCE.** Heap-use-after-free — классический примитив для heap-spray + type confusion.
@@ -1214,13 +1215,54 @@ freed by thread T0:
 
 ---
 
-### Что ещё нужно подтвердить до заявления полного RCE
+### Reachability — ПОДТВЕРЖДЕНО ПО ИСХОДНИКАМ (`TelegramMessenger/widget-sandbox`)
 
-1. **Виджет действительно диспатчит произвольный JS**: подтвердить что движок получает сырой JS из
-   виджета без языкового subset-фильтра (генераторы не запрещены). `trusted_validator.cpp` кода не
-   показывает JS-ограничений — но нужна финальная проверка на реальном клиенте.
-2. **Изоляция widget-sandbox-процесса на iOS/Android**: определить, является ли QuickJS-поток частью
-   основного процесса Telegram или изолированного child-процесса.
+Главная неопределённость первого черновика («виджет действительно диспатчит произвольный JS в движок»)
+**закрыта чтением кода**. Цепочка от inline-`<script>` виджета до сырого `JS_Eval` в форке — без единого
+JS-source-фильтра — одинакова на всех трёх нативных платформах:
+
+**Submodule-пин движка совпадает с нашей ASan-сборкой:**
+```
+.gitmodules → packages/ios/Sources/CQuickJS/quickjs
+  url = https://github.com/TelegramMessenger/quickjs.git
+  pinned @ b526a817f188ef861eea7666d68361c7851673a0   ← ТОТ ЖЕ коммит, где воспроизведён UAF
+```
+
+**Desktop** (`packages/desktop/sandbox/src/`):
+```
+sandbox_engine.cpp:902  callTw("nextScript")                       // тянем inline-script виджета
+sandbox_engine.cpp:914  evalScript(code->asString(), "inline-script-N.js", asModule)
+sandbox_engine.cpp:897  js_->evaluate(code, filename, asModule)
+quickjs_context.cpp:144 qjs_eval(context_, code.c_str(), code.size(), filename, asModule)  // сырой JS_Eval
+```
+
+**iOS** (`packages/ios/Sources/CQuickJS/shim/qjs_shim.c:35`):
+```c
+JSValue qjs_eval(JSContext *ctx, const char *code, size_t len, const char *filename, bool as_module) {
+    return JS_Eval(ctx, code, len, filename, as_module ? JS_EVAL_TYPE_MODULE : JS_EVAL_TYPE_GLOBAL);
+}
+```
+
+**Android** (`packages/android/.../SandboxEngine.kt`):
+```
+SandboxEngine.kt:962  callTw("nextScript")
+SandboxEngine.kt:953  ctx.evaluate(code, filename, asModule)        // JNI → native JS_Eval
+```
+
+**Нет source-фильтра + eval явно разрешён.** `profile.json` декларирует `js.eval` ("eval / new Function
+inside QuickJS", status **"in"**, :3943) и `js.microtasks` (Promise/async, "in", :3830). Единственный
+входной фильтр в `pumpScripts` — пропуск `src`-скриптов (внешние не грузятся); inline-`code` исполняется
+сырым. То есть даже при гипотетическом статическом subset-фильтре `eval("function* g(){…}")` обошёл бы
+его. Генераторы — стандартная фича без блока → PoC #1910 исполняется дословно из бот-виджета.
+
+### Остаётся подтвердить только степень RCE (не reachability)
+
+- **Изоляция widget-sandbox-потока/процесса на iOS/Android**: QuickJS крутится «on its own thread»
+  (README). Нужно определить, изолирован ли этот поток в отдельном процессе (тогда UAF контейнится
+  в sandbox-child) или делит адресное пространство с хостом. На Desktop (Win/Lin) sandbox процесса нет
+  → UAF в engine-потоке напрямую в адресном пространстве Telegram.
+- Контролируемая эксплуатация (heap-spray → контроль указателя) **не выполнялась** — репорт покрывает
+  reachability и сам UAF-примитив.
 
 ---
 
