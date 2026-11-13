@@ -8908,7 +8908,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-title">➕ Добавить узел</div>
     <div class="field">
       <label>Тип узла *</label>
-      <select id="nbNodeType" class="sel">
+      <select id="nbNodeType" class="sel" onchange="document.getElementById('nbNodeId').value='';loadProjectCatalog()">
         <option value="bot">🤖 Бот</option>
         <option value="channel">📡 Канал</option>
         <option value="group">👥 Группа</option>
@@ -8916,8 +8916,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </select>
     </div>
     <div class="field">
-      <label>ID объекта *</label>
-      <input type="text" id="nbNodeId" placeholder="bot_id, channel_id…" class="inp">
+      <div id="nbCatalog" hidden>
+        <label for="nbCatalogQuery">Поиск в каталоге</label>
+        <input type="search" id="nbCatalogQuery" class="inp" maxlength="100" oninput="queueProjectCatalog()">
+        <div id="nbCatalogItems" class="lst" style="max-height:30vh;overflow:auto"></div>
+        <div id="nbCatalogStatus" class="hint" role="status"></div>
+      </div>
+      <label for="nbNodeId">ID объекта</label>
+      <input type="text" inputmode="numeric" id="nbNodeId" placeholder="Введите ID или выберите из каталога" class="inp">
     </div>
     <div class="field">
       <label>Метка</label>
@@ -16618,9 +16624,16 @@ let MP_SAMPLE = [];
 let MP_PROJECT_ID = null;
 let MP_PROJECT_CHANNEL_ID = null;
 function openMassPub(projectId, channelId) {
-  projectId = Number.isSafeInteger(projectId) && projectId > 0 ? projectId : null;
+  const validProject = Number.isSafeInteger(projectId) && projectId > 0;
+  const exactChannel = Number.isSafeInteger(channelId) || typeof channelId === 'string' ? String(channelId) : '';
+  if ((projectId != null && !validProject) ||
+      (channelId != null && (!validProject || !/^-?[1-9]\d{0,18}$/.test(exactChannel)))) {
+    toast('Не удалось определить канал или проект');
+    return;
+  }
+  projectId = validProject ? projectId : null;
   MP_PROJECT_ID = projectId;
-  MP_PROJECT_CHANNEL_ID = projectId && Number.isSafeInteger(channelId) && channelId !== 0 ? channelId : null;
+  MP_PROJECT_CHANNEL_ID = exactChannel || null;
   const option = document.getElementById('mpProjectOption');
   option.hidden = !projectId;
   option.disabled = !projectId;
@@ -16920,7 +16933,7 @@ async function sendMassPublish() {
     const when = scheduled_for ? '\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU') : '';
     if (!(await askConfirm(edNote+'Опубликовать в каналах проекта ('+projectTargets.length+')?\n\n'
         + _mpChList(projectTargets, 12) + when + _repNote))) return;
-    channel_ids = projectTargets.map(channel => channel.channel_id);
+    channel_ids = projectTargets.map(channel => channel.channel_id_text ?? channel.channel_id);
   } else if (scope === 'pick') {
     // Ручной выбор каналов (поглощённый «Быстрый пост»): публикуем ровно в
     // отмеченные. Канарейка тут не нужна — набор и так ограничен вручную.
@@ -34684,7 +34697,7 @@ function renderNetNodesEdges(d) {
     <div class="ava ava-blue">${icoMap[n.type] || '⚫'}</div>
     <div class="li-body">
       <div class="li-name">${esc(n.label || objRu(n.type))}</div>
-      <div class="li-sub">${esc(objRu(n.type))} · ${n.object_id ? 'ID: ' + esc(n.object_id) : 'создастся при развёртывании'}</div>
+      <div class="li-sub">${esc(objRu(n.type))} · ${n.object_id ? 'ID: ' + esc(n.object_id_text ?? n.object_id) : 'создастся при развёртывании'}${n.resource_available === false ? ' · недоступен в каталоге' : ''}</div>
     </div>
     <div class="li-right">${pilot
       ? '<button type="button" class="btn btn-s resource-actions-trigger" data-resource-menu aria-label="Действия">⋯</button>'
@@ -34749,9 +34762,56 @@ async function applyNetTemplate(template) {
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
 }
 
+let projectCatalogRequest = 0;
+let projectCatalogTimer;
+
+function queueProjectCatalog() {
+  projectCatalogRequest++;
+  clearTimeout(projectCatalogTimer);
+  projectCatalogTimer = setTimeout(loadProjectCatalog, 200);
+}
+
+async function loadProjectCatalog() {
+  const panel = document.getElementById('nbCatalog');
+  if (panel.hidden) return;
+  const projectId = _currentNetId;
+  const revision = ++projectCatalogRequest;
+  const kind = document.getElementById('nbNodeType').value;
+  const query = document.getElementById('nbCatalogQuery').value.trim();
+  const list = document.getElementById('nbCatalogItems');
+  const status = document.getElementById('nbCatalogStatus');
+  list.replaceChildren();
+  status.textContent = 'Загрузка каталога…';
+  try {
+    const params = new URLSearchParams({type: kind, q: query});
+    const result = await api(`/api/miniapp/networks/${projectId}/catalog?${params}`);
+    if (revision !== projectCatalogRequest || projectId !== _currentNetId) return;
+    for (const item of result.items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-s';
+      button.style.width = '100%';
+      button.textContent = item.label + (item.username ? ' · @' + item.username : '') + ' · ' + item.id;
+      button.onclick = () => {
+        if (revision !== projectCatalogRequest || projectId !== _currentNetId) return;
+        document.getElementById('nbNodeId').value = item.id;
+        status.textContent = 'Выбран ' + item.label;
+      };
+      list.append(button);
+    }
+    status.textContent = !result.items.length ? 'Ресурсы не найдены' : result.has_more ? 'Показано 30. Уточните поиск.' : '';
+  } catch (error) {
+    if (revision !== projectCatalogRequest || projectId !== _currentNetId) return;
+    status.textContent = errRu(error, 'Каталог не загрузился. Измените запрос для повтора.');
+  }
+}
+
 function openNetAddNodeModal() {
   if (!_currentNetId) { toast('❗ Выберите сеть'); return; }
   document.getElementById('nbNodeId').value = '';
+  document.getElementById('nbCatalogQuery').value = '';
+  document.getElementById('nbCatalog').hidden = !window._lastNetData?.project_pilot;
+  loadProjectCatalog();
   document.getElementById('nbNodeLabel').value = '';
   document.getElementById('nbNodeErr').style.display = 'none';
   document.getElementById('mo-net-node').classList.add('show');
@@ -34766,9 +34826,9 @@ async function submitNetAddNode() {
   errEl.style.display = 'none';
   if (!object_id) { errEl.textContent = 'Введите ID объекта'; errEl.style.display = 'block'; return; }
   try {
-    await api(`/api/miniapp/networks/${_currentNetId}/nodes`, { method: 'POST', body: JSON.stringify({ type, object_id, label }) });
+    const r = await api(`/api/miniapp/networks/${_currentNetId}/nodes`, { method: 'POST', body: JSON.stringify({ type, object_id, label }) });
     closeModal('mo-net-node');
-    toast('✅ Узел добавлен');
+    toast(r.already_linked ? 'Ресурс уже в проекте' : '✅ Узел добавлен');
     selectNetwork(_currentNetId);
   } catch(e) { errEl.textContent = 'Ошибка: ' + errRu(e); errEl.style.display = 'block'; }
 }
@@ -34805,9 +34865,9 @@ async function submitNetAddEdge() {
   errEl.style.display = 'none';
   if (from_id === to_id) { errEl.textContent = 'Узлы должны быть разными'; errEl.style.display = 'block'; return; }
   try {
-    await api(`/api/miniapp/networks/${_currentNetId}/edges`, { method: 'POST', body: JSON.stringify({ from_id, to_id, type }) });
+    const r = await api(`/api/miniapp/networks/${_currentNetId}/edges`, { method: 'POST', body: JSON.stringify({ from_id, to_id, type }) });
     closeModal('mo-net-edge');
-    toast('✅ Ребро добавлено');
+    toast(r.already_linked ? 'Связь уже есть' : '✅ Связь добавлена');
     selectNetwork(_currentNetId);
   } catch(e) { errEl.textContent = 'Ошибка: ' + errRu(e); errEl.style.display = 'block'; }
 }

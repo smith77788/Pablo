@@ -7759,7 +7759,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 if channel_id is None:
                     return _err("Неверный канал проекта", 400)
             channels = await _nb.project_publish_channels(pool, uid, project_id, channel_id)
-            return _json_resp({"ok": True, "total": len(channels), "sample": channels})
+            return _json_resp({"ok": True, "total": len(channels), "sample": [
+                {**row, "channel_id_text": str(row["channel_id"])} for row in channels
+            ]})
         try:
             sample_limit = min(validate_integer(request.query.get("sample", "12"),
                                                 min_val=0, max_val=100) or 0, 100)

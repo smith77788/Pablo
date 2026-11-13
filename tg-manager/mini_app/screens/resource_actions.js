@@ -2,10 +2,12 @@
 
 // Действия открывают штатные карточки и используют их проверки доступа.
 function projectResourceActions(node, trigger, projectId) {
-  const id = Number(node.object_id);
+  const exact = String(node.object_id_text ?? node.object_id ?? '');
+  const parsed = Number(exact);
+  const id = Number.isSafeInteger(parsed) ? parsed : exact;
   const primary = [];
   const secondary = [];
-  if (Number.isSafeInteger(id) && id !== 0) {
+  if (/^-?[1-9]\d*$/.test(exact) && node.resource_available !== false) {
     const openers = {
       account: () => openAccount(id),
       bot: () => openBot(id),
@@ -19,7 +21,7 @@ function projectResourceActions(node, trigger, projectId) {
     if (node.type === 'channel' && Number.isSafeInteger(projectId) && projectId > 0) {
       primary.push(['Подготовить публикацию', () => openMassPub(projectId, id)]);
     }
-    primary.push(['Копировать ID', () => copyText(String(node.object_id))]);
+    primary.push(['Копировать ID', () => copyText(exact)]);
     if (node.type === 'account') secondary.push(['Диалоги профиля', () => openAccountDialogs(id)]);
     if (node.type === 'bot') secondary.push(['Команды бота', () => openBotCommands(id)]);
   }

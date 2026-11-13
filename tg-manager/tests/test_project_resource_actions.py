@@ -38,6 +38,14 @@ const channel = projectResourceActions({id: 7, type: 'channel', object_id: 52}, 
 channel.primary[1][1]();
 assert.deepEqual(calls.pop(), ['publish', 13, 52]);
 assert.equal(projectResourceActions({id: 7, type: 'group', object_id: 52}, trigger, 13).primary.length, 2);
+const big = projectResourceActions({id: 7, type: 'channel', object_id: 9007199254740992,
+  object_id_text: '9007199254740993'}, trigger, 13);
+big.primary[1][1]();
+assert.deepEqual(calls.pop(), ['publish', 13, '9007199254740993']);
+big.primary[2][1]();
+assert.deepEqual(calls.pop(), ['copy', '9007199254740993']);
+assert.deepEqual(projectResourceActions({id: 7, type: 'channel', object_id: 52,
+  resource_available: false}, trigger, 13).primary, []);
 const unbound = projectResourceActions({id: 7, type: 'channel', object_id: null}, trigger);
 assert.deepEqual(unbound.primary, []);
 unbound.secondary[0][1]();

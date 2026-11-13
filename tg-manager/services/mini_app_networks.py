@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import asyncpg
 from aiohttp import web
 
 
@@ -22,7 +23,7 @@ def setup_routes(app: web.Application, pool) -> None:
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, _safe_count, _safe_fetch,
         _safe_fetchrow, log,
     )
-    from services.security import validate_integer, validate_string
+    from services.security import tg_id, validate_integer, validate_string
 
     # Где искать имя объекта каждого рода. Экосистема хранит только тип и id, и
     # экран показывал «account #17» — номер строки в базе, по которому владелец
@@ -399,8 +400,21 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Сеть не найдена", 404)
         label_by_id = {n["id"]: (n.get("label") or n.get("node_type") or "#") for n in d["nodes"]}
         nodes = [{"id": n["id"], "type": n.get("node_type"),
-                  "label": n.get("label") or "", "object_id": n.get("ref_id")}
+                  "label": n.get("label") or "", "object_id": n.get("ref_id"),
+                  "object_id_text": str(n["ref_id"]) if n.get("ref_id") is not None else None}
                  for n in d["nodes"]]
+        pilot = _nb.project_pilot_enabled(uid)
+        if pilot:
+            for kind in _nb.PROJECT_RESOURCES:
+                matching = [n for n in nodes if ("group" if n["type"] == "chat" else n["type"]) == kind
+                            and n["object_id"] is not None]
+                ids = sorted({n["object_id"] for n in matching})
+                if not ids:
+                    continue
+                rows = await _nb.project_catalog(pool, uid, kind, ids=ids, limit=len(ids))
+                available = {row["id"] for row in rows}
+                for node in matching:
+                    node["resource_available"] = node["object_id_text"] in available
         edges = [{"id": e["id"], "from_id": e.get("source_node_id"),
                   "to_id": e.get("target_node_id"), "type": e.get("edge_type"),
                   "from_label": label_by_id.get(e.get("source_node_id"), "#"),
@@ -410,7 +424,7 @@ def setup_routes(app: web.Application, pool) -> None:
         return _json_resp({"id": nid, "name": inst.get("name"),
                            "status": inst.get("status"),
                            "description": inst.get("description") or "",
-                           "project_pilot": _nb.project_pilot_enabled(uid),
+                           "project_pilot": pilot,
                            "nodes": nodes, "edges": edges})
 
     async def network_deploy_plan(request: web.Request) -> web.Response:
@@ -524,73 +538,102 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("crosspost_run uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def network_catalog(request: web.Request) -> web.Response:
+        from services import network_builder as nb
+
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not nb.project_pilot_enabled(uid):
+            return _err("Недоступно", 403)
+        nid = validate_integer(request.match_info["net_id"], min_val=1)
+        kind = request.query.get("type", "")
+        search = request.query.get("q", "").strip()
+        if nid is None or kind not in nb.PROJECT_RESOURCES or len(search) > 100:
+            return _err("Неверные параметры каталога", 400)
+        if not await pool.fetchval(
+            "SELECT 1 FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid,
+        ):
+            return _err("Сеть не найдена", 404)
+        rows = await nb.project_catalog(pool, uid, kind, search=search)
+        return _json_resp({"items": [dict(row) for row in rows[:30]], "has_more": len(rows) > 30})
+
     async def network_add_node(request: web.Request) -> web.Response:
+        from services import network_builder as nb
+
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            nid = int(request.match_info["net_id"])
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
-        if not owns:
-            return _err("Сеть не найдена", 404)
-        from services import network_builder as _nb
-        typ = validate_string(body.get("type"), max_len=40) or "node"
-        label = validate_string(body.get("label"), max_len=200) or ""
-        try:
-            ref = int(body.get("object_id")) if str(body.get("object_id") or "").strip() else None
-        except (TypeError, ValueError):
-            ref = None
-        res = await _nb.add_node(pool, nid, typ, label, ref_id=ref)
-        return _json_resp(res)
+        nid = validate_integer(request.match_info["net_id"], min_val=1)
+        if nid is None or not isinstance(body, dict):
+            return _err("Неверный запрос", 400)
+        typ = body.get("type")
+        label = body.get("label", "")
+        raw = body.get("object_id")
+        if typ == "chat":
+            typ = "group"
+        if not isinstance(typ, str) or typ not in nb.PROJECT_RESOURCES:
+            return _err("Неизвестный тип ресурса", 400)
+        if not isinstance(label, str) or len(label) > 200:
+            return _err("Метка должна содержать до 200 символов", 400)
+        ref = None
+        if raw is not None and raw != "":
+            if type(raw) not in (int, str) or (ref := tg_id(raw, positive=typ in ("bot", "account"))) is None:
+                return _err("Неверный ID объекта", 400)
+        res = await nb.add_project_node(pool, nid, typ, label.strip(), ref_id=ref, owner_id=uid)
+        return _json_resp(res) if res["ok"] else _err(res["error"], res["status"])
 
     async def network_delete_node(request: web.Request) -> web.Response:
+        from services import network_builder as nb
+
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            node_id = int(request.match_info["node_id"])
-        except (KeyError, ValueError):
+        node_id = validate_integer(request.match_info["node_id"], min_val=1)
+        if node_id is None:
             return _err("Неверный идентификатор", 400)
-        await pool.execute(
-            "DELETE FROM network_nodes WHERE id=$1 AND instance_id IN "
-            "(SELECT id FROM network_instances WHERE owner_id=$2)", node_id, uid)
-        return _json_resp({"ok": True})
+        try:
+            res = await nb.detach_node(pool, uid, node_id)
+        except (asyncpg.LockNotAvailableError, asyncpg.DeadlockDetectedError):
+            return _err("Проект сейчас изменяется. Повторите позже.", 409)
+        return _json_resp(res) if res["ok"] else _err(res["error"], res["status"])
 
     async def network_add_edge(request: web.Request) -> web.Response:
+        from services import network_builder as nb
+
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            nid = int(request.match_info["net_id"])
             body = await request.json()
-            frm = int(body.get("from_id")); to = int(body.get("to_id"))
         except Exception:
             return _err("Неверный запрос", 400)
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
-        if not owns:
-            return _err("Сеть не найдена", 404)
-        from services import network_builder as _nb
-        typ = validate_string(body.get("type"), max_len=40) or "forward"
-        res = await _nb.add_edge(pool, nid, frm, to, edge_type=typ)
-        return _json_resp(res)
+        nid = validate_integer(request.match_info["net_id"], min_val=1)
+        if not isinstance(body, dict):
+            return _err("Неверный запрос", 400)
+        frm = validate_integer(str(body.get("from_id")), min_val=1)
+        to = validate_integer(str(body.get("to_id")), min_val=1)
+        typ = body.get("type", "forward")
+        if not nid or not frm or not to or frm == to or typ not in ("forward", "crosspost", "mention", "referral", "admin"):
+            return _err("Укажите два разных узла и тип связи", 400)
+        res = await nb.add_project_edge(pool, nid, frm, to, typ, owner_id=uid)
+        return _json_resp(res) if res["ok"] else _err(res["error"], res["status"])
 
     async def network_delete_edge(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            edge_id = int(request.match_info["edge_id"])
-        except (KeyError, ValueError):
+        edge_id = validate_integer(request.match_info["edge_id"], min_val=1)
+        if edge_id is None:
             return _err("Неверный идентификатор", 400)
-        await pool.execute(
+        result = await pool.execute(
             "DELETE FROM network_edges WHERE id=$1 AND instance_id IN "
             "(SELECT id FROM network_instances WHERE owner_id=$2)", edge_id, uid)
-        return _json_resp({"ok": True})
+        return _json_resp({"ok": True}) if result == "DELETE 1" else _err("Связь не найдена", 404)
 
     async def network_templates(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -691,6 +734,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_delete("/api/miniapp/networks/nodes/{node_id}", network_delete_node)
     app.router.add_delete("/api/miniapp/networks/edges/{edge_id}", network_delete_edge)
     app.router.add_get("/api/miniapp/networks/{net_id}", network_detail_plural)
+    app.router.add_get("/api/miniapp/networks/{net_id}/catalog", network_catalog)
     app.router.add_get("/api/miniapp/networks/{net_id}/deploy_plan", network_deploy_plan)
     app.router.add_post("/api/miniapp/networks/{net_id}/deploy", network_deploy)
     app.router.add_get("/api/miniapp/crosspost/links", crosspost_links_list)

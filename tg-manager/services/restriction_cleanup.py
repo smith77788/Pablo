@@ -180,7 +180,7 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
 
     if lock:
         await conn.execute("SET LOCAL lock_timeout = '3s'")
-        if any(kind != "bot" for kind, _ in keys):
+        if action == "detach" or any(kind != "bot" for kind, _ in keys):
             # Захват публикации не должен совпасть с проверкой привязок.
             await conn.execute("LOCK TABLE operation_queue IN SHARE ROW EXCLUSIVE MODE")
             if action == "disable":
@@ -198,6 +198,11 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
         if not await conn.fetchval(project_sql + (" FOR UPDATE" if lock else ""), project_id, owner_id):
             raise CleanupError("Проект не найден", 404)
 
+    deployment_running = action == "detach" and await conn.fetchval(
+        """SELECT 1 FROM operation_queue WHERE owner_id=$1 AND status='running'
+           AND op_type='deploy_network' AND params->>'instance_id'=$2 LIMIT 1""",
+        owner_id, str(project_id),
+    )
     items, nodes = await _snapshot(
         conn, owner_id, {key: entries[key] for key in sorted(keys)}, lock=lock)
     channel_ids = [str(item_id) for kind, item_id in sorted(keys) if kind != "bot"]
@@ -224,7 +229,9 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
             "kind": key[0], "id": str(key[1]),
             "title": str(entry.get("title") or key[1]), "status": entry["status"],
         })
-        if item["id"] in busy_channels and item["kind"] != "bot":
+        if deployment_running:
+            reason = "Дождитесь завершения развёртывания проекта"
+        elif item["id"] in busy_channels and item["kind"] != "bot":
             reason = "Дождитесь завершения текущей публикации"
         elif "active" not in item:
             reason = "Ресурс больше не доступен владельцу"

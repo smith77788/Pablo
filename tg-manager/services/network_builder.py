@@ -219,6 +219,124 @@ async def project_publish_channels(
     return [dict(row) for row in rows]
 
 
+# Выбираются только ресурсы каталога владельца. Имена таблиц и столбцов
+# заданы здесь, пользовательский ввод передаётся параметрами.
+_PROJECT_GROUPS = "('group','supergroup','megagroup','chat','gigagroup')"
+PROJECT_RESOURCES = {
+    "account": ("tg_accounts", "id", "owner_id", "first_name", "TRUE"),
+    "bot": ("managed_bots", "bot_id", "added_by", "first_name", "deleted_at IS NULL"),
+    "channel": ("managed_channels", "channel_id", "owner_id", "title",
+                "(type IS NULL OR type='channel')"),
+    "group": ("managed_channels", "channel_id", "owner_id", "title", f"type IN {_PROJECT_GROUPS}"),
+}
+
+
+async def project_catalog(pool, owner_id: int, kind: str, *, search="", ids=None, limit=31):
+    table, key, owner, title, eligible = PROJECT_RESOURCES[kind]
+    return await pool.fetch(
+        f"""SELECT {key}::text AS id, COALESCE(NULLIF({title},''), NULLIF(username,''), {key}::text) AS label,
+                   COALESCE(username,'') AS username
+              FROM {table}
+             WHERE {owner}=$1 AND ({eligible})
+               AND ($2::bigint[] IS NULL OR {key}=ANY($2::bigint[]))
+               AND ($3='' OR strpos(lower(COALESCE({title},'')), lower($3))>0
+                    OR strpos(lower(COALESCE(username,'')), lower(ltrim($3,'@')))>0
+                    OR strpos({key}::text, $3)>0)
+             ORDER BY {key} LIMIT $4""",
+        owner_id, ids, search, limit,
+    )
+
+
+async def add_project_node(pool, instance_id: int, node_type: str, label: str,
+                   ref_id: int | None = None, *, owner_id: int) -> dict:
+    async with pool.acquire() as conn, conn.transaction():
+        if not await conn.fetchval(
+            "SELECT id FROM network_instances WHERE id=$1 AND owner_id=$2 FOR UPDATE",
+            instance_id, owner_id,
+        ):
+            return {"ok": False, "status": 404, "error": "Сеть не найдена"}
+        if ref_id is not None:
+            table, key, owner, _, eligible = PROJECT_RESOURCES[node_type]
+            if not await conn.fetchval(
+                f"SELECT {key} FROM {table} WHERE {owner}=$1 AND {key}=$2 AND ({eligible}) FOR SHARE",
+                owner_id, ref_id,
+            ):
+                return {"ok": False, "status": 404, "error": "Ресурс отсутствует в каталоге"}
+            existing = await conn.fetchval(
+                """SELECT id FROM network_nodes WHERE instance_id=$1 AND node_type=$2 AND ref_id=$3
+                   ORDER BY id LIMIT 1""", instance_id, node_type, ref_id)
+            if existing is not None:
+                return {"ok": True, "id": existing, "already_linked": True}
+        node_id = await conn.fetchval(
+            """INSERT INTO network_nodes(instance_id,node_type,label,ref_id)
+               VALUES($1,$2,$3,$4) RETURNING id""", instance_id, node_type, label, ref_id)
+    return {"ok": True, "id": node_id}
+
+
+async def add_project_edge(pool, instance_id: int, source_node_id: int, target_node_id: int,
+                   edge_type: str = "admin", *, owner_id: int) -> dict:
+    async with pool.acquire() as conn, conn.transaction():
+        if not await conn.fetchval(
+            "SELECT id FROM network_instances WHERE id=$1 AND owner_id=$2 FOR UPDATE",
+            instance_id, owner_id,
+        ):
+            return {"ok": False, "status": 404, "error": "Сеть не найдена"}
+        if await conn.fetchval(
+            "SELECT count(*) FROM network_nodes WHERE instance_id=$1 AND id=ANY($2::int[])",
+            instance_id, [source_node_id, target_node_id],
+        ) != 2:
+            return {"ok": False, "status": 404, "error": "Оба узла должны принадлежать этой сети"}
+        edge_id = await conn.fetchval(
+            """SELECT id FROM network_edges WHERE instance_id=$1 AND source_node_id=$2
+               AND target_node_id=$3 AND edge_type=$4 ORDER BY id LIMIT 1""",
+            instance_id, source_node_id, target_node_id, edge_type)
+        if edge_id is not None:
+            return {"ok": True, "id": edge_id, "already_linked": True}
+        edge_id = await conn.fetchval(
+            """INSERT INTO network_edges(instance_id,source_node_id,target_node_id,edge_type)
+               VALUES($1,$2,$3,$4) RETURNING id""",
+            instance_id, source_node_id, target_node_id, edge_type)
+    return {"ok": True, "id": edge_id}
+
+
+async def detach_node(pool, owner_id: int, node_id: int) -> dict:
+    async with pool.acquire() as conn, conn.transaction():
+        project_id = await conn.fetchval(
+            """SELECT p.id FROM network_instances p JOIN network_nodes n ON n.instance_id=p.id
+               WHERE n.id=$1 AND p.owner_id=$2""", node_id, owner_id)
+        if project_id is None:
+            return {"ok": False, "status": 404, "error": "Узел не найден"}
+        await conn.execute("SET LOCAL lock_timeout = '3s'")
+        # Тот же порядок блокировок, что в очистке из отчёта.
+        await conn.execute("LOCK TABLE operation_queue IN SHARE ROW EXCLUSIVE MODE")
+        if not await conn.fetchval(
+            "SELECT id FROM network_instances WHERE id=$1 AND owner_id=$2 FOR UPDATE",
+            project_id, owner_id,
+        ):
+            return {"ok": False, "status": 404, "error": "Сеть не найдена"}
+        if not await conn.fetchval(
+            "SELECT id FROM network_nodes WHERE id=$1 AND instance_id=$2 FOR UPDATE", node_id, project_id,
+        ):
+            return {"ok": False, "status": 404, "error": "Узел не найден"}
+        if await conn.fetchval(
+            """SELECT 1 FROM operation_queue WHERE owner_id=$1 AND status='running'
+               AND (op_type IN ('mass_publish','quick_post','bulk_post_chans') AND params->>'project_id'=$2
+                    OR op_type='deploy_network' AND params->>'instance_id'=$2) LIMIT 1""",
+            owner_id, str(project_id),
+        ):
+            return {"ok": False, "status": 409, "error": "Дождитесь завершения операции проекта"}
+        if await conn.fetchval(
+            """SELECT 1 FROM network_edges WHERE instance_id IS DISTINCT FROM $2
+               AND (source_node_id=$1 OR target_node_id=$1) LIMIT 1""", node_id, project_id,
+        ):
+            return {"ok": False, "status": 409, "error": "У узла есть связь из другой сети"}
+        await conn.execute(
+            """DELETE FROM network_edges WHERE instance_id=$1 AND (source_node_id=$2 OR target_node_id=$2)""",
+            project_id, node_id)
+        await conn.execute("DELETE FROM network_nodes WHERE id=$1 AND instance_id=$2", node_id, project_id)
+    return {"ok": True}
+
+
 async def add_node(pool: asyncpg.Pool, instance_id: int, node_type: str,
                    label: str, ref_id: Optional[int] = None,
                    config: dict = None) -> dict:

@@ -35,7 +35,7 @@ def test_network_plural_routes_registered():
     assert '"from_id"' in seg and '"to_id"' in seg and '"from_label"' in seg
     # delete узла/ребра owner-scoped (через instance владельца)
     dseg = api_function("network_delete_node")
-    assert "WHERE owner_id=$2" in dseg
+    assert "detach_node(pool, uid, node_id)" in dseg
 
 
 def test_workflow_plural_routes_and_list_fixed():

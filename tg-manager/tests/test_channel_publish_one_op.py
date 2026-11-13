@@ -90,7 +90,7 @@ def test_project_publish_requires_exact_reviewed_targets():
     assert submit.index("project_publish_channels(") < submit.index("await submit(")
     send = js_function("sendMassPublish")
     assert "payload.project_id = projectId" in send
-    assert "projectTargets.map(channel => channel.channel_id)" in send
+    assert "projectTargets.map(channel => channel.channel_id_text ?? channel.channel_id)" in send
 
 
 def test_context_publish_validates_single_target_before_enqueuing(monkeypatch):

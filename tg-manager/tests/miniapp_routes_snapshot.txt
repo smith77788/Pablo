@@ -263,6 +263,7 @@ GET /api/miniapp/network/stats
 GET /api/miniapp/network/templates
 GET /api/miniapp/networks
 GET /api/miniapp/networks/{net_id}
+GET /api/miniapp/networks/{net_id}/catalog
 GET /api/miniapp/networks/{net_id}/deploy_plan
 GET /api/miniapp/new_users
 GET /api/miniapp/new_users/export
@@ -625,6 +626,7 @@ HEAD /api/miniapp/network/stats
 HEAD /api/miniapp/network/templates
 HEAD /api/miniapp/networks
 HEAD /api/miniapp/networks/{net_id}
+HEAD /api/miniapp/networks/{net_id}/catalog
 HEAD /api/miniapp/networks/{net_id}/deploy_plan
 HEAD /api/miniapp/new_users
 HEAD /api/miniapp/new_users/export
