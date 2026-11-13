@@ -115,14 +115,13 @@ async def test_multi_send_requires_at_least_one_mailbox():
 
 def test_mass_report_explains_why_fewer_accounts_ran():
     """Жалоба владельца: операция взяла 1 аккаунт из выбранного среза без
-    объяснения. Если захват вернул меньше (часть занята другой операцией), это
-    обязано попасть в сводку, а не оставить владельца гадать."""
+    объяснения. Теперь исход РАСКЛАДЫВАЕТ остаток по причинам (кулдаун/спамблок/
+    риск-пульс/занятость), а не оставляет владельца гадать."""
     import inspect
     from services import op_worker
     src = inspect.getsource(op_worker._exec_mass_report)
-    # считаем, сколько было доступно ДО захвата, и насколько захват сузил срез
-    assert "_available_cnt = len(accounts)" in src
-    assert "_busy_cnt = _available_cnt - len(accounts)" in src
-    # и прямо называем это в сводке операции
-    assert "Занято другими операциями" in src
-    assert '"busy": _busy_cnt' in src
+    # явный выбор владельца (account_ids) против реально отработавших (used_ids)
+    assert "used_ids = {int(a[\"id\"]) for a in accounts}" in src
+    # раскладываем, почему из выбранного пошло меньше
+    assert "_diagnose_unused_accounts(" in src
+    assert '"unused_reasons"' in src

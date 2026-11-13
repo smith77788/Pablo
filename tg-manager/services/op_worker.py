@@ -23263,6 +23263,69 @@ async def _remember_twofa(pool, owner_id: int, account_id: int, password: str) -
 
 # ── Репортер ──────────────────────────────────────────────────────────────────
 
+async def _diagnose_unused_accounts(
+    pool, owner_id: int, requested_ids: list[int], used_ids: set[int],
+) -> tuple[str, dict]:
+    """Объяснить, ПОЧЕМУ выбранные аккаунты не пошли в работу.
+
+    Жалоба владельца: «массовые жалобы берут один аккаунт вместо заданного
+    количества». Причина — защитные гейты (кулдаун после FloodWait, спамблок/бан,
+    риск-пульс, занятость другой операцией) молча выкидывают аккаунты из явного
+    выбора, и владелец видит «1», не понимая почему. Здесь раскладываем остаток
+    по причинам одним запросом — чтобы сводка операции была честной и
+    действенной (ждать снятия кулдауна / прогреть / освободить флот).
+
+    Возвращает (готовая строка для сводки, счётчики по причинам).
+    """
+    dropped = [int(a) for a in requested_ids if int(a) not in used_ids]
+    if not dropped:
+        return "", {}
+    from services import account_status as _acc_status
+    rows = await _safe_fetch(
+        pool,
+        "SELECT id, is_active, (session_str IS NOT NULL) AS has_sess, "
+        "COALESCE(acc_status,'active') AS acc_status, "
+        "(cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS on_cooldown "
+        "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        owner_id, dropped, log_ctx=f"[diagnose_unused op_owner={owner_id}]")
+    by_id = {int(r["id"]): r for r in (rows or [])}
+    try:
+        _quar = await _infra_mem.quarantined_accounts(pool, dropped)
+    except Exception:
+        _quar = set()
+    counts = {"cooldown": 0, "spamblock": 0, "quarantine": 0, "busy": 0,
+              "no_session": 0, "unknown": 0}
+    for aid in dropped:
+        r = by_id.get(aid)
+        if r is None:
+            counts["unknown"] += 1
+        elif not r["is_active"] or not r["has_sess"]:
+            counts["no_session"] += 1
+        elif _acc_status.is_dead(r["acc_status"]):
+            counts["spamblock"] += 1
+        elif r["on_cooldown"]:
+            counts["cooldown"] += 1
+        elif int(aid) in _quar:
+            counts["quarantine"] += 1
+        else:
+            # Прошёл все статусные гейты, но в работу не попал — значит был занят
+            # другой операцией/прогревом на момент захвата.
+            counts["busy"] += 1
+    labels = [
+        ("cooldown", "⏳ на кулдауне (FloodWait)"),
+        ("spamblock", "🚫 спамблок/бан/заморозка"),
+        ("quarantine", "🛡 риск-пульс (недавние ограничения)"),
+        ("busy", "🔄 заняты другой операцией"),
+        ("no_session", "⚪ без активной сессии"),
+        ("unknown", "❓ не ваши/не найдены"),
+    ]
+    parts = [f"{txt}: {counts[key]}" for key, txt in labels if counts[key]]
+    if not parts:
+        return "", counts
+    frag = "⚠️ Не пошли в работу " + str(len(dropped)) + ":\n   " + "\n   ".join(parts)
+    return frag, counts
+
+
 async def _exec_mass_report(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -23381,19 +23444,26 @@ async def _exec_mass_report(
         status = "partial"
     else:
         status = "done"
+    # Явный выбор владельца = account_ids; реально отработавшие = used_ids. Из
+    # выбора часть молча выкидывали защитные гейты (кулдаун/спамблок/риск-пульс/
+    # занятость) — раскладываем ПОЧЕМУ, чтобы «1 из 10» перестало быть загадкой.
+    used_ids = {int(a["id"]) for a in accounts}
+    _why_frag, _why_counts = await _diagnose_unused_accounts(
+        pool, owner_id, account_ids, used_ids)
     head = (f"✅ Отправлено: {ok_count}/{total}" if ok_count
             else f"⚠️ Не отправлено ни одной жалобы: 0/{total}")
+    # Напоминаем исходный размер выбора, если из него дошли не все.
+    scope = (f" (выбрано {len(account_ids)})"
+             if len(account_ids) > total else "")
     summary = (
         f"🚨 Жалобы на {target} [{reason_label}]\n"
-        f"{head}"
+        f"{head}{scope}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
-        # «Занято» объясняет, почему из выбранного среза в работу пошло меньше:
-        # эти аккаунты в этот момент вела другая операция/прогрев (аренда сессии).
-        + (f"\n⏳ Занято другими операциями: {_busy_cnt}" if _busy_cnt else "")
-        + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
+        + (f"\n{_why_frag}" if _why_frag else "")
     )
     return {"status": status, "ok": ok_count, "failed": fail_count,
-            "busy": _busy_cnt, "summary": summary}
+            "busy": _busy_cnt, "skipped_quarantine": _skipped_quar,
+            "unused_reasons": _why_counts, "summary": summary}
 
 
 # ── Content Clone executor ──────────────────────────────────────────────────
@@ -25610,6 +25680,21 @@ async def _exec_report_peer(
         if idx + 1 < len(accounts):
             await asyncio.sleep(2.5)
 
+    # Запрошено acc_count аккаунтов, в работу пошло len(accounts). Если меньше —
+    # раскладываем ПОЧЕМУ по всему флоту владельца (кулдаун/спамблок/риск-пульс/
+    # занятость), чтобы «1 вместо 10» перестало быть загадкой.
+    _why_frag = ""
+    if len(accounts) < acc_count:
+        try:
+            _all = await _safe_fetch(
+                pool, "SELECT id FROM tg_accounts WHERE owner_id=$1", owner_id,
+                log_ctx=f"[report_peer_fleet op={op_id}]")
+            _all_ids = [int(r["id"]) for r in (_all or [])]
+            _used = {int(a["id"]) for a in accounts}
+            _why_frag, _ = await _diagnose_unused_accounts(
+                pool, owner_id, _all_ids, _used)
+        except Exception:
+            log_exc_swallow(log, f"report_peer diagnose op={op_id}")
     return {
         "status": "done" if ok_count else "failed",
         "ok": ok_count,
@@ -25618,8 +25703,10 @@ async def _exec_report_peer(
         # Пропущенные называем прямо: иначе повтор выглядит мгновенным успехом,
         # и непонятно, ушла жалоба заново или нет.
         "summary": (f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно"
+                    + (f" из {acc_count} запрошенных" if len(accounts) < acc_count else "")
                     + (f" (из них {skip_count} отправили в прошлый раз)" if skip_count else "")
-                    + (f" ❌ {fail_count}" if fail_count else "")),
+                    + (f" ❌ {fail_count}" if fail_count else "")
+                    + (f"\n{_why_frag}" if _why_frag else "")),
     }
 
 

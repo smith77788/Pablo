@@ -19040,10 +19040,12 @@ async function submitComplaint() {
     const lines = [];
     if (r.in_app) {
       if (r.in_app.op_id) {
-        lines.push(`🚨 In-app жалоба поставлена · ${r.in_app.accounts} акк.${(r.in_app.selected>r.in_app.accounts)?` (из ${r.in_app.selected} выбранных доступно ${r.in_app.accounts})`:''} · операция #${r.in_app.op_id}`);
+        lines.push(`🚨 In-app жалоба поставлена · ${r.in_app.accounts} акк.${(r.in_app.selected>r.in_app.accounts)?` (из ${r.in_app.selected} выбранных пойдут ${r.in_app.accounts})`:''} · операция #${r.in_app.op_id}`);
+        if (r.in_app.dropped_note) lines.push(esc(r.in_app.dropped_note).replace(/\n/g,'<br>'));
         pollOpResult(r.in_app.op_id, 'Жалоба (флот)');
       } else if (r.in_app.error) {
         lines.push(`⚠️ In-app жалоба не поставлена: ${esc(r.in_app.error)}`);
+        if (r.in_app.dropped_note) lines.push(esc(r.in_app.dropped_note).replace(/\n/g,'<br>'));
       }
     }
     if (r.email) {
