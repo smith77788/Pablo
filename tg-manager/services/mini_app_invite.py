@@ -49,6 +49,12 @@ def setup_routes(app: web.Application, pool) -> None:
                JOIN operation_queue oq ON oq.id = ol.op_id
                WHERE oq.owner_id=$1 AND oq.op_type LIKE '%invite%'
                  AND ol.status='ok' AND ol.message='joined'
+                 -- Строка журнала за окно бывает только у операции, которая
+                 -- закончилась в окне или ещё не закончилась: без этого
+                 -- условия запрос пробовал журнал КАЖДОЙ инвайт-операции
+                 -- владельца за всю историю (десятки тысяч чтений страниц).
+                 AND (oq.finished_at IS NULL
+                      OR oq.finished_at > NOW() - ($2 || ' days')::interval)
                  AND ol.created_at > NOW() - ($2 || ' days')::interval""",
             uid, str(days))
         left = await _safe_count(pool,

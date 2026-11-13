@@ -231,6 +231,10 @@ PROCESS_LOCAL: dict[str, str] = {
         "застоя, и оба живут в одном процессе с самой задачей операции. "
         "Делить не с кем и нечего: после рестарта ни задачи, ни паузы нет."),
     "services/op_worker.py:_active_op_tasks": "asyncio.Task этого процесса",
+    "services/op_worker.py:_stale_mode": (
+        "ContextVar режима особого прохода сторожа зависших (только свои / "
+        "операции умерших исполнителей); живёт в пределах одного вызова, "
+        "делить между процессами нечего"),
     "services/op_worker.py:_accounts_in_use": "быстрый локальный фильтр; арбитр — аренда в БД",
     "services/op_worker.py:_operation_account_locks": "то же, привязка операция→аккаунты",
     "services/op_worker.py:_db_pool": "пул asyncpg привязан к циклу событий",
