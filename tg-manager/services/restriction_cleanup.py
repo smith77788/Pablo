@@ -160,11 +160,39 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
     return items, nodes
 
 
+async def _disabled_channels(conn, owner_id, entries, items):
+    ids = [item_id for (kind, item_id) in entries
+           if kind != "bot" and (kind, item_id) not in items]
+    if not ids:
+        return {}
+    rows = await conn.fetch(
+        """SELECT channel_id, title, username, type FROM removed_channels
+            WHERE owner_id=$1 AND reason=$2 AND channel_id=ANY($3::bigint[])""",
+        owner_id, db.REMOVED_BY_OWNER, ids,
+    )
+    disabled = {}
+    for row in rows:
+        kind = "group" if (row["type"] or "").lower() in _GROUP_TYPES else "channel"
+        key = kind, row["channel_id"]
+        if key in entries and key not in items:
+            entry = entries[key]
+            disabled[key] = {
+                "kind": kind, "id": str(row["channel_id"]),
+                "title": str(row["title"] or row["username"] or entry.get("title") or row["channel_id"]),
+                "status": entry["status"], "reason": str(entry.get("reason") or ""),
+                "projects": [], "active": False, "can_disable": False,
+                "disable_reason": "Ресурс уже отключён в Infragram",
+            }
+    return disabled
+
+
 async def findings(pool, owner_id, op_id, *, include_history=False):
     async with pool.acquire() as conn, conn.transaction(isolation="repeatable_read", readonly=True):
         entries, legacy = await _report(conn, owner_id, op_id)
         items, _ = await _snapshot(conn, owner_id, entries)
-        response = {"findings": list(items.values()), "legacy": legacy, "max_targets": _MAX_TARGETS}
+        items.update(await _disabled_channels(conn, owner_id, entries, items))
+        response = {"findings": [items[key] for key in entries if key in items],
+                    "legacy": legacy, "max_targets": _MAX_TARGETS}
         if include_history:
             history = await conn.fetch(
                 """SELECT action, target, occurred_at FROM operation_audit
@@ -223,8 +251,9 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
            AND op_type='deploy_network' AND params->>'instance_id'=$2 LIMIT 1""",
         owner_id, str(project_id),
     )
-    items, nodes = await _snapshot(
-        conn, owner_id, {key: entries[key] for key in sorted(keys)}, lock=lock)
+    selected_entries = {key: entries[key] for key in sorted(keys)}
+    items, nodes = await _snapshot(conn, owner_id, selected_entries, lock=lock)
+    disabled = await _disabled_channels(conn, owner_id, selected_entries, items)
     channel_ids = [str(item_id) for kind, item_id in sorted(keys) if kind != "bot"]
     running_publications = await conn.fetch(
         """SELECT params->'channel_ids' AS targets
@@ -249,7 +278,9 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
             "kind": key[0], "id": str(key[1]),
             "title": str(entry.get("title") or key[1]), "status": entry["status"],
         })
-        if deployment_running:
+        if key in disabled:
+            reason = disabled[key]["disable_reason"]
+        elif deployment_running:
             reason = "Дождитесь завершения развёртывания проекта"
         elif item["id"] in busy_channels and item["kind"] != "bot":
             reason = "Дождитесь завершения текущей публикации"

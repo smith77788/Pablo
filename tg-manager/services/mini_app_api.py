@@ -8158,7 +8158,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             current = await cleanup.findings(pool, uid, op_id)
             target_map = {
                 ("bot" if f["kind"] == "bot" else "channel", f["id"]): f["kind"]
-                for f in current["findings"] if f["status"] == "unreachable"
+                for f in current["findings"] if f["status"] == "unreachable" and f["active"]
             }
             targets = []
             for kind, ids in (("channel", channel_ids), ("bot", bot_ids)):

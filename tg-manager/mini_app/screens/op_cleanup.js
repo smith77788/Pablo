@@ -134,7 +134,7 @@ async function openOperationCleanup(opId) {
             statusText[item.status] || 'Требуется проверка',
             item.reason,
             action.value === 'detach' ? (item.projects || []).map(p => p.name).filter(Boolean).join(', ') : '',
-            action.value === 'disable' && !eligible ? item.disable_reason : '',
+            (!item.active || (action.value === 'disable' && !eligible)) ? item.disable_reason : '',
           ].filter(Boolean).join(' · ');
           return `<label class="row chk-row" style="cursor:${eligible ? 'pointer' : 'default'}">
             <input type="checkbox" data-cleanup-target value="${esc(index)}" ${eligible ? '' : 'disabled'} ${selected.has(index) ? 'checked' : ''}>

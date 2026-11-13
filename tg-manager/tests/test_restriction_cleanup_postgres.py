@@ -86,10 +86,19 @@ def test_owner_exact_ids_preview_and_reversible_cleanup(monkeypatch):
         assert not await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
         assert (await db.set_managed_bot_active(pool, BOT, OWNER, True))["is_active"]
         assert await db.add_managed_channels(pool, OWNER, 111, [{"id": CHANNEL}]) == 0
+        report = await cleanup.findings(pool, OWNER, op_id, include_history=True)
+        disabled = next(item for item in report["findings"] if item["id"] == str(CHANNEL))
+        assert disabled["status"] == "check_failed" and not disabled["can_disable"]
+        assert disabled["disable_reason"] == "Ресурс уже отключён в Infragram"
+        recheck = await cleanup.plan(pool, OWNER, op_id, [CHANNEL_TARGET], "disable")
+        assert recheck["items"][0]["outcome"] == "skipped"
+        assert recheck["items"][0]["reason"] == disabled["disable_reason"]
         assert not await pool.fetchval(
             "SELECT enabled FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2",
             OWNER, CHANNEL)
         assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
+        restored = await cleanup.findings(pool, OWNER, op_id, include_history=True)
+        assert next(item for item in restored["findings"] if item["id"] == str(CHANNEL))["can_disable"]
         assert await pool.fetchval(
             "SELECT count(*) FROM operation_audit WHERE owner_id=$1 AND operation_id=$2",
             OWNER, op_id) == 2
