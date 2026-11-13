@@ -820,9 +820,9 @@ POST /api/miniapp/account/{acc_id}/note
 POST /api/miniapp/account/{acc_id}/post_story
 POST /api/miniapp/account/{acc_id}/profile
 POST /api/miniapp/account/{acc_id}/proxy
+POST /api/miniapp/account/{acc_id}/public_channel_capacity
 POST /api/miniapp/account/{acc_id}/session/close
 POST /api/miniapp/account/{acc_id}/session/trust
-POST /api/miniapp/account/{acc_id}/public_channel_capacity
 POST /api/miniapp/account/{acc_id}/spamblock_appeal
 POST /api/miniapp/account/{acc_id}/toggle
 POST /api/miniapp/account/{acc_id}/warmup/pause

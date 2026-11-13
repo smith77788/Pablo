@@ -15202,7 +15202,8 @@ async function openOpDetail(opId) {
     // «Повторить» уже стоит кнопкой выше — второй раз в «Что сделать дальше» не нужен.
     const _retryShown = opCanRetry(o);
     const _qa = (o.quick_actions||[]).filter(a => typeof window[a.fn] === 'function'
-      && !(_retryShown && a.fn === 'retryOp'));
+      && !(_retryShown && a.fn === 'retryOp')
+      && a.id !== 'cleanup_restrictions');
     if (_qa.length) {
       html += `<div class="sec" style="margin-top:12px">⚡ Что сделать дальше</div>
         <div class="lst" style="margin:0 16px">` + _qa.map(a=>{

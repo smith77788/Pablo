@@ -1,4 +1,10 @@
+# Контрольные суммы миграций. Проверяет tests/test_migrations_are_frozen.py.
 #
+# Уже применённый schema_vN.sql править нельзя: прод пропустит его по журналу
+# schema_migrations, и схема прода разойдётся со схемой кода. Нужна правка —
+# заводится новый файл schema_vN+1.sql (только вперёд, ADD COLUMN).
+#
+# Добавили миграцию — впишите её сюда:
 #     python deploy/scripts/lock_migrations.py
 7e81e9fa8b068c2182a40c3cd91ffa1f4b1b002387b7742d51fbb75802cb8453  schema.sql
 c1e9f39e64b3d3639bec6043331ae774e06c1cab97a06635dc0aac415c4910a9  schema_v10.sql
@@ -337,8 +343,3 @@ e90f3be8d01a30d4a5cc03c12c226760b43875e3f02952c73c90f12e07ef642c  schema_v95.sql
 98affde74a89d64ff66ca5c294b6be9915b708fedc337465330a026d6ee51811  schema_v97.sql
 75c0e4e8f6f0999c52b79c995eb3b40f2be62a59f69f9c924247ba1476317f64  schema_v98.sql
 194609a686211a8c57e864a6a630828926a82057aeea300bf8407f7a091ae501  schema_v99.sql
-# schema_migrations, и схема прода разойдётся со схемой кода. Нужна правка —
-# Добавили миграцию — впишите её сюда:
-# Контрольные суммы миграций. Проверяет tests/test_migrations_are_frozen.py.
-# Уже применённый schema_vN.sql править нельзя: прод пропустит его по журналу
-# заводится новый файл schema_vN+1.sql (только вперёд, ADD COLUMN).

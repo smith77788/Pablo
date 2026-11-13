@@ -56,6 +56,7 @@ def test_problems_endpoint_exists_and_covers_all_problem_statuses():
     body = body[:body.index("async def restrictions_remove_dead(")]
     assert "_erc.is_problem(" in body, "эндпоинт должен брать все проблемные статусы"
     assert "op_id" in body, "должна быть возможность разобрать конкретную проверку"
+    assert '"id_text": str(ent_id)' in body
     snap = _src("tests/miniapp_routes_snapshot.txt")
     assert "GET /api/miniapp/restrictions/problems" in snap
 
@@ -66,6 +67,7 @@ def test_cleanup_screen_wired_in_frontend():
     assert "/api/miniapp/restrictions/problems" in js
     assert "/api/miniapp/restrictions/remove_dead" in js
     assert "'s-restrcleanup'" in js and "push('s-restrcleanup')" in js
+    assert "x.dead && x.id_text" in js and "const id = cb.value" in js
 
 
 def test_catalogs_offer_cleanup():

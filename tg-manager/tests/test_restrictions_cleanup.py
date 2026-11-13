@@ -20,7 +20,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OPW = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
 sys.path.insert(0, str(ROOT / "tests"))
-from miniapp_source import api_function  # noqa: E402  (ручка в любом модуле API-слоя)
+from miniapp_source import api_function, js_function  # noqa: E402  (ручка в любом модуле API-слоя)
 JS = (ROOT / "mini_app" / "screens" / "shield_check.js").read_text(encoding="utf-8")
 
 
@@ -61,6 +61,7 @@ def test_remove_dead_requires_a_selection():
 
 
 def test_shield_links_to_operation_instead_of_direct_mutation():
-    assert "restrictions/dead" in JS
-    assert "restrictions/remove_dead" not in JS
-    assert "d.op_id" in JS and "openOpDetail" in JS
+    shield = js_function("loadDeadEntities")
+    assert "restrictions/dead" in shield
+    assert "restrictions/remove_dead" not in shield
+    assert "openOpDetail(String(result.op_id))" in shield

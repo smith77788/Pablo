@@ -8095,12 +8095,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except (TypeError, ValueError):
                 continue
             st = f.get("status")
-            item = {"kind": kind, "id": ent_id,
+            item = {"kind": kind, "id": ent_id, "id_text": str(ent_id),
                     "title": str(f.get("title") or ent_id)[:120],
                     "status": st, "status_label": _erc.status_label(st),
                     "reason": str(f.get("reason") or "")[:160],
-                    # Недоступные в Telegram уже мертвы — их отмечаем по умолчанию;
-                    # ограниченные/скрытые живы, их владелец выбирает сам.
                     "dead": st == _erc.STATUS_UNREACHABLE}
             if kind == "bot":
                 prob_bot[ent_id] = item

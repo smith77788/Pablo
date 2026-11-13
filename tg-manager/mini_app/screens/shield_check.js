@@ -328,7 +328,6 @@ async function loadShieldOps() {
   }
 }
 
-let _restrCleanupOp = "";
 function _restrScreen() {
   let el = document.getElementById('s-restrcleanup');
   if (el) return el;
@@ -346,9 +345,7 @@ function _restrScreen() {
 }
 
 async function openRestrictionCleanup(opId) {
-  _restrCleanupOp = String(opId || '');
-  if (_restrCleanupOp && _restrCleanupOp !== '0') return openOpDetail(_restrCleanupOp);
-  _restrCleanupOp = '';
+  if (opId && String(opId) !== '0') return openOpDetail(String(opId));
   _restrScreen();
   push('s-restrcleanup');
   const body = document.getElementById('s-restrcleanup-body');
@@ -363,7 +360,7 @@ async function openRestrictionCleanup(opId) {
     const d = await api('/api/miniapp/restrictions/problems');
     body.innerHTML = _restrCleanupRender((d && d.problems) || []);
   } catch (e) {
-    body.innerHTML = errHtml(errRu(e, 'Не удалось получить список'), retryCall('openRestrictionCleanup', _restrCleanupOp));
+    body.innerHTML = errHtml(errRu(e, 'Не удалось получить список'), retryCall('openRestrictionCleanup', 0));
   }
 }
 
@@ -376,7 +373,7 @@ function _restrCleanupRender(list) {
     const ico = kindIco[x.kind] || '🔗';
     const stColor = x.status === 'restricted' ? 'var(--red)' : x.status === 'unreachable' ? 'var(--red)' : 'var(--orange)';
     return '<label class="chk-row" style="display:flex;align-items:flex-start;gap:8px;padding:9px 0;border-top:1px solid var(--sep);font-size:14px">' +
-      '<input type="checkbox" class="restr-cb" ' + (x.dead ? '' : 'disabled') + ' value="' + esc(String(x.id)) + '" data-kind="' + esc(x.kind || '') + '" style="margin-top:3px">' +
+      '<input type="checkbox" class="restr-cb" ' + (x.dead && x.id_text ? '' : 'disabled') + ' value="' + esc(x.id_text || '') + '" data-kind="' + esc(x.kind || '') + '" style="margin-top:3px">' +
       '<div style="flex:1 1 auto;min-width:0">' +
         '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ico + ' ' + esc(x.title || x.id) + '</div>' +
         '<div style="font-size:12px;margin-top:2px"><span style="color:' + stColor + '">' + esc(x.status_label || '') + '</span>' + (x.reason ? ('<span style="color:var(--hint)"> · ' + esc(x.reason) + '</span>') : '') + '</div>' +
@@ -414,7 +411,7 @@ async function restrCleanupRemove() {
   });
   const n = channel_ids.length + bot_ids.length;
   if (!n) { if (errEl) errEl.textContent = 'Отметьте хотя бы один ресурс'; return; }
-  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nЭто снятие с учёта в вашей базе. Telegram не трогается: недоступные там уже мертвы, а заблокированные и скрытые останутся в Telegram, просто уйдут из вашего каталога.')) return;
+  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nВыбранные недоступные ресурсы будут отключены в Infragram. Управление можно восстановить.')) return;
   const payload = {};
   if (channel_ids.length) payload.channel_ids = channel_ids;
   if (bot_ids.length) payload.bot_ids = bot_ids;
@@ -422,10 +419,9 @@ async function restrCleanupRemove() {
     const r = await api('/api/miniapp/restrictions/remove_dead', { method: 'POST', body: JSON.stringify(payload) });
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🗑 Убрано из списка: ' + (r.removed || 0));
-    openRestrictionCleanup(_restrCleanupOp);
+    openRestrictionCleanup(0);
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
     if (errEl) errEl.textContent = errRu(e, 'Не удалось убрать');
   }
 }
-
