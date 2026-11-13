@@ -1,0 +1,52 @@
+# Функции, которые вызывает старт мини-аппа до готовой главной: остаются в
+# странице, а не в ленивых кусках (services/miniapp_lazy.py). Список строит
+# node deploy/scripts/lazy_check.mjs boot --write-boot; устаревший список не
+# ломает ничего — старт просто догрузит недостающее синхронно.
+#bcastMbg
+#chPostMbg
+#cmpMbg
+#mo-wf-step
+#netbcMbg
+#s-masspub
+#tplMbg
+_apiRaw
+_freqLoad
+_fxSortState
+_hueForStr
+_isWide
+_readRetryDelay
+_serverBooting
+_sumMainCur
+_sumMoney
+_sumMoneyDelta
+_sumMoneySub
+_tierList
+acquireSessionToken
+api
+applyLabState
+fetchT
+fleetSortQS
+fleetToolsInit
+fleetToolsRender
+fleetViewsLoad
+getCached
+homeLoadState
+labEnabled
+loadAdminSection
+loadOnboarding
+loadOrganismPulse
+loadRef
+loadSub
+modernizeIcons
+rebuildPlanPrices
+renderAct
+renderBotFilterChips
+renderBotLoadMore
+renderBots
+renderCards
+renderFrequent
+renderMiniChart
+renderSummary
+setCache
+updatePlan
+urlTicket

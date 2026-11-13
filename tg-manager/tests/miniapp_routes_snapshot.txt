@@ -416,6 +416,7 @@ GET /media/u/{token}
 GET /metrics
 GET /miniapp
 GET /miniapp/
+GET /miniapp/lazy/{h}.js
 GET /miniapp/{path}
 GET /s/{code}
 GET /{code}
@@ -774,6 +775,7 @@ HEAD /media/u/{token}
 HEAD /metrics
 HEAD /miniapp
 HEAD /miniapp/
+HEAD /miniapp/lazy/{h}.js
 HEAD /miniapp/{path}
 HEAD /s/{code}
 HEAD /{code}
