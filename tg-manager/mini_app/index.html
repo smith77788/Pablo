@@ -13713,6 +13713,37 @@ function buildAccDetail(d) {
     </div>`;
   }
 
+  // Безопасность аккаунта — одна картина выживаемости. Запасной ключ (второй
+  // наш сеанс) оживляет аккаунт при смерти основной сессии; 2FA без сохранённого
+  // у нас пароля восстановить нельзя; чужие сеансы могут выкинуть наш.
+  const sec = d.security;
+  const securityHtml = !sec ? '' : (() => {
+    const rows = [];
+    // 2FA
+    if (sec.has_2fa && sec.twofa_saved)
+      rows.push(['🔑','var(--green)','2FA включён','Пароль сохранён у нас — аккаунт можно восстановить']);
+    else if (sec.has_2fa && !sec.twofa_saved)
+      rows.push(['⚠️','var(--orange)','2FA включён, пароль НЕ сохранён','Если сессия умрёт, войти заново без пароля не выйдет. Смените пароль через «Профиль → 2FA» — он сохранится']);
+    else
+      rows.push(['🔓', sec.guard && sec.guard.twofa ? 'var(--hint)' : 'var(--orange)','2FA не установлен', sec.guard && sec.guard.twofa ? 'Автозащита поставит свой пароль, когда сессия повзрослеет (сутки)' : 'Без 2FA угонщик с кодом входит и забирает аккаунт. Поставьте через «Профиль → 2FA» или включите «Щит → Автозащита: пароль 2FA»']);
+    // Запасной ключ
+    if (sec.has_reserve)
+      rows.push(['🗝','var(--green)','Запасной ключ есть','Второй наш сеанс. Если основная сессия умрёт — флот поднимет аккаунт сам, без SMS']);
+    else
+      rows.push(['🗝', sec.guard && sec.guard.reserve ? 'var(--hint)' : 'var(--orange)','Запасного ключа нет', sec.guard && sec.guard.reserve ? 'Автозащита заведёт его автоматически (из сеанса старше суток)' : 'Включите «Щит → Автозащита: запасной ключ» — тогда смерть сессии не потеряет аккаунт']);
+    // Чужие сеансы
+    if (sec.foreign_sessions > 0)
+      rows.push(['🚨','var(--red)',`Чужих сеансов: ${Number(sec.foreign_sessions)}`,'Нажмите, чтобы разобрать: пометить свои или закрыть чужие', `openAccSessions(${a.id})`]);
+    const rowHtml = rows.map(r => `<div class="row"${r[4]?` onclick="${r[4]}" style="cursor:pointer"`:''}>
+        <div class="row-ico" style="background:var(--bg2)">${r[0]}</div>
+        <div class="row-body"><div class="row-name" style="color:${r[1]}">${r[2]}</div>
+          <div style="font-size:12px;color:var(--hint);white-space:normal;margin-top:2px">${esc(r[3])}</div></div>
+        ${r[4]?'<div class="row-right"><span class="chev">›</span></div>':''}
+      </div>`).join('');
+    return `<div class="sec" style="margin-top:8px">🛡 Безопасность аккаунта</div>
+      <div class="lst">${rowHtml}</div>`;
+  })();
+
   const warmupHtml = `
     <div class="sec" style="margin-top:8px">Прогрев аккаунта</div>
     <div class="lst">
@@ -13836,6 +13867,8 @@ function buildAccDetail(d) {
       <button class="btn btn-d" onclick="deleteAccount(${a.id}, this)" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
       ${a.acc_status==='session_expired'?`<button class="btn btn-g" onclick="reauthAccount(${a.id})" style="flex:1 1 auto;min-width:130px;font-size:13px;padding:10px 6px">🔑 Переавторизация</button>`:''}
     </div>
+
+    ${securityHtml}
 
     <div class="sec">Ресурсы аккаунта</div>
     <div style="display:flex;gap:8px;padding:2px 0 4px">

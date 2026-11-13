@@ -492,6 +492,33 @@ def setup_routes(app: web.Application, pool) -> None:
                              "title": "Без своего прокси — общий CF-relay/прямое (НЕ уникальный IP)"}
         from services.network_builder import project_pilot_enabled
 
+        # Безопасность аккаунта — одна картина выживаемости: 2FA (установлен и
+        # сохранён ли у нас пароль — без сохранённого аккаунт не вернуть),
+        # запасной ключ (второй наш сеанс, оживляет аккаунт при смерти основной
+        # сессии), чужие сеансы и включена ли автозащита щита. Раньше запасной
+        # ключ был виден только флот-широким тумблером, а по аккаунту — никак.
+        security = None
+        if not admin:
+            srow = await _safe_fetchrow(pool,
+                "SELECT (twofa_enc IS NOT NULL) AS twofa_saved, "
+                "(reserve_session_enc IS NOT NULL) AS has_reserve, reserve_auth_hash "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            guard = {}
+            try:
+                from services import account_shield as _shield
+                _cfg = await _shield.get_shield_config(pool, uid)
+                guard = {"sessions": bool(getattr(_cfg, "guard_sessions", False)),
+                         "reserve": bool(getattr(_cfg, "guard_reserve", False)),
+                         "twofa": bool(getattr(_cfg, "guard_twofa", False))}
+            except Exception as _e:
+                log.debug("account_detail shield owner=%s acc=%s: %s", uid, acc_id, _e)
+            security = {
+                "has_2fa": bool(caps and caps["has_2fa"]),
+                "twofa_saved": bool(srow and srow["twofa_saved"]),
+                "has_reserve": bool(srow and srow["has_reserve"]),
+                "foreign_sessions": int(acc["foreign_sessions"] or 0),
+                "guard": guard,
+            }
         return _json_resp({
             "account": acc,
             "public_channel_capacity_available": not admin and bool(acc["is_active"]) and project_pilot_enabled(uid),
@@ -502,6 +529,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "health": health,
             "verdict": verdict,
             "transport": transport,
+            "security": security,
         })
 
     async def accounts_export(request: web.Request) -> web.Response:
