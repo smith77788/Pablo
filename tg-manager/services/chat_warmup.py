@@ -1197,6 +1197,63 @@ def _sender_name(msg) -> str:
     return "Участник"
 
 
+# ── Зрение ──────────────────────────────────────────────────────────────────
+# Фото без подписи для разогрева было пустым сообщением: на «гляньте, что
+# пришло» флот отвечал мимо или не отвечал вовсе, хотя половина живого чата —
+# скрины, мемы и фото. Новое фото описывается моделью со зрением и входит в
+# разговор репликой «[фото: …]». Описание кэшируется: картинку смотрят один раз.
+SEEN_PHOTOS_MAX = 500
+_SEEN_PHOTOS: dict[str, str] = {}
+
+
+def is_photo(msg) -> bool:
+    """Сообщение — фото (Telethon MessageMediaPhoto). ЧИСТАЯ."""
+    return type(getattr(msg, "media", None)).__name__ == "MessageMediaPhoto"
+
+
+def photo_line(desc: str, caption: str = "") -> str:
+    """Реплика с картинкой для модели: описание и подпись. ЧИСТАЯ."""
+    d = " ".join((desc or "").split())[:400]
+    c = " ".join((caption or "").split())
+    if not d:
+        return c
+    return f"[фото: {d}]" + (f" {c}" if c else "")
+
+
+async def see_photo(client, raw, recent: list[dict], *, last_seen: int,
+                    chat_key: str, owner_id) -> bool:
+    """Описать самое свежее НОВОЕ фото от живого человека и вписать описание в
+    его реплику. True — описание есть. Никогда не кидает."""
+    by_id = {int(getattr(m, "id", 0) or 0): m for m in raw or []}
+    for item in reversed(recent or []):
+        if item.get("is_fleet") or item.get("is_self") or int(item.get("id") or 0) <= int(last_seen or 0):
+            continue
+        msg = by_id.get(int(item["id"]))
+        if msg is None or not is_photo(msg):
+            continue
+        key = f"{chat_key}:{item['id']}"
+        desc = _SEEN_PHOTOS.get(key)
+        if desc is None:
+            desc = ""
+            try:
+                from services import ai_gateway
+                data = await asyncio.wait_for(client.download_media(msg, file=bytes),
+                                              timeout=_TG_TIMEOUT)
+                r = await ai_gateway.describe_image(data or b"", owner_id=owner_id,
+                                                    hint=item.get("text") or "")
+                desc = r.text or ""
+            except Exception as exc:  # noqa: BLE001 - без зрения ход идёт, как раньше
+                log.debug("chat_warmup: фото %s не описано: %s", key, exc)
+            if len(_SEEN_PHOTOS) >= SEEN_PHOTOS_MAX:
+                _SEEN_PHOTOS.pop(next(iter(_SEEN_PHOTOS)))
+            _SEEN_PHOTOS[key] = desc
+        if desc:
+            item["text"] = photo_line(desc, item.get("text") or "")
+            item["photo"] = True
+        return bool(desc)
+    return False
+
+
 def _msg_to_dict(msg, own_tg_ids: set[int]) -> dict:
     sid = int(getattr(msg, "sender_id", 0) or 0)
     return {
@@ -1560,6 +1617,11 @@ async def _process_session(pool, session: dict) -> None:
             return
         raw = await asyncio.wait_for(client.get_messages(entity, limit=CONTEXT_WINDOW), timeout=_TG_TIMEOUT)
         recent = [_msg_to_dict(m, own_tg) for m in reversed(list(raw))]  # старые → новые
+        # Новое фото от человека — описать до плана: фото без подписи иначе
+        # пустое сообщение, и ход его не видит.
+        await see_photo(client, raw, recent,
+                        last_seen=int(session.get("last_seen_msg") or 0),
+                        chat_key=str(session.get("chat_ref") or sid), owner_id=owner_id)
         plan = plan_turn(recent, account_ids, mode, session.get("last_speaker"),
                          int(session.get("last_seen_msg") or 0))
         if recent:

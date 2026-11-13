@@ -142,6 +142,34 @@ async def chat(system: str, messages: list[dict], *, max_tokens: int = 400,
     }
 
 
+async def describe_image(system: str, b64: str, media_type: str, ask: str, *,
+                         timeout: float = 30.0) -> tuple[str, dict]:
+    """Описание картинки моделью чата (Claude видит изображения). Кидает при
+    отказе — вызывающий уходит на запасного провайдера."""
+    if not enabled():
+        raise RuntimeError("Anthropic не настроен")
+    client = _make_client(timeout)
+    message = await client.messages.create(
+        model=CHAT_MODEL,
+        max_tokens=_CHAT_MIN_TOKENS,
+        output_config={"effort": CHAT_EFFORT},
+        system=system,
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": media_type,
+                                         "data": b64}},
+            {"type": "text", "text": ask}]}],
+    )
+    if getattr(message, "stop_reason", None) == "refusal":
+        raise RuntimeError("модель отказалась описывать")
+    text = _extract_text(message)
+    if not text:
+        raise RuntimeError("пустой ответ")
+    usage = getattr(message, "usage", None)
+    return text, {"model": CHAT_MODEL,
+                  "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+                  "output_tokens": int(getattr(usage, "output_tokens", 0) or 0)}
+
+
 async def complete(system: str, user: str, *, timeout: float = 120.0) -> str:
     """Единичный запрос к Claude Opus 4.8 (adaptive thinking, effort=xhigh),
     стримингом. Возвращает текст ответа. Кидает, если ключ не задан или SDK/сеть
