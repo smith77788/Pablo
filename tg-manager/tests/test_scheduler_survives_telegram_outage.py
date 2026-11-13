@@ -18,6 +18,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+from contextlib import nullcontext
+
 import pytest
 
 
@@ -29,6 +31,16 @@ class _Pool:
     def __init__(self, status="pending"):
         self.status = status
         self.executed: list[str] = []
+
+    def acquire(self):
+        return nullcontext(self)
+
+    def transaction(self):
+        return nullcontext()
+
+    async def fetchrow(self, query, *args):
+        assert "FROM managed_bots mb" in query
+        return {"is_active": True, "token": "1:x"}
 
     async def execute(self, query, *args):
         self.executed.append(query)
@@ -47,7 +59,7 @@ class _Pool:
                 return "UPDATE 0"
             self.status = "missed"
             return "UPDATE 1"
-        if "SET status='failed'" in query:
+        if "SET status='failed'" in query or (len(args) > 1 and args[1] == "failed"):
             self.status = "failed"
             return "UPDATE 1"
         return "UPDATE 1"

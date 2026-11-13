@@ -46,6 +46,22 @@ class _BotPool:
         self.result = result
         self.statements: list[tuple[str, tuple]] = []
 
+    def acquire(self):
+        return self
+
+    def transaction(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    async def fetch(self, q, *a):
+        self.statements.append((_flat(q), a))
+        return [{"bot_id": a[1][0]}] if self.result == "UPDATE 1" else []
+
     async def execute(self, q, *a):
         self.statements.append((_flat(q), a))
         return self.result
@@ -62,7 +78,7 @@ def test_delete_bot_marks_deleted_not_just_paused():
     assert "deleted_at=now()" in q, "удаление снова ничем не отличается от паузы"
     assert "is_active=FALSE" in q, "удалённый бот остаётся в работе"
     assert "DELETE FROM managed_bots" not in q, "каскадом уйдёт аудитория"
-    assert args == (7, 1)
+    assert args == (1, [7])
 
 
 def test_deleting_twice_reports_nothing_deleted():

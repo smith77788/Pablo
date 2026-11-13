@@ -3027,7 +3027,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             await pool.execute(
                 """DELETE FROM bot_deep_links WHERE id=$1
-                   AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)""",
+                   AND bot_id IN (
+                       SELECT bot_id FROM managed_bots WHERE added_by=$2 AND deleted_at IS NULL
+                       FOR SHARE)""",
                 link_id, uid)
             return _json_resp({"ok": True})
         except Exception as e:

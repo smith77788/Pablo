@@ -7546,7 +7546,7 @@ async def _exec_bulk_bot_profile_rollback(
     target_ids = [int(s["target_id"]) for s in snaps]
     rows = await _fetch_bots_op(
         pool,
-        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[]) AND is_active AND deleted_at IS NULL",
         owner_id, target_ids)
     tok_by_bot = {int(r["bot_id"]): r["token"] for r in rows}
     label_by_bot = {int(r["bot_id"]): _bp_bot_label(r) for r in rows}
@@ -7582,7 +7582,7 @@ async def _exec_bulk_bot_profile_rollback(
 
             reasons: list[str] = []
             if token is None:
-                reasons.append("бот не найден")
+                reasons.append("бот недоступен для отката")
             else:
                 # Имя/описания/команды/кнопка меню/права — общий список вызовов
                 # из движка клона: снимки «Клона и адаптации» лежат в той же

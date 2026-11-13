@@ -39,6 +39,22 @@ class _Pool:
         self.execute_result = execute_result
         self.statements: list[tuple[str, tuple]] = []
 
+    def acquire(self):
+        return self
+
+    def transaction(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    async def fetch(self, q, *a):
+        self.statements.append((" ".join(q.split()), a))
+        return [{"bot_id": a[1][0]}] if self.execute_result == "UPDATE 1" else []
+
     async def execute(self, q, *a):
         self.statements.append((" ".join(q.split()), a))
         return "DELETE 1" if q.startswith("DELETE FROM managed_bots") else self.execute_result
@@ -71,7 +87,7 @@ def test_remove_is_owner_scoped():
     pool = _Pool()
     _run(db.delete_bot(pool, bot_id=7, added_by=1))
     q, args = pool.statements[0]
-    assert "added_by=$2" in q and args == (7, 1)
+    assert "added_by=$1" in q and args == (1, [7])
 
 
 def test_remove_reports_failure_when_nothing_changed():

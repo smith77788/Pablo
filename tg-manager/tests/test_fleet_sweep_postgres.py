@@ -100,9 +100,9 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
             # Плюс чужой забаненный. Проверяем, что session_expired переживает
             # очистку: сессия переподключается, выбрасывать его нельзя.
             for aid, status, owner in [
-                (99501, "active", OWNER), (99502, "banned", OWNER),
-                (99503, "deactivated", OWNER), (99504, "cooldown", OWNER),
-                (99505, "session_expired", OWNER), (99601, "banned", OTHER)]:
+                (1900099501, "active", OWNER), (1900099502, "banned", OWNER),
+                (1900099503, "deactivated", OWNER), (1900099504, "cooldown", OWNER),
+                (1900099505, "session_expired", OWNER), (1900099601, "banned", OTHER)]:
                 await pool.execute(
                     "INSERT INTO tg_accounts(id, owner_id, phone, session_str, acc_status) "
                     "VALUES($1,$2,$3,$4,$5)", aid, owner, f"+79{aid}", "sess", status)
@@ -163,12 +163,12 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
                 assert await pool.fetchval("SELECT NOT is_active FROM managed_bots WHERE bot_id=302")
                 accs_left = {r["id"] for r in await pool.fetch(
                     "SELECT id FROM tg_accounts WHERE owner_id=$1", OWNER)}
-                # 99501 рабочий, 99504 кулдаун, 99505 session_expired — все восстановимы.
-                assert accs_left == {99501, 99504, 99505}, f"удалён не тот аккаунт: {accs_left}"
+                # 1900099501 рабочий, 1900099504 кулдаун, 1900099505 session_expired — все восстановимы.
+                assert accs_left == {1900099501, 1900099504, 1900099505}, f"удалён не тот аккаунт: {accs_left}"
 
                 # Чужое не тронуто.
                 assert await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE bot_id=401") == 1
-                assert await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE id=99601") == 1
+                assert await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE id=1900099601") == 1
 
                 # 4) Повтор удаления идемпотентен: мёртвых больше нет.
                 r = await client.post("/api/miniapp/fleet/sweep", headers=hdr,

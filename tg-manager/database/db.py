@@ -1178,42 +1178,51 @@ _SOFT_DELETE_BOT = (
 
 async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
     """Скрыть бота и остановить его работу, сохранив подписчиков и историю."""
-    result = await pool.execute(
-        _SOFT_DELETE_BOT + "WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
-        bot_id,
-        added_by,
-    )
-    if result == "UPDATE 1":
+    removed = await delete_bots(pool, added_by, [bot_id])
+    if removed:
         await record_manual_action(pool, added_by, "bot_remove", target=str(bot_id))
-    return result == "UPDATE 1"
+    return bool(removed)
 
 
 async def delete_bots(
     pool: asyncpg.Pool, added_by: int, bot_ids: list[int],
     *, checked_tokens: dict[int, str] | None = None,
 ) -> list[int]:
-    """Скрыть свои выбранные строки и вернуть ID фактически убранных ботов.
-
-    При автоматической очистке меняем только токены, проверенные этим запросом.
-    Пауза из отчёта остаётся в силе, пока владелец явно не выберет действие.
-    """
+    """Скрыть ботов и отменить их ещё не материализованные рассылки."""
     if checked_tokens is None:
-        rows = await pool.fetch(
-            _SOFT_DELETE_BOT
-            + "WHERE added_by=$1 AND bot_id=ANY($2::bigint[]) AND deleted_at IS NULL "
-            "RETURNING bot_id",
-            added_by, bot_ids,
-        )
+        where = "WHERE added_by=$1 AND bot_id=ANY($2::bigint[]) AND deleted_at IS NULL "
+        args = (added_by, bot_ids)
     else:
-        rows = await pool.fetch(
-            _SOFT_DELETE_BOT
-            + "FROM unnest($2::bigint[], $3::text[]) AS checked(id, token) "
+        # Автоматическая очистка действует на тот же токен. Пауза отчёта сохраняется.
+        where = (
+            "FROM unnest($2::bigint[], $3::text[]) AS checked(id, token) "
             "WHERE managed_bots.added_by=$1 AND managed_bots.bot_id=checked.id "
             "AND managed_bots.token=checked.token AND managed_bots.deleted_at IS NULL "
-            "AND NOT managed_bots.cleanup_paused RETURNING managed_bots.bot_id",
-            added_by, bot_ids, [checked_tokens[bot_id] for bot_id in bot_ids],
+            "AND NOT managed_bots.cleanup_paused "
         )
-    return sorted(row["bot_id"] for row in rows)
+        args = (added_by, bot_ids, [checked_tokens[bot_id] for bot_id in bot_ids])
+    async with pool.acquire() as conn, conn.transaction():
+        rows = await conn.fetch(
+            _SOFT_DELETE_BOT + where + "RETURNING managed_bots.bot_id", *args,
+        )
+        removed = sorted(row["bot_id"] for row in rows)
+        if removed:
+            # Новый снимок READ COMMITTED видит вставки, завершившиеся до
+            # захвата строки бота. Создание расписания удерживает FOR SHARE.
+            await conn.execute(
+                """UPDATE scheduled_broadcasts SET status='cancelled'
+                   WHERE bot_id=ANY($1::bigint[]) AND status IN ('pending','processing')
+                     AND broadcast_id IS NULL""",
+                removed,
+            )
+            await conn.execute(
+                """UPDATE broadcasts SET status='cancelled', finished_at=now(),
+                          status_note='Бот убран из Infragram'
+                   WHERE bot_id=ANY($1::bigint[]) AND scheduled_id IS NOT NULL
+                     AND status IN ('pending','running')""",
+                removed,
+            )
+    return removed
 
 
 async def save_bot_note(
@@ -1466,7 +1475,7 @@ async def get_interrupted_broadcasts(pool: asyncpg.Pool) -> list[dict]:
     try:
         rows = await pool.fetch(
             """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
-                      b.buttons, b.silent, m.token
+                      b.buttons, b.silent, b.scheduled_id, b.created_by, m.token
                FROM broadcasts b
                JOIN managed_bots m ON m.bot_id = b.bot_id
                WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE

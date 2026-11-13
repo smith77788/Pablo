@@ -207,15 +207,17 @@ async def set_extra_username(pool: asyncpg.Pool, owner_id: int, bot_id: int,
 
     row = await pool.fetchrow(
         "SELECT bot_id, username, extra_username FROM managed_bots "
-        "WHERE bot_id=$1 AND added_by=$2", bot_id, owner_id)
+        "WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, owner_id)
     if not row:
         return {"ok": False, "status": 404, "error": "Бот не найден"}
 
     if not bot_usernames.normalize(username):
-        await pool.execute(
+        updated = await pool.execute(
             "UPDATE managed_bots SET extra_username=NULL, "
             "extra_username_verified=FALSE, extra_username_checked_at=NULL "
-            "WHERE bot_id=$1 AND added_by=$2", bot_id, owner_id)
+            "WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, owner_id)
+        if updated == "UPDATE 0":
+            return {"ok": False, "status": 404, "error": "Бот не найден"}
         log.info("extra_username: снят у bot=%s owner=%s", bot_id, owner_id)
         return {"ok": True, "extra_username": None, "verified": False, "hint": ""}
 
@@ -246,13 +248,15 @@ async def set_extra_username(pool: asyncpg.Pool, owner_id: int, bot_id: int,
     hint = "" if verified else _UNVERIFIED_HINTS.get(res.get("reason"), "")
 
     try:
-        await pool.execute(
+        updated = await pool.execute(
             "UPDATE managed_bots SET extra_username=$3, extra_username_verified=$4, "
-            "extra_username_checked_at=NOW() WHERE bot_id=$1 AND added_by=$2",
+            "extra_username_checked_at=NOW() WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
             bot_id, owner_id, norm, verified)
     except asyncpg.UniqueViolationError:
         return {"ok": False, "status": 409,
                 "error": f"@{norm} уже привязан к другому боту"}
+    if updated == "UPDATE 0":
+        return {"ok": False, "status": 404, "error": "Бот не найден"}
     log.info("extra_username: bot=%s owner=%s @%s verified=%s",
              bot_id, owner_id, norm, verified)
     return {"ok": True, "extra_username": norm, "verified": verified, "hint": hint}
