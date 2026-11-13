@@ -499,6 +499,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     try:
                         plan["approval"] = approval.issue_deployment(uid, params)
                     except approval.ApprovalError:
+                        log.error("Не настроено подтверждение развёртывания uid=%s project=%s", uid, nid)
                         return _err("Сервис подтверждения временно недоступен", 500)
                 return _json_resp({**plan, "executor": dict(executor)})
             if not isinstance(token, str) or not token or len(token) > 1024:

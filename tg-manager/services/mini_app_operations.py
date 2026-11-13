@@ -789,7 +789,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Не найдено", 404)
             # Общие запреты повтора (журнал убран, повтор уже идёт) — те же,
             # что у бота: `operation_bus.retry_blocker`.
-            _blocked = await _obus.retry_blocker(pool, op_id)
+            _blocked = await _obus.retry_blocker(pool, op_id, row)
             if _blocked:
                 return _err(_blocked["reason"], 409)
 

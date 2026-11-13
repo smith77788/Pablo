@@ -1958,7 +1958,7 @@ async def resubmit_unfinished(
             "recurrence_dropped": dropped, "plan_blocked": plan_blocked}
 
 
-async def retry_blocker(pool: asyncpg.Pool, op_id: int) -> dict | None:
+async def retry_blocker(pool: asyncpg.Pool, op_id: int, operation) -> dict | None:
     """Почему эту операцию сейчас НЕЛЬЗЯ повторять, или None.
 
     Общая проверка всех поверхностей повтора одной операции (бот — через
@@ -1966,11 +1966,12 @@ async def retry_blocker(pool: asyncpg.Pool, op_id: int) -> dict | None:
     жила только в `resubmit_one`, мини-апп повторял операцию с убранным
     журналом целиком заново. Возвращает {"reason": str, ...}.
     """
-    if await pool.fetchval(
-        """SELECT 1 FROM operation_queue WHERE id=$1 AND op_type='deploy_network'
-           AND params ? 'topology_digest'""", op_id,
-    ):
-        return {"reason": "Сверьте результат и заново откройте план развёртывания проекта"}
+    if operation["op_type"] == "deploy_network":
+        params = operation["params"]
+        if isinstance(params, str):
+            params = json.loads(params)
+        if isinstance(params, dict) and "topology_digest" in params:
+            return {"reason": "Сверьте результат и заново откройте план развёртывания проекта"}
 
     # Журнал целей убран уборкой — повторять НЕЛЬЗЯ. Идемпотентность
     # исполнителя стоит на `operation_log`: пустой журнал означает «ничего не
@@ -2079,7 +2080,7 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
         return {"ok": False, "op_id": None, "count": 0, "code": 409,
                 "reason": f"Повтор невозможен: {_why}"}
 
-    _blocked = await retry_blocker(pool, op_id)
+    _blocked = await retry_blocker(pool, op_id, info)
     if _blocked:
         return {"ok": False, "op_id": None, "count": 0, "code": 409, **_blocked}
 
