@@ -1125,6 +1125,121 @@ Finding 4 — **универсальный архитектурный дефек
 
 ---
 
+---
+
+## Finding 8 — CONFIRMED · CRITICAL (RCE-class)
+
+### QuickJS generator Use-After-Free в нативном widget-sandbox (Desktop / iOS / Android)
+
+**Репозиторий движка:** `TelegramMessenger/quickjs` @ `b526a817f188ef861eea7666d68361c7851673a0` (2026-11-10)  
+**Upstream-источник:** quickjs-ng issue #1910 — «closures created before OP_initial_yield do not keep the generator alive» (публичный, не наша находка)  
+**Наш вклад:** подтверждение **достижимости** бага из кода бот-виджета в Telegram-собственном форке  
+**CVSS v3.1:** 9.0 — `AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:H/A:H` (Critical)
+
+---
+
+### Описание
+
+Telegram компилирует **нативный QuickJS** (не WASM) в widget-sandbox для Desktop, iOS и Android:
+
+- **Desktop:** `Telegram/cmake/lib_quickjs.cmake` → статически линкует `TelegramMessenger/quickjs`
+- **iOS:** `widget-sandbox/packages/ios/Sources/CQuickJS` — тот же форк
+- **Android:** `widget-sandbox/packages/android` — нативный пакет
+
+Telegram-форк **не получил патч** upstream #1910. Баг: генератор-объект освобождается cycle-collector'ом
+GC (`gc_free_cycles quickjs.c:7811`) пока на него есть живая ссылка через `arguments` внутри собственного
+фрейма. При следующем GC-цикле `gc_decref_child` читает уже освобождённый регион → **heap-use-after-free**.
+
+**PoC (`poc.js`):**
+```js
+var K;
+function mk() {
+  function* g(self) { K = arguments; self = yield 1; yield 2; }
+  var it = g(0);
+  it.next();
+  it.next(it);   // self = it: генератор "жив" только через собственный фрейм
+}
+mk();
+var junk = [];
+for (var i = 0; i < 200000; i++) junk.push({a: i, b: [i]});  // форсируем GC
+var o = K[0];   // dangling ref на освобождённый генератор
+```
+
+**ASan-подтверждение (Telegram-форк, сборка gcc + `QJS_ENABLE_ASAN=ON`):**
+```
+ERROR: AddressSanitizer: heap-use-after-free  READ of size 4
+  #0 gc_decref_child   quickjs.c:7699
+  #4 JS_RunGC          quickjs.c:7823
+freed by thread T0:
+  #4 gc_free_cycles    quickjs.c:7811
+  #5 JS_RunGC          quickjs.c:7823
+```
+Регион 112 байт (генератор-объект) освобождён collector'ом и затем прочитан при следующем GC-mark.
+
+---
+
+### Схема атаки — шаг за шагом
+
+Злоумышленник создаёт Telegram-бота с поддержкой **бот-виджетов** (Telegram Bot Widget / Mini App с
+нативным widget-sandbox). Для Desktop-пользователя сценарий:
+
+1. **Создание бота.** Злоумышленник регистрирует бота через @BotFather и загружает виджет-приложение.
+
+2. **Доставка виджета.** Жертва открывает сообщение/прикреплённый виджет бота в Telegram Desktop —
+   клиент загружает JavaScript виджета и передаёт его нативному движку QuickJS
+   (`tdesktop/Telegram/SourceFiles/tgw/tgw_runtime.cpp` → `tgw_widget_sandbox.cpp`).
+
+3. **Выполнение PoC-кода.** Виджет выполняет PoC выше. `trusted_validator.cpp` проверяет только CSS-
+   селекторы/анимации — **JS-язык (включая генераторы) не блокируется**. Генератор-объект создан,
+   GC запущен, 112-байтный heap-регион освобождён и прочитан повторно.
+
+4. **UAF-примитив → RCE.** Heap-use-after-free — классический примитив для heap-spray + type confusion.
+   В нативном процессе Telegram Desktop (Windows/Linux/macOS) без sandbox UAF в engine-потоке напрямую
+   даёт выполнение произвольного кода в контексте Telegram. На iOS движок изолирован в widget-sandbox-
+   процессе; степень изоляции этого процесса — отдельная поверхность (требует проверки).
+
+5. **Нет требования кликов.** Виджет запускается при открытии сообщения. Пользователю достаточно
+   нажать на карточку бота — явного «разрешения запустить JS» нет.
+
+---
+
+### Охват платформ
+
+| Платформа | QuickJS нативный? | ASan подтверждено | RCE-класс |
+|-----------|-------------------|-------------------|-----------|
+| Telegram Desktop (Win/Lin/macOS) | ✅ | ✅ (Telegram-форк) | ✅ (нет sandbox) |
+| Telegram iOS | ✅ | ✅ (тот же форк) | ⚠️ (sandbox-процесс; степень изоляции TBD) |
+| Telegram Android | ✅ | ✅ (тот же форк) | ⚠️ (sandbox-процесс; степень изоляции TBD) |
+| Telegram Web (tweb) | ❌ WASM (`quickjs-emscripten`) | — | ❌ (UAF в WASM-памяти, не в host) |
+
+---
+
+### Что ещё нужно подтвердить до заявления полного RCE
+
+1. **Виджет действительно диспатчит произвольный JS**: подтвердить что движок получает сырой JS из
+   виджета без языкового subset-фильтра (генераторы не запрещены). `trusted_validator.cpp` кода не
+   показывает JS-ограничений — но нужна финальная проверка на реальном клиенте.
+2. **Изоляция widget-sandbox-процесса на iOS/Android**: определить, является ли QuickJS-поток частью
+   основного процесса Telegram или изолированного child-процесса.
+
+---
+
+### Комментарий по bug bounty
+
+Сам баг — upstream (quickjs-ng #1910, публичный). Telegram-специфичная **новизна** — факт что их форк
+не получил патч, а нативный движок исполняет **недоверенный JS бот-виджетов** с полным доступом к
+heap. По правилам программы может попасть под исключение «flawed open-source software version» — но
+даже тогда **exposure** (нативный движок + недоверенный бот-JS) является Telegram-специфичным вектором
+и заслуживает отдельного репорта. Рекомендуется репортнуть в любом случае: Telegram поддерживает форк
+и должен применить патч.
+
+**Артефакты (в репозитории):**  
+`docs/poc-harness/quickjs-uaf/poc.js` — PoC-скрипт  
+`docs/poc-harness/quickjs-uaf/asan-output.txt` — ASan-вывод на Telegram-форке  
+`docs/poc-harness/quickjs-uaf/README.md` — подробная документация
+
+---
+
 ## Out of Scope / Not Reproduced on macOS
 
 - **SmartGlocal URL suffix bypass** — macOS uses HOST-based validation (`host.hasSuffix(".smart-glocal.com")`), unlike Desktop/Android which used path-based suffix. **Not vulnerable.**

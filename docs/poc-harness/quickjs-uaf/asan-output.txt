@@ -1,0 +1,114 @@
+=================================================================
+==1005==ERROR: AddressSanitizer: heap-use-after-free on address 0x50b000009af4 at pc 0x5637d70ff9de bp 0x7fff63840210 sp 0x7fff63840200
+READ of size 4 at 0x50b000009af4 thread T0
+    #0 0x5637d70ff9dd in gc_decref_child /home/user/telegrammessenger/tg-quickjs/quickjs.c:7699
+    #1 0x5637d70fec33 in JS_MarkValue /home/user/telegrammessenger/tg-quickjs/quickjs.c:7565
+    #2 0x5637d70ff6f5 in mark_children /home/user/telegrammessenger/tg-quickjs/quickjs.c:7658
+    #3 0x5637d70ffc50 in gc_decref /home/user/telegrammessenger/tg-quickjs/quickjs.c:7720
+    #4 0x5637d710051e in JS_RunGC /home/user/telegrammessenger/tg-quickjs/quickjs.c:7823
+    #5 0x5637d70d94f1 in js_trigger_gc /home/user/telegrammessenger/tg-quickjs/quickjs.c:1744
+    #6 0x5637d70f6e89 in JS_NewObjectFromShape /home/user/telegrammessenger/tg-quickjs/quickjs.c:6468
+    #7 0x5637d70f7b37 in JS_NewObjectProtoClass /home/user/telegrammessenger/tg-quickjs/quickjs.c:6604
+    #8 0x5637d70f89d8 in JS_NewObject /home/user/telegrammessenger/tg-quickjs/quickjs.c:6751
+    #9 0x5637d714d7ea in JS_CallInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:18993
+    #10 0x5637d7175ec4 in JS_CallFree /home/user/telegrammessenger/tg-quickjs/quickjs.c:21732
+    #11 0x5637d71ec6c1 in JS_EvalFunctionInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:38994
+    #12 0x5637d71ed733 in __JS_EvalInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:39130
+    #13 0x5637d71eda1b in JS_EvalInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:39156
+    #14 0x5637d71ee16b in JS_EvalThis2 /home/user/telegrammessenger/tg-quickjs/quickjs.c:39211
+    #15 0x5637d71ee3cc in JS_Eval /home/user/telegrammessenger/tg-quickjs/quickjs.c:39225
+    #16 0x5637d70af22f in eval_buf /home/user/telegrammessenger/tg-quickjs/qjs.c:139
+    #17 0x5637d70af499 in eval_file /home/user/telegrammessenger/tg-quickjs/qjs.c:172
+    #18 0x5637d70b20a0 in main /home/user/telegrammessenger/tg-quickjs/qjs.c:700
+    #19 0x7f2e2662a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #20 0x7f2e2662a28a in __libc_start_main_impl ../csu/libc-start.c:360
+    #21 0x5637d70ad8a4 in _start (/home/user/telegrammessenger/tg-quickjs/build-gcc/qjs+0x418a4) (BuildId: d06ad4e427397d00eff4b38ecc53cfc27d0d17fe)
+
+0x50b000009af4 is located 4 bytes inside of 112-byte region [0x50b000009af0,0x50b000009b60)
+freed by thread T0 here:
+    #0 0x7f2e26afc4d8 in free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:52
+    #1 0x5637d70dc791 in js_def_free /home/user/telegrammessenger/tg-quickjs/quickjs.c:2666
+    #2 0x5637d70d9eb8 in js_arena_free /home/user/telegrammessenger/tg-quickjs/quickjs.c:2071
+    #3 0x5637d70daf56 in js_free_rt /home/user/telegrammessenger/tg-quickjs/quickjs.c:2293
+    #4 0x5637d7100494 in gc_free_cycles /home/user/telegrammessenger/tg-quickjs/quickjs.c:7811
+    #5 0x5637d7100536 in JS_RunGC /home/user/telegrammessenger/tg-quickjs/quickjs.c:7829
+    #6 0x5637d70d94f1 in js_trigger_gc /home/user/telegrammessenger/tg-quickjs/quickjs.c:1744
+    #7 0x5637d70f6e89 in JS_NewObjectFromShape /home/user/telegrammessenger/tg-quickjs/quickjs.c:6468
+    #8 0x5637d70f8683 in JS_NewArray /home/user/telegrammessenger/tg-quickjs/quickjs.c:6717
+    #9 0x5637d70f8724 in JS_NewArrayFrom /home/user/telegrammessenger/tg-quickjs/quickjs.c:6728
+    #10 0x5637d7152cd1 in JS_CallInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:19279
+    #11 0x5637d7175ec4 in JS_CallFree /home/user/telegrammessenger/tg-quickjs/quickjs.c:21732
+    #12 0x5637d71ec6c1 in JS_EvalFunctionInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:38994
+    #13 0x5637d71ed733 in __JS_EvalInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:39130
+    #14 0x5637d71eda1b in JS_EvalInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:39156
+    #15 0x5637d71ee16b in JS_EvalThis2 /home/user/telegrammessenger/tg-quickjs/quickjs.c:39211
+    #16 0x5637d71ee3cc in JS_Eval /home/user/telegrammessenger/tg-quickjs/quickjs.c:39225
+    #17 0x5637d70af22f in eval_buf /home/user/telegrammessenger/tg-quickjs/qjs.c:139
+    #18 0x5637d70af499 in eval_file /home/user/telegrammessenger/tg-quickjs/qjs.c:172
+    #19 0x5637d70b20a0 in main /home/user/telegrammessenger/tg-quickjs/qjs.c:700
+    #20 0x7f2e2662a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #21 0x7f2e2662a28a in __libc_start_main_impl ../csu/libc-start.c:360
+    #22 0x5637d70ad8a4 in _start (/home/user/telegrammessenger/tg-quickjs/build-gcc/qjs+0x418a4) (BuildId: d06ad4e427397d00eff4b38ecc53cfc27d0d17fe)
+
+previously allocated by thread T0 here:
+    #0 0x7f2e26afd9c7 in malloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:69
+    #1 0x5637d70dc76f in js_def_malloc /home/user/telegrammessenger/tg-quickjs/quickjs.c:2661
+    #2 0x5637d70d9b26 in arena_malloc_large /home/user/telegrammessenger/tg-quickjs/quickjs.c:1988
+    #3 0x5637d70d9d2d in js_arena_malloc /home/user/telegrammessenger/tg-quickjs/quickjs.c:2044
+    #4 0x5637d70dad87 in js_malloc_rt /home/user/telegrammessenger/tg-quickjs/quickjs.c:2269
+    #5 0x5637d70db219 in js_malloc /home/user/telegrammessenger/tg-quickjs/quickjs.c:2357
+    #6 0x5637d70f6f01 in JS_NewObjectFromShape /home/user/telegrammessenger/tg-quickjs/quickjs.c:6472
+    #7 0x5637d70f7b37 in JS_NewObjectProtoClass /home/user/telegrammessenger/tg-quickjs/quickjs.c:6604
+    #8 0x5637d7176695 in js_create_from_ctor /home/user/telegrammessenger/tg-quickjs/quickjs.c:21808
+    #9 0x5637d7178f3f in js_call_generator_function /home/user/telegrammessenger/tg-quickjs/quickjs.c:22164
+    #10 0x5637d7149d01 in JS_CallInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:18780
+    #11 0x5637d7148b85 in js_call_interp /home/user/telegrammessenger/tg-quickjs/quickjs.c:18700
+    #12 0x5637d71521e3 in JS_CallInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:19226
+    #13 0x5637d7148b85 in js_call_interp /home/user/telegrammessenger/tg-quickjs/quickjs.c:18700
+    #14 0x5637d71521e3 in JS_CallInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:19226
+    #15 0x5637d7175ec4 in JS_CallFree /home/user/telegrammessenger/tg-quickjs/quickjs.c:21732
+    #16 0x5637d71ec6c1 in JS_EvalFunctionInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:38994
+    #17 0x5637d71ed733 in __JS_EvalInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:39130
+    #18 0x5637d71eda1b in JS_EvalInternal /home/user/telegrammessenger/tg-quickjs/quickjs.c:39156
+    #19 0x5637d71ee16b in JS_EvalThis2 /home/user/telegrammessenger/tg-quickjs/quickjs.c:39211
+    #20 0x5637d71ee3cc in JS_Eval /home/user/telegrammessenger/tg-quickjs/quickjs.c:39225
+    #21 0x5637d70af22f in eval_buf /home/user/telegrammessenger/tg-quickjs/qjs.c:139
+    #22 0x5637d70af499 in eval_file /home/user/telegrammessenger/tg-quickjs/qjs.c:172
+    #23 0x5637d70b20a0 in main /home/user/telegrammessenger/tg-quickjs/qjs.c:700
+    #24 0x7f2e2662a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #25 0x7f2e2662a28a in __libc_start_main_impl ../csu/libc-start.c:360
+    #26 0x5637d70ad8a4 in _start (/home/user/telegrammessenger/tg-quickjs/build-gcc/qjs+0x418a4) (BuildId: d06ad4e427397d00eff4b38ecc53cfc27d0d17fe)
+
+SUMMARY: AddressSanitizer: heap-use-after-free /home/user/telegrammessenger/tg-quickjs/quickjs.c:7699 in gc_decref_child
+Shadow bytes around the buggy address:
+  0x50b000009800: fa fa fa fa fa fa 00 00 00 00 00 00 00 00 00 00
+  0x50b000009880: 00 00 00 fa fa fa fa fa fa fa fa fa 00 00 00 00
+  0x50b000009900: 00 00 00 00 00 00 00 00 00 00 fa fa fa fa fa fa
+  0x50b000009980: fa fa 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x50b000009a00: fa fa fa fa fa fa fa fa 00 00 00 00 00 00 00 00
+=>0x50b000009a80: 00 00 00 00 00 fa fa fa fa fa fa fa fa fa[fd]fd
+  0x50b000009b00: fd fd fd fd fd fd fd fd fd fd fd fd fa fa fa fa
+  0x50b000009b80: fa fa fa fa 00 00 00 00 00 00 00 00 00 00 00 00
+  0x50b000009c00: 00 00 fa fa fa fa fa fa fa fa fd fd fd fd fd fd
+  0x50b000009c80: fd fd fd fd fd fd fd fd fa fa fa fa fa fa fa fa
+  0x50b000009d00: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==1005==ABORTING

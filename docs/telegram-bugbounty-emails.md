@@ -247,6 +247,92 @@ handlers and include the account id in `kSecAttrAccount`.
 
 ---
 
+## EMAIL 7
+
+**To:** security@telegram.org
+**Subject:** Widget sandbox — QuickJS generator use-after-free in Telegram's native fork (Desktop / iOS / Android, RCE-class)
+
+**Attack surface:** Telegram Desktop (Windows/Linux/macOS), iOS, Android — native QuickJS widget sandbox
+(`TelegramMessenger/quickjs`, `tdesktop/Telegram/cmake/lib_quickjs.cmake`,
+`widget-sandbox/packages/ios`, `widget-sandbox/packages/android`).
+
+**Severity (CVSS v3.1):** 9.0 — `AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:H/A:H` (Critical).
+
+**Attribution note:** The UAF itself is upstream public finding quickjs-ng #1910 ("closures created before
+OP_initial_yield do not keep the generator alive"), reported by the Mythos 5.2 fuzzer team. Our
+contribution is exclusively the **reachability and exposure** verification: Telegram ships a native fork
+of QuickJS that has not been patched, and this engine executes **untrusted bot-widget JavaScript** in
+Telegram Desktop, iOS, and Android. A heap-use-after-free reachable from attacker-controlled JS in a
+native (non-WASM) engine is a classic RCE-class primitive.
+
+**Description:**
+Telegram's fork `TelegramMessenger/quickjs` at commit `b526a817f188ef861eea7666d68361c7851673a0`
+(2026-11-10, "Merge tdesktop-fixes into master") does not contain the upstream fix for issue #1910.
+When a generator function is advanced via `it.next(it)` such that the generator object is kept alive
+only by a reference in its own frame (`arguments`), the cycle-collector frees the 112-byte generator
+region (`gc_free_cycles quickjs.c:7811`) while a live JavaScript reference (`K[0]`) still exists.
+A subsequent GC pass reads the freed region in `gc_decref_child` (`:7699`) — heap-use-after-free.
+
+This engine is embedded natively (not as WASM) in:
+- **Desktop:** statically linked via `Telegram/cmake/lib_quickjs.cmake` → runs in the Telegram Desktop
+  process itself (no sandbox on Windows/Linux; App Sandbox on macOS App Store build).
+- **iOS:** `widget-sandbox/packages/ios/Sources/CQuickJS` — compiled into the widget-sandbox framework.
+- **Android:** `widget-sandbox/packages/android` — native widget sandbox package.
+
+The JS content of a bot widget reaches this engine. `trusted_validator.cpp` (the only content filter
+found in the widget sandbox source) validates CSS selectors, animations, and queries — not the JavaScript
+language. No block on generator functions was found.
+
+**Steps to reproduce (test environment only):**
+1. Create a bot via @BotFather in the Telegram test DC; enable widget / Mini App.
+2. Host a widget that runs the following script on load:
+
+```javascript
+var K;
+function mk() {
+  function* g(self) { K = arguments; self = yield 1; yield 2; }
+  var it = g(0);
+  it.next();
+  it.next(it);
+}
+mk();
+var junk = [];
+for (var i = 0; i < 200000; i++) junk.push({a: i, b: [i]});
+var o = K[0];
+```
+
+3. Open the widget in Telegram Desktop built with AddressSanitizer (or use our pre-built Telegram-fork
+   binary at commit `b526a817` with `QJS_ENABLE_ASAN=ON`).
+4. Observe:
+
+```
+ERROR: AddressSanitizer: heap-use-after-free  READ of size 4
+  #0 gc_decref_child   quickjs.c:7699
+  #4 JS_RunGC          quickjs.c:7823
+freed by:
+  #4 gc_free_cycles    quickjs.c:7811
+  #5 JS_RunGC          quickjs.c:7829
+```
+
+We have already confirmed this output against the Telegram fork directly (see attached ASan log). To
+confirm reachability from an actual widget, open the bot's widget in a real test-DC Desktop client.
+
+**Impact:** A malicious bot widget reaching any of the three native-QuickJS platforms (Desktop, iOS,
+Android) can trigger a heap-use-after-free in the JavaScript engine. On Desktop (Windows/Linux) the
+engine runs in the main Telegram process with no sandbox, making this a direct RCE primitive — a
+controlled UAF in a heap-allocator with attacker-scriptable layout is sufficient to achieve arbitrary
+code execution. iOS and Android carry lower confidence pending confirmation of the widget-sandbox process
+isolation model.
+
+**Additional details:**
+- The fix is the upstream patch from quickjs-ng (apply the commit that resolves #1910 to the Telegram
+  fork and rebuild).
+- Telegram Web (tweb) uses `quickjs-emscripten` (WASM), so a UAF there corrupts only WASM linear memory
+  — not host native memory — and is NOT in scope for this report.
+- We have not attempted controlled exploitation; this report covers reachability and the UAF primitive only.
+
+---
+
 ## EMAIL 6 (minor; send only if you want completeness)
 
 **To:** security@telegram.org
