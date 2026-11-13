@@ -17863,6 +17863,7 @@ async def _exec_deploy_network(
     подключений не вводит.
     """
     from services import network_builder as _nb, account_manager
+    confirmed = "topology_digest" in params
     # Бренд-бот/промо — только free-tier (см. фабрику каналов и create_channel).
     try:
         from services import brand_injection as _bi_gate
@@ -17876,6 +17877,14 @@ async def _exec_deploy_network(
     d = await _nb.get_instance_detail(pool, owner_id, instance_id)
     if not d:
         return {"status": "failed", "summary": "⚠️ Связка не найдена"}
+    if confirmed:
+        account_id = params.get("account_id")
+        if not _nb.project_pilot_enabled(owner_id):
+            return {"status": "failed", "summary": "Доступ к пилоту отозван"}
+        if params["topology_digest"] != _nb.deployment_topology_digest(d):
+            return {"status": "failed", "summary": "Топология изменилась. Сверьте результат и откройте новый предпросмотр."}
+        if type(account_id) is not int or not await _nb.deployment_account(pool, owner_id, account_id):
+            return {"status": "failed", "summary": "Выбранный аккаунт недоступен"}
     nodes, edges = d["nodes"], d["edges"]
 
     # Аккаунт-создатель: явный или первый живой с сессией.
@@ -17903,6 +17912,17 @@ async def _exec_deploy_network(
     _claimed_acc = int(acc["id"])
 
     try:
+
+        if confirmed:
+            async with pool.acquire() as conn, conn.transaction():
+                await conn.fetchval("SELECT id FROM operation_queue WHERE id=$1 FOR UPDATE", op_id)
+                started = await conn.fetchval(
+                    """INSERT INTO operation_log(op_id,step_num,target,status,message)
+                       SELECT $1,0,'deploy_start','info','Начато развёртывание подтверждённого плана'
+                       WHERE NOT EXISTS (SELECT 1 FROM operation_log WHERE op_id=$1 AND target='deploy_start')
+                       RETURNING id""", op_id)
+            if not started:
+                return {"status": "failed", "summary": "Требуется сверка результата предыдущей попытки"}
 
         node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
         node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
@@ -17933,10 +17953,17 @@ async def _exec_deploy_network(
                     res = await account_manager.create_channel(
                         acc["session_str"], label,
                         megagroup=ntype in ("group", "chat"), _acc=acc,
-                        brand_promo=_brand_free)
-                except Exception as e:
-                    manual.append(f"{label}: ошибка создания ({str(e)[:60]})")
+                        brand_promo=_brand_free and not confirmed)
+                except TimeoutError:
+                    if confirmed:
+                        return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
+                    manual.append(f"{label}: истекло время ожидания создания")
                     continue
+                except Exception as e:
+                    manual.append(f"{label}: ошибка создания ({type(e).__name__})")
+                    continue
+                if confirmed and isinstance(res, dict) and res.get("requires_reconciliation"):
+                    return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
                 ch_id = res.get("channel_id") if isinstance(res, dict) else None
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
@@ -17961,10 +17988,12 @@ async def _exec_deploy_network(
                 # Нода-сообщество = форум-супергруппа + регистрация community_node.
                 try:
                     res = await account_manager.create_forum_supergroup(
-                        acc["session_str"], label, _acc=acc)
+                        acc["session_str"], label, _acc=acc, brand_promo=not confirmed)
                 except Exception as e:
                     manual.append(f"{label}: ошибка создания ноды ({str(e)[:60]})")
                     continue
+                if confirmed and isinstance(res, dict) and res.get("requires_reconciliation"):
+                    return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
                 ch_id = res.get("channel_id") if isinstance(res, dict) else None
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'нода не создана')[:60]}")
@@ -18060,9 +18089,13 @@ async def _exec_deploy_network(
         # «partial» с пустыми счётчиками он превращает в «done». Незапомненный
         # узел — именно непройденная работа: объект создан, а план о нём не
         # знает, и повтор создаст его заново.
-        return {"status": "partial" if unmarked else "done",
+        failed = max(unmarked, _done_n - created - wired) if confirmed else unmarked
+        status = "done"
+        if failed:
+            status = "partial" if created + wired or not confirmed else "failed"
+        return {"status": status,
                 "created": created, "wired": wired, "unmarked": unmarked,
-                "ok": created + wired, "failed": unmarked,
+                "ok": created + wired, "failed": failed,
                 "manual": manual, "summary": " · ".join(parts)}
     finally:
         await release_accounts([_claimed_acc])

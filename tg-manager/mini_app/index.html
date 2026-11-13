@@ -34561,11 +34561,20 @@ async function loadNetworkBuilder() {
 }
 
 // Превью-план развёртывания связки (Фаза 1: только план, без исполнения).
-async function showNetDeployPlan() {
+let netDeployPreview = null;
+let netDeployRequest = 0;
+let netDeploySubmitting = false;
+async function showNetDeployPlan(accountId) {
   if (!_currentNetId) { toast('❗ Выберите сеть'); return; }
+  const projectId = _currentNetId;
+  const revision = ++netDeployRequest;
+  netDeployPreview = null;
   txt('netDeployPlan','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const p = await api('/api/miniapp/networks/'+_currentNetId+'/deploy_plan');
+    const query = accountId ? '?account_id=' + encodeURIComponent(accountId) : '';
+    const p = await api('/api/miniapp/networks/' + projectId + '/deploy_plan' + query);
+    if (projectId !== _currentNetId || revision !== netDeployRequest) return;
+    netDeployPreview = {projectId, plan: p};
     const steps = p.steps||[];
     if (!steps.length) { txt('netDeployPlan', empty('🔗','Нечего разворачивать','Добавьте узлы и рёбра в связку')); return; }
     const facts = Object.entries(p.factories||{}).map(([f,n])=>`${n}× ${f}`).join(', ');
@@ -34575,24 +34584,55 @@ async function showNetDeployPlan() {
       <div class="row-val">${facts?('фабрики: '+esc(facts)):'все объекты уже существуют'}</div></div></div>`;
     h += steps.map((s,i)=>`<div class="row"><div class="row-ico" style="background:${s.kind==='create'?'var(--bg-purple-16)':'var(--bg-blue-16)'}">${i+1}</div>
       <div class="row-body"><div class="row-name" style="font-size:13px;white-space:normal">${esc(s.text)}</div></div></div>`).join('');
-    if (p.create > 0 || p.wire > 0) {
+    if (p.executor) h += `<div class="hint">Исполнитель: ${esc(p.executor.label)} · #${p.executor.id}</div>`;
+    if (p.requires_account && p.ready) {
+      h += `<button class="btn btn-s" onclick="pickNetDeployAccount()">${p.executor ? 'Сменить исполнителя' : 'Выбрать исполнителя'}</button>`;
+    }
+    if (p.ready && (!p.requires_account || p.approval)) {
       h += `<button class="btn btn-p" style="width:100%;margin-top:8px" onclick="deployNet()">🚀 Развернуть связку</button>`;
       h += `<div class="hint" style="font-size:11px;color:var(--hint);padding:6px 2px">Создаст недостающие каналы/группы и назначит admin-связи под защитой темпа. Боты — вручную через @BotFather.</div>`;
     }
     h += `<button class="btn btn-s" style="width:100%;margin-top:6px" onclick="folderFromNet()">📁 Собрать общую папку из каналов связки</button>`;
     txt('netDeployPlan', h);
   } catch(e) {
+    if (projectId !== _currentNetId || revision !== netDeployRequest) return;
     txt('netDeployPlan', empty('⚠️','Ошибка',errRu(e)||'Не удалось построить план', {label:'↺ Повторить',fn:retryCall('showNetDeployPlan')}));
   }
 }
-async function deployNet() {
-  if (!_currentNetId) { toast('❗ Выберите сеть'); return; }
-  if (!await askConfirm('Развернуть связку? Будут созданы недостающие каналы/группы и назначены admin-связи. Действие необратимо.')) return;
+async function pickNetDeployAccount() {
+  const preview = netDeployPreview;
+  if (!preview || preview.projectId !== _currentNetId) return;
+  const query = await askPrompt('Найти активный аккаунт', {placeholder: 'Имя, username или телефон'});
+  if (query === null || preview !== netDeployPreview) return;
   try {
-    const r = await api('/api/miniapp/networks/'+_currentNetId+'/deploy', {method:'POST', body:'{}'});
+    const result = await accPickerLoad('active', query.trim());
+    if (preview !== netDeployPreview || preview.projectId !== _currentNetId) return;
+    if (!result.accs.length) { toast('Аккаунты не найдены'); return; }
+    const account = await askChoice(accPickerNote(result) || 'Выберите исполнителя', result.accs.map(a => ({
+      value: a.id, label: a.first_name || a.username || 'Аккаунт', sub: '#' + a.id,
+    })));
+    if (account && preview === netDeployPreview && preview.projectId === _currentNetId) {
+      await showNetDeployPlan(account);
+    }
+  } catch(e) { toast(errRu(e, 'Не удалось загрузить аккаунты')); }
+}
+async function deployNet() {
+  const preview = netDeployPreview;
+  if (netDeploySubmitting || !preview?.plan.ready || preview.projectId !== _currentNetId) return;
+  const {projectId, plan} = preview;
+  netDeploySubmitting = true;
+  try {
+    const executor = plan.executor ? '\nИсполнитель: ' + plan.executor.label + ' · #' + plan.executor.id : '';
+    const message = 'Развернуть проект #' + projectId + '?\nСоздать: ' + plan.create + ', связать: ' + plan.wire + executor;
+    if (!await askConfirm(message) || preview !== netDeployPreview || projectId !== _currentNetId) return;
+    const body = plan.requires_account ? {account_id: plan.executor.id, approval: plan.approval} : {};
+    const r = await api('/api/miniapp/networks/' + projectId + '/deploy', {method:'POST', body:JSON.stringify(body)});
     toast(`🚀 Запущено: +${r.create} объектов${r.op_id?` · операция #${r.op_id}`:''}`);
+    if (r.op_id && plan.requires_account && projectId === _currentNetId) openOpDetail(String(r.op_id));
   } catch(e) {
     toast('⚠️ '+errRu(e,'Ошибка'));
+  } finally {
+    netDeploySubmitting = false;
   }
 }
 // «Развернул связку → раздал одной ссылкой»: собираем общую папку прямо из
@@ -34609,6 +34649,8 @@ async function folderFromNet() {
   }
 }
 async function selectNetwork(netId) {
+  netDeployPreview = null;
+  netDeployRequest++;
   _currentNetId = netId;
   const publish = document.getElementById('netPublishProject');
   const journal = document.getElementById('netProjectOps');

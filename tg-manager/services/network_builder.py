@@ -6,6 +6,7 @@ of interconnected channels, groups, and bots.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -199,6 +200,22 @@ async def get_instance_detail(pool: asyncpg.Pool, owner_id: int,
 def project_pilot_enabled(owner_id: int) -> bool:
     allowed = os.getenv("INFRAGRAM_PROJECT_PILOT_IDS", "").split(",")
     return str(owner_id) in {value.strip() for value in allowed}
+
+
+def deployment_topology_digest(detail: dict) -> str:
+    nodes = sorted((n["id"], n["node_type"], n["label"], n["ref_id"]) for n in detail["nodes"])
+    edges = sorted((e["id"], e["source_node_id"], e["target_node_id"], e["edge_type"])
+                   for e in detail["edges"])
+    return hashlib.sha256(json.dumps([nodes, edges], ensure_ascii=False).encode()).hexdigest()
+
+
+async def deployment_account(pool, owner_id: int, account_id: int):
+    return await pool.fetchrow(
+        """SELECT id, COALESCE(NULLIF(first_name,''), NULLIF(username,''), id::text) AS label
+             FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active
+               AND NULLIF(session_str,'') IS NOT NULL""",
+        owner_id, account_id,
+    )
 
 
 async def project_publish_channels(

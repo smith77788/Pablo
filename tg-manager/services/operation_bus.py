@@ -1111,6 +1111,38 @@ async def submit(
                     if active is not None:
                         op_id = int(active)
                         reused = True
+                if op_type == "deploy_network" and params.get("instance_id") is not None:
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                        f"deploy-network|{owner_id}|{params['instance_id']}",
+                    )
+                    from services import op_status as _deploy_status
+                    if params.get("approval_digest"):
+                        confirmed = await conn.fetchval(
+                            """SELECT id FROM operation_queue WHERE owner_id=$1 AND op_type='deploy_network'
+                               AND params->>'instance_id'=$2 AND params->>'approval_digest'=$3
+                               ORDER BY id LIMIT 1""",
+                            owner_id, str(params["instance_id"]), params["approval_digest"],
+                        )
+                        if confirmed:
+                            op_id, reused = int(confirmed), True
+                    if not reused:
+                        active = await conn.fetchrow(
+                            """SELECT id, params->>'topology_digest' AS digest,
+                                      params->>'account_id' AS executor,
+                                      params->>'approval_digest' AS approval
+                               FROM operation_queue
+                               WHERE owner_id=$1 AND op_type='deploy_network'
+                                 AND params->>'instance_id'=$2
+                                 AND status=ANY($3::text[]) ORDER BY id LIMIT 1""",
+                            owner_id, str(params["instance_id"]), sorted(_deploy_status.IN_FLIGHT),
+                        )
+                        if active and ("topology_digest" in params or active["digest"] is not None):
+                            if (active["digest"] != params.get("topology_digest")
+                                    or active["executor"] != str(params.get("account_id"))
+                                    or active["approval"] != params.get("approval_digest")):
+                                raise PermissionError("Для этого проекта уже идёт другое развёртывание")
+                            op_id, reused = int(active["id"]), True
                 if not reused and dedup_window_sec and dedup_window_sec > 0:
                     dedup_identity = sensitive_params_fp or dedup_params_json
                     _dedup_statuses = _dedup_status_sql()
@@ -1934,6 +1966,12 @@ async def retry_blocker(pool: asyncpg.Pool, op_id: int) -> dict | None:
     жила только в `resubmit_one`, мини-апп повторял операцию с убранным
     журналом целиком заново. Возвращает {"reason": str, ...}.
     """
+    if await pool.fetchval(
+        """SELECT 1 FROM operation_queue WHERE id=$1 AND op_type='deploy_network'
+           AND params ? 'topology_digest'""", op_id,
+    ):
+        return {"reason": "Сверьте результат и заново откройте план развёртывания проекта"}
+
     # Журнал целей убран уборкой — повторять НЕЛЬЗЯ. Идемпотентность
     # исполнителя стоит на `operation_log`: пустой журнал означает «ничего не
     # сделано», и повтор прошёл бы ВСЕ цели заново — те же приглашения тем же

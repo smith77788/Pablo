@@ -1131,6 +1131,8 @@ def setup_routes(app: web.Application, pool) -> None:
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return None, _err("Не найдено", 404)
+        if row["op_type"] == "deploy_network" and "topology_digest" in _row_params(row):
+            return None, _err("Сверьте результат и заново откройте план развёртывания проекта", 409)
         return (uid, op_id, row), None
 
     async def _live_copy(op_id: int, uid: int) -> int | None:

@@ -5664,6 +5664,8 @@ async def create_channel(
             "type": "group" if megagroup else "channel",
             "invite_link": "",
         }
+    except TimeoutError:
+        return {"error": "Telegram не ответил вовремя", "requires_reconciliation": True}
     except Exception as e:
         from telethon.errors import (
             FloodWaitError, PeerFloodError,
@@ -7620,6 +7622,8 @@ async def create_forum_supergroup(
     title: str,
     about: str = "",
     _acc: dict | None = None,
+    *,
+    brand_promo: bool = True,
 ) -> dict:
     """Создать супергруппу и включить форум-режим (нода-комьюнити mini-Discord).
 
@@ -7627,7 +7631,7 @@ async def create_forum_supergroup(
     каналы ноды были топиками. Один клиент: create → ToggleForum."""
     from telethon.tl.functions.channels import ToggleForumRequest
 
-    res = await create_channel(session_string, title, about=about, megagroup=True, _acc=_acc)
+    res = await create_channel(session_string, title, about=about, megagroup=True, _acc=_acc, brand_promo=brand_promo)
     if not isinstance(res, dict) or res.get("error") or not res.get("channel_id"):
         return res if isinstance(res, dict) else {"error": "create failed"}
     ch_id = res["channel_id"]

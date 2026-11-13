@@ -88,3 +88,16 @@ def verify_cleanup(token: str, owner_id: int, plan: dict) -> None:
     payload = _read(token)
     if any(payload.get(key) != value for key, value in _cleanup_scope(owner_id, plan).items()):
         raise ApprovalError("План очистки изменился. Обновите предпросмотр.")
+
+
+def issue_deployment(owner_id: int, params: dict) -> str:
+    return _sign({"purpose": "project_deployment", "owner": owner_id, **params,
+                  "expires": int(time.time()) + 600})
+
+
+def verify_deployment(token: str, owner_id: int, params: dict) -> str:
+    payload = _read(token)
+    expected = {"purpose": "project_deployment", "owner": owner_id, **params}
+    if any(payload.get(key) != value for key, value in expected.items()):
+        raise ApprovalError("План или исполнитель изменились. Обновите предпросмотр.")
+    return hashlib.sha256(token.encode()).hexdigest()

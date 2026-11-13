@@ -428,56 +428,79 @@ def setup_routes(app: web.Application, pool) -> None:
                            "nodes": nodes, "edges": edges})
 
     async def network_deploy_plan(request: web.Request) -> web.Response:
-        """Превью-план развёртывания связки: топология → упорядоченные шаги.
-
-        Чистый network_builder.plan_deployment по узлам/рёбрам инстанса —
-        показывает, что создать (через какие фабрики) и как связать. Фаза 1:
-        только план (исполнитель — отдельно)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            nid = int(request.match_info["net_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        from services import network_builder as _nb
-        d = await _nb.get_instance_detail(pool, uid, nid)
-        if not d:
-            return _err("Сеть не найдена", 404)
-        nodes = [{"id": n["id"], "type": n.get("node_type"),
-                  "label": n.get("label") or "", "object_id": n.get("ref_id")}
-                 for n in d["nodes"]]
-        edges = [{"from_id": e.get("source_node_id"), "to_id": e.get("target_node_id"),
-                  "type": e.get("edge_type")} for e in d["edges"]]
-        return _json_resp(_nb.plan_deployment(nodes, edges))
+        return await _network_deployment(request, preview=True)
 
     async def network_deploy(request: web.Request) -> web.Response:
-        """Развернуть связку (Фаза 2): поставить op deploy_network в очередь.
-        Создаёт недостающие каналы/группы и вяжет admin-рёбра под губернатором."""
+        return await _network_deployment(request, preview=False)
+
+    async def _network_deployment(request: web.Request, *, preview: bool) -> web.Response:
+        from services import channel_change_approval as approval, network_builder as nb, operation_bus
+
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            nid = int(request.match_info["net_id"])
-        except (KeyError, ValueError):
+        nid = validate_integer(request.match_info["net_id"], min_val=1)
+        if nid is None:
             return _err("Неверный идентификатор", 400)
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
-        if not owns:
+        detail = await nb.get_instance_detail(pool, uid, nid)
+        if not detail:
             return _err("Сеть не найдена", 404)
-        from services import network_builder as _nb
-        d = await _nb.get_instance_detail(pool, uid, nid)
-        nodes = [{"id": n["id"], "type": n.get("node_type"), "label": n.get("label") or "",
-                  "object_id": n.get("ref_id")} for n in (d["nodes"] if d else [])]
-        edges = [{"from_id": e.get("source_node_id"), "to_id": e.get("target_node_id"),
-                  "type": e.get("edge_type")} for e in (d["edges"] if d else [])]
-        plan = _nb.plan_deployment(nodes, edges)
-        if not plan.get("steps"):
-            return _err("Нечего разворачивать — добавьте узлы/рёбра", 400)
+        nodes = [{"id": n["id"], "type": n["node_type"], "label": n["label"],
+                  "object_id": n["ref_id"]} for n in detail["nodes"]]
+        edges = [{"from_id": e["source_node_id"], "to_id": e["target_node_id"],
+                  "type": e["edge_type"]} for e in detail["edges"]]
+        plan = nb.plan_deployment(nodes, edges)
+        pilot = nb.project_pilot_enabled(uid)
+        params = {"instance_id": nid}
+        if pilot:
+            if preview:
+                raw_account, token = request.query.get("account_id"), None
+            else:
+                try:
+                    body = await request.json()
+                except (ValueError, web.HTTPBadRequest):
+                    return _err("Неверные параметры развёртывания", 400)
+                if not isinstance(body, dict):
+                    return _err("Неверные параметры развёртывания", 400)
+                raw_account, token = body.get("account_id"), body.get("approval")
+            plan["requires_account"] = True
+            if preview and raw_account is None:
+                return _json_resp(plan)
+            account_id = validate_integer(str(raw_account), min_val=1)
+            if account_id is None:
+                return _err("Выберите аккаунт для развёртывания", 400)
+            executor = await nb.deployment_account(pool, uid, account_id)
+            if not executor:
+                return _err("Аккаунт не найден или отключён", 404)
+            params.update(account_id=account_id, topology_digest=nb.deployment_topology_digest(detail))
+            if preview:
+                if plan["ready"]:
+                    try:
+                        plan["approval"] = approval.issue_deployment(uid, params)
+                    except approval.ApprovalError:
+                        return _err("Сервис подтверждения временно недоступен", 503)
+                return _json_resp({**plan, "executor": dict(executor)})
+            if not isinstance(token, str) or not token or len(token) > 1024:
+                return _err("Подтвердите предпросмотр развёртывания", 400)
+            try:
+                params["approval_digest"] = approval.verify_deployment(token, uid, params)
+            except approval.ApprovalError as exc:
+                return _err(str(exc), 409)
+        elif preview:
+            return _json_resp(plan)
+        elif request.can_read_body:
+            # Согласие пилота теряет силу после отзыва доступа к нему.
+            try:
+                body = await request.json()
+            except (ValueError, web.HTTPBadRequest):
+                body = None
+            if isinstance(body, dict) and ("approval" in body or "account_id" in body):
+                return _err("Доступ к пилоту отозван", 403)
+        if not plan["ready"]:
+            return _err("Проверьте узлы и связи проекта перед развёртыванием", 400)
         try:
-            from services import operation_bus
             op_id = await operation_bus.submit(
-                pool, uid, "deploy_network", {"instance_id": nid},
+                pool, uid, "deploy_network", params,
                 total_items=len(plan["steps"]),
                 label=f"Развернуть связку #{nid}: +{plan['create']} объектов")
             return _json_resp({"ok": True, "op_id": op_id,
@@ -618,7 +641,7 @@ def setup_routes(app: web.Application, pool) -> None:
         frm = validate_integer(str(body.get("from_id")), min_val=1)
         to = validate_integer(str(body.get("to_id")), min_val=1)
         typ = body.get("type", "forward")
-        if not nid or not frm or not to or frm == to or typ not in ("forward", "crosspost", "mention", "referral", "admin"):
+        if not nid or not frm or not to or frm == to or typ not in ("forward", "crosspost", "mention", "referral", "admin", "attach", "link"):
             return _err("Укажите два разных узла и тип связи", 400)
         res = await nb.add_project_edge(pool, nid, frm, to, typ, owner_id=uid)
         return _json_resp(res) if res["ok"] else _err(res["error"], res["status"])
