@@ -222,6 +222,16 @@ def classify(kind: str, signals: dict) -> dict:
             "signals": signals,
         }
 
+    # Токен бота Telegram больше не принимает (getMe по токену, без аккаунта
+    # флота) — бот удалён или токен отозван.
+    if kind == "bot" and signals.get("token_alive") is False:
+        return {
+            "status": STATUS_UNREACHABLE,
+            "label": _STATUS_LABELS[STATUS_UNREACHABLE],
+            "reason_ru": "Telegram не принимает токен бота — бот удалён или токен отозван",
+            "signals": signals,
+        }
+
     # Бот резолвится, но молчит на /start — жив в каталоге, но недоступен для
     # диалога (остановлен владельцем или ограничен). Это тоже недоступность.
     if kind == "bot" and signals.get("responds") is False:

@@ -16408,7 +16408,7 @@ async def _exec_check_owned_restrictions(
         _bot_args.append(only_bots)
     bot_rows = await _safe_fetch(
         pool,
-        f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
+        f"SELECT bot_id, username, first_name, token FROM managed_bots {_bot_where}",
         *_bot_args,
     )
 
@@ -16439,6 +16439,7 @@ async def _exec_check_owned_restrictions(
             # Бот публичен по @username; без него проверить нечем.
             "is_private": not _uname,
             "bot_id": int(r["bot_id"]),
+            "token": r.get("token"),
         })
 
     if not entities:
@@ -16446,21 +16447,32 @@ async def _exec_check_owned_restrictions(
                 "summary": "⚠️ Нет каналов/чатов/ботов для проверки. Сначала подключите их."}
 
     # ── 2. Аккаунты-наблюдатели ──────────────────────────────────────────────
+    # Предохранитель (services/observer_guard): наблюдатель прошлого прогона
+    # получил ограничение после него — расписание снимаем, флот не жжём дальше.
+    from services import observer_guard as _og
+    _hit = await _og.tripped(pool, params)
+    if _hit:
+        await _og.stop_schedule(pool, op_id, params)
+        return {"status": "failed", "stop_reason": "observers_restricted",
+                "summary": _og.trip_summary(_hit, "Ограничения и теневой бан")}
+
+    # Наблюдатель — только живой аккаунт без ограничений: ограниченный и сам
+    # не всё видит, и проверка добавляла бы ему следа.
     acc_rows = await _safe_fetch(
         pool,
-        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+        f"""SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
                   a.device_model, a.system_version, a.app_version,
                   a.lang_code, a.system_lang_code,
                   a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.owner_id=$1 AND a.is_active=TRUE""",
+           WHERE a.owner_id=$1 AND a.is_active=TRUE AND {_og.observer_where("a")}""",
         owner_id,
     )
     observers = [dict(r) for r in (acc_rows or []) if (r.get("session_str") or "").strip()]
     if not observers:
         return {"status": "failed",
-                "summary": "⚠️ Нет активного аккаунта для проверки. Подключите хотя бы один аккаунт."}
+                "summary": "⚠️ Нет активного аккаунта без ограничений для проверки."}
 
     # Карантинные аккаунты не используем как наблюдателей (fail-open: пульс мог не
     # ответить — тогда аккаунт остаётся кандидатом, это осознанный fail-open).
@@ -16502,11 +16514,15 @@ async def _exec_check_owned_restrictions(
     # действия владельца). Старт пула сдвигаем по op_id — разные прогоны берут
     # разные аккаунты, риск не копится на одной и той же горстке.
     _SAFE_TOUCHES_PER_ACCOUNT = 40
+    # Пул ПОСТОЯННЫЙ (observer_guard.stable_pick): раньше старт сдвигался по
+    # op_id, и за несколько прогонов по расписанию сущности сети «трогал» весь
+    # флот — после чего наблюдатели получали ограничение «жалоба на материалы».
+    # Аккаунты, которые сами ведут каналы владельца, — в последнюю очередь.
     if observers:
         _target_pool = max(2, -(-2 * max(1, n) // _SAFE_TOUCHES_PER_ACCOUNT))  # ceil(2n/safe)
         _pool_size = min(len(observers), _target_pool)
-        _pstart = (int(op_id) or 0) % len(observers)
-        _pool = (observers[_pstart:] + observers[:_pstart])[:_pool_size]
+        _pool = _og.stable_pick(observers, _pool_size,
+                                avoid_ids=await _og.admin_account_ids(pool, owner_id))
     else:
         _pool = []
 
@@ -16630,11 +16646,13 @@ async def _exec_check_owned_restrictions(
                 if _is_private and not chash:
                     await _ensure_dialogs(int(cand["id"]), client)
                 try:
+                    # /start боту с аккаунта флота больше не шлём: живость
+                    # бота — getMe по его же токену, без аккаунта (ниже).
                     v = await _erc.probe_entity(
                         client, kind=ent["kind"], entity_id=ent["id"],
                         username=ent.get("username"), access_hash=chash,
                         search_client=search_client,
-                        do_search=bool(search_client))
+                        do_search=bool(search_client), do_bot_ping=False)
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -16651,6 +16669,13 @@ async def _exec_check_owned_restrictions(
                 verdict = _erc.classify(ent["kind"], {
                     "probe_error": "нет доступного аккаунта для проверки "
                                    "(все заняты другими операциями или не подключились)"})
+            elif ent["kind"] == "bot" and ent.get("token"):
+                _alive = await _og.bot_alive_by_token(ent["token"])
+                if _alive is not None:
+                    _meta = verdict.get("meta")
+                    verdict = _erc.classify("bot", {**(verdict.get("signals") or {}),
+                                                    "token_alive": _alive})
+                    verdict["meta"] = _meta
 
             status = verdict["status"]
             counts[status] = counts.get(status, 0) + 1
@@ -16701,6 +16726,11 @@ async def _exec_check_owned_restrictions(
                 await c.disconnect()
             except Exception:
                 pass
+        # Кто смотрел — первыми к @SpamBot и в params следующего круга: так
+        # предохранитель видит ограничение наблюдателя уже на следующем прогоне.
+        _used = list(_clients.keys())
+        await _og.mark_for_recheck(pool, _used)
+        _og.remember_run(params, _used)
 
     summary = _erc.build_summary(counts, n)
     # Честность про непроверенную видимость: если у владельца всего один аккаунт
@@ -16796,20 +16826,28 @@ async def _exec_check_bot_geoban(
                 "summary": "⚠️ Нет публичных каналов, чатов или ботов (с @username) "
                            "для проверки гео-доступности."}
 
+    # Предохранитель и выбор наблюдателей — общие с проверкой ограничений
+    # (services/observer_guard).
+    from services import observer_guard as _og
+    _hit = await _og.tripped(pool, params)
+    if _hit:
+        await _og.stop_schedule(pool, op_id, params)
+        return {"status": "failed", "stop_reason": "observers_restricted",
+                "summary": _og.trip_summary(_hit, "Гео-доступность")}
     acc_rows = await _safe_fetch(
         pool,
-        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+        f"""SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
                   a.device_model, a.system_version, a.app_version,
                   a.lang_code, a.system_lang_code,
                   a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.owner_id=$1 AND a.is_active=TRUE""",
+           WHERE a.owner_id=$1 AND a.is_active=TRUE AND {_og.observer_where("a")}""",
         owner_id)
     observers = [dict(r) for r in (acc_rows or []) if (r.get("session_str") or "").strip()]
     if not observers:
         return {"status": "failed",
-                "summary": "⚠️ Нет активного аккаунта для проверки."}
+                "summary": "⚠️ Нет активного аккаунта без ограничений для проверки."}
 
     observers = await _claim_available_accounts(op_id, observers, owner_id)
     if not observers:
@@ -16826,6 +16864,10 @@ async def _exec_check_bot_geoban(
 
     # Одна страна = один наблюдатель (первый здоровый с известным geo). Без geo
     # прокси страну не знаем — такие аккаунты для гео-пробы бесполезны.
+    # Порядок постоянный (по id, ведущие каналы — в конце): одни и те же
+    # наблюдатели от прогона к прогону, а не случайный аккаунт страны.
+    healthy = _og.stable_pick(healthy, len(healthy),
+                              avoid_ids=await _og.admin_account_ids(pool, owner_id))
     geo_acc: dict = {}
     for a in healthy:
         geo = (str(a.get("geo_country") or "")).strip().upper()
@@ -16958,6 +17000,9 @@ async def _exec_check_bot_geoban(
                 await c.disconnect()
             except Exception:
                 pass
+        _used = list(_clients.keys())
+        await _og.mark_for_recheck(pool, _used)
+        _og.remember_run(params, _used)
 
     summary = _erc.build_geoban_summary(counts, n)
     summary += f"\n\nℹ️ Проверено стран: {distinct_geos} ({', '.join(sorted(geo_acc))})."
