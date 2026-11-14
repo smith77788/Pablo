@@ -93,7 +93,7 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("Ошибка очистки по результату проверки op_id=%s uid=%s", op_id, uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    async def project_scope(request, uid):
+    async def _project_scope(request, uid):
         if "project_id" not in request.query:
             return None, None
         from services.network_builder import project_pilot_enabled
@@ -118,7 +118,7 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        project_id, scope_error = await project_scope(request, uid)
+        project_id, scope_error = await _project_scope(request, uid)
         if scope_error is not None:
             return scope_error
         project_args = [uid, project_id] if project_id else [uid]
@@ -1075,7 +1075,7 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        project_id, scope_error = await project_scope(request, uid)
+        project_id, scope_error = await _project_scope(request, uid)
         if scope_error is not None:
             return scope_error
         args = [uid, project_id] if project_id else [uid]
