@@ -253,25 +253,27 @@ def setup_routes(app: web.Application, pool) -> None:
             reply_delay_sec = 0
         # Создание автоответа — МУТАЦИЯ, и доступ к ней ýже видимости.
         # `_user_can_use_bot` (своё + экосистема + пространство) — это правило
-        # ВИДИМОСТИ: участник рабочего пространства с ролью viewer видит бота
+        # ВИДИМОСТИ: участник рабочего пространства с ролью viewer ВИДИТ бота
         # (bot_detail, bot_auto_replies), но ПИСАТЬ ему правила нельзя. Все
         # прочие мутации ботов в этом файле скоупятся по `added_by` (токен,
-        # заметка, swarm, роль, relay) — здесь так же. Проверка и вставка —
-        # ОДНИМ запросом `INSERT … SELECT … WHERE added_by`, без окна между
-        # «проверил» и «вставил»; пустой результат = бот не свой = 404.
+        # заметка, swarm, роль, relay) — здесь так же, тем же способом, что и
+        # create_deeplink/bot_funnels: проверка владельца, затем вставка.
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
+            bot_id, uid)
+        if not owns:
+            return _err("Бот не найден", 404)
         try:
             row = await pool.fetchrow(
                 """INSERT INTO auto_replies
                        (bot_id, trigger_type, keyword, response_text, is_active,
                         match_mode, buttons, priority, reply_delay_sec)
-                   SELECT $1,$2,$3,$4,TRUE,$5,$6,$7,$8
-                   FROM managed_bots
-                   WHERE bot_id=$1 AND added_by=$9 AND deleted_at IS NULL
+                   VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7,$8)
                    RETURNING id""",
                 bot_id, trigger_type, keyword or None, response_text, match_mode,
-                buttons_json, priority, reply_delay_sec, uid)
+                buttons_json, priority, reply_delay_sec)
             if row is None:
-                return _err("Бот не найден", 404)
+                return _err("Не удалось создать автоответ", 500)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)
