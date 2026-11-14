@@ -26,6 +26,8 @@
 """
 from __future__ import annotations
 
+from services.secret_masking import redact_secrets
+
 import asyncio
 import logging
 from typing import Any, Optional
@@ -56,13 +58,14 @@ def _classify_resolve_error(err: str) -> tuple[bool, Optional[str]]:
     Своя-ошибка проверяется ПЕРВОЙ: FloodWait нашей сессии не должен ложно
     зачитаться сущности как недоступность.
     """
-    low = (err or "").lower()
+    err = err or ""
+    low = err.lower()
     if any(m in low for m in _OWN_FAULT_MARKERS):
-        return (False, err[:160] or "ошибка подключения")
+        return (False, redact_secrets(err, limit=len(err))[:160] or "ошибка подключения")
     if any(m in low for m in _UNREACHABLE_MARKERS):
         return (True, None)
     # Незнакомая ошибка — честнее пометить как сбой проверки, чем выдать вердикт.
-    return (False, err[:160] or "неизвестная ошибка резолва")
+    return (False, redact_secrets(err, limit=len(err))[:160] or "неизвестная ошибка резолва")
 
 # ── Статусы на сущность ──────────────────────────────────────────────────────
 STATUS_CLEAN = "clean"            # ограничений не обнаружено

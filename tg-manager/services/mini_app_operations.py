@@ -84,6 +84,7 @@ def setup_routes(app: web.Application, pool) -> None:
             verify(await cleanup.plan(*args, project_id=project_id))
             result = await cleanup.apply(*args, project_id=project_id, verify=verify)
             result["items"] = cleanup.public_items(result["items"])
+            result["changed"] = cleanup.public_items(result["changed"])
             return _json_resp(result)
         except cleanup.CleanupError as exc:
             return _err(str(exc), exc.status)

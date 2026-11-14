@@ -1,5 +1,6 @@
 """Подписанная сессия Mini App и точное подтверждение на тестовом PostgreSQL."""
 import asyncio
+import json
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -19,6 +20,14 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
     monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
 
     async def scenario(pool, op_id):
+        session = "1" + "A" * 180
+        await pool.execute("UPDATE managed_bots SET first_name=$1 WHERE bot_id=$2 AND added_by=$3",
+                           session, BOT, OWNER)
+        await pool.execute("UPDATE operation_queue SET result=$2::jsonb WHERE id=$1", op_id,
+                           json.dumps({"findings_version": 2, "findings": [
+                               {**BOT_TARGET, "status": "restricted", "reason": f"Ошибка {session}"},
+                               {**CHANNEL_TARGET, "status": "check_failed"},
+                           ]}))
         app = web.Application()
         mini_app_operations.setup_routes(app, pool)
         path = f"/api/miniapp/operations/{op_id}/cleanup"
@@ -35,6 +44,8 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             payload = await findings.json()
             assert {item["id"] for item in payload["findings"]} == {str(BOT), str(CHANNEL)}
             assert "12345:restriction-cleanup-test" not in str(payload)
+            masked = next(item for item in payload["findings"] if item["kind"] == "bot")
+            assert masked["title"] == "***" and masked["reason"] == "Ошибка ***"
             assert payload["history"] == []
             assert not any("revisions" in item or "bindings" in item for item in payload["findings"])
             assert (await client.post(path, json=action, headers=headers)).status == 400
@@ -44,6 +55,7 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             preview = await client.post(path, json={**action, "preview": True}, headers=headers)
             assert preview.status == 200
             preview_body = await preview.json()
+            assert preview_body["items"][0]["reason"] == "Ошибка ***"
             assert "revisions" not in preview_body["items"][0]
             token = preview_body["token"]
             assert secret not in token
@@ -55,7 +67,9 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
             response = await client.post(path, json=confirmation, headers=headers)
             assert response.status == 200, await response.text()
-            outcome = (await response.json())["items"][0]
+            applied = await response.json()
+            assert applied["changed"][0]["title"] == "***"
+            outcome = applied["items"][0]
             assert outcome["id"] == str(BOT) and outcome["outcome"] in ("applied", "disabled")
             assert "revisions" not in outcome
             reread = await (await client.get(path, headers=headers)).json()

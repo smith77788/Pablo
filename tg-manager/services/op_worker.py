@@ -16566,7 +16566,7 @@ async def _exec_check_owned_restrictions(
             return c
         except Exception as e:
             log.warning("check_owned_restrictions op=%d: наблюдатель acc=%s не подключился: %s",
-                        op_id, aid, e)
+                        op_id, aid, type(e).__name__)
             _dead.add(aid)
             return None
 
@@ -16584,7 +16584,7 @@ async def _exec_check_owned_restrictions(
             raise
         except Exception as e:
             log.debug("check_owned_restrictions op=%d: get_dialogs acc=%s не удался: %s",
-                      op_id, aid, e)
+                      op_id, aid, type(e).__name__)
 
     def _access_candidates(ent: dict, idx: int):
         # Кандидаты на РЕЗОЛВ+флаги: пары (аккаунт, access_hash для НЕГО), в
@@ -16671,8 +16671,8 @@ async def _exec_check_owned_restrictions(
                     raise
                 except Exception as e:
                     log.warning("check_owned_restrictions op=%d ent=%s: проба упала: %s",
-                                op_id, ent["id"], e)
-                    v = _erc.classify(ent["kind"], {"probe_error": str(e)[:160]})
+                                op_id, ent["id"], type(e).__name__)
+                    v = _erc.classify(ent["kind"], {"probe_error": type(e).__name__})
                 verdict = v
                 if _is_private and v["status"] == _erc.STATUS_CHECK_FAILED:
                     continue   # не-участник — пробуем следующего
@@ -16696,8 +16696,11 @@ async def _exec_check_owned_restrictions(
 
             _title = (ent.get("title") or (verdict.get("meta") or {}).get("title")
                       or (f"@{ent['username']}" if ent.get("username") else str(ent["id"])))
+            _title = redact_secrets(_title, limit=len(_title))[:500]
+            _reason = verdict["reason_ru"]
+            _reason = redact_secrets(_reason, limit=len(_reason))[:500]
             _label = f"{_KIND_RU.get(ent['kind'], ent['kind'])} «{_title}»"
-            _log_msg = f"{verdict['label']} — {verdict['reason_ru']}"
+            _log_msg = f"{verdict['label']} — {_reason}"
             await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -16710,7 +16713,7 @@ async def _exec_check_owned_restrictions(
             if status != _erc.STATUS_CLEAN:
                 findings.append({"kind": ent["kind"], "title": _title,
                                  "id": ent["id"], "bot_id": ent.get("bot_id"),
-                                 "status": status, "reason": verdict["reason_ru"]})
+                                 "status": status, "reason": _reason})
             # В пульс ограничений попадают только выявленные проблемы.
             if _erc.is_problem(status):
                 try:
@@ -16720,7 +16723,7 @@ async def _exec_check_owned_restrictions(
                         _erc.severity_for(status),
                         {"entity_id": ent["id"], "kind": ent["kind"],
                          "username": ent.get("username"), "title": _title,
-                         "reason": verdict["reason_ru"]},
+                         "reason": _reason},
                         bot_id=ent.get("bot_id"),
                     )
                 except Exception as e:

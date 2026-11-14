@@ -9,6 +9,7 @@ import asyncpg
 from database import db
 
 from services import entity_restriction_check as check
+from services.secret_masking import redact_secrets
 
 _KINDS = frozenset({"bot", "channel", "group"})
 _GROUP_TYPES = ("chat", "group", "megagroup", "supergroup")
@@ -220,8 +221,22 @@ async def findings(pool, owner_id, op_id, *, include_history=False):
 
 
 def public_items(items):
-    return [{key: value for key, value in item.items() if key not in ("revisions", "bindings")}
-            for item in items]
+    def safe_text(value, max_length):
+        text = str(value or "")
+        return redact_secrets(text, limit=len(text))[:max_length]
+
+    public = []
+    for item in items:
+        safe = {key: value for key, value in item.items() if key not in ("revisions", "bindings")}
+        for key in ("title", "reason", "disable_reason"):
+            if isinstance(safe.get(key), str):
+                safe[key] = safe_text(safe[key], 500)
+        if "projects" in safe:
+            safe["projects"] = [
+                {**project, "name": safe_text(project["name"], 200)} for project in safe["projects"]
+            ]
+        public.append(safe)
+    return public
 
 
 async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=False):
@@ -265,7 +280,8 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
     disabled = await _disabled_channels(conn, owner_id, selected_entries, items)
     channel_ids = [str(item_id) for kind, item_id in sorted(keys) if kind != "bot"]
     running_publications = await conn.fetch(
-        """SELECT op_type, params->'channel_ids' AS targets
+        """SELECT op_type, params->'channel_ids' AS targets,
+                  params->>'target' AS target_kind
              FROM operation_queue
             WHERE owner_id=$1 AND status='running'
               AND op_type IN ('mass_publish', 'quick_post', 'bulk_post_chans')
@@ -286,10 +302,15 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
             if isinstance(selected, list):
                 busy_channels.update(channel_by_row[str(value)] for value in selected
                                      if str(value) in channel_by_row)
-        elif selected is None:
-            busy_channels.update(channel_ids)
-        elif isinstance(selected, list):
-            busy_channels.update(str(value) for value in selected)
+        elif selected is None or isinstance(selected, list):
+            scope = publication["target_kind"]
+            if scope is None:
+                scope = "channels"
+            kind = {"channels": "channel", "groups": "group"}.get(scope)
+            explicit = None if selected is None else {str(value) for value in selected}
+            busy_channels.update(str(item_id) for key_kind, item_id in keys
+                                 if key_kind != "bot" and (kind is None or key_kind == kind)
+                                 and (explicit is None or str(item_id) in explicit))
 
     for key in sorted(keys):
         entry = entries[key]

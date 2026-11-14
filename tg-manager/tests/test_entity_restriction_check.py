@@ -20,6 +20,13 @@ from services import entity_restriction_check as erc
 
 # ── classify: каждая ветка вердикта ──────────────────────────────────────────
 
+def test_resolve_error_masks_secret_before_shortening():
+    session = "1" + "A" * 180
+    absent, error = erc._classify_resolve_error("proxy " + " " * 100 + session)
+    assert not absent and error.endswith("***")
+    assert "A" * 30 not in error
+
+
 def test_clean_when_resolves_and_visible():
     r = erc.classify("channel", {"resolved": True, "has_username": True,
                                   "found_in_search": True})

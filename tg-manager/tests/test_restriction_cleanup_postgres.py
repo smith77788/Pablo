@@ -184,6 +184,8 @@ def test_running_publication_blocks_detach_and_pending_rechecks_targets():
 
 @pytest.mark.parametrize(("op_type", "selection", "blocked"), [
     ("mass_publish", "all", True),
+    ("mass_publish", "groups", False),
+    ("mass_publish", "groups_explicit", False),
     ("mass_publish", "empty", False),
     ("mass_publish", "telegram_id", True),
     ("quick_post", "telegram_id", True),
@@ -196,7 +198,11 @@ def test_running_publication_matches_the_id_kind_used_by_its_executor(op_type, s
         row_id = await pool.fetchval(
             "SELECT id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL)
         params = {"text": "Синтетический пост"}
-        if selection != "all":
+        if selection in ("groups", "groups_explicit"):
+            params["target"] = "groups"
+            if selection == "groups_explicit":
+                params["channel_ids"] = [CHANNEL]
+        elif selection != "all":
             params["channel_ids"] = {"empty": [], "telegram_id": [CHANNEL], "catalog_id": [row_id]}[selection]
         await pool.execute(
             "INSERT INTO operation_queue(owner_id,op_type,status,params) VALUES($1,$2,'running',$3::jsonb)",

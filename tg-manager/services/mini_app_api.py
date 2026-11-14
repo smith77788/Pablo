@@ -8025,9 +8025,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 ent_id = int(f.get("id"))
             except (TypeError, ValueError):
                 continue
+            title = str(f.get("title") or ent_id)
+            reason = str(f.get("reason") or "")
             item = {"kind": kind, "id": ent_id,
-                    "title": str(f.get("title") or ent_id)[:120],
-                    "reason": str(f.get("reason") or "")[:160]}
+                    "title": redact_secrets(title, limit=len(title))[:120],
+                    "reason": redact_secrets(reason, limit=len(reason))[:160]}
             if kind == "bot":
                 dead_bot[ent_id] = item
             else:
@@ -8111,10 +8113,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except (TypeError, ValueError):
                 continue
             st = f.get("status")
+            title = str(f.get("title") or ent_id)
+            reason = str(f.get("reason") or "")
             item = {"kind": kind, "id": ent_id, "id_text": str(ent_id),
-                    "title": str(f.get("title") or ent_id)[:120],
+                    "title": redact_secrets(title, limit=len(title))[:120],
                     "status": st, "status_label": _erc.status_label(st),
-                    "reason": str(f.get("reason") or "")[:160],
+                    "reason": redact_secrets(reason, limit=len(reason))[:160],
                     "dead": st == _erc.STATUS_UNREACHABLE}
             if kind == "bot":
                 prob_bot[ent_id] = item
