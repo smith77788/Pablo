@@ -95,10 +95,13 @@ def pool():
         # Запасной ключ (v347) дописывает колонку и в настройки щита.
         await p.execute("CREATE TABLE IF NOT EXISTS shield_configs (owner_id BIGINT PRIMARY KEY)")
         # Ровно те миграции, что уезжают в прод: конфликт сессии (v185),
-        # пароль 2FA (v331), дозор флота (v340) и запасной ключ (v347) —
-        # обход читает их колонки.
+        # пароль 2FA (v331), дозор флота (v340), запасной ключ (v347) и
+        # доверенные сеансы (v371) — обход читает их колонки. Монитор выбирает
+        # a.trusted_session_hashes (v371); без этой миграции тестовая схема
+        # отстаёт от запроса, и выборка падает «column … does not exist».
         for mig in ("schema_v185.sql", "schema_v331_account_twofa.sql",
-                    "schema_v340_fleet_watch.sql", "schema_v347_reserve_key.sql"):
+                    "schema_v340_fleet_watch.sql", "schema_v347_reserve_key.sql",
+                    "schema_v371_trusted_sessions.sql"):
             with open(os.path.join(ROOT, mig), encoding="utf-8") as f:
                 for chunk in f.read().split(";"):
                     body = "\n".join(ln for ln in chunk.split("\n")
