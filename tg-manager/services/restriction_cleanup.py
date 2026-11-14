@@ -103,7 +103,7 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
     projects = defaultdict(dict)
     nodes = defaultdict(list)
     for row in await conn.fetch(
-        """SELECT n.id AS node_id, n.node_type, n.ref_id, p.id, p.name
+        """SELECT n.id AS node_id, n.node_type, n.ref_id, p.id, p.name, n.xmin::text AS revision
              FROM network_nodes n JOIN network_instances p ON p.id=n.instance_id
             WHERE p.owner_id=$1
               AND ((n.node_type='bot' AND n.ref_id=ANY($2::bigint[]))
@@ -114,7 +114,7 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
         kind = "group" if row["node_type"] in _GROUP_TYPES else row["node_type"]
         key = kind, row["ref_id"]
         projects[key][row["id"]] = {"id": row["id"], "name": row["name"]}
-        nodes[key].append({"id": row["node_id"], "project_id": row["id"]})
+        nodes[key].append({"id": row["node_id"], "project_id": row["id"], "revision": row["revision"]})
 
     busy_bots = {row["bot_id"] for row in await conn.fetch(
         """SELECT b.bot_id
@@ -227,8 +227,9 @@ def public_items(items):
 
     public = []
     for item in items:
-        safe = {key: value for key, value in item.items() if key not in ("revisions", "bindings")}
-        for key in ("title", "reason", "disable_reason"):
+        safe = {key: value for key, value in item.items()
+                if key not in ("revisions", "bindings", "node_revisions", "edge_revisions")}
+        for key in ("title", "reason", "disable_reason", "finding_reason"):
             if isinstance(safe.get(key), str):
                 safe[key] = safe_text(safe[key], 500)
         if "projects" in safe:
@@ -318,6 +319,7 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
             "kind": key[0], "id": str(key[1]),
             "title": str(entry.get("title") or key[1]), "status": entry["status"],
         })
+        item["finding_reason"] = str(entry.get("reason") or "")
         if key in disabled and action == "disable":
             reason = disabled[key]["disable_reason"]
         elif deployment_running:
@@ -333,28 +335,34 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
             item.update(outcome="skipped", reason=reason)
             continue
         if action == "detach":
-            node_ids = [node["id"] for node in nodes[key] if node["project_id"] == project_id]
-            if not node_ids:
+            project_nodes = [node for node in nodes[key] if node["project_id"] == project_id]
+            if not project_nodes:
                 item.update(outcome="skipped", reason="Ресурс больше не связан с выбранным проектом")
             else:
-                item["node_ids"] = node_ids
+                item["node_ids"] = [node["id"] for node in project_nodes]
+                item["node_revisions"] = [node["revision"] for node in project_nodes]
         elif not item["can_disable"]:
             item.update(outcome="skipped", reason=item["disable_reason"])
     if action == "detach":
         selected = [node_id for item in items.values() for node_id in item.get("node_ids", [])]
         edges = await conn.fetch(
-            """SELECT id, instance_id, source_node_id, target_node_id, edge_type
+            """SELECT id, instance_id, source_node_id, target_node_id, xmin::text AS revision
                  FROM network_edges
                 WHERE source_node_id=ANY($1::int[]) OR target_node_id=ANY($1::int[])
                 ORDER BY id""" + (" FOR UPDATE" if lock else ""), selected)
         if any(edge["instance_id"] != project_id for edge in edges):
             raise CleanupError("Обнаружена связь с другим проектом. Исправьте топологию перед отвязкой.", 409)
+        edges_by_node = defaultdict(dict)
+        for edge in edges:
+            edges_by_node[edge["source_node_id"]][edge["id"]] = edge["revision"]
+            edges_by_node[edge["target_node_id"]][edge["id"]] = edge["revision"]
         for item in items.values():
             if item["outcome"] == "skipped":
                 continue
-            item["edge_ids"] = [edge["id"] for edge in edges if (
-                edge["source_node_id"] in item["node_ids"] or edge["target_node_id"] in item["node_ids"]
-            )]
+            item_edges = {edge_id: revision for node_id in item["node_ids"]
+                          for edge_id, revision in edges_by_node[node_id].items()}
+            item["edge_ids"] = sorted(item_edges)
+            item["edge_revisions"] = [item_edges[edge_id] for edge_id in item["edge_ids"]]
     return {"action": action, "op_id": op_id, "project_id": project_id,
             "items": list(items.values())}
 

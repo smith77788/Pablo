@@ -254,7 +254,8 @@ async function openOperationCleanup(opId) {
       + (items.length ? `<div class="lst" style="${listStyle}">` + items.map(item => {
         const planned = payload.action === 'detach'
           ? 'Отвязать от проекта · связей: ' + (item.edge_ids || []).length : actionText.disable;
-        return row(item, item.outcome === 'ready' ? planned : item.reason || 'Пропущено');
+        return row(item, [statusText[item.status], item.finding_reason,
+          item.outcome === 'ready' ? planned : item.reason || 'Пропущено'].filter(Boolean).join(' · '));
       }).join('') + '</div>' : '<div class="field-note">Сейчас нет ресурсов для этого действия.</div>')
       + (readyCount && preview.token ? '<button type="button" class="btn btn-p" data-cleanup-apply style="width:100%;margin-top:12px">Подтвердить</button>' : '')
       + '<button type="button" class="btn btn-s" data-cleanup-reload style="width:100%;margin-top:8px">Вернуться к выбору</button>';

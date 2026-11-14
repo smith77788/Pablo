@@ -79,9 +79,11 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Сначала подтвердите предпросмотр очистки", 400)
 
             def verify(current):
+                if not project_pilot_enabled(uid):
+                    raise cleanup.CleanupError("Недоступно", 403)
                 approval.verify_cleanup(token, uid, current)
 
-            verify(await cleanup.plan(*args, project_id=project_id))
+            approval.read_cleanup(token, uid)
             result = await cleanup.apply(*args, project_id=project_id, verify=verify)
             result["items"] = cleanup.public_items(result["items"])
             result["changed"] = cleanup.public_items(result["changed"])

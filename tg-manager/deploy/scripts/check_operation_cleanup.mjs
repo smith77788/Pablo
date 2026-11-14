@@ -13,7 +13,7 @@ try {
       status:'hidden', projects:[{id:7,name:'Проект'}], can_disable:false };
     const skipped = { kind:'bot', id:'9007199254740994', title:'Другой бот',
       status:'check_failed', projects:[{id:7,name:'Проект'},{id:8,name:'Другой проект'}], can_disable:false,
-      outcome:'skipped', reason:'Изменились права' };
+      outcome:'skipped', reason:'Изменились права', finding_reason:'Сбой наблюдателя' };
     window.cleanupCalls = [];
     window.openRemovedChannels = () => { window.cleanupRecovery = 'channels'; };
     window.api = async (path, options) => {
@@ -67,7 +67,7 @@ try {
   await preview.click();
   await page.getByText('Отвязать от проекта · связей: 2').waitFor();
   assert.equal(await page.getByText('<script>Проверка</script>', {exact:true}).count(), 1);
-  await page.getByText('Изменились права', {exact:true}).waitFor();
+  await page.getByText('Не удалось проверить · Сбой наблюдателя · Изменились права').waitFor();
   assert.equal((await page.evaluate(() => window.cleanupCalls)).length, 1);
   await page.getByRole('button', { name: 'Подтвердить' }).click();
   await page.getByText('Применено', {exact:true}).waitFor();

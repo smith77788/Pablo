@@ -84,9 +84,17 @@ def issue_cleanup(owner_id: int, plan: dict) -> str:
     return _sign({**_cleanup_scope(owner_id, plan), "expires": int(time.time()) + 600})
 
 
-def verify_cleanup(token: str, owner_id: int, plan: dict) -> None:
+def read_cleanup(token: str, owner_id: int) -> str:
     payload = _read(token)
-    if any(payload.get(key) != value for key, value in _cleanup_scope(owner_id, plan).items()):
+    digest = payload.get("plan")
+    if (payload.get("purpose") != "restriction_cleanup" or payload.get("owner") != owner_id
+            or not isinstance(digest, str)):
+        raise ApprovalError("Подтверждение недействительно")
+    return digest
+
+
+def verify_cleanup(token: str, owner_id: int, plan: dict) -> None:
+    if read_cleanup(token, owner_id) != _cleanup_scope(owner_id, plan)["plan"]:
         raise ApprovalError("План очистки изменился. Обновите предпросмотр.")
 
 

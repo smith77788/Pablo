@@ -4,8 +4,9 @@ import json
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+import pytest
 
-from services import mini_app_operations
+from services import mini_app_operations, restriction_cleanup
 from services.mini_app_auth import make_token
 from tests.test_restriction_cleanup_postgres import (
     BOT, BOT_TARGET, CHANNEL, CHANNEL_TARGET, OWNER, _run, pytestmark,
@@ -65,6 +66,17 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER + 1))
             assert (await client.post(path, json=confirmation, headers=headers)).status == 403
             monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+            apply = restriction_cleanup.apply
+
+            async def revoke_before_write(*args, **kwargs):
+                with monkeypatch.context() as revoked:
+                    revoked.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER + 1))
+                    return await apply(*args, **kwargs)
+
+            with monkeypatch.context() as blocked:
+                blocked.setattr(restriction_cleanup, "apply", revoke_before_write)
+                assert (await client.post(path, json=confirmation, headers=headers)).status == 403
+                assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
             response = await client.post(path, json=confirmation, headers=headers)
             assert response.status == 200, await response.text()
             applied = await response.json()
@@ -109,7 +121,8 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
     asyncio.run(_run(scenario))
 
 
-def test_detach_stale_catalog_link_through_authenticated_preview(monkeypatch):
+@pytest.mark.parametrize("changed", ["node", "edge"])
+def test_detach_stale_catalog_link_through_authenticated_preview(monkeypatch, changed):
     secret = "123456:synthetic-stale-link"
     monkeypatch.setenv("BOT_TOKEN", secret)
     monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
@@ -122,6 +135,13 @@ def test_detach_stale_catalog_link_through_authenticated_preview(monkeypatch):
         await pool.execute(
             """INSERT INTO network_nodes(instance_id,node_type,ref_id)
                VALUES($1,'channel',$3),($2,'channel',$3)""", project, other, CHANNEL)
+        node = await pool.fetchval(
+            "SELECT id FROM network_nodes WHERE instance_id=$1 AND ref_id=$2", project, CHANNEL)
+        anchor = await pool.fetchval(
+            "INSERT INTO network_nodes(instance_id,node_type) VALUES($1,'bot') RETURNING id", project)
+        edge = await pool.fetchval(
+            """INSERT INTO network_edges(instance_id,source_node_id,target_node_id)
+               VALUES($1,$2,$3) RETURNING id""", project, node, anchor)
         await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL)
         app = web.Application()
         mini_app_operations.setup_routes(app, pool)
@@ -138,10 +158,25 @@ def test_detach_stale_catalog_link_through_authenticated_preview(monkeypatch):
             assert response.status == 200, await response.text()
             preview = await response.json()
             assert preview["items"][0]["outcome"] == "ready"
+            assert preview["items"][0]["status"] == "check_failed"
+            assert "node_revisions" not in preview["items"][0]
+            assert "edge_revisions" not in preview["items"][0]
+            if changed == "node":
+                await pool.execute("UPDATE network_nodes SET label='Новая метка' WHERE id=$1", node)
+            else:
+                await pool.execute("UPDATE network_edges SET edge_type='copy' WHERE id=$1", edge)
+            rejected = await client.post(path, json={**body, "token": preview["token"]}, headers=headers)
+            assert rejected.status == 409, await rejected.text()
+            assert await pool.fetchval("SELECT 1 FROM network_edges WHERE id=$1", edge)
+            assert not await pool.fetchval("SELECT 1 FROM operation_audit WHERE operation_id=$1", op_id)
+            response = await client.post(path, json={**body, "preview": True}, headers=headers)
+            preview = await response.json()
             response = await client.post(path, json={**body, "token": preview["token"]}, headers=headers)
             assert response.status == 200, await response.text()
             assert (await response.json())["items"][0]["outcome"] == "applied"
             assert await pool.fetchval("SELECT instance_id FROM network_nodes WHERE ref_id=$1", CHANNEL) == other
+            assert await pool.fetchval("SELECT 1 FROM network_nodes WHERE id=$1", anchor)
+            assert not await pool.fetchval("SELECT 1 FROM network_edges WHERE id=$1", edge)
             assert (await client.post(path, json={**body, "token": preview["token"]}, headers=headers)).status == 409
 
     asyncio.run(_run(scenario))
