@@ -55,13 +55,22 @@ def quiet_journal_writes(src: str) -> list[tuple[int, str]]:
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
             continue
-        if not any(isinstance(a, ast.Constant) and isinstance(a.value, str)
-                   and "INSERT INTO operation_log" in a.value for a in n.args):
+        _sql = "".join(a.value for a in n.args
+                       if isinstance(a, ast.Constant) and isinstance(a.value, str))
+        if "INSERT INTO operation_log" not in _sql:
             continue
         if n.lineno in inside_writer:
             continue
         callee = ast.unparse(n.func)
         if any(callee.endswith(w) for w in LOUD_WRITERS):
+            continue
+        # Атомарный ПРОВЕРЯЕМЫЙ claim — не «тихая» запись: `INSERT … SELECT …
+        # WHERE NOT EXISTS … RETURNING` вставляет-или-нет и ВОЗВРАЩАЕТ результат,
+        # а вызывающий его читает (deploy_start: `if not started: return failed`).
+        # Сбой базы здесь не теряется молча — fetchval бросает, и операция падает,
+        # а не продолжает как ни в чём не бывало. Громкие писатели такой
+        # идемпотентной семантики (анти-двойной-деплой) выразить не могут.
+        if "WHERE NOT EXISTS" in _sql and "RETURNING" in _sql:
             continue
         out.append((n.lineno, callee))
     return sorted(out)
