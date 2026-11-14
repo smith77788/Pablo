@@ -41,6 +41,13 @@ PICKERS = {
     "_complaintLoadAccs": ("cmpAccounts", True),
 }
 
+# Пикеры НА МОДАЛКЕ: берут accPickerLoad, но выбор идёт через askChoice/askPrompt,
+# а не рендер в постоянный anchor-контейнер. Поэтому у них нет своей строки-
+# приписки (accPickerSetNote) и поля поиска (accPickerSearchBox) — их роль играют
+# заголовок askChoice (туда идёт accPickerNote) и askPrompt (серверный поиск).
+# Полнота таблицы учитывает и их, но anchor-проверки к ним неприменимы.
+MODAL_PICKERS = {"pickNetDeployAccount"}
+
 
 def _body(fn: str) -> str:
     """Тело функции целиком — по балансу фигурных скобок.
@@ -76,9 +83,10 @@ def test_the_table_lists_every_picker_there_is():
     live = {n for n, body in js_functions().items()
             if "accPickerLoad(" in body and n != "accPickerLoad"}
     assert live, "ни одного пикера не нашлось — измеритель сломан"
-    assert live == set(PICKERS), (
-        f"таблица разошлась с кодом: без строки {sorted(live - set(PICKERS))}, "
-        f"лишние строки {sorted(set(PICKERS) - live)}")
+    known = set(PICKERS) | MODAL_PICKERS
+    assert live == known, (
+        f"таблица разошлась с кодом: без строки {sorted(live - known)}, "
+        f"лишние строки {sorted(known - live)}")
 
 
 def test_no_picker_calls_accounts_without_limit():
