@@ -394,8 +394,10 @@ async function cleanupDeadBots() {
   finally { if (btn) { btn.disabled = false; btn.textContent = '🧹 Удалить мёртвых'; } }
 }
 
+let botBroadcastTargets = [];
 function openBotBroadcast() {
-  if (!BOT_SEL.size) { toast('❗ Выберите хотя бы одного бота'); return; }
+  botBroadcastTargets = [...BOT_SEL];
+  if (!botBroadcastTargets.length) { toast('❗ Выберите хотя бы одного бота'); return; }
   document.getElementById('bbText').value='';
   { const _b=document.getElementById('bbButtons'); if(_b) _b.value=''; }
   document.getElementById('bbErr').textContent='';
@@ -408,22 +410,26 @@ async function submitBotBroadcast() {
   const text=document.getElementById('bbText').value.trim();
   if(!text){ errEl.textContent='Введите текст рассылки'; return; }
   const buttons = parseInlineButtons(document.getElementById('bbButtons')?.value||'');
-  const preview = `Отправить рассылку по ${BOT_SEL.size} ${plural(BOT_SEL.size,'боту','ботам','ботам')}?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+  const ids = botBroadcastTargets;
+  if (!ids.length) { errEl.textContent='Выберите ботов заново'; return; }
+  const preview = `Отправить рассылку по ${ids.length} ${plural(ids.length,'боту','ботам','ботам')}?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
     + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'');
   if (!await askConfirm(preview)) return;
   const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const _p={text, bot_ids:[...BOT_SEL]}; if(buttons.length) _p.buttons=buttons;
+    const _p={text, bot_ids:ids}; if(buttons.length) _p.buttons=buttons;
     const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify(_p)});
-    toast(`📢 Рассылка запущена: ${r.broadcasts_created||BOT_SEL.size} ботов, ${r.total_recipients||0} получателей`);
+    toast(`📢 Рассылка запущена: ${r.broadcasts_created??ids.length} ботов, ${r.total_recipients||0} получателей`);
     closeModal('mo-bot-broadcast'); toggleBotSelMode();
   } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
 }
 
 // ── Массовое изменение профиля (имя/описание/приветствие) ──────────────────
+let botProfileTargets = [];
 function openBotProfileEdit() {
-  if (!BOT_SEL.size) { toast('❗ Выберите хотя бы одного бота'); return; }
+  botProfileTargets = [...BOT_SEL];
+  if (!botProfileTargets.length) { toast('❗ Выберите хотя бы одного бота'); return; }
   ['bpName','bpDesc','bpShort','bpGreet'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
   document.getElementById('bpErr').textContent='';
   document.getElementById('bpHint').textContent = `Изменения применятся к ${BOT_SEL.size} ${plural(BOT_SEL.size,'выбранному боту','выбранным ботам','выбранным ботам')}.`;
@@ -439,7 +445,8 @@ async function submitBotProfileEdit() {
   if(!name && !description && !short_description && !greeting){
     errEl.textContent='Заполните хотя бы одно поле'; return;
   }
-  const _p={bot_ids:[...BOT_SEL]};
+  if (!botProfileTargets.length) { errEl.textContent='Выберите ботов заново'; return; }
+  const _p={bot_ids:botProfileTargets};
   if(name) _p.name=name;
   if(description) _p.description=description;
   if(short_description) _p.short_description=short_description;

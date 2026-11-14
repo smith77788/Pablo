@@ -1375,8 +1375,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 .resource-actions-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .resource-actions-head h2{font-size:16px;margin:0;overflow-wrap:anywhere}
 .resource-actions-list{display:grid;gap:6px}
+.resource-actions-list[hidden],.resource-actions-list .btn[hidden],.resource-actions input[hidden]{display:none}
+.resource-actions-quick{grid-template-columns:repeat(auto-fit,minmax(110px,1fr))}
+.resource-actions-search{box-sizing:border-box;width:100%;margin-bottom:10px;padding:10px 12px;border:1px solid var(--border-input);border-radius:var(--radius);background:var(--bg3);color:var(--text);font:inherit;font-size:16px}
+.resource-actions h3{font-size:12px;color:var(--hint);margin:8px 0 0}
+.resource-actions .resource-action-danger{color:var(--red)}
 .resource-actions .btn,.resource-actions summary,.resource-actions-trigger{min-height:44px}
 .resource-actions-list .btn{text-align:left;white-space:normal}
+.resource-actions-quick .btn{text-align:center}
 .resource-actions-trigger{min-width:44px;flex-shrink:0}
 .resource-actions-trigger[hidden]{display:none}
 .bot-card .resource-actions-trigger{position:absolute;top:4px;left:4px}
@@ -1634,9 +1640,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <span class="sel-bar-link" onclick="botSelClear()">Сброс</span>
       </div>
       <div class="sel-bar-acts">
-        <button class="mini-btn" onclick="openBotBroadcast()">📢 Рассылка выбранным</button>
-        <button class="mini-btn" onclick="openBotProfileEdit()">✏️ Изменить профиль</button>
-        <button class="mini-btn" onclick="bulkDeleteBots()">🗑 Удалить выбранных</button>
+        <button type="button" class="mini-btn resource-actions-trigger" aria-haspopup="dialog" onclick="openSelectedResourceActions('bot', this)">Действия с выбранными</button>
       </div>
     </div>
   </div>
@@ -1804,16 +1808,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <span class="sel-bar-link" onclick="accSelClear()">Сброс</span>
       </div>
       <div class="sel-bar-acts">
-        <button class="mini-btn" onclick="runAccMass('check')">🔍 Проверка</button>
-        <button class="mini-btn" onclick="runAccMass('scan')">🔎 Скан</button>
-        <button class="mini-btn" onclick="openMassProfile()">🎨 Профиль</button>
-        <button class="mini-btn" onclick="openMassStage()">📂 В статус</button>
-        <button class="mini-btn" onclick="runAccTag('add_tag')">🏷 Поставить тег</button>
-        <button class="mini-btn" onclick="runAccTag('remove_tag')">🏷 Снять тег</button>
-        <button class="mini-btn" onclick="runAccPool()" title="Положить выбранные аккаунты в пул">🗂 В пул</button>
-        <button class="mini-btn" onclick="runAccMass('detach_proxy')" title="Снять прокси — работать напрямую">🔌 Снять прокси</button>
-        <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
-        <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.18)" onclick="runAccMass('delete')" title="Удалить выбранные аккаунты безвозвратно">🗑 Удалить</button>
+        <button type="button" class="mini-btn resource-actions-trigger" aria-haspopup="dialog" onclick="openSelectedResourceActions('account', this)">Действия с выбранными</button>
       </div>
     </div>
   </div>
@@ -2152,16 +2147,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <span class="sel-bar-link" onclick="chSelClear()">Сброс</span>
       </div>
       <div class="sel-bar-acts">
-        <button class="mini-btn" onclick="openChMass('post')">📤 Пост</button>
-        <button class="mini-btn" onclick="openChMass('title')">📛 Название</button>
-        <button class="mini-btn" onclick="openChMass('about')">✏️ Описание</button>
-        <button class="mini-btn" onclick="openChMass('username')">🔗 Юзернейм</button>
-        <button class="mini-btn" onclick="runChMass('promote')">👑 Админы</button>
-        <button class="mini-btn" onclick="openChAutopost([...CH_SEL])">🔁 Автопостинг</button>
-        <button class="mini-btn" onclick="openChDestructive('clear',[...CH_SEL])">🧹 Очистить посты</button>
-        <button class="mini-btn" style="color:var(--red)" onclick="openChDestructive('delete',[...CH_SEL])">💥 Удалить в Telegram</button>
-        <button class="mini-btn" onclick="runChLeave([...CH_SEL])">🚪 Покинуть</button>
-        <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.18)" onclick="bulkDeleteChannels()" title="Убрать выбранные каналы из управления (в Telegram канал не трогаем)">🗑 Убрать выбранные</button>
+        <button type="button" class="mini-btn resource-actions-trigger" aria-haspopup="dialog" onclick="openSelectedResourceActions('channel', this)">Действия с выбранными</button>
       </div>
     </div>
   </div>
@@ -8873,11 +8859,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <h2 id="resourceActionsTitle"></h2>
     <button class="btn btn-s" aria-label="Закрыть">✕</button>
   </form>
-  <div id="resourceActionsPrimary" class="resource-actions-list"></div>
+  <input id="resourceActionsSearch" class="resource-actions-search" type="search" placeholder="Найти действие" aria-label="Найти действие" autocomplete="off" hidden>
+  <div id="resourceActionsPrimary" class="resource-actions-list resource-actions-quick"></div>
   <details id="resourceActionsMore">
     <summary>Все действия</summary>
     <div id="resourceActionsSecondary" class="resource-actions-list"></div>
   </details>
+  <p id="resourceActionsEmpty" role="status" hidden>Действий по запросу нет</p>
 </dialog>
 
 <!-- ══════════════════════ MODAL: CREATE NETWORK ══════════════════════ -->
@@ -12698,8 +12686,12 @@ async function toggleFunnel(id, el) {
 }
 
 // ── Accounts ───────────────────────────────────────────
-async function removeChannel(chId, _el) {
-  if (!await confirmDelete('Удалить из системы канал', _el, 'Он пропадёт из списков и не будет браться в работу; импорт с аккаунтов его не вернёт. Сам канал в Telegram не удаляется — для этого «💥 Удалить в Telegram». Вернуть: «🗑 Удалённые и недоступные».')) return;
+async function removeChannel(chId, _el, label) {
+  const note = 'Он пропадёт из списков и не будет браться в работу; импорт с аккаунтов его не вернёт. Сам канал в Telegram не удаляется — для этого «💥 Удалить в Telegram». Вернуть: «🗑 Удалённые и недоступные».';
+  const confirmed = label
+    ? await askConfirm(`Убрать «${label}» из Infragram?\n${note}`)
+    : await confirmDelete('Удалить из системы канал', _el, note);
+  if (!confirmed) return;
   try {
     await api(`/api/miniapp/channel/${chId}`, {method:'DELETE'});
     toast('🗑 Канал удалён из системы');
@@ -12743,6 +12735,7 @@ async function restoreRemovedChannel(chId, el) {
 // ── Профиль аккаунта (модалка) ───────────────────────────
 let AP_ACC_ID = null;
 let AP_MASS = false;
+let AP_MASS_SCOPE = null;
 function openAccProfile(id) {
   AP_ACC_ID = id;
   AP_MASS = false;
@@ -12785,9 +12778,9 @@ async function submitAccProxy() {
 }
 // ── Заметка аккаунта ────────────────────────────────────
 let ANT_ACC_ID = null;
-function openAccNote(id) {
+function openAccNote(id, item = window._accDetail) {
   ANT_ACC_ID = id;
-  const ta=document.getElementById('antText'); if(ta) ta.value = (window._accDetail && window._accDetail.account_notes) || '';
+  const ta=document.getElementById('antText'); if(ta) ta.value = item?.account_notes || '';
   const e=document.getElementById('antErr'); if(e) e.textContent='';
   showModal('mo-acc-note');
 }
@@ -12818,9 +12811,8 @@ function stageBadge(stage) {
 }
 // ── Кластер / метка аккаунта ────────────────────
 let AM_ACC_ID = null;
-function openAccMeta(id) {
+function openAccMeta(id, d = window._accDetail || {}) {
   AM_ACC_ID = id;
-  const d = window._accDetail || {};
   const li=document.getElementById('amLabel'); if(li) li.value = d.first_name || '';
   const ci=document.getElementById('amCluster'); if(ci) ci.value = d.cluster || '';
   const si=document.getElementById('amStage'); if(si) si.value = d.stage || '';
@@ -12843,18 +12835,20 @@ async function submitAccMeta() {
   finally { btn.disabled=false; btn.textContent='Сохранить'; }
 }
 // Массовое перемещение в статус
+let massStageScope = null;
 function openMassStage() {
   if (!_massSelCount()) { toast('❗ Выберите хотя бы один аккаунт'); return; }
+  massStageScope = _massSel();
   const e=document.getElementById('msErr'); if(e) e.textContent='';
   showModal('mo-acc-stage');
 }
 async function submitMassStage() {
   const err=document.getElementById('msErr'); err.textContent='';
   const stage=document.getElementById('msStage').value;
-  if(!_massSelCount()){ err.textContent='Не выбраны аккаунты'; return; }
+  if (!massStageScope) { err.textContent='Не выбраны аккаунты'; return; }
   const btn=document.getElementById('msBtn'); btn.disabled=true; btn.textContent='Применяю…';
   try {
-    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', target_stage:stage, ..._massSel()})});
+    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', target_stage:stage, ...massStageScope})});
     const nm = stage ? (ACC_STAGES[stage]?ACC_STAGES[stage].label:stage) : 'без статуса';
     toast(`✅ Перемещено в «${nm}»: ${r.count}`);
     closeModal('mo-acc-stage'); toggleAccSelMode(); loadAccounts();
@@ -12925,7 +12919,7 @@ async function submitAccProfile() {
       // человек не видит списка и должен узнать, скольких это коснётся.
       const _apOpt = document.querySelector('#apOp option[value="' + op + '"]');
       const _apWhat = _apOpt ? (_apOpt.textContent || op).trim() : op;
-      const _apN = _massSelCount();
+      const {selection, count: _apN} = AP_MASS_SCOPE;
       const _apWarn = (op === '2fa')
         ? '\n\n⚠️ Пароль 2FA восстановить нельзя. Потеряете его — потеряете аккаунты.'
         : (op === 'close_sessions')
@@ -12937,9 +12931,9 @@ async function submitAccProfile() {
             + plural(_apN, 'аккаунте', 'аккаунтах', 'аккаунтах') + '?' + _apWarn)) {
         return;  // кнопку вернёт finally этого же try
       }
-      Object.assign(payload, _massSel());
+      Object.assign(payload, selection);
       r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify(payload)});
-      toast(`✅ Поставлено в очередь для ${r.count||_massSelCount()} аккаунтов`);
+      toast(`✅ Поставлено в очередь для ${r.count??_apN} аккаунтов`);
       closeModal('mo-acc-profile');
       toggleAccSelMode();
     } else {
@@ -13323,6 +13317,7 @@ function _massSelCount() {
   return ACC_SEL_ALL_FILTERED ? Math.min(ACC_FILTERED_TOTAL||0, FLEET_MASS_CAP) : ACC_SEL.size;
 }
 async function runAccMass(op) {
+  const selection = _massSel();
   const n = _massSelCount();
   if (!n) { toast('❗ Выберите хотя бы один аккаунт'); return; }
   const confirmMsg = op==='leave_all'
@@ -13336,7 +13331,7 @@ async function runAccMass(op) {
   if (over && !await askConfirm(`Под фильтром ${num(ACC_FILTERED_TOTAL)} аккаунтов, за раз берём ${num(FLEET_MASS_CAP)}. Не войдут ${num(over)} — запустите для них ещё раз. Продолжить?`)) return;
   if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
-    const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, ..._massSel()})});
+    const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, ...selection})});
     // Ноль — честный результат, а не отсутствие поля. `r.count || n` превращал
     // нулевой эффект в ложный успех для всех выбранных аккаунтов.
     const cnt = Number.isFinite(Number(r.count)) ? Number(r.count) : n;
@@ -13351,7 +13346,9 @@ async function runAccMass(op) {
 }
 
 function openMassProfile() {
-  if (!_massSelCount()) { toast('❗ Выберите хотя бы один аккаунт'); return; }
+  const count = _massSelCount();
+  if (!count) { toast('❗ Выберите хотя бы один аккаунт'); return; }
+  AP_MASS_SCOPE = {selection: _massSel(), count};
   AP_MASS = true;
   const e=document.getElementById('apErr'); if(e) e.textContent='';
   document.getElementById('apOp').value='name';
@@ -14147,6 +14144,7 @@ function renderChannels(_ignored) {
 let CH_SEL_MODE = false;
 let CH_SEL = new Set();
 let CHM_OP = null;
+let CHM_TARGETS = [];
 function toggleChSelMode() {
   CH_SEL_MODE = !CH_SEL_MODE;
   CH_SEL.clear();
@@ -14185,6 +14183,7 @@ function updateChSelBar() {
 function openChMass(op) {
   if (!CH_SEL.size) { toast('❗ Выберите хотя бы один канал'); return; }
   CHM_OP = op;
+  CHM_TARGETS = [...CH_SEL];
   const cfg = {
     post:{t:'📤 Пост в каналы', h:`Текст будет опубликован в ${CH_SEL.size} каналах. Спинтакс {A|B} — свой вариант на канал (меньше палева).`, ph:'Текст поста… Спинтакс: {Привет|Здравствуйте}!'},
     title:{t:'📛 Новое название', h:`Название изменится в ${CH_SEL.size} каналах.`, ph:'Новое название…'},
@@ -14204,13 +14203,15 @@ async function submitChMass() {
   if (!val) { errEl.textContent='Введите значение'; return; }
   // Публикация в N каналов необратима → осознанное подтверждение (как mass_publish/
   // invite). Правки метаданных (title/about/username) обратимы — без подтверждения.
-  if (CHM_OP==='post' && !await askConfirm(`Опубликовать пост в ${CH_SEL.size} ${plural(CH_SEL.size,'канал','канала','каналов')}? После публикации отменить нельзя.\n\nСовет: каждый канал получит свой вариант, если использовать Spintax {A|B}.`)) return;
-  const body = {op:CHM_OP, channel_ids:[...CH_SEL]};
-  if (CHM_OP==='post') body.text = val; else body.value = val.replace(/^@/,'');
+  const body = {op:CHM_OP, channel_ids:CHM_TARGETS};
+  const count = body.channel_ids.length;
+  if (!count) { errEl.textContent='Выберите каналы заново'; return; }
+  if (body.op==='post' && !await askConfirm(`Опубликовать пост в ${count} ${plural(count,'канал','канала','каналов')}? После публикации отменить нельзя.\n\nСовет: каждый канал получит свой вариант, если использовать Spintax {A|B}.`)) return;
+  if (body.op==='post') body.text = val; else body.value = val.replace(/^@/,'');
   const btn=document.getElementById('chmBtn'); btn.disabled=true; btn.textContent='Применяю…';
   try {
     const r = await api('/api/miniapp/channels/mass', {method:'POST', body:JSON.stringify(body)});
-    toast(`✅ Поставлено в очередь для ${r.count||CH_SEL.size} каналов`);
+    toast(`✅ Поставлено в очередь для ${r.count??count} каналов`);
     closeModal('mo-chan-mass'); toggleChSelMode();
   } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='Применить'; }
@@ -14229,11 +14230,12 @@ async function bulkDeleteChannels() {
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 async function runChMass(op) {
-  if (!CH_SEL.size) { toast('❗ Выберите хотя бы один канал'); return; }
-  if (op==='promote' && !await askConfirm(`Назначить аккаунты администраторами в ${CH_SEL.size} ${plural(CH_SEL.size,'канале','каналах','каналах')}?`)) return;
+  const ids = [...CH_SEL];
+  if (!ids.length) { toast('❗ Выберите хотя бы один канал'); return; }
+  if (op==='promote' && !await askConfirm(`Назначить аккаунты администраторами в ${ids.length} ${plural(ids.length,'канале','каналах','каналах')}?`)) return;
   try {
-    const r = await api('/api/miniapp/channels/mass', {method:'POST', body:JSON.stringify({op, channel_ids:[...CH_SEL]})});
-    toast(`✅ Поставлено в очередь для ${r.count||CH_SEL.size} каналов`);
+    const r = await api('/api/miniapp/channels/mass', {method:'POST', body:JSON.stringify({op, channel_ids:ids})});
+    toast(`✅ Поставлено в очередь для ${r.count??ids.length} каналов`);
     toggleChSelMode();
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
 }

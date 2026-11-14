@@ -297,6 +297,7 @@ function filterAccTag(tag) {
   reloadAccounts();
 }
 async function runAccTag(op) {
+  const selection = _massSel();
   const n = _massSelCount();
   if (!n) { toast('❗ Выберите хотя бы один аккаунт'); return; }
   const hint = ACC_TAGS.slice(0, 5).map(t => t.tag).join(', ');
@@ -305,7 +306,7 @@ async function runAccTag(op) {
   if (!tag || !tag.trim()) return;
   try {
     const r = await api('/api/miniapp/accounts/mass', {method: 'POST',
-      body: JSON.stringify(Object.assign({op, value: tag.trim()}, _massSel()))});
+      body: JSON.stringify({op, value: tag.trim(), ...selection})});
     toast((op === 'add_tag' ? '🏷 Тег поставлен: ' : '🏷 Тег снят: ') + num(r.count || 0)
       + (r.capped ? ` · не вошло сверх ${num(FLEET_MASS_CAP)}: ${num(r.capped)}` : ''));
     toggleAccSelMode();

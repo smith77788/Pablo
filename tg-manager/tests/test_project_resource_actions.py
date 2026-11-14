@@ -48,7 +48,7 @@ assert.deepEqual(projectResourceActions({id: 7, type: 'channel', object_id: 52,
   resource_available: false}, trigger, 13).primary, []);
 const unbound = projectResourceActions({id: 7, type: 'channel', object_id: null}, trigger);
 assert.deepEqual(unbound.primary, []);
-unbound.secondary[0][1]();
+unbound.groups[0][1][0][1]();
 assert.deepEqual(calls.pop(), ['remove', 7, trigger]);
 assert.equal(projectResourceActions({type: 'constructor', object_id: 52}).primary.length, 1);
 """
@@ -176,3 +176,173 @@ assert.deepEqual(calls, [[item,'channel','9007199254740993',button,true]]);
     subprocess.run(["node", "-"], input=source + "\n" + probe, text=True, check=True)
     for opener in ("openAccount", "openBot", "openChannel"):
         assert "prepareResourceCardMenu(" in js_function(opener)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="нет node")
+def test_catalog_actions_follow_ownership_role_and_exact_id():
+    source = "\n".join(js_function(name) for name in ("resourceActionsFor", "openCatalogResourceActions"))
+    probe = """
+const assert = require('node:assert/strict');
+let menu;
+const calls = [];
+const showResourceActions = (_, actions) => menu = actions;
+const openChDestructive = (...args) => calls.push(args);
+const copyText = text => calls.push(text);
+const find = label => [...menu.primary, ...menu.secondary, ...menu.groups.flatMap(([, items]) => items)]
+  .find(([name]) => name === label);
+openCatalogResourceActions({title:'Общий',username:'public_bot',is_owned:false,is_active:true}, 'bot', '52', {});
+assert.equal(find('Добавить в проект'), undefined);
+assert.equal(find('Команды бота'), undefined);
+assert.equal(find('Убрать бота из Infragram'), undefined);
+find('Копировать ссылку')[1]();
+assert.equal(calls.pop(), 'https://t.me/public_bot');
+openCatalogResourceActions({title:'Пауза',is_owned:true,is_active:false}, 'bot', '52', {});
+assert.ok(find('Вернуть в работу'));
+assert.equal(find('Изменить профиль'), undefined);
+for (const role of ['member', 'admin', 'owner']) {
+  openCatalogResourceActions({title:'Чат',type:'supergroup',acc_id:1,role,username:'evil/path'}, 'channel', '52', {}, true);
+  assert.equal(!!find('Покинуть чат или канал'), role === 'member');
+  assert.equal(!!find('Удалить канал или чат в Telegram'), role === 'owner');
+  assert.equal(!!find('Изменить название или описание'), role !== 'member');
+  assert.ok(find('Убрать из Infragram'));
+  assert.equal(find('Копировать ссылку'), undefined);
+}
+find('Удалить канал или чат в Telegram')[1]();
+assert.deepEqual(calls.pop(), ['delete',['52']]);
+openCatalogResourceActions({title:'Чат',acc_id:1,role:'owner'}, 'channel', '9007199254740993', {}, true);
+assert.equal(find('Удалить канал или чат в Telegram'), undefined);
+find('Копировать ID')[1]();
+assert.equal(calls.pop(), '9007199254740993');
+"""
+    subprocess.run(["node", "-"], input=source + "\n" + probe, text=True, check=True)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="нет node")
+def test_selected_menu_rejects_changed_scope_and_inexact_ids():
+    source = js_function("openSelectedResourceActions")
+    probe = r"""
+const assert = require('node:assert/strict');
+const ACC_SEL = new Set(), BOT_SEL = new Set([17, 23]), CH_SEL = new Set();
+const ACC_SEL_ALL_FILTERED = true;
+let ACC_FILTERED_TOTAL = 1200, filter = 'first', title, menu;
+const calls = [];
+const _massSel = () => ({select_all_filtered:true, filter});
+const showResourceActions = (value, actions) => { title = value; menu = actions; };
+const openBotBroadcast = () => calls.push('broadcast');
+const openBotProfileEdit = () => {};
+const bulkDeleteBots = () => {};
+const openMassProfile = () => {}, openMassStage = () => {}, runAccPool = () => {};
+const runAccMass = op => calls.push(op);
+const toast = message => calls.push(message);
+const copyText = text => calls.push(text);
+openSelectedResourceActions('bot', {});
+assert.equal(title, 'Выбрано: 2');
+menu.primary[0][1]();
+assert.equal(calls.pop(), '17\n23');
+const broadcast = menu.groups[0][1][0][1];
+broadcast();
+assert.equal(calls.pop(), 'broadcast');
+BOT_SEL.delete(17);
+BOT_SEL.add(31);
+broadcast();
+assert.match(calls.pop(), /Выбор изменился/);
+openSelectedResourceActions('account', {});
+assert.equal(title, 'Весь срез: 1200');
+assert.deepEqual(menu.primary.map(([label]) => label), ['Проверить аккаунты']);
+const check = menu.primary[0][1];
+check();
+assert.equal(calls.pop(), 'check');
+filter = 'second';
+check();
+assert.match(calls.pop(), /Выбор изменился/);
+CH_SEL.add(9007199254740992);
+openSelectedResourceActions('channel', {});
+assert.match(calls.pop(), /нет точного ID/);
+CH_SEL.clear();
+openSelectedResourceActions('channel', {});
+assert.match(calls.pop(), /Сначала отметьте/);
+"""
+    subprocess.run(["node", "-"], input=source + "\n" + probe, text=True, check=True)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="нет node")
+def test_mass_post_keeps_the_targets_shown_in_confirmation():
+    source = "\n".join(js_function(name) for name in ("openChMass", "submitChMass"))
+    probe = r"""
+const assert = require('node:assert/strict');
+const CH_SEL = new Set([41, 42]);
+let CHM_OP, CHM_TARGETS;
+const fields = Object.fromEntries(['chmTitle', 'chmHint', 'chmValue', 'chmErr', 'chmBtn']
+  .map(id => [id, {}]));
+const document = {getElementById: id => fields[id]};
+const showModal = () => {}, closeModal = () => {}, toggleChSelMode = () => {};
+const toast = () => {}, plural = () => 'каналах';
+let accept = false, requests = [];
+const askConfirm = async message => {
+  assert.match(message, /в 2 каналах/);
+  CH_SEL.add(100);
+  return accept;
+};
+const api = async (path, options) => {
+  requests.push([path, JSON.parse(options.body)]);
+  return {count:2};
+};
+(async () => {
+  openChMass('post');
+  fields.chmValue.value = 'Синтетический пост';
+  CH_SEL.delete(41);
+  await submitChMass();
+  assert.deepEqual(requests, []);
+  accept = true;
+  await submitChMass();
+  assert.deepEqual(requests, [['/api/miniapp/channels/mass',
+    {op:'post', channel_ids:[41, 42], text:'Синтетический пост'}]]);
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+    subprocess.run(["node", "-"], input=source + "\n" + probe, text=True, check=True)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="нет node")
+def test_resource_menu_search_reveals_grouped_commands_and_runs_one_action():
+    source = js_function("showResourceActions")
+    probe = """
+const assert = require('node:assert/strict');
+const make = (tag = '') => ({
+  tag, children: [], listeners: {}, classList: {toggle() {}}, hidden: false, open: false,
+  append(...items) { this.children.push(...items); },
+  replaceChildren(...items) { this.children = items; },
+  querySelector(name) { return this.children.find(item => item.tag === name); },
+  querySelectorAll(name) { return this.children.filter(item => item.tag === name); },
+  addEventListener(name, handler) { this.listeners[name] = handler; },
+  close() { this.open = false; this.listeners.close?.(); }, showModal() { this.open = true; },
+});
+const elements = {};
+const document = {createElement: make, getElementById: id => elements[id] ??= make()};
+let calls = 0;
+const run = () => calls++;
+const quick = ['Открыть карточку', 'Копировать ID', 'Копировать ссылку'].map(label => [label, run]);
+const group = ['Снять тег', 'Поставить тег', 'Изменить статус', 'В пул'].map(label => [label, run]);
+showResourceActions('<img>', {primary:quick, secondary:[], groups:[['Организация', group]]});
+const search = elements.resourceActionsSearch;
+const more = elements.resourceActionsMore;
+assert.equal(elements.resourceActionsTitle.textContent, '<img>');
+assert.equal(search.hidden, false);
+assert.equal(more.open, false);
+search.value = '  СНЯТЬ ';
+search.oninput();
+assert.equal(more.open, true);
+assert.equal(elements.resourceActionsPrimary.hidden, true);
+const buttons = elements.resourceActionsSecondary.children[0].querySelectorAll('button');
+assert.deepEqual(buttons.filter(button => !button.hidden).map(button => button.textContent), ['Снять тег']);
+search.value = 'Нет совпадений';
+search.oninput();
+assert.equal(elements.resourceActionsEmpty.hidden, false);
+search.value = '';
+search.oninput();
+assert.equal(more.open, false);
+assert.equal(elements.resourceActionsEmpty.hidden, true);
+elements.resourceActionsPrimary.children[0].listeners.click();
+assert.equal(elements.resourceActions.open, false);
+assert.equal(calls, 1);
+"""
+    subprocess.run(["node", "-"], input=source + "\n" + probe, text=True, check=True)

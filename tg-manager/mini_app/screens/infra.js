@@ -256,6 +256,7 @@ async function infraPoolRebalance() {
 
 // Пул выбранным аккаунтам — кнопка «🗂 В пул» на панели выбора аккаунтов.
 async function runAccPool() {
+  const selection = _massSel();
   const n = _massSelCount();
   if (!n) { toast('❗ Выберите хотя бы один аккаунт'); return; }
   let target = INFRA_PENDING_POOL;
@@ -282,7 +283,7 @@ async function runAccPool() {
   }
   try {
     const r = await api('/api/miniapp/accounts/mass', {method: 'POST',
-      body: JSON.stringify(Object.assign({op: 'set_pool', value: target}, _massSel()))});
+      body: JSON.stringify({op: 'set_pool', value: target, ...selection})});
     INFRA_PENDING_POOL = '';
     toast((target ? `🗂 В пул «${r.label}»: ` : '🗂 Пул снят: ') + num(r.count || 0)
       + (r.capped ? ` · не вошло сверх ${num(FLEET_MASS_CAP)}: ${num(r.capped)}` : ''));
