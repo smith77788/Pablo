@@ -65,6 +65,7 @@ def test_project_history_isolated_and_consistent_with_export(monkeypatch):
                 all_rows = json.loads((await get()).text)
                 assert {row["id"] for row in all_rows["operations"]} == {1, 2, 3, 5, 6}
 
+                monkeypatch.delenv("INFRAGRAM_PROJECT_PILOT_IDS")
                 result = json.loads((await get("?project_id=10&format=json", export=True)).text)
                 assert result["total"] == 2 and {row["id"] for row in result["operations"]} == {1, 2}
                 response = await get("?project_id=10", export=True)
@@ -75,7 +76,7 @@ def test_project_history_isolated_and_consistent_with_export(monkeypatch):
                     assert (await get("?project_id=30", export=export)).status == 404
                     assert (await get("?project_id=garbage", export=export)).status == 400
                     actor = 77
-                    assert (await get("?project_id=10", export=export)).status == 403
+                    assert (await get("?project_id=10", export=export)).status == 404
                     actor = 42
         finally:
             await conn.close()

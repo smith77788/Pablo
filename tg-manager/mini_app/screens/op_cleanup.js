@@ -105,7 +105,7 @@ async function openOperationCleanup(opId) {
       body.innerHTML = legacy
         + '<div class="field-note">Выберите ресурсы и проверьте план. Действия выполняются в Infragram.</div>'
         + '<div class="field"><label for="opCleanupAction">Действие</label><select class="sel" id="opCleanupAction" data-cleanup-action>'
-        + `<option value="detach">${actionText.detach}</option><option value="disable">${actionText.disable}</option></select></div>`
+        + `<option value="disable">${actionText.disable}</option><option value="detach">${actionText.detach}</option></select></div>`
         + '<div class="field" data-cleanup-project-field><label for="opCleanupProject">Проект</label>'
         + '<select class="sel" id="opCleanupProject" data-cleanup-project>'
         + '<option value="">Выберите проект</option>'
@@ -126,10 +126,7 @@ async function openOperationCleanup(opId) {
       const button = body.querySelector('[data-cleanup-preview]');
       const selectAll = body.querySelector('[data-cleanup-select-all]');
       const clear = body.querySelector('[data-cleanup-clear]');
-      if (!projects.size) {
-        action.value = 'disable';
-        action.options[0].disabled = true;
-      }
+      if (!projects.size) action.querySelector('[value="detach"]').disabled = true;
       const selected = new Set();
       const refreshSelection = () => {
         const count = selected.size;
@@ -139,7 +136,11 @@ async function openOperationCleanup(opId) {
         selectAll.disabled = remaining <= 0 || !list.querySelector('input:not(:disabled):not(:checked)');
         clear.disabled = !count;
         const hidden = count - visible;
-        notice.textContent = count ? 'Выбрано: ' + count + (hidden ? ' · вне фильтра: ' + hidden : '') : '';
+        let message = '';
+        if (count) message = 'Выбрано: ' + count + (hidden ? ' · вне фильтра: ' + hidden : '');
+        else if (action.value === 'detach' && !project.value) message = 'Выберите проект, чтобы отметить его ресурсы.';
+        else if (selectAll.disabled) message = 'В этом срезе нет ресурсов, доступных для выбранного действия.';
+        notice.textContent = message;
         if (!remaining) notice.textContent += ' · достигнут предел ' + maxTargets;
       };
       const renderFindings = () => {

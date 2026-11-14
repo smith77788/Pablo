@@ -73,6 +73,7 @@ def setup_routes(app: web.Application, pool) -> None:
         _BOT_HEALTH_COLS = "mb.last_error, mb.fail_streak, mb.last_ok_at, mb.extra_username,"
         _BOTS_SQL = """SELECT DISTINCT mb.bot_id, mb.username, mb.first_name, mb.is_active,
                       {health}
+                      BOOL_OR(mb.added_by=$1) AS is_owned,
                       COUNT(DISTINCT bu.user_id) FILTER (WHERE bu.is_active=true) AS subscriber_count,
                       COUNT(DISTINCT bu.user_id) AS total_users
                FROM managed_bots mb
@@ -110,7 +111,9 @@ def setup_routes(app: web.Application, pool) -> None:
         total = await _safe_count(pool,
             f"""SELECT COUNT(DISTINCT mb.bot_id) FROM managed_bots mb
                 WHERE ({_BOTS_VISIBLE_SQL})""", uid)
+        rows = [{**dict(row), "bot_id_text": str(row["bot_id"])} for row in (rows or [])]
         return _json_resp({"bots": rows, "total": int(total or 0),
+                           "resource_menu": True,
                            "offset": offset, "limit": limit})
 
     async def bot_detail(request: web.Request) -> web.Response:
@@ -126,7 +129,11 @@ def setup_routes(app: web.Application, pool) -> None:
         if not owns:
             return _err("Бот не найден или нет доступа", 404)
         bot = await _safe_fetchrow(pool,
-            "SELECT * FROM managed_bots WHERE bot_id=$1 AND deleted_at IS NULL", bot_id)
+            """SELECT mb.*, EXISTS (
+                   SELECT 1 FROM managed_bots owned
+                   WHERE owned.bot_id=mb.bot_id AND owned.added_by=$2 AND owned.deleted_at IS NULL
+               ) AS is_owned
+               FROM managed_bots mb WHERE mb.bot_id=$1 AND mb.deleted_at IS NULL""", bot_id, uid)
         if not bot:
             return _err("Бот не найден", 404)
         # Токен клиенту не отдаём. `SELECT *` тянул и его: у ботов, добавленных

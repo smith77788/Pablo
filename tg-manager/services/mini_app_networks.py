@@ -357,7 +357,8 @@ def setup_routes(app: web.Application, pool) -> None:
                      (SELECT COUNT(*) FROM network_edges e WHERE e.instance_id=ni.id) AS edge_count
                    FROM network_instances ni WHERE ni.owner_id=$1 ORDER BY ni.created_at DESC""",
                 uid)
-            return _json_resp({"networks": [dict(r) for r in (rows or [])]})
+            return _json_resp({"networks": [dict(r) for r in (rows or [])],
+                               "resource_menu": True})
         except Exception:
             log.exception("networks_list uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -425,17 +426,16 @@ def setup_routes(app: web.Application, pool) -> None:
                   "object_id_text": str(n["ref_id"]) if n.get("ref_id") is not None else None}
                  for n in d["nodes"]]
         pilot = _nb.project_pilot_enabled(uid)
-        if pilot:
-            for kind in _nb.PROJECT_RESOURCES:
-                matching = [n for n in nodes if ("group" if n["type"] == "chat" else n["type"]) == kind
-                            and n["object_id"] is not None]
-                ids = sorted({n["object_id"] for n in matching})
-                if not ids:
-                    continue
-                rows = await _nb.project_catalog(pool, uid, kind, ids=ids, limit=len(ids))
-                available = {row["id"] for row in rows}
-                for node in matching:
-                    node["resource_available"] = node["object_id_text"] in available
+        for kind in _nb.PROJECT_RESOURCES:
+            matching = [n for n in nodes if ("group" if n["type"] == "chat" else n["type"]) == kind
+                        and n["object_id"] is not None]
+            ids = sorted({n["object_id"] for n in matching})
+            if not ids:
+                continue
+            rows = await _nb.project_catalog(pool, uid, kind, ids=ids, limit=len(ids))
+            available = {row["id"] for row in rows}
+            for node in matching:
+                node["resource_available"] = node["object_id_text"] in available
         edges = [{"id": e["id"], "from_id": e.get("source_node_id"),
                   "to_id": e.get("target_node_id"), "type": e.get("edge_type"),
                   "from_label": label_by_id.get(e.get("source_node_id"), "#"),

@@ -454,9 +454,13 @@ def test_ui_wires_new_actions():
     m = re.search(r'<div id="chSelBar".*?</div>\s*</div>\s*</div>', HTML, re.DOTALL)
     assert m
     bar = m.group(0)
+    assert "openSelectedResourceActions('channel', this)" in bar
+    from tests.miniapp_source import js_function
+
+    selected = js_function("openSelectedResourceActions")
     for call in ("openChDestructive('delete'", "openChDestructive('clear'",
-                 "openChAutopost(", "runChLeave(", "bulkDeleteChannels("):
-        assert call in bar, call
+                 "openChAutopost(", "runChLeave(", "guarded(bulkDeleteChannels)"):
+        assert call in selected, call
     i = HTML.index("function buildChDetail")
     card = HTML[i:i + 6000]
     assert "Удалить в Telegram" in card and "openChAutopost([" in card

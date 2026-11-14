@@ -6995,6 +6995,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE a.owner_id = $1""",
                 uid, cfg_obj.risk_threshold, cfg_obj.ban_prob_threshold,
             )
+            # Охват защиты по флоту: тумблер «вкл» не значит «все защищены» —
+            # свежие аккаунты и сбои оставляют дыры. Показываем, сколько из
+            # активных реально с сохранённым паролем 2FA, с запасным ключом и
+            # сколько под чужими (недоверенными) сеансами. Те же сигналы, что
+            # в блоке «Безопасность» карточки, но агрегатом по флоту.
+            cov_row = await pool.fetchrow(
+                """SELECT
+                   COUNT(*) FILTER (WHERE is_active) AS total,
+                   COUNT(*) FILTER (WHERE is_active AND twofa_enc IS NOT NULL) AS twofa_saved,
+                   COUNT(*) FILTER (WHERE is_active AND reserve_session_enc IS NOT NULL) AS reserve,
+                   COUNT(*) FILTER (WHERE is_active AND COALESCE(foreign_sessions, 0) > 0) AS foreign_sess
+                   FROM tg_accounts WHERE owner_id=$1""",
+                uid)
             # Кого щит держит прямо сейчас — с кнопкой «Вернуть».
             held = await pool.fetch(
                 """SELECT a.id, a.first_name, a.username, a.phone, a.is_active,
@@ -7044,8 +7057,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                  ("total_active", "cooling", "paused", "threatened", "high_ban", "ok_count")} if row else {}
         if row is not None:
             stats["avg_risk"] = round(float(row["avg_risk"] or 0), 4)
+        coverage = {k: int(cov_row[k] or 0) for k in
+                    ("total", "twofa_saved", "reserve", "foreign_sess")} if cov_row else {}
         return _json_resp({
             "stats": stats,
+            "coverage": coverage,
             "week": {r["action"]: int(r["n"] or 0) for r in counts},
             "config": cfg_obj.as_dict(),
             "presets": _sh.PRESETS,

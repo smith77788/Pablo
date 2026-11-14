@@ -119,7 +119,9 @@ def setup_routes(app: web.Application, pool) -> None:
                       "group": int(crow["group_n"] or 0),
                       "mine": int(crow["mine_n"] or 0),
                       "foreign": int(crow["foreign_n"] or 0)}
+        rows = [{**dict(row), "channel_id_text": str(row["channel_id"])} for row in (rows or [])]
         return _json_resp({"channels": rows, "total": int(total or 0),
+                           "resource_menu": True,
                            "counts": counts, "offset": offset, "limit": limit})
 
     async def post_to_channel(request: web.Request) -> web.Response:

@@ -12,7 +12,7 @@ try {
     const item = { kind:'bot', id:'9007199254740993', title:'<script>Проверка</script>',
       status:'hidden', projects:[{id:7,name:'Проект'}], can_disable:false };
     const skipped = { kind:'bot', id:'9007199254740994', title:'Другой бот',
-      status:'check_failed', projects:[{id:7,name:'Проект'}], can_disable:false,
+      status:'check_failed', projects:[{id:7,name:'Проект'},{id:8,name:'Другой проект'}], can_disable:false,
       outcome:'skipped', reason:'Изменились права' };
     window.cleanupCalls = [];
     window.openRemovedChannels = () => { window.cleanupRecovery = 'channels'; };
@@ -40,9 +40,13 @@ try {
   const preview = page.getByRole('button', { name: 'Проверить план' });
   assert.equal(await target.isChecked(), false);
   assert.equal(await preview.isEnabled(), false);
-  await page.locator('[data-cleanup-action]').selectOption('disable');
+  assert.equal(await page.locator('[data-cleanup-action]').inputValue(), 'disable');
   assert.equal(await target.isEnabled(), false);
+  await page.getByText('В этом срезе нет ресурсов, доступных для выбранного действия.').waitFor();
   await page.locator('[data-cleanup-action]').selectOption('detach');
+  await page.getByText('Выберите проект, чтобы отметить его ресурсы.').waitFor();
+  assert.equal(await target.isEnabled(), false);
+  await page.locator('[data-cleanup-project]').selectOption('7');
   await page.getByText('Скрыт из глобального поиска', {exact:false}).waitFor();
   await page.getByRole('button', {name:'Выбрать доступные'}).click();
   assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 2);
