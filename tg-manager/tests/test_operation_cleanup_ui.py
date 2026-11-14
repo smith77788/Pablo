@@ -14,6 +14,8 @@ def test_cleanup_opens_from_the_operation_card_and_shield_links_to_the_card():
     assert 'src="screens/op_cleanup.js"' in miniapp_html()
     details = js_function("openOpDetail")
     assert "o.cleanup_available" in details and "openOperationCleanup" in details
+    catalog = js_function("openRestrictionCleanup")
+    assert "openOperationCleanup(String(report.op_id))" in catalog
     shield = js_function("loadDeadEntities")
     assert "openOpDetail(String(result.op_id))" in shield
     assert "/restrictions/remove_dead" not in shield
@@ -24,7 +26,7 @@ def test_cleanup_recovery_uses_existing_screens_and_exact_bot_id():
     assert "openRemovedChannels()" in source
     assert "openBot(String(item.id))" in source
     assert "appendRecovery(body, applied.filter(item => item.outcome === 'applied'))" in source
-    assert "item.active === false" in source
+    assert "item.can_restore === true" in source
 
 
 def test_cleanup_confirms_exact_targets_in_chromium():

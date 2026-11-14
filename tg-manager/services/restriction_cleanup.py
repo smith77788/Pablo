@@ -131,6 +131,14 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
     for key, entry in entries.items():
         owned = assets[key]
         if not owned:
+            if projects[key]:
+                kind, item_id = key
+                items[key] = {
+                    "kind": kind, "id": str(item_id), "title": str(entry.get("title") or item_id),
+                    "status": entry["status"], "reason": str(entry.get("reason") or ""),
+                    "projects": list(projects[key].values()), "active": False, "can_disable": False,
+                    "disable_reason": "Ресурс отсутствует в каталоге. Можно убрать его связь с проектом.",
+                }
             continue
         kind, item_id = key
         row = owned[0]
@@ -162,7 +170,7 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
 
 async def _disabled_channels(conn, owner_id, entries, items):
     ids = [item_id for (kind, item_id) in entries
-           if kind != "bot" and (kind, item_id) not in items]
+           if kind != "bot" and not items.get((kind, item_id), {}).get("active")]
     if not ids:
         return {}
     rows = await conn.fetch(
@@ -174,13 +182,14 @@ async def _disabled_channels(conn, owner_id, entries, items):
     for row in rows:
         kind = "group" if (row["type"] or "").lower() in _GROUP_TYPES else "channel"
         key = kind, row["channel_id"]
-        if key in entries and key not in items:
+        if key in entries and not items.get(key, {}).get("active"):
             entry = entries[key]
             disabled[key] = {
                 "kind": kind, "id": str(row["channel_id"]),
                 "title": str(row["title"] or row["username"] or entry.get("title") or row["channel_id"]),
                 "status": entry["status"], "reason": str(entry.get("reason") or ""),
-                "projects": [], "active": False, "can_disable": False,
+                "projects": items.get(key, {}).get("projects", []), "active": False, "can_disable": False,
+                "can_restore": True,
                 "disable_reason": "Ресурс уже отключён в Infragram",
             }
     return disabled
@@ -278,7 +287,7 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
             "kind": key[0], "id": str(key[1]),
             "title": str(entry.get("title") or key[1]), "status": entry["status"],
         })
-        if key in disabled:
+        if key in disabled and action == "disable":
             reason = disabled[key]["disable_reason"]
         elif deployment_running:
             reason = "Дождитесь завершения развёртывания проекта"

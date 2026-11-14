@@ -95,6 +95,44 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
     asyncio.run(_run(scenario))
 
 
+def test_detach_stale_catalog_link_through_authenticated_preview(monkeypatch):
+    secret = "123456:synthetic-stale-link"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+
+    async def scenario(pool, op_id):
+        projects = await pool.fetch(
+            "INSERT INTO network_instances(owner_id,name) VALUES($1,'Первый'),($1,'Второй') RETURNING id",
+            OWNER)
+        project, other = (row["id"] for row in projects)
+        await pool.execute(
+            """INSERT INTO network_nodes(instance_id,node_type,ref_id)
+               VALUES($1,'channel',$3),($2,'channel',$3)""", project, other, CHANNEL)
+        await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL)
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        path = f"/api/miniapp/operations/{op_id}/cleanup"
+        async with TestClient(TestServer(app)) as client:
+            result = await (await client.get(path, headers=headers)).json()
+            stale = next(item for item in result["findings"] if item["id"] == str(CHANNEL))
+            assert stale["active"] is False and stale["can_disable"] is False
+            assert {item["id"] for item in stale["projects"]} == {project, other}
+            assert "can_restore" not in stale
+            body = {"action": "detach", "project_id": str(project), "targets": [CHANNEL_TARGET]}
+            response = await client.post(path, json={**body, "preview": True}, headers=headers)
+            assert response.status == 200, await response.text()
+            preview = await response.json()
+            assert preview["items"][0]["outcome"] == "ready"
+            response = await client.post(path, json={**body, "token": preview["token"]}, headers=headers)
+            assert response.status == 200, await response.text()
+            assert (await response.json())["items"][0]["outcome"] == "applied"
+            assert await pool.fetchval("SELECT instance_id FROM network_nodes WHERE ref_id=$1", CHANNEL) == other
+            assert (await client.post(path, json={**body, "token": preview["token"]}, headers=headers)).status == 409
+
+    asyncio.run(_run(scenario))
+
+
 def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
     from unittest.mock import AsyncMock
 

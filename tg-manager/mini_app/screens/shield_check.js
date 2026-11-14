@@ -353,8 +353,11 @@ async function openRestrictionCleanup(opId) {
   try {
     const report = await api('/api/miniapp/restrictions/dead');
     if (report.cleanup_available && report.op_id) {
-      body.innerHTML = '<button type="button" class="btn btn-s">Открыть карточку проверки</button>';
-      body.querySelector('button').onclick = () => openOpDetail(String(report.op_id));
+      body.innerHTML = '<div class="actions"><button type="button" class="btn btn-p">Управлять найденными</button>'
+        + '<button type="button" class="btn btn-s">Открыть карточку проверки</button></div>';
+      const [manage, details] = body.querySelectorAll('button');
+      manage.onclick = () => openOperationCleanup(String(report.op_id));
+      details.onclick = () => openOpDetail(String(report.op_id));
       return;
     }
     const d = await api('/api/miniapp/restrictions/problems');

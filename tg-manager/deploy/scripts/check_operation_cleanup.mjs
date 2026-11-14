@@ -18,7 +18,7 @@ try {
     window.openRemovedChannels = () => { window.cleanupRecovery = 'channels'; };
     window.api = async (path, options) => {
       if (!options) return {findings:[item, skipped, {kind:'channel', id:'9007199254740995',
-        title:'Отключённый канал', status:'restricted', active:false, can_disable:false,
+        title:'Отключённый канал', status:'restricted', active:false, can_disable:false, can_restore:true,
         disable_reason:'Ресурс уже отключён в Infragram'}], legacy:true, max_targets:2,
         history:[{action:'detach', target:'bot:9007199254740993 project:7'}]};
       const body = JSON.parse(options.body);
@@ -37,7 +37,7 @@ try {
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-cleanup-action')), true);
   const target = page.locator('[data-cleanup-target]').first();
-  const preview = page.getByRole('button', { name: 'Проверить план' });
+  const preview = page.getByRole('button', { name: /^Проверить план/ });
   assert.equal(await target.isChecked(), false);
   assert.equal(await preview.isEnabled(), false);
   assert.equal(await page.locator('[data-cleanup-action]').inputValue(), 'disable');
@@ -50,6 +50,11 @@ try {
   await page.getByText('Скрыт из глобального поиска', {exact:false}).waitFor();
   await page.getByRole('button', {name:'Выбрать доступные'}).click();
   assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 2);
+  await preview.click();
+  await page.getByRole('button', {name:'Вернуться к выбору'}).click();
+  assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 2);
+  assert.equal(await page.locator('[data-cleanup-project]').inputValue(), '7');
+  await page.evaluate(() => { window.cleanupCalls.length = 0; });
   await page.getByRole('button', {name:'Снять выбор'}).click();
   assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 0);
   await page.getByText('История изменений', {exact:true}).click();

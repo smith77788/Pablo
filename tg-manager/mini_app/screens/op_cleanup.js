@@ -1,7 +1,10 @@
 // Уборка по результатам диагностики: выбор → серверный план → применение.
 async function openOperationCleanup(opId) {
+  const existing = document.querySelector('[data-operation-cleanup]');
+  if (existing) { existing.querySelector('[data-cleanup-close]')?.focus(); return; }
   const path = '/api/miniapp/operations/' + encodeURIComponent(opId) + '/cleanup';
   const overlay = document.createElement('div');
+  overlay.dataset.operationCleanup = '';
   overlay.className = 'mbg show';
   overlay.style.zIndex = '9999';
   overlay.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-label="Уборка по итогам проверки">'
@@ -20,7 +23,7 @@ async function openOperationCleanup(opId) {
     if (event.key === 'Escape' && !close.disabled) close.click();
     if (event.key !== 'Tab') return;
     const controls = [...overlay.querySelectorAll('button,select,input,summary')].filter(
-      control => !control.disabled && !control.closest('[hidden]'));
+      control => !control.disabled && control.getClientRects().length);
     const edge = event.shiftKey ? controls[0] : controls.at(-1);
     if (!controls.includes(document.activeElement) || document.activeElement === edge) {
       event.preventDefault();
@@ -37,7 +40,7 @@ async function openOperationCleanup(opId) {
   const title = item => item.title || (labels[item.kind] || 'Ресурс') + ' #' + item.id;
   const row = (item, text) => `<div class="row"><div class="row-body">
     <div class="row-name" style="overflow-wrap:anywhere">${esc(title(item))}</div>
-    <div class="row-val" style="white-space:normal">${esc(text)}</div></div></div>`;
+    <div class="row-val" style="white-space:normal">ID: ${esc(item.id)} · ${esc(text)}</div></div></div>`;
   const statusText = {unreachable:'Недоступен снаружи', restricted:'Ограничен Telegram',
     hidden:'Скрыт из глобального поиска', check_failed:'Не удалось проверить'};
   const outcomeText = {detached:'Убран из проекта', disabled:'Отключён', applied:'Применено', changed:'Применено',
@@ -136,6 +139,7 @@ async function openOperationCleanup(opId) {
         selectAll.disabled = remaining <= 0 || !list.querySelector('input:not(:disabled):not(:checked)');
         clear.disabled = !count;
         const hidden = count - visible;
+        button.textContent = count ? 'Проверить план · ' + count : 'Проверить план';
         let message = '';
         if (count) message = 'Выбрано: ' + count + (hidden ? ' · вне фильтра: ' + hidden : '');
         else if (action.value === 'detach' && !project.value) message = 'Выберите проект, чтобы отметить его ресурсы.';
@@ -152,12 +156,13 @@ async function openOperationCleanup(opId) {
             : item.can_disable === true;
           const details = [
             labels[item.kind] || 'Ресурс',
+            'ID: ' + item.id,
             statusText[item.status] || 'Требуется проверка',
             item.reason,
             action.value === 'detach' ? (item.projects || []).map(p => p.name).filter(Boolean).join(', ') : '',
             (!item.active || (action.value === 'disable' && !eligible)) ? item.disable_reason : '',
           ].filter(Boolean).join(' · ');
-          return `<label class="row chk-row" style="cursor:${eligible ? 'pointer' : 'default'}">
+          return `<label class="row chk-row" style="min-height:44px;cursor:${eligible ? 'pointer' : 'default'}">
             <input type="checkbox" data-cleanup-target value="${esc(index)}" ${eligible ? '' : 'disabled'} ${selected.has(index) ? 'checked' : ''}>
             <span class="row-body"><span class="row-name" style="display:block;overflow-wrap:anywhere">${esc(title(item))}</span>
             <span class="row-val" style="display:block;white-space:normal">${esc(details)}</span></span></label>`;
@@ -195,6 +200,7 @@ async function openOperationCleanup(opId) {
       status.onchange = renderFindings;
       if (projects.size === 1) project.selectedIndex = 1;
       button.onclick = async () => {
+        if (button.disabled) return;
         const targets = [...selected].map(index => {
           const {kind, id} = findings[index];
           return {kind, id: String(id)};
@@ -202,21 +208,29 @@ async function openOperationCleanup(opId) {
         if (!targets.length || targets.length > maxTargets) return;
         const payload = {action:action.value, targets};
         if (action.value === 'detach') payload.project_id = project.value;
-        body.querySelectorAll('input,select,button').forEach(input => { input.disabled = true; });
+        const enabled = [...body.querySelectorAll('input,select,button')].filter(input => !input.disabled);
+        const saved = [...body.childNodes];
+        enabled.forEach(input => { input.disabled = true; });
+        const restoreSelection = () => {
+          body.replaceChildren(...saved);
+          enabled.forEach(input => { input.disabled = false; });
+          refreshSelection();
+          button.focus();
+        };
         notice.textContent = 'Проверяем текущее состояние ресурсов…';
         try {
           const preview = await api(path, {method:'POST', body:JSON.stringify({...payload, preview:true})});
-          if (overlay.isConnected) renderPreview(payload, preview);
+          if (overlay.isConnected) renderPreview(payload, preview, restoreSelection);
         } catch (e) {
           if (overlay.isConnected) {
-            await load();
+            restoreSelection();
             notice.textContent = errRu(e, 'Не удалось подготовить план');
           }
         }
       };
       renderFindings();
       renderHistory();
-      const disabledChannels = findings.filter(item => item.active === false && item.kind !== 'bot');
+      const disabledChannels = findings.filter(item => item.can_restore === true);
       appendRecovery(body, disabledChannels);
     } catch (e) {
       body.innerHTML = '<button type="button" class="btn btn-s" style="width:100%">Повторить загрузку</button>';
@@ -225,7 +239,7 @@ async function openOperationCleanup(opId) {
     }
   }
 
-  function renderPreview(payload, preview) {
+  function renderPreview(payload, preview, restoreSelection) {
     const items = Array.isArray(preview.items) ? preview.items : [];
     const readyCount = items.filter(item => item.outcome === 'ready').length;
     notice.textContent = '';
@@ -235,16 +249,17 @@ async function openOperationCleanup(opId) {
       + (items.length ? `<div class="lst" style="${listStyle}">` + items.map(item => {
         const planned = payload.action === 'detach'
           ? 'Отвязать от проекта · связей: ' + (item.edge_ids || []).length : actionText.disable;
-        return row(item, item.outcome === 'skipped' ? item.reason || 'Пропущено' : planned);
+        return row(item, item.outcome === 'ready' ? planned : item.reason || 'Пропущено');
       }).join('') + '</div>' : '<div class="field-note">Сейчас нет ресурсов для этого действия.</div>')
       + (readyCount && preview.token ? '<button type="button" class="btn btn-p" data-cleanup-apply style="width:100%;margin-top:12px">Подтвердить</button>' : '')
       + '<button type="button" class="btn btn-s" data-cleanup-reload style="width:100%;margin-top:8px">Вернуться к выбору</button>';
     const reload = body.querySelector('[data-cleanup-reload]');
-    reload.onclick = load;
+    reload.onclick = restoreSelection;
     const apply = body.querySelector('[data-cleanup-apply]');
     (apply || reload).focus();
     if (!apply) return;
     apply.onclick = async () => {
+      if (apply.disabled) return;
       apply.disabled = true;
       reload.disabled = true;
       close.disabled = true;
@@ -266,6 +281,8 @@ async function openOperationCleanup(opId) {
       } catch (e) {
         apply.remove();
         reload.disabled = false;
+        reload.textContent = 'Обновить список';
+        reload.onclick = load;
         reload.focus();
         notice.textContent = errRu(e, 'Не удалось подтвердить результат') + '. Обновите список перед новой попыткой.';
       } finally {
