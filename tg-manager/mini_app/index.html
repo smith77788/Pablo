@@ -5622,10 +5622,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <div style="font-size:12px;color:var(--hint);margin-bottom:6px">Жалоба уйдёт с КАЖДОГО отмеченного аккаунта. Больше аккаунтов — выше охват, но и выше риск для них. Ничего не отмечено — in-app вектор пропускается.</div>
       <div id="cmpAccounts" style="max-height:170px;overflow-y:auto;margin-bottom:6px"><div class="spin-wrap"><div class="spin"></div></div></div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;margin-bottom:8px">
         <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:8px 6px" onclick="cmpSelectAllAccounts(true)">✅ Все</button>
         <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:8px 6px" onclick="cmpSelectAllAccounts(false)">⬜ Снять</button>
       </div>
+      <label class="chk-row" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;padding-top:4px;border-top:1px solid var(--sep)">
+        <input type="checkbox" id="cmpForceAll" style="margin-top:2px">
+        <span>⚠️ Слать со <b>всех</b> выбранных, игнорируя защиту (кулдаун после FloodWait и риск-пульс). Больше аккаунтов в работе, но <b>выше риск бана/спамблока</b> для них. Забаненные и удалённые всё равно не отправят. По умолчанию такие аккаунты бережём.</span>
+      </label>
     </div>
 
     <div class="sec">2️⃣ Почтовые ящики (письмо в органы)</div>
@@ -19221,6 +19225,7 @@ async function submitComplaint() {
   const context = (document.getElementById('cmpContext').value||'').trim();
   const accIds = [...document.querySelectorAll('.cmp-acc-cb:checked')].map(cb=>+cb.value);
   const mboxIds = [...document.querySelectorAll('.cmp-mbox-cb:checked')].map(cb=>+cb.value);
+  const forceAll = !!document.getElementById('cmpForceAll')?.checked;
   if (!target) { errEl.textContent='Укажите запрещённый ресурс'; return; }
   if (!category) { errEl.textContent='Выберите категорию нарушения'; return; }
   if (!accIds.length && !mboxIds.length) { errEl.textContent='Отметьте хотя бы один аккаунт флота или почтовый ящик'; return; }
@@ -19228,24 +19233,27 @@ async function submitComplaint() {
     errEl.textContent='Для письма нужны ссылки-доказательства и описание нарушения (от 20 символов)'; return;
   }
   const parts = [];
-  if (accIds.length) parts.push(`${accIds.length} ${plural(accIds.length,'аккаунта','аккаунтов','аккаунтов')} флота (in-app жалоба)`);
+  if (accIds.length) parts.push(`${accIds.length} ${plural(accIds.length,'аккаунта','аккаунтов','аккаунтов')} флота (in-app жалоба)${forceAll?' — СО ВСЕХ, игнорируя защиту':''}`);
   if (mboxIds.length) parts.push(`${mboxIds.length} ${plural(mboxIds.length,'ящик','ящика','ящиков')} (письмо в органы)`);
-  if (!await askConfirm(`Подать жалобу на «${target}»?\n\n${parts.join('\n')}\n\nОтменить отправленные жалобы и письма нельзя.`)) return;
+  const warn = (forceAll && accIds.length) ? '\n\n⚠️ Режим «со всех»: жалоба уйдёт и с аккаунтов на кулдауне/под риск-пульсом — выше риск бана.' : '';
+  if (!await askConfirm(`Подать жалобу на «${target}»?\n\n${parts.join('\n')}${warn}\n\nОтменить отправленные жалобы и письма нельзя.`)) return;
   const btn = document.getElementById('complaintBtn');
   btn.disabled=true; btn.textContent='Подаю…';
   try {
     const r = await api('/api/miniapp/complaint/submit', {method:'POST', body:JSON.stringify({
       target, category, report_text,
       account_ids: accIds, mailbox_ids: mboxIds,
-      evidence, context,
+      evidence, context, force_all: forceAll,
     })});
     const lines = [];
     if (r.in_app) {
       if (r.in_app.op_id) {
-        lines.push(`🚨 In-app жалоба поставлена · ${r.in_app.accounts} акк.${(r.in_app.selected>r.in_app.accounts)?` (из ${r.in_app.selected} выбранных доступно ${r.in_app.accounts})`:''} · операция #${r.in_app.op_id}`);
+        lines.push(`🚨 In-app жалоба поставлена · ${r.in_app.accounts} акк.${(r.in_app.selected>r.in_app.accounts)?` (из ${r.in_app.selected} выбранных пойдут ${r.in_app.accounts})`:''} · операция #${r.in_app.op_id}`);
+        if (r.in_app.dropped_note) lines.push(esc(r.in_app.dropped_note).replace(/\n/g,'<br>'));
         pollOpResult(r.in_app.op_id, 'Жалоба (флот)');
       } else if (r.in_app.error) {
         lines.push(`⚠️ In-app жалоба не поставлена: ${esc(r.in_app.error)}`);
+        if (r.in_app.dropped_note) lines.push(esc(r.in_app.dropped_note).replace(/\n/g,'<br>'));
       }
     }
     if (r.email) {
