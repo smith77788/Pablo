@@ -28,6 +28,25 @@ from database import db
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+class _AcquireCM:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _NoopCM:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *a):
+        return False
+
+
 class _Pool:
     def __init__(self, result="UPDATE 1"):
         self.result = result
@@ -40,6 +59,24 @@ class _Pool:
     async def fetchrow(self, sql, *a):
         self.log.append((sql, a))
         return None
+
+    # delete_bots открывает транзакцию и читает удалённые id через RETURNING:
+    # мок отдаёт строку на каждый запрошенный id, если результат «сработал»
+    # (UPDATE 1 → строка, UPDATE 0 → пусто) — смысл теста сохранён.
+    def acquire(self):
+        return _AcquireCM(self)
+
+    def transaction(self):
+        return _NoopCM()
+
+    async def fetch(self, sql, *a):
+        self.log.append((sql, a))
+        m = re.search(r"(\d+)\s*$", str(self.result))
+        n = int(m.group(1)) if m else 0
+        if "RETURNING" in sql and n > 0:
+            ids = next((x for x in a if isinstance(x, (list, tuple))), [])
+            return [{"bot_id": b} for b in ids]
+        return []
 
 
 def _run(coro):
