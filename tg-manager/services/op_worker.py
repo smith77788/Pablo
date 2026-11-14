@@ -4353,6 +4353,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "карантин и попадёт в следующую операцию, а волна банов его не посчитает",
     "infragram_notifications_undelivered_total":
         "отчёт об операции не доехал до владельца",
+    "infragram_notifications_bad_content_total":
+        "отчёт об операции не приняли из-за самого текста (битый HTML или длина) "
+        "— аварийная отправка простым текстом тоже не прошла; операция выполнена, "
+        "её итог записан, чинить надо формат отчёта",
     "infragram_recurring_reschedule_failures_total":
         "следующий запуск повторяющейся операции не поставлен — она остановилась",
     "infragram_executor_lease_errors_total":
@@ -4389,6 +4393,7 @@ _SHUTDOWN_CANCEL_GRACE_S = 2.0
 # и её итог записан.
 _DELIVERY_FAILURE_COUNTERS = frozenset({
     "infragram_notifications_undelivered_total",
+    "infragram_notifications_bad_content_total",
 })
 
 

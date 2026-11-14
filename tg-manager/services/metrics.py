@@ -110,6 +110,9 @@ _HELP = {
     "infragram_notifications_recipient_gone_total":
         "Уведомления, которые Telegram отклонил навсегда (получатель заблокировал "
         "бота, не нажимал /start или удалил аккаунт) — не сбой доставки",
+    "infragram_notifications_bad_content_total":
+        "Отчёт не приняли из-за самого текста (битый HTML или длина >4096): "
+        "аварийная отправка простым текстом тоже не прошла — чинить формат отчёта",
     "infragram_budget_write_failures_total":
         "Потерянные записи суточного счёта действий (аккаунт могут взять сверх лимита)",
     "infragram_strike_history_write_failures_total":

@@ -5311,6 +5311,40 @@ def _notify_failure_is_permanent(exc: Exception) -> bool:
     return any(mark in text for mark in _NOTIFY_PERMANENT_MARKS)
 
 
+# Ошибка РАЗМЕТКИ или ДЛИНЫ сообщения (а не сети/лимита и не «получатель
+# пропал»): Telegram отклоняет сам ТЕКСТ. Повтор того же текста её не починит,
+# но отчёт владельцу можно доставить простым текстом (без HTML), усечённым до
+# лимита. Так владелец наконец получает содержимое — пусть без форматирования.
+# Симптом из прода: «отчёт об операции не доехал до владельца — N раз» с
+# растущим N, тогда как мета-алерт «не доставлено» (короткий, чистый) доходил.
+_NOTIFY_CONTENT_ERROR_MARKS = (
+    "can't parse entities", "can't parse", "unsupported start tag",
+    "unclosed", "unexpected end tag", "can't find end tag", "entity",
+    "byte offset",                                  # битый HTML
+    "message is too long", "message_too_long", "text is too long",
+    "message caption is too long",                  # длина
+    "message text is empty", "message to be sent is empty",  # пусто
+)
+_TG_MESSAGE_LIMIT = 4096
+
+
+def _notify_failure_is_content_error(exc: Exception) -> bool:
+    """Ошибка в самом тексте (разметка/длина/пусто) — повтор не поможет."""
+    text = str(exc).lower()
+    return any(mark in text for mark in _NOTIFY_CONTENT_ERROR_MARKS)
+
+
+def _html_to_plain(text: str) -> str:
+    """HTML-разметку — в простой текст: <br>/</p> в перевод строки, остальные
+    теги убрать, сущности развернуть. Для аварийной доставки, когда Telegram
+    не принял HTML."""
+    import html as _html
+    t = re.sub(r"(?i)<br\s*/?>", "\n", text or "")
+    t = re.sub(r"(?i)</(p|div|li)>", "\n", t)
+    t = re.sub(r"<[^>]+>", "", t)
+    return _html.unescape(t)
+
+
 def _cleanup_notify_cooldown() -> None:
     """Evict stale entries when cache grows too large."""
     if len(_notify_cooldown) <= _NOTIFY_CACHE_MAX:
@@ -5448,8 +5482,22 @@ async def notify_if_enabled(
                 )
                 return True
             except Exception as exc:
+                # Ошибка разметки/длины: тем же HTML Telegram отклонит и на
+                # повторе. Но отчёт владельцу нужен — шлём простым текстом,
+                # усечённым до лимита. Получилось — доставлено.
+                if _notify_failure_is_content_error(exc):
+                    try:
+                        _plain = _html_to_plain(text)
+                        if len(_plain) > _TG_MESSAGE_LIMIT:
+                            _plain = _plain[:_TG_MESSAGE_LIMIT - 1].rstrip() + "…"
+                        await bot.send_message(
+                            user_id, _plain, reply_markup=reply_markup)
+                        return True
+                    except Exception as exc2:
+                        # Простой текст тоже не ушёл — дальше по общей логике.
+                        exc = exc2
                 _last_exc = exc
-                if _notify_failure_is_permanent(exc):
+                if _notify_failure_is_permanent(exc) or _notify_failure_is_content_error(exc):
                     break
                 if _attempt >= len(_NOTIFY_RETRY_DELAYS):
                     break
@@ -5480,18 +5528,27 @@ async def notify_if_enabled(
         # False означает «стоит попробовать снова», поэтому его возвращает
         # ТОЛЬКО временный сбой. На заблокированном боте повтор каждый круг
         # воркера жёг бы лимиты Telegram, ничего не доставляя, — там True.
-        _worth_retrying = not _notify_failure_is_permanent(exc)
+        # Ошибка самого текста (разметка/длина) — наш сбой формата, а не сети
+        # и не выбор получателя. Повтор того же текста её не чинит (простой
+        # текст мы уже попробовали выше), поэтому НЕ временная: иначе отчёт
+        # слался бы заново каждый цикл воркера и копил счётчик недоставки —
+        # ровно симптом из прода.
+        _is_content = _notify_failure_is_content_error(exc)
+        _worth_retrying = not _is_content and not _notify_failure_is_permanent(exc)
         try:
             from services import metrics as _m
 
-            # Постоянный отказ (человек заблокировал бота, не нажимал /start,
-            # удалил аккаунт) — не сбой нашей доставки, а выбор получателя.
-            # Раньше он шёл в тот же счётчик, что и сбой сети, и админ получал
-            # тревогу «Защита не записалась» о чужом заблокированном боте.
-            _m.inc("infragram_notifications_undelivered_total"
-                   if _worth_retrying
-                   else "infragram_notifications_recipient_gone_total",
-                   {"pref": str(pref)[:40]})
+            # Три разных исхода, три счётчика:
+            # — наш битый текст (bad_content): чинить формат отчёта, не сеть;
+            # — выбор получателя (recipient_gone): заблокировал/удалил бота;
+            # — временный сбой (undelivered): сеть/перегрузка/лимит — повтор.
+            if _is_content:
+                _metric = "infragram_notifications_bad_content_total"
+            elif _worth_retrying:
+                _metric = "infragram_notifications_undelivered_total"
+            else:
+                _metric = "infragram_notifications_recipient_gone_total"
+            _m.inc(_metric, {"pref": str(pref)[:40]})
         except Exception:
             pass
         return not _worth_retrying
