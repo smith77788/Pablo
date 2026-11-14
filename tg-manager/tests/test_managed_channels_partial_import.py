@@ -84,6 +84,10 @@ class _FakeConn:
     def __init__(self, log: list[tuple[str, tuple]]):
         self._log = log
 
+    async def fetch(self, query, *args):
+        assert "FROM removed_channels" in query
+        return []
+
     async def execute(self, query, *args):
         self._log.append((query, args))
         return "OK"
@@ -184,14 +188,14 @@ def test_add_managed_channels_upsert_never_regresses_count_to_zero():
             pool, owner_id=1, acc_id=10, channels=[{"id": 1, "title": "Ch1", "members": 0}])
 
     asyncio.run(_run())
-    q = pool.log[0][0]
+    q = next(q for q, _ in pool.log if "INSERT INTO managed_channels" in q)
     assert "CASE WHEN EXCLUDED.members_count > 0" in q
     assert "managed_channels.members_count END" in q
 
 
 def test_op_worker_channel_add_persists_member_count():
     src = _func_source("services/op_worker.py", "_exec_channel_add")
-    assert "members_count" in src
+    assert "add_managed_channels(" in src
     assert 'res.get("members")' in src
 
 
@@ -335,7 +339,7 @@ def test_op_worker_channel_add_already_used_point_wise_insert():
     обратно в полный upsert_managed_channels."""
     src = _func_source("services/op_worker.py", "_exec_channel_add")
     assert "upsert_managed_channels(" not in _without_comment_lines(src)
-    assert "ON CONFLICT (owner_id, channel_id) DO UPDATE" in src
+    assert "add_managed_channels(" in src and "reconnect=True" in src
 
 
 def test_channel_ops_live_reload_still_uses_full_resync_intentionally():
@@ -377,7 +381,7 @@ def pg_pool():
 
     async def _boot():
         conn = await asyncpg.connect(DSN)
-        for f in ("schema_v19.sql", "schema_v91.sql"):
+        for f in ("schema_v19.sql", "schema_v91.sql", "schema_v257_entity_removal.sql"):
             path = _TG_MANAGER_ROOT / f
             for chunk in path.read_text(encoding="utf-8").split(";"):
                 body = "\n".join(

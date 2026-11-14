@@ -45,6 +45,26 @@ def new_sessions(foreign: list[dict], known_hashes) -> list[dict]:
     return [f for f in foreign if int(f.get("hash") or 0) not in known]
 
 
+def trusted_hashes(acc: dict) -> set[int]:
+    """Отпечатки сеансов, помеченных владельцем «это я» (v371)."""
+    return {int(h) for h in (acc.get("trusted_session_hashes") or ()) if h is not None}
+
+
+def drop_trusted(foreign: list[dict] | None, acc: dict) -> list[dict]:
+    """Убрать из списка чужих сеансов доверенные — их владелец считает своими.
+
+    Один аккаунт, открытый на телефоне владельца и на втором устройстве, иначе
+    висел бы вечной тревогой «чужой сеанс», а автозащита закрыла бы собственный
+    вход владельца.
+    """
+    if not foreign:
+        return []
+    trust = trusted_hashes(acc)
+    if not trust:
+        return list(foreign)
+    return [f for f in foreign if int(f.get("hash") or 0) not in trust]
+
+
 def _when(ts: int) -> str:
     if not ts:
         return "дата неизвестна"
@@ -108,6 +128,9 @@ async def record(pool, acc: dict, foreign: list[dict] | None, bot=None, *,
         acc_id = int(acc["id"])
     except (KeyError, TypeError, ValueError):
         return {"skipped": True}
+    # Доверенные («это я») — не чужие: ни в счётчик, ни в тревогу, ни в
+    # автозащиту. Снимаем их до всего остального.
+    foreign = drop_trusted(foreign, acc)
     new = new_sessions(foreign, acc.get("foreign_session_hashes"))
     _hold = {int(h) for h in (unsettled or ())}
     hashes = sorted({int(f["hash"]) for f in foreign
@@ -231,7 +254,9 @@ async def guard(pool, client, acc: dict, profile: dict, cfg, budget: dict) -> di
     if cfg is None or acc_id in {int(x) for x in (getattr(cfg, "exempt_account_ids", None) or [])}:
         return out
     old_enough = session_old_enough(int(profile.get("own_session_created") or 0))
-    foreign = profile.get("authorizations")
+    # Доверенные сеансы владельца автозащита не трогает — иначе закрыла бы его
+    # собственный вход на втором устройстве.
+    foreign = drop_trusted(profile.get("authorizations"), acc)
     if getattr(cfg, "guard_sessions", False) and foreign:
         new = new_sessions(foreign, acc.get("foreign_session_hashes"))
         if new and not old_enough:
@@ -384,6 +409,55 @@ async def forget(pool, owner_id: int, account_id: int) -> None:
             account_id, owner_id)
     except Exception as exc:
         log.warning("session_watch.forget acc=%s: %s", account_id, exc)
+
+
+async def drop_one(pool, owner_id: int, account_id: int, h: int) -> None:
+    """Один чужой сеанс закрыт с карточки — убрать его из счётчика (fail-soft).
+
+    Счётчик — денормализованный кэш для списка; живой список сеансов карточка
+    всё равно берёт прямым запросом к Telegram. Но на строке списка цифра
+    должна осесть сразу, а не ждать следующего фонового прохода.
+    """
+    try:
+        await pool.execute(
+            "UPDATE tg_accounts SET "
+            "foreign_sessions=GREATEST(COALESCE(foreign_sessions,0)-1, 0), "
+            "foreign_session_hashes=array_remove(foreign_session_hashes, $3::bigint), "
+            "sessions_checked_at=now() WHERE id=$1 AND owner_id=$2",
+            account_id, owner_id, int(h))
+    except Exception as exc:
+        log.warning("session_watch.drop_one acc=%s: %s", account_id, exc)
+
+
+async def set_trust(pool, owner_id: int, account_id: int, h: int, on: bool) -> None:
+    """Пометить сеанс своим / снять пометку (fail-soft).
+
+    Помечая сеанс своим, его же убираем из счётчика чужих и из «уже показанных»
+    (иначе он остался бы в цифре до следующего прохода). Снимая пометку, счётчик
+    не трогаем: вернётся сам на ближайшем фоновом проходе, если сеанс ещё жив.
+    """
+    try:
+        if on:
+            # Счётчик уменьшаем только если сеанс РЕАЛЬНО числился чужим: иначе
+            # повторная пометка уже доверенного (кнопка-переключатель от двойного
+            # тапа) увела бы цифру ниже правды.
+            await pool.execute(
+                "UPDATE tg_accounts SET "
+                "trusted_session_hashes=(SELECT ARRAY(SELECT DISTINCT unnest("
+                "  COALESCE(trusted_session_hashes, '{}'::bigint[]) || $3::bigint))), "
+                "foreign_sessions=CASE WHEN $3::bigint = ANY(COALESCE(foreign_session_hashes, '{}'::bigint[])) "
+                "  THEN GREATEST(COALESCE(foreign_sessions,0)-1, 0) ELSE COALESCE(foreign_sessions,0) END, "
+                "foreign_session_hashes=array_remove(foreign_session_hashes, $3::bigint) "
+                "WHERE id=$1 AND owner_id=$2",
+                account_id, owner_id, int(h))
+        else:
+            await pool.execute(
+                "UPDATE tg_accounts SET "
+                "trusted_session_hashes=array_remove(trusted_session_hashes, $3::bigint) "
+                "WHERE id=$1 AND owner_id=$2",
+                account_id, owner_id, int(h))
+    except Exception as exc:
+        log.warning("session_watch.set_trust acc=%s on=%s: %s", account_id, on, exc)
 
 
 _LOST_RU = {

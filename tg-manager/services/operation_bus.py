@@ -1111,6 +1111,38 @@ async def submit(
                     if active is not None:
                         op_id = int(active)
                         reused = True
+                if op_type == "deploy_network" and params.get("instance_id") is not None:
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                        f"deploy-network|{owner_id}|{params['instance_id']}",
+                    )
+                    from services import op_status as _deploy_status
+                    if params.get("approval_digest"):
+                        confirmed = await conn.fetchval(
+                            """SELECT id FROM operation_queue WHERE owner_id=$1 AND op_type='deploy_network'
+                               AND params->>'instance_id'=$2 AND params->>'approval_digest'=$3
+                               ORDER BY id LIMIT 1""",
+                            owner_id, str(params["instance_id"]), params["approval_digest"],
+                        )
+                        if confirmed:
+                            op_id, reused = int(confirmed), True
+                    if not reused:
+                        active = await conn.fetchrow(
+                            """SELECT id, params->>'topology_digest' AS digest,
+                                      params->>'account_id' AS executor,
+                                      params->>'approval_digest' AS approval
+                               FROM operation_queue
+                               WHERE owner_id=$1 AND op_type='deploy_network'
+                                 AND params->>'instance_id'=$2
+                                 AND status=ANY($3::text[]) ORDER BY id LIMIT 1""",
+                            owner_id, str(params["instance_id"]), sorted(_deploy_status.IN_FLIGHT),
+                        )
+                        if active and ("topology_digest" in params or active["digest"] is not None):
+                            if (active["digest"] != params.get("topology_digest")
+                                    or active["executor"] != str(params.get("account_id"))
+                                    or active["approval"] != params.get("approval_digest")):
+                                raise PermissionError("Для этого проекта уже идёт другое развёртывание")
+                            op_id, reused = int(active["id"]), True
                 if not reused and dedup_window_sec and dedup_window_sec > 0:
                     dedup_identity = sensitive_params_fp or dedup_params_json
                     _dedup_statuses = _dedup_status_sql()
@@ -1926,7 +1958,7 @@ async def resubmit_unfinished(
             "recurrence_dropped": dropped, "plan_blocked": plan_blocked}
 
 
-async def retry_blocker(pool: asyncpg.Pool, op_id: int) -> dict | None:
+async def retry_blocker(pool: asyncpg.Pool, op_id: int, operation) -> dict | None:
     """Почему эту операцию сейчас НЕЛЬЗЯ повторять, или None.
 
     Общая проверка всех поверхностей повтора одной операции (бот — через
@@ -1934,6 +1966,13 @@ async def retry_blocker(pool: asyncpg.Pool, op_id: int) -> dict | None:
     жила только в `resubmit_one`, мини-апп повторял операцию с убранным
     журналом целиком заново. Возвращает {"reason": str, ...}.
     """
+    if operation["op_type"] == "deploy_network":
+        params = operation["params"]
+        if isinstance(params, str):
+            params = json.loads(params)
+        if isinstance(params, dict) and "topology_digest" in params:
+            return {"reason": "Сверьте результат и заново откройте план развёртывания проекта"}
+
     # Журнал целей убран уборкой — повторять НЕЛЬЗЯ. Идемпотентность
     # исполнителя стоит на `operation_log`: пустой журнал означает «ничего не
     # сделано», и повтор прошёл бы ВСЕ цели заново — те же приглашения тем же
@@ -2041,7 +2080,7 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
         return {"ok": False, "op_id": None, "count": 0, "code": 409,
                 "reason": f"Повтор невозможен: {_why}"}
 
-    _blocked = await retry_blocker(pool, op_id)
+    _blocked = await retry_blocker(pool, op_id, info)
     if _blocked:
         return {"ok": False, "op_id": None, "count": 0, "code": 409, **_blocked}
 

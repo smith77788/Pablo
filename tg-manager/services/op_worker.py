@@ -619,10 +619,6 @@ _POISON_ERROR_TOTAL = (
 # МОЛЧА: в интерфейсе она откатывалась на нулевой прогресс без единого слова, и
 # владелец видел ровно то, что выглядит как потерянная работа. Про соседние
 # случаи (флуд-пауза, исчерпанный бюджет живучести) ему пишут — здесь пробел.
-_REVIVE_AFTER_RESTART = (
-    "Процесс операций перезапустился, пока операция шла — она возвращена в "
-    "очередь и запустится заново."
-)
 _REVIVE_AFTER_SILENCE = (
     "Операция не подавала признаков работы дольше {mins} мин — возвращена в "
     "очередь и запустится заново."
@@ -2551,6 +2547,8 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
 # op_worker._classify_op_error / _FATAL_ERRORS / _normalize_result и т.п.
 # остались доступны как раньше (публичный/приватный контракт не изменился).
 from services import op_status
+
+_REVIVE_AFTER_RESTART = op_status.REVIVE_AFTER_RESTART
 from services.op_errors import (  # noqa: E402,F401
     _RETRYABLE_ERRORS,
     _FATAL_ERRORS,
@@ -5077,7 +5075,7 @@ async def shutdown(
                       last_error=$2
                 WHERE id = ANY($1::bigint[]) AND status='running'""",
             [int(i) for i in op_ids],
-            "Сервис перезапускался — операция продолжится автоматически с места остановки (уже сделанное не повторится)",
+            op_status.REQUEUE_ON_SHUTDOWN,
             log_ctx="[shutdown_requeue]",
         )
         try:
@@ -7548,7 +7546,7 @@ async def _exec_bulk_bot_profile_rollback(
     target_ids = [int(s["target_id"]) for s in snaps]
     rows = await _fetch_bots_op(
         pool,
-        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[]) AND is_active AND deleted_at IS NULL",
         owner_id, target_ids)
     tok_by_bot = {int(r["bot_id"]): r["token"] for r in rows}
     label_by_bot = {int(r["bot_id"]): _bp_bot_label(r) for r in rows}
@@ -7584,7 +7582,7 @@ async def _exec_bulk_bot_profile_rollback(
 
             reasons: list[str] = []
             if token is None:
-                reasons.append("бот не найден")
+                reasons.append("бот недоступен для отката")
             else:
                 # Имя/описания/команды/кнопка меню/права — общий список вызовов
                 # из движка клона: снимки «Клона и адаптации» лежат в той же
@@ -7864,6 +7862,15 @@ async def _exec_mass_publish(
             and not explicit_channel_ids:
         return {"status": "failed",
                 "summary": "⚠️ Не выбран ни один канал — публикацию не запускали"}
+    if params.get("project_id") is not None:
+        from services.network_builder import project_publish_channels
+
+        channels = await project_publish_channels(pool, owner_id, int(params["project_id"]))
+        if not explicit_channel_ids or not set(explicit_channel_ids).issubset(
+            {row["channel_id"] for row in channels}
+        ):
+            return {"status": "failed",
+                    "summary": "Каналы больше не доступны в проекте. Подтвердите новый список."}
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None
@@ -14035,6 +14042,7 @@ async def _exec_group_import_all(
     try:
 
         total_imported = 0
+        total_disabled = 0
         total_foreign = 0  # группы, где аккаунт лишь участник — чужие, не тянем
         errors: list[str] = []
         n = len(accounts)
@@ -14062,8 +14070,9 @@ async def _exec_group_import_all(
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
                     # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
                     # ВСЕ ранее сохранённые каналы/группы аккаунта перед вставкой этого среза.
-                    await add_managed_channels(pool, owner_id, acc["id"], groups)
-                    total_imported += len(groups)
+                    imported = await add_managed_channels(pool, owner_id, acc["id"], groups)
+                    total_imported += imported
+                    total_disabled += len(groups) - imported
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -14078,12 +14087,14 @@ async def _exec_group_import_all(
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
         foreign_hint = f"\n🚫 Пропущено чужих (только участник): {total_foreign}" if total_foreign else ""
+        disabled_hint = f"\nОтключены в Infragram: {total_disabled}" if total_disabled else ""
         return {
             "status": "done",
             "imported": total_imported,
+            "disabled_skipped": total_disabled,
             "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{err_hint}",
+            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{disabled_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
@@ -15826,6 +15837,7 @@ async def _exec_channel_import_all(
                 pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
         total_imported = 0
+        total_disabled = 0
         total_foreign = 0  # чужие каналы (аккаунт — лишь подписчик), их не тянем
         errors: list[str] = []
 
@@ -15849,8 +15861,9 @@ async def _exec_channel_import_all(
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
                     # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
                     # ВСЕ ранее сохранённые каналы аккаунта перед вставкой этого среза.
-                    await add_managed_channels(pool, owner_id, acc["id"], channels)
-                    total_imported += len(channels)
+                    imported = await add_managed_channels(pool, owner_id, acc["id"], channels)
+                    total_imported += imported
+                    total_disabled += len(channels) - imported
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -15865,12 +15878,14 @@ async def _exec_channel_import_all(
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
         foreign_hint = f"\n🚫 Пропущено чужих (только подписка): {total_foreign}" if total_foreign else ""
+        disabled_hint = f"\nОтключены в Infragram: {total_disabled}" if total_disabled else ""
         return {
             "status": "done",
             "imported": total_imported,
+            "disabled_skipped": total_disabled,
             "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{err_hint}",
+            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{disabled_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
@@ -15900,26 +15915,16 @@ async def _exec_channel_add(
         if "error" in res:
             return {"status": "failed", "summary": f"❌ {res['error']}"}
         title = res.get("title") or link
-        # Точечный upsert одной строки — НЕ upsert_managed_channels(), т.к. та
-        # функция удаляет ВСЕ существующие каналы аккаунта перед вставкой
-        # (рассчитана на полный ре-импорт, а не на добавление одного канала).
-        await pool.execute(
-            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, members_count)
-               VALUES($1, $2, $3, $4, $5, $6, $7, $8)
-               ON CONFLICT (owner_id, channel_id) DO UPDATE
-               SET title=EXCLUDED.title, username=EXCLUDED.username,
-                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
-                   type=EXCLUDED.type,
-                   members_count=CASE WHEN EXCLUDED.members_count > 0
-                                       THEN EXCLUDED.members_count
-                                       ELSE managed_channels.members_count END""",
-            owner_id, int(acc["id"]), res["channel_id"], title,
-            res.get("username") or "", res.get("access_hash") or 0,
-            res.get("type") or "channel", int(res.get("members") or 0),
+        # Явное подключение снимает отметку отключения в той же транзакции.
+        from database.db import add_managed_channels
+
+        await add_managed_channels(
+            pool, owner_id, int(acc["id"]), [{
+                "id": res["channel_id"], "title": title,
+                "username": res.get("username") or "", "access_hash": res.get("access_hash") or 0,
+                "type": res.get("type") or "channel", "members": res.get("members") or 0,
+            }], reconnect=True,
         )
-        # Владелец явно добавил канал — прежнее удаление больше не действует.
-        from database.db import forget_removed_channels
-        await forget_removed_channels(pool, owner_id, [res["channel_id"]])
         return {
             "status": "done",
             "channel_id": res["channel_id"],
@@ -16388,13 +16393,14 @@ async def _exec_check_owned_restrictions(
 
     only_channels = [int(x) for x in (params.get("channel_ids") or [])]
     only_bots = [int(x) for x in (params.get("bot_ids") or [])]
+    exact = params.get("selection_mode") == "exact"
 
     # ── 1. Сущности владельца ────────────────────────────────────────────────
     # Каналы/чаты: scope по owner_id. DISTINCT ON — один канал может вестись
     # несколькими аккаунтами (строка на acc_id), берём одну с её управляющим acc.
     _ch_where = "WHERE owner_id=$1"
     _ch_args: list = [owner_id]
-    if only_channels:
+    if only_channels or exact:
         _ch_where += " AND channel_id = ANY($2::bigint[])"
         _ch_args.append(only_channels)
     ch_rows = await _safe_fetch(
@@ -16404,9 +16410,9 @@ async def _exec_check_owned_restrictions(
         *_ch_args,
     )
     # Боты: scope по added_by (НЕ owner_id — такой колонки на managed_bots нет).
-    _bot_where = "WHERE added_by=$1"
+    _bot_where = "WHERE added_by=$1 AND is_active AND deleted_at IS NULL"
     _bot_args: list = [owner_id]
-    if only_bots:
+    if only_bots or exact:
         _bot_where += " AND bot_id = ANY($2::bigint[])"
         _bot_args.append(only_bots)
     bot_rows = await _safe_fetch(
@@ -16695,14 +16701,13 @@ async def _exec_check_owned_restrictions(
                 "error" if _erc.is_problem(status) else "ok", _log_msg[:200],
             )
 
-            # Реальное ограничение сущности — в общий пульс (restriction_events),
-            # чтобы shadowban_monitor/get_account_health его видели.
-            if _erc.is_problem(status):
-                # id/bot_id — чтобы итог проверки был ДЕЙСТВЕННЫМ: по нему мини-апп
-                # предлагает убрать из списка те, что Telegram уже удалил/заблокировал.
+            # Для карточки сохраняем и неудавшиеся проверки со стабильным ID.
+            if status != _erc.STATUS_CLEAN:
                 findings.append({"kind": ent["kind"], "title": _title,
                                  "id": ent["id"], "bot_id": ent.get("bot_id"),
                                  "status": status, "reason": verdict["reason_ru"]})
+            # В пульс ограничений попадают только выявленные проблемы.
+            if _erc.is_problem(status):
                 try:
                     await _sbm._record_event(
                         pool, owner_id,
@@ -16747,7 +16752,8 @@ async def _exec_check_owned_restrictions(
         "status": "done",
         "checked": n,
         "counts": counts,
-        "findings": findings[:50],
+        "findings": findings,
+        "findings_version": 2,
         "visibility_unmeasured": vis_unmeasured,
         "summary": summary,
     }
@@ -17857,6 +17863,7 @@ async def _exec_deploy_network(
     подключений не вводит.
     """
     from services import network_builder as _nb, account_manager
+    confirmed = "topology_digest" in params
     # Бренд-бот/промо — только free-tier (см. фабрику каналов и create_channel).
     try:
         from services import brand_injection as _bi_gate
@@ -17870,6 +17877,14 @@ async def _exec_deploy_network(
     d = await _nb.get_instance_detail(pool, owner_id, instance_id)
     if not d:
         return {"status": "failed", "summary": "⚠️ Связка не найдена"}
+    if confirmed:
+        account_id = params.get("account_id")
+        if not _nb.project_pilot_enabled(owner_id):
+            return {"status": "failed", "summary": "Доступ к пилоту отозван"}
+        if params["topology_digest"] != _nb.deployment_topology_digest(d):
+            return {"status": "failed", "summary": "Топология изменилась. Сверьте результат и откройте новый предпросмотр."}
+        if type(account_id) is not int or not await _nb.deployment_account(pool, owner_id, account_id):
+            return {"status": "failed", "summary": "Выбранный аккаунт недоступен"}
     nodes, edges = d["nodes"], d["edges"]
 
     # Аккаунт-создатель: явный или первый живой с сессией.
@@ -17897,6 +17912,17 @@ async def _exec_deploy_network(
     _claimed_acc = int(acc["id"])
 
     try:
+
+        if confirmed:
+            async with pool.acquire() as conn, conn.transaction():
+                await conn.fetchval("SELECT id FROM operation_queue WHERE id=$1 FOR UPDATE", op_id)
+                started = await conn.fetchval(
+                    """INSERT INTO operation_log(op_id,step_num,target,status,message)
+                       SELECT $1,0,'deploy_start','info','Начато развёртывание подтверждённого плана'
+                       WHERE NOT EXISTS (SELECT 1 FROM operation_log WHERE op_id=$1 AND target='deploy_start')
+                       RETURNING id""", op_id)
+            if not started:
+                return {"status": "failed", "summary": "Требуется сверка результата предыдущей попытки"}
 
         node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
         node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
@@ -17927,10 +17953,17 @@ async def _exec_deploy_network(
                     res = await account_manager.create_channel(
                         acc["session_str"], label,
                         megagroup=ntype in ("group", "chat"), _acc=acc,
-                        brand_promo=_brand_free)
-                except Exception as e:
-                    manual.append(f"{label}: ошибка создания ({str(e)[:60]})")
+                        brand_promo=_brand_free and not confirmed)
+                except TimeoutError:
+                    if confirmed:
+                        return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
+                    manual.append(f"{label}: истекло время ожидания создания")
                     continue
+                except Exception as e:
+                    manual.append(f"{label}: ошибка создания ({type(e).__name__})")
+                    continue
+                if confirmed and isinstance(res, dict) and res.get("requires_reconciliation"):
+                    return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
                 ch_id = res.get("channel_id") if isinstance(res, dict) else None
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
@@ -17955,10 +17988,12 @@ async def _exec_deploy_network(
                 # Нода-сообщество = форум-супергруппа + регистрация community_node.
                 try:
                     res = await account_manager.create_forum_supergroup(
-                        acc["session_str"], label, _acc=acc)
+                        acc["session_str"], label, _acc=acc, brand_promo=not confirmed)
                 except Exception as e:
                     manual.append(f"{label}: ошибка создания ноды ({str(e)[:60]})")
                     continue
+                if confirmed and isinstance(res, dict) and res.get("requires_reconciliation"):
+                    return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
                 ch_id = res.get("channel_id") if isinstance(res, dict) else None
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'нода не создана')[:60]}")
@@ -18054,9 +18089,13 @@ async def _exec_deploy_network(
         # «partial» с пустыми счётчиками он превращает в «done». Незапомненный
         # узел — именно непройденная работа: объект создан, а план о нём не
         # знает, и повтор создаст его заново.
-        return {"status": "partial" if unmarked else "done",
+        failed = max(unmarked, _done_n - created - wired) if confirmed else unmarked
+        status = "done"
+        if failed:
+            status = "partial" if created + wired or not confirmed else "failed"
+        return {"status": status,
                 "created": created, "wired": wired, "unmarked": unmarked,
-                "ok": created + wired, "failed": unmarked,
+                "ok": created + wired, "failed": failed,
                 "manual": manual, "summary": " · ".join(parts)}
     finally:
         await release_accounts([_claimed_acc])

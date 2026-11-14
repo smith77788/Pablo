@@ -33,7 +33,7 @@ def setup_routes(app: web.Application, pool) -> None:
         _str_list, _text, _user_can_use_bot, log, schedule_repeat_minutes,
     )
     from services.security import (
-        escape_html, resolve_url_is_public, validate_bot_token,
+        escape_html, resolve_url_is_public, selection_ids, tg_id, validate_bot_token,
         validate_integer, validate_start_param, validate_string,
     )
 
@@ -73,6 +73,7 @@ def setup_routes(app: web.Application, pool) -> None:
         _BOT_HEALTH_COLS = "mb.last_error, mb.fail_streak, mb.last_ok_at, mb.extra_username,"
         _BOTS_SQL = """SELECT DISTINCT mb.bot_id, mb.username, mb.first_name, mb.is_active,
                       {health}
+                      BOOL_OR(mb.added_by=$1) AS is_owned,
                       COUNT(DISTINCT bu.user_id) FILTER (WHERE bu.is_active=true) AS subscriber_count,
                       COUNT(DISTINCT bu.user_id) AS total_users
                FROM managed_bots mb
@@ -110,7 +111,9 @@ def setup_routes(app: web.Application, pool) -> None:
         total = await _safe_count(pool,
             f"""SELECT COUNT(DISTINCT mb.bot_id) FROM managed_bots mb
                 WHERE ({_BOTS_VISIBLE_SQL})""", uid)
+        rows = [{**dict(row), "bot_id_text": str(row["bot_id"])} for row in (rows or [])]
         return _json_resp({"bots": rows, "total": int(total or 0),
+                           "resource_menu": True,
                            "offset": offset, "limit": limit})
 
     async def bot_detail(request: web.Request) -> web.Response:
@@ -126,7 +129,11 @@ def setup_routes(app: web.Application, pool) -> None:
         if not owns:
             return _err("Бот не найден или нет доступа", 404)
         bot = await _safe_fetchrow(pool,
-            "SELECT * FROM managed_bots WHERE bot_id=$1", bot_id)
+            """SELECT mb.*, EXISTS (
+                   SELECT 1 FROM managed_bots owned
+                   WHERE owned.bot_id=mb.bot_id AND owned.added_by=$2 AND owned.deleted_at IS NULL
+               ) AS is_owned
+               FROM managed_bots mb WHERE mb.bot_id=$1 AND mb.deleted_at IS NULL""", bot_id, uid)
         if not bot:
             return _err("Бот не найден", 404)
         # Токен клиенту не отдаём. `SELECT *` тянул и его: у ботов, добавленных
@@ -251,19 +258,29 @@ def setup_routes(app: web.Application, pool) -> None:
             reply_delay_sec = max(0, min(300, int(body.get("reply_delay_sec") or 0)))
         except (TypeError, ValueError):
             reply_delay_sec = 0
+        # Создание автоответа — МУТАЦИЯ, и доступ к ней ýже видимости.
+        # `_user_can_use_bot` (своё + экосистема + пространство) — это правило
+        # ВИДИМОСТИ: участник рабочего пространства с ролью viewer ВИДИТ бота
+        # (bot_detail, bot_auto_replies), но ПИСАТЬ ему правила нельзя. Все
+        # прочие мутации ботов в этом файле скоупятся по `added_by` (токен,
+        # заметка, swarm, роль, relay) — здесь так же, тем же способом, что и
+        # create_deeplink/bot_funnels: проверка владельца, затем вставка.
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
+            bot_id, uid)
+        if not owns:
+            return _err("Бот не найден", 404)
         try:
             row = await pool.fetchrow(
                 """INSERT INTO auto_replies
                        (bot_id, trigger_type, keyword, response_text, is_active,
                         match_mode, buttons, priority, reply_delay_sec)
-                   SELECT $1,$2,$3,$4,TRUE,$5,$6,$7,$8
-                   FROM managed_bots
-                   WHERE bot_id=$1 AND added_by=$9 AND deleted_at IS NULL
+                   VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7,$8)
                    RETURNING id""",
                 bot_id, trigger_type, keyword or None, response_text, match_mode,
-                buttons_json, priority, reply_delay_sec, uid)
+                buttons_json, priority, reply_delay_sec)
             if row is None:
-                return _err("Бот не найден", 404)
+                return _err("Не удалось создать автоответ", 500)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)
@@ -278,7 +295,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         rows = await _safe_fetch(pool,
@@ -347,7 +364,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # отдать человеку. Экран показывал «?start=promo» и кнопку удаления,
         # то есть всё, кроме самой ссылки, ради которой экран и существует.
         own = await _safe_fetchrow(pool,
-            "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
             bot_id, uid)
         if not own:
             return _err("Бот не найден", 404)
@@ -396,7 +413,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         name = validate_string(body.get("name"), max_len=200)
@@ -407,9 +424,15 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("start_param: только латиница, цифры, _ и -, не длиннее 64 символов")
         try:
             row = await pool.fetchrow(
-                "INSERT INTO bot_deep_links(bot_id, name, start_param) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id",
-                bot_id, name, start_param)
+                "INSERT INTO bot_deep_links(bot_id, name, start_param) "
+                "SELECT $1,$2,$3 FROM managed_bots WHERE bot_id=$1 AND added_by=$4 AND deleted_at IS NULL "
+                "FOR SHARE ON CONFLICT DO NOTHING RETURNING id",
+                bot_id, name, start_param, uid)
             if not row:
+                if not await _safe_count(pool,
+                    "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
+                    bot_id, uid):
+                    return _err("Бот не найден", 404)
                 return _err("Такой start_param у бота уже есть")
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception:
@@ -425,7 +448,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         # Try user_activity table first, fallback to bot_users.last_seen
@@ -483,7 +506,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
                 bot_id, uid,
             )
         except Exception:
@@ -508,7 +531,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверное тело запроса", 400)
         try:
             res = await pool.execute(
-                "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
+                "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
                 bot_id, uid, note or None,
             )
         except Exception:
@@ -554,7 +577,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active",
                 bot_id, uid,
             )
         except Exception:
@@ -594,7 +617,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверное тело запроса", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active",
                 bot_id, uid,
             )
         except Exception:
@@ -633,7 +656,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not (name or description or short_description):
             return _err("Укажите хотя бы одно поле", 400)
         row = await _safe_fetchrow(pool,
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active", bot_id, uid)
         if not row:
             return _err("Бот не найден", 404)
         try:
@@ -662,9 +685,9 @@ def setup_routes(app: web.Application, pool) -> None:
                         results[key] = bool(jd.get("ok"))
                         if not jd.get("ok"):
                             results[key + "_error"] = jd.get("description", "error")
-                    except Exception as e:
+                    except Exception:
                         results[key] = False
-                        results[key + "_error"] = str(e)[:80]
+                        results[key + "_error"] = "Не удалось получить ответ Telegram"
         except Exception:
             log.exception("bot_profile uid=%d bot=%d", uid, bot_id)
             return _err(_INTERNAL_ERROR, 500)
@@ -682,7 +705,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         row = await _safe_fetchrow(pool,
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active", bot_id, uid)
         if not row:
             return _err("Бот не найден", 404)
         try:
@@ -748,7 +771,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             owned = await pool.fetchval(
-                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid
             )
         except Exception:
             log.exception("bot_stats uid=%d bot=%d", uid, bot_id)
@@ -860,7 +883,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active",
                 bot_id, uid,
             )
         except Exception:
@@ -895,7 +918,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active", bot_id, uid
             )
         except Exception:
             log.exception("bot_webhook_delete uid=%d bot=%d", uid, bot_id)
@@ -1052,7 +1075,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не указано, включать или выключать")
         enabled = bool(body["enabled"])
         res = await pool.execute(
-            "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1 AND added_by=$3",
+            "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1 AND added_by=$3 AND deleted_at IS NULL",
             bot_id, enabled, uid,
         )
         if res == "UPDATE 0":
@@ -1075,7 +1098,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Роль бота: вход, конверсия, удержание или общая", 400)
         try:
             res = await pool.execute(
-                "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4",
+                "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4 AND deleted_at IS NULL",
                 role, cluster, bot_id, uid,
             )
             if res == "UPDATE 0":
@@ -1095,7 +1118,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             owned = await pool.fetchval(
-                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid
             )
         except Exception:
             log.exception("relay_sessions_list ownership uid=%d bot=%d", uid, bot_id)
@@ -1135,7 +1158,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный запрос", 400)
         try:
             res = await pool.execute(
-                "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3",
+                "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3 AND deleted_at IS NULL",
                 enabled, bot_id, uid,
             )
             if res == "UPDATE 0":
@@ -1160,7 +1183,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return None, _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active",
                 bot_id, uid,
             )
         except Exception as e:
@@ -1452,12 +1475,9 @@ def setup_routes(app: web.Application, pool) -> None:
             if isinstance(body, dict) and isinstance(body.get("active"), bool):
                 want = body["active"]
         try:
-            row = await pool.fetchrow(
-                """UPDATE managed_bots
-                      SET is_active = COALESCE($3::boolean, NOT is_active)
-                    WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL
-                RETURNING bot_id, is_active""",
-                bot_id, uid, want)
+            from database.db import set_managed_bot_active
+
+            row = await set_managed_bot_active(pool, bot_id, uid, want)
             if not row:
                 return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
@@ -1475,7 +1495,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         name = (body.get("name") or "").strip()
@@ -1494,8 +1514,12 @@ def setup_routes(app: web.Application, pool) -> None:
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     funnel_row = await conn.fetchrow(
-                        "INSERT INTO funnels(bot_id, name, trigger_type, keyword) VALUES($1,$2,$3,$4) RETURNING id",
-                        bot_id, name, trigger_type, keyword)
+                        "INSERT INTO funnels(bot_id, name, trigger_type, keyword) "
+                        "SELECT $1,$2,$3,$4 FROM managed_bots WHERE bot_id=$1 AND added_by=$5 "
+                        "AND deleted_at IS NULL FOR SHARE RETURNING id",
+                        bot_id, name, trigger_type, keyword, uid)
+                    if not funnel_row:
+                        return _err("Бот не найден", 404)
                     funnel_id = funnel_row["id"]
                     await conn.execute(
                         "INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes) VALUES($1,1,$2,0)",
@@ -1514,7 +1538,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         total = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
@@ -1549,7 +1573,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         rows = await _safe_fetch(pool,
@@ -1574,7 +1598,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not execute_at:
             return _err("Нужно время запуска в формате ISO")
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         try:
@@ -1590,13 +1614,18 @@ def setup_routes(app: web.Application, pool) -> None:
             try:
                 row = await pool.fetchrow(
                     "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by, repeat_interval_min) "
-                    "VALUES($1,$2,$3,$4,$5) RETURNING id",
+                    "SELECT $1,$2,$3,$4,$5 FROM managed_bots WHERE bot_id=$1 AND added_by=$4 "
+                    "AND deleted_at IS NULL FOR SHARE RETURNING id",
                     bot_id, text, dt, uid, repeat_min)
             except asyncpg.UndefinedColumnError:
                 # schema_v145 ещё не применена — падаем на одноразовое.
                 row = await pool.fetchrow(
-                    "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by) VALUES($1,$2,$3,$4) RETURNING id",
+                    "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by) "
+                    "SELECT $1,$2,$3,$4 FROM managed_bots WHERE bot_id=$1 AND added_by=$4 "
+                    "AND deleted_at IS NULL FOR SHARE RETURNING id",
                     bot_id, text, dt, uid)
+            if not row:
+                return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "id": row["id"], "repeat_min": repeat_min})
         except Exception:
             log.exception("create_schedule bot=%d uid=%d", bot_id, uid)
@@ -1614,7 +1643,7 @@ def setup_routes(app: web.Application, pool) -> None:
         rows = await _safe_fetch(
             pool,
             "SELECT bot_id, username, first_name, token FROM managed_bots "
-            "WHERE added_by=$1 ORDER BY bot_id", uid)
+            "WHERE added_by=$1 AND deleted_at IS NULL ORDER BY bot_id", uid)
         rows = rows or []
         if not rows:
             return _json_resp({"bots": [], "alive": 0, "dead": 0, "unknown": 0})
@@ -1664,23 +1693,8 @@ def setup_routes(app: web.Application, pool) -> None:
             return None, "Не выбран ни один бот"
         return bot_ids, None
 
-    def _deleted_count(res) -> int:
-        """Число строк из тега asyncpg «DELETE N» (0 при любом другом ответе)."""
-        s = str(res)
-        if not s.startswith("DELETE"):
-            return 0
-        try:
-            return int(s.rsplit(" ", 1)[-1])
-        except (ValueError, IndexError):
-            return 0
-
     async def bots_bulk_delete(request: web.Request) -> web.Response:
-        """Полностью удалить выбранных ботов владельца (одного или нескольких).
-
-        В отличие от «убрать из работы» (is_active=FALSE) — это DELETE строки
-        managed_bots; связанные записи уходят по ON DELETE CASCADE. Скоуп —
-        только свои боты (added_by). Идемпотентно: повтор по уже удалённым = 0.
-        """
+        """Убрать выбранных ботов владельца, сохранив аудиторию."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -1688,68 +1702,60 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Некорректный запрос", 400)
-        bot_ids = _parse_bot_ids(body.get("bot_ids"))
-        if bot_ids is None:
-            return _err("Не выбран ни один бот", 400)
+        bot_ids, error = selection_ids(body, "bot_ids", what="бот")
+        if error or not bot_ids or any(tg_id(bot_id, positive=True) is None for bot_id in bot_ids):
+            return _err(error or "Выберите ботов с действительными идентификаторами", 400)
         try:
-            res = await pool.execute(
-                "DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2",
-                bot_ids, uid)
-            from database.db import record_manual_action
-            await record_manual_action(
-                pool, uid, "bots_bulk_delete",
-                target=",".join(str(b) for b in bot_ids[:50]))
-            return _json_resp({"ok": True, "deleted": _deleted_count(res),
-                               "requested": len(bot_ids)})
+            from database.db import delete_bots, record_manual_action
+
+            removed = await delete_bots(pool, uid, bot_ids)
+            if removed:
+                await record_manual_action(
+                    pool, uid, "bots_bulk_delete",
+                    target=",".join(str(bot_id) for bot_id in removed[:50]))
+            return _json_resp({"ok": True, "deleted": len(removed), "requested": len(bot_ids)})
         except Exception:
             log.exception("bots_bulk_delete uid=%d n=%d", uid, len(bot_ids))
             return _err(_INTERNAL_ERROR, 500)
 
     async def bots_cleanup_dead(request: web.Request) -> web.Response:
-        """Проверить всех ботов владельца и удалить ТОЛЬКО мёртвых (401).
-
-        Боты со статусом unknown (сеть/Telegram недоступны) НЕ удаляются:
-        удалять можно лишь то, про что точно известно, что токен отозван.
-        """
+        """Скрыть ботов с подтверждённо отозванным токеном, сохранив данные."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        rows = await _safe_fetch(
-            pool, "SELECT bot_id, token FROM managed_bots WHERE added_by=$1", uid)
-        rows = rows or []
-        if not rows:
-            return _json_resp({"checked": 0, "deleted": 0, "dead": 0,
-                               "unknown": 0, "alive": 0, "deleted_ids": []})
+        from database.db import delete_bots, record_manual_action
         from services import bot_api
         import aiohttp as _aio
-        tokens = [r["token"] for r in rows]
+
         try:
-            async with _aio.ClientSession() as sess:
-                statuses = await bot_api.batch_check_alive(sess, tokens)
-        except Exception:
-            log.exception("bots_cleanup_dead check uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        dead_ids = [int(r["bot_id"]) for r, st in zip(rows, statuses)
-                    if st == bot_api.BOT_DEAD]
-        unknown = sum(1 for st in statuses if st == bot_api.BOT_UNKNOWN)
-        alive = sum(1 for st in statuses if st == bot_api.BOT_ALIVE)
-        deleted = 0
-        if dead_ids:
-            try:
-                res = await pool.execute(
-                    "DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2",
-                    dead_ids, uid)
-                deleted = _deleted_count(res)
-                from database.db import record_manual_action
+            rows = await pool.fetch(
+                "SELECT bot_id, token FROM managed_bots WHERE added_by=$1 "
+                "AND deleted_at IS NULL AND NOT cleanup_paused ORDER BY bot_id", uid)
+            statuses = []
+            if rows:
+                async with _aio.ClientSession() as sess:
+                    statuses = await bot_api.batch_check_alive(sess, [r["token"] for r in rows])
+            if len(rows) != len(statuses):
+                return _err("Проверка вернула неполный результат. Повторите проверку.", 409)
+
+            checked_tokens = {row["bot_id"]: row["token"] for row, status in zip(rows, statuses)
+                              if status == bot_api.BOT_DEAD}
+            removed = []
+            if checked_tokens:
+                removed = await delete_bots(pool, uid, list(checked_tokens), checked_tokens=checked_tokens)
+            if removed:
                 await record_manual_action(
                     pool, uid, "bots_cleanup_dead",
-                    target=",".join(str(b) for b in dead_ids[:50]))
-            except Exception:
-                log.exception("bots_cleanup_dead delete uid=%d", uid)
-                return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"checked": len(rows), "deleted": deleted,
-                           "dead": len(dead_ids), "unknown": unknown,
-                           "alive": alive, "deleted_ids": dead_ids})
+                    target=",".join(str(bot_id) for bot_id in removed[:50]))
+            return _json_resp({
+                "checked": len(rows), "deleted": len(removed), "dead": len(checked_tokens),
+                "unknown": statuses.count(bot_api.BOT_UNKNOWN), "alive": statuses.count(bot_api.BOT_ALIVE),
+                "deleted_ids": removed, "changed_since_check": len(checked_tokens) - len(removed),
+            })
+        except Exception as exc:
+            # Сетевое исключение может содержать URL с токеном.
+            log.warning("bots_cleanup_dead uid=%d error=%s", uid, type(exc).__name__)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def bots_bulk_profile(request: web.Request) -> web.Response:
         """Массово изменить профиль выбранных (или ВСЕХ) ботов владельца:

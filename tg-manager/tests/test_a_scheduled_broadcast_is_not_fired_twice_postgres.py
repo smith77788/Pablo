@@ -168,3 +168,122 @@ def test_a_schedule_with_no_broadcast_still_returns_to_the_queue(pool):
     stats, row = _run(_go())
     assert stats["requeued"] >= 1, f"брошенное расписание не вернулось в очередь ({stats})"
     assert row["status"] == "pending"
+
+
+@pytest.mark.parametrize("change,expected", [
+    ("pause", "pending"), ("archive", "cancelled"), ("rotate", "pending"),
+    ("revoke_share", "cancelled"), ("none", "done"),
+])
+def test_scheduler_rechecks_admission_after_telegram_preflight(pool, monkeypatch, change, expected):
+    """Даже успешный getMe не разрешает отправку после смены допуска."""
+    from unittest.mock import Mock
+
+    from services import scheduler
+
+    class StopScheduler(Exception):
+        pass
+
+    async def stop_after_tick(seconds):
+        assert seconds == 60
+        raise StopScheduler
+
+    async def scenario():
+        schedule_owner = OWNER
+        workspace = None
+        if change == "revoke_share":
+            await pool.execute(
+                "INSERT INTO platform_users(user_id) VALUES($1),($2) ON CONFLICT DO NOTHING",
+                OWNER, OWNER + 1)
+            workspace = await pool.fetchval(
+                "INSERT INTO workspaces(owner_id, name) VALUES($1,'Тестовый доступ') RETURNING id", OWNER)
+            schedule_owner = OWNER + 1
+            await pool.execute(
+                "INSERT INTO workspace_members(workspace_id,user_id,role) VALUES($1,$2,'editor')",
+                workspace, schedule_owner)
+        schedule = await pool.fetchval(
+            """INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by, repeat_interval_min)
+               VALUES($1,'Проверка',now()-interval '1 minute',$2,60) RETURNING id""", BOT, schedule_owner)
+        token = f"test-token-{BOT}"
+        start = Mock()
+
+        async def preflight(http, actual_token):
+            assert actual_token == token
+            if change == "pause":
+                await pool.execute("UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1", BOT)
+            elif change == "archive":
+                await pool.execute(
+                    "UPDATE managed_bots SET is_active=FALSE, deleted_at=now() WHERE bot_id=$1", BOT)
+            elif change == "rotate":
+                await pool.execute("UPDATE managed_bots SET token='rotated' WHERE bot_id=$1", BOT)
+            elif change == "revoke_share":
+                await pool.execute("DELETE FROM workspace_members WHERE workspace_id=$1", workspace)
+            return "ok"
+
+        try:
+            monkeypatch.setattr(scheduler, "_token_state", preflight)
+            monkeypatch.setattr(scheduler.broadcaster, "start", start)
+            monkeypatch.setattr(scheduler.asyncio, "sleep", stop_after_tick)
+            with pytest.raises(StopScheduler):
+                await scheduler.run(pool, None)
+            row = await pool.fetchrow(
+                "SELECT status, broadcast_id FROM scheduled_broadcasts WHERE id=$1", schedule)
+            assert row["status"] == expected
+            if change == "none":
+                start.assert_called_once()
+                assert start.call_args.kwargs["schedule_creator_id"] == schedule_owner
+                assert row["broadcast_id"] is not None
+                assert await pool.fetchval(
+                    "SELECT scheduled_id FROM broadcasts WHERE id=$1", row["broadcast_id"]) == schedule
+                assert await pool.fetchval(
+                    "SELECT count(*) FROM scheduled_broadcasts WHERE bot_id=$1 AND status='pending'",
+                    BOT) == 1
+            else:
+                start.assert_not_called()
+                assert row["broadcast_id"] is None
+                assert await pool.fetchval("SELECT count(*) FROM broadcasts WHERE scheduled_id=$1", schedule) == 0
+        finally:
+            await pool.execute(
+                "UPDATE managed_bots SET is_active=TRUE, deleted_at=NULL, token=$2 WHERE bot_id=$1",
+                BOT, token,
+            )
+            if workspace is not None:
+                await pool.execute("DELETE FROM workspaces WHERE id=$1", workspace)
+            await pool.execute("DELETE FROM scheduled_broadcasts WHERE id=$1", schedule)
+
+    _run(scenario())
+
+
+def test_archive_during_broadcast_preflight_cannot_revive_cancellation(pool, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from database import db
+    from services import broadcaster
+
+    async def scenario():
+        token = "778900:synthetic_token_for_postgres_tests_0123456789"
+        old_token = f"test-token-{BOT}"
+        await pool.execute("UPDATE managed_bots SET token=$2 WHERE bot_id=$1", BOT, token)
+        schedule = await _schedule(pool)
+        broadcast = await db.create_broadcast(pool, BOT, "Привет", 1, OWNER, scheduled_id=schedule)
+
+        async def get_me(*args):
+            await pool.execute(
+                "UPDATE broadcasts SET status='cancelled', status_note='Архивирование' WHERE id=$1",
+                broadcast)
+            return {"id": BOT}
+
+        send = AsyncMock()
+        monkeypatch.setattr(broadcaster.bot_api, "get_me", get_me)
+        monkeypatch.setattr(broadcaster.bot_api, "send_message_classified", send)
+        try:
+            await broadcaster.run(
+                pool, object(), broadcast, token, BOT, "Привет", user_ids=[100],
+                schedule_creator_id=OWNER,
+            )
+            send.assert_not_awaited()
+            row = await pool.fetchrow("SELECT status, status_note FROM broadcasts WHERE id=$1", broadcast)
+            assert tuple(row) == ("cancelled", "Архивирование")
+        finally:
+            await pool.execute("UPDATE managed_bots SET token=$2 WHERE bot_id=$1", BOT, old_token)
+
+    _run(scenario())

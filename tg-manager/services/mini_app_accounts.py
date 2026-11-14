@@ -27,6 +27,7 @@ tdata).
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import re
 
 from aiohttp import web
@@ -341,6 +342,7 @@ def setup_routes(app: web.Application, pool) -> None:
         stats["by_stage"] = by_stage
         return _json_resp({
             "accounts": rows,
+            "resource_menu": not admin,
             "stats": stats,
             "admin_view": admin,
             "page": {
@@ -379,7 +381,7 @@ def setup_routes(app: web.Application, pool) -> None:
                           ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
                           status_reason, cooldown_until, cluster, stage, proxy_id,
-                          pool
+                          COALESCE(foreign_sessions, 0) AS foreign_sessions, pool
                    FROM tg_accounts WHERE id=$1""", acc_id)
         else:
             acc = await _safe_fetchrow(pool,
@@ -388,7 +390,7 @@ def setup_routes(app: web.Application, pool) -> None:
                           ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
                           status_reason, cooldown_until, cluster, stage, proxy_id,
-                          pool
+                          COALESCE(foreign_sessions, 0) AS foreign_sessions, pool
                    FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Аккаунт не найден", 404)
@@ -489,8 +491,38 @@ def setup_routes(app: web.Application, pool) -> None:
             else:
                 transport = {"kind": "shared", "unique": False,
                              "title": "Без своего прокси — общий CF-relay/прямое (НЕ уникальный IP)"}
+        from services.network_builder import project_pilot_enabled
+
+        # Безопасность аккаунта — одна картина выживаемости: 2FA (установлен и
+        # сохранён ли у нас пароль — без сохранённого аккаунт не вернуть),
+        # запасной ключ (второй наш сеанс, оживляет аккаунт при смерти основной
+        # сессии), чужие сеансы и включена ли автозащита щита. Раньше запасной
+        # ключ был виден только флот-широким тумблером, а по аккаунту — никак.
+        security = None
+        if not admin:
+            srow = await _safe_fetchrow(pool,
+                "SELECT (twofa_enc IS NOT NULL) AS twofa_saved, "
+                "(reserve_session_enc IS NOT NULL) AS has_reserve, reserve_auth_hash "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            guard = {}
+            try:
+                from services import account_shield as _shield
+                _cfg = await _shield.get_shield_config(pool, uid)
+                guard = {"sessions": bool(getattr(_cfg, "guard_sessions", False)),
+                         "reserve": bool(getattr(_cfg, "guard_reserve", False)),
+                         "twofa": bool(getattr(_cfg, "guard_twofa", False))}
+            except Exception as _e:
+                log.debug("account_detail shield owner=%s acc=%s: %s", uid, acc_id, _e)
+            security = {
+                "has_2fa": bool(caps and caps["has_2fa"]),
+                "twofa_saved": bool(srow and srow["twofa_saved"]),
+                "has_reserve": bool(srow and srow["has_reserve"]),
+                "foreign_sessions": int(acc["foreign_sessions"] or 0),
+                "guard": guard,
+            }
         return _json_resp({
             "account": acc,
+            "public_channel_capacity_available": not admin and bool(acc["is_active"]) and project_pilot_enabled(uid),
             "capabilities": caps,
             "warmup": warmup,
             "rehab": rehab,
@@ -498,6 +530,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "health": health,
             "verdict": verdict,
             "transport": transport,
+            "security": security,
         })
 
     async def accounts_export(request: web.Request) -> web.Response:
@@ -1026,6 +1059,139 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.exception("account_check_restriction uid=%d acc=%d", uid, acc_id)
             return _err("Ошибка проверки аккаунта", 400)
+
+    _SESS_COLS = (
+        "SELECT id, session_str, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, trusted_session_hashes, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE")
+
+    async def account_sessions(request: web.Request) -> web.Response:
+        """Живой список сеансов аккаунта (устройства) — для карточки.
+
+        Берётся прямым запросом к Telegram, поэтому показывает правду, а не
+        денормализованный счётчик. Каждый сеанс помечен, свой он («это я») или
+        нет, и можно ли его сейчас закрыть (Telegram не даёт из сеанса моложе
+        суток)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор аккаунта", 400)
+        acc = await _safe_fetchrow(pool, _SESS_COLS, acc_id, uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import profile_setter_engine as pse
+            from services import session_watch as _sw
+            res = await asyncio.wait_for(
+                pse.list_sessions(acc["session_str"], {**dict(acc), "_low_risk": True}), timeout=30)
+            if not res.get("ok"):
+                return _err(res.get("error") or "Не удалось получить список сеансов", 400)
+            trusted = {int(h) for h in (acc.get("trusted_session_hashes") or ()) if h is not None}
+            own_created = int(res.get("own_created") or 0)
+            old_enough = _sw.session_old_enough(own_created)
+            out = []
+            for s in res.get("sessions") or []:
+                h = int(s.get("hash") or 0)
+                out.append({**s, "trusted": h in trusted})
+            return _json_resp({"ok": True, "sessions": out,
+                               "own_created": own_created,
+                               # Можно ли сейчас закрывать чужие сеансы (сутки прошли).
+                               "can_close": old_enough})
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 30с — проверьте прокси/сессию", 400)
+        except Exception:
+            log.exception("account_sessions uid=%d acc=%d", uid, acc_id)
+            return _err("Ошибка получения сеансов", 400)
+
+    async def account_session_close(request: web.Request) -> web.Response:
+        """Завершить ОДИН чужой сеанс по его отпечатку."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+            h = int(body.get("hash"))
+        except Exception:
+            return _err("Неверный запрос", 400)
+        if not h:
+            return _err("Не указан сеанс", 400)
+        acc = await _safe_fetchrow(pool, _SESS_COLS, acc_id, uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import profile_setter_engine as pse
+            from services import session_watch as _sw
+            res = await asyncio.wait_for(
+                pse.close_one_session(acc["session_str"], {**dict(acc), "_low_risk": True}, h),
+                timeout=30)
+            if not res.get("ok"):
+                return _err(res.get("error") or "Не удалось закрыть сеанс", 400)
+            await _sw.drop_one(pool, uid, acc_id, h)
+            return _json_resp({"ok": True})
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 30с — проверьте прокси/сессию", 400)
+        except Exception:
+            log.exception("account_session_close uid=%d acc=%d", uid, acc_id)
+            return _err("Ошибка закрытия сеанса", 400)
+
+    async def account_session_trust(request: web.Request) -> web.Response:
+        """Пометить сеанс своим / снять пометку. Своё не считается чужим и не
+        закрывается автозащитой."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+            h = int(body.get("hash"))
+        except Exception:
+            return _err("Неверный запрос", 400)
+        if not h:
+            return _err("Не указан сеанс", 400)
+        on = bool(body.get("trust", True))
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        from services import session_watch as _sw
+        await _sw.set_trust(pool, uid, acc_id, h, on)
+        return _json_resp({"ok": True, "trusted": on})
+    async def account_public_channel_capacity(request: web.Request) -> web.Response:
+        from services.account_manager import probe_public_channel_capacity
+        from services.network_builder import project_pilot_enabled
+        from services.op_worker import release_accounts, try_claim_account
+        from services.security import validate_integer
+
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not project_pilot_enabled(uid):
+            return _err("Недоступно", 403)
+        acc_id = validate_integer(request.match_info["acc_id"], min_val=1)
+        if acc_id is None:
+            return _err("Неверный идентификатор аккаунта", 400)
+        acc = await _console_account(uid, acc_id)
+        if not acc:
+            return _err("Аккаунт не найден или отключён", 404)
+        if not await try_claim_account(acc_id):
+            return _json_resp({"ok": True, "status": "unknown", "reason": "busy"})
+        try:
+            result = await asyncio.wait_for(
+                probe_public_channel_capacity(acc.get("session_str"), dict(acc)), timeout=45)
+        except TimeoutError:
+            result = {"status": "unknown", "reason": "telegram_unavailable"}
+        finally:
+            await release_accounts([acc_id])
+        return _json_resp({
+            "ok": True, "status": result["status"], "reason": result.get("reason"),
+            "retry_after": result.get("retry_after"),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        })
 
     async def accounts_export_json(request: web.Request) -> web.Response:
         """Экспорт МЕТАДАННЫХ аккаунтов пользователя в JSON (аналог «РАБОТА С JSON»).
@@ -2236,6 +2402,10 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/account/{acc_id}/login_code", account_login_code)
     app.router.add_post("/api/miniapp/account/{acc_id}/check_restriction", account_check_restriction)
+    app.router.add_get("/api/miniapp/account/{acc_id}/sessions", account_sessions)
+    app.router.add_post("/api/miniapp/account/{acc_id}/session/close", account_session_close)
+    app.router.add_post("/api/miniapp/account/{acc_id}/session/trust", account_session_trust)
+    app.router.add_post("/api/miniapp/account/{acc_id}/public_channel_capacity", account_public_channel_capacity)
     app.router.add_get("/api/miniapp/accounts/export_json", accounts_export_json)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)

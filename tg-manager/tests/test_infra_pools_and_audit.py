@@ -111,7 +111,8 @@ def test_selected_accounts_can_be_put_into_a_pool():
     html = miniapp_html()
     bar = html[html.index('id="accSelBar"'):]
     bar = bar[:bar.index("</div>\n  </div>")]
-    assert 'onclick="runAccPool()"' in bar, "на панели выбора нет «В пул»"
+    assert "openSelectedResourceActions('account', this)" in bar
+    assert "guarded(runAccPool)" in js_function("openSelectedResourceActions")
     assert "op: 'set_pool'" in js_function("runAccPool")
     src = api_source()
     assert 'if op == "set_pool":' in src, "массовое действие не умеет пул"

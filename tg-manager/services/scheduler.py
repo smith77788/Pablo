@@ -57,6 +57,37 @@ async def _ensure_claim_columns(pool: asyncpg.Pool) -> None:
         log.warning("Scheduler: ensure claim columns failed", exc_info=True)
 
 
+async def scheduled_bot_state(pool, creator_id: int, bot_id: int, token: str | None = None,
+                              *, lock: bool = False) -> str:
+    """Статус допуска для создателя расписания и текущего токена."""
+    from services.mini_app_api import _BOTS_VISIBLE_SQL
+    from services.token_vault import decrypt_token
+
+    bot = await pool.fetchrow(
+        f"""SELECT mb.is_active, mb.token FROM managed_bots mb
+            WHERE mb.bot_id=$2 AND ({_BOTS_VISIBLE_SQL})"""
+        + (" FOR SHARE OF mb" if lock else ""),
+        creator_id, bot_id,
+    )
+    if not bot:
+        return "cancelled"
+    if not bot["is_active"] or (token is not None and decrypt_token(bot["token"]) != token):
+        return "pending"
+    return "ready"
+
+
+async def _reschedule(pool, row) -> int | None:
+    if not row["repeat_interval_min"]:
+        return None
+    async with pool.acquire() as conn, conn.transaction():
+        # Архивирование сначала меняет бота. При том же порядке блокировок
+        # следующее вхождение либо успеет записаться, либо уже не появится.
+        state = await scheduled_bot_state(conn, row["created_by"], row["bot_id"], lock=True)
+        if state == "cancelled":
+            return None
+        return await db.reschedule_if_recurring(conn, dict(row))
+
+
 async def recover_stuck_claims(pool: asyncpg.Pool) -> dict[str, int]:
     """Вернуть к жизни расписания, брошенные умершим процессом.
 
@@ -138,26 +169,29 @@ async def recover_stuck_claims(pool: asyncpg.Pool) -> dict[str, int]:
                         row["id"], int(_bc),
                     )
             if _bc:
-                await pool.execute(
+                changed = await pool.execute(
                     "UPDATE scheduled_broadcasts SET status='done' "
                     "WHERE id=$1 AND status='processing'",
                     row["id"],
                 )
+                if changed == "UPDATE 0":
+                    continue
                 stats["closed"] += 1
                 # Повторяемое расписание не должно оборваться на рестарте.
                 try:
-                    await db.reschedule_if_recurring(pool, dict(row))
+                    await _reschedule(pool, row)
                 except Exception:
                     log.exception(
                         "Scheduler: продление после восстановления #%d не удалось",
                         row["id"])
             else:
-                await pool.execute(
+                changed = await pool.execute(
                     "UPDATE scheduled_broadcasts SET status='pending', claimed_at=NULL "
-                    "WHERE id=$1 AND status='processing'",
+                    "WHERE id=$1 AND status='processing' AND broadcast_id IS NULL",
                     row["id"],
                 )
-                stats["requeued"] += 1
+                if changed != "UPDATE 0":
+                    stats["requeued"] += 1
         except Exception:
             log.exception("Scheduler: восстановление расписания #%d не удалось", row["id"])
 
@@ -195,6 +229,14 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 # Skip if already being processed in this scheduler instance
                 if row["id"] in _in_flight:
                     continue
+                admission = await scheduled_bot_state(pool, row["created_by"], row["bot_id"], row["token"])
+                if admission != "ready":
+                    if admission == "cancelled":
+                        await pool.execute(
+                            "UPDATE scheduled_broadcasts SET status='cancelled' "
+                            "WHERE id=$1 AND status='pending'", row["id"],
+                        )
+                    continue
                 execute_at = row["execute_at"]
                 # Нормализуем timezone если нужно
                 if execute_at is not None and execute_at.tzinfo is None:
@@ -214,7 +256,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                             continue
                         # Повторяемое: пропуск одной итерации не должен рвать цепочку.
                         try:
-                            await db.reschedule_if_recurring(pool, dict(row))
+                            await _reschedule(pool, row)
                         except Exception:
                             log.exception("Scheduler: reschedule(missed) failed for #%d", row["id"])
                         log.warning(
@@ -269,54 +311,38 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         )
                         _in_flight.discard(row["id"])
                         continue
-                    if token_state == "revoked":
-                        log.error(
-                            "Scheduler: bot token for scheduled #%d (bot_id=%d) is invalid "
-                            "or revoked — marking scheduled done to prevent refire",
-                            row["id"],
-                            row["bot_id"],
+                    total = (await db.get_audience_count(pool, row["bot_id"])
+                             if token_state != "revoked" else 0)
+                    async with pool.acquire() as conn, conn.transaction():
+                        admission = await scheduled_bot_state(
+                            conn, row["created_by"], row["bot_id"], row["token"], lock=True,
                         )
-                        try:
-                            await pool.execute(
-                                "UPDATE scheduled_broadcasts SET status='failed' WHERE id=$1",
-                                row["id"],
+                        if admission != "ready" or token_state == "revoked":
+                            status = admission if admission != "ready" else "failed"
+                            await conn.execute(
+                                "UPDATE scheduled_broadcasts SET status=$2, claimed_at=NULL "
+                                "WHERE id=$1 AND status='processing'",
+                                row["id"], status,
                             )
-                        except Exception:
-                            log.exception(
-                                "Scheduler: failed to mark scheduled #%d as failed",
-                                row["id"],
+                        else:
+                            current = await conn.fetchval(
+                                "SELECT id FROM scheduled_broadcasts WHERE id=$1 AND status='processing' "
+                                "AND bot_id=$2 AND created_by=$3 AND broadcast_id IS NULL FOR UPDATE",
+                                row["id"], row["bot_id"], row["created_by"],
                             )
+                            if current:
+                                bc_id = await db.create_broadcast(
+                                    conn, row["bot_id"], row["message_text"], total, row["created_by"],
+                                    scheduled_id=int(row["id"]),
+                                )
+                                await conn.execute(
+                                    "UPDATE scheduled_broadcasts SET broadcast_id=$2 WHERE id=$1",
+                                    row["id"], bc_id,
+                                )
+                    if bc_id is None:
                         _in_flight.discard(row["id"])
                         continue
-
-                    total = await db.get_audience_count(pool, row["bot_id"])
-                    bc_id = await db.create_broadcast(
-                        pool,
-                        row["bot_id"],
-                        row["message_text"],
-                        total,
-                        row["created_by"],
-                        # Обратная ссылка пишется ТЕМ ЖЕ INSERT (schema_v298):
-                        # по ней восстановление узнаёт о созданной рассылке,
-                        # даже если процесс умрёт прямо здесь, до записи
-                        # broadcast_id ниже. Без неё рассылка ушла бы сама
-                        # (resume_interrupted поднимает 'pending'), а
-                        # расписание вернулось бы в очередь и завело вторую.
-                        scheduled_id=int(row["id"]),
-                    )
                     created_bc = True
-                    # Записываем id рассылки ДО запуска задачи: если процесс
-                    # умрёт сейчас, сторож обязан увидеть, что рассылка уже
-                    # создана, и не создавать вторую на всю аудиторию.
-                    try:
-                        await pool.execute(
-                            "UPDATE scheduled_broadcasts SET broadcast_id=$2 WHERE id=$1",
-                            row["id"], bc_id,
-                        )
-                    except Exception:
-                        log.exception(
-                            "Scheduler: не записан broadcast_id для расписания #%d",
-                            row["id"])
                     broadcaster.start(
                         pool,
                         http,
@@ -324,11 +350,15 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         row["token"],
                         row["bot_id"],
                         row["message_text"],
+                        schedule_creator_id=row["created_by"],
                     )
-                    await db.mark_scheduled_done(pool, row["id"])
-                    # Повторяемое расписание → ставим следующее вхождение.
+                    finished = await pool.execute(
+                        "UPDATE scheduled_broadcasts SET status='done' WHERE id=$1 AND status='processing'",
+                        row["id"],
+                    )
+                    # Только победитель перехода в done продолжает цепочку.
                     try:
-                        new_id = await db.reschedule_if_recurring(pool, dict(row))
+                        new_id = await _reschedule(pool, row) if finished != "UPDATE 0" else None
                         if new_id:
                             log.info("Scheduled #%d recurring → next #%d", row["id"], new_id)
                     except Exception:
@@ -349,14 +379,18 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                             row["id"],
                         )
                         try:
-                            await db.mark_scheduled_done(pool, row["id"])
+                            await pool.execute(
+                                "UPDATE scheduled_broadcasts SET status='done' WHERE id=$1 AND status='processing'",
+                                row["id"],
+                            )
                         except Exception:
                             log.exception(
                                 "Scheduler: failed to mark scheduled #%d as done",
                                 row["id"],
                             )
-                    else:
-                        # No broadcast created — revert claim so it can be retried next cycle
+                    elif bc_id is None:
+                        # Ошибка до получения ID: попытка создания не завершилась.
+                        # Если ID получен, но commit неизвестен, сторож сверит связь.
                         try:
                             await pool.execute(
                                 "UPDATE scheduled_broadcasts SET status='pending' "
