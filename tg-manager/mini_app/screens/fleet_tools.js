@@ -331,12 +331,13 @@ function _fxTh(kind, key, label) {
   return `<th class="fx-th" role="button" tabindex="0" onclick="fleetSortByColumn('${kind}','${key}')">${label}${mark}</th>`;
 }
 function accTableHtml(list) {
+  const menu = !ACC_SEL_MODE && catalogResourceMenus.account;
   const head = `<tr>${ACC_SEL_MODE ? '<th class="fx-chk"></th>' : ''}`
     + _fxTh('accounts', 'name', 'Аккаунт') + _fxTh('accounts', 'phone', 'Телефон')
     + _fxTh('accounts', 'status', 'Состояние') + _fxTh('accounts', 'trust', 'Траст')
     + _fxTh('accounts', 'geo', 'Прокси') + _fxTh('accounts', 'pool', 'Пул')
     + _fxTh('accounts', 'stage', 'Статус') + '<th>Теги</th>'
-    + _fxTh('accounts', 'last_used', 'Работал') + '</tr>';
+    + _fxTh('accounts', 'last_used', 'Работал') + (menu ? '<th scope="col">Действия</th>' : '') + '</tr>';
   const rows = list.map(a => {
     const s = accStatusOf(a);
     const sel = ACC_SEL.has(a.id);
@@ -345,13 +346,14 @@ function accTableHtml(list) {
     const proxy = !a.has_proxy ? '<span class="fx-dim">напрямую</span>'
       : (a.proxy_alive === false ? '<span class="fx-bad">🔌 ' : '<span>') + esc(a.proxy_label || 'прокси') + '</span>';
     const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id},event)` : `openAccount(${a.id})`;
-    return `<tr class="fx-tr${ACC_SEL_MODE && sel ? ' fx-on' : ''}" onclick="${onclick}">`
+    return `<tr class="fx-tr${ACC_SEL_MODE && sel ? ' fx-on' : ''}" ${menu ? `data-resource-node="${esc(a.id)}"` : ''} onclick="${onclick}">`
       + (ACC_SEL_MODE ? `<td class="fx-chk"><span class="acc-check ${sel ? 'on' : ''}">${sel ? '✓' : ''}</span></td>` : '')
       + `<td>${phoneFlag(a.phone || '')} ${esc(name)}</td><td class="fx-mono">${esc(a.phone || '')}</td>`
       + `<td><span class="badge ${s.cls}">${s.status}</span>${a.verdict ? (a.verdict.level !== 'ok' && a.verdict.reason ? `<div class="fx-dim">${esc(a.verdict.reason)}</div>` : '') : (a.health_reason && (a.health_status === 'quarantine' || a.health_status === 'at_risk') ? `<div class="fx-dim">${esc(a.health_reason)}</div>` : '')}</td>`
       + `<td>${trust}%</td><td>${proxy}</td><td>${esc(a.pool || '')}</td>`
       + `<td>${stageBadge(a.stage)}</td><td>${accTagsHtml(a)}</td>`
-      + `<td class="fx-dim">${a.last_used ? ago(a.last_used) : '—'}</td></tr>`;
+      + `<td class="fx-dim">${a.last_used ? ago(a.last_used) : '—'}</td>`
+      + (menu ? '<td>' + resourceMenuButton() + '</td>' : '') + '</tr>';
   }).join('');
   return `<div class="fx-table-wrap"><table class="fx-table"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }

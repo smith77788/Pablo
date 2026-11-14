@@ -45,6 +45,7 @@ UNPOOLED = "__none__"
 
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
+    from services.network_builder import project_pilot_enabled
     from services.mini_app_api import (
         _FLOODED_SQL, _FOREIGN_SQL, _LOW_TRUST_SQL, _NO2FA_SQL,
         ACCOUNT_FILTERS, ACCOUNT_STAGES, ACTIVE_ACC_SQL, _INTERNAL_ERROR,
@@ -342,6 +343,7 @@ def setup_routes(app: web.Application, pool) -> None:
         stats["by_stage"] = by_stage
         return _json_resp({
             "accounts": rows,
+            "resource_menu": project_pilot_enabled(uid) and not admin,
             "stats": stats,
             "admin_view": admin,
             "page": {

@@ -68,6 +68,7 @@ async function loadAccounts() {
   loadAccTags();
   // Accounts and channels load independently — one failure doesn't break the other
   api(_accQuery(0)).then(ad => {
+    catalogResourceMenus.account = ad.resource_menu === true;
     CUR_ACCS = ad.accounts||[];
     ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
     if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
@@ -110,6 +111,7 @@ async function loadAccounts() {
 async function reloadAccounts() {
   try {
     const ad = await api(_accQuery(0));
+    catalogResourceMenus.account = ad.resource_menu === true;
     CUR_ACCS = ad.accounts||[];
     ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
     if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
@@ -207,6 +209,7 @@ function accStatusOf(a) {
 
 function renderAccounts(list) {
   const el = document.getElementById('accList');
+  if (catalogResourceMenus.account) bindCatalogResourceActions(el, 'account', () => CUR_ACCS);
   if (!list.length) {
     const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || ACC_TAG_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
     _accToolsShown(!!filtered);
@@ -261,7 +264,8 @@ function accRowHtml(a) {
         ${a.verdict ? '' : `<span style="font-size:10px;color:var(--hint)">${trust}%</span>`}
         <span class="chev">›</span>
       </div>`;
-    return `<div class="acc-row ${ACC_SEL_MODE&&sel?'sel':''}" data-acc-id="${a.id}" onclick="${onclick}">
+    const menu = !ACC_SEL_MODE && catalogResourceMenus.account;
+    return `<div class="acc-row ${ACC_SEL_MODE&&sel?'sel':''}" data-acc-id="${a.id}" ${menu ? `data-resource-node="${esc(a.id)}"` : ''} onclick="${onclick}">
       ${checkbox}
       <div class="ava ${ava_cls}" style="font-size:15px">${flag}</div>
       <div class="acc-body">
@@ -275,6 +279,7 @@ function accRowHtml(a) {
         ${ACC_SEL_MODE ? '' : _fixBtn(a.fix)}
       </div>
       ${right}
+      ${menu ? resourceMenuButton() : ''}
     </div>`;
 }
 

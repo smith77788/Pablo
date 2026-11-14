@@ -42,6 +42,18 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
                 monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER + 1))
                 assert (await client.get(catalog, headers=owner)).status == 403
                 monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+                projects = await (await client.get(base, headers=owner)).json()
+                assert projects["resource_menu"] is True
+                assert {item["id"] for item in projects["networks"]} >= {project, other_project}
+                for endpoint, key, field in (("channels", "channels", "channel_id"), ("bots", "bots", "bot_id")):
+                    response = await client.get(f"/api/miniapp/{endpoint}", headers=owner)
+                    assert response.status == 200, await response.text()
+                    payload = await response.json()
+                    assert payload["resource_menu"] is True and payload[key]
+                    assert all(item[field + "_text"] == str(item[field]) for item in payload[key])
+                    if endpoint == "channels":
+                        assert str(CHANNEL) in {item[field + "_text"] for item in payload[key]}
+                        assert str(foreign) not in {item[field + "_text"] for item in payload[key]}
                 response = await client.get(catalog, headers=owner)
                 assert (await response.json())["items"] == [
                     {"id": str(CHANNEL), "label": "Канал", "username": ""}]

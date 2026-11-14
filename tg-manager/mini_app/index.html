@@ -1377,6 +1377,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 .resource-actions-list{display:grid;gap:6px}
 .resource-actions .btn,.resource-actions summary,.resource-actions-trigger{min-height:44px}
 .resource-actions-list .btn{text-align:left;white-space:normal}
+.resource-actions-trigger{min-width:44px;flex-shrink:0}
+.bot-card .resource-actions-trigger{position:absolute;top:4px;left:4px}
 .resource-actions summary{display:list-item;align-content:center}
 @media(pointer:coarse){.resource-actions{margin:auto auto max(12px,env(safe-area-inset-bottom))}}
 </style>
@@ -13973,6 +13975,7 @@ async function openChannels() {
   CH_OFFSET = 0;
   try {
     const d = await api(_chQuery(0));
+    catalogResourceMenus.channel = d.resource_menu === true;
     CUR_CHANNELS = d.channels||[];
     CH_OFFSET = CUR_CHANNELS.length;
     CH_TOTAL = (d.total!=null?d.total:CUR_CHANNELS.length);
@@ -14026,6 +14029,7 @@ async function reloadChannels() {
   CH_OFFSET = 0;
   try {
     const d = await api(_chQuery(0));
+    catalogResourceMenus.channel = d.resource_menu === true;
     CUR_CHANNELS = d.channels || [];
     CH_OFFSET = CUR_CHANNELS.length;
     CH_TOTAL = (d.total != null ? d.total : CUR_CHANNELS.length);
@@ -14100,6 +14104,9 @@ function renderChLoadMore(shownCount) {
 // Аргумент больше не нужен: срез всегда считается от CUR_CHANNELS, чтобы поиск,
 // фильтр и «Выбрать все» не могли разойтись между собой.
 function renderChannels(_ignored) {
+  if (catalogResourceMenus.channel) {
+    bindCatalogResourceActions(document.getElementById('chList'), 'channel', () => CUR_CHANNELS);
+  }
   const list = _chFiltered();
   if (CUR_CHANNELS.length && !list.length) {
     txt('chList', empty('🔍','Ничего не найдено',
@@ -14118,7 +14125,8 @@ function renderChannels(_ignored) {
     const onclick = CH_SEL_MODE ? `toggleChSel('${c.channel_id}',event)` : `openChannel(${c.channel_id})`;
     const checkbox = CH_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
     const right = CH_SEL_MODE ? '' : `<div class="li-right"><span class="badge b-bl">${num(c.member_count||0)}</span><span class="chev">›</span></div>`;
-    return `<div class="li tap ${CH_SEL_MODE&&sel?'sel':''}" onclick="${onclick}">
+    const menuId = !CH_SEL_MODE && catalogResourceMenus.channel ? catalogResourceId(c, 'channel') : '';
+    return `<div class="li tap ${CH_SEL_MODE&&sel?'sel':''}" ${menuId ? `data-resource-node="${esc(menuId)}"` : ''} onclick="${onclick}">
       ${checkbox}
       <div class="ava ava-purple">${isGroup?'💬':'📡'}</div>
       <div class="li-body">
@@ -14126,6 +14134,7 @@ function renderChannels(_ignored) {
         <div class="li-sub">${type}${role}${CH_SEL_MODE?' · '+num(c.member_count||0)+' участников':''}</div>
       </div>
       ${right}
+      ${menuId ? resourceMenuButton() : ''}
     </div>`;
   }).join(''));
 }
@@ -34585,18 +34594,23 @@ async function loadNetworkBuilder() {
       txt('netBuilderList', empty('🕸️', 'Нет сеток', 'Создайте первую сеть', {label:'🕸️ Создать сеть', fn:'openNetBuilderCreateModal()'}));
       return;
     }
+    const menu = d.resource_menu === true;
     txt('netBuilderList', nets.map(n => {
       const status = n.status === 'active' ? '🟢' : n.status === 'paused' ? '🟡' : '⚪';
-      return `<div class="li tap" onclick="selectNetwork(${n.id})">
+      return `<div class="li tap" ${menu ? `data-resource-node="${esc(n.id)}"` : ''} onclick="selectNetwork(${n.id})">
         <div class="ava ava-teal">🕸️</div>
         <div class="li-body">
           <div class="li-name">${esc(n.name)}</div>
           <div class="li-sub">${n.node_count || 0} узлов · ${n.edge_count || 0} рёбер</div>
           ${n.description ? `<div class="li-sub">${esc(n.description)}</div>` : ''}
         </div>
-        <div class="li-right"><span>${status}</span><span class="chev">›</span></div>
+        <div class="li-right"><span>${status}</span><span class="chev">›</span>${menu ? resourceMenuButton() : ''}</div>
       </div>`;
     }).join(''));
+    if (menu) bindResourceActionRows(document.getElementById('netBuilderList'), (id, trigger) => {
+      const project = nets.find(item => String(item.id) === id);
+      if (project) openNetworkResourceActions(project, trigger);
+    });
   } catch(e) {
     txt('netBuilderList', errHtml(errRu(e), retryCall('loadNetworkBuilder')));
   }
@@ -34784,12 +34798,12 @@ function renderNetNodesEdges(d) {
       <div class="li-sub">${esc(objRu(n.type))} · ${n.object_id ? 'ID: ' + esc(n.object_id_text ?? n.object_id) : 'создастся при развёртывании'}${n.resource_available === false ? ' · недоступен в каталоге' : ''}</div>
     </div>
     <div class="li-right">${pilot
-      ? '<button type="button" class="btn btn-s resource-actions-trigger" data-resource-menu aria-label="Действия">⋯</button>'
+      ? resourceMenuButton()
       : `<button type="button" class="btn btn-s" onclick="removeNetNode(${Number(n.id)}, this)" aria-label="Убрать из проекта">🗑</button>`}</div>
   </div>`).join('') || '<div class="empty-inline">Нет узлов</div>');
 
   if (pilot) bindResourceActionRows(document.getElementById('netNodesList'), (nodeId, trigger) => {
-    const node = nodes.find(item => Number(item.id) === nodeId);
+    const node = nodes.find(item => String(item.id) === nodeId);
     if (node) openProjectResourceActions(node, trigger, Number(d.id));
   });
 

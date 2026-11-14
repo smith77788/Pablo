@@ -26,6 +26,7 @@ from aiohttp import web
 
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты ботов на приложении мини-аппа."""
+    from services.network_builder import project_pilot_enabled
     from services import operation_bus as _obus
     from services.mini_app_api import (
         _BOTS_VISIBLE_SQL, _INTERNAL_ERROR, _cached_user, _err, _get_uid,
@@ -110,7 +111,9 @@ def setup_routes(app: web.Application, pool) -> None:
         total = await _safe_count(pool,
             f"""SELECT COUNT(DISTINCT mb.bot_id) FROM managed_bots mb
                 WHERE ({_BOTS_VISIBLE_SQL})""", uid)
+        rows = [{**dict(row), "bot_id_text": str(row["bot_id"])} for row in (rows or [])]
         return _json_resp({"bots": rows, "total": int(total or 0),
+                           "resource_menu": project_pilot_enabled(uid),
                            "offset": offset, "limit": limit})
 
     async def bot_detail(request: web.Request) -> web.Response:

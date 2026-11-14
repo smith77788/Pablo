@@ -346,6 +346,8 @@ def setup_routes(app: web.Application, pool) -> None:
 
     async def networks_list(request: web.Request) -> web.Response:
         """Network Builder — список сеток владельца (форма экрана s-network-builder)."""
+        from services.network_builder import project_pilot_enabled
+
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -357,7 +359,8 @@ def setup_routes(app: web.Application, pool) -> None:
                      (SELECT COUNT(*) FROM network_edges e WHERE e.instance_id=ni.id) AS edge_count
                    FROM network_instances ni WHERE ni.owner_id=$1 ORDER BY ni.created_at DESC""",
                 uid)
-            return _json_resp({"networks": [dict(r) for r in (rows or [])]})
+            return _json_resp({"networks": [dict(r) for r in (rows or [])],
+                               "resource_menu": project_pilot_enabled(uid)})
         except Exception:
             log.exception("networks_list uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)

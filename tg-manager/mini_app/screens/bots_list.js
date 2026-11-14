@@ -15,6 +15,7 @@ async function loadBots() {
   try {
     BOT_OFFSET = 0;
     const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0' + fleetSortQS('bots'));
+    catalogResourceMenus.bot = d.resource_menu === true;
     BOTS = d.bots||[];
     BOT_OFFSET = BOTS.length;
     BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
@@ -218,6 +219,7 @@ async function openBotByUsername(uname) {
     // первую страницу заново.
     if (!BOTS || !BOTS.length) {
       const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0');
+      catalogResourceMenus.bot = d.resource_menu === true;
       BOTS = d.bots||[];
       BOT_OFFSET = BOTS.length;
       BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
@@ -253,6 +255,7 @@ function renderBots() {
     renderBotLoadMore(0);
     return;
   }
+  if (catalogResourceMenus.bot) bindCatalogResourceActions(wrap, 'bot', () => BOTS);
   wrap.className = 'bot-cards';
   wrap.innerHTML = _list.map(b=>{
     // Показываем ИМЯ бота (first_name) как основную подпись, @username — второй
@@ -295,7 +298,8 @@ function renderBots() {
       : '';
     // На карточке — только пауза (⏻/▶️). Удаление из системы — на экране
     // бота, кнопкой «🗑 Удалить», с подтверждением.
-    return `<div class="bot-card" ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
+    const menuId = catalogResourceMenus.bot ? catalogResourceId(b, 'bot') : '';
+    return `<div class="bot-card" ${menuId ? `data-resource-node="${esc(menuId)}"` : ''} ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
       <div class="bot-card-del" title="${active?'Поставить на паузу':'Вернуть в работу'}" onclick="event.stopPropagation();botPowerConfirm(${b.bot_id},'${escJs(name)}',${!!active})">${active?'⏻':'▶️'}</div>
       <div class="bot-card-ava" style="background:${grad}">${initials}</div>
       <div class="bot-card-name">${esc(name)}</div>
@@ -304,6 +308,7 @@ function renderBots() {
       <div class="bot-card-lbl">подписчиков</div>
       ${badge}
       ${chkBadge}
+      ${menuId ? resourceMenuButton() : ''}
     </div>`;
   }).join('');
   renderBotLoadMore(_list.length);
