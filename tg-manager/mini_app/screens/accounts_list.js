@@ -353,6 +353,7 @@ async function exportAccountsJson() {
 
 // ── Account Detail ─────────────────────────────────────
 async function openAccount(accId) {
+  const resourceMenu = prepareResourceCardMenu('acd-resource-menu', 'account', accId);
   const a = CUR_ACCS.find(x=>x.id==accId);
   const name = a?(a.first_name||(a.username?'@'+a.username:a.phone||'Аккаунт #'+accId)):'Аккаунт';
   txt('acd-name', name);
@@ -361,6 +362,7 @@ async function openAccount(accId) {
   try {
     const d = await api('/api/miniapp/account/'+accId);
     window._accDetail = d.account || {};
+    resourceMenu(d.account);
     txt('acd-body', buildAccDetail(d));
   } catch(e) {
     txt('acd-body', errHtml(errRu(e), retryCall('openAccount', accId)));

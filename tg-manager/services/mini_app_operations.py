@@ -90,10 +90,6 @@ def setup_routes(app: web.Application, pool) -> None:
     async def project_scope(request, uid):
         if "project_id" not in request.query:
             return None, None
-        from services.network_builder import project_pilot_enabled
-
-        if not project_pilot_enabled(uid):
-            return None, _err("Недоступно", 403)
         project_id = validate_integer(request.query["project_id"], min_val=1)
         if project_id is None:
             return None, _err("Неверный проект", 400)

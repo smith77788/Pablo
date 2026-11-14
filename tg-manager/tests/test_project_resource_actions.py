@@ -109,6 +109,7 @@ assert.equal(calls.length, 4);
 assert.equal(catalogResourceId({channel_id:9007199254740992}, 'channel'), '');
 assert.equal(catalogResourceId({channel_id_text:'9007199254740993'}, 'channel'), row.dataset.resourceNode);
 assert.deepEqual(resourceActionsFor({type:'bot',object_id_text:'52',is_active:false}).secondary, []);
+assert.deepEqual(resourceActionsFor({type:'bot',object_id_text:'52',is_owned:false}).secondary, []);
 assert.equal(resourceActionsFor({type:'channel',object_id_text:'52'}).primary.length, 2);
 """
     subprocess.run(["node", "-"], input=script + "\n" + probe, text=True, check=True)
@@ -130,11 +131,10 @@ def test_add_to_project_submits_only_the_selected_project_and_exact_resource():
 const assert = require('node:assert/strict');
 const calls = [];
 let choice = null;
-let enabled = true;
 const askChoice = async () => choice;
 const toast = () => {};
 const api = async (path, options) => {
-  if (!options) return {resource_menu:enabled,networks:[{id:7,name:'A'},{id:8,name:'B'}]};
+  if (!options) return {resource_menu:false,networks:[{id:7,name:'A'},{id:8,name:'B'}]};
   calls.push([path,JSON.parse(options.body)]);
   return {already_linked:false};
 };
@@ -146,10 +146,33 @@ const api = async (path, options) => {
   assert.deepEqual(calls, []);
   choice = 8;
   await add();
-  enabled = false;
-  await add();
   assert.deepEqual(calls, [['/api/miniapp/networks/8/nodes',
     {type:'group', object_id:'9007199254740993', label:'Группа'}]]);
 })().catch(error => {console.error(error);process.exitCode = 1;});
 """
     subprocess.run(["node", "-"], input=source + "\n" + probe, text=True, check=True)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="нет node")
+def test_card_menu_ignores_a_late_response_for_another_resource():
+    source = js_function("prepareResourceCardMenu")
+    probe = """
+const assert = require('node:assert/strict');
+const button = {hidden:false,onclick:() => assert.fail('старый обработчик')};
+const document = {getElementById: () => button};
+const calls = [];
+const openCatalogResourceActions = (...args) => calls.push(args);
+const old = prepareResourceCardMenu('menu','channel','44');
+const current = prepareResourceCardMenu('menu','channel','9007199254740993');
+old({title:'Старый ответ'});
+assert.equal(button.hidden, true);
+assert.equal(button.onclick, null);
+const item = {title:'Канал'};
+current(item);
+assert.equal(button.hidden, false);
+button.onclick();
+assert.deepEqual(calls, [[item,'channel','9007199254740993',button,true]]);
+"""
+    subprocess.run(["node", "-"], input=source + "\n" + probe, text=True, check=True)
+    for opener in ("openAccount", "openBot", "openChannel"):
+        assert "prepareResourceCardMenu(" in js_function(opener)

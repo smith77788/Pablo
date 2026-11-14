@@ -24,7 +24,6 @@ from aiohttp import web
 
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты каналов и групп на приложении мини-аппа."""
-    from services.network_builder import project_pilot_enabled
     from services import operation_bus as _obus
     from services import postbot as _postbot
     from services.mini_app_api import (
@@ -122,7 +121,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       "foreign": int(crow["foreign_n"] or 0)}
         rows = [{**dict(row), "channel_id_text": str(row["channel_id"])} for row in (rows or [])]
         return _json_resp({"channels": rows, "total": int(total or 0),
-                           "resource_menu": project_pilot_enabled(uid),
+                           "resource_menu": True,
                            "counts": counts, "offset": offset, "limit": limit})
 
     async def post_to_channel(request: web.Request) -> web.Response:

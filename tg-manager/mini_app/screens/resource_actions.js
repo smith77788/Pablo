@@ -1,7 +1,7 @@
 'use strict';
 
 // Действия открывают штатные карточки и используют их проверки доступа.
-function resourceActionsFor(node, projectId) {
+function resourceActionsFor(node, projectId, fromCard = false) {
   const exact = String(node.object_id_text ?? node.object_id ?? '');
   const parsed = Number(exact);
   const id = Number.isSafeInteger(parsed) ? parsed : exact;
@@ -15,7 +15,7 @@ function resourceActionsFor(node, projectId) {
       group: () => openChannel(id),
       chat: () => openChannel(id),
     };
-    if (Object.hasOwn(openers, node.type)) {
+    if (!fromCard && Object.hasOwn(openers, node.type)) {
       primary.push(['Открыть карточку', openers[node.type]]);
     }
     if (node.type === 'channel' && Number.isSafeInteger(projectId) && projectId > 0) {
@@ -26,7 +26,9 @@ function resourceActionsFor(node, projectId) {
       secondary.push(['Диалоги профиля', () => openAccountDialogs(id)]);
       if (node.is_active !== false) secondary.push(['Сеансы аккаунта', () => openAccSessions(id)]);
     }
-    if (node.type === 'bot' && node.is_active !== false) secondary.push(['Команды бота', () => openBotCommands(id)]);
+    if (node.type === 'bot' && node.is_active !== false && node.is_owned !== false) {
+      secondary.push(['Команды бота', () => openBotCommands(id)]);
+    }
   }
   return {primary, secondary};
 }
@@ -64,22 +66,42 @@ function catalogResourceId(item, type) {
   return typeof exact === 'string' ? exact : Number.isSafeInteger(item[key]) ? String(item[key]) : '';
 }
 
+function openCatalogResourceActions(item, type, id, trigger, fromCard = false) {
+  const kind = type === 'channel' && item.type && item.type !== 'channel' ? 'group' : type;
+  const label = item.title || item.first_name || (item.username ? '@' + item.username : objRu(kind));
+  const actions = resourceActionsFor({
+    type: kind, object_id_text: id, is_active: item.is_active, is_owned: item.is_owned,
+  }, null, fromCard);
+  if (kind !== 'bot' || item.is_owned !== false) {
+    actions.secondary.push(['Добавить в проект', () => addCatalogResourceToProject(kind, id, label)]);
+  }
+  showResourceActions(label, actions, trigger);
+}
+
 function bindCatalogResourceActions(root, type, items) {
   bindResourceActionRows(root, (id, trigger) => {
     const item = items().find(entry => catalogResourceId(entry, type) === id);
-    if (!item) return;
-    const kind = type === 'channel' && item.type && item.type !== 'channel' ? 'group' : type;
-    const label = item.title || item.first_name || (item.username ? '@' + item.username : objRu(kind));
-    const actions = resourceActionsFor({type: kind, object_id_text: id, is_active: item.is_active});
-    actions.secondary.push(['Добавить в проект', () => addCatalogResourceToProject(kind, id, label)]);
-    showResourceActions(label, actions, trigger);
+    if (item) openCatalogResourceActions(item, type, id, trigger);
   });
+}
+
+function prepareResourceCardMenu(buttonId, type, id) {
+  const button = document.getElementById(buttonId);
+  if (!button) return () => {};
+  button.hidden = true;
+  button.onclick = null;
+  const request = Symbol();
+  button.resourceMenuRequest = request;
+  return item => {
+    if (!item || button.resourceMenuRequest !== request || !/^-?[1-9]\d*$/.test(String(id))) return;
+    button.onclick = () => openCatalogResourceActions(item, type, String(id), button, true);
+    button.hidden = false;
+  };
 }
 
 async function addCatalogResourceToProject(type, id, label) {
   try {
     const data = await api('/api/miniapp/networks');
-    if (!data.resource_menu) { toast('Доступ к пилоту отключён'); return; }
     const projects = data.networks || [];
     if (!projects.length) { toast('Сначала создайте проект'); return; }
     const projectId = await askChoice('Добавить ресурс в проект', projects.map(project => ({

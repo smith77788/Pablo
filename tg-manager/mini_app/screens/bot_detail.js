@@ -10,6 +10,7 @@
 // остаются в index.html.
 
 async function openBot(botId) {
+  const resourceMenu = prepareResourceCardMenu('bd-resource-menu', 'bot', botId);
   const b = BOTS.find(x=>x.bot_id==botId);
   const name = b?(b.username?'@'+b.username:(b.first_name||'Бот #'+botId)):'Бот';
   CUR_BOT = {id:botId, name};
@@ -19,6 +20,7 @@ async function openBot(botId) {
   try {
     const d = await api('/api/miniapp/bot/'+botId);
     if (CUR_BOT && CUR_BOT.id==botId) CUR_BOT.d = d;
+    resourceMenu(d.bot);
     txt('bd-body', buildBotDetail(d));
     modernizeIcons(document.getElementById('s-botdetail'));
   } catch(e) {

@@ -41,7 +41,6 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
                 assert (await client.get(catalog, headers=outsider)).status == 404
                 monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER + 1))
                 assert (await client.get(catalog, headers=owner)).status == 403
-                monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
                 projects = await (await client.get(base, headers=owner)).json()
                 assert projects["resource_menu"] is True
                 assert {item["id"] for item in projects["networks"]} >= {project, other_project}
@@ -54,11 +53,8 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
                     if endpoint == "channels":
                         assert str(CHANNEL) in {item[field + "_text"] for item in payload[key]}
                         assert str(foreign) not in {item[field + "_text"] for item in payload[key]}
-                response = await client.get(catalog, headers=owner)
-                assert (await response.json())["items"] == [
-                    {"id": str(CHANNEL), "label": "Канал", "username": ""}]
-                assert (await (await client.get(
-                    path + "/catalog?type=channel&q=" + str(foreign), headers=owner)).json())["items"] == []
+                    else:
+                        assert all(item["is_owned"] for item in payload[key])
                 add = {"type": "channel", "object_id": str(CHANNEL), "label": "Новости"}
                 for bad in (True, 1.2, "bad", str(2**63)):
                     assert (await client.post(path + "/nodes", headers=owner,
@@ -92,7 +88,14 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
 
                 detail = await (await client.get(path, headers=owner)).json()
                 channel = next(item for item in detail["nodes"] if item["id"] == node)
+                assert detail["project_pilot"] is False
                 assert channel["object_id_text"] == str(CHANNEL) and channel["resource_available"]
+                monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+                response = await client.get(catalog, headers=owner)
+                assert (await response.json())["items"] == [
+                    {"id": str(CHANNEL), "label": "Канал", "username": ""}]
+                assert (await (await client.get(
+                    path + "/catalog?type=channel&q=" + str(foreign), headers=owner)).json())["items"] == []
                 targets_path = f"/api/miniapp/mass_publish/targets?project_id={project}&project_channel_id={CHANNEL}"
                 preview = await (await client.get(targets_path, headers=owner)).json()
                 assert preview["sample"][0]["channel_id_text"] == str(CHANNEL)

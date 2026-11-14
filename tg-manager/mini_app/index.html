@@ -1378,6 +1378,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 .resource-actions .btn,.resource-actions summary,.resource-actions-trigger{min-height:44px}
 .resource-actions-list .btn{text-align:left;white-space:normal}
 .resource-actions-trigger{min-width:44px;flex-shrink:0}
+.resource-actions-trigger[hidden]{display:none}
 .bot-card .resource-actions-trigger{position:absolute;top:4px;left:4px}
 .resource-actions summary{display:list-item;align-content:center}
 @media(pointer:coarse){.resource-actions{margin:auto auto max(12px,env(safe-area-inset-bottom))}}
@@ -1684,6 +1685,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="bd-name">Бот</div>
+    <button id="bd-resource-menu" type="button" class="btn btn-s resource-actions-trigger" aria-label="Действия ресурса" aria-haspopup="dialog" hidden>⋯</button>
   </div>
   <div class="sub-sb" id="bd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -1822,6 +1824,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="acd-name">Аккаунт</div>
+    <button id="acd-resource-menu" type="button" class="btn btn-s resource-actions-trigger" aria-label="Действия ресурса" aria-haspopup="dialog" hidden>⋯</button>
   </div>
   <div class="sub-sb" id="acd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -2194,6 +2197,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="chd-name">Канал</div>
+    <button id="chd-resource-menu" type="button" class="btn btn-s resource-actions-trigger" aria-label="Действия ресурса" aria-haspopup="dialog" hidden>⋯</button>
   </div>
   <div class="sub-sb" id="chd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -14235,13 +14239,15 @@ async function runChMass(op) {
 }
 
 async function openChannel(chId) {
-  const c = CUR_CHANNELS.find(x=>x.channel_id==chId);
+  const resourceMenu = prepareResourceCardMenu('chd-resource-menu', 'channel', chId);
+  const c = CUR_CHANNELS.find(x => catalogResourceId(x, 'channel') === String(chId));
   const name = c?(c.title||(c.username?'@'+c.username:'Канал #'+chId)):'Канал';
   txt('chd-name', name);
   txt('chd-body', '<div class="spin-wrap"><div class="spin"></div></div>');
   push('s-chdetail');
   try {
     const d = await api('/api/miniapp/channel/'+chId);
+    resourceMenu(d.channel);
     txt('chd-body', buildChDetail(d));
     loadChAutoposts(chId, 'chdAutoposts');  // screens/channel_manage.js
   } catch(e) {
@@ -34722,7 +34728,8 @@ async function selectNetwork(netId) {
   try {
     const d = await api('/api/miniapp/networks/' + netId);
     if (_currentNetId !== netId) return;
-    journal.hidden = publish.hidden = !d.project_pilot;
+    journal.hidden = false;
+    publish.hidden = !d.project_pilot;
     window._lastNetData = d;
     renderNetTopology(d);
     renderNetNodesEdges(d);
@@ -34791,20 +34798,18 @@ function renderNetNodesEdges(d) {
   // Узел шаблона ещё не привязан к объекту: object_id у него пуст. Печатать
   // «ID: null» нельзя — это читается как поломка, а не как «создадим при
   // развёртывании».
-  txt('netNodesList', nodes.map(n => `<div class="li"${pilot ? ` data-resource-node="${Number(n.id)}"` : ''}>
+  txt('netNodesList', nodes.map(n => `<div class="li" data-resource-node="${Number(n.id)}">
     <div class="ava ava-blue">${icoMap[n.type] || '⚫'}</div>
     <div class="li-body">
       <div class="li-name">${esc(n.label || objRu(n.type))}</div>
       <div class="li-sub">${esc(objRu(n.type))} · ${n.object_id ? 'ID: ' + esc(n.object_id_text ?? n.object_id) : 'создастся при развёртывании'}${n.resource_available === false ? ' · недоступен в каталоге' : ''}</div>
     </div>
-    <div class="li-right">${pilot
-      ? resourceMenuButton()
-      : `<button type="button" class="btn btn-s" onclick="removeNetNode(${Number(n.id)}, this)" aria-label="Убрать из проекта">🗑</button>`}</div>
+    <div class="li-right">${resourceMenuButton()}</div>
   </div>`).join('') || '<div class="empty-inline">Нет узлов</div>');
 
-  if (pilot) bindResourceActionRows(document.getElementById('netNodesList'), (nodeId, trigger) => {
+  bindResourceActionRows(document.getElementById('netNodesList'), (nodeId, trigger) => {
     const node = nodes.find(item => String(item.id) === nodeId);
-    if (node) openProjectResourceActions(node, trigger, Number(d.id));
+    if (node) openProjectResourceActions(node, trigger, pilot ? Number(d.id) : null);
   });
 
   txt('netEdgesList', edges.map(e => `<div class="li">
