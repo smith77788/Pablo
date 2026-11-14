@@ -84,7 +84,6 @@ SENSITIVE_FIELD_NAMES = frozenset({
     "api_hash", "app_hash",
     "password", "passwd", "twofa_password", "two_fa_password",
     "password_2fa", "cloud_password", "new_password", "current_password",
-    "twofa_enc",
     "bot_token", "token_plain", "secret", "admin_secret",
 })
 _SECRET_KEYS = SENSITIVE_FIELD_NAMES

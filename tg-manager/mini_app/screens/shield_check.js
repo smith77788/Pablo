@@ -54,29 +54,6 @@ async function _shLoadBody() {
   try { mon = await api('/api/miniapp/monitor/status'); } catch (e) { mon = null; }
   body.innerHTML = _shRender(t) + _shGeoRender(g) + _shMonRender(mon);
   loadShieldOps();
-  loadDeadEntities();
-}
-
-// Переход из «Защиты» в карточку конкретной проверки с её сохранённым результатом.
-async function loadDeadEntities() {
-  const box = document.getElementById('shDeadBox');
-  if (!box) return;
-  try {
-    const result = await api('/api/miniapp/restrictions/dead');
-    box.innerHTML = '';
-    if (!result.op_id) return;
-    const unavailable = Array.isArray(result.dead) ? result.dead : [];
-    const rows = result.cleanup_available ? '' : unavailable.map(item =>
-      '<div class="row"><div class="row-body"><div class="row-name">'
-      + esc(item.title || item.id) + '</div><div class="row-val">'
-      + esc(item.reason || 'Недоступен снаружи') + '</div></div></div>').join('');
-    box.innerHTML = '<div class="sec">Результат последней проверки</div>'
-      + '<div class="lst" style="padding:14px">' + rows
-      + '<button type="button" class="btn btn-s" style="width:100%">Открыть карточку проверки</button></div>';
-    box.querySelector('button').onclick = () => openOpDetail(String(result.op_id));
-  } catch (_) {
-    box.innerHTML = '';
-  }
 }
 
 // Авто-мониторинг флота: периодические фоновые проверки (здоровье, ограничения,
@@ -254,8 +231,6 @@ function _shRender(t) {
         : '<button class="btn btn-p" id="shRunBtn" onclick="runShieldCheck()" style="width:100%"' + disabled + '>' +
             '🛡 Проверить ' + total + ' ' + _shPlural(total) + '</button>') +
     '</div>' +
-    // Быстрая уборка мёртвых карточек после проверки (заполняется loadDeadEntities).
-    '<div id="shDeadBox"></div>' +
     '<div class="sec">Последние проверки</div>' +
     '<div class="lst" id="shOpsList"><div class="spin-wrap"><div class="spin"></div></div></div>';
 }
@@ -325,103 +300,5 @@ async function loadShieldOps() {
       : '');
   } catch (e) {
     box.innerHTML = errHtml('Не удалось загрузить проверки: ' + ((e && e.message) || ''), 'loadShieldOps()');
-  }
-}
-
-function _restrScreen() {
-  let el = document.getElementById('s-restrcleanup');
-  if (el) return el;
-  el = document.createElement('div');
-  el.className = 'screen';
-  el.id = 's-restrcleanup';
-  el.innerHTML =
-    '<div class="hdr">' +
-      '<div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>' +
-      '<div class="hdr-title">🧹 Убрать проблемные</div>' +
-    '</div>' +
-    '<div class="sub-sb" id="s-restrcleanup-body"><div class="spin-wrap"><div class="spin"></div></div></div>';
-  document.body.appendChild(el);
-  return el;
-}
-
-async function openRestrictionCleanup(opId) {
-  if (opId && String(opId) !== '0') return openOpDetail(String(opId));
-  _restrScreen();
-  push('s-restrcleanup');
-  const body = document.getElementById('s-restrcleanup-body');
-  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
-  try {
-    const report = await api('/api/miniapp/restrictions/dead');
-    if (report.cleanup_available && report.op_id) {
-      body.innerHTML = '<button type="button" class="btn btn-s">Открыть карточку проверки</button>';
-      body.querySelector('button').onclick = () => openOpDetail(String(report.op_id));
-      return;
-    }
-    const d = await api('/api/miniapp/restrictions/problems');
-    body.innerHTML = _restrCleanupRender((d && d.problems) || []);
-  } catch (e) {
-    body.innerHTML = errHtml(errRu(e, 'Не удалось получить список'), retryCall('openRestrictionCleanup', 0));
-  }
-}
-
-function _restrCleanupRender(list) {
-  if (!list.length) {
-    return '<div style="padding:8px 0">' + empty('✅', 'Проблемных ресурсов нет', 'Последняя проверка не нашла заблокированных, скрытых или недоступных — убирать нечего') + '</div>';
-  }
-  const kindIco = { channel: '📡', group: '💬', bot: '🤖' };
-  const rows = list.map(function (x) {
-    const ico = kindIco[x.kind] || '🔗';
-    const stColor = x.status === 'restricted' ? 'var(--red)' : x.status === 'unreachable' ? 'var(--red)' : 'var(--orange)';
-    return '<label class="chk-row" style="display:flex;align-items:flex-start;gap:8px;padding:9px 0;border-top:1px solid var(--sep);font-size:14px">' +
-      '<input type="checkbox" class="restr-cb" ' + (x.dead && x.id_text ? '' : 'disabled') + ' value="' + esc(x.id_text || '') + '" data-kind="' + esc(x.kind || '') + '" style="margin-top:3px">' +
-      '<div style="flex:1 1 auto;min-width:0">' +
-        '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ico + ' ' + esc(x.title || x.id) + '</div>' +
-        '<div style="font-size:12px;margin-top:2px"><span style="color:' + stColor + '">' + esc(x.status_label || '') + '</span>' + (x.reason ? ('<span style="color:var(--hint)"> · ' + esc(x.reason) + '</span>') : '') + '</div>' +
-      '</div></label>';
-  }).join('');
-  return '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin:12px 14px 6px">' +
-      'Проверка нашла <b>' + list.length + '</b> ' + _shPlural(list.length) + ' с проблемами. ' +
-      'Можно выбрать недоступные ресурсы для отключения в Infragram. ' +
-      'Ограниченные и скрытые ресурсы показаны для справки.' +
-    '</div>' +
-    '<div style="display:flex;gap:8px;margin:0 14px 8px">' +
-      '<button class="btn btn-s" onclick="restrCleanupSelectAll(true)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">✅ Все</button>' +
-      '<button class="btn btn-s" onclick="restrCleanupSelectAll(false)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">⬜ Снять</button>' +
-    '</div>' +
-    '<div class="lst" style="margin:0 14px">' + rows + '</div>' +
-    '<div class="actions" style="padding:10px 14px 4px">' +
-      '<button class="btn btn-d" onclick="restrCleanupRemove()" style="width:100%">🗑 Убрать выбранные из списка</button>' +
-    '</div>' +
-    '<div id="restrCleanupErr" style="color:var(--red);font-size:13px;margin:6px 14px"></div>';
-}
-
-function restrCleanupSelectAll(on) {
-  document.querySelectorAll('.restr-cb').forEach(function (cb) { cb.checked = !!on && !cb.disabled; });
-}
-
-async function restrCleanupRemove() {
-  const errEl = document.getElementById('restrCleanupErr');
-  if (errEl) errEl.textContent = '';
-  const checked = [].slice.call(document.querySelectorAll('.restr-cb:checked'));
-  const channel_ids = [], bot_ids = [];
-  checked.forEach(function (cb) {
-    const id = cb.value;
-    if (!/^-?[1-9]\d*$/.test(id)) return;
-    if (cb.getAttribute('data-kind') === 'bot') bot_ids.push(id); else channel_ids.push(id);
-  });
-  const n = channel_ids.length + bot_ids.length;
-  if (!n) { if (errEl) errEl.textContent = 'Отметьте хотя бы один ресурс'; return; }
-  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nВыбранные недоступные ресурсы будут отключены в Infragram. Управление можно восстановить.')) return;
-  const payload = {};
-  if (channel_ids.length) payload.channel_ids = channel_ids;
-  if (bot_ids.length) payload.bot_ids = bot_ids;
-  try {
-    const r = await api('/api/miniapp/restrictions/remove_dead', { method: 'POST', body: JSON.stringify(payload) });
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('🗑 Убрано из списка: ' + (r.removed || 0));
-    openRestrictionCleanup(0);
-  } catch (e) {
-    tg.HapticFeedback?.notificationOccurred('error');
-    if (errEl) errEl.textContent = errRu(e, 'Не удалось убрать');
   }
 }

@@ -188,6 +188,21 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("vault_analytics viewer=%s owner=%s", uid, owner_id)
             return _json_resp({"total": 0, "days": days})
 
+    async def vault_chats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        owner_id, owner_err = _vault_owner(request, uid)
+        if owner_err is not None:
+            return owner_err
+        from services import vault_service as _v
+        try:
+            chats = await _v.list_chats(pool, owner_id, limit=200)
+        except Exception:
+            log.exception("vault_chats viewer=%s owner=%s", uid, owner_id)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"chats": chats, "total": len(chats)})
+
     async def vault_messages(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -458,97 +473,11 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(res.get("error") or "Не отправлено", 400)
         return _json_resp({"ok": True, "message_id": res.get("message_id")})
 
-    async def vault_dialogs(request: web.Request) -> web.Response:
-        """Список диалогов как в Telegram: папки, непрочитанные, ждущие ответа.
-
-        ?folder=all|unread|waiting|deleted|archived, ?q= — поиск по имени,
-        нику, превью и заметке. counts — числа для всех вкладок сразу."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        owner_id, owner_err = _vault_owner(request, uid)
-        if owner_err is not None:
-            return owner_err
-        q = request.query
-        try:
-            limit = max(1, min(int(q.get("limit", 200)), 500))
-            offset = max(int(q.get("offset", 0)), 0)
-        except (TypeError, ValueError):
-            limit, offset = 200, 0
-        from services import vault_dialogs as _vd
-        try:
-            res = await _vd.dialogs(pool, owner_id, folder=q.get("folder", "all"),
-                                    q=(q.get("q") or "")[:100], limit=limit,
-                                    offset=offset)
-        except Exception:
-            log.exception("vault_dialogs viewer=%s owner=%s", uid, owner_id)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp(res)
-
-    async def vault_dialog_info(request: web.Request) -> web.Response:
-        """Карточка одного диалога: объёмы, даты, скорость ответа, CRM."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        owner_id, owner_err = _vault_owner(request, uid)
-        if owner_err is not None:
-            return owner_err
-        try:
-            chat_id = int(request.match_info["chat_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор чата", 400)
-        from services import vault_dialogs as _vd
-        try:
-            info = await _vd.dialog_info(pool, owner_id, chat_id)
-        except Exception:
-            log.exception("vault_dialog_info viewer=%s owner=%s chat=%s",
-                          uid, owner_id, chat_id)
-            return _err(_INTERNAL_ERROR, 500)
-        if not info:
-            return _err("Диалог не найден", 404)
-        return _json_resp(info)
-
-    async def vault_dialog_state(request: web.Request) -> web.Response:
-        """Действия над диалогом: прочитано, отвечено, купил, закрепить,
-        в архив, без напоминаний, заметка. Только своё хранилище."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        owner_id, owner_err = _vault_owner(request, uid)
-        if owner_err is not None:
-            return owner_err
-        if owner_id != uid:
-            return _err("Чужое хранилище доступно только для просмотра", 403)
-        try:
-            chat_id = int(request.match_info["chat_id"])
-            body = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not isinstance(body, dict):
-            return _err("Неверный запрос", 400)
-        changes = {}
-        for k in ("pinned", "archived", "muted", "read", "handled", "purchased"):
-            if k in body and isinstance(body[k], bool):
-                changes[k] = body[k]
-        if isinstance(body.get("note"), str):
-            changes["note"] = body["note"]
-        if not changes:
-            return _err("Нечего менять", 400)
-        from services import vault_dialogs as _vd
-        try:
-            st = await _vd.set_state(pool, owner_id, chat_id, **changes)
-        except Exception:
-            log.exception("vault_dialog_state uid=%s chat=%s", uid, chat_id)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "state": st})
-
     # «Хранилище» (Echo Vault)
     app.router.add_get("/api/miniapp/vault/owners", vault_owners)
-    app.router.add_get("/api/miniapp/vault/dialogs", vault_dialogs)
-    app.router.add_get("/api/miniapp/vault/chat/{chat_id}/info", vault_dialog_info)
-    app.router.add_post("/api/miniapp/vault/chat/{chat_id}/state", vault_dialog_state)
     app.router.add_get("/api/miniapp/vault/status", vault_status)
     app.router.add_get("/api/miniapp/vault/analytics", vault_analytics)
+    app.router.add_get("/api/miniapp/vault/chats", vault_chats)
     app.router.add_get("/api/miniapp/vault/chat/{chat_id}/messages", vault_messages)
     app.router.add_get("/api/miniapp/vault/search", vault_search)
     app.router.add_get("/api/miniapp/vault/recent", vault_recent)

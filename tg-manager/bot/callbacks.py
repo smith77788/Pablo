@@ -150,18 +150,6 @@ class SnoozeCb(CallbackData, prefix="snz"):
     code: str = ""
 
 
-class VaultCb(CallbackData, prefix="vlt"):
-    """Хранилище в боте: список диалогов и карточка диалога.
-
-    a: list | open | msgs | reply | done | buy | pin | arch | mute | cancel
-    c — chat_id диалога (0 для списка); f — папка списка; p — страница.
-    """
-    a: str
-    c: int = 0
-    f: str = "all"
-    p: int = 0
-
-
 class SwarmCb(CallbackData, prefix="sw"):
     action: str
     bot_id: int = 0

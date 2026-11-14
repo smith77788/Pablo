@@ -26,9 +26,9 @@ def test_mass_post_confirms_before_publish():
     # подтверждение ТОЛЬКО для необратимого post, до отправки
     i_conf = body.find("askConfirm")
     i_api = body.find("/api/miniapp/channels/mass")
-    assert i_conf != -1 and "body.op==='post'" in body, "нет подтверждения для массового поста"
+    assert i_conf != -1 and "CHM_OP==='post'" in body, "нет подтверждения для массового поста"
     assert i_conf < i_api, "подтверждение должно быть ДО отправки"
-    assert re.search(r"if\s*\(body.op==='post'\s*&&\s*!await askConfirm", body)
+    assert re.search(r"if\s*\(CHM_OP==='post'\s*&&\s*!await askConfirm", body)
 
 
 def test_metadata_edits_not_gated_by_confirm():
@@ -44,6 +44,7 @@ def _channels_mass_src() -> str:
     срезу фиксированной длины: иначе отрицательная проверка ниже промахнулась бы
     окном при сдвиге кода и выключилась молча (храповик про это)."""
     import ast
+    import inspect
 
     src = api_source()
     tree = ast.parse(src)

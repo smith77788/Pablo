@@ -155,21 +155,3 @@ def test_senders_report_the_real_retry_after(sender):
     assert not slept
     assert out[0] is False
     assert out[1] == long_wait
-
-
-def test_network_exception_url_does_not_leak_token_or_mark_bot_dead(caplog):
-    import logging
-
-    token = "123456:synthetic-sensitive-token"
-
-    class Session:
-        def post(self, url, **kwargs):
-            raise OSError(f"unauthorized route: {url}")
-
-    with caplog.at_level(logging.DEBUG, logger=bot_api.log.name):
-        response, _ = _run_tracking_sleeps(lambda: bot_api._call(Session(), token, "getMe"))
-        alive, _ = _run_tracking_sleeps(lambda: bot_api.check_alive(Session(), token))
-    assert response["error_code"] == 0
-    assert "OSError" in response["description"]
-    assert token not in response["description"] and token not in caplog.text
-    assert alive == bot_api.BOT_UNKNOWN

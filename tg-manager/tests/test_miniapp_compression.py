@@ -50,11 +50,7 @@ def _build_app() -> web.Application:
 
 
 @pytest.fixture
-async def client(monkeypatch):
-    # Здесь проверяется сжатие ПОЛНОЙ страницы. Ленивая (нарезанная) версия
-    # подменяет её через ~1 с после первого открытия — её отдачу и куски
-    # проверяет tests/test_miniapp_lazy.py.
-    monkeypatch.setenv("MINIAPP_LAZY", "0")
+async def client():
     cli = TestClient(TestServer(_build_app()), auto_decompress=False)
     await cli.start_server()
     yield cli

@@ -97,9 +97,7 @@ OWNER = 992001
 # где `chat_id=$2` стоит безусловно. Список имён потому и плох: он переносит
 # довод с места, где тот верен, на место, где не верен.
 _UNIQUE = ("id", "uc.id", "unified_contacts.id", "r.id", "q.id", "a.id",
-           "b.id", "oq.id", "p.id", "s.id", "ba.id", "mb.bot_id",
-           # operation_audit oa (infra_hub.audit_page): id — первичный ключ.
-           "oa.id")
+           "b.id", "oq.id", "p.id", "s.id", "ba.id", "mb.bot_id")
 
 # Запросом со сдвигом считается ТОЛЬКО строковый литерал, в котором есть и
 # подстановка OFFSET, и свой ORDER BY. Первая мерка искала слово OFFSET где

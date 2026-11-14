@@ -200,17 +200,13 @@ def merge_messages(fleet=None, vault=None, bots=None, limit: int = 200,
                    relay=None) -> list[dict]:
     """Одна лента сообщений разговора из всех источников, по времени (старые сверху).
 
-    Каждый элемент: {at, direction: in|out, text, source, channel}; у сообщений
-    флота ещё account_id — аккаунт, на который написал человек.
+    Каждый элемент: {at, direction: in|out, text, source, channel}.
     """
     items: list[dict] = []
     for r in fleet or []:
         items.append({"at": r.get("msg_date"), "direction": "in",
                       "text": r.get("text") or "", "source": SRC_FLEET,
-                      "channel": f"Аккаунт #{r.get('account_id')}",
-                      # Каким аккаунтом флота пришло — по нему черновик ответа
-                      # берёт голос персоны этого аккаунта.
-                      "account_id": r.get("account_id")})
+                      "channel": f"Аккаунт #{r.get('account_id')}"})
     for r in vault or []:
         items.append({"at": r.get("msg_date"), "direction": r.get("direction") or "in",
                       "text": r.get("text") or "", "source": SRC_VAULT,

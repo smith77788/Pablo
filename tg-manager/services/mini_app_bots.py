@@ -33,7 +33,7 @@ def setup_routes(app: web.Application, pool) -> None:
         _str_list, _text, _user_can_use_bot, log, schedule_repeat_minutes,
     )
     from services.security import (
-        escape_html, resolve_url_is_public, selection_ids, tg_id, validate_bot_token,
+        escape_html, resolve_url_is_public, validate_bot_token,
         validate_integer, validate_start_param, validate_string,
     )
 
@@ -73,7 +73,6 @@ def setup_routes(app: web.Application, pool) -> None:
         _BOT_HEALTH_COLS = "mb.last_error, mb.fail_streak, mb.last_ok_at, mb.extra_username,"
         _BOTS_SQL = """SELECT DISTINCT mb.bot_id, mb.username, mb.first_name, mb.is_active,
                       {health}
-                      BOOL_OR(mb.added_by=$1) AS is_owned,
                       COUNT(DISTINCT bu.user_id) FILTER (WHERE bu.is_active=true) AS subscriber_count,
                       COUNT(DISTINCT bu.user_id) AS total_users
                FROM managed_bots mb
@@ -111,9 +110,7 @@ def setup_routes(app: web.Application, pool) -> None:
         total = await _safe_count(pool,
             f"""SELECT COUNT(DISTINCT mb.bot_id) FROM managed_bots mb
                 WHERE ({_BOTS_VISIBLE_SQL})""", uid)
-        rows = [{**dict(row), "bot_id_text": str(row["bot_id"])} for row in (rows or [])]
         return _json_resp({"bots": rows, "total": int(total or 0),
-                           "resource_menu": True,
                            "offset": offset, "limit": limit})
 
     async def bot_detail(request: web.Request) -> web.Response:
@@ -129,11 +126,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not owns:
             return _err("Бот не найден или нет доступа", 404)
         bot = await _safe_fetchrow(pool,
-            """SELECT mb.*, EXISTS (
-                   SELECT 1 FROM managed_bots owned
-                   WHERE owned.bot_id=mb.bot_id AND owned.added_by=$2 AND owned.deleted_at IS NULL
-               ) AS is_owned
-               FROM managed_bots mb WHERE mb.bot_id=$1 AND mb.deleted_at IS NULL""", bot_id, uid)
+            "SELECT * FROM managed_bots WHERE bot_id=$1", bot_id)
         if not bot:
             return _err("Бот не найден", 404)
         # Токен клиенту не отдаём. `SELECT *` тянул и его: у ботов, добавленных
@@ -224,8 +217,9 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        if not isinstance(body, dict):
-            return _err("Неверный запрос", 400)
+        owns = await _user_can_use_bot(pool, uid, bot_id)
+        if not owns:
+            return _err("Бот не найден", 404)
         trigger_type = body.get("trigger_type", "keyword")
         keyword = body.get("keyword", "").strip()
         response_text = body.get("response_text", "").strip()
@@ -263,14 +257,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 """INSERT INTO auto_replies
                        (bot_id, trigger_type, keyword, response_text, is_active,
                         match_mode, buttons, priority, reply_delay_sec)
-                   SELECT $1,$2,$3,$4,TRUE,$5,$6,$7,$8
-                   FROM managed_bots
-                   WHERE bot_id=$1 AND added_by=$9 AND deleted_at IS NULL
-                   FOR SHARE RETURNING id""",
+                   VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7,$8) RETURNING id""",
                 bot_id, trigger_type, keyword or None, response_text, match_mode,
-                buttons_json, priority, reply_delay_sec, uid)
-            if row is None:
-                return _err("Бот не найден", 404)
+                buttons_json, priority, reply_delay_sec)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)
@@ -285,7 +274,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         rows = await _safe_fetch(pool,
@@ -354,7 +343,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # отдать человеку. Экран показывал «?start=promo» и кнопку удаления,
         # то есть всё, кроме самой ссылки, ради которой экран и существует.
         own = await _safe_fetchrow(pool,
-            "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
+            "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
             bot_id, uid)
         if not own:
             return _err("Бот не найден", 404)
@@ -403,7 +392,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         name = validate_string(body.get("name"), max_len=200)
@@ -414,15 +403,9 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("start_param: только латиница, цифры, _ и -, не длиннее 64 символов")
         try:
             row = await pool.fetchrow(
-                "INSERT INTO bot_deep_links(bot_id, name, start_param) "
-                "SELECT $1,$2,$3 FROM managed_bots WHERE bot_id=$1 AND added_by=$4 AND deleted_at IS NULL "
-                "FOR SHARE ON CONFLICT DO NOTHING RETURNING id",
-                bot_id, name, start_param, uid)
+                "INSERT INTO bot_deep_links(bot_id, name, start_param) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id",
+                bot_id, name, start_param)
             if not row:
-                if not await _safe_count(pool,
-                    "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
-                    bot_id, uid):
-                    return _err("Бот не найден", 404)
                 return _err("Такой start_param у бота уже есть")
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception:
@@ -438,7 +421,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         # Try user_activity table first, fallback to bot_users.last_seen
@@ -496,7 +479,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
+                "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid,
             )
         except Exception:
@@ -521,7 +504,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверное тело запроса", 400)
         try:
             res = await pool.execute(
-                "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
+                "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid, note or None,
             )
         except Exception:
@@ -567,7 +550,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active",
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid,
             )
         except Exception:
@@ -607,7 +590,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверное тело запроса", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active",
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid,
             )
         except Exception:
@@ -646,7 +629,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not (name or description or short_description):
             return _err("Укажите хотя бы одно поле", 400)
         row = await _safe_fetchrow(pool,
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active", bot_id, uid)
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not row:
             return _err("Бот не найден", 404)
         try:
@@ -675,9 +658,9 @@ def setup_routes(app: web.Application, pool) -> None:
                         results[key] = bool(jd.get("ok"))
                         if not jd.get("ok"):
                             results[key + "_error"] = jd.get("description", "error")
-                    except Exception:
+                    except Exception as e:
                         results[key] = False
-                        results[key + "_error"] = "Не удалось получить ответ Telegram"
+                        results[key + "_error"] = str(e)[:80]
         except Exception:
             log.exception("bot_profile uid=%d bot=%d", uid, bot_id)
             return _err(_INTERNAL_ERROR, 500)
@@ -695,7 +678,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         row = await _safe_fetchrow(pool,
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active", bot_id, uid)
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not row:
             return _err("Бот не найден", 404)
         try:
@@ -761,7 +744,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             owned = await pool.fetchval(
-                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
             )
         except Exception:
             log.exception("bot_stats uid=%d bot=%d", uid, bot_id)
@@ -873,7 +856,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active",
+                "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid,
             )
         except Exception:
@@ -908,7 +891,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active", bot_id, uid
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
             )
         except Exception:
             log.exception("bot_webhook_delete uid=%d bot=%d", uid, bot_id)
@@ -1065,7 +1048,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не указано, включать или выключать")
         enabled = bool(body["enabled"])
         res = await pool.execute(
-            "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1 AND added_by=$3 AND deleted_at IS NULL",
+            "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1 AND added_by=$3",
             bot_id, enabled, uid,
         )
         if res == "UPDATE 0":
@@ -1088,7 +1071,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Роль бота: вход, конверсия, удержание или общая", 400)
         try:
             res = await pool.execute(
-                "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4 AND deleted_at IS NULL",
+                "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4",
                 role, cluster, bot_id, uid,
             )
             if res == "UPDATE 0":
@@ -1108,7 +1091,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный идентификатор бота", 400)
         try:
             owned = await pool.fetchval(
-                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
             )
         except Exception:
             log.exception("relay_sessions_list ownership uid=%d bot=%d", uid, bot_id)
@@ -1148,7 +1131,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный запрос", 400)
         try:
             res = await pool.execute(
-                "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3 AND deleted_at IS NULL",
+                "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3",
                 enabled, bot_id, uid,
             )
             if res == "UPDATE 0":
@@ -1158,291 +1141,87 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("relay_toggle uid=%d bot=%d", uid, bot_id)
             return _err(_INTERNAL_ERROR, 500)
 
-    # ── Языки бота (модуль «Гео-сеть») ──────────────────────────────────────
-    # Общая основа — services/bot_localization: один список языков, запись с
-    # причинами по-русски, сброс языка, черновой ИИ-перевод.
-
-    async def _mg_bot_token(request: web.Request):
-        """(uid, bot_id, token) своего активного бота или готовый ответ-ошибка."""
+    async def multigeo_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return None, _err("Unauthorized", 401)
+            return _err("Unauthorized", 401)
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return None, _err("Неверный идентификатор бота", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL AND is_active",
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
                 bot_id, uid,
             )
         except Exception as e:
-            log.warning("multigeo db error: %s", e)
-            return None, _err("Ошибка базы данных", 500)
+            log.warning("multigeo_get db error: %s", e)
+            return _err("Ошибка базы данных", 500)
         if not row:
-            return None, _err("Бот не найден", 404)
-        return (uid, bot_id, row["token"]), None
-
-    async def multigeo_get(request: web.Request) -> web.Response:
-        ctx, err = await _mg_bot_token(request)
-        if err:
-            return err
-        _uid, _bot_id, token = ctx
+            return _err("Бот не найден", 404)
         import aiohttp as _aiohttp
         from services import bot_api as _bapi
-        from services import bot_localization as _bl
-        langs = [""] + _bl.LANG_CODES
+        langs = ["", "ru", "en", "de", "fr", "es", "it", "uk", "pt", "zh", "ar"]
         try:
             async with _aiohttp.ClientSession() as session:
-                # Параллельно: последовательно это по три запроса на язык подряд.
-                result = await _bapi.get_localized_profiles(
-                    session, token, langs, concurrency=12)
+                # Параллельно: последовательно это 33 запроса к Telegram подряд.
+                result = await _bapi.get_localized_profiles(session, row["token"], langs)
         except Exception:
             log.exception("multigeo_get")
             return _err(_INTERNAL_ERROR, 500)
-        for p in result:
-            p["label"] = _bl.lang_label(p.get("lang") or "")
-        return _json_resp({"profiles": result, **_bl.catalog()})
+        return _json_resp({"profiles": result})
 
     async def multigeo_set(request: web.Request) -> web.Response:
-        """Сохранить профиль одного языка.
-
-        Пришедший ключ — записать, отсутствующий — не трогать. Пустое поле
-        сбрасывает его только при `replace: true` (форма правки шлёт все три
-        поля и сама решает, что значит пустое); без отметки пустое поле, как и
-        раньше, не трогаем."""
-        ctx, err = await _mg_bot_token(request)
-        if err:
-            return err
-        _uid, _bot_id, token = ctx
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор бота", 400)
         try:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        if not isinstance(body, dict):
-            return _err("Не удалось разобрать запрос")
-        from services import bot_localization as _bl
-        lang = _bl.normalize_lang(body.get("lang"))
-        if lang is None:
-            return _err("Неверный код языка", 400)
-        fields = _bl.clean_fields(body)
-        if body.get("replace") is not True:
-            fields = {k: v for k, v in fields.items() if v}
-        if not fields:
-            return _err("Заполните хотя бы одно поле", 400)
+        lang = (body.get("lang") or "").strip()
+        name = (body.get("name") or "").strip()[:64]
+        description = (body.get("description") or "").strip()[:512]
+        short_description = (body.get("short_description") or "").strip()[:120]
+        if lang == "default":
+            lang = ""
+        try:
+            row = await pool.fetchrow(
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+                bot_id, uid,
+            )
+        except Exception as e:
+            log.warning("multigeo_set db error: %s", e)
+            return _err("Ошибка базы данных", 500)
+        if not row:
+            return _err("Бот не найден", 404)
         import aiohttp as _aiohttp
+        from services import bot_api as _bapi
+        errors = []
         try:
             async with _aiohttp.ClientSession() as session:
-                res = await _bl.apply_profile(session, token, lang, fields)
+                if name:
+                    ok = await _bapi.set_name(session, row["token"], name, lang)
+                    if not ok:
+                        errors.append("name")
+                if description:
+                    ok = await _bapi.set_description(session, row["token"], description, lang)
+                    if not ok:
+                        errors.append("description")
+                if short_description:
+                    ok = await _bapi.set_short_description(session, row["token"], short_description, lang)
+                    if not ok:
+                        errors.append("short_description")
         except Exception:
             log.exception("multigeo_set")
             return _err(_INTERNAL_ERROR, 500)
-        if not res["ok"]:
-            # errors — список ключей (прежний контракт экрана), reasons — почему.
-            return _json_resp({"ok": False, "errors": list(res["errors"]),
-                               "reasons": res["errors"], "saved": res["saved"]})
-        return _json_resp({"ok": True, "saved": res["saved"]})
-
-    async def multigeo_reset(request: web.Request) -> web.Response:
-        """Убрать отдельный профиль языка: человек с этим языком снова видит
-        профиль по умолчанию. Профиль по умолчанию так не убирается."""
-        ctx, err = await _mg_bot_token(request)
-        if err:
-            return err
-        _uid, _bot_id, token = ctx
-        from services import bot_localization as _bl
-        lang = _bl.normalize_lang(request.match_info.get("lang"))
-        if lang is None:
-            return _err("Неверный код языка", 400)
-        if not lang:
-            return _err("Профиль по умолчанию сбросить нельзя — его можно только изменить", 400)
-        import aiohttp as _aiohttp
-        try:
-            async with _aiohttp.ClientSession() as session:
-                res = await _bl.apply_profile(
-                    session, token, lang, {f: "" for f in _bl.FIELDS})
-        except Exception:
-            log.exception("multigeo_reset")
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": res["ok"], "reasons": res["errors"]})
-
-    async def multigeo_translate(request: web.Request) -> web.Response:
-        """Черновой ИИ-перевод профиля на выбранные языки. В Telegram ничего
-        не пишет: черновики возвращаются на экран, владелец правит и сохраняет."""
-        ctx, err = await _mg_bot_token(request)
-        if err:
-            return err
-        uid, _bot_id, token = ctx
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        if not isinstance(body, dict):
-            return _err("Не удалось разобрать запрос")
-        from services import bot_localization as _bl
-        src_lang = _bl.normalize_lang(body.get("source_lang"))
-        if src_lang is None:
-            return _err("Неверный язык-источник", 400)
-        targets: list[str] = []
-        for x in (body.get("target_langs") or []):
-            lc = _bl.normalize_lang(x)
-            if lc and lc != src_lang and lc not in targets:
-                targets.append(lc)
-        if not targets:
-            return _err("Выберите хотя бы один язык для перевода", 400)
-        if len(targets) > 30:
-            return _err("За один раз — не больше 30 языков", 400)
-        import aiohttp as _aiohttp
-        from services import bot_api as _bapi
-        try:
-            async with _aiohttp.ClientSession() as session:
-                prof = await _bapi.get_localized_profiles(session, token, [src_lang])
-        except Exception:
-            log.exception("multigeo_translate read")
-            return _err(_INTERNAL_ERROR, 500)
-        source = prof[0] if prof else {}
-        if not any((source.get(f) or "").strip() for f in _bl.FIELDS):
-            return _err(f"У языка «{_bl.lang_label(src_lang)}» пустой профиль — переводить нечего", 400)
-        try:
-            res = await _bl.translate_profile(
-                source, targets, owner_id=uid,
-                translate_name=body.get("translate_name") is True)
-        except Exception:
-            log.exception("multigeo_translate uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not res["drafts"]:
-            return _err("ИИ не ответил — проверьте подключение ИИ в настройках или повторите позже", 409)
-        return _json_resp({"ok": True, "source": {f: source.get(f) or "" for f in _bl.FIELDS},
-                           **res})
-
-    async def multigeo_apply(request: web.Request) -> web.Response:
-        """Сохранить профили нескольких языков разом (черновики перевода).
-        Итог — по каждому языку отдельно: что сохранилось и почему нет."""
-        ctx, err = await _mg_bot_token(request)
-        if err:
-            return err
-        _uid, _bot_id, token = ctx
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        items = body.get("profiles") if isinstance(body, dict) else None
-        if not isinstance(items, list) or not items:
-            return _err("Нет профилей для сохранения", 400)
-        if len(items) > 30:
-            return _err("За один раз — не больше 30 языков", 400)
-        from services import bot_localization as _bl
-        plan: list[tuple[str, dict]] = []
-        seen: set[str] = set()
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            lang = _bl.normalize_lang(it.get("lang"))
-            if lang is None or lang in seen:
-                continue
-            fields = {k: v for k, v in _bl.clean_fields(it).items() if v}
-            if fields:
-                seen.add(lang)
-                plan.append((lang, fields))
-        if not plan:
-            return _err("Нет заполненных профилей для сохранения", 400)
-        import aiohttp as _aiohttp
-        results = []
-        try:
-            async with _aiohttp.ClientSession() as session:
-                # Подряд, а не параллельно: setMy* у Telegram лимитирован
-                # сильнее прочих методов, а флуд-паузу apply_profile отсыпает сам.
-                for lang, fields in plan:
-                    r = await _bl.apply_profile(session, token, lang, fields)
-                    results.append({"lang": lang or "default",
-                                    "label": _bl.lang_label(lang), **r})
-        except Exception:
-            log.exception("multigeo_apply")
-            return _err(_INTERNAL_ERROR, 500)
-        ok_n = sum(1 for r in results if r["ok"])
-        return _json_resp({"ok": ok_n == len(results), "saved": ok_n,
-                           "total": len(results), "results": results})
-
-    async def multigeo_copy(request: web.Request) -> web.Response:
-        """Перенести языковые профили бота на другие свои боты.
-
-        Это массовое изменение профиля, поэтому оно идёт той же операцией
-        bulk_bot_profile, что и экран «Массовый профиль»: по-ботный журнал,
-        снимок «как было» и откат. Одна операция на язык — у каждой свой
-        снимок и свой откат."""
-        ctx, err = await _mg_bot_token(request)
-        if err:
-            return err
-        uid, src_bot_id, token = ctx
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        if not isinstance(body, dict):
-            return _err("Не удалось разобрать запрос")
-        from services import bot_localization as _bl
-        langs: list[str] = []
-        for x in (body.get("langs") or []):
-            lc = _bl.normalize_lang(x)
-            if lc is not None and lc not in langs:
-                langs.append(lc)
-        if not langs:
-            return _err("Выберите языки, которые переносить", 400)
-        from services.security import selection_ids as _sel_ids
-        # Перенос «на всех» без явного выбора не делаем: нет ключа — тоже ошибка.
-        _picked, _serr = _sel_ids(body, "bot_ids", what="бот", cap=500)
-        if _serr:
-            return _err(_serr, 400)
-        bot_ids = [b for b in (_picked or []) if b != src_bot_id]
-        if not bot_ids:
-            return _err("Выберите боты, на которые переносить", 400)
-        try:
-            _rows = await pool.fetch(
-                "SELECT DISTINCT bot_id FROM managed_bots WHERE added_by=$1 "
-                "AND is_active AND bot_id = ANY($2::bigint[])", uid, bot_ids)
-        except Exception:
-            log.exception("multigeo_copy: выбор ботов uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        live = {int(r["bot_id"]) for r in _rows}
-        bot_ids = [b for b in bot_ids if b in live]
-        if not bot_ids:
-            return _err("Нет подходящих ботов", 400)
-        import aiohttp as _aiohttp
-        from services import bot_api as _bapi
-        try:
-            async with _aiohttp.ClientSession() as session:
-                profs = await _bapi.get_localized_profiles(session, token, langs)
-        except Exception:
-            log.exception("multigeo_copy read")
-            return _err(_INTERNAL_ERROR, 500)
-        by_lang = {("" if p["lang"] == "default" else p["lang"]): p for p in profs}
-        ops: list[dict] = []
-        skipped: list[str] = []
-        for lang in langs:
-            p = by_lang.get(lang)
-            fields = {f: (p.get(f) or "").strip() for f in _bl.FIELDS} if p else {}
-            if not any(fields.values()):
-                skipped.append(_bl.lang_label(lang))
-                continue
-            params = {**fields, "language_code": lang, "bot_ids": bot_ids,
-                      "source_bot_id": src_bot_id}
-            try:
-                op_id = await _obus.submit(
-                    pool, uid, "bulk_bot_profile", params, total_items=len(bot_ids),
-                    label=f"Профиль ботов ({_bl.lang_label(lang)}): {len(bot_ids)} шт.")
-            except PermissionError as exc:
-                return _err(f"Перенос профилей доступен на тарифе "
-                            f"«{getattr(exc, 'required_plan', '')}» и выше — продлите подписку", 403)
-            except Exception:
-                log.exception("multigeo_copy submit uid=%d", uid)
-                return _err(_INTERNAL_ERROR, 500)
-            if op_id:
-                ops.append({"lang": lang or "default", "label": _bl.lang_label(lang),
-                            "op_id": op_id})
-        if not ops:
-            return _err("У выбранных языков пустые профили — переносить нечего", 400)
-        return _json_resp({"ok": True, "ops": ops, "bots": len(bot_ids),
-                           "skipped": skipped})
+        if errors:
+            return _json_resp({"ok": False, "errors": errors})
+        return _json_resp({"ok": True})
 
     async def toggle_bot(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -1465,9 +1244,12 @@ def setup_routes(app: web.Application, pool) -> None:
             if isinstance(body, dict) and isinstance(body.get("active"), bool):
                 want = body["active"]
         try:
-            from database.db import set_managed_bot_active
-
-            row = await set_managed_bot_active(pool, bot_id, uid, want)
+            row = await pool.fetchrow(
+                """UPDATE managed_bots
+                      SET is_active = COALESCE($3::boolean, NOT is_active)
+                    WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL
+                RETURNING bot_id, is_active""",
+                bot_id, uid, want)
             if not row:
                 return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
@@ -1485,7 +1267,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         name = (body.get("name") or "").strip()
@@ -1504,12 +1286,8 @@ def setup_routes(app: web.Application, pool) -> None:
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     funnel_row = await conn.fetchrow(
-                        "INSERT INTO funnels(bot_id, name, trigger_type, keyword) "
-                        "SELECT $1,$2,$3,$4 FROM managed_bots WHERE bot_id=$1 AND added_by=$5 "
-                        "AND deleted_at IS NULL FOR SHARE RETURNING id",
-                        bot_id, name, trigger_type, keyword, uid)
-                    if not funnel_row:
-                        return _err("Бот не найден", 404)
+                        "INSERT INTO funnels(bot_id, name, trigger_type, keyword) VALUES($1,$2,$3,$4) RETURNING id",
+                        bot_id, name, trigger_type, keyword)
                     funnel_id = funnel_row["id"]
                     await conn.execute(
                         "INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes) VALUES($1,1,$2,0)",
@@ -1528,7 +1306,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         total = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
@@ -1563,7 +1341,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         rows = await _safe_fetch(pool,
@@ -1588,7 +1366,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not execute_at:
             return _err("Нужно время запуска в формате ISO")
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
         try:
@@ -1604,18 +1382,13 @@ def setup_routes(app: web.Application, pool) -> None:
             try:
                 row = await pool.fetchrow(
                     "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by, repeat_interval_min) "
-                    "SELECT $1,$2,$3,$4,$5 FROM managed_bots WHERE bot_id=$1 AND added_by=$4 "
-                    "AND deleted_at IS NULL FOR SHARE RETURNING id",
+                    "VALUES($1,$2,$3,$4,$5) RETURNING id",
                     bot_id, text, dt, uid, repeat_min)
             except asyncpg.UndefinedColumnError:
                 # schema_v145 ещё не применена — падаем на одноразовое.
                 row = await pool.fetchrow(
-                    "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by) "
-                    "SELECT $1,$2,$3,$4 FROM managed_bots WHERE bot_id=$1 AND added_by=$4 "
-                    "AND deleted_at IS NULL FOR SHARE RETURNING id",
+                    "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by) VALUES($1,$2,$3,$4) RETURNING id",
                     bot_id, text, dt, uid)
-            if not row:
-                return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "id": row["id"], "repeat_min": repeat_min})
         except Exception:
             log.exception("create_schedule bot=%d uid=%d", bot_id, uid)
@@ -1633,7 +1406,7 @@ def setup_routes(app: web.Application, pool) -> None:
         rows = await _safe_fetch(
             pool,
             "SELECT bot_id, username, first_name, token FROM managed_bots "
-            "WHERE added_by=$1 AND deleted_at IS NULL ORDER BY bot_id", uid)
+            "WHERE added_by=$1 ORDER BY bot_id", uid)
         rows = rows or []
         if not rows:
             return _json_resp({"bots": [], "alive": 0, "dead": 0, "unknown": 0})
@@ -1683,8 +1456,23 @@ def setup_routes(app: web.Application, pool) -> None:
             return None, "Не выбран ни один бот"
         return bot_ids, None
 
+    def _deleted_count(res) -> int:
+        """Число строк из тега asyncpg «DELETE N» (0 при любом другом ответе)."""
+        s = str(res)
+        if not s.startswith("DELETE"):
+            return 0
+        try:
+            return int(s.rsplit(" ", 1)[-1])
+        except (ValueError, IndexError):
+            return 0
+
     async def bots_bulk_delete(request: web.Request) -> web.Response:
-        """Убрать выбранных ботов владельца, сохранив аудиторию."""
+        """Полностью удалить выбранных ботов владельца (одного или нескольких).
+
+        В отличие от «убрать из работы» (is_active=FALSE) — это DELETE строки
+        managed_bots; связанные записи уходят по ON DELETE CASCADE. Скоуп —
+        только свои боты (added_by). Идемпотентно: повтор по уже удалённым = 0.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -1692,60 +1480,68 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Некорректный запрос", 400)
-        bot_ids, error = selection_ids(body, "bot_ids", what="бот")
-        if error or not bot_ids or any(tg_id(bot_id, positive=True) is None for bot_id in bot_ids):
-            return _err(error or "Выберите ботов с действительными идентификаторами", 400)
+        bot_ids = _parse_bot_ids(body.get("bot_ids"))
+        if bot_ids is None:
+            return _err("Не выбран ни один бот", 400)
         try:
-            from database.db import delete_bots, record_manual_action
-
-            removed = await delete_bots(pool, uid, bot_ids)
-            if removed:
-                await record_manual_action(
-                    pool, uid, "bots_bulk_delete",
-                    target=",".join(str(bot_id) for bot_id in removed[:50]))
-            return _json_resp({"ok": True, "deleted": len(removed), "requested": len(bot_ids)})
+            res = await pool.execute(
+                "DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2",
+                bot_ids, uid)
+            from database.db import record_manual_action
+            await record_manual_action(
+                pool, uid, "bots_bulk_delete",
+                target=",".join(str(b) for b in bot_ids[:50]))
+            return _json_resp({"ok": True, "deleted": _deleted_count(res),
+                               "requested": len(bot_ids)})
         except Exception:
             log.exception("bots_bulk_delete uid=%d n=%d", uid, len(bot_ids))
             return _err(_INTERNAL_ERROR, 500)
 
     async def bots_cleanup_dead(request: web.Request) -> web.Response:
-        """Скрыть ботов с подтверждённо отозванным токеном, сохранив данные."""
+        """Проверить всех ботов владельца и удалить ТОЛЬКО мёртвых (401).
+
+        Боты со статусом unknown (сеть/Telegram недоступны) НЕ удаляются:
+        удалять можно лишь то, про что точно известно, что токен отозван.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        from database.db import delete_bots, record_manual_action
+        rows = await _safe_fetch(
+            pool, "SELECT bot_id, token FROM managed_bots WHERE added_by=$1", uid)
+        rows = rows or []
+        if not rows:
+            return _json_resp({"checked": 0, "deleted": 0, "dead": 0,
+                               "unknown": 0, "alive": 0, "deleted_ids": []})
         from services import bot_api
         import aiohttp as _aio
-
+        tokens = [r["token"] for r in rows]
         try:
-            rows = await pool.fetch(
-                "SELECT bot_id, token FROM managed_bots WHERE added_by=$1 "
-                "AND deleted_at IS NULL AND NOT cleanup_paused ORDER BY bot_id", uid)
-            statuses = []
-            if rows:
-                async with _aio.ClientSession() as sess:
-                    statuses = await bot_api.batch_check_alive(sess, [r["token"] for r in rows])
-            if len(rows) != len(statuses):
-                return _err("Проверка вернула неполный результат. Повторите проверку.", 409)
-
-            checked_tokens = {row["bot_id"]: row["token"] for row, status in zip(rows, statuses)
-                              if status == bot_api.BOT_DEAD}
-            removed = []
-            if checked_tokens:
-                removed = await delete_bots(pool, uid, list(checked_tokens), checked_tokens=checked_tokens)
-            if removed:
+            async with _aio.ClientSession() as sess:
+                statuses = await bot_api.batch_check_alive(sess, tokens)
+        except Exception:
+            log.exception("bots_cleanup_dead check uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        dead_ids = [int(r["bot_id"]) for r, st in zip(rows, statuses)
+                    if st == bot_api.BOT_DEAD]
+        unknown = sum(1 for st in statuses if st == bot_api.BOT_UNKNOWN)
+        alive = sum(1 for st in statuses if st == bot_api.BOT_ALIVE)
+        deleted = 0
+        if dead_ids:
+            try:
+                res = await pool.execute(
+                    "DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2",
+                    dead_ids, uid)
+                deleted = _deleted_count(res)
+                from database.db import record_manual_action
                 await record_manual_action(
                     pool, uid, "bots_cleanup_dead",
-                    target=",".join(str(bot_id) for bot_id in removed[:50]))
-            return _json_resp({
-                "checked": len(rows), "deleted": len(removed), "dead": len(checked_tokens),
-                "unknown": statuses.count(bot_api.BOT_UNKNOWN), "alive": statuses.count(bot_api.BOT_ALIVE),
-                "deleted_ids": removed, "changed_since_check": len(checked_tokens) - len(removed),
-            })
-        except Exception as exc:
-            # Сетевое исключение может содержать URL с токеном.
-            log.warning("bots_cleanup_dead uid=%d error=%s", uid, type(exc).__name__)
-            return _err(_INTERNAL_ERROR, 500)
+                    target=",".join(str(b) for b in dead_ids[:50]))
+            except Exception:
+                log.exception("bots_cleanup_dead delete uid=%d", uid)
+                return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"checked": len(rows), "deleted": deleted,
+                           "dead": len(dead_ids), "unknown": unknown,
+                           "alive": alive, "deleted_ids": dead_ids})
 
     async def bots_bulk_profile(request: web.Request) -> web.Response:
         """Массово изменить профиль выбранных (или ВСЕХ) ботов владельца:
@@ -1975,10 +1771,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_put("/api/miniapp/bot/{bot_id}/relay/toggle", relay_toggle)
     app.router.add_get("/api/miniapp/bot/{bot_id}/multigeo", multigeo_get)
     app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo", multigeo_set)
-    app.router.add_delete("/api/miniapp/bot/{bot_id}/multigeo/{lang}", multigeo_reset)
-    app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo/translate", multigeo_translate)
-    app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo/apply", multigeo_apply)
-    app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo/copy", multigeo_copy)
     app.router.add_post("/api/miniapp/bots/scan_fleet", bots_scan_fleet)
     app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
     app.router.add_post("/api/miniapp/bots/connect_discovered", bots_connect_discovered)

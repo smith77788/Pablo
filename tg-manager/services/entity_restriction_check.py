@@ -184,8 +184,7 @@ def classify(kind: str, signals: dict) -> dict:
       has_username: bool            — публичная (есть @username) → участвует в поиске
       restricted: bool              — флаг restricted на сущности
       restriction_reasons: list[dict] — из parse_restriction_reasons
-      found_in_search: bool | None  — найдена ли в поиске ПО НАЗВАНИЮ (None = не искали)
-      found_by_username: bool | None — найдена ли в поиске по точному @username
+      found_in_search: bool | None  — найдена ли в глобальном поиске (None = не искали)
       responds: bool | None         — для бота: ответил ли на /start (None = не слали)
 
     Возвращает {status, label, reason_ru, signals}. Приоритеты — от худшего:
@@ -223,16 +222,6 @@ def classify(kind: str, signals: dict) -> dict:
             "signals": signals,
         }
 
-    # Токен бота Telegram больше не принимает (getMe по токену, без аккаунта
-    # флота) — бот удалён или токен отозван.
-    if kind == "bot" and signals.get("token_alive") is False:
-        return {
-            "status": STATUS_UNREACHABLE,
-            "label": _STATUS_LABELS[STATUS_UNREACHABLE],
-            "reason_ru": "Telegram не принимает токен бота — бот удалён или токен отозван",
-            "signals": signals,
-        }
-
     # Бот резолвится, но молчит на /start — жив в каталоге, но недоступен для
     # диалога (остановлен владельцем или ограничен). Это тоже недоступность.
     if kind == "bot" and signals.get("responds") is False:
@@ -244,42 +233,9 @@ def classify(kind: str, signals: dict) -> dict:
         }
 
     # Скрыт из поиска — только для публичных (у приватных поиска нет по определению).
-    # Поиск по ТОЧНОМУ юзернейму Telegram почти всегда возвращает сущность, это
-    # не признак видимости. Теневой бан виден по названию: по имени сущность из
-    # глобального поиска пропадает, по юзернейму ещё находится.
     has_username = bool(signals.get("has_username"))
-    found_by_name = signals.get("found_in_search")
-    found_by_username = signals.get("found_by_username")
-    if has_username and found_by_name is False and found_by_username is True:
-        return {
-            "status": STATUS_HIDDEN,
-            "label": _STATUS_LABELS[STATUS_HIDDEN],
-            "reason_ru": "Находится в поиске по юзернейму, но НЕ по названию — "
-                         "скрыт из поиска по имени (теневой бан)",
-            "signals": signals,
-        }
-    if has_username and found_by_name is False and found_by_username is False:
-        return {
-            "status": STATUS_HIDDEN,
-            "label": _STATUS_LABELS[STATUS_HIDDEN],
-            "reason_ru": "Публичный @username резолвится по ссылке, но не находится "
-                         "в глобальном поиске ни по названию, ни по юзернейму — "
-                         "скрыт из поиска (теневой бан)",
-            "signals": signals,
-        }
-    # По названию не нашли, а юзернейм-выдачу не мерили (например, одиночный
-    # аккаунт мерит только одну) — считаем скрытием по названию.
-    if has_username and found_by_name is False and found_by_username is None:
-        return {
-            "status": STATUS_HIDDEN,
-            "label": _STATUS_LABELS[STATUS_HIDDEN],
-            "reason_ru": "Публичный @username резолвится по ссылке, но не находится "
-                         "в глобальном поиске по названию — скрыт из поиска (теневой бан)",
-            "signals": signals,
-        }
-    # Название проверить было нечем (короткое/совпадает с юзернеймом), а по
-    # юзернейму сущность из поиска пропала — тоже признак скрытия.
-    if has_username and found_by_name is None and found_by_username is False:
+    found_in_search = signals.get("found_in_search")
+    if has_username and found_in_search is False:
         return {
             "status": STATUS_HIDDEN,
             "label": _STATUS_LABELS[STATUS_HIDDEN],
@@ -446,66 +402,36 @@ async def resolve_flags(
     return {"signals": signals, "meta": meta}
 
 
-async def _search_hit(client, *, query: str, username: str,
-                      target_id: Optional[int]) -> Optional[bool]:
-    """Есть ли НАША сущность в выдаче глобального поиска по строке `query`.
+async def search_visible(client, *, username: str,
+                         target_id: Optional[int] = None) -> Optional[bool]:
+    """Фаза 2: виден ли публичный @username в глобальном поиске.
 
-    True — наша сущность (по id или точному @username) в выдаче; False — её
-    там нет; None — сбой поиска (вердикт не выносим). Совпадение по id/username,
-    а не по названию: у названия бывают однофамильцы, и чужой бот с тем же
-    именем не должен считаться «нашим найден».
+    True — найден; False — по точному username не найден (скрыт из поиска);
+    None — сбой поиска (сигнал не снят, вердикт «скрыт» не выносим). Вызывать
+    ВНЕШНИМ аккаунтом: у управляющего сущность в диалогах и найдётся всегда.
     """
-    query = (query or "").strip()
-    if not query:
+    username = (username or "").strip().lstrip("@")
+    if not username:
         return None
     try:
         from telethon.tl.functions.contacts import SearchRequest
         found = await asyncio.wait_for(
-            client(SearchRequest(q=query, limit=50)), timeout=_SEARCH_TIMEOUT)
+            client(SearchRequest(q=username, limit=30)), timeout=_SEARCH_TIMEOUT)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001
-        log.debug("_search_hit failed for %r: %s", query, e)
+        log.debug("search_visible failed for @%s: %s", username, e)
         return None
-    uname_low = (username or "").strip().lstrip("@").lower()
+    uname_low = username.lower()
     for coll in (getattr(found, "chats", None) or [],
                  getattr(found, "users", None) or []):
         for ent in coll:
             if target_id is not None and int(getattr(ent, "id", 0)) == int(target_id):
                 return True
             ent_uname = (getattr(ent, "username", None) or "").lower()
-            if uname_low and ent_uname == uname_low:
+            if ent_uname and ent_uname == uname_low:
                 return True
     return False
-
-
-async def search_visible(client, *, username: str, title: Optional[str] = None,
-                         target_id: Optional[int] = None) -> dict:
-    """Фаза 2: видна ли публичная сущность в глобальном поиске.
-
-    Телеграм на поиск по ТОЧНОМУ @username почти всегда возвращает сущность
-    (он резолвит юзернеймы напрямую) — это не признак видимости. Настоящий
-    теневой бан виден иначе: по НАЗВАНИЮ сущность из глобального поиска
-    пропадает, а по юзернейму ещё находится. Поэтому мерим обе выдачи.
-
-    Возвращает {by_name, by_username}: каждое True | False | None (сбой/нечем).
-    Вызывать ВНЕШНИМ аккаунтом: у управляющего сущность в диалогах и
-    найдётся всегда.
-    """
-    username = (username or "").strip().lstrip("@")
-    out: dict = {"by_name": None, "by_username": None}
-    if not username:
-        return out
-    title = (title or "").strip()
-    # Короткое/пустое название на поиск по имени не проверяем: одна-две буквы
-    # дают тысячи однофамильцев, наша сущность законно не влезет в выдачу, и
-    # вердикт «скрыт» был бы ложным. Для таких — только проверка по юзернейму.
-    if len(title) >= 3 and title.lstrip("@").lower() != username.lower():
-        out["by_name"] = await _search_hit(client, query=title, username=username,
-                                            target_id=target_id)
-    out["by_username"] = await _search_hit(client, query=username, username=username,
-                                           target_id=target_id)
-    return out
 
 
 async def probe_entity(
@@ -537,12 +463,9 @@ async def probe_entity(
     if (do_search and signals.get("has_username") and signals.get("resolved")
             and not signals.get("_short_circuit")):
         vis = await search_visible(search_client or access_client,
-                                   username=username, title=meta.get("title"),
-                                   target_id=meta.get("id"))
-        if vis.get("by_name") is not None:
-            signals["found_in_search"] = vis["by_name"]
-        if vis.get("by_username") is not None:
-            signals["found_by_username"] = vis["by_username"]
+                                   username=username, target_id=meta.get("id"))
+        if vis is not None:
+            signals["found_in_search"] = vis
 
     signals.pop("_short_circuit", None)
     out = classify(kind, signals)

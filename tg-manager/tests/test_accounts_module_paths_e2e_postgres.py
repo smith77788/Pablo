@@ -482,39 +482,3 @@ def test_added_account_is_placed_on_a_proxy_and_keeps_it(pool):
     assert _run(pool.fetchval("SELECT proxy_id FROM tg_accounts WHERE id=$1", a)) == other
     _run(pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER))
     _run(pool.execute("DELETE FROM user_proxies WHERE owner_id=$1", OWNER))
-
-
-def test_mass_stage_moves_only_the_selected_owner_slice(pool, monkeypatch):
-    from aiohttp import web
-    from aiohttp.test_utils import make_mocked_request
-
-    from services import mini_app_accounts, mini_app_api
-
-    selected = _acc(pool)
-    other_stage = _acc(pool)
-    other_owner = _acc(pool, owner=OTHER)
-    _run(pool.execute("UPDATE tg_accounts SET stage='ready' WHERE id=ANY($1::bigint[])",
-                      [selected, other_owner]))
-    monkeypatch.setattr(mini_app_api, "_get_uid", lambda request: OWNER)
-    app = web.Application()
-    mini_app_accounts.setup_routes(app, pool)
-    path = "/api/miniapp/accounts/mass"
-    handler = next(route.handler for route in app.router.routes()
-                   if route.resource.canonical == path)
-
-    async def move():
-        request = make_mocked_request("POST", path)
-
-        async def payload():
-            return {"op": "set_stage", "select_all_filtered": True, "stage": "ready",
-                    "target_stage": "resting"}
-
-        request.json = payload
-        response = await handler(request)
-        assert response.status == 200, response.text
-        rows = await pool.fetch(
-            "SELECT id, stage FROM tg_accounts WHERE id=ANY($1::bigint[])",
-            [selected, other_stage, other_owner])
-        return {row["id"]: row["stage"] for row in rows}
-
-    assert _run(move()) == {selected: "resting", other_stage: None, other_owner: "ready"}

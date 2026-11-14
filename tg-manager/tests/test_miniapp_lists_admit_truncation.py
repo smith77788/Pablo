@@ -23,7 +23,7 @@ import os
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-from tests.miniapp_source import api_source, miniapp_source
+from tests.miniapp_source import api_source
 
 # Весь API-слой мини-аппа: ручки переезжают из 25-тысячестрочного
 # mini_app_api.py в соседние services/mini_app_*.py, и проверка не должна
@@ -68,9 +68,7 @@ def _api_funcs() -> dict[str, str]:
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
-    # Весь мини-апп, а не только index.html: экраны переезжают в
-    # mini_app/screens/*.js («Клон и адаптация» — screens/clone_adapt.js).
-    return miniapp_source()
+    return open(HTML, encoding="utf-8").read()
 
 
 def _js_func(name: str) -> str:

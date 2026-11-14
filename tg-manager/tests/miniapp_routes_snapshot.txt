@@ -1,5 +1,4 @@
 DELETE /api/miniapp/account/{acc_id}
-DELETE /api/miniapp/ad_intel/channel/{username}
 DELETE /api/miniapp/ai_memory/{mem_id}
 DELETE /api/miniapp/api_key/{key_id}
 DELETE /api/miniapp/asset_template/{tpl_id}
@@ -8,7 +7,6 @@ DELETE /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 DELETE /api/miniapp/auto_reply/{reply_id}
 DELETE /api/miniapp/bot/{bot_id}
 DELETE /api/miniapp/bot/{bot_id}/avatar
-DELETE /api/miniapp/bot/{bot_id}/multigeo/{lang}
 DELETE /api/miniapp/bot/{bot_id}/webhook
 DELETE /api/miniapp/channel/{ch_id}
 DELETE /api/miniapp/chatlist_folders/{folder_id}
@@ -31,8 +29,6 @@ DELETE /api/miniapp/networks/nodes/{node_id}
 DELETE /api/miniapp/node/{node_id}
 DELETE /api/miniapp/notary/{watch_id}
 DELETE /api/miniapp/persona/{persona_id}
-DELETE /api/miniapp/persona/{persona_id}/memory
-DELETE /api/miniapp/persona/{persona_id}/peer/{peer_id}
 DELETE /api/miniapp/presence_pack/{pack_id}
 DELETE /api/miniapp/proxy/{proxy_id}
 DELETE /api/miniapp/sales/delivery/{did}
@@ -43,7 +39,6 @@ DELETE /api/miniapp/sales/product/{prid}
 DELETE /api/miniapp/sales/promo/{prid}
 DELETE /api/miniapp/self_promo/{tpl_id}
 DELETE /api/miniapp/semantic_memory/{bot_id}/user/{user_id}
-DELETE /api/miniapp/semantic_memory/{bot_id}/user/{user_id}/fact/{key}
 DELETE /api/miniapp/stars/experiment/{exp_id}
 DELETE /api/miniapp/template/{tpl_id}
 DELETE /api/miniapp/uch/contacts/{contact_id}
@@ -69,7 +64,6 @@ GET /api/miniapp/account/{acc_id}/channels
 GET /api/miniapp/account/{acc_id}/contacts
 GET /api/miniapp/account/{acc_id}/dialog/{peer}/history
 GET /api/miniapp/account/{acc_id}/dialogs
-GET /api/miniapp/account/{acc_id}/sessions
 GET /api/miniapp/accounts
 GET /api/miniapp/accounts/export
 GET /api/miniapp/accounts/export_json
@@ -77,11 +71,6 @@ GET /api/miniapp/accounts/health
 GET /api/miniapp/accounts/survival
 GET /api/miniapp/accounts/tags
 GET /api/miniapp/ad_intel
-GET /api/miniapp/ad_intel/ads
-GET /api/miniapp/ad_intel/advertiser/{username}
-GET /api/miniapp/ad_intel/advertisers
-GET /api/miniapp/ad_intel/channel/{username}
-GET /api/miniapp/ad_intel/channels
 GET /api/miniapp/admin/actions
 GET /api/miniapp/admin/audit
 GET /api/miniapp/admin/broadcast/recent
@@ -154,7 +143,6 @@ GET /api/miniapp/check_owned_restrictions/targets
 GET /api/miniapp/circuit_breaker
 GET /api/miniapp/cleaner/accounts
 GET /api/miniapp/clone_adapt/history
-GET /api/miniapp/clone_adapt/profile
 GET /api/miniapp/cloud/file/{file_id}/download
 GET /api/miniapp/cloud/files
 GET /api/miniapp/cloud/status
@@ -164,7 +152,6 @@ GET /api/miniapp/community/node/{node_id}/invite_link
 GET /api/miniapp/community/node/{node_id}/members
 GET /api/miniapp/community/nodes
 GET /api/miniapp/competitors
-GET /api/miniapp/complaint/history
 GET /api/miniapp/compliance
 GET /api/miniapp/compliance/export
 GET /api/miniapp/config
@@ -223,9 +210,6 @@ GET /api/miniapp/host_server/status
 GET /api/miniapp/inbox
 GET /api/miniapp/inbox/{peer_user_id}
 GET /api/miniapp/infra
-GET /api/miniapp/infra/audit
-GET /api/miniapp/infra/pools
-GET /api/miniapp/infra/pools/rebalance
 GET /api/miniapp/infra_health
 GET /api/miniapp/integrations
 GET /api/miniapp/invite/account/{acc_id}
@@ -262,9 +246,7 @@ GET /api/miniapp/network/instances
 GET /api/miniapp/network/stats
 GET /api/miniapp/network/templates
 GET /api/miniapp/networks
-GET /api/miniapp/networks/project_overview
 GET /api/miniapp/networks/{net_id}
-GET /api/miniapp/networks/{net_id}/catalog
 GET /api/miniapp/networks/{net_id}/deploy_plan
 GET /api/miniapp/new_users
 GET /api/miniapp/new_users/export
@@ -283,15 +265,12 @@ GET /api/miniapp/operation/{op_id}/log
 GET /api/miniapp/operation/{op_id}/log.csv
 GET /api/miniapp/operations
 GET /api/miniapp/operations/export
-GET /api/miniapp/operations/{op_id}/cleanup
 GET /api/miniapp/organism/digest
 GET /api/miniapp/organism/pulse
 GET /api/miniapp/parser/audience
 GET /api/miniapp/parser/audience/export
 GET /api/miniapp/parser/runs
 GET /api/miniapp/payments
-GET /api/miniapp/persona/style_from_my_chats
-GET /api/miniapp/persona/{persona_id}/memory
 GET /api/miniapp/personas
 GET /api/miniapp/physics
 GET /api/miniapp/physics/{account_id}/telemetry
@@ -316,12 +295,8 @@ GET /api/miniapp/referral
 GET /api/miniapp/referral/detail
 GET /api/miniapp/reg_check/history
 GET /api/miniapp/rehab
-GET /api/miniapp/rehab/settings
-GET /api/miniapp/rehab/{acc_id}/history
 GET /api/miniapp/relay/session/{session_id}/messages
 GET /api/miniapp/report_channels
-GET /api/miniapp/restrictions/dead
-GET /api/miniapp/restrictions/problems
 GET /api/miniapp/sales/ai-journal
 GET /api/miniapp/sales/ai-quality
 GET /api/miniapp/sales/ai-usage
@@ -334,7 +309,6 @@ GET /api/miniapp/self_promo/audience
 GET /api/miniapp/selfpromo/overview
 GET /api/miniapp/semantic_memory
 GET /api/miniapp/semantic_memory/{bot_id}
-GET /api/miniapp/semantic_memory/{bot_id}/user/{user_id}
 GET /api/miniapp/seo
 GET /api/miniapp/settings
 GET /api/miniapp/shield
@@ -387,9 +361,8 @@ GET /api/miniapp/va/channels
 GET /api/miniapp/va/posts
 GET /api/miniapp/va/strategy
 GET /api/miniapp/vault/analytics
-GET /api/miniapp/vault/chat/{chat_id}/info
 GET /api/miniapp/vault/chat/{chat_id}/messages
-GET /api/miniapp/vault/dialogs
+GET /api/miniapp/vault/chats
 GET /api/miniapp/vault/export
 GET /api/miniapp/vault/media/{chat_id}/{msg_id}
 GET /api/miniapp/vault/owners
@@ -401,7 +374,6 @@ GET /api/miniapp/views
 GET /api/miniapp/vlayer/analytics
 GET /api/miniapp/vlayer/entity/{entity_type}/{entity_id}
 GET /api/miniapp/vlayer/overview
-GET /api/miniapp/vlayer/rules
 GET /api/miniapp/vlayer/segment/{value}
 GET /api/miniapp/warmup
 GET /api/miniapp/warmup/{plan_id}/log
@@ -421,7 +393,6 @@ GET /media/u/{token}
 GET /metrics
 GET /miniapp
 GET /miniapp/
-GET /miniapp/lazy/{h}.js
 GET /miniapp/{path}
 GET /s/{code}
 GET /{code}
@@ -433,7 +404,6 @@ HEAD /api/miniapp/account/{acc_id}/channels
 HEAD /api/miniapp/account/{acc_id}/contacts
 HEAD /api/miniapp/account/{acc_id}/dialog/{peer}/history
 HEAD /api/miniapp/account/{acc_id}/dialogs
-HEAD /api/miniapp/account/{acc_id}/sessions
 HEAD /api/miniapp/accounts
 HEAD /api/miniapp/accounts/export
 HEAD /api/miniapp/accounts/export_json
@@ -441,11 +411,6 @@ HEAD /api/miniapp/accounts/health
 HEAD /api/miniapp/accounts/survival
 HEAD /api/miniapp/accounts/tags
 HEAD /api/miniapp/ad_intel
-HEAD /api/miniapp/ad_intel/ads
-HEAD /api/miniapp/ad_intel/advertiser/{username}
-HEAD /api/miniapp/ad_intel/advertisers
-HEAD /api/miniapp/ad_intel/channel/{username}
-HEAD /api/miniapp/ad_intel/channels
 HEAD /api/miniapp/admin/actions
 HEAD /api/miniapp/admin/audit
 HEAD /api/miniapp/admin/broadcast/recent
@@ -518,7 +483,6 @@ HEAD /api/miniapp/check_owned_restrictions/targets
 HEAD /api/miniapp/circuit_breaker
 HEAD /api/miniapp/cleaner/accounts
 HEAD /api/miniapp/clone_adapt/history
-HEAD /api/miniapp/clone_adapt/profile
 HEAD /api/miniapp/cloud/file/{file_id}/download
 HEAD /api/miniapp/cloud/files
 HEAD /api/miniapp/cloud/status
@@ -528,7 +492,6 @@ HEAD /api/miniapp/community/node/{node_id}/invite_link
 HEAD /api/miniapp/community/node/{node_id}/members
 HEAD /api/miniapp/community/nodes
 HEAD /api/miniapp/competitors
-HEAD /api/miniapp/complaint/history
 HEAD /api/miniapp/compliance
 HEAD /api/miniapp/compliance/export
 HEAD /api/miniapp/config
@@ -587,9 +550,6 @@ HEAD /api/miniapp/host_server/status
 HEAD /api/miniapp/inbox
 HEAD /api/miniapp/inbox/{peer_user_id}
 HEAD /api/miniapp/infra
-HEAD /api/miniapp/infra/audit
-HEAD /api/miniapp/infra/pools
-HEAD /api/miniapp/infra/pools/rebalance
 HEAD /api/miniapp/infra_health
 HEAD /api/miniapp/integrations
 HEAD /api/miniapp/invite/account/{acc_id}
@@ -626,9 +586,7 @@ HEAD /api/miniapp/network/instances
 HEAD /api/miniapp/network/stats
 HEAD /api/miniapp/network/templates
 HEAD /api/miniapp/networks
-HEAD /api/miniapp/networks/project_overview
 HEAD /api/miniapp/networks/{net_id}
-HEAD /api/miniapp/networks/{net_id}/catalog
 HEAD /api/miniapp/networks/{net_id}/deploy_plan
 HEAD /api/miniapp/new_users
 HEAD /api/miniapp/new_users/export
@@ -647,15 +605,12 @@ HEAD /api/miniapp/operation/{op_id}/log
 HEAD /api/miniapp/operation/{op_id}/log.csv
 HEAD /api/miniapp/operations
 HEAD /api/miniapp/operations/export
-HEAD /api/miniapp/operations/{op_id}/cleanup
 HEAD /api/miniapp/organism/digest
 HEAD /api/miniapp/organism/pulse
 HEAD /api/miniapp/parser/audience
 HEAD /api/miniapp/parser/audience/export
 HEAD /api/miniapp/parser/runs
 HEAD /api/miniapp/payments
-HEAD /api/miniapp/persona/style_from_my_chats
-HEAD /api/miniapp/persona/{persona_id}/memory
 HEAD /api/miniapp/personas
 HEAD /api/miniapp/physics
 HEAD /api/miniapp/physics/{account_id}/telemetry
@@ -680,12 +635,8 @@ HEAD /api/miniapp/referral
 HEAD /api/miniapp/referral/detail
 HEAD /api/miniapp/reg_check/history
 HEAD /api/miniapp/rehab
-HEAD /api/miniapp/rehab/settings
-HEAD /api/miniapp/rehab/{acc_id}/history
 HEAD /api/miniapp/relay/session/{session_id}/messages
 HEAD /api/miniapp/report_channels
-HEAD /api/miniapp/restrictions/dead
-HEAD /api/miniapp/restrictions/problems
 HEAD /api/miniapp/sales/ai-journal
 HEAD /api/miniapp/sales/ai-quality
 HEAD /api/miniapp/sales/ai-usage
@@ -698,7 +649,6 @@ HEAD /api/miniapp/self_promo/audience
 HEAD /api/miniapp/selfpromo/overview
 HEAD /api/miniapp/semantic_memory
 HEAD /api/miniapp/semantic_memory/{bot_id}
-HEAD /api/miniapp/semantic_memory/{bot_id}/user/{user_id}
 HEAD /api/miniapp/seo
 HEAD /api/miniapp/settings
 HEAD /api/miniapp/shield
@@ -751,9 +701,8 @@ HEAD /api/miniapp/va/channels
 HEAD /api/miniapp/va/posts
 HEAD /api/miniapp/va/strategy
 HEAD /api/miniapp/vault/analytics
-HEAD /api/miniapp/vault/chat/{chat_id}/info
 HEAD /api/miniapp/vault/chat/{chat_id}/messages
-HEAD /api/miniapp/vault/dialogs
+HEAD /api/miniapp/vault/chats
 HEAD /api/miniapp/vault/export
 HEAD /api/miniapp/vault/media/{chat_id}/{msg_id}
 HEAD /api/miniapp/vault/owners
@@ -765,7 +714,6 @@ HEAD /api/miniapp/views
 HEAD /api/miniapp/vlayer/analytics
 HEAD /api/miniapp/vlayer/entity/{entity_type}/{entity_id}
 HEAD /api/miniapp/vlayer/overview
-HEAD /api/miniapp/vlayer/rules
 HEAD /api/miniapp/vlayer/segment/{value}
 HEAD /api/miniapp/warmup
 HEAD /api/miniapp/warmup/{plan_id}/log
@@ -785,7 +733,6 @@ HEAD /media/u/{token}
 HEAD /metrics
 HEAD /miniapp
 HEAD /miniapp/
-HEAD /miniapp/lazy/{h}.js
 HEAD /miniapp/{path}
 HEAD /s/{code}
 HEAD /{code}
@@ -822,9 +769,6 @@ POST /api/miniapp/account/{acc_id}/note
 POST /api/miniapp/account/{acc_id}/post_story
 POST /api/miniapp/account/{acc_id}/profile
 POST /api/miniapp/account/{acc_id}/proxy
-POST /api/miniapp/account/{acc_id}/public_channel_capacity
-POST /api/miniapp/account/{acc_id}/session/close
-POST /api/miniapp/account/{acc_id}/session/trust
 POST /api/miniapp/account/{acc_id}/spamblock_appeal
 POST /api/miniapp/account/{acc_id}/toggle
 POST /api/miniapp/account/{acc_id}/warmup/pause
@@ -835,8 +779,6 @@ POST /api/miniapp/accounts/check_all
 POST /api/miniapp/accounts/mass
 POST /api/miniapp/accounts/revive
 POST /api/miniapp/ad_intel/channel
-POST /api/miniapp/ad_intel/channel/{username}/auto
-POST /api/miniapp/ad_intel/channel/{username}/rescan
 POST /api/miniapp/admin/broadcast
 POST /api/miniapp/admin/report/{report_id}/status
 POST /api/miniapp/admin/user/{user_id}/ban
@@ -862,9 +804,6 @@ POST /api/miniapp/bot/{bot_id}/avatar
 POST /api/miniapp/bot/{bot_id}/deeplink
 POST /api/miniapp/bot/{bot_id}/funnel
 POST /api/miniapp/bot/{bot_id}/multigeo
-POST /api/miniapp/bot/{bot_id}/multigeo/apply
-POST /api/miniapp/bot/{bot_id}/multigeo/copy
-POST /api/miniapp/bot/{bot_id}/multigeo/translate
 POST /api/miniapp/bot/{bot_id}/profile
 POST /api/miniapp/bot/{bot_id}/schedule
 POST /api/miniapp/bot/{bot_id}/swarm
@@ -919,8 +858,6 @@ POST /api/miniapp/chatwarmup/session/{sid}/status
 POST /api/miniapp/check_bot_geoban
 POST /api/miniapp/check_owned_restrictions
 POST /api/miniapp/cleaner/submit
-POST /api/miniapp/clone_adapt/preview
-POST /api/miniapp/clone_adapt/rollback
 POST /api/miniapp/clone_adapt/submit
 POST /api/miniapp/cloud/file/{file_id}/delete
 POST /api/miniapp/cloud/file/{file_id}/heal
@@ -931,7 +868,6 @@ POST /api/miniapp/community/node/{node_id}/channels
 POST /api/miniapp/community/node/{node_id}/liven
 POST /api/miniapp/community/node/{node_id}/staff
 POST /api/miniapp/competitor
-POST /api/miniapp/complaint/submit
 POST /api/miniapp/compliance_scan
 POST /api/miniapp/content_cloner/submit
 POST /api/miniapp/content_mesh
@@ -990,13 +926,7 @@ POST /api/miniapp/inbox/{peer_user_id}/ai-draft
 POST /api/miniapp/inbox/{peer_user_id}/ai-summary
 POST /api/miniapp/inbox/{peer_user_id}/read
 POST /api/miniapp/inbox/{peer_user_id}/reply
-POST /api/miniapp/infra/pools/assign
-POST /api/miniapp/infra/pools/dissolve
-POST /api/miniapp/infra/pools/rebalance
-POST /api/miniapp/infra/pools/rename
 POST /api/miniapp/infra_health/anomaly/{anomaly_id}/resolve
-POST /api/miniapp/infra_health/mute/{anomaly_type}
-POST /api/miniapp/infra_health/resolve_all
 POST /api/miniapp/invite/grant_admin
 POST /api/miniapp/invite/join_all
 POST /api/miniapp/invite/parse_file
@@ -1056,7 +986,6 @@ POST /api/miniapp/operations/clear
 POST /api/miniapp/operations/pause
 POST /api/miniapp/operations/resume
 POST /api/miniapp/operations/retry_failed
-POST /api/miniapp/operations/{op_id}/cleanup
 POST /api/miniapp/organism/dismiss
 POST /api/miniapp/organism/pending_open
 POST /api/miniapp/osint_search
@@ -1064,16 +993,11 @@ POST /api/miniapp/pair
 POST /api/miniapp/pair/exchange
 POST /api/miniapp/parser/submit
 POST /api/miniapp/persona
-POST /api/miniapp/persona/preview
-POST /api/miniapp/persona/{persona_id}/apply_profile
-POST /api/miniapp/persona/{persona_id}/memory/rebuild
 POST /api/miniapp/phone_check
 POST /api/miniapp/presence_pack
 POST /api/miniapp/presence_pack/{pack_id}/promote
 POST /api/miniapp/presence_pack/{pack_id}/seed
 POST /api/miniapp/profile_setter
-POST /api/miniapp/profile_setter/preview
-POST /api/miniapp/profile_setter/twofa
 POST /api/miniapp/promo/order
 POST /api/miniapp/promo/order/{order_id}/boost
 POST /api/miniapp/promo/order/{order_id}/cancel
@@ -1094,11 +1018,8 @@ POST /api/miniapp/ranking/reopt_setting
 POST /api/miniapp/ranking/track
 POST /api/miniapp/ranking/untrack
 POST /api/miniapp/reg_check
-POST /api/miniapp/rehab/settings
 POST /api/miniapp/rehab/{acc_id}/{action}
-POST /api/miniapp/rehab_bulk/{action}
 POST /api/miniapp/reporter
-POST /api/miniapp/restrictions/remove_dead
 POST /api/miniapp/sales/ai-journal/{rid}/rate
 POST /api/miniapp/sales/persona
 POST /api/miniapp/sales/persona/{pid}/assign
@@ -1130,8 +1051,6 @@ POST /api/miniapp/sheets/connect
 POST /api/miniapp/sheets/disconnect
 POST /api/miniapp/sheets/export
 POST /api/miniapp/shield/config
-POST /api/miniapp/shield/resume
-POST /api/miniapp/shield/run
 POST /api/miniapp/spintax/expand
 POST /api/miniapp/spintax/generate
 POST /api/miniapp/stars/experiment
@@ -1190,13 +1109,9 @@ POST /api/miniapp/va/drafts/{did}/regenerate
 POST /api/miniapp/va/drafts/{did}/reject
 POST /api/miniapp/va/references/{rid}/refresh
 POST /api/miniapp/vault/chat/{chat_id}/reply
-POST /api/miniapp/vault/chat/{chat_id}/state
 POST /api/miniapp/vault/settings
 POST /api/miniapp/views
 POST /api/miniapp/vlayer/entity/{entity_type}/{entity_id}/purchased
-POST /api/miniapp/vlayer/entity/{entity_type}/{entity_id}/stage
-POST /api/miniapp/vlayer/rules
-POST /api/miniapp/vlayer/rules/reset
 POST /api/miniapp/warmup
 POST /api/miniapp/warmup/bulk_start
 POST /api/miniapp/warmup/{plan_id}/cancel
@@ -1234,7 +1149,6 @@ POST /api/miniapp/workspace/join
 POST /api/miniapp/workspace/{ws_id}/invite
 POST /webhook/crm/{token}
 POST /webhook/scenario/{token}
-PUT /api/miniapp/ai_memory/{mem_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/toggle
 PUT /api/miniapp/auto_reply/{reply_id}/toggle
@@ -1252,14 +1166,9 @@ PUT /api/miniapp/editorial/policy
 PUT /api/miniapp/funnel/{funnel_id}/toggle
 PUT /api/miniapp/ghost/{profile_id}
 PUT /api/miniapp/ghost/{profile_id}/toggle
-PUT /api/miniapp/persona/{persona_id}
-PUT /api/miniapp/persona/{persona_id}/memory
-PUT /api/miniapp/persona/{persona_id}/peer/{peer_id}
 PUT /api/miniapp/persona/{persona_id}/toggle
 PUT /api/miniapp/presence_pack/{pack_id}/config
 PUT /api/miniapp/self_promo/{tpl_id}/toggle
-PUT /api/miniapp/semantic_memory/{bot_id}/settings
-PUT /api/miniapp/semantic_memory/{bot_id}/user/{user_id}/fact
 PUT /api/miniapp/stars/experiment/{exp_id}/toggle
 PUT /api/miniapp/uch/groups/{group_id}
 PUT /api/miniapp/uch/smart-tags/rules/{rule_id}/toggle

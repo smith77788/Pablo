@@ -90,14 +90,12 @@ def test_duplicate_detection_is_exact_not_approximate():
     for (fa, la), (fb, lb) in itertools.product(names, repeat=2):
         for ca, cb in itertools.product(comps, repeat=2):
             a = {"telegram_user_id": 1, "username": "a", "phones": ["1"],
-                 "emails": ["a@x.ru"],
                  "first_name": fa, "last_name": la, "company": ca}
             b = {"telegram_user_id": 2, "username": "b", "phones": ["2"],
-                 "emails": ["b@x.ru"],
                  "first_name": fb, "last_name": lb, "company": cb}
             best = max(best, compute_merge_confidence(a, b)["confidence"])
     assert best < 0.5, (
-        f"пара без общего tg/телефона/почты/ника дотягивает до {best}: отбор по "
+        f"пара без общего tg/телефона/ника дотягивает до {best}: отбор по "
         "группам перестал быть точным, и дубли молча пропадут")
 
 

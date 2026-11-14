@@ -704,24 +704,6 @@ async def mute(pool: asyncpg.Pool, owner_id: int, anomaly_type: str, hours: int)
         return False
 
 
-async def muted_until(pool: asyncpg.Pool, owner_id: int) -> dict[str, Any]:
-    """До какого момента владелец заглушил сообщения по каждому типу аномалий.
-
-    Экран показывает это на карточке оповещения: иначе заглушённая тревога
-    выглядит так же, как та, о которой бот ещё напишет. Сбой — пустой ответ.
-    """
-    try:
-        rows = await pool.fetch(
-            "SELECT dedup_key, last_sent FROM notification_dedup "
-            "WHERE user_id=$1 AND dedup_key LIKE $2 AND last_sent > NOW()",
-            int(owner_id), _MUTE_KEY + "%",
-        )
-        return {r["dedup_key"][len(_MUTE_KEY):]: r["last_sent"] for r in rows}
-    except Exception as exc:
-        log.debug("muted_until fail-soft: %s", exc)
-        return {}
-
-
 def _mute_keyboard(anomaly_type: str):
     """Кнопки под тревогой: заглушить именно этот тип и открыть список."""
     try:
@@ -766,49 +748,18 @@ async def _notify_anomaly(pool: asyncpg.Pool, bot, anomaly: Anomaly) -> None:
 
 
 async def get_active_anomalies(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
-    """Активные аномалии владельца — ОДНА строка на эпизод (тип аномалии).
-
-    Пока аномалия длится, детектор пишет запись каждые полчаса, а снимал
-    старые записи только при следующей записи того же типа — и только старше
-    двух часов. Отсюда две неправды на экране «Здоровье → Инфраструктура»:
-
-      * одна волна флудов висела тремя одинаковыми критическими карточками;
-      * закончившийся эпизод не снимался НИКОГДА: новой записи нет — нет и
-        снятия. Владелец через восемь дней видел «Волна флудов: 48/50» на
-        флоте из 34 аккаунтов, а соседняя вкладка в это же время писала
-        «Флуд 7д: 0».
-
-    Поэтому здесь берётся последняя запись каждого типа (её цифры — текущее
-    состояние), к ней — сколько раз эпизод подтверждался и когда начался.
-    Эпизод, который детектор не подтверждал дольше `_EPISODE_GAP_SQL`,
-    закончился: его не показываем, даже если фоновое снятие
-    (`expire_ended_anomalies`) ещё не прошло.
-    """
+    """Получить список активных аномалий для владельца."""
     try:
         rows = await pool.fetch(
-            f"""WITH act AS (
-                   SELECT id, anomaly_type, detector, severity, title, description,
-                          baseline_value, anomaly_value, deviation_pct, affected_count,
-                          triggered_recovery, detected_at
-                     FROM anomaly_events
-                    WHERE owner_id=$1 AND is_active=TRUE
-               ), latest AS (
-                   SELECT DISTINCT ON (anomaly_type) *
-                     FROM act
-                    ORDER BY anomaly_type, detected_at DESC, id DESC
-               ), agg AS (
-                   SELECT anomaly_type, COUNT(*) AS occurrences,
-                          MIN(detected_at) AS first_detected_at
-                     FROM act GROUP BY anomaly_type
-               )
-               SELECT l.*, a.occurrences, a.first_detected_at,
-                      l.detected_at AS last_detected_at
-                 FROM latest l JOIN agg a ON a.anomaly_type = l.anomaly_type
-                WHERE l.detected_at > NOW() - {_EPISODE_GAP_SQL}
-                ORDER BY
-                   CASE l.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
-                   l.detected_at DESC
-                LIMIT 20""",
+            """SELECT id, anomaly_type, detector, severity, title, description,
+                      baseline_value, anomaly_value, deviation_pct, affected_count,
+                      triggered_recovery, detected_at
+               FROM anomaly_events
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY
+                   CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+                   detected_at DESC
+               LIMIT 20""",
             owner_id,
         )
         return [dict(r) for r in rows]
@@ -817,68 +768,19 @@ async def get_active_anomalies(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
         return []
 
 
-async def expire_ended_anomalies(pool: asyncpg.Pool) -> int:
-    """Снять с активных эпизоды, которые детектор больше не подтверждает.
-
-    Раньше запись снималась только следующей записью того же типа — то есть
-    кончившаяся аномалия оставалась «активной» навсегда. Здесь снимается
-    всё, у чего за `_EPISODE_GAP_SQL` не было ни одной записи того же типа у
-    того же владельца. Идёт каждым кругом детектора. Возвращает число снятых.
-    """
-    try:
-        res = await pool.execute(
-            f"""UPDATE anomaly_events e
-                  SET is_active=FALSE, resolved_at=NOW()
-                WHERE e.is_active=TRUE
-                  AND NOT EXISTS (
-                      SELECT 1 FROM anomaly_events x
-                       WHERE x.owner_id = e.owner_id
-                         AND x.anomaly_type = e.anomaly_type
-                         AND x.detected_at > NOW() - {_EPISODE_GAP_SQL})"""
-        )
-        try:
-            return int(str(res).split()[-1])
-        except (ValueError, IndexError):
-            return 0
-    except Exception as e:
-        log.debug("expire_ended_anomalies failed: %s", e)
-        return 0
-
-
 async def resolve_anomaly(pool: asyncpg.Pool, anomaly_id: int, owner_id: int) -> bool:
-    """Вручную снять аномалию — вместе со всем её эпизодом.
-
-    Экран показывает одну карточку на тип, а под ней лежат все записи эпизода.
-    Снятие одной записи поднимало на её место предыдущую такую же, и «Снять»
-    приходилось жать столько раз, сколько полчаса длилась волна.
-    """
+    """Вручную разрешить аномалию."""
     try:
         result = await pool.execute(
-            """UPDATE anomaly_events SET is_active=FALSE, resolved_at=NOW()
-                WHERE owner_id=$2 AND is_active=TRUE
-                  AND anomaly_type = (SELECT anomaly_type FROM anomaly_events
-                                       WHERE id=$1 AND owner_id=$2)""",
+            "UPDATE anomaly_events SET is_active=FALSE, resolved_at=NOW() "
+            "WHERE id=$1 AND owner_id=$2",
             anomaly_id,
             owner_id,
         )
-        return str(result).split()[-1] not in ("0", "")
+        return result == "UPDATE 1"
     except Exception as e:
         log.debug("resolve_anomaly failed: %s", e)
         return False
-
-
-async def resolve_all_anomalies(pool: asyncpg.Pool, owner_id: int) -> int:
-    """Снять все активные аномалии владельца (кнопка «Снять все»)."""
-    try:
-        res = await pool.execute(
-            "UPDATE anomaly_events SET is_active=FALSE, resolved_at=NOW() "
-            "WHERE owner_id=$1 AND is_active=TRUE",
-            owner_id,
-        )
-        return int(str(res).split()[-1])
-    except Exception as e:
-        log.debug("resolve_all_anomalies failed: %s", e)
-        return -1
 
 
 # ─── Фоновый цикл ─────────────────────────────────────────────────────────────
@@ -891,7 +793,6 @@ async def run_anomaly_loop(pool: asyncpg.Pool, bot) -> None:
 
     while True:
         try:
-            await expire_ended_anomalies(pool)
             anomalies = await run_full_detection(pool, bot)
             if anomalies:
                 critical = [a for a in anomalies if a.severity == "critical"]

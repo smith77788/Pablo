@@ -68,7 +68,6 @@ async function loadAccounts() {
   loadAccTags();
   // Accounts and channels load independently — one failure doesn't break the other
   api(_accQuery(0)).then(ad => {
-    catalogResourceMenus.account = ad.resource_menu === true;
     CUR_ACCS = ad.accounts||[];
     ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
     if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
@@ -111,7 +110,6 @@ async function loadAccounts() {
 async function reloadAccounts() {
   try {
     const ad = await api(_accQuery(0));
-    catalogResourceMenus.account = ad.resource_menu === true;
     CUR_ACCS = ad.accounts||[];
     ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
     if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
@@ -209,7 +207,6 @@ function accStatusOf(a) {
 
 function renderAccounts(list) {
   const el = document.getElementById('accList');
-  if (catalogResourceMenus.account) bindCatalogResourceActions(el, 'account', () => CUR_ACCS);
   if (!list.length) {
     const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || ACC_TAG_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
     _accToolsShown(!!filtered);
@@ -247,15 +244,6 @@ function accRowHtml(a) {
     const pulseNote = a.verdict ? verdictNote : (a.health_reason && (a.health_status==='quarantine' || a.health_status==='at_risk'))
       ? `<div class="acc-phone" style="color:var(--${a.health_status==='quarantine'?'red':'orange'})">${esc(a.health_reason)}</div>`
       : '';
-    // Чужие сеансы (дозор угона, services/session_watch): кто-то ещё вошёл в
-    // аккаунт и может выкинуть наш сеанс. Видно всегда, поверх вердикта.
-    // Тап по предупреждению ведёт прямо в сеансы аккаунта: там каждый сеанс
-    // можно пометить своим («это я») или закрыть по одному. Раньше текст слал в
-    // старый массовый экран «Профили → Очистка и сеансы», где только «закрыть
-    // все» — и свой же сеанс со второго устройства закрылся бы вместе с чужими.
-    const theftNote = (a.foreign_sessions > 0)
-      ? `<div class="acc-phone" style="color:var(--red);cursor:pointer" onclick="event.stopPropagation();openAccSessions(${a.id})" role="button" tabindex="0">🚨 Чужих сеансов: ${Number(a.foreign_sessions)} — разобрать ›</div>`
-      : '';
     const sel = ACC_SEL.has(a.id);
     const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id},event)` : `openAccount(${a.id})`;
     const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
@@ -264,22 +252,19 @@ function accRowHtml(a) {
         ${a.verdict ? '' : `<span style="font-size:10px;color:var(--hint)">${trust}%</span>`}
         <span class="chev">›</span>
       </div>`;
-    const menu = !ACC_SEL_MODE && catalogResourceMenus.account;
-    return `<div class="acc-row ${ACC_SEL_MODE&&sel?'sel':''}" data-acc-id="${a.id}" ${menu ? `data-resource-node="${esc(a.id)}"` : ''} onclick="${onclick}">
+    return `<div class="acc-row ${ACC_SEL_MODE&&sel?'sel':''}" data-acc-id="${a.id}" onclick="${onclick}">
       ${checkbox}
       <div class="ava ${ava_cls}" style="font-size:15px">${flag}</div>
       <div class="acc-body">
         <div class="acc-name">${esc(name)} ${stageBadge(a.stage)}</div>
         <div class="acc-phone">${esc(phone)}</div>
         ${(a.tags||[]).length ? `<div class="fx-tags">${accTagsHtml(a)}</div>` : ''}
-        ${theftNote}
         ${proxyNote}
         ${pulseNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
         ${ACC_SEL_MODE ? '' : _fixBtn(a.fix)}
       </div>
       ${right}
-      ${menu ? resourceMenuButton() : ''}
     </div>`;
 }
 
@@ -353,7 +338,6 @@ async function exportAccountsJson() {
 
 // ── Account Detail ─────────────────────────────────────
 async function openAccount(accId) {
-  const resourceMenu = prepareResourceCardMenu('acd-resource-menu', 'account', accId);
   const a = CUR_ACCS.find(x=>x.id==accId);
   const name = a?(a.first_name||(a.username?'@'+a.username:a.phone||'Аккаунт #'+accId)):'Аккаунт';
   txt('acd-name', name);
@@ -362,118 +346,9 @@ async function openAccount(accId) {
   try {
     const d = await api('/api/miniapp/account/'+accId);
     window._accDetail = d.account || {};
-    resourceMenu(d.account);
     txt('acd-body', buildAccDetail(d));
   } catch(e) {
     txt('acd-body', errHtml(errRu(e), retryCall('openAccount', accId)));
-  }
-}
-
-// ── Сеансы аккаунта (устройства) ───────────────────────
-// Какие устройства вошли в аккаунт. Дозор угона (services/session_watch)
-// считает чужим любой сеанс, кроме нашего, — но часто «чужой» это сам владелец
-// с телефона или второго устройства. Здесь можно пометить сеанс своим («это я»)
-// или закрыть конкретный, а не только «все сразу».
-async function openAccSessions(accId) {
-  ACC_SESS_ID = Number(accId) || 0;
-  push('s-accsessions');
-  txt('accsess-body', '<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const d = await api('/api/miniapp/account/'+ACC_SESS_ID+'/sessions');
-    txt('accsess-body', buildAccSessions(d));
-  } catch(e) {
-    txt('accsess-body', errHtml(errRu(e, 'Не удалось получить сеансы'), retryCall('openAccSessions', ACC_SESS_ID)));
-  }
-}
-
-function _accSessWhen(ts) {
-  if (!ts) return '';
-  try { return new Date(ts*1000).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}); }
-  catch(_) { return ''; }
-}
-
-function buildAccSessions(d) {
-  const list = d.sessions || [];
-  const canClose = d.can_close !== false;
-  const freshNote = canClose ? '' :
-    `<div style="margin:10px 14px;padding:11px;border-radius:12px;background:rgba(251,191,36,.12);font-size:12px;line-height:1.45;color:var(--hint)">
-      ⏳ Чужие сеансы можно закрывать только из сеанса старше суток. Этот аккаунт вошёл в Infragram недавно — закрытие станет доступно через 24 часа после входа. Пометить «это я» можно уже сейчас.
-    </div>`;
-  const head = `<div style="margin:10px 14px 2px;font-size:13px;line-height:1.45;color:var(--hint)">
-      Устройства, которые сейчас вошли в аккаунт (кроме нашего рабочего сеанса). Если сеанс ваш — пометьте <b>«это я»</b>, он перестанет считаться чужим и автозащита его не закроет. Чужой — <b>завершите</b>.
-    </div>`;
-  if (!list.length) {
-    return head + `<div style="padding:8px 0">${empty('✅','Чужих сеансов нет','В аккаунт вошло только наше рабочее устройство — это норма')}</div>`;
-  }
-  const rows = list.map(s => {
-    const h = String(s.hash);
-    const title = esc([s.device, s.app].filter(Boolean).join(' · ') || 'неизвестное устройство');
-    const where = esc([s.country, s.ip].filter(Boolean).join(' · '));
-    const when = _accSessWhen(s.created);
-    const act = s.active ? _accSessWhen(s.active) : '';
-    const trusted = !!s.trusted;
-    const badge = trusted
-      ? '<span class="badge b-gr" style="margin-left:6px">✓ это я</span>'
-      : (s.official ? '' : '<span class="badge b-or" style="margin-left:6px">чужой</span>');
-    return `<div class="li" style="cursor:default;align-items:flex-start">
-      <div class="ava ${trusted?'ava-green':'ava-orange'}" style="flex:0 0 auto">${trusted?'🟢':'📱'}</div>
-      <div class="li-body">
-        <div class="li-name">${title}${badge}</div>
-        ${where?`<div class="li-sub">${where}</div>`:''}
-        <div class="li-sub">${when?('вход '+when):''}${act?(' · был '+act):''}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">
-          <button class="btn btn-s" style="flex:0 0 auto;font-size:12px;padding:7px 12px" onclick="accSessTrust('${h}', ${trusted?'false':'true'}, this)">${trusted?'↩️ Не я':'✅ Это я'}</button>
-          ${trusted?'':`<button class="btn btn-d" style="flex:0 0 auto;font-size:12px;padding:7px 12px" ${canClose?'':'disabled title="Доступно через сутки после входа аккаунта"'} onclick="accSessClose('${h}', this)">🚪 Завершить</button>`}
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-  const closeAll = canClose ? `
-    <div class="actions" style="padding:10px 14px 4px">
-      <button class="btn btn-o" onclick="accSessCloseAll()" style="width:100%">🛡 Завершить все чужие сеансы</button>
-    </div>` : '';
-  return head + freshNote + `<div class="lst" style="margin:6px 14px 0">${rows}</div>` + closeAll;
-}
-
-async function accSessClose(h, btn) {
-  if (!await askConfirm('Завершить этот сеанс? Устройство выйдет из аккаунта.')) return;
-  if (btn) btn.disabled = true;
-  try {
-    await api('/api/miniapp/account/'+ACC_SESS_ID+'/session/close', {method:'POST', body:JSON.stringify({hash:String(h)})});
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('🚪 Сеанс завершён');
-    openAccSessions(ACC_SESS_ID);
-  } catch(e) {
-    if (btn) btn.disabled = false;
-    toast('⚠️ '+errRu(e, 'Не удалось завершить сеанс'));
-  }
-}
-
-async function accSessTrust(h, on, btn) {
-  if (btn) btn.disabled = true;
-  try {
-    await api('/api/miniapp/account/'+ACC_SESS_ID+'/session/trust', {method:'POST', body:JSON.stringify({hash:String(h), trust:!!on})});
-    toast(on ? '✅ Помечено «это я»' : '↩️ Пометка снята');
-    openAccSessions(ACC_SESS_ID);
-  } catch(e) {
-    if (btn) btn.disabled = false;
-    toast('⚠️ '+errRu(e, 'Не удалось изменить пометку'));
-  }
-}
-
-// «Все чужие» — существующая операция оформления (profile_setter close_sessions),
-// та же, что на экране «Профили → Очистка и сеансы». Доверенные она не трогает:
-// Telegram закрывает все, кроме текущего, а помеченные своими после прохода
-// дозора снова не считаются чужими.
-async function accSessCloseAll() {
-  if (!await askConfirm('Завершить ВСЕ чужие сеансы этого аккаунта? Останется только наше рабочее устройство. Помеченные «это я» тоже будут закрыты — Telegram закрывает все, кроме текущего.')) return;
-  try {
-    await api('/api/miniapp/account/'+ACC_SESS_ID+'/profile', {method:'POST', body:JSON.stringify({op:'close_sessions'})});
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('🛡 Чужие сеансы закрыты');
-    openAccSessions(ACC_SESS_ID);
-  } catch(e) {
-    toast('⚠️ '+errRu(e, 'Не удалось закрыть сеансы'));
   }
 }
 
@@ -500,42 +375,20 @@ function accPoolBanner() {
   const host = document.getElementById('accList');
   const old = document.getElementById('accPoolBanner');
   if (old) old.remove();
-  // У срезов «Низкий траст» и «Флуд за 7 дней» своей плитки на вкладке нет:
-  // они приходят с экрана «Здоровье», и без баннера список был бы просто
-  // короче без объяснения.
-  const hidden = accHiddenFilterLabel(ACC_FILTER);
-  if ((!ACC_POOL_FILTER && !ACC_GEO_FILTER && !hidden) || !host || !host.parentNode) return;
+  if ((!ACC_POOL_FILTER && !ACC_GEO_FILTER) || !host || !host.parentNode) return;
   const el = document.createElement('div');
   el.id = 'accPoolBanner';
   el.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin:0 16px 8px;padding:8px 12px;'
     + 'border-radius:10px;background:var(--bg-blue-16);font-size:13px';
   let rows = '';
-  if (hidden) rows += '<div style="display:flex;align-items:center;gap:8px">'
-    + '<span style="flex:1">Срез: <b>' + esc(hidden) + '</b></span>'
-    + '<span class="icon-tap" onclick="accHiddenFilterClear()" role="button" tabindex="0">Снять \u2715</span></div>';
   if (ACC_POOL_FILTER) rows += '<div style="display:flex;align-items:center;gap:8px">'
-    + '<span style="flex:1">Пул: <b>' + esc(typeof infraPoolLabel === 'function'
-        ? (ACC_POOL_FILTER === '__none__' ? 'Без пула' : infraPoolLabel(ACC_POOL_FILTER))
-        : ACC_POOL_FILTER) + '</b></span>'
+    + '<span style="flex:1">Пул: <b>' + esc(ACC_POOL_FILTER) + '</b></span>'
     + '<span class="icon-tap" onclick="accPoolClear()" role="button" tabindex="0">Снять \u2715</span></div>';
   if (ACC_GEO_FILTER) rows += '<div style="display:flex;align-items:center;gap:8px">'
     + '<span style="flex:1">Страна: <b>' + esc(ACC_GEO_TITLE || ACC_GEO_FILTER) + '</b></span>'
     + '<span class="icon-tap" onclick="accGeoClear()" role="button" tabindex="0">Снять \u2715</span></div>';
   el.innerHTML = rows;
   host.parentNode.insertBefore(el, host);
-}
-
-function accHiddenFilterLabel(f) {
-  return ({low_trust: 'Низкое доверие', flooded: 'Ловили флуд за 7 дней',
-           foreign: 'Чужие сеансы', no2fa: 'Без пароля 2FA'})[f] || '';
-}
-function accHiddenFilterClear() {
-  ACC_FILTER = 'all';
-  document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x => {
-    x.classList.toggle('on', x.getAttribute('data-filter') === 'all');
-  });
-  accPoolBanner();
-  reloadAccounts();
 }
 
 function accPoolClear() {

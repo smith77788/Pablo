@@ -28,91 +28,10 @@ def setup_routes(app: web.Application, pool) -> None:
     )
     from services.security import validate_integer
 
-    async def restriction_cleanup(request: web.Request) -> web.Response:
-        from services import channel_change_approval as approval
-        from services import restriction_cleanup as cleanup
-        from services.network_builder import project_pilot_enabled
-
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        if not project_pilot_enabled(uid):
-            return _err("Недоступно", 403)
-        op_id = validate_integer(request.match_info["op_id"], min_val=1)
-        if op_id is None:
-            return _err("Неверный идентификатор операции", 400)
-        try:
-            if request.method in ("GET", "HEAD"):
-                report = await cleanup.findings(pool, uid, op_id, include_history=True)
-                report["findings"] = cleanup.public_items(report["findings"])
-                return _json_resp({"ok": True, **report})
-            try:
-                data = await request.json()
-            except Exception as exc:
-                bad = bad_body_response(request, exc)
-                return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
-            if not isinstance(data, dict):
-                return _err("Неверные параметры очистки", 400)
-            project = data.get("project_id")
-            project_id = None
-            if project is not None:
-                project_id = validate_integer(str(project), min_val=1)
-                if project_id is None:
-                    return _err("Неверный проект", 400)
-            args = (pool, uid, op_id, data.get("targets"), data.get("action"))
-            token = data.get("token")
-            if data.get("preview") is True and token is None:
-                plan = await cleanup.plan(*args, project_id=project_id)
-                try:
-                    token = approval.issue_cleanup(uid, plan)
-                except approval.ApprovalError:
-                    log.error("Не настроено подтверждение очистки op_id=%s", op_id)
-                    return _err("Сервис подтверждения временно недоступен", 500)
-                return _json_resp({"ok": True, **plan, "items": cleanup.public_items(plan["items"]), "token": token})
-            if not isinstance(token, str) or not token or len(token) > 1024:
-                return _err("Сначала подтвердите предпросмотр очистки", 400)
-
-            def verify(current):
-                approval.verify_cleanup(token, uid, current)
-
-            verify(await cleanup.plan(*args, project_id=project_id))
-            result = await cleanup.apply(*args, project_id=project_id, verify=verify)
-            result["items"] = cleanup.public_items(result["items"])
-            return _json_resp(result)
-        except cleanup.CleanupError as exc:
-            return _err(str(exc), exc.status)
-        except approval.ApprovalError as exc:
-            return _err(str(exc), 409)
-        except Exception:
-            log.exception("Ошибка очистки по результату проверки op_id=%s uid=%s", op_id, uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def project_scope(request, uid):
-        if "project_id" not in request.query:
-            return None, None
-        project_id = validate_integer(request.query["project_id"], min_val=1)
-        if project_id is None:
-            return None, _err("Неверный проект", 400)
-        exists = await pool.fetchval(
-            "SELECT 1 FROM network_instances WHERE id=$1 AND owner_id=$2", project_id, uid)
-        if not exists:
-            return None, _err("Проект не найден", 404)
-        return str(project_id), None
-
-    def project_predicate(prefix):
-        from services.network_builder import project_operation_keys
-
-        return f" AND $2 IN ({project_operation_keys(prefix)})"
-
     async def operations(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        project_id, scope_error = await project_scope(request, uid)
-        if scope_error is not None:
-            return scope_error
-        project_args = [uid, project_id] if project_id else [uid]
-        project_sql = project_predicate("") if project_id else ""
         status_filter = request.query.get("status")
         # 'paused' обязан быть в списке: «Пауза» переводит pending → paused, и без
         # него фильтр по приостановленным молча отдавал ВСЮ очередь — человек
@@ -194,14 +113,13 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             for r in await pool.fetch(
                     "SELECT op_type, COUNT(*) AS n FROM operation_queue "
-                    f"WHERE owner_id=$1{project_sql} GROUP BY op_type ORDER BY 2 DESC, 1 LIMIT 60",
-                    *project_args):
+                    "WHERE owner_id=$1 GROUP BY op_type ORDER BY 2 DESC, 1 LIMIT 60", uid):
                 types.append({"op_type": r["op_type"], "n": int(r["n"] or 0)})
         except Exception:
             log.debug("operations: список типов недоступен uid=%s", uid)
         counts: dict = {}
-        _cwhere = "owner_id=$1" + project_sql
-        _cargs = project_args.copy()
+        _cwhere = "owner_id=$1"
+        _cargs: list = [uid]
         if days:
             _cargs.append(days)
             _cwhere += f" AND created_at >= now() - make_interval(days => ${len(_cargs)})"
@@ -224,8 +142,8 @@ def setup_routes(app: web.Application, pool) -> None:
                           {op_status.sql_error_reason("oq.")} AS error_msg,
                           oq.created_at, oq.started_at, oq.finished_at,
                           oq.scheduled_for, {_err_sub}"""
-        _where = "oq.owner_id=$1" + (project_predicate("oq.") if project_id else "")
-        _wargs = project_args.copy()
+        _where = "oq.owner_id=$1"
+        _wargs: list = [uid]
         if days:
             _wargs.append(days)
             _where += f" AND oq.created_at >= now() - make_interval(days => ${len(_wargs)})"
@@ -290,16 +208,11 @@ def setup_routes(app: web.Application, pool) -> None:
         if not row:
             return _err("Операция не найдена", 404)
         d = dict(row)
-        if d.get("op_type") == "check_owned_restrictions" and op_status.is_productive(d.get("status")):
-            from services.network_builder import project_pilot_enabled
-
-            d["cleanup_available"] = project_pilot_enabled(uid)
         # Быстрые действия по ИТОГУ: раньше сводка советовала словами
         # («назначьте прокси», «проверьте права», «повторите позже»), а кнопки
         # рядом не было — совет уходил в пустоту.
         _res_raw = d.pop("_result", None)
         _prm_raw = d.pop("_params", None)
-        _res = {}
         try:
             import json as _json_qa
             from services import op_quick_actions as _qa
@@ -321,13 +234,6 @@ def setup_routes(app: web.Application, pool) -> None:
             from services import op_params_view as _pv
             _p = _prm_raw if isinstance(_prm_raw, dict) else _json_pv.loads(_prm_raw or "{}")
             d["params_view"] = _pv.describe(d.get("op_type"), _p)
-            if d.get("op_type") == "strike":
-                _count = _res.get("accounts_used") if isinstance(_res, dict) else None
-                if type(_count) is int and _count >= 0:
-                    d["params_view"].append({
-                        "label": "Передано исполнителю",
-                        "value": str(_count),
-                    })
         except Exception:
             d["params_view"] = []
         # Длительность — от старта до конца (или до сейчас, пока идёт).
@@ -788,7 +694,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Не найдено", 404)
             # Общие запреты повтора (журнал убран, повтор уже идёт) — те же,
             # что у бота: `operation_bus.retry_blocker`.
-            _blocked = await _obus.retry_blocker(pool, op_id, row)
+            _blocked = await _obus.retry_blocker(pool, op_id)
             if _blocked:
                 return _err(_blocked["reason"], 409)
 
@@ -1065,11 +971,6 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        project_id, scope_error = await project_scope(request, uid)
-        if scope_error is not None:
-            return scope_error
-        args = [uid, project_id] if project_id else [uid]
-        where = "owner_id=$1" + (project_predicate("") if project_id else "")
         fmt = request.query.get("format", "csv")
         try:
             # Потолок — предохранитель от выгрузки на миллион строк, а не
@@ -1082,15 +983,15 @@ def setup_routes(app: web.Application, pool) -> None:
             rows = await pool.fetch(
                 # Колонки err_cnt нет — экспорт падал всегда. Число неудачных
                 # попыток в этой схеме — retry_count.
-                f"""SELECT id, op_type, label, status, total_items, done_items,
+                """SELECT id, op_type, label, status, total_items, done_items,
                           COALESCE(retry_count, 0) AS err_cnt, created_at, finished_at
-                   FROM operation_queue WHERE {where}
-                   ORDER BY created_at DESC, id DESC LIMIT ${len(args) + 1}""",
-                *args, cap,
+                   FROM operation_queue WHERE owner_id=$1
+                   ORDER BY created_at DESC, id DESC LIMIT $2""",
+                uid, cap,
             )
             if fmt == "json":
                 total = await _safe_count(pool,
-                    f"SELECT COUNT(*) FROM operation_queue WHERE {where}", *args)
+                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", uid)
                 return _json_resp({"operations": [dict(r) for r in rows],
                                    "total": total,
                                    "truncated": len(rows) >= cap})
@@ -1130,8 +1031,6 @@ def setup_routes(app: web.Application, pool) -> None:
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return None, _err("Не найдено", 404)
-        if row["op_type"] == "deploy_network" and "topology_digest" in _row_params(row):
-            return None, _err("Сверьте результат и заново откройте план развёртывания проекта", 409)
         return (uid, op_id, row), None
 
     async def _live_copy(op_id: int, uid: int) -> int | None:
@@ -1253,5 +1152,3 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/operations/resume", resume_operations)
     app.router.add_post("/api/miniapp/operations/retry_failed", operations_retry_failed)
     app.router.add_get("/api/miniapp/operations/export", operation_export)
-    app.router.add_get("/api/miniapp/operations/{op_id}/cleanup", restriction_cleanup)
-    app.router.add_post("/api/miniapp/operations/{op_id}/cleanup", restriction_cleanup)

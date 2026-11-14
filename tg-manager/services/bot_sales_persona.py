@@ -1912,16 +1912,6 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
     except Exception:
         log.debug("bsp handle_incoming: faq/examples load skipped")
     dialog["kb_posts"] = await load_posts_knowledge(pool, persona.get("owner_id"), text)
-    # Память о собеседнике (модуль «ИИ Память»): факты, накопленные этим ботом
-    # о человеке, в том числе заметка владельца. Продавец помнит клиента и
-    # между диалогами, а не только в пределах своей истории.
-    try:
-        from services import semantic_memory
-        _mem = await semantic_memory.build_memory_prompt(pool, bot_id, chat_id)
-        if _mem:
-            dialog["kb_posts"] = ((dialog.get("kb_posts") or "") + "\n" + _mem).strip()
-    except Exception:
-        log.debug("bsp handle_incoming: semantic memory skipped", exc_info=True)
     reply = await generate_reply(persona, products, dialog, text, faqs, examples,
                                  delivery, promos)
     meta = dialog.get("_ai_meta") if isinstance(dialog, dict) else None
@@ -1963,8 +1953,6 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
         await append_turn(pool, dialog["id"], text, reply, stage=stage)
     except Exception:
         log.warning("bsp handle_incoming: append_turn failed")
-    from services import semantic_memory
-    await semantic_memory.remember_turn(pool, bot_id, chat_id, text, reply, owner_id)
 
     # 4) Память как у живого оператора: раз в несколько ходов сжимаем диалог в
     #    резюме + предпочтения (throttle, fail-open — не тормозим каждый ответ).

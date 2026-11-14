@@ -20,7 +20,6 @@ import ast
 import asyncio
 import os
 import re
-from contextlib import asynccontextmanager
 
 import pytest
 
@@ -41,22 +40,6 @@ class _Pool:
     async def fetchrow(self, sql, *a):
         self.log.append((sql, a))
         return None
-
-
-class _BotPool(_Pool):
-    @asynccontextmanager
-    async def acquire(self):
-        yield self
-
-    @asynccontextmanager
-    async def transaction(self):
-        yield
-
-    async def fetch(self, sql, *args):
-        self.log.append((sql, args))
-        owner, ids = args
-        assert owner == 777 and ids == [555] and "added_by=$1" in sql
-        return [{"bot_id": 555}] if self.result == "UPDATE 1" else []
 
 
 def _run(coro):
@@ -98,14 +81,14 @@ def test_record_never_raises():
 
 
 def test_bot_removal_is_recorded():
-    pool = _BotPool("UPDATE 1")
+    pool = _Pool("UPDATE 1")
     assert _run(db.delete_bot(pool, 555, 777)) is True
     assert _audits(pool), "убрали бота и не записали"
 
 
 def test_bot_removal_of_a_foreign_bot_is_not_recorded():
     """Ничего не сделали — нечего и записывать."""
-    pool = _BotPool("UPDATE 0")
+    pool = _Pool("UPDATE 0")
     assert _run(db.delete_bot(pool, 555, 777)) is False
     assert not _audits(pool)
 

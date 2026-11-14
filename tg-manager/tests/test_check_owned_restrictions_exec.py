@@ -177,43 +177,6 @@ def test_dead_observer_makes_entity_check_failed_not_crash():
     assert res["counts"].get(erc.STATUS_CHECK_FAILED) == 1
 
 
-
-def test_full_findings_are_retained_beyond_operation_log_first_page():
-    statuses = [erc.STATUS_UNREACHABLE, erc.STATUS_RESTRICTED,
-                erc.STATUS_HIDDEN, erc.STATUS_CHECK_FAILED, erc.STATUS_CLEAN]
-    pool = _FakePool(
-        channels=[_ch(i, f"c{i}") for i in range(1, 296)], bots=[], accounts=[_acc(1)],
-    )
-    result = _exec(pool, [_verdict(statuses[(i - 1) % 5]) for i in range(1, 296)])
-    assert result["findings_version"] == 2 and result["checked"] == 295
-    assert len(result["findings"]) == 236
-    assert len(pool.logged) == 295
-    assert result["findings"][-4:] == [
-        {"id": i, "kind": "channel", "title": "Канал", "bot_id": None,
-         "status": status, "reason": "r"}
-        for i, status in zip(range(291, 295), statuses[:4])
-    ]
-
-
-def test_exact_worker_selection_never_probes_other_resource_kinds():
-    class ExactPool(_FakePool):
-        async def fetch(self, query, *args):
-            rows = await super().fetch(query, *args)
-            if "managed_channels" in query:
-                assert args == (99, [101])
-                return [row for row in rows if row["channel_id"] in args[1]]
-            if "managed_bots" in query:
-                assert args == (99, [])
-                return []
-            return rows
-
-    pool = ExactPool(channels=[_ch(101, "a"), _ch(102, "b")],
-                     bots=[_bot(201, "testbot")], accounts=[_acc(1)])
-    result = _exec(pool, [_verdict(erc.STATUS_HIDDEN)],
-                   {"selection_mode": "exact", "channel_ids": [101]})
-    assert result["checked"] == 1 and [item["id"] for item in result["findings"]] == [101]
-
-
 def test_no_entities_fails_clearly():
     pool = _FakePool(channels=[], bots=[], accounts=[_acc(1)])
     res = _exec(pool, [])

@@ -38,7 +38,6 @@ PICKERS = {
     "_meshLoadAccs": ("mc-account", False),
     "_invLoadAccs": ("massInviteAccsWrap", True),
     "_ucLoadAccs": ("ucAccounts", True),
-    "_complaintLoadAccs": ("cmpAccounts", True),
 }
 
 

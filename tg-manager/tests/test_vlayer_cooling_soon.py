@@ -21,7 +21,7 @@ class _Pool:
         self._names = names or {}
 
     async def fetch(self, q, *a):
-        if "make_interval(hours => $4)" in q:
+        if "interval '24 hours'" in q:
             return self._cooling
         if "unified_contacts" in q:
             return [{"eid": k, "name": v} for k, v in self._names.items()]

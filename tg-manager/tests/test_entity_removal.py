@@ -46,22 +46,6 @@ class _BotPool:
         self.result = result
         self.statements: list[tuple[str, tuple]] = []
 
-    def acquire(self):
-        return self
-
-    def transaction(self):
-        return self
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_):
-        return False
-
-    async def fetch(self, q, *a):
-        self.statements.append((_flat(q), a))
-        return [{"bot_id": a[1][0]}] if self.result == "UPDATE 1" else []
-
     async def execute(self, q, *a):
         self.statements.append((_flat(q), a))
         return self.result
@@ -78,7 +62,7 @@ def test_delete_bot_marks_deleted_not_just_paused():
     assert "deleted_at=now()" in q, "удаление снова ничем не отличается от паузы"
     assert "is_active=FALSE" in q, "удалённый бот остаётся в работе"
     assert "DELETE FROM managed_bots" not in q, "каскадом уйдёт аудитория"
-    assert args == (1, [7])
+    assert args == (7, 1)
 
 
 def test_deleting_twice_reports_nothing_deleted():
@@ -110,10 +94,8 @@ def test_pause_cannot_resurrect_a_deleted_bot():
 
     src = inspect.getsource(mini_app_bots.setup_routes)
     toggle = src[src.index("async def toggle_bot"):src.index("async def create_funnel")]
-    assert "set_managed_bot_active(pool, bot_id, uid, want)" in toggle
-    toggle_sql = inspect.getsource(db.set_managed_bot_active)
-    assert "deleted_at IS NULL" in toggle_sql, "«Вернуть в работу» поднимает удалённого бота"
-    assert "COALESCE($3::boolean, NOT is_active)" in toggle_sql, (
+    assert "deleted_at IS NULL" in toggle, "«Вернуть в работу» поднимает удалённого бота"
+    assert "COALESCE($3::boolean, NOT is_active)" in toggle, (
         "пауза не принимает явное состояние")
 
 
@@ -203,12 +185,12 @@ class _ChanConn:
         self.log.append((q, a))
         if q.startswith("DELETE FROM managed_channels"):
             row = self.rows.pop(a[1], None)
-            return {**row, "catalog_metadata": None} if row else None
+            return row
         if q.startswith("DELETE FROM removed_channels"):
             if a[1] in self.removed:
                 del self.removed[a[1]]
                 return {"acc_id": 5, "title": "T", "username": "u",
-                        "type": "channel", "access_hash": 9, "catalog_metadata": None}
+                        "type": "channel", "access_hash": 9}
         return None
 
     async def execute(self, q, *a):
@@ -271,20 +253,18 @@ def test_channel_seen_again_in_dialogs_is_no_longer_marked_gone():
     assert written == [3]
 
 
-def test_filter_failure_prevents_writing_the_import():
+def test_filter_failure_never_loses_the_import():
     class _NoFetch(_ChanConn):
         async def fetch(self, q, *a):
             raise RuntimeError("relation removed_channels does not exist")
 
     pool = _NoFetch()
-    with pytest.raises(RuntimeError, match="relation removed_channels"):
-        _run(db.add_managed_channels(pool, 1, 10, _chs(1, 2)))
-    assert not any(q.startswith("INSERT INTO managed_channels") for q, _ in pool.log)
+    assert _run(db.add_managed_channels(pool, 1, 10, _chs(1, 2))) == 2
 
 
 def test_remove_channel_records_reason_and_stops_its_admin():
     pool = _ChanConn(rows={100: {"acc_id": 5, "title": "T", "username": "u",
-                                 "type": "channel", "access_hash": 9, "catalog_metadata": None}})
+                                 "type": "channel", "access_hash": 9}})
     assert _run(db.remove_managed_channel(pool, 1, 100)) is True
     assert pool.removed == {100: "owner"}
     sql = " | ".join(q for q, _ in pool.log)
@@ -327,7 +307,7 @@ def test_explicit_add_clears_the_old_removal():
     from services import op_worker
 
     src = inspect.getsource(op_worker._exec_channel_add)
-    assert "add_managed_channels(" in src and "reconnect=True" in src
+    assert "forget_removed_channels(" in src
 
 
 # ── Канал/чат: проверка живости ───────────────────────────────────────────────

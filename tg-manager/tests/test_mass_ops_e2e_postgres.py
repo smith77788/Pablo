@@ -95,7 +95,7 @@ class _Stand:
     async def _get_dialogs(self, session, limit=None, _acc=None):
         return []  # пре-скан access_hash в mass_publish — пусто, безвредно
 
-    async def _apply_op(self, session, acc, op, params, slot=0):
+    async def _apply_op(self, session, acc, op, params):
         # Единый seam аккаунт-действий (profile_setter_engine.apply_op).
         self.apply_op_calls.append(
             {"op": op, "acc_id": acc.get("id"), "params": dict(params)})

@@ -20,7 +20,7 @@ import hashlib
 import random
 import re
 
-from services.username_engine import is_valid_username, normalize_username, slugify
+from services.username_engine import slugify
 
 # Символы без визуально похожих (i,l,o,1,0) — как в username_engine.
 _RAND_ALNUM = "abcdefghjkmnpqrstuvwxyz23456789"
@@ -247,46 +247,6 @@ def assign_accounts_by_geo(
     return out
 
 
-def fit_username(raw: str | None, *, bot: bool, taken: set[str]) -> str | None:
-    """Привести планируемый username к правилам Telegram и сделать его
-    уникальным в плане. `taken` пополняется.
-
-    ЗАЧЕМ. Гео-сеть планировала username как `slugify(шаблон)[:32]` и ничем
-    не проверяла: короткий слаг («msk»), слаг с цифры, хвост «_» после
-    обрезки, «…_bot» длиннее 32 у бота (исполнитель дописывает «_bot» сам) и,
-    главное, ОДИН И ТОТ ЖЕ username у нескольких городов, когда шаблон без
-    {{CITY_SLUG}}. Каждая такая цель тратила на создании лишний запрос к
-    Telegram (отказ «занят/недопустим», потом перебор вариантов) — а лишние
-    запросы при массовом создании каналов и есть то, за что дают флуд.
-    Планировщик фабрики (`infra_generator`) уникальность держал аллокатором;
-    гео-сеть — нет.
-    """
-    if not raw:
-        return None
-    slug = slugify(raw)
-    base = (normalize_username(raw) or normalize_username("tg_" + slug)
-            or normalize_username(f"tg_{slug}_ch"))
-    if not base:
-        return None
-    if bot:
-        base = base[:-3].rstrip("_") if base.endswith("bot") else base
-        base = base or "geo"
-
-    def _make(suffix: str = "") -> str:
-        tail = suffix + ("_bot" if bot else "")
-        return base[:32 - len(tail)].rstrip("_") + tail
-
-    cand = _make()
-    n = 1
-    while (not is_valid_username(cand) or cand in taken) and n < 999:
-        n += 1
-        cand = _make(f"_{n}")
-    if not is_valid_username(cand) or cand in taken:
-        return None
-    taken.add(cand)
-    return cand
-
-
 def build_targets(
     geo_list: list[dict],
     asset_type: str,
@@ -306,15 +266,11 @@ def build_targets(
     targets: list[dict] = []
     _acc_for_target = assign_accounts_by_geo(
         [(g.get("country_code") or "") for g in geo_list], account_ids, account_geo)
-    _taken: set[str] = set()
 
     for i, geo in enumerate(geo_list):
         planned_name, planned_username = plan_target(
             geo, i + 1, name_pattern, username_pattern
         )
-        # Валидный и уникальный в плане — см. fit_username.
-        planned_username = fit_username(
-            planned_username, bot=(asset_type == "bot"), taken=_taken)
         selected_account_id = _acc_for_target[i]
 
         targets.append(

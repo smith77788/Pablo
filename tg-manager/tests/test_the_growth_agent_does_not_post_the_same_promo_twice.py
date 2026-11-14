@@ -42,8 +42,6 @@ class _Pool:
         self.marked: list[int] = []
 
     async def fetch(self, query: str, *args):
-        if "outcome='posted' AND alive" in query:
-            return []  # доказанных групп нет — см. test_growth_agent_reposts_where_it_worked
         if "niche_growth_targets" in query:
             if self.fail_read:
                 raise RuntimeError("база недоступна")
@@ -92,8 +90,6 @@ def harness(monkeypatch):
     """Исполнитель с заглушенным окружением: наружу ходит только _Telegram."""
     import services
     from services import op_worker
-    from services import niche_searcher as _real_ns
-    from services.niche_searcher import filter_groups as _real_filter
 
     tg = _Telegram()
     groups = {"value": [
@@ -106,7 +102,7 @@ def harness(monkeypatch):
         seen["exclude_ids"] = set(kw.get("exclude_ids") or ())
         return list(groups["value"])
 
-    async def _keywords(desc, *a, **kw):
+    async def _keywords(desc):
         return [desc]
 
     async def _enforce(pool, owner_id, *texts, **kw):
@@ -115,11 +111,7 @@ def harness(monkeypatch):
     for name, mod in (
         ("niche_searcher", _module("services.niche_searcher",
                                    generate_keywords=_keywords,
-                                   search_niche_groups=_search,
-                                   filter_groups=_real_filter,
-                                   text_has_links=_real_ns.text_has_links,
-                                   postable=_real_ns.postable,
-                                   rank_groups=_real_ns.rank_groups)),
+                                   search_niche_groups=_search)),
         ("account_manager", _module("services.account_manager",
                                     join_channel=tg.join_channel,
                                     post_to_channel=tg.post_to_channel)),
@@ -220,53 +212,3 @@ def test_both_failures_reach_the_owner_as_protective_counters(harness):
     for name in ("infragram_growth_dedup_read_failures_total",
                  "infragram_growth_dedup_write_failures_total"):
         assert name in reg, f"{name} не попадёт в оповещение владельцу"
-
-
-# ── флуд — ответ аккаунту, а не группе ───────────────────────────────────────
-#
-# НАХОДКА. join_channel и post_to_channel отдают флуд СЛОВАРЁМ
-# ({"error", "flood_wait"}), а не исключением, и исполнитель ловил флуд только
-# в except. Флуд на вступлении считался «не удалось вступить», и цикл без паузы
-# шёл вступать в следующую группу; флуд на посте записывался в обучение как
-# «здесь не публикуют» (запрос отсеивался), а группа сгорала навсегда без поста.
-# Обратный контроль: убрать ветки flood_wait -> оба теста ниже красные.
-
-def test_flood_on_join_stops_the_run(harness):
-    harness.groups["value"].append(
-        {"id": 112, "title": "Группа 2", "join_ref": "@g2", "username": "g2",
-         "access_hash": 1})
-
-    async def _flood_join(session_str, ref, **kw):
-        harness.tg.joined.append(ref)
-        return {"error": "FloodWait 700s", "flood_wait": 700}
-
-    sys.modules["services.account_manager"].join_channel = _flood_join
-    pool = _Pool()
-    res = harness.run(pool)
-    assert res["status"] == "requeue" and res["defer_cause"] == "flood", res
-    assert res["defer_s"] >= 700
-    assert len(harness.tg.joined) == 1, "после флуда агент полез во вторую группу"
-    assert harness.tg.posted == [] and pool.marked == []
-
-
-def test_flood_on_post_frees_the_group_and_does_not_teach(harness):
-    async def _flood_post(session_str, grp_id, text, **kw):
-        harness.tg.posted.append(grp_id)
-        return {"error": "Флуд-лимит: подождите 400с", "flood_wait": 400}
-
-    sys.modules["services.account_manager"].post_to_channel = _flood_post
-    pool = _Pool()
-    seen: list = []
-    _orig = pool.execute
-
-    async def _execute(query, *args):
-        seen.append(query)
-        return await _orig(query, *args)
-
-    pool.execute = _execute
-    res = harness.run(pool)
-    assert res["status"] == "requeue" and res["defer_cause"] == "flood", res
-    assert any("DELETE FROM niche_growth_targets" in q and "outcome='marked'" in q
-               for q in seen), "метка группы без поста не снята"
-    assert not any("outcome=$3" in q for q in seen), (
-        "флуд записан в обучение как неудачная публикация")

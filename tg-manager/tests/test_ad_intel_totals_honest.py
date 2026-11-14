@@ -48,5 +48,5 @@ def test_frontend_still_reads_those_keys():
     html = INDEX.read_text(encoding="utf-8")
     i = html.find("api('/api/miniapp/ad_intel'")
     assert i != -1, "вызов ad_intel не найден"
-    seg = html[i:i + 1600]
+    seg = html[i:i + 900]
     assert "total_advertisers" in seg and "total_placements" in seg

@@ -52,10 +52,6 @@ class _FakePool:
         async def __aexit__(self, *a):
             return False
 
-        async def fetch(self, sql, *a):
-            assert "FROM removed_channels" in sql
-            return []
-
         async def execute(self, sql, *a):
             self._log.append(sql)
             return "DELETE 0"

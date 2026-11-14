@@ -5,9 +5,6 @@ import logging
 import re
 import time
 
-from services.contacts_hub.identity_keys import merge_phones
-from services.contacts_hub.merge_engine import _as_list
-
 log = logging.getLogger(__name__)
 
 # Сколько аккаунтов синхронизируем параллельно. Раньше sync_all_accounts обходил
@@ -123,16 +120,9 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
             )})
 
             existing = await pool.fetchrow(
-                'SELECT id, phones FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id=$2',
+                'SELECT id FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id=$2',
                 owner_id, user_id)
             if existing:
-                # Телефоны ДОПОЛНЯЮТСЯ, а не перезаписываются. Синк писал
-                # `phones = [номер из Telegram]`, а у собеседника из диалогов
-                # Telegram номера не отдаёт вовсе — то есть каждый синк стирал
-                # номера, внесённые владельцем вручную, импортом или слиянием
-                # дублей (absorb_contact объединяет списки). Объединённая база
-                # теряла ровно то, ради чего её объединяли.
-                phones = merge_phones(_as_list(existing['phones']), phones)
                 await pool.execute(
                     'UPDATE unified_contacts SET username=$1, first_name=$2, last_name=$3, display_name=$4, '
                     'phones=$5::jsonb, is_premium=$6, is_verified=$7, is_mutual=$8, '

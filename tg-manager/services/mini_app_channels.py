@@ -119,9 +119,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       "group": int(crow["group_n"] or 0),
                       "mine": int(crow["mine_n"] or 0),
                       "foreign": int(crow["foreign_n"] or 0)}
-        rows = [{**dict(row), "channel_id_text": str(row["channel_id"])} for row in (rows or [])]
         return _json_resp({"channels": rows, "total": int(total or 0),
-                           "resource_menu": True,
                            "counts": counts, "offset": offset, "limit": limit})
 
     async def post_to_channel(request: web.Request) -> web.Response:
@@ -664,11 +662,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.exception("channels_removed uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        # Старый числовой ID оставляем для клиентов. Новый экран использует
-        # точную строку, поскольку JavaScript округляет большие Telegram ID.
-        return _json_resp({"channels": [
-            {**row, "channel_id_text": str(row["channel_id"])} for row in rows
-        ], "total": len(rows)})
+        return _json_resp({"channels": rows, "total": len(rows)})
 
     async def channel_restore(request: web.Request) -> web.Response:
         """Вернуть удалённый канал/чат в систему."""

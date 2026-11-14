@@ -16,10 +16,6 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
-import subprocess
-
-import pytest
 from datetime import datetime, timedelta, timezone
 
 from services import op_params_view as pv
@@ -91,7 +87,7 @@ class _Pool:
         return "OK"
 
 
-def _get(monkeypatch, path, pool=None):
+def _get(monkeypatch, path):
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
     from services import mini_app_api
@@ -100,7 +96,7 @@ def _get(monkeypatch, path, pool=None):
 
     async def _go():
         app = web.Application()
-        mini_app_api.setup_routes(app, pool or _Pool())
+        mini_app_api.setup_routes(app, _Pool())
         client = TestClient(TestServer(app))
         await client.start_server()
         try:
@@ -144,35 +140,3 @@ def test_card_screen_shows_what_was_launched():
     assert "log.csv" in body and "status=error" in body
     assert "max-height:300px" not in body, "журнал снова в окошке с прокруткой"
     assert "a.fn === 'retryOp'" in body, "«Повторить» снова дублируется"
-
-
-def test_strike_card_distinguishes_selected_and_passed_to_executor(monkeypatch):
-    class StrikePool(_Pool):
-        async def fetchrow(self, sql, *args):
-            row = await super().fetchrow(sql, *args)
-            if row and "_params" in row:
-                row.update(op_type="strike", _params={"account_ids": [1, 2, 3]},
-                           _result={"accounts_used": 1})
-            return row
-
-    status, body = _get(monkeypatch, "/api/miniapp/operation/5", StrikePool())
-    assert status == 200
-    params = {row["label"]: row["value"] for row in body["params_view"]}
-    assert params["Выбрано при запуске"] == "3: 1, 2, 3"
-    assert params["Передано исполнителю"] == "1"
-
-
-@pytest.mark.skipif(not shutil.which("node"), reason="нет node")
-def test_strike_report_formats_only_allowlisted_tags():
-    assert "opSummaryHtml(o.summary,o.op_type)" in js_function("openOpDetail")
-    js = js_function("esc") + "\n" + js_function("opSummaryHtml") + r"""
-const assert = require('node:assert/strict');
-assert.equal(opSummaryHtml('<b>Итог</b>\n<code>@name</code> <i>Текст</i>', 'strike'),
-             '<b>Итог</b>\n<code>@name</code> <i>Текст</i>');
-assert.equal(opSummaryHtml('<img src=x onerror=alert(1)>', 'strike'),
-             '&lt;img src=x onerror=alert(1)&gt;');
-assert.equal(opSummaryHtml('<b onclick=alert(1)>', 'strike'),
-             '&lt;b onclick=alert(1)&gt;');
-assert.equal(opSummaryHtml('<b>Данные</b>', 'mass_publish'), '&lt;b&gt;Данные&lt;/b&gt;');
-"""
-    subprocess.run(["node", "-"], input=js, text=True, check=True)

@@ -5,8 +5,6 @@ from typing import Optional
 
 import asyncpg
 
-from services.contacts_hub.identity_keys import email_keys, phone_keys, username_key
-
 log = logging.getLogger(__name__)
 
 
@@ -64,11 +62,8 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
         score += 0.5
         reasons.append('same_telegram_id')
 
-    # Номер сравнивается КЛЮЧОМ (identity_keys.phone_key), а не строкой:
-    # `+79991234567` и `8 999 123-45-67` — один номер. Тот же ключ стоит в
-    # группировке detect_smart_duplicates, иначе отбор перестал бы быть точным.
-    phones_a = phone_keys(_as_list(contact_a.get('phones')))
-    phones_b = phone_keys(_as_list(contact_b.get('phones')))
+    phones_a = {str(x) for x in _as_list(contact_a.get('phones')) if x}
+    phones_b = {str(x) for x in _as_list(contact_b.get('phones')) if x}
     if phones_a and phones_b and phones_a & phones_b:
         # 0.4, а не 0.3. Пока телефоны сравнивались как наборы символов, вес
         # не имел значения: признак стоял почти на каждой паре. Когда признак
@@ -80,18 +75,8 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
         score += 0.4
         reasons.append('same_phone')
 
-    # Почта опознаёт человека так же, как номер: тот же вес, тот же ключ в
-    # группировке detect_smart_duplicates (иначе отбор перестал бы быть
-    # точным). Раньше почта в сравнении не участвовала вовсе: две записи
-    # одного клиента из CRM и из импорта с одной почтой дублями не считались.
-    emails_a = email_keys(_as_list(contact_a.get('emails')))
-    emails_b = email_keys(_as_list(contact_b.get('emails')))
-    if emails_a and emails_b and emails_a & emails_b:
-        score += 0.4
-        reasons.append('same_email')
-
-    username_a = username_key(contact_a.get('username'))
-    username_b = username_key(contact_b.get('username'))
+    username_a = (contact_a.get('username') or '').lower()
+    username_b = (contact_b.get('username') or '').lower()
     if username_a and username_b and username_a == username_b:
         score += 0.25
         reasons.append('same_username')
@@ -123,7 +108,6 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
 REASON_LABELS = {
     'same_telegram_id': 'один Telegram ID',
     'same_phone': 'один телефон',
-    'same_email': 'одна почта',
     'same_username': 'один @ник',
     'same_name': 'одинаковое имя',
     'same_first_name': 'одинаковое имя (без фамилии)',
@@ -166,7 +150,7 @@ async def detect_smart_duplicates(pool, owner_id: int) -> dict:
     ответа. Молча срезанный список дублей читается как «больше дублей нет».
     """
     contacts = await pool.fetch(
-        '''SELECT id, telegram_user_id, username, first_name, last_name, phones, emails, company
+        '''SELECT id, telegram_user_id, username, first_name, last_name, phones, company
            FROM unified_contacts WHERE owner_id=$1''', owner_id)
     rows = [dict(c) for c in contacts]
 
@@ -175,13 +159,17 @@ async def detect_smart_duplicates(pool, owner_id: int) -> dict:
         keys = set()
         if c.get('telegram_user_id'):
             keys.add(('tg', str(c['telegram_user_id'])))
-        if username_key(c.get('username')):
-            keys.add(('un', username_key(c['username'])))
-        # Тот же ключ, что в compute_merge_confidence (см. identity_keys).
-        for ph in phone_keys(_as_list(c.get('phones'))):
-            keys.add(('ph', ph))
-        for em in email_keys(_as_list(c.get('emails'))):
-            keys.add(('em', em))
+        if c.get('username'):
+            keys.add(('un', str(c['username']).lower()))
+        phones = c.get('phones') or []
+        if isinstance(phones, str):
+            try:
+                phones = json.loads(phones)
+            except Exception:
+                phones = []
+        for ph in (phones or []):
+            if ph:
+                keys.add(('ph', str(ph)))
         for k in keys:
             groups.setdefault(k, []).append(i)
 

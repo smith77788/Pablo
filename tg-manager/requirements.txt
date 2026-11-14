@@ -45,10 +45,6 @@ pypdf>=4.3.1
 python-docx>=1.1.2
 openpyxl>=3.1.5
 pycryptodome>=3.19.0
-# cryptg — AES-IGE MTProto на C: 400 МБ/с против 8 МБ/с у libssl через ctypes
-# и единиц КБ/с у чистого Python (замер 12.11.2026). Telethon подхватывает его
-# сам при импорте; AES-CTR обфускации ставит services/telethon_crypto.py.
-cryptg>=0.5.0
 # Отправка ошибок во внешний сервис (Better Stack Errors / Sentry), включается
 # SENTRY_DSN; без переменной не делает ничего (services/observability.py).
 sentry-sdk==2.70.0

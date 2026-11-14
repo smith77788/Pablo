@@ -91,22 +91,6 @@ def suggest(op_type: str, status: str, result: dict | None,
         _add("fleet_health", "📊 Здоровье флота", "openHealth",
              "флот перегрет — посмотрите, каким аккаунтам нужен отдых")
 
-    # 1b. Проверка ресурсов нашла проблемные (ограничен / теневой бан /
-    #     недоступен) — дать прямой путь убрать их из списка. Раньше владелец
-    #     видел итог «Ограничение: 23 · Скрыт из поиска: 88» и кнопки рядом не
-    #     было: уборка жила только на экране «Защита», до которого от карточки
-    #     операции не дойти.
-    if op_type == "check_owned_restrictions" and op_id:
-        findings = res.get("findings")
-        if isinstance(findings, list):
-            n = sum(1 for f in findings if isinstance(f, dict)
-                    and f.get("status") in ("restricted", "hidden", "unreachable"))
-            if n:
-                _add("cleanup_restrictions", f"🧹 Убрать проблемные ({n})",
-                     "openRestrictionCleanup",
-                     f"{n} ресурсов заблокированы, в теневом бане или недоступны — "
-                     "можно убрать из списка", arg=op_id)
-
     # 2. Недоделанная цель. Если продолжение уже запланировано — не зовём
     #    человека делать то, что система сделает сама.
     left = _int(res.get("left"))

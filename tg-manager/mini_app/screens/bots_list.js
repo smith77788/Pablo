@@ -15,7 +15,6 @@ async function loadBots() {
   try {
     BOT_OFFSET = 0;
     const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0' + fleetSortQS('bots'));
-    catalogResourceMenus.bot = d.resource_menu === true;
     BOTS = d.bots||[];
     BOT_OFFSET = BOTS.length;
     BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
@@ -219,7 +218,6 @@ async function openBotByUsername(uname) {
     // первую страницу заново.
     if (!BOTS || !BOTS.length) {
       const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0');
-      catalogResourceMenus.bot = d.resource_menu === true;
       BOTS = d.bots||[];
       BOT_OFFSET = BOTS.length;
       BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
@@ -255,7 +253,6 @@ function renderBots() {
     renderBotLoadMore(0);
     return;
   }
-  if (catalogResourceMenus.bot) bindCatalogResourceActions(wrap, 'bot', () => BOTS);
   wrap.className = 'bot-cards';
   wrap.innerHTML = _list.map(b=>{
     // Показываем ИМЯ бота (first_name) как основную подпись, @username — второй
@@ -298,8 +295,7 @@ function renderBots() {
       : '';
     // На карточке — только пауза (⏻/▶️). Удаление из системы — на экране
     // бота, кнопкой «🗑 Удалить», с подтверждением.
-    const menuId = catalogResourceMenus.bot ? catalogResourceId(b, 'bot') : '';
-    return `<div class="bot-card" ${menuId ? `data-resource-node="${esc(menuId)}"` : ''} ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
+    return `<div class="bot-card" ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
       <div class="bot-card-del" title="${active?'Поставить на паузу':'Вернуть в работу'}" onclick="event.stopPropagation();botPowerConfirm(${b.bot_id},'${escJs(name)}',${!!active})">${active?'⏻':'▶️'}</div>
       <div class="bot-card-ava" style="background:${grad}">${initials}</div>
       <div class="bot-card-name">${esc(name)}</div>
@@ -308,7 +304,6 @@ function renderBots() {
       <div class="bot-card-lbl">подписчиков</div>
       ${badge}
       ${chkBadge}
-      ${menuId ? resourceMenuButton() : ''}
     </div>`;
   }).join('');
   renderBotLoadMore(_list.length);
@@ -352,8 +347,10 @@ function updateBotSelBar() {
   if (el) el.textContent = 'Выбрано: '+BOT_SEL.size;
 }
 
-// ── Проверка живости и удаление из списка ─────────────────────────────────
-// «Мёртвый» означает отозванный токен. Статусы совпадают с services/bot_api.py.
+// ── Проверка живости и полное удаление ботов ───────────────────────────────
+// «Полное удаление» ≠ «убрать из работы» (is_active=FALSE): здесь удаляется
+// сама строка бота. «Мёртвый» = отозванный токен (getMe → 401). Статусы
+// обязаны совпадать со services/bot_api.py.
 const BOT_STATUS_ALIVE = 'alive', BOT_STATUS_DEAD = 'dead', BOT_STATUS_UNKNOWN = 'unknown';
 
 async function checkAllBots() {
@@ -372,7 +369,7 @@ async function checkAllBots() {
 async function bulkDeleteBots() {
   const ids = [...BOT_SEL];
   if (!ids.length) { toast('❗ Выберите хотя бы одного бота'); return; }
-  if (!await askConfirm(`Убрать из Infragram ${ids.length} ${plural(ids.length,'бота','ботов','ботов')}?\n\nПодписчики и история сохранятся. Чтобы вернуть бота, добавьте его действующий токен.`)) return;
+  if (!await askConfirm(`Удалить ПОЛНОСТЬЮ ${ids.length} ${plural(ids.length,'бота','ботов','ботов')}?\n\nЭто не «убрать из работы»: боты и их данные удаляются из системы без возврата.`)) return;
   try {
     const r = await api('/api/miniapp/bots/bulk_delete', {method:'POST', body:JSON.stringify({bot_ids:ids})});
     toast(`🗑 Удалено: ${r.deleted||0} из ${r.requested||ids.length}`);
@@ -382,22 +379,20 @@ async function bulkDeleteBots() {
 }
 
 async function cleanupDeadBots() {
-  if (!await askConfirm('Проверить ботов и убрать из Infragram тех, у кого отозван токен?\n\nПодписчики и история сохранятся.')) return;
+  if (!await askConfirm('Проверить всех ботов и удалить тех, у кого отозван токен?\n\nБоты, до которых Telegram сейчас не достучался, затронуты не будут.')) return;
   const btn = document.getElementById('botCleanupBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Проверяю…'; }
   try {
     const r = await api('/api/miniapp/bots/cleanup_dead', {method:'POST', body:'{}'});
-    toast(`🧹 Проверено: ${r.checked||0} · удалено мёртвых: ${r.deleted||0} · не ответили: ${r.unknown||0}` + (r.changed_since_check ? ` · изменились за время проверки: ${r.changed_since_check}` : ''));
+    toast(`🧹 Проверено: ${r.checked||0} · удалено мёртвых: ${r.deleted||0} · не ответили: ${r.unknown||0}`);
     BOT_CHECK = {};
     await loadBots();
   } catch(e) { toast('⚠️ '+errRu(e,'Не удалось очистить')); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '🧹 Удалить мёртвых'; } }
 }
 
-let botBroadcastTargets = [];
 function openBotBroadcast() {
-  botBroadcastTargets = [...BOT_SEL];
-  if (!botBroadcastTargets.length) { toast('❗ Выберите хотя бы одного бота'); return; }
+  if (!BOT_SEL.size) { toast('❗ Выберите хотя бы одного бота'); return; }
   document.getElementById('bbText').value='';
   { const _b=document.getElementById('bbButtons'); if(_b) _b.value=''; }
   document.getElementById('bbErr').textContent='';
@@ -410,26 +405,22 @@ async function submitBotBroadcast() {
   const text=document.getElementById('bbText').value.trim();
   if(!text){ errEl.textContent='Введите текст рассылки'; return; }
   const buttons = parseInlineButtons(document.getElementById('bbButtons')?.value||'');
-  const ids = botBroadcastTargets;
-  if (!ids.length) { errEl.textContent='Выберите ботов заново'; return; }
-  const preview = `Отправить рассылку по ${ids.length} ${plural(ids.length,'боту','ботам','ботам')}?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+  const preview = `Отправить рассылку по ${BOT_SEL.size} ${plural(BOT_SEL.size,'боту','ботам','ботам')}?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
     + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'');
   if (!await askConfirm(preview)) return;
   const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const _p={text, bot_ids:ids}; if(buttons.length) _p.buttons=buttons;
+    const _p={text, bot_ids:[...BOT_SEL]}; if(buttons.length) _p.buttons=buttons;
     const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify(_p)});
-    toast(`📢 Рассылка запущена: ${r.broadcasts_created??ids.length} ботов, ${r.total_recipients||0} получателей`);
+    toast(`📢 Рассылка запущена: ${r.broadcasts_created||BOT_SEL.size} ботов, ${r.total_recipients||0} получателей`);
     closeModal('mo-bot-broadcast'); toggleBotSelMode();
   } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
 }
 
 // ── Массовое изменение профиля (имя/описание/приветствие) ──────────────────
-let botProfileTargets = [];
 function openBotProfileEdit() {
-  botProfileTargets = [...BOT_SEL];
-  if (!botProfileTargets.length) { toast('❗ Выберите хотя бы одного бота'); return; }
+  if (!BOT_SEL.size) { toast('❗ Выберите хотя бы одного бота'); return; }
   ['bpName','bpDesc','bpShort','bpGreet'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
   document.getElementById('bpErr').textContent='';
   document.getElementById('bpHint').textContent = `Изменения применятся к ${BOT_SEL.size} ${plural(BOT_SEL.size,'выбранному боту','выбранным ботам','выбранным ботам')}.`;
@@ -445,8 +436,7 @@ async function submitBotProfileEdit() {
   if(!name && !description && !short_description && !greeting){
     errEl.textContent='Заполните хотя бы одно поле'; return;
   }
-  if (!botProfileTargets.length) { errEl.textContent='Выберите ботов заново'; return; }
-  const _p={bot_ids:botProfileTargets};
+  const _p={bot_ids:[...BOT_SEL]};
   if(name) _p.name=name;
   if(description) _p.description=description;
   if(short_description) _p.short_description=short_description;

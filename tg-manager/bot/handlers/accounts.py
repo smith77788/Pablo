@@ -1022,7 +1022,6 @@ async def _qr_wait_task(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
-            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         try:
@@ -1126,7 +1125,6 @@ async def handle_qr_2fa(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
-            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         await message.answer(
@@ -1296,7 +1294,6 @@ async def _finalize_login(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
-            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         await message.answer(
@@ -4823,11 +4820,32 @@ async def cb_scan_connect(
 
     await callback.answer("⏳ Подключаю…")
 
-    connected = await db.add_managed_channels(pool, user_id, acc_id, to_connect)
-    if connected:
-        summary = f"✅ <b>Подключено: {connected} активов</b>\n\nОни доступны в разделах <b>Каналы</b> и <b>Группы</b>."
-    else:
-        summary = "Все выбранные ресурсы были отключены до завершения импорта."
+    # Insert all selected into managed_channels (no delete, just upsert)
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash)
+               VALUES($1, $2, $3, $4, $5, $6)
+               ON CONFLICT (owner_id, channel_id) DO UPDATE
+               SET title=EXCLUDED.title, username=EXCLUDED.username,
+                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash""",
+            [
+                (
+                    user_id,
+                    acc_id,
+                    ch["id"],
+                    ch.get("title", ""),
+                    ch.get("username", ""),
+                    ch.get("access_hash", 0),
+                )
+                for ch in to_connect
+            ],
+        )
+
+    parts = []
+    if action in ("scan_connect_all", "scan_connect_ch"):
+        parts.append(f"📢 {len(result['channels'])} каналов")
+    if action in ("scan_connect_all", "scan_connect_gr"):
+        parts.append(f"👥 {len(result['groups'])} групп")
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -4837,7 +4855,9 @@ async def cb_scan_connect(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        summary,
+        f"✅ <b>Подключено: {len(to_connect)} активов</b>\n\n"
+        + "\n".join(f"  • {p}" for p in parts)
+        + "\n\nОни доступны в разделах <b>Каналы</b> и <b>Группы</b>.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

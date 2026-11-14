@@ -10,8 +10,7 @@
 // остаются в index.html.
 
 async function openBot(botId) {
-  const resourceMenu = prepareResourceCardMenu('bd-resource-menu', 'bot', botId);
-  const b = BOTS.find(x => catalogResourceId(x, 'bot') === String(botId));
+  const b = BOTS.find(x=>x.bot_id==botId);
   const name = b?(b.username?'@'+b.username:(b.first_name||'Бот #'+botId)):'Бот';
   CUR_BOT = {id:botId, name};
   txt('bd-name', name);
@@ -19,9 +18,7 @@ async function openBot(botId) {
   push('s-botdetail');
   try {
     const d = await api('/api/miniapp/bot/'+botId);
-    if (String(CUR_BOT?.id) !== String(botId)) return;
-    CUR_BOT.d = d;
-    resourceMenu(d.bot);
+    if (CUR_BOT && CUR_BOT.id==botId) CUR_BOT.d = d;
     txt('bd-body', buildBotDetail(d));
     modernizeIcons(document.getElementById('s-botdetail'));
   } catch(e) {
@@ -42,8 +39,7 @@ async function botPowerConfirm(botId, name, isActive) {
     await api('/api/miniapp/bot/'+botId+'/toggle', {method:'PUT', body:JSON.stringify({active:!isActive})});
     toast(isActive ? '⏸ Бот на паузе — данные сохранены' : '🟢 Бот вернулся в работу');
     loadBots();
-    if (document.getElementById('s-botdetail')?.classList.contains('show') &&
-        String(CUR_BOT?.id) === String(botId)) openBot(botId);
+    if (document.getElementById('s-botdetail')?.classList.contains('show')) openBot(botId);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
 
@@ -52,8 +48,7 @@ async function botDeleteConfirm(botId, name) {
   try {
     await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
     toast('🗑 Бот удалён из системы');
-    if (document.getElementById('s-botdetail')?.classList.contains('show') &&
-        String(CUR_BOT?.id) === String(botId)) back();
+    if (document.getElementById('s-botdetail')?.classList.contains('show')) back();
     loadBots();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
@@ -73,10 +68,7 @@ function buildBotDetail(d) {
   // нет, и объяснения нигде. Восстановление тоже не подсказывалось, а
   // единственный доступный путь (удалить и добавить заново) стирал аудиторию.
   const bh = b.health || {};
-  const pausedByCheck = b.cleanup_paused && !b.is_active;
-  const bhBanner = pausedByCheck
-    ? '<div class="field-note">Бот отключён по результатам проверки. История и настройки доступны. Для действий в Telegram верните бота в работу.</div>'
-    : (bh.state && bh.state!=='ok' && bh.hint)
+  const bhBanner = (bh.state && bh.state!=='ok' && bh.hint)
     ? `<div style="margin:8px 0;padding:11px 13px;background:var(--bg2);border-left:3px solid ${bh.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'};border-radius:8px">
          <div style="font-weight:600;font-size:14px">${esc(bh.label)}</div>
          <div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.45">${esc(bh.hint)}</div>
@@ -108,9 +100,9 @@ function buildBotDetail(d) {
       {ico:'🌐',lbl:'Глобал. поиск',  fn:`openGlobalSearch()`},
       {ico:'💬',lbl:'Входящие',       fn:`openRelay(${bid},'${bnJs}')`},
       {ico:'🔗',lbl:'Диплинки',       fn:`openDeeplinks(${bid})`},
-      {ico:'⌨️',lbl:'Команды',        requiresActive:true, fn:`openBotCommands(${bid})`},
-      {ico:'🔗',lbl:'Вебхук',        requiresActive:true, fn:`openBotWebhook(${bid},'${bnJs}')`},
-      {ico:'🌍',lbl:'Мультигео',      requiresActive:true, fn:`openMultigeo()`},
+      {ico:'⌨️',lbl:'Команды',        fn:`openBotCommands(${bid})`},
+      {ico:'🔗',lbl:'Вебхук',        fn:`openBotWebhook(${bid},'${bnJs}')`},
+      {ico:'🌍',lbl:'Мультигео',      fn:`openMultigeo()`},
       {ico:'📝',lbl:'Заметка',        fn:`openBotNote(${bid})`},
       {ico:'🏷',lbl:'Доп. username',  fn:`openBotExtraUsername(${bid})`},
     ]},
@@ -158,13 +150,13 @@ function buildBotDetail(d) {
     </div>
     <div style="display:flex;gap:8px;padding:4px 0 4px">
       <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="botPowerConfirm(${bid},'${bnJs}',${!!b.is_active})">${b.is_active?'⏸ На паузу':'▶️ Вернуть в работу'}</button>
-      <button class="btn btn-s" ${b.is_active ? '' : 'disabled'} style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
       <button class="btn btn-s" style="flex:0 0 auto;font-size:13px;padding:10px 10px;color:var(--red)" onclick="botDeleteConfirm(${bid},'${bnJs}')" aria-label="Удалить бота">🗑 Удалить</button>
     </div>
     ${mgmtSections.map(s=>`
       <div class="sec">${s.title}</div>
       <div class="mgmt-grid">
-        ${s.tiles.filter(t=>!t.requiresActive || b.is_active).map(t=>`<div class="mgmt-tile" onclick="${t.fn}">
+        ${s.tiles.map(t=>`<div class="mgmt-tile" onclick="${t.fn}">
           <div class="mgmt-tile-ico">${t.ico}</div>
           <div class="mgmt-tile-lbl">${t.lbl}</div>
         </div>`).join('')}

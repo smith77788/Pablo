@@ -40,7 +40,6 @@ from services import mini_app_dashboard
 from services import mini_app_dm
 from services import mini_app_cf
 from services import mini_app_content
-from services import mini_app_clone_adapt
 from services import mini_app_presence
 from services import mini_app_cloud
 from services import mini_app_media
@@ -80,7 +79,6 @@ from services.security import (
     validate_integer,
     validate_string,
     selection_ids,
-    tg_id,
     sanitize_search_query,
     check_sql_suspicious,
     escape_html,
@@ -109,7 +107,7 @@ ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "re
 # флоту вместо тех пяти. Список сверяется с ветками билдера тестом
 # tests/test_account_filter_is_not_silently_widened.py.
 ACCOUNT_FILTERS = ("all", "active", "cooldown", "banned", "spamblock",
-                   "proxy_down", "dead", "low_trust", "flooded", "foreign", "no2fa")
+                   "proxy_down", "dead")
 
 # Статусы operation_queue, которые вправе прийти фильтром с фронта. Колонка —
 # обычный TEXT без CHECK, поэтому список живёт здесь и его сторожит тест
@@ -143,108 +141,6 @@ ACTIVE_ACC_SQL = (
     "AND (cooldown_until IS NULL OR cooldown_until <= now())")
 
 _cache: dict[str, tuple[float, Any]] = {}
-
-# Срезы здоровья флота, которые и считает экран «Здоровье», и открывает список
-# аккаунтов (`_accounts_where`). Одно условие на двоих: плитка «Низкий траст 3»
-# обязана открывать ровно этих троих, а массовое действие по срезу — идти по
-# ним же. Раньше у «Низкого траста» и «Флуда» списка не было вовсе: число на
-# экране было, а посмотреть, кто это, — нечем.
-_LOW_TRUST_SQL = "trust_score IS NOT NULL AND trust_score < 0.4"
-# В аккаунт вошёл кто-то ещё (дозор угона, services/session_watch).
-_FOREIGN_SQL = "COALESCE(foreign_sessions, 0) > 0"
-# Живой аккаунт без пароля 2FA (обход флота спрашивает Telegram, v346):
-# угоняется одним кодом входа. Мёртвые не считаем — защищать там нечего.
-# Ограниченные (спам-блок, заморозка) считаем: их снимают, и угнать их можно.
-# Потерянные и с отозванной сессией — нет: поставить пароль там нечем.
-def _no2fa_sql() -> str:
-    from services.account_status import LOST_STATUSES, SESSION_STATUSES, sql_status_list
-    return ("twofa_on IS FALSE AND COALESCE(acc_status, 'active') NOT IN ("
-            + sql_status_list(LOST_STATUSES | SESSION_STATUSES) + ")")
-
-
-_NO2FA_SQL = _no2fa_sql()
-_FLOODED_SQL = (
-    "EXISTS (SELECT 1 FROM account_flood_log l WHERE l.account_id = tg_accounts.id "
-    "AND l.created_at > now() - interval '7 days')")
-_PROXY_DOWN_SQL = (
-    "proxy_id IS NOT NULL AND EXISTS ("
-    "SELECT 1 FROM user_proxies p WHERE p.id = tg_accounts.proxy_id "
-    "AND p.is_alive IS FALSE)")
-
-
-def fleet_verdict(c: dict, alerts: list[dict] | None = None) -> dict:
-    """Итог здоровья флота одной фразой — и ПОЧЕМУ, с дверью к каждой причине.
-
-    Статус на экране «Здоровье» смотрел только на бан и низкий траст: при
-    трёх критических оповещениях о волне флудов и половине флота в кулдауне
-    он писал «✅ Норма». Здесь учитывается всё, что мешает операциям, а
-    каждая причина несёт срез списка аккаунтов (`filter`) или экран (`open`),
-    где её чинят, и подсказку, что делать.
-
-    level: ok | warn | crit. Порядок причин — от самой срочной.
-    """
-    alerts = alerts or []
-    total = int(c.get("total") or 0)
-    active = int(c.get("active") or 0)
-    reasons: list[dict] = []
-
-    def add(key, level, count, text, hint, filter_=None, open_=None):
-        if count:
-            reasons.append({"key": key, "level": level, "count": int(count),
-                            "text": text, "hint": hint,
-                            "filter": filter_, "open": open_})
-
-    crit_alerts = [a for a in alerts if a.get("severity") == "critical"]
-    warn_alerts = [a for a in alerts if a.get("severity") != "critical"]
-    if total and not active:
-        add("none_usable", "crit", total, "Ни один аккаунт сейчас не может работать",
-            "Операции встанут. Откройте разбор: он покажет, на каком шаге "
-            "отсеиваются аккаунты.", open_="fleetdoctor")
-    add("alerts_crit", "crit", len(crit_alerts), "Критичные оповещения",
-        "Детектор видит сбой прямо сейчас — откройте, там сказано, что делать.",
-        open_="infra")
-    # Угон дороже бана: бан снимается апелляцией, а аккаунт, из которого
-    # выкинули наш сеанс, не вернуть ничем. Поэтому — критично и первым.
-    add("foreign", "crit", c.get("foreign"), "В аккаунты вошли с других устройств",
-        "Закройте чужие сеансы («Профили → Очистка и сеансы») и поставьте "
-        "пароль 2FA — иначе тот, кто вошёл, может забрать аккаунт.",
-        filter_="foreign")
-    add("no2fa", "warn", c.get("no2fa"), "Аккаунты без пароля 2FA",
-        "Такой аккаунт забирают одним кодом входа. Включите «Щит → Автозащита» "
-        "— каждому поставится свой пароль, — или задайте его в «Профили → 2FA».",
-        filter_="no2fa")
-    add("proxy_down", "warn", c.get("proxy_down"), "Прокси не отвечает",
-        "Сами аккаунты целы, но их операции падают по сети. Замените прокси.",
-        filter_="proxy_down")
-    add("spamblock", "warn", c.get("spamblock"), "Спам-блок",
-        "Система сама просит снятия у @SpamBot и держит аккаунт только на "
-        "пассивных действиях. Ничего делать не нужно — следите за восстановлением.",
-        filter_="spamblock")
-    add("cooldown", "warn", c.get("cooling"), "На паузе после флуда",
-        "Telegram попросил подождать. Вернутся сами; если таких много — "
-        "снизьте темп операций.", filter_="cooldown")
-    add("flooded_24h", "warn", c.get("flooded_24h"), "Ловили флуд за сутки",
-        "Признак слишком быстрого темпа. Дайте этим аккаунтам отдохнуть.",
-        filter_="flooded")
-    add("low_trust", "warn", c.get("low_trust"), "Низкое доверие",
-        "Такие аккаунты чаще получают ограничения. Прогрейте их и не ставьте "
-        "в массовые операции.", filter_="low_trust")
-    add("dead", "warn", c.get("dead"), "Мёртвые: бан, удалён или сессия отозвана",
-        "В операциях не участвуют. Отозванную сессию можно перезалить, "
-        "остальное — убрать кнопкой «Очистить мёртвое».", filter_="dead")
-    add("alerts_warn", "warn", len(warn_alerts), "Предупреждения детектора",
-        "Пока не сбой, но стоит посмотреть.", open_="infra")
-
-    if any(r["level"] == "crit" for r in reasons):
-        level, text = "crit", "Нужны действия"
-    elif reasons:
-        level, text = "warn", "Есть что поправить"
-    elif not total:
-        level, text = "warn", "Аккаунтов пока нет"
-    else:
-        level, text = "ok", "Норма — всё работает"
-    return {"level": level, "text": text, "reasons": reasons}
-
 _CACHE_TTL = 30  # секунд
 try:
     _DASHBOARD_QUERY_TIMEOUT = float(os.getenv("MINIAPP_DASHBOARD_QUERY_TIMEOUT", "8"))
@@ -551,33 +447,6 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
     "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS tags TEXT",
     "CREATE INDEX IF NOT EXISTS idx_short_links_owner ON short_links(owner_id, created_at DESC)",
-    # Центр восстановления аккаунтов: история шагов, настройки владельца, дата
-    # снятия от @SpamBot и счётчик повторных блоков (services/account_rehab).
-    # Источник правды — schema_v344_rehab_center.sql; здесь и в main.py тот же
-    # идемпотентный DDL на случай лага миграции.
-    "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS release_at TIMESTAMPTZ",
-    "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS relapses INTEGER NOT NULL DEFAULT 0",
-    """CREATE TABLE IF NOT EXISTS account_rehab_events (
-        id        BIGSERIAL PRIMARY KEY,
-        acc_id    BIGINT NOT NULL,
-        owner_id  BIGINT NOT NULL,
-        at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-        step      TEXT NOT NULL,
-        outcome   TEXT,
-        detail    TEXT
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_rehab_events_acc ON account_rehab_events(acc_id, at DESC)",
-    """CREATE TABLE IF NOT EXISTS rehab_settings (
-        owner_id      BIGINT PRIMARY KEY,
-        paused        BOOLEAN NOT NULL DEFAULT FALSE,
-        auto_appeal   BOOLEAN NOT NULL DEFAULT TRUE,
-        pace          TEXT NOT NULL DEFAULT 'normal',
-        max_rechecks  INTEGER NOT NULL DEFAULT 8,
-        rest_hours    INTEGER NOT NULL DEFAULT 24,
-        notify_freed  BOOLEAN NOT NULL DEFAULT TRUE,
-        notify_stuck  BOOLEAN NOT NULL DEFAULT TRUE,
-        updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-    )""",
 ]
 
 
@@ -3027,9 +2896,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             await pool.execute(
                 """DELETE FROM bot_deep_links WHERE id=$1
-                   AND bot_id IN (
-                       SELECT bot_id FROM managed_bots WHERE added_by=$2 AND deleted_at IS NULL
-                       FOR SHARE)""",
+                   AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)""",
                 link_id, uid)
             return _json_resp({"ok": True})
         except Exception as e:
@@ -3054,74 +2921,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Profile Setter ─────────────────────────────────────────────────────────
 
-    # Какие аккаунты годятся для оформления: живые, с сессией, не в паузе.
-    # Одно условие на статус, выбор и отправку — иначе экран обещал бы одно
-    # число, а операция ушла бы на другое.
-    # Владелец ($1) стоит в самих запросах ниже, а не здесь: так его видит
-    # сторож скоупа (tests/test_miniapp_path_param_scope_ratchet.py).
-    _SETTER_ELIGIBLE = (
-        "is_active=TRUE AND session_str IS NOT NULL "
-        "AND (cooldown_until IS NULL OR cooldown_until < NOW())"
-    )
-
     async def profile_setter_status(request: web.Request) -> web.Response:
-        """Сколько аккаунтов можно оформить и какие именно (для выбора)."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            rows = await pool.fetch(
-                "SELECT a.id, a.phone, a.first_name, a.username, "
-                "(a.twofa_enc IS NOT NULL) AS twofa_saved, "
-                "pp.persona_name "
-                "FROM tg_accounts a "
-                "LEFT JOIN persona_profiles pp ON pp.account_id=a.id AND pp.owner_id=a.owner_id "
-                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
-                "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
-                "ORDER BY a.trust_score DESC NULLS LAST, a.id LIMIT 500",
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+                "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
                 uid,
             )
         except Exception:
             log.exception("profile_setter_status uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        accounts = [{
-            "id": r["id"],
-            "phone": r["phone"] or "",
-            "first_name": r["first_name"] or "",
-            "username": r["username"] or "",
-            "twofa_saved": bool(r["twofa_saved"]),
-            "persona": r["persona_name"] or "",
-        } for r in rows]
-        return _json_resp({
-            "available_accounts": len(accounts),
-            "accounts": accounts,
-            "twofa_saved": sum(1 for a in accounts if a["twofa_saved"]),
-        })
-
-    async def profile_setter_preview(request: web.Request) -> web.Response:
-        """Как будут выглядеть профили после оформления.
-
-        Рендер — ТЕМИ ЖЕ функциями движка, что и у исполнителя, иначе
-        предпросмотр стал бы вторым источником правды.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        from services import profile_setter_engine as _pse
-        fields = {k: str(body.get(k) or "")[:512]
-                  for k in ("first_name", "last_name", "about")}
-        un = str(body.get("username") or "").strip().lstrip("@")[:200]
-        try:
-            out = _pse.render_preview(fields)
-            if un:
-                out["usernames"] = [_pse.render_username(un, i) for i in range(3)]
-        except Exception as exc:
-            return _err(f"Шаблон не разворачивается: {str(exc)[:100]}", 400)
-        return _json_resp(out)
+        return _json_resp({"available_accounts": int(total or 0)})
 
     async def profile_setter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3129,52 +2943,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            op = validate_string(body.get("op"), max_len=20) or ""
+            op = validate_string(body.get("op"), max_len=20)
             acc_count = validate_integer(body.get("acc_count", 0), min_val=0) or 0
         except Exception:
             return _err("Неверное тело запроса", 400)
-        from services import profile_setter_engine as _pse
+        if op not in ("name", "avatar", "2fa"):
+            return _err("Операция: имя, аватар или двухфакторная защита", 400)
+        if acc_count < 0:
+            return _err("Число аккаунтов не может быть отрицательным", 400)
         try:
-            params = _pse.build_setter_params(op, body)
-        except ValueError as exc:
-            return _err(str(exc), 400)
-        want_ids: list[int] = []
-        for raw in (body.get("account_ids") or [])[:500]:
-            try:
-                want_ids.append(int(raw))
-            except (TypeError, ValueError):
-                return _err("Неверный список аккаунтов", 400)
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+                "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
+                uid,
+            )
+        except Exception:
+            log.exception("profile_setter_submit fetchval uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        total = int(total or 0)
+        use = min(acc_count, total) if acc_count > 0 else total
+        if use == 0:
+            return _err("Нет доступных аккаунтов", 400)
         try:
-            # Явный выбор проверяется тем же условием и тем же владельцем:
-            # чужой или выбывший id просто не попадёт в выборку.
-            if want_ids:
-                rows = await pool.fetch(
-                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND " + _SETTER_ELIGIBLE
-                    + " AND id = ANY($2::bigint[])",
-                    uid, want_ids,
-                )
-                got = {r["id"] for r in rows}
-                account_ids = [i for i in want_ids if i in got]
-            else:
-                rows = await pool.fetch(
-                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND " + _SETTER_ELIGIBLE + " "
-                    "ORDER BY trust_score DESC NULLS LAST, id LIMIT $2",
-                    uid, acc_count if acc_count > 0 else 500,
-                )
-                account_ids = [r["id"] for r in rows]
+            rows = await pool.fetch(
+                "SELECT id FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+                "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
+                "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
+                uid, use,
+            )
         except Exception:
             log.exception("profile_setter_submit fetch uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        if not account_ids:
-            return _err("Нет доступных аккаунтов", 400)
-        # Канарейка: сначала один аккаунт — владелец смотрит результат и только
-        # потом раскатывает на флот. Ошибка в шаблоне стоит одного профиля.
-        if body.get("canary"):
-            account_ids = account_ids[:1]
-        params["account_ids"] = account_ids
-        label = _pse.setter_label(op, params, len(account_ids))
-        if body.get("canary"):
-            label = "🧪 Проба · " + label
+        account_ids = [r["id"] for r in rows]
+        params: dict = {"op": op, "account_ids": account_ids}
+        if op == "name":
+            params["name_data"] = {
+                "first_name": str(body.get("first_name", "")).strip()[:64],
+                "last_name": str(body.get("last_name", "")).strip()[:64],
+                "about": str(body.get("about", "")).strip()[:70],
+            }
+        elif op == "avatar":
+            url = str(body.get("avatar_url", "")).strip()
+            if not url.startswith("http"):
+                return _err("Ссылка на аватар должна начинаться с http", 400)
+            params["avatar_url"] = url
+        elif op == "2fa":
+            new_pass = str(body.get("new_password", "")).strip()
+            if len(new_pass) < 4:
+                return _err("Пароль минимум 4 символа", 400)
+            params["new_password"] = new_pass
+            params["current_password"] = str(body.get("current_password", "")).strip()
+            params["hint"] = str(body.get("hint", "")).strip()
+        label_map = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
+        label = f"Сеттер: {label_map.get(op, op)} × {len(account_ids)} акк."
         try:
             op_id = await _obus.submit(
                 pool, uid, "bulk_set_profile", params,
@@ -3186,39 +3009,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("profile_setter_submit insert uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "op_id": op_id, "label": label,
-                           "count": len(account_ids), "account_ids": account_ids})
-
-    async def profile_setter_twofa(request: web.Request) -> web.Response:
-        """Сохранённые пароли 2FA своих аккаунтов — чтобы владелец мог их
-        записать. Только свои аккаунты (owner_id в запросе), только POST:
-        GET оседает в истории и логах прокси."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            rows = await pool.fetch(
-                "SELECT id, phone, first_name, username, twofa_enc FROM tg_accounts "
-                "WHERE owner_id=$1 AND twofa_enc IS NOT NULL ORDER BY id",
-                uid,
-            )
-        except Exception:
-            log.exception("profile_setter_twofa uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        from services.token_vault import decrypt_token
-        items = [{
-            "id": r["id"],
-            "phone": r["phone"] or "",
-            "name": r["first_name"] or (("@" + r["username"]) if r["username"] else ""),
-            # Ключ не «password»: тот последний барьер _json_resp гасит
-            # целиком, а здесь владелец НАРОЧНО открывает пароли своих
-            # аккаунтов, чтобы записать их, — как с экспортом своей сессии
-            # (ключ «session», см. services/secret_masking.py).
-            "twofa": decrypt_token(r["twofa_enc"]) or "",
-        } for r in rows]
-        # Факт показа — в журнал (без самих паролей): кто и сколько открыл.
-        log.info("profile_setter_twofa reveal uid=%d accounts=%d", uid, len(items))
-        return _json_resp({"items": items})
+        return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(account_ids)})
 
     # ── Account Cleaner ────────────────────────────────────────────────────────
 
@@ -3292,6 +3083,76 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
     # ── Infra Analytics ────────────────────────────────────────────────────────
+
+    async def infra_analytics_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            active_accs = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
+            )
+        except Exception as e:
+            log.warning("infra_analytics active_accs uid=%d: %s", uid, e)
+            active_accs = 0
+        try:
+            flood_24h = await pool.fetchval(
+                """SELECT COUNT(*) FROM account_flood_log fl
+                   JOIN tg_accounts ta ON ta.id=fl.account_id
+                   WHERE ta.owner_id=$1 AND fl.created_at > NOW()-INTERVAL '24h'""",
+                uid,
+            )
+        except Exception as e:
+            log.warning("infra_analytics flood_24h uid=%d: %s", uid, e)
+            flood_24h = 0
+        try:
+            ops_24h = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW()-INTERVAL '24h'",
+                uid,
+            )
+        except Exception as e:
+            log.warning("infra_analytics ops_24h uid=%d: %s", uid, e)
+            ops_24h = 0
+        try:
+            warmup_active = await pool.fetchval(
+                """SELECT COUNT(*) FROM account_warmup_plans wp
+                   WHERE wp.owner_id=$1 AND wp.status='active'""",
+                uid,
+            )
+        except Exception as e:
+            log.warning("infra_analytics warmup uid=%d: %s", uid, e)
+            warmup_active = 0
+        try:
+            pools = await pool.fetch(
+                """SELECT pool, COUNT(*) AS cnt FROM tg_accounts
+                   WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL
+                   GROUP BY pool ORDER BY cnt DESC LIMIT 10""",
+                uid,
+            )
+        except Exception as e:
+            log.warning("infra_analytics pools uid=%d: %s", uid, e)
+            pools = []
+        try:
+            audit_rows = await pool.fetch(
+                """SELECT action, target, result, occurred_at
+                   FROM operation_audit WHERE owner_id=$1
+                   ORDER BY occurred_at DESC LIMIT 10""",
+                uid,
+            )
+        except Exception as e:
+            log.warning("infra_analytics audit uid=%d: %s", uid, e)
+            audit_rows = []
+        return _json_resp({
+            "active_accounts": int(active_accs or 0),
+            "flood_24h": int(flood_24h or 0),
+            "ops_24h": int(ops_24h or 0),
+            "warmup_active": int(warmup_active or 0),
+            "pools": [dict(p) for p in pools],
+            "audit": [
+                {**dict(a), "occurred_at": a["occurred_at"].isoformat() if a["occurred_at"] else None}
+                for a in audit_rows
+            ],
+        })
 
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
@@ -3711,14 +3572,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         tone = (body.get("tone") or "neutral").strip()
         if tone not in COMMENT_TONES:
             tone = "neutral"
-        from services.growth_agent_settings import comment_settings
-        cfg = comment_settings(body)
-        acc_count = cfg["acc_count"]
+        try:
+            acc_count = max(1, min(validate_integer(body.get("acc_count") or 3, min_val=1, max_val=10) or 3, 10))
+        except (TypeError, ValueError):
+            acc_count = 3
         if not channels:
             return _err("Укажите хотя бы один канал", 400)
         from services import content_safety
-        _v = await content_safety.enforce(
-            pool, uid, niche or "comment", cfg["extra_instruction"], surface="ai_comment")
+        _v = await content_safety.enforce(pool, uid, niche or "comment", "", surface="ai_comment")
         if _v.blocked:
             return _err("Контент заблокирован политикой платформы", 403)
         has_acc = await _safe_count(pool,
@@ -3730,8 +3591,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             label = f"AI-комментинг: {len(channels)} каналов"
             op_id = await _obus.submit(
                 pool, uid, "ai_comment",
-                {"channels": channels, "niche": niche, "tone": tone, **cfg,
-                 "acc_count": acc_count},
+                {"channels": channels, "niche": niche, "tone": tone, "acc_count": acc_count},
                 total_items=len(channels), label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "channels": len(channels)})
         except PermissionError as exc:
@@ -4454,15 +4314,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # губернатор флота стретчит её МУЛЬТИПЛИКАТИВНО (base × mult), и при 0 он
         # уже ничего не затормозит. FloodWait/карантин тормозят независимо.
         delay = min(max(validate_integer(data.get("delay", 30), min_val=1, max_val=600) or 30, 1), 600)
-        # Суточный потолок ЛС с одного аккаунта. Пусто — безопасный дефолт
-        # исполнителя (dm_engine.effective_daily_cap), сверху — тот же предел.
-        from services.dm_engine import DM_DAILY_CAP_MAX as _dm_cap_max
+        # Потолок сообщений с одного аккаунта за эту рассылку. Раньше его не
+        # было вовсе: 1000 получателей на двух аккаунтах = по 500 ЛС с каждого.
         per_account_cap = None
         if data.get("per_account_cap") not in (None, "", 0):
             per_account_cap = min(max(
-                validate_integer(data.get("per_account_cap"), min_val=1,
-                                 max_val=_dm_cap_max) or 1,
-                1), _dm_cap_max)
+                validate_integer(data.get("per_account_cap"), min_val=1, max_val=500) or 1,
+                1), 500)
 
         acc_ids = await _alive_accounts(
             uid, [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()])
@@ -4723,166 +4581,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Persona Hub ───────────────────────────────────────────────────────────
 
-    # Персона работает ТОЛЬКО через аккаунт: прогрев чатов и ИИ-комментинг
-    # берут характер по account_id (persona_engine.get_persona). Экран
-    # создавал персоны без аккаунта, и ни одна из них не участвовала ни в
-    # одном диалоге — список выглядел рабочим, а голос флота был прежним.
-    _PERSONA_STYLES = {"formal", "casual", "expert", "friendly", "sarcastic", "neutral"}
-    _PERSONA_TONES = {"positive", "neutral", "skeptical", "enthusiastic"}
-    _PERSONA_GENDERS = {"", "m", "f"}
-    _PERSONA_EMOJI = {"none", "rare", "often"}
-    _PERSONA_LITERACY = {"careful", "casual", "sloppy"}
-    # Черты голоса (schema_v341) — одним списком для вставки и правки.
-    _PERSONA_VOICE_COLS = ("gender", "city", "occupation", "emoji_level", "literacy",
-                           "taboo_topics", "sample_messages", "memory_enabled",
-                           "ai_provider", "ai_model", "creativity", "quality",
-                           "split_messages", "sleep_from", "sleep_to", "utc_offset")
-    _PERSONA_QUALITY = {"fast", "best"}
-
-    def _hour_or_none(v, lo: int, hi: int):
-        if v in (None, ""):
-            return None
-        try:
-            n = int(v)
-        except (TypeError, ValueError):
-            return None
-        return n if lo <= n <= hi else None
-
-    def _style_summary(samples) -> str:
-        from services import persona_style as _ps
-        return _ps.summary(_ps.fingerprint(list(samples or [])))
-
-    def _creativity(v) -> int:
-        """Креативность 0–100: за краями — до края, нечисло — 60 (как в схеме)."""
-        try:
-            return max(0, min(100, int(float(v))))
-        except (TypeError, ValueError):
-            return 60
-
-    def _persona_fields(body: dict) -> dict:
-        """Поля персоны из тела запроса — проверенные и обрезанные."""
-        interests_raw = body.get("interests", "")
-        if isinstance(interests_raw, list):
-            items = interests_raw
-        else:
-            items = str(interests_raw or "").split(",")
-        interests = [v for v in (validate_string(i, max_len=50) or "" for i in items) if v][:20]
-        style = validate_string(body.get("speech_style"), max_len=20) or "casual"
-        tone = validate_string(body.get("tone"), max_len=20) or "positive"
-        gender = str(body.get("gender") or "").strip()
-        emoji = str(body.get("emoji_level") or "rare").strip()
-        literacy = str(body.get("literacy") or "casual").strip()
-        samples_raw = body.get("sample_messages") or []
-        if not isinstance(samples_raw, list):
-            # С экрана образцы приходят текстом: одна строка — одно сообщение.
-            samples_raw = str(samples_raw).splitlines()
-        from services import persona_style as _ps
-        samples = [" ".join(str(x).split())[:_ps.SAMPLE_LEN]
-                   for x in samples_raw if str(x).strip()][:_ps.SAMPLES_KEEP]
-        provider = str(body.get("ai_provider") or "").strip().lower()
-        quality = str(body.get("quality") or "fast").strip()
-        return {
-            "persona_name": (validate_string(body.get("persona_name"), max_len=64) or "").strip(),
-            "bio": (str(body.get("bio") or "").strip()[:1000]) or None,
-            "age": validate_integer(body.get("age") or 25, min_val=18, max_val=80) or 25,
-            "interests": interests,
-            "speech_style": style if style in _PERSONA_STYLES else "casual",
-            "tone": tone if tone in _PERSONA_TONES else "positive",
-            "niche": (str(body.get("niche") or "").strip()[:64]) or None,
-            "backstory": (str(body.get("backstory") or "").strip()[:2000]) or None,
-            "gender": gender if gender in _PERSONA_GENDERS else "",
-            "city": (str(body.get("city") or "").strip()[:64]) or None,
-            "occupation": (str(body.get("occupation") or "").strip()[:96]) or None,
-            "emoji_level": emoji if emoji in _PERSONA_EMOJI else "rare",
-            "literacy": literacy if literacy in _PERSONA_LITERACY else "casual",
-            "taboo_topics": (str(body.get("taboo_topics") or "").strip()[:400]) or None,
-            "sample_messages": samples,
-            "memory_enabled": body.get("memory_enabled", True) not in (False, 0, "0", "false"),
-            # «Мотор» персоны (schema_v345). Провайдер — только из настроенных
-            # на платформе: имя чужого провайдера молча не сработало бы никогда.
-            "ai_provider": provider if provider in _configured_provider_names() else "",
-            "ai_model": (str(body.get("ai_model") or "").strip()[:96]
-                         if provider in _configured_provider_names() else ""),
-            "creativity": _creativity(body.get("creativity")),
-            "quality": quality if quality in _PERSONA_QUALITY else "fast",
-            "split_messages": body.get("split_messages", True) not in (False, 0, "0", "false"),
-            "sleep_from": _hour_or_none(body.get("sleep_from"), 0, 23),
-            "sleep_to": _hour_or_none(body.get("sleep_to"), 0, 23),
-            "utc_offset": _hour_or_none(body.get("utc_offset"), -12, 14),
-        }
-
-    def _configured_provider_names() -> set[str]:
-        names = set()
-        try:
-            from services import ai_claude as _ac
-            if _ac.enabled():
-                names.add("anthropic")
-        except Exception:
-            log.debug("persona: Claude не проверен", exc_info=True)
-        try:
-            from services.ai_providers import configured_providers
-            names.update(p.name for p in configured_providers())
-        except Exception:
-            log.debug("persona: провайдеры не прочитаны", exc_info=True)
-        return names
-
-    def _provider_catalog() -> list[dict]:
-        """Провайдеры и модели, которые можно выбрать персоне — только настроенные."""
-        out = []
-        try:
-            from services import ai_claude as _ac
-            if _ac.enabled():
-                out.append({"name": "anthropic", "label": "Claude",
-                            "models": [_ac.CHAT_MODEL]})
-        except Exception:
-            log.debug("persona: Claude не проверен", exc_info=True)
-        labels = {"openai": "OpenAI", "groq": "Groq", "openrouter": "OpenRouter",
-                  "gemini": "Gemini", "ollama": "Ollama (свой сервер)"}
-        try:
-            from services.ai_providers import configured_providers
-            for p in configured_providers():
-                out.append({"name": p.name, "label": labels.get(p.name, p.name),
-                            "models": list(p.models or [])[:12]})
-        except Exception:
-            log.debug("persona: провайдеры не прочитаны", exc_info=True)
-        return out
-
-    async def _persona_account(uid: int, raw, exclude_persona: int | None = None):
-        """Аккаунт для персоны: (account_id | None, ошибка | None).
-
-        ``"auto"`` — первый свой живой аккаунт без персоны; число — свой аккаунт,
-        не занятый ДРУГОЙ персоной; пусто — без аккаунта.
-        """
-        if raw in (None, "", 0, "0"):
-            return None, None
-        if raw == "auto":
-            aid = await pool.fetchval(
-                "SELECT a.id FROM tg_accounts a WHERE a.owner_id=$1 AND a.is_active=TRUE "
-                "AND a.session_str IS NOT NULL AND NOT EXISTS ("
-                "SELECT 1 FROM persona_profiles pp WHERE pp.account_id=a.id) "
-                "ORDER BY a.trust_score DESC NULLS LAST, a.id LIMIT 1",
-                uid,
-            )
-            if not aid:
-                return None, "Свободных аккаунтов нет: у каждого уже есть персона"
-            return int(aid), None
-        try:
-            aid = int(raw)
-        except (TypeError, ValueError):
-            return None, "Неверный аккаунт"
-        own = await pool.fetchval(
-            "SELECT 1 FROM tg_accounts WHERE id=$1 AND owner_id=$2", aid, uid)
-        if not own:
-            return None, "Аккаунт не найден"
-        busy = await pool.fetchval(
-            "SELECT persona_name FROM persona_profiles WHERE account_id=$1 "
-            "AND id IS DISTINCT FROM $2",
-            aid, exclude_persona,
-        )
-        if busy:
-            return None, f"У этого аккаунта уже есть персона «{busy}»"
-        return aid, None
-
     async def persona_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -4890,51 +4588,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 """SELECT pp.id, pp.persona_name, pp.bio, pp.age, pp.speech_style,
-                          pp.tone, pp.niche, pp.backstory, pp.is_active, pp.created_at,
-                          pp.interests, pp.account_id,
-                          pp.gender, pp.city, pp.occupation, pp.emoji_level, pp.literacy,
-                          pp.taboo_topics, pp.sample_messages, pp.memory_enabled,
-                          pp.self_facts, pp.ai_provider, pp.ai_model, pp.creativity,
-                          pp.quality, pp.split_messages, pp.sleep_from, pp.sleep_to,
-                          pp.utc_offset,
-                          ta.phone, ta.first_name, ta.username,
-                          (SELECT COUNT(*) FROM persona_memory pm WHERE pm.persona_id=pp.id) AS memory_n
+                          pp.tone, pp.niche, pp.is_active, pp.created_at, pp.interests,
+                          ta.phone, ta.first_name, ta.username
                    FROM persona_profiles pp
-                   LEFT JOIN tg_accounts ta ON ta.id=pp.account_id AND ta.owner_id=pp.owner_id
+                   LEFT JOIN tg_accounts ta ON ta.id=pp.account_id
                    WHERE pp.owner_id=$1 ORDER BY pp.created_at DESC""",
                 uid,
             )
-            accs = await pool.fetch(
-                "SELECT a.id, a.phone, a.first_name, a.username, "
-                "(SELECT pp.persona_name FROM persona_profiles pp WHERE pp.account_id=a.id) AS persona "
-                "FROM tg_accounts a WHERE a.owner_id=$1 AND a.is_active=TRUE "
-                "AND a.session_str IS NOT NULL ORDER BY a.trust_score DESC NULLS LAST, a.id LIMIT 500",
-                uid,
-            )
-            from services import persona_engine as _pe
-            return _json_resp({
-                "personas": [
-                    {
-                        **dict(r),
-                        "interests": list(r.get("interests") or []),
-                        "sample_messages": list(r.get("sample_messages") or []),
-                        "style_summary": _style_summary(r.get("sample_messages")),
-                        "memory_n": int(r.get("memory_n") or 0),
-                        "style_label": _pe.STYLE_LABELS.get(r["speech_style"] or "", ""),
-                        "tone_label": _pe.TONE_LABELS.get(r["tone"] or "", ""),
-                        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                    }
-                    for r in rows
-                ],
-                "accounts": [dict(a) for a in accs],
-                "styles": _pe.STYLE_LABELS,
-                "tones": _pe.TONE_LABELS,
-                "genders": _pe.GENDER_LABELS,
-                "emoji_levels": _pe.EMOJI_LABELS,
-                "literacy": _pe.LITERACY_LABELS,
-                "qualities": _pe.QUALITY_LABELS,
-                "providers": _provider_catalog(),
-            })
+            return _json_resp({"personas": [
+                {
+                    **dict(r),
+                    "interests": list(r.get("interests") or []),
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                }
+                for r in rows
+            ]})
         except Exception:
             log.exception("persona_list uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -4955,8 +4623,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             new_val = not row["is_active"]
             await pool.execute(
-                "UPDATE persona_profiles SET is_active=$1, updated_at=NOW() "
-                "WHERE id=$2 AND owner_id=$3", new_val, persona_id, uid
+                "UPDATE persona_profiles SET is_active=$1 WHERE id=$2 AND owner_id=$3", new_val, persona_id, uid
             )
             return _json_resp({"is_active": new_val})
         except Exception:
@@ -4988,378 +4655,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
-        f = _persona_fields(body)
-        if not f["persona_name"]:
+        name = validate_string(body.get("persona_name"), max_len=100)
+        if not name:
             return _err("Имя персоны обязательно", 400)
+        VALID_STYLES = {"formal", "casual", "expert", "friendly", "sarcastic", "neutral"}
+        speech_style = validate_string(body.get("speech_style"), max_len=20) or "casual"
+        if speech_style not in VALID_STYLES:
+            speech_style = "casual"
         try:
-            account_id, why = await _persona_account(uid, body.get("account_id"))
-            if why:
-                return _err(why, 409 if "уже есть" in why else 400)
+            interests_raw = body.get("interests", "")
+            if isinstance(interests_raw, list):
+                interests = [validate_string(i, max_len=50) or "" for i in interests_raw]
+                interests = [i for i in interests if i]
+            else:
+                interests = [validate_string(t, max_len=50) or "" for t in str(interests_raw).split(",")]
+                interests = [i for i in interests if i]
+            age = validate_integer(body.get("age") or 25, min_val=18, max_val=80) or 25
             row = await pool.fetchrow(
                 """INSERT INTO persona_profiles
-                   (owner_id, account_id, persona_name, bio, age, interests, speech_style,
-                    tone, niche, backstory, is_active,
-                    gender, city, occupation, emoji_level, literacy, taboo_topics,
-                    sample_messages, memory_enabled,
-                    ai_provider, ai_model, creativity, quality, split_messages,
-                    sleep_from, sleep_to, utc_offset)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE,
-                           $11,$12,$13,$14,$15,$16,$17,$18,
-                           $19,$20,$21,$22,$23,$24,$25,$26)
-                   RETURNING id, persona_name, account_id, is_active""",
-                uid, account_id, f["persona_name"], f["bio"], f["age"], f["interests"],
-                f["speech_style"], f["tone"], f["niche"], f["backstory"],
-                *(f[c] for c in _PERSONA_VOICE_COLS),
+                   (owner_id, persona_name, bio, age, interests, speech_style, tone, niche, backstory, is_active)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)
+                   RETURNING id, persona_name, is_active""",
+                uid, name,
+                (body.get("bio") or "").strip() or None,
+                age,
+                interests,
+                speech_style,
+                (body.get("tone") or "positive").strip(),
+                (body.get("niche") or "").strip() or None,
+                (body.get("backstory") or "").strip() or None,
             )
             return _json_resp({"ok": True, "persona": dict(row)})
-        except asyncpg.UniqueViolationError:
-            return _err("У этого аккаунта уже есть персона", 409)
         except Exception:
             log.exception("persona_create uid=%d", uid)
             return _err("Ошибка создания персоны", 500)
-
-    async def persona_update(request: web.Request) -> web.Response:
-        """Правка персоны целиком, включая привязку к аккаунту."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            persona_id = int(request.match_info["persona_id"])
-            body = await request.json()
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор персоны", 400)
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        f = _persona_fields(body)
-        if not f["persona_name"]:
-            return _err("Имя персоны обязательно", 400)
-        try:
-            account_id, why = await _persona_account(uid, body.get("account_id"),
-                                                     exclude_persona=persona_id)
-            if why:
-                return _err(why, 409 if "уже есть" in why else 400)
-            row = await pool.fetchrow(
-                """UPDATE persona_profiles SET account_id=$3, persona_name=$4, bio=$5,
-                       age=$6, interests=$7, speech_style=$8, tone=$9, niche=$10,
-                       backstory=$11, gender=$12, city=$13, occupation=$14,
-                       emoji_level=$15, literacy=$16, taboo_topics=$17,
-                       sample_messages=$18, memory_enabled=$19,
-                       ai_provider=$20, ai_model=$21, creativity=$22, quality=$23,
-                       split_messages=$24, sleep_from=$25, sleep_to=$26, utc_offset=$27,
-                       updated_at=NOW()
-                   WHERE id=$1 AND owner_id=$2
-                   RETURNING id, persona_name, account_id, is_active""",
-                persona_id, uid, account_id, f["persona_name"], f["bio"], f["age"],
-                f["interests"], f["speech_style"], f["tone"], f["niche"], f["backstory"],
-                *(f[c] for c in _PERSONA_VOICE_COLS),
-            )
-            if not row:
-                return _err("Не найдено", 404)
-            return _json_resp({"ok": True, "persona": dict(row)})
-        except asyncpg.UniqueViolationError:
-            return _err("У этого аккаунта уже есть персона", 409)
-        except Exception:
-            log.exception("persona_update uid=%d persona=%d", uid, persona_id)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def persona_preview(request: web.Request) -> web.Response:
-        """Как персона ответит на реплику — до того, как она заговорит в чатах.
-
-        Данные формы, а не сохранённая запись: владелец подбирает характер и
-        сразу видит голос. Ответ модели — только показ, наружу не уходит.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        f = _persona_fields(body)
-        if not f["persona_name"]:
-            return _err("Сначала укажите имя персоны", 400)
-        message = (str(body.get("message") or "").strip()[:500]
-                   or "Привет! Как тебе последние новости в твоей теме?")
-        from services import chat_warmup as _cw
-        from services import persona_engine as _pe
-        from services import persona_voice as _pv
-        persona = _pe.PersonaProfile(
-            persona_id=0, account_id=0, name=f["persona_name"], bio=f["bio"] or "",
-            age=f["age"], interests=f["interests"], speech_style=f["speech_style"],
-            tone=f["tone"], niche=f["niche"] or "", backstory=f["backstory"] or "",
-            created_at=None, gender=f["gender"], city=f["city"] or "",
-            occupation=f["occupation"] or "", emoji_level=f["emoji_level"],
-            literacy=f["literacy"], taboo_topics=f["taboo_topics"] or "",
-            sample_messages=f["sample_messages"], memory_enabled=f["memory_enabled"],
-            ai_provider=f["ai_provider"], ai_model=f["ai_model"],
-            creativity=f["creativity"], quality=f["quality"],
-            split_messages=f["split_messages"],
-        )
-        # Правка сохранённой персоны — с её памятью: предпросмотр обязан
-        # показывать тот голос, которым она заговорит, а говорит она с памятью.
-        voice = _pv.Voice(account_id=0, persona=persona,
-                          prompt=_pe.build_persona_system_prompt(persona))
-        try:
-            pid = int(body.get("persona_id") or 0)
-        except (TypeError, ValueError):
-            pid = 0
-        if pid and f["memory_enabled"]:
-            try:
-                saved = await pool.fetchrow(
-                    "SELECT id, self_facts FROM persona_profiles WHERE id=$1 AND owner_id=$2",
-                    pid, uid)
-                if saved:
-                    voice.recent = await _pv.recent_statements(pool, pid, limit=_pv.RECENT_IN_PROMPT)
-                    mem = _pv.memory_block(saved["self_facts"] or "", voice.recent)
-                    if mem:
-                        voice.prompt += "\n\n" + mem
-            except Exception:
-                log.warning("persona_preview uid=%d: память персоны не прочитана", uid)
-        # Тот же промпт и та же доводка, что у живой реплики в чате.
-        asked = {"id": 1, "sender_name": "Собеседник", "text": message, "is_fleet": False}
-        system, user = _cw.build_dialogue_prompt(
-            voice.prompt, [asked], asked, "", "engage", lang="ru", reply_len="short")
-        # Тот же «мотор», что у живой реплики: выбранная модель, смелость, и
-        # для «лучшего» — три варианта и судья. Владелец видит и варианты, и
-        # почему выбран этот: так настраивают голос, а не гадают.
-        from services import ai_gateway
-        n = 3 if f["quality"] == "best" else 1
-        try:
-            outs = await asyncio.gather(*[ai_gateway.chat(
-                [{"role": "system", "content": system},
-                 {"role": "user", "content": user}],
-                task=ai_gateway.TASK_ASSISTANT, owner_id=uid, max_tokens=200,
-                temperature=_pe.temperature_for(persona),
-                prefer_provider=f["ai_provider"], prefer_model=f["ai_model"],
-            ) for _ in range(n)])
-        except Exception:
-            log.exception("persona_preview uid=%d", uid)
-            return _err("ИИ сейчас недоступен — попробуйте позже", 422)
-        cands = [_pv.enforce_style(_cw.sanitize_reply(r.text), persona)
-                 for r in outs if r.text]
-        cands = [c for c in cands if c]
-        if not cands:
-            if not any(r.text for r in outs):
-                return _err("ИИ не ответил: проверьте ключи ИИ в настройках", 422)
-            return _err("Ответ модели не прошёл проверку образа — попробуйте ещё раз", 422)
-        reply, info = await _pv.pick_best(cands, voice, context=f"Собеседник: {message}",
-                                          owner_id=uid, use_judge=len(cands) > 1)
-        parts = _pv.split_reply(reply, persona, 0.0)
-        model = next((r.model for r in outs if r.text), None)
-        return _json_resp({"reply": reply[:1000], "asked": message,
-                           "parts": [x[:1000] for x in parts],
-                           "candidates": [c[:1000] for c in dict.fromkeys(cands)],
-                           "picked_by": info.get("by"), "why": info.get("why") or "",
-                           "model": model or "",
-                           "style": _style_summary(persona.sample_messages)})
-
-    async def _own_persona_id(request):
-        uid = _get_uid(request)
-        if not uid:
-            return None, None, _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["persona_id"])
-        except (KeyError, ValueError):
-            return None, None, _err("Неверный идентификатор персоны", 400)
-        return uid, pid, None
-
-    async def persona_memory_get(request: web.Request) -> web.Response:
-        """Что персона помнит: факты о себе и последние сказанные фразы."""
-        uid, pid, err = await _own_persona_id(request)
-        if err is not None:
-            return err
-        from services import persona_voice as _pv
-        try:
-            view = await _pv.memory_view(pool, pid, uid, limit=50)
-        except Exception:
-            log.exception("persona_memory_get uid=%d persona=%d", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
-        if view is None:
-            return _err("Не найдено", 404)
-        return _json_resp(view)
-
-    async def persona_memory_facts(request: web.Request) -> web.Response:
-        """Владелец правит «факты о себе» руками: модель могла записать лишнее."""
-        uid, pid, err = await _own_persona_id(request)
-        if err is not None:
-            return err
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        facts = " ".join(str(body.get("self_facts") or "").split())[:900] or None
-        try:
-            row = await pool.fetchrow(
-                "UPDATE persona_profiles SET self_facts=$3, self_facts_at=NOW(), "
-                "updated_at=NOW() WHERE id=$1 AND owner_id=$2 RETURNING id",
-                pid, uid, facts)
-        except Exception:
-            log.exception("persona_memory_facts uid=%d persona=%d", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not row:
-            return _err("Не найдено", 404)
-        return _json_resp({"ok": True, "self_facts": facts or ""})
-
-    async def persona_memory_forget(request: web.Request) -> web.Response:
-        """Забыть всё: сказанное, факты о себе и знакомых. Персона говорит с
-        чистого листа."""
-        uid, pid, err = await _own_persona_id(request)
-        if err is not None:
-            return err
-        try:
-            row = await pool.fetchrow(
-                "UPDATE persona_profiles SET self_facts=NULL, self_facts_at=NULL, "
-                "updated_at=NOW() WHERE id=$1 AND owner_id=$2 RETURNING id", pid, uid)
-            if not row:
-                return _err("Не найдено", 404)
-            res = await pool.execute(
-                "DELETE FROM persona_memory WHERE persona_id=$1 AND owner_id=$2", pid, uid)
-            await pool.execute(
-                "DELETE FROM persona_peers WHERE persona_id=$1 AND owner_id=$2", pid, uid)
-        except Exception:
-            log.exception("persona_memory_forget uid=%d persona=%d", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
-        try:
-            n = int(str(res).split()[-1])
-        except (ValueError, IndexError):
-            n = 0
-        return _json_resp({"ok": True, "deleted": n})
-
-    def _peer_tg_id(request):
-        try:
-            v = int(request.match_info["peer_id"])
-        except (KeyError, ValueError):
-            return None
-        return v if v > 0 else None
-
-    async def persona_peer_notes(request: web.Request) -> web.Response:
-        """Владелец правит заметку о собеседнике: модель могла понять не так."""
-        uid, pid, err = await _own_persona_id(request)
-        if err is not None:
-            return err
-        peer = _peer_tg_id(request)
-        if not peer:
-            return _err("Неверный собеседник", 400)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        notes = " ".join(str((body or {}).get("notes") or "").split())[:600]
-        try:
-            row = await pool.fetchrow(
-                "UPDATE persona_peers SET notes=$4, notes_at=NOW(), "
-                "notes_exchanges=exchanges "
-                "WHERE persona_id=$1 AND owner_id=$2 AND peer_tg_id=$3 RETURNING id",
-                pid, uid, peer, notes)
-        except Exception:
-            log.exception("persona_peer_notes uid=%d persona=%d", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not row:
-            return _err("Не найдено", 404)
-        return _json_resp({"ok": True, "notes": notes})
-
-    async def persona_peer_forget(request: web.Request) -> web.Response:
-        """Забыть одного собеседника: при следующей встрече персона его не узнает."""
-        uid, pid, err = await _own_persona_id(request)
-        if err is not None:
-            return err
-        peer = _peer_tg_id(request)
-        if not peer:
-            return _err("Неверный собеседник", 400)
-        try:
-            row = await pool.fetchrow(
-                "DELETE FROM persona_peers WHERE persona_id=$1 AND owner_id=$2 "
-                "AND peer_tg_id=$3 RETURNING id", pid, uid, peer)
-        except Exception:
-            log.exception("persona_peer_forget uid=%d persona=%d", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not row:
-            return _err("Не найдено", 404)
-        return _json_resp({"ok": True})
-
-    async def persona_style_from_my_chats(request: web.Request) -> web.Response:
-        """Образцы манеры из СВОИХ переписок владельца (Telegram Business):
-        живой человек пишет так, как пишет он, а не как описано словами.
-        Ничего не сохраняет — экран кладёт образцы в поле, владелец смотрит
-        и сохраняет сам."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import persona_style as _ps
-        from services.unified_inbox import _decrypt
-        try:
-            rows = await pool.fetch(
-                "SELECT text_enc FROM vault_messages WHERE owner_id=$1 AND direction='out' "
-                "AND NOT is_deleted AND text_enc IS NOT NULL "
-                "ORDER BY COALESCE(msg_date, created_at) DESC LIMIT $2", uid, 600)
-        except Exception:
-            log.exception("persona_style_from_my_chats uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        samples = _ps.pick_samples([_decrypt(r["text_enc"]) for r in rows],
-                                   limit=_ps.SAMPLES_KEEP)
-        fp = _ps.fingerprint(samples)
-        return _json_resp({
-            "samples": samples, "seen": len(rows), "summary": _ps.summary(fp),
-            "note": "" if fp else
-            ("Своих сообщений в Хранилище пока мало: подключите Telegram Business "
-             "или впишите образцы руками")})
-
-    async def persona_memory_rebuild(request: web.Request) -> web.Response:
-        """Пересобрать «факты о себе» из сказанного сейчас, не дожидаясь десятой фразы."""
-        uid, pid, err = await _own_persona_id(request)
-        if err is not None:
-            return err
-        own = await pool.fetchval(
-            "SELECT 1 FROM persona_profiles WHERE id=$1 AND owner_id=$2", pid, uid)
-        if not own:
-            return _err("Не найдено", 404)
-        from services import persona_voice as _pv
-        facts = await _pv.consolidate(pool, pid, owner_id=uid)
-        return _json_resp({"ok": True, "self_facts": facts or "",
-                           "note": "" if facts else
-                           "Пока нечего сжимать: персона ещё не рассказывала о себе"})
-
-    async def persona_apply_profile(request: web.Request) -> web.Response:
-        """Оформить аккаунт персоны под неё: имя и описание из персоны.
-
-        Идёт той же массовой операцией оформления (bulk_set_profile) на один
-        аккаунт — со всеми её защитами (аренда сессии, карантин, журнал).
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            persona_id = int(request.match_info["persona_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор персоны", 400)
-        try:
-            row = await pool.fetchrow(
-                "SELECT persona_name, bio, account_id FROM persona_profiles "
-                "WHERE id=$1 AND owner_id=$2", persona_id, uid)
-        except Exception:
-            log.exception("persona_apply_profile uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not row:
-            return _err("Не найдено", 404)
-        if not row["account_id"]:
-            return _err("Сначала привяжите персону к аккаунту", 400)
-        name = (row["persona_name"] or "").strip()
-        first, _, last = name.partition(" ")
-        params = {
-            "op": "name", "keep_empty": True, "account_ids": [int(row["account_id"])],
-            "name_data": {"first_name": first[:64], "last_name": last.strip()[:64],
-                          "about": (row["bio"] or "").strip()[:70]},
-        }
-        label = f"Оформление: профиль по персоне «{name[:40]}»"
-        try:
-            op_id = await _obus.submit(pool, uid, "bulk_set_profile", params,
-                                       total_items=1, label=label)
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("persona_apply_profile submit uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
     # ── Auto Registrar ─────────────────────────────────────────────────────────
 
@@ -5507,7 +4836,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except ValueError as exc:
             return _err(str(exc), 400)
         if not _osint.is_available():
-            return _err("Поиск по нику пока не установлен на сервере", 409)
+            return _err("Поиск по нику пока не установлен на сервере", 503)
         try:
             what = "нику" if kind == "username" else "почте"
             label = f"Поиск по {what}: {query}"[:120]
@@ -6440,127 +5769,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         from services import virtual_layer as _vl
-        # Период: 7/30/90 дней; всё прочее (и пусто) — за всё время.
-        days = _vl._period(request.query.get("days"))
         try:
-            return _json_resp({"ok": True,
-                               **await _vl.analytics(pool, uid, days=days)})
+            return _json_resp({"ok": True, **await _vl.analytics(pool, uid)})
         except Exception:
             log.exception("vlayer_analytics uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
-
-    def _vlayer_rules_payload(_vl, rules: dict) -> dict:
-        """Правила + всё, что экрану нужно, чтобы их показать по-русски."""
-        return {
-            "ok": True, "rules": rules, "defaults": _vl.normalize_rules(None),
-            "changed": _vl.rules_diff(rules),
-            "signals": [{"key": k, "label": _vl.SIGNAL_LABEL[k]}
-                        for k in _vl.RULE_SIGNALS],
-            "locked": [{"key": k, "label": _vl.SIGNAL_LABEL[k],
-                        "target_label": _vl.VALUE_LABEL["purchased"]}
-                       for k in _vl.LOCKED_SIGNALS],
-            "targets": [{"value": v, "label": _vl.RULE_TARGET_LABEL[v]}
-                        for v in _vl.RULE_TARGETS],
-            "ttl_rungs": [{"value": v, "label": _vl.VALUE_LABEL[v]}
-                          for v in _vl.TTL_RUNGS],
-            "hot_at": [{"value": v, "label": _vl.VALUE_LABEL[v]}
-                       for v in _vl.CASCADE_HOT_AT],
-            "limits": {"ttl_min": _vl.TTL_MIN_H, "ttl_max": _vl.TTL_MAX_H},
-        }
-
-    async def vlayer_rules_get(request: web.Request) -> web.Response:
-        """Правила модели поведения владельца (или стандартные)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import virtual_layer as _vl
-        rules = await _vl.get_rules(pool, uid)
-        return _json_resp(_vlayer_rules_payload(_vl, rules))
-
-    async def vlayer_rules_save(request: web.Request) -> web.Response:
-        """Сохранить правила. Всё вне границ заменяется стандартом
-        (normalize_rules), поэтому ответ — то, что реально записано."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import virtual_layer as _vl
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        raw = (body or {}).get("rules") if isinstance(body, dict) else None
-        if not isinstance(raw, dict):
-            return _err("Нет правил в запросе", 400)
-        try:
-            rules = await _vl.save_rules(pool, uid, raw)
-        except Exception:
-            log.exception("vlayer_rules_save uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp(_vlayer_rules_payload(_vl, rules))
-
-    async def vlayer_rules_reset(request: web.Request) -> web.Response:
-        """Вернуть стандартные правила."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import virtual_layer as _vl
-        try:
-            rules = await _vl.reset_rules(pool, uid)
-        except Exception:
-            log.exception("vlayer_rules_reset uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp(_vlayer_rules_payload(_vl, rules))
-
-    async def vlayer_set_stage(request: web.Request) -> web.Response:
-        """Владелец ставит человека на ступень вручную (вверх, вниз, в «Потерян»).
-
-        Слой видит только то, что прошло через систему; отказ по телефону или
-        ошибочный «Потерян» исправить было нечем, кроме «Купил». Пишется в
-        историю с причиной «владелец перевёл вручную»."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import virtual_layer as _vl
-        etype = (request.match_info.get("entity_type") or "").strip()
-        eid = (request.match_info.get("entity_id") or "").strip()
-        if etype != _vl.USER:
-            return _err("Ступень можно поменять только у человека", 400)
-        if not eid or len(eid) > 128:
-            return _err("Неверный идентификатор", 400)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        value = str((body or {}).get("value") or "").strip()
-        if value not in _vl.MANUAL_STAGES:
-            return _err("Неизвестная ступень", 400)
-        # id приходит из адреса: чужой или несуществующий контакт не трогаем.
-        try:
-            known = await pool.fetchval(
-                "SELECT 1 FROM unified_contacts WHERE owner_id=$1 AND id::text=$2",
-                uid, eid)
-        except Exception:
-            known = None
-        if not known:
-            return _err("Контакт не найден", 404)
-        try:
-            change = await _vl.set_stage(pool, uid, _vl.USER, eid, value)
-        except Exception:
-            log.exception("vlayer_set_stage uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        # CRM и модель обязаны говорить одно: «Купил» → «Выиграно»,
-        # «Потерян» → «Проиграно». Промежуточные ступени CRM не трогаем —
-        # у неё свои стадии, и однозначного соответствия нет.
-        crm_stage = {"purchased": "won", _vl.LOST: "lost"}.get(value)
-        if crm_stage:
-            try:
-                from services.contacts_hub.crm_engine import upsert_crm
-                await upsert_crm(pool, uid, eid, {"stage": crm_stage})
-            except Exception:
-                log.debug("vlayer_set_stage crm failed uid=%s", uid, exc_info=True)
-        return _json_resp({"ok": True, "changed": change is not None,
-                           "value": value,
-                           "label": _vl.VALUE_LABEL.get(value, value)})
 
     # ── «Нотариус»: заверение рекламных размещений ────────────────────────
 
@@ -6590,27 +5803,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             counts = {"in_progress": 0, "freed": 0, "stuck": 0, "gone": 0, "by_phase": {}}
         lim = _list_limit(request, 100, 500)
         off = _list_offset(request)
-        view = (request.query.get("view") or "all").strip().lower()
-        if view not in _rh.VIEWS:
-            view = "all"
-        settings = await _rh.get_settings(pool, uid)
-        accounts = await _rh.list_for_owner(pool, uid, limit=lim, offset=off,
-                                            view=view, settings=settings)
+        accounts = await _rh.list_for_owner(pool, uid, limit=lim, offset=off)
         # Итог берём из той же сводки, что и плитки сверху — лишнего запроса не
         # нужно: `by_phase` считает ВСЕ строки реабилитации. Если сводка не
-        # получилась, итог не меньше того, что уже на экране. Для среза —
-        # сумма его фаз.
-        bp = counts.get("by_phase") or {}
-        view_phases = {"active": ("appeal", "warming", "recheck"),
-                       "attention": ("stuck",), "freed": ("freed",),
-                       "closed": ("gone", "off")}.get(view)
-        view_total = (sum(int(v) for v in bp.values()) if view_phases is None
-                      else sum(int(bp.get(p, 0)) for p in view_phases))
-        total = max(view_total, off + len(accounts))
+        # получилась, итог не меньше того, что уже на экране.
+        total = max(sum(int(v) for v in (counts.get("by_phase") or {}).values()),
+                    off + len(accounts))
         return _json_resp({"ok": True, **counts, "accounts": accounts,
-                           "total": total, "view": view,
-                           "settings": settings,
-                           "pace_labels": _rh.PACE_LABEL,
+                           "total": total,
                            "page": {"limit": lim, "offset": off,
                                     "has_more": off + len(accounts) < total}})
 
@@ -6645,103 +5845,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "phase": "appeal" if action == "restart" else "off"})
         return _err("Неизвестное действие", 400)
 
-    async def rehab_history_ep(request: web.Request) -> web.Response:
-        """Что автоматика делала с одним аккаунтом — по шагам, новые сверху."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            acc_id = int(request.match_info["acc_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор аккаунта", 400)
-        from services import account_rehab as _rh
 
-        row = await pool.fetchrow(
-            """SELECT r.acc_id, r.phase, r.kind, r.attempts, r.appeal_count,
-                      r.warm_cycles, r.warm_actions, r.note, r.first_seen,
-                      r.last_action_at, r.next_action_at, r.freed_at,
-                      r.release_at, r.relapses,
-                      a.phone, a.first_name, a.username, a.acc_status,
-                      a.cooldown_until
-                 FROM account_rehab_state r
-                 JOIN tg_accounts a ON a.id = r.acc_id
-                WHERE r.acc_id=$1 AND r.owner_id=$2""", acc_id, uid)
-        if not row:
-            return _err("Аккаунт не найден в восстановлении", 404)
-        settings = await _rh.get_settings(pool, uid)
-        acc = dict(row)
-        acc["state"] = _rh.describe(acc, settings=settings)
-        for k in ("first_seen", "last_action_at", "next_action_at", "freed_at",
-                  "release_at", "cooldown_until"):
-            acc[k] = acc[k].isoformat() if acc.get(k) else None
-        lim = _list_limit(request, 100, 500)
-        try:
-            events = await _rh.history(pool, uid, acc_id, limit=lim)
-            events_total = int(await pool.fetchval(
-                "SELECT COUNT(*) FROM account_rehab_events WHERE acc_id=$1 AND owner_id=$2",
-                acc_id, uid) or 0)
-        except Exception:
-            log.warning("rehab_history uid=%s acc=%s", uid, acc_id, exc_info=True)
-            events, events_total = [], 0
-        events_total = max(events_total, len(events))
-        return _json_resp({"ok": True, "account": acc, "events": events,
-                           "events_total": events_total,
-                           "capped": events_total > len(events)})
 
-    async def rehab_settings_get(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import account_rehab as _rh
 
-        return _json_resp({"ok": True, "settings": await _rh.get_settings(pool, uid),
-                           "pace_labels": _rh.PACE_LABEL,
-                           "defaults": _rh.DEFAULT_SETTINGS})
-
-    async def rehab_settings_save(request: web.Request) -> web.Response:
-        """Темп, лимит перепроверок, отдых после снятия, аппеляция, пауза,
-        уведомления — всё, что раньше было зашито в код."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Неверный формат запроса", 400)
-        if not isinstance(body, dict):
-            return _err("Неверный формат запроса", 400)
-        from services import account_rehab as _rh
-
-        try:
-            s = await _rh.save_settings(pool, uid, body)
-        except Exception:
-            log.exception("rehab_settings_save uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "settings": s})
-
-    async def rehab_bulk(request: web.Request) -> web.Response:
-        """Действия над всем восстановлением сразу.
-
-        `restart_stuck` — ещё попытка всем, кого автоматика отдала на разбор
-        (кроме замороженных); `pause` / `resume` — пауза всего восстановления.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        action = (request.match_info.get("action") or "").lower()
-        from services import account_rehab as _rh
-
-        if action == "restart_stuck":
-            try:
-                n = await _rh.restart_all_stuck(pool, uid)
-            except Exception:
-                log.exception("rehab_bulk restart uid=%s", uid)
-                return _err(_INTERNAL_ERROR, 500)
-            return _json_resp({"ok": True, "count": n})
-        if action in ("pause", "resume"):
-            s = await _rh.save_settings(pool, uid, {"paused": action == "pause"})
-            return _json_resp({"ok": True, "settings": s})
-        return _err("Неизвестное действие", 400)
 
 
 
@@ -6762,29 +5868,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            # Каждое число здесь обязано совпадать со списком, который открывает
-            # его плитка (`_accounts_where`): «Активных 34» раньше считалось по
-            # acc_status='active', а плитка открывала ACTIVE_ACC_SQL; «Забанено»
-            # складывало бан с деактивацией, а открывало только бан.
             stats = await pool.fetchrow(
-                f"""SELECT
+                """SELECT
                    COUNT(*) AS total,
-                   COUNT(*) FILTER (WHERE {ACTIVE_ACC_SQL}) AS active,
-                   COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') = 'banned') AS banned,
-                   COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')
-                                    IN ('banned','deactivated','session_expired')) AS dead,
-                   COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') = 'spamblock') AS spamblock,
-                   COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL
-                                      AND cooldown_until > now()) AS cooling,
-                   COUNT(*) FILTER (WHERE {_LOW_TRUST_SQL}) AS low_trust,
-                   COUNT(*) FILTER (WHERE {_FLOODED_SQL}) AS flooded_7d,
-                   COUNT(*) FILTER (WHERE EXISTS (
-                       SELECT 1 FROM account_flood_log l
-                        WHERE l.account_id = tg_accounts.id
-                          AND l.created_at > now() - interval '24 hours')) AS flooded_24h,
-                   COUNT(*) FILTER (WHERE {_PROXY_DOWN_SQL}) AS proxy_down,
-                   COUNT(*) FILTER (WHERE {_FOREIGN_SQL}) AS foreign,
-                   COUNT(*) FILTER (WHERE {_NO2FA_SQL}) AS no2fa
+                   COUNT(*) FILTER (WHERE acc_status='active') AS active,
+                   COUNT(*) FILTER (WHERE acc_status IN ('banned','deactivated')) AS banned,
+                   COUNT(*) FILTER (WHERE cooldown_until > now()) AS cooling,
+                   COUNT(*) FILTER (WHERE trust_score IS NOT NULL AND trust_score < 0.4) AS low_trust
                    FROM tg_accounts WHERE owner_id=$1""",
                 uid,
             )
@@ -6794,21 +5884,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE ta.owner_id=$1 AND afl.created_at > now()-interval '7 days'""",
                 uid,
             )
-            # План прогрева переживает свой аккаунт: на экране было «На
-            # прогреве 49» при 34 аккаунтах. Считаем только планы живых
-            # аккаунтов этого владельца.
             warmup_active = await pool.fetchval(
-                """SELECT COUNT(*) FROM account_warmup_plans wp
-                   JOIN tg_accounts ta ON ta.id = wp.account_id AND ta.owner_id = wp.owner_id
-                   WHERE wp.owner_id=$1 AND wp.status='active'""",
-                uid,
+                "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1 AND status='active'", uid
             )
-            alerts: list[dict] = []
-            try:
-                from services import anomaly_detector as _ad
-                alerts = await _ad.get_active_anomalies(pool, uid)
-            except Exception:
-                log.exception("health_overview alerts uid=%d", uid)
             # Recent flood events.
             # Со строки флуд-события владелец идёт РАЗБИРАТЬ ПРИЧИНУ — а причина
             # (что за операция флудила, её статус и ошибка) живёт в карточке
@@ -6841,15 +5919,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE ta.owner_id=$1""",
                 uid,
             )
-            counts = {k: int(stats[k] or 0) for k in (
-                "total", "active", "banned", "dead", "spamblock", "cooling",
-                "low_trust", "flooded_7d", "flooded_24h", "proxy_down", "foreign",
-                "no2fa")}
             return _json_resp({
-                **counts,
-                "flood_7d": flood_7d,
+                "total": stats["total"], "active": stats["active"],
+                "banned": stats["banned"], "cooling": stats["cooling"],
+                "low_trust": stats["low_trust"], "flood_7d": flood_7d,
                 "warmup_active": warmup_active,
-                "verdict": fleet_verdict(counts, alerts),
                 "events_total": events_total or 0,
                 "events": [
                     {**dict(e), "created_at": e["created_at"].isoformat() if e["created_at"] else None}
@@ -6872,17 +5946,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        if not isinstance(data, dict):
-            return _err("Не удалось разобрать запрос")
-        from services import account_shield as _sh
         fields = {}
-        for key in ("risk_threshold", "ban_prob_threshold",
-                    "pause_risk_threshold", "pause_ban_threshold"):
+        for key in ("risk_threshold", "ban_prob_threshold"):
             if key in data and data[key] is not None:
                 try:
                     v = float(data[key])
                 except (TypeError, ValueError):
-                    return _err("Некорректное значение порога")
+                    return _err(f"Некорректное значение: {key}")
                 if not 0.0 <= v <= 1.0:
                     return _err("Порог должен быть от 0 до 1")
                 fields[key] = v
@@ -6891,191 +5961,68 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if hours is None:
                 return _err("Пауза — от 1 до 168 часов")
             fields["cool_duration_hours"] = hours
-        if "cool_hours" in data and data["cool_hours"] is not None:
-            hours = validate_integer(data["cool_hours"], min_val=1, max_val=48)
-            if hours is None:
-                return _err("Охлаждение — от 1 до 48 часов")
-            fields["cool_hours"] = hours
-        for key in ("auto_pause", "notify_admin", "guard_sessions", "guard_twofa",
-                    "guard_reserve"):
+        for key in ("auto_pause", "notify_admin"):
             if key in data and data[key] is not None:
                 fields[key] = bool(data[key])
-        if data.get("response_mode") is not None:
-            if data["response_mode"] not in _sh.RESPONSE_MODES:
-                return _err("Неизвестная реакция щита")
-            fields["response_mode"] = data["response_mode"]
-        if data.get("preset") is not None:
-            if data["preset"] not in _sh.PRESETS:
-                return _err("Неизвестный профиль защиты")
-            fields["preset"] = data["preset"]
-        if "exempt_account_ids" in data and data["exempt_account_ids"] is not None:
-            raw = data["exempt_account_ids"]
-            if not isinstance(raw, list) or len(raw) > 5000:
-                return _err("Список исключений не разобран")
-            try:
-                ids = sorted({int(x) for x in raw})
-            except (TypeError, ValueError):
-                return _err("Список исключений не разобран")
-            if ids:
-                # Только свои аккаунты: чужой id в списке ничего не даёт, но
-                # и лежать у владельца не должен.
-                own = await pool.fetch(
-                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::int[])",
-                    uid, ids)
-                ids = sorted(int(r["id"]) for r in own)
-            fields["exempt_account_ids"] = ids
         if not fields:
             return _err("Нечего сохранять")
         try:
-            cfg = await _sh.save_shield_config(pool, uid, **fields)
+            from services.account_shield import save_shield_config
+            cfg = await save_shield_config(pool, uid, **fields)
         except Exception:
             log.exception("shield_config_save uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "config": cfg.as_dict()})
-
-    async def shield_resume(request: web.Request) -> web.Response:
-        """Вернуть аккаунт из паузы/охлаждения щита досрочно."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-            acc_id = int(data.get("account_id"))
-        except Exception:
-            return _err("Неверный идентификатор аккаунта")
-        try:
-            from services import account_shield as _sh
-            ok = await _sh.resume_now(pool, uid, acc_id)
-        except Exception:
-            log.exception("shield_resume uid=%d acc=%d", uid, acc_id)
-            return _err(_INTERNAL_ERROR, 500)
-        if not ok:
-            return _err("Этот аккаунт щит не останавливал", 404)
-        return _json_resp({"ok": True})
-
-    async def shield_run_now(request: web.Request) -> web.Response:
-        """Проверить флот щитом сейчас, не дожидаясь 30-минутного цикла."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import account_shield as _sh
-            # Без бота: итог проверки владелец видит на экране сразу, а
-            # уведомления о паузах шлёт фоновый цикл.
-            res = await _sh.run_owner(pool, uid, None)
-        except Exception:
-            log.exception("shield_run_now uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, **res})
+        return _json_resp({"ok": True, "config": {
+            "risk_threshold": cfg.risk_threshold,
+            "ban_prob_threshold": cfg.ban_prob_threshold,
+            "auto_pause": cfg.auto_pause,
+            "notify_admin": cfg.notify_admin,
+            "cool_duration_hours": cfg.cool_duration_hours,
+        }})
 
     async def shield_summary(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        action_filter = (request.rel_url.query.get("action") or "").strip()
-        if action_filter not in ("", "warn", "cool", "pause", "resume"):
-            action_filter = ""
         try:
-            from services import account_shield as _sh
-            cfg_obj = await _sh.get_shield_config(pool, uid)
-            # Пороги — ВЛАДЕЛЬЦА, а не зашитые 0.7/0.5: плитки «Высокий риск»
-            # и «Под защитой» должны значить то же, что значат решения щита.
             row = await pool.fetchrow(
                 """SELECT
                    COUNT(*) FILTER (WHERE a.is_active = TRUE) AS total_active,
-                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND a.cooldown_until > NOW()) AS cooling,
-                   COUNT(*) FILTER (WHERE a.is_active = FALSE AND a.shield_paused_until > NOW()) AS paused,
-                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND (r.risk_score >= $2 OR r.ban_probability >= $3)) AS threatened,
-                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND r.ban_probability >= $3) AS high_ban,
-                   COUNT(*) FILTER (WHERE a.is_active = TRUE AND COALESCE(r.risk_score, 0) < $2
-                                      AND COALESCE(r.ban_probability, 0) < $3) AS ok_count,
-                   AVG(r.risk_score) FILTER (WHERE a.is_active = TRUE) AS avg_risk
+                   COUNT(*) FILTER (WHERE a.is_active = FALSE AND a.cooldown_until > NOW()) AS cooling,
+                   COUNT(*) FILTER (WHERE r.risk_score >= 0.7) AS threatened,
+                   COUNT(*) FILTER (WHERE r.ban_probability >= 0.5) AS high_ban,
+                   COUNT(*) FILTER (WHERE r.risk_score < 0.7 AND (r.ban_probability < 0.5 OR r.ban_probability IS NULL)) AS ok_count
                    FROM tg_accounts a
                    LEFT JOIN account_risk_scores r ON r.account_id = a.id
                    WHERE a.owner_id = $1""",
-                uid, cfg_obj.risk_threshold, cfg_obj.ban_prob_threshold,
-            )
-            # Охват защиты по флоту: тумблер «вкл» не значит «все защищены» —
-            # свежие аккаунты и сбои оставляют дыры. Показываем, сколько из
-            # активных реально с сохранённым паролем 2FA, с запасным ключом и
-            # сколько под чужими (недоверенными) сеансами. Те же сигналы, что
-            # в блоке «Безопасность» карточки, но агрегатом по флоту.
-            cov_row = await pool.fetchrow(
-                """SELECT
-                   COUNT(*) FILTER (WHERE is_active) AS total,
-                   COUNT(*) FILTER (WHERE is_active AND twofa_enc IS NOT NULL) AS twofa_saved,
-                   COUNT(*) FILTER (WHERE is_active AND reserve_session_enc IS NOT NULL) AS reserve,
-                   COUNT(*) FILTER (WHERE is_active AND COALESCE(foreign_sessions, 0) > 0) AS foreign_sess
-                   FROM tg_accounts WHERE owner_id=$1""",
-                uid)
-            # Кого щит держит прямо сейчас — с кнопкой «Вернуть».
-            held = await pool.fetch(
-                """SELECT a.id, a.first_name, a.username, a.phone, a.is_active,
-                          a.shield_paused_until, a.cooldown_until, a.status_reason
-                   FROM tg_accounts a
-                   WHERE a.owner_id=$1
-                     AND ((a.is_active = FALSE AND a.shield_paused_until > NOW())
-                       OR (a.is_active = TRUE AND a.cooldown_until > NOW()
-                           AND a.status_reason LIKE 'Охлаждение на %'))
-                   ORDER BY COALESCE(a.shield_paused_until, a.cooldown_until) DESC
-                   LIMIT 50""",
                 uid,
             )
             # account_id — чтобы строка истории открывала карточку аккаунта.
             history = await pool.fetch(
                 """SELECT a.id AS account_id, sa.action, sa.risk_score,
-                          sa.ban_probability, sa.created_at, sa.note,
-                          a.phone, a.first_name
+                          sa.ban_probability, sa.created_at, a.phone, a.first_name
                    FROM shield_actions sa
                    JOIN tg_accounts a ON a.id = sa.account_id
-                   WHERE sa.owner_id=$1 AND ($2 = '' OR sa.action = $2)
-                   ORDER BY sa.created_at DESC LIMIT 30""",
-                uid, action_filter,
+                   WHERE sa.owner_id=$1 ORDER BY sa.created_at DESC LIMIT 20""",
+                uid,
             )
             history_total = await pool.fetchval(
-                "SELECT COUNT(*) FROM shield_actions WHERE owner_id=$1 AND ($2 = '' OR action = $2)",
-                uid, action_filter)
-            counts = await pool.fetch(
-                """SELECT action, COUNT(*) AS n FROM shield_actions
-                   WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '7 days'
-                   GROUP BY action""",
-                uid)
-            exempt = []
-            if cfg_obj.exempt_account_ids:
-                exempt = await pool.fetch(
-                    """SELECT id, first_name, username, phone FROM tg_accounts
-                       WHERE owner_id=$1 AND id = ANY($2::int[]) ORDER BY id""",
-                    uid, list(cfg_obj.exempt_account_ids))
+                "SELECT COUNT(*) FROM shield_actions WHERE owner_id=$1", uid)
+            cfg = await pool.fetchrow(
+                "SELECT * FROM shield_configs WHERE owner_id=$1", uid
+            )
         except Exception:
             log.exception("shield_summary uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-
-        def _nm(r):
-            return r["first_name"] or (("@" + r["username"]) if r.get("username") else "") or r["phone"] or ""
-
-        stats = {k: int(row[k] or 0) for k in
-                 ("total_active", "cooling", "paused", "threatened", "high_ban", "ok_count")} if row else {}
-        if row is not None:
-            stats["avg_risk"] = round(float(row["avg_risk"] or 0), 4)
-        coverage = {k: int(cov_row[k] or 0) for k in
-                    ("total", "twofa_saved", "reserve", "foreign_sess")} if cov_row else {}
         return _json_resp({
-            "stats": stats,
-            "coverage": coverage,
-            "week": {r["action"]: int(r["n"] or 0) for r in counts},
-            "config": cfg_obj.as_dict(),
-            "presets": _sh.PRESETS,
-            "held": [
-                {
-                    "account_id": r["id"], "name": _nm(r),
-                    "state": "pause" if not r["is_active"] else "cool",
-                    "until": (r["shield_paused_until"] if not r["is_active"] else r["cooldown_until"]).isoformat()
-                             if (r["shield_paused_until"] if not r["is_active"] else r["cooldown_until"]) else None,
-                    "reason": r["status_reason"] or "",
-                }
-                for r in held
-            ],
-            "exempt": [{"account_id": r["id"], "name": _nm(r)} for r in exempt],
+            "stats": {k: int(row[k] or 0) for k in ("total_active","cooling","threatened","high_ban","ok_count")} if row else {},
+            "config": {
+                "risk_threshold": float(cfg["risk_threshold"]) if cfg else 0.7,
+                "ban_prob_threshold": float(cfg["ban_prob_threshold"]) if cfg else 0.5,
+                "auto_pause": bool(cfg["auto_pause"]) if cfg else True,
+                "notify_admin": bool(cfg["notify_admin"]) if cfg else True,
+                "cool_duration_hours": int(cfg["cool_duration_hours"]) if cfg else 24,
+            },
             "history_total": history_total or 0,
             "history": [
                 {
@@ -7083,12 +6030,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "action": r["action"], "risk": float(r["risk_score"] or 0),
                     "ban_prob": float(r["ban_probability"] or 0),
                     "name": r["first_name"] or r["phone"] or "",
-                    "note": r["note"] or "",
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 }
                 for r in history
             ],
         })
+
+    # ── Ad Intelligence ────────────────────────────────────────────────────────
 
     async def ad_intel_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -7096,30 +6044,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             top = await pool.fetch(
-                """SELECT channel_username, channel_title, subscribers, quality_score,
-                          COALESCE(NULLIF(reach_rate, 0), er_rate) AS reach_rate,
-                          engagement_rate, ad_price_rub, ads_per_week, fraud_flags
+                """SELECT channel_username, channel_title, subscribers, quality_score, er_rate, ad_price_est
                    FROM ad_placements WHERE owner_id=$1 ORDER BY quality_score DESC LIMIT 10""",
                 uid,
             )
             total = await pool.fetchval("SELECT COUNT(*) FROM ad_placements WHERE owner_id=$1", uid)
-            agg = await pool.fetchrow(
-                """SELECT AVG(quality_score) AS q,
-                          COUNT(*) FILTER (WHERE last_error IS NOT NULL) AS failed,
-                          COUNT(*) FILTER (WHERE COALESCE(array_length(fraud_flags,1),0) > 0) AS suspicious,
-                          MAX(last_scanned_at) AS last_scan
-                   FROM ad_placements WHERE owner_id=$1""",
-                uid,
-            )
-            ads_7d = await pool.fetchval(
-                """SELECT COUNT(*) FROM ad_posts_log WHERE owner_id=$1
-                   AND COALESCE(post_date, detected_at) >= NOW() - INTERVAL '7 days'""",
-                uid,
-            )
             advertisers = await pool.fetch(
-                """SELECT advertiser_username, placements_count, channels_count, kind, last_seen_at
-                   FROM ad_advertisers WHERE owner_id=$1 AND placements_count > 0
-                   ORDER BY placements_count DESC, last_seen_at DESC LIMIT 10""",
+                """SELECT advertiser_username, placements_count, last_seen_at
+                   FROM ad_advertisers WHERE owner_id=$1 ORDER BY last_seen_at DESC LIMIT 10""",
                 uid,
             )
             # Итоги по ВСЕМ рекламодателям, а не по top-10: фронт рисует ими KPI-плитки
@@ -7134,41 +6066,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("ad_intel_overview uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        # Следующий слой рынка — подсказка, не основа экрана: её сбой не
-        # должен ронять сводку.
-        try:
-            from services.ad_intelligence import discovery_candidates
-            # Подсказка на экране — не список: восемь чипов и кнопка «Разведать
-            # все» (не больше пакета ручки добавления каналов).
-            discover = await discovery_candidates(pool, uid, limit=10)
-        except Exception:
-            log.warning("ad_intel_overview: discovery failed uid=%d", uid, exc_info=True)
-            discover = []
-        _agg = agg or {}
+        avg_score = sum(r["quality_score"] or 0 for r in top) / max(len(top), 1)
         return _json_resp({
             "total_channels": int(total or 0),
             "total_advertisers": int((adv_totals or {}).get("advertisers") or 0),
             "total_placements": int((adv_totals or {}).get("placements") or 0),
-            # Среднее по ВСЕМ каналам, а не по десятке лучших (было завышено).
-            "avg_quality": round(float(_agg.get("q") or 0), 1),
-            "ads_7d": int(ads_7d or 0),
-            "failed_channels": int(_agg.get("failed") or 0),
-            "suspicious_channels": int(_agg.get("suspicious") or 0),
-            "last_scan": _agg["last_scan"].isoformat() if _agg.get("last_scan") else None,
+            "avg_quality": round(avg_score, 1),
             "top_channels": [
                 {
                     "username": r["channel_username"] or "",
                     "title": r["channel_title"] or "",
                     "subscribers": r["subscribers"] or 0,
                     "quality_score": round(float(r["quality_score"] or 0), 1),
-                    # Доли, а не проценты: 0.35 = охват 35%. er_rate — прежнее
-                    # имя охвата для старых клиентов.
-                    "er_rate": round(float(r["reach_rate"] or 0), 4),
-                    "reach_rate": round(float(r["reach_rate"] or 0), 4),
-                    "engagement_rate": round(float(r["engagement_rate"] or 0), 4),
-                    "ad_price_rub": r["ad_price_rub"] or 0,
-                    "ads_per_week": round(float(r["ads_per_week"] or 0), 1),
-                    "fraud_flags": list(r["fraud_flags"] or []),
+                    "er_rate": round(float(r["er_rate"] or 0), 2),
+                    "ad_price_est": r["ad_price_est"] or 0,
                 }
                 for r in top
             ],
@@ -7176,37 +6087,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {
                     "username": r["advertiser_username"] or "",
                     "placements": r["placements_count"] or 0,
-                    "channels": r["channels_count"] or 0,
-                    "kind": r["kind"] or "",
                     "last_seen": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
                 }
                 for r in advertisers
             ],
-            "discover": discover,
         })
-
-    # Сколько каналов можно поставить на разведку одним запросом.
-    _AD_INTEL_BATCH = 20
-
-    def _ad_intel_inputs(body: dict) -> list[str]:
-        """Каналы из тела: `channel` (строка) и/или `channels` (список или
-        текст — по строке, через запятую или пробел)."""
-        raw: list[str] = []
-        one = body.get("channel")
-        if one:
-            raw.append(str(one))
-        many = body.get("channels")
-        if isinstance(many, str):
-            raw.extend(re.split(r"[\s,;]+", many))
-        elif isinstance(many, list):
-            raw.extend(str(x) for x in many)
-        seen, out = set(), []
-        for x in raw:
-            x = x.strip()
-            if x and x.lower() not in seen:
-                seen.add(x.lower())
-                out.append(x)
-        return out
 
     async def ad_intel_add_channel(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -7214,191 +6099,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            if not isinstance(body, dict):
-                raise ValueError
+            _given = str(body.get("channel", "")).strip()
         except Exception:
             return _err("Неверное тело запроса", 400)
-        inputs = _ad_intel_inputs(body)
-        if not inputs:
+        if not _given:
             return _err("Укажите канал", 400)
-        if len(inputs) > _AD_INTEL_BATCH:
-            return _err(f"За раз — не больше {_AD_INTEL_BATCH} каналов", 400)
         from services.ad_intelligence import channel_username_from
-        rejected, channels = [], []
-        for given in inputs:
-            ch = channel_username_from(given)
-            if not ch:
-                rejected.append({"input": given[:80], "reason": (
-                    "нужен публичный канал: @имя или ссылка t.me/имя; закрытые "
-                    "каналы по ссылке-приглашению не сканируются")})
-            elif ch.lower() not in {c.lower() for c in channels}:
-                channels.append(ch)
-        if not channels:
+        channel = channel_username_from(_given)
+        if not channel:
             # Отказ сразу, а не сорванная операция через минуту.
             return _err("Нужен публичный канал: @имя или ссылка t.me/имя. "
                         "Закрытые каналы по ссылке-приглашению не сканируются", 400)
-        queued = []
+        label = f"Разведка рекламы @{channel}"
         try:
-            for ch in channels:
-                label = f"Разведка рекламы @{ch}"
-                op_id = await _obus.submit(
-                    pool, uid, "ad_intel_scan", {"channel": ch},
-                    total_items=1, label=label)
-                queued.append({"channel": ch, "op_id": op_id})
+            op_id = await _obus.submit(
+                pool, uid, "ad_intel_scan", {"channel": channel},
+                total_items=1, label=label)
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            if not queued:
-                return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("ad_intel_add_channel uid=%d", uid)
-            if not queued:
-                return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({
-            "ok": True, "op_id": queued[0]["op_id"],
-            "label": f"Разведка рекламы @{queued[0]['channel']}",
-            "queued": queued, "rejected": rejected,
-        })
-
-    def _q_int(request: web.Request, key: str, default: int = 0) -> int:
-        try:
-            return int(request.query.get(key, default))
-        except (TypeError, ValueError):
-            return default
-
-    async def ad_intel_channels(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import ad_intelligence as _ai
-        qy = request.query
-        try:
-            data = await _ai.list_channels(
-                pool, uid, q=qy.get("q", ""), niche=qy.get("niche", "")[:64],
-                sort=qy.get("sort", "quality"), only_clean=qy.get("clean") == "1",
-                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
-        except Exception:
-            log.exception("ad_intel_channels uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp(data)
-
-    async def ad_intel_channel_detail(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import ad_intelligence as _ai
-        try:
-            data = await _ai.channel_detail(pool, uid, request.match_info["username"])
-        except Exception:
-            log.exception("ad_intel_channel_detail uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not data:
-            return _err("Канала нет на разведке", 404)
-        return _json_resp(data)
-
-    async def ad_intel_channel_rescan(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import ad_intelligence as _ai
-        ch = _ai.channel_username_from(request.match_info["username"])
-        if not ch:
-            return _err("Нужен публичный канал", 400)
-        try:
-            if not await pool.fetchval(
-                    "SELECT 1 FROM ad_placements WHERE owner_id=$1 "
-                    "AND lower(channel_username)=lower($2)", uid, ch):
-                return _err("Канала нет на разведке", 404)
-            label = f"Разведка рекламы @{ch}"
-            op_id = await _obus.submit(pool, uid, "ad_intel_scan", {"channel": ch},
-                                       total_items=1, label=label)
-        except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
-            log.exception("ad_intel_channel_rescan uid=%d", uid)
+            log.exception("ad_intel_add_channel uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "op_id": op_id, "label": label})
-
-    async def ad_intel_channel_auto(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-            on = bool(body.get("on")) if isinstance(body, dict) else None
-        except Exception:
-            on = None
-        if on is None:
-            return _err("Неверное тело запроса", 400)
-        from services import ad_intelligence as _ai
-        try:
-            ok = await _ai.set_auto_rescan(pool, uid, request.match_info["username"], on)
-        except Exception:
-            log.exception("ad_intel_channel_auto uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not ok:
-            return _err("Канала нет на разведке", 404)
-        return _json_resp({"ok": True, "auto_rescan": on})
-
-    async def ad_intel_channel_delete(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import ad_intelligence as _ai
-        try:
-            ok = await _ai.delete_channel(pool, uid, request.match_info["username"])
-        except Exception:
-            log.exception("ad_intel_channel_delete uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not ok:
-            return _err("Канала нет на разведке", 404)
-        return _json_resp({"ok": True})
-
-    async def ad_intel_advertisers(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import ad_intelligence as _ai
-        qy = request.query
-        try:
-            data = await _ai.list_advertisers(
-                pool, uid, q=qy.get("q", ""), kind=qy.get("kind", ""),
-                sort=qy.get("sort", "placements"),
-                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
-        except Exception:
-            log.exception("ad_intel_advertisers uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp(data)
-
-    async def ad_intel_advertiser_detail(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import ad_intelligence as _ai
-        try:
-            data = await _ai.advertiser_detail(pool, uid, request.match_info["username"])
-        except Exception:
-            log.exception("ad_intel_advertiser_detail uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        if not data:
-            return _err("Такого рекламодателя в разведке нет", 404)
-        return _json_resp(data)
-
-    async def ad_intel_ads(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import ad_intelligence as _ai
-        qy = request.query
-        try:
-            data = await _ai.list_ads(
-                pool, uid, q=qy.get("q", ""), erid_only=qy.get("erid") == "1",
-                days=_q_int(request, "days", 0),
-                limit=_q_int(request, "limit", 50), offset=_q_int(request, "offset", 0))
-        except Exception:
-            log.exception("ad_intel_ads uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp(data)
 
     # ── Network / Cluster Overview ─────────────────────────────────────────────
 
@@ -7743,10 +6467,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Mass Publish ─────────────────────────────────────────────────────────
 
-    def _project_channel_id(value):
-        # Telegram IDs can be signed, but zero and non-integer values are invalid.
-        return validate_integer(str(value), min_val=-(2**63), max_val=2**63 - 1) or None
-
     async def mass_publish_targets(request: web.Request) -> web.Response:
         """Сколько каналов реально получат массовую публикацию — и какие именно.
 
@@ -7761,23 +6481,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        if "project_id" in request.query:
-            from services import network_builder as _nb
-
-            if not _nb.project_pilot_enabled(uid):
-                return _err("Недоступно", 403)
-            project_id = validate_integer(request.query["project_id"], min_val=1, max_val=2147483647)
-            if project_id is None:
-                return _err("Неверный проект", 400)
-            channel_id = None
-            if "project_channel_id" in request.query:
-                channel_id = _project_channel_id(request.query["project_channel_id"])
-                if channel_id is None:
-                    return _err("Неверный канал проекта", 400)
-            channels = await _nb.project_publish_channels(pool, uid, project_id, channel_id)
-            return _json_resp({"ok": True, "total": len(channels), "sample": [
-                {**row, "channel_id_text": str(row["channel_id"])} for row in channels
-            ]})
         try:
             sample_limit = min(validate_integer(request.query.get("sample", "12"),
                                                 min_val=0, max_val=100) or 0, 100)
@@ -7813,8 +6516,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        if not isinstance(body, dict):
-            return _err("Не удалось разобрать запрос", 400)
         text = validate_string(body.get("text"), max_len=4096)
         delay = validate_integer(body.get("delay", 30), min_val=-1, max_val=300) or 30
         # Ключа нет — все каналы; список передан, но пуст или с мусором — отказ.
@@ -7823,25 +6524,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         channel_ids, _sel_err = selection_ids(body, "channel_ids", what="канал")
         if _sel_err:
             return _err(_sel_err, 400)
-        project_id = None
-        if "project_channel_id" in body and "project_id" not in body:
-            return _err("Укажите проект", 400)
-        if "project_id" in body:
-            from services import network_builder as _nb
-
-            if not _nb.project_pilot_enabled(uid):
-                return _err("Недоступно", 403)
-            project_id = validate_integer(body["project_id"], min_val=1, max_val=2147483647)
-            if project_id is None or not channel_ids:
-                return _err("Подтвердите список каналов проекта", 400)
-            channel_id = None
-            if "project_channel_id" in body:
-                channel_id = _project_channel_id(body["project_channel_id"])
-                if channel_id is None:
-                    return _err("Неверный канал проекта", 400)
-            channels = await _nb.project_publish_channels(pool, uid, project_id, channel_id)
-            if set(channel_ids) != {row["channel_id"] for row in channels}:
-                return _err("Список каналов проекта изменился. Обновите предпросмотр", 409)
         if not text:
             return _err("Нужен текст")
         from services import postbot as _postbot
@@ -7881,9 +6563,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # каналы» исполнителя: автопостинг из карточки шлёт target=all.
             if body.get("target") in ("all", "channels", "groups"):
                 params["target"] = body["target"]
-        if project_id is not None:
-            params["project_id"] = project_id
-            params["target"] = "channels"
         # Рекуррентная публикация (0 = разовая). Умел её только «Быстрый пост»,
         # слитый в этот экран; при слиянии повтор потерялся, хотя воркер его
         # поддерживает — после успешного прогона сам ставит следующий запуск.
@@ -7936,8 +6615,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         channels = await _safe_count(pool,
             "SELECT COUNT(DISTINCT channel_id) FROM managed_channels WHERE owner_id=$1", uid)
         bots = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
-            "AND is_active AND deleted_at IS NULL", uid)
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
         return _json_resp({"ok": True, "channels": int(channels or 0),
                            "bots": int(bots or 0),
                            "total": int(channels or 0) + int(bots or 0)})
@@ -7948,30 +6626,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-        except Exception as exc:
-            bad = bad_body_response(request, exc)
-            return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
-        if not isinstance(body, dict):
-            return _err("Неверные параметры проверки", 400)
-        selected = {}
-        for key, label in (("channel_ids", "канал"), ("bot_ids", "бот")):
-            if key not in body:
-                continue
-            ids, error = selection_ids(body, key, what=label, cap=1000)
-            if error or not ids or any(tg_id(i, positive=(key == "bot_ids")) is None for i in ids):
-                return _err(error or f"Неверный выбор: {label}", 400)
-            selected[key] = ids
+        except Exception:
+            body = {}
+        # Необязательные списки: проверить только выбранные сущности. Пусто = все.
+        channel_ids = body.get("channel_ids")
+        bot_ids = body.get("bot_ids")
         params: dict = {"owner_id": uid}
-        if selected:
-            params.update(selected)
-            params["selection_mode"] = "exact"
-            total = sum(len(ids) for ids in selected.values())
+        if channel_ids:
+            try:
+                params["channel_ids"] = [int(x) for x in channel_ids
+                                         if str(x).lstrip("-").isdigit()]
+            except (TypeError, ValueError):
+                return _err("Неверные идентификаторы каналов", 400)
+        if bot_ids:
+            try:
+                params["bot_ids"] = [int(x) for x in bot_ids
+                                     if str(x).lstrip("-").isdigit()]
+            except (TypeError, ValueError):
+                return _err("Неверные идентификаторы ботов", 400)
+        # Число сущностей = total операции (для честного счётчика прогресса).
+        if params.get("channel_ids") is not None or params.get("bot_ids") is not None:
+            total = len(params.get("channel_ids") or []) + len(params.get("bot_ids") or [])
         else:
             ch = await _safe_count(pool,
                 "SELECT COUNT(DISTINCT channel_id) FROM managed_channels WHERE owner_id=$1", uid)
             bt = await _safe_count(pool,
-                "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
-                "AND is_active AND deleted_at IS NULL", uid)
+                "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
             total = int(ch or 0) + int(bt or 0)
         if total == 0:
             return _err("Нет каналов/чатов/ботов для проверки")
@@ -7985,217 +6665,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("check_owned_restrictions uid=%d", uid)
             return _err("Не удалось поставить проверку в очередь", 500)
-
-    async def restrictions_dead(request: web.Request) -> web.Response:
-        """Недоступные при последней проверке ресурсы владельца и ID проверки."""
-        from services.network_builder import project_pilot_enabled
-
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        row = await _safe_fetchrow(
-            pool,
-            "SELECT id, result FROM operation_queue "
-            "WHERE owner_id=$1 AND op_type='check_owned_restrictions' "
-            "AND status IN ('done','partial') AND result IS NOT NULL "
-            "ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1",
-            uid)
-        if not row or not row.get("result"):
-            return _json_resp({"ok": True, "dead": [], "checked_at": None})
-        res = row["result"]
-        if isinstance(res, str):
-            try:
-                res = _json.loads(res)
-            except (ValueError, TypeError):
-                res = {}
-        findings = res.get("findings") if isinstance(res, dict) else None
-        if not isinstance(findings, list):
-            findings = []
-        # «Мёртвые» = недоступные снаружи (удалён/заблокирован/скрыт от чужого
-        # аккаунта). Официально ограниченные (restricted) ЖИВЫ — их не трогаем.
-        dead_ch: dict[int, dict] = {}
-        dead_bot: dict[int, dict] = {}
-        for f in findings:
-            if not isinstance(f, dict) or f.get("status") != "unreachable":
-                continue
-            kind = f.get("kind")
-            if kind not in ("channel", "group", "bot"):
-                continue
-            try:
-                ent_id = int(f.get("id"))
-            except (TypeError, ValueError):
-                continue
-            item = {"kind": kind, "id": ent_id,
-                    "title": str(f.get("title") or ent_id)[:120],
-                    "reason": str(f.get("reason") or "")[:160]}
-            if kind == "bot":
-                dead_bot[ent_id] = item
-            else:
-                dead_ch[ent_id] = item
-        # Сверяем, что ещё в списке владельца (scope: каналы — owner_id, боты —
-        # added_by). Убранные ранее не показываем.
-        out: list[dict] = []
-        if dead_ch:
-            rows = await _safe_fetch(
-                pool, "SELECT channel_id FROM managed_channels "
-                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
-                uid, list(dead_ch))
-            for r in rows or []:
-                out.append(dead_ch[int(r["channel_id"])])
-        if dead_bot:
-            rows = await _safe_fetch(
-                pool, "SELECT bot_id FROM managed_bots "
-                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[]) "
-                "AND is_active AND deleted_at IS NULL",
-                uid, list(dead_bot))
-            for r in rows or []:
-                out.append(dead_bot[int(r["bot_id"])])
-        return _json_resp({"ok": True, "dead": out, "total": len(out),
-                           "checked_at": (res.get("checked_at") if isinstance(res, dict) else None),
-                           "op_id": str(row["id"]), "cleanup_available": project_pilot_enabled(uid)})
-
-    async def restrictions_problems(request: web.Request) -> web.Response:
-        """ВСЕ проблемные ресурсы последней (или указанной) проверки: ограничен,
-        в теневом бане ИЛИ недоступен — чтобы их можно было быстро убрать из
-        списка прямо по итогу проверки.
-
-        Отличие от /restrictions/dead: тот отдаёт только недоступные
-        (`unreachable`). Владелец просил убирать и заблокированные (`restricted`),
-        и скрытые из поиска (`hidden`). Эти ресурсы в Telegram ЖИВЫ — удаление
-        снимает их только с учёта у нас, Telegram не трогает; поэтому в выдаче у
-        каждого есть статус, а решение владелец принимает по нему.
-
-        op_id (необязательно) — разобрать конкретную проверку (ту, что открыта);
-        без него берётся последняя завершённая. Сверка с managed_channels/bots:
-        не предлагаем убрать то, что уже убрано.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import entity_restriction_check as _erc
-        q = request.rel_url.query
-        _where = ("WHERE owner_id=$1 AND op_type='check_owned_restrictions' "
-                  "AND status IN ('done','partial') AND result IS NOT NULL")
-        _args: list = [uid]
-        try:
-            _oid = int(q.get("op_id")) if q.get("op_id") else 0
-        except (TypeError, ValueError):
-            _oid = 0
-        if _oid:
-            _where += " AND id=$2"
-            _args.append(_oid)
-        row = await _safe_fetchrow(
-            pool,
-            f"SELECT result FROM operation_queue {_where} "
-            "ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1",
-            *_args)
-        if not row or not row.get("result"):
-            return _json_resp({"ok": True, "problems": [], "total": 0, "checked_at": None})
-        res = row["result"]
-        if isinstance(res, str):
-            try:
-                res = _json.loads(res)
-            except (ValueError, TypeError):
-                res = {}
-        findings = res.get("findings") if isinstance(res, dict) else None
-        if not isinstance(findings, list):
-            findings = []
-        prob_ch: dict[int, dict] = {}
-        prob_bot: dict[int, dict] = {}
-        for f in findings:
-            if not isinstance(f, dict) or not _erc.is_problem(f.get("status")):
-                continue
-            kind = f.get("kind")
-            try:
-                ent_id = int(f.get("id"))
-            except (TypeError, ValueError):
-                continue
-            st = f.get("status")
-            item = {"kind": kind, "id": ent_id, "id_text": str(ent_id),
-                    "title": str(f.get("title") or ent_id)[:120],
-                    "status": st, "status_label": _erc.status_label(st),
-                    "reason": str(f.get("reason") or "")[:160],
-                    "dead": st == _erc.STATUS_UNREACHABLE}
-            if kind == "bot":
-                prob_bot[ent_id] = item
-            else:
-                prob_ch[ent_id] = item
-        out: list[dict] = []
-        if prob_ch:
-            rows = await _safe_fetch(
-                pool, "SELECT channel_id FROM managed_channels "
-                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
-                uid, list(prob_ch))
-            for r in rows or []:
-                out.append(prob_ch[int(r["channel_id"])])
-        if prob_bot:
-            rows = await _safe_fetch(
-                pool, "SELECT bot_id FROM managed_bots "
-                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
-                uid, list(prob_bot))
-            for r in rows or []:
-                out.append(prob_bot[int(r["bot_id"])])
-        # Худшее — выше: ограничение, затем недоступность, затем теневой бан.
-        _rank = {_erc.STATUS_RESTRICTED: 0, _erc.STATUS_UNREACHABLE: 1, _erc.STATUS_HIDDEN: 2}
-        out.sort(key=lambda x: _rank.get(x.get("status"), 9))
-        return _json_resp({"ok": True, "problems": out, "total": len(out),
-                           "checked_at": (res.get("checked_at") if isinstance(res, dict) else None)})
-
-    async def restrictions_remove_dead(request: web.Request) -> web.Response:
-        """Совместимый маршрут отключения ресурсов, недоступных при проверке."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        # Удаление: отсутствующий ключ — «этого вида не трогать» (а не «все»),
-        # пустой или битый список — ошибка выбора.
-        channel_ids, _e1 = selection_ids(data, "channel_ids", what="канал", cap=1000)
-        bot_ids, _e2 = selection_ids(data, "bot_ids", what="бот", cap=1000)
-        if _e1 or _e2:
-            return _err(_e1 or _e2, 400)
-        channel_ids, bot_ids = channel_ids or [], bot_ids or []
-        if not channel_ids and not bot_ids:
-            return _err("Не выбрано ни одной сущности для удаления", 400)
-        # Старый клиент передаёт только ID. Он может отключить лишь цели из
-        # последней проверки с тем же вердиктом и с теми же ограничениями,
-        # что действуют в новом предпросмотре.
-        from services import restriction_cleanup as cleanup
-
-        op_id = await _safe_fetchval(
-            pool, "SELECT id FROM operation_queue WHERE owner_id=$1 "
-            "AND op_type='check_owned_restrictions' AND status IN ('done','partial') "
-            "AND result IS NOT NULL ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1", uid)
-        if not op_id:
-            return _err("Нет завершённой проверки", 409)
-        try:
-            current = await cleanup.findings(pool, uid, op_id)
-            target_map = {
-                ("bot" if f["kind"] == "bot" else "channel", f["id"]): f["kind"]
-                for f in current["findings"] if f["status"] == "unreachable" and f["active"]
-            }
-            targets = []
-            for kind, ids in (("channel", channel_ids), ("bot", bot_ids)):
-                for entity_id in ids:
-                    actual_kind = target_map.get((kind, str(entity_id)))
-                    if actual_kind is None:
-                        return _err("Список недоступных ресурсов изменился. Обновите его.", 409)
-                    targets.append({"kind": actual_kind, "id": str(entity_id)})
-            plan = await cleanup.plan(pool, uid, op_id, targets, "disable")
-
-            def verify(current_plan):
-                if current_plan != plan:
-                    raise cleanup.CleanupError("Список изменился. Обновите проверку.", 409)
-
-            result = await cleanup.apply(pool, uid, op_id, targets, "disable", verify=verify)
-        except cleanup.CleanupError as exc:
-            return _err(str(exc), exc.status)
-        changed = result["changed"]
-        removed_bot = sum(item["kind"] == "bot" for item in changed)
-        return _json_resp({"ok": True, "removed_channels": len(changed) - removed_bot,
-                           "removed_bots": removed_bot, "removed": len(changed)})
 
     async def check_bot_geoban_targets(request: web.Request) -> web.Response:
         """Сколько ПУБЛИЧНЫХ ресурсов (каналов, чатов, ботов с @username) можно
@@ -8709,46 +7178,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Оповещение не найдено или уже снято", 404)
         return _json_resp({"ok": True})
 
-    async def infra_health_resolve_all(request: web.Request) -> web.Response:
-        """Снять все активные оповещения владельца одним нажатием.
-
-        Если причина осталась, детектор найдёт её снова через пять минут, —
-        это и сказано в подтверждении на экране.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import anomaly_detector
-        n = await anomaly_detector.resolve_all_anomalies(pool, uid)
-        if n < 0:
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "resolved": n})
-
-    async def infra_health_mute(request: web.Request) -> web.Response:
-        """Не присылать в Telegram сообщения об аномалии этого типа N часов.
-
-        Кнопки «Не присылать 24 ч / неделю» были только под сообщением бота;
-        в мини-аппе тревогу можно было лишь снять, и через пять минут детектор
-        находил её снова. hours=0 — снова присылать.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import anomaly_detector
-        a_type = request.match_info.get("anomaly_type") or ""
-        if a_type not in anomaly_detector.ANOMALY_TYPES:
-            return _err("Неизвестный тип оповещения")
-        try:
-            data = await request.json()
-        except Exception:
-            data = {}
-        hours = validate_integer((data or {}).get("hours", 24), min_val=0, max_val=720)
-        if hours is None:
-            return _err("Срок — от 0 до 720 часов")
-        if not await anomaly_detector.mute(pool, uid, a_type, hours):
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "hours": hours})
-
     async def infra_health_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -8764,26 +7193,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import anomaly_detector
 
-            muted = await anomaly_detector.muted_until(pool, uid)
-            # Одна карточка на эпизод: начало эпизода, последнее подтверждение
-            # и сколько раз детектор его подтверждал. Раньше каждая получасовая
-            # запись была отдельной «критичной» карточкой, а закончившаяся
-            # волна висела неделями (get_active_anomalies).
             for a in await anomaly_detector.get_active_anomalies(pool, uid):
-                a_type = a.get("anomaly_type") or "anomaly"
                 alerts.append({
                     "id": a.get("id"),
-                    "alert_type": a_type,
+                    "alert_type": a.get("anomaly_type") or "anomaly",
                     "severity": a.get("severity") or "warning",
                     "title": a.get("title") or "",
                     "description": a.get("description") or "",
                     "target_type": a.get("detector"),
                     "affected_count": a.get("affected_count"),
                     "is_active": True,
-                    "first_seen_at": a.get("first_detected_at") or a.get("detected_at"),
-                    "last_seen_at": a.get("last_detected_at") or a.get("detected_at"),
-                    "occurrences": int(a.get("occurrences") or 1),
-                    "muted_until": muted.get(a_type),
+                    "first_seen_at": a.get("detected_at"),
                     "resolved_at": None,
                 })
         except Exception:
@@ -9052,24 +7472,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """
                 SELECT ars.account_id, ta.phone, ta.username, ta.first_name,
                        ars.risk_score, ars.ban_probability, ars.flood_rate_1h,
-                       ars.ops_24h, ars.last_flood_at, ars.computed_at,
-                       ars.factors, ta.is_active, ta.shield_paused_until
+                       ars.ops_24h, ars.last_flood_at, ars.computed_at
                 FROM account_risk_scores ars
                 JOIN tg_accounts ta ON ta.id = ars.account_id
                 WHERE ta.owner_id = $1
-                ORDER BY ars.risk_score DESC NULLS LAST, ta.id
-                LIMIT 500
+                ORDER BY ars.risk_score DESC NULLS LAST
+                LIMIT 30
                 """,
                 uid,
             )
-            from services.physics_engine import _parse_factors
-            out = []
-            for r in rows:
-                d = dict(r)
-                # jsonb приходит строкой — экрану нужен список факторов.
-                d["factors"] = _parse_factors(d.get("factors"))
-                out.append(d)
-            return _json_resp(out)
+            return _json_resp([dict(r) for r in rows])
         except Exception:
             log.exception("physics_overview uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -9703,9 +8115,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/mass_publish", mass_publish)
     app.router.add_get("/api/miniapp/check_owned_restrictions/targets", check_owned_restrictions_targets)
     app.router.add_post("/api/miniapp/check_owned_restrictions", check_owned_restrictions)
-    app.router.add_get("/api/miniapp/restrictions/dead", restrictions_dead)
-    app.router.add_get("/api/miniapp/restrictions/problems", restrictions_problems)
-    app.router.add_post("/api/miniapp/restrictions/remove_dead", restrictions_remove_dead)
     app.router.add_get("/api/miniapp/check_bot_geoban/targets", check_bot_geoban_targets)
     app.router.add_post("/api/miniapp/check_bot_geoban", check_bot_geoban)
     app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)
@@ -9729,8 +8138,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     from services import mini_app_saved_views
     mini_app_saved_views.setup_routes(app, pool)
     mini_app_fleet.setup_routes(app, pool)
-    from services import mini_app_infra
-    mini_app_infra.setup_routes(app, pool)
     mini_app_rankings.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_crm.setup_routes(app, pool)
@@ -9754,7 +8161,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_integrations.setup_routes(app, pool)
     mini_app_cf.setup_routes(app, pool)
     mini_app_content.setup_routes(app, pool)
-    mini_app_clone_adapt.setup_routes(app, pool)
     mini_app_presence.setup_routes(app, pool)
     mini_app_cloud.setup_routes(app, pool)
     mini_app_media.setup_routes(app, pool)
@@ -9776,26 +8182,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Profile Setter
     app.router.add_get("/api/miniapp/profile_setter/status", profile_setter_status)
     app.router.add_post("/api/miniapp/profile_setter", profile_setter_submit)
-    app.router.add_post("/api/miniapp/profile_setter/preview", profile_setter_preview)
-    app.router.add_post("/api/miniapp/profile_setter/twofa", profile_setter_twofa)
     # Bot Notes
     # Bot Commands
     # Account Shield
     app.router.add_get("/api/miniapp/shield", shield_summary)
     app.router.add_post("/api/miniapp/shield/config", shield_config_save)
-    app.router.add_post("/api/miniapp/shield/resume", shield_resume)
-    app.router.add_post("/api/miniapp/shield/run", shield_run_now)
     # Ad Intelligence
     app.router.add_get("/api/miniapp/ad_intel", ad_intel_overview)
     app.router.add_post("/api/miniapp/ad_intel/channel", ad_intel_add_channel)
-    app.router.add_get("/api/miniapp/ad_intel/channels", ad_intel_channels)
-    app.router.add_get("/api/miniapp/ad_intel/channel/{username}", ad_intel_channel_detail)
-    app.router.add_post("/api/miniapp/ad_intel/channel/{username}/rescan", ad_intel_channel_rescan)
-    app.router.add_post("/api/miniapp/ad_intel/channel/{username}/auto", ad_intel_channel_auto)
-    app.router.add_delete("/api/miniapp/ad_intel/channel/{username}", ad_intel_channel_delete)
-    app.router.add_get("/api/miniapp/ad_intel/advertisers", ad_intel_advertisers)
-    app.router.add_get("/api/miniapp/ad_intel/advertiser/{username}", ad_intel_advertiser_detail)
-    app.router.add_get("/api/miniapp/ad_intel/ads", ad_intel_ads)
     # Network / Cluster
     # Relay (Inbox)
     app.router.add_get("/api/miniapp/relay/session/{session_id}/messages", relay_session_messages)
@@ -9830,16 +8224,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         vlayer_mark_purchased)
     app.router.add_get("/api/miniapp/vlayer/analytics", vlayer_analytics)
     app.router.add_get("/api/miniapp/vlayer/segment/{value}", vlayer_segment)
-    app.router.add_get("/api/miniapp/vlayer/rules", vlayer_rules_get)
-    app.router.add_post("/api/miniapp/vlayer/rules", vlayer_rules_save)
-    app.router.add_post("/api/miniapp/vlayer/rules/reset", vlayer_rules_reset)
-    app.router.add_post("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}/stage",
-                        vlayer_set_stage)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
-    app.router.add_get("/api/miniapp/rehab/settings", rehab_settings_get)
-    app.router.add_post("/api/miniapp/rehab/settings", rehab_settings_save)
-    app.router.add_post("/api/miniapp/rehab_bulk/{action}", rehab_bulk)
-    app.router.add_get("/api/miniapp/rehab/{acc_id}/history", rehab_history_ep)
     app.router.add_post("/api/miniapp/rehab/{acc_id}/{action}", rehab_action)
     # A/B Experiments
     # Health Dashboard
@@ -9905,6 +8290,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
     # Infra Analytics
+    app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
     app.router.add_get("/api/miniapp/diag", diag)
     app.router.add_get("/api/miniapp/new_users", new_users)
@@ -9932,16 +8318,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/persona", persona_create)
     app.router.add_put("/api/miniapp/persona/{persona_id}/toggle", persona_toggle)
     app.router.add_delete("/api/miniapp/persona/{persona_id}", persona_delete)
-    app.router.add_put("/api/miniapp/persona/{persona_id}", persona_update)
-    app.router.add_post("/api/miniapp/persona/preview", persona_preview)
-    app.router.add_post("/api/miniapp/persona/{persona_id}/apply_profile", persona_apply_profile)
-    app.router.add_get("/api/miniapp/persona/{persona_id}/memory", persona_memory_get)
-    app.router.add_put("/api/miniapp/persona/{persona_id}/memory", persona_memory_facts)
-    app.router.add_delete("/api/miniapp/persona/{persona_id}/memory", persona_memory_forget)
-    app.router.add_post("/api/miniapp/persona/{persona_id}/memory/rebuild", persona_memory_rebuild)
-    app.router.add_get("/api/miniapp/persona/style_from_my_chats", persona_style_from_my_chats)
-    app.router.add_put("/api/miniapp/persona/{persona_id}/peer/{peer_id}", persona_peer_notes)
-    app.router.add_delete("/api/miniapp/persona/{persona_id}/peer/{peer_id}", persona_peer_forget)
     # Auto Registrar
     app.router.add_get("/api/miniapp/autoreg", autoreg_status)
     app.router.add_post("/api/miniapp/autoreg", autoreg_submit)
@@ -9982,8 +8358,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Infra Health Center
     app.router.add_get("/api/miniapp/infra_health", infra_health_overview)
     app.router.add_post("/api/miniapp/infra_health/anomaly/{anomaly_id}/resolve", infra_health_resolve)
-    app.router.add_post("/api/miniapp/infra_health/resolve_all", infra_health_resolve_all)
-    app.router.add_post("/api/miniapp/infra_health/mute/{anomaly_type}", infra_health_mute)
     # Swarm
     app.router.add_get("/api/miniapp/swarm", swarm_metrics)
     # Presence Packs
@@ -11223,8 +9597,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Сжатый мини-апп в памяти: {"key": (mtime, size), "body": bytes}.
     # Пересобирается сам, когда файл меняется (деплой) — ключ перестаёт совпадать.
     _MINIAPP_GZ: dict = {}
-    from services.miniapp_lazy import LazyCache as _LazyCache
-    _LAZY = _LazyCache()
     if os.path.isdir(_static_dir):
         async def serve_index(request: web.Request) -> web.Response:
             """Отдать мини-апп сжатым, с ETag на повторное открытие.
@@ -11242,9 +9614,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return web.FileResponse(_index_path)   # пусть aiohttp отдаст 404
             from services import miniapp_assets as _ma
             key = (int(st.st_mtime), int(st.st_size))
-            from services import miniapp_minify as _mm
             if _MINIAPP_GZ.get("key") != key or not _MINIAPP_GZ.get("html"):
                 try:
+                    from services import miniapp_minify as _mm
                     with open(_index_path, "rb") as _f:
                         _raw = _f.read().decode("utf-8")
                     # Без комментариев и отступов: −25% сжатого размера на
@@ -11266,33 +9638,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     versions[_rel] = _tok
             etag = _ma.page_etag(key, versions)
 
-            # Ленивая страница (services/miniapp_lazy.py): код разделов — в
-            # кусках по требованию, на старте только нужное старту. Пока
-            # нарезка этой версии не готова (идёт в фоне) — полная, как раньше.
-            # `?full=1` — полная всегда: ею страница лечит себя, если кусок
-            # не загрузился.
-            from services import miniapp_lazy as _ml
-            _page_html, _variant = _MINIAPP_GZ["html"], "full"
-            if _ml.enabled() and request.query.get("full") != "1":
-                _sp = _LAZY.page(etag, _MINIAPP_GZ["html"], _static_dir,
-                                 lambda _t, _l: _mm.safe(_mm.strip_js, _t, _l))
-                if _sp is not None:
-                    _page_html, _variant = _sp.html, "lazy"
-                    etag = etag[:-1] + '-lz"'
-
             # Повторное открытие: браузер прислал тот же ETag — тело не гоним.
             if request.headers.get("If-None-Match") == etag:
                 return web.Response(status=304, headers={"ETag": etag,
                                                          "Cache-Control": "no-cache"})
 
-            _bodies = _MINIAPP_GZ.setdefault("bodies", {})
-            if etag not in _bodies:
+            if _MINIAPP_GZ.get("etag") != etag or not _MINIAPP_GZ.get("body"):
                 import gzip as _gzip
-                _bodies[etag] = _gzip.compress(
-                    _ma.stamp_versions(_page_html, versions).encode("utf-8"), 6)
-                while len(_bodies) > 4:
-                    del _bodies[next(iter(_bodies))]
-            _page_gz = _bodies[etag]
+                _MINIAPP_GZ["body"] = _gzip.compress(
+                    _ma.stamp_versions(_MINIAPP_GZ["html"], versions).encode("utf-8"), 6)
+                _MINIAPP_GZ["etag"] = etag
 
             headers = {
                 "ETag": etag,
@@ -11307,17 +9662,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if _mb.accepts(request.headers.get("Accept-Encoding")):
                 import gzip as _gz_br
                 _br = _mb.get_or_schedule(
-                    "index.html#" + _variant, etag, lambda: _gz_br.decompress(_page_gz))
+                    "index.html", etag, lambda: _gz_br.decompress(_MINIAPP_GZ["body"]))
                 if _br is not None:
                     headers["Content-Encoding"] = "br"
                     return web.Response(body=_br, headers=headers,
                                         content_type="text/html", charset="utf-8")
             if "gzip" in (request.headers.get("Accept-Encoding") or ""):
                 headers["Content-Encoding"] = "gzip"
-                return web.Response(body=_page_gz, headers=headers,
+                return web.Response(body=_MINIAPP_GZ["body"], headers=headers,
                                     content_type="text/html", charset="utf-8")
             import gzip as _gzip_mod   # клиент без gzip — та же очищенная страница
-            return web.Response(body=_gzip_mod.decompress(_page_gz),
+            return web.Response(body=_gzip_mod.decompress(_MINIAPP_GZ["body"]),
                                 headers=headers, content_type="text/html", charset="utf-8")
 
         # Скрипты экранов и стили — тем же путём, что index.html: сжатыми один
@@ -11383,45 +9738,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return web.Response(body=hit[1], headers=headers, content_type=ctype,
                                 charset="utf-8")
 
-        async def serve_lazy_chunk(request: web.Request) -> web.Response:
-            """Ленивый кусок кода по хэшу содержимого: адрес не меняется
-            никогда, поэтому кэшируется навсегда. Кусок прошлой версии
-            страницы ещё живёт два деплоя; совсем старый — 404, и страница
-            перезагружает себя полной (services/miniapp_lazy.py)."""
-            from services import miniapp_assets as _ma
-            from services import miniapp_brotli as _mb
-            h = request.match_info.get("h", "")
-            gz = _LAZY.chunk_gz(h)
-            if gz is None and _LAZY.wants_warmup():
-                # Процесс только поднялся (деплой) или страницу отдала другая
-                # реплика: нарезки здесь ещё нет. Нарезка детерминирована —
-                # запускаем её для текущей версии и ждём, а не отвечаем 404
-                # (404 стоит странице перезагрузки).
-                import asyncio as _aio
-                await serve_index(request.clone(rel_url="/miniapp"))
-                if _LAZY._tasks:
-                    await _aio.wait(list(_LAZY._tasks), timeout=20)
-                gz = _LAZY.chunk_gz(h)
-            if gz is None:
-                raise web.HTTPNotFound()
-            etag = f'"{h}"'
-            headers = {"ETag": etag, "Cache-Control": _ma.IMMUTABLE, "Vary": "Accept-Encoding"}
-            if request.headers.get("If-None-Match") == etag:
-                return web.Response(status=304, headers=headers)
-            ae = request.headers.get("Accept-Encoding")
-            if _mb.accepts(ae):
-                _br = _mb.get_or_schedule("lazy/" + h, h, lambda: _LAZY.chunks[h].encode("utf-8"))
-                if _br is not None:
-                    headers["Content-Encoding"] = "br"
-                    return web.Response(body=_br, headers=headers,
-                                        content_type="application/javascript", charset="utf-8")
-            if "gzip" in (ae or ""):
-                headers["Content-Encoding"] = "gzip"
-                return web.Response(body=gz, headers=headers,
-                                    content_type="application/javascript", charset="utf-8")
-            return web.Response(text=_LAZY.chunks[h], headers=headers,
-                                content_type="application/javascript", charset="utf-8")
-
         async def assetlinks(request: web.Request) -> web.Response:
             """Digital Asset Links для Android-приложения (TWA): связывает домен с
             APK по отпечатку ключа подписи, чтобы приложение открывалось БЕЗ
@@ -11438,8 +9754,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Раньше add_static: точный обработчик должен поймать .js/.css первым.
         # Шаблон в переменной: скобки регулярки внутри вызова add_get сбивают
         # статический скан регистраций (test_uch_bulk_routes_registered).
-        _lazy_pattern = r"/miniapp/lazy/{h:[0-9a-f]{16}}.js"
-        app.router.add_get(_lazy_pattern, serve_lazy_chunk)
         _asset_pattern = r"/miniapp/{path:[A-Za-z0-9_\-/.]+\.(?:js|css)}"
         app.router.add_get(_asset_pattern, serve_asset)
         app.router.add_static("/miniapp", _static_dir, show_index=False)

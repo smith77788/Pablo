@@ -733,9 +733,9 @@ class TestTrustEngine:
 
     def test_compute_merge_confidence_same_phone(self):
         from services.contacts_hub.trust_engine import compute_merge_confidence
-        a = {"telegram_user_id": 1, "username": "a", "phones": ["+79991234567"],
+        a = {"telegram_user_id": 1, "username": "a", "phones": ["+123"],
              "first_name": "A", "last_name": "", "company": ""}
-        b = {"telegram_user_id": 2, "username": "b", "phones": ["+79991234567"],
+        b = {"telegram_user_id": 2, "username": "b", "phones": ["+123"],
              "first_name": "B", "last_name": "", "company": ""}
         result = compute_merge_confidence(a, b)
         assert "same_phone" in result["reasons"]

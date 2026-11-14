@@ -841,15 +841,6 @@ OP_REGISTRY: dict[str, dict] = {
         # Повтор после таймаута клиента выполнил бы её второй раз: посты копируются в канал.
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
-    # Откат клона — тот же исполнитель, что откат массовой правки профиля
-    # (снимки в одной таблице), но на тарифе самого клона: иначе владелец
-    # «starter» клонировать может, а вернуть как было — нет.
-    "clone_adapt_rollback": {
-        "description": "Откат клонирования профиля ботов",
-        "min_plan": "starter",
-        "max_retries": 2,
-        "icon": "↩️",
-    },
     "ad_intel_scan": {
         "description": "Разведка рекламы конкурентов",
         "min_plan": "pro",
@@ -971,28 +962,6 @@ def _coerce_scheduled_for(value):
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
 
-_PRESENCE_CREATION_TYPES = (
-    "global_presence_channel", "global_presence_group", "global_presence_bot",
-    "global_presence_package", "global_presence_full_package",
-)
-
-
-async def _active_presence_launch(conn, owner_id: int, plan_id: str) -> int | None:
-    from services.op_status import IN_FLIGHT
-
-    await conn.execute(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        f"global-presence|{owner_id}|{plan_id}",
-    )
-    return await conn.fetchval(
-        """SELECT id FROM operation_queue
-           WHERE owner_id=$1 AND params->>'plan_id'=$2
-             AND op_type=ANY($3::text[]) AND status=ANY($4::text[])
-           ORDER BY id LIMIT 1""",
-        owner_id, plan_id, list(_PRESENCE_CREATION_TYPES), sorted(IN_FLIGHT),
-    )
-
-
 async def submit(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -1104,46 +1073,7 @@ async def submit(
         reused = False
         async with pool.acquire() as conn:
             async with conn.transaction():
-                # Один активный запуск на план, независимо от входа и возраста
-                # операции. Параметры бота и Mini App могут отличаться.
-                if op_type in _PRESENCE_CREATION_TYPES and params.get("plan_id"):
-                    active = await _active_presence_launch(conn, owner_id, str(params["plan_id"]))
-                    if active is not None:
-                        op_id = int(active)
-                        reused = True
-                if op_type == "deploy_network" and params.get("instance_id") is not None:
-                    await conn.execute(
-                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                        f"deploy-network|{owner_id}|{params['instance_id']}",
-                    )
-                    from services import op_status as _deploy_status
-                    if params.get("approval_digest"):
-                        confirmed = await conn.fetchval(
-                            """SELECT id FROM operation_queue WHERE owner_id=$1 AND op_type='deploy_network'
-                               AND params->>'instance_id'=$2 AND params->>'approval_digest'=$3
-                               ORDER BY id LIMIT 1""",
-                            owner_id, str(params["instance_id"]), params["approval_digest"],
-                        )
-                        if confirmed:
-                            op_id, reused = int(confirmed), True
-                    if not reused:
-                        active = await conn.fetchrow(
-                            """SELECT id, params->>'topology_digest' AS digest,
-                                      params->>'account_id' AS executor,
-                                      params->>'approval_digest' AS approval
-                               FROM operation_queue
-                               WHERE owner_id=$1 AND op_type='deploy_network'
-                                 AND params->>'instance_id'=$2
-                                 AND status=ANY($3::text[]) ORDER BY id LIMIT 1""",
-                            owner_id, str(params["instance_id"]), sorted(_deploy_status.IN_FLIGHT),
-                        )
-                        if active and ("topology_digest" in params or active["digest"] is not None):
-                            if (active["digest"] != params.get("topology_digest")
-                                    or active["executor"] != str(params.get("account_id"))
-                                    or active["approval"] != params.get("approval_digest")):
-                                raise PermissionError("Для этого проекта уже идёт другое развёртывание")
-                            op_id, reused = int(active["id"]), True
-                if not reused and dedup_window_sec and dedup_window_sec > 0:
+                if dedup_window_sec and dedup_window_sec > 0:
                     dedup_identity = sensitive_params_fp or dedup_params_json
                     _dedup_statuses = _dedup_status_sql()
                     await conn.execute(
@@ -1958,7 +1888,7 @@ async def resubmit_unfinished(
             "recurrence_dropped": dropped, "plan_blocked": plan_blocked}
 
 
-async def retry_blocker(pool: asyncpg.Pool, op_id: int, operation) -> dict | None:
+async def retry_blocker(pool: asyncpg.Pool, op_id: int) -> dict | None:
     """Почему эту операцию сейчас НЕЛЬЗЯ повторять, или None.
 
     Общая проверка всех поверхностей повтора одной операции (бот — через
@@ -1966,13 +1896,6 @@ async def retry_blocker(pool: asyncpg.Pool, op_id: int, operation) -> dict | Non
     жила только в `resubmit_one`, мини-апп повторял операцию с убранным
     журналом целиком заново. Возвращает {"reason": str, ...}.
     """
-    if operation["op_type"] == "deploy_network":
-        params = operation["params"]
-        if isinstance(params, str):
-            params = json.loads(params)
-        if isinstance(params, dict) and "topology_digest" in params:
-            return {"reason": "Сверьте результат и заново откройте план развёртывания проекта"}
-
     # Журнал целей убран уборкой — повторять НЕЛЬЗЯ. Идемпотентность
     # исполнителя стоит на `operation_log`: пустой журнал означает «ничего не
     # сделано», и повтор прошёл бы ВСЕ цели заново — те же приглашения тем же
@@ -2080,7 +2003,7 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
         return {"ok": False, "op_id": None, "count": 0, "code": 409,
                 "reason": f"Повтор невозможен: {_why}"}
 
-    _blocked = await retry_blocker(pool, op_id, info)
+    _blocked = await retry_blocker(pool, op_id)
     if _blocked:
         return {"ok": False, "op_id": None, "count": 0, "code": 409, **_blocked}
 

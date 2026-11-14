@@ -72,10 +72,7 @@ async def test_no_accounts_but_smtp_runs_legal_only(monkeypatch):
     async def _fake_staggered(plan, **kwargs):
         captured["accounts"] = list(plan.accounts)
         captured["owner_id"] = plan.owner_id
-        # Одно письмо ушло: исход Strike считается по факту отправленного
-        # (f7aabcfa), и пустой результат честно даёт failed.
-        from services.strike_engine import StrikeResult
-        return [StrikeResult(target="@bad", emails_sent=1)]
+        return []  # никаких целей-результатов — важно, что дошли до запуска
 
     # staggered_strike импортируется внутри _exec_strike из strike_engine — патчим там
     monkeypatch.setattr("services.strike_engine.staggered_strike", _fake_staggered)

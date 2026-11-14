@@ -27,7 +27,6 @@ tdata).
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import re
 
 from aiohttp import web
@@ -39,14 +38,9 @@ from aiohttp import web
 MASS_CAP = 20000
 
 
-# Значение среза «пул», означающее «аккаунты без пула».
-UNPOOLED = "__none__"
-
-
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты аккаунтов на приложении мини-аппа."""
     from services.mini_app_api import (
-        _FLOODED_SQL, _FOREIGN_SQL, _LOW_TRUST_SQL, _NO2FA_SQL,
         ACCOUNT_FILTERS, ACCOUNT_STAGES, ACTIVE_ACC_SQL, _INTERNAL_ERROR,
         _body_wants_platform_scope, _csv_resp, _err, _geo_code, _get_uid,
         _json_resp, _obus, _proxy_display_host, _safe_count, _safe_fetch,
@@ -94,25 +88,10 @@ def setup_routes(app: web.Application, pool) -> None:
             # целы, но каждая их операция падает по сети. Без этого среза мёртвый
             # прокси нельзя было ни увидеть списком, ни починить оптом.
             # Строго is_alive=FALSE: непроверенный прокси (NULL) — не мёртвый.
-            # Текст условия совпадает с _PROXY_DOWN_SQL, которым считает плитку
-            # экран «Здоровье»; здесь он выписан, потому что его сторожит
-            # tests/test_fleet_proxy_visibility.py.
             clauses.append(
                 "proxy_id IS NOT NULL AND EXISTS ("
                 "SELECT 1 FROM user_proxies p WHERE p.id = tg_accounts.proxy_id "
                 "AND p.is_alive IS FALSE)")
-        elif flt == "low_trust":
-            # Тот же порог, что у плитки «Низкий траст» на экране «Здоровье».
-            clauses.append(_LOW_TRUST_SQL)
-        elif flt == "flooded":
-            # Ловили флуд-ожидание за 7 дней — плитка «Флуд 7д» на «Здоровье».
-            clauses.append(_FLOODED_SQL)
-        elif flt == "foreign":
-            # Чужие сеансы — плитка «Чужие сеансы» на «Здоровье».
-            clauses.append(_FOREIGN_SQL)
-        elif flt == "no2fa":
-            # Без пароля 2FA — плитка «Без 2FA» на «Здоровье».
-            clauses.append(_NO2FA_SQL)
         elif flt == "dead":
             # Невоскрешаемые: забанен / удалён-деактивирован / сессия отозвана.
             # Именно их массово удаляют «в один тап». Конфликт двух IP (cooldown)
@@ -135,11 +114,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # Пул — то, чем владелец делит флот на группы. На экране «Инфраструктура»
         # он был виден числом («Пул europe — 42 акк») и ничем больше: открыть
         # эти 42 аккаунта было нечем, среза под пул не существовало.
-        if acc_pool == UNPOOLED:
-            # «Без пула» — отдельный срез: строка «Без пула» на экране пулов
-            # открывала ВЕСЬ флот (пустой пул = нет фильтра).
-            clauses.append("(pool IS NULL OR pool = '')")
-        elif acc_pool:
+        if acc_pool:
             args.append(acc_pool)
             clauses.append(f"pool = ${len(args)}")
         # Страна аккаунта = страна его прокси (так же считает geo_router). На
@@ -200,8 +175,6 @@ def setup_routes(app: web.Application, pool) -> None:
                       ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
                       cooldown_until, cluster, stage, pool,
-                      -- Чужие сеансы аккаунта (дозор угона, services/session_watch).
-                      COALESCE(foreign_sessions, 0) AS foreign_sessions,
                       -- Без сессии аккаунт не берёт ни одна операция (условие
                       -- двери выбора). Строке это тоже нужно: иначе экран
                       -- показывает «Активен» там, где работать нечем.
@@ -342,7 +315,6 @@ def setup_routes(app: web.Application, pool) -> None:
         stats["by_stage"] = by_stage
         return _json_resp({
             "accounts": rows,
-            "resource_menu": not admin,
             "stats": stats,
             "admin_view": admin,
             "page": {
@@ -380,8 +352,7 @@ def setup_routes(app: web.Application, pool) -> None:
                           is_active, added_at, last_used,
                           ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          status_reason, cooldown_until, cluster, stage, proxy_id,
-                          COALESCE(foreign_sessions, 0) AS foreign_sessions, pool
+                          status_reason, cooldown_until, cluster, stage, proxy_id
                    FROM tg_accounts WHERE id=$1""", acc_id)
         else:
             acc = await _safe_fetchrow(pool,
@@ -389,8 +360,7 @@ def setup_routes(app: web.Application, pool) -> None:
                           is_active, added_at, last_used,
                           ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          status_reason, cooldown_until, cluster, stage, proxy_id,
-                          COALESCE(foreign_sessions, 0) AS foreign_sessions, pool
+                          status_reason, cooldown_until, cluster, stage, proxy_id
                    FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Аккаунт не найден", 404)
@@ -409,11 +379,8 @@ def setup_routes(app: web.Application, pool) -> None:
         # решения человека).
         rehab = None
         _rh_row = await _safe_fetchrow(pool,
-            """SELECT r.phase, r.note, r.attempts, r.next_action_at,
-                      r.release_at, r.relapses, a.acc_status, a.cooldown_until
-                 FROM account_rehab_state r
-                 JOIN tg_accounts a ON a.id = r.acc_id
-                WHERE r.acc_id=$1""", acc_id)
+            """SELECT phase, note, attempts, next_action_at
+                 FROM account_rehab_state WHERE acc_id=$1""", acc_id)
         if _rh_row:
             try:
                 from services import account_rehab as _rh
@@ -491,38 +458,8 @@ def setup_routes(app: web.Application, pool) -> None:
             else:
                 transport = {"kind": "shared", "unique": False,
                              "title": "Без своего прокси — общий CF-relay/прямое (НЕ уникальный IP)"}
-        from services.network_builder import project_pilot_enabled
-
-        # Безопасность аккаунта — одна картина выживаемости: 2FA (установлен и
-        # сохранён ли у нас пароль — без сохранённого аккаунт не вернуть),
-        # запасной ключ (второй наш сеанс, оживляет аккаунт при смерти основной
-        # сессии), чужие сеансы и включена ли автозащита щита. Раньше запасной
-        # ключ был виден только флот-широким тумблером, а по аккаунту — никак.
-        security = None
-        if not admin:
-            srow = await _safe_fetchrow(pool,
-                "SELECT (twofa_enc IS NOT NULL) AS twofa_saved, "
-                "(reserve_session_enc IS NOT NULL) AS has_reserve, reserve_auth_hash "
-                "FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
-            guard = {}
-            try:
-                from services import account_shield as _shield
-                _cfg = await _shield.get_shield_config(pool, uid)
-                guard = {"sessions": bool(getattr(_cfg, "guard_sessions", False)),
-                         "reserve": bool(getattr(_cfg, "guard_reserve", False)),
-                         "twofa": bool(getattr(_cfg, "guard_twofa", False))}
-            except Exception as _e:
-                log.debug("account_detail shield owner=%s acc=%s: %s", uid, acc_id, _e)
-            security = {
-                "has_2fa": bool(caps and caps["has_2fa"]),
-                "twofa_saved": bool(srow and srow["twofa_saved"]),
-                "has_reserve": bool(srow and srow["has_reserve"]),
-                "foreign_sessions": int(acc["foreign_sessions"] or 0),
-                "guard": guard,
-            }
         return _json_resp({
             "account": acc,
-            "public_channel_capacity_available": not admin and bool(acc["is_active"]) and project_pilot_enabled(uid),
             "capabilities": caps,
             "warmup": warmup,
             "rehab": rehab,
@@ -530,7 +467,6 @@ def setup_routes(app: web.Application, pool) -> None:
             "health": health,
             "verdict": verdict,
             "transport": transport,
-            "security": security,
         })
 
     async def accounts_export(request: web.Request) -> web.Response:
@@ -688,19 +624,7 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        if not isinstance(body, dict):
-            return _err("Неверный запрос", 400)
         op = body.get("op")
-        target_stage = None
-        if op == "set_stage":
-            if body.get("select_all_filtered") and "target_stage" not in body:
-                return _err("Укажите новый статус для выбранного среза", 400)
-            raw_stage = body.get("target_stage", body.get("stage"))
-            if raw_stage is not None and not isinstance(raw_stage, str):
-                return _err("Неизвестный статус", 400)
-            target_stage = (raw_stage or "").strip().lower() or None
-            if target_stage is not None and target_stage not in ACCOUNT_STAGES:
-                return _err("Неизвестный статус", 400)
         # По умолчанию масс-операция идёт по СВОИМ аккаунтам (даже у админа) —
         # чтобы админ случайно не оперировал над чужими. Платформенный срез —
         # только явным {"scope":"platform"} в теле.
@@ -712,13 +636,10 @@ def setup_routes(app: web.Application, pool) -> None:
         if body.get("select_all_filtered"):
             flt = body.get("filter", "all")
             if flt not in ACCOUNT_FILTERS:
-                return _err("Неизвестный фильтр аккаунтов", 400)
-            if any(body.get(key) is not None and not isinstance(body[key], str)
-                   for key in ("stage", "q", "pool", "geo", "tag")):
-                return _err("Неверный формат фильтра аккаунтов", 400)
+                flt = "all"
             stage = (body.get("stage") or "").strip().lower()
             if stage and stage not in ACCOUNT_STAGES:
-                return _err("Неизвестный статус в фильтре", 400)
+                stage = ""
             qterm = (body.get("q") or "").strip()[:64]
             # Срез по пулу обязан доехать и сюда: иначе «применить ко всему
             # срезу» взяло бы аккаунты вне показанного пула — операция ушла бы
@@ -727,8 +648,6 @@ def setup_routes(app: web.Application, pool) -> None:
             # То же и про срез по стране: иначе «применить ко всему срезу»
             # ушло бы по всему флоту, а владелец видел одну страну.
             bgeo = _geo_code(body.get("geo"))
-            if (body.get("geo") or "").strip() and not bgeo:
-                return _err("Неизвестная страна в фильтре", 400)
             btag = _norm_tag(body.get("tag"))
             where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin,
                                            acc_pool=bpool, geo=bgeo, tag=btag)
@@ -764,24 +683,6 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Аккаунты не найдены", 404)
         n = len(ids)
         try:
-            if op == "set_pool":
-                # Пул выбранным аккаунтам (или всему срезу). Раньше назначить
-                # пул из мини-аппа было нечем — только из бота, хотя пустой
-                # экран пулов отправлял «назначить на карточке аккаунта».
-                from services import infra_hub as _ih
-                raw_pool = body.get("value")
-                if raw_pool in (None, ""):
-                    new_pool = None
-                else:
-                    try:
-                        new_pool = _ih.normalize_pool_name(raw_pool)
-                    except _ih.PoolNameError as e:
-                        return _err(str(e), 400)
-                if admin:
-                    return _err("Пул назначается только своим аккаунтам", 400)
-                changed = await _ih.assign_pool(pool, uid, new_pool, account_ids=ids)
-                return _json_resp({"ok": True, "count": changed, "pool": new_pool,
-                                   "label": _ih.pool_label(new_pool), "capped": capped})
             if op in ("add_tag", "remove_tag"):
                 tag = _norm_tag(body.get("value") or body.get("tag_value"))
                 if not tag:
@@ -813,12 +714,14 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _json_resp({"ok": True, "op_id": op_id, "count": n, "capped": capped})
             if op == "set_stage":
                 # Пере­мещение в CRM-статус — чистое DB-действие, без очереди/Telethon.
-                result = await pool.execute(
+                raw = body.get("stage")
+                stage = (str(raw).strip().lower() or None) if raw is not None else None
+                if stage is not None and stage not in ACCOUNT_STAGES:
+                    return _err("Неизвестный статус", 400)
+                await pool.execute(
                     "UPDATE tg_accounts SET stage=$1 WHERE owner_id=$2 AND id=ANY($3::bigint[])",
-                    target_stage, uid, ids)
-                changed = int(result.split()[-1])
-                return _json_resp({"ok": True, "count": changed, "stage": target_stage,
-                                   "capped": capped})
+                    stage, uid, ids)
+                return _json_resp({"ok": True, "count": n, "stage": stage, "capped": capped})
             if op == "detach_proxy":
                 # Снять прокси у выбранных аккаунтов — чтобы работать БЕЗ прокси
                 # (прямое соединение). Чистое DB-действие. После этого аккаунт
@@ -963,19 +866,6 @@ def setup_routes(app: web.Application, pool) -> None:
             res = await asyncio.wait_for(
                 pse.apply_op(acc["session_str"], dict(acc), op, params), timeout=45)
             if res.get("ok"):
-                # То же, что делает очередь (op_worker._exec_bulk_set_profile):
-                # пароль 2FA, поставленный с карточки аккаунта, раньше не
-                # сохранялся нигде — тот же дефект, что закрывала v331 для
-                # массового пути; закрытые чужие сеансы обнуляют дозор.
-                from database import db as _db
-                if op == "2fa":
-                    await _db.remember_account_twofa(
-                        pool, uid, acc_id, params.get("new_password") or "")
-                elif op == "reset_2fa":
-                    await _db.remember_account_twofa(pool, uid, acc_id, "")
-                elif op == "close_sessions":
-                    from services import session_watch as _sw
-                    await _sw.forget(pool, uid, acc_id)
                 return _json_resp({"ok": True, "result": res, "label": label})
             return _err(res.get("error") or "Операция не выполнена", 400)
         except asyncio.TimeoutError:
@@ -1060,139 +950,6 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("account_check_restriction uid=%d acc=%d", uid, acc_id)
             return _err("Ошибка проверки аккаунта", 400)
 
-    _SESS_COLS = (
-        "SELECT id, session_str, device_model, system_version, app_version, "
-        "lang_code, system_lang_code, trusted_session_hashes, "
-        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE")
-
-    async def account_sessions(request: web.Request) -> web.Response:
-        """Живой список сеансов аккаунта (устройства) — для карточки.
-
-        Берётся прямым запросом к Telegram, поэтому показывает правду, а не
-        денормализованный счётчик. Каждый сеанс помечен, свой он («это я») или
-        нет, и можно ли его сейчас закрыть (Telegram не даёт из сеанса моложе
-        суток)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            acc_id = int(request.match_info["acc_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор аккаунта", 400)
-        acc = await _safe_fetchrow(pool, _SESS_COLS, acc_id, uid)
-        if not acc or not acc.get("session_str"):
-            return _err("Аккаунт недоступен", 400)
-        try:
-            from services import profile_setter_engine as pse
-            from services import session_watch as _sw
-            res = await asyncio.wait_for(
-                pse.list_sessions(acc["session_str"], {**dict(acc), "_low_risk": True}), timeout=30)
-            if not res.get("ok"):
-                return _err(res.get("error") or "Не удалось получить список сеансов", 400)
-            trusted = {int(h) for h in (acc.get("trusted_session_hashes") or ()) if h is not None}
-            own_created = int(res.get("own_created") or 0)
-            old_enough = _sw.session_old_enough(own_created)
-            out = []
-            for s in res.get("sessions") or []:
-                h = int(s.get("hash") or 0)
-                out.append({**s, "trusted": h in trusted})
-            return _json_resp({"ok": True, "sessions": out,
-                               "own_created": own_created,
-                               # Можно ли сейчас закрывать чужие сеансы (сутки прошли).
-                               "can_close": old_enough})
-        except asyncio.TimeoutError:
-            return _err("Аккаунт не ответил за 30с — проверьте прокси/сессию", 400)
-        except Exception:
-            log.exception("account_sessions uid=%d acc=%d", uid, acc_id)
-            return _err("Ошибка получения сеансов", 400)
-
-    async def account_session_close(request: web.Request) -> web.Response:
-        """Завершить ОДИН чужой сеанс по его отпечатку."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            acc_id = int(request.match_info["acc_id"])
-            body = await request.json()
-            h = int(body.get("hash"))
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not h:
-            return _err("Не указан сеанс", 400)
-        acc = await _safe_fetchrow(pool, _SESS_COLS, acc_id, uid)
-        if not acc or not acc.get("session_str"):
-            return _err("Аккаунт недоступен", 400)
-        try:
-            from services import profile_setter_engine as pse
-            from services import session_watch as _sw
-            res = await asyncio.wait_for(
-                pse.close_one_session(acc["session_str"], {**dict(acc), "_low_risk": True}, h),
-                timeout=30)
-            if not res.get("ok"):
-                return _err(res.get("error") or "Не удалось закрыть сеанс", 400)
-            await _sw.drop_one(pool, uid, acc_id, h)
-            return _json_resp({"ok": True})
-        except asyncio.TimeoutError:
-            return _err("Аккаунт не ответил за 30с — проверьте прокси/сессию", 400)
-        except Exception:
-            log.exception("account_session_close uid=%d acc=%d", uid, acc_id)
-            return _err("Ошибка закрытия сеанса", 400)
-
-    async def account_session_trust(request: web.Request) -> web.Response:
-        """Пометить сеанс своим / снять пометку. Своё не считается чужим и не
-        закрывается автозащитой."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            acc_id = int(request.match_info["acc_id"])
-            body = await request.json()
-            h = int(body.get("hash"))
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not h:
-            return _err("Не указан сеанс", 400)
-        on = bool(body.get("trust", True))
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
-        if not owns:
-            return _err("Аккаунт не найден", 404)
-        from services import session_watch as _sw
-        await _sw.set_trust(pool, uid, acc_id, h, on)
-        return _json_resp({"ok": True, "trusted": on})
-    async def account_public_channel_capacity(request: web.Request) -> web.Response:
-        from services.account_manager import probe_public_channel_capacity
-        from services.network_builder import project_pilot_enabled
-        from services.op_worker import release_accounts, try_claim_account
-        from services.security import validate_integer
-
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        if not project_pilot_enabled(uid):
-            return _err("Недоступно", 403)
-        acc_id = validate_integer(request.match_info["acc_id"], min_val=1)
-        if acc_id is None:
-            return _err("Неверный идентификатор аккаунта", 400)
-        acc = await _console_account(uid, acc_id)
-        if not acc:
-            return _err("Аккаунт не найден или отключён", 404)
-        if not await try_claim_account(acc_id):
-            return _json_resp({"ok": True, "status": "unknown", "reason": "busy"})
-        try:
-            result = await asyncio.wait_for(
-                probe_public_channel_capacity(acc.get("session_str"), dict(acc)), timeout=45)
-        except TimeoutError:
-            result = {"status": "unknown", "reason": "telegram_unavailable"}
-        finally:
-            await release_accounts([acc_id])
-        return _json_resp({
-            "ok": True, "status": result["status"], "reason": result.get("reason"),
-            "retry_after": result.get("retry_after"),
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-        })
-
     async def accounts_export_json(request: web.Request) -> web.Response:
         """Экспорт МЕТАДАННЫХ аккаунтов пользователя в JSON (аналог «РАБОТА С JSON»).
         Секреты (session_str, proxy-креды) НАМЕРЕННО не выгружаются — иначе это
@@ -1239,10 +996,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Аккаунт не найден", 404)
             new_state = not bool(row["is_active"])
             await pool.execute(
-                # Ручное переключение снимает метку паузы щита: иначе щит по
-                # истечении срока включил бы аккаунт, выключенный владельцем.
-                "UPDATE tg_accounts SET is_active=$1, shield_paused_until=NULL "
-                "WHERE id=$2 AND owner_id=$3",
+                "UPDATE tg_accounts SET is_active=$1 WHERE id=$2 AND owner_id=$3",
                 new_state, acc_id, uid)
             return _json_resp({"ok": True, "is_active": new_state})
         except Exception:
@@ -1907,7 +1661,6 @@ def setup_routes(app: web.Application, pool) -> None:
                 # аккаунт, и защищает здесь именно SQL, а не снимок.
                 """UPDATE tg_accounts
                    SET is_active=TRUE,
-                       shield_paused_until=NULL,
                        acc_status='active',
                        status_reason=NULL,
                        in_operation=FALSE,
@@ -2091,7 +1844,6 @@ def setup_routes(app: web.Application, pool) -> None:
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
             proxy_id=pid, override_proxy=bool(pid), auto_proxy=True,
-            twofa_password=info.get("twofa_password"),
         )
         return acc_id
 
@@ -2402,10 +2154,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/account/{acc_id}/login_code", account_login_code)
     app.router.add_post("/api/miniapp/account/{acc_id}/check_restriction", account_check_restriction)
-    app.router.add_get("/api/miniapp/account/{acc_id}/sessions", account_sessions)
-    app.router.add_post("/api/miniapp/account/{acc_id}/session/close", account_session_close)
-    app.router.add_post("/api/miniapp/account/{acc_id}/session/trust", account_session_trust)
-    app.router.add_post("/api/miniapp/account/{acc_id}/public_channel_capacity", account_public_channel_capacity)
     app.router.add_get("/api/miniapp/accounts/export_json", accounts_export_json)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)

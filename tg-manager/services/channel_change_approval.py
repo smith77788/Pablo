@@ -1,4 +1,4 @@
-"""Подтверждения владельца с привязкой к параметрам и составу целей."""
+"""Short-lived, owner-scoped approvals for destructive channel metadata changes."""
 from __future__ import annotations
 
 import base64
@@ -35,17 +35,14 @@ def issue(owner_id: int, value: str, targets: list[dict], *, now: int | None = N
         "targets": digest_targets(targets), "count": len(targets),
         "expires": int(now or time.time()) + 600,
     }
-    return _sign(payload)
-
-
-def _sign(payload: dict) -> str:
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     body = base64.urlsafe_b64encode(raw).decode().rstrip("=")
     signature = hmac.new(_secret(), body.encode(), hashlib.sha256).hexdigest()
     return f"{body}.{signature}"
 
 
-def _read(token: str, now: int | None = None) -> dict:
+def verify(token: str, owner_id: int, value: str, targets: list[dict], *,
+           now: int | None = None) -> str:
     try:
         body, signature = token.split(".", 1)
         expected = hmac.new(_secret(), body.encode(), hashlib.sha256).hexdigest()
@@ -59,12 +56,6 @@ def _read(token: str, now: int | None = None) -> dict:
         raise ApprovalError("Подтверждение повреждено") from exc
     if int(payload.get("expires") or 0) < int(now or time.time()):
         raise ApprovalError("Подтверждение устарело, проверьте список ещё раз")
-    return payload
-
-
-def verify(token: str, owner_id: int, value: str, targets: list[dict], *,
-           now: int | None = None) -> str:
-    payload = _read(token, now)
     expected_payload = {
         "owner": int(owner_id), "value": hashlib.sha256(value.encode()).hexdigest(),
         "targets": digest_targets(targets), "count": len(targets),
@@ -72,32 +63,3 @@ def verify(token: str, owner_id: int, value: str, targets: list[dict], *,
     if any(payload.get(key) != expected for key, expected in expected_payload.items()):
         raise ApprovalError("Список каналов изменился; нужно новое подтверждение")
     return expected_payload["targets"]
-
-
-def _cleanup_scope(owner_id: int, plan: dict) -> dict:
-    raw = json.dumps(plan, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
-    return {"purpose": "restriction_cleanup", "owner": owner_id,
-            "plan": hashlib.sha256(raw).hexdigest()}
-
-
-def issue_cleanup(owner_id: int, plan: dict) -> str:
-    return _sign({**_cleanup_scope(owner_id, plan), "expires": int(time.time()) + 600})
-
-
-def verify_cleanup(token: str, owner_id: int, plan: dict) -> None:
-    payload = _read(token)
-    if any(payload.get(key) != value for key, value in _cleanup_scope(owner_id, plan).items()):
-        raise ApprovalError("План очистки изменился. Обновите предпросмотр.")
-
-
-def issue_deployment(owner_id: int, params: dict) -> str:
-    return _sign({"purpose": "project_deployment", "owner": owner_id, **params,
-                  "expires": int(time.time()) + 600})
-
-
-def verify_deployment(token: str, owner_id: int, params: dict) -> str:
-    payload = _read(token)
-    expected = {"purpose": "project_deployment", "owner": owner_id, **params}
-    if any(payload.get(key) != value for key, value in expected.items()):
-        raise ApprovalError("План или исполнитель изменились. Обновите предпросмотр.")
-    return hashlib.sha256(token.encode()).hexdigest()

@@ -188,23 +188,12 @@ from services import anomaly_detector
 from services import ecosystem_brain
 from services import activity_logger
 from services import promo_scheduler
-from services import replica_guard as _rguard_main
 
 configure_root_logger(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
     use_json=os.environ.get("LOG_FORMAT") == "json",
 )
 log = get_logger(__name__)
-
-# Шифрование трафика флота — нативное, до первого клиента Telethon. Без этого
-# обфускация шла на чистом Python (0.4 МБ/с на весь процесс) и каждая загрузка
-# медиа замораживала цикл событий. См. services/telethon_crypto.py.
-try:
-    from services import telethon_crypto as _tg_crypto
-
-    _tg_crypto.install_and_report()
-except Exception:
-    log_exc_swallow(log, "telethon_crypto: подмена шифрования не встала")
 
 
 # ── Фоновые задачи: держим на них ссылки ─────────────────────────────────────
@@ -309,15 +298,6 @@ if _ROLE not in _VALID_ROLES:
     log.warning("ROLE=%r неизвестна — работаю как 'all'. Допустимо: %s",
                 _ROLE, ", ".join(_VALID_ROLES))
     _ROLE = "all"
-
-# Сервисы, которые при горизонтальном исполнителе идут в КАЖДОМ процессе:
-# исполнитель операций и то, что обслуживает память самого процесса (буферы
-# записи, обмен темпом флота с базой, реестр задач, пул). Остальные фоновые
-# циклы — только у лидера (см. _resilient).
-_PER_PROCESS_SERVICES = frozenset({
-    "op_worker", "infra_memory", "pacing_store", "activity_logger",
-    "task_registry", "pool_monitor",
-})
 
 
 async def _global_error_handler(event: ErrorEvent) -> None:
@@ -969,21 +949,6 @@ async def main() -> None:
         # выборка уведомлений падает и итог восстановления снова становится
         # немым — то есть ровно то, что эта колонка и лечит.
         "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS notified_phase TEXT",
-        # Центр восстановления (тот же список — в INLINE_MIGRATIONS mini_app_api): история шагов, настройки
-        # владельца, дата снятия и повторные блоки. Без них заведение и шаги
-        # цикла падали бы целиком при лаге миграции.
-        "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS release_at TIMESTAMPTZ",
-        "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS relapses INTEGER NOT NULL DEFAULT 0",
-        "CREATE TABLE IF NOT EXISTS account_rehab_events ("
-        "id BIGSERIAL PRIMARY KEY, acc_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
-        "at TIMESTAMPTZ NOT NULL DEFAULT now(), step TEXT NOT NULL, outcome TEXT, detail TEXT)",
-        "CREATE INDEX IF NOT EXISTS idx_rehab_events_acc ON account_rehab_events(acc_id, at DESC)",
-        "CREATE TABLE IF NOT EXISTS rehab_settings ("
-        "owner_id BIGINT PRIMARY KEY, paused BOOLEAN NOT NULL DEFAULT FALSE, "
-        "auto_appeal BOOLEAN NOT NULL DEFAULT TRUE, pace TEXT NOT NULL DEFAULT 'normal', "
-        "max_rechecks INTEGER NOT NULL DEFAULT 8, rest_hours INTEGER NOT NULL DEFAULT 24, "
-        "notify_freed BOOLEAN NOT NULL DEFAULT TRUE, notify_stuck BOOLEAN NOT NULL DEFAULT TRUE, "
-        "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())",
         # Починка CHECK плана подписки (schema_v189): код перешёл на тариф 'paid',
         # а базовая схема разрешала только старые 'starter'/'pro'/'enterprise' —
         # из-за чего ВСЯ выдача 'paid' (мини-апп, billing, восстановление подписок)
@@ -1246,26 +1211,16 @@ async def main() -> None:
             return
         nonlocal _svc_stagger_index
         _svc_stagger_index += 1
-        _kw = dict(
+        # Сам цикл присмотра живёт в services/service_supervisor.py: вложенной
+        # функцией он был непроверяем, и там пряталось зависание всего процесса
+        # на сервисе, выключенном настройкой (подробности — в докстринге модуля).
+        await service_supervisor.supervise(
+            name, fn, *args,
             restart_delay=30.0,
             start_delay=_svc_stagger_index * 2,   # разносим старты по 2с
             restart_on_return=False,              # вернулся значит выключен
             alert=_svc_alert,                     # падение — админу (D27)
         )
-        # ГОРИЗОНТАЛЬНЫЙ ИСПОЛНИТЕЛЬ (OP_SHARDED_EXECUTOR=1): операции разбирают
-        # все процессы, а фоновые циклы — один лидер, иначе каждый лишний
-        # процесс удваивал бы прогрев, призрака, авто-ответы и прочие реальные
-        # действия аккаунтов. Исключения — то, что обслуживает память ЭТОГО
-        # процесса (буферы, синк темпа, реестр задач) и сам исполнитель.
-        if (_rguard_main.sharded_executor()
-                and name not in _PER_PROCESS_SERVICES):
-            await service_supervisor.supervise_while_leader(
-                name, fn, *args, is_leader=_rguard_main.holds_executor_lease, **_kw)
-            return
-        # Сам цикл присмотра живёт в services/service_supervisor.py: вложенной
-        # функцией он был непроверяем, и там пряталось зависание всего процесса
-        # на сервисе, выключенном настройкой (подробности — в докстринге модуля).
-        await service_supervisor.supervise(name, fn, *args, **_kw)
 
     async def _web_resilient(name: str, fn, *args):
         """Как _resilient, но БЕЗ гейта роли, без разноса стартов и с перезапуском в 5с.
@@ -1403,9 +1358,6 @@ async def main() -> None:
         # Сводка за тихие часы: придержанное ночью уходит одним сообщением.
         from services import quiet_hours as _quiet_hours
         _spawn(_resilient("quiet_hours", _quiet_hours.run, pool, bot))
-        # Разведка рекламы: каналы на разведке пересканируются раз в сутки.
-        from services import ad_intel_refresher as _ad_intel_refresher
-        _spawn(_resilient("ad_intel_refresher", _ad_intel_refresher.run, pool, bot))
         # Новая версия Bot API — сразу админам: HTML-виджеты (HTMLBubbles) уже
         # в приложениях, но API для их отправки ещё не опубликован.
         from services import telegram_updates_watch as _tg_updates
@@ -1558,10 +1510,7 @@ async def main() -> None:
         _spawn(_broadcaster.resume_interrupted(pool), name="resume_interrupted")
         # Session Health Monitor — проверка сессий каждые 6 часов
         from services.account_manager import run_session_health_monitor
-        _spawn(_resilient("session_health_monitor", run_session_health_monitor, pool, bot))
-        # Запасной ключ: поднять аккаунт, чей основной сеанс умер (session_watch).
-        from services.session_watch import run_reserve_keeper
-        _spawn(_resilient("reserve_keeper", run_reserve_keeper, pool, bot))
+        _spawn(_resilient("session_health_monitor", run_session_health_monitor, pool))
         # Pool Monitor — проверка пула соединений каждые 5 минут
         from database.db import run_pool_monitor
         _spawn(_resilient("pool_monitor", run_pool_monitor, pool))

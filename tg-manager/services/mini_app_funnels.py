@@ -52,7 +52,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             row = await pool.fetchrow(
                 """UPDATE funnels SET is_active = NOT is_active
-                   WHERE id=$1 AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2 AND deleted_at IS NULL FOR SHARE)
+                   WHERE id=$1 AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)
                    RETURNING id, is_active""",
                 funnel_id, uid)
             if not row:
@@ -77,7 +77,7 @@ def setup_routes(app: web.Application, pool) -> None:
                    -- которую не подключал, падал всегда, и экран «Воронки»
                    -- отдавал пустой список при любом числе воронок.
                    LEFT JOIN funnel_subscriptions fs ON fs.funnel_id=f.id
-                   WHERE mb.added_by=$1 AND mb.deleted_at IS NULL
+                   WHERE mb.added_by=$1
                    GROUP BY f.id, f.name, f.is_active, mb.username
                    ORDER BY active_subs DESC LIMIT 30""", uid)
             return _json_resp({"funnels": [dict(r) for r in rows]})
@@ -97,7 +97,7 @@ def setup_routes(app: web.Application, pool) -> None:
         funnel = await _safe_fetchrow(pool,
             """SELECT f.id, f.name, f.trigger_type, f.keyword, f.is_active, mb.username AS bot_username
                FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
-               WHERE f.id=$1 AND mb.added_by=$2 AND mb.deleted_at IS NULL""", funnel_id, uid)
+               WHERE f.id=$1 AND mb.added_by=$2""", funnel_id, uid)
         if not funnel:
             return _err("Воронка не найдена", 404)
         steps = await _safe_fetch(pool,
@@ -169,7 +169,7 @@ def setup_routes(app: web.Application, pool) -> None:
         # Владение через managed_bots.
         funnel = await _safe_fetchrow(pool,
             """SELECT f.id FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
-               WHERE f.id=$1 AND mb.added_by=$2 AND mb.deleted_at IS NULL""", funnel_id, uid)
+               WHERE f.id=$1 AND mb.added_by=$2""", funnel_id, uid)
         if not funnel:
             return _err("Воронка не найдена", 404)
         message_text = (body.get("message_text") or "").strip()
@@ -188,13 +188,9 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             row = await pool.fetchrow(
                 """INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes)
-                   SELECT $1, COALESCE((SELECT MAX(step_order) FROM funnel_steps WHERE funnel_id=$1),0)+1, $2, $3
-                   FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
-                   WHERE f.id=$1 AND mb.added_by=$4 AND mb.deleted_at IS NULL
-                   FOR SHARE OF mb RETURNING id, step_order""",
-                funnel_id, message_text, delay_minutes, uid)
-            if not row:
-                return _err("Воронка не найдена", 404)
+                   VALUES($1, COALESCE((SELECT MAX(step_order) FROM funnel_steps WHERE funnel_id=$1),0)+1, $2, $3)
+                   RETURNING id, step_order""",
+                funnel_id, message_text, delay_minutes)
             return _json_resp({"ok": True, "step_id": row["id"], "step_order": row["step_order"]})
         except Exception:
             log.exception("add_funnel_step funnel=%d uid=%d", funnel_id, uid)
@@ -214,19 +210,13 @@ def setup_routes(app: web.Application, pool) -> None:
             """SELECT fs.id, fs.step_order FROM funnel_steps fs
                JOIN funnels f ON f.id=fs.funnel_id
                JOIN managed_bots mb ON mb.bot_id=f.bot_id
-               WHERE fs.id=$1 AND mb.added_by=$2 AND mb.deleted_at IS NULL""", step_id, uid)
+               WHERE fs.id=$1 AND mb.added_by=$2""", step_id, uid)
         if not step:
             return _err("Шаг не найден", 404)
         if int(step["step_order"]) <= 1:
             return _err("Первый шаг удалить нельзя (это стартовое сообщение)", 400)
         try:
-            result = await pool.execute(
-                """DELETE FROM funnel_steps WHERE id=$1 AND funnel_id IN (
-                       SELECT f.id FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
-                       WHERE mb.added_by=$2 AND mb.deleted_at IS NULL FOR SHARE OF mb)""",
-                step_id, uid)
-            if result == "DELETE 0":
-                return _err("Шаг не найден", 404)
+            await pool.execute("DELETE FROM funnel_steps WHERE id=$1", step_id)
             return _json_resp({"ok": True})
         except Exception:
             log.exception("delete_funnel_step step=%d uid=%d", step_id, uid)
@@ -256,7 +246,7 @@ def setup_routes(app: web.Application, pool) -> None:
             """SELECT fs.id FROM funnel_steps fs
                JOIN funnels f ON f.id=fs.funnel_id
                JOIN managed_bots mb ON mb.bot_id=f.bot_id
-               WHERE fs.id=$1 AND mb.added_by=$2 AND mb.deleted_at IS NULL""", step_id, uid)
+               WHERE fs.id=$1 AND mb.added_by=$2""", step_id, uid)
         if not step:
             return _err("Шаг не найден", 404)
 
@@ -280,14 +270,8 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Нечего изменять", 400)
         args.append(step_id)
         try:
-            result = await pool.execute(
-                f"""UPDATE funnel_steps SET {', '.join(sets)} WHERE id=${len(args)}
-                    AND funnel_id IN (
-                        SELECT f.id FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
-                        WHERE mb.added_by=${len(args) + 1} AND mb.deleted_at IS NULL FOR SHARE OF mb)""",
-                *args, uid)
-            if result == "UPDATE 0":
-                return _err("Шаг не найден", 404)
+            await pool.execute(
+                f"UPDATE funnel_steps SET {', '.join(sets)} WHERE id=${len(args)}", *args)
             return _json_resp({"ok": True})
         except Exception:
             log.exception("update_funnel_step step=%d uid=%d", step_id, uid)
@@ -631,7 +615,7 @@ def setup_routes(app: web.Application, pool) -> None:
         funnel = await _safe_fetchrow(pool,
             """SELECT f.id, f.name, f.bot_id
                  FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
-                WHERE f.id=$1 AND mb.added_by=$2 AND mb.deleted_at IS NULL""", funnel_id, uid)
+                WHERE f.id=$1 AND mb.added_by=$2""", funnel_id, uid)
         if not funnel:
             return _err("Воронка не найдена", 404)
         state = (request.query.get("state") or "").strip().lower()
