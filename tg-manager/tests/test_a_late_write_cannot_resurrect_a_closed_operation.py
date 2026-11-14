@@ -26,6 +26,7 @@ SKIP LOCKED` плюс перепроверка `status = 'pending'` под за�
 from __future__ import annotations
 
 import ast
+import functools
 import os
 import re
 
@@ -53,12 +54,46 @@ def _src() -> str:
         return f.read()
 
 
+def _collect_sql(node: ast.AST) -> str:
+    """Строки и маркеры-условия из поддерева (общая часть для вызовов и переменных)."""
+    txt = ""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            txt += " " + sub.value
+        elif isinstance(sub, ast.Call):
+            name = ast.unparse(sub.func)
+            if name.endswith(("sql_terminal_list", "sql_in_flight_list")):
+                txt += " __STATUS_GUARD__ "
+    return txt
+
+
+@functools.lru_cache(maxsize=1)
+def _var_sql() -> dict[str, str]:
+    """Переменные, которым присвоена строка-SQL (в т.ч. скобочная конкатенация).
+
+    Нужно, потому что запрос отбора операций вынесен в переменную
+    (`_claim_sql = (...)`, затем `_safe_fetch(pool, _claim_sql, …)`), а перепись
+    смотрела только строковые ЛИТЕРАЛЫ в аргументах вызова — и переставала видеть
+    SQL, как только его выносили из вызова. Детектор, слепой к заведомо живому
+    запросу, сломан сам: учим его резолвить переменную.
+    """
+    out: dict[str, str] = {}
+    for n in ast.walk(ast.parse(_src())):
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name)):
+            s = _collect_sql(n.value)
+            if s.strip():
+                out[n.targets[0].id] = re.sub(r"\s+", " ", s)
+    return out
+
+
 def _sql_with_markers(node: ast.Call) -> str:
     """SQL вызова; готовые фрагменты-условия заменяются маркером.
 
     Условие бывает собрано не литералом, а вызовом `op_status.sql_*_list()` —
     без маркера его присутствие не отличить от отсутствия, и перепись считала
-    бы находкой самый аккуратный код.
+    бы находкой самый аккуратный код. SQL, вынесенный в переменную, резолвится
+    через `_var_sql()` — иначе `_safe_fetch(pool, _claim_sql)` выглядит бессловесным.
     """
     txt = ""
     for a in node.args:
@@ -69,6 +104,8 @@ def _sql_with_markers(node: ast.Call) -> str:
                 name = ast.unparse(sub.func)
                 if name.endswith(("sql_terminal_list", "sql_in_flight_list")):
                     txt += " __STATUS_GUARD__ "
+            elif isinstance(sub, ast.Name) and sub.id in _var_sql():
+                txt += " " + _var_sql()[sub.id]
     return re.sub(r"\s+", " ", txt)
 
 
