@@ -87,9 +87,29 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
             for table in ("operation_audit", "restriction_cleanup_receipts"):
                 assert not await pool.fetchval(f"SELECT 1 FROM {table} WHERE operation_id=$1", op_id)
-            response = await client.post(path, json=confirmation, headers=headers)
-            assert response.status == 200, await response.text()
-            applied = await response.json()
+            receipt_lookup = restriction_cleanup._receipt
+            both_read = asyncio.Event()
+            initial_reads = 0
+
+            async def sync_initial_reads(connection, *args):
+                result = await receipt_lookup(connection, *args)
+                nonlocal initial_reads
+                if result is None and initial_reads < 2:
+                    initial_reads += 1
+                    if initial_reads == 2:
+                        both_read.set()
+                    await asyncio.wait_for(both_read.wait(), timeout=3)
+                return result
+
+            with monkeypatch.context() as concurrent:
+                concurrent.setattr(restriction_cleanup, "_receipt", sync_initial_reads)
+                responses = await asyncio.gather(*(
+                    client.post(path, json=confirmation, headers=headers) for _ in range(2)))
+            for response in responses:
+                assert response.status == 200, await response.text()
+            applied, replayed = sorted([await response.json() for response in responses],
+                                      key=lambda body: body.get("replayed", False))
+            assert replayed == {**applied, "replayed": True}
             assert applied["changed"][0]["title"] == "***"
             outcome = applied["items"][0]
             assert outcome["id"] == str(BOT) and outcome["outcome"] in ("applied", "disabled")
@@ -105,6 +125,9 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             repeated = await client.post(path, json=confirmation, headers=headers)
             assert repeated.status == 200, await repeated.text()
             assert await repeated.json() == {**applied, "replayed": True}
+            with monkeypatch.context() as revoked:
+                revoked.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER + 1))
+                assert (await client.post(path, json=confirmation, headers=headers)).status == 403
             assert (await client.post(path, json=changed, headers=headers)).status == 409
             assert (await client.post(path, json=confirmation, headers=wrong)).status == 409
             await pool.execute("UPDATE managed_bots SET is_active=TRUE WHERE bot_id=$1", BOT)

@@ -79,15 +79,20 @@ def setup_routes(app: web.Application, pool) -> None:
             if not isinstance(token, str) or not token or len(token) > 1024:
                 return _err("Сначала подтвердите предпросмотр очистки", 400)
 
+            def verify_access():
+                if not project_pilot_enabled(uid):
+                    raise cleanup.CleanupError("Недоступно", 403)
+                approval.read_cleanup(token, uid)
+
             def verify(current):
                 if not project_pilot_enabled(uid):
                     raise cleanup.CleanupError("Недоступно", 403)
                 approval.verify_cleanup(token, uid, current)
 
-            approval.read_cleanup(token, uid)
+            verify_access()
             result = await cleanup.apply(
                 *args, project_id=project_id, verify=verify,
-                confirmation_id=hashlib.sha256(token.encode()).hexdigest())
+                confirmation_id=hashlib.sha256(token.encode()).hexdigest(), verify_access=verify_access)
             return _json_resp(result)
         except cleanup.CleanupError as exc:
             return _err(str(exc), exc.status)

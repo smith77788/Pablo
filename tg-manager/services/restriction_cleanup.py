@@ -372,20 +372,33 @@ async def plan(pool, owner_id, op_id, targets, action, *, project_id=None):
         return await _plan(conn, owner_id, op_id, targets, action, project_id)
 
 
-async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, verify, confirmation_id=None):
+async def _receipt(conn, owner_id, op_id, confirmation_id, scope):
+    row = await conn.fetchrow(
+        """SELECT request_scope, response FROM restriction_cleanup_receipts
+           WHERE operation_id=$1 AND owner_id=$2 AND confirmation_id=$3""",
+        op_id, owner_id, confirmation_id)
+    if row is None:
+        return None
+    if json.loads(row["request_scope"]) != scope:
+        raise CleanupError("Подтверждение выдано для другого выбора", 409)
+    return {**json.loads(row["response"]), "replayed": True}
+
+
+async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, verify,
+                confirmation_id=None, verify_access=None):
+    receipt_args = None
+    if confirmation_id:
+        scope = {"action": action, "project_id": project_id,
+                 "targets": [list(key) for key in sorted(_target_keys(targets))]}
+        receipt_args = (owner_id, op_id, confirmation_id, scope)
     try:
         async with pool.acquire() as conn, conn.transaction(isolation="serializable"):
-            if confirmation_id:
-                scope = {"action": action, "project_id": project_id,
-                         "targets": [list(key) for key in sorted(_target_keys(targets))]}
-                receipt = await conn.fetchrow(
-                    """SELECT request_scope, response FROM restriction_cleanup_receipts
-                       WHERE operation_id=$1 AND owner_id=$2 AND confirmation_id=$3""",
-                    op_id, owner_id, confirmation_id)
+            if receipt_args:
+                receipt = await _receipt(conn, *receipt_args)
                 if receipt:
-                    if json.loads(receipt["request_scope"]) != scope:
-                        raise CleanupError("Подтверждение выдано для другого выбора", 409)
-                    return {**json.loads(receipt["response"]), "replayed": True}
+                    if verify_access:
+                        verify_access()
+                    return receipt
             preview = await _plan(conn, owner_id, op_id, targets, action, project_id, lock=True)
             verify(preview)
             ready = [item for item in preview["items"] if item["outcome"] == "ready"]
@@ -423,6 +436,13 @@ async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, veri
             return result
     except (asyncpg.SerializationError, asyncpg.DeadlockDetectedError,
             asyncpg.LockNotAvailableError) as exc:
+        if receipt_args:
+            # После отката новая транзакция видит результат, записанный конкурентом.
+            receipt = await _receipt(pool, *receipt_args)
+            if receipt:
+                if verify_access:
+                    verify_access()
+                return receipt
         raise CleanupError(_STALE, 409) from exc
 
 
