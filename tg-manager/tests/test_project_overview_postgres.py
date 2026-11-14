@@ -49,8 +49,14 @@ def test_project_overview_isolated_and_links_to_existing_history(monkeypatch):
             outsider = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
             async with TestClient(TestServer(app)) as client:
                 assert (await client.get(path)).status == 401
-                assert (await client.get(path + "?limit=0", headers=owner)).status == 400
-                assert (await client.get(path + "?limit=21", headers=owner)).status == 400
+                # Лимит вне диапазона не отбивается ошибкой, а мягко сводится к
+                # потолку общим _list_limit (его требуют храповики честности
+                # списков): ответ несёт total, поэтому молчаливого обрыва нет.
+                # limit=0 и limit=21 → дефолтная страница с 200, а не 400.
+                over = await client.get(path + "?limit=0", headers=owner)
+                assert over.status == 200 and (await over.json())["total"] == 2
+                big = await client.get(path + "?limit=21", headers=owner)
+                assert big.status == 200 and (await big.json())["total"] == 2
                 response = await client.get(path + "?limit=1", headers=owner)
                 assert response.status == 200, await response.text()
                 result = await response.json()
