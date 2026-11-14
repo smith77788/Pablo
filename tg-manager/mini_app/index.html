@@ -7431,6 +7431,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-p" style="flex:1 1 auto" id="shieldRunBtn" onclick="shieldRunNow()">🔍 Проверить сейчас</button>
       <button class="btn btn-s" style="flex:1 1 auto" onclick="openPhysics()">⚛️ Риск по аккаунтам</button>
     </div>
+    <div id="shieldCoverage"></div>
     <div class="sec">Профиль защиты</div>
     <div class="filter-chips" id="shieldPresets" style="padding:4px 16px 8px;flex-wrap:wrap"></div>
     <div class="sec">Настройки</div>
@@ -27813,6 +27814,39 @@ async function openShield() {
       + card(threatened, 'Выше вашего порога', kpiTone(threatened,'red'), 'openPhysics()')
       + card(held, 'Щит держит сейчас', kpiTone(held,'orange')));
     txt('m-shield-val', `${threatened} под угрозой · ${total} аккаунтов`);
+    // Охват защиты по флоту: тумблеры автозащиты ниже говорят, что защита
+    // ВКЛЮЧЕНА, а эта секция — сколько аккаунтов реально защищены сейчас
+    // (свежие и сбойные остаются дырой). Те же три сигнала, что в блоке
+    // «Безопасность» карточки аккаунта, агрегатом.
+    const cov = d.coverage || null;
+    if (cov && cov.total > 0) {
+      const covRow = (ico, name, have, total2, warnWhenMissing) => {
+        const miss = Math.max(0, (total2||0) - (have||0));
+        const col = miss === 0 ? 'var(--green)' : warnWhenMissing ? 'var(--orange)' : 'var(--hint)';
+        return `<div class="row">
+          <div class="row-ico" style="background:var(--bg2)">${ico}</div>
+          <div class="row-body"><div class="row-name">${name}</div>
+            <div style="font-size:12px;color:var(--hint);margin-top:2px">${miss===0?'все защищены':('без защиты: '+num(miss))}</div></div>
+          <div class="row-right" style="color:${col};font-weight:600">${num(have||0)} / ${num(total2||0)}</div>
+        </div>`;
+      };
+      const foreignRow = `<div class="row"${cov.foreign_sess>0?' onclick="healthGoAccounts(\'active\')" role="button" tabindex="0" style="cursor:pointer"':''}>
+          <div class="row-ico" style="background:var(--bg2)">🚪</div>
+          <div class="row-body"><div class="row-name">Без чужих сеансов</div>
+            <div style="font-size:12px;color:var(--hint);margin-top:2px">${cov.foreign_sess>0?('под чужим входом: '+num(cov.foreign_sess)+' — разобрать в карточках'):'ни на одном аккаунте чужих сеансов'}</div></div>
+          <div class="row-right" style="color:${cov.foreign_sess>0?'var(--red)':'var(--green)'};font-weight:600">${num(cov.total-cov.foreign_sess)} / ${num(cov.total)}${cov.foreign_sess>0?' ›':''}</div>
+        </div>`;
+      txt('shieldCoverage',
+        `<div class="sec">🛡 Защита флота сейчас</div>
+         <div class="lst">`
+        + covRow('🔐', 'Пароль 2FA сохранён', cov.twofa_saved, cov.total, true)
+        + covRow('🗝', 'Запасной ключ заведён', cov.reserve, cov.total, true)
+        + foreignRow
+        + `</div>
+         <div style="font-size:11px;color:var(--hint);padding:6px 16px 2px;line-height:1.4">Тумблеры автозащиты ниже доводят эти числа до полного охвата со временем (из сеанса старше суток). Красное и оранжевое — дыры прямо сейчас.</div>`);
+    } else {
+      txt('shieldCoverage', '');
+    }
     const cfg = d.config||{};
     SHIELD_CFG = cfg;
     const preset = cfg.preset || 'balanced';
