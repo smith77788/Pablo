@@ -16934,7 +16934,7 @@ async function sendMassPublish() {
   let channel_ids = null;
   if (projectId) {
     const when = scheduled_for ? '\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU') : '';
-    if (!(await askConfirm(edNote+'Опубликовать в каналах проекта ('+projectTargets.length+')?\n\n'
+    if (!(await askConfirm(edNote+'Опубликовать в '+num(projectTargets.length)+' '+plural(projectTargets.length,'канал проекта','канала проекта','каналов проекта')+'?\n\n'
         + _mpChList(projectTargets, 12) + when + _repNote))) return;
     channel_ids = projectTargets.map(channel => channel.channel_id_text ?? channel.channel_id);
   } else if (scope === 'pick') {

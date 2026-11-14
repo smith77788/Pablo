@@ -34,4 +34,6 @@ def test_tab_chips_use_valid_tabs():
 
 def test_target_functions_exist():
     assert "function openChannels()" in HTML
-    assert "function openOps()" in HTML
+    # openOps получил необязательный параметр (журнал сетевого проекта:
+    # openOps(projectId)), поэтому сверяем префикс определения, а не пустые скобки.
+    assert "function openOps(" in HTML

@@ -42,6 +42,12 @@ LEGACY_VERSION_COLLISIONS = {
     213: ("schema_v213_bot_b2b.sql", "schema_v213_tg_cloud_replicas.sql"),
     219: ("schema_v219_scheduled_claim.sql", "schema_v219_vault_key_check.sql"),
     220: ("schema_v220_acct_wait_since.sql", "schema_v220_retention_indexes.sql"),
+    # Коллизия из двух параллельных веток, уже вмёрженных на деплой и внесённых в
+    # манифест: переименовать нельзя (freeze: применённые миграции не
+    # переименовывают и не удаляют), а функционально безвредно — раннер трекает
+    # по ИМЕНИ файла, обе применяются независимо, фичи несвязанные
+    # (уборка ограничений ↔ доверенные сеансы). Фиксируем как исторические.
+    371: ("schema_v371_restriction_cleanup.sql", "schema_v371_trusted_sessions.sql"),
 }
 
 
