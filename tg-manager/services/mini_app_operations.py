@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import re
 
 from aiohttp import web
@@ -84,9 +85,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 approval.verify_cleanup(token, uid, current)
 
             approval.read_cleanup(token, uid)
-            result = await cleanup.apply(*args, project_id=project_id, verify=verify)
-            result["items"] = cleanup.public_items(result["items"])
-            result["changed"] = cleanup.public_items(result["changed"])
+            result = await cleanup.apply(
+                *args, project_id=project_id, verify=verify,
+                confirmation_id=hashlib.sha256(token.encode()).hexdigest())
             return _json_resp(result)
         except cleanup.CleanupError as exc:
             return _err(str(exc), exc.status)

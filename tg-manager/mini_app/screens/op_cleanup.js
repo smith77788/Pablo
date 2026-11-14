@@ -273,7 +273,7 @@ async function openOperationCleanup(opId) {
       try {
         const result = await api(path, {method:'POST', body:JSON.stringify({...payload, token:preview.token})});
         const applied = Array.isArray(result.items) ? result.items : [];
-        body.innerHTML = '<div class="field-note">Результат</div>'
+        body.innerHTML = '<div class="field-note">' + (result.replayed ? 'Сохранённый результат' : 'Результат') + '</div>'
           + (applied.length ? `<div class="lst" style="${listStyle}">` + applied.map(item => row(item,
             [outcomeText[item.outcome] || 'Нет подтверждения изменения', item.outcome === 'applied' ? '' : item.reason].filter(Boolean).join(' · '))).join('') + '</div>'
             : '<div class="field-note">Сервер не вернул результаты по ресурсам.</div>')
@@ -285,12 +285,14 @@ async function openOperationCleanup(opId) {
         }
         notice.textContent = '';
       } catch (e) {
-        apply.remove();
+        apply.disabled = false;
+        apply.textContent = 'Повторить то же подтверждение';
         reload.disabled = false;
         reload.textContent = 'Обновить список';
         reload.onclick = load;
         reload.focus();
-        notice.textContent = errRu(e, 'Не удалось подтвердить результат') + '. Обновите список перед новой попыткой.';
+        notice.textContent = errRu(e, 'Не удалось получить результат')
+          + '. Можно отправить то же подтверждение или обновить список.';
       } finally {
         close.disabled = false;
       }

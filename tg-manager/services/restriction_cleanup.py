@@ -372,9 +372,20 @@ async def plan(pool, owner_id, op_id, targets, action, *, project_id=None):
         return await _plan(conn, owner_id, op_id, targets, action, project_id)
 
 
-async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, verify):
+async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, verify, confirmation_id=None):
     try:
         async with pool.acquire() as conn, conn.transaction(isolation="serializable"):
+            if confirmation_id:
+                scope = {"action": action, "project_id": project_id,
+                         "targets": [list(key) for key in sorted(_target_keys(targets))]}
+                receipt = await conn.fetchrow(
+                    """SELECT request_scope, response FROM restriction_cleanup_receipts
+                       WHERE operation_id=$1 AND owner_id=$2 AND confirmation_id=$3""",
+                    op_id, owner_id, confirmation_id)
+                if receipt:
+                    if json.loads(receipt["request_scope"]) != scope:
+                        raise CleanupError("Подтверждение выдано для другого выбора", 409)
+                    return {**json.loads(receipt["response"]), "replayed": True}
             preview = await _plan(conn, owner_id, op_id, targets, action, project_id, lock=True)
             verify(preview)
             ready = [item for item in preview["items"] if item["outcome"] == "ready"]
@@ -397,15 +408,22 @@ async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, veri
                   f"{item['kind']}:{item['id']}" + (f" project:{project_id}" if project_id else ""))
                  for item in ready],
             )
+            items = [{**item, "outcome": "applied" if item["outcome"] == "ready" else "skipped"}
+                     for item in preview["items"]]
+            changed = [{key: item[key] for key in ("kind", "id", "title")}
+                       for item in items if item["outcome"] == "applied"]
+            result = {"ok": True, "action": action, "op_id": op_id, "project_id": project_id,
+                      "items": public_items(items), "changed": public_items(changed), "count": len(changed)}
+            if confirmation_id and ready:
+                await conn.execute(
+                    """INSERT INTO restriction_cleanup_receipts
+                       (operation_id, owner_id, confirmation_id, request_scope, response)
+                       VALUES($1,$2,$3,$4::jsonb,$5::jsonb)""",
+                    op_id, owner_id, confirmation_id, json.dumps(scope), json.dumps(result))
+            return result
     except (asyncpg.SerializationError, asyncpg.DeadlockDetectedError,
             asyncpg.LockNotAvailableError) as exc:
         raise CleanupError(_STALE, 409) from exc
-    items = [{**item, "outcome": "applied" if item["outcome"] == "ready" else "skipped"}
-             for item in preview["items"]]
-    changed = [{key: item[key] for key in ("kind", "id", "title")}
-               for item in items if item["outcome"] == "applied"]
-    return {"ok": True, "action": action, "op_id": op_id, "project_id": project_id,
-            "items": items, "changed": changed, "count": len(changed)}
 
 
 async def _disable(conn, owner_id, op_id, item):

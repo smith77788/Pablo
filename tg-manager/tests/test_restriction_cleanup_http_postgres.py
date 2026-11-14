@@ -77,6 +77,16 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
                 blocked.setattr(restriction_cleanup, "apply", revoke_before_write)
                 assert (await client.post(path, json=confirmation, headers=headers)).status == 403
                 assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
+
+            def fail_before_receipt(_items):
+                raise RuntimeError("Синтетический сбой перед сохранением результата")
+
+            with monkeypatch.context() as failed:
+                failed.setattr(restriction_cleanup, "public_items", fail_before_receipt)
+                assert (await client.post(path, json=confirmation, headers=headers)).status == 500
+            assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
+            for table in ("operation_audit", "restriction_cleanup_receipts"):
+                assert not await pool.fetchval(f"SELECT 1 FROM {table} WHERE operation_id=$1", op_id)
             response = await client.post(path, json=confirmation, headers=headers)
             assert response.status == 200, await response.text()
             applied = await response.json()
@@ -92,12 +102,23 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
             assert (await client.get(path, headers=wrong)).status == 404
             assert not await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
-            assert (await client.post(path, json=confirmation, headers=headers)).status == 409
+            repeated = await client.post(path, json=confirmation, headers=headers)
+            assert repeated.status == 200, await repeated.text()
+            assert await repeated.json() == {**applied, "replayed": True}
+            assert (await client.post(path, json=changed, headers=headers)).status == 409
+            assert (await client.post(path, json=confirmation, headers=wrong)).status == 409
             await pool.execute("UPDATE managed_bots SET is_active=TRUE WHERE bot_id=$1", BOT)
-            assert (await client.post(path, json=confirmation, headers=headers)).status == 409
+            again = await (await client.post(path, json=confirmation, headers=headers)).json()
+            assert again == {**applied, "replayed": True}
+            assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
             assert await pool.fetchval(
                 "SELECT count(*) FROM operation_audit WHERE owner_id=$1 AND operation_id=$2",
                 OWNER, op_id) == 1
+            receipt = await pool.fetchrow(
+                "SELECT confirmation_id, response FROM restriction_cleanup_receipts WHERE operation_id=$1",
+                op_id)
+            assert receipt["confirmation_id"] != token
+            assert session not in receipt["response"]
             await pool.execute(
                 """INSERT INTO operation_audit(owner_id, operation_id, action, target, result, occurred_at)
                    SELECT $1, $2, 'restriction_cleanup_detach', 'channel:' || n, 'success',
@@ -177,7 +198,11 @@ def test_detach_stale_catalog_link_through_authenticated_preview(monkeypatch, ch
             assert await pool.fetchval("SELECT instance_id FROM network_nodes WHERE ref_id=$1", CHANNEL) == other
             assert await pool.fetchval("SELECT 1 FROM network_nodes WHERE id=$1", anchor)
             assert not await pool.fetchval("SELECT 1 FROM network_edges WHERE id=$1", edge)
-            assert (await client.post(path, json={**body, "token": preview["token"]}, headers=headers)).status == 409
+            replay = await client.post(path, json={**body, "token": preview["token"]}, headers=headers)
+            assert replay.status == 200 and (await replay.json())["replayed"] is True
+            wrong_project = await client.post(path, json={**body, "project_id": str(other),
+                                                          "token": preview["token"]}, headers=headers)
+            assert wrong_project.status == 409
 
     asyncio.run(_run(scenario))
 

@@ -15,6 +15,7 @@ try {
       status:'check_failed', projects:[{id:7,name:'Проект'},{id:8,name:'Другой проект'}], can_disable:false,
       outcome:'skipped', reason:'Изменились права', finding_reason:'Сбой наблюдателя' };
     window.cleanupCalls = [];
+    let lostResponse = false;
     window.openRemovedChannels = () => { window.cleanupRecovery = 'channels'; };
     window.api = async (path, options) => {
       if (!options) return {findings:[item, skipped, {kind:'channel', id:'9007199254740995',
@@ -23,8 +24,12 @@ try {
         history:[{action:'detach', target:'bot:9007199254740993 project:7'}]};
       const body = JSON.parse(options.body);
       window.cleanupCalls.push({path, body});
-      return body.preview ? {items:[{...item, edge_ids:[1,2], outcome:'ready'}, skipped], token:'подтверждение'}
-        : {items:[{...item, outcome:'applied'}, skipped]};
+      if (body.preview) return {items:[{...item, edge_ids:[1,2], outcome:'ready'}, skipped], token:'подтверждение'};
+      if (!lostResponse) {
+        lostResponse = true;
+        throw new Error('Ответ потерян');
+      }
+      return {items:[{...item, outcome:'applied'}, skipped], replayed:true};
     };
     window.esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -70,6 +75,9 @@ try {
   await page.getByText('Не удалось проверить · Сбой наблюдателя · Изменились права').waitFor();
   assert.equal((await page.evaluate(() => window.cleanupCalls)).length, 1);
   await page.getByRole('button', { name: 'Подтвердить' }).click();
+  await page.getByText('Ответ потерян', {exact:false}).waitFor();
+  await page.getByRole('button', { name: 'Повторить то же подтверждение' }).click();
+  await page.getByText('Сохранённый результат', {exact:true}).waitFor();
   await page.getByText('Применено', {exact:true}).waitFor();
   await page.getByText('Пропущено · Изменились права', {exact:true}).waitFor();
   const base = {action:'detach', project_id:'7',
@@ -77,6 +85,7 @@ try {
   const path = '/api/miniapp/operations/42/cleanup';
   assert.deepEqual(await page.evaluate(() => window.cleanupCalls), [
     {path, body:{...base, preview:true}}, {path, body:{...base, token:'подтверждение'}},
+    {path, body:{...base, token:'подтверждение'}},
   ]);
   await page.getByRole('button', {name:'Обновить список'}).click();
   await page.getByRole('button', {name:'Открыть список восстановления каналов и групп'}).click();
