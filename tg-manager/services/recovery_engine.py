@@ -687,7 +687,7 @@ async def _operation_recovery(
         # должен узнать. Пока фильтр был только по 'failed', эскалация молча
         # пропускала как раз те операции, где незакрытой работы больше всего.
         terminal_failed = await pool.fetch(
-            f"""SELECT id, op_type, retry_count, max_retries,
+            f"""SELECT id, op_type, retry_count, max_retries, status,
                       {_ost_reason.sql_error_reason()} AS error_msg, created_at
                FROM operation_queue
                WHERE owner_id=$1
@@ -708,6 +708,12 @@ async def _operation_recovery(
             )
 
             for op in terminal_failed:
+                # Defense-in-depth: успешную операцию (DONE) не эскалируем, даже
+                # если она просочилась в выборку. SQL-фильтр её исключает, но
+                # завершённая операция с остаточным error_msg/retry_count не
+                # должна тревожить владельца «провалом» — это ложный сигнал.
+                if _ost_reason.normalize(op.get("status")) in _ost_reason.SUCCESSFUL:
+                    continue
                 action = RecoveryAction(
                     recovery_type="operation",
                     target_type="operation",
