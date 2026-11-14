@@ -128,10 +128,33 @@ def _str_parts(node: ast.AST) -> list[str]:
     return []
 
 
-def _sql_literals(fn: ast.AST) -> list[str]:
+def _sql_constants(src: str) -> dict[str, str]:
+    """{имя: SQL} для именованных констант-запросов (`NAME = "SELECT …"`).
+
+    Запрос, положенный в константу и переданный в БД ПО ИМЕНИ
+    (`_safe_fetchrow(pool, _SESS_COLS, acc_id, uid)`), литералом в теле ручки
+    не виден — ровно тот же класс, что склейка через `+` в `retry_operation`.
+    Без резолва имени ручка с верным скоупом в константе (`_SESS_COLS` держит
+    `owner_id=$2`) ускользает от суда вовсе — так храповик краснел на
+    `account_sessions`/`account_session_close`. Соседние строковые литералы в
+    скобках парсер склеивает в один `ast.Constant`, поэтому `_str_parts` берёт
+    и их."""
+    out: dict[str, str] = {}
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign):
+            joined = " ".join(_str_parts(node.value))
+            if joined and _SQL_VERB.search(joined):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        out[tgt.id] = joined
+    return out
+
+
+def _sql_literals(fn: ast.AST, consts: dict[str, str] | None = None) -> list[str]:
     """Все SQL-строки функции — в любых кавычках, включая f-строки (у f-строк
-    берём только постоянные куски: имена таблиц и условий живут там) и склейки
-    через `+` (такая склейка — один запрос, см. `_str_parts`)."""
+    берём только постоянные куски: имена таблиц и условий живут там), склейки
+    через `+` (такая склейка — один запрос, см. `_str_parts`) и запрос,
+    переданный по имени константы (`consts`, см. `_sql_constants`)."""
     out: list[str] = []
     consumed: set[int] = set()
     # Сначала склейки: их куски не должны попасть в выдачу поодиночке.
@@ -154,6 +177,8 @@ def _sql_literals(fn: ast.AST) -> list[str]:
             joined = " ".join(_str_parts(n))
             if _SQL_VERB.search(joined):
                 out.append(joined)
+        elif consts and isinstance(n, ast.Name) and n.id in consts:
+            out.append(consts[n.id])
     return out
 
 
@@ -180,12 +205,13 @@ def _calls_db(fn: ast.AST) -> bool:
 def _handlers_with_path_param(src: str):
     """(имя, SQL-литералы) для функций «id из пути + поход в БД»."""
     tree = ast.parse(src)
+    consts = _sql_constants(src)
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)):
             continue
         if not _reads_path_param(fn) or not _calls_db(fn):
             continue
-        stmts = _sql_literals(fn)
+        stmts = _sql_literals(fn, consts)
         if stmts:
             yield fn.name, stmts
 
@@ -309,10 +335,11 @@ def test_no_handler_escapes_judgment_by_the_shape_of_its_sql():
     escaped = []
     for src in _SOURCES:
         tree = ast.parse(src)
+        consts = _sql_constants(src)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)):
                 continue
-            if _judgeable(fn) and not _sql_literals(fn):
+            if _judgeable(fn) and not _sql_literals(fn, consts):
                 escaped.append(fn.name)
     assert not escaped, (
         "эти ручки берут id из пути и ходят в БД, но храповик их не судит — у "
