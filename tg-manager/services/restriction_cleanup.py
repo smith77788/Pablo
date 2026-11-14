@@ -265,7 +265,7 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
     disabled = await _disabled_channels(conn, owner_id, selected_entries, items)
     channel_ids = [str(item_id) for kind, item_id in sorted(keys) if kind != "bot"]
     running_publications = await conn.fetch(
-        """SELECT params->'channel_ids' AS targets
+        """SELECT op_type, params->'channel_ids' AS targets
              FROM operation_queue
             WHERE owner_id=$1 AND status='running'
               AND op_type IN ('mass_publish', 'quick_post', 'bulk_post_chans')
@@ -273,13 +273,23 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
                 OR ($2::text IS NULL AND cardinality($3::text[])>0))""",
         owner_id, str(project_id) if project_id else None, channel_ids)
     busy_channels = set()
+    channel_by_row = {
+        str(binding["row_id"]): item["id"] for item in items.values()
+        for binding in item.get("bindings", ())
+    }
     for publication in running_publications:
         selected = publication["targets"]
         if isinstance(selected, str):
             selected = json.loads(selected)
-        if not isinstance(selected, list) or not selected:
-            selected = channel_ids
-        busy_channels.update(str(value) for value in selected)
+        if publication["op_type"] == "bulk_post_chans":
+            # Этот исполнитель принимает PK строки каталога, а остальные — Telegram ID.
+            if isinstance(selected, list):
+                busy_channels.update(channel_by_row[str(value)] for value in selected
+                                     if str(value) in channel_by_row)
+        elif selected is None:
+            busy_channels.update(channel_ids)
+        elif isinstance(selected, list):
+            busy_channels.update(str(value) for value in selected)
 
     for key in sorted(keys):
         entry = entries[key]

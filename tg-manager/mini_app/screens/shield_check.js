@@ -72,8 +72,13 @@ async function loadDeadEntities() {
       + esc(item.reason || 'Недоступен снаружи') + '</div></div></div>').join('');
     box.innerHTML = '<div class="sec">Результат последней проверки</div>'
       + '<div class="lst" style="padding:14px">' + rows
-      + '<button type="button" class="btn btn-s" style="width:100%">Открыть карточку проверки</button></div>';
-    box.querySelector('button').onclick = () => openOpDetail(String(result.op_id));
+      + '<button type="button" class="btn btn-s" style="width:100%">Открыть карточку проверки</button>'
+      + (result.cleanup_available
+        ? '<button type="button" class="btn btn-p" style="width:100%;margin-top:8px">Управлять найденными</button>'
+        : '') + '</div>';
+    const [details, manage] = box.querySelectorAll('button');
+    details.onclick = () => openOpDetail(String(result.op_id));
+    if (manage) manage.onclick = () => openOperationCleanup(String(result.op_id));
   } catch (_) {
     box.innerHTML = '';
   }

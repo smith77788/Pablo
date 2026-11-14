@@ -107,6 +107,7 @@ async function openOperationCleanup(opId) {
       }
       body.innerHTML = legacy
         + '<div class="field-note">Выберите ресурсы и проверьте план. Действия выполняются в Infragram.</div>'
+        + '<div class="field-note" data-cleanup-scope></div>'
         + '<div class="field"><label for="opCleanupAction">Действие</label><select class="sel" id="opCleanupAction" data-cleanup-action>'
         + `<option value="disable">${actionText.disable}</option><option value="detach">${actionText.detach}</option></select></div>`
         + '<div class="field" data-cleanup-project-field><label for="opCleanupProject">Проект</label>'
@@ -129,6 +130,7 @@ async function openOperationCleanup(opId) {
       const button = body.querySelector('[data-cleanup-preview]');
       const selectAll = body.querySelector('[data-cleanup-select-all]');
       const clear = body.querySelector('[data-cleanup-clear]');
+      const scope = body.querySelector('[data-cleanup-scope]');
       if (!projects.size) action.querySelector('[value="detach"]').disabled = true;
       const selected = new Set();
       const refreshSelection = () => {
@@ -149,6 +151,9 @@ async function openOperationCleanup(opId) {
       };
       const renderFindings = () => {
         projectField.hidden = action.value !== 'detach';
+        scope.textContent = action.value === 'detach'
+          ? 'Связь исчезнет только из выбранного проекта.'
+          : 'Ресурс перестанет использоваться в Infragram. Управление можно восстановить.';
         list.innerHTML = findings.map((item, index) => {
           if (status.value && status.value !== item.status) return '';
           const eligible = action.value === 'detach'
@@ -245,7 +250,7 @@ async function openOperationCleanup(opId) {
     notice.textContent = '';
     const project = items.flatMap(item => item.projects || []).find(p => String(p.id) === payload.project_id);
     const scope = project ? ' · ' + (project.name || '#' + project.id) : '';
-    body.innerHTML = `<div class="field-note">${esc(actionText[payload.action] + scope)} · ${esc(readyCount)} к применению</div>`
+    body.innerHTML = `<div class="field-note">${esc(actionText[payload.action] + scope)} · ${readyCount} к применению · ${items.length - readyCount} пропущено</div>`
       + (items.length ? `<div class="lst" style="${listStyle}">` + items.map(item => {
         const planned = payload.action === 'detach'
           ? 'Отвязать от проекта · связей: ' + (item.edge_ids || []).length : actionText.disable;

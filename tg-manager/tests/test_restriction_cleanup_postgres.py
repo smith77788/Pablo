@@ -182,6 +182,34 @@ def test_running_publication_blocks_detach_and_pending_rechecks_targets():
     asyncio.run(_run(scenario))
 
 
+@pytest.mark.parametrize(("op_type", "selection", "blocked"), [
+    ("mass_publish", "all", True),
+    ("mass_publish", "empty", False),
+    ("mass_publish", "telegram_id", True),
+    ("quick_post", "telegram_id", True),
+    ("bulk_post_chans", "catalog_id", True),
+    ("bulk_post_chans", "telegram_id", False),
+    ("bulk_post_chans", "empty", False),
+])
+def test_running_publication_matches_the_id_kind_used_by_its_executor(op_type, selection, blocked):
+    async def scenario(pool, op_id):
+        row_id = await pool.fetchval(
+            "SELECT id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL)
+        params = {"text": "Синтетический пост"}
+        if selection != "all":
+            params["channel_ids"] = {"empty": [], "telegram_id": [CHANNEL], "catalog_id": [row_id]}[selection]
+        await pool.execute(
+            "INSERT INTO operation_queue(owner_id,op_type,status,params) VALUES($1,$2,'running',$3::jsonb)",
+            OWNER, op_type, json.dumps(params))
+        preview = await cleanup.plan(pool, OWNER, op_id, [CHANNEL_TARGET], "disable")
+        item = preview["items"][0]
+        assert item["outcome"] == ("skipped" if blocked else "ready")
+        if blocked:
+            assert "текущей публикации" in item["reason"]
+
+    asyncio.run(_run(scenario))
+
+
 def test_295_findings_and_parallel_confirmation_preserve_other_projects():
     async def scenario(pool, op_id):
         await pool.execute(

@@ -18,6 +18,7 @@ def test_cleanup_opens_from_the_operation_card_and_shield_links_to_the_card():
     assert "openOperationCleanup(String(report.op_id))" in catalog
     shield = js_function("loadDeadEntities")
     assert "openOpDetail(String(result.op_id))" in shield
+    assert "openOperationCleanup(String(result.op_id))" in shield
     assert "/restrictions/remove_dead" not in shield
 
 
