@@ -251,26 +251,27 @@ def setup_routes(app: web.Application, pool) -> None:
             reply_delay_sec = max(0, min(300, int(body.get("reply_delay_sec") or 0)))
         except (TypeError, ValueError):
             reply_delay_sec = 0
-        # Доступ — через ОБЩЕЕ условие `_user_can_use_bot` (своё + экосистема +
-        # рабочее пространство, и `deleted_at IS NULL` внутри него, т.е. архив
-        # закрыт). Инлайн-проверка `added_by=$9`, что стояла здесь, была ýже
-        # политики: бот, доступный через экосистему/пространство, переставал
-        # принимать автоответы, а остальные три ручки ботов отвечали правильно —
-        # ровно тот разъезд копий условия, от которого стоит `_user_can_use_bot`.
-        owns = await _user_can_use_bot(pool, uid, bot_id)
-        if not owns:
-            return _err("Бот не найден", 404)
+        # Создание автоответа — МУТАЦИЯ, и доступ к ней ýже видимости.
+        # `_user_can_use_bot` (своё + экосистема + пространство) — это правило
+        # ВИДИМОСТИ: участник рабочего пространства с ролью viewer видит бота
+        # (bot_detail, bot_auto_replies), но ПИСАТЬ ему правила нельзя. Все
+        # прочие мутации ботов в этом файле скоупятся по `added_by` (токен,
+        # заметка, swarm, роль, relay) — здесь так же. Проверка и вставка —
+        # ОДНИМ запросом `INSERT … SELECT … WHERE added_by`, без окна между
+        # «проверил» и «вставил»; пустой результат = бот не свой = 404.
         try:
             row = await pool.fetchrow(
                 """INSERT INTO auto_replies
                        (bot_id, trigger_type, keyword, response_text, is_active,
                         match_mode, buttons, priority, reply_delay_sec)
-                   VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7,$8)
+                   SELECT $1,$2,$3,$4,TRUE,$5,$6,$7,$8
+                   FROM managed_bots
+                   WHERE bot_id=$1 AND added_by=$9 AND deleted_at IS NULL
                    RETURNING id""",
                 bot_id, trigger_type, keyword or None, response_text, match_mode,
-                buttons_json, priority, reply_delay_sec)
+                buttons_json, priority, reply_delay_sec, uid)
             if row is None:
-                return _err("Не удалось создать автоответ", 500)
+                return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)
