@@ -17,6 +17,8 @@ def test_header_matches_the_tile():
                      r'<div class="qa-tile-lbl">([^<]+)</div>', html)
     assert tile, "плитка операций на главной пропала"
     i = html.index('id="s-ops"')
-    head = re.search(r'class="hdr-title">([^<]+)<', html[i:i + 800])
+    # hdr-title может нести атрибуты (id="opsTitle" для динамической смены
+    # заголовка), поэтому допускаем их между классом и «>».
+    head = re.search(r'class="hdr-title"[^>]*>([^<]+)<', html[i:i + 800])
     assert head and tile.group(1) in head.group(1), (
         f"плитка «{tile.group(1)}», а шапка экрана «{head.group(1) if head else '—'}»")

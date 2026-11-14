@@ -129,12 +129,19 @@ def test_bad_offset_does_not_break_the_list():
 
 
 def test_visibility_condition_has_one_source():
-    """Условие доступа к ботам лежало в файле ПЯТЬЮ копиями.
+    """Условие ВИДИМОСТИ бота лежало в файле ПЯТЬЮ копиями.
 
-    Одна — в списке ботов и его счётчике, ещё четыре — дословно одинаковые
-    проверки «мой ли это бот» в четырёх эндпоинтах. Разъедься любая из четырёх,
-    и ровно этот эндпоинт начал бы отдавать чужого бота, пока остальные три
-    отказывают правильно: снаружи такую дыру почти нечем заметить.
+    Одна — в списке ботов и его счётчике, ещё несколько — дословно одинаковые
+    проверки «вижу ли я этот бот» в эндпоинтах ЧТЕНИЯ. Разъедься любая, и ровно
+    этот эндпоинт начал бы отдавать чужого бота, пока остальные отказывают
+    правильно: снаружи такую дыру почти нечем заметить.
+
+    Видимость (своё + экосистема + пространство) — для ЧТЕНИЯ: bot_detail,
+    bot_auto_replies, bot_subscribers. МУТАЦИЯ (create_auto_reply) скоупится
+    строго по `added_by` — как токен, заметка, swarm, роль, relay, — потому что
+    участник пространства с ролью viewer бота видит, но менять правила ему
+    нельзя (tests/test_workflow_runtime_postgres.py::test_workspace_visibility_
+    does_not_allow_bot_mutations). Поэтому читающих вызовов видимости ровно три.
     """
     # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py, а
     # условие доступа (`_BOTS_VISIBLE_SQL`, `_user_can_use_bot`) осталось общим
@@ -147,8 +154,9 @@ def test_visibility_condition_has_one_source():
     assert src.count("FROM ecosystem_bots eb") == 1, (
         "условие доступа к ботам снова размножено по файлу")
     assert src.count("async def _user_can_use_bot") == 1
-    assert src.count("await _user_can_use_bot(pool") == 4, (
-        "эндпоинт проверяет доступ к боту своей копией условия, а не общей")
+    assert src.count("await _user_can_use_bot(pool") == 3, (
+        "эндпоинт ЧТЕНИЯ проверяет видимость своей копией условия, а не общей "
+        "(мутации скоупятся по added_by и _user_can_use_bot не зовут)")
 
 
 def test_access_check_binds_the_bot_and_the_owner_in_the_right_slots():

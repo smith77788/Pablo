@@ -20,8 +20,8 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты сетей и экосистем на приложении мини-аппа."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _safe_count, _safe_fetch,
-        _safe_fetchrow, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
+        _safe_fetch, _safe_fetchrow, log,
     )
     from services.security import tg_id, validate_integer, validate_string
 
@@ -331,9 +331,9 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Unauthorized", 401)
         if not nb.project_pilot_enabled(uid):
             return _json_resp({"enabled": False})
-        limit = validate_integer(request.query.get("limit", "5"), min_val=1, max_val=20)
-        if limit is None:
-            return _err("Неверный размер списка", 400)
+        # Лимит — через общий помощник (храповик честности видит только его):
+        # ответ и так несёт total, так что молчаливого обрыва нет.
+        limit = _list_limit(request, 5, 20)
         try:
             projects = await nb.project_overview(pool, uid, limit=limit)
         except (asyncpg.PostgresError, TimeoutError):
