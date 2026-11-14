@@ -41,11 +41,12 @@ def setup_routes(app: web.Application, pool) -> None:
         op_id = validate_integer(request.match_info["op_id"], min_val=1)
         if op_id is None:
             return _err("Неверный идентификатор операции", 400)
-        try:
-            if request.method in ("GET", "HEAD"):
-                report = await cleanup.findings(pool, uid, op_id, include_history=True)
-                report["findings"] = cleanup.public_items(report["findings"])
-                return _json_resp({"ok": True, **report})
+        # Тело POST разбираем ДО общего `except … 500`: битое или пустое тело —
+        # вина клиента (400 с bad_body_response), а не поломка сервера. Под
+        # общим except его чтение маскировало бы 400 под 500 с неверным советом
+        # повторить (сторож test_a_broken_body_is_not_our_fault).
+        data: dict = {}
+        if request.method not in ("GET", "HEAD"):
             try:
                 data = await request.json()
             except Exception as exc:
@@ -53,6 +54,11 @@ def setup_routes(app: web.Application, pool) -> None:
                 return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
             if not isinstance(data, dict):
                 return _err("Неверные параметры очистки", 400)
+        try:
+            if request.method in ("GET", "HEAD"):
+                report = await cleanup.findings(pool, uid, op_id, include_history=True)
+                report["findings"] = cleanup.public_items(report["findings"])
+                return _json_resp({"ok": True, **report})
             project = data.get("project_id")
             project_id = None
             if project is not None:
