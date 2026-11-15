@@ -188,12 +188,11 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-        except (KeyError, ValueError):
+        ch_id = tg_id(request.match_info.get("ch_id"))
+        if ch_id is None:
             return _err("Неверный идентификатор канала", 400)
         ch = await _safe_fetchrow(pool,
-            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
+            "SELECT id, acc_id FROM managed_channels "
             "WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
         if not ch:
             return _err("Канал не найден", 404)
@@ -204,7 +203,7 @@ def setup_routes(app: web.Application, pool) -> None:
             op_id = await submit(pool, uid, "pin_last_post", {
                 "channel_ref": int(ch_id),
                 "account_id": int(ch["acc_id"]),
-                "access_hash": int(ch.get("access_hash") or 0),
+                "managed_channel_row_id": int(ch["id"]),
             }, total_items=1)
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
@@ -270,8 +269,8 @@ def setup_routes(app: web.Application, pool) -> None:
         acc = None
         if ch and ch.get("acc_id"):
             acc = await _safe_fetchrow(pool,
-                "SELECT id, phone, first_name, username FROM tg_accounts WHERE id=$1",
-                ch["acc_id"])
+                "SELECT id, phone, first_name, username FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                ch["acc_id"], uid)
         recent_ops = await _safe_fetch(pool,
             """SELECT op_type, label, status, done_items, total_items, created_at
                FROM operation_queue WHERE owner_id=$1
@@ -319,7 +318,8 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.debug("channel_detail: posts_published failed ch=%d", ch_id)
         return _json_resp({
-            "channel": {**dict(ch), "role": managed_channel_role(ch)},
+            "channel": {**dict(ch), "channel_id_text": str(ch["channel_id"]),
+                        "role": managed_channel_role(ch)},
             "linked_account": acc,
             "recent_ops": recent_ops,
             "member_growth": member_growth,

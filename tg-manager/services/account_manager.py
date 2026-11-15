@@ -7742,6 +7742,8 @@ async def pin_last_channel_post(
     username: str = "",
     _acc: dict | None = None,
     silent: bool = True,
+    *,
+    before_pin=None,
 ) -> dict:
     """Закрепить последний пост в канале от имени аккаунта.
 
@@ -7770,7 +7772,9 @@ async def pin_last_channel_post(
             isinstance(channel_id, str) and channel_id.lstrip("-").isdigit()
         )
         cid = abs(int(channel_id)) if _numeric_channel_id else 0
-        if access_hash and cid > 0:
+        if before_pin is not None:
+            peer = await _resolve_managed_channel(client, channel_id, access_hash, username)
+        elif access_hash and cid > 0:
             peer = InputPeerChannel(channel_id=cid, access_hash=access_hash)
         elif isinstance(channel_id, str) and not channel_id.lstrip("-").isdigit():
             peer = channel_id
@@ -7786,23 +7790,27 @@ async def pin_last_channel_post(
         if not msgs:
             return {"error": "В канале нет сообщений для закрепления"}
         last_id = msgs[0].id
+        if before_pin is not None:
+            await before_pin(last_id)
         await asyncio.wait_for(
             client(UpdatePinnedMessageRequest(peer=peer, id=last_id, silent=silent)),
             timeout=_OP_TIMEOUT)
         return {"pinned_msg_id": last_id}
     except FloodWaitError as e:
-        return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}
+        return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds, "pin_rejected": True}
     except ChatAdminRequiredError:
-        return {"error": "Требуются права администратора канала (pin_messages)", "banned": True}
+        return {"error": "Требуются права администратора канала (pin_messages)", "banned": True, "pin_rejected": True}
     except MessageIdInvalidError:
-        return {"error": "Сообщение недоступно для закрепления"}
-    except AuthKeyUnregisteredError as e:
-        return {"error": f"AUTH_KEY: сессия недействительна: {e}"}
+        return {"error": "Сообщение недоступно для закрепления", "pin_rejected": True}
+    except AuthKeyUnregisteredError:
+        return {"error": "AUTH_KEY: сессия недействительна", "pin_rejected": True}
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "pin")
         return {"error": "Timeout при подключении — прокси недоступен", "proxy_error": True}
     except Exception as e:
-        log.warning("pin_last_channel_post error: %s", e)
+        log.warning("pin_last_channel_post error: %s", type(e).__name__)
+        if before_pin is not None:
+            return {"error": "Не удалось подтвердить канал или закрепить пост"}
         return {"error": str(e)[:150]}
     finally:
         try:

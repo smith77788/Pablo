@@ -340,7 +340,11 @@ async def _plan(conn, owner_id, op_id, keys, action, project_id, *, lock=False):
     has_channels = any(kind != "bot" for kind, _ in keys)
     running_channel_operations = await conn.fetch(
         """SELECT op_type,
-                  CASE WHEN op_type='bulk_chan_exec' THEN params->'channel_acc_pairs'
+                  CASE op_type
+                       WHEN 'bulk_chan_exec' THEN params->'channel_acc_pairs'
+                       WHEN 'pin_last_post' THEN jsonb_build_array(jsonb_build_object(
+                           'channel_id', params->'channel_ref', 'acc_id', params->'account_id',
+                           'row_id', params->'managed_channel_row_id'))
                        ELSE params->'channel_ids' END AS targets,
                   params->>'target' AS target_kind
              FROM operation_queue
@@ -348,7 +352,7 @@ async def _plan(conn, owner_id, op_id, keys, action, project_id, *, lock=False):
               AND ((op_type IN ('mass_publish', 'quick_post', 'bulk_post_chans')
                     AND (($2::text IS NOT NULL AND params->>'project_id'=$2)
                       OR ($2::text IS NULL AND $3)))
-                OR (op_type='bulk_chan_exec' AND $2::text IS NULL AND $3))""",
+                OR (op_type IN ('bulk_chan_exec', 'pin_last_post') AND $2::text IS NULL AND $3))""",
         owner_id, str(project_id) if project_id else None, has_channels)
     busy_channels = set()
     editing_channels = set()
@@ -357,20 +361,22 @@ async def _plan(conn, owner_id, op_id, keys, action, project_id, *, lock=False):
         for binding in item.get("bindings", ())
     }
     active_pairs = {
-        (int(item["id"]), binding["account_id"]) for item in items.values()
+        (int(item["id"]), binding["account_id"]): binding["row_id"] for item in items.values()
         for binding in item.get("bindings", ())
     }
     for operation in running_channel_operations:
         selected = operation["targets"]
         if isinstance(selected, str):
             selected = json.loads(selected)
-        if operation["op_type"] == "bulk_chan_exec":
+        if operation["op_type"] in ("bulk_chan_exec", "pin_last_post"):
             if isinstance(selected, list):
                 for pair in selected:
                     if isinstance(pair, dict):
                         channel = _telegram_id(pair.get("channel_id"))
                         account = _telegram_id(pair.get("acc_id"))
-                        if (channel, account) in active_pairs:
+                        row_id = active_pairs.get((channel, account))
+                        expected_row = pair.get("row_id")
+                        if row_id is not None and (expected_row is None or _telegram_id(expected_row) == row_id):
                             editing_channels.add(str(channel))
         elif operation["op_type"] == "bulk_post_chans":
             # Этот исполнитель принимает PK строки каталога, а остальные — Telegram ID.

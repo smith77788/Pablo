@@ -14340,6 +14340,7 @@ function buildChDetail(d) {
     return empty('📡','Канал не открылся','Сервер не вернул данные канала. Обновите список и попробуйте снова');
   }
   const c = d.channel||{};
+  const pinChannelId = catalogResourceId(c, "channel");
   const acc = d.linked_account;
   const ops = d.recent_ops||[];
 
@@ -14372,7 +14373,7 @@ function buildChDetail(d) {
       ${c.type==='channel' ? '' : `<button class="btn btn-p" onclick="startChatWarmup('${escJs(c.username||'')}', this)" style="flex:1 1 100%" title="Флот вступит в чат и будет вести в нём живой диалог">🔥 Разогрев флотом</button>`}
       ${c.username?`<button class="btn btn-s" onclick="openTgUser('${escJs(c.username)}')" style="flex:1 1 auto;min-width:88px" title="Открыть канал в Telegram">↗ Открыть в Telegram</button>`:''}
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📝 Опубликовать</button>
-      <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>
+      ${pinChannelId ? `<button class="btn btn-s" onclick="pinLastPost('${escJs(pinChannelId)}')" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>` : ''}
       <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1 1 auto;min-width:88px">✏️ Изменить</button>
       <button class="btn btn-s" onclick="getChannelInviteLink(${c.channel_id})" style="flex:1 1 auto;min-width:88px">🔗 Ссылка</button>
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👑 Админы</button>
@@ -14429,11 +14430,14 @@ function buildChDetail(d) {
 
 // ── Закрепление последнего поста канала ─────────────────
 async function pinLastPost(chId) {
-  if (!await askConfirm('Закрепить последний пост канала? Аккаунт-владелец должен быть админом с правом закрепления.')) return;
+  const exactId = typeof chId === 'string' ? chId : Number.isSafeInteger(chId) ? String(chId) : '';
+  if (!/^-?[1-9]\d*$/.test(exactId)) return;
+  if (!await askConfirm(`Закрепить последний на момент выполнения пост канала #${exactId}? Нужны права администратора на закрепление.`)) return;
   try {
-    await api('/api/miniapp/channel/'+chId+'/pin', {method:'POST', body:'{}'});
+    const result = await api('/api/miniapp/channel/'+exactId+'/pin', {method:'POST', body:'{}'});
     toast('📌 Закрепление поставлено в очередь');
-    tg.HapticFeedback?.impactOccurred('medium');
+    tg?.HapticFeedback?.impactOccurred('medium');
+    if (result.op_id) pollOpResult(result.op_id, 'Закрепление поста');
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 // ── Рендер статистики роста участников канала ───────────
@@ -15443,7 +15447,7 @@ function _opLogOk(st) { return String(st||'').toLowerCase() === 'ok'; }
 // «failed» нельзя — переводим известные, неизвестный оставляем как есть, чтобы
 // не спрятать то, чего мы не поняли.
 const OPLOG_ST_RU = {ok:'Успешно', failed:'Ошибка', fail:'Ошибка', error:'Ошибка',
-                     skipped:'Пропущено', skip:'Пропущено', retry:'Повтор',
+                     skipped:'Пропущено', skip:'Пропущено', retry:'Повтор', started:'Запрос подготовлен',
                      timeout:'Таймаут', flood:'Лимит Telegram'};
 function _opLogStRu(st) {
   const k = String(st||'').toLowerCase();
@@ -15469,7 +15473,7 @@ function renderOpLog() {
     el.innerHTML = OPLOG_ROWS.length
       ? OPLOG_ROWS.map((l,i)=>`<div class="row" style="cursor:pointer" role="button" tabindex="0" onclick="openOpLogRow(${i})"><div class="row-body">
           <div class="row-name">${esc(l.target||'')}</div>
-          <div class="row-val" style="white-space:normal">${esc((l.message||'').replace(/\n/g,'; ')).substring(0,160)}${(l.message||'').length>160?'…':''} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
+          <div class="row-val" style="white-space:normal">${esc((l.message||'').replace(/\n/g,'; ')).substring(0,160)}${(l.message||'').length>160?'…':''} <span class="badge ${l.status==='started'?'b-bl':_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
         </div><div class="row-right"><span class="chev">›</span></div></div>`).join('')
       : `<div style="padding:14px;font-size:13px;color:var(--hint);text-align:center">${OPLOG_Q ? 'По этому поиску записей нет.' : 'По этому срезу записей нет.'}</div>`;
   }
@@ -15490,7 +15494,7 @@ function openOpLogRow(i) {
   bg.innerHTML = '<div class="modal">'
     + '<div class="modal-title" style="word-break:break-word">' + esc(l.target || 'Цель') + '</div>'
     + '<div style="margin-bottom:10px;font-size:12px;color:var(--hint)">'
-    + '<span class="badge ' + (_opLogOk(l.status) ? 'b-gr' : 'b-rd') + '">' + esc(_opLogStRu(l.status)) + '</span>'
+    + '<span class="badge ' + (l.status === 'started' ? 'b-bl' : _opLogOk(l.status) ? 'b-gr' : 'b-rd') + '">' + esc(_opLogStRu(l.status)) + '</span>'
     + (l.step_num != null ? ' · шаг ' + esc(String(l.step_num)) : '')
     + (when ? ' · ' + esc(when) : '') + '</div>'
     + '<div style="white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.5;max-height:55vh;overflow-y:auto">'
@@ -15510,7 +15514,7 @@ function renderOpLogChips() {
   // OPLOG_TOTAL приходит с сервера уже с учётом поиска — чип «Все» и список
   // считают один и тот же набор.
   const defs = [['', 'Все', OPLOG_TOTAL], ['ok', '🟢 Успешно', c.ok || 0]];
-  bad.forEach(k => defs.push([k, '🔴 ' + _opLogStRu(k), c[k] || 0]));
+  bad.forEach(k => defs.push([k, (k === 'started' ? '🔵 ' : '🔴 ') + _opLogStRu(k), c[k] || 0]));
   // Срез, за которым никого нет, не показываем: обещание без содержания.
   const vis = defs.filter(([k,,n]) => k === '' || n > 0);
   if (vis.length <= 1) { box.style.display='none'; box.innerHTML=''; return; }

@@ -14777,65 +14777,118 @@ async def _exec_bulk_dm_adhoc(
 async def _exec_pin_last_post(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Закрепить последний пост в канале от имени аккаунта-владельца/админа."""
-    import html as _html
+    """Закрепить последний пост, сверив привязку и сохранив ID перед запросом."""
     from services import account_manager
+    from services.security import tg_id, validate_integer
 
-    channel_ref = params.get("channel_ref")
-    account_id = params.get("account_id")
-    access_hash = int(params.get("access_hash", 0) or 0)
-    if not channel_ref or not account_id:
-        return {"status": "failed", "reason": "Не указан channel_ref или account_id"}
+    if any(type(params.get(key)) not in (int, str) for key in ("channel_ref", "account_id")):
+        return {"status": "failed", "reason": "Некорректный канал или аккаунт"}
+    channel_id = tg_id(params.get("channel_ref"))
+    account_id = validate_integer(params.get("account_id"), min_val=1)
+    row_id = params.get("managed_channel_row_id")
+    if row_id is not None:
+        row_id = validate_integer(row_id, min_val=1) if type(row_id) in (int, str) else None
+        if row_id is None:
+            return {"status": "failed", "reason": "Некорректная привязка канала"}
+    if channel_id is None or account_id is None:
+        return {"status": "failed", "reason": "Некорректный канал или аккаунт"}
 
-    row = await _safe_fetchrow(
+    target = str(channel_id)
+    family_ids = await journal_op_ids(pool, op_id)
+    previous = await _journal_fetch(
         pool,
-        "SELECT id, session_str, first_name, phone, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, "
-        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id "
-        "AND up.is_active=TRUE) AS proxy_url "
-        "FROM tg_accounts "
-        "WHERE owner_id=$1 AND id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
-        owner_id, int(account_id),
+        """SELECT entry.status, entry.message FROM operation_log entry
+            JOIN operation_queue job ON job.id=entry.op_id AND job.owner_id=$3
+                                    AND job.op_type='pin_last_post'
+           WHERE entry.op_id=ANY($1::bigint[]) AND entry.target=$2
+             AND entry.status IN ('started', 'ok', 'error')
+           ORDER BY entry.id DESC LIMIT 1""",
+        family_ids, target, owner_id, where="pin_last_post",
+    )
+    if previous:
+        last = previous[0]
+        if last["status"] == "ok":
+            await _safe_execute(pool, "UPDATE operation_queue SET done_items=1 WHERE id=$1", op_id)
+            return {"status": "done", "ok": 1, "summary": last["message"]}
+        if last["status"] == "started":
+            return {"status": "failed", "reason": f"Требуется сверка в Telegram. {last['message']}"}
+
+    row = await pool.fetchrow(
+        """SELECT a.id, a.session_str, a.first_name, a.phone, a.device_model, a.system_version,
+                  a.app_version, a.lang_code, a.system_lang_code, p.proxy_url,
+                  mc.access_hash, mc.username
+             FROM managed_channels mc
+             JOIN operation_queue queued ON queued.id=$5 AND queued.owner_id=mc.owner_id
+                                       AND queued.op_type='pin_last_post'
+             JOIN tg_accounts a ON a.owner_id=mc.owner_id AND a.id=mc.acc_id
+             LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+            WHERE mc.owner_id=$1 AND mc.channel_id=$2 AND mc.acc_id=$3
+              AND ($4::int IS NULL OR mc.id=$4)
+              AND a.is_active=TRUE AND NULLIF(a.session_str, '') IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM operation_audit restored
+                   WHERE restored.owner_id=$1 AND restored.action='channel_restore'
+                     AND restored.result='success' AND restored.target=$2::bigint::text
+                     AND restored.occurred_at >= (
+                         SELECT MIN(created_at) FROM operation_queue
+                          WHERE id=ANY($6::bigint[]) AND owner_id=$1 AND op_type='pin_last_post'))""",
+        owner_id, channel_id, account_id, row_id, op_id, family_ids,
     )
     if not row:
-        return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
+        return {"status": "failed", "reason": "Канал отключён, восстановлен после постановки или привязка к доступному аккаунту изменилась"}
     acc = dict(row)
+    if not await try_claim_account(account_id):
+        return {"status": "requeue", "reason": "Аккаунт занят другой операцией — попробуйте позже"}
 
-    # Отказной захват: операция работает живой сессией этого аккаунта.
-    # Без захвата он мог параллельно вести другую операцию (две сессии на
-    # одном auth-key → AUTH_KEY_DUPLICATED).
-    if not await try_claim_account(int(acc["id"])):
-        return {"status": "requeue",
-                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
-    _claimed_acc = int(acc["id"])
+    requested_post = None
+
+    async def before_pin(post_id):
+        nonlocal requested_post
+        if await _is_cancelled(pool, op_id):
+            raise asyncio.CancelledError
+        saved = await _journal_write(
+            pool,
+            """INSERT INTO operation_log(op_id, step_num, target, status, message)
+               SELECT $1::int, 1, $2::text, 'started', $3::text WHERE NOT EXISTS (
+                   SELECT 1 FROM operation_log WHERE op_id=$1 AND target=$2
+                      AND status='started' AND message=$3
+                      AND id > COALESCE((SELECT MAX(id) FROM operation_log WHERE op_id=$1
+                                        AND target=$2 AND status IN ('ok', 'error')), 0))""",
+            op_id, target, f"Запрос на закрепление поста #{post_id}", where="pin_last_post",
+        )
+        if saved == "ERROR":
+            raise JournalUnreadable("Не удалось сохранить ID поста перед закреплением")
+        requested_post = post_id
 
     try:
-
         await _safe_execute(pool, "UPDATE operation_queue SET total_items=1 WHERE id=$1", op_id)
-
         try:
             result = await account_manager.pin_last_channel_post(
-                acc["session_str"], channel_ref, access_hash=access_hash, _acc=acc)
+                acc["session_str"], channel_id, access_hash=acc["access_hash"] or 0,
+                username=acc["username"] or "", _acc=acc, before_pin=before_pin)
         except asyncio.CancelledError:
             raise
-        except Exception as _pin_exc:
-            log.warning("_exec_pin_last_post acc=%s: %s", acc.get("id"), _pin_exc)
-            result = {"error": str(_pin_exc)[:120]}
+        except Exception as exc:
+            log.warning("_exec_pin_last_post op=%s: %s", op_id, type(exc).__name__)
+            result = {"error": "Вызов закрепления завершился с ошибкой"}
 
         await _safe_execute(pool, "UPDATE operation_queue SET done_items=1 WHERE id=$1", op_id)
-
-        if "pinned_msg_id" in result:
-            return {
-                "status": "done", "ok": 1, "failed": 0,
-                "summary": f"\U0001F4CC Закреплён пост msg_id={result['pinned_msg_id']}",
-            }
-        return {
-            "status": "failed", "ok": 0, "failed": 1,
-            "reason": result.get("error", "ошибка"),
-            "summary": f"❌ {_html.escape(str(result.get('error', 'ошибка'))[:120])}",
-        }
+        if requested_post is not None and result.get("pinned_msg_id") == requested_post:
+            summary = f"Закреплён пост #{requested_post}"
+            if await _journal_done(pool, op_id, 1, target, summary):
+                return {"status": "done", "ok": 1, "failed": 0, "summary": summary}
+        if requested_post is not None and not result.get("pin_rejected"):
+            reason = f"Требуется сверка в Telegram. Запрос на закрепление поста #{requested_post}"
+        else:
+            reason = redact_secrets(str(result.get("error") or "Не удалось закрепить пост"), limit=150)
+            await _journal_write(
+                pool, """INSERT INTO operation_log(op_id, step_num, target, status, message)
+                         VALUES($1, 1, $2, 'error', $3)""",
+                op_id, target, reason, where="pin_last_post",
+            )
+        return {"status": "failed", "ok": 0, "failed": 1, "reason": reason}
     finally:
-        await release_accounts([_claimed_acc])
+        await release_accounts([account_id])
 
 
 async def _exec_bulk_post_to_channel(

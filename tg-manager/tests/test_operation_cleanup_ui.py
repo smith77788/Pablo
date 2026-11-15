@@ -361,3 +361,37 @@ Object.defineProperty(control('[data-cleanup-review]'), 'innerHTML', {set() {
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     subprocess.run([node, "-"], input=source.read_text() + "\n" + script, text=True, check=True)
+
+
+def test_pin_post_keeps_channel_id_and_opens_result():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("нужен node")
+    assert "pinLastPost('${escJs(pinChannelId)}')" in js_function("buildChDetail")
+    script = r"""
+const assert = require('node:assert/strict');
+const requests = [];
+const results = [];
+let confirm = false;
+function askConfirm(question) {
+  assert.match(question, /#9007199254740993/);
+  return confirm;
+}
+async function api(path) { requests.push(path); return {op_id: 44}; }
+function toast() {}
+function pollOpResult(id) { results.push(id); }
+const tg = null;
+(async () => {
+  const id = '9007199254740993';
+  await pinLastPost(Number(id));
+  await pinLastPost('../other');
+  await pinLastPost(id);
+  assert.deepEqual(requests, []);
+  confirm = true;
+  await pinLastPost(id);
+  assert.deepEqual(requests, ['/api/miniapp/channel/9007199254740993/pin']);
+  assert.deepEqual(results, [44]);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    subprocess.run([node, "-"], input=js_function("pinLastPost") + "\n" + script,
+                   text=True, check=True)

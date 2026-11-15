@@ -435,7 +435,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (ValueError, TypeError):
             offset = 0
         status = (request.query.get("status") or "").strip().lower()
-        if status not in ("ok", "fail", "failed", "error", "skip", "skipped"):
+        if status not in ("ok", "fail", "failed", "error", "skip", "skipped", "started"):
             status = ""
         # Поиск по цели. У операции на 2000 целей вопрос «а @ivan-то позвали?»
         # иначе решается прокруткой. Ищем и по сообщению: причина отказа
@@ -1100,7 +1100,7 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("operation_log_export op=%s", op_id)
             return _err(_INTERNAL_ERROR, 500)
         st_ru = {"ok": "Успешно", "error": "Ошибка", "failed": "Ошибка", "fail": "Ошибка",
-                 "skip": "Пропущено", "skipped": "Пропущено"}
+                 "skip": "Пропущено", "skipped": "Пропущено", "started": "Запрос подготовлен"}
         header = ["Шаг", "Цель", "Статус", "Причина / сообщение", "Время"]
         data = [[r["step_num"], r["target"] or "", st_ru.get((r["status"] or "").lower(),
                  r["status"] or ""), r["message"] or "", str(r["created_at"] or "")]
