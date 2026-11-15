@@ -3631,13 +3631,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 msg_id = int(body.get("msg_id") or 0)
             except (TypeError, ValueError):
                 msg_id = 0
-            emoji = (body.get("emoji") or "👍").strip() or "👍"
             if not channel or not msg_id:
                 return _err("Укажите канал и ID сообщения", 400)
             op_type = "boost_reactions"
-            params = {"channel": channel, "msg_id": msg_id, "emoji": emoji, "account_ids": account_ids}
+            params = {"channel": channel, "msg_id": msg_id, "account_ids": account_ids}
+            # Какие реакции ставить. Раньше экран всегда слал одно эмодзи (по
+            # умолчанию 👍), и разнобой исполнителя — N аккаунтов с ОДНОЙ
+            # реакцией выглядят накруткой — не включался ни разу. Теперь:
+            # свой набор (emojis), одна реакция (emoji) или, если не задано
+            # ничего, набор исполнителя вразнобой.
+            _raw_set = body.get("emojis")
+            _set = ([str(e).strip()[:8] for e in _raw_set if str(e).strip()][:12]
+                    if isinstance(_raw_set, list) else [])
+            _one = str(body.get("emoji") or "").strip()[:8]
+            if _set:
+                params["emojis"] = list(dict.fromkeys(_set))
+                _lbl = "".join(params["emojis"][:6])
+            elif _one:
+                params["emoji"] = _one
+                _lbl = _one
+            else:
+                _lbl = "вразнобой"
             total = len(account_ids)
-            label = f"Реакции {emoji}: {channel} × {len(account_ids)} акк."
+            label = f"Реакции {_lbl}: {channel} × {len(account_ids)} акк."
         elif btype == "stories":
             target = (body.get("target") or "").strip()
             if not target:
@@ -3674,6 +3690,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             total = len(account_ids)
             prem_suffix = " (только Premium)" if premium_only else ""
             label = f"Старты в боте: @{bot_username} × {len(account_ids)} акк.{prem_suffix}"
+
+        # «Растянуть по времени» — для просмотров и реакций: их исполнители
+        # делят окно на паузы между аккаунтами. Значение — из списка экрана.
+        if op_type in ("boost_views", "boost_reactions"):
+            from services.op_worker import boost_spread_minutes
+            _spread = boost_spread_minutes(body)
+            if _spread:
+                params["spread_minutes"] = _spread
+                label += f" · за {_spread // 60} ч" if _spread >= 60 else f" · за {_spread} мин"
 
         try:
             if op_type in ("boost_subscribers", "boost_bot_starts"):
@@ -7777,7 +7802,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             channels = await _nb.project_publish_channels(pool, uid, project_id, channel_id)
             return _json_resp({"ok": True, "total": len(channels), "sample": [
                 {**row, "channel_id_text": str(row["channel_id"])} for row in channels
-            ]})
+            ], "ai_image": _ai_image_available()})
         try:
             sample_limit = min(validate_integer(request.query.get("sample", "12"),
                                                 min_val=0, max_val=100) or 0, 100)
@@ -7803,7 +7828,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "title": r["title"],
                     "member_count": int(r["member_count"] or 0),
                 })
-        return _json_resp({"ok": True, "total": int(total or 0), "sample": sample})
+        return _json_resp({"ok": True, "total": int(total or 0), "sample": sample,
+                           "ai_image": _ai_image_available()})
+
+    def _ai_image_available() -> bool:
+        from services import va_image
+        return va_image.image_generation_available()
 
     async def mass_publish(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -7899,6 +7929,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     params["repeat_count"] = max(1, min(int(_rc), 1000))
                 except (TypeError, ValueError):
                     pass
+        # Картинка к посту, нарисованная ИИ по описанию. Исполнитель умел это
+        # всегда (media_prompt, им пользуется виртуальный администратор), а
+        # экран публикации не давал задать. Картинка рисуется ОДИН раз на
+        # запуск и уходит во все каналы. В очередь кладём описание, не байты.
+        _mprompt = validate_string(body.get("media_prompt"), max_len=1000) or ""
+        if _mprompt:
+            if _postbot.has_explicit_intent(text):
+                return _err("У поста @PostBot свои вложения: уберите описание картинки", 400)
+            if not _ai_image_available():
+                return _err("Генерация картинок не подключена: нужен ключ OpenAI или Gemini", 400)
+            params["media_prompt"] = _mprompt
+            params["media_type"] = "photo"
+            # «Без картинки не публиковать»: иначе при сбое генерации пост
+            # уходит текстом — так было всегда, и это остаётся по умолчанию.
+            if body.get("require_media") is True:
+                params["require_media"] = True
         # Рубрика поста (контент-микс редактора): только из рубрик владельца,
         # иначе история заполнится опечатками и микс перестанет что-то значить.
         _pillar = str(body.get("pillar") or "").strip()

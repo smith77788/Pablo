@@ -145,21 +145,30 @@ async function connectDiscoveredBots() {
 }
 
 // Включить режим bot-to-bot у сети — нужно для координации ботов (Bot Mesh).
-// Первый прогон делаем канарейкой на 2 ботах: разбор меню BotFather зависит от
-// локали и на живой сессии не выверен, лучше проверить на паре.
+// Первый прогон советуем канарейкой на 2 ботах: разбор меню BotFather зависит
+// от локали и на живой сессии не выверен. Раньше экран умел ТОЛЬКО канарейку
+// («Отмена» отменяла всё), и после удачной проверки остальной парк включить
+// было нечем. Теперь масштаб выбирает владелец.
 async function enableBotMesh() {
-  const canary = await askConfirm(
-    'Включить режим bot-to-bot у сети ботов?\n\n'
-    + 'Это нужно, чтобы боты координировали задачи между собой. Включает '
-    + 'аккаунт-владелец через @BotFather.\n\n'
-    + 'РЕКОМЕНДУЕМ начать с проверки на 2 ботах: разбор меню BotFather зависит '
-    + 'от языка интерфейса. Нажмите ОК для канарейки (2 бота) или Отмена.');
-  if (!canary) return;
+  const pick = await askChoice('Включить bot-to-bot у ботов', [
+    {value:'canary', label:'🐤 Проверка на 2 ботах', sub:'Рекомендуем первым запуском: разбор меню @BotFather зависит от языка интерфейса.'},
+    {value:'10', label:'🔟 Ещё 10 ботов', sub:'Только те, у кого режим ещё выключен.'},
+    {value:'all', label:'🕸 Все, у кого выключено', sub:'До 200 ботов за запуск. Обращения к @BotFather разносятся по времени.'},
+    {value:'redo', label:'🔁 Включить заново у всех', sub:'Включая уже отмеченных — если режим слетел после смены владельца.'},
+  ]);
+  if (!pick) return;
+  const body = pick === 'canary' ? {limit: 2}
+    : pick === '10' ? {limit: 10}
+    : pick === 'all' ? {limit: 200}
+    : {limit: 200, only_disabled: false};
+  const what = pick === 'canary' ? 'на 2 ботах' : pick === '10' ? 'на 10 ботах' : 'на всех ботах';
+  if (pick !== 'canary' && !await askConfirm('Включить bot-to-bot ' + what + '?\n\n'
+      + 'Включает аккаунт-владелец каждого бота через @BotFather.')) return;
   try {
-    const r = await api('/api/miniapp/bots/enable_b2b',
-      {method:'POST', body: JSON.stringify({limit: 2})});
-    toast('🕸 Включение запущено на 2 ботах' + (r.op_id ? ' · #'+r.op_id : ''));
-    if (r.op_id) pollOpResult(r.op_id, 'Включение bot-to-bot (канарейка)', loadBots);
+    const r = await api('/api/miniapp/bots/enable_b2b', {method:'POST', body: JSON.stringify(body)});
+    const n = Math.min(Number(r.pending || 0), body.limit);
+    toast('🕸 Включение запущено' + (n ? ': ' + n + ' ' + plural(n,'бот','бота','ботов') : '') + (r.op_id ? ' · #'+r.op_id : ''));
+    if (r.op_id) pollOpResult(r.op_id, pick === 'canary' ? 'Включение bot-to-bot (проверка)' : 'Включение bot-to-bot', loadBots);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,140)); }
 }
 

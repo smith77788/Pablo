@@ -172,6 +172,20 @@ async def _download(img_url: str) -> bytes | None:
     return None
 
 
+def image_generation_available() -> bool:
+    """Есть ли провайдер, который умеет рисовать (тот же порядок, что ниже).
+
+    Экран спрашивает это ДО публикации: без провайдера `generate_image_bytes`
+    молча отдаёт None, и пост уходит текстом, хотя владелец просил картинку.
+    """
+    try:
+        from services import ai_providers
+        names = {p.name for p in ai_providers.configured_providers()}
+    except Exception:
+        return False
+    return bool(names & {"openai", "gemini"})
+
+
 async def generate_image_bytes(prompt: str) -> bytes | None:
     """Сгенерировать картинку по промпту первым доступным провайдером.
 
