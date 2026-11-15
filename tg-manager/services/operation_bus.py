@@ -993,6 +993,44 @@ async def _active_presence_launch(conn, owner_id: int, plan_id: str) -> int | No
     )
 
 
+PROJECT_PUBLISH_REVIEW_MESSAGE = "Заново откройте предпросмотр публикации проекта и подтвердите цели."
+
+
+class ProjectPublishReviewRequired(PermissionError):
+    def __init__(self) -> None:
+        super().__init__(PROJECT_PUBLISH_REVIEW_MESSAGE)
+
+
+async def _check_project_publish_derivation(pool, owner_id: int, params: dict, source_id: int) -> None:
+    from services.network_builder import project_pilot_enabled, project_publish_channels
+    from services.security import selection_ids, validate_integer
+
+    project_id = validate_integer(str(params["project_id"]), min_val=1, max_val=2**31 - 1)
+    if project_id is None or not project_pilot_enabled(owner_id):
+        raise ProjectPublishReviewRequired
+    source = await pool.fetchrow(
+        """SELECT params->>'project_id' AS project_id,
+                  params->'channel_ids' AS channel_ids,
+                  (result->>'project_publish_scope_refused' IS NOT NULL
+                   OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required
+             FROM operation_queue
+            WHERE id=$1 AND owner_id=$2 AND op_type IN ('mass_publish','quick_post')""",
+        source_id, owner_id,
+    )
+    if not source or source["project_id"] != str(params["project_id"]) or source["review_required"]:
+        raise ProjectPublishReviewRequired
+    original = source["channel_ids"]
+    if isinstance(original, str):
+        original = json.loads(original)
+    confirmed, _ = selection_ids({"channel_ids": original}, "channel_ids")
+    requested, _ = selection_ids(params, "channel_ids")
+    if not confirmed or not requested or not set(requested).issubset(confirmed):
+        raise ProjectPublishReviewRequired
+    available = await project_publish_channels(pool, owner_id, project_id)
+    if not set(requested).issubset(row["channel_id"] for row in available):
+        raise ProjectPublishReviewRequired
+
+
 async def submit(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -1042,6 +1080,16 @@ async def submit(
         raise ValueError(
             f"operation_bus: unknown op_type={op_type!r}. Register in OP_REGISTRY first."
         )
+
+    if op_type in ("mass_publish", "quick_post") and params.get("project_id") is not None:
+        source = params.get("retry_of_op") or params.get("cloned_from_op")
+        if source is not None:
+            from services.security import validate_integer
+
+            source_id = validate_integer(str(source), min_val=1, max_val=2**63 - 1)
+            if source_id is None:
+                raise ProjectPublishReviewRequired
+            await _check_project_publish_derivation(pool, owner_id, params, source_id)
 
     meta = OP_REGISTRY[op_type]
     # Окно идемпотентности: своё у типа операции, если объявлено, иначе общее.
@@ -1966,6 +2014,8 @@ async def retry_blocker(pool: asyncpg.Pool, op_id: int, operation) -> dict | Non
     жила только в `resubmit_one`, мини-апп повторял операцию с убранным
     журналом целиком заново. Возвращает {"reason": str, ...}.
     """
+    if dict(operation).get("review_required"):
+        return {"reason": PROJECT_PUBLISH_REVIEW_MESSAGE}
     if operation["op_type"] == "deploy_network":
         params = operation["params"]
         if isinstance(params, str):
@@ -2061,6 +2111,8 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
 
     row = await pool.fetchrow(
         "SELECT owner_id, op_type, params, label, status, total_items, done_items, "
+        "       (result->>'project_publish_scope_refused' IS NOT NULL "
+        "        OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required, "
         "       (SELECT COUNT(*) FROM operation_log ol "
         "          WHERE ol.op_id = operation_queue.id AND ol.status='error'"
         + REAL_TARGET_SQL + ") AS err_cnt "

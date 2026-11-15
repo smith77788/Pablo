@@ -309,13 +309,36 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
                         project, CHANNEL)
                 elif changed == "revoked":
                     monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+                    await pool.execute(
+                        """UPDATE operation_queue SET result=result-'project_publish_scope_refused'
+                            WHERE id=$1""", op_id)
                 await pool.execute(
                     "UPDATE operation_queue SET finished_at=now()-interval '10 minutes' WHERE id=$1", op_id)
                 await op_worker._watchdog_recurring_chain(pool, None)
+                from services import operation_bus
+
+                operation = f"/api/miniapp/operation/{op_id}"
+                responses = (
+                    await client.post(operation + "/retry", headers=headers),
+                    await client.get(operation + "/editable", headers=headers),
+                    await client.post(operation + "/clone", headers=headers, json={}),
+                    await client.post("/api/miniapp/operations/retry_failed", headers=headers),
+                )
+                for response in responses:
+                    assert response.status == 409, await response.text()
+                    assert operation_bus.PROJECT_PUBLISH_REVIEW_MESSAGE in await response.text()
+                native = await operation_bus.resubmit_one(pool, OWNER, op_id)
+                assert native["code"] == 409 and native["reason"] == operation_bus.PROJECT_PUBLISH_REVIEW_MESSAGE
                 assert await pool.fetchval(
                     "SELECT count(*) FROM operation_queue WHERE owner_id=$1 AND params->>'project_id'=$2",
                     OWNER, str(project),
                 ) == 1
+                if changed == "detached":
+                    fresh_review = await client.get(
+                        f"{preview_path}?project_id={project}&project_channel_id={CHANNEL}", headers=headers)
+                    assert fresh_review.status == 200 and (await fresh_review.json())["total"] == 1
+                    fresh = await client.post(endpoint, headers=headers, json=payload)
+                    assert fresh.status == 200 and (await fresh.json())["op_id"] != op_id
             card = await client.get(f"/api/miniapp/operation/{op_id}", headers=headers)
             assert card.status == 200
             assert expected in await card.text()
@@ -335,3 +358,54 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
             await pool.execute("DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, OWNER)
 
     asyncio.run(_run(with_synthetic_account))
+
+
+def test_project_publication_retry_cannot_add_unconfirmed_targets(monkeypatch):
+    from services import operation_bus
+
+    monkeypatch.setattr("bot.utils.subscription.require_plan", AsyncMock(return_value=True))
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+
+    async def scenario(pool, _check_id):
+        project = await pool.fetchval(
+            "INSERT INTO network_instances(owner_id,name) VALUES($1,'Проект') RETURNING id", OWNER)
+        await pool.execute(
+            """INSERT INTO managed_channels(owner_id,acc_id,channel_id,title,type)
+               VALUES($1,111,$2,'Другой канал','channel'),($1,111,$3,'Поздний канал','channel')""",
+            OWNER, CHANNEL + 1, CHANNEL + 2)
+        await pool.execute(
+            """INSERT INTO network_nodes(instance_id,node_type,ref_id)
+               VALUES($1,'channel',$2),($1,'channel',$3),($1,'channel',$4)""",
+            project, CHANNEL, CHANNEL + 1, CHANNEL + 2)
+        params = {"project_id": project, "channel_ids": [CHANNEL, CHANNEL + 1], "text": "Тест"}
+        source = await operation_bus.submit(pool, OWNER, "mass_publish", params, total_items=2)
+        await pool.execute("UPDATE operation_queue SET status='failed' WHERE id=$1", source)
+        original = operation_bus.params_for_retry(source, params)
+        for invalid in (
+            {**original, "channel_ids": [CHANNEL + 2]},
+            {**original, "project_id": project + 1},
+            {**original, "retry_of_op": True},
+            {**original, "channel_ids": []},
+        ):
+            with pytest.raises(operation_bus.ProjectPublishReviewRequired):
+                await operation_bus.submit(pool, OWNER, "mass_publish", invalid)
+        with pytest.raises(operation_bus.ProjectPublishReviewRequired):
+            await operation_bus.submit(pool, OWNER + 1, "mass_publish", original)
+        assert await pool.fetchval(
+            """SELECT count(*) FROM operation_queue WHERE owner_id=$1 AND params->>'retry_of_op'=$2""",
+            OWNER, str(source),
+        ) == 0
+        retry = await operation_bus.submit(
+            pool, OWNER, "mass_publish", {**original, "channel_ids": [str(CHANNEL + 1)]}, total_items=1)
+        saved = json.loads(await pool.fetchval("SELECT params FROM operation_queue WHERE id=$1", retry))
+        assert saved["project_id"] == project and saved["channel_ids"] == [str(CHANNEL + 1)]
+        await pool.execute(
+            "DELETE FROM network_nodes WHERE instance_id=$1 AND ref_id=$2", project, CHANNEL + 1)
+        with pytest.raises(operation_bus.ProjectPublishReviewRequired):
+            await operation_bus.submit(
+                pool, OWNER, "mass_publish", {**original, "channel_ids": [str(CHANNEL + 1)]}, total_items=1)
+        monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", "")
+        with pytest.raises(operation_bus.ProjectPublishReviewRequired):
+            await operation_bus.submit(pool, OWNER, "mass_publish", {**original, "channel_ids": [CHANNEL]})
+
+    asyncio.run(_run(scenario))

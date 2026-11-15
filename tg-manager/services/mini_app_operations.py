@@ -796,6 +796,8 @@ def setup_routes(app: web.Application, pool) -> None:
                         + _obus.REAL_TARGET_SQL + ") AS err_cnt")
             row = await pool.fetchrow(
                 f"SELECT op_type, params, label, status, total_items, done_items, "
+                f"(result->>'project_publish_scope_refused' IS NOT NULL "
+                f" OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required, "
                 f"{_err_cnt} "
                 f"FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
@@ -913,6 +915,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 _resp["note"] = ("Повтор запущен один раз — расписание исходной "
                                  "операции не копируется.")
             return _json_resp(_resp)
+        except _obus.ProjectPublishReviewRequired as exc:
+            return _err(str(exc), 409)
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
@@ -965,6 +969,7 @@ def setup_routes(app: web.Application, pool) -> None:
 
         retried, skipped = [], []
         dropped_schedules = 0
+        review_required = 0
         chosen = candidates[:25]    # потолок: не заваливаем очередь одним нажатием
         # Параметры всех выбранных операций — ОДНИМ запросом. Раньше здесь был
         # отдельный запрос на каждую: до 25 обращений к базе подряд, и владелец
@@ -1007,6 +1012,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 # обещала бы владельцу запуски, которых не было.
                 if _had_schedule:
                     dropped_schedules += 1
+            except _obus.ProjectPublishReviewRequired as exc:
+                review_required += 1
+                skipped.append({"id": int(c["id"]), "why": str(exc)})
             except PermissionError as exc:
                 skipped.append({"id": int(c["id"]), "why": str(exc)[:80]})
             except ValueError:
@@ -1015,6 +1023,8 @@ def setup_routes(app: web.Application, pool) -> None:
         # Если по тарифу отказано ВО ВСЁМ — это отказ, а не «успех с пропусками»:
         # честный 403 с причиной, иначе платное ограничение выглядело бы как
         # молчаливое ничегонеделание. Частичный успех остаётся успехом.
+        if not retried and review_required:
+            return _err(_obus.PROJECT_PUBLISH_REVIEW_MESSAGE, 409)
         if not retried and skipped:
             return _err("Повтор отклонён тарифом: " + (skipped[0]["why"] or "требуется подписка"), 403)
         # Кнопка называется «перезапустить все», а за нажатие ставится не
@@ -1027,6 +1037,7 @@ def setup_routes(app: web.Application, pool) -> None:
             "candidates": len(candidates), "left": left, "items": retried[:25],
             "note": (f"Перезапущено {len(retried)}"
                      + (f", пропущено {len(skipped)}" if skipped else "")
+                     + (f". Нужен новый предпросмотр публикаций: {review_required}" if review_required else "")
                      + (f". Разовым запуском, без копирования расписания: "
                         f"{dropped_schedules}" if dropped_schedules else "")
                      + (f". Осталось недоведённых: {left} — нажмите ещё раз"
@@ -1141,12 +1152,16 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return None, _err("Неверный идентификатор операции", 400)
         row = await pool.fetchrow(
-            "SELECT op_type, params, label, status, total_items "
+            "SELECT op_type, params, label, status, total_items, "
+            "(result->>'project_publish_scope_refused' IS NOT NULL "
+            " OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return None, _err("Не найдено", 404)
         if row["op_type"] == "deploy_network" and "topology_digest" in _row_params(row):
             return None, _err("Сверьте результат и заново откройте план развёртывания проекта", 409)
+        if dict(row).get("review_required"):
+            return None, _err(_obus.PROJECT_PUBLISH_REVIEW_MESSAGE, 409)
         return (uid, op_id, row), None
 
     async def _live_copy(op_id: int, uid: int) -> int | None:
@@ -1249,6 +1264,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 new_id = await _obus.submit(pool, uid, row["op_type"], params,
                                             total_items=int(row["total_items"] or 0),
                                             label=label)
+            except _obus.ProjectPublishReviewRequired as exc:
+                return _err(str(exc), 409)
             except PermissionError as exc:
                 # Отказ по тарифу или предохранителю — не сбой: честный 403.
                 return _err(str(exc) or "Требуется подписка", 403)

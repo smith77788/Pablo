@@ -7792,7 +7792,7 @@ async def _reference_media_bytes(pool, owner_id: int, refs, acc_ids) -> bytes | 
 
 
 def _project_publication_refused(params: dict, reason: str) -> dict:
-    result = {"status": "failed", "summary": reason}
+    result = {"status": "failed", "summary": reason, "project_publish_scope_refused": True}
     if params.get("repeat_interval_min"):
         result["summary"] = f"{reason} Расписание остановлено. Подтвердите новый запуск."
         result["recurring_stop_reason"] = reason
