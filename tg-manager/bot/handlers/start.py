@@ -291,15 +291,30 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
         await message.answer("⛔️ Ваш аккаунт заблокирован. Обратитесь в поддержку.")
         return
 
-    is_new = False
+    is_new = existing is None
+
+    async def _register() -> None:
+        try:
+            await db.register_or_update_user(
+                pool,
+                uid,
+                message.from_user.username,
+                message.from_user.first_name or "",
+            )
+        except Exception:
+            log_exc_swallow(log, "Не удалось зарегистрировать или обновить пользователя")
+
+    # Новичку регистрация нужна ДО всего остального (реферал, онбординг).
+    # Вернувшемуся владельцу она — просто отметка last_seen: идёт одной пачкой
+    # с подсчётами сводки ниже, а не отдельным походом в базу перед ними.
+    register_task = None
+    if is_new or not bots:
+        await _register()
+    else:
+        from services.bg_tasks import spawn as _spawn_bg  # strong-ссылка (класс #14)
+        register_task = _spawn_bg(_register(), name="start_register")
+
     try:
-        is_new = existing is None
-        await db.register_or_update_user(
-            pool,
-            uid,
-            message.from_user.username,
-            message.from_user.first_name or "",
-        )
         if is_new:
             await notify_new_platform_user(
                 message.bot,
@@ -318,7 +333,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
                 from services.bg_tasks import spawn  # strong-ссылка (класс #14)
                 spawn(_record_reentry_safe(pool, uid, days_absent))
     except Exception:
-        log_exc_swallow(log, "Не удалось зарегистрировать или обновить пользователя")
+        log_exc_swallow(log, "Не удалось обработать вход пользователя")
 
     # Handle deep link params from /start
     args = message.text.split(maxsplit=1)
@@ -412,19 +427,39 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
 
     total_aud = sum(b["audience_count"] for b in bots if "audience_count" in b.keys())
 
-    active_broadcasts = 0
-    try:
-        bot_ids = [b["bot_id"] for b in bots]
-        active_broadcasts = (
-            await pool.fetchval(
-                "SELECT COUNT(*) FROM broadcasts WHERE bot_id = ANY($1::bigint[]) AND status IN ('pending', 'running')",
-                bot_ids,
+    async def _active_broadcasts() -> int:
+        try:
+            bot_ids = [b["bot_id"] for b in bots]
+            return (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM broadcasts WHERE bot_id = ANY($1::bigint[]) AND status IN ('pending', 'running')",
+                    bot_ids,
+                )
+                or 0
             )
-            or 0
-        )
-    except Exception:
-        log_exc_swallow(log, "Не удалось получить количество активных рассылок")
-        active_broadcasts = 0
+        except Exception:
+            log_exc_swallow(log, "Не удалось получить количество активных рассылок")
+            return 0
+
+    # Итог недели одной строкой — тот же расчёт, что «📊 Итоги»: вернувшийся
+    # владелец первым видит результат, а не только число ботов. Ограничен по
+    # времени и глушится: /start не должен ждать медленную базу.
+    async def _result_line() -> str:
+        try:
+            from services import results_summary as _rs
+
+            _sum = await asyncio.wait_for(
+                _rs.compute(pool, uid, 7, with_attention=False), 3)
+            return f"\n📊 {_rs.one_line(_sum)}"
+        except Exception:
+            log_exc_swallow(log, "/start: итоги недели не посчитались")
+            return ""
+
+    # Счётчик рассылок, итоги недели и отметка входа независимы — разом.
+    active_broadcasts, result_line = await asyncio.gather(
+        _active_broadcasts(), _result_line())
+    if register_task is not None:
+        await register_task
 
     stats_lines = [
         f"🤖 Ботов: <b>{bot_count}</b>",
@@ -434,19 +469,6 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
         stats_lines.append(f"📢 Активных рассылок: <b>{active_broadcasts}</b>")
     summary = " · ".join(stats_lines[:2])
     extra = f"\n{stats_lines[2]}" if active_broadcasts else ""
-
-    # Итог недели одной строкой — тот же расчёт, что «📊 Итоги»: вернувшийся
-    # владелец первым видит результат, а не только число ботов. Ограничен по
-    # времени и глушится: /start не должен ждать медленную базу.
-    result_line = ""
-    try:
-        from services import results_summary as _rs
-
-        _sum = await asyncio.wait_for(
-            _rs.compute(pool, uid, 7, with_attention=False), 3)
-        result_line = f"\n📊 {_rs.one_line(_sum)}"
-    except Exception:
-        log_exc_swallow(log, "/start: итоги недели не посчитались")
 
     await message.answer(
         f"👋 <b>Infragram OS</b>  <code>v{BUILD_VERSION}</code>\n\n"

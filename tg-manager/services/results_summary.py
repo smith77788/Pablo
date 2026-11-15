@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 log = logging.getLogger(__name__)
@@ -127,24 +128,28 @@ async def _money(pool, uid: int, days: int) -> dict | None:
     out: dict = {"orders": 0, "by_currency": {}, "prev_by_currency": {},
                  "deals_won": 0, "deals_value": 0.0}
     ok = False
-    try:
-        rows = await pool.fetch(_ORDERS_SQL, uid, days)
+    # Заказы и сделки — два независимых запроса: разом, не подряд.
+    rows, row = await asyncio.gather(
+        pool.fetch(_ORDERS_SQL, uid, days),
+        pool.fetchrow(_DEALS_SQL, uid, days),
+        return_exceptions=True,
+    )
+    if isinstance(rows, BaseException):
+        log.warning("итоги: не удалось посчитать заказы", exc_info=rows)
+    else:
         ok = True
         for r in rows or []:
             cur = str(r["currency"] or "USD").upper()
             out["by_currency"][cur] = int(r["cur"] or 0)
             out["prev_by_currency"][cur] = int(r["prev"] or 0)
             out["orders"] += int(r["n"] or 0)
-    except Exception:
-        log.warning("итоги: не удалось посчитать заказы", exc_info=True)
-    try:
-        row = await pool.fetchrow(_DEALS_SQL, uid, days)
+    if isinstance(row, BaseException):
+        log.warning("итоги: не удалось посчитать сделки", exc_info=row)
+    else:
         ok = True
         if row:
             out["deals_won"] = int(row["n"] or 0)
             out["deals_value"] = float(row["total"] or 0)
-    except Exception:
-        log.warning("итоги: не удалось посчитать сделки", exc_info=True)
     return out if ok else None
 
 
@@ -171,10 +176,25 @@ async def _has_resources(pool, uid: int) -> bool | None:
 async def compute(pool, uid: int, days: int = 7, *, with_attention: bool = True) -> dict:
     """Итоги владельца за `days` дней (1..90) и сравнение с прошлым периодом."""
     days = _clamp_days(days)
-    leads = await _scalar_pair(pool, _LEADS_SQL, uid, days, "лиды")
-    replies = await _scalar_pair(pool, _REPLIES_SQL, uid, days, "ответы")
-    reach = await _scalar_pair(pool, _REACH_SQL, uid, days, "охват")
-    money = await _money(pool, uid, days)
+    # Все выборки независимы и каждая глушит свой сбой сама — идут разом, а
+    # не друг за другом: шесть походов в базу подряд были главной частью
+    # времени /start и экрана «Итоги». «Требует внимания» — тоже в общей
+    # пачке, а не после неё.
+    att_task = None
+    if with_attention:
+        att_task = asyncio.ensure_future(_attention(pool, uid))
+    try:
+        leads, replies, reach, money, has_res = await asyncio.gather(
+            _scalar_pair(pool, _LEADS_SQL, uid, days, "лиды"),
+            _scalar_pair(pool, _REPLIES_SQL, uid, days, "ответы"),
+            _scalar_pair(pool, _REACH_SQL, uid, days, "охват"),
+            _money(pool, uid, days),
+            _has_resources(pool, uid),
+        )
+    except BaseException:
+        if att_task is not None:
+            att_task.cancel()
+        raise
 
     def _metric(pair):
         cur, prev = pair
@@ -188,19 +208,26 @@ async def compute(pool, uid: int, days: int = 7, *, with_attention: bool = True)
         "reach": _metric(reach),
         "attention": [],
         "attention_total": 0,
-        "has_resources": await _has_resources(pool, uid),
+        "has_resources": has_res,
     }
-    if with_attention:
-        try:
-            from services.mini_app_dashboard import attention_items
-
-            att = await attention_items(pool, uid)
-            items = list(att.get("items") or [])
+    if att_task is not None:
+        items = await att_task
+        if items is not None:
             out["attention"] = items[:ATTENTION_LIMIT]
             out["attention_total"] = len(items)
-        except Exception:
-            log.warning("итоги: не удалось собрать «требует внимания»", exc_info=True)
     return out
+
+
+async def _attention(pool, uid: int) -> list | None:
+    """Карточки «требует внимания»; None — не удалось собрать."""
+    try:
+        from services.mini_app_dashboard import attention_items
+
+        att = await attention_items(pool, uid)
+        return list(att.get("items") or [])
+    except Exception:
+        log.warning("итоги: не удалось собрать «требует внимания»", exc_info=True)
+        return None
 
 
 # ── Текст для бота ─────────────────────────────────────────────────────────

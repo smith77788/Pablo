@@ -29,6 +29,7 @@ build_checklist — чистая функция (тестируется без �
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
@@ -474,24 +475,23 @@ async def _count(pool, sql: str, uid: int) -> int:
 async def _goal_counts(pool, uid: int, goal: Optional[str]) -> dict:
     """Счётчики шагов пути цели. Читаются только для выбранной цели."""
     if goal == "sell_bot":
-        return {
-            "bots": await _count(pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid),
-            "personas_bound": await _count(
-                pool, "SELECT COUNT(*) FROM bot_sales_personas "
-                      "WHERE owner_id=$1 AND bot_id IS NOT NULL", uid),
-            "sales_dialogs": await _count(
-                pool, "SELECT COUNT(*) FROM bot_sales_dialogs WHERE owner_id=$1", uid),
-            "sales_orders": await _count(
-                pool, "SELECT COUNT(*) FROM bot_sales_orders WHERE owner_id=$1", uid),
+        sql = {
+            "bots": "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1",
+            "personas_bound": "SELECT COUNT(*) FROM bot_sales_personas "
+                              "WHERE owner_id=$1 AND bot_id IS NOT NULL",
+            "sales_dialogs": "SELECT COUNT(*) FROM bot_sales_dialogs WHERE owner_id=$1",
+            "sales_orders": "SELECT COUNT(*) FROM bot_sales_orders WHERE owner_id=$1",
         }
-    if goal == "crm":
-        return {
-            "contacts": await _count(
-                pool, "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1", uid),
-            "deals": await _count(
-                pool, "SELECT COUNT(*) FROM contact_crm WHERE owner_id=$1", uid),
+    elif goal == "crm":
+        sql = {
+            "contacts": "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1",
+            "deals": "SELECT COUNT(*) FROM contact_crm WHERE owner_id=$1",
         }
-    return {}
+    else:
+        return {}
+    # Счётчики независимы и каждый глушит свой сбой сам — разом, не подряд.
+    vals = await asyncio.gather(*(_count(pool, q, uid) for q in sql.values()))
+    return dict(zip(sql.keys(), vals))
 
 
 def goal_result(state: dict) -> Optional[dict]:
@@ -515,9 +515,16 @@ async def load_state(pool, uid: int) -> dict:
     фиксации активации (см. record_activation)."""
     from services import op_status
 
-    stored = await pool.fetchrow(
-        "SELECT activated_at, first_result_op_id, first_result_label, first_result_ok "
-        "FROM onboarding_progress WHERE owner_id=$1", uid)
+    # Запросы ниже независимы и идут пачками разом, а не по одному: чеклист
+    # грузится при каждом открытии мини-аппа, и десяток походов в базу подряд
+    # был заметной частью времени главной. Цель нужна обеим веткам — читаем
+    # её сразу вместе с отметкой активации.
+    stored, goal = await asyncio.gather(
+        pool.fetchrow(
+            "SELECT activated_at, first_result_op_id, first_result_label, first_result_ok "
+            "FROM onboarding_progress WHERE owner_id=$1", uid),
+        load_goal(pool, uid),
+    )
     if stored and stored["activated_at"] is not None:
         # Активирован раньше — остальное не читаем: чеклист ему не покажут.
         fr = None
@@ -527,60 +534,68 @@ async def load_state(pool, uid: int) -> dict:
                   "ok": stored["first_result_ok"]}
         return {"accounts": 1, "first_result": fr,
                 "activated_at": stored["activated_at"],
-                "goal": await load_goal(pool, uid)}
+                "goal": goal}
 
-    acc = await pool.fetchrow(
-        "SELECT COUNT(*) AS total, "
-        "COUNT(*) FILTER (WHERE is_active IS NOT FALSE "
-        "  AND COALESCE(acc_status, 'active') <> ALL($2::text[])) AS alive, "
-        "COUNT(*) FILTER (WHERE proxy_id IS NOT NULL) AS with_proxy "
-        "FROM tg_accounts WHERE owner_id=$1 "
-        "AND session_str IS NOT NULL AND session_str <> ''",
-        uid, list(_DEAD))
-    proxies = await pool.fetchval(
-        "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1", uid) or 0
     excl = list(NOT_A_RESULT)
-    user_ops = await pool.fetchval(
-        "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 "
-        "AND op_type <> ALL($2::text[])", uid, excl) or 0
+    acc, proxies, user_ops, goal_counts, warmup_days = await asyncio.gather(
+        pool.fetchrow(
+            "SELECT COUNT(*) AS total, "
+            "COUNT(*) FILTER (WHERE is_active IS NOT FALSE "
+            "  AND COALESCE(acc_status, 'active') <> ALL($2::text[])) AS alive, "
+            "COUNT(*) FILTER (WHERE proxy_id IS NOT NULL) AS with_proxy "
+            "FROM tg_accounts WHERE owner_id=$1 "
+            "AND session_str IS NOT NULL AND session_str <> ''",
+            uid, list(_DEAD)),
+        pool.fetchval(
+            "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1", uid),
+        pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 "
+            "AND op_type <> ALL($2::text[])", uid, excl),
+        _goal_counts(pool, uid, goal),
+        # Нужен только без первого результата, но дешёвый и независимый —
+        # читаем заранее в той же пачке, а не отдельным походом после.
+        pool.fetchval(
+            "SELECT COALESCE(MAX(current_day), 0) FROM account_warmup_plans "
+            "WHERE owner_id=$1", uid),
+    )
+    proxies = proxies or 0
+    user_ops = user_ops or 0
 
     first_result = inflight = last_failed = None
     if user_ops:
-        row = await pool.fetchrow(
-            f"SELECT q.id, q.op_type, q.label, {_OK_SQL} AS ok "
-            "FROM operation_queue q WHERE q.owner_id=$1 "
-            "AND q.op_type <> ALL($2::text[]) AND q.status = ANY($3::text[]) "
-            f"AND {_OK_SQL} > 0 "
-            "ORDER BY q.finished_at NULLS LAST, q.id LIMIT 1",
-            uid, excl, sorted(op_status.PRODUCTIVE))
-        first_result = dict(row) if row else None
-        if not first_result:
-            row = await pool.fetchrow(
+        # Три выборки по операциям владельца — одной пачкой. «В работе» и
+        # «последняя завершённая» нужны только без первого результата; их
+        # отбрасываем, если он есть.
+        fr_row, if_row, lf_row = await asyncio.gather(
+            pool.fetchrow(
+                f"SELECT q.id, q.op_type, q.label, {_OK_SQL} AS ok "
+                "FROM operation_queue q WHERE q.owner_id=$1 "
+                "AND q.op_type <> ALL($2::text[]) AND q.status = ANY($3::text[]) "
+                f"AND {_OK_SQL} > 0 "
+                "ORDER BY q.finished_at NULLS LAST, q.id LIMIT 1",
+                uid, excl, sorted(op_status.PRODUCTIVE)),
+            pool.fetchrow(
                 "SELECT q.id, q.op_type, q.label, q.status, q.done_items, q.total_items "
                 "FROM operation_queue q WHERE q.owner_id=$1 "
                 "AND q.op_type <> ALL($2::text[]) AND q.status = ANY($3::text[]) "
                 "ORDER BY q.id DESC LIMIT 1",
-                uid, excl, sorted(op_status.IN_FLIGHT))
-            inflight = dict(row) if row else None
-            row = await pool.fetchrow(
+                uid, excl, sorted(op_status.IN_FLIGHT)),
+            pool.fetchrow(
                 "SELECT q.id, q.op_type, q.label, q.status, "
                 f"{op_status.sql_error_reason('q.')} AS reason "
                 "FROM operation_queue q WHERE q.owner_id=$1 "
                 "AND q.op_type <> ALL($2::text[]) AND q.status = ANY($3::text[]) "
                 "ORDER BY q.id DESC LIMIT 1",
-                uid, excl, sorted(op_status.TERMINAL))
-            last_failed = dict(row) if row else None
+                uid, excl, sorted(op_status.TERMINAL)),
+        )
+        first_result = dict(fr_row) if fr_row else None
+        if not first_result:
+            inflight = dict(if_row) if if_row else None
+            last_failed = dict(lf_row) if lf_row else None
             if last_failed and last_failed.get("status") == op_status.CANCELLED:
                 last_failed["reason"] = last_failed.get("reason") or "отменена"
 
-    goal = await load_goal(pool, uid)
-    goal_counts = await _goal_counts(pool, uid, goal)
-
-    warmup_days = 0
-    if not first_result:
-        warmup_days = await pool.fetchval(
-            "SELECT COALESCE(MAX(current_day), 0) FROM account_warmup_plans "
-            "WHERE owner_id=$1", uid) or 0
+    warmup_days = 0 if first_result else (warmup_days or 0)
 
     return {
         "accounts": acc["total"] if acc else 0,

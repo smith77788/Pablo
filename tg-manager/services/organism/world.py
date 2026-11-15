@@ -304,41 +304,54 @@ async def _invite_chats(pool, owner_id: int) -> dict:
 async def _fleet(pool, owner_id: int) -> dict:
     out = {"accounts": 0, "active": 0, "dead": 0, "restricted": 0, "bans_24h": 0,
            "pressure": 0, "governor_mult": 1.0, "governor_level": "green"}
-    try:
-        r = await pool.fetchrow(
-            "SELECT COUNT(*) AS total, "
-            "COUNT(*) FILTER (WHERE is_active AND "
-            + _acc_status.sql_not_dead(default="ok") + ") AS active, "
-            "COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') "
-            "  IN ('banned','deactivated','session_expired')) AS dead, "
-            "COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') = 'spamblock') AS restricted "
-            "FROM tg_accounts WHERE owner_id=$1", owner_id)
-        if r:
-            out["accounts"], out["active"], out["dead"] = int(r["total"]), int(r["active"]), int(r["dead"])
-            out["restricted"] = int(r["restricted"] or 0)
-    except Exception:
-        log.debug("world._fleet failed owner=%s", owner_id)
-    try:
-        from services import fleet_governor
-        g = await fleet_governor.status(pool, owner_id)
-        out["pressure"] = g.get("score", 0)
-        out["governor_mult"] = g.get("multiplier", 1.0)
-        out["governor_level"] = g.get("level", "green")
-        if g.get("storm"):
-            out["storm"] = g["storm"]
-    except Exception:
-        log.debug("world._fleet governor failed owner=%s", owner_id)
-    try:
-        from services.organism import spine
-        out["bans_24h"] = int((await spine.event_counts(pool, owner_id, hours=24)).get("ban", 0))
-    except Exception:
-        pass
-    try:
-        from services import geo_router
-        dist = await geo_router.get_geo_distribution(pool, owner_id)
-        out["geo"] = geo_router.summarize_distribution(dist)
-    except Exception:
-        log.debug("world._fleet geo failed owner=%s", owner_id)
+
+    # Четыре части независимы, пишут в разные ключи и каждая глушит свой сбой
+    # сама — идут разом. Подряд это была самая долгая секция снимка, то есть
+    # время всего «Пульса» на главной.
+    async def _counts():
+        try:
+            r = await pool.fetchrow(
+                "SELECT COUNT(*) AS total, "
+                "COUNT(*) FILTER (WHERE is_active AND "
+                + _acc_status.sql_not_dead(default="ok") + ") AS active, "
+                "COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') "
+                "  IN ('banned','deactivated','session_expired')) AS dead, "
+                "COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') = 'spamblock') AS restricted "
+                "FROM tg_accounts WHERE owner_id=$1", owner_id)
+            if r:
+                out["accounts"], out["active"], out["dead"] = int(r["total"]), int(r["active"]), int(r["dead"])
+                out["restricted"] = int(r["restricted"] or 0)
+        except Exception:
+            log.debug("world._fleet failed owner=%s", owner_id)
+
+    async def _governor():
+        try:
+            from services import fleet_governor
+            g = await fleet_governor.status(pool, owner_id)
+            out["pressure"] = g.get("score", 0)
+            out["governor_mult"] = g.get("multiplier", 1.0)
+            out["governor_level"] = g.get("level", "green")
+            if g.get("storm"):
+                out["storm"] = g["storm"]
+        except Exception:
+            log.debug("world._fleet governor failed owner=%s", owner_id)
+
+    async def _bans():
+        try:
+            from services.organism import spine
+            out["bans_24h"] = int((await spine.event_counts(pool, owner_id, hours=24)).get("ban", 0))
+        except Exception:
+            pass
+
+    async def _geo():
+        try:
+            from services import geo_router
+            dist = await geo_router.get_geo_distribution(pool, owner_id)
+            out["geo"] = geo_router.summarize_distribution(dist)
+        except Exception:
+            log.debug("world._fleet geo failed owner=%s", owner_id)
+
+    await asyncio.gather(_counts(), _governor(), _bans(), _geo())
     return out
 
 
