@@ -984,7 +984,7 @@ async def replace_bot_token(
               SET token=$3,
                   username=COALESCE(NULLIF($4,''), username),
                   first_name=COALESCE(NULLIF($5,''), first_name),
-                  is_active=TRUE, deleted_at=NULL, cleanup_paused=FALSE,
+                  is_active=NOT cleanup_paused, deleted_at=NULL,
                   fail_streak=0, last_error=NULL, dead_notified_at=NULL
             WHERE bot_id=$1 AND added_by=$2
         RETURNING bot_id""",
@@ -1169,6 +1169,35 @@ async def set_managed_bot_active(conn, bot_id: int, owner_id: int, active: bool 
         RETURNING bot_id, is_active""",
         bot_id, owner_id, active, cleanup_pause,
     )
+
+
+async def toggle_managed_bot_with_history(pool, bot_id: int, owner_id: int, active: bool | None):
+    """Записать восстановление из очистки вместе со снятием паузы."""
+    async with pool.acquire() as conn, conn.transaction():
+        before = await conn.fetchrow(
+            """SELECT cleanup_paused FROM managed_bots
+                WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL FOR UPDATE""",
+            bot_id, owner_id,
+        )
+        if before is None:
+            return None
+        row = await set_managed_bot_active(conn, bot_id, owner_id, active)
+        if row["is_active"] and before["cleanup_paused"]:
+            target = f"bot:{bot_id}"
+            operation_id = await conn.fetchval(
+                """SELECT id FROM operation_queue
+                    WHERE owner_id=$1 AND op_type='check_owned_restrictions' AND id=(
+                        SELECT operation_id FROM operation_audit
+                         WHERE owner_id=$1 AND action='restriction_cleanup_disable'
+                           AND target=$2 AND result='success'
+                         ORDER BY id DESC LIMIT 1
+                    )""", owner_id, target,
+            )
+            await record_manual_action(
+                conn, owner_id, "bot_restore", target=target, require_audit=True,
+                operation_id=operation_id,
+            )
+        return row
 
 
 _SOFT_DELETE_BOT = (
@@ -2273,19 +2302,22 @@ async def update_bot_token(
     new_bot_id: int,
     username: str,
     first_name: str,
-) -> None:
+) -> bool:
+    """При паузе очистки токен можно обновить для того же бота."""
     from services.token_vault import encrypt_token as _enc_tok
-    await pool.execute(
+    return bool(await pool.fetchval(
         """UPDATE managed_bots
            SET token=$3, bot_id=$4, username=$5, first_name=$6
-           WHERE bot_id=$1 AND added_by=$2""",
+           WHERE bot_id=$1 AND added_by=$2
+             AND (NOT cleanup_paused OR bot_id=$4)
+           RETURNING 1""",
         bot_id,
         added_by,
         _enc_tok(new_token),
         new_bot_id,
         username,
         first_name,
-    )
+    ))
 
 
 async def get_audience_daily_growth(

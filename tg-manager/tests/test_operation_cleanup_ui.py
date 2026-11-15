@@ -185,6 +185,8 @@ const esc = String;
 const errRu = e => e.message;
 let recoveryId;
 const openRemovedChannels = id => { recoveryId = id; };
+let resumedBotId;
+const openBot = id => { resumedBotId = id; };
 const firstId = 9007199254740993n;
 const ids = Array.from({length:1000}, (_, i) => String(firstId + BigInt(i)));
 const findings = ids.map((id, i) => ({id, kind:'channel', title:'Ресурс ' + i,
@@ -339,6 +341,17 @@ Object.defineProperty(control('[data-cleanup-review]'), 'innerHTML', {set() {
   control('[data-cleanup-action]').onchange();
   assert.match(list.innerHTML, /data-cleanup-target value="1000" disabled/);
   assert.equal(control('[data-cleanup-preview]').disabled, true);
+
+  const pausedBotId = String(firstId + 1001n);
+  findings.push({id:pausedBotId, kind:'bot', title:'Бот на паузе', status:'restricted',
+    active:false, can_disable:false, can_resume:true, projects:[]});
+  await openOperationCleanup(42);
+  search.value = '#' + pausedBotId;
+  search.oninput();
+  assert.match(list.innerHTML, /data-cleanup-target value="1001" disabled/);
+  assert.match(list.innerHTML, /data-cleanup-resume="1001"/);
+  list.onclick({target:{closest:() => ({dataset:{cleanupResume:'1001'}})}});
+  assert.equal(resumedBotId, pausedBotId);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     subprocess.run([node, "-"], input=source.read_text() + "\n" + script, text=True, check=True)

@@ -111,7 +111,7 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
     channels = sorted(item_id for kind, item_id in entries if kind != "bot")
     suffix = " FOR UPDATE" if lock else ""
     bot_rows = await conn.fetch(
-        """SELECT bot_id, first_name, username, is_active, xmin::text AS revision
+        """SELECT bot_id, first_name, username, is_active, cleanup_paused, xmin::text AS revision
              FROM managed_bots
             WHERE added_by=$1 AND bot_id=ANY($2::bigint[]) AND deleted_at IS NULL
             ORDER BY bot_id""" + suffix, owner_id, bots)
@@ -188,6 +188,8 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
             "can_disable": not reason, "disable_reason": reason,
             "revisions": [value["revision"] for value in owned],
         }
+        if kind == "bot" and row["cleanup_paused"] and not active:
+            items[key]["can_resume"] = True
         if kind != "bot":
             items[key]["bindings"] = [
                 {"row_id": value["id"], "account_id": value["acc_id"]} for value in owned
@@ -232,12 +234,14 @@ async def findings(pool, owner_id, op_id, *, include_history=False):
             history = await conn.fetch(
                 """SELECT action, target, occurred_at FROM operation_audit
                     WHERE owner_id=$1 AND operation_id=$2 AND result='success'
-                      AND action IN ('restriction_cleanup_detach','restriction_cleanup_disable','channel_restore')
+                      AND action IN ('restriction_cleanup_detach','restriction_cleanup_disable',
+                                     'channel_restore','bot_restore')
                     ORDER BY occurred_at DESC NULLS LAST, id DESC LIMIT 51""",
                 owner_id, op_id,
             )
             response["history"] = [
-                {"action": "restore" if r["action"] == "channel_restore" else r["action"].removeprefix("restriction_cleanup_"),
+                {"action": "restore" if r["action"] in ("bot_restore", "channel_restore")
+                 else r["action"].removeprefix("restriction_cleanup_"),
                  "target": r["target"],
                  "occurred_at": r["occurred_at"].isoformat() if r["occurred_at"] else None}
                 for r in history[:50]

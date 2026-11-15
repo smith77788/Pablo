@@ -239,10 +239,14 @@ async function openOperationCleanup(opId) {
             memberships ? 'Проекты: ' + memberships : '',
             unavailable,
           ].filter(Boolean).join(' · ');
+          const resume = item.can_resume === true
+            ? `<button type="button" class="btn btn-s" data-cleanup-resume="${esc(index)}"
+                aria-label="${esc('Настройки бота · ' + title(item) + ' · ID: ' + item.id)}">Настройки бота</button>`
+            : '';
           return `<label class="row chk-row" style="min-height:44px;cursor:${eligible ? 'pointer' : 'default'}">
             <input type="checkbox" data-cleanup-target value="${esc(index)}" ${eligible ? '' : 'disabled'} ${selected.has(index) ? 'checked' : ''}>
             <span class="row-body"><span class="row-name" style="display:block;overflow-wrap:anywhere">${esc(title(item))}</span>
-            <span class="row-val" style="display:block;white-space:normal">${esc(details)}</span></span></label>`;
+            <span class="row-val" style="display:block;white-space:normal">${esc(details)}</span></span></label>${resume}`;
         }).join('');
         if (!filtered.length) list.textContent = 'В этом срезе нет ресурсов.';
         list.scrollTop = 0;
@@ -261,6 +265,13 @@ async function openOperationCleanup(opId) {
         resetPage();
       };
       selectedOnly.onclick = () => { showSelected = !showSelected; resetPage(); };
+      list.onclick = event => {
+        const button = event.target.closest('[data-cleanup-resume]');
+        const item = button && findings[Number(button.dataset.cleanupResume)];
+        if (item?.kind !== 'bot' || item.can_resume !== true) return;
+        close.click();
+        openBot(String(item.id));
+      };
       list.onchange = event => {
         const input = event.target;
         if (!input.matches('[data-cleanup-target]') || input.disabled) return;

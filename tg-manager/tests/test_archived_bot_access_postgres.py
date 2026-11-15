@@ -1,8 +1,8 @@
 """Границы отключения бота через отчёт и архивирования через Mini App."""
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
-from aiohttp import web
+from aiohttp import ClientSession, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from services import bot_api, mini_app_bots, mini_app_funnels, mini_app_operations, op_worker
@@ -10,6 +10,91 @@ from services.mini_app_auth import make_token
 from tests.test_restriction_cleanup_postgres import BOT, BOT_TARGET, OWNER, _run, pytestmark
 
 __all__ = ["pytestmark"]
+
+
+def test_report_bot_reimport_and_atomic_resume_history(monkeypatch):
+    from bot.handlers.edit import msg_update_token
+    from database import db
+
+    secret = "123456:synthetic-bot-resume"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+    replacement = f"{BOT}:" + "a" * 35
+    telegram_response = AsyncMock()
+    telegram_response.__aenter__.return_value = telegram_response
+    telegram_response.json.return_value = {
+        "ok": True, "result": {"id": BOT, "first_name": "Переимпортированный бот"},
+    }
+
+    async def scenario(pool, op_id):
+        app = web.Application()
+        mini_app_bots.setup_routes(app, pool)
+        mini_app_operations.setup_routes(app, pool)
+        path = f"/api/miniapp/bot/{BOT}/toggle"
+        cleanup = f"/api/miniapp/operations/{op_id}/cleanup"
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        outsider = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+        plan = {"action": "disable", "targets": [BOT_TARGET]}
+        async with TestClient(TestServer(app)) as client:
+            preview = await (await client.post(cleanup, json={**plan, "preview": True}, headers=headers)).json()
+            signed = {**plan, "token": preview["token"]}
+            assert (await client.post(cleanup, json=signed, headers=headers)).status == 200
+            imported = Mock(return_value=telegram_response)
+            with monkeypatch.context() as telegram:
+                telegram.setattr(ClientSession, "get", imported)
+                response = await client.post("/api/miniapp/bot/add", json={"token": replacement}, headers=headers)
+                assert response.status == 200, await response.text()
+                assert (await response.json())["token_replaced"]
+            imported.assert_called_once()
+            message = Mock(text=replacement, from_user=Mock(id=OWNER), answer=AsyncMock())
+            state = Mock(get_data=AsyncMock(return_value={"old_bot_id": BOT}), clear=AsyncMock())
+            identity = AsyncMock(side_effect=[
+                {"id": BOT + 1}, {"id": BOT, "first_name": "<Имя бота>"},
+            ])
+            with monkeypatch.context() as telegram:
+                telegram.setattr(bot_api, "get_me", identity)
+                await msg_update_token(message, state, pool, None)
+                state.clear.assert_not_awaited()
+                assert "Не удалось обновить токен" in message.answer.await_args.args[0]
+                await msg_update_token(message, state, pool, None)
+                state.clear.assert_awaited_once()
+                assert "&lt;Имя бота&gt;" in message.answer.await_args.args[0]
+            assert await pool.fetchval("SELECT cleanup_paused FROM managed_bots WHERE bot_id=$1", BOT)
+            report = await (await client.get(cleanup, headers=headers)).json()
+            bot = report["findings"][0]
+            assert (bot["id"], bot["status"], bot["active"], bot["can_resume"]) == (
+                str(BOT), "restricted", False, True)
+            assert replacement not in str(report)
+            card = await client.get(f"/api/miniapp/bot/{BOT}", headers=headers)
+            assert card.status == 200
+            assert "token" not in (await card.json())["bot"]
+            assert [entry["action"] for entry in report["history"]] == ["disable"]
+            assert (await client.put(path, json={"active": True}, headers=outsider)).status == 404
+            assert (await client.put(path, json={"active": "true"}, headers=headers)).status == 400
+            with monkeypatch.context() as failed:
+                failed.setattr(db, "record_manual_action", AsyncMock(side_effect=RuntimeError("Сбой аудита")))
+                assert (await client.put(path, json={"active": True}, headers=headers)).status == 500
+            assert not await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
+            results = await asyncio.gather(*(
+                client.put(path, json={"active": True}, headers=headers) for _ in range(2)
+            ))
+            for result in results:
+                assert result.status == 200
+                assert (await result.json())["is_active"]
+            reread = await (await client.get(cleanup, headers=headers)).json()
+            assert reread["findings"][0]["can_disable"] and "can_resume" not in reread["findings"][0]
+            assert [(entry["action"], entry["target"]) for entry in reread["history"]] == [
+                ("restore", f"bot:{BOT}"), ("disable", f"bot:{BOT}")]
+            replay = await client.post(cleanup, json=signed, headers=headers)
+            assert replay.status == 200 and (await replay.json())["replayed"]
+            assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
+            for expected in (False, True):
+                legacy = await client.put(path, headers=headers)
+                assert legacy.status == 200 and (await legacy.json())["is_active"] is expected
+            after_legacy = await (await client.get(cleanup, headers=headers)).json()
+            assert after_legacy["history"] == reread["history"]
+
+    asyncio.run(_run(scenario))
 
 
 def test_report_pause_archive_and_restore_across_direct_routes(monkeypatch):

@@ -276,6 +276,7 @@ ACTION_RU: dict[str, str] = {
     "bots_cleanup_dead": "Очистка мёртвых ботов",
     "channel_remove": "Канал убран из управления",
     "channel_restore": "Канал возвращён в управление",
+    "bot_restore": "Бот возвращён в работу",
     "channels_bulk_delete": "Массовое удаление каналов",
     "ecosystem_delete": "Удалена экосистема",
     "ecosystem_foreign_link_refused": "Отказ: чужая ссылка в экосистеме",

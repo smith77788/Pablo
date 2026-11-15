@@ -1470,14 +1470,15 @@ def setup_routes(app: web.Application, pool) -> None:
         if request.can_read_body:
             try:
                 body = await request.json()
-            except Exception:
-                body = None
-            if isinstance(body, dict) and isinstance(body.get("active"), bool):
-                want = body["active"]
+            except ValueError:
+                return _err("Неверное состояние бота", 400)
+            if not isinstance(body, dict) or not isinstance(body.get("active"), bool):
+                return _err("Укажите состояние бота", 400)
+            want = body["active"]
         try:
-            from database.db import set_managed_bot_active
+            from database.db import toggle_managed_bot_with_history
 
-            row = await set_managed_bot_active(pool, bot_id, uid, want)
+            row = await toggle_managed_bot_with_history(pool, bot_id, uid, want)
             if not row:
                 return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
