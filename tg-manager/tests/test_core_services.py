@@ -152,14 +152,14 @@ class TestTrustEngineEdgeCases:
     def test_merge_confidence_empty_phones(self):
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": [], "first_name": "A", "last_name": "", "company": ""}
-        b = {"telegram_user_id": 2, "username": "b", "phones": [], "first_name": "B", "last_name": "", "company": ""}
+        b = {"telegram_user_id": None, "username": "b", "phones": [], "first_name": "B", "last_name": "", "company": ""}
         result = compute_merge_confidence(a, b)
         assert result["confidence"] >= 0
 
     def test_merge_confidence_same_company(self):
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": [], "first_name": "A", "last_name": "", "company": "Google"}
-        b = {"telegram_user_id": 2, "username": "b", "phones": [], "first_name": "B", "last_name": "", "company": "Google"}
+        b = {"telegram_user_id": None, "username": "b", "phones": [], "first_name": "B", "last_name": "", "company": "Google"}
         result = compute_merge_confidence(a, b)
         assert "same_company" in result["reasons"]
 

@@ -229,21 +229,21 @@ class TestTrustEngine:
     def test_compute_merge_confidence_same_phone(self):
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": ["+79991234567"], "first_name": "A", "last_name": "", "company": ""}
-        b = {"telegram_user_id": 2, "username": "b", "phones": ["+79991234567"], "first_name": "B", "last_name": "", "company": ""}
+        b = {"telegram_user_id": None, "username": "b", "phones": ["+79991234567"], "first_name": "B", "last_name": "", "company": ""}
         result = compute_merge_confidence(a, b)
         assert "same_phone" in result["reasons"]
 
     def test_compute_merge_confidence_same_name(self):
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": [], "first_name": "Ivan", "last_name": "Ivanov", "company": ""}
-        b = {"telegram_user_id": 2, "username": "b", "phones": [], "first_name": "Ivan", "last_name": "Ivanov", "company": ""}
+        b = {"telegram_user_id": None, "username": "b", "phones": [], "first_name": "Ivan", "last_name": "Ivanov", "company": ""}
         result = compute_merge_confidence(a, b)
         assert "same_name" in result["reasons"]
 
     def test_compute_merge_confidence_low(self):
         from services.contacts_hub.trust_engine import compute_merge_confidence
         a = {"telegram_user_id": 1, "username": "a", "phones": ["+111"], "first_name": "A", "last_name": "X", "company": "C1"}
-        b = {"telegram_user_id": 2, "username": "b", "phones": ["+222"], "first_name": "B", "last_name": "Y", "company": "C2"}
+        b = {"telegram_user_id": None, "username": "b", "phones": ["+222"], "first_name": "B", "last_name": "Y", "company": "C2"}
         result = compute_merge_confidence(a, b)
         assert result["confidence"] < 0.5
 

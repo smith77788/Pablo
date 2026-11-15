@@ -212,13 +212,32 @@ async def bulk_merge(pool, owner_id: int, pairs: list) -> dict:
     merged = 0
     skipped = 0
     absorbed_log: list = []
+    # Цепочки дублей сливаются ЦЕЛИКОМ. Экран присылает пары, а дубль бывает
+    # и из трёх записей: (А,Б) по телефону и (Б,В) по почте. Раньше вторая
+    # пара шла после того, как Б уже поглощён А, — absorb_contact не находил
+    # Б, пара считалась «пропущенной», и В оставался дублем: владелец жал
+    # «Объединить надёжные» второй, третий раз. Теперь поглощённая запись
+    # помнит, куда ушла, и пара (Б,В) становится парой (А,В).
+    went_to: dict = {}
+
+    def _alive(cid):
+        seen = set()
+        while cid in went_to and cid not in seen:
+            seen.add(cid)
+            cid = went_to[cid]
+        return cid
+
     conn = await pool.acquire()
     try:
         for pair in pairs:
-            primary_id = pair.get('primary_id')
-            secondary_id = pair.get('secondary_id')
-            if not primary_id or not secondary_id or primary_id == secondary_id:
+            raw_p = str(pair.get('primary_id') or '')
+            raw_s = str(pair.get('secondary_id') or '')
+            primary_id, secondary_id = _alive(raw_p), _alive(raw_s)
+            if not primary_id or not secondary_id or raw_p == raw_s:
                 skipped += 1
+                continue
+            if primary_id == secondary_id:
+                # обе записи уже в одном контакте — пара закрыта цепочкой
                 continue
             # Пакетное слияние идёт тем же путём, что и одиночное: перенос
             # полей, версия основного и только потом удаление второго. Своя
@@ -235,6 +254,7 @@ async def bulk_merge(pool, owner_id: int, pairs: list) -> dict:
                 skipped += 1
                 continue
             absorbed_log.append((primary_id, secondary_id, absorbed))
+            went_to[secondary_id] = primary_id
             merged += 1
     finally:
         await pool.release(conn)

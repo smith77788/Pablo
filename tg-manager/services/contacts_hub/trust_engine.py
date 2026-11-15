@@ -5,7 +5,9 @@ from typing import Optional
 
 import asyncpg
 
-from services.contacts_hub.identity_keys import email_keys, phone_keys, username_key
+from services.contacts_hub.identity_keys import (
+    company_key, email_keys, name_key, name_tokens, phone_keys, username_key,
+)
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +62,18 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
     score = 0.0
     reasons = []
 
+    # Два РАЗНЫХ Telegram ID — два разных аккаунта, а не дубль. Раньше такая
+    # пара с общим телефоном и именем набирала 0.55 и выходила на экран с
+    # кнопкой «Объединить», а слияние оставляло один telegram_user_id из двух:
+    # второй аккаунт терялся (в ЛС ему больше не написать), а синхронизация
+    # заводила его заново. Слияние такую пару теперь отклоняет
+    # (merge_engine.telegram_conflict), значит и предлагать её нельзя.
+    # Признак только ОБНУЛЯЕТ оценку, поэтому точность отбора по группам
+    # (оценка сверху, см. detect_smart_duplicates) не меняется.
+    tg_a, tg_b = contact_a.get('telegram_user_id'), contact_b.get('telegram_user_id')
+    if tg_a and tg_b and str(tg_a) != str(tg_b):
+        return {'confidence': 0.0, 'reasons': ['different_telegram_id']}
+
     if contact_a.get('telegram_user_id') and contact_a['telegram_user_id'] == contact_b.get('telegram_user_id'):
         score += 0.5
         reasons.append('same_telegram_id')
@@ -96,18 +110,23 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
         score += 0.25
         reasons.append('same_username')
 
-    name_a = f"{(contact_a.get('first_name') or '').lower()} {(contact_a.get('last_name') or '').lower()}"
-    name_b = f"{(contact_b.get('first_name') or '').lower()} {(contact_b.get('last_name') or '').lower()}"
-    if name_a.strip() and name_b.strip():
+    # Имя — ключом (identity_keys.name_key): «Ivan Petrov», «Иван Петров» и
+    # «Петров Иван» — одно имя. Веса прежние: имя остаётся слабым признаком.
+    name_a = name_key(contact_a.get('first_name'), contact_a.get('last_name'))
+    name_b = name_key(contact_b.get('first_name'), contact_b.get('last_name'))
+    if name_a and name_b:
         if name_a == name_b:
             score += 0.15
             reasons.append('same_name')
-        elif name_a.split()[0] == name_b.split()[0]:
-            score += 0.05
-            reasons.append('same_first_name')
+        else:
+            tok_a = name_tokens(contact_a.get('first_name'), contact_a.get('last_name'))
+            tok_b = name_tokens(contact_b.get('first_name'), contact_b.get('last_name'))
+            if tok_a and tok_b and tok_a[0] == tok_b[0]:
+                score += 0.05
+                reasons.append('same_first_name')
 
-    company_a = (contact_a.get('company') or '').lower()
-    company_b = (contact_b.get('company') or '').lower()
+    company_a = company_key(contact_a.get('company'))
+    company_b = company_key(contact_b.get('company'))
     if company_a and company_b and company_a == company_b:
         score += 0.1
         reasons.append('same_company')
@@ -128,6 +147,7 @@ REASON_LABELS = {
     'same_name': 'одинаковое имя',
     'same_first_name': 'одинаковое имя (без фамилии)',
     'same_company': 'одна компания',
+    'different_telegram_id': 'разные аккаунты Telegram',
 }
 
 

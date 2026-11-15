@@ -105,7 +105,7 @@ def test_different_phones_are_not_the_same_phone():
     """Два РАЗНЫХ номера — не причина считать людей одним человеком."""
     a = {"telegram_user_id": 1, "username": "x", "phones": '["+79990000001"]',
          "first_name": "Иван", "last_name": "Петров", "company": "acme"}
-    b = {"telegram_user_id": 2, "username": "y", "phones": '["+79995555555"]',
+    b = {"telegram_user_id": None, "username": "y", "phones": '["+79995555555"]',
          "first_name": "Иван", "last_name": "Петров", "company": "acme"}
     r = compute_merge_confidence(a, b)
     assert "same_phone" not in r["reasons"], (
@@ -127,7 +127,7 @@ def test_a_real_shared_phone_with_a_name_reaches_the_screen():
     """
     a = {"telegram_user_id": 1, "username": "x", "phones": '["+79990000001"]',
          "first_name": "Иван", "last_name": "Петров", "company": None}
-    b = {"telegram_user_id": 2, "username": "y", "phones": '["+79990000001"]',
+    b = {"telegram_user_id": None, "username": "y", "phones": '["+79990000001"]',
          "first_name": "Иван", "last_name": "Петров", "company": None}
     r = compute_merge_confidence(a, b)
     assert "same_phone" in r["reasons"], r
@@ -139,7 +139,7 @@ def test_a_shared_phone_alone_is_not_a_duplicate():
     """Семейный или рабочий номер на двух разных людях — не дубль."""
     a = {"telegram_user_id": 1, "username": "x", "phones": '["+79990000001"]',
          "first_name": "Иван", "last_name": "Петров", "company": None}
-    b = {"telegram_user_id": 2, "username": "y", "phones": '["+79990000001"]',
+    b = {"telegram_user_id": None, "username": "y", "phones": '["+79990000001"]',
          "first_name": "Мария", "last_name": "Сидорова", "company": None}
     r = compute_merge_confidence(a, b)
     assert r["confidence"] < 0.5, f"один номер сам по себе стал дублем: {r}"
