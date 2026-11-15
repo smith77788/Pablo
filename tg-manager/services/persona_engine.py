@@ -262,11 +262,17 @@ def build_persona_system_prompt(persona: PersonaProfile) -> str:
     taboo = " ".join((persona.taboo_topics or "").split())[:400]
     if taboo:
         parts.append(f"Темы, которых ты не касаешься (мягко уходишь от них): {taboo}.")
-    samples = [" ".join(str(x).split())[:SAMPLE_LEN]
-               for x in (persona.sample_messages or []) if str(x).strip()][:SAMPLES_MAX]
+    from services import persona_style as _ps
+    all_samples = [" ".join(str(x).split())[:SAMPLE_LEN]
+                   for x in (persona.sample_messages or []) if str(x).strip()]
+    # В промпт — несколько образцов разной длины, а манера целиком идёт
+    # замером по ВСЕМ образцам: цифры модель держит лучше, чем пример.
+    samples = (all_samples if len(all_samples) <= SAMPLES_MAX
+               else _ps.pick_samples(all_samples, SAMPLES_MAX) or all_samples[:SAMPLES_MAX])
     if samples:
         parts.append("Так ты обычно пишешь — это образцы манеры, дословно их не "
                      "повторяй: " + " | ".join(f"«{x}»" for x in samples) + ".")
+    parts.append(_ps.rules(_ps.fingerprint(all_samples)))
     parts.append("Отвечай всегда в этом образе, как живой человек; "
                  "не упоминай, что ты ИИ или бот.")
     return " ".join(p for p in parts if p)

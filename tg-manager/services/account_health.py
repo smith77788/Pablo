@@ -374,75 +374,80 @@ def get_health_summary(account_ids: list[int]) -> list[dict]:
     return sorted(result, key=lambda x: -x["health_score"])
 
 
-async def _persist_health_snapshots(pool: asyncpg.Pool) -> int:
-    """Сохраняет текущие health_score из in-memory кеша в account_health_history."""
+async def _persist_health_snapshots(
+    pool: asyncpg.Pool, owner_id: int | None = None,
+) -> int:
+    """Сохраняет текущие health_score из in-memory кеша в account_health_history.
+
+    ОДНИМ запросом, а не строкой на аккаунт. Раньше здесь был `pool.execute`
+    на каждый аккаунт кеша: флот в 6000 аккаунтов — 6000 отдельных захватов
+    соединения пула подряд. На стенде (12.11.2026) это давало очередь до 28
+    ждущих соединения, и запись журнала целей операций (`_journal_write`)
+    ждала пул до 0.5 с — защитная запись стояла за снимками для графика.
+
+    `owner_id` — снимки только аккаунтов этого владельца. Проверка аккаунтов
+    одного владельца (`_exec_check_accounts_health`) звала эту функцию без
+    него и переписывала снимки ВСЕГО флота платформы: кеш общий на процесс.
+    Десять проверок подряд — десять копий истории всех аккаунтов всех
+    клиентов (на стенде 96 тыс. строк за минуту вместо ~2 тыс.).
+    """
     if not _health_cache:
         return 0
 
     import json as _json
 
-    batch = []
-    for acc_id, health in _health_cache.items():
-        batch.append(
-            (
-                acc_id,
-                0,  # owner_id будет заполнен из БД через ON CONFLICT или отдельным запросом
-                round(health.health_score, 2),
-                round(health.load_score, 2),
-                0.0,  # trust_score — заполнится ниже
-                health.flood_events_7d,
-                health.success_ops,
-                health.fail_ops,
-                health.warmup_state.value,
-                _json.dumps(health.suitability, ensure_ascii=False),
-            )
-        )
-
-    if not batch:
-        return 0
-
-    # Получаем owner_id и trust_score для аккаунтов одним запросом
-    acc_ids = [b[0] for b in batch]
+    items = list(_health_cache.items())
+    acc_ids = [int(acc_id) for acc_id, _ in items]
+    # owner_id и trust_score — одним запросом, и там же отбор по владельцу:
+    # кеш про владельца не знает, база знает.
     acc_info = await pool.fetch(
-        "SELECT id, owner_id, trust_score FROM tg_accounts WHERE id = ANY($1::int[])",
-        acc_ids,
+        "SELECT id, owner_id, trust_score FROM tg_accounts "
+        "WHERE id = ANY($1::int[]) AND ($2::bigint IS NULL OR owner_id = $2)",
+        acc_ids, owner_id,
     )
-    info_map: dict[int, tuple[int, float]] = {}
-    for row in acc_info:
-        info_map[row["id"]] = (row["owner_id"], float(row["trust_score"] or 0))
+    info_map: dict[int, tuple[int, float]] = {
+        int(r["id"]): (int(r["owner_id"]), float(r["trust_score"] or 0))
+        for r in acc_info
+    }
 
-    written = 0
-    for item in batch:
-        acc_id = item[0]
-        if acc_id not in info_map:
+    cols: list[list] = [[] for _ in range(10)]
+    for acc_id, health in items:
+        info = info_map.get(int(acc_id))
+        if info is None:
             continue
-        owner_id, trust_score = info_map[acc_id]
-        try:
-            await pool.execute(
-                """INSERT INTO account_health_history
-                       (account_id, owner_id, health_score, load_score, trust_score,
-                        flood_events_7d, success_ops, fail_ops, warmup_state, suitability)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)""",
-                acc_id,
-                owner_id,
-                item[2],
-                item[3],
-                trust_score,
-                item[5],
-                item[6],
-                item[7],
-                item[8],
-                item[9],
-            )
-            written += 1
-        except Exception:
-            log_exc_swallow(
-                log,
-                "Сбой записи health-снапшота — таблица может ещё не существовать",
-                account_id=acc_id,
-            )
-
-    return written
+        row = (
+            int(acc_id), info[0],
+            round(health.health_score, 2), round(health.load_score, 2),
+            # numeric(5,4): доверие в базе — доля от 0 до 1
+            max(0.0, min(info[1], 9.9999)),
+            int(health.flood_events_7d or 0), int(health.success_ops or 0),
+            int(health.fail_ops or 0), health.warmup_state.value,
+            _json.dumps(health.suitability, ensure_ascii=False),
+        )
+        for i, v in enumerate(row):
+            cols[i].append(v)
+    if not cols[0]:
+        return 0
+    try:
+        await pool.execute(
+            """INSERT INTO account_health_history
+                   (account_id, owner_id, health_score, load_score, trust_score,
+                    flood_events_7d, success_ops, fail_ops, warmup_state, suitability)
+               SELECT a, o, h, l, t, f, s, x, w, j::jsonb
+                 FROM unnest($1::int[], $2::bigint[], $3::numeric[], $4::numeric[],
+                             $5::numeric[], $6::int[], $7::int[], $8::int[],
+                             $9::text[], $10::text[])
+                      AS u(a, o, h, l, t, f, s, x, w, j)""",
+            *cols,
+        )
+    except Exception:
+        log_exc_swallow(
+            log,
+            "Сбой записи health-снапшотов — таблица может ещё не существовать",
+            accounts=len(cols[0]),
+        )
+        return 0
+    return len(cols[0])
 
 
 async def _cleanup_old_health_history(pool: asyncpg.Pool) -> int:

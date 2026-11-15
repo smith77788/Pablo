@@ -188,6 +188,7 @@ from services import anomaly_detector
 from services import ecosystem_brain
 from services import activity_logger
 from services import promo_scheduler
+from services import replica_guard as _rguard_main
 
 configure_root_logger(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
@@ -308,6 +309,15 @@ if _ROLE not in _VALID_ROLES:
     log.warning("ROLE=%r неизвестна — работаю как 'all'. Допустимо: %s",
                 _ROLE, ", ".join(_VALID_ROLES))
     _ROLE = "all"
+
+# Сервисы, которые при горизонтальном исполнителе идут в КАЖДОМ процессе:
+# исполнитель операций и то, что обслуживает память самого процесса (буферы
+# записи, обмен темпом флота с базой, реестр задач, пул). Остальные фоновые
+# циклы — только у лидера (см. _resilient).
+_PER_PROCESS_SERVICES = frozenset({
+    "op_worker", "infra_memory", "pacing_store", "activity_logger",
+    "task_registry", "pool_monitor",
+})
 
 
 async def _global_error_handler(event: ErrorEvent) -> None:
@@ -1236,16 +1246,26 @@ async def main() -> None:
             return
         nonlocal _svc_stagger_index
         _svc_stagger_index += 1
-        # Сам цикл присмотра живёт в services/service_supervisor.py: вложенной
-        # функцией он был непроверяем, и там пряталось зависание всего процесса
-        # на сервисе, выключенном настройкой (подробности — в докстринге модуля).
-        await service_supervisor.supervise(
-            name, fn, *args,
+        _kw = dict(
             restart_delay=30.0,
             start_delay=_svc_stagger_index * 2,   # разносим старты по 2с
             restart_on_return=False,              # вернулся значит выключен
             alert=_svc_alert,                     # падение — админу (D27)
         )
+        # ГОРИЗОНТАЛЬНЫЙ ИСПОЛНИТЕЛЬ (OP_SHARDED_EXECUTOR=1): операции разбирают
+        # все процессы, а фоновые циклы — один лидер, иначе каждый лишний
+        # процесс удваивал бы прогрев, призрака, авто-ответы и прочие реальные
+        # действия аккаунтов. Исключения — то, что обслуживает память ЭТОГО
+        # процесса (буферы, синк темпа, реестр задач) и сам исполнитель.
+        if (_rguard_main.sharded_executor()
+                and name not in _PER_PROCESS_SERVICES):
+            await service_supervisor.supervise_while_leader(
+                name, fn, *args, is_leader=_rguard_main.holds_executor_lease, **_kw)
+            return
+        # Сам цикл присмотра живёт в services/service_supervisor.py: вложенной
+        # функцией он был непроверяем, и там пряталось зависание всего процесса
+        # на сервисе, выключенном настройкой (подробности — в докстринге модуля).
+        await service_supervisor.supervise(name, fn, *args, **_kw)
 
     async def _web_resilient(name: str, fn, *args):
         """Как _resilient, но БЕЗ гейта роли, без разноса стартов и с перезапуском в 5с.

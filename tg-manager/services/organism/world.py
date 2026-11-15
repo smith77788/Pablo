@@ -243,6 +243,10 @@ async def _retention(pool, owner_id: int) -> dict:
                JOIN operation_queue oq ON oq.id = ol.op_id
                WHERE oq.owner_id=$1 AND oq.op_type LIKE '%invite%'
                  AND ol.status='ok' AND ol.message='joined'
+                 -- журнал за окно — только у операций, закончившихся в окне
+                 -- или ещё идущих (см. mini_app_invite)
+                 AND (oq.finished_at IS NULL
+                      OR oq.finished_at > NOW() - INTERVAL '30 days')
                  AND ol.created_at > NOW() - INTERVAL '30 days'""", owner_id) or 0)
         left = int(await pool.fetchval(
             "SELECT COUNT(*) FROM organism_events WHERE owner_id=$1 AND kind='left' "

@@ -806,7 +806,8 @@ async def _remember_source(pool, ev: dict) -> None:
 
     Только если поля ещё нет: человек, пришедший по рекламе, а через неделю
     открывший бота по ссылке из канала, остаётся «из рекламы»."""
-    param = ((ev.get("data") or {}).get("param") or "").strip()[:64]
+    raw_param = (ev.get("data") or {}).get("param")
+    param = raw_param.strip()[:64] if isinstance(raw_param, str) else ""
     if not param or not ev.get("bot_id") or not ev.get("chat_id"):
         return
     await pool.execute(
@@ -906,32 +907,33 @@ async def dispatch_events(pool) -> int:
     for r in rows:
         by_owner.setdefault(r["owner_id"], []).append(dict(r))
     for ev in events:
-        try:
-            if ev["event_type"] == "contact.started":
-                await _remember_source(pool, ev)
-            await _check_goals(pool, ev)
-            await _resume_waiting(pool, ev)
-        except Exception:
-            log.exception("workflow_runtime: цель/источник по событию %s", ev["id"])
-        for wf in by_owner.get(ev["owner_id"], []):
-            if not trigger_matches(wf, ev):
+        async with pool.acquire() as conn, conn.transaction():
+            # Повторный обработчик может уже иметь событие в своей выборке.
+            # Блокировка курсора сериализует запуск и отметку события.
+            cursor = await conn.fetchval(
+                "SELECT last_id FROM automation_cursors WHERE consumer=$1 FOR UPDATE",
+                CONSUMER)
+            if cursor is not None and cursor >= ev["id"]:
                 continue
-            bot_id = ev.get("bot_id") or wf.get("bot_id")
-            try:
-                param = ((ev.get("data") or {}).get("param") or "") \
-                    if ev["event_type"] == "contact.started" else ""
+            if ev["event_type"] == "contact.started":
+                await _remember_source(conn, ev)
+            await _check_goals(conn, ev)
+            await _resume_waiting(conn, ev)
+            for wf in by_owner.get(ev["owner_id"], []):
+                if not trigger_matches(wf, ev):
+                    continue
+                bot_id = ev.get("bot_id") or wf.get("bot_id")
+                param = ((ev.get("data") or {}).get("param")
+                         if ev["event_type"] == "contact.started" else None)
                 rid = await start_run(
-                    pool, wf, bot_id, ev.get("chat_id"),
+                    conn, wf, bot_id, ev.get("chat_id"),
                     input_data={"event_type": ev["event_type"],
                                 "event": ev.get("data") or {}},
-                    trigger_event_id=ev["id"], source=param or None)
-            except Exception:
-                log.exception("workflow_runtime: запуск сценария %s по событию %s",
-                              wf["id"], ev["id"])
-                rid = None
-            if rid:
-                started += 1
-        await bus.advance_cursor(pool, CONSUMER, ev["id"])
+                    trigger_event_id=ev["id"],
+                    source=param if isinstance(param, str) and param else None)
+                if rid:
+                    started += 1
+            await bus.advance_cursor(conn, CONSUMER, ev["id"])
     return started
 
 

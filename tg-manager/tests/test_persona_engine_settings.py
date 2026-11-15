@@ -144,7 +144,7 @@ def test_best_quality_makes_three_and_the_judge_chooses(turn, monkeypatch):  # n
     persona = _p(quality="best", creativity=80, ai_provider="groq", ai_model="m",
                  split_messages=False)
 
-    async def _load(pool, acc, fallback="", context=""):
+    async def _load(pool, acc, fallback="", context="", **kw):
         return pv.Voice(account_id=acc, persona=persona, prompt="образ")
 
     async def _judge(messages, **kw):
@@ -161,7 +161,7 @@ def test_best_quality_makes_three_and_the_judge_chooses(turn, monkeypatch):  # n
 def test_a_split_thought_goes_as_two_messages_reply_only_first(turn, monkeypatch):  # noqa: F811
     persona = _p(literacy="casual")
 
-    async def _load(pool, acc, fallback="", context=""):
+    async def _load(pool, acc, fallback="", context="", **kw):
         return pv.Voice(account_id=acc, persona=persona, prompt="образ")
     monkeypatch.setattr(pv, "load", _load)
     monkeypatch.setattr(cw.random, "random", lambda: 0.0)

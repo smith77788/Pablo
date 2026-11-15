@@ -20,6 +20,8 @@ broadcast_id, а не по одному лишь возрасту занятия
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import pytest
 
 
@@ -40,6 +42,16 @@ class _Pool:
         self.linked_bc = linked_bc
         self.executed: list[tuple[str, tuple]] = []
         self.inserted: list[tuple[str, tuple]] = []
+
+    def acquire(self):
+        return nullcontext(self)
+
+    def transaction(self):
+        return nullcontext()
+
+    async def fetchrow(self, query, *args):
+        assert "FROM managed_bots mb" in query
+        return {"is_active": True, "token": "1:x"}
 
     async def fetch(self, query, *args):
         return self.rows

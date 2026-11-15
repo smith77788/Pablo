@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -618,13 +619,13 @@ _POISON_ERROR_TOTAL = (
 # МОЛЧА: в интерфейсе она откатывалась на нулевой прогресс без единого слова, и
 # владелец видел ровно то, что выглядит как потерянная работа. Про соседние
 # случаи (флуд-пауза, исчерпанный бюджет живучести) ему пишут — здесь пробел.
-_REVIVE_AFTER_RESTART = (
-    "Процесс операций перезапустился, пока операция шла — она возвращена в "
-    "очередь и запустится заново."
-)
 _REVIVE_AFTER_SILENCE = (
     "Операция не подавала признаков работы дольше {mins} мин — возвращена в "
     "очередь и запустится заново."
+)
+_REVIVE_AFTER_DEATH = (
+    "Процесс, который выполнял операцию, остановился — операция возвращена в "
+    "очередь и продолжится на другом (уже сделанное не повторится)."
 )
 
 
@@ -688,6 +689,20 @@ async def _ensure_pause_requested_column(pool: "asyncpg.Pool") -> None:
         log_exc_swallow(log, f"op_worker: ensure pause_requested column failed: {e}")
 
 
+async def _ensure_claimed_by_column(pool: "asyncpg.Pool") -> None:
+    """Досоздать operation_queue.claimed_by (schema_v370), если миграция не доехала.
+
+    Цена та же, что у pause_requested, только хуже: колонку ПИШЕТ отбор
+    операций, и без неё `_safe_fetch` вернул бы пустой список — очередь
+    молча встала бы целиком.
+    """
+    try:
+        await pool.execute(
+            "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS claimed_by TEXT")
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: ensure claimed_by column failed: {e}")
+
+
 
 # Реестр аккаунтов, занятых активными операциями op_worker.
 # account_warmer проверяет этот реестр перед использованием аккаунта.
@@ -718,6 +733,81 @@ _WORKER_ID = _rguard.WORKER_ID
 # Упал процесс — аренда истекает сама, и аккаунты возвращаются в оборот без
 # 60-минутного сторожа.
 _LEASE_TTL_S = 900
+
+
+# ── Горизонтальный исполнитель (шардированная очередь) ──────────────────────
+# По умолчанию очередь разбирает ОДИН процесс — держатель аренды исполнителя
+# (`replica_guard`). Это потолок продукта: все операции всех клиентов, все
+# клиенты Telethon и ~70 фоновых циклов в одном цикле событий одного ядра.
+#
+# OP_SHARDED_EXECUTOR=1 снимает потолок: операции разбирают ВСЕ процессы с
+# ролью worker/all, каждый до OP_MAX_PARALLEL. Держатель аренды остаётся
+# ЛИДЕРОМ — только он гоняет сторожей очереди и фоновые циклы (main.py), а
+# остальные только исполняют. Что делает это безопасным:
+#   * у каждой запущенной операции есть хозяин — `operation_queue.claimed_by`
+#     (worker_id процесса), и сторожа лидера трогают только СВОИ, бесхозные
+#     (строки до этой правки) и операции УМЕРШИХ процессов — тех, чей хартбит
+#     (`process_heartbeats`) молчит дольше _EXECUTOR_DEAD_S;
+#   * операции умершего процесса возвращаются в очередь сразу, а не через
+#     60 минут сторожа зависших (`_sweep_dead_executor_ops`);
+#   * процесс, у которого операцию забрали (его посчитали мёртвым, пока цикл
+#     стоял), гасит свою задачу сам (`_fence_lost_ops`) — второго прогона той
+#     же операции нет;
+#   * аренды аккаунтов, темп флота, предохранитель и лимит на владельца и так
+#     живут в Postgres (лимит держит запрос отбора с FOR UPDATE SKIP LOCKED).
+_EXECUTOR_DEAD_S = _int_env("OP_EXECUTOR_DEAD_SEC", 300, 120, 3600)
+
+
+# Режим особого прохода сторожа зависших: (scope, возраст в мин., метка).
+# ContextVar, а не аргумент: сигнатуру `_watchdog_stale(pool, bot=None)` держат
+# сторожа набора, а значение живёт ровно в пределах одного вызова.
+_stale_mode: "contextvars.ContextVar[tuple | None]" = contextvars.ContextVar(
+    "op_worker_stale_mode", default=None)
+
+
+def sharded_mode() -> bool:
+    """Включён ли горизонтальный исполнитель — один источник правды в replica_guard."""
+    return _rguard.sharded_executor()
+
+
+# Предикат «эту запущенную операцию вправе чинить сторож этого процесса».
+# Подставляется в WHERE по operation_queue; $self — worker_id процесса,
+# $dead — окно молчания хартбита в секундах. Текст — константы, не ввод.
+_DEAD_OWNER_SQL = (
+    "NOT EXISTS (SELECT 1 FROM process_heartbeats ph "
+    "WHERE ph.worker_id = operation_queue.claimed_by "
+    "AND ph.last_seen > now() - make_interval(secs => {dead}))"
+)
+
+
+def _repair_scope_sql(scope: "str | None", self_ph: str, dead_ph: str) -> str:
+    """SQL-условие по хозяину операции для сторожа.
+
+    None     — без условия (одиночный исполнитель, поведение как раньше);
+    'leader' — свои, бесхозные и операции умерших процессов;
+    'others' — бесхозные и операции умерших процессов, но не свои;
+    'mine'   — только свои (сторож процесса-исполнителя без лидерства);
+    'dead'   — только чужие операции умерших процессов.
+    """
+    dead = _DEAD_OWNER_SQL.format(dead=dead_ph)
+    if scope is None:
+        return "TRUE"
+    if scope == "leader":
+        return (f"(claimed_by IS NULL OR claimed_by = {self_ph} OR {dead})")
+    if scope == "others":
+        # Уборка на старте лидера: свои операции этого процесса живы по
+        # определению (worker_id новый на каждый процесс), а у процесса,
+        # ставшего лидером не на старте, они прямо сейчас выполняются.
+        return (f"((claimed_by IS NULL OR claimed_by <> {self_ph}) "
+                f"AND (claimed_by IS NULL OR {dead}))")
+    if scope == "mine":
+        # Окно хартбита здесь не нужно, но параметр в запросе есть всегда:
+        # Postgres не принимает запрос с неиспользованным параметром.
+        return f"(claimed_by = {self_ph} AND {dead_ph}::float8 >= 0)"
+    if scope == "dead":
+        return (f"(claimed_by IS NOT NULL AND claimed_by <> {self_ph} "
+                f"AND {dead})")
+    raise ValueError(f"неизвестный scope сторожа: {scope!r}")
 
 
 def init_op_worker_pool(pool: "asyncpg.Pool") -> None:
@@ -2457,6 +2547,8 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
 # op_worker._classify_op_error / _FATAL_ERRORS / _normalize_result и т.п.
 # остались доступны как раньше (публичный/приватный контракт не изменился).
 from services import op_status
+
+_REVIVE_AFTER_RESTART = op_status.REVIVE_AFTER_RESTART
 from services.op_errors import (  # noqa: E402,F401
     _RETRYABLE_ERRORS,
     _FATAL_ERRORS,
@@ -3393,6 +3485,13 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
     # RETURNING: гашение атомарно одним UPDATE, но закрыть операцию до конца
     # (результат, подпись, слово владельцу) можно только по строкам — см.
     # _finish_poisoned_op.
+    # Горизонтальный исполнитель: на старте лидер чинит только бесхозные и
+    # операции умерших процессов — живые операции соседей (и свои, если
+    # лидерство пришло не на старте процесса) не его.
+    scope = "others" if sharded_mode() else None
+    _scope_args: tuple = ()
+    if scope is not None:
+        _scope_args = (_WORKER_ID, float(_EXECUTOR_DEAD_S))
     poisoned_rows = await _safe_fetch(
         pool,
         """UPDATE operation_queue
@@ -3402,6 +3501,7 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
                error_msg = COALESCE(error_msg,
                    CASE WHEN COALESCE(revive_count, 0) >= $1 THEN $2 ELSE $4 END)
            WHERE status = 'running'
+             AND """ + _repair_scope_sql(scope, "$5", "$6") + """
              AND (COALESCE(revive_count, 0) >= $1
                   OR (COALESCE(revive_total, 0) >= $3
                       AND COALESCE(revive_mark, 0)
@@ -3412,6 +3512,7 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
         _POISON_ERROR.format(n=_MAX_REVIVES),
         _MAX_REVIVES_TOTAL,
         _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
+        *_scope_args,
         log_ctx="[reset_stale_poison]",
     )
     poisoned_n = len(poisoned_rows)
@@ -3457,8 +3558,10 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
                -- копился бы поверх прошлого прогона — класс «34/17»).
                done_items = 0,
                last_error = $1
-           WHERE status = 'running'""",
+           WHERE status = 'running'
+             AND """ + _repair_scope_sql(scope, "$2", "$3"),
         _REVIVE_AFTER_RESTART,
+        *_scope_args,
         log_ctx="[reset_stale_revive]",
     )
     # asyncpg возвращает строку вида "UPDATE N"
@@ -3517,7 +3620,19 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
 
     Исключает операции, которые реально выполняются в памяти (_active_op_ids),
     чтобы не перезапустить strike/bulk-op пока первый прогон ещё идёт.
+
+    При горизонтальном исполнителе — чьи операции чинить (`_repair_scope_sql`):
+    лидер — свои, бесхозные и умерших процессов. Два особых прохода ставят
+    режим через `_stale_mode` (сигнатура общая, её держат сторожа набора):
+    `_watchdog_stale_mine` — только свои, `_sweep_dead_executor_ops` —
+    операции умерших процессов без ожидания 60 минут.
     """
+    scope, min_age_min, source = _stale_mode.get() or (
+        ("leader" if sharded_mode() else None), None, "watchdog")
+    _age = _STALE_RUNNING_TIMEOUT_MIN if min_age_min is None else int(min_age_min)
+    _scope_args: tuple = ()
+    if scope is not None:
+        _scope_args = (_WORKER_ID, float(_EXECUTOR_DEAD_S))
     try:
         async with _active_lock:
             active_now: frozenset[int] = frozenset(_active_op_ids)
@@ -3542,18 +3657,20 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
+                  AND """ + _repair_scope_sql(scope, "$7", "$8") + """
                   AND (COALESCE(revive_count, 0) >= $3
                        OR (COALESCE(revive_total, 0) >= $5
                            AND COALESCE(revive_mark, 0)
                                <= COALESCE(revive_total, 0)))
              RETURNING id, owner_id, op_type, params, done_items, total_items,
                        revive_count, revive_total""",
-            _STALE_RUNNING_TIMEOUT_MIN,
+            _age,
             active_ids_list,
             _MAX_REVIVES,
             _POISON_ERROR.format(n=_MAX_REVIVES),
             _MAX_REVIVES_TOTAL,
             _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
+            *_scope_args,
         )
         poisoned_n = len(poisoned_rows)
         if poisoned_n:
@@ -3561,7 +3678,10 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 "op_worker watchdog: %d hung ops exceeded revive budget (%d) → failed",
                 poisoned_n, _MAX_REVIVES,
             )
-            _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
+            if source == "dead_executor":
+                _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="dead_executor")
+            else:
+                _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
             for _poisoned in poisoned_rows:
                 # В своей защите — по той же причине, что на старте: ниже
                 # стоит общий возврат зависших операций в очередь, и одно
@@ -3569,7 +3689,7 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 await _maintenance_step(
                     f"finish_poisoned_op:{(_poisoned or {}).get('id')}",
                     lambda r=_poisoned: _finish_poisoned_op(
-                        pool, r, source="watchdog", bot=bot))
+                        pool, r, source=source, bot=bot))
 
         result = await pool.execute(
             # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с
@@ -3589,17 +3709,88 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                     last_error = $3
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
-                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
-            _STALE_RUNNING_TIMEOUT_MIN,
+                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
+                  AND """ + _repair_scope_sql(scope, "$4", "$5"),
+            _age,
             active_ids_list,
-            _REVIVE_AFTER_SILENCE.format(mins=_STALE_RUNNING_TIMEOUT_MIN),
+            (_REVIVE_AFTER_DEATH if source == "dead_executor"
+             else _REVIVE_AFTER_SILENCE.format(mins=_STALE_RUNNING_TIMEOUT_MIN)),
+            *_scope_args,
         )
         count = int((result or "UPDATE 0").split()[-1])
         if count:
             log.warning("op_worker watchdog: reset %d stale running ops → pending", count)
-            _reliability_metric("infragram_op_revives_total", count, source="watchdog")
+            if source == "dead_executor":
+                _reliability_metric("infragram_op_revives_total", count, source="dead_executor")
+            else:
+                _reliability_metric("infragram_op_revives_total", count, source="watchdog")
     except Exception as e:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
+
+
+async def _sweep_dead_executor_ops(pool: asyncpg.Pool, bot=None) -> None:
+    """Горизонтальный исполнитель: вернуть в очередь операции умерших процессов.
+
+    Процесс-исполнитель умер (OOM, SIGKILL, потеря узла) — его операции
+    остаются 'running' с его worker_id в `claimed_by`. Ждать для них 60 минут
+    общего сторожа незачем: смерть видна по хартбиту за _EXECUTOR_DEAD_S, а
+    аренды его аккаунтов истекают сами (`_LEASE_TTL_S`). Бюджет живучести
+    списывается как за падение — так и есть.
+    """
+    tok = _stale_mode.set(("dead", 0, "dead_executor"))
+    try:
+        await _watchdog_stale(pool, bot)
+    finally:
+        _stale_mode.reset(tok)
+
+
+async def _watchdog_stale_mine(pool: asyncpg.Pool, bot=None) -> None:
+    """Сторож зависших исполнителя без лидерства: только свои операции."""
+    tok = _stale_mode.set(("mine", None, "watchdog"))
+    try:
+        await _watchdog_stale(pool, bot)
+    finally:
+        _stale_mode.reset(tok)
+
+
+async def _fence_lost_ops(pool: asyncpg.Pool) -> list[int]:
+    """Погасить свои задачи, чьи операции уже числятся за другим процессом.
+
+    Так бывает, только если этот процесс посчитали умершим: цикл событий
+    стоял дольше _EXECUTOR_DEAD_S, хартбит молчал, лидер вернул операцию в
+    очередь, и её взял другой исполнитель. Наша задача про это не знает и
+    продолжила бы те же реальные действия вторым прогоном. Гасим её тем же
+    способом, что и при сдаче аренды (`_stand_down_after_lease_loss`): отмена
+    задачи, её finally отпускает свои аккаунты.
+
+    Возвращает id погашенных операций. Сбой запроса — ничего не гасим: блип
+    базы не повод останавливать живую работу.
+    """
+    async with _active_lock:
+        active = sorted(_active_op_ids)
+        tasks = {t.get_name(): t for t in _active_op_tasks if not t.done()}
+    if not active:
+        return []
+    try:
+        rows = await pool.fetch(
+            "SELECT id FROM operation_queue WHERE id = ANY($1::int[]) "
+            "AND status = 'running' AND claimed_by IS DISTINCT FROM $2",
+            active, _WORKER_ID)
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: проверка хозяина операций: {e}")
+        return []
+    lost = [int(r["id"]) for r in rows]
+    for op_id in lost:
+        t = tasks.get(f"op:{op_id}")
+        if t is not None:
+            t.cancel()
+    if lost:
+        log.error(
+            "op_worker: операции %s уже выполняет другой процесс (этот считали "
+            "умершим — цикл событий стоял) — свои задачи по ним погашены, "
+            "чтобы не было второго прогона.", lost)
+        _reliability_metric("infragram_executor_fenced_ops_total", len(lost))
+    return lost
 
 
 # Сколько ждать, прежде чем считать отменённую операцию брошенной. Запас нужен
@@ -3646,6 +3837,7 @@ async def _watchdog_cancelled_orphans(pool: asyncpg.Pool, bot=None) -> int:
     Возвращает число закрытых операций. Никогда не бросает.
     """
     closed = 0
+    scope = "leader" if sharded_mode() else None
     try:
         async with _active_lock:
             active_now: frozenset[int] = frozenset(_active_op_ids)
@@ -3657,11 +3849,15 @@ async def _watchdog_cancelled_orphans(pool: asyncpg.Pool, bot=None) -> int:
                   AND result IS NULL
                   AND finished_at < now() - make_interval(mins => $1::int)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
+                  -- горизонтальный исполнитель: отмену, которую сворачивает
+                  -- живой сосед, закроет он сам
+                  AND """ + _repair_scope_sql(scope, "$4", "$5") + """
                 ORDER BY id
                 LIMIT $3::int""",
             _CANCEL_ORPHAN_GRACE_MIN,
             (list(active_now) or None),
             _CANCEL_ORPHAN_BATCH,
+            *((_WORKER_ID, float(_EXECUTOR_DEAD_S)) if scope is not None else ()),
             log_ctx="[watchdog_cancel_orphans]",
         )
         for row in rows:
@@ -4157,6 +4353,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "карантин и попадёт в следующую операцию, а волна банов его не посчитает",
     "infragram_notifications_undelivered_total":
         "отчёт об операции не доехал до владельца",
+    "infragram_notifications_bad_content_total":
+        "отчёт об операции не приняли из-за самого текста (битый HTML или длина) "
+        "— аварийная отправка простым текстом тоже не прошла; операция выполнена, "
+        "её итог записан, чинить надо формат отчёта",
     "infragram_recurring_reschedule_failures_total":
         "следующий запуск повторяющейся операции не поставлен — она остановилась",
     "infragram_executor_lease_errors_total":
@@ -4193,6 +4393,7 @@ _SHUTDOWN_CANCEL_GRACE_S = 2.0
 # и её итог записан.
 _DELIVERY_FAILURE_COUNTERS = frozenset({
     "infragram_notifications_undelivered_total",
+    "infragram_notifications_bad_content_total",
 })
 
 
@@ -4474,6 +4675,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     except Exception:
         log_exc_swallow(log, "op_worker: проверка получателя защитных алертов")
     _role = (os.getenv("INFRAGRAM_ROLE") or "all").strip().lower()
+    await _ensure_claimed_by_column(pool)
+    # Хартбит ДО первого отбора: при горизонтальном исполнителе лидер судит о
+    # живости хозяина операции по нему, и операция, взятая процессом без
+    # хартбита, выглядела бы брошенной.
+    await _rguard.beat(pool, _WORKER_ID, _role)
     _did_startup_reset = False
     _lease_denied_log_at = 0.0
     # База отсчёта для счётчиков защитных записей — локальная, не модульная.
@@ -4484,6 +4690,14 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         # останавливал бы и сторожей, которые в этот момент нужнее всего.
         _watchdog_tick += 1
         if not await _rguard.acquire_executor_lease(pool, _WORKER_ID, _role):
+            if sharded_mode():
+                # ГОРИЗОНТАЛЬНЫЙ ИСПОЛНИТЕЛЬ: без лидерства операции всё равно
+                # разбираем — у каждой есть хозяин (claimed_by), и сторожа
+                # лидера живые операции этого процесса не трогают. Сторожей
+                # очереди и уборку на старте ведёт лидер; здесь только свои.
+                await _follower_round(pool, bot, _watchdog_tick, _protective_seen)
+                await asyncio.sleep(_POLL_INTERVAL)
+                continue
             _reliability_metric("infragram_executor_lease_denied_total")
             _now = time.monotonic()
             if _now - _lease_denied_log_at > 60:
@@ -4533,6 +4747,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # и исключение в раннем стороже забирало весь остаток круга — в
             # том числе последний, которым владелец узнаёт о сбое защитных
             # записей. См. _maintenance_step.
+            if sharded_mode():
+                # Свои операции, которые уже числятся за другим процессом, —
+                # погасить (см. _fence_lost_ops).
+                await _maintenance_step(
+                    "fence_lost_ops", lambda: _fence_lost_ops(pool))
             if _watchdog_tick % 3 == 0:
                 await _maintenance_step("renew_leases", renew_leases)
                 # Признак жизни самого поллера: единственный способ узнать
@@ -4545,6 +4764,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             if _watchdog_tick % 6 == 0:
                 await _maintenance_step(
                     "watchdog_stale", lambda: _watchdog_stale(pool, bot))
+                if sharded_mode():
+                    # Операции умерших исполнителей — сразу, а не через час.
+                    await _maintenance_step(
+                        "sweep_dead_executor_ops",
+                        lambda: _sweep_dead_executor_ops(pool, bot))
                 # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
                 # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
                 await _maintenance_step(
@@ -4584,6 +4808,41 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         except Exception as e:
             log.exception("op_worker watchdog cycle error: %s", e)
         await asyncio.sleep(_POLL_INTERVAL)
+
+
+async def _follower_round(
+    pool: asyncpg.Pool, bot: Bot, tick: int, protective_seen: dict,
+) -> None:
+    """Один круг исполнителя без лидерства (OP_SHARDED_EXECUTOR=1).
+
+    Разбирает очередь и обслуживает ТОЛЬКО своё: гасит операции, которые уже
+    числятся за другим процессом, продлевает свои аренды, отмечает живость
+    поллера, чинит свои сироты и доносит свои защитные счётчики (они живут в
+    памяти каждого процесса). Сторожа всей очереди и уборку на старте ведёт
+    лидер — со своими условиями по хозяину операции.
+
+    Каждый шаг в своей защите (`_maintenance_step`), как в круге лидера.
+    """
+    await _maintenance_step("fence_lost_ops", lambda: _fence_lost_ops(pool))
+    try:
+        await _process_pending(pool, bot)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.exception("op_worker error: %s", e)
+    if tick % 3 == 0:
+        await _maintenance_step("renew_leases", renew_leases)
+        await _maintenance_step(
+            "poller_alive", lambda: _obus_reg.mark_poller_alive(pool, _WORKER_ID))
+    if tick % 6 == 0:
+        await _maintenance_step(
+            "watchdog_stale_mine", lambda: _watchdog_stale_mine(pool, bot))
+        await _maintenance_step(
+            "reconcile_in_operation", lambda: _reconcile_in_operation(pool))
+    if tick % 360 == 0:
+        await _maintenance_step(
+            "watchdog_protective_failures",
+            lambda: _watchdog_protective_failures(pool, bot, protective_seen))
 
 
 async def _stand_down_after_lease_loss(
@@ -4821,7 +5080,7 @@ async def shutdown(
                       last_error=$2
                 WHERE id = ANY($1::bigint[]) AND status='running'""",
             [int(i) for i in op_ids],
-            "Сервис перезапускался — операция продолжится автоматически с места остановки (уже сделанное не повторится)",
+            op_status.REQUEUE_ON_SHUTDOWN,
             log_ctx="[shutdown_requeue]",
         )
         try:
@@ -5274,8 +5533,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     # владельца. Цена — полный проход по ожидающим на каждый тик; замер на живой
     # базе: 50 000 ожидающих в 500 владельцах — 37 мс против 22 мс у старого
     # запроса, при тике раз в 10 секунд.
-    rows = await _safe_fetch(
-        pool,
+    _claim_sql = (
         """WITH owner_running AS (
                SELECT owner_id, COUNT(*)::int AS running_count
                FROM operation_queue
@@ -5326,20 +5584,31 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
                FOR UPDATE OF oq SKIP LOCKED
            )
            UPDATE operation_queue
-           SET status = 'running', started_at = now()
+           SET status = 'running', started_at = now(), claimed_by = $5
            WHERE id IN (SELECT id FROM picked)
-           RETURNING id, owner_id, op_type, params""",
+           RETURNING id, owner_id, op_type, params""")
+    _claim_args = (
         available_slots,
         _MAX_PARALLEL_PER_OWNER,
         candidate_window,
         (list(active_now) or None),
+        _WORKER_ID,
     )
+    # Несколько исполнителей (OP_SHARDED_EXECUTOR) отбирают одним и тем же
+    # запросом. Лимит на владельца при этом не превышается и без отдельной
+    # блокировки: одновременные отборы видят одни и те же первые N ожидающих
+    # владельца, и FOR UPDATE SKIP LOCKED отдаёт каждую строку одному из них
+    # (проверено на живой базе: test_sharded_executor_postgres).
+    rows = await _safe_fetch(pool, _claim_sql, *_claim_args)
 
     for row in rows:
         op_id = row["id"]
         async with _active_lock:
             _active_op_ids.add(op_id)
-        _op_task = asyncio.create_task(_run_op_task_guarded(pool, bot, dict(row)))
+        # Имя задачи — op:<id>: по нему `_fence_lost_ops` находит задачу
+        # операции, которую забрал другой исполнитель.
+        _op_task = asyncio.create_task(
+            _run_op_task_guarded(pool, bot, dict(row)), name=f"op:{op_id}")
         _active_op_tasks.add(_op_task)
         _op_task.add_done_callback(_active_op_tasks.discard)
 
@@ -7282,7 +7551,7 @@ async def _exec_bulk_bot_profile_rollback(
     target_ids = [int(s["target_id"]) for s in snaps]
     rows = await _fetch_bots_op(
         pool,
-        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[]) AND is_active AND deleted_at IS NULL",
         owner_id, target_ids)
     tok_by_bot = {int(r["bot_id"]): r["token"] for r in rows}
     label_by_bot = {int(r["bot_id"]): _bp_bot_label(r) for r in rows}
@@ -7318,7 +7587,7 @@ async def _exec_bulk_bot_profile_rollback(
 
             reasons: list[str] = []
             if token is None:
-                reasons.append("бот не найден")
+                reasons.append("бот недоступен для отката")
             else:
                 # Имя/описания/команды/кнопка меню/права — общий список вызовов
                 # из движка клона: снимки «Клона и адаптации» лежат в той же
@@ -7598,6 +7867,15 @@ async def _exec_mass_publish(
             and not explicit_channel_ids:
         return {"status": "failed",
                 "summary": "⚠️ Не выбран ни один канал — публикацию не запускали"}
+    if params.get("project_id") is not None:
+        from services.network_builder import project_publish_channels
+
+        channels = await project_publish_channels(pool, owner_id, int(params["project_id"]))
+        if not explicit_channel_ids or not set(explicit_channel_ids).issubset(
+            {row["channel_id"] for row in channels}
+        ):
+            return {"status": "failed",
+                    "summary": "Каналы больше не доступны в проекте. Подтвердите новый список."}
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None
@@ -9416,6 +9694,21 @@ async def _mark_gp_asset(pool, target_id: int, asset_id: int, kind: str) -> bool
     return False
 
 
+async def _claim_gp_target(pool: asyncpg.Pool, target_id: int) -> bool:
+    """Создание в Telegram допустимо только после подтверждённой записи в базе."""
+    claimed = await _safe_execute(
+        pool,
+        "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
+        target_id,
+        log_ctx=f"[gp_claim target={target_id}]",
+    )
+    if claimed == "UPDATE 1":
+        return True
+    if claimed == "UPDATE 0":
+        return False
+    raise RuntimeError(f"Не удалось занять цель Global Presence №{target_id}")
+
+
 async def _revive_abandoned_gp_targets(pool: asyncpg.Pool, plan_id: int, what: str) -> None:
     """Расклинить цели плана Global Presence, брошенные прошлым прогоном.
 
@@ -9662,13 +9955,7 @@ async def _exec_global_presence_channel(
 
                 acc = alt_acc
 
-            # Atomic claim: only proceed if target is still 'pending' to prevent duplicate processing
-            claimed = await _safe_execute(
-                    pool,
-                "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
-                target["id"],
-            )
-            if claimed == "UPDATE 0":
+            if not await _claim_gp_target(pool, target["id"]):
                 log.info(
                     "op_worker gp: target %d already claimed by another worker, skipping",
                     target["id"],
@@ -10727,13 +11014,7 @@ async def _exec_global_presence_bot(
             if bot_username and not bot_username.lower().endswith("bot"):
                 bot_username = bot_username + "_bot"
 
-            # Atomic claim: skip if already claimed by another worker
-            claimed = await _safe_execute(
-                    pool,
-                "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
-                target["id"],
-            )
-            if claimed == "UPDATE 0":
+            if not await _claim_gp_target(pool, target["id"]):
                 log.info(
                     "op_worker gp_bot: target %d already claimed, skipping", target["id"]
                 )
@@ -13766,6 +14047,7 @@ async def _exec_group_import_all(
     try:
 
         total_imported = 0
+        total_disabled = 0
         total_foreign = 0  # группы, где аккаунт лишь участник — чужие, не тянем
         errors: list[str] = []
         n = len(accounts)
@@ -13793,8 +14075,9 @@ async def _exec_group_import_all(
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
                     # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
                     # ВСЕ ранее сохранённые каналы/группы аккаунта перед вставкой этого среза.
-                    await add_managed_channels(pool, owner_id, acc["id"], groups)
-                    total_imported += len(groups)
+                    imported = await add_managed_channels(pool, owner_id, acc["id"], groups)
+                    total_imported += imported
+                    total_disabled += len(groups) - imported
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -13809,12 +14092,14 @@ async def _exec_group_import_all(
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
         foreign_hint = f"\n🚫 Пропущено чужих (только участник): {total_foreign}" if total_foreign else ""
+        disabled_hint = f"\nОтключены в Infragram: {total_disabled}" if total_disabled else ""
         return {
             "status": "done",
             "imported": total_imported,
+            "disabled_skipped": total_disabled,
             "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{err_hint}",
+            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{disabled_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
@@ -14039,6 +14324,8 @@ async def _exec_group_announce(
                 await _settle(_key, True)
             elif _kind == "flood" or result.get("flood_wait"):
                 await _unmark(_key)
+                await _note_flood_penalty(pool, int(acc["id"]),
+                                          int(result.get("flood_wait") or 600), "post", op_id)
                 _wait = int(result.get("flood_wait") or 600) + random.randint(30, 180)
                 _why = (f"Telegram попросил паузу (флуд-лимит) — объявления "
                         f"продолжатся позже. Отправлено в этот заход: {ok_count}")
@@ -15555,6 +15842,7 @@ async def _exec_channel_import_all(
                 pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
         total_imported = 0
+        total_disabled = 0
         total_foreign = 0  # чужие каналы (аккаунт — лишь подписчик), их не тянем
         errors: list[str] = []
 
@@ -15578,8 +15866,9 @@ async def _exec_channel_import_all(
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
                     # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
                     # ВСЕ ранее сохранённые каналы аккаунта перед вставкой этого среза.
-                    await add_managed_channels(pool, owner_id, acc["id"], channels)
-                    total_imported += len(channels)
+                    imported = await add_managed_channels(pool, owner_id, acc["id"], channels)
+                    total_imported += imported
+                    total_disabled += len(channels) - imported
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -15594,12 +15883,14 @@ async def _exec_channel_import_all(
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
         foreign_hint = f"\n🚫 Пропущено чужих (только подписка): {total_foreign}" if total_foreign else ""
+        disabled_hint = f"\nОтключены в Infragram: {total_disabled}" if total_disabled else ""
         return {
             "status": "done",
             "imported": total_imported,
+            "disabled_skipped": total_disabled,
             "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{err_hint}",
+            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{disabled_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
@@ -15629,26 +15920,16 @@ async def _exec_channel_add(
         if "error" in res:
             return {"status": "failed", "summary": f"❌ {res['error']}"}
         title = res.get("title") or link
-        # Точечный upsert одной строки — НЕ upsert_managed_channels(), т.к. та
-        # функция удаляет ВСЕ существующие каналы аккаунта перед вставкой
-        # (рассчитана на полный ре-импорт, а не на добавление одного канала).
-        await pool.execute(
-            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, members_count)
-               VALUES($1, $2, $3, $4, $5, $6, $7, $8)
-               ON CONFLICT (owner_id, channel_id) DO UPDATE
-               SET title=EXCLUDED.title, username=EXCLUDED.username,
-                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
-                   type=EXCLUDED.type,
-                   members_count=CASE WHEN EXCLUDED.members_count > 0
-                                       THEN EXCLUDED.members_count
-                                       ELSE managed_channels.members_count END""",
-            owner_id, int(acc["id"]), res["channel_id"], title,
-            res.get("username") or "", res.get("access_hash") or 0,
-            res.get("type") or "channel", int(res.get("members") or 0),
+        # Явное подключение снимает отметку отключения в той же транзакции.
+        from database.db import add_managed_channels
+
+        await add_managed_channels(
+            pool, owner_id, int(acc["id"]), [{
+                "id": res["channel_id"], "title": title,
+                "username": res.get("username") or "", "access_hash": res.get("access_hash") or 0,
+                "type": res.get("type") or "channel", "members": res.get("members") or 0,
+            }], reconnect=True,
         )
-        # Владелец явно добавил канал — прежнее удаление больше не действует.
-        from database.db import forget_removed_channels
-        await forget_removed_channels(pool, owner_id, [res["channel_id"]])
         return {
             "status": "done",
             "channel_id": res["channel_id"],
@@ -16022,7 +16303,9 @@ async def _exec_check_accounts_health(
     try:
         from services import account_health as _ah
         await _ah.load_from_db(pool, owner_id)
-        await _ah._persist_health_snapshots(pool)
+        # Только этого владельца: кеш общий на процесс, и без фильтра
+        # проверка одного клиента переписывала историю всего флота.
+        await _ah._persist_health_snapshots(pool, owner_id)
     except Exception as _he:
         log.debug("_exec_check_accounts_health: health snapshot persist failed: %s", _he)
 
@@ -16115,13 +16398,14 @@ async def _exec_check_owned_restrictions(
 
     only_channels = [int(x) for x in (params.get("channel_ids") or [])]
     only_bots = [int(x) for x in (params.get("bot_ids") or [])]
+    exact = params.get("selection_mode") == "exact"
 
     # ── 1. Сущности владельца ────────────────────────────────────────────────
     # Каналы/чаты: scope по owner_id. DISTINCT ON — один канал может вестись
     # несколькими аккаунтами (строка на acc_id), берём одну с её управляющим acc.
     _ch_where = "WHERE owner_id=$1"
     _ch_args: list = [owner_id]
-    if only_channels:
+    if only_channels or exact:
         _ch_where += " AND channel_id = ANY($2::bigint[])"
         _ch_args.append(only_channels)
     ch_rows = await _safe_fetch(
@@ -16131,14 +16415,14 @@ async def _exec_check_owned_restrictions(
         *_ch_args,
     )
     # Боты: scope по added_by (НЕ owner_id — такой колонки на managed_bots нет).
-    _bot_where = "WHERE added_by=$1"
+    _bot_where = "WHERE added_by=$1 AND is_active AND deleted_at IS NULL"
     _bot_args: list = [owner_id]
-    if only_bots:
+    if only_bots or exact:
         _bot_where += " AND bot_id = ANY($2::bigint[])"
         _bot_args.append(only_bots)
     bot_rows = await _safe_fetch(
         pool,
-        f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
+        f"SELECT bot_id, username, first_name, token FROM managed_bots {_bot_where}",
         *_bot_args,
     )
 
@@ -16169,6 +16453,7 @@ async def _exec_check_owned_restrictions(
             # Бот публичен по @username; без него проверить нечем.
             "is_private": not _uname,
             "bot_id": int(r["bot_id"]),
+            "token": r.get("token"),
         })
 
     if not entities:
@@ -16176,21 +16461,32 @@ async def _exec_check_owned_restrictions(
                 "summary": "⚠️ Нет каналов/чатов/ботов для проверки. Сначала подключите их."}
 
     # ── 2. Аккаунты-наблюдатели ──────────────────────────────────────────────
+    # Предохранитель (services/observer_guard): наблюдатель прошлого прогона
+    # получил ограничение после него — расписание снимаем, флот не жжём дальше.
+    from services import observer_guard as _og
+    _hit = await _og.tripped(pool, params)
+    if _hit:
+        await _og.stop_schedule(pool, op_id, params)
+        return {"status": "failed", "stop_reason": "observers_restricted",
+                "summary": _og.trip_summary(_hit, "Ограничения и теневой бан")}
+
+    # Наблюдатель — только живой аккаунт без ограничений: ограниченный и сам
+    # не всё видит, и проверка добавляла бы ему следа.
     acc_rows = await _safe_fetch(
         pool,
-        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+        f"""SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
                   a.device_model, a.system_version, a.app_version,
                   a.lang_code, a.system_lang_code,
                   a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.owner_id=$1 AND a.is_active=TRUE""",
+           WHERE a.owner_id=$1 AND a.is_active=TRUE AND {_og.observer_where("a")}""",
         owner_id,
     )
     observers = [dict(r) for r in (acc_rows or []) if (r.get("session_str") or "").strip()]
     if not observers:
         return {"status": "failed",
-                "summary": "⚠️ Нет активного аккаунта для проверки. Подключите хотя бы один аккаунт."}
+                "summary": "⚠️ Нет активного аккаунта без ограничений для проверки."}
 
     # Карантинные аккаунты не используем как наблюдателей (fail-open: пульс мог не
     # ответить — тогда аккаунт остаётся кандидатом, это осознанный fail-open).
@@ -16232,11 +16528,15 @@ async def _exec_check_owned_restrictions(
     # действия владельца). Старт пула сдвигаем по op_id — разные прогоны берут
     # разные аккаунты, риск не копится на одной и той же горстке.
     _SAFE_TOUCHES_PER_ACCOUNT = 40
+    # Пул ПОСТОЯННЫЙ (observer_guard.stable_pick): раньше старт сдвигался по
+    # op_id, и за несколько прогонов по расписанию сущности сети «трогал» весь
+    # флот — после чего наблюдатели получали ограничение «жалоба на материалы».
+    # Аккаунты, которые сами ведут каналы владельца, — в последнюю очередь.
     if observers:
         _target_pool = max(2, -(-2 * max(1, n) // _SAFE_TOUCHES_PER_ACCOUNT))  # ceil(2n/safe)
         _pool_size = min(len(observers), _target_pool)
-        _pstart = (int(op_id) or 0) % len(observers)
-        _pool = (observers[_pstart:] + observers[:_pstart])[:_pool_size]
+        _pool = _og.stable_pick(observers, _pool_size,
+                                avoid_ids=await _og.admin_account_ids(pool, owner_id))
     else:
         _pool = []
 
@@ -16360,11 +16660,13 @@ async def _exec_check_owned_restrictions(
                 if _is_private and not chash:
                     await _ensure_dialogs(int(cand["id"]), client)
                 try:
+                    # /start боту с аккаунта флота больше не шлём: живость
+                    # бота — getMe по его же токену, без аккаунта (ниже).
                     v = await _erc.probe_entity(
                         client, kind=ent["kind"], entity_id=ent["id"],
                         username=ent.get("username"), access_hash=chash,
                         search_client=search_client,
-                        do_search=bool(search_client))
+                        do_search=bool(search_client), do_bot_ping=False)
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -16381,6 +16683,13 @@ async def _exec_check_owned_restrictions(
                 verdict = _erc.classify(ent["kind"], {
                     "probe_error": "нет доступного аккаунта для проверки "
                                    "(все заняты другими операциями или не подключились)"})
+            elif ent["kind"] == "bot" and ent.get("token"):
+                _alive = await _og.bot_alive_by_token(ent["token"])
+                if _alive is not None:
+                    _meta = verdict.get("meta")
+                    verdict = _erc.classify("bot", {**(verdict.get("signals") or {}),
+                                                    "token_alive": _alive})
+                    verdict["meta"] = _meta
 
             status = verdict["status"]
             counts[status] = counts.get(status, 0) + 1
@@ -16397,14 +16706,13 @@ async def _exec_check_owned_restrictions(
                 "error" if _erc.is_problem(status) else "ok", _log_msg[:200],
             )
 
-            # Реальное ограничение сущности — в общий пульс (restriction_events),
-            # чтобы shadowban_monitor/get_account_health его видели.
-            if _erc.is_problem(status):
-                # id/bot_id — чтобы итог проверки был ДЕЙСТВЕННЫМ: по нему мини-апп
-                # предлагает убрать из списка те, что Telegram уже удалил/заблокировал.
+            # Для карточки сохраняем и неудавшиеся проверки со стабильным ID.
+            if status != _erc.STATUS_CLEAN:
                 findings.append({"kind": ent["kind"], "title": _title,
                                  "id": ent["id"], "bot_id": ent.get("bot_id"),
                                  "status": status, "reason": verdict["reason_ru"]})
+            # В пульс ограничений попадают только выявленные проблемы.
+            if _erc.is_problem(status):
                 try:
                     await _sbm._record_event(
                         pool, owner_id,
@@ -16431,6 +16739,11 @@ async def _exec_check_owned_restrictions(
                 await c.disconnect()
             except Exception:
                 pass
+        # Кто смотрел — первыми к @SpamBot и в params следующего круга: так
+        # предохранитель видит ограничение наблюдателя уже на следующем прогоне.
+        _used = list(_clients.keys())
+        await _og.mark_for_recheck(pool, _used)
+        _og.remember_run(params, _used)
 
     summary = _erc.build_summary(counts, n)
     # Честность про непроверенную видимость: если у владельца всего один аккаунт
@@ -16444,7 +16757,8 @@ async def _exec_check_owned_restrictions(
         "status": "done",
         "checked": n,
         "counts": counts,
-        "findings": findings[:50],
+        "findings": findings,
+        "findings_version": 2,
         "visibility_unmeasured": vis_unmeasured,
         "summary": summary,
     }
@@ -16526,20 +16840,28 @@ async def _exec_check_bot_geoban(
                 "summary": "⚠️ Нет публичных каналов, чатов или ботов (с @username) "
                            "для проверки гео-доступности."}
 
+    # Предохранитель и выбор наблюдателей — общие с проверкой ограничений
+    # (services/observer_guard).
+    from services import observer_guard as _og
+    _hit = await _og.tripped(pool, params)
+    if _hit:
+        await _og.stop_schedule(pool, op_id, params)
+        return {"status": "failed", "stop_reason": "observers_restricted",
+                "summary": _og.trip_summary(_hit, "Гео-доступность")}
     acc_rows = await _safe_fetch(
         pool,
-        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+        f"""SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
                   a.device_model, a.system_version, a.app_version,
                   a.lang_code, a.system_lang_code,
                   a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.owner_id=$1 AND a.is_active=TRUE""",
+           WHERE a.owner_id=$1 AND a.is_active=TRUE AND {_og.observer_where("a")}""",
         owner_id)
     observers = [dict(r) for r in (acc_rows or []) if (r.get("session_str") or "").strip()]
     if not observers:
         return {"status": "failed",
-                "summary": "⚠️ Нет активного аккаунта для проверки."}
+                "summary": "⚠️ Нет активного аккаунта без ограничений для проверки."}
 
     observers = await _claim_available_accounts(op_id, observers, owner_id)
     if not observers:
@@ -16556,6 +16878,10 @@ async def _exec_check_bot_geoban(
 
     # Одна страна = один наблюдатель (первый здоровый с известным geo). Без geo
     # прокси страну не знаем — такие аккаунты для гео-пробы бесполезны.
+    # Порядок постоянный (по id, ведущие каналы — в конце): одни и те же
+    # наблюдатели от прогона к прогону, а не случайный аккаунт страны.
+    healthy = _og.stable_pick(healthy, len(healthy),
+                              avoid_ids=await _og.admin_account_ids(pool, owner_id))
     geo_acc: dict = {}
     for a in healthy:
         geo = (str(a.get("geo_country") or "")).strip().upper()
@@ -16688,6 +17014,9 @@ async def _exec_check_bot_geoban(
                 await c.disconnect()
             except Exception:
                 pass
+        _used = list(_clients.keys())
+        await _og.mark_for_recheck(pool, _used)
+        _og.remember_run(params, _used)
 
     summary = _erc.build_geoban_summary(counts, n)
     summary += f"\n\nℹ️ Проверено стран: {distinct_geos} ({', '.join(sorted(geo_acc))})."
@@ -17539,6 +17868,7 @@ async def _exec_deploy_network(
     подключений не вводит.
     """
     from services import network_builder as _nb, account_manager
+    confirmed = "topology_digest" in params
     # Бренд-бот/промо — только free-tier (см. фабрику каналов и create_channel).
     try:
         from services import brand_injection as _bi_gate
@@ -17552,6 +17882,14 @@ async def _exec_deploy_network(
     d = await _nb.get_instance_detail(pool, owner_id, instance_id)
     if not d:
         return {"status": "failed", "summary": "⚠️ Связка не найдена"}
+    if confirmed:
+        account_id = params.get("account_id")
+        if not _nb.project_pilot_enabled(owner_id):
+            return {"status": "failed", "summary": "Доступ к пилоту отозван"}
+        if params["topology_digest"] != _nb.deployment_topology_digest(d):
+            return {"status": "failed", "summary": "Топология изменилась. Сверьте результат и откройте новый предпросмотр."}
+        if type(account_id) is not int or not await _nb.deployment_account(pool, owner_id, account_id):
+            return {"status": "failed", "summary": "Выбранный аккаунт недоступен"}
     nodes, edges = d["nodes"], d["edges"]
 
     # Аккаунт-создатель: явный или первый живой с сессией.
@@ -17579,6 +17917,17 @@ async def _exec_deploy_network(
     _claimed_acc = int(acc["id"])
 
     try:
+
+        if confirmed:
+            async with pool.acquire() as conn, conn.transaction():
+                await conn.fetchval("SELECT id FROM operation_queue WHERE id=$1 FOR UPDATE", op_id)
+                started = await conn.fetchval(
+                    """INSERT INTO operation_log(op_id,step_num,target,status,message)
+                       SELECT $1,0,'deploy_start','info','Начато развёртывание подтверждённого плана'
+                       WHERE NOT EXISTS (SELECT 1 FROM operation_log WHERE op_id=$1 AND target='deploy_start')
+                       RETURNING id""", op_id)
+            if not started:
+                return {"status": "failed", "summary": "Требуется сверка результата предыдущей попытки"}
 
         node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
         node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
@@ -17609,10 +17958,17 @@ async def _exec_deploy_network(
                     res = await account_manager.create_channel(
                         acc["session_str"], label,
                         megagroup=ntype in ("group", "chat"), _acc=acc,
-                        brand_promo=_brand_free)
-                except Exception as e:
-                    manual.append(f"{label}: ошибка создания ({str(e)[:60]})")
+                        brand_promo=_brand_free and not confirmed)
+                except TimeoutError:
+                    if confirmed:
+                        return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
+                    manual.append(f"{label}: истекло время ожидания создания")
                     continue
+                except Exception as e:
+                    manual.append(f"{label}: ошибка создания ({type(e).__name__})")
+                    continue
+                if confirmed and isinstance(res, dict) and res.get("requires_reconciliation"):
+                    return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
                 ch_id = res.get("channel_id") if isinstance(res, dict) else None
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
@@ -17637,10 +17993,12 @@ async def _exec_deploy_network(
                 # Нода-сообщество = форум-супергруппа + регистрация community_node.
                 try:
                     res = await account_manager.create_forum_supergroup(
-                        acc["session_str"], label, _acc=acc)
+                        acc["session_str"], label, _acc=acc, brand_promo=not confirmed)
                 except Exception as e:
                     manual.append(f"{label}: ошибка создания ноды ({str(e)[:60]})")
                     continue
+                if confirmed and isinstance(res, dict) and res.get("requires_reconciliation"):
+                    return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
                 ch_id = res.get("channel_id") if isinstance(res, dict) else None
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'нода не создана')[:60]}")
@@ -17736,9 +18094,13 @@ async def _exec_deploy_network(
         # «partial» с пустыми счётчиками он превращает в «done». Незапомненный
         # узел — именно непройденная работа: объект создан, а план о нём не
         # знает, и повтор создаст его заново.
-        return {"status": "partial" if unmarked else "done",
+        failed = max(unmarked, _done_n - created - wired) if confirmed else unmarked
+        status = "done"
+        if failed:
+            status = "partial" if created + wired or not confirmed else "failed"
+        return {"status": status,
                 "created": created, "wired": wired, "unmarked": unmarked,
-                "ok": created + wired, "failed": unmarked,
+                "ok": created + wired, "failed": failed,
                 "manual": manual, "summary": " · ".join(parts)}
     finally:
         await release_accounts([_claimed_acc])
@@ -22945,6 +23307,78 @@ async def _remember_twofa(pool, owner_id: int, account_id: int, password: str) -
 
 # ── Репортер ──────────────────────────────────────────────────────────────────
 
+async def _diagnose_unused_accounts(
+    pool, owner_id: int, requested_ids: list[int] | None, used_ids: set[int],
+) -> tuple[str, dict]:
+    """Объяснить, ПОЧЕМУ выбранные аккаунты не пошли в работу.
+
+    Жалоба владельца: «массовые жалобы берут один аккаунт вместо заданного
+    количества». Причина — защитные гейты (кулдаун после FloodWait, спамблок/бан,
+    риск-пульс, занятость другой операцией) молча выкидывают аккаунты из явного
+    выбора, и владелец видит «1», не понимая почему. Здесь раскладываем остаток
+    по причинам одним запросом — чтобы сводка операции была честной и
+    действенной (ждать снятия кулдауна / прогреть / освободить флот).
+
+    requested_ids=None — взять ВЕСЬ флот владельца (для операций без явного
+    списка, напр. report_peer по числу аккаунтов). Чтение tg_accounts держим
+    ЗДЕСЬ, в помощнике, а не в теле исполнителя: выбор аккаунтов исполнителем —
+    только через resource_selector (сторож test_op_worker_single_door_scans).
+
+    Возвращает (готовая строка для сводки, счётчики по причинам).
+    """
+    if requested_ids is None:
+        _fleet = await _safe_fetch(
+            pool, "SELECT id FROM tg_accounts WHERE owner_id=$1", owner_id,
+            log_ctx=f"[diagnose_fleet owner={owner_id}]")
+        requested_ids = [int(r["id"]) for r in (_fleet or [])]
+    dropped = [int(a) for a in requested_ids if int(a) not in used_ids]
+    if not dropped:
+        return "", {}
+    rows = await _safe_fetch(
+        pool,
+        "SELECT id, is_active, (session_str IS NOT NULL) AS has_sess, "
+        "COALESCE(acc_status,'active') AS acc_status, "
+        "(cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS on_cooldown "
+        "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        owner_id, dropped, log_ctx=f"[diagnose_unused op_owner={owner_id}]")
+    by_id = {int(r["id"]): r for r in (rows or [])}
+    try:
+        _quar = await _infra_mem.quarantined_accounts(pool, dropped)
+    except Exception:
+        _quar = set()
+    counts = {"cooldown": 0, "spamblock": 0, "quarantine": 0, "busy": 0,
+              "no_session": 0, "unknown": 0}
+    for aid in dropped:
+        r = by_id.get(aid)
+        if r is None:
+            counts["unknown"] += 1
+        elif not r["is_active"] or not r["has_sess"]:
+            counts["no_session"] += 1
+        elif _acc_status.is_dead(r["acc_status"]):
+            counts["spamblock"] += 1
+        elif r["on_cooldown"]:
+            counts["cooldown"] += 1
+        elif int(aid) in _quar:
+            counts["quarantine"] += 1
+        else:
+            # Прошёл все статусные гейты, но в работу не попал — значит был занят
+            # другой операцией/прогревом на момент захвата.
+            counts["busy"] += 1
+    labels = [
+        ("cooldown", "⏳ на кулдауне (FloodWait)"),
+        ("spamblock", "🚫 спамблок/бан/заморозка"),
+        ("quarantine", "🛡 риск-пульс (недавние ограничения)"),
+        ("busy", "🔄 заняты другой операцией"),
+        ("no_session", "⚪ без активной сессии"),
+        ("unknown", "❓ не ваши/не найдены"),
+    ]
+    parts = [f"{txt}: {counts[key]}" for key, txt in labels if counts[key]]
+    if not parts:
+        return "", counts
+    frag = "⚠️ Не пошли в работу " + str(len(dropped)) + ":\n   " + "\n   ".join(parts)
+    return frag, counts
+
+
 async def _exec_mass_report(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -22961,8 +23395,13 @@ async def _exec_mass_report(
     if not target or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры mass_report"}
 
+    # force: владелец осознанно шлёт СО ВСЕХ выбранных, игнорируя защиту (кулдаун
+    # после FloodWait и риск-пульс). Мёртвые (бан/деактивация/отозванная сессия)
+    # не включаем даже так — они физически не отправят. Дефолт — защита (force=off).
+    _force = bool(params.get("force"))
     accounts = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0,
+        respect_cooldown=not _force, respect_quarantine=not _force)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -22983,7 +23422,11 @@ async def _exec_mass_report(
 
     # Риск-пульс: жалоба с аккаунта под недавним серьёзным ограничением = быстрый бан
     # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
-    accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+    # В force-режиме НЕ отсеиваем — владелец осознанно принял риск.
+    if _force:
+        _skipped_quar = 0
+    else:
+        accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
 
     # Идемпотентность повтора. Повтор — и автоматический (_maybe_requeue после
     # сетевой ошибки, сброс зависшей операции, воскрешение после перезапуска
@@ -23063,19 +23506,26 @@ async def _exec_mass_report(
         status = "partial"
     else:
         status = "done"
+    # Явный выбор владельца = account_ids; реально отработавшие = used_ids. Из
+    # выбора часть молча выкидывали защитные гейты (кулдаун/спамблок/риск-пульс/
+    # занятость) — раскладываем ПОЧЕМУ, чтобы «1 из 10» перестало быть загадкой.
+    used_ids = {int(a["id"]) for a in accounts}
+    _why_frag, _why_counts = await _diagnose_unused_accounts(
+        pool, owner_id, account_ids, used_ids)
     head = (f"✅ Отправлено: {ok_count}/{total}" if ok_count
             else f"⚠️ Не отправлено ни одной жалобы: 0/{total}")
+    # Напоминаем исходный размер выбора, если из него дошли не все.
+    scope = (f" (выбрано {len(account_ids)})"
+             if len(account_ids) > total else "")
     summary = (
         f"🚨 Жалобы на {target} [{reason_label}]\n"
-        f"{head}"
+        f"{head}{scope}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
-        # «Занято» объясняет, почему из выбранного среза в работу пошло меньше:
-        # эти аккаунты в этот момент вела другая операция/прогрев (аренда сессии).
-        + (f"\n⏳ Занято другими операциями: {_busy_cnt}" if _busy_cnt else "")
-        + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
+        + (f"\n{_why_frag}" if _why_frag else "")
     )
     return {"status": status, "ok": ok_count, "failed": fail_count,
-            "busy": _busy_cnt, "summary": summary}
+            "busy": _busy_cnt, "skipped_quarantine": _skipped_quar,
+            "unused_reasons": _why_counts, "summary": summary}
 
 
 # ── Content Clone executor ──────────────────────────────────────────────────
@@ -24219,6 +24669,8 @@ async def _exec_niche_growth_post(
                     # попытка вступить сразу же продлевает его. Раньше это
                     # считалось «не удалось вступить» и цикл шёл к следующей
                     # группе без паузы. Группа ещё не отмечена — повтор её найдёт.
+                    await _note_flood_penalty(pool, int(acc["id"]),
+                                              int(join_result["flood_wait"]), "join", op_id)
                     _why = (f"Telegram попросил паузу на вступления — Агент роста "
                             f"продолжит позже. Опубликовано в этот заход: {ok_count}")
                     return {"status": "requeue",
@@ -24339,6 +24791,8 @@ async def _exec_niche_growth_post(
                               "AND group_id=$2 AND outcome='marked'",
                         owner_id, int(grp_id),
                         log_ctx=f"[niche_growth_unmark op={op_id}]")
+                    await _note_flood_penalty(pool, int(acc["id"]),
+                                              int(post_result["flood_wait"]), "post", op_id)
                     _why = (f"Telegram попросил паузу на публикации — Агент роста "
                             f"продолжит позже. Опубликовано в этот заход: {ok_count}")
                     return {"status": "requeue",
@@ -25288,6 +25742,18 @@ async def _exec_report_peer(
         if idx + 1 < len(accounts):
             await asyncio.sleep(2.5)
 
+    # Запрошено acc_count аккаунтов, в работу пошло len(accounts). Если меньше —
+    # раскладываем ПОЧЕМУ по всему флоту владельца (кулдаун/спамблок/риск-пульс/
+    # занятость), чтобы «1 вместо 10» перестало быть загадкой. Весь флот берёт
+    # сам помощник (requested_ids=None): чтение tg_accounts — не в исполнителе.
+    _why_frag = ""
+    if len(accounts) < acc_count:
+        try:
+            _used = {int(a["id"]) for a in accounts}
+            _why_frag, _ = await _diagnose_unused_accounts(
+                pool, owner_id, None, _used)
+        except Exception:
+            log_exc_swallow(log, f"report_peer diagnose op={op_id}")
     return {
         "status": "done" if ok_count else "failed",
         "ok": ok_count,
@@ -25296,8 +25762,10 @@ async def _exec_report_peer(
         # Пропущенные называем прямо: иначе повтор выглядит мгновенным успехом,
         # и непонятно, ушла жалоба заново или нет.
         "summary": (f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно"
+                    + (f" из {acc_count} запрошенных" if len(accounts) < acc_count else "")
                     + (f" (из них {skip_count} отправили в прошлый раз)" if skip_count else "")
-                    + (f" ❌ {fail_count}" if fail_count else "")),
+                    + (f" ❌ {fail_count}" if fail_count else "")
+                    + (f"\n{_why_frag}" if _why_frag else "")),
     }
 
 

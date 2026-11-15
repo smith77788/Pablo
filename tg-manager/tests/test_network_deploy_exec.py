@@ -77,7 +77,7 @@ def test_set_discussion_group_helper_exists():
 
 def test_deploy_endpoint_goes_through_bus():
     src = _api()
-    fn = api_function("network_deploy")
+    fn = api_function("_network_deployment")
     assert 'operation_bus.submit' in fn
     assert '"deploy_network"' in fn
     assert "plan_deployment" in fn        # пусто → 400

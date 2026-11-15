@@ -31,6 +31,7 @@ const chromium = await chromiumOf();
 const ROOT = process.env.MINIAPP_DIR
   || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'mini_app');
 const asJson = process.argv.includes('--json');
+const GZIP = process.argv.includes('--gzip');
 const runsArg = process.argv.indexOf('--runs');
 const RUNS = runsArg > 0 ? Number(process.argv[runsArg + 1]) || 3 : 3;
 
@@ -53,11 +54,14 @@ const server = http.createServer((req, res) => {
   if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404); return res.end();
   }
-  if (!gz.has(file)) gz.set(file, zlib.gzipSync(fs.readFileSync(file), { level: 6 }));
+  // Как в бою: brotli (services/miniapp_brotli.py); --gzip — для сравнения
+  // со старыми замерами.
+  if (!gz.has(file)) gz.set(file, GZIP ? zlib.gzipSync(fs.readFileSync(file), { level: 6 })
+    : zlib.brotliCompressSync(fs.readFileSync(file), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }));
   const body = gz.get(file);
   bytes += body.length;
   res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream',
-    'Content-Encoding': 'gzip', 'Cache-Control': 'no-store' });
+    'Content-Encoding': GZIP ? 'gzip' : 'br', 'Cache-Control': 'no-store' });
   res.end(body);
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -92,10 +96,11 @@ async function once(cpu) {
   await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 120000 });
   let homeMs = null;
   try {
-    await page.waitForFunction(() => {
-      const s = document.getElementById('homeDataStatus');
-      return s && /обновлены/.test(s.textContent || '');
-    }, null, { timeout: 60000, polling: 50 });
+    // Главная готова: loadHome() получил и отрисовал показатели. Прежний
+    // признак — строка «Показатели обновлены…» — убрали с экрана, и замер
+    // с тех пор молча писал «null».
+    await page.waitForFunction(() => window.loadHome && window.loadHome.lastData,
+      null, { timeout: 60000, polling: 50 });
     homeMs = Date.now() - t0;
   } catch (_) { /* не дошли — так и запишем */ }
   const t = await page.evaluate(() => {
@@ -104,7 +109,15 @@ async function once(cpu) {
     return { dcl: Math.round(n.domContentLoadedEventEnd || 0), load: Math.round(n.loadEventEnd || 0),
       fcp: fcp ? Math.round(fcp.startTime) : null };
   });
-  const out = { ...t, home: homeMs, kb: Math.round(bytes / 1024) };
+  const homeKb = Math.round(bytes / 1024);
+  // Ленивая страница: когда докачан весь код (дальше ни одного запроса за кодом).
+  let allMs = null;
+  try {
+    await page.waitForFunction(() => !window.__lazyState
+      || window.__lazyState().loaded === window.__lazyState().total, null, { timeout: 60000, polling: 100 });
+    allMs = Date.now() - t0;
+  } catch (_) {}
+  const out = { ...t, home: homeMs, kb: homeKb, all: allMs, kb_all: Math.round(bytes / 1024) };
   await ctx.close();
   return out;
 }
@@ -116,7 +129,8 @@ for (const [name, cpu] of [['mid', 4], ['low', 6]]) {
   for (let i = 0; i < RUNS; i++) rows.push(await once(cpu));
   result.profiles[name] = { cpu_slowdown: cpu, fcp_ms: median(rows.map(r => r.fcp)),
     dcl_ms: median(rows.map(r => r.dcl)), home_ms: median(rows.map(r => r.home)),
-    transfer_kb: median(rows.map(r => r.kb)), all: rows };
+    transfer_kb: median(rows.map(r => r.kb)), all_code_ms: median(rows.map(r => r.all)),
+    transfer_all_kb: median(rows.map(r => r.kb_all)), runs: rows };
 }
 await browser.close();
 server.close();
@@ -126,6 +140,6 @@ else {
   console.log(`Сеть: ${result.network}, прогонов: ${RUNS}, кэш пустой`);
   for (const [n, p] of Object.entries(result.profiles)) {
     console.log(`${n} (CPU ×${p.cpu_slowdown}): первая отрисовка ${p.fcp_ms} мс · DOM ${p.dcl_ms} мс · `
-      + `главный экран ${p.home_ms} мс · передано ${p.transfer_kb} КБ`);
+      + `главный экран ${p.home_ms} мс · передано ${p.transfer_kb} КБ · весь код ${p.all_code_ms} мс, ${p.transfer_all_kb} КБ`);
   }
 }

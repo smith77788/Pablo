@@ -671,8 +671,38 @@ def setup_routes(app: web.Application, pool) -> None:
             except Exception:
                 log.exception("complaint_submit alive_accounts uid=%d", uid)
                 alive = []
-            if not alive:
-                in_app = {"error": "Среди выбранных нет доступных активных аккаунтов"}
+            # force_all: владелец осознанно шлёт СО ВСЕХ выбранных, игнорируя
+            # защиту (кулдаун/риск-пульс) — выше риск бана, но это его решение.
+            force_all = bool(data.get("force_all"))
+            # Реально пригодный набор — ТЕМИ ЖЕ фильтрами, что и операция
+            # (кулдаун, риск-пульс, мёртвый прокси), а не только is_active+сессия.
+            # Иначе пикер показывает «active», владелец выбирает 10, а в работу
+            # идёт 1 — без объяснения. Считаем честно и раскладываем остаток.
+            # В force-режиме фильтры ослаблены (кулдаун/карантин не отсеиваем).
+            try:
+                from services import resource_selector as _rsel
+                usable = await _rsel.select_all_active(
+                    pool, uid, include_ids=alive, min_trust_score=0.0,
+                    respect_cooldown=not force_all, respect_quarantine=not force_all)
+                usable_ids = [int(a["id"]) for a in usable]
+            except Exception:
+                log.warning("complaint_submit: select_all_active failed", exc_info=True)
+                usable_ids = list(alive)
+            dropped_counts: dict = {}
+            dropped_note = ""
+            if len(usable_ids) < len(account_ids):
+                try:
+                    from services import op_worker as _opw
+                    dropped_note, dropped_counts = await _opw._diagnose_unused_accounts(
+                        pool, uid, account_ids, set(usable_ids))
+                except Exception:
+                    log.debug("complaint_submit: diagnose failed", exc_info=True)
+            if not usable_ids:
+                in_app = {"error": "Среди выбранных сейчас нет готовых аккаунтов "
+                          "(кулдаун/спамблок/риск-пульс). Подождите снятия "
+                          "кулдауна или прогрейте их.",
+                          "selected": len(account_ids), "accounts": 0,
+                          "dropped": dropped_counts, "dropped_note": dropped_note}
             else:
                 # Гейт давления инфраструктуры — как у mass_report (самая
                 # баноопасная ветка). Fail-open: сбой проверки не блокирует.
@@ -693,16 +723,25 @@ def setup_routes(app: web.Application, pool) -> None:
                             pool, uid, "mass_report",
                             {"mode": mode, "target": target, "reason": tg_reason,
                              "report_text": report_text, "msg_ids": msg_ids,
-                             "account_ids": alive},
-                            total_items=len(alive),
-                            label=f"Жалоба: {target} [{category}] × {len(alive)} акк.",
+                             "account_ids": usable_ids, "force": force_all},
+                            total_items=len(usable_ids),
+                            label=f"Жалоба: {target} [{category}] × {len(usable_ids)} акк.",
                         )
-                        # selected > alive: часть выбранных мертва/без сессии —
-                        # говорим прямо, сколько реально пошло в работу.
-                        in_app = {"op_id": op_id, "accounts": len(alive),
-                                  "selected": len(account_ids)}
+                        # Честно: сколько выбрано, сколько реально пойдёт и почему
+                        # остальные выпали — чтобы «1 из 10» не было загадкой.
+                        in_app = {"op_id": op_id, "accounts": len(usable_ids),
+                                  "selected": len(account_ids),
+                                  "dropped": dropped_counts,
+                                  "dropped_note": dropped_note}
                     except PermissionError as exc:
-                        in_app = {"error": str(exc) or "Требуется подписка"}
+                        # Отказ по тарифу (operation_bus.PlanRequiredError) — НЕ
+                        # ошибка сервера. Если in-app — единственный вектор,
+                        # отдаём честный 403 с причиной; если выбрана и почта,
+                        # причину кладём в in_app.error, а письмо всё равно уйдёт.
+                        _reason = str(exc) or "Требуется подписка"
+                        if not mailbox_ids:
+                            return _err(_reason, 403)
+                        in_app = {"error": _reason}
                     except Exception:
                         log.exception("complaint_submit mass_report uid=%d", uid)
                         in_app = {"error": "Не удалось поставить in-app жалобу"}

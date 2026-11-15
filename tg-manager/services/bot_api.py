@@ -164,19 +164,20 @@ async def _call(
             return data
 
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
-            last_error = e
+            # Исключение клиента может содержать полный URL с токеном.
+            last_error = type(e).__name__
             if attempt < _MAX_RETRIES - 1:
                 backoff = _BASE_BACKOFF * (2**attempt)
                 log.debug(
                     "bot_api %s network error, retrying in %.1fs: %s",
                     method,
                     backoff,
-                    e,
+                    last_error,
                 )
                 await asyncio.sleep(backoff)
                 continue
             log.warning(
-                "bot_api %s failed after %d retries: %s", method, _MAX_RETRIES, e
+                "bot_api %s failed after %d retries: %s", method, _MAX_RETRIES, last_error
             )
 
     # All retries exhausted

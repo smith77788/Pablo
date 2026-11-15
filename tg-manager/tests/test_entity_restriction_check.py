@@ -269,14 +269,20 @@ def test_private_entity_resolved_via_managing_dialogs_reads_flags():
     assert erc.classify("channel", r["signals"])["status"] == erc.STATUS_RESTRICTED
 
 
-def test_search_visible_true_false_and_none():
-    hit = _FakeClient(_Ent(100, "chan"), search_hit=True)
-    miss = _FakeClient(_Ent(100, "chan"), search_hit=False)
-    boom = _FakeClient(_Ent(100, "chan"), search_exc=Exception("flood"))
+def test_search_visible_measures_name_and_username_separately():
+    hit = _FakeClient(_Ent(100, "chan", title="Новости дня"), search_hit=True)
+    miss = _FakeClient(_Ent(100, "chan", title="Новости дня"), search_hit=False)
+    boom = _FakeClient(_Ent(100, "chan", title="Новости дня"), search_exc=Exception("flood"))
 
-    assert _run(erc.search_visible(hit, username="chan", target_id=100)) is True
-    assert _run(erc.search_visible(miss, username="chan", target_id=100)) is False
-    assert _run(erc.search_visible(boom, username="chan", target_id=100)) is None
+    assert _run(erc.search_visible(hit, username="chan", title="Новости дня",
+                                   target_id=100)) == {"by_name": True, "by_username": True}
+    assert _run(erc.search_visible(miss, username="chan", title="Новости дня",
+                                   target_id=100)) == {"by_name": False, "by_username": False}
+    assert _run(erc.search_visible(boom, username="chan", title="Новости дня",
+                                   target_id=100)) == {"by_name": None, "by_username": None}
+    # Короткое/совпадающее с юзернеймом название по имени не проверяем.
+    assert _run(erc.search_visible(hit, username="chan", title="ch",
+                                   target_id=100))["by_name"] is None
 
 
 def test_probe_uses_external_search_client_for_visibility():
@@ -298,3 +304,54 @@ def test_probe_without_search_client_and_no_search_leaves_visibility_unknown():
                               username="chan", do_search=False))
     assert r["status"] == erc.STATUS_CLEAN
     assert "found_in_search" not in r["signals"]
+
+
+# ── Теневой бан по названию: находится по юзернейму, но не по имени ──────────
+
+class _QueryAwareClient:
+    """search_visible ищет сначала по названию, потом по юзернейму — отвечаем
+    по порядку вызова (стаб telethon не доносит req.q до фейка)."""
+
+    def __init__(self, ent, *, hit_by_name, hit_by_username):
+        self._e = ent
+        self._answers = [hit_by_name, hit_by_username]
+        self._i = 0
+
+    async def get_entity(self, ref):
+        return self._e
+
+    async def __call__(self, req):
+        hit = self._answers[self._i] if self._i < len(self._answers) else False
+        self._i += 1
+        return _Found(chats=[self._e]) if hit else _Found()
+
+    async def send_message(self, *a, **k):
+        return None
+
+    async def get_messages(self, *a, **k):
+        return [object()]
+
+
+def test_found_by_username_but_not_by_name_is_shadowban():
+    ent = _Ent(100, "mybot", title="Мой Помощник")
+    c = _QueryAwareClient(ent, hit_by_name=False, hit_by_username=True)
+    r = _run(erc.probe_entity(c, kind="bot", entity_id=100, username="mybot",
+                              search_client=c, do_bot_ping=False))
+    assert r["status"] == erc.STATUS_HIDDEN
+    assert "по юзернейму" in r["reason_ru"] and "по названию" in r["reason_ru"]
+    assert r["signals"]["found_in_search"] is False
+    assert r["signals"]["found_by_username"] is True
+
+
+def test_found_by_name_is_clean():
+    ent = _Ent(100, "mybot", title="Мой Помощник")
+    c = _QueryAwareClient(ent, hit_by_name=True, hit_by_username=True)
+    r = _run(erc.probe_entity(c, kind="bot", entity_id=100, username="mybot",
+                              search_client=c, do_bot_ping=False))
+    assert r["status"] == erc.STATUS_CLEAN
+
+
+def test_classify_username_yes_name_no_is_hidden():
+    r = erc.classify("bot", {"resolved": True, "has_username": True,
+                             "found_in_search": False, "found_by_username": True})
+    assert r["status"] == erc.STATUS_HIDDEN and "по юзернейму" in r["reason_ru"]

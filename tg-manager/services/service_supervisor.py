@@ -276,3 +276,55 @@ async def run_stall_watch(
         except Exception:
             log.warning("service_supervisor: осмотр зависаний не выполнен",
                         exc_info=True)
+
+
+async def supervise_while_leader(
+    name: str,
+    fn,
+    *args,
+    is_leader,
+    poll_s: float = 5.0,
+    **supervise_kwargs,
+) -> None:
+    """`supervise`, но сервис живёт ТОЛЬКО пока процесс — лидер.
+
+    Нужен горизонтальному исполнителю (OP_SHARDED_EXECUTOR=1): операции там
+    разбирают все процессы-исполнители, а фоновые циклы (прогрев, призрак,
+    восстановление, авто-ответы, расписания…) обязаны идти в ОДНОМ экземпляре
+    — иначе каждый лишний процесс удваивал бы реальные действия аккаунтов.
+    Лидер — держатель аренды исполнителя (`replica_guard.holds_executor_lease`).
+
+    Не лидер — ждём. Стали лидером — запускаем обычный `supervise`. Потеряли
+    лидерство — гасим сервис и снова ждём: новый лидер поднимет свой
+    экземпляр, и двух не будет дольше одного опроса. Штатный возврат сервиса
+    (выключен настройкой) завершает и эту обёртку — как у `supervise`.
+    """
+    while True:
+        while not is_leader():
+            await asyncio.sleep(poll_s)
+        task = asyncio.create_task(
+            supervise(name, fn, *args, **supervise_kwargs),
+            name=f"svc:{name}")
+        try:
+            while not task.done():
+                await asyncio.sleep(poll_s)
+                if not is_leader():
+                    log.warning(
+                        "%s: процесс больше не лидер — фоновый сервис "
+                        "останавливается до возврата лидерства", name)
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        log.exception("%s: сбой при остановке после потери лидерства", name)
+                    break
+            else:
+                # Сервис закончился сам (выключен) — как у supervise.
+                if not task.cancelled():
+                    task.result()
+                return
+        except asyncio.CancelledError:
+            task.cancel()
+            raise

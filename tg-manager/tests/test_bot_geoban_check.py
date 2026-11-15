@@ -241,8 +241,10 @@ def test_executor_skips_private_channels_and_respects_bot_only_selection():
         bots=[{"bot_id": 201, "username": "help_bot", "first_name": "Помощник"}],
         accounts=[_geo_acc(1, "RU"), _geo_acc(2, "DE")])
     res, calls, _ = _run_geo_exec(pool, {}, params={"bot_ids": [201]})
-    # Выбрали только ботов — каналы даже не запрашиваются.
-    assert not any("managed_channels" in q for q in pool.fetch_queries)
+    # Выбрали только ботов — каналы даже не запрашиваются (запрос «кто ведёт
+    # каналы» — это выбор наблюдателей, observer_guard, а не список каналов).
+    assert not any("managed_channels" in q and "distinct acc_id" not in q
+                   for q in pool.fetch_queries)
     assert {c[0] for c in calls} == {"bot"}
     # А запрос каналов (когда он идёт) берёт только публичные.
     pool2 = _GeoPool(channels=[], bots=[], accounts=[_geo_acc(1, "RU"), _geo_acc(2, "DE")])

@@ -101,7 +101,21 @@ def holds_executor_lease() -> bool:
         _EXEC_LEASE_TTL_S - _EXEC_LEASE_MARGIN_S)
 
 
+def sharded_executor() -> bool:
+    """Горизонтальный исполнитель (OP_SHARDED_EXECUTOR=1, см. op_worker).
+
+    Тогда операции разбирают все процессы-исполнители, а лидер (держатель
+    аренды) один ведёт сторожей очереди и фоновые циклы.
+    """
+    return str(os.getenv("OP_SHARDED_EXECUTOR", "")).strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def _multi_allowed() -> bool:
+    # Горизонтальный исполнитель — это и есть осознанный мульти-режим:
+    # несколько исполнителей там штатная раскладка, а не ошибка.
+    if sharded_executor():
+        return True
     return str(os.getenv("INFRAGRAM_ALLOW_MULTI_REPLICA", "")).strip().lower() in (
         "1", "true", "yes", "on")
 

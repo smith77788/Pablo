@@ -69,6 +69,7 @@ GET /api/miniapp/account/{acc_id}/channels
 GET /api/miniapp/account/{acc_id}/contacts
 GET /api/miniapp/account/{acc_id}/dialog/{peer}/history
 GET /api/miniapp/account/{acc_id}/dialogs
+GET /api/miniapp/account/{acc_id}/sessions
 GET /api/miniapp/accounts
 GET /api/miniapp/accounts/export
 GET /api/miniapp/accounts/export_json
@@ -262,7 +263,9 @@ GET /api/miniapp/network/instances
 GET /api/miniapp/network/stats
 GET /api/miniapp/network/templates
 GET /api/miniapp/networks
+GET /api/miniapp/networks/project_overview
 GET /api/miniapp/networks/{net_id}
+GET /api/miniapp/networks/{net_id}/catalog
 GET /api/miniapp/networks/{net_id}/deploy_plan
 GET /api/miniapp/new_users
 GET /api/miniapp/new_users/export
@@ -281,12 +284,14 @@ GET /api/miniapp/operation/{op_id}/log
 GET /api/miniapp/operation/{op_id}/log.csv
 GET /api/miniapp/operations
 GET /api/miniapp/operations/export
+GET /api/miniapp/operations/{op_id}/cleanup
 GET /api/miniapp/organism/digest
 GET /api/miniapp/organism/pulse
 GET /api/miniapp/parser/audience
 GET /api/miniapp/parser/audience/export
 GET /api/miniapp/parser/runs
 GET /api/miniapp/payments
+GET /api/miniapp/persona/style_from_my_chats
 GET /api/miniapp/persona/{persona_id}/memory
 GET /api/miniapp/personas
 GET /api/miniapp/physics
@@ -317,6 +322,7 @@ GET /api/miniapp/rehab/{acc_id}/history
 GET /api/miniapp/relay/session/{session_id}/messages
 GET /api/miniapp/report_channels
 GET /api/miniapp/restrictions/dead
+GET /api/miniapp/restrictions/problems
 GET /api/miniapp/sales/ai-journal
 GET /api/miniapp/sales/ai-quality
 GET /api/miniapp/sales/ai-usage
@@ -416,6 +422,7 @@ GET /media/u/{token}
 GET /metrics
 GET /miniapp
 GET /miniapp/
+GET /miniapp/lazy/{h}.js
 GET /miniapp/{path}
 GET /s/{code}
 GET /{code}
@@ -427,6 +434,7 @@ HEAD /api/miniapp/account/{acc_id}/channels
 HEAD /api/miniapp/account/{acc_id}/contacts
 HEAD /api/miniapp/account/{acc_id}/dialog/{peer}/history
 HEAD /api/miniapp/account/{acc_id}/dialogs
+HEAD /api/miniapp/account/{acc_id}/sessions
 HEAD /api/miniapp/accounts
 HEAD /api/miniapp/accounts/export
 HEAD /api/miniapp/accounts/export_json
@@ -620,7 +628,9 @@ HEAD /api/miniapp/network/instances
 HEAD /api/miniapp/network/stats
 HEAD /api/miniapp/network/templates
 HEAD /api/miniapp/networks
+HEAD /api/miniapp/networks/project_overview
 HEAD /api/miniapp/networks/{net_id}
+HEAD /api/miniapp/networks/{net_id}/catalog
 HEAD /api/miniapp/networks/{net_id}/deploy_plan
 HEAD /api/miniapp/new_users
 HEAD /api/miniapp/new_users/export
@@ -639,12 +649,14 @@ HEAD /api/miniapp/operation/{op_id}/log
 HEAD /api/miniapp/operation/{op_id}/log.csv
 HEAD /api/miniapp/operations
 HEAD /api/miniapp/operations/export
+HEAD /api/miniapp/operations/{op_id}/cleanup
 HEAD /api/miniapp/organism/digest
 HEAD /api/miniapp/organism/pulse
 HEAD /api/miniapp/parser/audience
 HEAD /api/miniapp/parser/audience/export
 HEAD /api/miniapp/parser/runs
 HEAD /api/miniapp/payments
+HEAD /api/miniapp/persona/style_from_my_chats
 HEAD /api/miniapp/persona/{persona_id}/memory
 HEAD /api/miniapp/personas
 HEAD /api/miniapp/physics
@@ -675,6 +687,7 @@ HEAD /api/miniapp/rehab/{acc_id}/history
 HEAD /api/miniapp/relay/session/{session_id}/messages
 HEAD /api/miniapp/report_channels
 HEAD /api/miniapp/restrictions/dead
+HEAD /api/miniapp/restrictions/problems
 HEAD /api/miniapp/sales/ai-journal
 HEAD /api/miniapp/sales/ai-quality
 HEAD /api/miniapp/sales/ai-usage
@@ -774,6 +787,7 @@ HEAD /media/u/{token}
 HEAD /metrics
 HEAD /miniapp
 HEAD /miniapp/
+HEAD /miniapp/lazy/{h}.js
 HEAD /miniapp/{path}
 HEAD /s/{code}
 HEAD /{code}
@@ -810,6 +824,9 @@ POST /api/miniapp/account/{acc_id}/note
 POST /api/miniapp/account/{acc_id}/post_story
 POST /api/miniapp/account/{acc_id}/profile
 POST /api/miniapp/account/{acc_id}/proxy
+POST /api/miniapp/account/{acc_id}/public_channel_capacity
+POST /api/miniapp/account/{acc_id}/session/close
+POST /api/miniapp/account/{acc_id}/session/trust
 POST /api/miniapp/account/{acc_id}/spamblock_appeal
 POST /api/miniapp/account/{acc_id}/toggle
 POST /api/miniapp/account/{acc_id}/warmup/pause
@@ -1041,6 +1058,7 @@ POST /api/miniapp/operations/clear
 POST /api/miniapp/operations/pause
 POST /api/miniapp/operations/resume
 POST /api/miniapp/operations/retry_failed
+POST /api/miniapp/operations/{op_id}/cleanup
 POST /api/miniapp/organism/dismiss
 POST /api/miniapp/organism/pending_open
 POST /api/miniapp/osint_search

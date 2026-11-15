@@ -53,8 +53,12 @@ async def _poll(conn, slots, per_owner, window, exclude=None):
     пропустить ($4::bigint[]; NULL = не пропускать ничего). Тест звал его с
     тремя аргументами и падал на связывании, но файл выполняется только с живым
     Postgres, которого в CI не было, поэтому расхождение никто не видел.
+
+    Пятый — worker_id, который отбор пишет в `claimed_by` (хозяин запущенной
+    операции для горизонтального исполнителя, schema_v370).
     """
-    return await conn.fetch(_poller_sql(), slots, per_owner, window, exclude)
+    return await conn.fetch(_poller_sql(), slots, per_owner, window, exclude,
+                            "test-poller:0:0000")
 
 # ── Ратчет по исходнику: работает и без Postgres ─────────────────────────────
 

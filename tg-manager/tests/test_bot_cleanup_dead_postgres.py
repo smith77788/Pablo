@@ -1,22 +1,7 @@
-"""Проверка живости ботов и полное удаление: мёртвых сносим, неизвестных — нет.
+"""Очистка Mini App на PostgreSQL с имитацией ответов Telegram.
 
-До этой фичи у ботов в мини-аппе было только «убрать из работы»
-(`is_active=FALSE`) — реального удаления и проверки «жив ли токен» не было
-(см. tests/test_bot_power_one_honest_action.py: «удаления, которого в продукте
-нет»). Здесь добавлены три ручки:
-
-  • POST /api/miniapp/bots/check_all   — getMe по каждому токену, только чтение;
-  • POST /api/miniapp/bots/bulk_delete — полное удаление выбранных (DELETE строки);
-  • POST /api/miniapp/bots/cleanup_dead — проверить всех и удалить ТОЛЬКО мёртвых.
-
-Главный инвариант, который стережёт этот тест: удаляется только то, про что
-ТОЧНО известно, что токен отозван (getMe → 401 → 'dead'). Бот со статусом
-'unknown' (Telegram не ответил: сеть/5xx/429) НЕ удаляется — иначе одна сетевая
-ошибка снесла бы живой флот. Плюс скоуп владельца (added_by) и идемпотентность.
-
-Живой Postgres обязателен: заглушка пула не проверяет связывание
-`ANY($1::bigint[])` и не уследит за owner-скоупом DELETE — ровно та ошибка,
-которая на юнит-тесте невидима. Инструкция по DSN — в других *_postgres.py.
+Аудитория остаётся после пакетного и автоматического скрытия. Автоматическая
+очистка сравнивает сохранённый токен с тем, который проверяла.
 """
 from __future__ import annotations
 
@@ -78,11 +63,16 @@ def test_check_bulk_delete_and_cleanup_dead(monkeypatch):
             return bot_api.BOT_UNKNOWN
         return bot_api.BOT_ALIVE
 
+    rotate = None
+
     async def _fake_batch(session, tokens):
+        if rotate is not None:
+            await rotate()
         return [_status_for(t) for t in tokens]
     monkeypatch.setattr(bot_api, "batch_check_alive", _fake_batch)
 
     async def go():
+        nonlocal rotate
         conn = await asyncpg.connect(DSN)
         await _load_schema(conn)
         await conn.close()
@@ -91,19 +81,24 @@ def test_check_bulk_delete_and_cleanup_dead(monkeypatch):
             await pool.execute(
                 "DELETE FROM managed_bots WHERE added_by = ANY($1::bigint[])",
                 [OWNER, OTHER])
-            # bot_id уникален глобально; token уникален. Четыре бота владельца:
-            # один жив, два с отозванным токеном, один не ответил. Плюс чужой.
+            # У владельца живой бот, два с отозванным токеном, один без
+            # ответа и один на паузе из отчёта. Плюс чужой бот.
             bots = [
                 (101, "t_alive_101", OWNER),
                 (102, "t_dead_102", OWNER),
                 (103, "t_unknown_103", OWNER),
                 (104, "t_dead_104", OWNER),
+                (105, "t_dead_105", OWNER),
                 (201, "t_alive_201", OTHER),
             ]
             for bid, tok, owner in bots:
                 await pool.execute(
                     "INSERT INTO managed_bots(bot_id, token, username, is_active, added_by) "
                     "VALUES($1,$2,$3,TRUE,$4)", bid, tok, f"bot{bid}", owner)
+
+            await pool.execute("UPDATE managed_bots SET is_active=FALSE, cleanup_paused=TRUE WHERE bot_id=105")
+            await pool.execute(
+                "INSERT INTO bot_users(bot_id,user_id) VALUES(101,501),(102,502),(104,504),(105,505)")
 
             app = web.Application()
             mini_app_bots.setup_routes(app, pool)
@@ -116,41 +111,47 @@ def test_check_bulk_delete_and_cleanup_dead(monkeypatch):
                 r = await client.post("/api/miniapp/bots/check_all", headers=hdr, json={})
                 assert r.status == 200, await r.text()
                 d = await r.json()
-                assert d["alive"] == 1 and d["dead"] == 2 and d["unknown"] == 1, d
+                assert d["alive"] == 1 and d["dead"] == 3 and d["unknown"] == 1, d
                 by_id = {b["bot_id"]: b["status"] for b in d["bots"]}
                 assert by_id[102] == "dead" and by_id[103] == "unknown", by_id
                 # Ничего не удалено проверкой.
                 n = await pool.fetchval(
                     "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", OWNER)
-                assert n == 4, "check_all не должен удалять"
+                assert n == 5, "check_all не должен удалять"
 
-                # 2) cleanup_dead — удаляет ТОЛЬКО мёртвых (102, 104); 101 (жив)
-                #    и 103 (не ответил) остаются; чужой 201 не тронут.
+                # Ротация между проверкой и записью должна отменить снятие бота.
+                async def rotate_token():
+                    assert await _db.replace_bot_token(pool, OWNER, 104, "t_alive_rotated_104")
+
+                rotate = rotate_token
                 r = await client.post("/api/miniapp/bots/cleanup_dead", headers=hdr, json={})
+                rotate = None
                 assert r.status == 200, await r.text()
                 d = await r.json()
-                assert d["checked"] == 4 and d["deleted"] == 2 and d["dead"] == 2, d
-                assert d["unknown"] == 1 and d["alive"] == 1, d
-                assert sorted(d["deleted_ids"]) == [102, 104], d
-                left = {r["bot_id"] for r in await pool.fetch(
-                    "SELECT bot_id FROM managed_bots WHERE added_by=$1", OWNER)}
-                assert left == {101, 103}, f"удалены не те боты: {left}"
-                assert await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_bots WHERE bot_id=201") == 1, \
-                    "чужой бот не должен быть затронут"
+                assert d["checked"] == 4 and d["deleted"] == 1 and d["dead"] == 2, d
+                assert d["unknown"] == 1 and d["alive"] == 1 and d["changed_since_check"] == 1
+                assert d["deleted_ids"] == [102]
+                assert "t_dead" not in str(d) and "t_alive" not in str(d)
+                state = {row["bot_id"]: (row["is_active"], row["deleted_at"] is not None,
+                                        row["cleanup_paused"]) for row in await pool.fetch(
+                    "SELECT bot_id,is_active,deleted_at,cleanup_paused "
+                    "FROM managed_bots WHERE added_by=ANY($1::bigint[])", [OWNER, OTHER])}
+                assert state == {101: (True, False, False), 102: (False, True, False),
+                                 103: (True, False, False), 104: (True, False, False),
+                                 105: (False, False, True), 201: (True, False, False)}
+                assert not await _db.add_bot(pool, "t_dead_105", 105, "bot105", "Paused", OWNER)
+                assert await pool.fetchval("SELECT count(*) FROM bot_users WHERE bot_id=102") == 1
 
-                # 3) bulk_delete — скоуп владельца: 101 свой (удалится), 201 чужой
-                #    (не удалится). requested=2, deleted=1.
                 r = await client.post("/api/miniapp/bots/bulk_delete", headers=hdr,
                                       json={"bot_ids": [101, 201]})
                 assert r.status == 200, await r.text()
                 d = await r.json()
                 assert d["requested"] == 2 and d["deleted"] == 1, d
                 assert await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_bots WHERE bot_id=101") == 0
+                    "SELECT deleted_at IS NOT NULL AND NOT is_active FROM managed_bots WHERE bot_id=101")
                 assert await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_bots WHERE bot_id=201") == 1, \
-                    "bulk_delete вышел за owner-скоуп"
+                    "SELECT deleted_at IS NULL AND is_active FROM managed_bots WHERE bot_id=201")
+                assert await pool.fetchval("SELECT count(*) FROM bot_users WHERE bot_id=101") == 1
 
                 # 4) Идемпотентность: повтор по уже удалённому = 0, не ошибка.
                 r = await client.post("/api/miniapp/bots/bulk_delete", headers=hdr,
@@ -158,10 +159,15 @@ def test_check_bulk_delete_and_cleanup_dead(monkeypatch):
                 assert r.status == 200
                 assert (await r.json())["deleted"] == 0
 
-                # 5) Пустой выбор — явная 400, а не молчаливое удаление всего.
-                r = await client.post("/api/miniapp/bots/bulk_delete", headers=hdr,
-                                      json={"bot_ids": []})
-                assert r.status == 400
+                for malformed in ([], {"bot_ids": []}, {"bot_ids": [True]},
+                                  {"bot_ids": [101.9]}, {"bot_ids": [2**63]}):
+                    r = await client.post("/api/miniapp/bots/bulk_delete", headers=hdr, json=malformed)
+                    assert r.status == 400
+
+                assert await _db.add_bot(pool, "t_alive_101", 101, "bot101", "Returned", OWNER)
+                assert await pool.fetchval("SELECT count(*) FROM bot_users WHERE bot_id=101") == 1
+                assert await pool.fetchval(
+                    "SELECT deleted_at IS NULL AND is_active FROM managed_bots WHERE bot_id=101")
             finally:
                 await client.close()
 

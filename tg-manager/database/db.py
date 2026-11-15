@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import time
+from contextlib import nullcontext
 from config import DATABASE_URL, PLAN_PRICES_USD, PERIOD_DISCOUNTS
 
 from services.logger import log_exc_swallow, timed
@@ -337,6 +338,16 @@ async def create_pool() -> asyncpg.Pool:
         DATABASE_URL,
         **pool_config,
     )
+    # Ожидание соединения пула — в метрики в момент, когда оно случается
+    # (database/pool_metrics.py). Сбой обёртки не мешает старту.
+    try:
+        from database import pool_metrics as _pool_metrics
+
+        if not _pool_metrics.instrument(pool):
+            log.warning("pool_metrics: замер ожидания пула не встал — "
+                        "в asyncpg нет Pool._acquire")
+    except Exception:
+        log_exc_swallow(log, "pool_metrics: замер ожидания пула")
     async with pool.acquire() as conn:
         # ── ПОТОЛОК ОЖИДАНИЯ БЛОКИРОВКИ ──────────────────────────────────────
         # Без него DDL миграции ждёт блокировку БЕСКОНЕЧНО, и это кладёт продукт
@@ -973,7 +984,7 @@ async def replace_bot_token(
               SET token=$3,
                   username=COALESCE(NULLIF($4,''), username),
                   first_name=COALESCE(NULLIF($5,''), first_name),
-                  is_active=TRUE, deleted_at=NULL,
+                  is_active=TRUE, deleted_at=NULL, cleanup_paused=FALSE,
                   fail_streak=0, last_error=NULL, dead_notified_at=NULL
             WHERE bot_id=$1 AND added_by=$2
         RETURNING bot_id""",
@@ -1018,16 +1029,16 @@ async def add_bot(
             # после мёртвого токена. Раньше здесь тоже отвечали «уже добавлен»,
             # и бот было не вернуть в принципе — тупик на ровном месте.
             # Поднимаем ту же строку: аудитория, воронки и история на месте.
-            await pool.execute(
+            updated = await pool.execute(
                 """UPDATE managed_bots
                       SET token=$3,
                           username=COALESCE(NULLIF($4,''), username),
                           first_name=COALESCE(NULLIF($5,''), first_name),
                           is_active=TRUE, deleted_at=NULL,
                           fail_streak=0, last_error=NULL, dead_notified_at=NULL
-                    WHERE bot_id=$1 AND added_by=$2""",
+                    WHERE bot_id=$1 AND added_by=$2 AND NOT cleanup_paused""",
                 bot_id, added_by, _enc_tok(token), username or "", first_name or "")
-            return True
+            return updated == "UPDATE 1"
         if existing["is_active"]:
             return "taken"
         # Прежний владелец бота у себя убрал, а токен есть у нового. Строку
@@ -1035,7 +1046,13 @@ async def add_bot(
         # больше не относятся, и достаться новому хозяину не должны. Здесь
         # каскад срабатывает намеренно — это единственное место, где данные
         # действительно стираются.
-        await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", bot_id)
+        released = await pool.execute(
+            "DELETE FROM managed_bots WHERE bot_id=$1 AND added_by=$2 "
+            "AND NOT is_active AND NOT cleanup_paused",
+            bot_id, existing["added_by"],
+        )
+        if released != "DELETE 1":
+            return "taken"
 
     try:
         await pool.execute(
@@ -1112,11 +1129,12 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
 
 
 async def get_bot(
-    pool: asyncpg.Pool, bot_id: int, added_by: int
+    pool: asyncpg.Pool, bot_id: int, added_by: int, *, owner_only: bool = False
 ) -> dict | None:
     row = await pool.fetchrow(
         """SELECT * FROM managed_bots
            WHERE bot_id=$1 AND is_active=TRUE AND deleted_at IS NULL
+              AND (NOT $3::boolean OR added_by=$2)
               AND (added_by=$2
                    OR bot_id IN (
                        SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
@@ -1132,46 +1150,79 @@ async def get_bot(
                    ))""",
         bot_id,
         added_by,
+        owner_only,
     )
     if row is None:
         return None
     return _dec_bot_rows([row])[0]
 
 
-async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
-    """Удалить бота из системы. Строка остаётся, аудитория не теряется.
-
-    Удаление и пауза — РАЗНЫЕ состояния. Раньше оба писали только is_active,
-    и удалённый бот оставался в списке мини-аппа как «убранный из работы», а
-    кнопка «Вернуть в работу» поднимала его обратно. Теперь удаление ставит ещё
-    и deleted_at: бот исчезает из всех списков (_BOTS_VISIBLE_SQL, get_bots,
-    get_bot), переключатель паузы его не трогает, а работа его не берёт, потому
-    что is_active снимается тем же запросом.
-
-    Раньше это был DELETE, а на managed_bots(bot_id) висит десяток таблиц с
-    ON DELETE CASCADE: bot_users, funnels, auto_replies, broadcasts, статистика.
-    То есть «убрать бота из списка» стирало всю его базу подписчиков и историю
-    — безвозвратно, потому что удалённую строку неоткуда взять. Продукт уже
-    признал эту цену слишком высокой: ради неё появилась replace_bot_token, а
-    Mini App удаляет бота именно снятием is_active.
-
-    Теперь обе двери ведут в одно место: бот пропадает из списков (все они
-    фильтруют is_active), а данные остаются. Вернуть бота — добавить его
-    заново тем же токеном, add_bot поднимет ту же строку.
-
-    Данные стираются только тогда, когда бота действительно забирает ДРУГОЙ
-    владелец: это делает add_bot, и там иначе нельзя — чужая аудитория не
-    должна достаться новому хозяину.
-    """
-    result = await pool.execute(
-        "UPDATE managed_bots SET is_active=FALSE, deleted_at=now() "
-        "WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL",
-        bot_id,
-        added_by,
+async def set_managed_bot_active(conn, bot_id: int, owner_id: int, active: bool | None,
+                                 *, cleanup_pause: bool = False):
+    """Пауза сохраняет бота и данные. Явное включение снимает паузу очистки."""
+    return await conn.fetchrow(
+        """UPDATE managed_bots
+              SET is_active = COALESCE($3::boolean, NOT is_active),
+                  cleanup_paused = $4 OR
+                      (cleanup_paused AND NOT COALESCE($3::boolean, NOT is_active))
+            WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL
+        RETURNING bot_id, is_active""",
+        bot_id, owner_id, active, cleanup_pause,
     )
-    if result == "UPDATE 1":
+
+
+_SOFT_DELETE_BOT = (
+    "UPDATE managed_bots SET is_active=FALSE, deleted_at=now(), cleanup_paused=FALSE "
+)
+
+
+async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
+    """Скрыть бота и остановить его работу, сохранив подписчиков и историю."""
+    removed = await delete_bots(pool, added_by, [bot_id])
+    if removed:
         await record_manual_action(pool, added_by, "bot_remove", target=str(bot_id))
-    return result == "UPDATE 1"
+    return bool(removed)
+
+
+async def delete_bots(
+    pool: asyncpg.Pool, added_by: int, bot_ids: list[int],
+    *, checked_tokens: dict[int, str] | None = None,
+) -> list[int]:
+    """Скрыть ботов и отменить их ещё не материализованные рассылки."""
+    if checked_tokens is None:
+        where = "WHERE added_by=$1 AND bot_id=ANY($2::bigint[]) AND deleted_at IS NULL "
+        args = (added_by, bot_ids)
+    else:
+        # Автоматическая очистка действует на тот же токен. Пауза отчёта сохраняется.
+        where = (
+            "FROM unnest($2::bigint[], $3::text[]) AS checked(id, token) "
+            "WHERE managed_bots.added_by=$1 AND managed_bots.bot_id=checked.id "
+            "AND managed_bots.token=checked.token AND managed_bots.deleted_at IS NULL "
+            "AND NOT managed_bots.cleanup_paused "
+        )
+        args = (added_by, bot_ids, [checked_tokens[bot_id] for bot_id in bot_ids])
+    async with pool.acquire() as conn, conn.transaction():
+        rows = await conn.fetch(
+            _SOFT_DELETE_BOT + where + "RETURNING managed_bots.bot_id", *args,
+        )
+        removed = sorted(row["bot_id"] for row in rows)
+        if removed:
+            # Новый снимок READ COMMITTED видит вставки, завершившиеся до
+            # захвата строки бота. Создание расписания удерживает FOR SHARE.
+            await conn.execute(
+                """UPDATE scheduled_broadcasts SET status='cancelled'
+                   WHERE bot_id=ANY($1::bigint[]) AND status IN ('pending','processing')
+                     AND broadcast_id IS NULL""",
+                removed,
+            )
+            await conn.execute(
+                """UPDATE broadcasts SET status='cancelled', finished_at=now(),
+                          status_note='Бот убран из Infragram'
+                   WHERE bot_id=ANY($1::bigint[]) AND scheduled_id IS NOT NULL
+                     AND status IN ('pending','running')""",
+                removed,
+            )
+    return removed
 
 
 async def save_bot_note(
@@ -1424,7 +1475,7 @@ async def get_interrupted_broadcasts(pool: asyncpg.Pool) -> list[dict]:
     try:
         rows = await pool.fetch(
             """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
-                      b.buttons, b.silent, m.token
+                      b.buttons, b.silent, b.scheduled_id, b.created_by, m.token
                FROM broadcasts b
                JOIN managed_bots m ON m.bot_id = b.bot_id
                WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE
@@ -4473,6 +4524,14 @@ def _managed_channel_rows(owner_id: int, acc_id: int, channels: list[dict]) -> l
     ]
 
 
+async def lock_managed_channel_catalog(conn, owner_id: int) -> None:
+    """Сериализует запись каталога и отметок отключения одного владельца."""
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        f"managed_channels:{owner_id}",
+    )
+
+
 async def upsert_managed_channels(
     pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict],
     *, complete: bool,
@@ -4513,25 +4572,23 @@ async def upsert_managed_channels(
             ids.append(int(ch["id"]))
         except (KeyError, TypeError, ValueError):
             continue
-    # Фильтр — до транзакции: его сбой внутри неё оборвал бы весь импорт.
-    # ids собраны раньше намеренно: удалённый владельцем канал строки и так не
-    # имеет, а список «что оставить» должен быть полным.
-    channels = await skip_removed_channels(pool, owner_id, channels)
-    rows = _managed_channel_rows(owner_id, acc_id, channels)
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "DELETE FROM managed_channels "
-                " WHERE owner_id=$1 AND acc_id=$2 "
-                "   AND NOT (channel_id = ANY($3::bigint[]))",
-                owner_id, acc_id, ids,
-            )
-            await conn.executemany(_MANAGED_CHANNEL_UPSERT_SQL, rows)
+    async with pool.acquire() as conn, conn.transaction():
+        await lock_managed_channel_catalog(conn, owner_id)
+        channels = await skip_removed_channels(conn, owner_id, channels, strict=True)
+        rows = _managed_channel_rows(owner_id, acc_id, channels)
+        await conn.execute(
+            "DELETE FROM managed_channels "
+            " WHERE owner_id=$1 AND acc_id=$2 "
+            "   AND NOT (channel_id = ANY($3::bigint[]))",
+            owner_id, acc_id, ids,
+        )
+        await conn.executemany(_MANAGED_CHANNEL_UPSERT_SQL, rows)
     return len(channels)
 
 
 async def add_managed_channels(
-    pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict]
+    pool: asyncpg.Pool | asyncpg.Connection, owner_id: int, acc_id: int, channels: list[dict],
+    *, reconnect: bool = False,
 ) -> int:
     """Точечно добавляет/обновляет каналы в managed_channels БЕЗ удаления
     остальных ранее сохранённых строк аккаунта.
@@ -4545,13 +4602,18 @@ async def add_managed_channels(
     """
     if not channels:
         return 0
-    channels = await skip_removed_channels(pool, owner_id, channels)
-    if not channels:
-        return 0
-    await pool.executemany(
-        _MANAGED_CHANNEL_UPSERT_SQL,
-        _managed_channel_rows(owner_id, acc_id, channels),
-    )
+    connection = nullcontext(pool) if isinstance(pool, asyncpg.Connection) else pool.acquire()
+    async with connection as conn, conn.transaction():
+        await lock_managed_channel_catalog(conn, owner_id)
+        if reconnect:
+            await _forget_removed_channels(conn, owner_id, [int(ch["id"]) for ch in channels])
+        else:
+            channels = await skip_removed_channels(conn, owner_id, channels, strict=True)
+        if channels:
+            await conn.executemany(
+                _MANAGED_CHANNEL_UPSERT_SQL,
+                _managed_channel_rows(owner_id, acc_id, channels),
+            )
     return len(channels)
 
 
@@ -4572,14 +4634,16 @@ REMOVED_BY_OWNER = "owner"
 REMOVED_GONE = "gone"
 
 
-async def skip_removed_channels(conn, owner_id: int, channels: list[dict]) -> list[dict]:
+async def skip_removed_channels(
+    conn, owner_id: int, channels: list[dict], *, strict: bool = False,
+) -> list[dict]:
     """Убрать из импорта каналы, которые владелец удалил.
 
     Заодно снимает отметку «пропал в Telegram» с тех, что снова нашлись в
     диалогах: раз аккаунт их видит, канал жив и доступен.
 
-    Сбой (нет таблицы на базе без миграции, заглушка пула) импорт не ломает:
-    лучше вернуть удалённый канал, чем потерять импорт целиком.
+    Запись каталога требует успешной проверки. Предварительный просмотр
+    сохраняет список при временной ошибке, повторная проверка идёт при записи.
     """
     ids: list[int] = []
     for ch in channels:
@@ -4602,6 +4666,8 @@ async def skip_removed_channels(conn, owner_id: int, channels: list[dict]) -> li
             owner_id, ids,
         )
     except Exception as e:
+        if strict:
+            raise
         log.debug("removed_channels: фильтр импорта недоступен: %s", e)
         return channels
     blocked = {int(r["channel_id"]) for r in rows or []}
@@ -4633,33 +4699,49 @@ async def remove_managed_channel(
         raise ValueError(f"неизвестная причина удаления канала: {reason!r}")
     async with pool.acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow(
-                """DELETE FROM managed_channels
-                    WHERE owner_id=$1 AND channel_id=$2
-                RETURNING acc_id, title, username, type, access_hash""",
-                owner_id, channel_id,
+            await lock_managed_channel_catalog(conn, owner_id)
+            return await remove_managed_channel_on_connection(
+                conn, owner_id, channel_id, reason=reason, detail=detail,
             )
-            if not row:
-                return False
-            await conn.execute(
-                """INSERT INTO removed_channels
-                       (owner_id, channel_id, reason, detail, acc_id, title,
-                        username, type, access_hash)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 0))
-                   ON CONFLICT (owner_id, channel_id) DO UPDATE
-                   SET reason=EXCLUDED.reason, detail=EXCLUDED.detail,
-                       acc_id=EXCLUDED.acc_id, title=EXCLUDED.title,
-                       username=EXCLUDED.username, type=EXCLUDED.type,
-                       access_hash=EXCLUDED.access_hash, removed_at=now()""",
-                owner_id, channel_id, reason, (detail or "")[:300],
-                row["acc_id"], row["title"], row["username"], row["type"],
-                row["access_hash"],
-            )
-            await conn.execute(
-                "UPDATE va_channel_admin SET enabled=FALSE "
-                "WHERE owner_id=$1 AND channel_id=$2 AND enabled",
-                owner_id, channel_id,
-            )
+
+
+async def remove_managed_channel_on_connection(
+    conn, owner_id: int, channel_id: int, *, reason: str, detail: str,
+) -> bool:
+    """Удаление внутри транзакции, удерживающей блокировку каталога владельца."""
+    row = await conn.fetchrow(
+        """DELETE FROM managed_channels
+            WHERE owner_id=$1 AND channel_id=$2
+        RETURNING acc_id, title, username, type, access_hash,
+                  jsonb_build_object(
+                      'id', id, 'added_at', added_at, 'about', about, 'last_drift_check', last_drift_check,
+                      'members_count', members_count, 'avg_views', avg_views,
+                      'influence', influence, 'is_admin', is_admin, 'is_creator', is_creator
+                  ) AS catalog_metadata""",
+        owner_id, channel_id,
+    )
+    if not row:
+        return False
+    await conn.execute(
+        """INSERT INTO removed_channels
+               (owner_id, channel_id, reason, detail, acc_id, title,
+                username, type, access_hash, catalog_metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 0), $10::jsonb)
+           ON CONFLICT (owner_id, channel_id) DO UPDATE
+           SET reason=EXCLUDED.reason, detail=EXCLUDED.detail,
+               acc_id=EXCLUDED.acc_id, title=EXCLUDED.title,
+               username=EXCLUDED.username, type=EXCLUDED.type,
+               access_hash=EXCLUDED.access_hash, catalog_metadata=EXCLUDED.catalog_metadata,
+               removed_at=now()""",
+        owner_id, channel_id, reason, (detail or "")[:300],
+        row["acc_id"], row["title"], row["username"], row["type"],
+        row["access_hash"], row["catalog_metadata"],
+    )
+    await conn.execute(
+        "UPDATE va_channel_admin SET enabled=FALSE "
+        "WHERE owner_id=$1 AND channel_id=$2 AND enabled",
+        owner_id, channel_id,
+    )
     return True
 
 
@@ -4680,7 +4762,8 @@ async def forget_removed_channels(pool: asyncpg.Pool, owner_id: int, channel_ids
     """Снять отметку удаления: владелец снова явно добавил канал.
 
     Без этого канал, добавленный руками после удаления, висел бы сразу в двух
-    местах — в списке и среди удалённых. Сбой не критичен и не пробрасывается.
+    местах — в списке и среди удалённых. Для атомарной записи ресурса
+    используйте add_managed_channels с reconnect=True.
     """
     ids = []
     for c in channel_ids or []:
@@ -4690,34 +4773,45 @@ async def forget_removed_channels(pool: asyncpg.Pool, owner_id: int, channel_ids
             continue
     if not ids:
         return
-    try:
-        await pool.execute(
-            "DELETE FROM removed_channels WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
-            owner_id, ids,
-        )
-    except Exception as e:
-        log.debug("removed_channels: отметка не снята owner=%s: %s", owner_id, e)
+    async with pool.acquire() as conn, conn.transaction():
+        await lock_managed_channel_catalog(conn, owner_id)
+        await _forget_removed_channels(conn, owner_id, ids)
+
+
+async def _forget_removed_channels(conn, owner_id: int, ids: list[int]) -> None:
+    await conn.execute(
+        "DELETE FROM removed_channels WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+        owner_id, ids,
+    )
 
 
 async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id: int) -> bool:
     """Вернуть удалённый канал в систему той же строкой, что была до удаления."""
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_managed_channel_catalog(conn, owner_id)
             row = await conn.fetchrow(
                 """DELETE FROM removed_channels
                     WHERE owner_id=$1 AND channel_id=$2 AND acc_id IS NOT NULL
-                RETURNING acc_id, title, username, type, access_hash""",
+                RETURNING acc_id, title, username, type, access_hash, catalog_metadata""",
                 owner_id, channel_id,
             )
             if not row:
                 return False
             await conn.execute(
                 """INSERT INTO managed_channels
-                       (owner_id, acc_id, channel_id, title, username, access_hash, type)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7)
+                       (owner_id, acc_id, channel_id, title, username, access_hash, type,
+                        added_at, about, last_drift_check, members_count, avg_views,
+                        influence, is_admin, is_creator, id)
+                   SELECT $1, $2, $3, $4, $5, $6, $7,
+                          CASE WHEN $8::jsonb IS NULL THEN now() ELSE m.added_at END,
+                          m.about, m.last_drift_check, COALESCE(m.members_count, 0),
+                          COALESCE(m.avg_views, 0), COALESCE(m.influence, 0), m.is_admin, m.is_creator,
+                          COALESCE(m.id, nextval(pg_get_serial_sequence('managed_channels', 'id')))
+                     FROM jsonb_populate_record(NULL::managed_channels, COALESCE($8::jsonb, '{}')) AS m
                    ON CONFLICT (owner_id, channel_id) DO NOTHING""",
                 owner_id, row["acc_id"], channel_id, row["title"],
-                row["username"], int(row["access_hash"] or 0), row["type"],
+                row["username"], int(row["access_hash"] or 0), row["type"], row["catalog_metadata"],
             )
     return True
 
@@ -5217,6 +5311,40 @@ def _notify_failure_is_permanent(exc: Exception) -> bool:
     return any(mark in text for mark in _NOTIFY_PERMANENT_MARKS)
 
 
+# Ошибка РАЗМЕТКИ или ДЛИНЫ сообщения (а не сети/лимита и не «получатель
+# пропал»): Telegram отклоняет сам ТЕКСТ. Повтор того же текста её не починит,
+# но отчёт владельцу можно доставить простым текстом (без HTML), усечённым до
+# лимита. Так владелец наконец получает содержимое — пусть без форматирования.
+# Симптом из прода: «отчёт об операции не доехал до владельца — N раз» с
+# растущим N, тогда как мета-алерт «не доставлено» (короткий, чистый) доходил.
+_NOTIFY_CONTENT_ERROR_MARKS = (
+    "can't parse entities", "can't parse", "unsupported start tag",
+    "unclosed", "unexpected end tag", "can't find end tag", "entity",
+    "byte offset",                                  # битый HTML
+    "message is too long", "message_too_long", "text is too long",
+    "message caption is too long",                  # длина
+    "message text is empty", "message to be sent is empty",  # пусто
+)
+_TG_MESSAGE_LIMIT = 4096
+
+
+def _notify_failure_is_content_error(exc: Exception) -> bool:
+    """Ошибка в самом тексте (разметка/длина/пусто) — повтор не поможет."""
+    text = str(exc).lower()
+    return any(mark in text for mark in _NOTIFY_CONTENT_ERROR_MARKS)
+
+
+def _html_to_plain(text: str) -> str:
+    """HTML-разметку — в простой текст: <br>/</p> в перевод строки, остальные
+    теги убрать, сущности развернуть. Для аварийной доставки, когда Telegram
+    не принял HTML."""
+    import html as _html
+    t = re.sub(r"(?i)<br\s*/?>", "\n", text or "")
+    t = re.sub(r"(?i)</(p|div|li)>", "\n", t)
+    t = re.sub(r"<[^>]+>", "", t)
+    return _html.unescape(t)
+
+
 def _cleanup_notify_cooldown() -> None:
     """Evict stale entries when cache grows too large."""
     if len(_notify_cooldown) <= _NOTIFY_CACHE_MAX:
@@ -5354,8 +5482,22 @@ async def notify_if_enabled(
                 )
                 return True
             except Exception as exc:
+                # Ошибка разметки/длины: тем же HTML Telegram отклонит и на
+                # повторе. Но отчёт владельцу нужен — шлём простым текстом,
+                # усечённым до лимита. Получилось — доставлено.
+                if _notify_failure_is_content_error(exc):
+                    try:
+                        _plain = _html_to_plain(text)
+                        if len(_plain) > _TG_MESSAGE_LIMIT:
+                            _plain = _plain[:_TG_MESSAGE_LIMIT - 1].rstrip() + "…"
+                        await bot.send_message(
+                            user_id, _plain, reply_markup=reply_markup)
+                        return True
+                    except Exception as exc2:
+                        # Простой текст тоже не ушёл — дальше по общей логике.
+                        exc = exc2
                 _last_exc = exc
-                if _notify_failure_is_permanent(exc):
+                if _notify_failure_is_permanent(exc) or _notify_failure_is_content_error(exc):
                     break
                 if _attempt >= len(_NOTIFY_RETRY_DELAYS):
                     break
@@ -5386,18 +5528,27 @@ async def notify_if_enabled(
         # False означает «стоит попробовать снова», поэтому его возвращает
         # ТОЛЬКО временный сбой. На заблокированном боте повтор каждый круг
         # воркера жёг бы лимиты Telegram, ничего не доставляя, — там True.
-        _worth_retrying = not _notify_failure_is_permanent(exc)
+        # Ошибка самого текста (разметка/длина) — наш сбой формата, а не сети
+        # и не выбор получателя. Повтор того же текста её не чинит (простой
+        # текст мы уже попробовали выше), поэтому НЕ временная: иначе отчёт
+        # слался бы заново каждый цикл воркера и копил счётчик недоставки —
+        # ровно симптом из прода.
+        _is_content = _notify_failure_is_content_error(exc)
+        _worth_retrying = not _is_content and not _notify_failure_is_permanent(exc)
         try:
             from services import metrics as _m
 
-            # Постоянный отказ (человек заблокировал бота, не нажимал /start,
-            # удалил аккаунт) — не сбой нашей доставки, а выбор получателя.
-            # Раньше он шёл в тот же счётчик, что и сбой сети, и админ получал
-            # тревогу «Защита не записалась» о чужом заблокированном боте.
-            _m.inc("infragram_notifications_undelivered_total"
-                   if _worth_retrying
-                   else "infragram_notifications_recipient_gone_total",
-                   {"pref": str(pref)[:40]})
+            # Три разных исхода, три счётчика:
+            # — наш битый текст (bad_content): чинить формат отчёта, не сеть;
+            # — выбор получателя (recipient_gone): заблокировал/удалил бота;
+            # — временный сбой (undelivered): сеть/перегрузка/лимит — повтор.
+            if _is_content:
+                _metric = "infragram_notifications_bad_content_total"
+            elif _worth_retrying:
+                _metric = "infragram_notifications_undelivered_total"
+            else:
+                _metric = "infragram_notifications_recipient_gone_total"
+            _m.inc(_metric, {"pref": str(pref)[:40]})
         except Exception:
             pass
         return not _worth_retrying

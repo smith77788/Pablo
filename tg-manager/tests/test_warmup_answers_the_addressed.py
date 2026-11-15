@@ -159,7 +159,7 @@ def turn(monkeypatch):
         return object()
     monkeypatch.setattr(cw, "_resolve_and_join", _join)
 
-    async def _load(pool, acc, fallback="", context=""):
+    async def _load(pool, acc, fallback="", context="", **kw):
         return pv.Voice(account_id=acc, prompt="голос")
     monkeypatch.setattr(pv, "load", _load)
     monkeypatch.setattr(pv, "remember", _noop)

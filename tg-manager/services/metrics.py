@@ -99,6 +99,9 @@ _HELP = {
         "Кругов цикла, на которых процесс НЕ разбирал очередь: аренда у другого",
     "infragram_executor_standdowns_total":
         "Сдач аренды на ходу: процесс гасил идущие операции и отпускал аккаунты",
+    "infragram_executor_fenced_ops_total":
+        "Операций, погашенных исполнителем, потому что их уже выполняет другой "
+        "процесс (этот считали умершим — цикл стоял дольше окна хартбита)",
     "infragram_op_cancel_orphans_closed_total":
         "Отменённых операций, итог которым дописал сторож (воркер умер между "
         "отменой и сворачиванием)",
@@ -107,6 +110,9 @@ _HELP = {
     "infragram_notifications_recipient_gone_total":
         "Уведомления, которые Telegram отклонил навсегда (получатель заблокировал "
         "бота, не нажимал /start или удалил аккаунт) — не сбой доставки",
+    "infragram_notifications_bad_content_total":
+        "Отчёт не приняли из-за самого текста (битый HTML или длина >4096): "
+        "аварийная отправка простым текстом тоже не прошла — чинить формат отчёта",
     "infragram_budget_write_failures_total":
         "Потерянные записи суточного счёта действий (аккаунт могут взять сверх лимита)",
     "infragram_strike_history_write_failures_total":
@@ -221,6 +227,11 @@ _HELP = {
     "infragram_restricted_account_refusals_total": (
         "Запросы, не отправленные с аккаунта под спам-блоком или заморозкой"),
     "infragram_db_pool_connections": "Соединения пула БД",
+    "infragram_db_pool_waiters": "Сколько обращений ждут соединения пула БД прямо сейчас",
+    "infragram_db_pool_acquire_wait_seconds_sum": "Суммарное ожидание соединения пула БД, сек",
+    "infragram_db_pool_acquire_wait_seconds_count": "Число взятий соединения пула БД",
+    "infragram_db_pool_slow_acquires_total": "Взятий соединения пула БД с ожиданием дольше 100 мс",
+    "infragram_db_pool_acquire_wait_max_seconds": "Худшее ожидание соединения пула БД за минуту, сек",
     "infragram_bot_stale_updates_skipped_total":
         "Личные сообщения боту, пропущенные как устаревшие: пролежали у Telegram "
         "дольше STALE_UPDATE_MAX_AGE_SEC, пока бот не работал",
