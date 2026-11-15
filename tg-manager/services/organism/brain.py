@@ -10,6 +10,8 @@ build_suggestions — чистая функция (тестируется без
 """
 from __future__ import annotations
 
+import asyncio
+
 _SEV = {"urgent": 0, "warn": 1, "opportunity": 2, "info": 3}
 
 # Периоды «заглушить», предлагаемые кнопками под нуджем. Порядок = порядок кнопок.
@@ -390,15 +392,18 @@ async def pulse(pool, owner_id: int) -> dict:
     """Живой пульс: мир + повествование + цепочки действий (без отклонённых)."""
     import time as _t
     from services.organism import world, spine
-    snap = await world.snapshot(pool, owner_id)
-    try:
-        dismissed = await spine.state_get(pool, owner_id, "dismissed", []) or []
-    except Exception:
-        dismissed = []
-    try:
-        snoozed = await spine.state_get(pool, owner_id, SNOOZE_KEY, {}) or {}
-    except Exception:
-        snoozed = {}
+    # Отклонённые и заглушённые подсказки не зависят от снимка — читаем их
+    # одновременно с ним, а не двумя походами в базу после.
+    snap, dismissed, snoozed = await asyncio.gather(
+        world.snapshot(pool, owner_id),
+        spine.state_get(pool, owner_id, "dismissed", []),
+        spine.state_get(pool, owner_id, SNOOZE_KEY, {}),
+        return_exceptions=True,
+    )
+    if isinstance(snap, BaseException):
+        raise snap
+    dismissed = [] if isinstance(dismissed, BaseException) else (dismissed or [])
+    snoozed = {} if isinstance(snoozed, BaseException) else (snoozed or {})
     return {
         "narrative": narrative(snap),
         "snapshot": snap,

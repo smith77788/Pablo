@@ -12,6 +12,7 @@ op_worker применяет к паузам между действиями. О
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -76,19 +77,20 @@ def invalidate(owner_id: int) -> None:
 
 async def status(pool: asyncpg.Pool, owner_id: int) -> dict:
     """Состояние губернатора для UI: уровень, множитель, из чего сложилось."""
-    try:
-        from services.infra_pressure import compute_pressure
-        p = await compute_pressure(pool, owner_id)
-    except Exception:
+    from services.infra_pressure import compute_pressure
+    from services import anti_storm
+    # Давление и шторм независимы — читаем разом, а не друг за другом.
+    p, storm = await asyncio.gather(
+        compute_pressure(pool, owner_id),
+        anti_storm.current(pool, owner_id),
+        return_exceptions=True,
+    )
+    if isinstance(p, BaseException):
         p = {}
+    if isinstance(storm, BaseException):
+        storm = {"level": "calm", "mult": 1.0, "until": None}
     score = int(p.get("score", 0) or 0)
     mult = multiplier_for_score(score)
-    storm = {"level": "calm", "mult": 1.0, "until": None}
-    try:
-        from services import anti_storm
-        storm = await anti_storm.current(pool, owner_id)
-    except Exception:
-        pass
     storm_mult = float(storm.get("mult", 1.0) or 1.0)
     mult = max(mult, storm_mult)
     level = level_for_multiplier(mult)

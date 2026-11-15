@@ -334,8 +334,12 @@ async def create_pool() -> asyncpg.Pool:
     """
     pool_config = get_pool_config()
     log_pool_config(pool_config)
+    # Соединение без лишнего похода в базу на каждом возврате в пул: сброс
+    # сессии только тому, кто оставил состояние (database/lean_reset.py).
+    from database.lean_reset import LeanResetConnection
     pool = await asyncpg.create_pool(
         DATABASE_URL,
+        connection_class=LeanResetConnection,
         **pool_config,
     )
     # Ожидание соединения пула — в метрики в момент, когда оно случается
