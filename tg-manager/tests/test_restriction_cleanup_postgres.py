@@ -159,8 +159,10 @@ def test_reject_changed_edges_and_active_workflow_before_mutation():
 
 
 
-def test_running_publication_blocks_detach_and_pending_rechecks_targets():
+def test_running_publication_blocks_detach_and_pending_rechecks_targets(monkeypatch):
     from services import op_worker
+
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
 
     async def scenario(pool, op_id):
         project_id = await pool.fetchval(

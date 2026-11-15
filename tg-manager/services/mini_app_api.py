@@ -7761,6 +7761,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        if "project_channel_id" in request.query and "project_id" not in request.query:
+            return _err("Укажите проект", 400)
+        if any(len(request.query.getall(key, [])) > 1 for key in ("project_id", "project_channel_id")):
+            return _err("Укажите проект и канал однозначно", 400)
         if "project_id" in request.query:
             from services import network_builder as _nb
 
@@ -7831,7 +7835,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
             if not _nb.project_pilot_enabled(uid):
                 return _err("Недоступно", 403)
-            project_id = validate_integer(body["project_id"], min_val=1, max_val=2147483647)
+            project_id = validate_integer(str(body["project_id"]), min_val=1, max_val=2147483647)
             if project_id is None or not channel_ids:
                 return _err("Подтвердите список каналов проекта", 400)
             channel_id = None

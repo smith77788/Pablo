@@ -1,9 +1,12 @@
 """Каталог и изменение топологии по подписанному HTTP на PostgreSQL."""
 import asyncio
+from datetime import datetime, timedelta, timezone
+import json
 from unittest.mock import AsyncMock
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+import pytest
 
 from services import mini_app_api, op_worker
 from services.mini_app_auth import make_token
@@ -146,3 +149,136 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
             await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER + 1, foreign)
 
     asyncio.run(_run(scenario))
+
+
+@pytest.mark.parametrize("changed", ["detached", "revoked", "invalid_targets", "new_target"])
+def test_queued_project_publish_rechecks_scope_before_preparing_post(monkeypatch, changed):
+    from database import db
+    from services import account_manager, editorial_review
+
+    secret = "123456:synthetic-project-queue"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    monkeypatch.setattr("bot.utils.subscription.require_plan", AsyncMock(return_value=True))
+    monkeypatch.setattr(op_worker, "circuit_breaker_status", AsyncMock(return_value={}))
+    monkeypatch.setattr(db, "notify_if_enabled", AsyncMock())
+    editor = AsyncMock(return_value=(False, []))
+    send = AsyncMock(return_value={"message_id": 1})
+    monkeypatch.setattr(editorial_review, "autonomous_block", editor)
+    monkeypatch.setattr(account_manager, "post_to_channel", send)
+
+    async def scenario(pool, check_id):
+        projects = await pool.fetch(
+            """INSERT INTO network_instances(owner_id,name)
+               VALUES($1,'Публикации'),($1,'Соседний проект') RETURNING id""", OWNER)
+        project, other = (row["id"] for row in projects)
+        await pool.execute(
+            """INSERT INTO network_nodes(instance_id,node_type,ref_id)
+               VALUES($1,'channel',$3),($2,'channel',$3)""", project, other, CHANNEL)
+        app = web.Application()
+        mini_app_api.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+
+        async with TestClient(TestServer(app)) as client:
+            endpoint = "/api/miniapp/mass_publish"
+            preview_path = endpoint + "/targets"
+            for bad_query in (
+                f"?project_channel_id={CHANNEL}",
+                f"?project_id={project}&project_id={other}",
+                f"?project_id={project}&project_channel_id={CHANNEL}&project_channel_id=1",
+            ):
+                assert (await client.get(preview_path + bad_query, headers=headers)).status == 400
+            preview = await client.get(
+                f"{preview_path}?project_id={project}&project_channel_id={CHANNEL}", headers=headers)
+            assert (await preview.json())["sample"][0]["channel_id_text"] == str(CHANNEL)
+            payload = {"project_id": project, "project_channel_id": str(CHANNEL),
+                       "channel_ids": [str(CHANNEL)], "text": "Синтетический пост",
+                       "scheduled_for": tomorrow.isoformat()}
+            for invalid in (True, float(project) + .5):
+                bad = await client.post(endpoint, headers=headers, json={**payload, "project_id": invalid})
+                assert bad.status == 400
+            first = await client.post(endpoint, headers=headers, json=payload)
+            assert first.status == 200, await first.text()
+            op_id = (await first.json())["op_id"]
+            repeated = await client.post(endpoint, headers=headers, json=payload)
+            assert repeated.status == 200 and (await repeated.json())["op_id"] == op_id
+            queued = await pool.fetchrow(
+                "SELECT params, status, scheduled_for FROM operation_queue WHERE id=$1", op_id)
+            params = json.loads(queued["params"])
+            assert (params["project_id"], params["channel_ids"], queued["status"]) == (project, [CHANNEL], "pending")
+            assert queued["scheduled_for"] == tomorrow
+
+            if changed == "detached":
+                path = f"/api/miniapp/operations/{check_id}/cleanup"
+                cleanup = {"action": "detach", "project_id": project, "targets": [CHANNEL_TARGET]}
+                review = await client.post(path, headers=headers, json={**cleanup, "preview": True})
+                assert review.status == 200, await review.text()
+                applied = await client.post(
+                    path, headers=headers, json={**cleanup, "token": (await review.json())["token"]})
+                assert applied.status == 200 and (await applied.json())["count"] == 1
+                expected = "Каналы больше не доступны в проекте"
+            elif changed == "revoked":
+                monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", "")
+                expected = "Доступ к публикациям проекта отозван"
+            elif changed == "invalid_targets":
+                await pool.execute(
+                    """UPDATE operation_queue SET params=params || '{"channel_ids":[]}'::jsonb WHERE id=$1""", op_id)
+                expected = "Некорректный список каналов проекта"
+            else:
+                account = await pool.fetchrow(
+                    """SELECT * FROM tg_accounts WHERE owner_id=$1 AND phone='synthetic-project-queue'""", OWNER)
+                monkeypatch.setattr(op_worker.resource_selector, "select_all_active",
+                                    AsyncMock(return_value=[dict(account)]))
+                monkeypatch.setattr(op_worker, "_claim_available_accounts",
+                                    AsyncMock(return_value=[dict(account)]))
+                monkeypatch.setattr(op_worker, "release_accounts", AsyncMock())
+                await pool.execute(
+                    "UPDATE managed_channels SET acc_id=$1, access_hash=101 WHERE owner_id=$2 AND channel_id=$3",
+                    account["id"], OWNER, CHANNEL)
+                await pool.execute(
+                    """INSERT INTO managed_channels(owner_id,acc_id,channel_id,access_hash,title,type)
+                       VALUES($1,$2,$3,102,'Новый канал','channel')""", OWNER, account["id"], CHANNEL + 1)
+                await pool.execute(
+                    "INSERT INTO network_nodes(instance_id,node_type,ref_id) VALUES($1,'channel',$2)",
+                    project, CHANNEL + 1)
+                expected = "Опубликовано"
+
+            # Выполняем только выбранную синтетическую строку штатным диспетчером.
+            claimed = await pool.fetchrow(
+                """UPDATE operation_queue SET status='running', started_at=now() WHERE id=$1
+                   RETURNING id, owner_id, op_type, params""", op_id)
+            await op_worker._run_op_task(pool, None, dict(claimed))
+            state = await pool.fetchrow("SELECT status, result FROM operation_queue WHERE id=$1", op_id)
+            assert state["status"] == ("done" if changed == "new_target" else "failed")
+            result = json.loads(state["result"])
+            if changed == "new_target":
+                send.assert_awaited_once()
+                assert send.await_args.args[1] == CHANNEL
+                assert result["ok"] == 1
+                editor.assert_awaited_once()
+                assert await pool.fetchval(
+                    "SELECT target FROM operation_log WHERE op_id=$1 AND status='ok'", op_id) == str(CHANNEL)
+            else:
+                assert expected in result["summary"]
+                editor.assert_not_awaited()
+                send.assert_not_awaited()
+            card = await client.get(f"/api/miniapp/operation/{op_id}", headers=headers)
+            assert card.status == 200
+            assert expected in await card.text()
+            assert await pool.fetchval(
+                "SELECT 1 FROM network_nodes WHERE instance_id=$1 AND ref_id=$2", other, CHANNEL)
+
+    async def with_synthetic_account(pool, check_id):
+        if changed != "new_target":
+            await scenario(pool, check_id)
+            return
+        account_id = await pool.fetchval(
+            """INSERT INTO tg_accounts(owner_id,phone,session_str)
+               VALUES($1,'synthetic-project-queue','synthetic-session') RETURNING id""", OWNER)
+        try:
+            await scenario(pool, check_id)
+        finally:
+            await pool.execute("DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, OWNER)
+
+    asyncio.run(_run(with_synthetic_account))

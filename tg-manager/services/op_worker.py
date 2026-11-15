@@ -7793,6 +7793,23 @@ async def _exec_mass_publish(
     from services import account_manager, postbot
 
     target = params.get("target", "channels")
+    if params.get("project_id") is not None:
+        from services.network_builder import project_pilot_enabled, project_publish_channels
+        from services.security import selection_ids, tg_id, validate_integer
+
+        if not project_pilot_enabled(owner_id):
+            return {"status": "failed", "summary": "Доступ к публикациям проекта отозван."}
+        project_id = validate_integer(str(params["project_id"]), min_val=1, max_val=2**31 - 1)
+        channel_ids, error = selection_ids(params, "channel_ids", what="канал")
+        if project_id is None or error or not channel_ids or any(tg_id(cid) is None for cid in channel_ids):
+            return {"status": "failed",
+                    "summary": "Некорректный список каналов проекта. Подтвердите новый список."}
+        channels = await project_publish_channels(pool, owner_id, project_id)
+        if not set(channel_ids).issubset({row["channel_id"] for row in channels}):
+            return {"status": "failed",
+                    "summary": "Каналы больше не доступны в проекте. Подтвердите новый список."}
+        target = "channels"
+
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
     postbot_reference = postbot.parse_reference(mp_text)
     if postbot.has_explicit_intent(mp_text) and not postbot_reference:
@@ -7867,15 +7884,6 @@ async def _exec_mass_publish(
             and not explicit_channel_ids:
         return {"status": "failed",
                 "summary": "⚠️ Не выбран ни один канал — публикацию не запускали"}
-    if params.get("project_id") is not None:
-        from services.network_builder import project_publish_channels
-
-        channels = await project_publish_channels(pool, owner_id, int(params["project_id"]))
-        if not explicit_channel_ids or not set(explicit_channel_ids).issubset(
-            {row["channel_id"] for row in channels}
-        ):
-            return {"status": "failed",
-                    "summary": "Каналы больше не доступны в проекте. Подтвердите новый список."}
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None
