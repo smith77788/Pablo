@@ -66,8 +66,15 @@ try {
   await page.getByText('История изменений', {exact:true}).click();
   await page.getByText('Убрать из проекта · bot:9007199254740993 project:7').waitFor();
   await page.getByText('Восстановлен в Infragram · 9007199254740996').waitFor();
+  const search = page.getByRole('searchbox', {name:'Найти ресурс'});
   await page.locator('#opCleanupStatus').selectOption('hidden');
+  await search.fill('#9007199254740993');
+  assert.equal(await page.locator('[data-cleanup-target]').count(), 1);
   await page.getByRole('button', {name:'Выбрать доступные'}).click();
+  await search.fill('нет совпадений');
+  await page.getByText('В этом срезе нет ресурсов.', {exact:true}).waitFor();
+  assert.equal(await page.getByRole('button', {name:'Выбрать доступные'}).isEnabled(), false);
+  await search.fill('');
   await page.locator('#opCleanupStatus').selectOption('check_failed');
   await page.getByText('Выбрано: 1 · вне фильтра: 1').waitFor();
   await page.getByRole('button', {name:'Выбрать доступные'}).click();

@@ -140,3 +140,97 @@ const api = async path => path === '/log' ? {logs: []} : result;
 """
     source = "\n".join(js_function(name) for name in ("opCanRetry", "openOpDetail", "showOpComplete"))
     subprocess.run([node, "-"], input=source + "\n" + script, text=True, check=True)
+
+
+def test_cleanup_search_and_paging_keep_exact_selection_on_large_report():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("нужен node")
+    source = Path(__file__).resolve().parents[1] / "mini_app/screens/op_cleanup.js"
+    script = r"""
+const assert = require('node:assert/strict');
+const makeElement = () => ({
+  value: '', childNodes: [], dataset: {}, querySelectorAll: () => [],
+  focus() {}, append() {}, replaceChildren() {},
+});
+const overlay = {...makeElement(), addEventListener() {}, style: {}, isConnected: true};
+const body = makeElement();
+const notice = makeElement();
+const close = makeElement();
+const controls = new Map();
+const control = name => {
+  if (!controls.has(name)) controls.set(name, makeElement());
+  return controls.get(name);
+};
+overlay.querySelector = selector => ({
+  '[data-cleanup-body]': body, '[data-cleanup-notice]': notice, '[data-cleanup-close]': close,
+})[selector];
+body.querySelector = control;
+control('[data-cleanup-action]').querySelector = control;
+control('[data-cleanup-action]').value = 'detach';
+const project = control('[data-cleanup-project]');
+project.value = '7';
+const document = {querySelector: () => null, createElement: () => overlay, body: {appendChild(){}}};
+const esc = String;
+const errRu = e => e.message;
+const firstId = 9007199254740993n;
+const ids = Array.from({length:1000}, (_, i) => String(firstId + BigInt(i)));
+const findings = ids.map((id, i) => ({id, kind:'channel', title:'Ресурс ' + i,
+  status: i % 2 ? 'hidden' : 'restricted', projects: [{id: i === 1 ? 8 : 7, name:'Проект'}],
+  active:true, can_disable:false}));
+const submissions = [];
+const api = async (path, options) => {
+  assert.equal(path, '/api/miniapp/operations/42/cleanup');
+  if (!options) return {findings, max_targets:1000};
+  submissions.push(JSON.parse(options.body));
+  throw new Error('Синтетическая ошибка предпросмотра');
+};
+(async () => {
+  await openOperationCleanup(42);
+  const list = control('[data-cleanup-findings]');
+  const page = control('[data-cleanup-page]');
+  const next = control('[data-cleanup-next]');
+  const search = control('#opCleanupSearch');
+  const verdict = control('#opCleanupStatus');
+  const selectAll = control('[data-cleanup-select-all]');
+  assert.equal((list.innerHTML.match(/data-cleanup-target/g) || []).length, 40);
+  assert.equal(page.textContent, 'Страница 1 из 25');
+  next.onclick();
+  assert.equal(page.textContent, 'Страница 2 из 25');
+  assert.match(list.innerHTML, new RegExp(ids[40]));
+
+  search.value = '#' + ids[999];
+  search.oninput();
+  assert.equal((list.innerHTML.match(/data-cleanup-target/g) || []).length, 1);
+  assert.match(list.innerHTML, new RegExp(ids[999]));
+  selectAll.onclick();
+  search.value = 'РЕСУРС 0';
+  search.oninput();
+  assert.equal(notice.textContent, 'Выбрано: 1 · вне фильтра: 1');
+  assert.doesNotMatch(list.innerHTML, new RegExp(ids[999]));
+  selectAll.onclick();
+  search.value = ids[1];
+  search.oninput();
+  assert.equal(selectAll.disabled, true);
+  await control('[data-cleanup-preview]').onclick();
+  assert.deepEqual(submissions[0], {action:'detach', project_id:'7', targets:[
+    {kind:'channel', id:ids[999]}, {kind:'channel', id:ids[0]},
+  ], preview:true});
+
+  project.value = '8';
+  project.onchange();
+  assert.equal(control('[data-cleanup-preview]').disabled, true);
+  project.value = '7';
+  project.onchange();
+  search.value = '';
+  search.oninput();
+  verdict.value = 'hidden';
+  verdict.onchange();
+  selectAll.onclick();
+  assert.equal(notice.textContent, 'Выбрано: 499');
+  await control('[data-cleanup-preview]').onclick();
+  assert.deepEqual(submissions[1].targets.map(target => target.id),
+    ids.filter((id,i) => i % 2 === 1 && i !== 1));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    subprocess.run([node, "-"], input=source.read_text() + "\n" + script, text=True, check=True)

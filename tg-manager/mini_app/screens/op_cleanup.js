@@ -1,4 +1,11 @@
 // Уборка по результатам диагностики: выбор → серверный план → применение.
+function cleanupFindingMatches(item, verdict, query) {
+  if (verdict && verdict !== item.status) return false;
+  if (!query) return true;
+  if (/^#?-?\d+$/.test(query)) return String(item.id) === query.replace(/^#/, '');
+  return String(item.title || '').toLocaleLowerCase('ru-RU').includes(query);
+}
+
 async function openOperationCleanup(opId) {
   const existing = document.querySelector('[data-operation-cleanup]');
   if (existing) { existing.querySelector('[data-cleanup-close]')?.focus(); return; }
@@ -144,30 +151,49 @@ async function openOperationCleanup(opId) {
         + '</select></div><div class="field"><label for="opCleanupStatus">Результат проверки</label>'
         + '<select class="sel" id="opCleanupStatus"><option value="">Все результаты</option>'
         + Object.entries(statusText).map(([key, label]) => `<option value="${key}">${label}</option>`).join('')
-        + '</select></div><div style="display:flex;gap:8px;margin-bottom:8px">'
+        + '</select></div><div class="field"><label for="opCleanupSearch">Найти ресурс</label>'
+        + '<input type="search" class="inp" id="opCleanupSearch" placeholder="Название или точный ID" autocomplete="off"></div>'
+        + '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">'
         + '<button type="button" class="btn btn-s" data-cleanup-select-all>Выбрать доступные</button>'
         + '<button type="button" class="btn btn-s" data-cleanup-clear>Снять выбор</button></div>'
         + `<div class="lst" data-cleanup-findings style="${listStyle}"></div>`
+        + '<div data-cleanup-pages role="group" aria-label="Страницы результатов" hidden style="margin-top:8px">'
+        + '<button type="button" class="btn btn-s" data-cleanup-prev>Назад</button> '
+        + '<span data-cleanup-page role="status"></span> '
+        + '<button type="button" class="btn btn-s" data-cleanup-next>Вперёд</button></div>'
         + '<button type="button" class="btn btn-p" data-cleanup-preview style="width:100%;margin-top:12px">Проверить план</button>';
       const action = body.querySelector('[data-cleanup-action]');
       const project = body.querySelector('[data-cleanup-project]');
       const projectField = body.querySelector('[data-cleanup-project-field]');
       const list = body.querySelector('[data-cleanup-findings]');
       const status = body.querySelector('#opCleanupStatus');
+      const search = body.querySelector('#opCleanupSearch');
+      const pages = body.querySelector('[data-cleanup-pages]');
+      const pageLabel = body.querySelector('[data-cleanup-page]');
+      const prev = body.querySelector('[data-cleanup-prev]');
+      const next = body.querySelector('[data-cleanup-next]');
       const button = body.querySelector('[data-cleanup-preview]');
       const selectAll = body.querySelector('[data-cleanup-select-all]');
       const clear = body.querySelector('[data-cleanup-clear]');
       const scope = body.querySelector('[data-cleanup-scope]');
       if (!projects.size) action.querySelector('[value="detach"]').disabled = true;
       const selected = new Set();
+      const pageSize = 40;
+      const indexed = findings.map((item, index) => ({item, index}));
+      let filtered = indexed;
+      let page = 0;
+      const canSelect = item => action.value === 'detach'
+        ? Boolean(project.value && (item.projects || []).some(p => String(p.id) === project.value))
+        : item.can_disable === true;
       const refreshSelection = () => {
         const count = selected.size;
-        const visible = list.querySelectorAll('input:checked').length;
         const remaining = maxTargets - count;
         button.disabled = !count;
-        selectAll.disabled = remaining <= 0 || !list.querySelector('input:not(:disabled):not(:checked)');
+        selectAll.disabled = remaining <= 0 || !filtered.some(
+          ({item, index}) => !selected.has(index) && canSelect(item));
         clear.disabled = !count;
-        const hidden = count - visible;
+        const insideFilter = count ? filtered.filter(({index}) => selected.has(index)).length : 0;
+        const hidden = count - insideFilter;
         button.textContent = count ? 'Проверить план · ' + count : 'Проверить план';
         let message = '';
         if (count) message = 'Выбрано: ' + count + (hidden ? ' · вне фильтра: ' + hidden : '');
@@ -181,11 +207,17 @@ async function openOperationCleanup(opId) {
         scope.textContent = action.value === 'detach'
           ? 'Связь исчезнет только из выбранного проекта.'
           : 'Ресурс перестанет использоваться в Infragram. Управление можно восстановить.';
-        list.innerHTML = findings.map((item, index) => {
-          if (status.value && status.value !== item.status) return '';
-          const eligible = action.value === 'detach'
-            ? project.value && (item.projects || []).some(p => String(p.id) === project.value)
-            : item.can_disable === true;
+        const query = search.value.trim().toLocaleLowerCase('ru-RU');
+        filtered = indexed.filter(({item}) => cleanupFindingMatches(item, status.value, query));
+        const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+        page = Math.min(page, pageCount - 1);
+        pages.hidden = pageCount <= 1;
+        selectAll.textContent = pageCount > 1 ? 'Выбрать доступные во всём фильтре' : 'Выбрать доступные';
+        pageLabel.textContent = 'Страница ' + (page + 1) + ' из ' + pageCount;
+        prev.disabled = page === 0;
+        next.disabled = page + 1 >= pageCount;
+        list.innerHTML = filtered.slice(page * pageSize, (page + 1) * pageSize).map(({item, index}) => {
+          const eligible = canSelect(item);
           const details = [
             labels[item.kind] || 'Ресурс',
             'ID: ' + item.id,
@@ -199,16 +231,16 @@ async function openOperationCleanup(opId) {
             <span class="row-body"><span class="row-name" style="display:block;overflow-wrap:anywhere">${esc(title(item))}</span>
             <span class="row-val" style="display:block;white-space:normal">${esc(details)}</span></span></label>`;
         }).join('');
-        if (!list.childElementCount) list.textContent = 'В этом срезе нет ресурсов.';
+        if (!filtered.length) list.textContent = 'В этом срезе нет ресурсов.';
+        list.scrollTop = 0;
         refreshSelection();
       };
       selectAll.onclick = () => {
-        for (const input of list.querySelectorAll('input:not(:disabled):not(:checked)')) {
+        for (const {item, index} of filtered) {
           if (selected.size >= maxTargets) break;
-          selected.add(Number(input.value));
-          input.checked = true;
+          if (canSelect(item)) selected.add(index);
         }
-        refreshSelection();
+        renderFindings();
       };
       clear.onclick = () => {
         selected.clear();
@@ -223,13 +255,20 @@ async function openOperationCleanup(opId) {
         else input.checked = false;
         refreshSelection();
       };
+      const resetPage = () => {
+        page = 0;
+        renderFindings();
+      };
       const resetScope = () => {
         selected.clear();
-        renderFindings();
+        resetPage();
       };
       action.onchange = resetScope;
       project.onchange = resetScope;
-      status.onchange = renderFindings;
+      status.onchange = resetPage;
+      search.oninput = resetPage;
+      prev.onclick = () => { page--; renderFindings(); if (prev.disabled) next.focus(); };
+      next.onclick = () => { page++; renderFindings(); if (next.disabled) prev.focus(); };
       if (projects.size === 1) project.selectedIndex = 1;
       button.onclick = async () => {
         if (button.disabled) return;
