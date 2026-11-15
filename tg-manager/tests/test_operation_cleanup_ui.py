@@ -395,3 +395,67 @@ const tg = null;
 """
     subprocess.run([node, "-"], input=js_function("pinLastPost") + "\n" + script,
                    text=True, check=True)
+
+
+def test_saved_cleanup_result_reopens_without_resubmitting_confirmation():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("нужен node")
+    source = Path(__file__).resolve().parents[1] / "mini_app/screens/op_cleanup.js"
+    script = r"""
+const assert = require('node:assert/strict');
+let focused;
+function element() {
+  const node = {children:[], controls:new Map(), value:'', textContent:'', dataset:{}, style:{},
+    focus() { focused = this; }, addEventListener(){}, setAttribute(){},
+    append(child) { this.children.push(child); }, remove(){},
+    querySelector(key) {
+      if (!this.controls.has(key)) this.controls.set(key, element());
+      return this.controls.get(key);
+    },
+    contains(child) { return this.children.includes(child) || this.children.some(n => n.contains(child)); }};
+  Object.defineProperty(node, 'innerHTML', { get() { return this.markup || ''; }, set(value) {
+    this.markup = value; this.children.length = 0; this.controls.clear();
+  }});
+  return node;
+}
+let overlay;
+const document = {querySelector:() => null, createElement:element, body:{appendChild(node) {
+  overlay = node; overlay.isConnected = true;
+}}};
+const esc = String;
+const errRu = error => error.message;
+const calls = [];
+const receipt = 'a'.repeat(64);
+const path = '/api/miniapp/operations/42/cleanup';
+const api = async (url, options) => {
+  assert.equal(options, undefined);
+  calls.push(url);
+  if (url === path) return { findings:[], receipts:[{id:receipt, action:'disable', changed:1, total:2}] };
+  assert.equal(url, path + '?receipt=' + receipt);
+  if (calls.length === 2) throw new Error('Синтетический обрыв чтения');
+  return {replayed:true, items:[
+    {kind:'channel', id:'9007199254740993', status:'hidden', outcome:'applied'},
+    {kind:'channel', id:'99', status:'check_failed', outcome:'skipped', reason:'Отсутствует в каталоге'},
+  ]};
+};
+(async () => {
+  await openOperationCleanup(42);
+  const body = overlay.querySelector('[data-cleanup-body]');
+  const button = body.children[0].children[1];
+  assert.match(button.textContent, /Изменено 1 из 2/);
+  await button.onclick();
+  assert.equal(focused, button);
+  assert.match(overlay.querySelector('[data-cleanup-notice]').textContent, /обрыв/);
+  await Promise.all([button.onclick(), button.onclick()]);
+  assert.equal(calls.length, 3);
+  assert.match(body.innerHTML, /Сохранённый результат/);
+  const items = body.querySelector('[data-cleanup-review]').querySelector('[data-cleanup-review-list]').innerHTML;
+  assert.match(items, /9007199254740993/);
+  assert.match(items, /Отсутствует в каталоге/);
+  assert.doesNotMatch(items, /data-cleanup-recover/);
+  assert.equal(focused, body.querySelector('[data-cleanup-summary]'));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    subprocess.run([node, "-"], input=source.read_text(encoding="utf-8") + "\n" + script,
+                   text=True, check=True)

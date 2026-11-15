@@ -129,6 +129,45 @@ async function openOperationCleanup(opId) {
         block.append(list);
         body.append(block);
       };
+      const renderReceipts = () => {
+        const receipts = Array.isArray(result.receipts) ? result.receipts : [];
+        if (!receipts.length) return;
+        const block = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Сохранённые итоги' + (result.receipts_has_more ? ' · показано 25' : '');
+        block.append(summary);
+        let loading = false;
+        for (const receipt of receipts) {
+          const date = receipt.saved_at
+            ? new Date(receipt.saved_at).toLocaleString('ru-RU') : 'Дата не сохранена';
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'btn btn-s';
+          button.textContent = [actionText[receipt.action] || 'Очистка',
+            receipt.project_id ? 'Проект #' + receipt.project_id : '',
+            'Изменено ' + receipt.changed + ' из ' + receipt.total, date].filter(Boolean).join(' · ');
+          button.onclick = async () => {
+            if (loading) return;
+            loading = true;
+            button.setAttribute('aria-busy', 'true');
+            notice.textContent = 'Загружаем сохранённый итог…';
+            try {
+              const saved = await api(path + '?receipt=' + encodeURIComponent(receipt.id));
+              if (overlay.isConnected && body.contains(button)) renderResult(saved, receipt);
+            } catch (e) {
+              if (overlay.isConnected && body.contains(button)) {
+                notice.textContent = errRu(e, 'Не удалось загрузить сохранённый итог');
+                button.focus();
+              }
+            } finally {
+              button.setAttribute('aria-busy', 'false');
+              loading = false;
+            }
+          };
+          block.append(button);
+        }
+        body.append(block);
+      };
       const projects = new Map();
       findings.forEach(item => (item.projects || []).forEach(project => {
         projects.set(String(project.id), project.name);
@@ -139,6 +178,7 @@ async function openOperationCleanup(opId) {
       if (!findings.length) {
         body.innerHTML = legacy + '<div class="field-note">В сохранённом результате нет ресурсов для уборки.</div>';
         renderHistory();
+        renderReceipts();
         return;
       }
       body.innerHTML = legacy
@@ -334,6 +374,7 @@ async function openOperationCleanup(opId) {
       };
       renderFindings();
       renderHistory();
+      renderReceipts();
       const disabledChannels = findings.filter(item => item.can_restore === true);
       appendRecovery(body, disabledChannels);
     } catch (e) {
@@ -405,6 +446,25 @@ async function openOperationCleanup(opId) {
     render();
   }
 
+  function renderResult(result, payload) {
+    const applied = Array.isArray(result.items) ? result.items : [];
+    const scope = [actionText[payload.action], payload.project_id ? 'Проект #' + payload.project_id : '']
+      .filter(Boolean).join(' · ');
+    body.innerHTML = '<div class="field-note" data-cleanup-summary tabindex="-1">'
+      + (result.replayed ? 'Сохранённый результат' : 'Результат')
+      + (scope ? ' · ' + esc(scope) : '') + '</div>'
+      + '<div data-cleanup-review></div>'
+      + (!applied.length ? '<div class="field-note">Сервер не вернул результаты по ресурсам.</div>' : '')
+      + '<button type="button" class="btn btn-s" data-cleanup-refresh style="width:100%;margin-top:12px">Обновить список</button>';
+    renderReview(applied, item => [outcomeText[item.outcome] || 'Нет подтверждения изменения',
+      item.outcome === 'applied' ? '' : item.reason, statusText[item.status], item.finding_reason].filter(Boolean).join(' · '),
+    item => item.outcome === 'applied',
+    {result:true, canRecover:payload.action === 'disable' && !result.replayed});
+    body.querySelector('[data-cleanup-refresh]').onclick = load;
+    body.querySelector('[data-cleanup-summary]').focus();
+    notice.textContent = '';
+  }
+
   function renderPreview(payload, preview, restoreSelection) {
     const items = Array.isArray(preview.items) ? preview.items : [];
     const readyCount = items.filter(item => item.outcome === 'ready').length;
@@ -437,19 +497,7 @@ async function openOperationCleanup(opId) {
       notice.textContent = 'Применяем подтверждённый план…';
       try {
         const result = await api(path, {method:'POST', body:JSON.stringify({...payload, token:preview.token})});
-        const applied = Array.isArray(result.items) ? result.items : [];
-        body.innerHTML = '<div class="field-note" data-cleanup-summary tabindex="-1">'
-          + (result.replayed ? 'Сохранённый результат' : 'Результат') + '</div>'
-          + '<div data-cleanup-review></div>'
-          + (!applied.length ? '<div class="field-note">Сервер не вернул результаты по ресурсам.</div>' : '')
-          + '<button type="button" class="btn btn-s" data-cleanup-refresh style="width:100%;margin-top:12px">Обновить список</button>';
-        renderReview(applied, item => [outcomeText[item.outcome] || 'Нет подтверждения изменения',
-          item.outcome === 'applied' ? '' : item.reason, statusText[item.status], item.finding_reason].filter(Boolean).join(' · '),
-        item => item.outcome === 'applied',
-        {result:true, canRecover:payload.action === 'disable' && !result.replayed});
-        body.querySelector('[data-cleanup-refresh]').onclick = load;
-        body.querySelector('[data-cleanup-summary]').focus();
-        notice.textContent = '';
+        renderResult(result, payload);
       } catch (e) {
         apply.disabled = false;
         apply.textContent = 'Повторить то же подтверждение';

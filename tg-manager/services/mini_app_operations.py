@@ -46,6 +46,8 @@ def setup_routes(app: web.Application, pool) -> None:
         # вина клиента (400 с bad_body_response), а не поломка сервера. Под
         # общим except его чтение маскировало бы 400 под 500 с неверным советом
         # повторить (сторож test_a_broken_body_is_not_our_fault).
+        if request.method not in ("GET", "HEAD") and "receipt" in request.query:
+            return _err("Сохранённый результат доступен только для чтения", 400)
         data: dict = {}
         if request.method not in ("GET", "HEAD"):
             try:
@@ -57,6 +59,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Неверные параметры очистки", 400)
         try:
             if request.method in ("GET", "HEAD"):
+                receipts = request.query.getall("receipt", [])
+                if receipts:
+                    if len(receipts) != 1 or not re.fullmatch(r"[0-9a-f]{64}", receipts[0]):
+                        return _err("Неверный идентификатор результата очистки", 400)
+                    result = await cleanup.saved_result(pool, uid, op_id, receipts[0])
+                    return _json_resp(result)
                 report = await cleanup.findings(pool, uid, op_id, include_history=True)
                 report["findings"] = cleanup.public_items(report["findings"])
                 return _json_resp({"ok": True, **report})

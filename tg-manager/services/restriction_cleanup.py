@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 
 import asyncpg
 from database import db
@@ -14,6 +15,7 @@ from services.secret_masking import redact_secrets
 _KINDS = frozenset({"bot", "channel", "group"})
 _GROUP_TYPES = check.CHANNEL_GROUP_TYPES
 _MAX_TARGETS = 1000
+_RECEIPT_LIMIT = 25
 _STALE = "Состояние ресурсов изменилось. Откройте предпросмотр заново."
 
 
@@ -281,6 +283,20 @@ async def findings(pool, owner_id, op_id, *, include_history=False):
                 for r in history[:50]
             ]
             response["history_has_more"] = len(history) > 50
+            receipts = await conn.fetch(
+                """SELECT confirmation_id, response->>'action' AS action,
+                          response->>'project_id' AS project_id, response->>'saved_at' AS saved_at,
+                          response->>'count' AS changed, jsonb_array_length(response->'items') AS total
+                     FROM restriction_cleanup_receipts WHERE operation_id=$1 AND owner_id=$2
+                    ORDER BY response->>'saved_at' DESC NULLS LAST, confirmation_id LIMIT $3""",
+                op_id, owner_id, _RECEIPT_LIMIT + 1,
+            )
+            response["receipts"] = [
+                {"id": r["confirmation_id"], "action": r["action"], "project_id": r["project_id"],
+                 "saved_at": r["saved_at"], "changed": int(r["changed"]), "total": r["total"]}
+                for r in receipts[:_RECEIPT_LIMIT]
+            ]
+            response["receipts_has_more"] = len(receipts) > _RECEIPT_LIMIT
     return response
 
 
@@ -462,6 +478,18 @@ async def _receipt(conn, owner_id, op_id, confirmation_id, scope):
     return {**json.loads(row["response"]), "replayed": True}
 
 
+async def saved_result(pool, owner_id, op_id, confirmation_id):
+    row = await pool.fetchrow(
+        """SELECT r.response FROM restriction_cleanup_receipts r
+            JOIN operation_queue q ON q.id=r.operation_id AND q.owner_id=r.owner_id
+           WHERE r.operation_id=$1 AND r.owner_id=$2 AND r.confirmation_id=$3
+             AND q.op_type='check_owned_restrictions' AND q.status IN ('done', 'partial')""",
+        op_id, owner_id, confirmation_id)
+    if row is None:
+        raise CleanupError("Сохранённый результат очистки не найден", 404)
+    return {**json.loads(row["response"]), "replayed": True}
+
+
 async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, verify,
                 confirmation_id=None, verify_access=None):
     keys = _target_keys(targets)
@@ -512,6 +540,7 @@ async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, veri
             result = {"ok": True, "action": action, "op_id": op_id, "project_id": project_id,
                       "items": public_items(items), "changed": public_items(changed), "count": len(changed)}
             if confirmation_id and ready:
+                result["saved_at"] = datetime.now(timezone.utc).isoformat()
                 await conn.execute(
                     """INSERT INTO restriction_cleanup_receipts
                        (operation_id, owner_id, confirmation_id, request_scope, response)
