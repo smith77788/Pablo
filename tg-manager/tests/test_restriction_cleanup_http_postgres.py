@@ -187,7 +187,7 @@ def test_old_report_keeps_missing_findings_without_expanding_cleanup(monkeypatch
                            ]}))
         await pool.execute(
             "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, type) "
-            "VALUES($1,111,$2,'Закрытое название другого владельца','channel')",
+            "VALUES($1,992660,$2,'Закрытое название другого владельца','channel')",
             OWNER + 1, int(missing[0]["id"]))
         app = web.Application()
         mini_app_operations.setup_routes(app, pool)
@@ -314,7 +314,7 @@ def test_legacy_group_topology_recovers_only_owner_links(monkeypatch):
             await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL)
             await pool.execute(
                 """INSERT INTO managed_channels(owner_id,acc_id,channel_id,type,title)
-                   VALUES($1,111,$2,'channel','Обычный канал'),($3,111,$4,'channel','Чужой ресурс')""",
+                   VALUES($1,992660,$2,'channel','Обычный канал'),($3,992660,$4,'channel','Чужой ресурс')""",
                 OWNER, known, other_owner, CHANNEL)
             await pool.execute(
                 """INSERT INTO network_nodes(instance_id,node_type,ref_id)
@@ -390,6 +390,68 @@ def test_legacy_group_topology_recovers_only_owner_links(monkeypatch):
     asyncio.run(_run(scenario))
 
 
+@pytest.mark.parametrize("change", ["disabled", "foreign", "deleted", "empty_session"])
+def test_channel_restore_rechecks_account_after_preview(monkeypatch, change):
+    from database import db
+    from services import mini_app_channels
+
+    secret = "123456:synthetic-restore-binding"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    account = 992660
+
+    async def scenario(pool, op_id):
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        mini_app_channels.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        cleanup_path = f"/api/miniapp/operations/{op_id}/cleanup"
+        listing = f"/api/miniapp/channels/removed?channel_id={CHANNEL}"
+        restore = f"/api/miniapp/channel/{CHANNEL}/restore"
+        async with TestClient(TestServer(app)) as client:
+            action = {"action": "disable", "targets": [CHANNEL_TARGET]}
+            preview = await (await client.post(cleanup_path, json={**action, "preview": True},
+                                              headers=headers)).json()
+            disabled = await client.post(cleanup_path, json={**action, "token": preview["token"]}, headers=headers)
+            assert disabled.status == 200, await disabled.text()
+            assert (await (await client.get(listing, headers=headers)).json())["channels"][0]["can_restore"]
+            try:
+                if change == "deleted":
+                    await pool.execute("DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", account, OWNER)
+                else:
+                    await pool.execute(
+                        """UPDATE tg_accounts SET owner_id=$2, is_active=$3, session_str=$4
+                            WHERE id=$1 AND owner_id=$5""",
+                        account, OWNER + (change == "foreign"), change != "disabled",
+                        "" if change == "empty_session" else "synthetic-unavailable-session", OWNER)
+                failed = await client.post(restore, headers=headers)
+                assert failed.status == 409, await failed.text()
+                item = (await (await client.get(listing, headers=headers)).json())["channels"][0]
+                assert item["channel_id_text"] == str(CHANNEL) and not item["can_restore"]
+                assert "аккаунт больше не доступен" in item["restore_reason"]
+                report = await (await client.get(cleanup_path, headers=headers)).json()
+                finding = next(item for item in report["findings"] if item["id"] == str(CHANNEL))
+                assert finding["status"] == "check_failed" and not finding["can_restore"]
+                assert finding["restore_reason"] == item["restore_reason"]
+                assert "synthetic-unavailable-session" not in str(report)
+                assert [event["action"] for event in report["history"]] == ["disable"]
+                assert not await pool.fetchval("SELECT 1 FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+                                              OWNER, CHANNEL)
+                assert await db.add_managed_channels(pool, OWNER, account, [CHANNEL_TARGET]) == 0
+            finally:
+                await pool.execute(
+                    """INSERT INTO tg_accounts(id, owner_id, phone, session_str)
+                       VALUES($1,$2,'synthetic-cleanup','synthetic-restore-session')
+                       ON CONFLICT(id) DO UPDATE SET owner_id=EXCLUDED.owner_id, is_active=TRUE,
+                                                     session_str=EXCLUDED.session_str""", account, OWNER)
+            succeeded = await client.post(restore, headers=headers)
+            assert succeeded.status == 200, await succeeded.text()
+            report = await (await client.get(cleanup_path, headers=headers)).json()
+            assert [event["action"] for event in report["history"]] == ["restore", "disable"]
+
+    asyncio.run(_run(scenario))
+
+
 def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
     from unittest.mock import AsyncMock
 
@@ -418,7 +480,7 @@ def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
             assert completed.status == 200, await completed.text()
             await pool.execute(
                 """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, title, type, removed_at)
-                   SELECT $1, n, 111, 'owner', 'Другой ресурс', 'channel', now()+interval '1 second'
+                   SELECT $1, n, 992660, 'owner', 'Другой ресурс', 'channel', now()+interval '1 second'
                      FROM generate_series(1, 501) n""", OWNER)
             removed = await client.get("/api/miniapp/channels/removed", headers=owner)
             assert all(row["channel_id_text"] != str(CHANNEL) for row in (await removed.json())["channels"])
@@ -465,7 +527,7 @@ def test_restore_serializes_last_slot_and_rolls_back_without_audit(monkeypatch):
         assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
         await pool.execute(
             """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, title, type)
-               VALUES ($1,$2,111,'owner','Второй','channel'),
+               VALUES ($1,$2,992660,'owner','Второй','channel'),
                       ($1,$3,NULL,'owner','Старая запись','channel')""",
             OWNER, other_id, no_binding,
         )
@@ -547,8 +609,11 @@ def test_linked_owners_compete_for_one_catalog_slot(monkeypatch, competitor):
             "INSERT INTO linked_platform_users(owner_id_a, owner_id_b) VALUES($1,$2)", OWNER, linked)
         try:
             await pool.execute(
+                "INSERT INTO tg_accounts(id, owner_id, phone, session_str) "
+                "VALUES(992661,$1,'synthetic-linked-cleanup','synthetic-linked-session')", linked)
+            await pool.execute(
                 """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, title, type)
-                   VALUES($1,$2,112,$3,'Второй','megagroup')""",
+                   VALUES($1,$2,992661,$3,'Второй','megagroup')""",
                 linked, other_channel, "gone" if competitor == "scan" else "owner",
             )
             app = web.Application()
@@ -577,7 +642,7 @@ def test_linked_owners_compete_for_one_catalog_slot(monkeypatch, competitor):
                         return response.status
                     try:
                         imported, skipped = await db.connect_scanned_managed_channels(
-                            pool, linked, 112, [{"id": other_channel, "type": "megagroup"}])
+                            pool, linked, 992661, [{"id": other_channel, "type": "megagroup"}])
                     except db.ManagedChannelLimitError:
                         return 403
                     assert (imported, skipped) == (1, 0)
@@ -602,6 +667,7 @@ def test_linked_owners_compete_for_one_catalog_slot(monkeypatch, competitor):
             await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1", linked)
             await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1", linked)
             await pool.execute("DELETE FROM removed_channels WHERE owner_id=$1", linked)
+            await pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1 AND id=992661", linked)
             await pool.execute("DELETE FROM linked_platform_users WHERE owner_id_a=$1 AND owner_id_b=$2",
                                OWNER, linked)
 

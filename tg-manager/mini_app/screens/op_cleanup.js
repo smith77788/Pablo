@@ -238,6 +238,7 @@ async function openOperationCleanup(opId) {
             item.reason,
             memberships ? 'Проекты: ' + memberships : '',
             unavailable,
+            item.restore_reason,
           ].filter(Boolean).join(' · ');
           const resume = item.can_resume === true
             ? `<button type="button" class="btn btn-s" data-cleanup-resume="${esc(index)}"

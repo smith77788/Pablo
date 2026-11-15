@@ -32,6 +32,7 @@ async def _clear(pool):
         ("managed_bots", "added_by"),
     ):
         await pool.execute(f"DELETE FROM {table} WHERE {column}=$1", OWNER)
+    await pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1 AND id=992660", OWNER)
 
 
 async def _run(scenario):
@@ -44,8 +45,11 @@ async def _run(scenario):
                 "INSERT INTO managed_bots (bot_id, added_by, token, first_name) "
                 "VALUES($1,$2,$3,'Бот')", BOT, OWNER, "12345:restriction-cleanup-test")
             await pool.execute(
+                "INSERT INTO tg_accounts(id, owner_id, phone, session_str) "
+                "VALUES(992660,$1,'synthetic-cleanup','synthetic-restore-session')", OWNER)
+            await pool.execute(
                 "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, type) "
-                "VALUES($1,111,$2,'Канал','channel')", OWNER, CHANNEL)
+                "VALUES($1,992660,$2,'Канал','channel')", OWNER, CHANNEL)
             report = {"findings_version": 2, "findings": [
                 {**BOT_TARGET, "status": "restricted"},
                 {**CHANNEL_TARGET, "status": "check_failed"},
@@ -86,7 +90,7 @@ def test_owner_exact_ids_preview_and_reversible_cleanup(monkeypatch, legacy_remo
         assert await db.add_bot(pool, "12345:restriction-cleanup-test", BOT, "user", "Бот", OWNER) is False
         assert not await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
         assert (await db.set_managed_bot_active(pool, BOT, OWNER, True))["is_active"]
-        assert await db.add_managed_channels(pool, OWNER, 111, [{"id": CHANNEL}]) == 0
+        assert await db.add_managed_channels(pool, OWNER, 992660, [{"id": CHANNEL}]) == 0
         report = await cleanup.findings(pool, OWNER, op_id, include_history=True)
         disabled = next(item for item in report["findings"] if item["id"] == str(CHANNEL))
         assert disabled["status"] == "check_failed" and not disabled["can_disable"]
@@ -112,6 +116,43 @@ def test_owner_exact_ids_preview_and_reversible_cleanup(monkeypatch, legacy_remo
         assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
         reread = await cleanup.findings(pool, OWNER, op_id, include_history=True)
         assert reread["history"] == restored["history"]
+
+    asyncio.run(_run(scenario))
+
+
+def test_account_removal_cannot_leave_concurrently_restored_channel(monkeypatch):
+    async def scenario(pool, op_id):
+        assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        audit_entered, delete_entered, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        write_audit = db.record_manual_action
+        lock_catalog = db.lock_managed_channel_catalog
+
+        async def pause_restore_audit(*args, **kwargs):
+            if args[2] == "channel_restore":
+                audit_entered.set()
+                await finish.wait()
+            return await write_audit(*args, **kwargs)
+
+        async def signal_delete(connection, owner):
+            if audit_entered.is_set():
+                delete_entered.set()
+            await lock_catalog(connection, owner)
+
+        monkeypatch.setattr(db, "record_manual_action", pause_restore_audit)
+        monkeypatch.setattr(db, "lock_managed_channel_catalog", signal_delete)
+        restore = asyncio.create_task(db.restore_removed_channel(pool, OWNER, CHANNEL))
+        deleting = None
+        try:
+            await asyncio.wait_for(audit_entered.wait(), 3)
+            deleting = asyncio.create_task(db.remove_tg_account(pool, 992660, OWNER))
+            await asyncio.wait_for(delete_entered.wait(), 3)
+            assert not deleting.done()
+        finally:
+            finish.set()
+            await asyncio.wait_for(asyncio.gather(restore, *([deleting] if deleting else [])), 5)
+        assert restore.result() and deleting.result()
+        assert not await pool.fetchval("SELECT 1 FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+                                      OWNER, CHANNEL)
 
     asyncio.run(_run(scenario))
 
@@ -232,7 +273,7 @@ def test_295_findings_and_parallel_confirmation_preserve_other_projects():
     async def scenario(pool, op_id):
         await pool.execute(
             """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, type)
-               SELECT $1, 111, id, 'Ресурс ' || id, 'channel' FROM generate_series(1, 295) id""",
+               SELECT $1, 992660, id, 'Ресурс ' || id, 'channel' FROM generate_series(1, 295) id""",
             OWNER)
         statuses = ("restricted", "unreachable", "hidden", "check_failed")
         findings = [{"kind": "channel", "id": i, "status": statuses[i % 4]}
@@ -302,7 +343,7 @@ def test_overlapping_import_cannot_reactivate_disabled_channel(complete, monkeyp
 
                 monkeypatch.setattr(db, "lock_managed_channel_catalog", observe_lock)
                 importing = asyncio.create_task(db.upsert_managed_channels(
-                    pool, OWNER, 111, [{"id": CHANNEL, "title": "Результат скана"},
+                    pool, OWNER, 992660, [{"id": CHANNEL, "title": "Результат скана"},
                                        {"id": 123, "title": "Другой канал"}], complete=complete))
                 try:
                     await asyncio.wait_for(entered.wait(), 3)
@@ -340,7 +381,7 @@ def test_restore_preserves_catalog_identity_roles_and_statistics():
 
         await pool.execute(
             """INSERT INTO removed_channels(owner_id, channel_id, reason, acc_id, title)
-               VALUES($1, 42, 'owner', 111, 'Старый канал')""", OWNER)
+               VALUES($1, 42, 'owner', 992660, 'Старый канал')""", OWNER)
         assert await db.restore_removed_channel(pool, OWNER, 42)
         old = await pool.fetchrow(
             "SELECT id, title, members_count, added_at FROM managed_channels WHERE owner_id=$1 AND channel_id=42",
@@ -357,9 +398,9 @@ def test_reconnect_keeps_tombstone_on_write_failure():
         with pytest.raises(asyncpg.DataError):
             await db.add_managed_channels(
                 pool, OWNER, 2**40, [{"id": CHANNEL, "title": "Явное подключение"}], reconnect=True)
-        assert await db.add_managed_channels(pool, OWNER, 111, [{"id": CHANNEL}]) == 0
+        assert await db.add_managed_channels(pool, OWNER, 992660, [{"id": CHANNEL}]) == 0
         assert await db.add_managed_channels(
-            pool, OWNER, 111, [{"id": CHANNEL, "title": "Явное подключение"}], reconnect=True) == 1
+            pool, OWNER, 992660, [{"id": CHANNEL, "title": "Явное подключение"}], reconnect=True) == 1
         assert await db.list_removed_channels(pool, OWNER) == []
 
     asyncio.run(_run(scenario))
@@ -381,12 +422,12 @@ def test_import_worker_reports_only_saved_channels(kind, worker_name, monkeypatc
             {"id": 789, "type": kind, "is_admin": False},
         ]
         monkeypatch.setattr(op_worker.resource_selector, "select_all_active",
-                            AsyncMock(return_value=[{"id": 111, "session_str": "synthetic"}]))
-        monkeypatch.setattr(op_worker, "try_claim_accounts", AsyncMock(return_value=[111]))
+                            AsyncMock(return_value=[{"id": 992660, "session_str": "synthetic"}]))
+        monkeypatch.setattr(op_worker, "try_claim_accounts", AsyncMock(return_value=[992660]))
         monkeypatch.setattr(op_worker, "release_accounts", AsyncMock())
         monkeypatch.setattr(op_worker, "_is_cancelled", AsyncMock(return_value=False))
         monkeypatch.setattr(account_manager, "get_dialogs", AsyncMock(return_value=dialogs))
-        result = await getattr(op_worker, worker_name)(pool, None, op_id, OWNER, {"account_ids": [111]})
+        result = await getattr(op_worker, worker_name)(pool, None, op_id, OWNER, {"account_ids": [992660]})
         assert result["imported"] == result["disabled_skipped"] == result["foreign_skipped"] == 1
         assert "Отключены в Infragram: 1" in result["summary"]
         assert await pool.fetchval("SELECT channel_id FROM managed_channels WHERE owner_id=$1", OWNER) == 456
@@ -405,7 +446,7 @@ def test_native_scan_uses_the_same_catalog_guard(monkeypatch):
         await db.remove_managed_channel(pool, OWNER, CHANNEL)
         await pool.execute(
             """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, type)
-               VALUES ($1,456,111,'gone','megagroup'), ($1,789,111,'gone','megagroup')""", OWNER)
+               VALUES ($1,456,992660,'gone','megagroup'), ($1,789,992660,'gone','megagroup')""", OWNER)
         monkeypatch.setattr(db, "get_tg_account", AsyncMock(return_value={"session_str": "synthetic"}))
         monkeypatch.setattr(accounts, "scan_owned_assets", AsyncMock(return_value={
             "channels": [{"id": CHANNEL, "title": "Отключённый канал"}],
@@ -421,7 +462,7 @@ def test_native_scan_uses_the_same_catalog_guard(monkeypatch):
             from_user=SimpleNamespace(id=OWNER), answer=AsyncMock(),
             message=SimpleNamespace(edit_text=AsyncMock()),
         )
-        action = SimpleNamespace(acc_id=111, action="scan_connect_all")
+        action = SimpleNamespace(acc_id=992660, action="scan_connect_all")
         await accounts.cb_scan_connect(callback, action, pool)
         assert "Лимит каналов достигнут" in callback.message.edit_text.await_args.args[0]
         assert await pool.fetchval(
@@ -441,6 +482,6 @@ def test_native_scan_uses_the_same_catalog_guard(monkeypatch):
         assert await pool.fetchval(
             "SELECT reason FROM removed_channels WHERE owner_id=$1 AND channel_id=789", OWNER) == "gone"
         assert db.get_tg_account.await_count == 2
-        db.get_tg_account.assert_awaited_with(pool, 111, OWNER)
+        db.get_tg_account.assert_awaited_with(pool, 992660, OWNER)
 
     asyncio.run(_run(scenario))

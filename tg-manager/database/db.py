@@ -4259,6 +4259,7 @@ async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> b
     # и продолжают засчитываться в лимит каналов.
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await lock_managed_channel_catalog(conn, owner_id)
             await conn.execute(
                 "DELETE FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
                 owner_id, acc_id,
@@ -4826,19 +4827,44 @@ async def remove_managed_channel_on_connection(
     return True
 
 
+REMOVED_CHANNEL_RESTORE_ACCOUNT_SQL = """
+    SELECT 1 FROM tg_accounts a
+     WHERE a.id=r.acc_id AND a.owner_id=r.owner_id AND a.is_active IS TRUE
+       AND NULLIF(a.session_str, '') IS NOT NULL
+"""
+
+
+class RemovedChannelAccountError(ValueError):
+    """Архивная привязка больше не подходит для восстановления."""
+
+
+def removed_channel_restore_reason(has_binding: bool) -> str:
+    if not has_binding:
+        return "Нет сохранённой привязки к аккаунту"
+    return "Привязанный аккаунт больше не доступен. Подключите ресурс заново с доступного аккаунта."
+
+
 async def list_removed_channels(pool: asyncpg.Pool, owner_id: int, limit: int = 500,
                                 *, channel_id: int | None = None) -> list[dict]:
     """Удалённые владельцем и пропавшие в Telegram каналы — для экрана."""
     rows = await pool.fetch(
-        """SELECT channel_id, reason, detail, title, username, type, removed_at,
-                  acc_id IS NOT NULL AS can_restore
-             FROM removed_channels
+        f"""SELECT channel_id, reason, detail, title, username, type, removed_at,
+                  r.acc_id IS NOT NULL AS has_binding,
+                  EXISTS ({REMOVED_CHANNEL_RESTORE_ACCOUNT_SQL}) AS can_restore
+             FROM removed_channels r
             WHERE owner_id=$1 AND ($3::bigint IS NULL OR channel_id=$3)
             ORDER BY removed_at DESC, channel_id
             LIMIT $2""",
         owner_id, int(limit), channel_id,
     )
-    return [dict(r) for r in rows or []]
+    result = []
+    for row in rows or []:
+        item = dict(row)
+        has_binding = item.pop("has_binding")
+        if not item["can_restore"]:
+            item["restore_reason"] = removed_channel_restore_reason(has_binding)
+        result.append(item)
+    return result
 
 
 async def forget_removed_channels(pool: asyncpg.Pool, owner_id: int, channel_ids: list) -> None:
@@ -4878,14 +4904,21 @@ async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id:
             else:
                 await lock_managed_channel_catalog(conn, owner_id)
             row = await conn.fetchrow(
-                """DELETE FROM removed_channels
-                    WHERE owner_id=$1 AND channel_id=$2 AND acc_id IS NOT NULL
+                f"""DELETE FROM removed_channels r
+                    WHERE owner_id=$1 AND channel_id=$2
+                      AND EXISTS ({REMOVED_CHANNEL_RESTORE_ACCOUNT_SQL} FOR SHARE OF a)
                 RETURNING acc_id, title, username, type, access_hash, catalog_metadata,
                           reason, detail, removed_at,
                           catalog_metadata->>'cleanup_operation_id' AS cleanup_operation_id""",
                 owner_id, channel_id,
             )
             if not row:
+                if await conn.fetchval(
+                    """SELECT 1 FROM removed_channels
+                        WHERE owner_id=$1 AND channel_id=$2 AND acc_id IS NOT NULL""",
+                    owner_id, channel_id,
+                ):
+                    raise RemovedChannelAccountError(removed_channel_restore_reason(True))
                 return False
             if enforce_limit:
                 await _managed_channel_slots(conn, owner_id)
