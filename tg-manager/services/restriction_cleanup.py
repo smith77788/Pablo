@@ -98,6 +98,14 @@ async def _report(conn, owner_id, op_id, *, lock=False):
     return entries, result.get("findings_version") != 2
 
 
+def _report_item(key, entry):
+    kind, item_id = key
+    return {
+        "kind": kind, "id": str(item_id), "title": str(entry.get("title") or item_id),
+        "status": entry["status"], "reason": str(entry.get("reason") or ""),
+    }
+
+
 async def _snapshot(conn, owner_id, entries, *, lock=False):
     bots = sorted(item_id for kind, item_id in entries if kind == "bot")
     channels = sorted(item_id for kind, item_id in entries if kind != "bot")
@@ -151,14 +159,14 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
     for key, entry in entries.items():
         owned = assets[key]
         if not owned:
-            if projects[key]:
-                kind, item_id = key
-                items[key] = {
-                    "kind": kind, "id": str(item_id), "title": str(entry.get("title") or item_id),
-                    "status": entry["status"], "reason": str(entry.get("reason") or ""),
-                    "projects": list(projects[key].values()), "active": False, "can_disable": False,
-                    "disable_reason": "Ресурс отсутствует в каталоге. Можно убрать его связь с проектом.",
-                }
+            items[key] = {
+                **_report_item(key, entry),
+                "projects": list(projects[key].values()), "active": False, "can_disable": False,
+                "disable_reason": (
+                    "Ресурс отсутствует в каталоге. Можно убрать его связь с проектом."
+                    if projects[key] else "Ресурс отсутствует в вашем каталоге"
+                ),
+            }
             continue
         kind, item_id = key
         row = owned[0]
@@ -174,9 +182,8 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
         elif kind != "bot" and (len(owned) != 1 or not row["acc_id"]):
             reason = "Нет однозначной привязки к аккаунту для восстановления"
         items[key] = {
-            "kind": kind, "id": str(item_id),
+            **_report_item(key, entry),
             "title": str(title or row["username"] or entry.get("title") or item_id),
-            "status": entry["status"], "reason": str(entry.get("reason") or ""),
             "projects": list(projects[key].values()), "active": active,
             "can_disable": not reason, "disable_reason": reason,
             "revisions": [value["revision"] for value in owned],
@@ -205,9 +212,8 @@ async def _disabled_channels(conn, owner_id, entries, items):
         if key in entries and not items.get(key, {}).get("active"):
             entry = entries[key]
             disabled[key] = {
-                "kind": kind, "id": str(row["channel_id"]),
+                **_report_item(key, entry),
                 "title": str(row["title"] or row["username"] or entry.get("title") or row["channel_id"]),
-                "status": entry["status"], "reason": str(entry.get("reason") or ""),
                 "projects": items.get(key, {}).get("projects", []), "active": False, "can_disable": False,
                 "can_restore": row["can_restore"],
                 "disable_reason": "Ресурс уже отключён в Infragram",
@@ -220,7 +226,7 @@ async def findings(pool, owner_id, op_id, *, include_history=False):
         entries, legacy = await _report(conn, owner_id, op_id)
         items, _ = await _snapshot(conn, owner_id, entries)
         items.update(await _disabled_channels(conn, owner_id, entries, items))
-        response = {"findings": [items[key] for key in entries if key in items],
+        response = {"findings": [items[key] for key in entries],
                     "legacy": legacy, "max_targets": _MAX_TARGETS}
         if include_history:
             history = await conn.fetch(
@@ -334,20 +340,15 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
                                  and (explicit is None or str(item_id) in explicit))
 
     for key in sorted(keys):
-        entry = entries[key]
-        item = items.setdefault(key, {
-            "kind": key[0], "id": str(key[1]),
-            "title": str(entry.get("title") or key[1]), "status": entry["status"],
-        })
-        item["finding_reason"] = str(entry.get("reason") or "")
+        item = items[key]
+        item["finding_reason"] = item["reason"]
         if key in disabled and action == "disable":
-            reason = disabled[key]["disable_reason"]
+            item = items[key] = {**disabled[key], "finding_reason": item["finding_reason"]}
+            reason = item["disable_reason"]
         elif deployment_running:
             reason = "Дождитесь завершения развёртывания проекта"
         elif item["id"] in busy_channels and item["kind"] != "bot":
             reason = "Дождитесь завершения текущей публикации"
-        elif "active" not in item:
-            reason = "Ресурс больше не доступен владельцу"
         else:
             reason = ""
         item["outcome"] = "ready"

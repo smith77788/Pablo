@@ -68,10 +68,16 @@ def setup_routes(app: web.Application, pool) -> None:
                     return _err("Неверный проект", 400)
             args = (pool, uid, op_id, data.get("targets"), data.get("action"))
             token = data.get("token")
-            if data.get("preview") is True and token is None:
+            if "preview" in data and type(data["preview"]) is not bool:
+                return _err("Неверный режим очистки", 400)
+            if data.get("preview") is True:
+                if token is not None:
+                    return _err("Предпросмотр не принимает подтверждение", 400)
                 plan = await cleanup.plan(*args, project_id=project_id)
                 try:
-                    token = approval.issue_cleanup(uid, plan)
+                    token = approval.issue_cleanup(uid, plan) if any(
+                        item["outcome"] == "ready" for item in plan["items"]
+                    ) else None
                 except approval.ApprovalError:
                     log.error("Не настроено подтверждение очистки op_id=%s", op_id)
                     return _err("Сервис подтверждения временно недоступен", 500)

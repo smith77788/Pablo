@@ -63,6 +63,11 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
             changed = {**action, "targets": [CHANNEL_TARGET], "token": token}
             assert (await client.post(path, json=changed, headers=headers)).status == 409
             confirmation = {**action, "token": token}
+            for invalid_preview in (True, "true", 1, None):
+                refused = await client.post(path, json={**confirmation, "preview": invalid_preview}, headers=headers)
+                assert refused.status == 400
+            assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1", BOT)
+            assert not await pool.fetchval("SELECT 1 FROM operation_audit WHERE operation_id=$1", op_id)
             monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER + 1))
             assert (await client.post(path, json=confirmation, headers=headers)).status == 403
             monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
@@ -161,6 +166,69 @@ def test_authenticated_cleanup_round_trip(monkeypatch):
                 await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1 AND operation_id=$2",
                                    OWNER + 1, op_id)
 
+
+    asyncio.run(_run(scenario))
+
+
+def test_old_report_keeps_missing_findings_without_expanding_cleanup(monkeypatch):
+    secret = "123456:synthetic-history-only"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+    outcomes = ("unreachable", "restricted", "hidden", "check_failed")
+    missing = [{"kind": "channel", "id": str(CHANNEL + i), "status": status,
+                "title": f"Историческая находка {i}", "reason": "Исходная причина"}
+               for i, status in enumerate(outcomes, 1)]
+    targets = [{key: item[key] for key in ("kind", "id")} for item in missing]
+
+    async def scenario(pool, op_id):
+        await pool.execute("UPDATE operation_queue SET status='partial', result=$2::jsonb WHERE id=$1",
+                           op_id, json.dumps({"findings": [
+                               *missing, {**BOT_TARGET, "status": "restricted"}
+                           ]}))
+        await pool.execute(
+            "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, type) "
+            "VALUES($1,111,$2,'Закрытое название другого владельца','channel')",
+            OWNER + 1, int(missing[0]["id"]))
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        other = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+        path = f"/api/miniapp/operations/{op_id}/cleanup"
+        try:
+            async with TestClient(TestServer(app)) as client:
+                assert (await client.get(path, headers=other)).status == 404
+                report = await (await client.get(path, headers=headers)).json()
+                assert report["legacy"]
+                assert report["findings"][:4] == [
+                    {**item, "active": False, "can_disable": False, "projects": [],
+                     "disable_reason": "Ресурс отсутствует в вашем каталоге"}
+                    for item in missing
+                ]
+                action = {"action": "disable", "targets": targets}
+                unavailable = await client.post(path, json={**action, "preview": True}, headers=headers)
+                assert unavailable.status == 200
+                preview = await unavailable.json()
+                assert preview["token"] is None
+                assert [item["status"] for item in preview["items"]] == list(outcomes)
+                assert all(item["outcome"] == "skipped" and item["finding_reason"] == "Исходная причина"
+                           for item in preview["items"])
+                assert (await client.post(path, json=action, headers=headers)).status == 400
+                action["targets"] += [BOT_TARGET]
+                preview = await (await client.post(path, json={**action, "preview": True}, headers=headers)).json()
+                applied = await client.post(path, json={**action, "token": preview["token"]}, headers=headers)
+                assert applied.status == 200, await applied.text()
+                result = await applied.json()
+                assert [item["id"] for item in result["changed"]] == [str(BOT)]
+                assert [item["status"] for item in result["items"] if item["outcome"] == "skipped"] == list(outcomes)
+                assert await pool.fetchval(
+                    "SELECT 1 FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+                    OWNER + 1, int(missing[0]["id"]))
+                reread = await (await client.get(path, headers=headers)).json()
+                assert reread["findings"][:4] == report["findings"][:4]
+                assert [entry["target"] for entry in reread["history"]] == [f"bot:{BOT}"]
+        finally:
+            await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+                               OWNER + 1, int(missing[0]["id"]))
 
     asyncio.run(_run(scenario))
 

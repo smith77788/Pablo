@@ -230,6 +230,7 @@ const api = async (path, options) => {
   search.value = ids[1];
   search.oninput();
   assert.equal(selectAll.disabled, true);
+  assert.match(list.innerHTML, /Проекты: Проект · Нет связи с выбранным проектом/);
   const selectedOnly = control('[data-cleanup-selected]');
   selectedOnly.onclick();
   assert.equal(search.disabled, true);
@@ -323,6 +324,21 @@ Object.defineProperty(control('[data-cleanup-review]'), 'innerHTML', {set() {
   await control('[data-cleanup-preview]').onclick();
   assert.equal(body.querySelector('[data-cleanup-apply]'), null);
   assert.match(body.innerHTML, /0 к применению · 1000 пропущено/);
+
+  const missingId = String(firstId + 1000n);
+  findings.push({id:missingId, kind:'channel', title:'Старая находка', status:'check_failed',
+    reason:'Причина проверки', projects:[], active:false, can_disable:false,
+    disable_reason:'Ресурс отсутствует в вашем каталоге'});
+  await openOperationCleanup(42);
+  search.value = '#' + missingId;
+  search.oninput();
+  assert.match(list.innerHTML, /data-cleanup-target value="1000" disabled/);
+  assert.match(list.innerHTML, /Не удалось проверить · Причина проверки · Ресурс отсутствует в вашем каталоге/);
+  assert.equal(selectAll.disabled, true);
+  control('[data-cleanup-action]').value = 'detach';
+  control('[data-cleanup-action]').onchange();
+  assert.match(list.innerHTML, /data-cleanup-target value="1000" disabled/);
+  assert.equal(control('[data-cleanup-preview]').disabled, true);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     subprocess.run([node, "-"], input=source.read_text() + "\n" + script, text=True, check=True)

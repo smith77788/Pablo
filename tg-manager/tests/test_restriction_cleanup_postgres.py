@@ -66,7 +66,7 @@ def test_owner_exact_ids_preview_and_reversible_cleanup(monkeypatch, legacy_remo
 
     async def scenario(pool, op_id):
         result = await cleanup.findings(pool, OWNER, op_id)
-        assert [item["id"] for item in result["findings"]] == [str(BOT), str(CHANNEL)]
+        assert [item["id"] for item in result["findings"]] == [str(BOT), str(CHANNEL), "99"]
         assert result["findings"][1]["status"] == "check_failed"
         assert not result["legacy"]
         with pytest.raises(cleanup.CleanupError) as other:

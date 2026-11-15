@@ -227,13 +227,17 @@ async function openOperationCleanup(opId) {
         next.disabled = page + 1 >= pageCount;
         list.innerHTML = filtered.slice(page * pageSize, (page + 1) * pageSize).map(({item, index}) => {
           const eligible = canSelect(item);
+          const memberships = (item.projects || []).map(p => p.name || '#' + p.id).join(', ');
+          const outsideProject = action.value === 'detach' && project.value && !eligible && (item.active || memberships);
+          const unavailable = outsideProject ? 'Нет связи с выбранным проектом'
+            : action.value === 'disable' || !item.active ? item.disable_reason : '';
           const details = [
             labels[item.kind] || 'Ресурс',
             'ID: ' + item.id,
             statusText[item.status] || 'Требуется проверка',
             item.reason,
-            action.value === 'detach' ? (item.projects || []).map(p => p.name).filter(Boolean).join(', ') : '',
-            (!item.active || (action.value === 'disable' && !eligible)) ? item.disable_reason : '',
+            memberships ? 'Проекты: ' + memberships : '',
+            unavailable,
           ].filter(Boolean).join(' · ');
           return `<label class="row chk-row" style="min-height:44px;cursor:${eligible ? 'pointer' : 'default'}">
             <input type="checkbox" data-cleanup-target value="${esc(index)}" ${eligible ? '' : 'disabled'} ${selected.has(index) ? 'checked' : ''}>
