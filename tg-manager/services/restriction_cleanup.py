@@ -77,25 +77,56 @@ async def _report(conn, owner_id, op_id, *, lock=False):
             continue
         entries[kind, item_id] = entry
     channel_ids = [item_id for kind, item_id in entries if kind == "channel"]
-    if channel_ids:
-        # Старые проверки сохраняли gigagroup с видом channel. Исправляем
-        # вид по каталогу владельца, не меняя исходный вердикт проверки.
-        old_groups = await conn.fetch(
-            """SELECT channel_id FROM managed_channels
-                WHERE owner_id=$1 AND channel_id=ANY($2::bigint[]) AND lower(type)='gigagroup'
-                UNION
-               SELECT channel_id FROM removed_channels
-                WHERE owner_id=$1 AND channel_id=ANY($2::bigint[]) AND lower(type)='gigagroup'""",
-            owner_id, channel_ids,
-        )
-        old_ids = {row["channel_id"] for row in old_groups}
-        if old_ids:
-            entries = {
-                ("group", item_id) if kind == "channel" and item_id in old_ids else (kind, item_id): entry
-                for (kind, item_id), entry in entries.items()
-                if not (kind == "channel" and item_id in old_ids and ("group", item_id) in entries)
-            }
+    old_ids = await _legacy_group_ids(conn, owner_id, op_id, channel_ids)
+    if old_ids:
+        entries = {
+            ("group", item_id) if kind == "channel" and item_id in old_ids else (kind, item_id): entry
+            for (kind, item_id), entry in entries.items()
+            if not (kind == "channel" and item_id in old_ids and ("group", item_id) in entries)
+        }
     return entries, result.get("findings_version") != 2
+
+
+async def _legacy_group_ids(conn, owner_id, op_id, channel_ids):
+    if not channel_ids:
+        return set()
+    # Старые проверки сохраняли gigagroup с видом channel. При отсутствии
+    # каталога допускается однозначный тип из собственных узлов проекта.
+    rows = await conn.fetch(
+        """SELECT channel_id, lower(type) AS kind FROM managed_channels
+            WHERE owner_id=$1 AND channel_id=ANY($2::bigint[])
+            UNION ALL
+           SELECT channel_id, lower(type) AS kind FROM removed_channels
+            WHERE owner_id=$1 AND channel_id=ANY($2::bigint[])""", owner_id, channel_ids,
+    )
+    kinds = defaultdict(set)
+    for row in rows:
+        kinds[row["channel_id"]].add(row["kind"])
+    groups = {item_id for item_id, resource_types in kinds.items() if resource_types == {"gigagroup"}}
+    missing = [item_id for item_id in channel_ids if item_id not in kinds]
+    if not missing:
+        return groups
+    rows = await conn.fetch(
+        """SELECT n.ref_id, bool_and(n.node_type <> 'channel') AS only_groups
+                 FROM network_nodes n JOIN network_instances p ON p.id=n.instance_id
+                WHERE p.owner_id=$1 AND n.ref_id=ANY($2::bigint[])
+                  AND n.node_type=ANY($3::text[])
+                GROUP BY n.ref_id""", owner_id, missing, ["channel", *_GROUP_TYPES],
+    )
+    topology = {row["ref_id"]: row["only_groups"] for row in rows}
+    groups.update(item_id for item_id, only_groups in topology.items() if only_groups)
+    audit_targets = {f"group:{item_id}": item_id for item_id in missing if item_id not in topology}
+    if audit_targets:
+        # Последняя отвязка убирает узел, но проверенный вид остаётся в истории.
+        rows = await conn.fetch(
+            """SELECT DISTINCT split_part(target, ' ', 1) AS resource FROM operation_audit
+                WHERE owner_id=$1 AND operation_id=$2 AND result='success'
+                  AND action IN ('restriction_cleanup_detach','restriction_cleanup_disable')
+                  AND split_part(target, ' ', 1)=ANY($3::text[])""",
+            owner_id, op_id, list(audit_targets),
+        )
+        groups.update(audit_targets[row["resource"]] for row in rows)
+    return groups
 
 
 def _report_item(key, entry):

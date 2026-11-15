@@ -298,6 +298,98 @@ def test_detach_stale_catalog_link_through_authenticated_preview(monkeypatch, ch
     asyncio.run(_run(scenario))
 
 
+def test_legacy_group_topology_recovers_only_owner_links(monkeypatch):
+    secret = "123456:synthetic-legacy-group"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+
+    async def scenario(pool, op_id):
+        other_owner = OWNER + 1
+        project, neighbor, foreign = [row["id"] for row in await pool.fetch(
+            """INSERT INTO network_instances(owner_id,name)
+               VALUES($1,'Основной'),($1,'Соседний'),($2,'Чужой') RETURNING id""",
+            OWNER, other_owner)]
+        conflict, known = CHANNEL + 1, CHANNEL + 2
+        try:
+            await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL)
+            await pool.execute(
+                """INSERT INTO managed_channels(owner_id,acc_id,channel_id,type,title)
+                   VALUES($1,111,$2,'channel','Обычный канал'),($3,111,$4,'channel','Чужой ресурс')""",
+                OWNER, known, other_owner, CHANNEL)
+            await pool.execute(
+                """INSERT INTO network_nodes(instance_id,node_type,ref_id)
+                   VALUES($1,'group',$4),($2,'gigagroup',$4),($3,'channel',$4),
+                         ($1,'group',$5),($2,'channel',$5),($1,'group',$6)""",
+                project, neighbor, foreign, CHANNEL, conflict, known)
+            await pool.execute("UPDATE operation_queue SET result=$2::jsonb WHERE id=$1", op_id,
+                               json.dumps({"findings": [
+                                   {"kind": "channel", "id": CHANNEL, "status": "hidden",
+                                    "reason": "Скрыта из поиска"},
+                                   {"kind": "channel", "id": conflict, "status": "restricted"},
+                                   {"kind": "channel", "id": known, "status": "check_failed"},
+                               ]}))
+            headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+            app = web.Application()
+            mini_app_operations.setup_routes(app, pool)
+            path = f"/api/miniapp/operations/{op_id}/cleanup"
+            target = {"kind": "group", "id": str(CHANNEL)}
+            async with TestClient(TestServer(app)) as client:
+                report = await (await client.get(path, headers=headers)).json()
+                assert report["legacy"]
+                group, ambiguous, catalog = report["findings"]
+                assert group["kind"] == "group" and group["id"] == str(CHANNEL)
+                assert group["status"] == "hidden" and group["reason"] == "Скрыта из поиска"
+                assert not group["can_disable"] and not group.get("can_restore")
+                assert {p["id"] for p in group["projects"]} == {project, neighbor}
+                assert ambiguous["kind"] == "channel" and ambiguous["projects"][0]["id"] == neighbor
+                assert catalog["kind"] == "channel" and catalog["projects"] == []
+                payload = {"action": "detach", "project_id": project, "targets": [target]}
+                for target_id, code in ((conflict, 409), (known, 409)):
+                    rejected = await client.post(path, headers=headers, json={
+                        **payload, "preview": True, "targets": [{**target, "id": str(target_id)}],
+                    })
+                    assert rejected.status == code
+                assert (await client.post(path, headers=headers, json={
+                    **payload, "preview": True, "project_id": foreign})).status == 404
+                preview = await (await client.post(path, headers=headers,
+                                                  json={**payload, "preview": True})).json()
+                assert preview["items"][0]["outcome"] == "ready"
+                signed = {**payload, "token": preview["token"]}
+                await pool.execute("UPDATE network_nodes SET node_type='channel' WHERE instance_id=$1 AND ref_id=$2",
+                                   neighbor, CHANNEL)
+                assert (await client.post(path, headers=headers, json=signed)).status == 409
+                await pool.execute("UPDATE network_nodes SET node_type='gigagroup' WHERE instance_id=$1 AND ref_id=$2",
+                                   neighbor, CHANNEL)
+                confirmed = await client.post(path, headers=headers, json=signed)
+                assert confirmed.status == 200, await confirmed.text()
+                assert (await confirmed.json())["count"] == 1
+                rows = await pool.fetch("SELECT instance_id FROM network_nodes WHERE ref_id=$1", CHANNEL)
+                assert {row["instance_id"] for row in rows} == {neighbor, foreign}
+                replay = await (await client.post(path, headers=headers, json=signed)).json()
+                assert replay["replayed"]
+                reread = await (await client.get(path, headers=headers)).json()
+                assert reread["history"][0]["target"] == f"group:{CHANNEL} project:{project}"
+                assert reread["findings"][0]["projects"][0]["id"] == neighbor
+                last_link = {**payload, "project_id": neighbor}
+                last_preview = await (await client.post(path, headers=headers,
+                                                       json={**last_link, "preview": True})).json()
+                final = await client.post(path, headers=headers,
+                                          json={**last_link, "token": last_preview["token"]})
+                assert final.status == 200, await final.text()
+                assert (await final.json())["count"] == 1
+                history_only = await (await client.get(path, headers=headers)).json()
+                assert history_only["findings"][0]["kind"] == "group"
+                assert history_only["findings"][0]["status"] == "hidden"
+                assert history_only["findings"][0]["projects"] == []
+                assert len(history_only["history"]) == 2
+                assert await pool.fetchval("SELECT instance_id FROM network_nodes WHERE ref_id=$1", CHANNEL) == foreign
+        finally:
+            await pool.execute("DELETE FROM network_instances WHERE id=$1 AND owner_id=$2", foreign, other_owner)
+            await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", other_owner, CHANNEL)
+
+    asyncio.run(_run(scenario))
+
+
 def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
     from unittest.mock import AsyncMock
 
