@@ -18690,6 +18690,39 @@ async def _record_boost_flood(pool: asyncpg.Pool, acc_id: int, err: str, op_id: 
         log.debug("boost flood record failed acc=%s", acc_id)
 
 
+# Растянуть накрутку по времени (настройка экрана «Накрутка»): N аккаунтов,
+# отработавших пост за пару минут, — залп, по которому накрутку и видно;
+# живая аудитория приходит рассеянно. Допустимые окна — как на экране.
+BOOST_SPREAD_MINUTES = (0, 30, 60, 180, 360)
+
+
+def boost_spread_minutes(params: dict) -> int:
+    try:
+        m = int(params.get("spread_minutes") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return m if m in BOOST_SPREAD_MINUTES else 0
+
+
+async def _boost_gap_pause(
+    pool, op_id: int, delay: float, spread_min: int, total: int, where: str,
+) -> None:
+    """Пауза между аккаунтами накрутки.
+
+    `delay` — обычная пауза, уже растянутая губернатором (считает вызывающий).
+    Без растяжки — она и есть пауза. С растяжкой — окно делится
+    на промежутки между аккаунтами с разбросом ±40%, но не короче обычной
+    паузы. Длинная пауза обязана слышать «Отменить», поэтому только через
+    cancellable_pause: следом идёт виток цикла, он начинается с проверки отмены.
+    """
+    if spread_min > 0 and total > 1:
+        gap = spread_min * 60.0 / (total - 1) * random.uniform(0.6, 1.4)
+        delay = max(delay, gap)
+        await cancellable_pause(pool, op_id, delay, where)
+        return
+    await asyncio.sleep(delay)
+
+
 async def _exec_boost_views(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -18800,7 +18833,8 @@ async def _exec_boost_views(
                 _vd *= _sim_v.time_of_day_factor()
             except Exception:
                 pass
-            await asyncio.sleep(await _governed_delay(pool, owner_id, _vd))
+            await _boost_gap_pause(pool, op_id, await _governed_delay(pool, owner_id, _vd),
+                                   boost_spread_minutes(params), total, "boost_views")
 
     summary = (
         f"👁 Просмотры: {channel} × {len(msg_ids)} сообщений\n"
@@ -18934,7 +18968,8 @@ async def _exec_boost_reactions(
                 _rd *= _sim_r.time_of_day_factor()
             except Exception:
                 pass
-            await asyncio.sleep(await _governed_delay(pool, owner_id, _rd))
+            await _boost_gap_pause(pool, op_id, await _governed_delay(pool, owner_id, _rd),
+                                   boost_spread_minutes(params), total, "boost_reactions")
 
     summary = (
         f"💫 Реакции: {channel} сообщение #{msg_id}\n"

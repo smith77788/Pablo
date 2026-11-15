@@ -5153,6 +5153,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <select id="mpPillar"></select>
         <div class="field-note">Из правил редактора: по рубрикам он следит, чтобы в канале не шли три рекламы подряд.</div>
       </div>
+      <!-- Картинка к посту. Исполнитель умел рисовать её по описанию всегда
+           (так работает виртуальный администратор), а этот экран не давал её
+           задать. Поле видно, только когда подключён ИИ, умеющий рисовать. -->
+      <div class="field" id="mpImageWrap" style="margin-bottom:12px;display:none">
+        <label>🖼 Картинка к посту (необязательно)</label>
+        <textarea id="mpImagePrompt" rows="2" maxlength="1000" placeholder="Опишите картинку: «утренняя кофейня, тёплый свет, без текста»" oninput="renderMpImageNote()"></textarea>
+        <label class="chk-row" id="mpImageReqRow" style="margin:8px 0 0;font-size:13px;display:none"><input type="checkbox" id="mpImageRequired"> Без картинки не публиковать</label>
+        <div class="field-note" id="mpImageNote">ИИ нарисует картинку один раз, и она уйдёт во все каналы этого запуска.</div>
+      </div>
       <div class="field" style="margin-bottom:12px">
         <label>Задержка между постами</label>
         <select id="mpDelay">
@@ -5185,7 +5194,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
            воркер его умеет (op_worker переочередит следующий запуск сам). -->
       <div class="field">
         <label>🔁 Повторять (необязательно)</label>
-        <select id="mpRepeat">
+        <select id="mpRepeat" onchange="renderMpRepeatCount()">
           <option value="0" selected>Без повтора</option>
           <option value="360">Каждые 6 часов</option>
           <option value="720">Каждые 12 часов</option>
@@ -5193,6 +5202,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <option value="10080">Каждую неделю</option>
         </select>
         <div class="field-note">Повтор уходит в ту же очередь: следующий запуск ставится после успешного предыдущего. Остановить — в «Очереди операций»</div>
+        <div id="mpRepeatCountWrap" style="display:none;margin-top:8px">
+          <label>Сколько раз опубликовать</label>
+          <select id="mpRepeatCount">
+            <option value="" selected>Пока не остановлю</option>
+            <option value="2">2 раза</option>
+            <option value="3">3 раза</option>
+            <option value="7">7 раз</option>
+            <option value="14">14 раз</option>
+            <option value="30">30 раз</option>
+          </select>
+        </div>
       </div>
       <!-- Совет редактора (screens/editorial.js): повтор недавнего поста и
            правила канала. Появляется на подтверждении, публикацию не блокирует. -->
@@ -5682,7 +5702,28 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field" id="boostF-channel"><label>Канал (@username или ссылка)</label><input type="text" id="boostChannel" placeholder="@channel"></div>
       <div class="field" id="boostF-msgids"><label>ID сообщений (через запятую или диапазон 120-130)</label><input type="text" id="boostMsgIds" placeholder="123, 124, 125"></div>
       <div class="field" id="boostF-msgid"><label>ID сообщения</label><input type="number" id="boostMsgId" placeholder="123" class="inp"></div>
-      <div class="field" id="boostF-emoji"><label>Эмодзи реакции</label><input type="text" id="boostEmoji" value="👍" maxlength="8"></div>
+      <div class="field" id="boostF-emoji">
+        <label>Какие реакции ставить</label>
+        <select id="boostEmojiMode" class="sel" onchange="boostRenderEmoji()">
+          <option value="mix" selected>🎲 Вразнобой, как живая аудитория</option>
+          <option value="set">🎯 Мой набор — вразнобой из него</option>
+          <option value="one">1️⃣ Одна реакция у всех</option>
+        </select>
+        <div class="preset-row" id="boostEmojiChips" style="margin-top:6px;display:none"></div>
+        <input type="text" id="boostEmoji" value="👍" maxlength="8" style="display:none;margin-top:6px" aria-label="Эмодзи реакции">
+        <div class="field-note" id="boostEmojiNote">Каждый аккаунт поставит свою реакцию из набора ❤ 🔥 👍 😍 👏 ⚡ 🎉 💯. Одинаковая реакция от всех — главный признак накрутки.</div>
+      </div>
+      <div class="field" id="boostF-spread">
+        <label>Растянуть по времени</label>
+        <select id="boostSpread" class="sel">
+          <option value="0" selected>Сразу (несколько минут)</option>
+          <option value="30">За 30 минут</option>
+          <option value="60">За 1 час</option>
+          <option value="180">За 3 часа</option>
+          <option value="360">За 6 часов</option>
+        </select>
+        <div class="field-note">Живые просмотры и реакции приходят постепенно. Пока накрутка идёт, её аккаунты заняты и в других операциях не участвуют.</div>
+      </div>
       <div class="field" id="boostF-target"><label>Цель — чьи сторис смотреть (@username)</label><input type="text" id="boostTarget" placeholder="@username"></div>
       <div class="field" id="boostF-subtarget"><label>Канал/группа для вступления (@username или t.me/+hash)</label><input type="text" id="boostSubTarget" placeholder="@channel или t.me/+hash"></div>
       <div class="field" id="boostF-botuser"><label>@username бота</label><input type="text" id="boostBotUsername" placeholder="@mybot"></div>
@@ -13041,9 +13082,16 @@ async function appealSpamblock(id) {
 
 
 async function massCheckAccounts() {
+  // Глубина проверки — выбор владельца: быстрая годится для ежедневного
+  // взгляда на флот, полная нужна, когда подозревают спамблок.
+  const mode = await askChoice('Как проверить все аккаунты?', [
+    {value:'full', label:'🔍 Полная', sub:'Сессия, удаление, заморозка и спамблок через @SpamBot. Дольше, каждый аккаунт пишет @SpamBot.'},
+    {value:'quick', label:'⚡ Быстрая', sub:'Только сессия, удаление и заморозка. Спамблок не проверяется.'},
+  ]);
+  if (!mode) return;
   if (!await askConfirm('Проверить все аккаунты? Рабочие, ошибочно отключённые, будут восстановлены.')) return;
   try {
-    const r = await api('/api/miniapp/accounts/check', {method:'POST'});
+    const r = await api('/api/miniapp/accounts/check', {method:'POST', body: JSON.stringify({spambot: mode === 'full'})});
     toast(`🔍 Проверка ${r.count} ${plural(r.count,'аккаунту','аккаунтам','аккаунтам')} запущена (#${r.op_id}). Результат придёт в бот.`);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
@@ -16805,6 +16853,7 @@ async function loadMpTargets() {
     if (projectId !== MP_PROJECT_ID || channelId !== MP_PROJECT_CHANNEL_ID) return;
     MP_TOTAL = Number(d.total || 0);
     MP_SAMPLE = d.sample || [];
+    { const _w = document.getElementById('mpImageWrap'); if (_w) _w.style.display = d.ai_image ? '' : 'none'; }
     if (!MP_TOTAL) {
       txt('mpTargets', projectId ? (channelId === null ? 'В проекте нет доступных каналов' : 'Канал больше не доступен в проекте') : empty('📡','Публиковать некуда','Ни одного канала, принадлежащего вам, не найдено',
           {label:'📡 Фабрика каналов', fn:'openChannelFactory()'}));
@@ -16820,6 +16869,19 @@ async function loadMpTargets() {
   }
   renderMpCanaryNote();
   renderMpBtn();
+}
+
+// «Сколько раз» имеет смысл только у повтора: без него поле прячем.
+function renderMpRepeatCount() {
+  const rep = parseInt(document.getElementById('mpRepeat')?.value || '0') || 0;
+  const w = document.getElementById('mpRepeatCountWrap');
+  if (w) w.style.display = rep > 0 ? '' : 'none';
+}
+// Галочка «без картинки не публиковать» нужна только при заданном описании.
+function renderMpImageNote() {
+  const has = !!(document.getElementById('mpImagePrompt')?.value || '').trim();
+  const row = document.getElementById('mpImageReqRow');
+  if (row) row.style.display = has ? '' : 'none';
 }
 
 // Подпись кнопки = то, что случится по нажатию. Раньше она обещала «во все
@@ -16992,7 +17054,13 @@ async function sendMassPublish() {
     return (_repMin > 0 && e && e.selectedIndex >= 0)
       ? (e.options[e.selectedIndex].textContent || '').trim().toLowerCase() : '';
   })();
-  const _repNote = _repMin > 0 ? '\n\nПовтор: ' + _repLbl + '. Останавливается в «Очереди операций».' : '';
+  const _repCount = _repMin > 0 ? (parseInt(document.getElementById('mpRepeatCount')?.value || '0') || 0) : 0;
+  const _imgPrompt = ((document.getElementById('mpImageWrap')?.style.display !== 'none')
+    && (document.getElementById('mpImagePrompt')?.value || '').trim()) || '';
+  const _repNote = (_repMin > 0 ? '\n\nПовтор: ' + _repLbl
+      + (_repCount > 0 ? ', всего ' + _repCount + ' ' + plural(_repCount, 'раз', 'раза', 'раз') : '')
+      + '. Останавливается в «Очереди операций».' : '')
+    + (_imgPrompt ? '\n\nКартинка: нарисует ИИ по описанию' + (document.getElementById('mpImageRequired')?.checked ? ', без неё пост не уйдёт.' : '. Не получится — пост уйдёт текстом.') : '');
   // Совет редактора: повтор недавнего поста и правила канала. Это подсказка,
   // а не запрет — она дописывается в подтверждение, решает человек.
   const _edBox = document.getElementById('mpEditorial');
@@ -17076,11 +17144,21 @@ async function sendMassPublish() {
     { const _p=document.getElementById('mpPillar'); if (_p && _p.value) payload.pillar = _p.value; }
     if (scheduled_for) payload.scheduled_for = scheduled_for;
     if (_repMin > 0) payload.repeat_interval_min = _repMin;
+    if (_repMin > 0 && _repCount > 0) payload.repeat_count = _repCount;
+    if (_imgPrompt) {
+      payload.media_prompt = _imgPrompt;
+      if (document.getElementById('mpImageRequired')?.checked) payload.require_media = true;
+    }
     const d = await api('/api/miniapp/mass_publish', {method:'POST', body: JSON.stringify(payload)});
     document.getElementById('mpText').value='';
     document.getElementById('mpLen').textContent='0';
     { const _s=document.getElementById('mpSchedule'); if(_s) _s.value=''; }
     { const _r=document.getElementById('mpRepeat'); if(_r) _r.value='0'; }
+    { const _rc=document.getElementById('mpRepeatCount'); if(_rc) _rc.value=''; }
+    renderMpRepeatCount();
+    { const _ip=document.getElementById('mpImagePrompt'); if(_ip) _ip.value=''; }
+    { const _ir=document.getElementById('mpImageRequired'); if(_ir) _ir.checked=false; }
+    renderMpImageNote();
     { const _e=document.getElementById('mpEditorial'); if(_e) _e.innerHTML=''; }
     tg.HapticFeedback?.notificationOccurred('success');
     const _when = scheduled_for ? (' на '+new Date(scheduled_for).toLocaleString('ru-RU')) : '';
@@ -19325,6 +19403,32 @@ async function submitComplianceScan() {
 
 // ── Boost (Накрутка) ─────────────────────────────────────
 let BOOST_TYPE = 'views';
+// Набор реакций для режима «Мой набор». Те же, что исполнитель берёт сам.
+const BOOST_EMOJI_ALL = ['❤','🔥','👍','😍','👏','⚡','🎉','💯','🤩','🙏','😁','🥰'];
+const BOOST_EMOJI_PICK = new Set(['❤','🔥','👍']);
+function boostToggleEmoji(e) {
+  if (BOOST_EMOJI_PICK.has(e)) BOOST_EMOJI_PICK.delete(e); else BOOST_EMOJI_PICK.add(e);
+  boostRenderEmoji();
+}
+function boostRenderEmoji() {
+  const mode = document.getElementById('boostEmojiMode')?.value || 'mix';
+  const chips = document.getElementById('boostEmojiChips');
+  const one = document.getElementById('boostEmoji');
+  const note = document.getElementById('boostEmojiNote');
+  if (chips) {
+    chips.style.display = mode === 'set' ? '' : 'none';
+    chips.innerHTML = BOOST_EMOJI_ALL.map(e =>
+      '<span class="preset-chip' + (BOOST_EMOJI_PICK.has(e) ? ' on' : '') + '" role="button" tabindex="0"'
+      + ' aria-pressed="' + BOOST_EMOJI_PICK.has(e) + '" onclick="boostToggleEmoji(\'' + e + '\')"'
+      + ' style="' + (BOOST_EMOJI_PICK.has(e) ? 'background:var(--accent);color:#fff' : '') + '">' + e + '</span>').join('');
+  }
+  if (one) one.style.display = mode === 'one' ? '' : 'none';
+  if (note) note.textContent = mode === 'mix'
+    ? 'Каждый аккаунт поставит свою реакцию из набора ❤ 🔥 👍 😍 👏 ⚡ 🎉 💯. Одинаковая реакция от всех — главный признак накрутки.'
+    : mode === 'set'
+      ? 'Каждый аккаунт возьмёт случайную реакцию из отмеченных: ' + ([...BOOST_EMOJI_PICK].join(' ') || 'ничего не отмечено') + '.'
+      : 'Все аккаунты поставят одну и ту же реакцию. Так накрутку легче заметить.';
+}
 function boostSetType(t) {
   BOOST_TYPE = t;
   ['views','reactions','stories','subscribers','bot_starts'].forEach(x=>{
@@ -19337,6 +19441,8 @@ function boostSetType(t) {
   show('boostF-msgids', t==='views');
   show('boostF-msgid', t==='reactions');
   show('boostF-emoji', t==='reactions');
+  show('boostF-spread', t==='views'||t==='reactions');
+  if (t==='reactions') boostRenderEmoji();
   show('boostF-target', t==='stories');
   show('boostF-subtarget', t==='subscribers');
   show('boostF-botuser', t==='bot_starts');
@@ -19379,7 +19485,12 @@ async function submitBoost() {
   } else if (BOOST_TYPE==='reactions') {
     payload.channel=document.getElementById('boostChannel').value.trim();
     payload.msg_id=parseInt(document.getElementById('boostMsgId').value)||0;
-    payload.emoji=document.getElementById('boostEmoji').value.trim()||'👍';
+    const _em = document.getElementById('boostEmojiMode').value;
+    if (_em === 'one') payload.emoji = document.getElementById('boostEmoji').value.trim() || '👍';
+    else if (_em === 'set') {
+      payload.emojis = [...BOOST_EMOJI_PICK];
+      if (!payload.emojis.length) { errEl.textContent='Отметьте хотя бы одну реакцию'; return; }
+    }
     if(!payload.channel||!payload.msg_id){ errEl.textContent='Укажите канал и ID сообщения'; return; }
   } else if (BOOST_TYPE==='stories') {
     payload.target=document.getElementById('boostTarget').value.trim();
@@ -19393,6 +19504,10 @@ async function submitBoost() {
     payload.payload=document.getElementById('boostPayload').value.trim();
     payload.premium_only=document.getElementById('boostPremiumOnly').value==='1';
     if(!payload.bot_username){ errEl.textContent='Укажите @username бота'; return; }
+  }
+  if (BOOST_TYPE==='views' || BOOST_TYPE==='reactions') {
+    const _sp = parseInt(document.getElementById('boostSpread').value) || 0;
+    if (_sp > 0) payload.spread_minutes = _sp;
   }
   // Накрутка выполняется живыми аккаунтами и тратит их доверие: масштаб и
   // цель называем до нажатия, как в остальных массовых операциях.

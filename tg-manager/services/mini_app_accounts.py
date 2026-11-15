@@ -598,8 +598,17 @@ def setup_routes(app: web.Application, pool) -> None:
         ids = [int(r["id"]) for r in (rows or [])]
         if not ids:
             return _err("Нет аккаунтов для проверки", 400)
+        # Быстрая проверка (без диалога с @SpamBot): сессия жива, аккаунт не
+        # удалён и не заморожен. Полная ещё спрашивает @SpamBot про спамблок —
+        # это дольше и само по себе действие аккаунта. Исполнитель умел обе,
+        # экран всегда запускал полную. По умолчанию — полная, как было.
         try:
-            _params = {"account_ids": ids, "check_spambot": True}
+            _body = await request.json() if request.can_read_body else {}
+        except Exception:
+            _body = {}
+        _spambot = not (isinstance(_body, dict) and _body.get("spambot") is False)
+        try:
+            _params = {"account_ids": ids, "check_spambot": _spambot}
             if admin:
                 # Проверка подключается к Telegram сессией аккаунта, поэтому
                 # исполнитель по умолчанию чужие id отбрасывает. Право на
@@ -607,9 +616,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 _params["cross_owner"] = True
             op_id = await _obus.submit(
                 pool, uid, "check_accounts_health", _params,
-                total_items=len(ids), label=f"Проверка · аккаунтов: {len(ids)}",
+                total_items=len(ids),
+                label=(f"Проверка · аккаунтов: {len(ids)}"
+                       + ("" if _spambot else " · быстрая")),
             )
-            return _json_resp({"ok": True, "op_id": op_id, "count": len(ids)})
+            return _json_resp({"ok": True, "op_id": op_id, "count": len(ids),
+                               "spambot": _spambot})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
