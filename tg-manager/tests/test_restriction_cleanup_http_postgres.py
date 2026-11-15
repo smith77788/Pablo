@@ -234,28 +234,32 @@ def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
     from unittest.mock import AsyncMock
 
     from bot.utils import subscription
-    from database import db
     from services import mini_app_channels
 
     secret = "123456:synthetic-channel-restore-only"
     monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
     monkeypatch.setattr(subscription, "get_channel_limit", AsyncMock(return_value=10))
     monkeypatch.setattr(subscription, "get_effective_channel_count", AsyncMock(return_value=0))
 
     async def scenario(pool, op_id):
-        assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
-        await pool.execute(
-            "UPDATE removed_channels SET removed_at=now()-interval '1 day' WHERE owner_id=$1 AND channel_id=$2",
-            OWNER, CHANNEL)
-        await pool.execute(
-            """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, title, type)
-               SELECT $1, n, 111, 'owner', 'Другой ресурс', 'channel' FROM generate_series(1, 501) n""",
-            OWNER)
         app = web.Application()
         mini_app_channels.setup_routes(app, pool)
+        mini_app_operations.setup_routes(app, pool)
         owner = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
         other = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
         async with TestClient(TestServer(app)) as client:
+            report_path = f"/api/miniapp/operations/{op_id}/cleanup"
+            action = {"action": "disable", "targets": [CHANNEL_TARGET]}
+            preview = await client.post(report_path, json={**action, "preview": True}, headers=owner)
+            assert preview.status == 200, await preview.text()
+            completed = await client.post(report_path, json={**action, "token": (await preview.json())["token"]},
+                                          headers=owner)
+            assert completed.status == 200, await completed.text()
+            await pool.execute(
+                """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, title, type, removed_at)
+                   SELECT $1, n, 111, 'owner', 'Другой ресурс', 'channel', now()+interval '1 second'
+                     FROM generate_series(1, 501) n""", OWNER)
             removed = await client.get("/api/miniapp/channels/removed", headers=owner)
             assert all(row["channel_id_text"] != str(CHANNEL) for row in (await removed.json())["channels"])
             listing = "/api/miniapp/channels/removed"
@@ -275,6 +279,11 @@ def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
             assert (await (await client.get(exact, headers=owner)).json())["channels"] == []
             assert (await client.post(f"/api/miniapp/channel/{2**63}/restore", headers=owner)).status == 400
             assert (await client.post(path, headers=owner)).status == 404
+            original = await client.get(report_path, headers=owner)
+            report = await original.json()
+            assert [(entry["action"], entry["target"]) for entry in report["history"]] == [
+                ("restore", str(CHANNEL)), ("disable", f"channel:{CHANNEL}")]
+            assert (await client.get(report_path, headers=other)).status == 404
 
     asyncio.run(_run(scenario))
 

@@ -21,7 +21,8 @@ try {
       if (!options) return {findings:[item, skipped, {kind:'channel', id:'9007199254740995',
         title:'Отключённый канал', status:'restricted', active:false, can_disable:false, can_restore:true,
         disable_reason:'Ресурс уже отключён в Infragram'}], legacy:true, max_targets:2,
-        history:[{action:'detach', target:'bot:9007199254740993 project:7'}]};
+        history:[{action:'restore', target:'9007199254740996'},
+          {action:'detach', target:'bot:9007199254740993 project:7'}]};
       const body = JSON.parse(options.body);
       window.cleanupCalls.push({path, body});
       if (body.preview) return {items:[{...item, edge_ids:[1,2], outcome:'ready'}, skipped], token:'подтверждение'};
@@ -64,6 +65,7 @@ try {
   assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 0);
   await page.getByText('История изменений', {exact:true}).click();
   await page.getByText('Убрать из проекта · bot:9007199254740993 project:7').waitFor();
+  await page.getByText('Восстановлен в Infragram · 9007199254740996').waitFor();
   await page.locator('#opCleanupStatus').selectOption('hidden');
   await page.getByRole('button', {name:'Выбрать доступные'}).click();
   await page.locator('#opCleanupStatus').selectOption('check_failed');

@@ -4165,6 +4165,7 @@ async def record_manual_action(
     result: str = "success",
     error_msg: str | None = None,
     require_audit: bool = False,
+    operation_id: int | None = None,
 ) -> None:
     """Записать в журнал действие, сделанное человеком руками.
 
@@ -4186,9 +4187,9 @@ async def record_manual_action(
     try:
         await pool.execute(
             """INSERT INTO operation_audit(
-                   owner_id, action, target, result, error_msg
-               ) VALUES ($1,$2,$3,$4,$5)""",
-            int(owner_id), action, target, result, error_msg,
+                   owner_id, action, target, result, error_msg, operation_id
+               ) VALUES ($1,$2,$3,$4,$5,$6)""",
+            int(owner_id), action, target, result, error_msg, operation_id,
         )
     except Exception:
         if require_audit:
@@ -4711,6 +4712,7 @@ async def remove_managed_channel(
 
 async def remove_managed_channel_on_connection(
     conn, owner_id: int, channel_id: int, *, reason: str, detail: str,
+    cleanup_operation_id: int | None = None,
 ) -> bool:
     """Удаление внутри транзакции, удерживающей блокировку каталога владельца."""
     row = await conn.fetchrow(
@@ -4730,7 +4732,8 @@ async def remove_managed_channel_on_connection(
         """INSERT INTO removed_channels
                (owner_id, channel_id, reason, detail, acc_id, title,
                 username, type, access_hash, catalog_metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 0), $10::jsonb)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 0),
+                   $10::jsonb || jsonb_strip_nulls(jsonb_build_object('cleanup_operation_id', $11::bigint)))
            ON CONFLICT (owner_id, channel_id) DO UPDATE
            SET reason=EXCLUDED.reason, detail=EXCLUDED.detail,
                acc_id=EXCLUDED.acc_id, title=EXCLUDED.title,
@@ -4739,7 +4742,7 @@ async def remove_managed_channel_on_connection(
                removed_at=now()""",
         owner_id, channel_id, reason, (detail or "")[:300],
         row["acc_id"], row["title"], row["username"], row["type"],
-        row["access_hash"], row["catalog_metadata"],
+        row["access_hash"], row["catalog_metadata"], cleanup_operation_id,
     )
     await conn.execute(
         "UPDATE va_channel_admin SET enabled=FALSE "
@@ -4808,7 +4811,9 @@ async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id:
             row = await conn.fetchrow(
                 """DELETE FROM removed_channels
                     WHERE owner_id=$1 AND channel_id=$2 AND acc_id IS NOT NULL
-                RETURNING acc_id, title, username, type, access_hash, catalog_metadata""",
+                RETURNING acc_id, title, username, type, access_hash, catalog_metadata,
+                          reason, detail, removed_at,
+                          catalog_metadata->>'cleanup_operation_id' AS cleanup_operation_id""",
                 owner_id, channel_id,
             )
             if not row:
@@ -4834,8 +4839,28 @@ async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id:
                 owner_id, row["acc_id"], channel_id, row["title"],
                 row["username"], int(row["access_hash"] or 0), row["type"], row["catalog_metadata"],
             )
+            operation_id = None
+            if row["reason"] == REMOVED_BY_OWNER and row["detail"]:
+                # Старый отчёт связываем только с аудитом той же транзакции отключения.
+                operation_id = await conn.fetchval(
+                    """SELECT a.operation_id
+                         FROM operation_audit a JOIN operation_queue q
+                           ON q.owner_id=a.owner_id AND q.id=a.operation_id
+                        WHERE a.owner_id=$1 AND a.action='restriction_cleanup_disable'
+                          AND a.result='success' AND a.target IN ($2,$3)
+                          AND q.op_type='check_owned_restrictions'
+                          AND (
+                            a.operation_id::text=$4::text OR
+                            ($4::text IS NULL AND a.occurred_at=$5
+                             AND $6::text='Отключён по проверке ограничений №' || a.operation_id)
+                          )
+                        ORDER BY a.id DESC LIMIT 1""",
+                    owner_id, f"channel:{channel_id}", f"group:{channel_id}",
+                    row["cleanup_operation_id"], row["removed_at"], row["detail"],
+                )
             await record_manual_action(
                 conn, owner_id, "channel_restore", target=str(channel_id), require_audit=True,
+                operation_id=operation_id,
             )
     return True
 

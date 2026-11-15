@@ -206,9 +206,11 @@ class _ChanConn:
             return {**row, "catalog_metadata": None} if row else None
         if q.startswith("DELETE FROM removed_channels"):
             if a[1] in self.removed:
-                del self.removed[a[1]]
+                reason = self.removed.pop(a[1])
                 return {"acc_id": 5, "title": "T", "username": "u",
-                        "type": "channel", "access_hash": 9, "catalog_metadata": None}
+                        "type": "channel", "access_hash": 9, "catalog_metadata": None,
+                        "reason": reason, "detail": "", "removed_at": None,
+                        "cleanup_operation_id": None}
         return None
 
     async def execute(self, q, *a):

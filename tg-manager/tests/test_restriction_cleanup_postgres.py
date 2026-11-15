@@ -60,7 +60,8 @@ async def _run(scenario):
             await _clear(pool)
 
 
-def test_owner_exact_ids_preview_and_reversible_cleanup(monkeypatch):
+@pytest.mark.parametrize("legacy_removal", [False, True])
+def test_owner_exact_ids_preview_and_reversible_cleanup(monkeypatch, legacy_removal):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-restriction-cleanup")
 
     async def scenario(pool, op_id):
@@ -96,12 +97,21 @@ def test_owner_exact_ids_preview_and_reversible_cleanup(monkeypatch):
         assert not await pool.fetchval(
             "SELECT enabled FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2",
             OWNER, CHANNEL)
+        if legacy_removal:
+            await pool.execute(
+                """UPDATE removed_channels SET catalog_metadata=catalog_metadata-'cleanup_operation_id'
+                    WHERE owner_id=$1 AND channel_id=$2""", OWNER, CHANNEL)
         assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
         restored = await cleanup.findings(pool, OWNER, op_id, include_history=True)
         assert next(item for item in restored["findings"] if item["id"] == str(CHANNEL))["can_disable"]
-        assert await pool.fetchval(
-            "SELECT count(*) FROM operation_audit WHERE owner_id=$1 AND operation_id=$2",
-            OWNER, op_id) == 2
+        assert [(entry["action"], entry["target"]) for entry in restored["history"]] == [
+            ("restore", str(CHANNEL)), ("disable", f"channel:{CHANNEL}"), ("disable", f"bot:{BOT}")]
+        assert restored["history"][0]["occurred_at"]
+        # Даже прежнее описание не связывает новое ручное отключение со старым отчётом.
+        await db.remove_managed_channel(pool, OWNER, CHANNEL, detail=f"Отключён по проверке ограничений №{op_id}")
+        assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
+        reread = await cleanup.findings(pool, OWNER, op_id, include_history=True)
+        assert reread["history"] == restored["history"]
 
     asyncio.run(_run(scenario))
 

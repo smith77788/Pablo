@@ -113,7 +113,8 @@ async function openOperationCleanup(opId) {
         for (const entry of history) {
           const line = document.createElement('li');
           const time = entry.occurred_at ? new Date(entry.occurred_at).toLocaleString('ru-RU') : '';
-          line.textContent = [actionText[entry.action], entry.target, time].filter(Boolean).join(' · ');
+          const label = entry.action === 'restore' ? 'Восстановлен в Infragram' : actionText[entry.action];
+          line.textContent = [label, entry.target, time].filter(Boolean).join(' · ');
           list.append(line);
         }
         block.append(list);

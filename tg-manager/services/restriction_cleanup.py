@@ -207,12 +207,13 @@ async def findings(pool, owner_id, op_id, *, include_history=False):
             history = await conn.fetch(
                 """SELECT action, target, occurred_at FROM operation_audit
                     WHERE owner_id=$1 AND operation_id=$2 AND result='success'
-                      AND action IN ('restriction_cleanup_detach','restriction_cleanup_disable')
+                      AND action IN ('restriction_cleanup_detach','restriction_cleanup_disable','channel_restore')
                     ORDER BY occurred_at DESC NULLS LAST, id DESC LIMIT 51""",
                 owner_id, op_id,
             )
             response["history"] = [
-                {"action": r["action"].removeprefix("restriction_cleanup_"), "target": r["target"],
+                {"action": "restore" if r["action"] == "channel_restore" else r["action"].removeprefix("restriction_cleanup_"),
+                 "target": r["target"],
                  "occurred_at": r["occurred_at"].isoformat() if r["occurred_at"] else None}
                 for r in history[:50]
             ]
@@ -453,6 +454,6 @@ async def _disable(conn, owner_id, op_id, item):
             raise CleanupError(_STALE, 409)
     elif not await db.remove_managed_channel_on_connection(
         conn, owner_id, item_id, reason=db.REMOVED_BY_OWNER,
-        detail=f"Отключён по проверке ограничений №{op_id}",
+        detail=f"Отключён по проверке ограничений №{op_id}", cleanup_operation_id=op_id,
     ):
         raise CleanupError(_STALE, 409)
