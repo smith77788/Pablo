@@ -682,17 +682,14 @@ def setup_routes(app: web.Application, pool) -> None:
         ch_id = tg_id(request.match_info.get("ch_id"))
         if ch_id is None:
             return _err("Неверный идентификатор канала", 400)
-        try:
-            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
-            from database.db import record_manual_action, restore_removed_channel
+        from database.db import RestoreChannelLimitError, restore_removed_channel
 
-            _lim = await get_channel_limit(pool, uid)
-            if await get_effective_channel_count(pool, uid) >= _lim:
-                return _err(f"Достигнут лимит каналов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
-            if not await restore_removed_channel(pool, uid, ch_id):
+        try:
+            if not await restore_removed_channel(pool, uid, ch_id, enforce_limit=True):
                 return _err("Канал не найден среди удалённых", 404)
-            await record_manual_action(pool, uid, "channel_restore", target=str(ch_id))
             return _json_resp({"ok": True})
+        except RestoreChannelLimitError as exc:
+            return _err(f"Достигнут лимит каналов ({exc.limit}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
         except Exception:
             log.exception("channel_restore uid=%d ch=%d", uid, ch_id)
             return _err(_INTERNAL_ERROR, 500)

@@ -12732,8 +12732,11 @@ async function openRemovedChannels(channelId = '') {
         ? '<span class="badge b-rd">⛔ Недоступен в Telegram</span>'
         : '<span class="badge b-gy">🗑 Удалён вами</span>';
       const hint = c.reason === 'gone' && c.detail ? `<div class="li-sub">${esc(c.detail)}</div>` : '';
-      return `<div class="li" style="cursor:default"><div class="li-body"><div class="li-name">${esc(name)}</div>${why}${hint}</div>
-        <button class="btn btn-s" style="padding:6px 10px;min-width:0;font-size:12px" data-restore-channel="${esc(id)}" data-restore-scope="${esc(channelId)}" onclick="restoreRemovedChannel(this.dataset.restoreChannel, this)">↩️ Вернуть</button></div>`;
+      const unavailable = c.can_restore === false
+        ? '<div class="li-sub">Нет сохранённой привязки к аккаунту</div>' : '';
+      const restore = unavailable ? '' :
+        `<button class="btn btn-s" style="padding:6px 10px;min-width:0;font-size:12px" data-restore-channel="${esc(id)}" data-restore-scope="${esc(channelId)}" onclick="restoreRemovedChannel(this.dataset.restoreChannel, this)">↩️ Вернуть</button>`;
+      return `<div class="li" style="cursor:default"><div class="li-body"><div class="li-name">${esc(name)}</div>${why}${hint}${unavailable}</div>${restore}</div>`;
     }).join('');
   } catch(e) {
     if (box.removalRequest === request) box.innerHTML = errHtml(errRu(e), retryCall('openRemovedChannels', channelId));

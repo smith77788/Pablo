@@ -391,24 +391,39 @@ def test_native_scan_uses_the_same_catalog_guard(monkeypatch):
 
     async def scenario(pool, op_id):
         await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        await pool.execute(
+            """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, type)
+               VALUES ($1,456,111,'gone','megagroup')""", OWNER)
         monkeypatch.setattr(db, "get_tg_account", AsyncMock(return_value={"session_str": "synthetic"}))
         monkeypatch.setattr(accounts, "scan_owned_assets", AsyncMock(return_value={
             "channels": [{"id": CHANNEL, "title": "Отключённый канал"}],
             "groups": [{"id": 456, "title": "Группа", "type": "megagroup"}],
         }))
         monkeypatch.setattr(subscription, "get_channel_limit", AsyncMock(return_value=100))
-        monkeypatch.setattr(subscription, "get_effective_channel_count", AsyncMock(return_value=0))
+        effective_count = AsyncMock(side_effect=[100, 0])
+        monkeypatch.setattr(subscription, "get_effective_channel_count", effective_count)
         keyboard = MagicMock()
         monkeypatch.setattr(accounts, "InlineKeyboardBuilder", lambda: keyboard)
         callback = SimpleNamespace(
             from_user=SimpleNamespace(id=OWNER), answer=AsyncMock(),
             message=SimpleNamespace(edit_text=AsyncMock()),
         )
-        await accounts.cb_scan_connect(
-            callback, SimpleNamespace(acc_id=111, action="scan_connect_all"), pool)
+        action = SimpleNamespace(acc_id=111, action="scan_connect_all")
+        await accounts.cb_scan_connect(callback, action, pool)
+        assert "Лимит каналов достигнут" in callback.message.edit_text.await_args.args[0]
+        assert await pool.fetchval(
+            "SELECT reason FROM removed_channels WHERE owner_id=$1 AND channel_id=456", OWNER) == "gone"
+        assert not await pool.fetchval("SELECT 1 FROM managed_channels WHERE owner_id=$1", OWNER)
+
+        await accounts.cb_scan_connect(callback, action, pool)
         assert "Подключено: 1" in callback.message.edit_text.await_args.args[0]
         row = await pool.fetchrow("SELECT channel_id, type FROM managed_channels WHERE owner_id=$1", OWNER)
         assert (row["channel_id"], row["type"]) == (456, "megagroup")
-        db.get_tg_account.assert_awaited_once_with(pool, 111, OWNER)
+        assert not await pool.fetchval(
+            "SELECT 1 FROM removed_channels WHERE owner_id=$1 AND channel_id=456", OWNER)
+        assert await pool.fetchval(
+            "SELECT reason FROM removed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL) == "owner"
+        assert db.get_tg_account.await_count == 2
+        db.get_tg_account.assert_awaited_with(pool, 111, OWNER)
 
     asyncio.run(_run(scenario))

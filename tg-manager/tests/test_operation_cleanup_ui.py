@@ -55,6 +55,12 @@ const api = path => new Promise(resolve => pending.push({path, resolve}));
   pending[0].resolve({channels:[]});
   await first;
   assert.match(box.innerHTML, /Цель/);
+  const unavailable = openRemovedChannels('23');
+  pending[2].resolve({channels:[{channel_id_text:'23', can_restore:false, reason:'gone'}]});
+  await unavailable;
+  assert.match(box.innerHTML, /Недоступен в Telegram/);
+  assert.match(box.innerHTML, /Нет сохранённой привязки к аккаунту/);
+  assert.doesNotMatch(box.innerHTML, /data-restore-channel=/);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     subprocess.run([node, "-"], input=js_function("openRemovedChannels") + "\n" + script,

@@ -175,7 +175,7 @@ async def _disabled_channels(conn, owner_id, entries, items):
     if not ids:
         return {}
     rows = await conn.fetch(
-        """SELECT channel_id, title, username, type FROM removed_channels
+        """SELECT channel_id, title, username, type, acc_id IS NOT NULL AS can_restore FROM removed_channels
             WHERE owner_id=$1 AND reason=$2 AND channel_id=ANY($3::bigint[])""",
         owner_id, db.REMOVED_BY_OWNER, ids,
     )
@@ -190,7 +190,7 @@ async def _disabled_channels(conn, owner_id, entries, items):
                 "title": str(row["title"] or row["username"] or entry.get("title") or row["channel_id"]),
                 "status": entry["status"], "reason": str(entry.get("reason") or ""),
                 "projects": items.get(key, {}).get("projects", []), "active": False, "can_disable": False,
-                "can_restore": True,
+                "can_restore": row["can_restore"],
                 "disable_reason": "Ресурс уже отключён в Infragram",
             }
     return disabled

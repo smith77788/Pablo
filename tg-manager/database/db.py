@@ -4157,13 +4157,14 @@ async def remember_account_twofa(pool: asyncpg.Pool, owner_id: int,
 
 
 async def record_manual_action(
-    pool: asyncpg.Pool,
+    pool: asyncpg.Pool | asyncpg.Connection,
     owner_id: int,
     action: str,
     *,
     target: str | None = None,
     result: str = "success",
     error_msg: str | None = None,
+    require_audit: bool = False,
 ) -> None:
     """Записать в журнал действие, сделанное человеком руками.
 
@@ -4179,8 +4180,8 @@ async def record_manual_action(
     добавив туда записи интерфейса, мы разбавили бы долю неудач и аккаунт
     выглядел бы безопаснее, чем он есть. Идентификатор объекта кладём в target.
 
-    Никогда не бросает: журнал не должен ронять действие, которое он
-    описывает.
+    По умолчанию сбой журнала не прерывает действие. В общей транзакции
+    require_audit позволяет откатить действие вместе с записью журнала.
     """
     try:
         await pool.execute(
@@ -4190,6 +4191,8 @@ async def record_manual_action(
             int(owner_id), action, target, result, error_msg,
         )
     except Exception:
+        if require_audit:
+            raise
         log.debug("record_manual_action failed: %s owner=%s", action, owner_id,
                   exc_info=True)
 
@@ -4574,7 +4577,7 @@ async def upsert_managed_channels(
             continue
     async with pool.acquire() as conn, conn.transaction():
         await lock_managed_channel_catalog(conn, owner_id)
-        channels = await skip_removed_channels(conn, owner_id, channels, strict=True)
+        channels = await skip_removed_channels(conn, owner_id, channels, strict=True, restore_found=True)
         rows = _managed_channel_rows(owner_id, acc_id, channels)
         await conn.execute(
             "DELETE FROM managed_channels "
@@ -4608,7 +4611,7 @@ async def add_managed_channels(
         if reconnect:
             await _forget_removed_channels(conn, owner_id, [int(ch["id"]) for ch in channels])
         else:
-            channels = await skip_removed_channels(conn, owner_id, channels, strict=True)
+            channels = await skip_removed_channels(conn, owner_id, channels, strict=True, restore_found=True)
         if channels:
             await conn.executemany(
                 _MANAGED_CHANNEL_UPSERT_SQL,
@@ -4635,12 +4638,12 @@ REMOVED_GONE = "gone"
 
 
 async def skip_removed_channels(
-    conn, owner_id: int, channels: list[dict], *, strict: bool = False,
+    conn, owner_id: int, channels: list[dict], *, strict: bool = False, restore_found: bool = False,
 ) -> list[dict]:
     """Убрать из импорта каналы, которые владелец удалил.
 
-    Заодно снимает отметку «пропал в Telegram» с тех, что снова нашлись в
-    диалогах: раз аккаунт их видит, канал жив и доступен.
+    При записи каталога restore_found снимает отметку «пропал в Telegram»
+    с каналов, которые снова видны аккаунту. Предпросмотр только читает.
 
     Запись каталога требует успешной проверки. Предварительный просмотр
     сохраняет список при временной ошибке, повторная проверка идёт при записи.
@@ -4654,13 +4657,14 @@ async def skip_removed_channels(
     if not ids:
         return channels
     try:
+        if restore_found:
+            await conn.execute(
+                """DELETE FROM removed_channels WHERE owner_id=$1 AND reason='gone'
+                      AND channel_id = ANY($2::bigint[])""",
+                owner_id, ids,
+            )
         rows = await conn.fetch(
-            """WITH back AS (
-                   DELETE FROM removed_channels
-                    WHERE owner_id=$1 AND reason='gone'
-                      AND channel_id = ANY($2::bigint[])
-               )
-               SELECT channel_id FROM removed_channels
+            """SELECT channel_id FROM removed_channels
                 WHERE owner_id=$1 AND reason='owner'
                   AND channel_id = ANY($2::bigint[])""",
             owner_id, ids,
@@ -4749,7 +4753,8 @@ async def list_removed_channels(pool: asyncpg.Pool, owner_id: int, limit: int = 
                                 *, channel_id: int | None = None) -> list[dict]:
     """Удалённые владельцем и пропавшие в Telegram каналы — для экрана."""
     rows = await pool.fetch(
-        """SELECT channel_id, reason, detail, title, username, type, removed_at
+        """SELECT channel_id, reason, detail, title, username, type, removed_at,
+                  acc_id IS NOT NULL AS can_restore
              FROM removed_channels
             WHERE owner_id=$1 AND ($3::bigint IS NULL OR channel_id=$3)
             ORDER BY removed_at DESC, channel_id
@@ -4786,7 +4791,16 @@ async def _forget_removed_channels(conn, owner_id: int, ids: list[int]) -> None:
     )
 
 
-async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id: int) -> bool:
+class RestoreChannelLimitError(ValueError):
+    """В каталоге достигнут тарифный лимит каналов."""
+
+    def __init__(self, limit: int):
+        super().__init__(limit)
+        self.limit = limit
+
+
+async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id: int,
+                                  *, enforce_limit: bool = False) -> bool:
     """Вернуть удалённый канал в систему той же строкой, что была до удаления."""
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -4799,6 +4813,12 @@ async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id:
             )
             if not row:
                 return False
+            if enforce_limit:
+                from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+
+                limit = await get_channel_limit(conn, owner_id)
+                if await get_effective_channel_count(conn, owner_id) >= limit:
+                    raise RestoreChannelLimitError(limit)
             await conn.execute(
                 """INSERT INTO managed_channels
                        (owner_id, acc_id, channel_id, title, username, access_hash, type,
@@ -4813,6 +4833,9 @@ async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id:
                    ON CONFLICT (owner_id, channel_id) DO NOTHING""",
                 owner_id, row["acc_id"], channel_id, row["title"],
                 row["username"], int(row["access_hash"] or 0), row["type"], row["catalog_metadata"],
+            )
+            await record_manual_action(
+                conn, owner_id, "channel_restore", target=str(channel_id), require_audit=True,
             )
     return True
 

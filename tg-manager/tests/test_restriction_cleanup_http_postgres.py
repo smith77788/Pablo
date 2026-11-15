@@ -277,3 +277,82 @@ def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
             assert (await client.post(path, headers=owner)).status == 404
 
     asyncio.run(_run(scenario))
+
+
+def test_restore_serializes_last_slot_and_rolls_back_without_audit(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from bot.utils import subscription
+    from database import db
+    from services import mini_app_channels
+
+    secret = "123456:synthetic-restore-concurrency"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setattr(subscription, "get_channel_limit", AsyncMock(return_value=1))
+    monkeypatch.setattr(subscription, "get_plan", AsyncMock(return_value="free"))
+    other_id, no_binding = CHANNEL + 1, CHANNEL + 2
+
+    async def scenario(pool, op_id):
+        assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        await pool.execute(
+            """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, title, type)
+               VALUES ($1,$2,111,'owner','Второй','channel'),
+                      ($1,$3,NULL,'owner','Старая запись','channel')""",
+            OWNER, other_id, no_binding,
+        )
+        await pool.execute(
+            """UPDATE operation_queue SET result=$2::jsonb WHERE id=$1""",
+            op_id, json.dumps({"findings_version": 2, "findings": [
+                {"kind": "channel", "id": str(no_binding), "status": "unreachable"},
+            ]}),
+        )
+        report = await restriction_cleanup.findings(pool, OWNER, op_id)
+        assert not report["findings"][0]["can_restore"]
+        assert report["findings"][0]["status"] == "unreachable"
+
+        app = web.Application()
+        mini_app_channels.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        path = "/api/miniapp/channel/{}/restore"
+        lock_catalog = db.lock_managed_channel_catalog
+        both_ready = asyncio.Event()
+        requests = 0
+
+        async def meet_before_lock(conn, owner):
+            nonlocal requests
+            requests += 1
+            if requests == 2:
+                both_ready.set()
+            await asyncio.wait_for(both_ready.wait(), timeout=3)
+            await lock_catalog(conn, owner)
+
+        async with TestClient(TestServer(app)) as client:
+            with monkeypatch.context() as concurrent:
+                concurrent.setattr(db, "lock_managed_channel_catalog", meet_before_lock)
+                responses = await asyncio.gather(*(
+                    client.post(path.format(channel), headers=headers) for channel in (CHANNEL, other_id)
+                ))
+            assert sorted(response.status for response in responses) == [200, 403]
+            winner, loser = (CHANNEL, other_id) if responses[0].status == 200 else (other_id, CHANNEL)
+            assert await pool.fetchval("SELECT channel_id FROM managed_channels WHERE owner_id=$1", OWNER) == winner
+            audit = await pool.fetch(
+                "SELECT target FROM operation_audit WHERE owner_id=$1 AND action='channel_restore'", OWNER)
+            assert [row["target"] for row in audit] == [str(winner)]
+            assert (await client.post(path.format(winner), headers=headers)).status == 404
+            assert (await client.post(path.format(no_binding), headers=headers)).status == 404
+
+            await db.remove_managed_channel(pool, OWNER, winner)
+            await pool.execute(f"""ALTER TABLE operation_audit ADD CONSTRAINT synthetic_restore_failure
+                CHECK (owner_id <> {OWNER} OR action <> 'channel_restore' OR target <> '{loser}') NOT VALID""")
+            try:
+                assert (await client.post(path.format(loser), headers=headers)).status == 500
+                assert not await pool.fetchval("SELECT 1 FROM managed_channels WHERE owner_id=$1", OWNER)
+                assert await pool.fetchval(
+                    "SELECT 1 FROM removed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, loser)
+            finally:
+                await pool.execute("ALTER TABLE operation_audit DROP CONSTRAINT synthetic_restore_failure")
+            assert (await client.post(path.format(loser), headers=headers)).status == 200
+            assert await pool.fetchval(
+                "SELECT count(*) FROM operation_audit WHERE owner_id=$1 AND action='channel_restore'", OWNER) == 2
+
+    asyncio.run(_run(scenario))
