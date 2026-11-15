@@ -6137,8 +6137,7 @@ async def edit_channel_title(
         # Свежий клиент не знает канал по «голому» id → get_entity(id) падал и
         # смена названия давала 0. Резолвим надёжно: @username / InputPeerChannel
         # по access_hash / iter_dialogs (тот же путь, что у пина и постинга).
-        ref = f"@{username.lstrip('@')}" if username else channel_id
-        entity = await _resolve_channel_peer(client, ref, access_hash)
+        entity = await _resolve_managed_channel(client, channel_id, access_hash, username)
         await asyncio.wait_for(client(EditTitleRequest(channel=entity, title=title)), timeout=_OP_TIMEOUT)
         return True
     except Exception as e:
@@ -6164,8 +6163,7 @@ async def edit_channel_about(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        ref = f"@{username.lstrip('@')}" if username else channel_id
-        entity = await _resolve_channel_peer(client, ref, access_hash)
+        entity = await _resolve_managed_channel(client, channel_id, access_hash, username)
         await asyncio.wait_for(client(EditChatAboutRequest(peer=entity, about=about)), timeout=_OP_TIMEOUT)
         return True
     except Exception as e:
@@ -6545,8 +6543,14 @@ def channel_action_error_ru(exc: BaseException) -> str:
 
 
 async def _resolve_managed_channel(client, channel_id: int, access_hash: int, username: str):
-    ref = f"@{username.lstrip('@')}" if username else int(channel_id)
-    return await _resolve_channel_peer(client, ref, int(access_hash or 0))
+    target_id = _normalize_channel_id(channel_id)
+    ref = f"@{username.lstrip('@')}" if username and not access_hash else target_id
+    peer = await _resolve_channel_peer(client, ref, int(access_hash or 0))
+    resolved_id = (getattr(peer, "channel_id", None) or getattr(peer, "chat_id", None)
+                   or getattr(peer, "id", None))
+    if resolved_id != target_id or type(peer).__name__ in ("User", "UserEmpty"):
+        raise ValueError("Telegram вернул другой ID канала")
+    return peer
 
 
 async def destroy_channel(

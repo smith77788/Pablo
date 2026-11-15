@@ -269,6 +269,62 @@ def test_running_publication_matches_the_id_kind_used_by_its_executor(op_type, s
     asyncio.run(_run(scenario))
 
 
+def test_cleanup_confirmation_sees_channel_job_claimed_while_waiting_for_queue():
+    async def scenario(pool, check_id):
+        params = {"op": "chan_title", "value": "Синтетическое название",
+                  "channel_acc_pairs": [{"channel_id": str(CHANNEL), "acc_id": "992660"}]}
+        edit_id = await pool.fetchval(
+            """INSERT INTO operation_queue(owner_id,op_type,status,params)
+               VALUES($1,'bulk_chan_exec','pending',$2::jsonb) RETURNING id""",
+            OWNER, json.dumps(params))
+        targets = [CHANNEL_TARGET]
+        preview = await cleanup.plan(pool, OWNER, check_id, targets, "disable")
+        assert preview["items"][0]["outcome"] == "ready"
+
+        def verify(current):
+            if current != preview:
+                raise cleanup.CleanupError("Предпросмотр изменился", 409)
+
+        async with pool.acquire() as worker:
+            async with worker.transaction():
+                await worker.execute("UPDATE operation_queue SET status='running' WHERE id=$1", edit_id)
+                confirm = asyncio.create_task(cleanup.apply(
+                    pool, OWNER, check_id, targets, "disable", verify=verify,
+                    confirmation_id="synthetic-claim-before-snapshot"))
+                try:
+                    async with asyncio.timeout(2):
+                        while not await worker.fetchval(
+                            """SELECT EXISTS (SELECT 1 FROM pg_locks
+                                  WHERE relation='operation_queue'::regclass
+                                    AND mode='ShareRowExclusiveLock' AND NOT granted)"""
+                        ):
+                            await asyncio.sleep(0.01)
+                except BaseException:
+                    confirm.cancel()
+                    await asyncio.gather(confirm, return_exceptions=True)
+                    raise
+        with pytest.raises(cleanup.CleanupError) as stale:
+            await confirm
+        assert stale.value.status == 409
+        current = await cleanup.plan(pool, OWNER, check_id, targets, "disable")
+        assert current["items"][0]["outcome"] == "skipped"
+        assert "команды управления" in current["items"][0]["reason"]
+        assert not await pool.fetchval("SELECT 1 FROM operation_audit WHERE operation_id=$1", check_id)
+
+        for changes in ({"acc_id": 992661}, {"channel_id": str(CHANNEL + 1)}):
+            changed = {**params, "channel_acc_pairs": [{**params["channel_acc_pairs"][0], **changes}]}
+            await pool.execute("UPDATE operation_queue SET params=$2::jsonb WHERE id=$1",
+                               edit_id, json.dumps(changed))
+            assert (await cleanup.plan(pool, OWNER, check_id, targets, "disable")) == preview
+
+        await pool.execute("UPDATE operation_queue SET status='done' WHERE id=$1", edit_id)
+        result = await cleanup.apply(pool, OWNER, check_id, targets, "disable", verify=verify,
+                                     confirmation_id="synthetic-claim-before-snapshot")
+        assert result["count"] == 1
+
+    asyncio.run(_run(scenario))
+
+
 def test_295_findings_and_parallel_confirmation_preserve_other_projects():
     async def scenario(pool, op_id):
         await pool.execute(

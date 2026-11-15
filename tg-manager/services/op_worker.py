@@ -15395,68 +15395,88 @@ async def _exec_bulk_chan_exec(
                 "reason": "Состав массового переименования не был подтверждён",
             }
 
-    # Collect unique acc_ids and fetch sessions from DB (never pass session_str in params)
-    acc_ids = list({int(p["acc_id"]) for p in channel_acc_pairs})
+    try:
+        if any(type(pair[key]) not in (int, str) for pair in channel_acc_pairs
+               for key in ("channel_id", "acc_id")):
+            raise ValueError
+        pairs = [(int(pair["channel_id"]), int(pair["acc_id"])) for pair in channel_acc_pairs]
+        if any(not channel_id or not -(2**63) <= channel_id < 2**63 or not 0 < acc_id < 2**31
+               for channel_id, acc_id in pairs):
+            raise ValueError
+    except (TypeError, KeyError, ValueError, OverflowError):
+        return {"status": "failed", "reason": "Некорректная привязка канала к аккаунту"}
+
+    already = await completed_targets(pool, op_id)
+    prior_ok = len({str(ch_id) for ch_id, _ in pairs} & already)
+    selected_ids = sorted({ch_id for ch_id, _ in pairs if str(ch_id) not in already})
+    catalog = await pool.fetch(
+        """SELECT channel_id, acc_id, title, username, access_hash, type
+             FROM managed_channels WHERE owner_id=$1 AND channel_id=ANY($2::bigint[])""",
+        owner_id, selected_ids,
+    )
+    current = {(row["channel_id"], row["acc_id"]): row for row in catalog}
+    acc_ids = sorted({acc_id for ch_id, acc_id in pairs if (ch_id, acc_id) in current})
     rows = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=[int(_i) for _i in acc_ids], min_trust_score=0.0)
-    if not rows:
-        return {"status": "failed", "reason": "Нет активных аккаунтов"}
-
+        pool, owner_id, include_ids=acc_ids, min_trust_score=0.0) if acc_ids else []
     acc_map = {int(r["id"]): dict(r) for r in rows}
-
-    # Отказной захват вместо безусловной пометки. Пары «канал↔аккаунт» с
-    # незахваченным аккаунтом выбрасываем: работать ими нельзя, а молча оставить
-    # их в total — соврать в прогрессе и в итоге.
-    claimed_ids = await try_claim_accounts([int(a) for a in acc_map])
-    if not claimed_ids:
+    claimed_ids = await try_claim_accounts(list(acc_map)) if acc_map else []
+    if acc_map and not claimed_ids:
         return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
-    _claimed_set = set(claimed_ids)
-    _pairs_before = len(channel_acc_pairs)
-    channel_acc_pairs = [p for p in channel_acc_pairs
-                         if int(p["acc_id"]) in _claimed_set]
-    _busy = _pairs_before - len(channel_acc_pairs)
-
-    total = len(channel_acc_pairs)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
-
+    claimed = set(claimed_ids)
+    total = len(pairs)
+    busy = 0
     ok_list: list[str] = []
     err_list: list[str] = []
-    # Дверь идемпотентности: после сбоя/деплоя уже обработанные каналы не
-    # трогаем второй раз (повторная смена юзернейма, повторное удаление).
-    already = await completed_targets(pool, op_id)
-    _step = 0
 
     try:
-        for idx, pair in enumerate(channel_acc_pairs):
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+        for idx, (ch_id, acc_id) in enumerate(pairs):
             if await _is_cancelled(pool, op_id):
                 return {
                     "status": "cancelled",
-                    "ok": len(ok_list),
+                    "ok": prior_ok + len(ok_list),
                     "fail": len(err_list),
-                    "summary": f"Отменено. Изменено: {len(ok_list)}",
+                    "summary": f"Отменено. Изменено: {prior_ok + len(ok_list)}",
                 }
 
-            ch_id = pair["channel_id"]
             if str(ch_id) in already:
                 await _safe_execute(
                     pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
-            acc_id = int(pair["acc_id"])
+            row = current.get((ch_id, acc_id))
+            acc = acc_map.get(acc_id)
+            reason = ""
+            if row is None:
+                reason = "Ресурс отключён, удалён или сменил привязку к аккаунту"
+            elif acc is None:
+                reason = "Привязанный аккаунт недоступен"
+            elif acc_id not in claimed:
+                busy += 1
+                reason = "Привязанный аккаунт занят другой операцией"
+            if reason:
+                err_list.append(f"❌ {ch_id}: {reason}")
+                await _journal_write(
+                    pool,
+                    """INSERT INTO operation_log(op_id, step_num, target, status, message)
+                       SELECT $1::int,$2::int,$3::text,'skipped',$4::text WHERE NOT EXISTS (
+                           SELECT 1 FROM operation_log
+                            WHERE op_id=$1 AND step_num=$2 AND target=$3
+                              AND status='skipped' AND message=$4)""",
+                    op_id, idx + 1, str(ch_id), reason,
+                    log_ctx=f"[bulk_chan_exec op={op_id}]", where="bulk_chan_exec",
+                )
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
+
             _ok_before = len(ok_list)
-            chan_title = _html.escape(str(pair.get("title") or ch_id))
+            chan_title = _html.escape(redact_secrets(str(row["title"] or ch_id)))
             # access_hash/username нужны, чтобы свежий клиент нашёл канал по id
             # (иначе смена названия/описания давала 0 — get_entity(id) падал).
-            _pair_hash = int(pair.get("access_hash") or 0)
-            _pair_uname = str(pair.get("username") or "")
-            acc = acc_map.get(acc_id)
-            if not acc:
-                err_list.append(f"❌ {chan_title}: аккаунт не найден")
-                await pool.execute(
-                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-                )
-                continue
+            _pair_hash = int(row["access_hash"] or 0)
+            _pair_uname = str(row["username"] or "")
 
             try:
                 if op == "chan_uname":
@@ -15499,7 +15519,7 @@ async def _exec_bulk_chan_exec(
                         except Exception as e:
                             log_exc_swallow(log, f"bulk_chan_exec: persist username failed for ch={ch_id}: {e}")
                     else:
-                        err_list.append(f"❌ {chan_title}: {_html.escape(last_err[:60])}")
+                        err_list.append(f"❌ {chan_title}: {_html.escape(redact_secrets(last_err)[:60])}")
 
                 elif op == "chan_about":
                     ok = await account_manager.edit_channel_about(
@@ -15517,12 +15537,12 @@ async def _exec_bulk_chan_exec(
                         access_hash=_pair_hash, username=_pair_uname,
                     )
                     if ok:
-                        ok_list.append(f"✅ {chan_title} → {_html.escape(value[:40])}")
+                        ok_list.append(f"✅ {chan_title} → {_html.escape(redact_secrets(value)[:40])}")
                         try:
                             await pool.execute(
                                 "INSERT INTO channel_identity_history(owner_id,channel_id,old_title,new_title,"
                                 "source,operation_id) VALUES($1,$2,$3,$4,'manual',$5)",
-                                owner_id, ch_id, str(pair.get("title") or ""), value, op_id,
+                                owner_id, ch_id, str(row["title"] or ""), value, op_id,
                             )
                             await pool.execute(
                                 "UPDATE managed_channels SET title=$1 WHERE owner_id=$2 AND channel_id=$3",
@@ -15536,7 +15556,7 @@ async def _exec_bulk_chan_exec(
                 elif op in ("chan_delete", "chan_clear", "chan_leave"):
                     ok, line = await _chan_destructive_step(
                         pool, owner_id, op, acc, int(ch_id), chan_title,
-                        _pair_hash, _pair_uname, str(pair.get("type") or ""),
+                        _pair_hash, _pair_uname, str(row["type"] or ""),
                         int(params.get("clear_limit") or 0), op_id=op_id)
                     (ok_list if ok else err_list).append(line)
 
@@ -15547,26 +15567,28 @@ async def _exec_bulk_chan_exec(
                 err_list.append(f"❌ {chan_title}: исключение")
 
             if len(ok_list) > _ok_before:
-                _step += 1
-                await _journal_done(pool, op_id, _step, str(ch_id))
+                if await _journal_done(pool, op_id, idx + 1, str(ch_id)):
+                    already.add(str(ch_id))
             await _safe_execute(
                     pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
             await asyncio.sleep(2)
     finally:
-        await release_accounts(claimed_ids)
+        if claimed_ids:
+            await release_accounts(claimed_ids)
 
+    successes = prior_ok + len(ok_list)
     op_label = _CHAN_EXEC_OPS.get(op, op)
     summary_lines = [
-        f"{op_label} — завершено: ✅ {len(ok_list)} ❌ {len(err_list)} из {total}"
-        + (f" · пропущено (аккаунт занят): {_busy}" if _busy else "")
+        f"{op_label} — завершено: ✅ {successes} ❌ {len(err_list)} из {total}"
+        + (f" · аккаунт занят: {busy}" if busy else "")
     ] + (ok_list + err_list)[:40]
     summary = "\n".join(summary_lines)
 
     return {
         "status": "done",
-        "ok": len(ok_list),
+        "ok": successes,
         "fail": len(err_list),
         "summary": summary[:500],
     }

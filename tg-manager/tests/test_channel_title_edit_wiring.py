@@ -15,7 +15,11 @@ from services import op_worker
 
 class _Pool:
     async def execute(self, q, *a): return "OK"
-    async def fetch(self, q, *a): return []
+    async def fetch(self, q, *a):
+        if "FROM managed_channels" in q:
+            return [{"channel_id": 111, "acc_id": 5, "title": "Старое",
+                     "access_hash": 999, "username": "mychan", "type": "channel"}]
+        return []
     async def fetchval(self, q, *a): return 0
     async def fetchrow(self, q, *a): return None
 
@@ -42,8 +46,8 @@ def test_title_edit_forwards_access_hash_and_username(monkeypatch):
 
     params = {
         "op": "chan_title", "value": "Новое имя",
-        "channel_acc_pairs": [{"channel_id": 111, "acc_id": 5,
-                               "title": "Старое", "access_hash": 999, "username": "mychan"}],
+        "channel_acc_pairs": [{"channel_id": "111", "acc_id": "5",
+                               "title": "Устаревшее", "access_hash": 1, "username": "stale"}],
     }
     res = asyncio.run(op_worker._exec_bulk_chan_exec(_Pool(), None, 1, 42, params))
 

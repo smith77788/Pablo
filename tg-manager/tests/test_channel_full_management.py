@@ -11,8 +11,10 @@ import asyncio
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 from aiohttp import ClientSession, web
+import pytest
 
 from services import account_manager
 from services import mini_app_api as M
@@ -67,6 +69,8 @@ class _Pool:
         self.executed.append((q, a))
         if "FROM operation_queue" in q:
             return [{"id": 77}]
+        if "FROM managed_channels" in q:
+            return [_PAIR]
         return []
     async def fetchval(self, q, *a): return 0
     async def fetchrow(self, q, *a): return None
@@ -227,7 +231,6 @@ def _patch_client(monkeypatch, client):
     monkeypatch.setattr(account_manager, "_make_client", lambda s, a=None: client)
 
     from importlib import import_module
-    from types import SimpleNamespace
 
     utils = import_module("telethon.utils")
 
@@ -277,7 +280,6 @@ def test_destroy_names_the_reason(monkeypatch):
 
 def test_destroy_uses_confirmed_id_even_if_username_exists(monkeypatch):
     from importlib import import_module
-    from types import SimpleNamespace
 
     channels = import_module("telethon.tl.functions.channels")
 
@@ -300,10 +302,38 @@ def test_destroy_uses_confirmed_id_even_if_username_exists(monkeypatch):
     assert result["ok"] is False and "другой ID" in result["error"]
 
 
+@pytest.mark.parametrize(("method", "extra"), [
+    ("edit_channel_title", {"title": "Синтетическое название"}),
+    ("edit_channel_about", {"about": "Синтетическое описание"}),
+    ("clear_channel_posts", {}),
+    ("leave_managed_channel", {}),
+])
+def test_changed_username_cannot_redirect_channel_action(monkeypatch, method, extra):
+    requests = []
+
+    class Client(_Client):
+        async def __call__(self, request):
+            requests.append(request)
+
+    client = Client(1)
+    _patch_client(monkeypatch, client)
+
+    async def wrong_peer(client, ref, access_hash):
+        assert (ref, access_hash) == ("@oldname", 0)
+        return SimpleNamespace(channel_id=222)
+
+    monkeypatch.setattr(account_manager, "_resolve_channel_peer", wrong_peer)
+    result = asyncio.run(getattr(account_manager, method)("s", 111, username="oldname", **extra))
+    if isinstance(result, dict):
+        assert not result["ok"]
+    else:
+        assert result is False
+    assert client.iter_limit == "unset" and not client.batches and not requests
+
+
 def test_probe_public_channel_capacity_reports_telegram_outcome(monkeypatch):
     from telethon.errors import ChannelsAdminPublicTooMuchError, FloodWaitError
     from importlib import import_module
-    from types import SimpleNamespace
 
     channels = import_module("telethon.tl.functions.channels")
 

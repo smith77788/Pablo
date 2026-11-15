@@ -304,8 +304,7 @@ def public_items(items):
     return public
 
 
-async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=False):
-    keys = _target_keys(targets)
+async def _plan(conn, owner_id, op_id, keys, action, project_id, *, lock=False):
     if action not in ("detach", "disable"):
         raise CleanupError("Неизвестное действие")
     if action == "detach" and (
@@ -315,13 +314,8 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
     if action == "disable" and project_id is not None:
         raise CleanupError("Отключение ресурса действует на весь аккаунт")
 
-    if lock:
-        await conn.execute("SET LOCAL lock_timeout = '3s'")
-        if action == "detach" or any(kind != "bot" for kind, _ in keys):
-            # Захват публикации не должен совпасть с проверкой привязок.
-            await conn.execute("LOCK TABLE operation_queue IN SHARE ROW EXCLUSIVE MODE")
-            if action == "disable":
-                await db.lock_managed_channel_catalog(conn, owner_id)
+    if lock and action == "disable" and any(kind != "bot" for kind, _ in keys):
+        await db.lock_managed_channel_catalog(conn, owner_id)
     if lock and action == "disable" and any(kind == "bot" for kind, _ in keys):
         # Старт нового прогона или активация сценария между проверкой и
         # выключением бота должны дождаться завершения этой транзакции.
@@ -343,32 +337,48 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
     selected_entries = {key: entries[key] for key in sorted(keys)}
     items, nodes = await _snapshot(conn, owner_id, selected_entries, lock=lock)
     disabled = await _disabled_channels(conn, owner_id, selected_entries, items)
-    channel_ids = [str(item_id) for kind, item_id in sorted(keys) if kind != "bot"]
-    running_publications = await conn.fetch(
-        """SELECT op_type, params->'channel_ids' AS targets,
+    has_channels = any(kind != "bot" for kind, _ in keys)
+    running_channel_operations = await conn.fetch(
+        """SELECT op_type,
+                  CASE WHEN op_type='bulk_chan_exec' THEN params->'channel_acc_pairs'
+                       ELSE params->'channel_ids' END AS targets,
                   params->>'target' AS target_kind
              FROM operation_queue
             WHERE owner_id=$1 AND status='running'
-              AND op_type IN ('mass_publish', 'quick_post', 'bulk_post_chans')
-              AND (($2::text IS NOT NULL AND params->>'project_id'=$2)
-                OR ($2::text IS NULL AND cardinality($3::text[])>0))""",
-        owner_id, str(project_id) if project_id else None, channel_ids)
+              AND ((op_type IN ('mass_publish', 'quick_post', 'bulk_post_chans')
+                    AND (($2::text IS NOT NULL AND params->>'project_id'=$2)
+                      OR ($2::text IS NULL AND $3)))
+                OR (op_type='bulk_chan_exec' AND $2::text IS NULL AND $3))""",
+        owner_id, str(project_id) if project_id else None, has_channels)
     busy_channels = set()
+    editing_channels = set()
     channel_by_row = {
         str(binding["row_id"]): item["id"] for item in items.values()
         for binding in item.get("bindings", ())
     }
-    for publication in running_publications:
-        selected = publication["targets"]
+    active_pairs = {
+        (int(item["id"]), binding["account_id"]) for item in items.values()
+        for binding in item.get("bindings", ())
+    }
+    for operation in running_channel_operations:
+        selected = operation["targets"]
         if isinstance(selected, str):
             selected = json.loads(selected)
-        if publication["op_type"] == "bulk_post_chans":
+        if operation["op_type"] == "bulk_chan_exec":
+            if isinstance(selected, list):
+                for pair in selected:
+                    if isinstance(pair, dict):
+                        channel = _telegram_id(pair.get("channel_id"))
+                        account = _telegram_id(pair.get("acc_id"))
+                        if (channel, account) in active_pairs:
+                            editing_channels.add(str(channel))
+        elif operation["op_type"] == "bulk_post_chans":
             # Этот исполнитель принимает PK строки каталога, а остальные — Telegram ID.
             if isinstance(selected, list):
                 busy_channels.update(channel_by_row[str(value)] for value in selected
                                      if str(value) in channel_by_row)
         elif selected is None or isinstance(selected, list):
-            scope = publication["target_kind"]
+            scope = operation["target_kind"]
             if scope is None:
                 scope = "channels"
             kind = {"channels": "channel", "groups": "group"}.get(scope)
@@ -387,6 +397,8 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
             reason = "Дождитесь завершения развёртывания проекта"
         elif item["id"] in busy_channels and item["kind"] != "bot":
             reason = "Дождитесь завершения текущей публикации"
+        elif item["id"] in editing_channels and item["kind"] != "bot":
+            reason = "Дождитесь завершения текущей команды управления ресурсом"
         else:
             reason = ""
         item["outcome"] = "ready"
@@ -427,8 +439,9 @@ async def _plan(conn, owner_id, op_id, targets, action, project_id, *, lock=Fals
 
 
 async def plan(pool, owner_id, op_id, targets, action, *, project_id=None):
+    keys = _target_keys(targets)
     async with pool.acquire() as conn, conn.transaction(isolation="repeatable_read", readonly=True):
-        return await _plan(conn, owner_id, op_id, targets, action, project_id)
+        return await _plan(conn, owner_id, op_id, keys, action, project_id)
 
 
 async def _receipt(conn, owner_id, op_id, confirmation_id, scope):
@@ -445,20 +458,26 @@ async def _receipt(conn, owner_id, op_id, confirmation_id, scope):
 
 async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, verify,
                 confirmation_id=None, verify_access=None):
+    keys = _target_keys(targets)
     receipt_args = None
     if confirmation_id:
         scope = {"action": action, "project_id": project_id,
-                 "targets": [list(key) for key in sorted(_target_keys(targets))]}
+                 "targets": [list(key) for key in sorted(keys)]}
         receipt_args = (owner_id, op_id, confirmation_id, scope)
     try:
         async with pool.acquire() as conn, conn.transaction(isolation="serializable"):
+            await conn.execute("SET LOCAL lock_timeout = '3s'")
+            if action == "detach" or (action == "disable" and any(kind != "bot" for kind, _ in keys)):
+                # Блокируем захват до первого чтения, чтобы снимок увидел
+                # операцию, получившую статус running до нашей блокировки.
+                await conn.execute("LOCK TABLE operation_queue IN SHARE ROW EXCLUSIVE MODE")
             if receipt_args:
                 receipt = await _receipt(conn, *receipt_args)
                 if receipt:
                     if verify_access:
                         verify_access()
                     return receipt
-            preview = await _plan(conn, owner_id, op_id, targets, action, project_id, lock=True)
+            preview = await _plan(conn, owner_id, op_id, keys, action, project_id, lock=True)
             verify(preview)
             ready = [item for item in preview["items"] if item["outcome"] == "ready"]
             if action == "detach" and ready:

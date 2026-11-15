@@ -233,15 +233,15 @@ def test_upsert_managed_channels_still_deletes_first():
             pool, owner_id=1, acc_id=10, channels=_channels(100), complete=True)
 
     asyncio.run(_run())
-    deletes = [q for q, _ in pool.log if q.strip().startswith("DELETE")]
+    deletes = [q for q, _ in pool.log if q.strip().startswith("DELETE FROM managed_channels")]
     assert deletes, "upsert_managed_channels должна по-прежнему удалять лишние строки"
     assert "NOT (channel_id = ANY" in deletes[0], (
         "удаление должно обходить стороной каналы из переданного списка"
     )
 
 
-def test_add_managed_channels_never_deletes():
-    """Точечная функция не должна выпускать ни одного DELETE — это и есть фикс."""
+def test_add_managed_channels_never_deletes_current_catalog_rows():
+    """Точечный импорт сохраняет каталог и отключённые владельцем ресурсы."""
     pool = _FakePool()
 
     async def _run():
@@ -249,7 +249,7 @@ def test_add_managed_channels_never_deletes():
 
     asyncio.run(_run())
     deletes = [q for q, _ in pool.log if q.strip().startswith("DELETE")]
-    assert not deletes, "add_managed_channels не должна удалять существующие строки"
+    assert all("FROM removed_channels" in q and "reason='gone'" in q for q in deletes)
     inserts = [q for q, _ in pool.log if "INSERT INTO managed_channels" in q]
     assert len(inserts) == 1
 
@@ -281,7 +281,7 @@ def test_add_managed_channels_partial_call_does_not_wipe_existing_rows():
         await db.add_managed_channels(pool, owner_id=1, acc_id=10, channels=_channels(2))
 
     asyncio.run(_run())
-    assert not any(q.strip().startswith("DELETE") for q, _ in pool.log), (
+    assert not any(q.strip().startswith("DELETE FROM managed_channels") for q, _ in pool.log), (
         "довоз одного канала не должен трогать (и тем более удалять) остальные "
         "ранее сохранённые каналы того же аккаунта"
     )

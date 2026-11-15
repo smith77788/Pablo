@@ -1,18 +1,104 @@
 """Подписанная сессия Mini App и точное подтверждение на тестовом PostgreSQL."""
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 import pytest
 
-from services import mini_app_operations, restriction_cleanup
+from services import account_manager, mini_app_operations, op_worker, restriction_cleanup
 from services.mini_app_auth import make_token
 from tests.test_restriction_cleanup_postgres import (
     BOT, BOT_TARGET, CHANNEL, CHANNEL_TARGET, OWNER, _run, pytestmark,
 )
 
 __all__ = ["pytestmark"]
+
+
+@pytest.mark.parametrize("change", ["disable", "reassign"])
+def test_queued_channel_edit_revalidates_targets_after_cleanup(monkeypatch, change):
+    secret = "123456:synthetic-cleanup-authentication-only"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    editor = AsyncMock(return_value=True)
+    monkeypatch.setattr(account_manager, "edit_channel_about", editor)
+    monkeypatch.setattr(op_worker, "try_claim_accounts", AsyncMock(return_value=[992660]))
+    monkeypatch.setattr(op_worker, "release_accounts", AsyncMock())
+
+    async def scenario(pool, check_id):
+        other = CHANNEL + 1
+        foreign = CHANNEL + 2
+        await pool.execute(
+            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, type)
+               VALUES($1,992660,$2,'Другой канал','channel'),
+                     ($3,992660,$4,'Чужой канал','channel')""",
+            OWNER, other, OWNER + 1, foreign)
+        params = {"op": "chan_about", "value": "Синтетическое описание", "channel_acc_pairs": [
+            {"channel_id": str(CHANNEL), "acc_id": "992660"},
+            {"channel_id": other, "acc_id": 992660},
+            {"channel_id": foreign, "acc_id": 992660},
+        ]}
+        op_id = await pool.fetchval(
+            """INSERT INTO operation_queue(owner_id,op_type,status,params)
+               VALUES($1,'bulk_chan_exec','pending',$2::jsonb) RETURNING id""",
+            OWNER, json.dumps(params))
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        path = f"/api/miniapp/operations/{check_id}/cleanup"
+        action = {"action": "disable", "targets": [CHANNEL_TARGET]}
+        try:
+            async with TestClient(TestServer(app)) as client:
+                preview = await client.post(path, headers=headers, json={**action, "preview": True})
+                assert preview.status == 200, await preview.text()
+                confirmation = {**action, "token": (await preview.json())["token"]}
+                if change == "disable":
+                    applied = await client.post(path, headers=headers, json=confirmation)
+                    assert applied.status == 200 and (await applied.json())["count"] == 1
+                    report = await (await client.get(path, headers=headers)).json()
+                    item = next(item for item in report["findings"] if item["id"] == str(CHANNEL))
+                    assert item["status"] == "check_failed" and item["can_restore"]
+                else:
+                    await pool.execute(
+                        "UPDATE managed_channels SET acc_id=992661 WHERE owner_id=$1 AND channel_id=$2",
+                        OWNER, CHANNEL)
+                    assert (await client.post(path, headers=headers, json=confirmation)).status == 409
+
+                excluded = {row["id"] for row in await pool.fetch(
+                    "SELECT id FROM operation_queue WHERE status='pending' AND id<>$1", op_id)}
+                monkeypatch.setattr(op_worker, "_active_op_ids", excluded)
+                monkeypatch.setattr(op_worker, "_active_op_tasks", set())
+                monkeypatch.setattr(op_worker, "_MAX_PARALLEL", len(excluded) + 2)
+                await op_worker._process_pending(pool, None)
+                tasks = list(op_worker._active_op_tasks)
+                assert [task.get_name() for task in tasks] == [f"op:{op_id}"]
+                await asyncio.wait_for(asyncio.gather(*tasks), timeout=15)
+                editor.assert_awaited_once()
+                assert editor.await_args.args[1] == other
+
+                card_path = f"/api/miniapp/operation/{op_id}"
+                card = await (await client.get(card_path, headers=headers)).json()
+                assert card["status"] == "partial"
+                journal = await (await client.get(card_path + "/log", headers=headers)).json()
+                assert await pool.fetchval(
+                    "SELECT count(*) FROM operation_log WHERE op_id=$1 AND status='skipped'", op_id) == 2
+                assert {str(CHANNEL), str(other), str(foreign)} <= {
+                    row["target"] for row in journal["logs"]}
+                outside = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+                assert (await client.get(card_path + "/log", headers=outside)).status == 404
+
+                # Повтор не делает второй сетевой вызов и не дублирует отметки о пропуске.
+                replay = await op_worker._exec_bulk_chan_exec(pool, None, op_id, OWNER, params)
+                assert (replay["ok"], replay["fail"]) == (1, 2)
+                editor.assert_awaited_once()
+                assert await pool.fetchval(
+                    "SELECT count(*) FROM operation_log WHERE op_id=$1 AND status='skipped'", op_id) == 2
+        finally:
+            await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+                               OWNER + 1, foreign)
+
+    asyncio.run(_run(scenario))
 
 
 def test_authenticated_cleanup_round_trip(monkeypatch):
@@ -453,7 +539,6 @@ def test_channel_restore_rechecks_account_after_preview(monkeypatch, change):
 
 
 def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
-    from unittest.mock import AsyncMock
 
     from bot.utils import subscription
     from services import mini_app_channels
@@ -511,7 +596,6 @@ def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
 
 
 def test_restore_serializes_last_slot_and_rolls_back_without_audit(monkeypatch):
-    from unittest.mock import AsyncMock
 
     from bot.utils import subscription
     from database import db
@@ -591,7 +675,6 @@ def test_restore_serializes_last_slot_and_rolls_back_without_audit(monkeypatch):
 
 @pytest.mark.parametrize("competitor", ["restore", "scan"])
 def test_linked_owners_compete_for_one_catalog_slot(monkeypatch, competitor):
-    from unittest.mock import AsyncMock
 
     from bot.utils import subscription
     from database import db
