@@ -34,6 +34,13 @@ def _read(rel: str) -> str:
         return f.read()
 
 
+def _js_fn(src: str, name: str) -> str:
+    """Тело JS-функции верхнего уровня: от объявления до следующего объявления."""
+    i = src.index(f"function {name}(")
+    m = re.compile(r"\n(?:async )?function |\n// ── ").search(src, i + 1)
+    return src[i:m.start() if m else len(src)]
+
+
 class _Pool:
     async def fetchval(self, *a, **k):
         return 3
@@ -173,8 +180,7 @@ def test_spread_outside_the_list_is_ignored(monkeypatch):
 
 def test_boost_screen_sends_the_new_settings():
     html = _read("mini_app/index.html")
-    i = html.index("async function submitBoost()")
-    body = html[i:i + 4000]
+    body = _js_fn(html, "submitBoost")
     assert "payload.emojis" in body and "payload.spread_minutes" in body
     # 👍 больше не подставляется молча, когда выбран разнобой.
     assert "payload.emoji=document.getElementById('boostEmoji')" not in body
@@ -229,8 +235,7 @@ def test_account_check_without_a_choice_stays_full(monkeypatch):
 
 def test_account_check_screen_offers_the_choice():
     html = _read("mini_app/index.html")
-    i = html.index("async function massCheckAccounts()")
-    body = html[i:i + 1500]
+    body = _js_fn(html, "massCheckAccounts")
     assert "askChoice(" in body and "spambot: mode === 'full'" in body
 
 
@@ -238,8 +243,7 @@ def test_account_check_screen_offers_the_choice():
 
 def test_bot_mesh_can_scale_past_the_canary():
     js = _read("mini_app/screens/bots_list.js")
-    i = js.index("async function enableBotMesh()")
-    body = js[i:i + 2500]
+    body = _js_fn(js, "enableBotMesh")
     limits = {int(x) for x in re.findall(r"limit:\s*(\d+)", body)}
     assert limits >= {2, 10, 200}, limits
     assert "only_disabled: false" in body
