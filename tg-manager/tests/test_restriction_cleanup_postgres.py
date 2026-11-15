@@ -403,14 +403,15 @@ def test_native_scan_uses_the_same_catalog_guard(monkeypatch):
         await db.remove_managed_channel(pool, OWNER, CHANNEL)
         await pool.execute(
             """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, type)
-               VALUES ($1,456,111,'gone','megagroup')""", OWNER)
+               VALUES ($1,456,111,'gone','megagroup'), ($1,789,111,'gone','megagroup')""", OWNER)
         monkeypatch.setattr(db, "get_tg_account", AsyncMock(return_value={"session_str": "synthetic"}))
         monkeypatch.setattr(accounts, "scan_owned_assets", AsyncMock(return_value={
             "channels": [{"id": CHANNEL, "title": "Отключённый канал"}],
-            "groups": [{"id": 456, "title": "Группа", "type": "megagroup"}],
+            "groups": [{"id": 456, "title": "Группа", "type": "megagroup"},
+                       {"id": 789, "title": "Вторая группа", "type": "megagroup"}],
         }))
         monkeypatch.setattr(subscription, "get_channel_limit", AsyncMock(return_value=100))
-        effective_count = AsyncMock(side_effect=[100, 0])
+        effective_count = AsyncMock(side_effect=[100, 99])
         monkeypatch.setattr(subscription, "get_effective_channel_count", effective_count)
         keyboard = MagicMock()
         monkeypatch.setattr(accounts, "InlineKeyboardBuilder", lambda: keyboard)
@@ -426,13 +427,17 @@ def test_native_scan_uses_the_same_catalog_guard(monkeypatch):
         assert not await pool.fetchval("SELECT 1 FROM managed_channels WHERE owner_id=$1", OWNER)
 
         await accounts.cb_scan_connect(callback, action, pool)
-        assert "Подключено: 1" in callback.message.edit_text.await_args.args[0]
+        summary = callback.message.edit_text.await_args.args[0]
+        assert "Подключено: 1" in summary
+        assert "Пропущено по лимиту тарифа: 1" in summary
         row = await pool.fetchrow("SELECT channel_id, type FROM managed_channels WHERE owner_id=$1", OWNER)
         assert (row["channel_id"], row["type"]) == (456, "megagroup")
         assert not await pool.fetchval(
             "SELECT 1 FROM removed_channels WHERE owner_id=$1 AND channel_id=456", OWNER)
         assert await pool.fetchval(
             "SELECT reason FROM removed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL) == "owner"
+        assert await pool.fetchval(
+            "SELECT reason FROM removed_channels WHERE owner_id=$1 AND channel_id=789", OWNER) == "gone"
         assert db.get_tg_account.await_count == 2
         db.get_tg_account.assert_awaited_with(pool, 111, OWNER)
 

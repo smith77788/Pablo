@@ -4786,25 +4786,10 @@ async def cb_scan_connect(
     user_id = callback.from_user.id
     acc_id = callback_data.acc_id
 
-    # «Подключить все найденные» — тот же импорт: каналы, которые владелец
-    # удалил из системы, обратно не возвращаем.
-    to_connect = await db.skip_removed_channels(pool, user_id, to_connect)
-    if not to_connect:
-        await callback.answer("Все найденные каналы ранее удалены из системы.", show_alert=True)
-        return
-
-    # Check channel limit before importing (counts across linked abuse accounts)
-    from bot.utils.subscription import get_channel_limit, get_effective_channel_count
-    chan_limit = await get_channel_limit(pool, user_id)
+    await callback.answer("⏳ Подключаю…")
     try:
-        current_count = await get_effective_channel_count(pool, user_id)
-    except Exception as e:
-        log.warning('handler error in cb_scan_connect: %s', e)
-        current_count = await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
-        ) or 0
-    slots_free = chan_limit - current_count
-    if slots_free <= 0:
+        connected, skipped_by_limit = await db.connect_scanned_managed_channels(pool, user_id, acc_id, to_connect)
+    except db.ManagedChannelLimitError as exc:
         from bot.callbacks import SubCb
         from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
         kb2 = _IKB()
@@ -4812,20 +4797,16 @@ async def cb_scan_connect(
         kb2.adjust(1)
         await callback.message.edit_text(
             f"⛔️ <b>Лимит каналов достигнут</b>\n\n"
-            f"У вас {current_count} каналов из {chan_limit} доступных.\n"
+            f"У вас {exc.current_count} каналов из {exc.limit} доступных.\n"
             "Оформите подписку для неограниченного числа каналов.",
             parse_mode="HTML",
             reply_markup=kb2.as_markup(),
         )
         return
-    if len(to_connect) > slots_free:
-        to_connect = to_connect[:slots_free]
-
-    await callback.answer("⏳ Подключаю…")
-
-    connected = await db.add_managed_channels(pool, user_id, acc_id, to_connect)
     if connected:
         summary = f"✅ <b>Подключено: {connected} активов</b>\n\nОни доступны в разделах <b>Каналы</b> и <b>Группы</b>."
+        if skipped_by_limit:
+            summary += f"\nПропущено по лимиту тарифа: {skipped_by_limit}."
     else:
         summary = "Все выбранные ресурсы были отключены до завершения импорта."
 

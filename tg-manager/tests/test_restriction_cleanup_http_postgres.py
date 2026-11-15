@@ -365,3 +365,84 @@ def test_restore_serializes_last_slot_and_rolls_back_without_audit(monkeypatch):
                 "SELECT count(*) FROM operation_audit WHERE owner_id=$1 AND action='channel_restore'", OWNER) == 2
 
     asyncio.run(_run(scenario))
+
+
+@pytest.mark.parametrize("competitor", ["restore", "scan"])
+def test_linked_owners_compete_for_one_catalog_slot(monkeypatch, competitor):
+    from unittest.mock import AsyncMock
+
+    from bot.utils import subscription
+    from database import db
+    from services import mini_app_channels
+
+    secret = "123456:synthetic-linked-catalog-quota"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setattr(subscription, "get_channel_limit", AsyncMock(return_value=1))
+    monkeypatch.setattr(subscription, "get_plan", AsyncMock(return_value="free"))
+    linked, other_channel = OWNER + 1, CHANNEL + 1
+
+    async def scenario(pool, _op_id):
+        assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        await pool.execute(
+            "INSERT INTO linked_platform_users(owner_id_a, owner_id_b) VALUES($1,$2)", OWNER, linked)
+        try:
+            await pool.execute(
+                """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, title, type)
+                   VALUES($1,$2,112,$3,'Второй','megagroup')""",
+                linked, other_channel, "gone" if competitor == "scan" else "owner",
+            )
+            app = web.Application()
+            mini_app_channels.setup_routes(app, pool)
+            path = "/api/miniapp/channel/{}/restore"
+
+            def headers(owner):
+                return {"Authorization": f"Bearer {make_token(owner, secret)}"}
+
+            ready = asyncio.Event()
+            entrants = 0
+            original_lock = db._lock_managed_channel_quota
+
+            async def concurrent_quota(conn, owner):
+                nonlocal entrants
+                entrants += 1
+                if entrants == 2:
+                    ready.set()
+                await asyncio.wait_for(ready.wait(), timeout=3)
+                await original_lock(conn, owner)
+
+            async with TestClient(TestServer(app)) as client:
+                async def compete():
+                    if competitor == "restore":
+                        response = await client.post(path.format(other_channel), headers=headers(linked))
+                        return response.status
+                    try:
+                        imported, skipped = await db.connect_scanned_managed_channels(
+                            pool, linked, 112, [{"id": other_channel, "type": "megagroup"}])
+                    except db.ManagedChannelLimitError:
+                        return 403
+                    assert (imported, skipped) == (1, 0)
+                    return 200
+
+                with monkeypatch.context() as race:
+                    race.setattr(db, "_lock_managed_channel_quota", concurrent_quota)
+                    left, right = await asyncio.wait_for(asyncio.gather(
+                        client.post(path.format(CHANNEL), headers=headers(OWNER)), compete(),
+                    ), timeout=6)
+                assert sorted((left.status, right)) == [200, 403]
+                accepted, rejected = ((CHANNEL, other_channel) if left.status == 200
+                                      else (other_channel, CHANNEL))
+                assert await pool.fetchval(
+                    "SELECT channel_id FROM managed_channels WHERE owner_id IN ($1,$2)", OWNER, linked,
+                ) == accepted
+                rows = await pool.fetch(
+                    "SELECT channel_id FROM removed_channels WHERE owner_id IN ($1,$2)", OWNER, linked,
+                )
+                assert [row["channel_id"] for row in rows] == [rejected]
+        finally:
+            await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1", linked)
+            await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1", linked)
+            await pool.execute("DELETE FROM removed_channels WHERE owner_id=$1", linked)
+            await pool.execute("DELETE FROM linked_platform_users WHERE owner_id_a=$1 AND owner_id_b=$2",
+                               OWNER, linked)
+
+    asyncio.run(_run(scenario))

@@ -4536,6 +4536,33 @@ async def lock_managed_channel_catalog(conn, owner_id: int) -> None:
     )
 
 
+async def _lock_managed_channel_quota(conn, owner_id: int) -> None:
+    # Общая квота включает непосредственно связанных владельцев. Один порядок
+    # захвата нужен и для платных владельцев, которых учитывает связанный тариф.
+    linked = await get_linked_owner_ids(conn, owner_id)
+    for catalog_owner in sorted({owner_id, *linked}):
+        await lock_managed_channel_catalog(conn, catalog_owner)
+
+
+class ManagedChannelLimitError(ValueError):
+    """В каталоге достигнут тарифный лимит каналов."""
+
+    def __init__(self, limit: int, current_count: int):
+        super().__init__(limit)
+        self.limit = limit
+        self.current_count = current_count
+
+
+async def _managed_channel_slots(conn, owner_id: int) -> int:
+    from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+
+    limit = await get_channel_limit(conn, owner_id)
+    current_count = await get_effective_channel_count(conn, owner_id)
+    if current_count >= limit:
+        raise ManagedChannelLimitError(limit, current_count)
+    return limit - current_count
+
+
 async def upsert_managed_channels(
     pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict],
     *, complete: bool,
@@ -4619,6 +4646,21 @@ async def add_managed_channels(
                 _managed_channel_rows(owner_id, acc_id, channels),
             )
     return len(channels)
+
+
+async def connect_scanned_managed_channels(
+    pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict],
+) -> tuple[int, int]:
+    """Подключить точный срез сканирования, поместив проверку квоты и запись под общий лок."""
+    async with pool.acquire() as conn, conn.transaction():
+        await _lock_managed_channel_quota(conn, owner_id)
+        available = await skip_removed_channels(conn, owner_id, channels, strict=True)
+        if not available:
+            return 0, 0
+        slots = await _managed_channel_slots(conn, owner_id)
+        accepted = available[:slots]
+        imported = await add_managed_channels(conn, owner_id, acc_id, accepted)
+        return imported, len(available) - len(accepted)
 
 
 # ── Удалённые и пропавшие каналы/чаты (removed_channels, v257) ──────────────
@@ -4794,20 +4836,15 @@ async def _forget_removed_channels(conn, owner_id: int, ids: list[int]) -> None:
     )
 
 
-class RestoreChannelLimitError(ValueError):
-    """В каталоге достигнут тарифный лимит каналов."""
-
-    def __init__(self, limit: int):
-        super().__init__(limit)
-        self.limit = limit
-
-
 async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id: int,
                                   *, enforce_limit: bool = False) -> bool:
     """Вернуть удалённый канал в систему той же строкой, что была до удаления."""
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await lock_managed_channel_catalog(conn, owner_id)
+            if enforce_limit:
+                await _lock_managed_channel_quota(conn, owner_id)
+            else:
+                await lock_managed_channel_catalog(conn, owner_id)
             row = await conn.fetchrow(
                 """DELETE FROM removed_channels
                     WHERE owner_id=$1 AND channel_id=$2 AND acc_id IS NOT NULL
@@ -4819,11 +4856,7 @@ async def restore_removed_channel(pool: asyncpg.Pool, owner_id: int, channel_id:
             if not row:
                 return False
             if enforce_limit:
-                from bot.utils.subscription import get_channel_limit, get_effective_channel_count
-
-                limit = await get_channel_limit(conn, owner_id)
-                if await get_effective_channel_count(conn, owner_id) >= limit:
-                    raise RestoreChannelLimitError(limit)
+                await _managed_channel_slots(conn, owner_id)
             await conn.execute(
                 """INSERT INTO managed_channels
                        (owner_id, acc_id, channel_id, title, username, access_hash, type,
