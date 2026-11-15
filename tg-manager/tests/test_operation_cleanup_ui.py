@@ -82,3 +82,61 @@ def test_cleanup_confirms_exact_targets_in_chromium():
     if run.returncode and missing_browser:
         pytest.skip("Chromium или Playwright недоступен в окружении")
     assert run.returncode == 0, run.stderr
+
+
+def test_stopped_publication_card_and_banner_offer_project_instead_of_retry():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("нужен node")
+    script = r"""
+const assert = require('node:assert/strict');
+const elements = {};
+const banner = {classList:{add(){}}, style:{}};
+const document = {getElementById: () => banner};
+const window = {};
+const txt = (id, value) => { elements[id] = value; };
+const push = () => {};
+const esc = value => String(value).replace(/</g, '&lt;');
+const num = String;
+const stb = () => ['red', 'Ошибка'];
+const opRu = String;
+const _opLogQuery = () => '/log';
+const _qaButtons = () => '';
+const _opNextBtn = () => '';
+const hideOpDone = () => {};
+const clearTimeout = () => {};
+const setTimeout = () => {};
+let OPLOG_ID, OPLOG_FILTER, OPLOG_Q, OPLOG_ROWS, _opDoneTimer;
+let openedProject;
+const openNetworkBuilder = id => { openedProject = id; };
+let result = {id: 13, op_type: 'mass_publish', status: 'failed', project_review_required: true,
+  project_review_message: '<проверить>', review_project_id: 42};
+const api = async path => path === '/log' ? {logs: []} : result;
+(async () => {
+  await openOpDetail(13);
+  const card = elements.opdetBody;
+  assert.match(card, /&lt;проверить>/);
+  assert.doesNotMatch(card, /retryOp|openOpClone|openMassPub/);
+  const action = card.match(/onclick="(openNetworkBuilder\(42\))"/);
+  assert.ok(action);
+  eval(action[1]);
+  assert.equal(openedProject, 42);
+  showOpComplete(result);
+  assert.doesNotMatch(banner.innerHTML, /retryOp/);
+  assert.match(banner.innerHTML, /Открыть детали/);
+
+  result = {...result, review_project_id: undefined, project_review_message: 'Проект недоступен'};
+  await openOpDetail(13);
+  assert.match(elements.opdetBody, /Проект недоступен/);
+  assert.doesNotMatch(elements.opdetBody, /openNetworkBuilder|retryOp|openOpClone/);
+
+  result = {id:13, status:'failed'};
+  await openOpDetail(13);
+  assert.match(elements.opdetBody, /retryOp/);
+  assert.match(elements.opdetBody, /openOpClone/);
+  showOpComplete(result);
+  assert.match(banner.innerHTML, /retryOp/);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    source = "\n".join(js_function(name) for name in ("opCanRetry", "openOpDetail", "showOpComplete"))
+    subprocess.run([node, "-"], input=source + "\n" + script, text=True, check=True)

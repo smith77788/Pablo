@@ -9532,7 +9532,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 rows = await pool.fetch(
                     """SELECT id, op_type, COALESCE(label, op_type) AS label,
                               total_items, done_items, status, error_msg,
-                              COALESCE(result->>'summary', result->>'reason') AS summary
+                              COALESCE(result->>'summary', result->>'reason') AS summary,
+                              (result->>'project_publish_scope_refused' IS NOT NULL
+                               OR result->>'recurring_stop_reason' IS NOT NULL) AS project_review_required
                        FROM operation_queue WHERE owner_id=$1
                          AND status IN ('done','partial','failed')
                          AND finished_at > now() - make_interval(mins => 30)
@@ -9617,6 +9619,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                             "summary": op.get("summary"),
                             # Следующий шаг прямо на плашке итога — в т.ч.
                             # связка с другим модулем (services/op_chain).
+                            "project_review_required": bool(op.get("project_review_required")),
                             "quick_actions": await completed_quick_actions(op),
                         })
                 while len(_seen_order) > 500:

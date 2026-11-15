@@ -10098,7 +10098,7 @@ function showOpComplete(op) {
     <div class="od-title">${head}</div>
     <div class="od-sum">${esc(body)}</div>
     <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
-      ${_qaButtons(op) || (ok ? _opNextBtn(op) : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↺ Повторить</button>`)}
+      ${_qaButtons(op) || (ok ? _opNextBtn(op) : op.project_review_required ? '' : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↺ Повторить</button>`)}
       <span style="font-size:12px;color:var(--accent)">Открыть детали →</span>
     </div>`;
   el.onclick = () => { hideOpDone(); openOpDetail(op.id); };
@@ -15262,7 +15262,15 @@ async function openOpDetail(opId) {
     // «Повторить с правками» — та же операция ЗАНОВО, с поправленным текстом,
     // паузой или количеством. Есть у любой завершённой: успешный пост тоже
     // хотят выпустить ещё раз с другим текстом.
-    if (['done','partial','failed','cancelled'].includes(o.status)) {
+    if (o.project_review_required) {
+      const project = o.review_project_id;
+      html += `<div style="padding:8px 16px 0">
+        <div class="field-note">${esc(o.project_review_message || 'Нужен новый предпросмотр публикации.')}</div>
+        ${Number.isSafeInteger(project) && project > 0
+          ? `<button type="button" class="btn btn-p" onclick="openNetworkBuilder(${project})" style="width:100%">Открыть проект</button>`
+          : ''}
+        </div>`;
+    } else if (['done','partial','failed','cancelled'].includes(o.status)) {
       html += `<div style="padding:8px 16px 0"><button class="btn btn-s" onclick="openOpClone(${Number(o.id)})" style="width:100%">✏️ Повторить с правками</button></div>`;
     }
     if (o.cleanup_available) {
@@ -15578,6 +15586,7 @@ async function pollOpResult(opId, label, onDone){
 // Инвайт закрывался `done` на 203 целях из 380, и повторить его было нечем:
 // кнопка показывалась только для failed. Зеркалит services/operation_retry.py.
 function opCanRetry(o) {
+  if (o.project_review_required) return false;
   const st = String(o.status||'').toLowerCase();
   if (['pending','running','paused','scheduled'].includes(st)) return false;
   if (st === 'failed' || st === 'cancelled') return true;

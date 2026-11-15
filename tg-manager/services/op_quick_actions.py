@@ -57,6 +57,13 @@ _AFTER_DONE = {
 }
 
 
+def project_review_required(result) -> bool:
+    return isinstance(result, dict) and (
+        result.get("project_publish_scope_refused") is not None
+        or result.get("recurring_stop_reason") is not None
+    )
+
+
 def suggest(op_type: str, status: str, result: dict | None,
             op_id: int | None = None, params: dict | None = None) -> list[dict]:
     """Быстрые действия по итогу операции. Порядок = приоритет показа.
@@ -65,6 +72,8 @@ def suggest(op_type: str, status: str, result: dict | None,
     только потом обычный следующий шаг — иначе полезное действие тонет.
     """
     res = result if isinstance(result, dict) else {}
+    if project_review_required(res):
+        return []
     st = (status or "").strip().lower()
     out: list[dict] = []
     seen: set[str] = set()

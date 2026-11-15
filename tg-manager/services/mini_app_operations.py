@@ -238,7 +238,10 @@ def setup_routes(app: web.Application, pool) -> None:
         _cols = f"""oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
                           {op_status.sql_error_reason("oq.")} AS error_msg,
                           oq.created_at, oq.started_at, oq.finished_at,
-                          oq.scheduled_for, {_err_sub}"""
+                          oq.scheduled_for,
+                          (oq.result->>'project_publish_scope_refused' IS NOT NULL
+                           OR oq.result->>'recurring_stop_reason' IS NOT NULL) AS project_review_required,
+                          {_err_sub}"""
         _where = "oq.owner_id=$1" + (project_predicate("oq.") if project_id else "")
         _wargs = project_args.copy()
         if days:
@@ -325,6 +328,20 @@ def setup_routes(app: web.Application, pool) -> None:
                     else _json_qa.loads(_prm_raw or "{}"))
             d["quick_actions"] = _qa.suggest(
                 d.get("op_type"), d.get("status"), _res, op_id=op_id, params=_prm)
+            if _qa.project_review_required(_res):
+                d["project_review_required"] = True
+                from services.network_builder import project_pilot_enabled
+
+                project_id = validate_integer(str(_prm.get("project_id")), min_val=1)
+                if not project_pilot_enabled(uid):
+                    d["project_review_message"] = "Доступ к публикациям проекта сейчас закрыт."
+                elif project_id and await pool.fetchval(
+                    "SELECT 1 FROM network_instances WHERE id=$1 AND owner_id=$2", project_id, uid,
+                ):
+                    d["review_project_id"] = project_id
+                    d["project_review_message"] = _obus.PROJECT_PUBLISH_REVIEW_MESSAGE
+                else:
+                    d["project_review_message"] = "Исходный проект недоступен."
         except Exception:
             log.debug("operation_status: быстрые действия недоступны op=%s", op_id)
             d["quick_actions"] = []

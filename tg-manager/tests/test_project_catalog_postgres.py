@@ -301,6 +301,18 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
                 assert expected in result["recurring_stop_reason"]
                 assert "Расписание остановлено" in result["summary"]
                 stopped.assert_awaited_once()
+                before = await (await client.get(f"/api/miniapp/operation/{op_id}", headers=headers)).json()
+                assert before["project_review_required"] is True and before["quick_actions"] == []
+                if changed == "revoked":
+                    assert "review_project_id" not in before
+                    assert "доступ" in before["project_review_message"].lower()
+                else:
+                    assert before["review_project_id"] == project
+                outsider = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+                assert (await client.get(f"/api/miniapp/operation/{op_id}", headers=outsider)).status == 404
+                history = await (await client.get(
+                    f"/api/miniapp/operations?project_id={project}", headers=headers)).json()
+                assert next(row for row in history["operations"] if row["id"] == op_id)["project_review_required"]
                 # Даже когда цель снова доступна, восстановитель не продлевает
                 # цепочку, которую воркер остановил и сохранил в результате.
                 if changed == "detached":
@@ -342,6 +354,18 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
             card = await client.get(f"/api/miniapp/operation/{op_id}", headers=headers)
             assert card.status == 200
             assert expected in await card.text()
+            card_body = await card.json()
+            if changed == "new_target":
+                assert not card_body.get("project_review_required")
+            else:
+                assert card_body["review_project_id"] == project
+            if changed == "invalid_targets":
+                await pool.execute("DELETE FROM network_instances WHERE id=$1 AND owner_id=$2", project, OWNER)
+                deleted_project = await (await client.get(
+                    f"/api/miniapp/operation/{op_id}", headers=headers)).json()
+                assert deleted_project["project_review_required"] is True
+                assert "review_project_id" not in deleted_project
+                assert deleted_project["project_review_message"] == "Исходный проект недоступен."
             assert await pool.fetchval(
                 "SELECT 1 FROM network_nodes WHERE instance_id=$1 AND ref_id=$2", other, CHANNEL)
 
