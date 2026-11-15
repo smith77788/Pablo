@@ -446,7 +446,8 @@ def setup_routes(app: web.Application, pool) -> None:
                            "status": inst.get("status"),
                            "description": inst.get("description") or "",
                            "project_pilot": pilot,
-                           "nodes": nodes, "edges": edges})
+                           "nodes": nodes, "edges": edges,
+                           "topology_history": await _nb.project_topology_history(pool, uid, nid)})
 
     async def network_deploy_plan(request: web.Request) -> web.Response:
         return await _network_deployment(request, preview=True)
@@ -669,16 +670,16 @@ def setup_routes(app: web.Application, pool) -> None:
         return _json_resp(res) if res["ok"] else _err(res["error"], res["status"])
 
     async def network_delete_edge(request: web.Request) -> web.Response:
+        from services import network_builder as nb
+
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         edge_id = validate_integer(request.match_info["edge_id"], min_val=1)
         if edge_id is None:
             return _err("Неверный идентификатор", 400)
-        result = await pool.execute(
-            "DELETE FROM network_edges WHERE id=$1 AND instance_id IN "
-            "(SELECT id FROM network_instances WHERE owner_id=$2)", edge_id, uid)
-        return _json_resp({"ok": True}) if result == "DELETE 1" else _err("Связь не найдена", 404)
+        deleted = await nb.delete_project_edge(pool, uid, edge_id)
+        return _json_resp({"ok": True}) if deleted else _err("Связь не найдена", 404)
 
     async def network_templates(request: web.Request) -> web.Response:
         uid = _get_uid(request)

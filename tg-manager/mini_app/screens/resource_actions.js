@@ -57,6 +57,12 @@ function openNetworkResourceActions(project, trigger) {
     primary: [
       ['Открыть топологию', () => selectNetwork(id)],
       ['Журнал проекта', () => openOps(id)],
+      ['История изменений топологии', inProject(() => {
+        const history = document.getElementById('netTopologyHistory');
+        history.open = true;
+        history.querySelector('summary').focus();
+        history.scrollIntoView({block: 'start'});
+      })],
     ],
     secondary: [['Копировать ID проекта', () => copyText(String(id))]],
     groups: [['Топология', [

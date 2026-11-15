@@ -88,6 +88,12 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
                 again = await (await client.post(path + "/edges", headers=owner,
                     json={"from_id": node, "to_id": unbound["id"]})).json()
                 assert again == {"ok": True, "id": edge_id, "already_linked": True}
+                reverse = await (await client.post(path + "/edges", headers=owner,
+                    json={"from_id": unbound["id"], "to_id": node})).json()
+                edge_path = f"{base}/edges/{reverse['id']}"
+                assert (await client.delete(edge_path, headers=outsider)).status == 404
+                assert (await client.delete(edge_path, headers=owner)).status == 200
+                assert (await client.delete(edge_path, headers=owner)).status == 404
 
                 detail = await (await client.get(path, headers=owner)).json()
                 channel = next(item for item in detail["nodes"] if item["id"] == node)
@@ -131,12 +137,31 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
                        RETURNING id""", OWNER, project)
                 assert (await client.delete(detach, headers=owner)).status == 409
                 await pool.execute("UPDATE operation_queue SET status='pending' WHERE id=$1", running)
+                with monkeypatch.context() as failure:
+                    failure.setattr("database.db.record_manual_action",
+                                    AsyncMock(side_effect=RuntimeError("Синтетический сбой аудита")))
+                    assert (await client.delete(detach, headers=owner)).status == 500
+                assert await pool.fetchval("SELECT 1 FROM network_nodes WHERE id=$1", node)
+                assert await pool.fetchval("SELECT 1 FROM network_edges WHERE id=$1", edge_id)
                 assert (await client.delete(detach, headers=owner)).status == 200
                 assert (await client.delete(detach, headers=owner)).status == 404
                 assert (await client.post(cleanup_path, headers=owner, json=confirmation)).status == 409
                 assert not await pool.fetchval(
                     "SELECT 1 FROM operation_audit WHERE owner_id=$1 AND operation_id=$2", OWNER, op_id)
-                assert (await (await client.get(path, headers=owner)).json())["edges"] == []
+                assert (await client.get(path, headers=outsider)).status == 404
+                final = await (await client.get(path, headers=owner)).json()
+                assert final["edges"] == []
+                history = final["topology_history"]
+                assert [event["label"] for event in history] == [
+                    "Узел отвязан от проекта", "Связь удалена", "Связь удалена",
+                    "Связь добавлена", "Связь добавлена", "Узел добавлен", "Узел добавлен",
+                ]
+                assert history[0]["target"] == f"project:{project} node:{node} channel:{CHANNEL}"
+                assert history[1]["target"] == f"project:{project} edge:{edge_id} {node} → {unbound['id']}"
+                assert all(event["occurred_at"] for event in history)
+                nearby = await (await client.get(f"{base}/{other_project}", headers=owner)).json()
+                assert len(nearby["topology_history"]) == 1
+                assert f"node:{second['id']}" in nearby["topology_history"][0]["target"]
                 assert (await (await client.get(targets_path, headers=owner)).json())["total"] == 0
                 assert (await client.post("/api/miniapp/mass_publish", headers=owner, json=payload)).status == 409
                 stopped = await op_worker._exec_mass_publish(pool, None, running, OWNER, submit.await_args.args[3])
@@ -145,6 +170,17 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
                 assert await pool.fetchval("SELECT 1 FROM network_nodes WHERE id=$1", second["id"])
                 assert await pool.fetchval("SELECT 1 FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
                                            OWNER, CHANNEL)
+                neighbor_cleanup = {**cleanup, "project_id": other_project}
+                prepared = await client.post(cleanup_path, headers=owner,
+                                             json={**neighbor_cleanup, "preview": True})
+                applied = await client.post(cleanup_path, headers=owner, json={
+                    **neighbor_cleanup, "token": (await prepared.json())["token"],
+                })
+                assert applied.status == 200, await applied.text()
+                nearby = await (await client.get(f"{base}/{other_project}", headers=owner)).json()
+                assert nearby["topology_history"][0]["label"] == "Ресурс отвязан по результатам проверки"
+                assert nearby["topology_history"][0]["target"] == f"channel:{CHANNEL} project:{other_project}"
+                assert nearby["topology_history"][0]["operation_id"] == str(op_id)
         finally:
             await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER + 1, foreign)
 

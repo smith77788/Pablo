@@ -8853,6 +8853,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div id="netDeployPlan" style="padding:0 16px"></div>
       <div class="lst" id="netNodesList"></div>
       <div class="lst" id="netEdgesList" style="margin-top:8px"></div>
+      <details id="netTopologyHistory" style="margin:12px 16px" hidden>
+        <summary>История изменений топологии</summary>
+        <div id="netTopologyHistoryEntries" class="lst"></div>
+      </details>
     </div>
     <div class="sec" style="margin-top:12px">🔁 Кросспостинг <span class="sec-act" onclick="runCrosspost()">Прогнать →</span></div>
     <div class="lst" id="crosspostList" style="padding:0 16px"><div style="font-size:12px;color:var(--hint)">Правила создаются при развёртывании связки с ребром «кросспостинг».</div></div>
@@ -34794,6 +34798,9 @@ async function selectNetwork(netId) {
   _currentNetId = netId;
   const publish = document.getElementById('netPublishProject');
   const journal = document.getElementById('netProjectOps');
+  const history = document.getElementById('netTopologyHistory');
+  history.hidden = true;
+  history.open = false;
   journal.hidden = publish.hidden = true;
   const el = document.getElementById('netTopologyNodes');
   el.style.display = 'block';
@@ -34811,7 +34818,21 @@ async function selectNetwork(netId) {
     window._lastNetData = d;
     renderNetTopology(d);
     renderNetNodesEdges(d);
+    renderProjectTopologyHistory(d.topology_history);
+    history.hidden = false;
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
+}
+
+function renderProjectTopologyHistory(entries) {
+  const rows = Array.isArray(entries) ? entries : [];
+  txt('netTopologyHistoryEntries', rows.length ? rows.map(event => {
+    const time = event.occurred_at ? new Date(event.occurred_at).toLocaleString('ru-RU') : '';
+    const checkLink = /^[1-9]\d*$/.test(event.operation_id)
+      ? `<button type="button" class="btn btn-s" data-operation-id="${esc(event.operation_id)}"
+                 onclick="openOpDetail(this.dataset.operationId)">Открыть проверку</button>` : '';
+    return `<div class="li"><div class="li-body"><div class="li-name">${esc(event.label)}</div>
+      <div class="li-sub">${esc([event.target, time].filter(Boolean).join(' · '))}</div></div>${checkLink}</div>`;
+  }).join('') : '<div class="li">Пока нет записей об изменениях</div>');
 }
 
 function renderNetTopology(d) {

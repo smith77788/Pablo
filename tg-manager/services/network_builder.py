@@ -318,6 +318,33 @@ async def project_catalog(pool, owner_id: int, kind: str, *, search="", ids=None
     )
 
 
+async def project_topology_history(pool, owner_id: int, project_id: int) -> list[dict]:
+    from services.infra_hub import ACTION_RU
+
+    rows = await pool.fetch(
+        """SELECT action, target, operation_id, occurred_at FROM operation_audit
+            WHERE owner_id=$1 AND result='success' AND (
+                action IN ('project_node_add','project_node_detach','project_edge_add','project_edge_remove')
+                    AND target LIKE $2
+                OR action='restriction_cleanup_detach' AND target LIKE $3
+            )
+            ORDER BY occurred_at DESC NULLS LAST, id DESC LIMIT 30""",
+        owner_id, f"project:{project_id} %", f"% project:{project_id}",
+    )
+    return [{"label": ACTION_RU[row["action"]], "target": row["target"],
+             "operation_id": str(row["operation_id"]) if row["operation_id"] is not None else None,
+             "occurred_at": row["occurred_at"].isoformat() if row["occurred_at"] else None}
+            for row in rows]
+
+
+async def _record_topology_change(conn, owner_id, project_id, action, target):
+    from database.db import record_manual_action
+
+    await record_manual_action(
+        conn, owner_id, action, target=f"project:{project_id} {target}", require_audit=True,
+    )
+
+
 async def add_project_node(pool, instance_id: int, node_type: str, label: str,
                    ref_id: int | None = None, *, owner_id: int) -> dict:
     async with pool.acquire() as conn, conn.transaction():
@@ -341,6 +368,8 @@ async def add_project_node(pool, instance_id: int, node_type: str, label: str,
         node_id = await conn.fetchval(
             """INSERT INTO network_nodes(instance_id,node_type,label,ref_id)
                VALUES($1,$2,$3,$4) RETURNING id""", instance_id, node_type, label, ref_id)
+        resource = f" {node_type}:{ref_id}" if ref_id is not None else ""
+        await _record_topology_change(conn, owner_id, instance_id, "project_node_add", f"node:{node_id}{resource}")
     return {"ok": True, "id": node_id}
 
 
@@ -367,6 +396,8 @@ async def add_project_edge(pool, instance_id: int, source_node_id: int, target_n
             """INSERT INTO network_edges(instance_id,source_node_id,target_node_id,edge_type)
                VALUES($1,$2,$3,$4) RETURNING id""",
             instance_id, source_node_id, target_node_id, edge_type)
+        await _record_topology_change(conn, owner_id, instance_id, "project_edge_add",
+                                      f"edge:{edge_id} {source_node_id} → {target_node_id}")
     return {"ok": True, "id": edge_id}
 
 
@@ -385,9 +416,10 @@ async def detach_node(pool, owner_id: int, node_id: int) -> dict:
             project_id, owner_id,
         ):
             return {"ok": False, "status": 404, "error": "Сеть не найдена"}
-        if not await conn.fetchval(
-            "SELECT id FROM network_nodes WHERE id=$1 AND instance_id=$2 FOR UPDATE", node_id, project_id,
-        ):
+        node = await conn.fetchrow(
+            "SELECT node_type, ref_id FROM network_nodes WHERE id=$1 AND instance_id=$2 FOR UPDATE", node_id, project_id,
+        )
+        if node is None:
             return {"ok": False, "status": 404, "error": "Узел не найден"}
         if await conn.fetchval(
             """SELECT 1 FROM operation_queue WHERE owner_id=$1 AND status='running'
@@ -401,11 +433,34 @@ async def detach_node(pool, owner_id: int, node_id: int) -> dict:
                AND (source_node_id=$1 OR target_node_id=$1) LIMIT 1""", node_id, project_id,
         ):
             return {"ok": False, "status": 409, "error": "У узла есть связь из другой сети"}
-        await conn.execute(
-            """DELETE FROM network_edges WHERE instance_id=$1 AND (source_node_id=$2 OR target_node_id=$2)""",
+        removed_edges = await conn.fetch(
+            """DELETE FROM network_edges WHERE instance_id=$1 AND (source_node_id=$2 OR target_node_id=$2)
+               RETURNING id, source_node_id, target_node_id""",
             project_id, node_id)
+        for edge in sorted(removed_edges, key=lambda row: row["id"]):
+            await _record_topology_change(conn, owner_id, project_id, "project_edge_remove",
+                                          f"edge:{edge['id']} {edge['source_node_id']} → {edge['target_node_id']}")
         await conn.execute("DELETE FROM network_nodes WHERE id=$1 AND instance_id=$2", node_id, project_id)
+        resource = f" {node['node_type']}:{node['ref_id']}" if node["ref_id"] is not None else ""
+        await _record_topology_change(conn, owner_id, project_id, "project_node_detach", f"node:{node_id}{resource}")
     return {"ok": True}
+
+
+async def delete_project_edge(pool, owner_id: int, edge_id: int) -> bool:
+    async with pool.acquire() as conn, conn.transaction():
+        project_id = await conn.fetchval(
+            """SELECT p.id FROM network_instances p JOIN network_edges e ON e.instance_id=p.id
+                WHERE e.id=$1 AND p.owner_id=$2 FOR UPDATE OF p""", edge_id, owner_id)
+        if project_id is None:
+            return False
+        edge = await conn.fetchrow(
+            """DELETE FROM network_edges WHERE id=$1 AND instance_id=$2
+               RETURNING source_node_id, target_node_id""", edge_id, project_id)
+        if edge is None:
+            return False
+        await _record_topology_change(conn, owner_id, project_id, "project_edge_remove",
+                                      f"edge:{edge_id} {edge['source_node_id']} → {edge['target_node_id']}")
+    return True
 
 
 async def add_node(pool: asyncpg.Pool, instance_id: int, node_type: str,

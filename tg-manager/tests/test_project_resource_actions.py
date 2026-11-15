@@ -9,6 +9,41 @@ from tests.miniapp_source import js_function
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="нет node")
+def test_topology_history_menu_and_safe_rendering():
+    source = "\n".join(js_function(name) for name in
+                       ("openNetworkResourceActions", "renderProjectTopologyHistory"))
+    subprocess.run(["node", "-"], input=source + """
+const assert = require('node:assert/strict');
+let menu, html, selected, focused;
+const history = {open: false, querySelector: () => ({focus: () => {focused = true;}}), scrollIntoView() {}};
+const showResourceActions = (title, actions) => {menu = actions;};
+const document = {getElementById: () => history};
+const STACK = ['s-network-builder'];
+const window = {};
+let _currentNetId;
+const selectNetwork = async id => { selected = _currentNetId = id; window._lastNetData = {id}; };
+const openNetAddNodeModal = () => {};
+const openNetAddEdgeModal = () => {};
+const txt = (id, content) => {html = content;};
+const esc = value => String(value).replaceAll('<', '&lt;');
+(async () => {
+  openNetworkResourceActions({id: 8, name: 'Проект'});
+  await menu.primary.find(([label]) => label === 'История изменений топологии')[1]();
+  assert.equal(selected, 8);
+  assert.ok(history.open && focused);
+  renderProjectTopologyHistory([]);
+  assert.match(html, /Пока нет записей/);
+  renderProjectTopologyHistory([{label: 'Узел добавлен', target: '<script>9007199254740993'}]);
+  assert.match(html, /&lt;script>9007199254740993/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /Открыть проверку/);
+  renderProjectTopologyHistory([{label: 'Отвязка', operation_id: '9007199254740993'}]);
+  assert.match(html, /data-operation-id="9007199254740993"/);
+})().catch(error => {console.error(error); process.exitCode = 1;});
+""", text=True, check=True)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="нет node")
 def test_project_menu_routes_only_applicable_actions():
     actions = js_function("resourceActionsFor") + "\n" + js_function("projectResourceActions")
     check = """

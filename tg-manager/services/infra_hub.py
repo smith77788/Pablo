@@ -246,6 +246,11 @@ async def rebalance_apply(pool, owner_id: int) -> dict:
 # (warmup) и журнал ручных действий (account_delete/...). Тип операции
 # переводится по описанию из operation_bus.OP_REGISTRY.
 ACTION_RU: dict[str, str] = {
+    "project_node_add": "Узел добавлен",
+    "project_node_detach": "Узел отвязан от проекта",
+    "project_edge_add": "Связь добавлена",
+    "project_edge_remove": "Связь удалена",
+    "restriction_cleanup_detach": "Ресурс отвязан по результатам проверки",
     "warmup": "Прогрев аккаунта",
     "join": "Вступление в чат",
     "leave": "Выход из чата",
