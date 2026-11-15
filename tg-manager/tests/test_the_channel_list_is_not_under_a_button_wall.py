@@ -43,7 +43,7 @@ def test_at_most_two_rows_of_buttons_above_the_list():
     ("imp_gr", "importAllResources:groups"),
     ("refresh", "refreshChannelsMeta"),
     ("mine", "reclassifyChannels"),
-    ("problems", "openRestrictionCleanup"),
+    ("problems", "openRestrictionCleanup:0"),
     ("removed", "openRemovedChannels"),
     (None, None),
 ])
@@ -55,7 +55,7 @@ async function askChoice(t, opts) {{ offered = opts.map(o => o.value); return {j
 function importAllResources(k) {{ called.push('importAllResources:' + k); }}
 function refreshChannelsMeta() {{ called.push('refreshChannelsMeta'); }}
 function reclassifyChannels() {{ called.push('reclassifyChannels'); }}
-function openRestrictionCleanup(x) {{ called.push('openRestrictionCleanup'); }}
+function openRestrictionCleanup(id) {{ called.push('openRestrictionCleanup:' + id); }}
 function openRemovedChannels() {{ called.push('openRemovedChannels'); }}
 {js_function("chMoreActions")}
 (async () => {{ await chMoreActions(); console.log(JSON.stringify({{called, offered}})); }})();
@@ -64,7 +64,7 @@ function openRemovedChannels() {{ called.push('openRemovedChannels'); }}
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert res["called"] == ([expected] if expected else []), res
-    assert len(res["offered"]) == 6
+    assert res["offered"] == ["imp_ch", "imp_gr", "refresh", "mine", "problems", "removed"]
 
 
 def test_choice_rows_put_the_hint_under_the_label():

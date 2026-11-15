@@ -25,9 +25,40 @@ def test_cleanup_opens_from_the_operation_card_and_shield_links_to_the_card():
 def test_cleanup_recovery_uses_existing_screens_and_exact_bot_id():
     source = js_function("openOperationCleanup")
     assert "openRemovedChannels()" in source
+    assert "openRemovedChannels(String(item.id))" in source
+    assert "openRemovedChannels(select.value)" in source
     assert "openBot(String(item.id))" in source
     assert "appendRecovery(body, applied.filter(item => item.outcome === 'applied'))" in source
     assert "item.can_restore === true" in source
+
+
+def test_targeted_recovery_keeps_exact_id_and_discards_late_list():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("нужен node")
+    script = """
+const assert = require('node:assert/strict');
+const box = {};
+const pending = [];
+const document = {getElementById: () => box};
+const showModal = () => {};
+const empty = (...parts) => parts.join(' ');
+const esc = String;
+const api = path => new Promise(resolve => pending.push({path, resolve}));
+(async () => {
+  const first = openRemovedChannels();
+  const second = openRemovedChannels('9007199254740993');
+  assert.equal(pending[1].path, '/api/miniapp/channels/removed?channel_id=9007199254740993');
+  pending[1].resolve({channels:[{channel_id_text:'9007199254740993', title:'Цель'}]});
+  await second;
+  assert.match(box.innerHTML, /data-restore-channel="9007199254740993"/);
+  pending[0].resolve({channels:[]});
+  await first;
+  assert.match(box.innerHTML, /Цель/);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    subprocess.run([node, "-"], input=js_function("openRemovedChannels") + "\n" + script,
+                   text=True, check=True)
 
 
 def test_cleanup_confirms_exact_targets_in_chromium():

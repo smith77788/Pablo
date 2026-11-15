@@ -12707,15 +12707,24 @@ async function removeChannel(chId, _el, label) {
 // Удалённые владельцем и пропавшие в Telegram каналы/чаты. Раньше удалённый
 // канал возвращал следующий «Импорт с аккаунтов», а канал, удалённый в самом
 // Telegram, висел в списке и брался в рассылки, пока не падал каждый раз.
-async function openRemovedChannels() {
+async function openRemovedChannels(channelId = '') {
   showModal('mo-removed-channels');
   const box = document.getElementById('rmChList');
   if (!box) return;
+  const request = Symbol();
+  box.removalRequest = request;
   box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/channels/removed');
+    const d = await api('/api/miniapp/channels/removed' +
+      (channelId ? '?channel_id=' + encodeURIComponent(channelId) : ''));
+    if (box.removalRequest !== request) return;
     const rows = d.channels || [];
-    if (!rows.length) { box.innerHTML = empty('✅','Пусто','Удалённых и недоступных каналов нет'); return; }
+    if (!rows.length) {
+      box.innerHTML = empty('✅', 'Пусто', channelId
+        ? 'Этот ресурс уже отсутствует в списке восстановления'
+        : 'Удалённых и недоступных каналов нет');
+      return;
+    }
     box.innerHTML = rows.map(c => {
       const id = String(c.channel_id_text ?? c.channel_id);
       const name = c.title || (c.username ? '@'+c.username : 'Канал #'+c.channel_id);
@@ -12724,9 +12733,11 @@ async function openRemovedChannels() {
         : '<span class="badge b-gy">🗑 Удалён вами</span>';
       const hint = c.reason === 'gone' && c.detail ? `<div class="li-sub">${esc(c.detail)}</div>` : '';
       return `<div class="li" style="cursor:default"><div class="li-body"><div class="li-name">${esc(name)}</div>${why}${hint}</div>
-        <button class="btn btn-s" style="padding:6px 10px;min-width:0;font-size:12px" data-restore-channel="${esc(id)}" onclick="restoreRemovedChannel(this.dataset.restoreChannel, this)">↩️ Вернуть</button></div>`;
+        <button class="btn btn-s" style="padding:6px 10px;min-width:0;font-size:12px" data-restore-channel="${esc(id)}" data-restore-scope="${esc(channelId)}" onclick="restoreRemovedChannel(this.dataset.restoreChannel, this)">↩️ Вернуть</button></div>`;
     }).join('');
-  } catch(e) { box.innerHTML = errHtml(errRu(e), retryCall('openRemovedChannels')); }
+  } catch(e) {
+    if (box.removalRequest === request) box.innerHTML = errHtml(errRu(e), retryCall('openRemovedChannels', channelId));
+  }
 }
 
 async function restoreRemovedChannel(chId, el) {
@@ -12734,7 +12745,7 @@ async function restoreRemovedChannel(chId, el) {
   try {
     await api(`/api/miniapp/channel/${chId}/restore`, {method:'POST'});
     toast('↩️ Канал возвращён в систему — он снова в списке каналов');
-    openRemovedChannels();
+    if (!el || el.isConnected) openRemovedChannels(el?.dataset.restoreScope || '');
   } catch(e) { if (el) el.disabled = false; toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 // ── Профиль аккаунта (модалка) ───────────────────────────

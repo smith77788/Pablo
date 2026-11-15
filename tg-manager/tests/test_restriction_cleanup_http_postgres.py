@@ -244,19 +244,36 @@ def test_removed_channel_can_be_restored_by_exact_id_through_api(monkeypatch):
 
     async def scenario(pool, op_id):
         assert await db.remove_managed_channel(pool, OWNER, CHANNEL)
+        await pool.execute(
+            "UPDATE removed_channels SET removed_at=now()-interval '1 day' WHERE owner_id=$1 AND channel_id=$2",
+            OWNER, CHANNEL)
+        await pool.execute(
+            """INSERT INTO removed_channels(owner_id, channel_id, acc_id, reason, title, type)
+               SELECT $1, n, 111, 'owner', 'Другой ресурс', 'channel' FROM generate_series(1, 501) n""",
+            OWNER)
         app = web.Application()
         mini_app_channels.setup_routes(app, pool)
         owner = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
         other = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
         async with TestClient(TestServer(app)) as client:
             removed = await client.get("/api/miniapp/channels/removed", headers=owner)
-            item = (await removed.json())["channels"][0]
+            assert all(row["channel_id_text"] != str(CHANNEL) for row in (await removed.json())["channels"])
+            listing = "/api/miniapp/channels/removed"
+            for bad in ("0", "oops", str(2**63), "1&channel_id=2"):
+                assert (await client.get(listing + "?channel_id=" + bad, headers=owner)).status == 400
+            exact = listing + "?channel_id=" + str(CHANNEL)
+            assert (await (await client.get(exact, headers=other)).json())["channels"] == []
+            rows = (await (await client.get(exact, headers=owner)).json())["channels"]
+            assert len(rows) == 1
+            item = rows[0]
             assert item["channel_id"] == CHANNEL and item["channel_id_text"] == str(CHANNEL)
             assert "catalog_metadata" not in item and "access_hash" not in item
             path = f"/api/miniapp/channel/{item['channel_id_text']}/restore"
             assert (await client.post(path, headers=other)).status == 404
             response = await client.post(path, headers=owner)
             assert response.status == 200, await response.text()
+            assert (await (await client.get(exact, headers=owner)).json())["channels"] == []
+            assert (await client.post(f"/api/miniapp/channel/{2**63}/restore", headers=owner)).status == 400
             assert (await client.post(path, headers=owner)).status == 404
 
     asyncio.run(_run(scenario))

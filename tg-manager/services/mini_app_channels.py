@@ -34,7 +34,7 @@ def setup_routes(app: web.Application, pool) -> None:
         channel_manage_confirmed, channel_manage_worker_op, managed_channel_role,
     )
     from services.security import (
-        check_sql_suspicious, selection_ids, validate_integer, validate_string,
+        check_sql_suspicious, selection_ids, tg_id, validate_integer, validate_string,
     )
 
     # Режимы задержки массового вступления. Единственный потребитель —
@@ -657,10 +657,14 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        raw_id = request.query.get("channel_id")
+        channel_id = tg_id(raw_id) if raw_id is not None else None
+        if raw_id is not None and (channel_id is None or len(request.query.getall("channel_id")) != 1):
+            return _err("Неверный идентификатор канала", 400)
         try:
             from database.db import list_removed_channels
 
-            rows = await list_removed_channels(pool, uid)
+            rows = await list_removed_channels(pool, uid, channel_id=channel_id)
         except Exception:
             log.exception("channels_removed uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -675,9 +679,8 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-        except (KeyError, ValueError):
+        ch_id = tg_id(request.match_info.get("ch_id"))
+        if ch_id is None:
             return _err("Неверный идентификатор канала", 400)
         try:
             from bot.utils.subscription import get_channel_limit, get_effective_channel_count

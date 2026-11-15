@@ -16,7 +16,7 @@ try {
       outcome:'skipped', reason:'Изменились права', finding_reason:'Сбой наблюдателя' };
     window.cleanupCalls = [];
     let lostResponse = false;
-    window.openRemovedChannels = () => { window.cleanupRecovery = 'channels'; };
+    window.openRemovedChannels = id => { window.cleanupRecovery = id; };
     window.api = async (path, options) => {
       if (!options) return {findings:[item, skipped, {kind:'channel', id:'9007199254740995',
         title:'Отключённый канал', status:'restricted', active:false, can_disable:false, can_restore:true,
@@ -88,8 +88,8 @@ try {
     {path, body:{...base, token:'подтверждение'}},
   ]);
   await page.getByRole('button', {name:'Обновить список'}).click();
-  await page.getByRole('button', {name:'Открыть список восстановления каналов и групп'}).click();
-  assert.equal(await page.evaluate(() => window.cleanupRecovery), 'channels');
+  await page.getByRole('button', {name:'Восстановление · Отключённый канал'}).click();
+  assert.equal(await page.evaluate(() => window.cleanupRecovery), '9007199254740995');
   assert.equal(await page.getByRole('dialog').count(), 0);
 } finally {
   await browser.close();

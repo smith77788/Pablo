@@ -49,13 +49,39 @@ async function openOperationCleanup(opId) {
 
   function appendRecovery(container, items) {
     const bots = items.filter(item => item.kind === 'bot');
-    if (items.some(item => item.kind === 'channel' || item.kind === 'group')) {
+    const channels = items.filter(item => item.kind === 'channel' || item.kind === 'group');
+    if (channels.length) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'btn btn-s';
       button.textContent = 'Открыть список восстановления каналов и групп';
       button.onclick = () => { close.click(); openRemovedChannels(); };
       container.append(button);
+    }
+    if (channels.length === 1) {
+      const [item] = channels;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-s';
+      button.textContent = 'Восстановление · ' + title(item);
+      button.onclick = () => { close.click(); openRemovedChannels(String(item.id)); };
+      container.append(button);
+    } else if (channels.length > 1) {
+      const select = document.createElement('select');
+      select.className = 'sel';
+      select.setAttribute('aria-label', 'Ресурс для восстановления');
+      select.add(new Option('Выберите ресурс для восстановления', ''));
+      for (const item of channels) {
+        select.add(new Option(title(item) + ' · ID: ' + item.id, String(item.id)));
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-s';
+      button.textContent = 'Открыть выбранный ресурс';
+      button.disabled = true;
+      select.onchange = () => { button.disabled = !select.value; };
+      button.onclick = () => { if (select.value) { close.click(); openRemovedChannels(select.value); } };
+      container.append(select, button);
     }
     for (const item of bots) {
       const button = document.createElement('button');
@@ -280,7 +306,7 @@ async function openOperationCleanup(opId) {
           + '<button type="button" class="btn btn-s" style="width:100%;margin-top:12px">Обновить список</button>';
         body.querySelector('button').onclick = load;
         body.querySelector('button').focus();
-        if (payload.action === 'disable') {
+        if (payload.action === 'disable' && !result.replayed) {
           appendRecovery(body, applied.filter(item => item.outcome === 'applied'));
         }
         notice.textContent = '';

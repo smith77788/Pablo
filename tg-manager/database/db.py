@@ -4745,15 +4745,16 @@ async def remove_managed_channel_on_connection(
     return True
 
 
-async def list_removed_channels(pool: asyncpg.Pool, owner_id: int, limit: int = 500) -> list[dict]:
+async def list_removed_channels(pool: asyncpg.Pool, owner_id: int, limit: int = 500,
+                                *, channel_id: int | None = None) -> list[dict]:
     """Удалённые владельцем и пропавшие в Telegram каналы — для экрана."""
     rows = await pool.fetch(
         """SELECT channel_id, reason, detail, title, username, type, removed_at
              FROM removed_channels
-            WHERE owner_id=$1
-            ORDER BY removed_at DESC
+            WHERE owner_id=$1 AND ($3::bigint IS NULL OR channel_id=$3)
+            ORDER BY removed_at DESC, channel_id
             LIMIT $2""",
-        owner_id, int(limit),
+        owner_id, int(limit), channel_id,
     )
     return [dict(r) for r in rows or []]
 
