@@ -390,3 +390,12 @@ def test_ui_screen_wired():
     # экран зовёт наш API и переходит в детали операции
     assert "/api/miniapp/check_owned_restrictions" in js
     assert "function openShieldCheck" in js and "function runShieldCheck" in js
+
+
+def test_gigagroup_findings_are_saved_as_groups():
+    pool = _FakePool(
+        channels=[_ch(101, "large", type_="gigagroup")], bots=[], accounts=[_acc(1)],
+    )
+    result = _exec(pool, [_verdict(erc.STATUS_HIDDEN)])
+    assert result["findings"][0]["kind"] == "group"
+    assert result["findings"][0]["status"] == erc.STATUS_HIDDEN

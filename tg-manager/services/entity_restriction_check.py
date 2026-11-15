@@ -67,6 +67,8 @@ def _classify_resolve_error(err: str) -> tuple[bool, Optional[str]]:
     # Незнакомая ошибка — честнее пометить как сбой проверки, чем выдать вердикт.
     return (False, redact_secrets(err, limit=len(err))[:160] or "неизвестная ошибка резолва")
 
+CHANNEL_GROUP_TYPES = ("chat", "group", "megagroup", "supergroup", "gigagroup")
+
 # ── Статусы на сущность ──────────────────────────────────────────────────────
 STATUS_CLEAN = "clean"            # ограничений не обнаружено
 STATUS_RESTRICTED = "restricted"  # официальное ограничение Telegram (с причиной)

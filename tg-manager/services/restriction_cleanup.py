@@ -12,7 +12,7 @@ from services import entity_restriction_check as check
 from services.secret_masking import redact_secrets
 
 _KINDS = frozenset({"bot", "channel", "group"})
-_GROUP_TYPES = ("chat", "group", "megagroup", "supergroup")
+_GROUP_TYPES = check.CHANNEL_GROUP_TYPES
 _MAX_TARGETS = 1000
 _STALE = "Состояние ресурсов изменилось. Откройте предпросмотр заново."
 
@@ -76,6 +76,25 @@ async def _report(conn, owner_id, op_id, *, lock=False):
         if not isinstance(status, str) or not (check.is_problem(status) or status == check.STATUS_CHECK_FAILED):
             continue
         entries[kind, item_id] = entry
+    channel_ids = [item_id for kind, item_id in entries if kind == "channel"]
+    if channel_ids:
+        # Старые проверки сохраняли gigagroup с видом channel. Исправляем
+        # вид по каталогу владельца, не меняя исходный вердикт проверки.
+        old_groups = await conn.fetch(
+            """SELECT channel_id FROM managed_channels
+                WHERE owner_id=$1 AND channel_id=ANY($2::bigint[]) AND lower(type)='gigagroup'
+                UNION
+               SELECT channel_id FROM removed_channels
+                WHERE owner_id=$1 AND channel_id=ANY($2::bigint[]) AND lower(type)='gigagroup'""",
+            owner_id, channel_ids,
+        )
+        old_ids = {row["channel_id"] for row in old_groups}
+        if old_ids:
+            entries = {
+                ("group", item_id) if kind == "channel" and item_id in old_ids else (kind, item_id): entry
+                for (kind, item_id), entry in entries.items()
+                if not (kind == "channel" and item_id in old_ids and ("group", item_id) in entries)
+            }
     return entries, result.get("findings_version") != 2
 
 
@@ -107,9 +126,9 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
              FROM network_nodes n JOIN network_instances p ON p.id=n.instance_id
             WHERE p.owner_id=$1
               AND ((n.node_type='bot' AND n.ref_id=ANY($2::bigint[]))
-               OR (n.node_type IN ('channel', 'group', 'chat', 'megagroup', 'supergroup') AND n.ref_id=ANY($3::bigint[])))
+               OR (n.node_type=ANY($4::text[]) AND n.ref_id=ANY($3::bigint[])))
             ORDER BY p.id, n.id""" + (" FOR UPDATE OF n" if lock else ""),
-        owner_id, bots, channels,
+        owner_id, bots, channels, ["channel", *_GROUP_TYPES],
     ):
         kind = "group" if row["node_type"] in _GROUP_TYPES else row["node_type"]
         key = kind, row["ref_id"]

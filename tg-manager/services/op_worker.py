@@ -16450,7 +16450,7 @@ async def _exec_check_owned_restrictions(
     entities: list[dict] = []
     for r in ch_rows or []:
         _type = (r.get("type") or "").lower()
-        kind = "group" if _type in ("megagroup", "supergroup", "group", "chat") else "channel"
+        kind = "group" if _type in _erc.CHANNEL_GROUP_TYPES else "channel"
         _uname = (r.get("username") or "").strip() or None
         entities.append({
             "kind": kind,

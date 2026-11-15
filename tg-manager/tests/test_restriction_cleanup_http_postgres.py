@@ -446,3 +446,117 @@ def test_linked_owners_compete_for_one_catalog_slot(monkeypatch, competitor):
                                OWNER, linked)
 
     asyncio.run(_run(scenario))
+
+
+@pytest.mark.parametrize("profile_count", [295, 1000])
+def test_cleanup_large_report_through_signed_http(monkeypatch, profile_count):
+    import math
+    from time import perf_counter
+
+    from database import db
+
+    secret = "123456:synthetic-large-cleanup"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    statuses = ("restricted", "unreachable", "hidden", "check_failed")
+
+    async def scenario(pool, op_id):
+        profiles = await pool.fetch(
+            """INSERT INTO tg_accounts(owner_id,phone,session_str)
+               SELECT $1, 'synthetic-cleanup-scale-' || n, 'synthetic-scale-session'
+                 FROM generate_series(1,$2::int) n RETURNING id""", OWNER, profile_count)
+        account_ids = [row["id"] for row in profiles]
+        try:
+            await pool.execute(
+                """INSERT INTO managed_channels(owner_id,acc_id,channel_id,type,title)
+                   SELECT $1, aid, $2::bigint+ordinal,
+                          CASE WHEN ordinal=$4 THEN 'gigagroup' ELSE 'channel' END,
+                          'Синтетический ресурс ' || ordinal
+                     FROM unnest($3::bigint[]) WITH ORDINALITY AS p(aid,ordinal)""",
+                OWNER, CHANNEL, account_ids, profile_count,
+            )
+            last = CHANNEL + profile_count
+            findings = [
+                {"kind": "channel", "id": CHANNEL + n, "status": statuses[(n - 1) % len(statuses)]}
+                for n in range(1, profile_count + 1)
+            ]
+            await pool.execute("UPDATE operation_queue SET result=$2::jsonb WHERE id=$1", op_id,
+                               json.dumps({"findings_version": 2, "findings": findings}))
+            projects = await pool.fetch(
+                """INSERT INTO network_instances(owner_id,name)
+                   VALUES($1,'Основной'),($1,'Соседний') RETURNING id""", OWNER)
+            project, other = (row["id"] for row in projects)
+            await pool.execute(
+                """INSERT INTO network_nodes(instance_id,node_type,ref_id)
+                   SELECT $1, CASE WHEN n=$3 THEN 'group' ELSE 'channel' END, $2::bigint+n
+                     FROM generate_series(1,$3::int) n""", project, CHANNEL, profile_count)
+            await pool.execute(
+                "INSERT INTO network_nodes(instance_id,node_type,ref_id) VALUES($1,'gigagroup',$2)",
+                other, last)
+            headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+            path = f"/api/miniapp/operations/{op_id}/cleanup"
+            app = web.Application()
+            mini_app_operations.setup_routes(app, pool)
+
+            async with TestClient(TestServer(app)) as client:
+                async def timed(method, **kwargs):
+                    started = perf_counter()
+                    response = await client.request(method, path, headers=headers, **kwargs)
+                    body = await response.json()
+                    elapsed = (perf_counter() - started) * 1000
+                    assert response.status == 200, body
+                    return body, elapsed
+
+                report, _ = await timed("GET")
+                assert len(report["findings"]) == profile_count
+                assert {item["status"] for item in report["findings"]} == set(statuses)
+                final = report["findings"][-1]
+                assert (final["kind"], final["id"], final["status"]) == (
+                    "group", str(last), findings[-1]["status"])
+                assert {item["id"] for item in final["projects"]} == {project, other}
+                targets = [{"kind": item["kind"], "id": item["id"]} for item in report["findings"]]
+                payload = {"action": "detach", "project_id": project, "targets": targets}
+                get_times, preview_times = [], []
+                for _ in range(25):
+                    _, reading = await timed("GET")
+                    preview, planning = await timed("POST", json={**payload, "preview": True})
+                    get_times.append(reading)
+                    preview_times.append(planning)
+                    assert len(preview["items"]) == profile_count
+                    assert all(item["outcome"] == "ready" for item in preview["items"])
+                applied, apply_ms = await timed("POST", json={**payload, "token": preview["token"]})
+                assert applied["count"] == profile_count
+                after, _ = await timed("GET")
+                assert after["history_has_more"] and len(after["history"]) == 50
+                assert await pool.fetchval("SELECT count(*) FROM network_nodes WHERE instance_id=$1", project) == 0
+                assert await pool.fetchval(
+                    "SELECT ref_id FROM network_nodes WHERE instance_id=$1", other) == last
+                assert await pool.fetchval(
+                    "SELECT count(*) FROM operation_audit WHERE owner_id=$1 AND operation_id=$2", OWNER, op_id,
+                ) == profile_count
+
+                group = [{"kind": "group", "id": str(last)}]
+                for action in ({"action": "detach", "project_id": other}, {"action": "disable"}):
+                    request = {**action, "targets": group}
+                    preview, _ = await timed("POST", json={**request, "preview": True})
+                    result, _ = await timed("POST", json={**request, "token": preview["token"]})
+                    assert result["count"] == 1
+                archive, _ = await timed("GET")
+                assert archive["findings"][-1]["kind"] == "group"
+                assert archive["findings"][-1]["can_restore"]
+                assert await db.restore_removed_channel(pool, OWNER, last)
+                restored, _ = await timed("GET")
+                assert restored["findings"][-1]["can_disable"]
+                assert restored["history"][0]["action"] == "restore"
+
+            def percentiles(values):
+                ordered = sorted(values)
+                return tuple(round(ordered[math.ceil(len(ordered) * p) - 1], 1) for p in (0.5, 0.95))
+
+            print(f"profiles={profile_count} n=25 get_p50_p95_ms={percentiles(get_times)} "
+                  f"preview_p50_p95_ms={percentiles(preview_times)} apply_ms={apply_ms:.1f}")
+        finally:
+            await pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[])",
+                               OWNER, account_ids)
+
+    asyncio.run(_run(scenario))
