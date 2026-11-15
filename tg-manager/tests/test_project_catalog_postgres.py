@@ -152,7 +152,7 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
 
 
 @pytest.mark.parametrize("changed", ["detached", "revoked", "invalid_targets", "new_target"])
-def test_queued_project_publish_rechecks_scope_before_preparing_post(monkeypatch, changed):
+def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed):
     from database import db
     from services import account_manager, editorial_review
 
@@ -162,6 +162,8 @@ def test_queued_project_publish_rechecks_scope_before_preparing_post(monkeypatch
     monkeypatch.setattr("bot.utils.subscription.require_plan", AsyncMock(return_value=True))
     monkeypatch.setattr(op_worker, "circuit_breaker_status", AsyncMock(return_value={}))
     monkeypatch.setattr(db, "notify_if_enabled", AsyncMock())
+    stopped = AsyncMock()
+    monkeypatch.setattr(op_worker, "_notify_recurring_stopped", stopped)
     editor = AsyncMock(return_value=(False, []))
     send = AsyncMock(return_value={"message_id": 1})
     monkeypatch.setattr(editorial_review, "autonomous_block", editor)
@@ -179,6 +181,7 @@ def test_queued_project_publish_rechecks_scope_before_preparing_post(monkeypatch
         mini_app_api.setup_routes(app, pool)
         headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
         tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        client_time = tomorrow.astimezone(timezone(timedelta(hours=5, minutes=45)))
 
         async with TestClient(TestServer(app)) as client:
             endpoint = "/api/miniapp/mass_publish"
@@ -194,7 +197,7 @@ def test_queued_project_publish_rechecks_scope_before_preparing_post(monkeypatch
             assert (await preview.json())["sample"][0]["channel_id_text"] == str(CHANNEL)
             payload = {"project_id": project, "project_channel_id": str(CHANNEL),
                        "channel_ids": [str(CHANNEL)], "text": "Синтетический пост",
-                       "scheduled_for": tomorrow.isoformat()}
+                       "scheduled_for": client_time.isoformat(), "repeat_interval_min": 15}
             for invalid in (True, float(project) + .5):
                 bad = await client.post(endpoint, headers=headers, json={**payload, "project_id": invalid})
                 assert bad.status == 400
@@ -208,6 +211,16 @@ def test_queued_project_publish_rechecks_scope_before_preparing_post(monkeypatch
             params = json.loads(queued["params"])
             assert (params["project_id"], params["channel_ids"], queued["status"]) == (project, [CHANNEL], "pending")
             assert queued["scheduled_for"] == tomorrow
+
+            # Не исполняем другие сугубо тестовые задания, оставленные общей базой.
+            excluded = {row["id"] for row in await pool.fetch(
+                "SELECT id FROM operation_queue WHERE status='pending' AND id<>$1", op_id)}
+            monkeypatch.setattr(op_worker, "_active_op_ids", excluded)
+            monkeypatch.setattr(op_worker, "_active_op_tasks", set())
+            monkeypatch.setattr(op_worker, "_MAX_PARALLEL", len(excluded) + 2)
+            await op_worker._process_pending(pool, None)
+            assert not op_worker._active_op_tasks
+            assert await pool.fetchval("SELECT status FROM operation_queue WHERE id=$1", op_id) == "pending"
 
             if changed == "detached":
                 path = f"/api/miniapp/operations/{check_id}/cleanup"
@@ -244,11 +257,25 @@ def test_queued_project_publish_rechecks_scope_before_preparing_post(monkeypatch
                     project, CHANNEL + 1)
                 expected = "Опубликовано"
 
-            # Выполняем только выбранную синтетическую строку штатным диспетчером.
-            claimed = await pool.fetchrow(
-                """UPDATE operation_queue SET status='running', started_at=now() WHERE id=$1
-                   RETURNING id, owner_id, op_type, params""", op_id)
-            await op_worker._run_op_task(pool, None, dict(claimed))
+            # Сдвигаем только срок в синтетической строке, затем запускаем два тика поллера.
+            await pool.execute(
+                "UPDATE operation_queue SET scheduled_for=now()-interval '1 second' WHERE id=$1", op_id)
+            dispatched = asyncio.Event()
+            run_guarded = op_worker._run_op_task_guarded
+
+            async def wait_for_pollers(*args):
+                await dispatched.wait()
+                await run_guarded(*args)
+
+            with monkeypatch.context() as pollers:
+                pollers.setattr(op_worker, "_run_op_task_guarded", wait_for_pollers)
+                try:
+                    await asyncio.gather(*(op_worker._process_pending(pool, None) for _ in range(2)))
+                    tasks = list(op_worker._active_op_tasks)
+                    assert [task.get_name() for task in tasks] == [f"op:{op_id}"]
+                finally:
+                    dispatched.set()
+                await asyncio.wait_for(asyncio.gather(*tasks), timeout=15)
             state = await pool.fetchrow("SELECT status, result FROM operation_queue WHERE id=$1", op_id)
             assert state["status"] == ("done" if changed == "new_target" else "failed")
             result = json.loads(state["result"])
@@ -259,10 +286,36 @@ def test_queued_project_publish_rechecks_scope_before_preparing_post(monkeypatch
                 editor.assert_awaited_once()
                 assert await pool.fetchval(
                     "SELECT target FROM operation_log WHERE op_id=$1 AND status='ok'", op_id) == str(CHANNEL)
+                following = await pool.fetchrow(
+                    """SELECT status, params, scheduled_for > now() AS future FROM operation_queue
+                        WHERE owner_id=$1 AND id<>$2 AND params->>'project_id'=$3""",
+                    OWNER, op_id, str(project),
+                )
+                assert following["status"] == "pending" and following["future"]
+                assert json.loads(following["params"])["channel_ids"] == [CHANNEL]
+                stopped.assert_not_awaited()
             else:
                 assert expected in result["summary"]
                 editor.assert_not_awaited()
                 send.assert_not_awaited()
+                assert expected in result["recurring_stop_reason"]
+                assert "Расписание остановлено" in result["summary"]
+                stopped.assert_awaited_once()
+                # Даже когда цель снова доступна, восстановитель не продлевает
+                # цепочку, которую воркер остановил и сохранил в результате.
+                if changed == "detached":
+                    await pool.execute(
+                        "INSERT INTO network_nodes(instance_id,node_type,ref_id) VALUES($1,'channel',$2)",
+                        project, CHANNEL)
+                elif changed == "revoked":
+                    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+                await pool.execute(
+                    "UPDATE operation_queue SET finished_at=now()-interval '10 minutes' WHERE id=$1", op_id)
+                await op_worker._watchdog_recurring_chain(pool, None)
+                assert await pool.fetchval(
+                    "SELECT count(*) FROM operation_queue WHERE owner_id=$1 AND params->>'project_id'=$2",
+                    OWNER, str(project),
+                ) == 1
             card = await client.get(f"/api/miniapp/operation/{op_id}", headers=headers)
             assert card.status == 200
             assert expected in await card.text()

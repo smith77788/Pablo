@@ -3960,6 +3960,7 @@ async def _watchdog_recurring_chain(pool: asyncpg.Pool, bot: Bot) -> int:
                   AND finished_at > now() - make_interval(hours => $2::int)
                   AND COALESCE((params->>'repeat_interval_min')::int, 0) > 0
                   AND params->>'recurring_next_op' IS NULL
+                  AND result->>'recurring_stop_reason' IS NULL
                 ORDER BY finished_at
                 LIMIT $3::int""",
             _RECURRING_REPAIR_MIN_AGE_MIN,
@@ -5825,7 +5826,7 @@ async def _notify_recurring_stopped(
 
 async def _reschedule_recurring(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, op_type: str,
-    params: dict, *, productive: bool, why: str = "",
+    params: dict, *, productive: bool, why: str = "", stop_reason: str = "",
 ) -> None:
     """Поставить следующий круг повторяющейся операции — и не оборвать расписание молча.
 
@@ -5867,6 +5868,9 @@ async def _reschedule_recurring(
     except (TypeError, ValueError):
         _rmin = 0
     if _rmin <= 0:
+        return
+    if stop_reason:
+        await _notify_recurring_stopped(pool, bot, owner_id, op_id, op_type, stop_reason)
         return
 
     try:
@@ -6662,6 +6666,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     pool, bot, op_id, owner_id, op_type, params,
                     productive=op_status.is_productive(_final_status),
                     why=(result.get("reason") or result.get("summary") or "")[:200],
+                    stop_reason=result.get("recurring_stop_reason") or "",
                 )
             # Audit trail: write operation completion to operation_audit.
             # Outcome согласован с финальным статусом — провал не пишется как success.
@@ -7786,6 +7791,14 @@ async def _reference_media_bytes(pool, owner_id: int, refs, acc_ids) -> bytes | 
     return None
 
 
+def _project_publication_refused(params: dict, reason: str) -> dict:
+    result = {"status": "failed", "summary": reason}
+    if params.get("repeat_interval_min"):
+        result["summary"] = f"{reason} Расписание остановлено. Подтвердите новый запуск."
+        result["recurring_stop_reason"] = reason
+    return result
+
+
 async def _exec_mass_publish(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -7798,16 +7811,16 @@ async def _exec_mass_publish(
         from services.security import selection_ids, tg_id, validate_integer
 
         if not project_pilot_enabled(owner_id):
-            return {"status": "failed", "summary": "Доступ к публикациям проекта отозван."}
+            return _project_publication_refused(params, "Доступ к публикациям проекта отозван.")
         project_id = validate_integer(str(params["project_id"]), min_val=1, max_val=2**31 - 1)
         channel_ids, error = selection_ids(params, "channel_ids", what="канал")
         if project_id is None or error or not channel_ids or any(tg_id(cid) is None for cid in channel_ids):
-            return {"status": "failed",
-                    "summary": "Некорректный список каналов проекта. Подтвердите новый список."}
+            return _project_publication_refused(
+                params, "Некорректный список каналов проекта. Подтвердите новый список.")
         channels = await project_publish_channels(pool, owner_id, project_id)
         if not set(channel_ids).issubset({row["channel_id"] for row in channels}):
-            return {"status": "failed",
-                    "summary": "Каналы больше не доступны в проекте. Подтвердите новый список."}
+            return _project_publication_refused(
+                params, "Каналы больше не доступны в проекте. Подтвердите новый список.")
         target = "channels"
 
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
