@@ -43,11 +43,13 @@ async function openOperationCleanup(opId) {
   const labels = {channel:'Канал', group:'Группа', bot:'Бот', account:'Аккаунт'};
   const listStyle = 'max-height:42vh;overflow-y:auto;overscroll-behavior:contain';
   const defaultTargetLimit = 1000;
+  const pageSize = 40;
   const actionText = {detach:'Убрать из проекта', disable:'Отключить в Infragram'};
   const title = item => item.title || (labels[item.kind] || 'Ресурс') + ' #' + item.id;
-  const row = (item, text) => `<div class="row"><div class="row-body">
+  const row = (item, text, recovery) => `<div class="row"><div class="row-body">
     <div class="row-name" style="overflow-wrap:anywhere">${esc(title(item))}</div>
-    <div class="row-val" style="white-space:normal">ID: ${esc(item.id)} · ${esc(text)}</div></div></div>`;
+    <div class="row-val" style="white-space:normal">ID: ${esc(item.id)} · ${esc(text)}</div>
+    ${recovery}</div></div>`;
   const statusText = {unreachable:'Недоступен снаружи', restricted:'Ограничен Telegram',
     hidden:'Скрыт из глобального поиска', check_failed:'Не удалось проверить'};
   const outcomeText = {detached:'Убран из проекта', disabled:'Отключён', applied:'Применено', changed:'Применено',
@@ -155,7 +157,8 @@ async function openOperationCleanup(opId) {
         + '<input type="search" class="inp" id="opCleanupSearch" placeholder="Название или точный ID" autocomplete="off"></div>'
         + '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">'
         + '<button type="button" class="btn btn-s" data-cleanup-select-all>Выбрать доступные</button>'
-        + '<button type="button" class="btn btn-s" data-cleanup-clear>Снять выбор</button></div>'
+        + '<button type="button" class="btn btn-s" data-cleanup-clear>Снять выбор</button>'
+        + '<button type="button" class="btn btn-s" data-cleanup-selected aria-pressed="false">Только выбранные</button></div>'
         + `<div class="lst" data-cleanup-findings style="${listStyle}"></div>`
         + '<div data-cleanup-pages role="group" aria-label="Страницы результатов" hidden style="margin-top:8px">'
         + '<button type="button" class="btn btn-s" data-cleanup-prev>Назад</button> '
@@ -175,13 +178,14 @@ async function openOperationCleanup(opId) {
       const button = body.querySelector('[data-cleanup-preview]');
       const selectAll = body.querySelector('[data-cleanup-select-all]');
       const clear = body.querySelector('[data-cleanup-clear]');
+      const selectedOnly = body.querySelector('[data-cleanup-selected]');
       const scope = body.querySelector('[data-cleanup-scope]');
       if (!projects.size) action.querySelector('[value="detach"]').disabled = true;
       const selected = new Set();
-      const pageSize = 40;
       const indexed = findings.map((item, index) => ({item, index}));
       let filtered = indexed;
       let page = 0;
+      let showSelected = false;
       const canSelect = item => action.value === 'detach'
         ? Boolean(project.value && (item.projects || []).some(p => String(p.id) === project.value))
         : item.can_disable === true;
@@ -192,6 +196,8 @@ async function openOperationCleanup(opId) {
         selectAll.disabled = remaining <= 0 || !filtered.some(
           ({item, index}) => !selected.has(index) && canSelect(item));
         clear.disabled = !count;
+        selectedOnly.disabled = !count;
+        selectedOnly.setAttribute('aria-pressed', String(showSelected));
         const insideFilter = count ? filtered.filter(({index}) => selected.has(index)).length : 0;
         const hidden = count - insideFilter;
         button.textContent = count ? 'Проверить план · ' + count : 'Проверить план';
@@ -208,9 +214,12 @@ async function openOperationCleanup(opId) {
           ? 'Связь исчезнет только из выбранного проекта.'
           : 'Ресурс перестанет использоваться в Infragram. Управление можно восстановить.';
         const query = search.value.trim().toLocaleLowerCase('ru-RU');
-        filtered = indexed.filter(({item}) => cleanupFindingMatches(item, status.value, query));
+        filtered = indexed.filter(({item, index}) =>
+          showSelected ? selected.has(index) : cleanupFindingMatches(item, status.value, query));
         const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
         page = Math.min(page, pageCount - 1);
+        status.disabled = search.disabled = showSelected;
+        selectAll.hidden = showSelected;
         pages.hidden = pageCount <= 1;
         selectAll.textContent = pageCount > 1 ? 'Выбрать доступные во всём фильтре' : 'Выбрать доступные';
         pageLabel.textContent = 'Страница ' + (page + 1) + ' из ' + pageCount;
@@ -244,8 +253,10 @@ async function openOperationCleanup(opId) {
       };
       clear.onclick = () => {
         selected.clear();
-        renderFindings();
+        showSelected = false;
+        resetPage();
       };
+      selectedOnly.onclick = () => { showSelected = !showSelected; resetPage(); };
       list.onchange = event => {
         const input = event.target;
         if (!input.matches('[data-cleanup-target]') || input.disabled) return;
@@ -253,7 +264,12 @@ async function openOperationCleanup(opId) {
         if (!input.checked) selected.delete(index);
         else if (selected.size < maxTargets) selected.add(index);
         else input.checked = false;
-        refreshSelection();
+        if (showSelected) {
+          if (!selected.size) showSelected = false;
+          renderFindings();
+          if (showSelected) list.querySelector('[data-cleanup-target]')?.focus();
+          else (selectAll.disabled ? action : selectAll).focus();
+        } else refreshSelection();
       };
       const resetPage = () => {
         page = 0;
@@ -261,6 +277,7 @@ async function openOperationCleanup(opId) {
       };
       const resetScope = () => {
         selected.clear();
+        showSelected = false;
         resetPage();
       };
       action.onchange = resetScope;
@@ -310,25 +327,91 @@ async function openOperationCleanup(opId) {
     }
   }
 
+  function renderReview(items, describe, isSuccessful, {result = false, canRecover = false} = {}) {
+    const panel = body.querySelector('[data-cleanup-review]');
+    if (!items.length) return;
+    const successful = items.filter(isSuccessful).length;
+    panel.innerHTML = '<div class="field"><label for="opCleanupOutcome">Показать</label>'
+      + '<select class="sel" id="opCleanupOutcome">'
+      + `<option value="">Все цели · ${items.length}</option>`
+      + `<option value="yes">${result ? 'Изменены' : 'Готовы'} · ${successful}</option>`
+      + `<option value="no">${result ? 'Без изменений' : 'Пропущены'} · ${items.length - successful}</option></select></div>`
+      + '<div class="field"><label for="opCleanupReviewSearch">Найти в списке</label>'
+      + '<input type="search" class="inp" id="opCleanupReviewSearch" placeholder="Название или точный ID" autocomplete="off"></div>'
+      + `<div class="lst" data-cleanup-review-list style="${listStyle}"></div>`
+      + '<div data-cleanup-review-pages role="group" aria-label="Страницы списка" hidden>'
+      + '<button type="button" class="btn btn-s" data-cleanup-review-prev>Назад</button> '
+      + '<span data-cleanup-review-page role="status"></span> '
+      + '<button type="button" class="btn btn-s" data-cleanup-review-next>Вперёд</button></div>';
+    const outcome = panel.querySelector('#opCleanupOutcome');
+    const search = panel.querySelector('#opCleanupReviewSearch');
+    const list = panel.querySelector('[data-cleanup-review-list]');
+    const pages = panel.querySelector('[data-cleanup-review-pages]');
+    const pageLabel = panel.querySelector('[data-cleanup-review-page]');
+    const previous = panel.querySelector('[data-cleanup-review-prev]');
+    const next = panel.querySelector('[data-cleanup-review-next]');
+    const indexed = items.map((item, index) => ({item, index}));
+    let page = 0;
+    const render = () => {
+      const query = search.value.trim().toLocaleLowerCase('ru-RU');
+      const filtered = indexed.filter(({item}) =>
+        (!outcome.value || isSuccessful(item) === (outcome.value === 'yes'))
+        && cleanupFindingMatches(item, '', query));
+      const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+      pages.hidden = pageCount === 1;
+      pageLabel.textContent = 'Страница ' + (page + 1) + ' из ' + pageCount;
+      previous.disabled = page === 0;
+      next.disabled = page + 1 >= pageCount;
+      list.innerHTML = filtered.slice(page * pageSize, (page + 1) * pageSize).map(({item, index}) => {
+        const recover = canRecover && isSuccessful(item) && ['bot', 'channel', 'group'].includes(item.kind);
+        const label = item.kind === 'bot' ? 'Открыть настройки бота' : 'Открыть восстановление';
+        const recovery = recover ? `<button type="button" class="btn btn-s" data-cleanup-recover="${index}"
+          aria-label="${esc(label + ' · ' + title(item) + ' · ID: ' + item.id)}">${label}</button>` : '';
+        return row(item, describe(item), recovery);
+      }).join('');
+      if (!filtered.length) list.textContent = 'В этом срезе нет ресурсов.';
+      list.scrollTop = 0;
+    };
+    const reset = () => { page = 0; render(); };
+    outcome.onchange = reset;
+    search.oninput = reset;
+    previous.onclick = () => { page--; render(); if (previous.disabled) next.focus(); };
+    next.onclick = () => { page++; render(); if (next.disabled) previous.focus(); };
+    list.onclick = event => {
+      const button = event.target.closest('[data-cleanup-recover]');
+      if (!button || !canRecover) return;
+      const item = items[Number(button.dataset.cleanupRecover)];
+      if (!item || !isSuccessful(item)) return;
+      close.click();
+      if (item.kind === 'bot') openBot(String(item.id));
+      else if (item.kind === 'channel' || item.kind === 'group') openRemovedChannels(String(item.id));
+    };
+    render();
+  }
+
   function renderPreview(payload, preview, restoreSelection) {
     const items = Array.isArray(preview.items) ? preview.items : [];
     const readyCount = items.filter(item => item.outcome === 'ready').length;
     notice.textContent = '';
     const project = items.flatMap(item => item.projects || []).find(p => String(p.id) === payload.project_id);
-    const scope = project ? ' · ' + (project.name || '#' + project.id) : '';
-    body.innerHTML = `<div class="field-note">${esc(actionText[payload.action] + scope)} · ${readyCount} к применению · ${items.length - readyCount} пропущено</div>`
-      + (items.length ? `<div class="lst" style="${listStyle}">` + items.map(item => {
-        const planned = payload.action === 'detach'
-          ? 'Отвязать от проекта · связей: ' + (item.edge_ids || []).length : actionText.disable;
-        return row(item, [statusText[item.status], item.finding_reason,
-          item.outcome === 'ready' ? planned : item.reason || 'Пропущено'].filter(Boolean).join(' · '));
-      }).join('') + '</div>' : '<div class="field-note">Сейчас нет ресурсов для этого действия.</div>')
-      + (readyCount && preview.token ? '<button type="button" class="btn btn-p" data-cleanup-apply style="width:100%;margin-top:12px">Подтвердить</button>' : '')
+    const scope = payload.project_id ? ' · ' + (project?.name || 'Проект #' + payload.project_id) : '';
+    const summary = actionText[payload.action] + scope
+      + ' · ' + readyCount + ' к применению · ' + (items.length - readyCount) + ' пропущено';
+    body.innerHTML = `<div class="field-note" data-cleanup-summary tabindex="-1">${esc(summary)}</div>`
+      + '<div data-cleanup-review></div>'
+      + (!items.length ? '<div class="field-note">Сейчас нет ресурсов для этого действия.</div>' : '')
+      + (readyCount && preview.token ? `<button type="button" class="btn btn-p" data-cleanup-apply style="width:100%;margin-top:12px">Подтвердить · ${readyCount}</button>` : '')
       + '<button type="button" class="btn btn-s" data-cleanup-reload style="width:100%;margin-top:8px">Вернуться к выбору</button>';
     const reload = body.querySelector('[data-cleanup-reload]');
     reload.onclick = restoreSelection;
     const apply = body.querySelector('[data-cleanup-apply]');
-    (apply || reload).focus();
+    renderReview(items, item => {
+      const planned = payload.action === 'detach'
+        ? 'Отвязать от проекта · связей: ' + (item.edge_ids || []).length : actionText.disable;
+      return [statusText[item.status], item.finding_reason,
+        item.outcome === 'ready' ? planned : item.reason || 'Пропущено'].filter(Boolean).join(' · ');
+    }, item => item.outcome === 'ready');
+    body.querySelector('[data-cleanup-summary]').focus();
     if (!apply) return;
     apply.onclick = async () => {
       if (apply.disabled) return;
@@ -339,16 +422,17 @@ async function openOperationCleanup(opId) {
       try {
         const result = await api(path, {method:'POST', body:JSON.stringify({...payload, token:preview.token})});
         const applied = Array.isArray(result.items) ? result.items : [];
-        body.innerHTML = '<div class="field-note">' + (result.replayed ? 'Сохранённый результат' : 'Результат') + '</div>'
-          + (applied.length ? `<div class="lst" style="${listStyle}">` + applied.map(item => row(item,
-            [outcomeText[item.outcome] || 'Нет подтверждения изменения', item.outcome === 'applied' ? '' : item.reason].filter(Boolean).join(' · '))).join('') + '</div>'
-            : '<div class="field-note">Сервер не вернул результаты по ресурсам.</div>')
-          + '<button type="button" class="btn btn-s" style="width:100%;margin-top:12px">Обновить список</button>';
-        body.querySelector('button').onclick = load;
-        body.querySelector('button').focus();
-        if (payload.action === 'disable' && !result.replayed) {
-          appendRecovery(body, applied.filter(item => item.outcome === 'applied'));
-        }
+        body.innerHTML = '<div class="field-note" data-cleanup-summary tabindex="-1">'
+          + (result.replayed ? 'Сохранённый результат' : 'Результат') + '</div>'
+          + '<div data-cleanup-review></div>'
+          + (!applied.length ? '<div class="field-note">Сервер не вернул результаты по ресурсам.</div>' : '')
+          + '<button type="button" class="btn btn-s" data-cleanup-refresh style="width:100%;margin-top:12px">Обновить список</button>';
+        renderReview(applied, item => [outcomeText[item.outcome] || 'Нет подтверждения изменения',
+          item.outcome === 'applied' ? '' : item.reason, statusText[item.status], item.finding_reason].filter(Boolean).join(' · '),
+        item => item.outcome === 'applied',
+        {result:true, canRecover:payload.action === 'disable' && !result.replayed});
+        body.querySelector('[data-cleanup-refresh]').onclick = load;
+        body.querySelector('[data-cleanup-summary]').focus();
         notice.textContent = '';
       } catch (e) {
         apply.disabled = false;

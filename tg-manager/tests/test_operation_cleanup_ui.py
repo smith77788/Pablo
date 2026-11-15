@@ -28,7 +28,7 @@ def test_cleanup_recovery_uses_existing_screens_and_exact_bot_id():
     assert "openRemovedChannels(String(item.id))" in source
     assert "openRemovedChannels(select.value)" in source
     assert "openBot(String(item.id))" in source
-    assert "appendRecovery(body, applied.filter(item => item.outcome === 'applied'))" in source
+    assert "canRecover:payload.action === 'disable' && !result.replayed" in source
     assert "item.can_restore === true" in source
 
 
@@ -151,9 +151,11 @@ def test_cleanup_search_and_paging_keep_exact_selection_on_large_report():
 const assert = require('node:assert/strict');
 const makeElement = () => ({
   value: '', childNodes: [], dataset: {}, querySelectorAll: () => [],
-  focus() {}, append() {}, replaceChildren() {},
+  focus() { focused = this; }, append() {}, replaceChildren() {}, setAttribute() {},
+  click() { this.onclick?.(); },
 });
-const overlay = {...makeElement(), addEventListener() {}, style: {}, isConnected: true};
+let focused;
+const overlay = {...makeElement(), addEventListener() {}, style: {}, isConnected: true, remove() {}};
 const body = makeElement();
 const notice = makeElement();
 const close = makeElement();
@@ -165,7 +167,15 @@ const control = name => {
 overlay.querySelector = selector => ({
   '[data-cleanup-body]': body, '[data-cleanup-notice]': notice, '[data-cleanup-close]': close,
 })[selector];
-body.querySelector = control;
+let bodyMarkup = '';
+Object.defineProperty(body, 'innerHTML', {get: () => bodyMarkup, set(markup) {
+  bodyMarkup = markup;
+  control('[data-cleanup-apply]').disabled = false;
+}});
+body.querySelector = name => name === '[data-cleanup-apply]' && !bodyMarkup.includes('data-cleanup-apply')
+  ? null : control(name);
+control('[data-cleanup-review]').querySelector = control;
+control('[data-cleanup-findings]').querySelector = control;
 control('[data-cleanup-action]').querySelector = control;
 control('[data-cleanup-action]').value = 'detach';
 const project = control('[data-cleanup-project]');
@@ -173,16 +183,24 @@ project.value = '7';
 const document = {querySelector: () => null, createElement: () => overlay, body: {appendChild(){}}};
 const esc = String;
 const errRu = e => e.message;
+let recoveryId;
+const openRemovedChannels = id => { recoveryId = id; };
 const firstId = 9007199254740993n;
 const ids = Array.from({length:1000}, (_, i) => String(firstId + BigInt(i)));
 const findings = ids.map((id, i) => ({id, kind:'channel', title:'Ресурс ' + i,
   status: i % 2 ? 'hidden' : 'restricted', projects: [{id: i === 1 ? 8 : 7, name:'Проект'}],
-  active:true, can_disable:false}));
+  active:true, can_disable:true}));
 const submissions = [];
+let reviewItems;
+let replayed = false;
 const api = async (path, options) => {
   assert.equal(path, '/api/miniapp/operations/42/cleanup');
   if (!options) return {findings, max_targets:1000};
-  submissions.push(JSON.parse(options.body));
+  const request = JSON.parse(options.body);
+  submissions.push(request);
+  if (reviewItems) return request.preview ? {items:reviewItems, token:'test'}
+    : {items:reviewItems.map(item => ({...item, outcome:item.outcome === 'ready' ? 'applied' : 'skipped'})),
+      replayed};
   throw new Error('Синтетическая ошибка предпросмотра');
 };
 (async () => {
@@ -212,9 +230,28 @@ const api = async (path, options) => {
   search.value = ids[1];
   search.oninput();
   assert.equal(selectAll.disabled, true);
+  const selectedOnly = control('[data-cleanup-selected]');
+  selectedOnly.onclick();
+  assert.equal(search.disabled, true);
+  assert.match(list.innerHTML, new RegExp(ids[999]));
+  assert.equal((list.innerHTML.match(/data-cleanup-target/g) || []).length, 2);
+  list.onchange({target:{matches:() => true, value:'999', checked:false}});
+  assert.doesNotMatch(list.innerHTML, new RegExp(ids[999]));
+  assert.equal((list.innerHTML.match(/data-cleanup-target/g) || []).length, 1);
+  await control('[data-cleanup-preview]').onclick();
+  assert.deepEqual(submissions.shift().targets, [{kind:'channel', id:ids[0]}]);
+  assert.equal(search.disabled, true);
+  selectedOnly.onclick();
+  assert.equal(search.disabled, false);
+  assert.equal(search.value, ids[1]);
+  search.value = ids[999];
+  search.oninput();
+  selectAll.onclick();
+  search.value = ids[1];
+  search.oninput();
   await control('[data-cleanup-preview]').onclick();
   assert.deepEqual(submissions[0], {action:'detach', project_id:'7', targets:[
-    {kind:'channel', id:ids[999]}, {kind:'channel', id:ids[0]},
+    {kind:'channel', id:ids[0]}, {kind:'channel', id:ids[999]},
   ], preview:true});
 
   project.value = '8';
@@ -231,6 +268,61 @@ const api = async (path, options) => {
   await control('[data-cleanup-preview]').onclick();
   assert.deepEqual(submissions[1].targets.map(target => target.id),
     ids.filter((id,i) => i % 2 === 1 && i !== 1));
+
+  control('[data-cleanup-action]').value = 'disable';
+  control('[data-cleanup-action]').onchange();
+  verdict.value = '';
+  verdict.onchange();
+  selectAll.onclick();
+  reviewItems = findings.map((item,i) => ({...item, outcome:i % 2 ? 'ready' : 'skipped',
+    reason:i % 2 ? '' : 'Идёт публикация', finding_reason:'Диагностика'}));
+  await control('[data-cleanup-preview]').onclick();
+  const reviewList = control('[data-cleanup-review-list]');
+  const reviewPage = control('[data-cleanup-review-page]');
+  const reviewSearch = control('#opCleanupReviewSearch');
+  const outcome = control('#opCleanupOutcome');
+Object.defineProperty(control('[data-cleanup-review]'), 'innerHTML', {set() {
+  outcome.value = '';
+  reviewSearch.value = '';
+}});
+  assert.equal(focused, control('[data-cleanup-summary]'));
+  assert.match(body.innerHTML, /500 к применению · 500 пропущено/);
+  assert.equal((reviewList.innerHTML.match(/class="row-name"/g) || []).length, 40);
+  assert.equal(reviewPage.textContent, 'Страница 1 из 25');
+  control('[data-cleanup-review-next]').onclick();
+  assert.equal(reviewPage.textContent, 'Страница 2 из 25');
+  outcome.value = 'no';
+  outcome.onchange();
+  assert.equal(reviewPage.textContent, 'Страница 1 из 13');
+  assert.match(reviewList.innerHTML, /Ограничен Telegram · Диагностика · Идёт публикация/);
+  assert.doesNotMatch(reviewList.innerHTML, /Скрыт из глобального поиска|data-cleanup-recover/);
+  reviewSearch.value = '#' + ids[999];
+  reviewSearch.oninput();
+  assert.equal(reviewList.textContent, 'В этом срезе нет ресурсов.');
+  await control('[data-cleanup-apply]').onclick();
+  assert.deepEqual(submissions[3], {action:'disable', targets:ids.map(id => ({id, kind:'channel'})), token:'test'});
+  assert.equal((reviewList.innerHTML.match(/class="row-name"/g) || []).length, 40);
+  assert.match(reviewList.innerHTML, /Пропущено · Идёт публикация/);
+  outcome.value = 'yes';
+  outcome.onchange();
+  assert.doesNotMatch(reviewList.innerHTML, /Идёт публикация/);
+  reviewSearch.value = ids[999];
+  reviewSearch.oninput();
+  assert.match(reviewList.innerHTML, /data-cleanup-recover="999"/);
+  reviewList.onclick({target:{closest:() => ({dataset:{cleanupRecover:'999'}})}});
+  assert.equal(recoveryId, ids[999]);
+
+  outcome.value = '';
+  reviewSearch.value = '';
+  await control('[data-cleanup-preview]').onclick();
+  replayed = true;
+  await control('[data-cleanup-apply]').onclick();
+  assert.match(body.innerHTML, /Сохранённый результат/);
+  assert.doesNotMatch(reviewList.innerHTML, /data-cleanup-recover/);
+  reviewItems = reviewItems.map(item => ({...item, outcome:'skipped'}));
+  await control('[data-cleanup-preview]').onclick();
+  assert.equal(body.querySelector('[data-cleanup-apply]'), null);
+  assert.match(body.innerHTML, /0 к применению · 1000 пропущено/);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     subprocess.run([node, "-"], input=source.read_text() + "\n" + script, text=True, check=True)
