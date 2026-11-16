@@ -5188,7 +5188,9 @@ async def journal_op_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
             "журнал целей недоступен, прогон отложен до повтора") from e
 
 
-async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
+async def completed_targets(
+    pool: asyncpg.Pool, op_id: int, *, family_ids: list[int] | None = None,
+) -> set[str]:
     """Цели операции, уже отработанные УСПЕШНО (operation_log, status='ok').
 
     Нужно для идемпотентности повторов. Повтор операции — и автоматический
@@ -5213,7 +5215,7 @@ async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
         "SELECT DISTINCT target FROM operation_log "
         " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND target IS NOT NULL"
         + _obus_reg.REAL_TARGET_SQL,
-        await journal_op_ids(pool, op_id),
+        await journal_op_ids(pool, op_id) if family_ids is None else family_ids,
         log_ctx=f"[completed_targets op={op_id}]", where="completed_targets",
     )
     return {str(r["target"]) for r in (rows or []) if r["target"]}
@@ -14787,6 +14789,29 @@ async def _exec_bulk_dm_adhoc(
         await release_accounts(sorted(_held_ids))
 
 
+async def _channels_changed_after_queueing(
+    pool: asyncpg.Pool, owner_id: int, op_type: str, family_ids: list[int], targets: list[int],
+) -> set[int]:
+    """Ресурсы, для которых очистка или восстановление отменили прежний выбор."""
+    if not targets:
+        return set()
+    rows = await pool.fetch(
+        """SELECT DISTINCT CASE WHEN a.action='channel_restore' THEN a.target
+                                ELSE split_part(a.target, ':', 2) END AS channel_id
+             FROM operation_audit a
+            WHERE a.owner_id=$1 AND a.result='success'
+              AND (a.action='channel_restore' AND a.target=ANY($2::text[])
+                OR a.action='restriction_cleanup_disable' AND a.target=ANY($3::text[]))
+              AND a.occurred_at >= (
+                  SELECT min(queued.created_at) FROM operation_queue queued
+                   WHERE queued.id=ANY($4::bigint[]) AND queued.owner_id=$1 AND queued.op_type=$5)""",
+        owner_id, [str(ch_id) for ch_id in targets],
+        [f"{kind}:{ch_id}" for ch_id in targets for kind in ("channel", "group")],
+        family_ids, op_type,
+    )
+    return {int(row["channel_id"]) for row in rows}
+
+
 async def _exec_pin_last_post(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -14837,17 +14862,12 @@ async def _exec_pin_last_post(
              LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
             WHERE mc.owner_id=$1 AND mc.channel_id=$2 AND mc.acc_id=$3
               AND ($4::int IS NULL OR mc.id=$4)
-              AND a.is_active=TRUE AND NULLIF(a.session_str, '') IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM operation_audit restored
-                   WHERE restored.owner_id=$1 AND restored.action='channel_restore'
-                     AND restored.result='success' AND restored.target=$2::bigint::text
-                     AND restored.occurred_at >= (
-                         SELECT MIN(created_at) FROM operation_queue
-                          WHERE id=ANY($6::bigint[]) AND owner_id=$1 AND op_type='pin_last_post'))""",
-        owner_id, channel_id, account_id, row_id, op_id, family_ids,
+              AND a.is_active=TRUE AND NULLIF(a.session_str, '') IS NOT NULL""",
+        owner_id, channel_id, account_id, row_id, op_id,
     )
-    if not row:
+    if not row or channel_id in await _channels_changed_after_queueing(
+        pool, owner_id, "pin_last_post", family_ids, [channel_id],
+    ):
         return {"status": "failed", "reason": "Канал отключён, восстановлен после постановки или привязка к доступному аккаунту изменилась"}
     acc = dict(row)
     if not await try_claim_account(account_id):
@@ -15472,7 +15492,8 @@ async def _exec_bulk_chan_exec(
     except (TypeError, KeyError, ValueError, OverflowError):
         return {"status": "failed", "reason": "Некорректная привязка канала к аккаунту"}
 
-    already = await completed_targets(pool, op_id)
+    family_ids = await journal_op_ids(pool, op_id)
+    already = await completed_targets(pool, op_id, family_ids=family_ids)
     prior_ok = len({str(ch_id) for ch_id, _ in pairs} & already)
     selected_ids = sorted({ch_id for ch_id, _ in pairs if str(ch_id) not in already})
     catalog = await pool.fetch(
@@ -15481,7 +15502,12 @@ async def _exec_bulk_chan_exec(
         owner_id, selected_ids,
     )
     current = {(row["channel_id"], row["acc_id"]): row for row in catalog}
-    acc_ids = sorted({acc_id for ch_id, acc_id in pairs if (ch_id, acc_id) in current})
+    stale_ids = await _channels_changed_after_queueing(
+        pool, owner_id, "bulk_chan_exec", family_ids,
+        sorted({ch_id for ch_id, acc_id in pairs if (ch_id, acc_id) in current}),
+    )
+    acc_ids = sorted({acc_id for ch_id, acc_id in pairs
+                      if (ch_id, acc_id) in current and ch_id not in stale_ids})
     rows = await resource_selector.select_all_active(
         pool, owner_id, include_ids=acc_ids, min_trust_score=0.0) if acc_ids else []
     acc_map = {int(r["id"]): dict(r) for r in rows}
@@ -15516,6 +15542,8 @@ async def _exec_bulk_chan_exec(
             reason = ""
             if row is None:
                 reason = "Ресурс отключён, удалён или сменил привязку к аккаунту"
+            elif ch_id in stale_ids:
+                reason = "Ресурс отключали или восстанавливали после постановки. Подтвердите новую команду"
             elif acc is None:
                 reason = "Привязанный аккаунт недоступен"
             elif acc_id not in claimed:

@@ -16,11 +16,17 @@ from tests.test_restriction_cleanup_postgres import (
 __all__ = ["pytestmark"]
 
 
-@pytest.mark.parametrize("change", ["disable", "reassign"])
+@pytest.mark.parametrize("change", ["disable", "reassign", "restored", "reimported"])
 def test_queued_channel_edit_revalidates_targets_after_cleanup(monkeypatch, change):
+    from database import db as channel_db
+    from services import mini_app_channels as channel_api
+
     secret = "123456:synthetic-cleanup-authentication-only"
     monkeypatch.setenv("BOT_TOKEN", secret)
     monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    monkeypatch.setattr("bot.utils.subscription.require_plan", AsyncMock(return_value=True))
+    monkeypatch.setattr(op_worker, "circuit_breaker_status", AsyncMock(return_value={}))
+    monkeypatch.setattr(op_worker, "_circuit_breaker_record", AsyncMock())
     editor = AsyncMock(return_value=True)
     monkeypatch.setattr(account_manager, "edit_channel_about", editor)
     monkeypatch.setattr(op_worker, "try_claim_accounts", AsyncMock(return_value=[992660]))
@@ -43,8 +49,12 @@ def test_queued_channel_edit_revalidates_targets_after_cleanup(monkeypatch, chan
             """INSERT INTO operation_queue(owner_id,op_type,status,params)
                VALUES($1,'bulk_chan_exec','pending',$2::jsonb) RETURNING id""",
             OWNER, json.dumps(params))
+        foreign_audit = await pool.fetchval(
+            """INSERT INTO operation_audit(owner_id,action,target,result)
+               VALUES($1,'channel_restore',$2,'success') RETURNING id""", OWNER + 1, str(other))
         app = web.Application()
         mini_app_operations.setup_routes(app, pool)
+        channel_api.setup_routes(app, pool)
         headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
         path = f"/api/miniapp/operations/{check_id}/cleanup"
         action = {"action": "disable", "targets": [CHANNEL_TARGET]}
@@ -53,12 +63,21 @@ def test_queued_channel_edit_revalidates_targets_after_cleanup(monkeypatch, chan
                 preview = await client.post(path, headers=headers, json={**action, "preview": True})
                 assert preview.status == 200, await preview.text()
                 confirmation = {**action, "token": (await preview.json())["token"]}
-                if change == "disable":
+                if change in ("disable", "restored", "reimported"):
                     applied = await client.post(path, headers=headers, json=confirmation)
                     assert applied.status == 200 and (await applied.json())["count"] == 1
                     report = await (await client.get(path, headers=headers)).json()
                     item = next(item for item in report["findings"] if item["id"] == str(CHANNEL))
                     assert item["status"] == "check_failed" and item["can_restore"]
+                    if change == "restored":
+                        assert await channel_db.restore_removed_channel(pool, OWNER, CHANNEL)
+                    elif change == "reimported":
+                        assert await channel_db.add_managed_channels(
+                            pool, OWNER, 992660, [{"id": CHANNEL, "title": "Подключён вновь", "type": "channel"}],
+                            reconnect=True)
+                        assert not await pool.fetchval(
+                            """SELECT 1 FROM operation_audit WHERE owner_id=$1
+                                 AND target=$2 AND action='channel_restore'""", OWNER, str(CHANNEL))
                 else:
                     await pool.execute(
                         "UPDATE managed_channels SET acc_id=992661 WHERE owner_id=$1 AND channel_id=$2",
@@ -94,7 +113,29 @@ def test_queued_channel_edit_revalidates_targets_after_cleanup(monkeypatch, chan
                 editor.assert_awaited_once()
                 assert await pool.fetchval(
                     "SELECT count(*) FROM operation_log WHERE op_id=$1 AND status='skipped'", op_id) == 2
+                if change in ("restored", "reimported"):
+                    skip = next(row for row in journal["logs"] if row["target"] == str(CHANNEL))
+                    assert "Подтвердите новую команду" in skip["message"]
+                    retry_params = {**params, "retry_of_op": op_id}
+                    retry_id = await pool.fetchval(
+                        """INSERT INTO operation_queue(owner_id,op_type,status,params)
+                           VALUES($1,'bulk_chan_exec','pending',$2::jsonb) RETURNING id""",
+                        OWNER, json.dumps(retry_params))
+                    retried = await op_worker._exec_bulk_chan_exec(pool, None, retry_id, OWNER, retry_params)
+                    assert (retried["ok"], retried["fail"]) == (1, 2)
+                    editor.assert_awaited_once()
+
+                    fresh = await client.post(f"/api/miniapp/channel/{CHANNEL}/edit", headers=headers,
+                                              json={"op":"about", "value":"Новое подтверждение"})
+                    assert fresh.status == 200, await fresh.text()
+                    fresh_id = (await fresh.json())["op_id"]
+                    fresh_params = json.loads(await pool.fetchval(
+                        "SELECT params FROM operation_queue WHERE id=$1", fresh_id))
+                    fresh_result = await op_worker._exec_bulk_chan_exec(pool, None, fresh_id, OWNER, fresh_params)
+                    assert fresh_result["ok"] == 1
+                    assert editor.await_args.args[1] == CHANNEL
         finally:
+            await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1 AND id=$2", OWNER + 1, foreign_audit)
             await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
                                OWNER + 1, foreign)
 

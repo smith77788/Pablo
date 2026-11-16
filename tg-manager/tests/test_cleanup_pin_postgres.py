@@ -16,7 +16,8 @@ __all__ = ["pytestmark"]
 
 
 @pytest.mark.parametrize("case", [
-    "success", "legacy", "disabled", "restored", "reassigned", "inactive", "uncertain", "journal_lost", "rejected",
+    "success", "legacy", "disabled", "restored", "legacy_reimported", "reassigned",
+    "inactive", "uncertain", "journal_lost", "rejected",
 ])
 def test_cleanup_and_pin_through_signed_http(monkeypatch, case):
     secret = "123456:synthetic-cleanup-pin"
@@ -76,7 +77,7 @@ def test_cleanup_and_pin_through_signed_http(monkeypatch, case):
             params = json.loads(await pool.fetchval("SELECT params FROM operation_queue WHERE id=$1", op_id))
             assert params["channel_ref"] == CHANNEL and params["managed_channel_row_id"] == row_id
             assert "access_hash" not in params
-            if case == "legacy":
+            if case in ("legacy", "legacy_reimported"):
                 params.pop("managed_channel_row_id")
                 params.update(channel_ref=str(CHANNEL), account_id="992660", access_hash=99)
                 await pool.execute("UPDATE operation_queue SET params=$2::jsonb WHERE id=$1",
@@ -88,11 +89,18 @@ def test_cleanup_and_pin_through_signed_http(monkeypatch, case):
             review = await client.post(cleanup_path, headers=headers, json={**action, "preview": True})
             assert review.status == 200, await review.text()
             confirmation = {**action, "token": (await review.json())["token"]}
-            if case in ("disabled", "restored"):
+            if case in ("disabled", "restored", "legacy_reimported"):
                 applied = await client.post(cleanup_path, headers=headers, json=confirmation)
                 assert applied.status == 200 and (await applied.json())["count"] == 1
                 if case == "restored":
                     assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
+                elif case == "legacy_reimported":
+                    assert await db.add_managed_channels(
+                        pool, OWNER, 992660, [{"id":CHANNEL, "title":"Импорт", "type":"channel"}],
+                        reconnect=True)
+                    assert not await pool.fetchval(
+                        """SELECT 1 FROM operation_audit WHERE owner_id=$1 AND target=$2
+                             AND action='channel_restore'""", OWNER, str(CHANNEL))
             elif case == "reassigned":
                 await pool.execute(
                     "UPDATE managed_channels SET acc_id=992661 WHERE owner_id=$1 AND channel_id=$2",
