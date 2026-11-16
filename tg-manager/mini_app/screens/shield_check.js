@@ -380,8 +380,11 @@ function _restrCleanupRender(list) {
   const rows = list.map(function (x) {
     const ico = kindIco[x.kind] || '🔗';
     const stColor = x.status === 'restricted' ? 'var(--red)' : x.status === 'unreachable' ? 'var(--red)' : 'var(--orange)';
+    // Выбрать можно ЛЮБОЙ проблемный ресурс с id. Недоступные (в Telegram уже
+    // мертвы) отмечены сразу; заблокированные и скрытые из поиска живы, поэтому
+    // не отмечены по умолчанию — владелец решает по каждому сам.
     return '<label class="chk-row" style="display:flex;align-items:flex-start;gap:8px;padding:9px 0;border-top:1px solid var(--sep);font-size:14px">' +
-      '<input type="checkbox" class="restr-cb" ' + (x.dead && x.id_text ? '' : 'disabled') + ' value="' + esc(x.id_text || '') + '" data-kind="' + esc(x.kind || '') + '" style="margin-top:3px">' +
+      '<input type="checkbox" class="restr-cb" ' + (x.id_text ? (x.dead ? 'checked' : '') : 'disabled') + ' value="' + esc(x.id_text || '') + '" data-kind="' + esc(x.kind || '') + '" style="margin-top:3px">' +
       '<div style="flex:1 1 auto;min-width:0">' +
         '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ico + ' ' + esc(x.title || x.id) + '</div>' +
         '<div style="font-size:12px;margin-top:2px"><span style="color:' + stColor + '">' + esc(x.status_label || '') + '</span>' + (x.reason ? ('<span style="color:var(--hint)"> · ' + esc(x.reason) + '</span>') : '') + '</div>' +
@@ -389,8 +392,8 @@ function _restrCleanupRender(list) {
   }).join('');
   return '<div style="font-size:13px;line-height:1.5;color:var(--hint);margin:12px 14px 6px">' +
       'Проверка нашла <b>' + list.length + '</b> ' + _shPlural(list.length) + ' с проблемами. ' +
-      'Можно выбрать недоступные ресурсы для отключения в Infragram. ' +
-      'Ограниченные и скрытые ресурсы показаны для справки.' +
+      'Отметьте, что убрать из вашего списка. <b>Недоступные</b> в Telegram уже мертвы — отмечены сразу. ' +
+      '<b>Заблокированные</b> и <b>скрытые из поиска</b> ещё живы: удаление убирает их только из вашего списка в Infragram, в Telegram они остаются.' +
     '</div>' +
     '<div style="display:flex;gap:8px;margin:0 14px 8px">' +
       '<button class="btn btn-s" onclick="restrCleanupSelectAll(true)" style="flex:1 1 auto;font-size:13px;padding:8px 6px">✅ Все</button>' +
@@ -419,7 +422,7 @@ async function restrCleanupRemove() {
   });
   const n = channel_ids.length + bot_ids.length;
   if (!n) { if (errEl) errEl.textContent = 'Отметьте хотя бы один ресурс'; return; }
-  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nВыбранные недоступные ресурсы будут отключены в Infragram. Управление можно восстановить.')) return;
+  if (!await askConfirm('Убрать ' + n + ' ' + _shPlural(n) + ' из вашего списка?\n\nЭто снятие с учёта в Infragram. Telegram не трогается: недоступные там уже мертвы, а заблокированные и скрытые останутся в Telegram, просто уйдут из вашего каталога.')) return;
   const payload = {};
   if (channel_ids.length) payload.channel_ids = channel_ids;
   if (bot_ids.length) payload.bot_ids = bot_ids;

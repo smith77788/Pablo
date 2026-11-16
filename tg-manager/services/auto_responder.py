@@ -420,10 +420,26 @@ async def notify_broken_bots(pool: asyncpg.Pool, bot) -> int:
             continue
         name = (f"@{r['username']}" if r["username"]
                 else (r["first_name"] or f"бот #{r['bot_id']}"))
+        # У отозванного токена даём отключить бота прямо из уведомления (тот же
+        # owner-scoped путь, что кнопка «Удалить» в карточке: подписчики и
+        # история сохраняются). Только для unauthorized — остальное чинится
+        # само или заменой токена, отключать незачем.
+        _markup = None
+        if (r["last_error"] or "") == "unauthorized":
+            try:
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from bot.callbacks import BotCb
+                _kb = InlineKeyboardBuilder()
+                _kb.button(text="🗑 Отключить бота",
+                           callback_data=BotCb(action="delete", bot_id=int(r["bot_id"])))
+                _markup = _kb.as_markup()
+            except Exception as e:
+                log.debug("auto_responder: кнопка отключения бота не собралась: %s", e)
         try:
             await db.notify_if_enabled(
                 pool, bot, r["added_by"], "restriction",
                 build_alert(name, r["last_error"] or "", r["fail_streak"]),
+                reply_markup=_markup,
                 dedup_key=f"bot_broken:{r['bot_id']}")
             sent += 1
         except Exception:

@@ -67,7 +67,12 @@ def test_cleanup_screen_wired_in_frontend():
     assert "/api/miniapp/restrictions/problems" in js
     assert "/api/miniapp/restrictions/remove_dead" in js
     assert "'s-restrcleanup'" in js and "push('s-restrcleanup')" in js
-    assert "x.dead && x.id_text" in js and "const id = cb.value" in js
+    assert "const id = cb.value" in js
+    # Выбрать можно ЛЮБОЙ проблемный ресурс с id (не только недоступные):
+    # владелец просил убирать и заблокированные, и скрытые из поиска.
+    assert "x.id_text ? (x.dead ? 'checked' : '') : 'disabled'" in js, (
+        "чекбокс должен быть активен для всех проблемных с id, а не только dead"
+    )
 
 
 def test_catalogs_offer_cleanup():
