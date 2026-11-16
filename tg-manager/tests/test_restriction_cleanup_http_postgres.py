@@ -903,12 +903,48 @@ def test_cleanup_large_report_through_signed_http(monkeypatch, profile_count):
                 assert restored["findings"][-1]["can_disable"]
                 assert restored["history"][0]["action"] == "restore"
 
+                await pool.execute(
+                    """INSERT INTO va_channel_admin(owner_id,channel_id,enabled)
+                       VALUES($1,$2,TRUE),($1,$3,TRUE)""", OWNER, CHANNEL, last)
+                request = {"action": "disable", "targets": targets}
+                preview, disable_preview_ms = await timed("POST", json={**request, "preview": True})
+                assert all(item["outcome"] == "ready" for item in preview["items"])
+                result, disable_ms = await timed("POST", json={**request, "token": preview["token"]})
+                assert result["count"] == profile_count
+                assert [(item["id"], item["status"]) for item in result["items"]] == [
+                    (str(item["id"]), item["status"]) for item in findings
+                ]
+                assert await pool.fetchval(
+                    """SELECT count(*) FROM removed_channels WHERE owner_id=$1
+                       AND channel_id BETWEEN $2 AND $3 AND reason=$4""",
+                    OWNER, CHANNEL + 1, last, db.REMOVED_BY_OWNER,
+                ) == profile_count
+                assert not await pool.fetchval(
+                    """SELECT EXISTS(SELECT FROM managed_channels WHERE owner_id=$1
+                       AND channel_id BETWEEN $2 AND $3)""", OWNER, CHANNEL + 1, last,
+                )
+                assert await pool.fetchval(
+                    """SELECT count(*) FROM operation_audit WHERE owner_id=$1 AND operation_id=$2
+                       AND action='restriction_cleanup_disable'""", OWNER, op_id,
+                ) == profile_count + 1
+                assert await pool.fetchval(
+                    "SELECT enabled FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL,
+                )
+                assert not await pool.fetchval(
+                    "SELECT enabled FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2", OWNER, last,
+                )
+                assert await db.restore_removed_channel(pool, OWNER, last)
+                assert await pool.fetchval(
+                    "SELECT type FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, last,
+                ) == "gigagroup"
+
             def percentiles(values):
                 ordered = sorted(values)
                 return tuple(round(ordered[math.ceil(len(ordered) * p) - 1], 1) for p in (0.5, 0.95))
 
             print(f"profiles={profile_count} n=25 get_p50_p95_ms={percentiles(get_times)} "
-                  f"preview_p50_p95_ms={percentiles(preview_times)} apply_ms={apply_ms:.1f}")
+                  f"preview_p50_p95_ms={percentiles(preview_times)} apply_ms={apply_ms:.1f} "
+                  f"disable_preview_ms={disable_preview_ms:.1f} disable_ms={disable_ms:.1f}")
         finally:
             await pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[])",
                                OWNER, account_ids)

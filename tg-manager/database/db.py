@@ -4794,41 +4794,50 @@ async def remove_managed_channel_on_connection(
     cleanup_operation_id: int | None = None,
 ) -> bool:
     """Удаление внутри транзакции, удерживающей блокировку каталога владельца."""
-    row = await conn.fetchrow(
-        """DELETE FROM managed_channels
-            WHERE owner_id=$1 AND channel_id=$2
-        RETURNING acc_id, title, username, type, access_hash,
+    return bool(await remove_managed_channels_on_connection(
+        conn, owner_id, [channel_id], reason=reason, detail=detail,
+        cleanup_operation_id=cleanup_operation_id,
+    ))
+
+
+async def remove_managed_channels_on_connection(
+    conn, owner_id: int, channel_ids: list[int], *, reason: str, detail: str,
+    cleanup_operation_id: int | None = None,
+) -> set[int]:
+    """Архивировать выбранные ресурсы под блокировкой каталога владельца."""
+    if not channel_ids:
+        return set()
+    rows = await conn.fetch(
+        """WITH removed AS (
+               DELETE FROM managed_channels
+                WHERE owner_id=$1 AND channel_id=ANY($2::bigint[])
+               RETURNING channel_id, acc_id, title, username, type, access_hash,
                   jsonb_build_object(
                       'id', id, 'added_at', added_at, 'about', about, 'last_drift_check', last_drift_check,
                       'members_count', members_count, 'avg_views', avg_views,
                       'influence', influence, 'is_admin', is_admin, 'is_creator', is_creator
-                  ) AS catalog_metadata""",
-        owner_id, channel_id,
+                  ) AS catalog_metadata
+           ), archived AS (
+               INSERT INTO removed_channels
+                   (owner_id, channel_id, reason, detail, acc_id, title,
+                    username, type, access_hash, catalog_metadata)
+               SELECT $1, channel_id, $3, $4, acc_id, title, username, type, COALESCE(access_hash, 0),
+                      catalog_metadata || jsonb_strip_nulls(jsonb_build_object('cleanup_operation_id', $5::bigint))
+                 FROM removed ORDER BY channel_id
+               ON CONFLICT (owner_id, channel_id) DO UPDATE
+               SET reason=EXCLUDED.reason, detail=EXCLUDED.detail,
+                   acc_id=EXCLUDED.acc_id, title=EXCLUDED.title, username=EXCLUDED.username,
+                   type=EXCLUDED.type, access_hash=EXCLUDED.access_hash,
+                   catalog_metadata=EXCLUDED.catalog_metadata, removed_at=now()
+               RETURNING channel_id
+           ), stopped AS (
+               UPDATE va_channel_admin SET enabled=FALSE
+                WHERE owner_id=$1 AND enabled AND channel_id IN (SELECT channel_id FROM archived)
+           )
+           SELECT channel_id FROM archived""",
+        owner_id, channel_ids, reason, (detail or "")[:300], cleanup_operation_id,
     )
-    if not row:
-        return False
-    await conn.execute(
-        """INSERT INTO removed_channels
-               (owner_id, channel_id, reason, detail, acc_id, title,
-                username, type, access_hash, catalog_metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 0),
-                   $10::jsonb || jsonb_strip_nulls(jsonb_build_object('cleanup_operation_id', $11::bigint)))
-           ON CONFLICT (owner_id, channel_id) DO UPDATE
-           SET reason=EXCLUDED.reason, detail=EXCLUDED.detail,
-               acc_id=EXCLUDED.acc_id, title=EXCLUDED.title,
-               username=EXCLUDED.username, type=EXCLUDED.type,
-               access_hash=EXCLUDED.access_hash, catalog_metadata=EXCLUDED.catalog_metadata,
-               removed_at=now()""",
-        owner_id, channel_id, reason, (detail or "")[:300],
-        row["acc_id"], row["title"], row["username"], row["type"],
-        row["access_hash"], row["catalog_metadata"], cleanup_operation_id,
-    )
-    await conn.execute(
-        "UPDATE va_channel_admin SET enabled=FALSE "
-        "WHERE owner_id=$1 AND channel_id=$2 AND enabled",
-        owner_id, channel_id,
-    )
-    return True
+    return {row["channel_id"] for row in rows}
 
 
 REMOVED_CHANNEL_RESTORE_ACCOUNT_SQL = """

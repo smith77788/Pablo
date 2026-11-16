@@ -510,6 +510,11 @@ async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, veri
     if confirmation_id:
         scope = _confirmation_scope(keys, action, project_id)
         receipt_args = (owner_id, op_id, confirmation_id, scope)
+        receipt = await _receipt(pool, *receipt_args)
+        if receipt:
+            if verify_access:
+                verify_access()
+            return receipt
     try:
         async with pool.acquire() as conn, conn.transaction(isolation="serializable"):
             await conn.execute("SET LOCAL lock_timeout = '3s'")
@@ -535,16 +540,19 @@ async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, veri
                 await conn.execute(
                     "DELETE FROM network_nodes WHERE instance_id=$1 AND id=ANY($2::int[])",
                     project_id, node_ids)
-            if action == "disable":
-                for item in ready:
-                    await _disable(conn, owner_id, op_id, item)
-            await conn.executemany(
-                """INSERT INTO operation_audit(owner_id, operation_id, action, target, result)
-                   VALUES($1, $2, $3, $4, 'success')""",
-                [(owner_id, op_id, f"restriction_cleanup_{action}",
-                  f"{item['kind']}:{item['id']}" + (f" project:{project_id}" if project_id else ""))
-                 for item in ready],
-            )
+            if action == "disable" and ready:
+                await _disable(conn, owner_id, op_id, ready)
+            if ready:
+                targets_to_log = [f"{item['kind']}:{item['id']}" for item in ready]
+                if project_id:
+                    targets_to_log = [f"{target} project:{project_id}" for target in targets_to_log]
+                await conn.execute(
+                    """INSERT INTO operation_audit(owner_id, operation_id, action, target, result)
+                       SELECT $1, $2, $3, target, 'success'
+                       FROM unnest($4::text[]) WITH ORDINALITY AS targets(target, position)
+                       ORDER BY position""",
+                    owner_id, op_id, f"restriction_cleanup_{action}", targets_to_log,
+                )
             items = [{**item, "outcome": "applied" if item["outcome"] == "ready" else "skipped"}
                      for item in preview["items"]]
             changed = [{key: item[key] for key in ("kind", "id", "title")}
@@ -571,13 +579,18 @@ async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, veri
         raise CleanupError(_STALE, 409) from exc
 
 
-async def _disable(conn, owner_id, op_id, item):
-    item_id = int(item["id"])
-    if item["kind"] == "bot":
-        if not await db.set_managed_bot_active(conn, item_id, owner_id, False, cleanup_pause=True):
-            raise CleanupError(_STALE, 409)
-    elif not await db.remove_managed_channel_on_connection(
-        conn, owner_id, item_id, reason=db.REMOVED_BY_OWNER,
+async def _disable(conn, owner_id, op_id, items):
+    channels = []
+    for item in items:
+        item_id = int(item["id"])
+        if item["kind"] == "bot":
+            if not await db.set_managed_bot_active(conn, item_id, owner_id, False, cleanup_pause=True):
+                raise CleanupError(_STALE, 409)
+        else:
+            channels.append(item_id)
+    removed = await db.remove_managed_channels_on_connection(
+        conn, owner_id, channels, reason=db.REMOVED_BY_OWNER,
         detail=f"Отключён по проверке ограничений №{op_id}", cleanup_operation_id=op_id,
-    ):
+    )
+    if removed != set(channels):
         raise CleanupError(_STALE, 409)

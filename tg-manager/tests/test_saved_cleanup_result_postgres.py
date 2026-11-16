@@ -10,10 +10,56 @@ from database import db
 from services import mini_app_operations
 from services.mini_app_auth import make_token
 from tests.test_restriction_cleanup_postgres import (
-    CHANNEL, CHANNEL_TARGET, OWNER, _run, pytestmark,
+    BOT, BOT_TARGET, CHANNEL, CHANNEL_TARGET, OWNER, _run, pytestmark,
 )
 
 __all__ = ["pytestmark"]
+
+
+def test_incomplete_archive_rolls_back_mixed_cleanup(monkeypatch):
+    secret = "123456:synthetic-cleanup-rollback"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    archive_batch = db.remove_managed_channels_on_connection
+
+    async def archive_with_missing_target(*args, **kwargs):
+        assert await archive_batch(*args, **kwargs) == {CHANNEL}
+        return set()
+
+    async def scenario(pool, op_id):
+        await pool.execute(
+            "INSERT INTO va_channel_admin(owner_id,channel_id,enabled) VALUES($1,$2,TRUE)", OWNER, CHANNEL,
+        )
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        path = f"/api/miniapp/operations/{op_id}/cleanup"
+        action = {"action": "disable", "targets": [BOT_TARGET, CHANNEL_TARGET]}
+        async with TestClient(TestServer(app)) as client:
+            preview = await client.post(path, headers=headers, json={**action, "preview": True})
+            assert preview.status == 200
+            signed = {**action, "token": (await preview.json())["token"]}
+            with monkeypatch.context() as incomplete:
+                incomplete.setattr(db, "remove_managed_channels_on_connection", archive_with_missing_target)
+                response = await client.post(path, headers=headers, json=signed)
+                assert response.status == 409
+            assert await pool.fetchval(
+                "SELECT is_active FROM managed_bots WHERE added_by=$1 AND bot_id=$2", OWNER, BOT,
+            )
+            assert await pool.fetchval(
+                "SELECT enabled FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL,
+            )
+            assert not await pool.fetchval(
+                "SELECT 1 FROM removed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL,
+            )
+            assert not await pool.fetchval("SELECT 1 FROM operation_audit WHERE operation_id=$1", op_id)
+            report = await (await client.get(path, headers=headers)).json()
+            assert not report["receipts"]
+            applied = await client.post(path, headers=headers, json=signed)
+            assert applied.status == 200, await applied.text()
+            assert (await applied.json())["count"] == 2
+
+    asyncio.run(_run(scenario))
 
 
 def test_saved_result_preserves_applied_and_skipped_targets_across_sessions(monkeypatch):
@@ -45,6 +91,13 @@ def test_saved_result_preserves_applied_and_skipped_targets_across_sessions(monk
             assert {row["id"]: (row["status"], row["outcome"]) for row in applied_body["items"]} == {
                 str(CHANNEL): ("check_failed", "applied"), "99": ("restricted", "skipped"),
             }
+            async with pool.acquire() as busy, busy.transaction():
+                await busy.execute("LOCK TABLE operation_queue IN SHARE ROW EXCLUSIVE MODE")
+                replay = await asyncio.wait_for(
+                    first.post(path, headers=session, json={**action, "token": confirmation}), timeout=2,
+                )
+                assert replay.status == 200
+                assert await replay.json() == {**applied_body, "replayed": True}
 
         assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
         second_app = web.Application()
@@ -106,8 +159,6 @@ def test_expired_confirmation_only_reopens_the_exact_saved_result(monkeypatch):
     monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
 
     async def scenario(pool, op_id):
-        from tests.test_restriction_cleanup_postgres import BOT, BOT_TARGET
-
         app = web.Application()
         mini_app_operations.setup_routes(app, pool)
         headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}

@@ -191,6 +191,10 @@ class _ChanConn:
     async def fetch(self, q, *a):
         q = _flat(q)
         self.log.append((q, a))
+        if q.startswith("WITH removed AS"):
+            removed = [channel_id for channel_id in a[1] if self.rows.pop(channel_id, None)]
+            self.removed.update((channel_id, a[2]) for channel_id in removed)
+            return [{"channel_id": channel_id} for channel_id in removed]
         if "FROM removed_channels" in q and "reason='owner'" in q:
             ids = set(a[1])
             gone = [c for c, r in self.removed.items() if r == "gone" and c in ids]
@@ -203,9 +207,6 @@ class _ChanConn:
     async def fetchrow(self, q, *a):
         q = _flat(q)
         self.log.append((q, a))
-        if q.startswith("DELETE FROM managed_channels"):
-            row = self.rows.pop(a[1], None)
-            return {**row, "catalog_metadata": None} if row else None
         if q.startswith("DELETE FROM removed_channels"):
             if a[1] in self.removed:
                 reason = self.removed.pop(a[1])
@@ -218,8 +219,6 @@ class _ChanConn:
     async def execute(self, q, *a):
         q = _flat(q)
         self.log.append((q, a))
-        if q.startswith("INSERT INTO removed_channels"):
-            self.removed[a[1]] = a[2]
         return "OK"
 
     async def executemany(self, q, rows):
