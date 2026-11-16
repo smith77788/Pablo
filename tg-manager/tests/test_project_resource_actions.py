@@ -53,6 +53,7 @@ const openAccount = id => calls.push(['account', id]);
 const openBot = id => calls.push(['bot', id]);
 const openChannel = id => calls.push(['channel', id]);
 const openMassPub = (projectId, id) => calls.push(['publish', projectId, id]);
+const openLatestResourceCleanup = (...args) => calls.push(['cleanup', ...args]);
 const openAccountDialogs = id => calls.push(['dialogs', id]);
 const openBotCommands = id => calls.push(['commands', id]);
 const copyText = value => calls.push(['copy', value]);
@@ -79,6 +80,11 @@ big.primary[1][1]();
 assert.deepEqual(calls.pop(), ['publish', 13, '9007199254740993']);
 big.primary[2][1]();
 assert.deepEqual(calls.pop(), ['copy', '9007199254740993']);
+big.groups[1][1][0][1]();
+assert.deepEqual(calls.pop(), ['cleanup', 'channel', '9007199254740993', 13]);
+projectResourceActions({type:'chat', object_id:52, resource_available:false}, trigger, 13).groups[1][1][0][1]();
+assert.deepEqual(calls.pop(), ['cleanup', 'group', '52', 13]);
+assert.equal(projectResourceActions({type:'channel', object_id:9007199254740992}, trigger, 13).groups.length, 1);
 assert.deepEqual(projectResourceActions({id: 7, type: 'channel', object_id: 52,
   resource_available: false}, trigger, 13).primary, []);
 const unbound = projectResourceActions({id: 7, type: 'channel', object_id: null}, trigger);
@@ -222,6 +228,7 @@ let menu;
 const calls = [];
 const showResourceActions = (_, actions) => menu = actions;
 const openChDestructive = (...args) => calls.push(args);
+const openLatestResourceCleanup = (...args) => calls.push(args);
 const copyText = text => calls.push(text);
 const find = label => [...menu.primary, ...menu.secondary, ...menu.groups.flatMap(([, items]) => items)]
   .find(([name]) => name === label);
@@ -229,10 +236,13 @@ openCatalogResourceActions({title:'Общий',username:'public_bot',is_owned:fa
 assert.equal(find('Добавить в проект'), undefined);
 assert.equal(find('Команды бота'), undefined);
 assert.equal(find('Убрать бота из Infragram'), undefined);
+assert.equal(find('Открыть результат проверки'), undefined);
 find('Копировать ссылку')[1]();
 assert.equal(calls.pop(), 'https://t.me/public_bot');
 openCatalogResourceActions({title:'Пауза',is_owned:true,is_active:false}, 'bot', '52', {});
 assert.ok(find('Вернуть в работу'));
+find('Открыть результат проверки')[1]();
+assert.deepEqual(calls.pop(), ['bot', '52']);
 assert.equal(find('Изменить профиль'), undefined);
 for (const role of ['member', 'admin', 'owner']) {
   openCatalogResourceActions({title:'Чат',type:'supergroup',acc_id:1,role,username:'evil/path'}, 'channel', '52', {}, true);
@@ -248,6 +258,8 @@ openCatalogResourceActions({title:'Чат',acc_id:1,role:'owner'}, 'channel', '9
 assert.equal(find('Удалить канал или чат в Telegram'), undefined);
 find('Копировать ID')[1]();
 assert.equal(calls.pop(), '9007199254740993');
+find('Открыть результат проверки')[1]();
+assert.deepEqual(calls.pop(), ['channel', '9007199254740993']);
 """
     subprocess.run(["node", "-"], input=source + "\n" + probe, text=True, check=True)
 

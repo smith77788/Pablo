@@ -38,6 +38,14 @@ function projectResourceActions(node, trigger, projectId) {
   actions.groups = [['Состав проекта', [
     ['Убрать из проекта', () => removeNetNode(Number(node.id), trigger), {danger: true}],
   ]]];
+  const kind = ['chat', 'megagroup', 'supergroup', 'gigagroup'].includes(node.type) ? 'group' : node.type;
+  const id = node.object_id_text ?? (Number.isSafeInteger(node.object_id) ? String(node.object_id) : '');
+  if (['bot', 'channel', 'group'].includes(kind) && /^-?[1-9]\d*$/.test(id)
+      && Number.isSafeInteger(projectId) && projectId > 0) {
+    actions.groups.push(['Проверка ресурса', [
+      ['Открыть результат проверки', () => openLatestResourceCleanup(kind, id, projectId)],
+    ]]);
+  }
   return actions;
 }
 
@@ -101,6 +109,10 @@ function openCatalogResourceActions(item, type, id, trigger, fromCard = false) {
   const removal = [];
   if (kind !== 'bot' || item.is_owned !== false) {
     management.push(['Добавить в проект', () => addCatalogResourceToProject(kind, id, label)]);
+  }
+  if (['channel', 'group', 'bot'].includes(kind) && /^-?[1-9]\d*$/.test(id)
+      && (kind !== 'bot' || item.is_owned === true)) {
+    management.push(['Открыть результат проверки', () => openLatestResourceCleanup(kind, id)]);
   }
   if (kind === 'account') {
     management.push(['Каналы и чаты аккаунта', () => openAccountChannels(id)]);

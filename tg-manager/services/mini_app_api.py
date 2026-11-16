@@ -8043,13 +8043,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        summary = request.query.get("summary") == "1"
         row = await _safe_fetchrow(
             pool,
-            "SELECT id, result FROM operation_queue "
+            "SELECT id, CASE WHEN $2 THEN NULL ELSE result END AS result FROM operation_queue "
             "WHERE owner_id=$1 AND op_type='check_owned_restrictions' "
             "AND status IN ('done','partial') AND result IS NOT NULL "
             "ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1",
-            uid)
+            uid, summary)
+        if summary:
+            return _json_resp({"ok": True, "op_id": str(row["id"]) if row else None,
+                               "cleanup_available": project_pilot_enabled(uid)})
         if not row or not row.get("result"):
             return _json_resp({"ok": True, "dead": [], "checked_at": None})
         res = row["result"]

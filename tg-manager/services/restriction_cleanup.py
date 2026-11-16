@@ -273,21 +273,36 @@ async def _disabled_channels(conn, owner_id, entries, items):
     return disabled
 
 
-async def findings(pool, owner_id, op_id, *, include_history=False):
+async def findings(pool, owner_id, op_id, *, include_history=False, target=None):
     async with pool.acquire() as conn, conn.transaction(isolation="repeatable_read", readonly=True):
         entries, legacy = await _report(conn, owner_id, op_id)
-        items, _ = await _snapshot(conn, owner_id, entries)
-        items.update(await _disabled_channels(conn, owner_id, entries, items))
+        if target is not None:
+            key, = _target_keys([target])
+            entries = {key: entries[key]} if key in entries else {}
+        items = {}
+        if entries:
+            items, _ = await _snapshot(conn, owner_id, entries)
+            items.update(await _disabled_channels(conn, owner_id, entries, items))
         response = {"findings": [items[key] for key in entries],
                     "legacy": legacy, "max_targets": _MAX_TARGETS}
-        if include_history:
+        if target is not None:
+            response["target"] = {"kind": key[0], "id": str(key[1])}
+        if include_history and (target is None or entries):
+            audit_target = audit_id = None
+            recovery_actions = []
+            if target is not None:
+                kind, resource_id = key
+                audit_target, audit_id = f"{kind}:{resource_id}", str(resource_id)
+                recovery_actions = ["bot_restore"] if kind == "bot" else ["channel_restore", "channel_reconnect"]
             history = await conn.fetch(
                 """SELECT action, target, occurred_at FROM operation_audit
                     WHERE owner_id=$1 AND operation_id=$2 AND result='success'
                       AND action IN ('restriction_cleanup_detach','restriction_cleanup_disable',
                                      'channel_restore','bot_restore','channel_reconnect')
+                      AND ($3::text IS NULL OR split_part(target, ' ', 1)=$3
+                       OR (target=$4 AND action=ANY($5::text[])))
                     ORDER BY occurred_at DESC NULLS LAST, id DESC LIMIT 51""",
-                owner_id, op_id,
+                owner_id, op_id, audit_target, audit_id, recovery_actions,
             )
             response["history"] = [
                 {"action": "restore" if r["action"] in ("bot_restore", "channel_restore")
@@ -298,6 +313,7 @@ async def findings(pool, owner_id, op_id, *, include_history=False):
                 for r in history[:50]
             ]
             response["history_has_more"] = len(history) > 50
+        if include_history and target is None:
             receipts = await conn.fetch(
                 """SELECT confirmation_id, response->>'action' AS action,
                           response->>'project_id' AS project_id, response->>'saved_at' AS saved_at,

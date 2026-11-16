@@ -6,10 +6,30 @@ function cleanupFindingMatches(item, verdict, query) {
   return String(item.title || '').toLocaleLowerCase('ru-RU').includes(query);
 }
 
-async function openOperationCleanup(opId) {
+let latestResourceCleanupRequest = 0;
+
+async function openLatestResourceCleanup(kind, id, projectId = null) {
+  if (!['channel', 'group', 'bot'].includes(kind) || typeof id !== 'string' || !/^-?[1-9]\d{0,18}$/.test(id)) return;
+  const request = ++latestResourceCleanupRequest;
+  const trigger = document.activeElement;
+  try {
+    const report = await api('/api/miniapp/restrictions/dead?summary=1');
+    if (request !== latestResourceCleanupRequest || !trigger?.isConnected || document.activeElement !== trigger) return;
+    if (!report.op_id) { toast('Пока нет завершённой проверки ресурсов'); return; }
+    if (!report.cleanup_available) { toast('Очистка по результатам проверки недоступна'); return; }
+    await openOperationCleanup(report.op_id, {kind, id, projectId});
+  } catch (error) {
+    if (request === latestResourceCleanupRequest && trigger?.isConnected && document.activeElement === trigger) {
+      toast(errRu(error, 'Не удалось открыть результат проверки'));
+    }
+  }
+}
+
+async function openOperationCleanup(opId, context = null) {
   const existing = document.querySelector('[data-operation-cleanup]');
   if (existing) { existing.querySelector('[data-cleanup-close]')?.focus(); return; }
   const path = '/api/miniapp/operations/' + encodeURIComponent(opId) + '/cleanup';
+  const readPath = context ? path + '?' + new URLSearchParams({kind:context.kind, resource_id:context.id}) : path;
   const overlay = document.createElement('div');
   overlay.dataset.operationCleanup = '';
   overlay.className = 'mbg show';
@@ -106,9 +126,15 @@ async function openOperationCleanup(opId) {
     notice.textContent = 'Загружаем результат проверки…';
     body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
     try {
-      const result = await api(path);
+      const result = await api(readPath);
       if (!overlay.isConnected) return;
       findings = Array.isArray(result.findings) ? result.findings : [];
+      if (context) {
+        if (result.target?.kind !== context.kind || result.target?.id !== context.id) {
+          throw new Error('Сервер не подтвердил выбранный ресурс. Попробуйте открыть проверку ещё раз.');
+        }
+        findings = findings.filter(item => item.kind === context.kind && item.id === context.id);
+      }
       const maxTargets = Number(result.max_targets) || defaultTargetLimit;
       const history = Array.isArray(result.history) ? result.history : [];
       const historyLabels = {...actionText, restore: 'Восстановлен в Infragram', reconnect: 'Подключён повторно'};
@@ -177,7 +203,9 @@ async function openOperationCleanup(opId) {
         ? '<div class="field-note">Проверка сохранена в старом формате. Список может быть неполным. Запустите новую проверку для актуального списка.</div>'
         : '';
       if (!findings.length) {
-        body.innerHTML = legacy + '<div class="field-note">В сохранённом результате нет ресурсов для уборки.</div>';
+        body.innerHTML = legacy + '<div class="field-note">' + (context
+          ? 'Этого ресурса нет среди находок последней проверки.'
+          : 'В сохранённом результате нет ресурсов для уборки.') + '</div>';
         renderHistory();
         renderReceipts();
         notice.textContent = [message, selection?.targets.length
@@ -373,6 +401,9 @@ async function openOperationCleanup(opId) {
             selected.add(index);
           }
         }
+      } else if (context?.projectId) {
+        action.value = 'detach';
+        project.value = projects.has(String(context.projectId)) ? String(context.projectId) : '';
       } else if (projects.size === 1) project.selectedIndex = 1;
       button.onclick = async () => {
         if (button.disabled) return;

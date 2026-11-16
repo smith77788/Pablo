@@ -32,6 +32,57 @@ def test_cleanup_recovery_uses_existing_screens_and_exact_bot_id():
     assert "item.can_restore === true" in source
 
 
+def test_context_opens_only_latest_read_and_ignores_stale_menu_responses():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("нужен node")
+    script = """
+const assert = require('node:assert/strict');
+let latestResourceCleanupRequest = 0;
+const trigger = {isConnected:true};
+const document = {activeElement:trigger};
+const pending = [];
+const calls = [];
+const toast = text => calls.push(text);
+const errRu = error => error.message;
+const openOperationCleanup = (...args) => calls.push(args);
+const api = path => {
+  assert.equal(path, '/api/miniapp/restrictions/dead?summary=1');
+  return new Promise((resolve, reject) => pending.push({resolve, reject}));
+};
+(async () => {
+  await openLatestResourceCleanup('account', '51');
+  await openLatestResourceCleanup('channel', '../51');
+  assert.equal(pending.length, 0);
+  const stale = openLatestResourceCleanup('group', '51');
+  const current = openLatestResourceCleanup('channel', '9007199254740993', 7);
+  pending[0].resolve({cleanup_available:true, op_id:'12'});
+  pending[1].resolve({cleanup_available:true, op_id:'13'});
+  await Promise.all([stale, current]);
+  assert.deepEqual(calls.splice(0), [['13', {kind:'channel', id:'9007199254740993', projectId:7}]]);
+  const moved = openLatestResourceCleanup('bot', '51');
+  document.activeElement = {};
+  pending[2].resolve({cleanup_available:true, op_id:'13'});
+  await moved;
+  assert.equal(calls.length, 0);
+  document.activeElement = trigger;
+  const empty = openLatestResourceCleanup('bot', '51');
+  pending[3].resolve({op_id:null});
+  await empty;
+  const unpiloted = openLatestResourceCleanup('bot', '51');
+  pending[4].resolve({op_id:'13', cleanup_available:false});
+  await unpiloted;
+  const failed = openLatestResourceCleanup('bot', '51');
+  pending[5].reject(new Error('Временный сбой'));
+  await failed;
+  assert.deepEqual(calls, ['Пока нет завершённой проверки ресурсов',
+    'Очистка по результатам проверки недоступна', 'Временный сбой']);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    subprocess.run([node, "-"], input=js_function("openLatestResourceCleanup") + "\n" + script,
+                   text=True, check=True)
+
+
 def test_targeted_recovery_keeps_exact_id_and_discards_late_list():
     node = shutil.which("node")
     if not node:
@@ -205,11 +256,13 @@ let reviewItems;
 let replayed = false;
 let responseError, reportError;
 let reportFindings = findings;
+let readQuery = '';
+let reportTarget;
 const api = async (path, options) => {
-  assert.equal(path, '/api/miniapp/operations/42/cleanup');
+  assert.equal(path, '/api/miniapp/operations/42/cleanup' + (options ? '' : readQuery));
   if (!options) {
     if (reportError) throw reportError;
-    return {findings:reportFindings, max_targets:1000};
+    return {findings:reportFindings, target:reportTarget, max_targets:1000};
   }
   const request = JSON.parse(options.body);
   submissions.push(request);
@@ -432,6 +485,22 @@ Object.defineProperty(control('[data-cleanup-review]'), 'innerHTML', {set() {
   assert.equal(submissions.length, countBeforePreview + 1);
   assert.deepEqual(submissions.at(-1), {action:'detach', project_id:'7',
     targets:[{kind:'channel', id:ids[0]}], preview:true});
+  readQuery = '?kind=channel&resource_id=' + ids[0];
+  reportFindings = [findings[0], findings[2]];
+  await openOperationCleanup(42, {kind:'channel', id:ids[0]});
+  assert.match(notice.textContent, /Сервер не подтвердил выбранный ресурс/);
+  reportTarget = {kind:'channel', id:ids[0]};
+  await openOperationCleanup(42, {kind:'channel', id:ids[0], projectId:8});
+  assert.equal(project.value, '');
+  assert.equal(control('[data-cleanup-preview]').disabled, true);
+  assert.doesNotMatch(list.innerHTML, / checked/);
+  assert.doesNotMatch(list.innerHTML, new RegExp(ids[2]));
+  await openOperationCleanup(42, {kind:'channel', id:ids[0], projectId:7});
+  assert.equal(project.value, '7');
+  assert.equal(control('[data-cleanup-preview]').disabled, true);
+  reportFindings = [];
+  await openOperationCleanup(42, {kind:'channel', id:ids[0]});
+  assert.match(body.innerHTML, /Этого ресурса нет среди находок последней проверки/);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     subprocess.run([node, "-"], input=source.read_text() + "\n" + script, text=True, check=True)

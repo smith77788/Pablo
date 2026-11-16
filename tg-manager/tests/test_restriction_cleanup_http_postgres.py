@@ -7,13 +7,85 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 import pytest
 
-from services import account_manager, mini_app_operations, op_worker, restriction_cleanup
+from services import account_manager, mini_app_api, mini_app_operations, op_worker, restriction_cleanup
 from services.mini_app_auth import make_token
 from tests.test_restriction_cleanup_postgres import (
     BOT, BOT_TARGET, CHANNEL, CHANNEL_TARGET, OWNER, _run, pytestmark,
 )
 
 __all__ = ["pytestmark"]
+
+
+def test_context_report_reads_exact_target_without_widening(monkeypatch):
+    secret = "123456:synthetic-context-cleanup"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+
+    async def scenario(pool, op_id):
+        app = web.Application()
+        mini_app_api.setup_routes(app, pool)
+        app.on_startup.clear()
+        foreign_op = await pool.fetchval(
+            """INSERT INTO operation_queue(owner_id,op_type,status,result,finished_at)
+               VALUES($1,'check_owned_restrictions','done','{}',now()) RETURNING id""", OWNER + 1,
+        )
+        owner = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        foreign = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+        path = f"/api/miniapp/operations/{op_id}/cleanup"
+        query = f"kind=channel&resource_id={CHANNEL}"
+        try:
+            async with TestClient(TestServer(app)) as client:
+                await run_context_checks(client, owner, foreign, path, query, pool, op_id, foreign_op)
+        finally:
+            await pool.execute("DELETE FROM operation_queue WHERE owner_id=$1 AND id=$2", OWNER + 1, foreign_op)
+
+    async def run_context_checks(client, owner, foreign, path, query, pool, op_id, foreign_op):
+        summary = "/api/miniapp/restrictions/dead?summary=1"
+        assert (await client.get(summary)).status == 401
+        for headers, expected in ((owner, op_id), (foreign, foreign_op)):
+            response = await client.get(summary, headers=headers)
+            assert response.status == 200
+            assert await response.json() == {"ok": True, "op_id": str(expected), "cleanup_available": True}
+        ordinary = await (await client.get("/api/miniapp/restrictions/dead", headers=owner)).json()
+        assert ordinary["op_id"] == str(op_id) and ordinary["dead"] == []
+        request = await client.get(f"{path}?{query}", headers=owner)
+        assert request.status == 200
+        scoped = await request.json()
+        assert scoped["target"] == CHANNEL_TARGET
+        assert [(item["kind"], item["id"], item["status"]) for item in scoped["findings"]] == [
+            ("channel", str(CHANNEL), "check_failed"),
+        ]
+        assert scoped["history"] == [] and "receipts" not in scoped
+        for target in (f"kind=group&resource_id={CHANNEL}", f"kind=channel&resource_id={CHANNEL+1}"):
+            empty = await client.get(f"{path}?{target}", headers=owner)
+            assert empty.status == 200 and not (await empty.json())["findings"]
+        for target in ("kind=channel", query + "&kind=bot", query + "&receipt=abc", "kind=channel&resource_id=0"):
+            assert (await client.get(f"{path}?{target}", headers=owner)).status == 400
+        assert (await client.get(f"{path}?{query}", headers=foreign)).status == 404
+        full = await (await client.get(path, headers=owner)).json()
+        assert len(full["findings"]) == 3 and full["history"] == []
+        body = {"action": "disable", "targets": [CHANNEL_TARGET]}
+        assert (await client.post(f"{path}?{query}", headers=owner, json=body)).status == 400
+        preview = await (await client.post(path, headers=owner, json={**body, "preview": True})).json()
+        token = preview["token"]
+        assert (await client.post(path, headers=owner, json={
+            **body, "token": token, "targets": [BOT_TARGET],
+        })).status == 409
+        applied = await client.post(path, headers=owner, json={**body, "token": token})
+        assert applied.status == 200 and (await applied.json())["count"] == 1
+        await pool.execute(
+            """INSERT INTO operation_audit(owner_id,operation_id,action,target,result)
+               VALUES($1,$2,'restriction_cleanup_disable',$3,'success'),
+                     ($1,$2,'bot_restore',$4,'success')""", OWNER, op_id, f"bot:{BOT}", str(CHANNEL),
+        )
+        reread = await (await client.get(f"{path}?{query}", headers=owner)).json()
+        assert reread["findings"][0]["can_restore"]
+        assert [entry["target"] for entry in reread["history"]] == [f"channel:{CHANNEL}"]
+        assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1 AND added_by=$2", BOT, OWNER)
+        monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER + 1))
+        assert (await client.get(f"{path}?{query}", headers=owner)).status == 403
+
+    asyncio.run(_run(scenario))
 
 
 @pytest.mark.parametrize("change", ["disable", "reassign", "restored", "reimported"])
