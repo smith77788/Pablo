@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.miniapp_source import js_function, miniapp_html
+from tests.miniapp_source import js_function, miniapp_html, source_of
 
 
 def test_cleanup_opens_from_the_operation_card_and_shield_links_to_the_card():
@@ -201,11 +201,17 @@ const findings = ids.map((id, i) => ({id, kind:'channel', title:'Ресурс ' 
 const submissions = [];
 let reviewItems;
 let replayed = false;
+let responseError, reportError;
+let reportFindings = findings;
 const api = async (path, options) => {
   assert.equal(path, '/api/miniapp/operations/42/cleanup');
-  if (!options) return {findings, max_targets:1000};
+  if (!options) {
+    if (reportError) throw reportError;
+    return {findings:reportFindings, max_targets:1000};
+  }
   const request = JSON.parse(options.body);
   submissions.push(request);
+  if (!request.preview && responseError) throw responseError;
   if (reviewItems) return request.preview ? {items:reviewItems, token:'test'}
     : {items:reviewItems.map(item => ({...item, outcome:item.outcome === 'ready' ? 'applied' : 'skipped'})),
       replayed};
@@ -358,6 +364,56 @@ Object.defineProperty(control('[data-cleanup-review]'), 'innerHTML', {set() {
   assert.match(list.innerHTML, /data-cleanup-resume="1001"/);
   list.onclick({target:{closest:() => ({dataset:{cleanupResume:'1001'}})}});
   assert.equal(resumedBotId, pausedBotId);
+
+  const action = control('[data-cleanup-action]');
+  action.value = 'detach';
+  project.value = '7';
+  verdict.value = '';
+  search.value = '';
+  await openOperationCleanup(42);
+  // Одноимённый ресурс другого типа и новый сосед не входят в старый выбор.
+  for (const index of [0, 2, 3]) {
+    list.onchange({target:{matches:() => true, value:String(index), checked:true}});
+  }
+  reviewItems = [0, 2, 3].map(index => ({...findings[index], outcome:'ready'}));
+  await control('[data-cleanup-preview]').onclick();
+  const apply = control('[data-cleanup-apply]');
+  const reload = control('[data-cleanup-reload]');
+  responseError = new Error('Ответ потерян');
+  await apply.onclick();
+  assert.equal(apply.hidden, false);
+  assert.equal(apply.disabled, false);
+  assert.equal(apply.textContent, 'Повторить то же подтверждение');
+  responseError = Object.assign(new Error('План изменился'), {status:409});
+  await apply.onclick();
+  assert.equal(apply.hidden, true);
+  assert.equal(apply.disabled, true);
+  assert.match(notice.textContent, /нужен новый план/);
+  assert.equal(focused, reload);
+  assert.deepEqual(submissions.at(-1), submissions.at(-2));
+
+  reportFindings = [
+    {...findings[2], projects:[{id:8, name:'Чужая связь'}]},
+    {...findings[3], kind:'group'},
+    findings[4],
+    findings[0],
+  ];
+  reportError = new Error('Список временно недоступен');
+  await reload.onclick();
+  assert.equal(focused, control('button'));
+  assert.match(notice.textContent, /Список временно недоступен/);
+  reportError = null;
+  await control('button').onclick();
+  assert.equal(project.value, '7');
+  assert.match(notice.textContent, /Снято с выбора: 2/);
+  assert.equal((list.innerHTML.match(/ checked/g) || []).length, 1);
+  assert.equal(focused, control('[data-cleanup-preview]'));
+  const countBeforePreview = submissions.length;
+  reviewItems = [{...findings[0], outcome:'ready'}];
+  await control('[data-cleanup-preview]').onclick();
+  assert.equal(submissions.length, countBeforePreview + 1);
+  assert.deepEqual(submissions.at(-1), {action:'detach', project_id:'7',
+    targets:[{kind:'channel', id:ids[0]}], preview:true});
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     subprocess.run([node, "-"], input=source.read_text() + "\n" + script, text=True, check=True)
@@ -459,3 +515,41 @@ const api = async (url, options) => {
 """
     subprocess.run([node, "-"], input=source.read_text(encoding="utf-8") + "\n" + script,
                    text=True, check=True)
+
+
+def test_cleanup_can_distinguish_http_conflict_from_missing_response():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("нужен node")
+    script = r"""
+const assert = require('node:assert/strict');
+const TK = 'synthetic';
+const FETCH_TIMEOUT_MS = 500;
+const BOOT_RETRY_MAX = 1;
+const _readRetryDelay = async () => null;
+const _serverBooting = async () => false;
+const _reAuth = async () => {};
+let status = 409;
+let dropped = false;
+let requests = 0;
+const fetchT = async () => {
+  requests++;
+  if (dropped) throw new Error('Связь прервалась');
+  return {ok:false, status, json:async () => ({error:'Изменился план'})};
+};
+(async () => {
+  const request = () => _apiRaw('/api/miniapp/operations/42/cleanup', {method:'POST', body:'{}'});
+  await assert.rejects(request, error => error.status === 409 && error.message === 'Изменился план');
+  assert.equal(requests, 1);
+  status = 401;
+  await assert.rejects(request, error => error.status === 401);
+  assert.equal(requests, 3);
+  dropped = true;
+  await assert.rejects(request, error => error.status === undefined && /Связь/.test(error.message));
+  assert.equal(requests, 4);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    source = source_of("_apiRaw")
+    start = source.index("async function _apiRaw(")
+    end = source.index("// Через сколько мс повторить", start)
+    subprocess.run([node, "-"], input=source[start:end] + "\n" + script, text=True, check=True)

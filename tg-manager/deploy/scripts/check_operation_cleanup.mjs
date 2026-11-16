@@ -18,7 +18,8 @@ try {
     let lostResponse = false;
     window.openRemovedChannels = id => { window.cleanupRecovery = id; };
     window.api = async (path, options) => {
-      if (!options) return {findings:[item, skipped, {kind:'channel', id:'9007199254740995',
+      if (!options) return {findings:[item, window.cleanupCatalogChanged
+        ? {...skipped, projects:[{id:8,name:'Другой проект'}]} : skipped, {kind:'channel', id:'9007199254740995',
         title:'Отключённый канал', status:'restricted', active:false, can_disable:false, can_restore:true,
         disable_reason:'Ресурс уже отключён в Infragram'}], legacy:true, max_targets:2,
         history:[{action:'restore', target:'9007199254740996'},
@@ -26,7 +27,9 @@ try {
           {action:'detach', target:'bot:9007199254740993 project:7'}]};
       const body = JSON.parse(options.body);
       window.cleanupCalls.push({path, body});
-      if (body.preview) return {items:[{...item, edge_ids:[1,2], outcome:'ready'}, skipped], token:'подтверждение'};
+      if (body.preview) return {items:[{...item, edge_ids:[1,2], outcome:'ready'}, skipped]
+        .filter(row => body.targets.some(target => target.id === row.id)), token:'подтверждение'};
+      if (window.cleanupReject) throw Object.assign(new Error('План изменился'), {status:409});
       if (!lostResponse) {
         lostResponse = true;
         throw new Error('Ответ потерян');
@@ -108,6 +111,23 @@ try {
     {path, body:{...base, token:'подтверждение'}},
   ]);
   await page.getByRole('button', {name:'Обновить список'}).click();
+  await page.locator('[data-cleanup-action]').selectOption('detach');
+  await page.locator('[data-cleanup-project]').selectOption('7');
+  await page.getByRole('button', {name:'Выбрать доступные'}).click();
+  await preview.click();
+  await page.evaluate(() => { window.cleanupReject = true; window.cleanupCatalogChanged = true; });
+  await page.getByRole('button', {name:'Подтвердить · 1'}).click();
+  await page.getByText('Для следующего действия нужен новый план.', {exact:false}).waitFor();
+  assert.equal(await page.getByRole('button', {name:'Повторить то же подтверждение'}).isVisible(), false);
+  await page.getByRole('button', {name:'Обновить список и проверить выбор'}).click();
+  await page.getByText('Снято с выбора: 1', {exact:false}).waitFor();
+  assert.equal(await page.locator('[data-cleanup-project]').inputValue(), '7');
+  assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 1);
+  await preview.click();
+  assert.deepEqual((await page.evaluate(() => window.cleanupCalls)).at(-1), {
+    path, body:{...base, targets:[base.targets[0]], preview:true},
+  });
+  await page.getByRole('button', {name:'Вернуться к выбору'}).click();
   await page.getByRole('button', {name:'Восстановление · Отключённый канал'}).click();
   assert.equal(await page.evaluate(() => window.cleanupRecovery), '9007199254740995');
   assert.equal(await page.getByRole('dialog').count(), 0);

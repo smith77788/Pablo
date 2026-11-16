@@ -91,3 +91,62 @@ def test_saved_result_preserves_applied_and_skipped_targets_across_sessions(monk
             assert (await browser.get(saved_path, headers=session)).status == 403
 
     asyncio.run(_run(scenario))
+
+
+def test_expired_confirmation_only_reopens_the_exact_saved_result(monkeypatch):
+    from types import SimpleNamespace
+
+    from services import channel_change_approval as approval
+
+    secret = "123456:synthetic-expired-cleanup"
+    start = int(approval.time.time())
+    clock = [start]
+    monkeypatch.setattr(approval, "time", SimpleNamespace(time=lambda: clock[0]))
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", f"{OWNER},{OWNER + 1}")
+
+    async def scenario(pool, op_id):
+        from tests.test_restriction_cleanup_postgres import BOT, BOT_TARGET
+
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        outsider = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+        path = f"/api/miniapp/operations/{op_id}/cleanup"
+        by_channel = {"action": "disable", "targets": [CHANNEL_TARGET]}
+        by_bot = {"action": "disable", "targets": [BOT_TARGET]}
+        async with TestClient(TestServer(app)) as client:
+            first = await client.post(path, headers=headers, json={**by_channel, "preview": True})
+            second = await client.post(path, headers=headers, json={**by_bot, "preview": True})
+            used = {**by_channel, "token": (await first.json())["token"]}
+            unused = {**by_bot, "token": (await second.json())["token"]}
+            assert used["token"] and unused["token"] and used["token"] != unused["token"]
+            applied = await client.post(path, headers=headers, json=used)
+            assert applied.status == 200
+            result = await applied.json()
+            # После потери ответа пользователь мог уже вернуть ресурс из архива.
+            assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
+            clock[0] += 601
+            replayed = await client.post(path, headers=headers, json=used)
+            assert replayed.status == 200, await replayed.text()
+            assert await replayed.json() == {**result, "replayed": True}
+            for rejected in (
+                unused, {**used, "targets": [BOT_TARGET]},
+                {**used, "action": "detach", "project_id": 7},
+                {**used, "token": used["token"] + "0"},
+            ):
+                assert (await client.post(path, headers=headers, json=rejected)).status == 409
+            assert (await client.post(path, headers=outsider, json=used)).status == 409
+            assert (await client.post(path.replace(f"/{op_id}/", f"/{op_id+1}/"),
+                                      headers=headers, json=used)).status == 409
+            assert await pool.fetchval("SELECT is_active FROM managed_bots WHERE bot_id=$1 AND added_by=$2", BOT, OWNER)
+            assert await pool.fetchval(
+                "SELECT id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL,
+            )
+            assert await pool.fetchval(
+                "SELECT count(*) FROM restriction_cleanup_receipts WHERE owner_id=$1 AND operation_id=$2", OWNER, op_id,
+            ) == 1
+            monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER + 1))
+            assert (await client.post(path, headers=headers, json=used)).status == 403
+
+    asyncio.run(_run(scenario))

@@ -467,10 +467,22 @@ async def plan(pool, owner_id, op_id, targets, action, *, project_id=None):
         return await _plan(conn, owner_id, op_id, keys, action, project_id)
 
 
+def _confirmation_scope(keys, action, project_id):
+    return {"action": action, "project_id": project_id, "targets": [list(key) for key in sorted(keys)]}
+
+
+async def replay_confirmation(pool, owner_id, op_id, targets, action, *, project_id, confirmation_id):
+    """Точное чтение результата с уже использованной подписью."""
+    scope = _confirmation_scope(_target_keys(targets), action, project_id)
+    return await _receipt(pool, owner_id, op_id, confirmation_id, scope)
+
+
 async def _receipt(conn, owner_id, op_id, confirmation_id, scope):
     row = await conn.fetchrow(
-        """SELECT request_scope, response FROM restriction_cleanup_receipts
-           WHERE operation_id=$1 AND owner_id=$2 AND confirmation_id=$3""",
+        """SELECT r.request_scope, r.response FROM restriction_cleanup_receipts r
+           JOIN operation_queue q ON q.id=r.operation_id AND q.owner_id=r.owner_id
+           WHERE r.operation_id=$1 AND r.owner_id=$2 AND r.confirmation_id=$3
+             AND q.op_type='check_owned_restrictions' AND q.status IN ('done', 'partial')""",
         op_id, owner_id, confirmation_id)
     if row is None:
         return None
@@ -496,8 +508,7 @@ async def apply(pool, owner_id, op_id, targets, action, *, project_id=None, veri
     keys = _target_keys(targets)
     receipt_args = None
     if confirmation_id:
-        scope = {"action": action, "project_id": project_id,
-                 "targets": [list(key) for key in sorted(keys)]}
+        scope = _confirmation_scope(keys, action, project_id)
         receipt_args = (owner_id, op_id, confirmation_id, scope)
     try:
         async with pool.acquire() as conn, conn.transaction(isolation="serializable"):

@@ -13,6 +13,10 @@ class ApprovalError(ValueError):
     pass
 
 
+class ApprovalExpired(ApprovalError):
+    pass
+
+
 def digest_targets(targets: list[dict]) -> str:
     canonical = sorted(
         (int(item["channel_id"]), int(item["acc_id"]), str(item.get("title") or ""))
@@ -45,7 +49,7 @@ def _sign(payload: dict) -> str:
     return f"{body}.{signature}"
 
 
-def _read(token: str, now: int | None = None) -> dict:
+def _read(token: str, now: int | None = None, *, allow_expired: bool = False) -> dict:
     try:
         body, signature = token.split(".", 1)
         expected = hmac.new(_secret(), body.encode(), hashlib.sha256).hexdigest()
@@ -57,8 +61,8 @@ def _read(token: str, now: int | None = None) -> dict:
         raise
     except Exception as exc:
         raise ApprovalError("Подтверждение повреждено") from exc
-    if int(payload.get("expires") or 0) < int(now or time.time()):
-        raise ApprovalError("Подтверждение устарело, проверьте список ещё раз")
+    if not allow_expired and int(payload.get("expires") or 0) < int(now or time.time()):
+        raise ApprovalExpired("Подтверждение устарело, проверьте список ещё раз")
     return payload
 
 
@@ -84,8 +88,8 @@ def issue_cleanup(owner_id: int, plan: dict) -> str:
     return _sign({**_cleanup_scope(owner_id, plan), "expires": int(time.time()) + 600})
 
 
-def read_cleanup(token: str, owner_id: int) -> str:
-    payload = _read(token)
+def read_cleanup(token: str, owner_id: int, *, allow_expired: bool = False) -> str:
+    payload = _read(token, allow_expired=allow_expired)
     digest = payload.get("plan")
     if (payload.get("purpose") != "restriction_cleanup" or payload.get("owner") != owner_id
             or not isinstance(digest, str)):

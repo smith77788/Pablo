@@ -96,17 +96,28 @@ def setup_routes(app: web.Application, pool) -> None:
             def verify_access():
                 if not project_pilot_enabled(uid):
                     raise cleanup.CleanupError("Недоступно", 403)
-                approval.read_cleanup(token, uid)
+                approval.read_cleanup(token, uid, allow_expired=True)
 
             def verify(current):
                 if not project_pilot_enabled(uid):
                     raise cleanup.CleanupError("Недоступно", 403)
                 approval.verify_cleanup(token, uid, current)
 
-            verify_access()
+            confirmation_id = hashlib.sha256(token.encode()).hexdigest()
+            try:
+                approval.read_cleanup(token, uid)
+            except approval.ApprovalExpired:
+                verify_access()
+                receipt = await cleanup.replay_confirmation(
+                    *args, project_id=project_id, confirmation_id=confirmation_id,
+                )
+                if receipt is None:
+                    raise
+                verify_access()
+                return _json_resp(receipt)
             result = await cleanup.apply(
                 *args, project_id=project_id, verify=verify,
-                confirmation_id=hashlib.sha256(token.encode()).hexdigest(), verify_access=verify_access)
+                confirmation_id=confirmation_id, verify_access=verify_access)
             return _json_resp(result)
         except cleanup.CleanupError as exc:
             return _err(str(exc), exc.status)

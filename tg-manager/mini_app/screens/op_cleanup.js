@@ -102,8 +102,8 @@ async function openOperationCleanup(opId) {
     }
   }
 
-  async function load() {
-    notice.textContent = '';
+  async function load(selection = null, message = '') {
+    notice.textContent = 'Загружаем результат проверки…';
     body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
     try {
       const result = await api(path);
@@ -180,6 +180,9 @@ async function openOperationCleanup(opId) {
         body.innerHTML = legacy + '<div class="field-note">В сохранённом результате нет ресурсов для уборки.</div>';
         renderHistory();
         renderReceipts();
+        notice.textContent = [message, selection?.targets.length
+          ? 'Снято с выбора: ' + selection.targets.length : ''].filter(Boolean).join(' ');
+        close.focus();
         return;
       }
       body.innerHTML = legacy
@@ -205,7 +208,8 @@ async function openOperationCleanup(opId) {
         + '<button type="button" class="btn btn-s" data-cleanup-prev>Назад</button> '
         + '<span data-cleanup-page role="status"></span> '
         + '<button type="button" class="btn btn-s" data-cleanup-next>Вперёд</button></div>'
-        + '<button type="button" class="btn btn-p" data-cleanup-preview style="width:100%;margin-top:12px">Проверить план</button>';
+        + '<button type="button" class="btn btn-p" data-cleanup-preview style="width:100%;margin-top:12px">Проверить план</button>'
+        + '<button type="button" class="btn btn-s" data-cleanup-recheck hidden style="width:100%;margin-top:8px">Обновить список и проверить выбор</button>';
       const action = body.querySelector('[data-cleanup-action]');
       const project = body.querySelector('[data-cleanup-project]');
       const projectField = body.querySelector('[data-cleanup-project-field]');
@@ -343,7 +347,19 @@ async function openOperationCleanup(opId) {
       search.oninput = resetPage;
       prev.onclick = () => { page--; renderFindings(); if (prev.disabled) next.focus(); };
       next.onclick = () => { page++; renderFindings(); if (next.disabled) prev.focus(); };
-      if (projects.size === 1) project.selectedIndex = 1;
+      if (selection) {
+        action.value = selection.action;
+        project.value = projects.has(selection.project_id) ? selection.project_id : '';
+        status.value = selection.verdict;
+        search.value = selection.query;
+        const original = new Set(selection.targets.map(item => item.kind + ':' + item.id));
+        for (const {item, index} of indexed) {
+          if (selected.size >= maxTargets) break;
+          if (action.value === selection.action && original.has(item.kind + ':' + item.id) && canSelect(item)) {
+            selected.add(index);
+          }
+        }
+      } else if (projects.size === 1) project.selectedIndex = 1;
       button.onclick = async () => {
         if (button.disabled) return;
         const targets = [...selected].map(index => {
@@ -353,6 +369,7 @@ async function openOperationCleanup(opId) {
         if (!targets.length || targets.length > maxTargets) return;
         const payload = {action:action.value, targets};
         if (action.value === 'detach') payload.project_id = project.value;
+        const selectionSnapshot = {...payload, verdict:status.value, query:search.value};
         const enabled = [...body.querySelectorAll('input,select,button')].filter(input => !input.disabled);
         const saved = [...body.childNodes];
         enabled.forEach(input => { input.disabled = true; });
@@ -365,22 +382,37 @@ async function openOperationCleanup(opId) {
         notice.textContent = 'Проверяем текущее состояние ресурсов…';
         try {
           const preview = await api(path, {method:'POST', body:JSON.stringify({...payload, preview:true})});
-          if (overlay.isConnected) renderPreview(payload, preview, restoreSelection);
+          if (overlay.isConnected) renderPreview(payload, preview, restoreSelection, selectionSnapshot);
         } catch (e) {
           if (overlay.isConnected) {
             restoreSelection();
             notice.textContent = errRu(e, 'Не удалось подготовить план');
+            if (cleanupRequestRejected(e)) {
+              const recheck = body.querySelector('[data-cleanup-recheck]');
+              recheck.hidden = false;
+              recheck.onclick = () => load(selectionSnapshot, 'Список обновлён. Проверьте выбор.');
+              recheck.focus();
+            }
           }
         }
       };
       renderFindings();
+      if (selection) {
+        const dropped = selection.targets.length - selected.size;
+        notice.textContent = [message, notice.textContent,
+          dropped ? 'Снято с выбора: ' + dropped : ''].filter(Boolean).join(' ');
+        (button.disabled ? action : button).focus();
+      }
       renderHistory();
       renderReceipts();
       const disabledChannels = findings.filter(item => item.can_restore === true);
       appendRecovery(body, disabledChannels);
     } catch (e) {
+      if (!overlay.isConnected) return;
       body.innerHTML = '<button type="button" class="btn btn-s" style="width:100%">Повторить загрузку</button>';
-      body.querySelector('button').onclick = load;
+      const retry = body.querySelector('button');
+      retry.onclick = () => load(selection, message);
+      retry.focus();
       notice.textContent = errRu(e, 'Не удалось загрузить результат проверки');
     }
   }
@@ -461,12 +493,16 @@ async function openOperationCleanup(opId) {
       item.outcome === 'applied' ? '' : item.reason, statusText[item.status], item.finding_reason].filter(Boolean).join(' · '),
     item => item.outcome === 'applied',
     {result:true, canRecover:payload.action === 'disable' && !result.replayed});
-    body.querySelector('[data-cleanup-refresh]').onclick = load;
+    body.querySelector('[data-cleanup-refresh]').onclick = () => load();
     body.querySelector('[data-cleanup-summary]').focus();
     notice.textContent = '';
   }
 
-  function renderPreview(payload, preview, restoreSelection) {
+  function cleanupRequestRejected(error) {
+    return error?.status >= 400 && error.status < 500 && ![408, 429].includes(error.status);
+  }
+
+  function renderPreview(payload, preview, restoreSelection, selectionSnapshot) {
     const items = Array.isArray(preview.items) ? preview.items : [];
     const readyCount = items.filter(item => item.outcome === 'ready').length;
     notice.textContent = '';
@@ -500,14 +536,19 @@ async function openOperationCleanup(opId) {
         const result = await api(path, {method:'POST', body:JSON.stringify({...payload, token:preview.token})});
         renderResult(result, payload);
       } catch (e) {
-        apply.disabled = false;
+        const rejected = cleanupRequestRejected(e);
+        apply.hidden = rejected;
+        apply.disabled = rejected;
         apply.textContent = 'Повторить то же подтверждение';
         reload.disabled = false;
-        reload.textContent = 'Обновить список';
-        reload.onclick = load;
+        reload.textContent = rejected ? 'Обновить список и проверить выбор' : 'Обновить список';
+        reload.onclick = rejected
+          ? () => load(selectionSnapshot, 'Список обновлён. Проверьте выбор.')
+          : () => load();
         reload.focus();
-        notice.textContent = errRu(e, 'Не удалось получить результат')
-          + '. Можно отправить то же подтверждение или обновить список.';
+        notice.textContent = errRu(e, 'Не удалось получить результат') + (rejected
+          ? ' Для следующего действия нужен новый план.'
+          : ' Можно отправить то же подтверждение или обновить список.');
       } finally {
         close.disabled = false;
       }

@@ -9799,7 +9799,11 @@ async function _apiRaw(path, opts={}) {
     try {
       r = await fetchT(path, { ...opts, headers: _hdr() }, _ms);
     } catch(e) { throw new Error((e && e.message) || 'Нет соединения с сервером'); }
-    if (r.status === 401) throw new Error('Сессия истекла, перезапустите приложение');
+    if (r.status === 401) {
+      const error = new Error('Сессия истекла, перезапустите приложение');
+      error.status = r.status;
+      throw error;
+    }
   }
   // Сервер перезапускается после деплоя: пока идёт старт, порт держит
   // временный сервер. Запрос до приложения не дошёл и ничего не изменил, так
@@ -9830,7 +9834,9 @@ async function _apiRaw(path, opts={}) {
     // 500 = внутренняя ошибка: пользователю НЕ показываем сырой текст исключения
     // (нечитаемо и потенциальная утечка); деталь остаётся в серверных логах.
     if (r.status === 500) msg = 'Внутренняя ошибка сервиса — попробуйте позже';
-    throw new Error(msg);
+    const error = new Error(msg);
+    error.status = r.status;
+    throw error;
   }
   try { return await r.json(); } catch(_) { throw new Error('Сервер прислал неожиданный ответ — обновите экран'); }
 }
