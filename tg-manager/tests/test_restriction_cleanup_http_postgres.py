@@ -521,6 +521,131 @@ def test_legacy_group_topology_recovers_only_owner_links(monkeypatch):
     asyncio.run(_run(scenario))
 
 
+@pytest.mark.parametrize("change", ["disabled", "foreign", "deleted", "empty_session", "wrong_link_kind"])
+def test_disable_rechecks_recoverable_catalog_binding(monkeypatch, change):
+    secret = "123456:synthetic-disable-binding"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    account = 992660
+
+    async def scenario(pool, op_id):
+        from database import db
+
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        path = f"/api/miniapp/operations/{op_id}/cleanup"
+        action = {"action": "disable", "targets": [CHANNEL_TARGET]}
+        project = await pool.fetchval(
+            "INSERT INTO network_instances(owner_id,name) VALUES($1,'Локальный проект') RETURNING id", OWNER,
+        )
+        async with TestClient(TestServer(app)) as client:
+            first = await (await client.post(path, json={**action, "preview": True}, headers=headers)).json()
+            assert first["token"]
+            row_id = await pool.fetchval(
+                "SELECT id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL,
+            )
+            try:
+                if change == "wrong_link_kind":
+                    await pool.execute(
+                        "INSERT INTO network_nodes(instance_id,node_type,ref_id) VALUES($1,'group',$2)",
+                        project, CHANNEL,
+                    )
+                elif change == "deleted":
+                    await pool.execute("DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", account, OWNER)
+                else:
+                    await pool.execute(
+                        """UPDATE tg_accounts SET owner_id=$2, is_active=$3, session_str=$4
+                           WHERE id=$1 AND owner_id=$5""",
+                        account, OWNER + (change == "foreign"), change != "disabled",
+                        "" if change == "empty_session" else "synthetic-reassigned-session", OWNER,
+                    )
+                rejected = await client.post(path, json={**action, "token": first["token"]}, headers=headers)
+                assert rejected.status == 409, await rejected.text()
+                report = await (await client.get(path, headers=headers)).json()
+                finding = next(item for item in report["findings"] if item["id"] == str(CHANNEL))
+                assert finding["status"] == "check_failed" and finding["active"] and not finding["can_disable"]
+                reason = ("связь с другим типом" if change == "wrong_link_kind" else "недоступен для восстановления")
+                assert reason in finding["disable_reason"]
+                if change == "wrong_link_kind":
+                    assert finding["projects"] == []
+                    assert finding["conflicting_projects"] == [{"id": project, "name": "Локальный проект"}]
+                assert "synthetic-reassigned-session" not in str(report)
+                assert not report["history"] and not report["receipts"]
+                blocked = await (await client.post(path, json={**action, "preview": True}, headers=headers)).json()
+                assert blocked["token"] is None
+                assert blocked["items"][0]["outcome"] == "skipped" and reason in blocked["items"][0]["reason"]
+                if change == "empty_session":
+                    mixed = {**action, "targets": [CHANNEL_TARGET, BOT_TARGET]}
+                    plan = await (await client.post(path, json={**mixed, "preview": True}, headers=headers)).json()
+                    applied = await client.post(path, json={**mixed, "token": plan["token"]}, headers=headers)
+                    assert applied.status == 200
+                    result = await applied.json()
+                    assert [(item["kind"], item["outcome"]) for item in result["items"]] == [
+                        ("bot", "applied"), ("channel", "skipped"),
+                    ]
+                assert await pool.fetchval(
+                    "SELECT 1 FROM managed_channels WHERE owner_id=$1 AND id=$2", OWNER, row_id,
+                )
+                if change != "wrong_link_kind":
+                    await pool.execute(
+                        "INSERT INTO network_nodes(instance_id,node_type,ref_id) VALUES($1,'channel',$2)", project, CHANNEL,
+                    )
+                    detach = {**action, "action": "detach", "project_id": project}
+                    plan = await (await client.post(path, json={**detach, "preview": True}, headers=headers)).json()
+                    detached = await client.post(path, json={**detach, "token": plan["token"]}, headers=headers)
+                    assert detached.status == 200 and (await detached.json())["count"] == 1
+            finally:
+                await pool.execute("DELETE FROM network_nodes WHERE instance_id=$1", project)
+                await pool.execute(
+                    """INSERT INTO tg_accounts(id, owner_id, phone, session_str)
+                       VALUES($1,$2,'synthetic-cleanup','synthetic-restore-session')
+                       ON CONFLICT(id) DO UPDATE SET owner_id=EXCLUDED.owner_id, is_active=TRUE,
+                                                     session_str=EXCLUDED.session_str""", account, OWNER,
+                )
+            fresh = await (await client.post(path, json={**action, "preview": True}, headers=headers)).json()
+            applied = await client.post(path, json={**action, "token": fresh["token"]}, headers=headers)
+            assert applied.status == 200 and (await applied.json())["count"] == 1
+            assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
+            assert await pool.fetchval(
+                "SELECT id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL,
+            ) == row_id
+
+    asyncio.run(_run(scenario))
+
+
+def test_disable_holds_recovery_account_through_archive(monkeypatch):
+    import asyncpg
+    from database import db
+
+    async def scenario(pool, op_id):
+        archive = db.remove_managed_channels_on_connection
+
+        async def attempt_account_change(*args, **kwargs):
+            async with pool.acquire() as other:
+                with pytest.raises(asyncpg.LockNotAvailableError):
+                    async with other.transaction():
+                        await other.execute("SET LOCAL lock_timeout = '100ms'")
+                        await other.execute(
+                            "UPDATE tg_accounts SET is_active=FALSE WHERE id=992660 AND owner_id=$1", OWNER,
+                        )
+            return await archive(*args, **kwargs)
+
+        preview = await restriction_cleanup.plan(pool, OWNER, op_id, [CHANNEL_TARGET], "disable")
+        monkeypatch.setattr(db, "remove_managed_channels_on_connection", attempt_account_change)
+
+        def verify(plan):
+            assert plan == preview
+
+        result = await restriction_cleanup.apply(
+            pool, OWNER, op_id, [CHANNEL_TARGET], "disable", verify=verify,
+        )
+        assert result["count"] == 1
+        assert await db.restore_removed_channel(pool, OWNER, CHANNEL)
+
+    asyncio.run(_run(scenario))
+
+
 @pytest.mark.parametrize("change", ["disabled", "foreign", "deleted", "empty_session"])
 def test_channel_restore_rechecks_account_after_preview(monkeypatch, change):
     from database import db

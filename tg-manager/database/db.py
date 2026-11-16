@@ -4840,11 +4840,22 @@ async def remove_managed_channels_on_connection(
     return {row["channel_id"] for row in rows}
 
 
-REMOVED_CHANNEL_RESTORE_ACCOUNT_SQL = """
+_CHANNEL_RESTORE_ELIGIBLE_SQL = "a.is_active IS TRUE AND NULLIF(a.session_str, '') IS NOT NULL"
+REMOVED_CHANNEL_RESTORE_ACCOUNT_SQL = f"""
     SELECT 1 FROM tg_accounts a
-     WHERE a.id=r.acc_id AND a.owner_id=r.owner_id AND a.is_active IS TRUE
-       AND NULLIF(a.session_str, '') IS NOT NULL
+     WHERE a.id=r.acc_id AND a.owner_id=r.owner_id AND {_CHANNEL_RESTORE_ELIGIBLE_SQL}
 """
+
+
+async def find_channel_restore_accounts(conn, owner_id: int, account_ids: list[int], *, lock=False) -> set[int]:
+    if not account_ids:
+        return set()
+    rows = await conn.fetch(
+        f"""SELECT a.id FROM tg_accounts a
+            WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) AND {_CHANNEL_RESTORE_ELIGIBLE_SQL}
+            ORDER BY a.id""" + (" FOR SHARE OF a" if lock else ""), owner_id, account_ids,
+    )
+    return {row["id"] for row in rows}
 
 
 class RemovedChannelAccountError(ValueError):

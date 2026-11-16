@@ -139,7 +139,7 @@ def _report_item(key, entry):
     }
 
 
-async def _snapshot(conn, owner_id, entries, *, lock=False):
+async def _snapshot(conn, owner_id, entries, *, lock=False, for_detach=False):
     bots = sorted(item_id for kind, item_id in entries if kind == "bot")
     channels = sorted(item_id for kind, item_id in entries if kind != "bot")
     suffix = " FOR UPDATE" if lock else ""
@@ -159,6 +159,11 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
     for row in ch_rows:
         kind = "group" if (row["type"] or "").lower() in _GROUP_TYPES else "channel"
         assets[kind, row["channel_id"]].append(row)
+    restore_accounts = set()
+    if not for_detach:
+        restore_accounts = await db.find_channel_restore_accounts(
+            conn, owner_id, sorted({row["acc_id"] for row in ch_rows if row["acc_id"]}), lock=lock,
+        )
 
     projects = defaultdict(dict)
     nodes = defaultdict(list)
@@ -205,15 +210,22 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
         row = owned[0]
         title = row["first_name"] if kind == "bot" else row["title"]
         active = bool(row["is_active"]) if kind == "bot" else True
+        other_type_projects = {}
+        if kind != "bot":
+            other_type_projects = projects["group" if kind == "channel" else "channel", item_id]
         reason = ""
         if projects[key]:
             reason = "Сначала отвяжите ресурс от проектов"
+        elif other_type_projects:
+            reason = "В проекте сохранилась связь с другим типом ресурса. Исправьте связь в проекте."
         elif not active:
             reason = "Бот уже на паузе"
         elif kind == "bot" and item_id in busy_bots:
             reason = "Сначала остановите активные сценарии и прогоны бота"
         elif kind != "bot" and (len(owned) != 1 or not row["acc_id"]):
             reason = "Нет однозначной привязки к аккаунту для восстановления"
+        elif kind != "bot" and not for_detach and row["acc_id"] not in restore_accounts:
+            reason = "Привязанный аккаунт недоступен для восстановления. Проверьте аккаунт."
         items[key] = {
             **_report_item(key, entry),
             "title": str(title or row["username"] or entry.get("title") or item_id),
@@ -227,6 +239,8 @@ async def _snapshot(conn, owner_id, entries, *, lock=False):
             items[key]["bindings"] = [
                 {"row_id": value["id"], "account_id": value["acc_id"]} for value in owned
             ]
+            if other_type_projects:
+                items[key]["conflicting_projects"] = list(other_type_projects.values())
     return items, nodes
 
 
@@ -313,10 +327,9 @@ def public_items(items):
         for key in ("title", "reason", "disable_reason", "finding_reason"):
             if isinstance(safe.get(key), str):
                 safe[key] = safe_text(safe[key], 500)
-        if "projects" in safe:
-            safe["projects"] = [
-                {**project, "name": safe_text(project["name"], 200)} for project in safe["projects"]
-            ]
+        for key in ("projects", "conflicting_projects"):
+            if key in safe:
+                safe[key] = [{**project, "name": safe_text(project["name"], 200)} for project in safe[key]]
         public.append(safe)
     return public
 
@@ -352,7 +365,7 @@ async def _plan(conn, owner_id, op_id, keys, action, project_id, *, lock=False):
         owner_id, str(project_id),
     )
     selected_entries = {key: entries[key] for key in sorted(keys)}
-    items, nodes = await _snapshot(conn, owner_id, selected_entries, lock=lock)
+    items, nodes = await _snapshot(conn, owner_id, selected_entries, lock=lock, for_detach=action == "detach")
     disabled = await _disabled_channels(conn, owner_id, selected_entries, items)
     has_channels = any(kind != "bot" for kind, _ in keys)
     running_channel_operations = await conn.fetch(

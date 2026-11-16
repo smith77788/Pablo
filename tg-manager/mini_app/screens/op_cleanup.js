@@ -52,7 +52,7 @@ async function openOperationCleanup(opId) {
     ${recovery}</div></div>`;
   const statusText = {unreachable:'Недоступен снаружи', restricted:'Ограничен Telegram',
     hidden:'Скрыт из глобального поиска', check_failed:'Не удалось проверить'};
-  const outcomeText = {detached:'Убран из проекта', disabled:'Отключён', applied:'Применено', changed:'Применено',
+  const outcomeText = {detached:'Убран из проекта', disabled:'Отключён в Infragram',
     unchanged:'Без изменений', skipped:'Пропущено', failed:'Ошибка', stale:'Состояние изменилось', not_found:'Не найден'};
   let findings = [];
 
@@ -289,10 +289,13 @@ async function openOperationCleanup(opId) {
             ? `<button type="button" class="btn btn-s" data-cleanup-resume="${esc(index)}"
                 aria-label="${esc('Настройки бота · ' + title(item) + ' · ID: ' + item.id)}">Настройки бота</button>`
             : '';
+          const conflictingProjects = (item.conflicting_projects || []).map(p =>
+            `<button type="button" class="btn btn-s" data-cleanup-conflict-project="${esc(p.id)}"
+              data-cleanup-conflict-item="${index}">Открыть проект · ${esc(p.name || '#' + p.id)}</button>`).join('');
           return `<label class="row chk-row" style="min-height:44px;cursor:${eligible ? 'pointer' : 'default'}">
             <input type="checkbox" data-cleanup-target value="${esc(index)}" ${eligible ? '' : 'disabled'} ${selected.has(index) ? 'checked' : ''}>
             <span class="row-body"><span class="row-name" style="display:block;overflow-wrap:anywhere">${esc(title(item))}</span>
-            <span class="row-val" style="display:block;white-space:normal">${esc(details)}</span></span></label>${resume}`;
+            <span class="row-val" style="display:block;white-space:normal">${esc(details)}</span></span></label>${resume}${conflictingProjects}`;
         }).join('');
         if (!filtered.length) list.textContent = 'В этом срезе нет ресурсов.';
         list.scrollTop = 0;
@@ -312,6 +315,17 @@ async function openOperationCleanup(opId) {
       };
       selectedOnly.onclick = () => { showSelected = !showSelected; resetPage(); };
       list.onclick = event => {
+        const projectLink = event.target.closest('[data-cleanup-conflict-project]');
+        if (projectLink) {
+          const item = findings[Number(projectLink.dataset.cleanupConflictItem)];
+          const projectId = Number(projectLink.dataset.cleanupConflictProject);
+          if (Number.isSafeInteger(projectId) && projectId > 0 &&
+              item?.conflicting_projects?.some(p => p.id === projectId)) {
+            close.click();
+            openNetworkBuilder(projectId);
+          }
+          return;
+        }
         const button = event.target.closest('[data-cleanup-resume]');
         const item = button && findings[Number(button.dataset.cleanupResume)];
         if (item?.kind !== 'bot' || item.can_resume !== true) return;
@@ -481,6 +495,9 @@ async function openOperationCleanup(opId) {
 
   function renderResult(result, payload) {
     const applied = Array.isArray(result.items) ? result.items : [];
+    const successful = item => item.outcome === 'applied' || item.outcome === 'changed'
+      || item.outcome === (payload.action === 'detach' ? 'detached' : 'disabled');
+    const successLabel = payload.action === 'detach' ? outcomeText.detached : outcomeText.disabled;
     const scope = [actionText[payload.action], payload.project_id ? 'Проект #' + payload.project_id : '']
       .filter(Boolean).join(' · ');
     body.innerHTML = '<div class="field-note" data-cleanup-summary tabindex="-1">'
@@ -489,9 +506,9 @@ async function openOperationCleanup(opId) {
       + '<div data-cleanup-review></div>'
       + (!applied.length ? '<div class="field-note">Сервер не вернул результаты по ресурсам.</div>' : '')
       + '<button type="button" class="btn btn-s" data-cleanup-refresh style="width:100%;margin-top:12px">Обновить список</button>';
-    renderReview(applied, item => [outcomeText[item.outcome] || 'Нет подтверждения изменения',
-      item.outcome === 'applied' ? '' : item.reason, statusText[item.status], item.finding_reason].filter(Boolean).join(' · '),
-    item => item.outcome === 'applied',
+    renderReview(applied, item => [successful(item) ? successLabel : outcomeText[item.outcome] || 'Нет подтверждения изменения',
+      successful(item) ? '' : item.reason, statusText[item.status], item.finding_reason].filter(Boolean).join(' · '),
+    successful,
     {result:true, canRecover:payload.action === 'disable' && !result.replayed});
     body.querySelector('[data-cleanup-refresh]').onclick = () => load();
     body.querySelector('[data-cleanup-summary]').focus();

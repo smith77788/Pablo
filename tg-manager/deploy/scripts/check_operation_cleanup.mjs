@@ -100,8 +100,8 @@ try {
   await page.getByRole('button', { name: 'Подтвердить · 1' }).click();
   await page.getByText('Ответ потерян', {exact:false}).waitFor();
   await page.getByRole('button', { name: 'Повторить то же подтверждение' }).click();
-  await page.getByText('Сохранённый результат', {exact:true}).waitFor();
-  await page.getByText('Применено · Скрыт из глобального поиска', {exact:false}).waitFor();
+  await page.getByText('Сохранённый результат · Убрать из проекта · Проект #7', {exact:true}).waitFor();
+  await page.getByText('Убран из проекта · Скрыт из глобального поиска', {exact:false}).waitFor();
   await page.getByText('Пропущено · Изменились права', {exact:false}).waitFor();
   const base = {action:'detach', project_id:'7',
     targets:['9007199254740993','9007199254740994'].map(id => ({kind:'bot', id}))};

@@ -193,6 +193,8 @@ let recoveryId;
 const openRemovedChannels = id => { recoveryId = id; };
 let resumedBotId;
 const openBot = id => { resumedBotId = id; };
+let openedProject;
+const openNetworkBuilder = id => { openedProject = id; };
 const firstId = 9007199254740993n;
 const ids = Array.from({length:1000}, (_, i) => String(firstId + BigInt(i)));
 const findings = ids.map((id, i) => ({id, kind:'channel', title:'Ресурс ' + i,
@@ -321,6 +323,7 @@ Object.defineProperty(control('[data-cleanup-review]'), 'innerHTML', {set() {
   outcome.value = 'yes';
   outcome.onchange();
   assert.doesNotMatch(reviewList.innerHTML, /Идёт публикация/);
+  assert.match(reviewList.innerHTML, /Отключён в Infragram · Скрыт из глобального поиска/);
   reviewSearch.value = ids[999];
   reviewSearch.oninput();
   assert.match(reviewList.innerHTML, /data-cleanup-recover="999"/);
@@ -362,8 +365,23 @@ Object.defineProperty(control('[data-cleanup-review]'), 'innerHTML', {set() {
   search.oninput();
   assert.match(list.innerHTML, /data-cleanup-target value="1001" disabled/);
   assert.match(list.innerHTML, /data-cleanup-resume="1001"/);
-  list.onclick({target:{closest:() => ({dataset:{cleanupResume:'1001'}})}});
+  list.onclick({target:{closest:selector => selector === '[data-cleanup-resume]'
+    ? {dataset:{cleanupResume:'1001'}} : null}});
   assert.equal(resumedBotId, pausedBotId);
+
+  findings.push({id:String(firstId + 1002n), kind:'channel', title:'Канал со старой связью', status:'hidden',
+    active:true, can_disable:false, projects:[], conflicting_projects:[{id:14, name:'Старая схема'}]});
+  await openOperationCleanup(42);
+  search.value = 'Канал со старой связью';
+  search.oninput();
+  assert.match(list.innerHTML, /Открыть проект · Старая схема/);
+  const projectLink = id => ({target:{closest:() => ({dataset:{
+    cleanupConflictItem:'1002', cleanupConflictProject:String(id),
+  }})}});
+  list.onclick(projectLink(7));
+  assert.equal(openedProject, undefined);
+  list.onclick(projectLink(14));
+  assert.equal(openedProject, 14);
 
   const action = control('[data-cleanup-action]');
   action.value = 'detach';
