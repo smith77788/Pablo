@@ -7816,10 +7816,37 @@ def _project_publication_refused(params: dict, reason: str) -> dict:
     return result
 
 
+async def _review_queued_publication_copy(pool, owner_id: int, op_id: int, params: dict) -> str | None:
+    """Ранее поставленная копия тоже проверяет исходный выбор перед исполнением."""
+    if params.get("cloned_from_op") is None or params.get("_publication_catalog_since") is not None:
+        return None
+    from services.security import validate_integer
+
+    source_id = validate_integer(str(params["cloned_from_op"]), min_val=1, max_val=2**63 - 1)
+    op_type = await pool.fetchval(
+        "SELECT op_type FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, owner_id,
+    )
+    if source_id is None or op_type not in _obus_reg.CATALOG_PUBLICATION_TYPES:
+        return _obus_reg.CATALOG_PUBLISH_REVIEW_MESSAGE
+    try:
+        params["_publication_catalog_since"] = await _obus_reg.check_catalog_publish_derivation(
+            pool, owner_id, op_type, params, source_id, copying=True,
+        )
+    except _obus_reg.ProjectPublishReviewRequired as exc:
+        return str(exc)
+    if params.get("project_id") is not None:
+        params.setdefault("_project_scope_since", params["_publication_catalog_since"])
+    return None
+
+
 async def _exec_mass_publish(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Опубликовать сообщение во все управляемые каналы/группы владельца."""
+    copy_review = await _review_queued_publication_copy(pool, owner_id, op_id, params)
+    if copy_review:
+        return {"status": "failed", "summary": copy_review}
+
     from services import account_manager, postbot
 
     target = params.get("target", "channels")
@@ -15744,6 +15771,10 @@ async def _exec_bulk_post_chans(
     правила редактора, которых здесь нет). Исполнитель остаётся, чтобы честно
     доделать уже стоящие в очереди и рекуррентные круги — так же, как у
     `quick_post`. Стережёт `tests/test_channel_publish_one_op.py`."""
+    copy_review = await _review_queued_publication_copy(pool, owner_id, op_id, params)
+    if copy_review:
+        return {"status": "failed", "summary": copy_review}
+
     from services import account_manager, postbot
     from database import db as _db
     from bot.utils.op_helpers import backoff

@@ -1088,3 +1088,129 @@ def test_publication_skips_catalog_changes_after_queueing(monkeypatch, op_type, 
             await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1 AND id=$2", OWNER + 1, foreign_audit)
 
     asyncio.run(_run(scenario))
+
+
+@pytest.mark.parametrize(("op_type", "fixed"), [
+    ("mass_publish", True), ("quick_post", True), ("mass_publish", False), ("bulk_post_chans", True),
+])
+def test_publication_copies_use_original_catalog_selection(monkeypatch, op_type, fixed):
+    from services import operation_bus
+    from services import mini_app_channels as channel_api
+
+    secret = "123456:synthetic-catalog-copy"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    monkeypatch.setattr("bot.utils.subscription.require_plan", AsyncMock(return_value=True))
+    monkeypatch.setattr(op_worker, "circuit_breaker_status", AsyncMock(return_value={}))
+    send = AsyncMock()
+    monkeypatch.setattr(account_manager, "post_to_channel", send)
+
+    async def scenario(pool, check_id):
+        row_id = await pool.fetchval(
+            "SELECT id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2", OWNER, CHANNEL,
+        )
+        params = {"text": "Прежняя публикация"}
+        if fixed:
+            params["channel_ids"] = [str(row_id if op_type == "bulk_post_chans" else CHANNEL)]
+        if op_type == "bulk_post_chans":
+            params["acc_id"] = 992660
+
+        async def enqueue(payload, status):
+            return await pool.fetchval(
+                """INSERT INTO operation_queue(owner_id,op_type,status,params)
+                   VALUES($1,$2,$3,$4::jsonb) RETURNING id""",
+                OWNER, op_type, status, json.dumps(payload),
+            )
+
+        source_id = await enqueue(params, "done")
+        cutoff = await pool.fetchval("SELECT created_at FROM operation_queue WHERE id=$1", source_id)
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        channel_api.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        outsider = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+        source = f"/api/miniapp/operation/{source_id}"
+        cleanup = f"/api/miniapp/operations/{check_id}/cleanup"
+        action = {"action": "disable", "targets": [CHANNEL_TARGET]}
+
+        async with TestClient(TestServer(app)) as client:
+            assert (await client.get(source + "/editable", headers=outsider)).status == 404
+            assert (await client.post(source + "/clone", headers=outsider, json={})).status == 404
+            editable = await client.get(source + "/editable", headers=headers)
+            assert editable.status == (200 if fixed else 409), await editable.text()
+            copy = await client.post(source + "/clone", headers=headers, json={"changes": {"text": "Копия"}})
+            assert copy.status == (200 if fixed else 409), await copy.text()
+            copy_id = None
+            if fixed:
+                copy_id = (await copy.json())["new_id"]
+                stored = json.loads(await pool.fetchval("SELECT params FROM operation_queue WHERE id=$1", copy_id))
+                assert stored["_publication_catalog_since"] == cutoff.isoformat()
+                assert stored["channel_ids"] == params["channel_ids"] and stored["text"] == "Копия"
+                assert "retry_of_op" not in stored
+                await pool.execute("UPDATE operation_queue SET status='done' WHERE id=$1", copy_id)
+                parallel = await asyncio.gather(*(
+                    operation_bus.submit(pool, OWNER, op_type, {**params, "cloned_from_op": source_id, "text": text})
+                    for text in ("Первая параллельная", "Вторая параллельная")
+                ), return_exceptions=True)
+                assert sum(isinstance(value, int) for value in parallel) == 1
+                assert sum(isinstance(value, operation_bus.ProjectPublishReviewRequired) for value in parallel) == 1
+                active_id = next(value for value in parallel if isinstance(value, int))
+                await pool.execute("UPDATE operation_queue SET status='done' WHERE id=$1", active_id)
+                invalid = [
+                    {**params, "channel_ids": [CHANNEL + 1], "cloned_from_op": source_id},
+                    {**params, "target": "all", "cloned_from_op": source_id},
+                    {**params, "cloned_from_op": source_id, "project_id": 100},
+                ]
+                for changed in invalid:
+                    with pytest.raises(operation_bus.ProjectPublishReviewRequired):
+                        await operation_bus.submit(pool, OWNER, op_type, changed)
+                with pytest.raises(operation_bus.ProjectPublishReviewRequired):
+                    await operation_bus.submit(pool, OWNER + 1, op_type, {**params, "cloned_from_op": source_id})
+            else:
+                # Динамический источник разрешает только цели с ошибкой в своём журнале.
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id,step_num,target,status) VALUES($1,1,$2,'error')",
+                    source_id, str(CHANNEL),
+                )
+                retry = {**params, "channel_ids": [CHANNEL], "retry_of_op": source_id}
+                retry_id = await operation_bus.submit(pool, OWNER, op_type, retry)
+                stored = json.loads(await pool.fetchval("SELECT params FROM operation_queue WHERE id=$1", retry_id))
+                assert stored["_publication_catalog_since"] == cutoff.isoformat()
+                with pytest.raises(operation_bus.ProjectPublishReviewRequired):
+                    await operation_bus.submit(pool, OWNER, op_type, {**retry, "channel_ids": [CHANNEL + 1]})
+                await pool.execute("UPDATE operation_queue SET status='done' WHERE id=$1", retry_id)
+
+            plan = await client.post(cleanup, headers=headers, json={**action, "preview": True})
+            assert plan.status == 200, await plan.text()
+            applied = await client.post(cleanup, headers=headers, json={**action, "token": (await plan.json())["token"]})
+            assert applied.status == 200 and (await applied.json())["count"] == 1
+            restored = await client.post(f"/api/miniapp/channel/{CHANNEL}/restore", headers=headers)
+            assert restored.status == 200, await restored.text()
+            for route_source in (source, f"/api/miniapp/operation/{copy_id}" if copy_id else source):
+                for response in (await client.get(route_source + "/editable", headers=headers),
+                                 await client.post(route_source + "/clone", headers=headers, json={})):
+                    assert response.status == 409, await response.text()
+                    assert operation_bus.CATALOG_PUBLISH_REVIEW_MESSAGE in (await response.json())["error"]
+            if fixed:
+                old_params = {**params, "cloned_from_op": source_id}
+                old_copy = await enqueue(old_params, "pending")
+                executor = op_worker._exec_bulk_post_chans if op_type == "bulk_post_chans" else op_worker._exec_mass_publish
+                refused = await executor(pool, None, old_copy, OWNER, old_params)
+                assert refused["status"] == "failed" and refused["summary"] == operation_bus.CATALOG_PUBLISH_REVIEW_MESSAGE
+                send.assert_not_awaited()
+                if copy_id:
+                    await pool.execute("DELETE FROM operation_queue WHERE id=$1", source_id)
+                    copied = {**params, "retry_of_op": copy_id}
+                    retry_id = await operation_bus.submit(pool, OWNER, op_type, copied)
+                    retry_params = json.loads(await pool.fetchval(
+                        "SELECT params FROM operation_queue WHERE id=$1", retry_id))
+                    assert retry_params["_publication_catalog_since"] == cutoff.isoformat()
+                if op_type == "bulk_post_chans":
+                    await pool.execute("UPDATE operation_queue SET status='failed' WHERE id=$1", copy_id)
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id,step_num,target,status) VALUES($1,1,$2,'error')",
+                        copy_id, str(CHANNEL),
+                    )
+                    assert await operation_bus.collect_failed_targets(pool, copy_id, op_type) == [row_id]
+
+    asyncio.run(_run(scenario))

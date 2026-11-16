@@ -1235,6 +1235,13 @@ def setup_routes(app: web.Application, pool) -> None:
             uid, op_id, row = src
             from services import op_params_view as _opv
             params = _row_params(row)
+            if row["op_type"] in _obus.CATALOG_PUBLICATION_TYPES and op_status.is_terminal(row["status"]):
+                try:
+                    await _obus.check_catalog_publish_derivation(
+                        pool, uid, row["op_type"], params, op_id, copying=True,
+                    )
+                except _obus.ProjectPublishReviewRequired as exc:
+                    return _err(str(exc), 409)
             fields = _opv.editable(row["op_type"], params)
             editable_keys = {f["key"] for f in fields}
             context = [v for v in _opv.describe(row["op_type"], params)
