@@ -5924,8 +5924,14 @@ async def _reschedule_recurring(
     import datetime as _dt_r
 
     _row = await _safe_fetchrow(
-        pool, "SELECT label, total_items FROM operation_queue WHERE id=$1",
+        pool, "SELECT label, total_items, created_at FROM operation_queue WHERE id=$1",
         op_id, log_ctx=f"[recurring_label op={op_id}]")
+    if (op_type in ("mass_publish", "quick_post") and params.get("project_id") is not None
+            and "_project_scope_since" not in _next_params):
+        if not _row or not _row.get("created_at"):
+            log.warning("autopost v2: op=%d не прочитано время исходного подтверждения", op_id)
+            return
+        _next_params["_project_scope_since"] = _row["created_at"].isoformat()
     _base_label = (_row["label"] if _row else None) or op_type
     # Метку повтора ставим один раз: без этой проверки она копилась кругами
     # («Пост ↻↻↻↻») и к сотому запуску вытесняла из очереди само название.
@@ -7807,7 +7813,9 @@ async def _exec_mass_publish(
 
     target = params.get("target", "channels")
     if params.get("project_id") is not None:
-        from services.network_builder import project_pilot_enabled, project_publish_channels
+        from services.network_builder import (
+            project_pilot_enabled, project_publish_channels, project_publish_scope_was_detached,
+        )
         from services.security import selection_ids, tg_id, validate_integer
 
         if not project_pilot_enabled(owner_id):
@@ -7821,6 +7829,11 @@ async def _exec_mass_publish(
         if not set(channel_ids).issubset({row["channel_id"] for row in channels}):
             return _project_publication_refused(
                 params, "Каналы больше не доступны в проекте. Подтвердите новый список.")
+        if await project_publish_scope_was_detached(
+            pool, owner_id, project_id, channel_ids, op_id, since=params.get("_project_scope_since"),
+        ):
+            return _project_publication_refused(
+                params, "Канал был отвязан после подтверждения. Подтвердите новый список.")
         target = "channels"
 
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()

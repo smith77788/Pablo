@@ -187,11 +187,15 @@ def test_project_catalog_links_exact_resource_and_preserves_other_project(monkey
     asyncio.run(_run(scenario))
 
 
-@pytest.mark.parametrize("changed", ["detached", "revoked", "invalid_targets", "new_target"])
+@pytest.mark.parametrize("changed", [
+    "detached", "reattached", "manual_reattached", "neighbor_reattached",
+    "revoked", "invalid_targets", "new_target",
+])
 def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed):
     from database import db
     from services import account_manager, editorial_review
 
+    productive = changed in ("new_target", "neighbor_reattached")
     secret = "123456:synthetic-project-queue"
     monkeypatch.setenv("BOT_TOKEN", secret)
     monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
@@ -258,15 +262,30 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
             assert not op_worker._active_op_tasks
             assert await pool.fetchval("SELECT status FROM operation_queue WHERE id=$1", op_id) == "pending"
 
-            if changed == "detached":
+            if changed in ("detached", "reattached", "neighbor_reattached"):
+                changed_project = other if changed == "neighbor_reattached" else project
                 path = f"/api/miniapp/operations/{check_id}/cleanup"
-                cleanup = {"action": "detach", "project_id": project, "targets": [CHANNEL_TARGET]}
+                cleanup = {"action": "detach", "project_id": changed_project, "targets": [CHANNEL_TARGET]}
                 review = await client.post(path, headers=headers, json={**cleanup, "preview": True})
                 assert review.status == 200, await review.text()
                 applied = await client.post(
                     path, headers=headers, json={**cleanup, "token": (await review.json())["token"]})
                 assert applied.status == 200 and (await applied.json())["count"] == 1
                 expected = "Каналы больше не доступны в проекте"
+                if changed != "detached":
+                    restored = await client.post(f"/api/miniapp/networks/{changed_project}/nodes", headers=headers,
+                                                 json={"type": "channel", "object_id": str(CHANNEL)})
+                    assert restored.status == 200, await restored.text()
+                    expected = "Канал был отвязан после подтверждения"
+            elif changed == "manual_reattached":
+                node_id = await pool.fetchval(
+                    "SELECT id FROM network_nodes WHERE instance_id=$1 AND ref_id=$2", project, CHANNEL)
+                project_path = f"/api/miniapp/networks/{project}/nodes"
+                assert (await client.delete(f"/api/miniapp/networks/nodes/{node_id}", headers=headers)).status == 200
+                restored = await client.post(project_path, headers=headers,
+                                             json={"type":"channel", "object_id": str(CHANNEL)})
+                assert restored.status == 200, await restored.text()
+                expected = "Канал был отвязан после подтверждения"
             elif changed == "revoked":
                 monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", "")
                 expected = "Доступ к публикациям проекта отозван"
@@ -274,7 +293,12 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
                 await pool.execute(
                     """UPDATE operation_queue SET params=params || '{"channel_ids":[]}'::jsonb WHERE id=$1""", op_id)
                 expected = "Некорректный список каналов проекта"
-            else:
+            if changed in ("reattached", "manual_reattached"):
+                from services import operation_bus as retry_bus
+
+                with pytest.raises(retry_bus.ProjectPublishReviewRequired):
+                    await retry_bus.submit(pool, OWNER, "mass_publish", {**params, "cloned_from_op": op_id})
+            if productive:
                 account = await pool.fetchrow(
                     """SELECT * FROM tg_accounts WHERE owner_id=$1 AND phone='synthetic-project-queue'""", OWNER)
                 monkeypatch.setattr(op_worker.resource_selector, "select_all_active",
@@ -313,9 +337,9 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
                     dispatched.set()
                 await asyncio.wait_for(asyncio.gather(*tasks), timeout=15)
             state = await pool.fetchrow("SELECT status, result FROM operation_queue WHERE id=$1", op_id)
-            assert state["status"] == ("done" if changed == "new_target" else "failed")
+            assert state["status"] == ("done" if productive else "failed")
             result = json.loads(state["result"])
-            if changed == "new_target":
+            if productive:
                 send.assert_awaited_once()
                 assert send.await_args.args[1] == CHANNEL
                 assert result["ok"] == 1
@@ -323,12 +347,15 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
                 assert await pool.fetchval(
                     "SELECT target FROM operation_log WHERE op_id=$1 AND status='ok'", op_id) == str(CHANNEL)
                 following = await pool.fetchrow(
-                    """SELECT status, params, scheduled_for > now() AS future FROM operation_queue
+                    """SELECT id, status, params, scheduled_for > now() AS future FROM operation_queue
                         WHERE owner_id=$1 AND id<>$2 AND params->>'project_id'=$3""",
                     OWNER, op_id, str(project),
                 )
                 assert following["status"] == "pending" and following["future"]
-                assert json.loads(following["params"])["channel_ids"] == [CHANNEL]
+                following_params = json.loads(following["params"])
+                assert following_params["channel_ids"] == [CHANNEL]
+                assert following_params["_project_scope_since"] == (await pool.fetchval(
+                    "SELECT created_at FROM operation_queue WHERE id=$1", op_id)).isoformat()
                 stopped.assert_not_awaited()
             else:
                 assert expected in result["summary"]
@@ -381,7 +408,7 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
                     "SELECT count(*) FROM operation_queue WHERE owner_id=$1 AND params->>'project_id'=$2",
                     OWNER, str(project),
                 ) == 1
-                if changed == "detached":
+                if changed in ("detached", "reattached", "manual_reattached"):
                     fresh_review = await client.get(
                         f"{preview_path}?project_id={project}&project_channel_id={CHANNEL}", headers=headers)
                     assert fresh_review.status == 200 and (await fresh_review.json())["total"] == 1
@@ -391,7 +418,7 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
             assert card.status == 200
             assert expected in await card.text()
             card_body = await card.json()
-            if changed == "new_target":
+            if productive:
                 assert not card_body.get("project_review_required")
             else:
                 assert card_body["review_project_id"] == project
@@ -405,8 +432,30 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
             assert await pool.fetchval(
                 "SELECT 1 FROM network_nodes WHERE instance_id=$1 AND ref_id=$2", other, CHANNEL)
 
+            if changed == "neighbor_reattached":
+                # Следующий круг сохраняет время первоначального подтверждения,
+                # даже если прежняя операция уже удалена из истории владельцем.
+                original_path = f"/api/miniapp/operations/{check_id}/cleanup"
+                detach = {"action": "detach", "project_id": project, "targets": [CHANNEL_TARGET]}
+                plan = await client.post(original_path, headers=headers, json={**detach, "preview": True})
+                assert plan.status == 200
+                applied = await client.post(original_path, headers=headers, json={
+                    **detach, "token": (await plan.json())["token"],
+                })
+                assert applied.status == 200
+                assert (await client.post(f"/api/miniapp/networks/{project}/nodes", headers=headers,
+                                          json={"type":"channel", "object_id":str(CHANNEL)})).status == 200
+                await pool.execute("DELETE FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, OWNER)
+                await pool.execute("UPDATE operation_queue SET created_at=clock_timestamp() WHERE id=$1",
+                                   following["id"])
+                refused = await op_worker._exec_mass_publish(
+                    pool, None, following["id"], OWNER, following_params)
+                assert refused["status"] == "failed" and refused["project_publish_scope_refused"]
+                assert "Канал был отвязан после подтверждения" in refused["summary"]
+                send.assert_awaited_once()
+
     async def with_synthetic_account(pool, check_id):
-        if changed != "new_target":
+        if not productive:
             await scenario(pool, check_id)
             return
         account_id = await pool.fetchval(

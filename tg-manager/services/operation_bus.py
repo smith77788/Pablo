@@ -1002,7 +1002,9 @@ class ProjectPublishReviewRequired(PermissionError):
 
 
 async def _check_project_publish_derivation(pool, owner_id: int, params: dict, source_id: int) -> None:
-    from services.network_builder import project_pilot_enabled, project_publish_channels
+    from services.network_builder import (
+        project_pilot_enabled, project_publish_channels, project_publish_scope_was_detached,
+    )
     from services.security import selection_ids, validate_integer
 
     project_id = validate_integer(str(params["project_id"]), min_val=1, max_val=2**31 - 1)
@@ -1011,6 +1013,7 @@ async def _check_project_publish_derivation(pool, owner_id: int, params: dict, s
     source = await pool.fetchrow(
         """SELECT params->>'project_id' AS project_id,
                   params->'channel_ids' AS channel_ids,
+                  params->>'_project_scope_since' AS scope_since, created_at,
                   (result->>'project_publish_scope_refused' IS NOT NULL
                    OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required
              FROM operation_queue
@@ -1029,6 +1032,14 @@ async def _check_project_publish_derivation(pool, owner_id: int, params: dict, s
     available = await project_publish_channels(pool, owner_id, project_id)
     if not set(requested).issubset(row["channel_id"] for row in available):
         raise ProjectPublishReviewRequired
+    since = source["scope_since"]
+    if not since and source["created_at"] is not None:
+        since = source["created_at"].isoformat()
+    if not since or await project_publish_scope_was_detached(
+        pool, owner_id, project_id, requested, source_id, since=since,
+    ):
+        raise ProjectPublishReviewRequired
+    params["_project_scope_since"] = since
 
 
 async def submit(

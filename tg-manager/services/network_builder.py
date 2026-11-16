@@ -236,6 +236,38 @@ async def project_publish_channels(
     return [dict(row) for row in rows]
 
 
+async def project_publish_scope_was_detached(
+    pool, owner_id: int, project_id: int, channel_ids: list[int], op_id: int,
+    *, since: str | None = None,
+) -> bool:
+    """Проверяет отвязку подтверждённых каналов после постановки публикации."""
+    cutoff = None
+    if since is not None:
+        try:
+            cutoff = datetime.fromisoformat(since)
+        except (TypeError, ValueError):
+            return True
+        if cutoff.tzinfo is None:
+            return True
+    scope_is_current = await pool.fetchval(
+        """SELECT EXISTS (
+               SELECT 1 FROM operation_queue q
+                WHERE q.id=$2 AND q.owner_id=$1 AND q.op_type IN ('mass_publish','quick_post')
+                  AND q.params->>'project_id'=$3 AND NOT EXISTS (
+                      SELECT 1 FROM operation_audit a
+                       WHERE a.owner_id=$1 AND a.result='success'
+                         AND a.occurred_at >= LEAST($7::timestamptz, q.created_at)
+                         AND (a.action='restriction_cleanup_detach' AND a.target=ANY($4::text[])
+                           OR a.action='project_node_detach' AND split_part(a.target,' ',1)=$5
+                              AND split_part(a.target,' ',3)=ANY($6::text[])))
+           )""",
+        owner_id, op_id, str(project_id),
+        [f"channel:{channel_id} project:{project_id}" for channel_id in channel_ids],
+        f"project:{project_id}", [f"channel:{channel_id}" for channel_id in channel_ids], cutoff,
+    )
+    return not scope_is_current
+
+
 # Выбираются только ресурсы каталога владельца. Имена таблиц и столбцов
 # заданы здесь, пользовательский ввод передаётся параметрами.
 _PROJECT_GROUPS = "('group','supergroup','megagroup','chat','gigagroup')"
