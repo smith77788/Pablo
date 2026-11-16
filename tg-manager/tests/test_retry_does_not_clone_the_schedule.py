@@ -28,6 +28,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import ast
 import inspect
 
@@ -177,7 +178,7 @@ async def test_retry_of_failed_targets_does_not_clone_the_schedule(monkeypatch):
 
 class _RoundPool:
     async def fetchrow(self, query, *args):
-        return {"label": "Пост ↻", "total_items": 3}
+        return {"label": "Пост ↻", "total_items": 3, "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc)}
 
     async def fetch(self, query, *args):
         return []

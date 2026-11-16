@@ -5928,12 +5928,21 @@ async def _reschedule_recurring(
     _row = await _safe_fetchrow(
         pool, "SELECT label, total_items, created_at FROM operation_queue WHERE id=$1",
         op_id, log_ctx=f"[recurring_label op={op_id}]")
-    if (op_type in ("mass_publish", "quick_post") and params.get("project_id") is not None
-            and "_project_scope_since" not in _next_params):
-        if not _row or not _row.get("created_at"):
-            log.warning("autopost v2: op=%d не прочитано время исходного подтверждения", op_id)
-            return
-        _next_params["_project_scope_since"] = _row["created_at"].isoformat()
+    if op_type in ("mass_publish", "quick_post", "bulk_post_chans"):
+        catalog_since = _next_params.get("_publication_catalog_since")
+        project_since = _next_params.get("_project_scope_since")
+        if not catalog_since:
+            created_at = _row.get("created_at") if _row else None
+            if not project_since and created_at is None:
+                await _notify_recurring_stopped(
+                    pool, bot, owner_id, op_id, op_type,
+                    "не удалось прочитать время исходного подтверждения публикации",
+                )
+                return
+            catalog_since = project_since or created_at.isoformat()
+            _next_params["_publication_catalog_since"] = catalog_since
+        if params.get("project_id") is not None and op_type in ("mass_publish", "quick_post"):
+            _next_params["_project_scope_since"] = project_since or catalog_since
     _base_label = (_row["label"] if _row else None) or op_type
     # Метку повтора ставим один раз: без этой проверки она копилась кругами
     # («Пост ↻↻↻↻») и к сотому запуску вытесняла из очереди само название.
@@ -8108,7 +8117,17 @@ async def _exec_mass_publish(
         *fetch_params,
     )
 
-    if not db_pairs:
+    try:
+        stale_ids = await _channels_changed_after_queueing(
+            pool, owner_id, ("mass_publish", "quick_post"), await journal_op_ids(pool, op_id),
+            sorted({int(row["id"]) for row in db_pairs} | set(explicit_channel_ids)),
+            since=params.get("_publication_catalog_since"),
+        )
+    except (Exception, asyncio.CancelledError):
+        await release_accounts(mp_used_acc_ids)
+        raise
+
+    if not db_pairs and not stale_ids:
         await release_accounts(mp_used_acc_ids)
         return {
             "status": "done",
@@ -8137,6 +8156,8 @@ async def _exec_mass_publish(
             }
         target_map[channel_id]["accounts"].append(acc)
 
+    for channel_id in sorted(stale_ids - target_map.keys()):
+        target_map[channel_id] = {"dialog": {"id": channel_id}, "accounts": []}
     targets = list(target_map.values())
     total = len(targets)
     await _safe_execute(
@@ -8147,7 +8168,8 @@ async def _exec_mass_publish(
     # Pre-scan: for channels without access_hash AND without username,
     # do one full dialog scan per account to resolve missing hashes before the main loop.
     # Persists resolved hashes to DB so future runs use the fast path (Strategy 1).
-    _needs_hash = [t for t in targets if not t["dialog"]["access_hash"] and not t["dialog"].get("username")]
+    _needs_hash = [t for t in targets if t["dialog"]["id"] not in stale_ids
+                   and not t["dialog"]["access_hash"] and not t["dialog"].get("username")]
     if _needs_hash:
         _prescan_accs: dict[int, dict] = {}
         for _t in _needs_hash:
@@ -8164,7 +8186,7 @@ async def _exec_mass_publish(
                     for d in _all_dlg
                     if d.get("access_hash")
                 }
-                for _t in targets:
+                for _t in _needs_hash:
                     _d = _t["dialog"]
                     _cid = int(_d["id"])
                     if not _d["access_hash"] and _cid in _dlg_map:
@@ -8217,6 +8239,11 @@ async def _exec_mass_publish(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                 op_id,
             )
+            continue
+        if dialog["id"] in stale_ids:
+            fail_count += 1
+            failed_channels.append(str(dialog["id"]))
+            await _record_stale_publication_target(pool, op_id, idx, dialog["id"])
             continue
         candidate_accounts = [
             _acc
@@ -8634,6 +8661,8 @@ async def _exec_mass_publish(
 
     parts = [f"Опубликовано: {ok_count}", f"ошибок: {fail_count}"]
     _summary = ", ".join(parts)
+    if stale_ids:
+        _summary += f". {_STALE_PUBLICATION_TARGET}"
     if _has_channel_link and ok_count > 0:
         # Владелец должен понимать природу риска: код снизил сигнатуру, но
         # окончательно сохранность целевого канала решают его прогретость и то,
@@ -8646,7 +8675,7 @@ async def _exec_mass_publish(
             "добавляйте ссылочную массу постепенно."
         )
     return {
-        "status": "done",
+        "status": "failed" if stale_ids and not ok_count else "done",
         "ok": ok_count,
         "failed": fail_count,
         "failed_channels": failed_channels[:50],
@@ -14790,11 +14819,17 @@ async def _exec_bulk_dm_adhoc(
 
 
 async def _channels_changed_after_queueing(
-    pool: asyncpg.Pool, owner_id: int, op_type: str, family_ids: list[int], targets: list[int],
+    pool: asyncpg.Pool, owner_id: int, op_type: str | tuple[str, ...], family_ids: list[int],
+    targets: list[int], *, since: str | None = None,
 ) -> set[int]:
     """Ресурсы, для которых очистка или восстановление отменили прежний выбор."""
     if not targets:
         return set()
+    from datetime import datetime
+
+    cutoff = datetime.fromisoformat(since) if since is not None else None
+    if cutoff is not None and cutoff.tzinfo is None:
+        raise ValueError("Время подтверждения публикации без часового пояса")
     rows = await pool.fetch(
         """SELECT DISTINCT CASE WHEN a.action='channel_restore' THEN a.target
                                 ELSE split_part(a.target, ':', 2) END AS channel_id
@@ -14802,14 +14837,29 @@ async def _channels_changed_after_queueing(
             WHERE a.owner_id=$1 AND a.result='success'
               AND (a.action='channel_restore' AND a.target=ANY($2::text[])
                 OR a.action='restriction_cleanup_disable' AND a.target=ANY($3::text[]))
-              AND a.occurred_at >= (
+              AND a.occurred_at >= LEAST($6::timestamptz, (
                   SELECT min(queued.created_at) FROM operation_queue queued
-                   WHERE queued.id=ANY($4::bigint[]) AND queued.owner_id=$1 AND queued.op_type=$5)""",
+                   WHERE queued.id=ANY($4::bigint[]) AND queued.owner_id=$1 AND queued.op_type=ANY($5::text[])))""",
         owner_id, [str(ch_id) for ch_id in targets],
         [f"{kind}:{ch_id}" for ch_id in targets for kind in ("channel", "group")],
-        family_ids, op_type,
+        family_ids, [op_type] if isinstance(op_type, str) else list(op_type), cutoff,
     )
     return {int(row["channel_id"]) for row in rows}
+
+
+_STALE_PUBLICATION_TARGET = "Ресурс отключали или восстанавливали после постановки. Подтвердите новую публикацию."
+
+
+async def _record_stale_publication_target(pool, op_id: int, step: int, channel_id: int) -> None:
+    await _journal_write(
+        pool,
+        """INSERT INTO operation_log(op_id, step_num, target, status, message)
+           SELECT $1::int,$2::int,$3::text,'skipped',$4::text WHERE NOT EXISTS (
+               SELECT 1 FROM operation_log WHERE op_id=$1 AND target=$3 AND status='skipped' AND message=$4)""",
+        op_id, step, str(channel_id), _STALE_PUBLICATION_TARGET,
+        log_ctx=f"[publish_cleanup op={op_id}]", where="publish_cleanup",
+    )
+    await _safe_execute(pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
 
 
 async def _exec_pin_last_post(
@@ -15763,8 +15813,8 @@ async def _exec_bulk_post_chans(
         ch_rows = await _safe_fetch(
                 pool,
             "SELECT id, channel_id, access_hash, username FROM managed_channels "
-            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-            owner_id, channel_ids,
+            "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND acc_id=$3",
+            owner_id, channel_ids, acc_id,
         )
         channels = [dict(r) for r in ch_rows]
         if not channels:
@@ -15793,6 +15843,10 @@ async def _exec_bulk_post_chans(
                 log_ctx=f"[bulk_post_chans_log op={op_id}]",
             )
 
+        stale_ids = await _channels_changed_after_queueing(
+            pool, owner_id, "bulk_post_chans", await journal_op_ids(pool, op_id),
+            [ch["channel_id"] for ch in channels], since=params.get("_publication_catalog_since"),
+        )
         _already = await completed_targets(pool, op_id)
         if _already:
             log.info("bulk_post_chans op=%d: повтор — %d каналов уже опубликованы",
@@ -15815,6 +15869,10 @@ async def _exec_bulk_post_chans(
                         pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
+                continue
+            if ch_id in stale_ids:
+                err_count += 1
+                await _record_stale_publication_target(pool, op_id, idx + 1, ch_id)
                 continue
             access_hash = ch.get("access_hash", 0) or 0
             ch_username = ch.get("username") or ""
@@ -15927,6 +15985,8 @@ async def _exec_bulk_post_chans(
                 pool, op_id, max(0.0, _pace - slept), "bulk_publish_pace")
 
         _summary = f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}"
+        if stale_ids:
+            _summary += f". {_STALE_PUBLICATION_TARGET}"
         if _has_channel_link and ok_count > 0:
             _summary += (
                 "\n\n🔗 Ссылка в посте — включён безопасный режим (форма разнесена, "
@@ -15934,7 +15994,7 @@ async def _exec_bulk_post_chans(
                 "публикуйте ссылку сразу во все каналы."
             )
         return {
-            "status": "done",
+            "status": "failed" if stale_ids and not ok_count else "done",
             "ok": ok_count,
             "fail": err_count,
             "summary": _summary,

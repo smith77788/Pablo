@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import asyncio
 
 import pytest
@@ -23,7 +24,7 @@ from services import op_worker
 
 class _Pool:
     async def fetchrow(self, query, *args):
-        return {"label": "Автопост", "total_items": 10}
+        return {"label": "Автопост", "total_items": 10, "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc)}
 
     async def fetch(self, query, *args):
         return []

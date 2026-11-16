@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import ast
 import pathlib
 
@@ -34,7 +35,7 @@ _OP = "quick_post"
 
 class _Pool:
     async def fetchrow(self, query, *args):
-        return {"label": "Пост", "total_items": 10}
+        return {"label": "Пост", "total_items": 10, "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc)}
 
     async def fetch(self, query, *args):
         return []

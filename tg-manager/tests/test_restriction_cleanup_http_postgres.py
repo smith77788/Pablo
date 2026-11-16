@@ -910,3 +910,155 @@ def test_cleanup_large_report_through_signed_http(monkeypatch, profile_count):
                                OWNER, account_ids)
 
     asyncio.run(_run(scenario))
+
+
+@pytest.mark.parametrize(("op_type", "selection", "return_method"), [
+    ("mass_publish", "fixed", "disabled"),
+    ("mass_publish", "fixed", "restore"),
+    ("mass_publish", "dynamic", "reimport"),
+    ("quick_post", "fixed", "restore"),
+    ("bulk_post_chans", "legacy", "restore"),
+])
+def test_publication_skips_catalog_changes_after_queueing(monkeypatch, op_type, selection, return_method):
+    from database import db as channel_db
+    from services import editorial_review, operation_bus
+    from services import mini_app_channels as channel_api
+
+    secret = "123456:synthetic-publish-cleanup"
+    monkeypatch.setenv("BOT_TOKEN", secret)
+    monkeypatch.setenv("INFRAGRAM_PROJECT_PILOT_IDS", str(OWNER))
+    publish = AsyncMock(return_value={"msg_id": 123})
+    monkeypatch.setattr(account_manager, "post_to_channel", publish)
+    monkeypatch.setattr(editorial_review, "autonomous_block", AsyncMock(return_value=(False, [])))
+    monkeypatch.setattr(op_worker, "_claim_available_accounts", AsyncMock(side_effect=lambda _, rows, __: rows))
+    monkeypatch.setattr(op_worker, "try_claim_account", AsyncMock(return_value=True))
+    monkeypatch.setattr(op_worker, "_single_account_parked", AsyncMock(return_value=None))
+    monkeypatch.setattr(op_worker, "release_accounts", AsyncMock())
+    monkeypatch.setattr(op_worker, "_governed_sleep", AsyncMock())
+    monkeypatch.setattr(op_worker, "_pause_watching_for_cancel", AsyncMock())
+    monkeypatch.setattr(op_worker, "_flood_cooldown_left", lambda _: 0)
+    monkeypatch.setattr("bot.utils.subscription.require_plan", AsyncMock(return_value=True))
+    monkeypatch.setattr(op_worker, "circuit_breaker_status", AsyncMock(return_value={}))
+
+    async def scenario(pool, check_id):
+        sibling = CHANNEL + 1
+        source_row = await pool.fetchval(
+            "UPDATE managed_channels SET access_hash=111 WHERE owner_id=$1 AND channel_id=$2 RETURNING id",
+            OWNER, CHANNEL,
+        )
+        sibling_row = await pool.fetchval(
+            """INSERT INTO managed_channels(owner_id,acc_id,channel_id,access_hash,title,type)
+               VALUES($1,992660,$2,222,'Соседний канал','channel') RETURNING id""",
+            OWNER, sibling,
+        )
+        account = dict(await pool.fetchrow("SELECT * FROM tg_accounts WHERE id=992660"))
+        monkeypatch.setattr(op_worker.resource_selector, "select_all_active", AsyncMock(return_value=[account]))
+        params = {"text": "Синтетическая публикация", "delay": -1}
+        executor = op_worker._exec_mass_publish
+        if selection == "fixed":
+            params["channel_ids"] = [str(CHANNEL), str(sibling)]
+        elif selection == "legacy":
+            params.update(acc_id=992660, channel_ids=[source_row, str(sibling_row)])
+            executor = op_worker._exec_bulk_post_chans
+
+        async def enqueue(payload):
+            return await pool.fetchval(
+                """INSERT INTO operation_queue(owner_id,op_type,status,params)
+                   VALUES($1,$2,'running',$3::jsonb) RETURNING id""",
+                OWNER, op_type, json.dumps(payload),
+            )
+
+        op_id = await enqueue(params)
+        before = await pool.fetchval("SELECT created_at FROM operation_queue WHERE id=$1", op_id)
+        foreign_audit = await pool.fetchval(
+            """INSERT INTO operation_audit(owner_id,action,target,result)
+               VALUES($1,'channel_restore',$2,'success') RETURNING id""", OWNER + 1, str(sibling),
+        )
+        app = web.Application()
+        mini_app_operations.setup_routes(app, pool)
+        channel_api.setup_routes(app, pool)
+        headers = {"Authorization": f"Bearer {make_token(OWNER, secret)}"}
+        path = f"/api/miniapp/operations/{check_id}/cleanup"
+        action = {"action": "disable", "targets": [CHANNEL_TARGET]}
+        try:
+            async with TestClient(TestServer(app)) as client:
+                busy = await client.post(path, headers=headers, json={**action, "preview": True})
+                busy_plan = await busy.json()
+                assert busy.status == 200 and busy_plan["token"] is None
+                assert "текущей публикации" in busy_plan["items"][0]["reason"]
+                await pool.execute("UPDATE operation_queue SET status='pending' WHERE id=$1", op_id)
+
+                review = await client.post(path, headers=headers, json={**action, "preview": True})
+                assert review.status == 200, await review.text()
+                plan = await review.json()
+                confirmation = {**action, "token": plan["token"]}
+                applied = await client.post(path, headers=headers, json=confirmation)
+                assert applied.status == 200 and (await applied.json())["count"] == 1
+                restored_path = f"/api/miniapp/channel/{CHANNEL}/restore"
+                if return_method == "restore":
+                    outsider = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+                    assert (await client.post(restored_path, headers=outsider)).status == 404
+                    restored = await client.post(restored_path, headers=headers)
+                    assert restored.status == 200, await restored.text()
+                elif return_method == "reimport":
+                    resources = [{"id": CHANNEL, "title": "Возвращён", "type": "channel", "access_hash": 111}]
+                    assert await channel_db.add_managed_channels(pool, OWNER, 992660, resources) == 0
+                    assert await channel_db.add_managed_channels(pool, OWNER, 992660, resources, reconnect=True) == 1
+                    await pool.execute("UPDATE managed_channels SET access_hash=111 WHERE owner_id=$1 AND channel_id=$2",
+                                       OWNER, CHANNEL)
+
+                await pool.execute("UPDATE operation_queue SET status='running' WHERE id=$1", op_id)
+                result = await executor(pool, None, op_id, OWNER, params)
+                assert result["ok"] == 1 and result.get("failed", result.get("fail")) == 1
+                publish.assert_awaited_once()
+                assert publish.await_args.args[1] == sibling
+                log_response = await client.get(f"/api/miniapp/operation/{op_id}/log", headers=headers)
+                assert log_response.status == 200, await log_response.text()
+                logs = (await log_response.json())["logs"]
+                skipped, = [entry for entry in logs if entry["status"] == "skipped"]
+                assert skipped["target"] == str(CHANNEL)
+                assert "Подтвердите новую публикацию" in skipped["message"]
+                outsider = {"Authorization": f"Bearer {make_token(OWNER + 1, secret)}"}
+                assert (await client.get(f"/api/miniapp/operation/{op_id}/log", headers=outsider)).status == 404
+                exported = await client.get(f"/api/miniapp/operation/{op_id}/log.csv", headers=headers)
+                assert exported.status == 200
+                csv = await exported.text()
+                assert str(CHANNEL) in csv and "synthetic-restore-session" not in csv
+
+                for _ in range(2):
+                    await executor(pool, None, op_id, OWNER, params)
+                assert await pool.fetchval(
+                    "SELECT count(*) FROM operation_log WHERE op_id=$1 AND status='skipped'", op_id) == 1
+                retry = {**params, "retry_of_op": op_id}
+                retried = await executor(pool, None, await enqueue(retry), OWNER, retry)
+                assert retried["ok"] == 1
+                publish.assert_awaited_once()
+
+                if return_method != "disabled":
+                    await pool.execute("UPDATE operation_queue SET status='partial' WHERE id=$1", op_id)
+                    await op_worker._reschedule_recurring(
+                        pool, None, op_id, OWNER, op_type, {**params, "repeat_interval_min": 15},
+                        productive=True,
+                    )
+                    next_id = await pool.fetchval(
+                        "SELECT params->>'recurring_next_op' FROM operation_queue WHERE id=$1", op_id)
+                    assert next_id
+                    next_row = await pool.fetchrow(
+                        "SELECT params, scheduled_for > now() AS future FROM operation_queue WHERE id=$1",
+                        int(next_id),
+                    )
+                    following = json.loads(next_row["params"])
+                    assert next_row["future"] and following["_publication_catalog_since"] == before.isoformat()
+                    await pool.execute("DELETE FROM operation_queue WHERE id=$1", op_id)
+                    await executor(pool, None, int(next_id), OWNER, following)
+                    assert [call.args[1] for call in publish.await_args_list] == [sibling, sibling]
+
+                    fresh_id = (await enqueue(params) if selection == "legacy" else
+                                await operation_bus.submit(pool, OWNER, op_type, params, dedup_window_sec=0))
+                    fresh = await executor(pool, None, fresh_id, OWNER, params)
+                    assert fresh["ok"] == 2
+                    assert {call.args[1] for call in publish.await_args_list[-2:]} == {CHANNEL, sibling}
+        finally:
+            await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1 AND id=$2", OWNER + 1, foreign_audit)
+
+    asyncio.run(_run(scenario))
