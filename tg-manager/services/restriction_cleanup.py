@@ -271,12 +271,13 @@ async def findings(pool, owner_id, op_id, *, include_history=False):
                 """SELECT action, target, occurred_at FROM operation_audit
                     WHERE owner_id=$1 AND operation_id=$2 AND result='success'
                       AND action IN ('restriction_cleanup_detach','restriction_cleanup_disable',
-                                     'channel_restore','bot_restore')
+                                     'channel_restore','bot_restore','channel_reconnect')
                     ORDER BY occurred_at DESC NULLS LAST, id DESC LIMIT 51""",
                 owner_id, op_id,
             )
             response["history"] = [
                 {"action": "restore" if r["action"] in ("bot_restore", "channel_restore")
+                 else "reconnect" if r["action"] == "channel_reconnect"
                  else r["action"].removeprefix("restriction_cleanup_"),
                  "target": r["target"],
                  "occurred_at": r["occurred_at"].isoformat() if r["occurred_at"] else None}

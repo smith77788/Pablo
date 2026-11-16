@@ -293,6 +293,12 @@ def test_scheduled_project_publish_rechecks_scope_at_poller(monkeypatch, changed
                 await pool.execute(
                     """UPDATE operation_queue SET params=params || '{"channel_ids":[]}'::jsonb WHERE id=$1""", op_id)
                 expected = "Некорректный список каналов проекта"
+            if changed in ("reattached", "manual_reattached", "neighbor_reattached"):
+                deleted = await pool.execute(
+                    """DELETE FROM operation_audit WHERE owner_id=$1
+                       AND action IN ('restriction_cleanup_detach','project_node_detach')""", OWNER,
+                )
+                assert deleted == "DELETE 1"
             if changed in ("reattached", "manual_reattached"):
                 from services import operation_bus as retry_bus
 

@@ -135,6 +135,10 @@ def test_queued_channel_edit_revalidates_targets_after_cleanup(monkeypatch, chan
                     assert fresh_result["ok"] == 1
                     assert editor.await_args.args[1] == CHANNEL
         finally:
+            await pool.execute(
+                "DELETE FROM resource_selection_invalidations WHERE owner_id=$1 AND scope=$2",
+                OWNER + 1, f"channel:{other}",
+            )
             await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1 AND id=$2", OWNER + 1, foreign_audit)
             await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
                                OWNER + 1, foreign)
@@ -1003,10 +1007,28 @@ def test_publication_skips_catalog_changes_after_queueing(monkeypatch, op_type, 
                 elif return_method == "reimport":
                     resources = [{"id": CHANNEL, "title": "Возвращён", "type": "channel", "access_hash": 111}]
                     assert await channel_db.add_managed_channels(pool, OWNER, 992660, resources) == 0
+                    before = await pool.fetchval(
+                        "UPDATE operation_queue SET created_at=clock_timestamp() WHERE id=$1 RETURNING created_at",
+                        op_id,
+                    )
                     assert await channel_db.add_managed_channels(pool, OWNER, 992660, resources, reconnect=True) == 1
+                    report = await (await client.get(path, headers=headers)).json()
+                    assert any(row["action"] == "reconnect" and row["target"] == str(CHANNEL)
+                               for row in report["history"])
                     await pool.execute("UPDATE managed_channels SET access_hash=111 WHERE owner_id=$1 AND channel_id=$2",
                                        OWNER, CHANNEL)
 
+                from services.db_maintenance import _prune_batched
+
+                await pool.execute(
+                    """UPDATE operation_audit SET occurred_at=now()-interval '61 days'
+                       WHERE owner_id=$1 AND action=ANY($2::text[])""",
+                    OWNER, ["channel_restore", "channel_reconnect", "restriction_cleanup_disable"],
+                )
+                pruned, error = await _prune_batched(
+                    pool, "operation_audit", "owner_id=$1 AND occurred_at < now()-interval '60 days'", OWNER,
+                )
+                assert error is None and pruned == (1 if return_method == "disabled" else 2)
                 await pool.execute("UPDATE operation_queue SET status='running' WHERE id=$1", op_id)
                 result = await executor(pool, None, op_id, OWNER, params)
                 assert result["ok"] == 1 and result.get("failed", result.get("fail")) == 1
@@ -1059,6 +1081,10 @@ def test_publication_skips_catalog_changes_after_queueing(monkeypatch, op_type, 
                     assert fresh["ok"] == 2
                     assert {call.args[1] for call in publish.await_args_list[-2:]} == {CHANNEL, sibling}
         finally:
+            await pool.execute(
+                "DELETE FROM resource_selection_invalidations WHERE owner_id=$1 AND scope=$2",
+                OWNER + 1, f"channel:{sibling}",
+            )
             await pool.execute("DELETE FROM operation_audit WHERE owner_id=$1 AND id=$2", OWNER + 1, foreign_audit)
 
     asyncio.run(_run(scenario))

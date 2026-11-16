@@ -14831,17 +14831,13 @@ async def _channels_changed_after_queueing(
     if cutoff is not None and cutoff.tzinfo is None:
         raise ValueError("Время подтверждения публикации без часового пояса")
     rows = await pool.fetch(
-        """SELECT DISTINCT CASE WHEN a.action='channel_restore' THEN a.target
-                                ELSE split_part(a.target, ':', 2) END AS channel_id
-             FROM operation_audit a
-            WHERE a.owner_id=$1 AND a.result='success'
-              AND (a.action='channel_restore' AND a.target=ANY($2::text[])
-                OR a.action='restriction_cleanup_disable' AND a.target=ANY($3::text[]))
-              AND a.occurred_at >= LEAST($6::timestamptz, (
+        """SELECT split_part(i.scope, ':', 2) AS channel_id
+             FROM resource_selection_invalidations i
+            WHERE i.owner_id=$1 AND i.scope=ANY($2::text[])
+              AND i.changed_at >= LEAST($5::timestamptz, (
                   SELECT min(queued.created_at) FROM operation_queue queued
-                   WHERE queued.id=ANY($4::bigint[]) AND queued.owner_id=$1 AND queued.op_type=ANY($5::text[])))""",
-        owner_id, [str(ch_id) for ch_id in targets],
-        [f"{kind}:{ch_id}" for ch_id in targets for kind in ("channel", "group")],
+                   WHERE queued.id=ANY($3::bigint[]) AND queued.owner_id=$1 AND queued.op_type=ANY($4::text[])))""",
+        owner_id, [f"channel:{ch_id}" for ch_id in targets],
         family_ids, [op_type] if isinstance(op_type, str) else list(op_type), cutoff,
     )
     return {int(row["channel_id"]) for row in rows}

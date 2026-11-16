@@ -254,16 +254,12 @@ async def project_publish_scope_was_detached(
                SELECT 1 FROM operation_queue q
                 WHERE q.id=$2 AND q.owner_id=$1 AND q.op_type IN ('mass_publish','quick_post')
                   AND q.params->>'project_id'=$3 AND NOT EXISTS (
-                      SELECT 1 FROM operation_audit a
-                       WHERE a.owner_id=$1 AND a.result='success'
-                         AND a.occurred_at >= LEAST($7::timestamptz, q.created_at)
-                         AND (a.action='restriction_cleanup_detach' AND a.target=ANY($4::text[])
-                           OR a.action='project_node_detach' AND split_part(a.target,' ',1)=$5
-                              AND split_part(a.target,' ',3)=ANY($6::text[])))
+                      SELECT 1 FROM resource_selection_invalidations i
+                       WHERE i.owner_id=$1 AND i.scope=ANY($4::text[])
+                         AND i.changed_at >= LEAST($5::timestamptz, q.created_at))
            )""",
         owner_id, op_id, str(project_id),
-        [f"channel:{channel_id} project:{project_id}" for channel_id in channel_ids],
-        f"project:{project_id}", [f"channel:{channel_id}" for channel_id in channel_ids], cutoff,
+        [f"project:{project_id} channel:{channel_id}" for channel_id in channel_ids], cutoff,
     )
     return not scope_is_current
 

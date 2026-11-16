@@ -22,6 +22,7 @@ try {
         title:'Отключённый канал', status:'restricted', active:false, can_disable:false, can_restore:true,
         disable_reason:'Ресурс уже отключён в Infragram'}], legacy:true, max_targets:2,
         history:[{action:'restore', target:'9007199254740996'},
+                 {action:'reconnect', target:'9007199254740997'},
           {action:'detach', target:'bot:9007199254740993 project:7'}]};
       const body = JSON.parse(options.body);
       window.cleanupCalls.push({path, body});
@@ -66,6 +67,7 @@ try {
   await page.getByText('История изменений', {exact:true}).click();
   await page.getByText('Убрать из проекта · bot:9007199254740993 project:7').waitFor();
   await page.getByText('Восстановлен в Infragram · 9007199254740996').waitFor();
+  await page.getByText('Подключён повторно · 9007199254740997').waitFor();
   const search = page.getByRole('searchbox', {name:'Найти ресурс'});
   await page.locator('#opCleanupStatus').selectOption('hidden');
   await search.fill('#9007199254740993');

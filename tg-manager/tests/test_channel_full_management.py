@@ -67,7 +67,7 @@ class _Pool:
 
     async def fetch(self, q, *a):
         self.executed.append((q, a))
-        if "FROM operation_audit" in q:
+        if "FROM resource_selection_invalidations" in q:
             return []
         if "FROM operation_queue" in q:
             return [{"id": 77}]

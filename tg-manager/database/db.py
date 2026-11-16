@@ -4893,7 +4893,18 @@ async def forget_removed_channels(pool: asyncpg.Pool, owner_id: int, channel_ids
 
 async def _forget_removed_channels(conn, owner_id: int, ids: list[int]) -> None:
     await conn.execute(
-        "DELETE FROM removed_channels WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+        """WITH archived AS (
+               DELETE FROM removed_channels WHERE owner_id=$1 AND channel_id=ANY($2::bigint[])
+               RETURNING channel_id, reason, catalog_metadata->>'cleanup_operation_id' AS cleanup_operation_id
+           )
+           INSERT INTO operation_audit (owner_id, operation_id, action, target, result)
+           SELECT $1, q.id, 'channel_reconnect', archived.channel_id::text, 'success'
+             FROM archived
+             LEFT JOIN operation_queue q
+               ON q.id=CASE WHEN archived.cleanup_operation_id ~ '^[0-9]{1,18}$'
+                            THEN archived.cleanup_operation_id::bigint END
+              AND q.owner_id=$1 AND q.op_type='check_owned_restrictions'
+            WHERE archived.reason='owner'""",
         owner_id, ids,
     )
 

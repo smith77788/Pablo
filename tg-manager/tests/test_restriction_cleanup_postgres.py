@@ -26,6 +26,7 @@ async def _clear(pool):
         "(SELECT id FROM network_instances WHERE owner_id=$1)", OWNER)
     for table, column in (
         ("network_instances", "owner_id"), ("workflow_definitions", "owner_id"),
+        ("resource_selection_invalidations", "owner_id"),
         ("operation_audit", "owner_id"), ("operation_queue", "owner_id"),
         ("managed_channels", "owner_id"), ("removed_channels", "owner_id"),
         ("va_channel_admin", "owner_id"),
@@ -541,3 +542,75 @@ def test_native_scan_uses_the_same_catalog_guard(monkeypatch):
         db.get_tg_account.assert_awaited_with(pool, 992660, OWNER)
 
     asyncio.run(_run(scenario))
+
+
+def test_selection_invalidation_migrates_retained_history_and_archives():
+    from services.db_maintenance import _prune_batched
+
+    async def scenario():
+        conn = await asyncpg.connect(DSN)
+        transaction = conn.transaction()
+        await transaction.start()
+        try:
+            await conn.execute("""
+                CREATE SCHEMA selection_migration_test;
+                SET LOCAL search_path TO selection_migration_test;
+                CREATE TABLE operation_audit (
+                    owner_id bigint, action text, target text, result text, occurred_at timestamptz
+                );
+                CREATE TABLE removed_channels (
+                    owner_id bigint, channel_id bigint, reason text, removed_at timestamptz
+                );
+                INSERT INTO operation_audit VALUES
+                    (1, 'restriction_cleanup_disable', 'group:-10', 'success', now()-interval '65 days'),
+                    (1, 'channel_restore', '-10', 'success', now()-interval '61 days'),
+                    (2, 'channel_restore', '-10', 'success', now()-interval '62 days'),
+                    (1, 'project_node_detach', 'project:20 node:21 channel:-10', 'success', now()-interval '65 days'),
+                    (1, 'restriction_cleanup_detach', 'channel:-10 project:20', 'success', now()-interval '64 days'),
+                    (1, 'restriction_cleanup_detach', 'channel:-10 project:30', 'success', now()-interval '63 days'),
+                    (1, 'channel_restore', '-11', 'error', now()-interval '61 days'),
+                    (1, 'channel_restore', 'invalid', 'success', now()-interval '61 days');
+                INSERT INTO removed_channels VALUES
+                    (1, -12, 'owner', now()-interval '90 days'),
+                    (1, -13, 'gone', now()-interval '90 days');
+            """)
+            migration = Path("schema_v374_resource_selection_invalidations.sql").read_text(encoding="utf-8")
+            for _ in range(2):
+                await conn.execute(migration)
+            rows = await conn.fetch("""
+                SELECT owner_id, scope, EXTRACT(day FROM now()-changed_at)::int AS age
+                FROM resource_selection_invalidations ORDER BY owner_id, scope
+            """)
+            assert [tuple(row) for row in rows] == [
+                (1, "channel:-10", 61),
+                (1, "channel:-12", 90),
+                (1, "project:20 channel:-10", 64),
+                (1, "project:30 channel:-10", 63),
+                (2, "channel:-10", 62),
+            ]
+            assert await _prune_batched(
+                conn, "operation_audit", "occurred_at < now()-interval '60 days'",
+            ) == (8, None)
+            assert await conn.fetchval("SELECT count(*) FROM resource_selection_invalidations") == 5
+            async with conn.transaction():
+                await conn.execute("""
+                    INSERT INTO operation_audit VALUES (1, 'channel_reconnect', '-10', 'success', now())
+                """)
+                assert await conn.fetchval("""
+                    SELECT changed_at >= now() FROM resource_selection_invalidations
+                    WHERE owner_id=1 AND scope='channel:-10'
+                """)
+            with pytest.raises(asyncpg.CheckViolationError):
+                async with conn.transaction():
+                    await conn.execute("""
+                        INSERT INTO operation_audit VALUES (1, 'channel_restore', '-14', 'success', now());
+                        ALTER TABLE operation_audit ADD CHECK (target <> '-14');
+                    """)
+            assert not await conn.fetchval("""
+                SELECT EXISTS(SELECT FROM resource_selection_invalidations WHERE scope='channel:-14')
+            """)
+        finally:
+            await transaction.rollback()
+            await conn.close()
+
+    asyncio.run(scenario())

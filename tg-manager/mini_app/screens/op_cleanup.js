@@ -111,6 +111,7 @@ async function openOperationCleanup(opId) {
       findings = Array.isArray(result.findings) ? result.findings : [];
       const maxTargets = Number(result.max_targets) || defaultTargetLimit;
       const history = Array.isArray(result.history) ? result.history : [];
+      const historyLabels = {...actionText, restore: 'Восстановлен в Infragram', reconnect: 'Подключён повторно'};
       const renderHistory = () => {
         if (!history.length) return;
         const block = document.createElement('details');
@@ -122,7 +123,7 @@ async function openOperationCleanup(opId) {
         for (const entry of history) {
           const line = document.createElement('li');
           const time = entry.occurred_at ? new Date(entry.occurred_at).toLocaleString('ru-RU') : '';
-          const label = entry.action === 'restore' ? 'Восстановлен в Infragram' : actionText[entry.action];
+          const label = historyLabels[entry.action];
           line.textContent = [label, entry.target, time].filter(Boolean).join(' · ');
           list.append(line);
         }
