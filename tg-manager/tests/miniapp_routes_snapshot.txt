@@ -25,6 +25,7 @@ DELETE /api/miniapp/experiment/{exp_id}
 DELETE /api/miniapp/funnel/step/{step_id}
 DELETE /api/miniapp/ghost/{profile_id}
 DELETE /api/miniapp/mailboxes/{mailbox_id}
+DELETE /api/miniapp/mirror
 DELETE /api/miniapp/network/template/{template_id}
 DELETE /api/miniapp/networks/edges/{edge_id}
 DELETE /api/miniapp/networks/nodes/{node_id}
@@ -246,6 +247,7 @@ GET /api/miniapp/mass_publish/targets
 GET /api/miniapp/mass_targets
 GET /api/miniapp/mesh/task/{task_id}
 GET /api/miniapp/mesh/tasks
+GET /api/miniapp/mirror
 GET /api/miniapp/money_funnel
 GET /api/miniapp/money_settings
 GET /api/miniapp/monitor/status
@@ -611,6 +613,7 @@ HEAD /api/miniapp/mass_publish/targets
 HEAD /api/miniapp/mass_targets
 HEAD /api/miniapp/mesh/task/{task_id}
 HEAD /api/miniapp/mesh/tasks
+HEAD /api/miniapp/mirror
 HEAD /api/miniapp/money_funnel
 HEAD /api/miniapp/money_settings
 HEAD /api/miniapp/monitor/status
@@ -1015,6 +1018,7 @@ POST /api/miniapp/mass_report
 POST /api/miniapp/media/upload
 POST /api/miniapp/mesh/task
 POST /api/miniapp/mesh/task/{task_id}/drop
+POST /api/miniapp/mirror
 POST /api/miniapp/money_funnel/spend
 POST /api/miniapp/money_settings
 POST /api/miniapp/monitor/toggle

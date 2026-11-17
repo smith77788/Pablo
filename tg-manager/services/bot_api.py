@@ -435,6 +435,20 @@ async def delete_webhook(session: aiohttp.ClientSession, token: str) -> dict:
     return await _call(session, token, "deleteWebhook")
 
 
+async def set_chat_menu_button(
+    session: aiohttp.ClientSession, token: str, *,
+    text: str | None = None, web_app_url: str | None = None,
+) -> dict:
+    """Кнопка меню бота. С web_app_url — открывает мини-апп (для бота-зеркала);
+    без него — сброс к стандартной кнопке (при отключении зеркала)."""
+    if web_app_url:
+        menu_button = {"type": "web_app", "text": (text or "Панель")[:64],
+                       "web_app": {"url": web_app_url}}
+    else:
+        menu_button = {"type": "default"}
+    return await _call(session, token, "setChatMenuButton", menu_button=menu_button)
+
+
 async def get_webhook_info(session: aiohttp.ClientSession, token: str) -> dict:
     data = await _call(session, token, "getWebhookInfo")
     return data.get("result", {}) if data.get("ok") else {}

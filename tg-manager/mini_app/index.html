@@ -7977,6 +7977,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
     </div>
 
+    <!-- Бот-зеркало: личный запасной вход в панель. Если основной бот Infragram
+         забанят/ограничат, владелец откроет панель через свой бот. -->
+    <div class="sec" style="margin-top:16px">🪞 Бот-зеркало (запасной вход)</div>
+    <div class="card" style="padding:14px 16px">
+      <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:10px">Если с основным ботом что-то случится (бан, ограничение) — вход в панель откроет ваш собственный бот. Создайте бота у <b>@BotFather</b>, скопируйте его токен и вставьте сюда. Кнопка меню вашего бота будет открывать эту же панель.</div>
+      <div id="mirrorStatus"><div class="spin-wrap" style="padding:8px"><div class="spin"></div></div></div>
+    </div>
+
     <!-- Валюта жила только в «Когортах и LTV», а часовой пояс брался молча у
          телефона — «Тихие часы» на компьютере в другом поясе работали не в те
          часы. Выгрузка и удаление своих данных были только командами бота. -->
@@ -9449,11 +9457,22 @@ const FETCH_TIMEOUT_MS = 30000;
 // же — Telegram-бот; второго логина с паролем нет.
 const DEVICE_TOKEN_KEY = 'ig_device_token';
 
+// id бота-зеркала из адреса (?m=<id>): если мини-апп открыт из зеркала, его
+// initData подписан токеном зеркала — сервер проверит подпись этим токеном.
+function _mirrorId() {
+  try {
+    const m = new URLSearchParams(location.search).get('m');
+    return (m && /^\d+$/.test(m)) ? m : null;
+  } catch(_) { return null; }
+}
+
 async function acquireSessionToken() {
   if (tg.initData) {                       // обычный путь внутри Telegram
+    const _body = {initData: tg.initData};
+    const _m = _mirrorId(); if (_m) _body.mirror = _m;
     const r = await fetchT('/api/miniapp/auth', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({initData: tg.initData}),
+      body: JSON.stringify(_body),
     });
     if (!r.ok) throw new Error('Auth '+r.status);
     const _a = await r.json();
@@ -9749,9 +9768,11 @@ function _reAuth() {
   if (_reAuthInFlight) return _reAuthInFlight;
   _reAuthInFlight = (async () => {
     try {
+      const _rb = {initData: tg.initData || ''};
+      const _rm = _mirrorId(); if (_rm) _rb.mirror = _rm;
       const r = await fetchT('/api/miniapp/auth', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({initData: tg.initData || ''}),
+        body: JSON.stringify(_rb),
       });
       if (r.ok) { TK = (await r.json()).token; openSSE(); }
     } catch(_) {}
@@ -33761,6 +33782,70 @@ function _loadLocalSettings() {
 function _saveLocalSettings(s) {
   localStorage.setItem(_SETTINGS_KEY, JSON.stringify(s));
 }
+// 🪞 Бот-зеркало: запасной вход в панель через собственный бот владельца.
+async function loadMirror() {
+  const box = document.getElementById('mirrorStatus');
+  if (!box) return;
+  box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
+  let d;
+  try { d = await api('/api/miniapp/mirror'); }
+  catch (e) { box.innerHTML = `<div style="font-size:13px;color:var(--red)">${esc(errRu(e,'Не удалось загрузить'))}</div>`; return; }
+  if (!d.mini_app_ready) {
+    box.innerHTML = '<div style="font-size:13px;color:var(--hint)">Панель-мини-апп не настроена на сервере — зеркало открывать нечему. Обратитесь к администратору.</div>';
+    return;
+  }
+  const m = d.mirror;
+  if (m && m.username) {
+    box.innerHTML =
+      `<div style="display:flex;align-items:center;gap:10px;padding:8px 0">
+         <div class="ava ava-green" style="flex:0 0 auto">🪞</div>
+         <div style="flex:1 1 auto;min-width:0">
+           <div style="font-weight:600">Зеркало подключено</div>
+           <div style="font-size:13px"><a href="https://t.me/${esc(m.username)}" onclick="openTgLink('https://t.me/${escJs(m.username)}');return false" style="color:var(--accent)">@${esc(m.username)} ↗</a></div>
+           <div style="font-size:12px;color:var(--hint);margin-top:2px">Откройте этого бота и нажмите кнопку меню «🚀 Открыть панель». Работает, даже если основной бот недоступен.</div>
+         </div>
+       </div>
+       <button class="btn btn-d" onclick="mirrorDisconnect()" style="width:100%;margin-top:8px;font-size:13px;padding:9px">🗑 Отключить зеркало</button>`;
+  } else {
+    box.innerHTML =
+      `<input type="text" id="mirrorToken" placeholder="123456:AA... — токен из @BotFather" autocomplete="off"
+         style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
+       <button class="btn btn-p" onclick="mirrorConnect(this)" style="width:100%;font-size:14px;padding:11px">🪞 Подключить моего бота</button>
+       <div id="mirrorErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>`;
+  }
+}
+
+async function mirrorConnect(btn) {
+  const inp = document.getElementById('mirrorToken');
+  const errEl = document.getElementById('mirrorErr');
+  if (errEl) errEl.textContent = '';
+  const token = (inp && inp.value || '').trim();
+  if (!token) { if (errEl) errEl.textContent = 'Вставьте токен бота из @BotFather'; return; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Подключаю…'; }
+  try {
+    const d = await api('/api/miniapp/mirror', {method:'POST', body:JSON.stringify({token})});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🪞 Зеркало подключено' + (d && d.username ? ' · @'+d.username : ''));
+    if (d && d.menu_ok === false) toast('⚠️ Бот сохранён, но кнопку меню выставить не вышло — повторите подключение');
+    loadMirror();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '🪞 Подключить моего бота'; }
+    if (errEl) errEl.textContent = errRu(e, 'Не удалось подключить зеркало');
+  }
+}
+
+async function mirrorDisconnect() {
+  if (!await askConfirm('Отключить бот-зеркало?\n\nЕго кнопка меню перестанет открывать панель. Токен будет забыт. Подписчики и настройки самого бота в Telegram не трогаются.')) return;
+  try {
+    await api('/api/miniapp/mirror', {method:'DELETE'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🗑 Зеркало отключено');
+    loadMirror();
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось отключить'));
+  }
+}
+
 async function openSettings() {
   push('s-settings');
   const uid = window._tgUid || (tg.initDataUnsafe?.user?.id);
@@ -33780,6 +33865,7 @@ async function openSettings() {
   txt('set-err','');
   try { loadHomeScreenStatus(); } catch(_) {}
   try { renderFullscreenRow(); } catch(_) {}
+  try { loadMirror(); } catch(_) {}
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
     // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше

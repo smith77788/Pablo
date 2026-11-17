@@ -2770,9 +2770,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         bot_token = _bot_token()
         if not signing_secret_ok(bot_token):
             return _err(_NO_SIGNING_SECRET, 403)
-        user = validate_init_data(init_data, bot_token)
+        # Вход через бот-зеркало: мини-апп открыт из чужого бота владельца, и его
+        # initData подписан ТОКЕНОМ ЗЕРКАЛА (?m=<id> в адресе кнопки меню).
+        # Проверяем подпись токеном зеркала, но сессию ниже выдаём ОСНОВНЫМ
+        # токеном — так остальные ручки (их сотни, см. _get_uid) работают без
+        # изменений и ничего не знают о зеркалах. Токен зеркала наружу не идёт.
+        verify_token = bot_token
+        try:
+            _mid = int(body.get("mirror")) if body.get("mirror") else 0
+        except (TypeError, ValueError):
+            _mid = 0
+        if _mid:
+            from services import mirror_bot as _mb
+            _mt = await _mb.get_token_by_id(pool, _mid)
+            if _mt and signing_secret_ok(_mt):
+                verify_token = _mt
+        user = validate_init_data(init_data, verify_token)
         if not user:
             return _err("Подпись Telegram не подтвердилась — откройте приложение заново", 401)
+        # Сессия ВСЕГДА на основном токене: её проверяет _get_uid по основному.
         token = make_token(user["user_id"], bot_token)
         # Признак админа — чтобы мини-апп не пробовал админские ручки вслепую:
         # раньше каждый вход обычного пользователя начинался с 403 на
@@ -2780,6 +2796,67 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # ручки, признак лишь избавляет от пробы.
         return _json_resp({"token": token, "user": user,
                            "is_admin": _is_admin(user["user_id"])})
+
+    # ── Бот-зеркало: личный запасной вход в панель ───────────────────────────
+
+    async def mirror_get(request: web.Request) -> web.Response:
+        """Зеркало владельца (без токена) + готов ли адрес мини-аппа."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import mirror_bot as _mb
+        row = await _mb.get_for(pool, uid)
+        mini_app_ready = bool((os.getenv("MINI_APP_URL") or "").strip())
+        out = None
+        if row:
+            out = {"bot_id": row["bot_id"],
+                   "username": row.get("username") or "",
+                   "first_name": row.get("first_name") or "",
+                   "link": (f"https://t.me/{row['username']}" if row.get("username") else "")}
+        return _json_resp({"mirror": out, "mini_app_ready": mini_app_ready})
+
+    async def mirror_create(request: web.Request) -> web.Response:
+        """Подключить/обновить бот-зеркало по токену из @BotFather."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not (os.getenv("MINI_APP_URL") or "").strip():
+            return _err("Мини-апп не настроен на сервере — зеркало открывать нечему", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        token = validate_string(body.get("token"), max_len=100)
+        if not token:
+            return _err("Вставьте токен бота из @BotFather", 400)
+        from services import mirror_bot as _mb
+        import aiohttp as _aio
+        try:
+            async with _aio.ClientSession() as _http:
+                res = await _mb.register(pool, uid, token, _http)
+        except _mb.MirrorError as exc:
+            return _err(str(exc), 400)
+        except Exception:
+            log.exception("mirror_create uid=%d", uid)
+            return _err("Не удалось подключить зеркало — попробуйте ещё раз", 400)
+        link = f"https://t.me/{res['username']}" if res.get("username") else ""
+        return _json_resp({"ok": True, "username": res.get("username") or "",
+                           "link": link, "menu_ok": res.get("menu_ok", True)})
+
+    async def mirror_delete(request: web.Request) -> web.Response:
+        """Отключить бот-зеркало (сбросить его кнопку меню и забыть токен)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import mirror_bot as _mb
+        import aiohttp as _aio
+        try:
+            async with _aio.ClientSession() as _http:
+                ok = await _mb.remove(pool, uid, _http)
+        except Exception:
+            log.exception("mirror_delete uid=%d", uid)
+            return _err("Не удалось отключить зеркало", 400)
+        return _json_resp({"ok": ok})
 
     # ── Связывание устройства (автономный вход вне Telegram: PWA/Android) ─────
 
@@ -9712,6 +9789,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
     app.router.add_get("/s/{code}", short_link_redirect)
     app.router.add_post("/api/miniapp/auth", auth)
+    app.router.add_get("/api/miniapp/mirror", mirror_get)
+    app.router.add_post("/api/miniapp/mirror", mirror_create)
+    app.router.add_delete("/api/miniapp/mirror", mirror_delete)
     app.router.add_post("/api/miniapp/url_ticket", url_ticket)
     app.router.add_post("/api/miniapp/pair", pair_device)
     app.router.add_post("/api/miniapp/pair/exchange", pair_exchange)
