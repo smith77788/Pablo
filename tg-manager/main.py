@@ -1582,6 +1582,11 @@ async def main() -> None:
                 drop_pending_updates=False,
             )
             log.info("Webhook mode: %s (handler on shared HTTP server)", _webhook_url)
+            # Боты-зеркала: тот же Dispatcher, через long-poll каждого зеркала —
+            # полностью идентичный бот, а не только кнопка «открыть панель».
+            from services import mirror_runtime as _mirror_rt
+            _spawn(_resilient("mirror_runtime", _mirror_rt.run,
+                              pool, dp, http, bot, _allowed_updates))
             # Вебхук на остановке НЕ снимаем. Деплой поднимает новый контейнер
             # раньше, чем гасит старый, и новый уже поставил вебхук на себя.
             # delete_webhook из старого снимал ЕГО — и бот глох до следующего
@@ -1608,6 +1613,14 @@ async def main() -> None:
             #
             # Все остальные подсистемы давно живут под присмотром (_resilient,
             # _web_resilient); поллинг оставался единственным исключением.
+            #
+            # Боты-зеркала: тот же Dispatcher, через long-poll каждого зеркала —
+            # полностью идентичный бот, а не только кнопка «открыть панель».
+            # Запускаем здесь (в процессе, что поллит основной бот — одна
+            # реплика), а не в общем блоке служб (он во всех ролях).
+            from services import mirror_runtime as _mirror_rt
+            _spawn(_resilient("mirror_runtime", _mirror_rt.run,
+                              pool, dp, http, bot, _allowed_updates))
             _poll_fail = 0
             while True:
                 try:

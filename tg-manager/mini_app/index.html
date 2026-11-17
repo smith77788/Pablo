@@ -7981,7 +7981,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          забанят/ограничат, владелец откроет панель через свой бот. -->
     <div class="sec" style="margin-top:16px">🪞 Бот-зеркало (запасной вход)</div>
     <div class="card" style="padding:14px 16px">
-      <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:10px">Если с основным ботом что-то случится (бан, ограничение) — вход в панель откроет ваш собственный бот. Создайте бота у <b>@BotFather</b>, скопируйте его токен и вставьте сюда. Кнопка меню вашего бота будет открывать эту же панель.</div>
+      <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:10px">Если с основным ботом что-то случится (бан, ограничение) — у вас будет <b>полная копия</b> на своём боте: те же команды, меню и панель. Создайте бота у <b>@BotFather</b>, скопируйте его токен и вставьте сюда.</div>
       <div id="mirrorStatus"><div class="spin-wrap" style="padding:8px"><div class="spin"></div></div></div>
     </div>
 
@@ -33802,7 +33802,7 @@ async function loadMirror() {
          <div style="flex:1 1 auto;min-width:0">
            <div style="font-weight:600">Зеркало подключено</div>
            <div style="font-size:13px"><a href="https://t.me/${esc(m.username)}" onclick="openTgLink('https://t.me/${escJs(m.username)}');return false" style="color:var(--accent)">@${esc(m.username)} ↗</a></div>
-           <div style="font-size:12px;color:var(--hint);margin-top:2px">Откройте этого бота и нажмите кнопку меню «🚀 Открыть панель». Работает, даже если основной бот недоступен.</div>
+           <div style="font-size:12px;color:var(--hint);margin-top:2px">Полная копия: пишите этому боту команды (/start и др.) или откройте панель кнопкой меню «🚀». Работает, даже если основной бот недоступен. Отвечать начинает в течение минуты после подключения.</div>
          </div>
        </div>
        <button class="btn btn-d" onclick="mirrorDisconnect()" style="width:100%;margin-top:8px;font-size:13px;padding:9px">🗑 Отключить зеркало</button>`;

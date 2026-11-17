@@ -116,6 +116,29 @@ async def get_token_by_id(pool, mirror_id: int) -> str | None:
         return None
 
 
+async def find_user_by_init_data(pool, init_data: str, validate) -> dict | None:
+    """Найти зеркало, чьим токеном подтверждается initData, и вернуть его
+    пользователя. Нужен для web-app кнопок, которые хендлеры шлют из зеркала БЕЗ
+    ?m=<id> в адресе: там узнать зеркало можно только перебором. Запускается
+    только когда основной токен подпись НЕ подтвердил, то есть редко.
+    """
+    try:
+        rows = await pool.fetch(
+            "SELECT token_enc FROM mirror_bots ORDER BY id LIMIT 500")
+    except Exception as exc:
+        log.debug("mirror_bot.find_user_by_init_data: %s", exc)
+        return None
+    for r in rows:
+        try:
+            tok = decrypt_token(r["token_enc"])
+        except Exception:
+            continue
+        user = validate(init_data, tok)
+        if user:
+            return user
+    return None
+
+
 async def get_for(pool, owner_id: int) -> dict | None:
     """Зеркало владельца БЕЗ токена — для экрана. None, если нет."""
     try:

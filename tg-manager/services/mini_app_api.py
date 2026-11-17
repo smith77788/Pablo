@@ -2786,6 +2786,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if _mt and signing_secret_ok(_mt):
                 verify_token = _mt
         user = validate_init_data(init_data, verify_token)
+        # Открыто из зеркала без ?m (web-app кнопка из сообщения зеркала): подпись
+        # основным токеном не сойдётся — пробуем токены зеркал. Редкий путь:
+        # только когда основной не подтвердил.
+        if not user and verify_token == bot_token:
+            from services import mirror_bot as _mb
+            user = await _mb.find_user_by_init_data(pool, init_data, validate_init_data)
         if not user:
             return _err("Подпись Telegram не подтвердилась — откройте приложение заново", 401)
         # Сессия ВСЕГДА на основном токене: её проверяет _get_uid по основному.
