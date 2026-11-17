@@ -287,6 +287,11 @@ def fit_username(raw: str | None, *, bot: bool, taken: set[str]) -> str | None:
     return cand
 
 
+# Потолок ресурсов на один город/ключ. Общее число целей (города × per_city)
+# дополнительно ограничивает вызывающий (MAX_GEO_TARGETS).
+MAX_PER_CITY = 50
+
+
 def build_targets(
     geo_list: list[dict],
     asset_type: str,
@@ -294,6 +299,8 @@ def build_targets(
     username_pattern: str | None,
     account_ids: list[int],
     account_geo: dict[int, str] | None = None,
+    per_city: int = 1,
+    seo_permute: bool = False,
 ) -> list[dict]:
     """Build list of target dicts for insertion into global_presence_targets.
 
@@ -302,38 +309,92 @@ def build_targets(
     account_geo (id аккаунта → ISO2 страна прокси) включает ГЕО-привязку: цель
     под страну X получает аккаунт из страны X, когда такой есть (см.
     assign_accounts_by_geo); иначе — прежний глобальный round-robin.
+
+    per_city — сколько ресурсов на КАЖДЫЙ город (раньше всегда 1).
+    seo_permute — вместо повтора по индексу крутить ключи имени/username в
+    разные варианты на город (та же SEO-перестановка, что у Фабрики, но поверх
+    локализованного гео-имени): «Новости Москва» → «Москва Новости»,
+    «Новости Москваj»… — так сеть занимает много мест в поиске по каждому
+    городу. Детерминировано (сид от city_slug), предпросмотр == запуск.
     """
+    try:
+        per_city = int(per_city or 1)
+    except (TypeError, ValueError):
+        per_city = 1
+    per_city = max(1, min(per_city, MAX_PER_CITY))
+    bot = (asset_type == "bot")
+
+    # Аккаунт — на КАЖДУЮ цель (город × вариант), а не на город: иначе все
+    # ресурсы одного города создавались бы с одного аккаунта (риск при массовом
+    # создании). Разворачиваем страны целей в том же порядке, что и цели ниже.
+    expanded_cc: list[str] = []
+    for g in geo_list:
+        expanded_cc.extend([(g.get("country_code") or "")] * per_city)
+    _acc_for_target = assign_accounts_by_geo(expanded_cc, account_ids, account_geo)
+
     targets: list[dict] = []
-    _acc_for_target = assign_accounts_by_geo(
-        [(g.get("country_code") or "") for g in geo_list], account_ids, account_geo)
     _taken: set[str] = set()
+    t_index = 0
 
     for i, geo in enumerate(geo_list):
-        planned_name, planned_username = plan_target(
-            geo, i + 1, name_pattern, username_pattern
+        city_slug = (
+            geo.get("city_slug")
+            or slugify(geo.get("city", ""))
+            or geo.get("scope_slug")
+            or slugify(geo.get("scope", ""))
+            or "x"
         )
-        # Валидный и уникальный в плане — см. fit_username.
-        planned_username = fit_username(
-            planned_username, bot=(asset_type == "bot"), taken=_taken)
-        selected_account_id = _acc_for_target[i]
+        # SEO-перестановка: один раз рендерим базовое имя/username для города,
+        # затем получаем per_city РАЗНЫХ вариантов перестановкой ключей.
+        name_variants: list[str | None] = []
+        uname_variants: list[str | None] = []
+        if seo_permute:
+            base_name, base_username = plan_target(
+                geo, i + 1, name_pattern, username_pattern)
+            from services import name_variator as _nv
+            if base_name:
+                name_variants = list(_nv.generate_titles(
+                    base_name, per_city, seed=_seed_int(city_slug, "seoname")))
+            if base_username:
+                # require_suffix не задаём: суффикс «_bot» резервирует/дописывает
+                # fit_username ниже (единая дверь валидности и уникальности).
+                uname_variants = list(_nv.generate_usernames(
+                    base_username, per_city, seed=_seed_int(city_slug, "seouser"),
+                    taken=_taken))
 
-        targets.append(
-            {
-                "country": geo.get("country") or None,
-                "country_code": geo.get("country_code") or None,
-                "region": geo.get("region") or None,
-                "city": geo.get("city") or None,
-                "city_slug": geo.get("city_slug")
-                or slugify(geo.get("city", ""))
-                or None,
-                "language": geo.get("language") or None,
-                "timezone": geo.get("timezone") or None,
-                "asset_type": asset_type,
-                "planned_name": planned_name,
-                "planned_username": planned_username,
-                "selected_account_id": selected_account_id,
-            }
-        )
+        for j in range(per_city):
+            if seo_permute:
+                planned_name = name_variants[j] if j < len(name_variants) else None
+                raw_username = uname_variants[j] if j < len(uname_variants) else None
+            else:
+                # Без перестановки — повтор по сквозному индексу: {{INDEX}} и
+                # пулы шаблонов дают разные имена, при одиночном шаблоне без
+                # {{INDEX}} имена совпадут (это осознанный выбор владельца).
+                planned_name, raw_username = plan_target(
+                    geo, t_index + 1, name_pattern, username_pattern)
+            # Валидный и уникальный в плане, с учётом «_bot» для ботов — см.
+            # fit_username (общая дверь для обоих путей).
+            planned_username = fit_username(raw_username, bot=bot, taken=_taken)
+            selected_account_id = _acc_for_target[t_index]
+            t_index += 1
+
+            targets.append(
+                {
+                    "country": geo.get("country") or None,
+                    "country_code": geo.get("country_code") or None,
+                    "region": geo.get("region") or None,
+                    "city": geo.get("city") or None,
+                    "city_slug": geo.get("city_slug")
+                    or slugify(geo.get("city", ""))
+                    or None,
+                    "language": geo.get("language") or None,
+                    "timezone": geo.get("timezone") or None,
+                    "asset_type": asset_type,
+                    "planned_name": planned_name,
+                    "planned_username": planned_username,
+                    "selected_account_id": selected_account_id,
+                }
+            )
 
     return targets
 

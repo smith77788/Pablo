@@ -712,9 +712,23 @@ def setup_routes(app: web.Application, pool) -> None:
             geo_source = "countries"
         if not geo_list:
             return _err("Выберите гео-пресет, свои города или страны", 400)
+        # Число ресурсов на город + SEO-перестановка ключей (ровно то, чего не
+        # хватало гео-сети против Фабрики). per_city множит цели, поэтому лимит
+        # считаем по ИТОГУ (города × per_city), а не по числу городов.
+        from services.presence_planner import MAX_PER_CITY
+        try:
+            per_city = int(body.get("per_city") or 1)
+        except (TypeError, ValueError):
+            per_city = 1
+        per_city = max(1, min(per_city, MAX_PER_CITY))
+        seo_permute = bool(body.get("seo_permute"))
         from services.geo_va_link import MAX_GEO_TARGETS, validate_config
-        if len(geo_list) > MAX_GEO_TARGETS:
-            return _err(f"В одном плане не более {MAX_GEO_TARGETS} городов", 400)
+        total_planned = len(geo_list) * per_city
+        if total_planned > MAX_GEO_TARGETS:
+            return _err(
+                f"В одном плане не более {MAX_GEO_TARGETS} ресурсов "
+                f"(городов {len(geo_list)} × {per_city} на город = {total_planned})",
+                400)
         va_config, va_error = validate_config(body.get("virtual_admin"), asset_type)
         if va_error:
             return _err(va_error, 400)
@@ -742,6 +756,8 @@ def setup_routes(app: web.Application, pool) -> None:
             "channel" if asset_type in ("package", "full_package") else asset_type,
             name_pattern, username_pattern or None, acc_ids_int,
             account_geo=account_geo,
+            per_city=per_city,
+            seo_permute=seo_permute,
         )
         if not targets:
             return _err("Не удалось сгенерировать цели из гео", 400)
@@ -768,6 +784,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 name_pattern=name_pattern,
                 username_pattern=username_pattern,
                 geo_selection={"geo_source": geo_source, "count": len(targets),
+                               "per_city": per_city, "seo_permute": seo_permute,
                                "description": description,
                                "short_description": short_desc,
                                "virtual_admin": va_config},

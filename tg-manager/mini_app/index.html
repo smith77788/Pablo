@@ -3277,6 +3277,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="gpUsernamePattern" placeholder="novosti_{{CITY_SLUG}}" class="inp">
       <div style="font-size:11px;color:var(--hint);margin-top:4px">Плейсхолдеры: {{CITY_SLUG}}, {{COUNTRY_SLUG}}, {{INDEX}}. Суффикс bot добавится для ботов</div>
 
+      <div style="display:flex;gap:10px;margin-top:12px;align-items:flex-end">
+        <div style="flex:0 0 130px">
+          <label style="font-size:13px;color:var(--hint);display:block;margin-bottom:4px">Ресурсов на город</label>
+          <input type="number" id="gpPerCity" class="inp" min="1" max="50" value="1">
+        </div>
+        <label class="chk-row" style="flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;padding-bottom:9px">
+          <input type="checkbox" id="gpSeoPermute">
+          <span style="font-size:13px">🔎 SEO: перестановка ключей</span>
+        </label>
+      </div>
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Несколько ресурсов на каждый город с разным порядком ключевых слов — больше мест в поиске. «Новости Москва» → «Москва Новости», «Новости Москваj»… Перестановка крутит и локализованное имя, и @username.</div>
+
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Описание (для каналов/групп)</label>
       <textarea id="gpDescription" rows="2" placeholder="{{Новости {{city}}|Информация из {{city}}}}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
       
@@ -29975,6 +29987,8 @@ async function openGpCreateModal(presetAssetType) {
   { const _at=document.getElementById('gpAssetType');
     if (_at && presetAssetType) _at.value = presetAssetType; }
   ['gpRefName','gpRefUsername','gpRefCity','gpNamePattern','gpUsernamePattern','gpCustomCities'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  { const _pc=document.getElementById('gpPerCity'); if(_pc) _pc.value='1';
+    const _sp=document.getElementById('gpSeoPermute'); if(_sp) _sp.checked=false; }
   { const _g=document.getElementById('gpGeoPreset'); if(_g) _g.value=''; gpGeoToggle(); }
   loadGpGeoPresets();
   accPickerSearchBox('gpAccountsList', _gpLoadAccs);
@@ -30089,7 +30103,9 @@ async function submitGpCreate() {
   if (geoPreset==='__custom' && customCities.split(/\r?\n/).filter(Boolean).length > 500) { errEl.textContent = 'В одном плане не более 500 городов'; return; }
 
   const geoLbl = geoPreset==='__custom' ? 'свои города' : document.getElementById('gpGeoPreset').selectedOptions[0].textContent;
-  const preview = `Создать ${GP_TYPES[assetType]||assetType}?\n\nНазвание: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nГео: ${geoLbl}\nАккаунтов: ${accountIds.length}${vaEnabled?'\nАдминистратор: '+vaTopic+' ('+(vaMode==='review'?'проверка':'авто')+')':''}`;
+  const perCity = Math.max(1, Math.min(50, parseInt(document.getElementById('gpPerCity')?.value) || 1));
+  const seoPermute = !!document.getElementById('gpSeoPermute')?.checked;
+  const preview = `Создать ${GP_TYPES[assetType]||assetType}?\n\nНазвание: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nГео: ${geoLbl}\nНа город: ${perCity}${seoPermute?' (перестановка ключей)':''}\nАккаунтов: ${accountIds.length}${vaEnabled?'\nАдминистратор: '+vaTopic+' ('+(vaMode==='review'?'проверка':'авто')+')':''}`;
   if (!await askConfirm(preview)) return;
 
   const payload = {
@@ -30099,6 +30115,8 @@ async function submitGpCreate() {
     description: description,
     short_description: shortDesc,
     account_ids: accountIds,
+    per_city: perCity,
+    seo_permute: seoPermute,
     ecosystem_id: ecosystemId ? +ecosystemId : null,
     virtual_admin: vaEnabled ? {enabled:true, topic:vaTopic, lead_contact:vaContact, publish_mode:vaMode, posts_per_day:vaPosts} : null,
   };
