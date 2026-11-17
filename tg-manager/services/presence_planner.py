@@ -20,7 +20,12 @@ import hashlib
 import random
 import re
 
-from services.username_engine import is_valid_username, normalize_username, slugify
+from services.username_engine import (
+    is_valid_username,
+    normalize_username,
+    slugify,
+    transliterate,
+)
 
 # Символы без визуально похожих (i,l,o,1,0) — как в username_engine.
 _RAND_ALNUM = "abcdefghjkmnpqrstuvwxyz23456789"
@@ -132,19 +137,39 @@ def render_pattern(pattern: str, geo: dict, rng: random.Random | None = None) ->
     """
     scope = (geo.get("scope") or "").strip()
     scope_slug = geo.get("scope_slug") or slugify(scope)
-    city = geo.get("city") or scope
-    city_slug = geo.get("city_slug") or slugify(geo.get("city", "")) or scope_slug
+    city = geo.get("city") or scope  # английский экзоним (Moscow, Vienna)
     country_slug = geo.get("country_slug") or slugify(geo.get("country", ""))
     # {{CITY_NAME}} = нативное название (Москва, Київ, Wien), fallback → английское
     city_native = geo.get("city_native") or geo.get("city") or scope or ""
-    city_abbr = _CITY_ABBR.get(city_slug, city_slug)
+
+    # ЛАТИНИЦА ИЗ НАТИВНОГО ИМЕНИ. Пресеты хранят city=английский экзоним
+    # («Moscow»), но в поиске Telegram русскоязычная аудитория набирает «Moskva»,
+    # а не «Moscow» — экзоним нерелевантен. Поэтому {{CITY}} (в модале подписан
+    # «лат.») и {{CITY_SLUG}} берём ТРАНСЛИТЕРАЦИЕЙ нативного: Москва→Moskva/
+    # moskva. Для алфавитов без таблицы транслита (греческий, арабский)
+    # transliterate даёт мусор ('_____') — тогда честный фолбэк на экзоним/слаг.
+    _lat_raw = transliterate(city_native)
+    if _lat_raw and re.search(r"[A-Za-z]", _lat_raw):
+        # Читаемый вид: заглавная после начала и каждого разделителя (-, _, пробел).
+        city_latin = re.sub(
+            r"(^|[\s\-_])([a-z])",
+            lambda m: m.group(1) + m.group(2).upper(), _lat_raw)
+    else:
+        city_latin = city  # нетранслитерируемо → английский экзоним
+    _native_slug = slugify(city_native)
+    # Английский слаг храним отдельно: по нему идут аббревиатуры (_CITY_ABBR
+    # ключами «moscow», «saint_petersburg») и фолбэк, если нативный слаг пуст.
+    en_slug = geo.get("city_slug") or slugify(geo.get("city", "")) or scope_slug
+    city_slug = _native_slug or en_slug or "x"
+    city_abbr = _CITY_ABBR.get(en_slug) or _CITY_ABBR.get(city_slug) or city_slug
     # Падежи нужны, чтобы шаблон читался по-русски: «Работа в {{CITY_LOC}}» →
     # «Работа в Москве», «Новости города {{CITY_GEN}}» → «…города Самары».
     # Для нерусских названий склонятели возвращают исходную форму.
     from services import ru_morph
 
     replacements = {
-        "{{CITY}}": city,
+        "{{CITY}}": city_latin,
+        "{{CITY_EN}}": city,
         "{{CITY_NAME}}": city_native,
         "{{CITY_GEN}}": ru_morph.genitive(city_native),
         "{{CITY_LOC}}": ru_morph.prepositional(city_native),

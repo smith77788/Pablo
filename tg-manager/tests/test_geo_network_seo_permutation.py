@@ -132,6 +132,32 @@ def test_avatar_style_propagates_when_given():
     assert all(x["avatar_style"] == "flat" for x in t)
 
 
+# ── Транслитерация нативного имени, а не английский экзоним ───────────────────
+
+def test_city_slug_and_city_are_native_transliteration_not_exonym():
+    # Жалоба владельца: гео-сеть ставила «Moscow»/«moscow» (английский экзоним),
+    # а в поиске Telegram ищут «Moskva» — транслитерацию нативного «Москва».
+    # Пресеты хранят city='Moscow', city_native='Москва', city_slug='moscow'.
+    geo = [{"city": "Moscow", "city_native": "Москва", "city_slug": "moscow",
+            "country": "Россия", "country_code": "RU"}]
+    t = build_targets(geo, "channel", "Новости {{CITY}}", "novosti_{{CITY_SLUG}}", [1])
+    assert t[0]["planned_name"] == "Новости Moskva", t[0]["planned_name"]
+    assert t[0]["planned_username"] == "novosti_moskva", t[0]["planned_username"]
+    # Экзоним «Moscow» в выдаче быть не должен.
+    assert "moscow" not in (t[0]["planned_username"] or "").lower()
+    assert "Moscow" not in (t[0]["planned_name"] or "")
+
+
+def test_non_transliterable_falls_back_to_exonym():
+    # Для алфавитов без таблицы транслита (греческий) честный фолбэк на экзоним,
+    # а не пустой/мусорный слаг.
+    geo = [{"city": "Athens", "city_native": "Αθήνα", "city_slug": "athens",
+            "country": "Греция", "country_code": "GR"}]
+    t = build_targets(geo, "channel", "News {{CITY}}", "news_{{CITY_SLUG}}", [1])
+    assert t[0]["planned_username"] == "news_athens"
+    assert "Athens" in (t[0]["planned_name"] or "")
+
+
 def test_description_deterministic():
     kw = dict(per_city=2, description="{Новости|Вести|Инфо} {{CITY_NAME}}")
     a = build_targets(GEO, "channel", "Н {{CITY_NAME}}", "n_{{CITY_SLUG}}", [1], **kw)

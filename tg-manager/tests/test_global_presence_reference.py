@@ -46,8 +46,12 @@ def test_render_pattern_placeholders():
     geo = {"city": "Moscow", "city_native": "Москва", "city_slug": "moscow",
            "country": "Russia", "country_code": "ru"}
     assert render_pattern("Новости {{CITY_NAME}}", geo) == "Новости Москва"
-    assert render_pattern("news_{{CITY_SLUG}}", geo) == "news_moscow"
-    assert render_pattern("{{COUNTRY_CODE}} {{CITY}}", geo) == "RU Moscow"
+    # {{CITY_SLUG}} и {{CITY}} — ТРАНСЛИТЕРАЦИЯ нативного (Москва→moskva/Moskva),
+    # а не английский экзоним: «Moscow» нерелевантен в поиске у местной аудитории.
+    assert render_pattern("news_{{CITY_SLUG}}", geo) == "news_moskva"
+    assert render_pattern("{{COUNTRY_CODE}} {{CITY}}", geo) == "RU Moskva"
+    # Английский экзоним доступен явно через {{CITY_EN}}.
+    assert render_pattern("{{CITY_EN}}", geo) == "Moscow"
 
 
 def test_build_targets_generates_per_city():
@@ -58,9 +62,10 @@ def test_build_targets_generates_per_city():
     targets = build_targets(geo_list, "channel", "Новости {{CITY_NAME}}", "novosti_{{CITY_SLUG}}", [1, 2])
     assert len(targets) == 2
     assert targets[0]["planned_name"] == "Новости Москва"
-    assert targets[0]["planned_username"] == "novosti_moscow"
+    # Транслитерация нативного имени, не сохранённый англ. слаг «moscow».
+    assert targets[0]["planned_username"] == "novosti_moskva"
     assert targets[1]["planned_name"] == "Новости Київ"
-    assert targets[1]["planned_username"] == "novosti_kyiv"
+    assert targets[1]["planned_username"] == "novosti_kiyiv"
     # аккаунты распределяются по кругу
     assert targets[0]["selected_account_id"] == 1
     assert targets[1]["selected_account_id"] == 2
