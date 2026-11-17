@@ -3385,19 +3385,42 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         lim = _list_limit(request, 100, 2000)
+        # Один человек — одна строка, даже если он подписан на несколько ботов
+        # владельца (раньше строка была на КАЖДЫЙ бот — тот же человек десять
+        # раз). И без СВОИХ аккаунтов флота: они подписаны на боты доставки, но
+        # это не лиды, а собственный флот владельца.
         rows = await _safe_fetch(pool,
-            """SELECT bu.user_id, bu.username, bu.first_name, bu.first_seen,
-                      bu.bot_id, mb.username AS bot_username
-               FROM bot_users bu
-               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
-               WHERE mb.added_by = $1 AND bu.user_id > 0
-               ORDER BY bu.first_seen DESC NULLS LAST, bu.user_id DESC,
-                        bu.bot_id DESC
+            """WITH own AS (
+                   SELECT tg_user_id FROM tg_accounts
+                   WHERE owner_id=$1 AND tg_user_id IS NOT NULL
+               ),
+               agg AS (
+                   SELECT bu.user_id,
+                          MAX(bu.first_seen) AS first_seen,
+                          COUNT(DISTINCT bu.bot_id) AS bot_count,
+                          (array_agg(bu.bot_id ORDER BY bu.first_seen DESC NULLS LAST))[1] AS bot_id
+                   FROM bot_users bu
+                   JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+                   WHERE mb.added_by = $1 AND bu.user_id > 0
+                     AND bu.user_id NOT IN (SELECT tg_user_id FROM own)
+                   GROUP BY bu.user_id
+               )
+               SELECT a.user_id, a.first_seen, a.bot_count, a.bot_id,
+                      bu.username, bu.first_name, mb.username AS bot_username
+               FROM agg a
+               JOIN bot_users bu ON bu.user_id = a.user_id AND bu.bot_id = a.bot_id
+               JOIN managed_bots mb ON mb.bot_id = a.bot_id
+               ORDER BY a.first_seen DESC NULLS LAST, a.user_id DESC
                LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request))
         total = await _safe_count(pool,
-            """SELECT COUNT(*) FROM bot_users bu
+            """WITH own AS (
+                   SELECT tg_user_id FROM tg_accounts
+                   WHERE owner_id=$1 AND tg_user_id IS NOT NULL
+               )
+               SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
-               WHERE mb.added_by = $1 AND bu.user_id > 0""", uid)
+               WHERE mb.added_by = $1 AND bu.user_id > 0
+                 AND bu.user_id NOT IN (SELECT tg_user_id FROM own)""", uid)
         return _json_resp({"users": rows or [], "total": total})
 
     async def new_users_export(request: web.Request) -> web.Response:

@@ -7048,6 +7048,39 @@ async def join_channel_by_id(
             log.debug("join_channel_by_id: disconnect error: %s", e)
 
 
+async def resolve_user_id_by_username(
+    session_string: str, username: str, _acc: dict | None = None,
+) -> dict:
+    """@username → {ok, user_id, username, first_name} или {ok:False, error}.
+
+    Для назначения админа по юзернейму: одна сессия резолвит пользователя в id.
+    """
+    uname = (username or "").strip().lstrip("@")
+    if not uname:
+        return {"ok": False, "error": "пустой юзернейм"}
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        ent = await asyncio.wait_for(client.get_entity(uname), timeout=_OP_TIMEOUT)
+        uid = int(getattr(ent, "id", 0) or 0)
+        if not uid or getattr(ent, "bot", False) is None and not hasattr(ent, "first_name"):
+            # Это не пользователь (канал/чат по такому юзернейму).
+            return {"ok": False, "error": "это не пользователь, а канал или чат"}
+        return {"ok": True, "user_id": uid,
+                "username": getattr(ent, "username", "") or uname,
+                "first_name": getattr(ent, "first_name", "") or ""}
+    except Exception as e:
+        _m = str(e)
+        if "No user has" in _m or "Cannot find" in _m or "USERNAME_NOT_OCCUPIED" in _m.upper():
+            return {"ok": False, "error": "пользователь с таким юзернеймом не найден"}
+        return {"ok": False, "error": _m[:120]}
+    finally:
+        try:
+            await safe_disconnect(client)
+        except Exception as e:
+            log.debug("resolve_user_id_by_username: disconnect error: %s", e)
+
+
 async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
     """Return Telegram user id for a session, or 0 when the session is invalid."""
     client = _make_client(session_string, _acc)

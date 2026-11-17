@@ -401,6 +401,106 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def channel_promote_one(request: web.Request) -> web.Response:
+        """Назначить ОДНОГО администратора: аккаунт флота (account_id) или
+        пользователя по @username. Инлайн — немедленный результат. Повышает
+        аккаунт-создатель канала (у него есть право «Назначать админов»).
+        Аккаунт флота при необходимости сначала вступает в чат."""
+        import asyncio as _asyncio
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        account_id = int(body.get("account_id") or 0)
+        username = (body.get("username") or "").strip().lstrip("@")
+        if not account_id and not username:
+            return _err("Укажите аккаунт флота или @юзернейм", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, acc_id, access_hash FROM managed_channels "
+            "WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
+        if not ch:
+            return _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return _err("У канала нет привязанного аккаунта-создателя — назначать некем", 400)
+        from database import db as _db
+        from services import account_manager as _am
+        from services.op_worker import try_claim_account, release_accounts
+        promoter = await _db.get_account_for_telethon(pool, int(ch["acc_id"]), uid)
+        if not promoter or not promoter.get("session_str"):
+            return _err("Аккаунт-создатель недоступен", 400)
+        _hash = int(ch.get("access_hash") or 0)
+        claimed: list[int] = []
+        try:
+            target_uid = 0
+            target_label = ""
+            target_tel = None
+            if account_id:
+                if account_id == int(ch["acc_id"]):
+                    return _json_resp({"ok": True, "label": "Это аккаунт-создатель — он уже администратор"})
+                trow = await _safe_fetchrow(pool,
+                    "SELECT tg_user_id, phone, first_name FROM tg_accounts "
+                    "WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", account_id, uid)
+                if not trow or not trow.get("tg_user_id"):
+                    return _err("Аккаунт не найден или без Telegram id", 400)
+                target_uid = int(trow["tg_user_id"])
+                target_label = trow.get("phone") or trow.get("first_name") or f"#{account_id}"
+                target_tel = await _db.get_account_for_telethon(pool, account_id, uid)
+            else:
+                r = await _asyncio.wait_for(
+                    _am.resolve_user_id_by_username(promoter["session_str"], username, dict(promoter)),
+                    timeout=30)
+                if not r.get("ok"):
+                    return _err(r.get("error") or "Пользователь не найден", 400)
+                target_uid = int(r["user_id"])
+                target_label = "@" + (r.get("username") or username)
+            if not await try_claim_account(int(promoter["id"])):
+                return _err("Аккаунт-создатель занят другой операцией — повторите позже", 409)
+            claimed.append(int(promoter["id"]))
+            ok, why = await _asyncio.wait_for(
+                _am.promote_to_admin_ex(promoter["session_str"], ch_id, target_uid,
+                                        _acc=dict(promoter), access_hash=_hash, pool=pool),
+                timeout=45)
+            # Аккаунт флота ещё не в чате — вступаем его сессией и повторяем раз.
+            if not ok and why == "not_participant" and target_tel and target_tel.get("session_str"):
+                if await try_claim_account(account_id):
+                    claimed.append(account_id)
+                try:
+                    jr = await _asyncio.wait_for(
+                        _am.join_channel_by_id(target_tel["session_str"], ch_id, _hash, dict(target_tel)),
+                        timeout=30)
+                except Exception:
+                    jr = {"ok": False}
+                if jr.get("ok"):
+                    await _asyncio.sleep(2.0)
+                    ok, why = await _asyncio.wait_for(
+                        _am.promote_to_admin_ex(promoter["session_str"], ch_id, target_uid,
+                                                _acc=dict(promoter), access_hash=_hash, pool=pool),
+                        timeout=45)
+            if ok:
+                return _json_resp({"ok": True, "label": f"👑 {target_label} — назначен администратором"})
+            _why_ru = {
+                "not_participant": "Пользователь не состоит в чате — добавьте его туда и повторите",
+                "no_add_admins": "У аккаунта-создателя нет права «Назначать админов»",
+                "admins_too_much": "У чата кончились места админа (лимит Telegram ~50)",
+                "flood": "Telegram попросил паузу — повторите позже",
+            }
+            return _err(_why_ru.get(why, "Не удалось выдать права администратора"), 400)
+        except _asyncio.TimeoutError:
+            return _err("Аккаунт не ответил вовремя — проверьте прокси/сессию", 400)
+        except Exception:
+            log.exception("channel_promote_one uid=%d ch=%d", uid, ch_id)
+            return _err("Ошибка назначения администратора", 400)
+        finally:
+            if claimed:
+                try:
+                    await release_accounts(claimed)
+                except Exception:
+                    pass
+
     async def _submit_channel_manage(uid: int, op: str, chans: list, body: dict) -> web.Response:
         """Общий путь одиночного и массового удаления/очистки/выхода."""
         worker_op = channel_manage_worker_op(op)
@@ -1043,6 +1143,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/channel/add", channel_add)
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/promote_one", channel_promote_one)
     app.router.add_post("/api/miniapp/channels/mass", channels_mass)
     app.router.add_post("/api/miniapp/channels/bulk_delete", channels_bulk_delete)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)

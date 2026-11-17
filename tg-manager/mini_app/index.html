@@ -13110,12 +13110,50 @@ async function getChannelInviteLink(chId) {
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 async function promoteChannel(chId) {
-  if(!await askConfirm('Назначить все аккаунты администраторами этого канала?')) return;
+  // Раньше кнопка сразу делала админами ВЕСЬ флот. Теперь — выбор: один аккаунт
+  // из флота, пользователь по @юзернейму, или (как прежде) весь флот.
+  const choice = await askChoice('Назначить администратора', [
+    {label:'👤 Один аккаунт флота', sub:'Выбрать из списка и сделать админом', value:'one'},
+    {label:'🔗 По @юзернейму', sub:'Назначить админом по юзернейму', value:'uname'},
+    {label:'👥 Весь флот админами', sub:'Сделать админами все аккаунты', value:'all'},
+  ]);
+  if (!choice) return;
+  if (choice === 'all') return promoteChannelAll(chId);
+  if (choice === 'uname') {
+    const u = ((await askPrompt('Юзернейм пользователя', {placeholder:'@username'}))||'').trim();
+    if (!u) return;
+    return _promoteOne(chId, {username: u.replace(/^@/,'')});
+  }
+  // Выбор одного аккаунта флота.
+  let accs;
+  try { accs = (await api('/api/miniapp/accounts?filter=active&limit=500')).accounts || []; }
+  catch(e){ toast('⚠️ '+errRu(e,'Аккаунты не загрузились')); return; }
+  if (!accs.length) { toast('Нет активных аккаунтов'); return; }
+  const picked = await askChoice('Кого сделать админом', accs.map(a => ({
+    label: (a.first_name || (a.username?'@'+a.username:a.phone) || ('#'+a.id)),
+    sub: a.phone || (a.username?'@'+a.username:''),
+    value: a.id,
+  })));
+  if (!picked) return;
+  return _promoteOne(chId, {account_id: picked});
+}
+
+async function promoteChannelAll(chId) {
+  if(!await askConfirm('Назначить ВСЕ аккаунты администраторами этого канала?')) return;
   try {
     const r=await api(`/api/miniapp/channel/${chId}/promote`,{method:'POST'});
     toast(`👑 Поставлено в очередь (#${r.op_id})`);
     if(r.op_id) pollOpResult(r.op_id, 'Назначение админов');
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function _promoteOne(chId, payload) {
+  toast('👑 Назначаю администратора…');
+  try {
+    const r = await api(`/api/miniapp/channel/${chId}/promote_one`,{method:'POST',body:JSON.stringify(payload)});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast(r.label || '✅ Готово');
+  } catch(e){ toast('⚠️ '+errRu(e,'Не удалось назначить администратора')); }
 }
 
 
@@ -19697,11 +19735,16 @@ async function openNewUsers(keep) {
       // Строка — дверь к человеку: карточка контакта (CRM, сделка, история).
       // Раньше подписчик был тупиком — нажать было нечего.
       const tap = u.bot_id ? ` style="cursor:pointer" role="button" tabindex="0" onclick="openSubscriberCard(${Number(u.bot_id)},${Number(u.user_id)})"` : '';
+      // Один человек — одна строка; если он писал нескольким ботам, показываем
+      // «через N ботов» вместо повтора его же в списке.
+      const via = (u.bot_count && u.bot_count > 1)
+        ? `через ${num(u.bot_count)} ${plural(u.bot_count,'бот','бота','ботов')}`
+        : (u.bot_username ? '@'+esc(u.bot_username) : '');
       return `<div class="row"${tap}>
         <div class="row-ico" style="background:var(--bg-green-16)">👤</div>
         <div class="row-body">
           <div class="row-name">${esc(nm)}</div>
-          <div class="row-val" style="color:var(--hint)">${u.bot_username?'@'+esc(u.bot_username):''} · ${u.first_seen?ago(u.first_seen):''}</div>
+          <div class="row-val" style="color:var(--hint)">${via}${via?' · ':''}${u.first_seen?ago(u.first_seen):''}</div>
         </div>
         ${u.bot_id?'<div class="row-right"><span class="chev">›</span></div>':''}
       </div>`;

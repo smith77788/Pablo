@@ -903,6 +903,7 @@ POST /api/miniapp/channel/{ch_id}/manage
 POST /api/miniapp/channel/{ch_id}/pin
 POST /api/miniapp/channel/{ch_id}/post
 POST /api/miniapp/channel/{ch_id}/promote
+POST /api/miniapp/channel/{ch_id}/promote_one
 POST /api/miniapp/channel/{ch_id}/restore
 POST /api/miniapp/channel_factory/submit
 POST /api/miniapp/channel_rankings/add
