@@ -758,6 +758,9 @@ def setup_routes(app: web.Application, pool) -> None:
             account_geo=account_geo,
             per_city=per_city,
             seo_permute=seo_permute,
+            description=description,
+            short_description=short_desc,
+            avatar_style=(body.get("avatar_style") or None),
         )
         if not targets:
             return _err("Не удалось сгенерировать цели из гео", 400)

@@ -3290,10 +3290,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="font-size:11px;color:var(--hint);margin-top:4px">Несколько ресурсов на каждый город с разным порядком ключевых слов — больше мест в поиске. «Новости Москва» → «Москва Новости», «Новости Москваj»… Перестановка крутит и локализованное имя, и @username.</div>
 
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Описание (для каналов/групп)</label>
-      <textarea id="gpDescription" rows="2" placeholder="{{Новости {{city}}|Информация из {{city}}}}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
-      
+      <textarea id="gpDescription" rows="2" placeholder="{Новости|Вести} {{CITY_NAME}} — погода, транспорт, события" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Варианты — {Новости|Вести} (у каждого ресурса своё), плейсхолдеры — {{CITY_NAME}}, {{CITY_LOC}}, {{COUNTRY}}</div>
+
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Краткое описание (для ботов)</label>
-      <input type="text" id="gpShortDesc" placeholder="{{Помощник из {{city}}|Бот {{city}}}}" class="inp">
+      <input type="text" id="gpShortDesc" placeholder="{Помощник|Бот} {{CITY_NAME}}" class="inp">
       
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Гео-пресет *</label>
       <select id="gpGeoPreset" onchange="gpGeoToggle()" class="inp">

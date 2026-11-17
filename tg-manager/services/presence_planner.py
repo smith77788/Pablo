@@ -301,6 +301,9 @@ def build_targets(
     account_geo: dict[int, str] | None = None,
     per_city: int = 1,
     seo_permute: bool = False,
+    description: str = "",
+    short_description: str = "",
+    avatar_style: str | None = None,
 ) -> list[dict]:
     """Build list of target dicts for insertion into global_presence_targets.
 
@@ -323,6 +326,11 @@ def build_targets(
         per_city = 1
     per_city = max(1, min(per_city, MAX_PER_CITY))
     bot = (asset_type == "bot")
+    # Описание на КАЖДУЮ цель: у ботов — короткое, у каналов/групп — полное.
+    # Шаблон рендерится per-target (спинтакс {{A|B}} + плейсхолдеры), поэтому в
+    # сети описания разные, а не одно на всех. Раньше мини-апп-путь описание
+    # вообще не клал в planned_about — исполнитель ставил дженерик-заглушку.
+    desc_tpl = ((short_description if bot else description) or "").strip()
 
     # Аккаунт — на КАЖДУЮ цель (город × вариант), а не на город: иначе все
     # ресурсы одного города создавались бы с одного аккаунта (риск при массовом
@@ -376,6 +384,22 @@ def build_targets(
             # fit_username (общая дверь для обоих путей).
             planned_username = fit_username(raw_username, bot=bot, taken=_taken)
             selected_account_id = _acc_for_target[t_index]
+
+            # Описание цели: рендерим шаблон с сидом от (city, индекс) → разные
+            # описания у ресурсов, детерминированно (предпросмотр == запуск).
+            planned_about = None
+            if desc_tpl:
+                geo_i = {**geo, "index": t_index + 1}
+                # render_text = плейсхолдеры + канонический спинтакс {A|B}
+                # (единый движок проекта), с сидом → предпросмотр == запуск.
+                from services.infra_generator import render_text
+                rendered = render_text(
+                    desc_tpl, geo_i, _seeded_rng(city_slug, t_index, "about"))
+                planned_about = (rendered or "").strip()[:255] or None
+            # Аватар: сид от (city, индекс) — у каждого ресурса свой сгенерированный
+            # аватар (исполнитель уже умеет avatar_seed/avatar_style). Раньше
+            # мини-апп-путь seed не клал, и гео-ресурсы шли без аватара.
+            avatar_seed = _seed_int(city_slug, t_index, "avatar") % (2**31)
             t_index += 1
 
             targets.append(
@@ -392,6 +416,9 @@ def build_targets(
                     "asset_type": asset_type,
                     "planned_name": planned_name,
                     "planned_username": planned_username,
+                    "planned_about": planned_about,
+                    "avatar_seed": avatar_seed,
+                    "avatar_style": avatar_style,
                     "selected_account_id": selected_account_id,
                 }
             )

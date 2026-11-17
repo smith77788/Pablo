@@ -88,3 +88,52 @@ def test_bot_usernames_do_not_double_suffix():
         u = x["planned_username"] or ""
         assert not u.endswith("bot_bot")
         assert u.count("_bot") <= 1
+
+
+# ── Слайс 3a: описание (спинтакс + плейсхолдеры) и аватар на КАЖДУЮ цель ──────
+
+def test_description_rendered_per_target_with_spintax_and_placeholders():
+    # Описание было: мини-апп-путь не клал planned_about вовсе (исполнитель ставил
+    # дженерик). Теперь шаблон рендерится per-target: спинтакс {A|B} + {{CITY_NAME}}.
+    t = build_targets(GEO, "channel", "Новости {{CITY_NAME}}", "novosti_{{CITY_SLUG}}",
+                      [1], per_city=1, description="{Новости|Вести} {{CITY_NAME}} — погода")
+    msk = next(x for x in t if x["city"] == "Москва")
+    ab = msk["planned_about"]
+    assert ab, "описание обязано попасть в planned_about"
+    assert "{" not in ab and "}" not in ab, f"спинтакс/плейсхолдеры должны раскрыться: {ab}"
+    assert "Москва" in ab  # плейсхолдер подставлен
+    assert ab.split()[0] in ("Новости", "Вести")  # спинтакс раскрыт в один из вариантов
+
+
+def test_bot_uses_short_description_not_channel_description():
+    t = build_targets(GEO, "bot", "Помощник {{CITY_NAME}}", "{{CITY_SLUG}}_help",
+                      [1], per_city=1, description="это для каналов",
+                      short_description="{Помощник|Бот} {{CITY_NAME}}")
+    about = t[0]["planned_about"] or ""
+    assert "каналов" not in about, "бот обязан брать короткое описание, не описание канала"
+    assert about.split()[0] in ("Помощник", "Бот")
+
+
+def test_every_target_gets_an_avatar_seed():
+    # Раньше мини-апп гео-ресурсы шли БЕЗ аватара (seed не задавался). Теперь у
+    # каждого ресурса свой сид → исполнитель ставит сгенерированный аватар.
+    t = build_targets(GEO, "channel", "Новости {{CITY_NAME}}", "novosti_{{CITY_SLUG}}",
+                      [1], per_city=3, seo_permute=True)
+    seeds = [x["avatar_seed"] for x in t]
+    assert all(s is not None for s in seeds), "у каждой цели обязан быть avatar_seed"
+    # Ресурсы одного города не должны делить один аватар.
+    msk_seeds = [x["avatar_seed"] for x in t if x["city"] == "Москва"]
+    assert len(set(msk_seeds)) == len(msk_seeds), "аватары ресурсов города должны различаться"
+
+
+def test_avatar_style_propagates_when_given():
+    t = build_targets(GEO, "channel", "Новости {{CITY_NAME}}", None, [1],
+                      per_city=1, avatar_style="flat")
+    assert all(x["avatar_style"] == "flat" for x in t)
+
+
+def test_description_deterministic():
+    kw = dict(per_city=2, description="{Новости|Вести|Инфо} {{CITY_NAME}}")
+    a = build_targets(GEO, "channel", "Н {{CITY_NAME}}", "n_{{CITY_SLUG}}", [1], **kw)
+    b = build_targets(GEO, "channel", "Н {{CITY_NAME}}", "n_{{CITY_SLUG}}", [1], **kw)
+    assert [x["planned_about"] for x in a] == [x["planned_about"] for x in b]
