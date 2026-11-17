@@ -7703,6 +7703,24 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="strike-preview" id="strikePreviewBox"></div>
       <div id="strikeVectorWarn" style="display:none;font-size:12px;line-height:1.5;background:var(--card-2,rgba(255,180,0,.08));border:1px solid var(--orange,#e6a100);border-radius:10px;padding:10px 12px;margin-top:10px"></div>
       <div class="field" style="margin-top:10px">
+        <label>📱 Аккаунты флота <span id="strikeFleetCount" style="color:var(--hint);font-weight:400"></span></label>
+        <div id="strikeFleetPick" style="max-height:170px;overflow-y:auto;border:1px solid var(--border,rgba(128,128,128,.25));border-radius:10px;padding:4px"></div>
+        <div style="display:flex;gap:10px;margin-top:4px">
+          <button type="button" class="btn btn-s" style="flex:1;padding:4px 8px;font-size:12px;background:var(--bg)" onclick="strikePickAll('fleet',true)">Выбрать все</button>
+          <button type="button" class="btn btn-s" style="flex:1;padding:4px 8px;font-size:12px;background:var(--bg)" onclick="strikePickAll('fleet',false)">Снять все</button>
+        </div>
+        <div class="field-note">Снимите галочку, чтобы исключить аккаунт. Жалобы уходят с отмеченных.</div>
+      </div>
+      <div class="field">
+        <label>📧 Почтовые ящики <span style="color:var(--hint);font-weight:400">(юридический вектор)</span></label>
+        <div id="strikeMailboxPick" style="max-height:150px;overflow-y:auto;border:1px solid var(--border,rgba(128,128,128,.25));border-radius:10px;padding:4px"></div>
+        <div style="display:flex;gap:10px;margin-top:4px">
+          <button type="button" class="btn btn-s" style="flex:1;padding:4px 8px;font-size:12px;background:var(--bg)" onclick="strikePickAll('mailbox',true)">Выбрать все</button>
+          <button type="button" class="btn btn-s" style="flex:1;padding:4px 8px;font-size:12px;background:var(--bg)" onclick="strikePickAll('mailbox',false)">Снять все</button>
+        </div>
+        <div class="field-note">Письма abuse@/dmca@ Telegram уходят с отмеченных ящиков. Это вектор, который реально удаляет канал.</div>
+      </div>
+      <div class="field" style="margin-top:10px">
         <label>Эшелонирование (волн)</label>
         <select id="strikeWaves">
           <option value="1">1 — одной волной</option>
@@ -28585,9 +28603,11 @@ function strikeSelectCat(key, label) {
   txt('strikePreviewBox', `
     <div class="strike-preview-row"><div class="strike-preview-lbl">🎯 Цель:</div><div class="strike-preview-val">${esc(_STRIKE_TARGET)}</div></div>
     <div class="strike-preview-row"><div class="strike-preview-lbl">⚠️ Категория:</div><div class="strike-preview-val">${esc(label)}</div></div>
-    <div class="strike-preview-row"><div class="strike-preview-lbl">📱 Аккаунты:</div><div class="strike-preview-val">все доступные активные</div></div>
-    <div class="strike-preview-row"><div class="strike-preview-lbl">📡 Метод:</div><div class="strike-preview-val">Telegram Trust & Safety</div></div>
+    <div class="strike-preview-row"><div class="strike-preview-lbl">📡 Метод:</div><div class="strike-preview-val">Telegram Trust & Safety + юр-письма</div></div>
   `);
+  // Списки выбора: владелец ВИДИТ и РЕШАЕТ, какими аккаунтами и с каких ящиков
+  // бить. По умолчанию отмечено всё (прежнее поведение «все доступные»).
+  strikeRenderPicks();
   // Честное предупреждение о векторе. Массовые in-app жалобы сами по себе почти
   // никогда не удаляют канал (Telegram взвешивает репутацию жалующегося, а не число
   // репортов). Реально к удалению приводит юридический вектор — письма в abuse@/
@@ -28615,6 +28635,59 @@ function strikeSelectCat(key, label) {
   document.getElementById('strikeStep3').style.display = '';
 }
 
+// Рендер списков выбора аккаунтов флота и почтовых ящиков на шаге 3.
+// Источник — _STRIKE_STATUS.fleet / .mailboxes (их отдаёт /strike/status).
+function strikeRenderPicks() {
+  const fleet = (_STRIKE_STATUS && _STRIKE_STATUS.fleet) || [];
+  const mbx = (_STRIKE_STATUS && _STRIKE_STATUS.mailboxes) || [];
+  const fEl = document.getElementById('strikeFleetPick');
+  const mEl = document.getElementById('strikeMailboxPick');
+  const cEl = document.getElementById('strikeFleetCount');
+  if (cEl) cEl.textContent = fleet.length ? `· отмечено ${fleet.length}/${fleet.length}` : '';
+  if (fEl) {
+    fEl.innerHTML = fleet.length ? fleet.map(a =>
+      `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:6px 6px;cursor:pointer;border-radius:8px">
+        <input type="checkbox" class="strikeFleetCb" value="${esc(String(a.id))}" checked onchange="strikeUpdateCounts()">
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.label||('#'+a.id))}</span>
+      </label>`
+    ).join('') : '<div class="field-note" style="padding:6px">Нет активных аккаунтов. Операция уйдёт только юр-письмами (если отмечен ящик).</div>';
+  }
+  if (mEl) {
+    mEl.innerHTML = mbx.length ? mbx.map(m =>
+      `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:6px 6px;cursor:pointer;border-radius:8px">
+        <input type="checkbox" class="strikeMbxCb" value="${esc(String(m.id))}" checked onchange="strikeUpdateCounts()">
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.email||('#'+m.id))}${m.auth_type==='oauth'?' <span style=\"color:var(--hint)\">(OAuth)</span>':''}</span>
+      </label>`
+    ).join('') : '<div class="field-note" style="padding:6px">Нет подключённых ящиков. Юр-вектор (письма) выключен — подключите SMTP в настройках. Без него массовые жалобы почти никогда не удаляют канал.</div>';
+  }
+  strikeUpdateCounts();
+}
+
+function strikePickAll(kind, on) {
+  const cls = kind === 'fleet' ? '.strikeFleetCb' : '.strikeMbxCb';
+  document.querySelectorAll(cls).forEach(cb => { cb.checked = !!on; });
+  strikeUpdateCounts();
+}
+
+function strikeUpdateCounts() {
+  const cEl = document.getElementById('strikeFleetCount');
+  if (!cEl) return;
+  const all = document.querySelectorAll('.strikeFleetCb').length;
+  const on = document.querySelectorAll('.strikeFleetCb:checked').length;
+  cEl.textContent = all ? `· отмечено ${on}/${all}` : '';
+}
+
+// Собрать отмеченные id. Пустой выбор аккаунтов при наличии аккаунтов означает
+// «не выбрано ничего» — это осознанный выбор, но тогда флот не участвует; бэкенд
+// примет это как legal-only, если отмечен хотя бы один ящик.
+function strikeCollectPicks() {
+  const acc = Array.from(document.querySelectorAll('.strikeFleetCb:checked'))
+    .map(cb => parseInt(cb.value)).filter(n => !isNaN(n));
+  const mbx = Array.from(document.querySelectorAll('.strikeMbxCb:checked'))
+    .map(cb => parseInt(cb.value)).filter(n => !isNaN(n));
+  return {account_ids: acc, mailbox_ids: mbx};
+}
+
 function strikeBackStep() {
   document.getElementById('strikeStep3').style.display = 'none';
   document.getElementById('strikeStep2').style.display = '';
@@ -28629,7 +28702,16 @@ async function strikeLaunch() {
   try {
     const _waves = parseInt(document.getElementById('strikeWaves')?.value)||3;
     const _maxAccRaw = document.getElementById('strikeMaxAcc')?.value.trim();
-    const _payload = {target: _STRIKE_TARGET, category: _STRIKE_CAT.key, num_waves: _waves};
+    const _picks = strikeCollectPicks();
+    // Пустой выбор И по аккаунтам, И по ящикам — операции нечем работать.
+    // Говорим прямо ДО запроса, а не ловим 400 с сервера.
+    if (!_picks.account_ids.length && !_picks.mailbox_ids.length) {
+      toast('⚠️ Отметьте хотя бы один аккаунт или почтовый ящик');
+      btn.disabled = false; btn.textContent = '⚔️ Отправить жалобы';
+      return;
+    }
+    const _payload = {target: _STRIKE_TARGET, category: _STRIKE_CAT.key, num_waves: _waves,
+                      account_ids: _picks.account_ids, mailbox_ids: _picks.mailbox_ids};
     if (_maxAccRaw) _payload.max_accounts = parseInt(_maxAccRaw);
     const _restrikeRaw = document.getElementById('strikeRestrikeH')?.value.trim();
     if (_restrikeRaw !== '' && _restrikeRaw != null) _payload.min_restrike_hours = parseInt(_restrikeRaw);
@@ -28640,7 +28722,14 @@ async function strikeLaunch() {
       body: JSON.stringify(_payload),
     });
     closeStrikeModal();
-    toast(`✅ Жалобы пошли — ${d.accounts} аккаунтов, ${d.num_waves||_waves} волн`);
+    { const _mb = d.mailboxes||0;
+      const _parts = [];
+      if (d.accounts) _parts.push(`${d.accounts} аккаунтов`);
+      if (_mb) _parts.push(`${_mb} ящиков`);
+      if (d.accounts) _parts.push(`${d.num_waves||_waves} волн`);
+      toast(d.accounts
+        ? `✅ Жалобы пошли — ${_parts.join(', ')}`
+        : `✅ Запущен юр-вектор — ${_mb} ящиков (письма abuse@/dmca@)`); }
     openStrike();
   } catch(e) {
     toast('⚠️ '+errRu(e,'Ошибка').substring(0,60));

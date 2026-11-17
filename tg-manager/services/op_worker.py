@@ -12890,6 +12890,16 @@ async def _exec_strike(
         except (ValueError, TypeError):
             log.warning("_exec_strike op=%d: invalid account_id=%r, skipped", op_id, _x)
 
+    # Явно выбранные владельцем SMTP-ящики (пусто = все активные). Решает, с каких
+    # ящиков уйдёт юридический вектор; owner_id в запросе ящиков скоупит, чужой id
+    # просто не выберется.
+    mailbox_ids: list[int] = []
+    for _m in params.get("mailbox_ids") or []:
+        try:
+            mailbox_ids.append(int(_m))
+        except (ValueError, TypeError):
+            log.warning("_exec_strike op=%d: invalid mailbox_id=%r, skipped", op_id, _m)
+
     if not target:
         return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
 
@@ -12985,9 +12995,15 @@ async def _exec_strike(
     # нечего (ни аккаунтов, ни SMTP), а не тихо «готово, 0».
     if not viable:
         try:
-            _smtp_cnt = int(await pool.fetchval(
-                "SELECT COUNT(*) FROM strike_email_accounts "
-                "WHERE owner_id=$1 AND is_active=TRUE", owner_id) or 0)
+            if mailbox_ids:
+                _smtp_cnt = int(await pool.fetchval(
+                    "SELECT COUNT(*) FROM strike_email_accounts "
+                    "WHERE owner_id=$1 AND is_active=TRUE AND id = ANY($2::bigint[])",
+                    owner_id, mailbox_ids) or 0)
+            else:
+                _smtp_cnt = int(await pool.fetchval(
+                    "SELECT COUNT(*) FROM strike_email_accounts "
+                    "WHERE owner_id=$1 AND is_active=TRUE", owner_id) or 0)
         except Exception:
             _smtp_cnt = 0
         if not _smtp_cnt:
@@ -13064,6 +13080,7 @@ async def _exec_strike(
         phase="recon",  # начальная фаза: strike_engine начнёт со сбора данных
         mode=strike_mode,
         owner_id=owner_id,
+        mailbox_ids=mailbox_ids,
     )
 
     # Progress callback: обновляет done_items в БД при переходе между волнами

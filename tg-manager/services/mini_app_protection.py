@@ -384,6 +384,38 @@ def setup_routes(app: web.Application, pool) -> None:
                 )
             except Exception:
                 _email_cnt = None  # таблицы может не быть — не блокируем статус
+            # Реальные списки аккаунтов флота и ящиков — чтобы владелец ВИДЕЛ и
+            # ВЫБИРАЛ, чем бьёт. Фильтр аккаунтов тот же, что в strike_launch
+            # (активные и не «мёртвые»), иначе выбор на экране разошёлся бы с тем,
+            # что реально уходит в операцию. Обе выборки fail-soft: пустой список
+            # лучше 500 на экране статуса.
+            mailboxes: list[dict] = []
+            fleet: list[dict] = []
+            try:
+                _mbx_rows = await pool.fetch(
+                    "SELECT id, email, COALESCE(auth_type,'password') AS auth_type "
+                    "FROM strike_email_accounts "
+                    "WHERE owner_id=$1 AND is_active=TRUE ORDER BY id", uid)
+                mailboxes = [
+                    {"id": r["id"], "email": r["email"], "auth_type": r["auth_type"]}
+                    for r in _mbx_rows
+                ]
+            except Exception:
+                mailboxes = []
+            try:
+                _acc_rows = await pool.fetch(
+                    "SELECT id, phone, first_name, username FROM tg_accounts "
+                    "WHERE owner_id=$1 AND is_active=true AND "
+                    + _acc_status.sql_not_dead()
+                    + " ORDER BY id", uid)
+                for r in _acc_rows:
+                    _label = (r["first_name"] or "").strip() or (
+                        ("@" + r["username"]) if r["username"] else "") or (
+                        r["phone"] or "") or f"#{r['id']}"
+                    fleet.append({"id": r["id"], "label": _label,
+                                  "username": r["username"], "phone": r["phone"]})
+            except Exception:
+                fleet = []
             has_access = await _strike_has_access(uid)
             return _json_resp({
                 "has_access": has_access,
@@ -396,6 +428,10 @@ def setup_routes(app: web.Application, pool) -> None:
                     "configured": bool(_email_cnt) if _email_cnt is not None else None,
                     "accounts": int(_email_cnt or 0) if _email_cnt is not None else 0,
                 },
+                # Для экрана выбора: чем именно операция будет бить.
+                "fleet": fleet,
+                "fleet_count": len(fleet),
+                "mailboxes": mailboxes,
             })
         except Exception:
             log.exception("strike_status uid=%d", uid)
@@ -482,15 +518,63 @@ def setup_routes(app: web.Application, pool) -> None:
             # идут во времени, а не одним залпом).
             persist = bool(body.get("persist"))
 
-            # Подсчёт доступных аккаунтов
-            accs = await pool.fetch(
-                """SELECT id FROM tg_accounts
-                   WHERE owner_id=$1 AND is_active=true
-                     AND """ + _acc_status.sql_not_dead() + """
-                   LIMIT $2""",
-                uid, acc_limit,
-            )
-            if not accs:
+            # Явный выбор аккаунтов владельцем (UI показывает флот чекбоксами).
+            # Пусто = все активные до лимита (прежнее поведение). Выбранные id
+            # пересекаем с активными и не-мёртвыми В ЗАПРОСЕ (owner_id скоупит,
+            # чужой/битый id просто отсеивается), затем режем тем же лимитом.
+            sel_acc_ids: list[int] = []
+            for _a in body.get("account_ids") or []:
+                try:
+                    sel_acc_ids.append(int(_a))
+                except (TypeError, ValueError):
+                    pass
+            if sel_acc_ids:
+                accs = await pool.fetch(
+                    """SELECT id FROM tg_accounts
+                       WHERE owner_id=$1 AND is_active=true
+                         AND """ + _acc_status.sql_not_dead() + """
+                         AND id = ANY($2::bigint[])
+                       LIMIT $3""",
+                    uid, sel_acc_ids, acc_limit,
+                )
+            else:
+                accs = await pool.fetch(
+                    """SELECT id FROM tg_accounts
+                       WHERE owner_id=$1 AND is_active=true
+                         AND """ + _acc_status.sql_not_dead() + """
+                       LIMIT $2""",
+                    uid, acc_limit,
+                )
+
+            # Явный выбор ящиков (SMTP) — тем же принципом: пересекаем с активными
+            # владельца в запросе, в params кладём только валидные id. Пусто = все.
+            sel_mbx_ids: list[int] = []
+            for _m in body.get("mailbox_ids") or []:
+                try:
+                    sel_mbx_ids.append(int(_m))
+                except (TypeError, ValueError):
+                    pass
+            mailbox_ids: list[int] = []
+            if sel_mbx_ids:
+                try:
+                    _mrows = await pool.fetch(
+                        "SELECT id FROM strike_email_accounts "
+                        "WHERE owner_id=$1 AND is_active=TRUE AND id = ANY($2::bigint[])",
+                        uid, sel_mbx_ids,
+                    )
+                    mailbox_ids = [r["id"] for r in _mrows]
+                except Exception:
+                    mailbox_ids = []
+
+            # Нет НИ выбранных/доступных аккаунтов, НИ выбранных ящиков — операции
+            # нечем работать. Но если выбран хотя бы один действующий ящик,
+            # юридический вектор (письма) работает и без аккаунтов — тогда пускаем
+            # (legal-only отработает в _exec_strike).
+            if not accs and not mailbox_ids:
+                # Различаем «ничего не выбрано/нет живых» для honest-сообщения.
+                if sel_acc_ids or sel_mbx_ids:
+                    return _err("Выбранные аккаунты и ящики недоступны "
+                                "(неактивны или не ваши). Проверьте выбор.", 400)
                 return _err("Нет доступных активных аккаунтов для Strike", 400)
 
             # Создаём операцию в очереди (op_type='strike' — воркер знает этот тип)
@@ -504,8 +588,12 @@ def setup_routes(app: web.Application, pool) -> None:
                     "force": force,
                     "persist": persist,
                     "account_ids": [r["id"] for r in accs],
+                    "mailbox_ids": mailbox_ids,
                 },
-                total_items=len(accs),
+                # legal-only (флот пуст, но выбран ящик): считаем «1 единицу
+                # работы», чтобы прогресс не делил на 0 и операция не выглядела
+                # пустой 0/0.
+                total_items=len(accs) or 1,
                 label=f"Массовые жалобы: {normalized} [{cat['label']}] · {num_waves} волн")
             # Подписанная запись правового основания ДО запуска: жалоба подаётся
             # только по abuse-категории (гейт MINI_CATEGORIES выше), и этот факт
@@ -519,7 +607,9 @@ def setup_routes(app: web.Application, pool) -> None:
                             "category_label": cat.get("label")})
             except Exception:
                 log.debug("strike_launch: compliance record failed op=%s", op_id)
-            return _json_resp({"ok": True, "operation_id": op_id, "accounts": len(accs), "num_waves": num_waves})
+            return _json_resp({"ok": True, "operation_id": op_id,
+                               "accounts": len(accs), "mailboxes": len(mailbox_ids),
+                               "num_waves": num_waves})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
