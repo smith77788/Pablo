@@ -9886,6 +9886,36 @@ async def _exec_global_presence_channel(
     asset_type = plan.get("asset_type", "channel")
     from services.geo_va_link import config_from_plan
     va_config = config_from_plan(plan.get("geo_selection"))
+    # ── Настройки роста из плана (паритет с Фабрикой) ──────────────────────────
+    # Первый пост + закреп, автопосев, оживление. Хранятся в geo_selection.
+    _gp_sel = plan.get("geo_selection")
+    if isinstance(_gp_sel, str):
+        try:
+            import json as _json
+            _gp_sel = _json.loads(_gp_sel or "{}")
+        except Exception:
+            _gp_sel = {}
+    _gp_sel = _gp_sel if isinstance(_gp_sel, dict) else {}
+    _gp_first_post = (_gp_sel.get("first_post") or "").strip()
+    _gp_pin_first = bool(_gp_sel.get("pin_first_post"))
+    try:
+        _gp_seed_count = max(0, min(int(_gp_sel.get("seed_count") or 0), 200))
+    except (TypeError, ValueError):
+        _gp_seed_count = 0
+    try:
+        _gp_engage_count = max(0, min(int(_gp_sel.get("engage_count") or 0), 200))
+    except (TypeError, ValueError):
+        _gp_engage_count = 0
+    # Пул аккаунтов для посева/оживления — ДРУГИЕ аккаунты флота (не создатель).
+    # Строим один раз; тот же проверенный путь, что в фабрике каналов.
+    _gp_seed_pool: list[int] = []
+    if _gp_seed_count > 0 or _gp_engage_count > 0:
+        try:
+            _sp_rows = await resource_selector.select_all_active(
+                pool, owner_id, respect_cooldown=False)
+            _gp_seed_pool = [int(r["id"]) for r in (_sp_rows or [])]
+        except Exception:
+            _gp_seed_pool = []
     # Тип плана — лишь запасной вариант. Решает тип КАЖДОЙ цели: проект-генератор
     # кладёт в один план каналы (новости, работа, афиша) и группы (чат, барахолка)
     # вперемешку, и общий флаг превратил бы половину структуры не в тот тип актива.
@@ -10395,26 +10425,100 @@ async def _exec_global_presence_channel(
                 duration_ms=int((time.monotonic() - t0_gp) * 1000),
             )
 
-            # Публикуем начальный пост — пустой канал немедленно попадает в shadow ban.
-            # Любой пост делает канал "живым" для алгоритмов Telegram.
+            # ── Рост ресурса: первый пост (+закреп), оживление, посев ──────────
+            # Пустой канал мгновенно попадает в теневой бан — первый пост делает
+            # его «живым». Текст — пользовательский (спинтакс {A|B} + плейсхолдеры),
+            # иначе дженерик-welcome. Закреп/оживление/посев — паритет с Фабрикой,
+            # через те же проверенные boost_*-операции шины.
+            _gp_msg_id = 0
             try:
-                _welcome_text = f"{'👥' if is_group else '📢'} {title}"
-                if _geo_label:
-                    _welcome_text += f"\n\n📍 {_geo_label}"
+                if _gp_first_post:
+                    _geo_i = {"city": target.get("city") or "",
+                              "city_native": target.get("city") or "",
+                              "city_slug": target.get("city_slug") or "",
+                              "country": target.get("country") or "",
+                              "country_code": target.get("country_code") or "",
+                              "region": target.get("region") or "",
+                              "index": 1}
+                    from services.infra_generator import render_text as _rt
+                    _post_text = _rt(_gp_first_post, _geo_i,
+                                     random.Random(f"gpfp:{channel_id}")) or _gp_first_post
+                else:
+                    _post_text = f"{'👥' if is_group else '📢'} {title}"
+                    if _geo_label:
+                        _post_text += f"\n\n📍 {_geo_label}"
+                # Пауза перед первым постом остаётся ЦЕЛОЙ (зарегистрирована в
+                # _MUST_STAY_WHOLE): это не виток цикла, а разнос «создан»→«ожил»,
+                # укорачивать её нельзя — она и есть анти-детект-след.
                 _post_delay = random.uniform(30, 60) * session_simulator.chaos_factor()
                 await asyncio.sleep(_post_delay)
-                await account_manager.post_to_channel(
-                    acc["session_str"],
-                    channel_id,
-                    _welcome_text,
-                    access_hash=channel_access_hash,
-                    _acc=dict(acc),
-                )
+                _pr = await account_manager.post_to_channel(
+                    acc["session_str"], channel_id, _post_text[:4000],
+                    access_hash=channel_access_hash, _acc=dict(acc))
+                if isinstance(_pr, dict) and _pr.get("msg_id"):
+                    _gp_msg_id = int(_pr["msg_id"])
+                if _gp_pin_first and _gp_msg_id:
+                    try:
+                        await account_manager.pin_last_channel_post(
+                            acc["session_str"], channel_id,
+                            access_hash=channel_access_hash, _acc=dict(acc))
+                    except Exception:
+                        log_exc_swallow(log, f"gp_channel pin failed ch={channel_id}")
                 log.info(
-                    "op_worker gp_channel: initial post sent to channel_id=%s", channel_id
+                    "op_worker gp_channel: first post sent to channel_id=%s", channel_id
                 )
             except Exception:
-                log_exc_swallow(log, f"initial post failed for channel_id={channel_id}")
+                log_exc_swallow(log, f"first post failed for channel_id={channel_id}")
+
+            # Оживление: реакции + просмотры флотом. Только публичный канал (@) и
+            # когда есть пост — аккаунты должны видеть его без вступления.
+            if (_gp_engage_count > 0 and _gp_msg_id and applied_username
+                    and _gp_seed_pool and not is_group):
+                _eng_ids = [i for i in _gp_seed_pool
+                            if i != int(acc["id"])][:_gp_engage_count]
+                if _eng_ids:
+                    try:
+                        from services import operation_bus as _obus_eng
+                        await _obus_eng.submit(
+                            pool, owner_id, "boost_reactions",
+                            {"channel": f"@{applied_username}", "msg_id": _gp_msg_id,
+                             "account_ids": _eng_ids},
+                            total_items=len(_eng_ids),
+                            label=f"Оживление: реакции в {title[:40]}")
+                        await _obus_eng.submit(
+                            pool, owner_id, "boost_views",
+                            {"channel": f"@{applied_username}", "msg_ids": [_gp_msg_id],
+                             "account_ids": _eng_ids},
+                            total_items=len(_eng_ids),
+                            label=f"Оживление: просмотры в {title[:40]}")
+                    except Exception:
+                        log_exc_swallow(log, "gp_channel: engage submit failed")
+
+            # Автопосев участников: @username или инвайт-ссылка (приватный) →
+            # отдельной операцией boost_subscribers (свой захват, карантин, пейсинг).
+            if _gp_seed_count > 0 and _gp_seed_pool:
+                _seed_target = f"@{applied_username}" if applied_username else ""
+                if not _seed_target:
+                    try:
+                        _lk = await account_manager.create_channel_invite_link(
+                            acc["session_str"], channel_id,
+                            access_hash=channel_access_hash, _acc=acc)
+                        _seed_target = (_lk.get("invite_link")
+                                        if isinstance(_lk, dict) else "") or ""
+                    except Exception:
+                        _seed_target = ""
+                _seed_ids = [i for i in _gp_seed_pool
+                             if i != int(acc["id"])][:_gp_seed_count]
+                if _seed_target and _seed_ids:
+                    try:
+                        from services import operation_bus as _obus_seed
+                        await _obus_seed.submit(
+                            pool, owner_id, "boost_subscribers",
+                            {"target": _seed_target, "account_ids": _seed_ids},
+                            total_items=len(_seed_ids),
+                            label=f"Автопосев: +{len(_seed_ids)} в {title[:40]}")
+                    except Exception:
+                        log_exc_swallow(log, "gp_channel: seed submit failed")
 
             # Link to ecosystem if one exists for this owner
             try:

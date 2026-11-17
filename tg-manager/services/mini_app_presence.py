@@ -722,6 +722,18 @@ def setup_routes(app: web.Application, pool) -> None:
             per_city = 1
         per_city = max(1, min(per_city, MAX_PER_CITY))
         seo_permute = bool(body.get("seo_permute"))
+        # Настройки роста (паритет с Фабрикой): первый пост + закреп, автопосев,
+        # оживление. Исполнитель применит их к каждому созданному ресурсу.
+        first_post = (body.get("first_post") or "").strip()[:4000]
+        pin_first_post = bool(body.get("pin_first_post"))
+        try:
+            seed_count = max(0, min(int(body.get("seed_count") or 0), 200))
+        except (TypeError, ValueError):
+            seed_count = 0
+        try:
+            engage_count = max(0, min(int(body.get("engage_count") or 0), 200))
+        except (TypeError, ValueError):
+            engage_count = 0
         from services.geo_va_link import MAX_GEO_TARGETS, validate_config
         total_planned = len(geo_list) * per_city
         if total_planned > MAX_GEO_TARGETS:
@@ -790,6 +802,10 @@ def setup_routes(app: web.Application, pool) -> None:
                                "per_city": per_city, "seo_permute": seo_permute,
                                "description": description,
                                "short_description": short_desc,
+                               "first_post": first_post,
+                               "pin_first_post": pin_first_post,
+                               "seed_count": seed_count,
+                               "engage_count": engage_count,
                                "virtual_admin": va_config},
                 account_selection={"account_ids": acc_ids_int},
                 targets=targets,

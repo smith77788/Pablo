@@ -3295,7 +3295,28 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Краткое описание (для ботов)</label>
       <input type="text" id="gpShortDesc" placeholder="{Помощник|Бот} {{CITY_NAME}}" class="inp">
-      
+
+      <details style="margin-top:12px;border:1px solid var(--border-input);border-radius:10px;padding:10px">
+        <summary style="cursor:pointer;font-size:13px">🚀 Рост после создания (первый пост, подписчики, оживление)</summary>
+        <label style="font-size:13px;color:var(--hint);display:block;margin:10px 0 4px">Первый пост (необязательно)</label>
+        <textarea id="gpFirstPost" rows="2" placeholder="{Добро пожаловать|Привет}! Новости {{CITY_NAME}} — подпишитесь" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
+        <div style="font-size:11px;color:var(--hint);margin-top:4px">Варианты {A|B} + плейсхолдеры {{CITY_NAME}}/{{COUNTRY}}. Пустой канал без поста быстро попадает в теневой бан.</div>
+        <label class="chk-row" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
+          <input type="checkbox" id="gpPinFirst" checked><span style="font-size:13px">📌 Закрепить первый пост</span>
+        </label>
+        <div style="display:flex;gap:10px;margin-top:10px">
+          <div style="flex:1">
+            <label style="font-size:12px;color:var(--hint);display:block;margin-bottom:4px">👥 Автопосев</label>
+            <input type="number" id="gpSeedCount" class="inp" min="0" max="200" value="0">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:12px;color:var(--hint);display:block;margin-bottom:4px">🔥 Оживление</label>
+            <input type="number" id="gpEngageCount" class="inp" min="0" max="200" value="0">
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--hint);margin-top:6px">👥 Столько своих аккаунтов подпишутся на каждый ресурс (размер аудитории — главный фактор позиции в поиске). 🔥 Столько аккаунтов поставят реакцию и просмотр первому посту (нужен первый пост и публичный @). 0 — выключено.</div>
+      </details>
+
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Гео-пресет *</label>
       <select id="gpGeoPreset" onchange="gpGeoToggle()" class="inp">
         <option value="">— выберите пресет или свои города —</option>
@@ -30053,7 +30074,11 @@ async function openGpCreateModal(presetAssetType) {
     if (_at && presetAssetType) _at.value = presetAssetType; }
   ['gpRefName','gpRefUsername','gpRefCity','gpNamePattern','gpUsernamePattern','gpCustomCities'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
   { const _pc=document.getElementById('gpPerCity'); if(_pc) _pc.value='1';
-    const _sp=document.getElementById('gpSeoPermute'); if(_sp) _sp.checked=false; }
+    const _sp=document.getElementById('gpSeoPermute'); if(_sp) _sp.checked=false;
+    const _fp=document.getElementById('gpFirstPost'); if(_fp) _fp.value='';
+    const _pf=document.getElementById('gpPinFirst'); if(_pf) _pf.checked=true;
+    const _sc=document.getElementById('gpSeedCount'); if(_sc) _sc.value='0';
+    const _ec=document.getElementById('gpEngageCount'); if(_ec) _ec.value='0'; }
   { const _g=document.getElementById('gpGeoPreset'); if(_g) _g.value=''; gpGeoToggle(); }
   loadGpGeoPresets();
   accPickerSearchBox('gpAccountsList', _gpLoadAccs);
@@ -30170,7 +30195,15 @@ async function submitGpCreate() {
   const geoLbl = geoPreset==='__custom' ? 'свои города' : document.getElementById('gpGeoPreset').selectedOptions[0].textContent;
   const perCity = Math.max(1, Math.min(50, parseInt(document.getElementById('gpPerCity')?.value) || 1));
   const seoPermute = !!document.getElementById('gpSeoPermute')?.checked;
-  const preview = `Создать ${GP_TYPES[assetType]||assetType}?\n\nНазвание: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nГео: ${geoLbl}\nНа город: ${perCity}${seoPermute?' (перестановка ключей)':''}\nАккаунтов: ${accountIds.length}${vaEnabled?'\nАдминистратор: '+vaTopic+' ('+(vaMode==='review'?'проверка':'авто')+')':''}`;
+  const firstPost = (document.getElementById('gpFirstPost')?.value || '').trim();
+  const pinFirst = !!document.getElementById('gpPinFirst')?.checked;
+  const seedCount = Math.max(0, Math.min(200, parseInt(document.getElementById('gpSeedCount')?.value) || 0));
+  const engageCount = Math.max(0, Math.min(200, parseInt(document.getElementById('gpEngageCount')?.value) || 0));
+  let _growthLine = '';
+  if (firstPost) _growthLine += `\nПервый пост${pinFirst?' + закреп':''}`;
+  if (seedCount>0) _growthLine += `\nАвтопосев: +${seedCount} на каждый`;
+  if (engageCount>0) _growthLine += `\nОживление: ${engageCount} аккаунтов`;
+  const preview = `Создать ${GP_TYPES[assetType]||assetType}?\n\nНазвание: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nГео: ${geoLbl}\nНа город: ${perCity}${seoPermute?' (перестановка ключей)':''}\nАккаунтов: ${accountIds.length}${_growthLine}${vaEnabled?'\nАдминистратор: '+vaTopic+' ('+(vaMode==='review'?'проверка':'авто')+')':''}`;
   if (!await askConfirm(preview)) return;
 
   const payload = {
@@ -30182,6 +30215,10 @@ async function submitGpCreate() {
     account_ids: accountIds,
     per_city: perCity,
     seo_permute: seoPermute,
+    first_post: firstPost,
+    pin_first_post: pinFirst,
+    seed_count: seedCount,
+    engage_count: engageCount,
     ecosystem_id: ecosystemId ? +ecosystemId : null,
     virtual_admin: vaEnabled ? {enabled:true, topic:vaTopic, lead_contact:vaContact, publish_mode:vaMode, posts_per_day:vaPosts} : null,
   };
