@@ -158,7 +158,9 @@ def test_strike_card_distinguishes_selected_and_passed_to_executor(monkeypatch):
     status, body = _get(monkeypatch, "/api/miniapp/operation/5", StrikePool())
     assert status == 200
     params = {row["label"]: row["value"] for row in body["params_view"]}
-    assert params["Выбрано при запуске"] == "3: 1, 2, 3"
+    # Без резолва имён (в стабе нет tg_accounts) id помечаются «#», как у
+    # одиночного «Аккаунт»; с резолвом в проде здесь были бы имена аккаунтов.
+    assert params["Выбрано при запуске"] == "3: #1, #2, #3"
     assert params["Передано исполнителю"] == "1"
 
 

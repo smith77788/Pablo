@@ -388,7 +388,38 @@ def setup_routes(app: web.Application, pool) -> None:
             import json as _json_pv
             from services import op_params_view as _pv
             _p = _prm_raw if isinstance(_prm_raw, dict) else _json_pv.loads(_prm_raw or "{}")
-            d["params_view"] = _pv.describe(d.get("op_type"), _p)
+            # Резолвим id аккаунтов → имена: владелец видит «Иван (@ivan)», а не
+            # «#123». Карту строит хендлер (у describe нет БД). Скоуп по owner_id.
+            _acc_names: dict[int, str] = {}
+            try:
+                _ids: set[int] = set()
+                for _k in ("account_ids",):
+                    _v = _p.get(_k)
+                    if isinstance(_v, (list, tuple)):
+                        for _x in _v:
+                            try:
+                                _ids.add(int(_x))
+                            except (TypeError, ValueError):
+                                pass
+                for _k in ("acc_id", "account_id"):
+                    try:
+                        _ids.add(int(_p.get(_k)))
+                    except (TypeError, ValueError):
+                        pass
+                _ids.discard(0)
+                if _ids:
+                    _rows = await _safe_fetch(pool,
+                        "SELECT id, first_name, username, phone FROM tg_accounts "
+                        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                        uid, list(_ids))
+                    for _r in (_rows or []):
+                        _nm = (_r["first_name"] or "").strip() or (
+                            ("@" + _r["username"]) if _r["username"] else "") or (
+                            _r["phone"] or "") or f"#{_r['id']}"
+                        _acc_names[int(_r["id"])] = _nm
+            except Exception:
+                _acc_names = {}
+            d["params_view"] = _pv.describe(d.get("op_type"), _p, _acc_names)
             if d.get("op_type") == "strike":
                 _count = _res.get("accounts_used") if isinstance(_res, dict) else None
                 if type(_count) is int and _count >= 0:
@@ -507,8 +538,39 @@ def setup_routes(app: web.Application, pool) -> None:
                 f"ORDER BY step_num, id LIMIT ${_n + 2} OFFSET ${_n + 3}",
                 op_id, *_qa, limit, offset)
             shown_total = total
+        # Числовой target у операций по аккаунтам — это id аккаунта. Резолвим в
+        # имя (first_name/@username/телефон), чтобы владелец видел, КТО отработал,
+        # а не голый номер. Owner-scoped; нерезолвленные остаются как есть.
+        _num_t: set[int] = set()
+        for _r in rows:
+            _t = str(_r["target"] or "").strip()
+            if _t.isdigit():
+                try:
+                    _num_t.add(int(_t))
+                except ValueError:
+                    pass
+        _tmap: dict[int, str] = {}
+        if _num_t:
+            try:
+                _trows = await _safe_fetch(pool,
+                    "SELECT id, first_name, username, phone FROM tg_accounts "
+                    "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                    uid, list(_num_t))
+                for _tr in (_trows or []):
+                    _tmap[int(_tr["id"])] = (_tr["first_name"] or "").strip() or (
+                        ("@" + _tr["username"]) if _tr["username"] else "") or (
+                        _tr["phone"] or "") or f"#{_tr['id']}"
+            except Exception:
+                _tmap = {}
+        _logs = []
+        for _r in rows:
+            _row = dict(_r)
+            _t = str(_row.get("target") or "").strip()
+            if _t.isdigit() and int(_t) in _tmap:
+                _row["target"] = _tmap[int(_t)]
+            _logs.append(_row)
         return _json_resp({
-            "logs": rows,
+            "logs": _logs,
             "total": total,
             "counts": counts,
             "status": status,
