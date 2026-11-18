@@ -136,10 +136,10 @@ def test_frontend_has_import_button_and_offers_fleet_sync():
     assert "importContactsFile()" in html
     assert "async function _doImportContacts(" in html
     assert "/api/miniapp/uch/import" in html
-    # После импорта — предложить разложить по книгам флота (тот же синк).
+    # После импорта — предложить разложить по книгам флота (push, не pull).
     fn = html[html.index("async function _doImportContacts("):]
     fn = fn[:fn.index("\nasync function ", 1)] if "\nasync function " in fn[10:] else fn[:2000]
-    assert "suggest_sync" in fn and "syncContacts()" in fn
+    assert "suggest_sync" in fn and "pushContactsToFleet()" in fn
 
 
 # ── Живая БД: дедуп по телефону (слияние, не дубль) ───────────────────────────

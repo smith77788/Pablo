@@ -4693,12 +4693,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <details class="acc-actions" style="margin:8px 16px 4px;background:var(--bg2);border-radius:12px">
       <summary style="cursor:pointer;font-size:14px;font-weight:500;padding:13px 14px;display:flex;align-items:center;gap:8px">
         <span style="flex:1">🧰 Инструменты контактов</span>
-        <span style="font-size:12px;color:var(--hint);font-weight:400">ещё 14</span>
+        <span style="font-size:12px;color:var(--hint);font-weight:400">ещё 15</span>
         <span class="acc-chev" style="color:var(--hint)">▾</span>
       </summary>
     <div style="display:flex;gap:6px;padding:2px 12px 12px;flex-wrap:wrap">
       <span class="chip" style="flex:0 0 auto" onclick="openUchSyncCenter()">🔄 Синхронизация</span>
       <span class="chip" style="flex:0 0 auto" onclick="importContactsFile()">📥 Загрузить базу</span>
+      <span class="chip" style="flex:0 0 auto" onclick="pushContactsToFleet()">📲 В книги флота</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchGraph()">🕸 Граф связей</span>
       <span class="chip" style="flex:0 0 auto" onclick="detectDuplicates()">🔍 Дубликаты</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchConflicts()">⚠️ Конфликты</span>
@@ -22156,7 +22157,7 @@ async function _doImportContacts(inp) {
     loadContacts(); loadContactStats();
     if (d.suggest_sync) {
       if (await askConfirm('Контакты добавлены в хранилище.\nРазложить их по контактным книгам всего флота сейчас?')) {
-        syncContacts();
+        pushContactsToFleet();
       }
     }
   } catch(e) {
@@ -22164,6 +22165,21 @@ async function _doImportContacts(inp) {
   } finally {
     if (inp) inp.value = '';
   }
+}
+
+// Наполнить книги всего флота контактами из хранилища (хранилище → книги,
+// op contacts_push). Обратное к syncContacts (книги → хранилище). Раньше это
+// происходило только при подключении аккаунта — ручной двери не было.
+async function pushContactsToFleet() {
+  toast('📲 Раскладываю контакты по книгам флота…');
+  try {
+    const d = await api('/api/miniapp/uch/push', {method:'POST'});
+    if (d.queued) {
+      toast(`📲 Выгрузка ${d.contacts||''} контактов в книги ${d.accounts||''} аккаунтов запущена — идёт в фоне`);
+      return;
+    }
+    toast('⚠️ Не удалось запустить выгрузку — попробуйте ещё раз');
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 // Пары с последней проверки: пакетное объединение берёт их отсюда, а не

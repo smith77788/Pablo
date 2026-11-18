@@ -988,6 +988,51 @@ def setup_routes(app: web.Application, pool) -> None:
                                        + (f", пропущено {summary['skipped']}"
                                           if summary.get('skipped') else ""))})
 
+    async def uch_push(request: web.Request) -> web.Response:
+        """Наполнить контактные книги ВСЕГО флота контактами из хранилища.
+
+        Обратное направление к uch_sync: там книги аккаунтов → хранилище (pull),
+        здесь хранилище → книги аккаунтов (push, op contacts_push). Раньше push
+        ставился ТОЛЬКО автоматически при подключении нового аккаунта
+        (device_sync.schedule_for_new_account) — ручной двери не было, и после
+        пополнения хранилища (импорт базы, новые контакты) книги флота оставались
+        старыми. Теперь владелец может разложить хранилище по всему флоту сам, и
+        этим же завершается импорт базы контактов.
+
+        Повтор безопасен: аккаунт читает свою книгу и шлёт только недостающих.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 "
+                "AND session_str IS NOT NULL AND session_str <> '' AND is_active "
+                "ORDER BY id", uid) or []
+            acc_ids = [int(r["id"]) for r in rows]
+            if not acc_ids:
+                return _err("Нет активных аккаунтов с сессией. Подключите аккаунт "
+                            "в разделе «Аккаунты».", 400)
+            # Выгружать нечего, если в хранилище нет контактов с номером.
+            n_contacts = await _safe_count(pool,
+                "SELECT COUNT(*) FROM unified_contacts "
+                "WHERE owner_id=$1 AND phones IS NOT NULL AND phones <> '[]'::jsonb", uid)
+            if not n_contacts:
+                return _err("В хранилище нет контактов с номером телефона — "
+                            "выгружать в книги флота нечего.", 400)
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "contacts_push", {"account_ids": acc_ids},
+                total_items=len(acc_ids),
+                label=f"Контакты → книги флота: {len(acc_ids)} акк.")
+            return _json_resp({"ok": True, "queued": True, "op_id": op_id,
+                               "accounts": len(acc_ids), "contacts": int(n_contacts)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("uch_push submit uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def uch_sync_center(request: web.Request) -> web.Response:
         """Центр синхронизации: что принёс каждый аккаунт и почему не принёс.
 
@@ -2129,6 +2174,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
     app.router.add_post("/api/miniapp/uch/sync", uch_sync)
+    app.router.add_post("/api/miniapp/uch/push", uch_push)
     app.router.add_post("/api/miniapp/uch/import", uch_contacts_import)
     app.router.add_get("/api/miniapp/uch/sync_center", uch_sync_center)
     app.router.add_get("/api/miniapp/uch/groups", uch_groups)

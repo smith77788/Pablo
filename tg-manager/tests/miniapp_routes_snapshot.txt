@@ -1178,6 +1178,7 @@ POST /api/miniapp/uch/intent/rule
 POST /api/miniapp/uch/intent/rule/{rule_id}/toggle
 POST /api/miniapp/uch/intent/seed
 POST /api/miniapp/uch/merge
+POST /api/miniapp/uch/push
 POST /api/miniapp/uch/segment/invite
 POST /api/miniapp/uch/segment/media
 POST /api/miniapp/uch/segment/message
