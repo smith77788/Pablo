@@ -21013,9 +21013,16 @@ async def _exec_mass_invite(
     # (banned/spamblock/session_expired, мёртвый прокси) остаются: забаненный
     # аккаунт всё равно не пригласит, форсить его — только жечь. По умолчанию OFF.
     _include_risky = bool(params.get("include_risky"))
+    # ВАЖНО: select_all_active фильтрует карантин риск-пульса ВНУТРИ себя по
+    # respect_quarantine (по умолчанию True). Без передачи флага рисковые
+    # (карантинные) аккаунты вырезались ещё здесь — и ветка include_risky ниже
+    # их уже не видела (она лишь СЧИТАЛА форсированных среди оставшихся, но не
+    # возвращала вырезанных). Поэтому «взять рисковые» не брал никого. Снимаем
+    # оба мягких гейта — и кулдаун, и карантин — одним осознанным выбором.
     accounts = await resource_selector.select_all_active(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids],
-        min_trust_score=0.0, respect_cooldown=not _include_risky)
+        min_trust_score=0.0, respect_cooldown=not _include_risky,
+        respect_quarantine=not _include_risky)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
