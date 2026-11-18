@@ -1186,7 +1186,8 @@ from services.phone_utils import normalize_phone  # noqa: E402
 # Единый маппинг UI-операции редактирования канала → op воркера bulk_chan_exec.
 # Используется и в channel_edit (одиночный), и в channels_mass (массовый) —
 # один источник истины, чтобы наборы не разъехались.
-_CHANNEL_EDIT_OPS = {"title": "chan_title", "about": "chan_about", "username": "chan_uname"}
+_CHANNEL_EDIT_OPS = {"title": "chan_title", "about": "chan_about",
+                     "username": "chan_uname", "avatar": "chan_avatar"}
 
 
 def channel_edit_worker_op(op) -> str | None:

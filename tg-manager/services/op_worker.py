@@ -15548,6 +15548,7 @@ _CHAN_EXEC_OPS = {
     "chan_uname": "🔤 Username",
     "chan_about": "📄 Описание",
     "chan_title": "📛 Название",
+    "chan_avatar": "🖼 Аватар",
     "chan_delete": "💥 Удаление каналов в Telegram",
     "chan_clear": "🧹 Очистка постов",
     "chan_leave": "🚪 Выход из каналов",
@@ -15840,6 +15841,48 @@ async def _exec_bulk_chan_exec(
                             log_exc_swallow(log, f"bulk_chan_exec: persist title failed for ch={ch_id}: {e}")
                     else:
                         err_list.append(f"❌ {chan_title}: ошибка смены названия")
+
+                elif op == "chan_avatar":
+                    # value — публичный URL картинки (как у аватара аккаунта:
+                    # pickMediaInto грузит файл и подставляет ссылку). Качаем
+                    # безопасно (SSRF-гард + потолок 10МБ), уникализируем (чтобы у
+                    # сети каналов не было байт-в-байт одинакового фото —
+                    # тривиальный признак фермы), ставим.
+                    _photo_bytes = None
+                    try:
+                        import aiohttp as _aiohttp
+                        from services.security import public_http_session, read_capped
+                        async with public_http_session() as _http:
+                            async with _http.get(
+                                value, timeout=_aiohttp.ClientTimeout(total=20)
+                            ) as _resp:
+                                if _resp.status != 200:
+                                    err_list.append(
+                                        f"❌ {chan_title}: не скачать фото "
+                                        f"(HTTP {_resp.status})")
+                                else:
+                                    _photo_bytes = await read_capped(
+                                        _resp, 10 * 1024 * 1024)
+                    except Exception as _fe:
+                        log_exc_swallow(
+                            log, f"bulk_chan_exec: avatar fetch ch={ch_id}: {_fe}")
+                        err_list.append(f"❌ {chan_title}: не скачать фото")
+                    if _photo_bytes:
+                        try:
+                            from services import media_uniquifier as _mu
+                            _photo_bytes = _mu.uniquify(
+                                _photo_bytes, filename="avatar.jpg")
+                        except Exception:
+                            log_exc_swallow(log, "bulk_chan_exec: avatar uniquify")
+                        _perr = await account_manager.set_channel_photo(
+                            acc["session_str"], ch_id, _photo_bytes,
+                            access_hash=int(_pair_hash or 0), _acc=acc)
+                        if not _perr:
+                            ok_list.append(f"✅ {chan_title}")
+                        else:
+                            err_list.append(
+                                f"❌ {chan_title}: "
+                                f"{_html.escape(redact_secrets(_perr)[:60])}")
 
                 elif op in ("chan_delete", "chan_clear", "chan_leave"):
                     ok, line = await _chan_destructive_step(

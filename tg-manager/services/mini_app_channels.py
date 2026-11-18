@@ -341,9 +341,13 @@ def setup_routes(app: web.Application, pool) -> None:
         value = (body.get("value") or "").strip()
         worker_op = channel_edit_worker_op(op)
         if not worker_op or not value:
-            return _err("Укажите, что менять (название, описание или @username), и новое значение", 400)
+            return _err("Укажите, что менять (название, описание, @username или аватар), и новое значение", 400)
         if op == "title" and len(value) > 128:
             return _err("Название канала — до 128 символов", 400)
+        if op == "avatar" and not value.lower().startswith(("http://", "https://")):
+            # value — ссылка на картинку (её подставляет загрузчик файла или
+            # вводит владелец). Исполнитель качает её по SSRF-гарду.
+            return _err("Аватар — ссылка на изображение (http/https) или загрузите файл", 400)
         ch = await _safe_fetchrow(pool,
             "SELECT channel_id, title, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
             ch_id, uid)

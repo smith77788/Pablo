@@ -4073,9 +4073,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="title">Название</option>
         <option value="about">Описание</option>
         <option value="username">Имя в Telegram (@…)</option>
+        <option value="avatar">🖼 Аватар</option>
       </select>
     </div>
-    <div class="field"><label id="ceLbl">Новое описание *</label><textarea id="ceValue" rows="3" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
+    <div class="field"><label id="ceLbl">Новое описание *</label><textarea id="ceValue" rows="3" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      <button type="button" id="ceAvatarPick" class="btn btn-s" style="display:none;margin-top:6px;width:100%;font-size:13px;padding:8px" onclick="pickMediaInto('ceValue', this, 'image/*')">📎 Загрузить картинку с устройства</button>
+      <div id="ceAvatarHint" style="display:none;font-size:11px;color:var(--hint);margin-top:4px">Ссылка на изображение или загрузите файл. Каждому каналу сети ставится слегка уникализированный вариант.</div>
+    </div>
     <div class="field-err" id="ceErr"></div>
     <button class="btn btn-p" data-main id="ceBtn" onclick="submitChanEdit()" style="width:100%">Применить</button>
   </div>
@@ -13104,8 +13108,13 @@ function openChanEdit(id) {
 }
 function ceToggle() {
   const op=document.getElementById('ceOp').value;
-  const lbl = op==='about'?'Новое описание *':op==='username'?'Новый username (без @) *':'Новое название *';
+  const lbl = op==='about'?'Новое описание *':op==='username'?'Новый username (без @) *':op==='avatar'?'Ссылка на картинку *':'Новое название *';
   document.getElementById('ceLbl').textContent = lbl;
+  // Для аватара показываем загрузчик файла и подсказку; значение — URL картинки.
+  const _isAv = op==='avatar';
+  const _pick=document.getElementById('ceAvatarPick'); if(_pick) _pick.style.display=_isAv?'block':'none';
+  const _hint=document.getElementById('ceAvatarHint'); if(_hint) _hint.style.display=_isAv?'block':'none';
+  const _val=document.getElementById('ceValue'); if(_val) _val.placeholder=_isAv?'https://… или загрузите файл':'';
 }
 async function submitChanEdit() {
   const errEl=document.getElementById('ceErr'); errEl.textContent='';
