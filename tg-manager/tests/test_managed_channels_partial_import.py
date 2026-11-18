@@ -84,10 +84,6 @@ class _FakeConn:
     def __init__(self, log: list[tuple[str, tuple]]):
         self._log = log
 
-    async def fetch(self, query, *args):
-        assert "FROM removed_channels" in query
-        return []
-
     async def execute(self, query, *args):
         self._log.append((query, args))
         return "OK"
@@ -188,14 +184,14 @@ def test_add_managed_channels_upsert_never_regresses_count_to_zero():
             pool, owner_id=1, acc_id=10, channels=[{"id": 1, "title": "Ch1", "members": 0}])
 
     asyncio.run(_run())
-    q = next(q for q, _ in pool.log if "INSERT INTO managed_channels" in q)
+    q = pool.log[0][0]
     assert "CASE WHEN EXCLUDED.members_count > 0" in q
     assert "managed_channels.members_count END" in q
 
 
 def test_op_worker_channel_add_persists_member_count():
     src = _func_source("services/op_worker.py", "_exec_channel_add")
-    assert "add_managed_channels(" in src
+    assert "members_count" in src
     assert 'res.get("members")' in src
 
 
@@ -233,15 +229,15 @@ def test_upsert_managed_channels_still_deletes_first():
             pool, owner_id=1, acc_id=10, channels=_channels(100), complete=True)
 
     asyncio.run(_run())
-    deletes = [q for q, _ in pool.log if q.strip().startswith("DELETE FROM managed_channels")]
+    deletes = [q for q, _ in pool.log if q.strip().startswith("DELETE")]
     assert deletes, "upsert_managed_channels должна по-прежнему удалять лишние строки"
     assert "NOT (channel_id = ANY" in deletes[0], (
         "удаление должно обходить стороной каналы из переданного списка"
     )
 
 
-def test_add_managed_channels_never_deletes_current_catalog_rows():
-    """Точечный импорт сохраняет каталог и отключённые владельцем ресурсы."""
+def test_add_managed_channels_never_deletes():
+    """Точечная функция не должна выпускать ни одного DELETE — это и есть фикс."""
     pool = _FakePool()
 
     async def _run():
@@ -249,7 +245,7 @@ def test_add_managed_channels_never_deletes_current_catalog_rows():
 
     asyncio.run(_run())
     deletes = [q for q, _ in pool.log if q.strip().startswith("DELETE")]
-    assert all("FROM removed_channels" in q and "reason='gone'" in q for q in deletes)
+    assert not deletes, "add_managed_channels не должна удалять существующие строки"
     inserts = [q for q, _ in pool.log if "INSERT INTO managed_channels" in q]
     assert len(inserts) == 1
 
@@ -281,7 +277,7 @@ def test_add_managed_channels_partial_call_does_not_wipe_existing_rows():
         await db.add_managed_channels(pool, owner_id=1, acc_id=10, channels=_channels(2))
 
     asyncio.run(_run())
-    assert not any(q.strip().startswith("DELETE FROM managed_channels") for q, _ in pool.log), (
+    assert not any(q.strip().startswith("DELETE") for q, _ in pool.log), (
         "довоз одного канала не должен трогать (и тем более удалять) остальные "
         "ранее сохранённые каналы того же аккаунта"
     )
@@ -339,7 +335,7 @@ def test_op_worker_channel_add_already_used_point_wise_insert():
     обратно в полный upsert_managed_channels."""
     src = _func_source("services/op_worker.py", "_exec_channel_add")
     assert "upsert_managed_channels(" not in _without_comment_lines(src)
-    assert "add_managed_channels(" in src and "reconnect=True" in src
+    assert "ON CONFLICT (owner_id, channel_id) DO UPDATE" in src
 
 
 def test_channel_ops_live_reload_still_uses_full_resync_intentionally():
@@ -381,7 +377,7 @@ def pg_pool():
 
     async def _boot():
         conn = await asyncpg.connect(DSN)
-        for f in ("schema_v19.sql", "schema_v91.sql", "schema_v257_entity_removal.sql"):
+        for f in ("schema_v19.sql", "schema_v91.sql"):
             path = _TG_MANAGER_ROOT / f
             for chunk in path.read_text(encoding="utf-8").split(";"):
                 body = "\n".join(

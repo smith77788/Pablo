@@ -70,7 +70,7 @@ _FIELDS: tuple[tuple[str, str, str], ...] = (
     ("bot_ids", "Боты", "list"),
     ("selected_bot_ids", "Боты", "list"),
     ("msg_ids", "Сообщения", "list"),
-    ("account_ids", "Аккаунты", "account_list"),
+    ("account_ids", "Аккаунты", "list"),
     ("acc_id", "Аккаунт", "account"),
     ("account_id", "Аккаунт", "account"),
     ("count", "Количество", "num"),
@@ -116,14 +116,7 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
     return many
 
 
-def _as_int(x: Any) -> int | None:
-    try:
-        return int(x)
-    except (TypeError, ValueError):
-        return None
-
-
-def _fmt(kind: str, v: Any, account_names: dict | None = None) -> str | None:
+def _fmt(kind: str, v: Any) -> str | None:
     if v is None or v == "" or v == [] or v == {}:
         return None
     if kind == "text":
@@ -137,19 +130,7 @@ def _fmt(kind: str, v: Any, account_names: dict | None = None) -> str | None:
         more = len(items) - _LIST_PREVIEW
         return f"{len(items)}: {head}" + (f" и ещё {more}" if more > 0 else "")
     if kind == "account":
-        # Имя вместо голого id, если его удалось резолвить (карта от хендлера).
-        nm = (account_names or {}).get(_as_int(v))
-        return nm or f"#{v}"
-    if kind == "account_list":
-        items = v if isinstance(v, (list, tuple)) else [v]
-        items = [x for x in items if x not in (None, "")]
-        if not items:
-            return None
-        names = account_names or {}
-        labels = [names.get(_as_int(x)) or f"#{x}" for x in items]
-        head = ", ".join(_short(x, 40) for x in labels[:_LIST_PREVIEW])
-        more = len(labels) - _LIST_PREVIEW
-        return f"{len(labels)}: {head}" + (f" и ещё {more}" if more > 0 else "")
+        return f"#{v}"
     if kind == "num":
         try:
             n = int(v)
@@ -195,29 +176,16 @@ def _fmt(kind: str, v: Any, account_names: dict | None = None) -> str | None:
     return None
 
 
-def describe(op_type: str | None, params: Any,
-             account_names: dict | None = None) -> list[dict]:
-    """[{label, value}] для экрана. Пустой список — показывать нечего.
-
-    account_names: карта id аккаунта → читаемое имя (first_name/@username/телефон).
-    Передаётся хендлером (у него есть БД); без неё аккаунты показываются как #id —
-    прежнее поведение, но владелец видел номера вместо имён.
-    """
+def describe(op_type: str | None, params: Any) -> list[dict]:
+    """[{label, value}] для экрана. Пустой список — показывать нечего."""
     if not isinstance(params, dict):
         return []
     out: list[dict] = []
     seen_labels: set[str] = set()
-    project_id = params.get("project_id")
-    if project_id is None and op_type == "deploy_network":
-        project_id = params.get("instance_id")
-    if type(project_id) is int and project_id > 0:
-        out.append({"label": "Проект", "value": f"#{project_id}"})
     for key, label, kind in _FIELDS:
         if key not in params or key in _INTERNAL or _secret(key):
             continue
-        if op_type == "strike" and key == "account_ids":
-            label = "Выбрано при запуске"
-        val = _fmt(kind, params.get(key), account_names)
+        val = _fmt(kind, params.get(key))
         if val is None:
             continue
         if label in seen_labels:      # «Текст» и «Описание» из двух ключей — один раз

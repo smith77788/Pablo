@@ -38,7 +38,6 @@ def setup_routes(app: web.Application, pool) -> None:
         _BAD_BODY, _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit,
         _list_offset, _safe_count,
         _safe_fetch, _safe_fetchrow, log,
-        alive_accounts,
         bad_body_response,
     )
     from services.security import validate_string
@@ -384,38 +383,6 @@ def setup_routes(app: web.Application, pool) -> None:
                 )
             except Exception:
                 _email_cnt = None  # таблицы может не быть — не блокируем статус
-            # Реальные списки аккаунтов флота и ящиков — чтобы владелец ВИДЕЛ и
-            # ВЫБИРАЛ, чем бьёт. Фильтр аккаунтов тот же, что в strike_launch
-            # (активные и не «мёртвые»), иначе выбор на экране разошёлся бы с тем,
-            # что реально уходит в операцию. Обе выборки fail-soft: пустой список
-            # лучше 500 на экране статуса.
-            mailboxes: list[dict] = []
-            fleet: list[dict] = []
-            try:
-                _mbx_rows = await pool.fetch(
-                    "SELECT id, email, COALESCE(auth_type,'password') AS auth_type "
-                    "FROM strike_email_accounts "
-                    "WHERE owner_id=$1 AND is_active=TRUE ORDER BY id", uid)
-                mailboxes = [
-                    {"id": r["id"], "email": r["email"], "auth_type": r["auth_type"]}
-                    for r in _mbx_rows
-                ]
-            except Exception:
-                mailboxes = []
-            try:
-                _acc_rows = await pool.fetch(
-                    "SELECT id, phone, first_name, username FROM tg_accounts "
-                    "WHERE owner_id=$1 AND is_active=true AND "
-                    + _acc_status.sql_not_dead()
-                    + " ORDER BY id", uid)
-                for r in _acc_rows:
-                    _label = (r["first_name"] or "").strip() or (
-                        ("@" + r["username"]) if r["username"] else "") or (
-                        r["phone"] or "") or f"#{r['id']}"
-                    fleet.append({"id": r["id"], "label": _label,
-                                  "username": r["username"], "phone": r["phone"]})
-            except Exception:
-                fleet = []
             has_access = await _strike_has_access(uid)
             return _json_resp({
                 "has_access": has_access,
@@ -428,10 +395,6 @@ def setup_routes(app: web.Application, pool) -> None:
                     "configured": bool(_email_cnt) if _email_cnt is not None else None,
                     "accounts": int(_email_cnt or 0) if _email_cnt is not None else 0,
                 },
-                # Для экрана выбора: чем именно операция будет бить.
-                "fleet": fleet,
-                "fleet_count": len(fleet),
-                "mailboxes": mailboxes,
             })
         except Exception:
             log.exception("strike_status uid=%d", uid)
@@ -518,63 +481,15 @@ def setup_routes(app: web.Application, pool) -> None:
             # идут во времени, а не одним залпом).
             persist = bool(body.get("persist"))
 
-            # Явный выбор аккаунтов владельцем (UI показывает флот чекбоксами).
-            # Пусто = все активные до лимита (прежнее поведение). Выбранные id
-            # пересекаем с активными и не-мёртвыми В ЗАПРОСЕ (owner_id скоупит,
-            # чужой/битый id просто отсеивается), затем режем тем же лимитом.
-            sel_acc_ids: list[int] = []
-            for _a in body.get("account_ids") or []:
-                try:
-                    sel_acc_ids.append(int(_a))
-                except (TypeError, ValueError):
-                    pass
-            if sel_acc_ids:
-                accs = await pool.fetch(
-                    """SELECT id FROM tg_accounts
-                       WHERE owner_id=$1 AND is_active=true
-                         AND """ + _acc_status.sql_not_dead() + """
-                         AND id = ANY($2::bigint[])
-                       LIMIT $3""",
-                    uid, sel_acc_ids, acc_limit,
-                )
-            else:
-                accs = await pool.fetch(
-                    """SELECT id FROM tg_accounts
-                       WHERE owner_id=$1 AND is_active=true
-                         AND """ + _acc_status.sql_not_dead() + """
-                       LIMIT $2""",
-                    uid, acc_limit,
-                )
-
-            # Явный выбор ящиков (SMTP) — тем же принципом: пересекаем с активными
-            # владельца в запросе, в params кладём только валидные id. Пусто = все.
-            sel_mbx_ids: list[int] = []
-            for _m in body.get("mailbox_ids") or []:
-                try:
-                    sel_mbx_ids.append(int(_m))
-                except (TypeError, ValueError):
-                    pass
-            mailbox_ids: list[int] = []
-            if sel_mbx_ids:
-                try:
-                    _mrows = await pool.fetch(
-                        "SELECT id FROM strike_email_accounts "
-                        "WHERE owner_id=$1 AND is_active=TRUE AND id = ANY($2::bigint[])",
-                        uid, sel_mbx_ids,
-                    )
-                    mailbox_ids = [r["id"] for r in _mrows]
-                except Exception:
-                    mailbox_ids = []
-
-            # Нет НИ выбранных/доступных аккаунтов, НИ выбранных ящиков — операции
-            # нечем работать. Но если выбран хотя бы один действующий ящик,
-            # юридический вектор (письма) работает и без аккаунтов — тогда пускаем
-            # (legal-only отработает в _exec_strike).
-            if not accs and not mailbox_ids:
-                # Различаем «ничего не выбрано/нет живых» для honest-сообщения.
-                if sel_acc_ids or sel_mbx_ids:
-                    return _err("Выбранные аккаунты и ящики недоступны "
-                                "(неактивны или не ваши). Проверьте выбор.", 400)
+            # Подсчёт доступных аккаунтов
+            accs = await pool.fetch(
+                """SELECT id FROM tg_accounts
+                   WHERE owner_id=$1 AND is_active=true
+                     AND """ + _acc_status.sql_not_dead() + """
+                   LIMIT $2""",
+                uid, acc_limit,
+            )
+            if not accs:
                 return _err("Нет доступных активных аккаунтов для Strike", 400)
 
             # Создаём операцию в очереди (op_type='strike' — воркер знает этот тип)
@@ -588,12 +503,8 @@ def setup_routes(app: web.Application, pool) -> None:
                     "force": force,
                     "persist": persist,
                     "account_ids": [r["id"] for r in accs],
-                    "mailbox_ids": mailbox_ids,
                 },
-                # legal-only (флот пуст, но выбран ящик): считаем «1 единицу
-                # работы», чтобы прогресс не делил на 0 и операция не выглядела
-                # пустой 0/0.
-                total_items=len(accs) or 1,
+                total_items=len(accs),
                 label=f"Массовые жалобы: {normalized} [{cat['label']}] · {num_waves} волн")
             # Подписанная запись правового основания ДО запуска: жалоба подаётся
             # только по abuse-категории (гейт MINI_CATEGORIES выше), и этот факт
@@ -607,9 +518,7 @@ def setup_routes(app: web.Application, pool) -> None:
                             "category_label": cat.get("label")})
             except Exception:
                 log.debug("strike_launch: compliance record failed op=%s", op_id)
-            return _json_resp({"ok": True, "operation_id": op_id,
-                               "accounts": len(accs), "mailboxes": len(mailbox_ids),
-                               "num_waves": num_waves})
+            return _json_resp({"ok": True, "operation_id": op_id, "accounts": len(accs), "num_waves": num_waves})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
@@ -706,187 +615,6 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не найдено", 404)
         n = await _fg.unflag_all(pool, bot_id)
         return _json_resp({"ok": True, "unflagged": n})
-
-    # ── Единый модуль Жалоб ───────────────────────────────────────────────────
-    # Одна дверь на обе ветки жалобы на запрещённый ресурс: выбранные аккаунты
-    # флота подают in-app жалобу (через mass_report — честные счётчики, идёт по
-    # ВСЕМУ срезу выбранных аккаунтов), а выбранные почтовые ящики шлют письмо в
-    # компетентные органы с автоподстановкой текста по категории. Категория —
-    # единый источник правды (abuse_report.CATEGORIES): задаёт и повод MTProto-
-    # жалобы (tg_reason), и email-получателя/текст. Можно задействовать любой из
-    # векторов или оба сразу.
-    _COMPLAINT_MAX_MAILBOXES = 10
-
-    async def complaint_submit(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-
-        from services import abuse_report
-
-        target = validate_string(data.get("target"), max_len=256)
-        if not target:
-            return _err("Укажите цель жалобы (@username или ссылку)", 400)
-        category = str(data.get("category") or "").strip().lower()
-        if category not in abuse_report.CATEGORIES:
-            return _err("Выберите категорию нарушения из списка", 400)
-
-        account_ids = [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()]
-        mailbox_ids = [int(x) for x in (data.get("mailbox_ids") or []) if str(x).isdigit()]
-        # Дедуп, сохраняя порядок; ящики ограничиваем потолком (письма шлём
-        # последовательно прямо в запросе — иначе он тянется минутами).
-        account_ids = list(dict.fromkeys(account_ids))
-        mailbox_ids = list(dict.fromkeys(mailbox_ids))[:_COMPLAINT_MAX_MAILBOXES]
-
-        if not account_ids and not mailbox_ids:
-            return _err("Выберите хотя бы один аккаунт флота или почтовый ящик "
-                        "для подачи жалобы", 400)
-
-        report_text = validate_string(data.get("report_text"), max_len=512) or ""
-        mode = "msg" if str(data.get("mode")) == "msg" else "peer"
-        msg_ids = [int(x) for x in (data.get("msg_ids") or []) if str(x).isdigit()][:50]
-
-        in_app: dict | None = None
-        email: dict | None = None
-
-        # ── Ветка 1: in-app жалоба выбранными аккаунтами флота ────────────────
-        if account_ids:
-            tg_reason = abuse_report.tg_reason_for(category)
-            try:
-                alive = await alive_accounts(pool, uid, account_ids)
-            except Exception:
-                log.exception("complaint_submit alive_accounts uid=%d", uid)
-                alive = []
-            # force_all: владелец осознанно шлёт СО ВСЕХ выбранных, игнорируя
-            # защиту (кулдаун/риск-пульс) — выше риск бана, но это его решение.
-            force_all = bool(data.get("force_all"))
-            # Реально пригодный набор — ТЕМИ ЖЕ фильтрами, что и операция
-            # (кулдаун, риск-пульс, мёртвый прокси), а не только is_active+сессия.
-            # Иначе пикер показывает «active», владелец выбирает 10, а в работу
-            # идёт 1 — без объяснения. Считаем честно и раскладываем остаток.
-            # В force-режиме фильтры ослаблены (кулдаун/карантин не отсеиваем).
-            try:
-                from services import resource_selector as _rsel
-                usable = await _rsel.select_all_active(
-                    pool, uid, include_ids=alive, min_trust_score=0.0,
-                    respect_cooldown=not force_all, respect_quarantine=not force_all)
-                usable_ids = [int(a["id"]) for a in usable]
-            except Exception:
-                log.warning("complaint_submit: select_all_active failed", exc_info=True)
-                usable_ids = list(alive)
-            dropped_counts: dict = {}
-            dropped_note = ""
-            if len(usable_ids) < len(account_ids):
-                try:
-                    from services import op_worker as _opw
-                    dropped_note, dropped_counts = await _opw._diagnose_unused_accounts(
-                        pool, uid, account_ids, set(usable_ids))
-                except Exception:
-                    log.debug("complaint_submit: diagnose failed", exc_info=True)
-            if not usable_ids:
-                in_app = {"error": "Среди выбранных сейчас нет готовых аккаунтов "
-                          "(кулдаун/спамблок/риск-пульс). Подождите снятия "
-                          "кулдауна или прогрейте их.",
-                          "selected": len(account_ids), "accounts": 0,
-                          "dropped": dropped_counts, "dropped_note": dropped_note}
-            else:
-                # Гейт давления инфраструктуры — как у mass_report (самая
-                # баноопасная ветка). Fail-open: сбой проверки не блокирует.
-                blocked_reason = None
-                try:
-                    from services import infra_orchestrator
-                    ready, reason_txt = await infra_orchestrator.is_ready_for_op(
-                        pool, uid, "mass_report")
-                    if not ready:
-                        blocked_reason = reason_txt
-                except Exception:
-                    log.warning("complaint_submit: pressure check failed", exc_info=True)
-                if blocked_reason:
-                    in_app = {"error": f"Инфраструктура перегружена: {blocked_reason}"}
-                else:
-                    try:
-                        op_id = await _obus.submit(
-                            pool, uid, "mass_report",
-                            {"mode": mode, "target": target, "reason": tg_reason,
-                             "report_text": report_text, "msg_ids": msg_ids,
-                             "account_ids": usable_ids, "force": force_all},
-                            total_items=len(usable_ids),
-                            label=f"Жалоба: {target} [{category}] × {len(usable_ids)} акк.",
-                        )
-                        # Честно: сколько выбрано, сколько реально пойдёт и почему
-                        # остальные выпали — чтобы «1 из 10» не было загадкой.
-                        in_app = {"op_id": op_id, "accounts": len(usable_ids),
-                                  "selected": len(account_ids),
-                                  "dropped": dropped_counts,
-                                  "dropped_note": dropped_note}
-                    except PermissionError as exc:
-                        # Отказ по тарифу (operation_bus.PlanRequiredError) — НЕ
-                        # ошибка сервера. Если in-app — единственный вектор,
-                        # отдаём честный 403 с причиной; если выбрана и почта,
-                        # причину кладём в in_app.error, а письмо всё равно уйдёт.
-                        _reason = str(exc) or "Требуется подписка"
-                        if not mailbox_ids:
-                            return _err(_reason, 403)
-                        in_app = {"error": _reason}
-                    except Exception:
-                        log.exception("complaint_submit mass_report uid=%d", uid)
-                        in_app = {"error": "Не удалось поставить in-app жалобу"}
-
-        # ── Ветка 2: письмо в компетентные органы с выбранных ящиков ──────────
-        if mailbox_ids:
-            base = {"target": target, "category": category,
-                    "evidence": data.get("evidence"), "context": data.get("context"),
-                    "recipient_key": data.get("recipient_key")}
-            res = await abuse_report.send_report_multi(pool, uid, base, mailbox_ids)
-            if res.get("status") == "invalid":
-                # Неполные данные письма. Если in-app ветка уже поставлена — не
-                # рушим весь запрос 400-кой, а честно возвращаем причину.
-                errs = "; ".join(res.get("errors") or ["Неполные данные для письма"])
-                email = {"error": errs, "requested": res.get("requested", len(mailbox_ids)),
-                         "sent": 0, "failed": 0, "results": []}
-                if in_app is None:
-                    return _err(errs, 400)
-            else:
-                # Карта id→email для понятного отчёта по каждому ящику.
-                mbox_rows = await _safe_fetch(
-                    pool, "SELECT id, email FROM strike_email_accounts "
-                    "WHERE owner_id=$1 AND id = ANY($2::bigint[])", uid, mailbox_ids)
-                id2email = {int(r["id"]): r["email"] for r in (mbox_rows or [])}
-                for r in res.get("results", []):
-                    r["email"] = id2email.get(r.get("mailbox_id"))
-                email = res
-
-        # ok=True, если хоть один вектор реально отработал (in-app поставлен ИЛИ
-        # письмо ушло). Иначе честный провал — операция НЕ выдаёт ложный успех.
-        ok = bool((in_app and in_app.get("op_id")) or (email and email.get("sent")))
-        return _json_resp({"ok": ok, "in_app": in_app, "email": email})
-
-    async def complaint_history(request: web.Request) -> web.Response:
-        """История почтовых жалоб оператора (метаданные). In-app жалобы видны в
-        общей очереди операций."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import abuse_report
-            lim = _list_limit(request, 30, 100)
-            rows = await abuse_report.history(pool, uid, limit=lim)
-            # Честный итог: список урезан потолком — говорим, сколько всего, чтобы
-            # экран не выдал первые N за всю историю (храповик «потолок назван»).
-            total = await _safe_count(
-                pool, "SELECT COUNT(*) FROM abuse_reports WHERE owner_id=$1", uid)
-            return _json_resp({"ok": True, "email": rows, "total": int(total or 0),
-                               "has_more": int(total or 0) > len(rows)})
-        except Exception:
-            log.exception("complaint_history uid=%d", uid)
-            return _json_resp({"ok": True, "email": [], "total": 0, "has_more": False})
-
-    app.router.add_post("/api/miniapp/complaint/submit", complaint_submit)
-    app.router.add_get("/api/miniapp/complaint/history", complaint_history)
 
     app.router.add_get("/api/miniapp/strike/history", strike_history)
     app.router.add_get("/api/miniapp/strike/status", strike_status)

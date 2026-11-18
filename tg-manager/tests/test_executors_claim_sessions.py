@@ -33,11 +33,7 @@ _SRC = (pathlib.Path(__file__).resolve().parents[1]
 _TREE = ast.parse(_SRC)
 
 _CLAIM = re.compile(
-    r"try_claim_accounts?|_claim_available_accounts|_claim_single_account"
-    # Ленивый захват под операцию: read-only проверка подключает наблюдателей по
-    # мере нужды и держит только их (а не весь флот), через тот же арбитр
-    # try_claim_accounts. Та же дверь освобождения (release_operation_accounts).
-    r"|claim_account_for_op")
+    r"try_claim_accounts?|_claim_available_accounts|_claim_single_account")
 
 # Захват делает вызывающий, а не сам исполнитель. Пополнять этот список можно
 # только вместе с доказательством, что обёртка действительно захватывает.

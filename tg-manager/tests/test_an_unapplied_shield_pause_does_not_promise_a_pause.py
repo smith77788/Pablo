@@ -182,9 +182,7 @@ def test_the_cycle_notifies_by_the_real_outcome(sh):
     import inspect
     import textwrap
 
-    # Проход по владельцу вынесен в run_owner (его зовёт и цикл, и
-    # кнопка «Проверить сейчас»), поэтому смотрим туда.
-    src = textwrap.dedent(inspect.getsource(sh.run_owner))
+    src = textwrap.dedent(inspect.getsource(sh._run_cycle))
     tree = ast.parse(src)
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
     applies = [n for n in calls

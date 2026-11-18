@@ -136,21 +136,11 @@ def _handlers() -> dict[str, tuple[str, str]]:
 
 
 def _usp_names(body: str) -> set[str]:
-    """Имена параметров, собранных через URLSearchParams в этом тексте.
-
-    Поля FormData (`fd.append('file', …)`) НЕ в счёт: они уходят в
-    multipart-тело запроса (`body: fd`) и читаются сервером из тела, а не из
-    `request.query`. Считать их query-параметром значит обвинить загрузчик
-    файла в «потерянном срезе», которого у него нет, — ровно так правило и
-    краснело на `media/upload` и `invite/parse_file`.
-    """
+    """Имена параметров, собранных через URLSearchParams в этом тексте."""
     names: set[str] = set()
     for m in re.finditer(r"URLSearchParams\(\s*\{([^}]*)\}", body):
         names |= set(re.findall(r"(\w+)\s*:", m.group(1)))
-    form_vars = set(re.findall(r"\b(\w+)\s*=\s*new\s+FormData\b", body))
-    for m in re.finditer(r"""\b(\w+)\.(?:set|append)\(\s*['"](\w+)['"]""", body):
-        if m.group(1) not in form_vars:
-            names.add(m.group(2))
+    names |= set(re.findall(r"""\.(?:set|append)\(\s*['"](\w+)['"]""", body))
     return names
 
 
@@ -176,12 +166,7 @@ def _path_of(chunk: str, quote: str) -> str:
     body = re.sub(r"\$\{[^}]*\}", "{}", body)
     body = re.sub(quote + r"\s*\+[^+]*?\+\s*" + quote, "{}", body)
     path = body.split("?")[0]
-    path = re.sub(quote + r"\s*\+.*$", "{}", path)
-    # Литерал пути кончается на своей закрывающей кавычке: всё после неё —
-    # объект опций (`api('/x', {method:'POST'})`) или хвост строки, не путь.
-    # Без этой обрезки однострочный вызов с опциями давал мусорный путь
-    # (`/api/miniapp/media/upload', { method:'POST' …`) и уходил в «не разобрано».
-    return path.split(quote)[0].rstrip("/")
+    return re.sub(quote + r"\s*\+.*$", "{}", path).rstrip(quote).rstrip("/")
 
 
 @functools.lru_cache(maxsize=1)

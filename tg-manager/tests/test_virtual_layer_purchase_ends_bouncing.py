@@ -102,15 +102,10 @@ async def test_detector_skips_buyers():
 
 def test_nudge_count_excludes_buyers():
     from services.organism import world
-    src = inspect.getsource(world._vlayer)
-    assert "active_bouncing_ids" in src
-    # Одно условие на счётчик и на список: купившие, оплаченные заказы,
-    # «Купил» в Хранилище и живой разговор после отметки исключены.
-    cond = vl.BOUNCING_STILL_ACTIVE_SQL
-    for must in ("purchased", "bot_sales_orders", "vault_chat_state",
-                 "direction='out'"):
-        assert must in cond, f"уведомление считает «по кругу» без: {must}"
-    assert "BOUNCING_STILL_ACTIVE_SQL" in inspect.getsource(vl.bouncing_list)
+    src = inspect.getsource(world)
+    i = src.index("out[\"bouncing\"]")
+    chunk = src[i:i + 700]
+    assert "purchased" in chunk, "уведомление считает купивших «по кругу»"
 
 
 def test_crm_won_reaches_the_layer():

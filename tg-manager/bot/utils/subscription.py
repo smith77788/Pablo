@@ -12,7 +12,6 @@ Usage:
 """
 
 from __future__ import annotations
-import asyncio
 import logging
 import os
 import time
@@ -282,26 +281,21 @@ async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
     # поэтому вручную выданный тариф (живёт лишь в platform_users) резолвился как
     # free — и все гейты (require_plan/require_feature/лимиты) резали такого
     # пользователя до free: «подписку выдали вручную, а функционал недоступен».
-    # Оба источника читаются разом, а не друг за другом: get_plan стоит на
-    # пути почти каждой кнопки, и второй поход в базу подряд — чистое ожидание.
-    row, pu_row = await asyncio.gather(
-        pool.fetchrow(
-            "SELECT plan FROM subscriptions "
-            "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
-            user_id,
-        ),
-        pool.fetchrow(
+    row = await pool.fetchrow(
+        "SELECT plan FROM subscriptions "
+        "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
+        user_id,
+    )
+    pu_plan = None
+    try:
+        pu_row = await pool.fetchrow(
             "SELECT current_plan FROM platform_users "
             "WHERE user_id=$1 AND (plan_expires_at IS NULL OR plan_expires_at > now())",
             user_id,
-        ),
-        return_exceptions=True,
-    )
-    if isinstance(row, BaseException):
-        raise row
-    if isinstance(pu_row, BaseException):
-        pu_row = None  # schema drift/сбой — не роняем гейтинг, деградируем к subscriptions
-    pu_plan = pu_row["current_plan"] if pu_row else None
+        )
+        pu_plan = pu_row["current_plan"] if pu_row else None
+    except Exception:
+        pu_plan = None  # schema drift/сбой — не роняем гейтинг, деградируем к subscriptions
     plan = "free"
     for cand in ((row["plan"] if row else None), pu_plan):
         if not cand:

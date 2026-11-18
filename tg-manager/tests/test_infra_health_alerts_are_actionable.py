@@ -76,9 +76,7 @@ def test_alert_leads_to_where_the_problem_is():
     body = _js_func("openInfraHealth")
     assert "ihAnomalyGo(" in body, "оповещение никуда не ведёт"
     src = _html()
-    # Каждая тревога ведёт в срез, где её причину видно поимённо: упавшие
-    # операции, аккаунты с флудом, низкое доверие, прокси, разбор очереди.
-    for target in ("opsGo(", "healthGoAccounts(", "openProxies()", "openFleetDoctor()"):
+    for target in ("openOps()", "openHealth()", "healthGoAccounts("):
         assert target in re.search(r"const IH_ANOMALY = \{(.*?)\n\};", src, re.S).group(1), \
             f"ни одна аномалия не ведёт через {target}"
 

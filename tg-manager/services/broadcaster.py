@@ -222,23 +222,7 @@ async def run(
     buttons: list[dict] | None = None,
     start_delay: float = 0.0,
     silent: bool = False,
-    *,
-    schedule_creator_id: int | None = None,
 ) -> None:
-    async def _update_progress(sent: int, failed: int, status: str) -> bool:
-        if schedule_creator_id is None:
-            await db.update_broadcast(pool, broadcast_id, sent, failed, status)
-            return True
-        # Архивирование или отмена могли произойти после любой проверки
-        # допуска. Смена состояния не должна перезапустить эту рассылку.
-        result = await pool.execute(
-            """UPDATE broadcasts SET sent_count=$2, failed_count=$3, status=$4,
-                   finished_at=CASE WHEN $4='running' THEN NULL ELSE NOW() END
-                WHERE id=$1 AND status IN ('pending','running')""",
-            broadcast_id, sent, failed, status,
-        )
-        return result == "UPDATE 1"
-
     # ── Input validation ─────────────────────────────────────────────────────
     if broadcast_id <= 0:
         logger.error("Broadcast run: invalid broadcast_id=%d", broadcast_id)
@@ -246,14 +230,14 @@ async def run(
     if not validate_bot_token(token):
         logger.error("Broadcast %d: invalid token format", broadcast_id)
         try:
-            await _update_progress(0, 0, "failed")
+            await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
         except Exception:
             pass
         return
     if bot_id <= 0:
         logger.error("Broadcast %d: invalid bot_id=%d", broadcast_id, bot_id)
         try:
-            await _update_progress(0, 0, "failed")
+            await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
         except Exception:
             pass
         return
@@ -261,63 +245,38 @@ async def run(
     if not text:
         logger.warning("Broadcast %d: empty text, aborting", broadcast_id)
         try:
-            await _update_progress(0, 0, "failed")
+            await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
         except Exception:
             pass
         return
     if check_sql_suspicious(text):
         logger.warning("Broadcast %d: suspicious text detected, aborting", broadcast_id)
         try:
-            await _update_progress(0, 0, "blocked")
+            await db.update_broadcast(pool, broadcast_id, 0, 0, "blocked")
         except Exception:
             pass
         return
 
     # ── Access control: verify bot ownership ──────────────────────────────────
-    if schedule_creator_id is None:
-        try:
-            owner_check = await pool.fetchval(
-                "SELECT added_by FROM managed_bots WHERE bot_id=$1 AND is_active=TRUE",
-                bot_id,
-            )
-            if owner_check is None:
-                logger.warning("Broadcast %d: bot %d not found or inactive", broadcast_id, bot_id)
-                try:
-                    await _update_progress(0, 0, "failed")
-                except Exception:
-                    pass
-                return
-        except Exception as _e:
-            logger.warning("Broadcast %d: ownership check failed: %s", broadcast_id, _e)
+    try:
+        owner_check = await pool.fetchval(
+            "SELECT added_by FROM managed_bots WHERE bot_id=$1 AND is_active=TRUE",
+            bot_id,
+        )
+        if owner_check is None:
+            logger.warning("Broadcast %d: bot %d not found or inactive", broadcast_id, bot_id)
+            try:
+                await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
+            except Exception:
+                pass
+            return
+    except Exception as _e:
+        logger.warning("Broadcast %d: ownership check failed: %s", broadcast_id, _e)
 
     # Stagger start across multiple concurrent broadcasts (e.g. network broadcast)
     # so they don't all hammer Telegram at the same instant.
     if start_delay > 0:
         await asyncio.sleep(start_delay)
-
-    async def _scheduled_state() -> str:
-        from services.scheduler import scheduled_bot_state
-
-        return await scheduled_bot_state(pool, schedule_creator_id, bot_id, token)
-
-    if schedule_creator_id is not None:
-        try:
-            status = await pool.fetchval("SELECT status FROM broadcasts WHERE id=$1", broadcast_id)
-            if status not in ("pending", "running"):
-                return
-            admission = await _scheduled_state()
-        except Exception:
-            logger.warning("Broadcast %d: не удалось проверить допуск расписания", broadcast_id)
-            return
-        if admission != "ready":
-            await pool.execute(
-                """UPDATE broadcasts SET status='cancelled', finished_at=NOW()
-                    WHERE id=$1 AND status IN ('pending','running')""", broadcast_id,
-            )
-            note = ("Доступ создателя расписания к боту отозван" if admission == "cancelled"
-                    else "Бот поставлен на паузу или его токен изменился")
-            await _set_note(pool, broadcast_id, note)
-            return
 
     # If no session was provided (e.g. called from op_worker where the outer session
     # would already be closed by the time this task runs), create our own.
@@ -344,10 +303,10 @@ async def run(
             _verdict.rule,
         )
         try:
-            await _update_progress(0, 0, "blocked")
+            await db.update_broadcast(pool, broadcast_id, 0, 0, "blocked")
         except Exception:
             try:
-                await _update_progress(0, 0, "failed")
+                await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
             except Exception as _e:
                 logger.debug("Broadcast %d: could not mark blocked: %s", broadcast_id, _e)
         try:
@@ -387,7 +346,7 @@ async def run(
                 broadcast_id,
             )
             try:
-                await _update_progress(0, 0, "failed")
+                await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
             except Exception as _e:
                 logger.warning("Broadcast %d: failed to mark failed: %s", broadcast_id, _e)
             await _set_note(pool, broadcast_id, NOTE_TOKEN_REVOKED)
@@ -507,14 +466,9 @@ async def run(
     _DELIVERY_FLUSH_INTERVAL = 1
     _since_last_flush = 0
     try:
-        started = await _update_progress(sent, 0, "running")
+        await db.update_broadcast(pool, broadcast_id, sent, 0, "running")
     except Exception as _e:
         logger.warning("Broadcast %d: failed to mark running: %s", broadcast_id, _e)
-        started = schedule_creator_id is None
-    if not started:
-        if _own_session and session is not None:
-            await session.close()
-        return
 
     # Brand injection: append @MEXAHI3MBOT promo for free-tier bots (кэшировано)
     _now = time.monotonic()
@@ -633,15 +587,7 @@ async def run(
         try:
             _row = await pool.fetchrow(
                 "SELECT status FROM broadcasts WHERE id=$1", broadcast_id)
-            if schedule_creator_id is not None and await _scheduled_state() != "ready":
-                _stop_seen = True
-                return True
         except Exception as _e:
-            if schedule_creator_id is not None:
-                _stop_seen = True
-                logger.warning("Broadcast %d: остановка, проверка допуска расписания недоступна",
-                               broadcast_id)
-                return True
             logger.warning(
                 "Broadcast %d: проверка остановки не прошла (%s) — идём дальше "
                 "по прошлому ответу", broadcast_id, _e)
@@ -660,8 +606,7 @@ async def run(
         for uid in user_ids:
             if await _owner_stopped():
                 _stopped_by_owner = True
-                _aborted_reason = ("остановлена владельцем или отозван допуск расписания"
-                                   if schedule_creator_id is not None else "остановлена владельцем")
+                _aborted_reason = "остановлена владельцем"
                 logger.info(
                     "Broadcast %d: остановлена владельцем после %d отправленных",
                     broadcast_id, sent)
@@ -687,7 +632,7 @@ async def run(
                 if _since_last_flush >= _PROGRESS_FLUSH_INTERVAL:
                     _since_last_flush = 0
                     try:
-                        await _update_progress(sent, failed, "running")
+                        await db.update_broadcast(pool, broadcast_id, sent, failed, "running")
                     except Exception as _fe:
                         logger.debug(
                             "Broadcast %d: progress flush failed (non-fatal): %s",
@@ -713,10 +658,6 @@ async def run(
                         "Broadcast %d: rate-limited, slept %ds",
                         broadcast_id, retry_after,
                     )
-                    if schedule_creator_id is not None and await _owner_stopped():
-                        _stopped_by_owner = True
-                        _aborted_reason = "остановлена владельцем или отозван допуск расписания"
-                        break
                     ok, _, cat = await _deliver(uid, user_text)
                     if ok:
                         sent += 1
@@ -777,9 +718,9 @@ async def run(
         final_status = "partial"
 
     try:
-        if await _update_progress(sent, failed, final_status):
-            await _set_note(pool, broadcast_id,
-                            status_note(final_status, failed, _err_cats, _aborted_reason))
+        await db.update_broadcast(pool, broadcast_id, sent, failed, final_status)
+        await _set_note(pool, broadcast_id,
+                        status_note(final_status, failed, _err_cats, _aborted_reason))
     except Exception as _e:
         logger.warning(
             "Broadcast %d: failed to mark %s: %s", broadcast_id, final_status, _e
@@ -832,8 +773,6 @@ def start(
     buttons: list[dict] | None = None,
     start_delay: float = 0.0,
     silent: bool = False,
-    *,
-    schedule_creator_id: int | None = None,
 ) -> None:
     task = asyncio.create_task(
         run(
@@ -848,7 +787,6 @@ def start(
             buttons,
             start_delay,
             silent,
-            schedule_creator_id=schedule_creator_id,
         ),
         name=f"broadcast-{broadcast_id}",
     )
@@ -888,7 +826,6 @@ async def resume_interrupted(
                 r.get("buttons"),  # восстановить инлайн-кнопки после рестарта
                 start_delay=i * 2.0,  # разносим старты, чтобы не бить по Telegram разом
                 silent=bool(r.get("silent")),
-                schedule_creator_id=r["created_by"] if r.get("scheduled_id") is not None else None,
             )
         except Exception as exc:
             logger.warning("resume_interrupted: рассылка %s не перезапущена: %s", r.get("id"), exc)

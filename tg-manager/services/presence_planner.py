@@ -20,12 +20,7 @@ import hashlib
 import random
 import re
 
-from services.username_engine import (
-    is_valid_username,
-    normalize_username,
-    slugify,
-    transliterate,
-)
+from services.username_engine import slugify
 
 # Символы без визуально похожих (i,l,o,1,0) — как в username_engine.
 _RAND_ALNUM = "abcdefghjkmnpqrstuvwxyz23456789"
@@ -137,39 +132,19 @@ def render_pattern(pattern: str, geo: dict, rng: random.Random | None = None) ->
     """
     scope = (geo.get("scope") or "").strip()
     scope_slug = geo.get("scope_slug") or slugify(scope)
-    city = geo.get("city") or scope  # английский экзоним (Moscow, Vienna)
+    city = geo.get("city") or scope
+    city_slug = geo.get("city_slug") or slugify(geo.get("city", "")) or scope_slug
     country_slug = geo.get("country_slug") or slugify(geo.get("country", ""))
     # {{CITY_NAME}} = нативное название (Москва, Київ, Wien), fallback → английское
     city_native = geo.get("city_native") or geo.get("city") or scope or ""
-
-    # ЛАТИНИЦА ИЗ НАТИВНОГО ИМЕНИ. Пресеты хранят city=английский экзоним
-    # («Moscow»), но в поиске Telegram русскоязычная аудитория набирает «Moskva»,
-    # а не «Moscow» — экзоним нерелевантен. Поэтому {{CITY}} (в модале подписан
-    # «лат.») и {{CITY_SLUG}} берём ТРАНСЛИТЕРАЦИЕЙ нативного: Москва→Moskva/
-    # moskva. Для алфавитов без таблицы транслита (греческий, арабский)
-    # transliterate даёт мусор ('_____') — тогда честный фолбэк на экзоним/слаг.
-    _lat_raw = transliterate(city_native)
-    if _lat_raw and re.search(r"[A-Za-z]", _lat_raw):
-        # Читаемый вид: заглавная после начала и каждого разделителя (-, _, пробел).
-        city_latin = re.sub(
-            r"(^|[\s\-_])([a-z])",
-            lambda m: m.group(1) + m.group(2).upper(), _lat_raw)
-    else:
-        city_latin = city  # нетранслитерируемо → английский экзоним
-    _native_slug = slugify(city_native)
-    # Английский слаг храним отдельно: по нему идут аббревиатуры (_CITY_ABBR
-    # ключами «moscow», «saint_petersburg») и фолбэк, если нативный слаг пуст.
-    en_slug = geo.get("city_slug") or slugify(geo.get("city", "")) or scope_slug
-    city_slug = _native_slug or en_slug or "x"
-    city_abbr = _CITY_ABBR.get(en_slug) or _CITY_ABBR.get(city_slug) or city_slug
+    city_abbr = _CITY_ABBR.get(city_slug, city_slug)
     # Падежи нужны, чтобы шаблон читался по-русски: «Работа в {{CITY_LOC}}» →
     # «Работа в Москве», «Новости города {{CITY_GEN}}» → «…города Самары».
     # Для нерусских названий склонятели возвращают исходную форму.
     from services import ru_morph
 
     replacements = {
-        "{{CITY}}": city_latin,
-        "{{CITY_EN}}": city,
+        "{{CITY}}": city,
         "{{CITY_NAME}}": city_native,
         "{{CITY_GEN}}": ru_morph.genitive(city_native),
         "{{CITY_LOC}}": ru_morph.prepositional(city_native),
@@ -272,51 +247,6 @@ def assign_accounts_by_geo(
     return out
 
 
-def fit_username(raw: str | None, *, bot: bool, taken: set[str]) -> str | None:
-    """Привести планируемый username к правилам Telegram и сделать его
-    уникальным в плане. `taken` пополняется.
-
-    ЗАЧЕМ. Гео-сеть планировала username как `slugify(шаблон)[:32]` и ничем
-    не проверяла: короткий слаг («msk»), слаг с цифры, хвост «_» после
-    обрезки, «…_bot» длиннее 32 у бота (исполнитель дописывает «_bot» сам) и,
-    главное, ОДИН И ТОТ ЖЕ username у нескольких городов, когда шаблон без
-    {{CITY_SLUG}}. Каждая такая цель тратила на создании лишний запрос к
-    Telegram (отказ «занят/недопустим», потом перебор вариантов) — а лишние
-    запросы при массовом создании каналов и есть то, за что дают флуд.
-    Планировщик фабрики (`infra_generator`) уникальность держал аллокатором;
-    гео-сеть — нет.
-    """
-    if not raw:
-        return None
-    slug = slugify(raw)
-    base = (normalize_username(raw) or normalize_username("tg_" + slug)
-            or normalize_username(f"tg_{slug}_ch"))
-    if not base:
-        return None
-    if bot:
-        base = base[:-3].rstrip("_") if base.endswith("bot") else base
-        base = base or "geo"
-
-    def _make(suffix: str = "") -> str:
-        tail = suffix + ("_bot" if bot else "")
-        return base[:32 - len(tail)].rstrip("_") + tail
-
-    cand = _make()
-    n = 1
-    while (not is_valid_username(cand) or cand in taken) and n < 999:
-        n += 1
-        cand = _make(f"_{n}")
-    if not is_valid_username(cand) or cand in taken:
-        return None
-    taken.add(cand)
-    return cand
-
-
-# Потолок ресурсов на один город/ключ. Общее число целей (города × per_city)
-# дополнительно ограничивает вызывающий (MAX_GEO_TARGETS).
-MAX_PER_CITY = 50
-
-
 def build_targets(
     geo_list: list[dict],
     asset_type: str,
@@ -324,11 +254,6 @@ def build_targets(
     username_pattern: str | None,
     account_ids: list[int],
     account_geo: dict[int, str] | None = None,
-    per_city: int = 1,
-    seo_permute: bool = False,
-    description: str = "",
-    short_description: str = "",
-    avatar_style: str | None = None,
 ) -> list[dict]:
     """Build list of target dicts for insertion into global_presence_targets.
 
@@ -337,116 +262,34 @@ def build_targets(
     account_geo (id аккаунта → ISO2 страна прокси) включает ГЕО-привязку: цель
     под страну X получает аккаунт из страны X, когда такой есть (см.
     assign_accounts_by_geo); иначе — прежний глобальный round-robin.
-
-    per_city — сколько ресурсов на КАЖДЫЙ город (раньше всегда 1).
-    seo_permute — вместо повтора по индексу крутить ключи имени/username в
-    разные варианты на город (та же SEO-перестановка, что у Фабрики, но поверх
-    локализованного гео-имени): «Новости Москва» → «Москва Новости»,
-    «Новости Москваj»… — так сеть занимает много мест в поиске по каждому
-    городу. Детерминировано (сид от city_slug), предпросмотр == запуск.
     """
-    try:
-        per_city = int(per_city or 1)
-    except (TypeError, ValueError):
-        per_city = 1
-    per_city = max(1, min(per_city, MAX_PER_CITY))
-    bot = (asset_type == "bot")
-    # Описание на КАЖДУЮ цель: у ботов — короткое, у каналов/групп — полное.
-    # Шаблон рендерится per-target (спинтакс {{A|B}} + плейсхолдеры), поэтому в
-    # сети описания разные, а не одно на всех. Раньше мини-апп-путь описание
-    # вообще не клал в planned_about — исполнитель ставил дженерик-заглушку.
-    desc_tpl = ((short_description if bot else description) or "").strip()
-
-    # Аккаунт — на КАЖДУЮ цель (город × вариант), а не на город: иначе все
-    # ресурсы одного города создавались бы с одного аккаунта (риск при массовом
-    # создании). Разворачиваем страны целей в том же порядке, что и цели ниже.
-    expanded_cc: list[str] = []
-    for g in geo_list:
-        expanded_cc.extend([(g.get("country_code") or "")] * per_city)
-    _acc_for_target = assign_accounts_by_geo(expanded_cc, account_ids, account_geo)
-
     targets: list[dict] = []
-    _taken: set[str] = set()
-    t_index = 0
+    _acc_for_target = assign_accounts_by_geo(
+        [(g.get("country_code") or "") for g in geo_list], account_ids, account_geo)
 
     for i, geo in enumerate(geo_list):
-        city_slug = (
-            geo.get("city_slug")
-            or slugify(geo.get("city", ""))
-            or geo.get("scope_slug")
-            or slugify(geo.get("scope", ""))
-            or "x"
+        planned_name, planned_username = plan_target(
+            geo, i + 1, name_pattern, username_pattern
         )
-        # SEO-перестановка: один раз рендерим базовое имя/username для города,
-        # затем получаем per_city РАЗНЫХ вариантов перестановкой ключей.
-        name_variants: list[str | None] = []
-        uname_variants: list[str | None] = []
-        if seo_permute:
-            base_name, base_username = plan_target(
-                geo, i + 1, name_pattern, username_pattern)
-            from services import name_variator as _nv
-            if base_name:
-                name_variants = list(_nv.generate_titles(
-                    base_name, per_city, seed=_seed_int(city_slug, "seoname")))
-            if base_username:
-                # require_suffix не задаём: суффикс «_bot» резервирует/дописывает
-                # fit_username ниже (единая дверь валидности и уникальности).
-                uname_variants = list(_nv.generate_usernames(
-                    base_username, per_city, seed=_seed_int(city_slug, "seouser"),
-                    taken=_taken))
+        selected_account_id = _acc_for_target[i]
 
-        for j in range(per_city):
-            if seo_permute:
-                planned_name = name_variants[j] if j < len(name_variants) else None
-                raw_username = uname_variants[j] if j < len(uname_variants) else None
-            else:
-                # Без перестановки — повтор по сквозному индексу: {{INDEX}} и
-                # пулы шаблонов дают разные имена, при одиночном шаблоне без
-                # {{INDEX}} имена совпадут (это осознанный выбор владельца).
-                planned_name, raw_username = plan_target(
-                    geo, t_index + 1, name_pattern, username_pattern)
-            # Валидный и уникальный в плане, с учётом «_bot» для ботов — см.
-            # fit_username (общая дверь для обоих путей).
-            planned_username = fit_username(raw_username, bot=bot, taken=_taken)
-            selected_account_id = _acc_for_target[t_index]
-
-            # Описание цели: рендерим шаблон с сидом от (city, индекс) → разные
-            # описания у ресурсов, детерминированно (предпросмотр == запуск).
-            planned_about = None
-            if desc_tpl:
-                geo_i = {**geo, "index": t_index + 1}
-                # render_text = плейсхолдеры + канонический спинтакс {A|B}
-                # (единый движок проекта), с сидом → предпросмотр == запуск.
-                from services.infra_generator import render_text
-                rendered = render_text(
-                    desc_tpl, geo_i, _seeded_rng(city_slug, t_index, "about"))
-                planned_about = (rendered or "").strip()[:255] or None
-            # Аватар: сид от (city, индекс) — у каждого ресурса свой сгенерированный
-            # аватар (исполнитель уже умеет avatar_seed/avatar_style). Раньше
-            # мини-апп-путь seed не клал, и гео-ресурсы шли без аватара.
-            avatar_seed = _seed_int(city_slug, t_index, "avatar") % (2**31)
-            t_index += 1
-
-            targets.append(
-                {
-                    "country": geo.get("country") or None,
-                    "country_code": geo.get("country_code") or None,
-                    "region": geo.get("region") or None,
-                    "city": geo.get("city") or None,
-                    "city_slug": geo.get("city_slug")
-                    or slugify(geo.get("city", ""))
-                    or None,
-                    "language": geo.get("language") or None,
-                    "timezone": geo.get("timezone") or None,
-                    "asset_type": asset_type,
-                    "planned_name": planned_name,
-                    "planned_username": planned_username,
-                    "planned_about": planned_about,
-                    "avatar_seed": avatar_seed,
-                    "avatar_style": avatar_style,
-                    "selected_account_id": selected_account_id,
-                }
-            )
+        targets.append(
+            {
+                "country": geo.get("country") or None,
+                "country_code": geo.get("country_code") or None,
+                "region": geo.get("region") or None,
+                "city": geo.get("city") or None,
+                "city_slug": geo.get("city_slug")
+                or slugify(geo.get("city", ""))
+                or None,
+                "language": geo.get("language") or None,
+                "timezone": geo.get("timezone") or None,
+                "asset_type": asset_type,
+                "planned_name": planned_name,
+                "planned_username": planned_username,
+                "selected_account_id": selected_account_id,
+            }
+        )
 
     return targets
 

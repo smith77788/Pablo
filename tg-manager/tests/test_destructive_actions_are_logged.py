@@ -118,8 +118,7 @@ async def test_выход_из_пространства_реально_пише�
     pool = _Пул()
     await db.delete_workspace_member(pool, 10, 42)
     assert pool.аудит, "запись о выходе из пространства не появилась"
-    owner_id, action, target, result, _err, operation_id = pool.аудит[0]
-    assert result == "success" and operation_id is None
+    owner_id, action, target, result, _err = pool.аудит[0]
     assert action == "workspace_member_leave"
     assert "ws:10" in target and "user:42" in target
     assert owner_id == 42

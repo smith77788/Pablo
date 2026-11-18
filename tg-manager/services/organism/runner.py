@@ -21,23 +21,6 @@ _SAME_COOLDOWN = 6 * 3600   # та же подсказка не чаще раз�
 _ANY_GAP = 2 * 3600         # любой нудж не чаще раза в 2ч
 _NUDGE_SEV = ("urgent", "warn")
 _last_prune = 0.0          # троттл ретеншена журнала (не чаще раза в 6ч)
-_SEEN_KEY = "nudge_subjects"   # {id подсказки: [про кого уже сказали]}
-_SEEN_CAP = 300
-
-
-def already_told(suggestion: dict, seen: dict) -> bool:
-    """Подсказка про тех же людей, о которых уже было напоминание.
-
-    Сравниваем множества: если все нынешние «субъекты» уже были в прошлом
-    нудже этой подсказки — нового ничего нет (кто-то мог и отпасть: ответили,
-    купил). Новый человек или новое сообщение того же клиента — повод сказать.
-    Подсказки без субъектов (состояние системы) живут по старому кулдауну.
-    """
-    subj = suggestion.get("subjects")
-    if not subj:
-        return False
-    prev = set((seen or {}).get(suggestion.get("id")) or ())
-    return bool(prev) and set(subj) <= prev
 
 
 async def run(pool, bot) -> None:
@@ -141,12 +124,9 @@ async def _tick(pool, bot) -> int:
         if _do_cascade or oid in cooled_owners:
             try:
                 from services import virtual_layer as _vl
-                # Пороги «горячей аудитории» — из правил владельца (экран
-                # «Правила модели»); без правил — прежние 20 человек и 15%.
-                _rules = await _vl.get_rules(pool, oid)
                 await _vl.recompute_cascade(
                     pool, oid, _vl.NETWORK, "audience", _vl.USER,
-                    **_vl.cascade_kwargs(_rules, "audience"))
+                    min_count=20, min_share=0.15)
             except Exception:
                 log.debug("organism.runner: cascade failed owner=%s", oid, exc_info=True)
             # Каскад «бот ← люди». Раньше его было не из чего построить: связи
@@ -156,9 +136,7 @@ async def _tick(pool, bot) -> int:
             # только что она греется вообще.
             try:
                 from services import virtual_layer as _vl2
-                bot_temp = await _vl2.recompute_bot_cascade(
-                    pool, oid, **_vl2.cascade_kwargs(
-                        await _vl2.get_rules(pool, oid), "bot"))
+                bot_temp = await _vl2.recompute_bot_cascade(pool, oid)
                 if bot_temp:
                     log.info("organism.runner: температура ботов owner=%s: %s",
                              oid, bot_temp)
@@ -237,21 +215,13 @@ def _snooze_kb(suggestion_id: str, action: dict | None = None):
     ob = _open_button(action)
     if ob:
         kb.button(text=ob[0], web_app=ob[1])
-    # Ждущих ответа можно разобрать и не открывая приложение: список диалогов
-    # с карточками и «Ответить» живёт прямо в боте.
-    in_bot = (action or {}).get("kind") == "vault"
-    if in_bot:
-        from bot.callbacks import VaultCb
-        kb.button(text="💬 Ждущие ответа — в боте",
-                  callback_data=VaultCb(a="list", f="waiting"))
     for code, label, _secs in brain.SNOOZE_PRESETS:
         kb.button(text=f"🔕 {label}",
                   callback_data=SnoozeCb(action="mute", sid=suggestion_id, code=code))
     kb.button(text="🚫 Больше не напоминать",
               callback_data=SnoozeCb(action="off", sid=suggestion_id, code="never"))
     # Открыть (если есть) — отдельной строкой сверху, затем snooze-периоды 2×2.
-    head = ([1] if ob else []) + ([1] if in_bot else [])
-    kb.adjust(*head, 2, 2, 1)
+    kb.adjust(*([1, 2, 2, 1] if ob else [2, 2, 1]))
     return kb.as_markup()
 
 
@@ -261,16 +231,7 @@ async def _tick_owner(pool, bot, owner_id: int, *, notifier=None, now: float | N
     from services.organism import brain, spine
     now = time.time() if now is None else now
     pulse = await brain.pulse(pool, owner_id)
-    # Про тех же самых людей второй раз не напоминаем. Раньше «1 клиентов
-    # ждут ответа» приходило утром и снова вечером про одного и того же
-    # человека, а «8 ходят по кругу» — каждые 6 часов про одну и ту же
-    # восьмёрку: кулдаун знал только id подсказки, а не про кого она.
-    try:
-        seen = await spine.state_get(pool, owner_id, _SEEN_KEY, {}) or {}
-    except Exception:
-        seen = {}
-    top = next((s for s in pulse.get("suggestions", [])
-                if s["severity"] in _NUDGE_SEV and not already_told(s, seen)), None)
+    top = next((s for s in pulse.get("suggestions", []) if s["severity"] in _NUDGE_SEV), None)
     if not top:
         return False
     last = await spine.state_get(pool, owner_id, "last_nudge", {}) or {}
@@ -297,13 +258,6 @@ async def _tick_owner(pool, bot, owner_id: int, *, notifier=None, now: float | N
         log.debug("organism.runner: notify failed owner=%s", owner_id)
         return False
     await spine.state_set(pool, owner_id, "last_nudge", {"id": top["id"], "at": now})
-    if top.get("subjects"):
-        try:
-            seen = dict(seen)
-            seen[top["id"]] = list(top["subjects"])[:_SEEN_CAP]
-            await spine.state_set(pool, owner_id, _SEEN_KEY, seen)
-        except Exception:
-            log.debug("organism.runner: seen-subjects not saved owner=%s", owner_id)
     # Куда ведёт «Открыть» — дублируем в состояние. Кнопка кладёт раздел в
     # #<kind> web_app-ссылки, но ЧАСТЬ клиентов Telegram стирает наш хэш и
     # заменяет его своими tgWebApp-параметрами: раздел теряется, и «Открыть»

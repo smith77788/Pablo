@@ -1022,7 +1022,6 @@ async def _qr_wait_task(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
-            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         try:
@@ -1126,7 +1125,6 @@ async def handle_qr_2fa(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
-            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         await message.answer(
@@ -1296,7 +1294,6 @@ async def _finalize_login(
             app_version=info.get("app_version"),
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
-            twofa_password=info.get("twofa_password"),
         )
     except Exception as exc:
         await message.answer(
@@ -4786,10 +4783,25 @@ async def cb_scan_connect(
     user_id = callback.from_user.id
     acc_id = callback_data.acc_id
 
-    await callback.answer("⏳ Подключаю…")
+    # «Подключить все найденные» — тот же импорт: каналы, которые владелец
+    # удалил из системы, обратно не возвращаем.
+    to_connect = await db.skip_removed_channels(pool, user_id, to_connect)
+    if not to_connect:
+        await callback.answer("Все найденные каналы ранее удалены из системы.", show_alert=True)
+        return
+
+    # Check channel limit before importing (counts across linked abuse accounts)
+    from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+    chan_limit = await get_channel_limit(pool, user_id)
     try:
-        connected, skipped_by_limit = await db.connect_scanned_managed_channels(pool, user_id, acc_id, to_connect)
-    except db.ManagedChannelLimitError as exc:
+        current_count = await get_effective_channel_count(pool, user_id)
+    except Exception as e:
+        log.warning('handler error in cb_scan_connect: %s', e)
+        current_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
+        ) or 0
+    slots_free = chan_limit - current_count
+    if slots_free <= 0:
         from bot.callbacks import SubCb
         from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
         kb2 = _IKB()
@@ -4797,18 +4809,43 @@ async def cb_scan_connect(
         kb2.adjust(1)
         await callback.message.edit_text(
             f"⛔️ <b>Лимит каналов достигнут</b>\n\n"
-            f"У вас {exc.current_count} каналов из {exc.limit} доступных.\n"
+            f"У вас {current_count} каналов из {chan_limit} доступных.\n"
             "Оформите подписку для неограниченного числа каналов.",
             parse_mode="HTML",
             reply_markup=kb2.as_markup(),
         )
         return
-    if connected:
-        summary = f"✅ <b>Подключено: {connected} активов</b>\n\nОни доступны в разделах <b>Каналы</b> и <b>Группы</b>."
-        if skipped_by_limit:
-            summary += f"\nПропущено по лимиту тарифа: {skipped_by_limit}."
-    else:
-        summary = "Все выбранные ресурсы были отключены до завершения импорта."
+    if len(to_connect) > slots_free:
+        to_connect = to_connect[:slots_free]
+
+    await callback.answer("⏳ Подключаю…")
+
+    # Insert all selected into managed_channels (no delete, just upsert)
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash)
+               VALUES($1, $2, $3, $4, $5, $6)
+               ON CONFLICT (owner_id, channel_id) DO UPDATE
+               SET title=EXCLUDED.title, username=EXCLUDED.username,
+                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash""",
+            [
+                (
+                    user_id,
+                    acc_id,
+                    ch["id"],
+                    ch.get("title", ""),
+                    ch.get("username", ""),
+                    ch.get("access_hash", 0),
+                )
+                for ch in to_connect
+            ],
+        )
+
+    parts = []
+    if action in ("scan_connect_all", "scan_connect_ch"):
+        parts.append(f"📢 {len(result['channels'])} каналов")
+    if action in ("scan_connect_all", "scan_connect_gr"):
+        parts.append(f"👥 {len(result['groups'])} групп")
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -4818,7 +4855,9 @@ async def cb_scan_connect(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        summary,
+        f"✅ <b>Подключено: {len(to_connect)} активов</b>\n\n"
+        + "\n".join(f"  • {p}" for p in parts)
+        + "\n\nОни доступны в разделах <b>Каналы</b> и <b>Группы</b>.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

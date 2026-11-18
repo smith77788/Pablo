@@ -17,7 +17,6 @@ Factors (weights):
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import asyncpg
 
@@ -56,10 +55,10 @@ async def compute_pressure(pool: asyncpg.Pool, owner_id: int) -> dict:
 
 
 async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
-    # Три выборки независимы — идут разом, а не по очереди; каждая по-прежнему
-    # глушит свой сбой отдельно, чтобы одна не ломала весь балл.
-    acc_rows, queue_rows, proxy_rows = await asyncio.gather(
-        pool.fetch(
+    # 1. Account stats — individual try/except so one failure doesn't break the score
+    acc: dict = {}
+    try:
+        acc_rows = await pool.fetch(
             """SELECT
                    COUNT(*) FILTER (WHERE is_active) AS total_active,
                    COUNT(*) FILTER (WHERE is_active AND cooldown_until > NOW()) AS cooling,
@@ -69,28 +68,7 @@ async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
                FROM tg_accounts
                WHERE owner_id=$1""",
             owner_id,
-        ),
-        pool.fetch(
-            "SELECT COUNT(*) AS cnt FROM operation_queue WHERE owner_id=$1 AND status IN ('pending','running')",
-            owner_id,
-        ),
-        pool.fetch(
-            """SELECT
-                   COUNT(*) FILTER (WHERE success) AS ok,
-                   COUNT(*) FILTER (WHERE NOT success) AS fail
-               FROM proxy_quality_log pql
-               JOIN user_proxies up ON up.id=pql.proxy_id
-               WHERE up.owner_id=$1 AND pql.checked_at > NOW() - INTERVAL '7 days'""",
-            owner_id,
-        ),
-        return_exceptions=True,
-    )
-
-    # 1. Account stats — individual try/except so one failure doesn't break the score
-    acc: dict = {}
-    try:
-        if isinstance(acc_rows, BaseException):
-            raise acc_rows
+        )
         acc = acc_rows[0] if acc_rows else {}
     except Exception as e:
         log.warning(
@@ -101,8 +79,10 @@ async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
     # 2. Op queue depth — isolated
     active_ops = 0
     try:
-        if isinstance(queue_rows, BaseException):
-            raise queue_rows
+        queue_rows = await pool.fetch(
+            "SELECT COUNT(*) AS cnt FROM operation_queue WHERE owner_id=$1 AND status IN ('pending','running')",
+            owner_id,
+        )
         active_ops = (queue_rows[0]["cnt"] if queue_rows else 0) or 0
     except Exception as e:
         log.warning(
@@ -112,8 +92,15 @@ async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
     # 3. Proxy failures — isolated (table may not exist on older schemas)
     proxy_fail_rate = 0.0
     try:
-        if isinstance(proxy_rows, BaseException):
-            raise proxy_rows
+        proxy_rows = await pool.fetch(
+            """SELECT
+                   COUNT(*) FILTER (WHERE success) AS ok,
+                   COUNT(*) FILTER (WHERE NOT success) AS fail
+               FROM proxy_quality_log pql
+               JOIN user_proxies up ON up.id=pql.proxy_id
+               WHERE up.owner_id=$1 AND pql.checked_at > NOW() - INTERVAL '7 days'""",
+            owner_id,
+        )
         proxy_total = (
             ((proxy_rows[0]["ok"] or 0) + (proxy_rows[0]["fail"] or 0))
             if proxy_rows

@@ -939,10 +939,6 @@ class StrikePlan:
     phase: str = "init"
     mode: str = "normal"  # fast | normal | maximum
     owner_id: int = 0  # для email-эскалации (загрузка ящиков из DB)
-    # Явно выбранные владельцем SMTP-ящики (strike_email_accounts.id). Пусто =
-    # использовать все активные (прежнее поведение). Выбор идёт из UI запуска,
-    # чтобы владелец видел И решал, с каких ящиков уходят юридические письма.
-    mailbox_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -1615,7 +1611,6 @@ async def _run_email_escalation(
     reason: str,
     preset: str | None,
     progress_cb=None,
-    mailbox_ids: list[int] | None = None,
 ) -> dict:
     """
     Email-эскалация для основного Strike.
@@ -1642,33 +1637,17 @@ async def _run_email_escalation(
 
     # Загружаем email-аккаунты из БД
     db_emails: list[dict] = []
-    # Явно выбранные ящики сужают выборку (владелец решает, с каких слать). Пусто
-    # = все активные (прежнее поведение). Фильтруем прямо в запросе, а не в Python,
-    # чтобы чужой/несуществующий id не подхватился: owner_id в WHERE уже скоупит.
-    _mbx = [int(m) for m in (mailbox_ids or []) if str(m).lstrip("-").isdigit()]
     try:
-        if _mbx:
-            rows = await pool.fetch(
-                """SELECT id, email, smtp_host, smtp_port, smtp_pass,
-                          COALESCE(auth_type, 'password') AS auth_type,
-                          oauth_provider, oauth_refresh_token, oauth_access_token,
-                          oauth_expires_at
-                   FROM strike_email_accounts
-                   WHERE owner_id=$1 AND is_active=TRUE AND id = ANY($2::bigint[])
-                   ORDER BY last_used_at ASC NULLS FIRST""",
-                owner_id, _mbx,
-            )
-        else:
-            rows = await pool.fetch(
-                """SELECT id, email, smtp_host, smtp_port, smtp_pass,
-                          COALESCE(auth_type, 'password') AS auth_type,
-                          oauth_provider, oauth_refresh_token, oauth_access_token,
-                          oauth_expires_at
-                   FROM strike_email_accounts
-                   WHERE owner_id=$1 AND is_active=TRUE
-                   ORDER BY last_used_at ASC NULLS FIRST""",
-                owner_id,
-            )
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass,
+                      COALESCE(auth_type, 'password') AS auth_type,
+                      oauth_provider, oauth_refresh_token, oauth_access_token,
+                      oauth_expires_at
+               FROM strike_email_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY last_used_at ASC NULLS FIRST""",
+            owner_id,
+        )
         from services.token_vault import decrypt_token as _dt
         db_emails = [{**dict(r), "smtp_pass": _dt(r["smtp_pass"] or "")} for r in rows]
     except Exception as e:
@@ -2201,8 +2180,7 @@ async def staggered_strike(
                     )
                 try:
                     email_res = await _run_email_escalation(
-                        pool, plan.owner_id, target, plan.reason, plan.preset,
-                        mailbox_ids=plan.mailbox_ids,
+                        pool, plan.owner_id, target, plan.reason, plan.preset
                     )
                     result.emails_sent = email_res.get("total_sent", 0)
                     result.email_escalation = email_res

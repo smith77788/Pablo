@@ -159,13 +159,7 @@ def _queries_reading_targets() -> list[tuple[str, str]]:
     out = []
     for name in ("operation_bus.py", "op_worker.py"):
         txt = (_ROOT / "services" / name).read_text(encoding="utf-8")
-        # `[^;"]`, не `[^;]`: двойная кавычка ЗАКРЫВАЕТ Python-литерал запроса
-        # (внутри SQL строковые литералы — одинарные), поэтому матч не должен
-        # её пересекать. Иначе `"SELECT id FROM operation_queue … FOR UPDATE"`
-        # склеивается со следующим стейтментом, у которого `FROM operation_log`
-        # стоит в подзапросе `WHERE NOT EXISTS (SELECT 1 FROM operation_log …)`
-        # идемпотентного claim'а deploy_start — ложная находка на здоровом коде.
-        for m in re.finditer(r'"SELECT[^;"]{0,600}?FROM operation_log', txt):
+        for m in re.finditer(r'"SELECT[^;]{0,600}?FROM operation_log', txt):
             # дочитываем до закрывающей запятой вызова (конец склейки строк)
             tail = txt[m.start():m.start() + 900]
             end = tail.find("\n        )")

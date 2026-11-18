@@ -57,13 +57,6 @@ _AFTER_DONE = {
 }
 
 
-def project_review_required(result) -> bool:
-    return isinstance(result, dict) and (
-        result.get("project_publish_scope_refused") is not None
-        or result.get("recurring_stop_reason") is not None
-    )
-
-
 def suggest(op_type: str, status: str, result: dict | None,
             op_id: int | None = None, params: dict | None = None) -> list[dict]:
     """Быстрые действия по итогу операции. Порядок = приоритет показа.
@@ -72,8 +65,6 @@ def suggest(op_type: str, status: str, result: dict | None,
     только потом обычный следующий шаг — иначе полезное действие тонет.
     """
     res = result if isinstance(result, dict) else {}
-    if project_review_required(res):
-        return []
     st = (status or "").strip().lower()
     out: list[dict] = []
     seen: set[str] = set()
@@ -99,22 +90,6 @@ def suggest(op_type: str, status: str, result: dict | None,
     if res.get("flood_storm"):
         _add("fleet_health", "📊 Здоровье флота", "openHealth",
              "флот перегрет — посмотрите, каким аккаунтам нужен отдых")
-
-    # 1b. Проверка ресурсов нашла проблемные (ограничен / теневой бан /
-    #     недоступен) — дать прямой путь убрать их из списка. Раньше владелец
-    #     видел итог «Ограничение: 23 · Скрыт из поиска: 88» и кнопки рядом не
-    #     было: уборка жила только на экране «Защита», до которого от карточки
-    #     операции не дойти.
-    if op_type == "check_owned_restrictions" and op_id:
-        findings = res.get("findings")
-        if isinstance(findings, list):
-            n = sum(1 for f in findings if isinstance(f, dict)
-                    and f.get("status") in ("restricted", "hidden", "unreachable"))
-            if n:
-                _add("cleanup_restrictions", f"🧹 Убрать проблемные ({n})",
-                     "openRestrictionCleanup",
-                     f"{n} ресурсов заблокированы, в теневом бане или недоступны — "
-                     "можно убрать из списка", arg=op_id)
 
     # 2. Недоделанная цель. Если продолжение уже запланировано — не зовём
     #    человека делать то, что система сделает сама.

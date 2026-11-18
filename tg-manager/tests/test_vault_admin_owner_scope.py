@@ -58,18 +58,18 @@ def _payload(response: web.Response) -> dict:
 
 
 def test_regular_user_cannot_read_another_archive(monkeypatch):
-    from services import vault_dialogs
+    from services import vault_service
 
     called = False
 
-    async def fake_dialogs(*args, **kwargs):
+    async def fake_list(*args, **kwargs):
         nonlocal called
         called = True
-        return {"chats": [], "counts": {}, "total": 0}
+        return []
 
-    monkeypatch.setattr(vault_dialogs, "dialogs", fake_dialogs)
+    monkeypatch.setattr(vault_service, "list_chats", fake_list)
     handler = _handler(
-        monkeypatch, _Pool(), "GET", "/api/miniapp/vault/dialogs", admin=False
+        monkeypatch, _Pool(), "GET", "/api/miniapp/vault/chats", admin=False
     )
     response = asyncio.run(handler(_Request(owner_id=OTHER)))
 
@@ -82,7 +82,7 @@ def test_regular_user_cannot_read_another_archive(monkeypatch):
     [
         ("GET", "/api/miniapp/vault/status", {}),
         ("GET", "/api/miniapp/vault/analytics", {}),
-        ("GET", "/api/miniapp/vault/dialogs", {}),
+        ("GET", "/api/miniapp/vault/chats", {}),
         ("GET", "/api/miniapp/vault/chat/{chat_id}/messages", {"chat_id": "1"}),
         ("GET", "/api/miniapp/vault/search", {}),
         ("GET", "/api/miniapp/vault/recent", {}),
@@ -106,17 +106,17 @@ def test_every_read_route_rejects_a_foreign_owner(
 
 
 def test_admin_reads_exactly_the_selected_archive(monkeypatch):
-    from services import vault_dialogs
+    from services import vault_service
 
     owners = []
 
-    async def fake_dialogs(pool, owner_id, **kwargs):
+    async def fake_list(pool, owner_id, *, limit):
         owners.append(owner_id)
-        return {"chats": [], "counts": {}, "total": 0}
+        return []
 
-    monkeypatch.setattr(vault_dialogs, "dialogs", fake_dialogs)
+    monkeypatch.setattr(vault_service, "list_chats", fake_list)
     handler = _handler(
-        monkeypatch, _Pool(), "GET", "/api/miniapp/vault/dialogs", admin=True
+        monkeypatch, _Pool(), "GET", "/api/miniapp/vault/chats", admin=True
     )
     response = asyncio.run(handler(_Request(owner_id=OTHER)))
 
@@ -125,17 +125,17 @@ def test_admin_reads_exactly_the_selected_archive(monkeypatch):
 
 
 def test_missing_owner_id_stays_owner_scoped_even_for_admin(monkeypatch):
-    from services import vault_dialogs
+    from services import vault_service
 
     owners = []
 
-    async def fake_dialogs(pool, owner_id, **kwargs):
+    async def fake_list(pool, owner_id, *, limit):
         owners.append(owner_id)
-        return {"chats": [], "counts": {}, "total": 0}
+        return []
 
-    monkeypatch.setattr(vault_dialogs, "dialogs", fake_dialogs)
+    monkeypatch.setattr(vault_service, "list_chats", fake_list)
     handler = _handler(
-        monkeypatch, _Pool(), "GET", "/api/miniapp/vault/dialogs", admin=True
+        monkeypatch, _Pool(), "GET", "/api/miniapp/vault/chats", admin=True
     )
     response = asyncio.run(handler(_Request()))
 
@@ -145,18 +145,18 @@ def test_missing_owner_id_stays_owner_scoped_even_for_admin(monkeypatch):
 
 @pytest.mark.parametrize("owner_id", [0, -1, "bad", 9_223_372_036_854_775_808])
 def test_invalid_owner_id_never_reaches_storage(monkeypatch, owner_id):
-    from services import vault_dialogs
+    from services import vault_service
 
     called = False
 
-    async def fake_dialogs(*args, **kwargs):
+    async def fake_list(*args, **kwargs):
         nonlocal called
         called = True
-        return {"chats": [], "counts": {}, "total": 0}
+        return []
 
-    monkeypatch.setattr(vault_dialogs, "dialogs", fake_dialogs)
+    monkeypatch.setattr(vault_service, "list_chats", fake_list)
     handler = _handler(
-        monkeypatch, _Pool(), "GET", "/api/miniapp/vault/dialogs", admin=True
+        monkeypatch, _Pool(), "GET", "/api/miniapp/vault/chats", admin=True
     )
     response = asyncio.run(handler(_Request(owner_id=owner_id)))
 
@@ -233,8 +233,7 @@ def test_frontend_keeps_selected_owner_on_every_read_path():
     assert "VAULT_READ_ONLY" in HTML
     for endpoint in (
         "/api/miniapp/vault/status",
-        "/api/miniapp/vault/dialogs",
-        "/api/miniapp/vault/chat/",
+        "/api/miniapp/vault/chats",
         "/api/miniapp/vault/analytics",
         "/api/miniapp/vault/chat/",
         "/api/miniapp/vault/media/",

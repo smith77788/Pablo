@@ -3,7 +3,6 @@
 import asyncio
 import collections
 import contextlib
-import contextvars
 import json
 import logging
 import os
@@ -619,13 +618,13 @@ _POISON_ERROR_TOTAL = (
 # МОЛЧА: в интерфейсе она откатывалась на нулевой прогресс без единого слова, и
 # владелец видел ровно то, что выглядит как потерянная работа. Про соседние
 # случаи (флуд-пауза, исчерпанный бюджет живучести) ему пишут — здесь пробел.
+_REVIVE_AFTER_RESTART = (
+    "Процесс операций перезапустился, пока операция шла — она возвращена в "
+    "очередь и запустится заново."
+)
 _REVIVE_AFTER_SILENCE = (
     "Операция не подавала признаков работы дольше {mins} мин — возвращена в "
     "очередь и запустится заново."
-)
-_REVIVE_AFTER_DEATH = (
-    "Процесс, который выполнял операцию, остановился — операция возвращена в "
-    "очередь и продолжится на другом (уже сделанное не повторится)."
 )
 
 
@@ -689,20 +688,6 @@ async def _ensure_pause_requested_column(pool: "asyncpg.Pool") -> None:
         log_exc_swallow(log, f"op_worker: ensure pause_requested column failed: {e}")
 
 
-async def _ensure_claimed_by_column(pool: "asyncpg.Pool") -> None:
-    """Досоздать operation_queue.claimed_by (schema_v370), если миграция не доехала.
-
-    Цена та же, что у pause_requested, только хуже: колонку ПИШЕТ отбор
-    операций, и без неё `_safe_fetch` вернул бы пустой список — очередь
-    молча встала бы целиком.
-    """
-    try:
-        await pool.execute(
-            "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS claimed_by TEXT")
-    except Exception as e:
-        log_exc_swallow(log, f"op_worker: ensure claimed_by column failed: {e}")
-
-
 
 # Реестр аккаунтов, занятых активными операциями op_worker.
 # account_warmer проверяет этот реестр перед использованием аккаунта.
@@ -733,81 +718,6 @@ _WORKER_ID = _rguard.WORKER_ID
 # Упал процесс — аренда истекает сама, и аккаунты возвращаются в оборот без
 # 60-минутного сторожа.
 _LEASE_TTL_S = 900
-
-
-# ── Горизонтальный исполнитель (шардированная очередь) ──────────────────────
-# По умолчанию очередь разбирает ОДИН процесс — держатель аренды исполнителя
-# (`replica_guard`). Это потолок продукта: все операции всех клиентов, все
-# клиенты Telethon и ~70 фоновых циклов в одном цикле событий одного ядра.
-#
-# OP_SHARDED_EXECUTOR=1 снимает потолок: операции разбирают ВСЕ процессы с
-# ролью worker/all, каждый до OP_MAX_PARALLEL. Держатель аренды остаётся
-# ЛИДЕРОМ — только он гоняет сторожей очереди и фоновые циклы (main.py), а
-# остальные только исполняют. Что делает это безопасным:
-#   * у каждой запущенной операции есть хозяин — `operation_queue.claimed_by`
-#     (worker_id процесса), и сторожа лидера трогают только СВОИ, бесхозные
-#     (строки до этой правки) и операции УМЕРШИХ процессов — тех, чей хартбит
-#     (`process_heartbeats`) молчит дольше _EXECUTOR_DEAD_S;
-#   * операции умершего процесса возвращаются в очередь сразу, а не через
-#     60 минут сторожа зависших (`_sweep_dead_executor_ops`);
-#   * процесс, у которого операцию забрали (его посчитали мёртвым, пока цикл
-#     стоял), гасит свою задачу сам (`_fence_lost_ops`) — второго прогона той
-#     же операции нет;
-#   * аренды аккаунтов, темп флота, предохранитель и лимит на владельца и так
-#     живут в Postgres (лимит держит запрос отбора с FOR UPDATE SKIP LOCKED).
-_EXECUTOR_DEAD_S = _int_env("OP_EXECUTOR_DEAD_SEC", 300, 120, 3600)
-
-
-# Режим особого прохода сторожа зависших: (scope, возраст в мин., метка).
-# ContextVar, а не аргумент: сигнатуру `_watchdog_stale(pool, bot=None)` держат
-# сторожа набора, а значение живёт ровно в пределах одного вызова.
-_stale_mode: "contextvars.ContextVar[tuple | None]" = contextvars.ContextVar(
-    "op_worker_stale_mode", default=None)
-
-
-def sharded_mode() -> bool:
-    """Включён ли горизонтальный исполнитель — один источник правды в replica_guard."""
-    return _rguard.sharded_executor()
-
-
-# Предикат «эту запущенную операцию вправе чинить сторож этого процесса».
-# Подставляется в WHERE по operation_queue; $self — worker_id процесса,
-# $dead — окно молчания хартбита в секундах. Текст — константы, не ввод.
-_DEAD_OWNER_SQL = (
-    "NOT EXISTS (SELECT 1 FROM process_heartbeats ph "
-    "WHERE ph.worker_id = operation_queue.claimed_by "
-    "AND ph.last_seen > now() - make_interval(secs => {dead}))"
-)
-
-
-def _repair_scope_sql(scope: "str | None", self_ph: str, dead_ph: str) -> str:
-    """SQL-условие по хозяину операции для сторожа.
-
-    None     — без условия (одиночный исполнитель, поведение как раньше);
-    'leader' — свои, бесхозные и операции умерших процессов;
-    'others' — бесхозные и операции умерших процессов, но не свои;
-    'mine'   — только свои (сторож процесса-исполнителя без лидерства);
-    'dead'   — только чужие операции умерших процессов.
-    """
-    dead = _DEAD_OWNER_SQL.format(dead=dead_ph)
-    if scope is None:
-        return "TRUE"
-    if scope == "leader":
-        return (f"(claimed_by IS NULL OR claimed_by = {self_ph} OR {dead})")
-    if scope == "others":
-        # Уборка на старте лидера: свои операции этого процесса живы по
-        # определению (worker_id новый на каждый процесс), а у процесса,
-        # ставшего лидером не на старте, они прямо сейчас выполняются.
-        return (f"((claimed_by IS NULL OR claimed_by <> {self_ph}) "
-                f"AND (claimed_by IS NULL OR {dead}))")
-    if scope == "mine":
-        # Окно хартбита здесь не нужно, но параметр в запросе есть всегда:
-        # Postgres не принимает запрос с неиспользованным параметром.
-        return f"(claimed_by = {self_ph} AND {dead_ph}::float8 >= 0)"
-    if scope == "dead":
-        return (f"(claimed_by IS NOT NULL AND claimed_by <> {self_ph} "
-                f"AND {dead})")
-    raise ValueError(f"неизвестный scope сторожа: {scope!r}")
 
 
 def init_op_worker_pool(pool: "asyncpg.Pool") -> None:
@@ -1871,13 +1781,9 @@ async def _finish_fleet_starved_op(
 
 async def _defer_op_for_flood(
     pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = "",
-    bot=None, owner_id: int | None = None, cause: str = "flood",
+    bot=None, owner_id: int | None = None,
 ) -> None:
     """Отложить операцию до конца длинной флуд-паузы, освободив слот и флот.
-
-    `cause` != "flood" — паузу назначил не Telegram, а наш собственный лимит
-    (например, суточный потолок ЛС): механика та же, но владельцу пишется
-    настоящая причина из `reason`, а не «Telegram попросил паузу».
 
     Отдельно от _requeue_op_no_accounts: там отсчитывается _ACCT_WAIT_MAX_MIN от
     СОЗДАНИЯ операции и по его истечении операция проваливается. Для ожидания
@@ -1927,19 +1833,12 @@ async def _defer_op_for_flood(
     if delay >= _DEFER_NOTIFY_MIN_S:
         _hours, _mins = divmod(delay // 60, 60)
         _when = f"{_hours} ч {_mins} мин" if _hours else f"{_mins} мин"
-        if cause != "flood":
-            import html as _html
-            _text = (f"⏸ <b>Операция #{op_id}</b> отложена на {_when}."
-                     + (f"\n\n{_html.escape(reason[:300])}" if reason else "")
-                     + "\n\nОна продолжится сама, отменять и запускать заново "
-                       "не нужно.")
-        else:
-            _text = (f"⏸ <b>Операция #{op_id}</b> отложена на {_when}: Telegram попросил "
-                     f"паузу.\n\nОна продолжится сама, отменять и запускать заново не "
-                     f"нужно — повторный запуск только добавит ограничений."
-                     + (f"\n\n<i>{reason[:200]}</i>" if reason else ""))
         await _notify_owner_about_op(
-            pool, bot, owner_id, _text,
+            pool, bot, owner_id,
+            f"⏸ <b>Операция #{op_id}</b> отложена на {_when}: Telegram попросил "
+            f"паузу.\n\nОна продолжится сама, отменять и запускать заново не "
+            f"нужно — повторный запуск только добавит ограничений."
+            + (f"\n\n<i>{reason[:200]}</i>" if reason else ""),
             dedup_key=f"flood-defer:{op_id}",
         )
 
@@ -2148,27 +2047,6 @@ async def try_claim_account(acc_id: int) -> bool:
     """
     claimed = await try_claim_accounts([int(acc_id)])
     return bool(claimed)
-
-
-async def claim_account_for_op(op_id: int, acc_id: int) -> bool:
-    """Лениво захватить ОДИН аккаунт ПОД ОПЕРАЦИЮ и привязать к её уборке.
-
-    Для read-only проверок, подключающих наблюдателей по мере нужды: вместо
-    захвата всего флота заранее (и его простоя на всю длительность проверки)
-    держим только реально используемые сессии, а остальной флот остаётся
-    свободным для действий (strike/жалобы иначе берут один аккаунт из всего
-    флота — проверка на 25 минут забрала остальные). Арбитр тот же
-    (try_claim_accounts → _db_claim), поэтому одна сессия не уходит двум
-    операциям (защита от AUTH_KEY_DUPLICATED сохраняется). Привязка к
-    _operation_account_locks[op_id] — чтобы освобождение шло той же дверью, что
-    у пакетного захвата: release_operation_accounts(op_id) в finally _run_op_task.
-    """
-    claimed = await try_claim_accounts([int(acc_id)])
-    if not claimed:
-        return False
-    async with _accounts_lock:
-        _operation_account_locks.setdefault(op_id, set()).add(int(acc_id))
-    return True
 
 
 async def release_operation_accounts(op_id: int) -> None:
@@ -2547,8 +2425,6 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
 # op_worker._classify_op_error / _FATAL_ERRORS / _normalize_result и т.п.
 # остались доступны как раньше (публичный/приватный контракт не изменился).
 from services import op_status
-
-_REVIVE_AFTER_RESTART = op_status.REVIVE_AFTER_RESTART
 from services.op_errors import (  # noqa: E402,F401
     _RETRYABLE_ERRORS,
     _FATAL_ERRORS,
@@ -3485,13 +3361,6 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
     # RETURNING: гашение атомарно одним UPDATE, но закрыть операцию до конца
     # (результат, подпись, слово владельцу) можно только по строкам — см.
     # _finish_poisoned_op.
-    # Горизонтальный исполнитель: на старте лидер чинит только бесхозные и
-    # операции умерших процессов — живые операции соседей (и свои, если
-    # лидерство пришло не на старте процесса) не его.
-    scope = "others" if sharded_mode() else None
-    _scope_args: tuple = ()
-    if scope is not None:
-        _scope_args = (_WORKER_ID, float(_EXECUTOR_DEAD_S))
     poisoned_rows = await _safe_fetch(
         pool,
         """UPDATE operation_queue
@@ -3501,7 +3370,6 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
                error_msg = COALESCE(error_msg,
                    CASE WHEN COALESCE(revive_count, 0) >= $1 THEN $2 ELSE $4 END)
            WHERE status = 'running'
-             AND """ + _repair_scope_sql(scope, "$5", "$6") + """
              AND (COALESCE(revive_count, 0) >= $1
                   OR (COALESCE(revive_total, 0) >= $3
                       AND COALESCE(revive_mark, 0)
@@ -3512,7 +3380,6 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
         _POISON_ERROR.format(n=_MAX_REVIVES),
         _MAX_REVIVES_TOTAL,
         _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
-        *_scope_args,
         log_ctx="[reset_stale_poison]",
     )
     poisoned_n = len(poisoned_rows)
@@ -3558,10 +3425,8 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
                -- копился бы поверх прошлого прогона — класс «34/17»).
                done_items = 0,
                last_error = $1
-           WHERE status = 'running'
-             AND """ + _repair_scope_sql(scope, "$2", "$3"),
+           WHERE status = 'running'""",
         _REVIVE_AFTER_RESTART,
-        *_scope_args,
         log_ctx="[reset_stale_revive]",
     )
     # asyncpg возвращает строку вида "UPDATE N"
@@ -3620,19 +3485,7 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
 
     Исключает операции, которые реально выполняются в памяти (_active_op_ids),
     чтобы не перезапустить strike/bulk-op пока первый прогон ещё идёт.
-
-    При горизонтальном исполнителе — чьи операции чинить (`_repair_scope_sql`):
-    лидер — свои, бесхозные и умерших процессов. Два особых прохода ставят
-    режим через `_stale_mode` (сигнатура общая, её держат сторожа набора):
-    `_watchdog_stale_mine` — только свои, `_sweep_dead_executor_ops` —
-    операции умерших процессов без ожидания 60 минут.
     """
-    scope, min_age_min, source = _stale_mode.get() or (
-        ("leader" if sharded_mode() else None), None, "watchdog")
-    _age = _STALE_RUNNING_TIMEOUT_MIN if min_age_min is None else int(min_age_min)
-    _scope_args: tuple = ()
-    if scope is not None:
-        _scope_args = (_WORKER_ID, float(_EXECUTOR_DEAD_S))
     try:
         async with _active_lock:
             active_now: frozenset[int] = frozenset(_active_op_ids)
@@ -3657,20 +3510,18 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
-                  AND """ + _repair_scope_sql(scope, "$7", "$8") + """
                   AND (COALESCE(revive_count, 0) >= $3
                        OR (COALESCE(revive_total, 0) >= $5
                            AND COALESCE(revive_mark, 0)
                                <= COALESCE(revive_total, 0)))
              RETURNING id, owner_id, op_type, params, done_items, total_items,
                        revive_count, revive_total""",
-            _age,
+            _STALE_RUNNING_TIMEOUT_MIN,
             active_ids_list,
             _MAX_REVIVES,
             _POISON_ERROR.format(n=_MAX_REVIVES),
             _MAX_REVIVES_TOTAL,
             _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
-            *_scope_args,
         )
         poisoned_n = len(poisoned_rows)
         if poisoned_n:
@@ -3678,10 +3529,7 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 "op_worker watchdog: %d hung ops exceeded revive budget (%d) → failed",
                 poisoned_n, _MAX_REVIVES,
             )
-            if source == "dead_executor":
-                _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="dead_executor")
-            else:
-                _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
+            _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
             for _poisoned in poisoned_rows:
                 # В своей защите — по той же причине, что на старте: ниже
                 # стоит общий возврат зависших операций в очередь, и одно
@@ -3689,7 +3537,7 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                 await _maintenance_step(
                     f"finish_poisoned_op:{(_poisoned or {}).get('id')}",
                     lambda r=_poisoned: _finish_poisoned_op(
-                        pool, r, source=source, bot=bot))
+                        pool, r, source="watchdog", bot=bot))
 
         result = await pool.execute(
             # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с
@@ -3709,88 +3557,17 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
                     last_error = $3
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
-                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
-                  AND """ + _repair_scope_sql(scope, "$4", "$5"),
-            _age,
+                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
+            _STALE_RUNNING_TIMEOUT_MIN,
             active_ids_list,
-            (_REVIVE_AFTER_DEATH if source == "dead_executor"
-             else _REVIVE_AFTER_SILENCE.format(mins=_STALE_RUNNING_TIMEOUT_MIN)),
-            *_scope_args,
+            _REVIVE_AFTER_SILENCE.format(mins=_STALE_RUNNING_TIMEOUT_MIN),
         )
         count = int((result or "UPDATE 0").split()[-1])
         if count:
             log.warning("op_worker watchdog: reset %d stale running ops → pending", count)
-            if source == "dead_executor":
-                _reliability_metric("infragram_op_revives_total", count, source="dead_executor")
-            else:
-                _reliability_metric("infragram_op_revives_total", count, source="watchdog")
+            _reliability_metric("infragram_op_revives_total", count, source="watchdog")
     except Exception as e:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
-
-
-async def _sweep_dead_executor_ops(pool: asyncpg.Pool, bot=None) -> None:
-    """Горизонтальный исполнитель: вернуть в очередь операции умерших процессов.
-
-    Процесс-исполнитель умер (OOM, SIGKILL, потеря узла) — его операции
-    остаются 'running' с его worker_id в `claimed_by`. Ждать для них 60 минут
-    общего сторожа незачем: смерть видна по хартбиту за _EXECUTOR_DEAD_S, а
-    аренды его аккаунтов истекают сами (`_LEASE_TTL_S`). Бюджет живучести
-    списывается как за падение — так и есть.
-    """
-    tok = _stale_mode.set(("dead", 0, "dead_executor"))
-    try:
-        await _watchdog_stale(pool, bot)
-    finally:
-        _stale_mode.reset(tok)
-
-
-async def _watchdog_stale_mine(pool: asyncpg.Pool, bot=None) -> None:
-    """Сторож зависших исполнителя без лидерства: только свои операции."""
-    tok = _stale_mode.set(("mine", None, "watchdog"))
-    try:
-        await _watchdog_stale(pool, bot)
-    finally:
-        _stale_mode.reset(tok)
-
-
-async def _fence_lost_ops(pool: asyncpg.Pool) -> list[int]:
-    """Погасить свои задачи, чьи операции уже числятся за другим процессом.
-
-    Так бывает, только если этот процесс посчитали умершим: цикл событий
-    стоял дольше _EXECUTOR_DEAD_S, хартбит молчал, лидер вернул операцию в
-    очередь, и её взял другой исполнитель. Наша задача про это не знает и
-    продолжила бы те же реальные действия вторым прогоном. Гасим её тем же
-    способом, что и при сдаче аренды (`_stand_down_after_lease_loss`): отмена
-    задачи, её finally отпускает свои аккаунты.
-
-    Возвращает id погашенных операций. Сбой запроса — ничего не гасим: блип
-    базы не повод останавливать живую работу.
-    """
-    async with _active_lock:
-        active = sorted(_active_op_ids)
-        tasks = {t.get_name(): t for t in _active_op_tasks if not t.done()}
-    if not active:
-        return []
-    try:
-        rows = await pool.fetch(
-            "SELECT id FROM operation_queue WHERE id = ANY($1::int[]) "
-            "AND status = 'running' AND claimed_by IS DISTINCT FROM $2",
-            active, _WORKER_ID)
-    except Exception as e:
-        log_exc_swallow(log, f"op_worker: проверка хозяина операций: {e}")
-        return []
-    lost = [int(r["id"]) for r in rows]
-    for op_id in lost:
-        t = tasks.get(f"op:{op_id}")
-        if t is not None:
-            t.cancel()
-    if lost:
-        log.error(
-            "op_worker: операции %s уже выполняет другой процесс (этот считали "
-            "умершим — цикл событий стоял) — свои задачи по ним погашены, "
-            "чтобы не было второго прогона.", lost)
-        _reliability_metric("infragram_executor_fenced_ops_total", len(lost))
-    return lost
 
 
 # Сколько ждать, прежде чем считать отменённую операцию брошенной. Запас нужен
@@ -3837,7 +3614,6 @@ async def _watchdog_cancelled_orphans(pool: asyncpg.Pool, bot=None) -> int:
     Возвращает число закрытых операций. Никогда не бросает.
     """
     closed = 0
-    scope = "leader" if sharded_mode() else None
     try:
         async with _active_lock:
             active_now: frozenset[int] = frozenset(_active_op_ids)
@@ -3849,15 +3625,11 @@ async def _watchdog_cancelled_orphans(pool: asyncpg.Pool, bot=None) -> int:
                   AND result IS NULL
                   AND finished_at < now() - make_interval(mins => $1::int)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
-                  -- горизонтальный исполнитель: отмену, которую сворачивает
-                  -- живой сосед, закроет он сам
-                  AND """ + _repair_scope_sql(scope, "$4", "$5") + """
                 ORDER BY id
                 LIMIT $3::int""",
             _CANCEL_ORPHAN_GRACE_MIN,
             (list(active_now) or None),
             _CANCEL_ORPHAN_BATCH,
-            *((_WORKER_ID, float(_EXECUTOR_DEAD_S)) if scope is not None else ()),
             log_ctx="[watchdog_cancel_orphans]",
         )
         for row in rows:
@@ -3960,7 +3732,6 @@ async def _watchdog_recurring_chain(pool: asyncpg.Pool, bot: Bot) -> int:
                   AND finished_at > now() - make_interval(hours => $2::int)
                   AND COALESCE((params->>'repeat_interval_min')::int, 0) > 0
                   AND params->>'recurring_next_op' IS NULL
-                  AND result->>'recurring_stop_reason' IS NULL
                 ORDER BY finished_at
                 LIMIT $3::int""",
             _RECURRING_REPAIR_MIN_AGE_MIN,
@@ -4354,10 +4125,6 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "карантин и попадёт в следующую операцию, а волна банов его не посчитает",
     "infragram_notifications_undelivered_total":
         "отчёт об операции не доехал до владельца",
-    "infragram_notifications_bad_content_total":
-        "отчёт об операции не приняли из-за самого текста (битый HTML или длина) "
-        "— аварийная отправка простым текстом тоже не прошла; операция выполнена, "
-        "её итог записан, чинить надо формат отчёта",
     "infragram_recurring_reschedule_failures_total":
         "следующий запуск повторяющейся операции не поставлен — она остановилась",
     "infragram_executor_lease_errors_total":
@@ -4394,7 +4161,6 @@ _SHUTDOWN_CANCEL_GRACE_S = 2.0
 # и её итог записан.
 _DELIVERY_FAILURE_COUNTERS = frozenset({
     "infragram_notifications_undelivered_total",
-    "infragram_notifications_bad_content_total",
 })
 
 
@@ -4676,11 +4442,6 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     except Exception:
         log_exc_swallow(log, "op_worker: проверка получателя защитных алертов")
     _role = (os.getenv("INFRAGRAM_ROLE") or "all").strip().lower()
-    await _ensure_claimed_by_column(pool)
-    # Хартбит ДО первого отбора: при горизонтальном исполнителе лидер судит о
-    # живости хозяина операции по нему, и операция, взятая процессом без
-    # хартбита, выглядела бы брошенной.
-    await _rguard.beat(pool, _WORKER_ID, _role)
     _did_startup_reset = False
     _lease_denied_log_at = 0.0
     # База отсчёта для счётчиков защитных записей — локальная, не модульная.
@@ -4691,14 +4452,6 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         # останавливал бы и сторожей, которые в этот момент нужнее всего.
         _watchdog_tick += 1
         if not await _rguard.acquire_executor_lease(pool, _WORKER_ID, _role):
-            if sharded_mode():
-                # ГОРИЗОНТАЛЬНЫЙ ИСПОЛНИТЕЛЬ: без лидерства операции всё равно
-                # разбираем — у каждой есть хозяин (claimed_by), и сторожа
-                # лидера живые операции этого процесса не трогают. Сторожей
-                # очереди и уборку на старте ведёт лидер; здесь только свои.
-                await _follower_round(pool, bot, _watchdog_tick, _protective_seen)
-                await asyncio.sleep(_POLL_INTERVAL)
-                continue
             _reliability_metric("infragram_executor_lease_denied_total")
             _now = time.monotonic()
             if _now - _lease_denied_log_at > 60:
@@ -4748,11 +4501,6 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # и исключение в раннем стороже забирало весь остаток круга — в
             # том числе последний, которым владелец узнаёт о сбое защитных
             # записей. См. _maintenance_step.
-            if sharded_mode():
-                # Свои операции, которые уже числятся за другим процессом, —
-                # погасить (см. _fence_lost_ops).
-                await _maintenance_step(
-                    "fence_lost_ops", lambda: _fence_lost_ops(pool))
             if _watchdog_tick % 3 == 0:
                 await _maintenance_step("renew_leases", renew_leases)
                 # Признак жизни самого поллера: единственный способ узнать
@@ -4765,11 +4513,6 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             if _watchdog_tick % 6 == 0:
                 await _maintenance_step(
                     "watchdog_stale", lambda: _watchdog_stale(pool, bot))
-                if sharded_mode():
-                    # Операции умерших исполнителей — сразу, а не через час.
-                    await _maintenance_step(
-                        "sweep_dead_executor_ops",
-                        lambda: _sweep_dead_executor_ops(pool, bot))
                 # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
                 # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
                 await _maintenance_step(
@@ -4809,41 +4552,6 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         except Exception as e:
             log.exception("op_worker watchdog cycle error: %s", e)
         await asyncio.sleep(_POLL_INTERVAL)
-
-
-async def _follower_round(
-    pool: asyncpg.Pool, bot: Bot, tick: int, protective_seen: dict,
-) -> None:
-    """Один круг исполнителя без лидерства (OP_SHARDED_EXECUTOR=1).
-
-    Разбирает очередь и обслуживает ТОЛЬКО своё: гасит операции, которые уже
-    числятся за другим процессом, продлевает свои аренды, отмечает живость
-    поллера, чинит свои сироты и доносит свои защитные счётчики (они живут в
-    памяти каждого процесса). Сторожа всей очереди и уборку на старте ведёт
-    лидер — со своими условиями по хозяину операции.
-
-    Каждый шаг в своей защите (`_maintenance_step`), как в круге лидера.
-    """
-    await _maintenance_step("fence_lost_ops", lambda: _fence_lost_ops(pool))
-    try:
-        await _process_pending(pool, bot)
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        log.exception("op_worker error: %s", e)
-    if tick % 3 == 0:
-        await _maintenance_step("renew_leases", renew_leases)
-        await _maintenance_step(
-            "poller_alive", lambda: _obus_reg.mark_poller_alive(pool, _WORKER_ID))
-    if tick % 6 == 0:
-        await _maintenance_step(
-            "watchdog_stale_mine", lambda: _watchdog_stale_mine(pool, bot))
-        await _maintenance_step(
-            "reconcile_in_operation", lambda: _reconcile_in_operation(pool))
-    if tick % 360 == 0:
-        await _maintenance_step(
-            "watchdog_protective_failures",
-            lambda: _watchdog_protective_failures(pool, bot, protective_seen))
 
 
 async def _stand_down_after_lease_loss(
@@ -5081,7 +4789,7 @@ async def shutdown(
                       last_error=$2
                 WHERE id = ANY($1::bigint[]) AND status='running'""",
             [int(i) for i in op_ids],
-            op_status.REQUEUE_ON_SHUTDOWN,
+            "Сервис перезапускался — операция продолжится автоматически с места остановки (уже сделанное не повторится)",
             log_ctx="[shutdown_requeue]",
         )
         try:
@@ -5188,9 +4896,7 @@ async def journal_op_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
             "журнал целей недоступен, прогон отложен до повтора") from e
 
 
-async def completed_targets(
-    pool: asyncpg.Pool, op_id: int, *, family_ids: list[int] | None = None,
-) -> set[str]:
+async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     """Цели операции, уже отработанные УСПЕШНО (operation_log, status='ok').
 
     Нужно для идемпотентности повторов. Повтор операции — и автоматический
@@ -5215,7 +4921,7 @@ async def completed_targets(
         "SELECT DISTINCT target FROM operation_log "
         " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND target IS NOT NULL"
         + _obus_reg.REAL_TARGET_SQL,
-        await journal_op_ids(pool, op_id) if family_ids is None else family_ids,
+        await journal_op_ids(pool, op_id),
         log_ctx=f"[completed_targets op={op_id}]", where="completed_targets",
     )
     return {str(r["target"]) for r in (rows or []) if r["target"]}
@@ -5536,7 +5242,8 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     # владельца. Цена — полный проход по ожидающим на каждый тик; замер на живой
     # базе: 50 000 ожидающих в 500 владельцах — 37 мс против 22 мс у старого
     # запроса, при тике раз в 10 секунд.
-    _claim_sql = (
+    rows = await _safe_fetch(
+        pool,
         """WITH owner_running AS (
                SELECT owner_id, COUNT(*)::int AS running_count
                FROM operation_queue
@@ -5587,31 +5294,20 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
                FOR UPDATE OF oq SKIP LOCKED
            )
            UPDATE operation_queue
-           SET status = 'running', started_at = now(), claimed_by = $5
+           SET status = 'running', started_at = now()
            WHERE id IN (SELECT id FROM picked)
-           RETURNING id, owner_id, op_type, params""")
-    _claim_args = (
+           RETURNING id, owner_id, op_type, params""",
         available_slots,
         _MAX_PARALLEL_PER_OWNER,
         candidate_window,
         (list(active_now) or None),
-        _WORKER_ID,
     )
-    # Несколько исполнителей (OP_SHARDED_EXECUTOR) отбирают одним и тем же
-    # запросом. Лимит на владельца при этом не превышается и без отдельной
-    # блокировки: одновременные отборы видят одни и те же первые N ожидающих
-    # владельца, и FOR UPDATE SKIP LOCKED отдаёт каждую строку одному из них
-    # (проверено на живой базе: test_sharded_executor_postgres).
-    rows = await _safe_fetch(pool, _claim_sql, *_claim_args)
 
     for row in rows:
         op_id = row["id"]
         async with _active_lock:
             _active_op_ids.add(op_id)
-        # Имя задачи — op:<id>: по нему `_fence_lost_ops` находит задачу
-        # операции, которую забрал другой исполнитель.
-        _op_task = asyncio.create_task(
-            _run_op_task_guarded(pool, bot, dict(row)), name=f"op:{op_id}")
+        _op_task = asyncio.create_task(_run_op_task_guarded(pool, bot, dict(row)))
         _active_op_tasks.add(_op_task)
         _op_task.add_done_callback(_active_op_tasks.discard)
 
@@ -5654,11 +5350,6 @@ async def _dispatch_contacts_sync(pool, bot, op_id, owner_id, params) -> dict:
 async def _dispatch_contacts_push(pool, bot, op_id, owner_id, params) -> dict:
     """Выгрузка хранилища контактов в книгу аккаунта — bot ей не нужен."""
     return await _exec_contacts_push(pool, op_id, owner_id, params)
-
-
-async def _dispatch_contacts_import(pool, bot, op_id, owner_id, params) -> dict:
-    """Импорт базы контактов из файла в хранилище — bot ему не нужен."""
-    return await _exec_contacts_import(pool, op_id, owner_id, params)
 
 
 async def _dispatch_global_presence_group(pool, bot, op_id, owner_id, params) -> dict:
@@ -5774,7 +5465,6 @@ def _build_dispatch() -> dict:
         "ai_comment": _exec_ai_comment,
         "content_clone": _exec_content_clone,
         "clone_adapt": _exec_clone_adapt,
-        "clone_adapt_rollback": _exec_bulk_bot_profile_rollback,
         "niche_growth_post": _exec_niche_growth_post,
         "niche_scan": _exec_niche_scan,
         "niche_presence": _exec_niche_presence,
@@ -5792,7 +5482,6 @@ def _build_dispatch() -> dict:
         # ── Прочее ────────────────────────────────────────────────────────────
         "contacts_sync": _dispatch_contacts_sync,
         "contacts_push": _dispatch_contacts_push,
-        "contacts_import": _dispatch_contacts_import,
         "create_channel": _dispatch_create_channel,
         "create_group": _dispatch_create_group,
     }
@@ -5834,7 +5523,7 @@ async def _notify_recurring_stopped(
 
 async def _reschedule_recurring(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, op_type: str,
-    params: dict, *, productive: bool, why: str = "", stop_reason: str = "",
+    params: dict, *, productive: bool, why: str = "",
 ) -> None:
     """Поставить следующий круг повторяющейся операции — и не оборвать расписание молча.
 
@@ -5876,9 +5565,6 @@ async def _reschedule_recurring(
     except (TypeError, ValueError):
         _rmin = 0
     if _rmin <= 0:
-        return
-    if stop_reason:
-        await _notify_recurring_stopped(pool, bot, owner_id, op_id, op_type, stop_reason)
         return
 
     try:
@@ -5932,23 +5618,8 @@ async def _reschedule_recurring(
     import datetime as _dt_r
 
     _row = await _safe_fetchrow(
-        pool, "SELECT label, total_items, created_at FROM operation_queue WHERE id=$1",
+        pool, "SELECT label, total_items FROM operation_queue WHERE id=$1",
         op_id, log_ctx=f"[recurring_label op={op_id}]")
-    if op_type in ("mass_publish", "quick_post", "bulk_post_chans"):
-        catalog_since = _next_params.get("_publication_catalog_since")
-        project_since = _next_params.get("_project_scope_since")
-        if not catalog_since:
-            created_at = _row.get("created_at") if _row else None
-            if not project_since and created_at is None:
-                await _notify_recurring_stopped(
-                    pool, bot, owner_id, op_id, op_type,
-                    "не удалось прочитать время исходного подтверждения публикации",
-                )
-                return
-            catalog_since = project_since or created_at.isoformat()
-            _next_params["_publication_catalog_since"] = catalog_since
-        if params.get("project_id") is not None and op_type in ("mass_publish", "quick_post"):
-            _next_params["_project_scope_since"] = project_since or catalog_since
     _base_label = (_row["label"] if _row else None) or op_type
     # Метку повтора ставим один раз: без этой проверки она копилась кругами
     # («Пост ↻↻↻↻») и к сотому запуску вытесняла из очереди само название.
@@ -6486,8 +6157,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 if _defer_s:
                     await _defer_op_for_flood(
                         pool, op_id, int(_defer_s), result.get("reason") or "",
-                        bot=bot, owner_id=owner_id,
-                        cause=str(result.get("defer_cause") or "flood"))
+                        bot=bot, owner_id=owner_id)
                 else:
                     await _requeue_op_no_accounts(
                         pool, op_id, bot=bot, owner_id=owner_id,
@@ -6689,7 +6359,6 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     pool, bot, op_id, owner_id, op_type, params,
                     productive=op_status.is_productive(_final_status),
                     why=(result.get("reason") or result.get("summary") or "")[:200],
-                    stop_reason=result.get("recurring_stop_reason") or "",
                 )
             # Audit trail: write operation completion to operation_audit.
             # Outcome согласован с финальным статусом — провал не пишется как success.
@@ -7336,19 +7005,6 @@ async def _exec_bulk_bot_profile(
     description = (params.get("description") or "").strip()
     short_description = (params.get("short_description") or "").strip()
     greeting = (params.get("greeting") or "").strip()
-    # Язык профиля (вкладка «Языки бота» переносит профиль языка на другие
-    # боты). '' — профиль по умолчанию, как было всегда. Код проверяется: в
-    # Telegram уходят только две латинские буквы, иначе операция отказывается,
-    # а не правит профиль по умолчанию вместо языка.
-    language_code = str(params.get("language_code") or "").strip().lower()
-    if language_code and not (len(language_code) == 2 and language_code.isascii()
-                              and language_code.isalpha()):
-        return {"status": "failed",
-                "summary": f"⚠️ Неверный код языка «{language_code[:10]}» — профиль не меняли"}
-    if language_code and greeting:
-        # Приветствие — локальное правило без языка; с языком его не смешиваем.
-        greeting = ""
-    _lc_kw = {"language_code": language_code} if language_code else {}
 
     # Поля для Bot API: (метод, имя-параметра, значение). Приветствие — отдельно,
     # это не вызов Telegram, а локальное правило.
@@ -7427,20 +7083,13 @@ async def _exec_bulk_bot_profile(
             # (этот бот просто не попадёт в откат), но это логируем.
             _before: dict = {}
             try:
-                # Профиль языка снимается ключами «name:de» — тот же формат, что
-                # у «Клона и адаптации»: общий откат (clone_adapt_engine.
-                # restore_calls) вернёт профиль ТОГО ЖЕ языка, а не по умолчанию.
-                _sfx = f":{language_code}" if language_code else ""
                 if name:
-                    _before["name" + _sfx] = await bot_api.get_my_name(
-                        sess, b["token"], language_code)
+                    _before["name"] = await bot_api.get_my_name(sess, b["token"])
                 if description:
-                    _before["description" + _sfx] = await bot_api.get_my_description(
-                        sess, b["token"], language_code)
+                    _before["description"] = await bot_api.get_my_description(sess, b["token"])
                 if short_description:
-                    _before["short_description" + _sfx] = (
-                        await bot_api.get_my_short_description(
-                            sess, b["token"], language_code))
+                    _before["short_description"] = await bot_api.get_my_short_description(
+                        sess, b["token"])
                 if greeting:
                     _before["greeting"] = await pool.fetchval(
                         "SELECT response_text FROM auto_replies WHERE bot_id=$1 "
@@ -7457,7 +7106,7 @@ async def _exec_bulk_bot_profile(
             for method, pkey, val in api_fields:
                 _field = _BP_METHOD_LABEL.get(method, method)
                 try:
-                    data = await bot_api._call(sess, b["token"], method, **{pkey: val}, **_lc_kw)
+                    data = await bot_api._call(sess, b["token"], method, **{pkey: val})
                     # Короткий флуд Telegram (setMy* лимитирован сильнее
                     # прочих методов) — отсыпаем и пробуем поле ещё раз, а не
                     # записываем бота в ошибки, которые потом добивать вручную.
@@ -7468,7 +7117,7 @@ async def _exec_bulk_bot_profile(
                         if _ra <= 30:
                             await asyncio.sleep(_ra + 1)
                             data = await bot_api._call(
-                                sess, b["token"], method, **{pkey: val}, **_lc_kw)
+                                sess, b["token"], method, **{pkey: val})
                 except Exception as e:  # noqa: BLE001 — любая ошибка = провал поля, не всей операции
                     reasons.append(_bp_reason(_field, exc=e))
                     log.warning("bulk_bot_profile: bot=%s %s error=%r", b.get("bot_id"), method, e)
@@ -7498,8 +7147,7 @@ async def _exec_bulk_bot_profile(
                 # заставила бы повтор изменить этого бота второй раз.
                 await _journal_done(
                     pool, op_id, step, target,
-                    _bp_diff({k.partition(":")[0]: v for k, v in _before.items()},
-                             {"name": name, "description": description,
+                    _bp_diff(_before, {"name": name, "description": description,
                                        "short_description": short_description,
                                        "greeting": greeting})[:900])
             else:
@@ -7529,9 +7177,6 @@ async def _exec_bulk_bot_profile(
         lbl for lbl, on in (("имя", bool(name)), ("описание", bool(description)),
                             ("короткое описание", bool(short_description)),
                             ("приветствие", bool(greeting))) if on)
-    if language_code:
-        from services.bot_localization import lang_label as _bl_label
-        _changed = f"{_changed}; язык: {_bl_label(language_code)}"
     total_ok = prev_ok + ok_count
     _prev = f" (из них {prev_ok} — в прошлых прогонах)" if prev_ok else ""
     if fail_count:
@@ -7579,7 +7224,7 @@ async def _exec_bulk_bot_profile_rollback(
     target_ids = [int(s["target_id"]) for s in snaps]
     rows = await _fetch_bots_op(
         pool,
-        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[]) AND is_active AND deleted_at IS NULL",
+        "SELECT bot_id, token, username FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
         owner_id, target_ids)
     tok_by_bot = {int(r["bot_id"]): r["token"] for r in rows}
     label_by_bot = {int(r["bot_id"]): _bp_bot_label(r) for r in rows}
@@ -7588,8 +7233,8 @@ async def _exec_bulk_bot_profile_rollback(
         pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(snaps), op_id)
     already = await completed_targets(pool, op_id)
 
-    from services.clone_adapt_engine import restore_calls as _ca_restore_calls
-    from services.clone_adapt_engine import restored_label as _ca_restored_label
+    _METHOD = {"name": "setMyName", "description": "setMyDescription",
+               "short_description": "setMyShortDescription"}
     ok_count = 0
     fail_count = 0
     async with aiohttp.ClientSession() as sess:
@@ -7615,24 +7260,22 @@ async def _exec_bulk_bot_profile_rollback(
 
             reasons: list[str] = []
             if token is None:
-                reasons.append("бот недоступен для отката")
+                reasons.append("бот не найден")
             else:
-                # Имя/описания/команды/кнопка меню/права — общий список вызовов
-                # из движка клона: снимки «Клона и адаптации» лежат в той же
-                # таблице и откатываются этой же операцией (в том числе
-                # переводы на другие языки — ключи вида «name:en»).
-                for _lbl, method, _params in _ca_restore_calls(before):
+                for field, method in _METHOD.items():
+                    if field not in before:
+                        continue
                     try:
-                        data = await bot_api._call(sess, token, method, **_params)
+                        data = await bot_api._call(
+                            sess, token, method, **{field: before.get(field) or ""})
                     except Exception as e:  # noqa: BLE001
-                        reasons.append(f"{_lbl}: {bot_health._LABEL[bot_health.OTHER]}")
+                        reasons.append(bot_health._LABEL[bot_health.OTHER])
                         log.warning("rollback profile: bot=%s %s error=%s", bid, method, e)
                         continue
                     if not data.get("ok"):
                         _kind = bot_health.classify_error(
                             data.get("description", ""), data.get("error_code"))
-                        reasons.append(f"{_lbl}: " + bot_health._LABEL.get(
-                            _kind, bot_health._LABEL[bot_health.OTHER]))
+                        reasons.append(bot_health._LABEL.get(_kind, bot_health._LABEL[bot_health.OTHER]))
                 if "greeting" in before:
                     try:
                         async with pool.acquire() as conn:
@@ -7658,7 +7301,6 @@ async def _exec_bulk_bot_profile_rollback(
                 # боту — в сообщении: в логе владелец видит бота, не номер.
                 _restored = "; ".join(
                     f"{_BP_FIELD_LABEL.get(k, k)}: «{_bp_short(v)}»"
-                    if k in _BP_FIELD_LABEL else _ca_restored_label(k, v)
                     for k, v in before.items())
                 await _journal_done(
                     pool, op_id, ok_count + fail_count, target,
@@ -7721,11 +7363,10 @@ async def _exec_dm_campaign(
         )
         return {"status": "cancelled", "summary": "Operation cancelled before start"}
 
-    from services import dm_engine as _dme
     from services.dm_engine import run_campaign
 
     try:
-        _stopped_by = await run_campaign(pool, bot, campaign_id, op_id=op_id)
+        await run_campaign(pool, bot, campaign_id, op_id=op_id)
     except asyncio.CancelledError:
         # op_worker cancelled this asyncio task — mark campaign paused
         try:
@@ -7735,22 +7376,6 @@ async def _exec_dm_campaign(
         except Exception as e:
             log.warning("dm_campaign pause on cancel failed for campaign %d: %s", campaign_id, e)
         raise
-
-    # Кампания встала САМА — дневной лимит флота исчерпан или счёт за сегодня
-    # не прочитался. Это не конец рассылки и не пауза владельца: та же
-    # операция откладывается (до следующих суток или на пять минут) и
-    # продолжит с того же места — журнал кампании не даст написать дважды.
-    if _stopped_by in (_dme.CAMPAIGN_DAILY_CAP, _dme.CAMPAIGN_LIMIT_UNREADABLE):
-        if _stopped_by == _dme.CAMPAIGN_DAILY_CAP:
-            _wait = await _dme.seconds_until_next_day(pool)
-            _why = ("Все аккаунты отправили сегодня свой лимит ЛС — кампания "
-                    "продолжится завтра сама")
-        else:
-            _wait = 300
-            _why = ("Не прочитался счёт ЛС за сегодня — кампания продолжится "
-                    "через 5 минут, чтобы не превысить лимит")
-        return {"status": "requeue", "defer_s": _wait, "defer_cause": _stopped_by,
-                "reason": _why, "summary": _why}
 
     # Read final counts from dm_campaigns for the completion summary
     final = await _safe_fetchrow(
@@ -7814,72 +7439,13 @@ async def _reference_media_bytes(pool, owner_id: int, refs, acc_ids) -> bytes | 
     return None
 
 
-def _project_publication_refused(params: dict, reason: str) -> dict:
-    result = {"status": "failed", "summary": reason, "project_publish_scope_refused": True}
-    if params.get("repeat_interval_min"):
-        result["summary"] = f"{reason} Расписание остановлено. Подтвердите новый запуск."
-        result["recurring_stop_reason"] = reason
-    return result
-
-
-async def _review_queued_publication_copy(pool, owner_id: int, op_id: int, params: dict) -> str | None:
-    """Ранее поставленная копия тоже проверяет исходный выбор перед исполнением."""
-    if params.get("cloned_from_op") is None or params.get("_publication_catalog_since") is not None:
-        return None
-    from services.security import validate_integer
-
-    source_id = validate_integer(str(params["cloned_from_op"]), min_val=1, max_val=2**63 - 1)
-    op_type = await pool.fetchval(
-        "SELECT op_type FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, owner_id,
-    )
-    if source_id is None or op_type not in _obus_reg.CATALOG_PUBLICATION_TYPES:
-        return _obus_reg.CATALOG_PUBLISH_REVIEW_MESSAGE
-    try:
-        params["_publication_catalog_since"] = await _obus_reg.check_catalog_publish_derivation(
-            pool, owner_id, op_type, params, source_id, copying=True,
-        )
-    except _obus_reg.ProjectPublishReviewRequired as exc:
-        return str(exc)
-    if params.get("project_id") is not None:
-        params.setdefault("_project_scope_since", params["_publication_catalog_since"])
-    return None
-
-
 async def _exec_mass_publish(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Опубликовать сообщение во все управляемые каналы/группы владельца."""
-    copy_review = await _review_queued_publication_copy(pool, owner_id, op_id, params)
-    if copy_review:
-        return {"status": "failed", "summary": copy_review}
-
     from services import account_manager, postbot
 
     target = params.get("target", "channels")
-    if params.get("project_id") is not None:
-        from services.network_builder import (
-            project_pilot_enabled, project_publish_channels, project_publish_scope_was_detached,
-        )
-        from services.security import selection_ids, tg_id, validate_integer
-
-        if not project_pilot_enabled(owner_id):
-            return _project_publication_refused(params, "Доступ к публикациям проекта отозван.")
-        project_id = validate_integer(str(params["project_id"]), min_val=1, max_val=2**31 - 1)
-        channel_ids, error = selection_ids(params, "channel_ids", what="канал")
-        if project_id is None or error or not channel_ids or any(tg_id(cid) is None for cid in channel_ids):
-            return _project_publication_refused(
-                params, "Некорректный список каналов проекта. Подтвердите новый список.")
-        channels = await project_publish_channels(pool, owner_id, project_id)
-        if not set(channel_ids).issubset({row["channel_id"] for row in channels}):
-            return _project_publication_refused(
-                params, "Каналы больше не доступны в проекте. Подтвердите новый список.")
-        if await project_publish_scope_was_detached(
-            pool, owner_id, project_id, channel_ids, op_id, since=params.get("_project_scope_since"),
-        ):
-            return _project_publication_refused(
-                params, "Канал был отвязан после подтверждения. Подтвердите новый список.")
-        target = "channels"
-
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
     postbot_reference = postbot.parse_reference(mp_text)
     if postbot.has_explicit_intent(mp_text) and not postbot_reference:
@@ -8150,17 +7716,7 @@ async def _exec_mass_publish(
         *fetch_params,
     )
 
-    try:
-        stale_ids = await _channels_changed_after_queueing(
-            pool, owner_id, ("mass_publish", "quick_post"), await journal_op_ids(pool, op_id),
-            sorted({int(row["id"]) for row in db_pairs} | set(explicit_channel_ids)),
-            since=params.get("_publication_catalog_since"),
-        )
-    except (Exception, asyncio.CancelledError):
-        await release_accounts(mp_used_acc_ids)
-        raise
-
-    if not db_pairs and not stale_ids:
+    if not db_pairs:
         await release_accounts(mp_used_acc_ids)
         return {
             "status": "done",
@@ -8189,8 +7745,6 @@ async def _exec_mass_publish(
             }
         target_map[channel_id]["accounts"].append(acc)
 
-    for channel_id in sorted(stale_ids - target_map.keys()):
-        target_map[channel_id] = {"dialog": {"id": channel_id}, "accounts": []}
     targets = list(target_map.values())
     total = len(targets)
     await _safe_execute(
@@ -8201,8 +7755,7 @@ async def _exec_mass_publish(
     # Pre-scan: for channels without access_hash AND without username,
     # do one full dialog scan per account to resolve missing hashes before the main loop.
     # Persists resolved hashes to DB so future runs use the fast path (Strategy 1).
-    _needs_hash = [t for t in targets if t["dialog"]["id"] not in stale_ids
-                   and not t["dialog"]["access_hash"] and not t["dialog"].get("username")]
+    _needs_hash = [t for t in targets if not t["dialog"]["access_hash"] and not t["dialog"].get("username")]
     if _needs_hash:
         _prescan_accs: dict[int, dict] = {}
         for _t in _needs_hash:
@@ -8219,7 +7772,7 @@ async def _exec_mass_publish(
                     for d in _all_dlg
                     if d.get("access_hash")
                 }
-                for _t in _needs_hash:
+                for _t in targets:
                     _d = _t["dialog"]
                     _cid = int(_d["id"])
                     if not _d["access_hash"] and _cid in _dlg_map:
@@ -8272,11 +7825,6 @@ async def _exec_mass_publish(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                 op_id,
             )
-            continue
-        if dialog["id"] in stale_ids:
-            fail_count += 1
-            failed_channels.append(str(dialog["id"]))
-            await _record_stale_publication_target(pool, op_id, idx, dialog["id"])
             continue
         candidate_accounts = [
             _acc
@@ -8694,8 +8242,6 @@ async def _exec_mass_publish(
 
     parts = [f"Опубликовано: {ok_count}", f"ошибок: {fail_count}"]
     _summary = ", ".join(parts)
-    if stale_ids:
-        _summary += f". {_STALE_PUBLICATION_TARGET}"
     if _has_channel_link and ok_count > 0:
         # Владелец должен понимать природу риска: код снизил сигнатуру, но
         # окончательно сохранность целевого канала решают его прогретость и то,
@@ -8708,7 +8254,7 @@ async def _exec_mass_publish(
             "добавляйте ссылочную массу постепенно."
         )
     return {
-        "status": "failed" if stale_ids and not ok_count else "done",
+        "status": "done",
         "ok": ok_count,
         "failed": fail_count,
         "failed_channels": failed_channels[:50],
@@ -9792,21 +9338,6 @@ async def _mark_gp_asset(pool, target_id: int, asset_id: int, kind: str) -> bool
     return False
 
 
-async def _claim_gp_target(pool: asyncpg.Pool, target_id: int) -> bool:
-    """Создание в Telegram допустимо только после подтверждённой записи в базе."""
-    claimed = await _safe_execute(
-        pool,
-        "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
-        target_id,
-        log_ctx=f"[gp_claim target={target_id}]",
-    )
-    if claimed == "UPDATE 1":
-        return True
-    if claimed == "UPDATE 0":
-        return False
-    raise RuntimeError(f"Не удалось занять цель Global Presence №{target_id}")
-
-
 async def _revive_abandoned_gp_targets(pool: asyncpg.Pool, plan_id: int, what: str) -> None:
     """Расклинить цели плана Global Presence, брошенные прошлым прогоном.
 
@@ -9892,36 +9423,6 @@ async def _exec_global_presence_channel(
     asset_type = plan.get("asset_type", "channel")
     from services.geo_va_link import config_from_plan
     va_config = config_from_plan(plan.get("geo_selection"))
-    # ── Настройки роста из плана (паритет с Фабрикой) ──────────────────────────
-    # Первый пост + закреп, автопосев, оживление. Хранятся в geo_selection.
-    _gp_sel = plan.get("geo_selection")
-    if isinstance(_gp_sel, str):
-        try:
-            import json as _json
-            _gp_sel = _json.loads(_gp_sel or "{}")
-        except Exception:
-            _gp_sel = {}
-    _gp_sel = _gp_sel if isinstance(_gp_sel, dict) else {}
-    _gp_first_post = (_gp_sel.get("first_post") or "").strip()
-    _gp_pin_first = bool(_gp_sel.get("pin_first_post"))
-    try:
-        _gp_seed_count = max(0, min(int(_gp_sel.get("seed_count") or 0), 200))
-    except (TypeError, ValueError):
-        _gp_seed_count = 0
-    try:
-        _gp_engage_count = max(0, min(int(_gp_sel.get("engage_count") or 0), 200))
-    except (TypeError, ValueError):
-        _gp_engage_count = 0
-    # Пул аккаунтов для посева/оживления — ДРУГИЕ аккаунты флота (не создатель).
-    # Строим один раз; тот же проверенный путь, что в фабрике каналов.
-    _gp_seed_pool: list[int] = []
-    if _gp_seed_count > 0 or _gp_engage_count > 0:
-        try:
-            _sp_rows = await resource_selector.select_all_active(
-                pool, owner_id, respect_cooldown=False)
-            _gp_seed_pool = [int(r["id"]) for r in (_sp_rows or [])]
-        except Exception:
-            _gp_seed_pool = []
     # Тип плана — лишь запасной вариант. Решает тип КАЖДОЙ цели: проект-генератор
     # кладёт в один план каналы (новости, работа, афиша) и группы (чат, барахолка)
     # вперемешку, и общий флаг превратил бы половину структуры не в тот тип актива.
@@ -10083,7 +9584,13 @@ async def _exec_global_presence_channel(
 
                 acc = alt_acc
 
-            if not await _claim_gp_target(pool, target["id"]):
+            # Atomic claim: only proceed if target is still 'pending' to prevent duplicate processing
+            claimed = await _safe_execute(
+                    pool,
+                "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
+                target["id"],
+            )
+            if claimed == "UPDATE 0":
                 log.info(
                     "op_worker gp: target %d already claimed by another worker, skipping",
                     target["id"],
@@ -10431,100 +9938,26 @@ async def _exec_global_presence_channel(
                 duration_ms=int((time.monotonic() - t0_gp) * 1000),
             )
 
-            # ── Рост ресурса: первый пост (+закреп), оживление, посев ──────────
-            # Пустой канал мгновенно попадает в теневой бан — первый пост делает
-            # его «живым». Текст — пользовательский (спинтакс {A|B} + плейсхолдеры),
-            # иначе дженерик-welcome. Закреп/оживление/посев — паритет с Фабрикой,
-            # через те же проверенные boost_*-операции шины.
-            _gp_msg_id = 0
+            # Публикуем начальный пост — пустой канал немедленно попадает в shadow ban.
+            # Любой пост делает канал "живым" для алгоритмов Telegram.
             try:
-                if _gp_first_post:
-                    _geo_i = {"city": target.get("city") or "",
-                              "city_native": target.get("city") or "",
-                              "city_slug": target.get("city_slug") or "",
-                              "country": target.get("country") or "",
-                              "country_code": target.get("country_code") or "",
-                              "region": target.get("region") or "",
-                              "index": 1}
-                    from services.infra_generator import render_text as _rt
-                    _post_text = _rt(_gp_first_post, _geo_i,
-                                     random.Random(f"gpfp:{channel_id}")) or _gp_first_post
-                else:
-                    _post_text = f"{'👥' if is_group else '📢'} {title}"
-                    if _geo_label:
-                        _post_text += f"\n\n📍 {_geo_label}"
-                # Пауза перед первым постом остаётся ЦЕЛОЙ (зарегистрирована в
-                # _MUST_STAY_WHOLE): это не виток цикла, а разнос «создан»→«ожил»,
-                # укорачивать её нельзя — она и есть анти-детект-след.
+                _welcome_text = f"{'👥' if is_group else '📢'} {title}"
+                if _geo_label:
+                    _welcome_text += f"\n\n📍 {_geo_label}"
                 _post_delay = random.uniform(30, 60) * session_simulator.chaos_factor()
                 await asyncio.sleep(_post_delay)
-                _pr = await account_manager.post_to_channel(
-                    acc["session_str"], channel_id, _post_text[:4000],
-                    access_hash=channel_access_hash, _acc=dict(acc))
-                if isinstance(_pr, dict) and _pr.get("msg_id"):
-                    _gp_msg_id = int(_pr["msg_id"])
-                if _gp_pin_first and _gp_msg_id:
-                    try:
-                        await account_manager.pin_last_channel_post(
-                            acc["session_str"], channel_id,
-                            access_hash=channel_access_hash, _acc=dict(acc))
-                    except Exception:
-                        log_exc_swallow(log, f"gp_channel pin failed ch={channel_id}")
+                await account_manager.post_to_channel(
+                    acc["session_str"],
+                    channel_id,
+                    _welcome_text,
+                    access_hash=channel_access_hash,
+                    _acc=dict(acc),
+                )
                 log.info(
-                    "op_worker gp_channel: first post sent to channel_id=%s", channel_id
+                    "op_worker gp_channel: initial post sent to channel_id=%s", channel_id
                 )
             except Exception:
-                log_exc_swallow(log, f"first post failed for channel_id={channel_id}")
-
-            # Оживление: реакции + просмотры флотом. Только публичный канал (@) и
-            # когда есть пост — аккаунты должны видеть его без вступления.
-            if (_gp_engage_count > 0 and _gp_msg_id and applied_username
-                    and _gp_seed_pool and not is_group):
-                _eng_ids = [i for i in _gp_seed_pool
-                            if i != int(acc["id"])][:_gp_engage_count]
-                if _eng_ids:
-                    try:
-                        from services import operation_bus as _obus_eng
-                        await _obus_eng.submit(
-                            pool, owner_id, "boost_reactions",
-                            {"channel": f"@{applied_username}", "msg_id": _gp_msg_id,
-                             "account_ids": _eng_ids},
-                            total_items=len(_eng_ids),
-                            label=f"Оживление: реакции в {title[:40]}")
-                        await _obus_eng.submit(
-                            pool, owner_id, "boost_views",
-                            {"channel": f"@{applied_username}", "msg_ids": [_gp_msg_id],
-                             "account_ids": _eng_ids},
-                            total_items=len(_eng_ids),
-                            label=f"Оживление: просмотры в {title[:40]}")
-                    except Exception:
-                        log_exc_swallow(log, "gp_channel: engage submit failed")
-
-            # Автопосев участников: @username или инвайт-ссылка (приватный) →
-            # отдельной операцией boost_subscribers (свой захват, карантин, пейсинг).
-            if _gp_seed_count > 0 and _gp_seed_pool:
-                _seed_target = f"@{applied_username}" if applied_username else ""
-                if not _seed_target:
-                    try:
-                        _lk = await account_manager.create_channel_invite_link(
-                            acc["session_str"], channel_id,
-                            access_hash=channel_access_hash, _acc=acc)
-                        _seed_target = (_lk.get("invite_link")
-                                        if isinstance(_lk, dict) else "") or ""
-                    except Exception:
-                        _seed_target = ""
-                _seed_ids = [i for i in _gp_seed_pool
-                             if i != int(acc["id"])][:_gp_seed_count]
-                if _seed_target and _seed_ids:
-                    try:
-                        from services import operation_bus as _obus_seed
-                        await _obus_seed.submit(
-                            pool, owner_id, "boost_subscribers",
-                            {"target": _seed_target, "account_ids": _seed_ids},
-                            total_items=len(_seed_ids),
-                            label=f"Автопосев: +{len(_seed_ids)} в {title[:40]}")
-                    except Exception:
-                        log_exc_swallow(log, "gp_channel: seed submit failed")
+                log_exc_swallow(log, f"initial post failed for channel_id={channel_id}")
 
             # Link to ecosystem if one exists for this owner
             try:
@@ -11216,7 +10649,13 @@ async def _exec_global_presence_bot(
             if bot_username and not bot_username.lower().endswith("bot"):
                 bot_username = bot_username + "_bot"
 
-            if not await _claim_gp_target(pool, target["id"]):
+            # Atomic claim: skip if already claimed by another worker
+            claimed = await _safe_execute(
+                    pool,
+                "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
+                target["id"],
+            )
+            if claimed == "UPDATE 0":
                 log.info(
                     "op_worker gp_bot: target %d already claimed, skipping", target["id"]
                 )
@@ -13000,16 +12439,6 @@ async def _exec_strike(
         except (ValueError, TypeError):
             log.warning("_exec_strike op=%d: invalid account_id=%r, skipped", op_id, _x)
 
-    # Явно выбранные владельцем SMTP-ящики (пусто = все активные). Решает, с каких
-    # ящиков уйдёт юридический вектор; owner_id в запросе ящиков скоупит, чужой id
-    # просто не выберется.
-    mailbox_ids: list[int] = []
-    for _m in params.get("mailbox_ids") or []:
-        try:
-            mailbox_ids.append(int(_m))
-        except (ValueError, TypeError):
-            log.warning("_exec_strike op=%d: invalid mailbox_id=%r, skipped", op_id, _m)
-
     if not target:
         return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
 
@@ -13105,15 +12534,9 @@ async def _exec_strike(
     # нечего (ни аккаунтов, ни SMTP), а не тихо «готово, 0».
     if not viable:
         try:
-            if mailbox_ids:
-                _smtp_cnt = int(await pool.fetchval(
-                    "SELECT COUNT(*) FROM strike_email_accounts "
-                    "WHERE owner_id=$1 AND is_active=TRUE AND id = ANY($2::bigint[])",
-                    owner_id, mailbox_ids) or 0)
-            else:
-                _smtp_cnt = int(await pool.fetchval(
-                    "SELECT COUNT(*) FROM strike_email_accounts "
-                    "WHERE owner_id=$1 AND is_active=TRUE", owner_id) or 0)
+            _smtp_cnt = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM strike_email_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE", owner_id) or 0)
         except Exception:
             _smtp_cnt = 0
         if not _smtp_cnt:
@@ -13190,7 +12613,6 @@ async def _exec_strike(
         phase="recon",  # начальная фаза: strike_engine начнёт со сбора данных
         mode=strike_mode,
         owner_id=owner_id,
-        mailbox_ids=mailbox_ids,
     )
 
     # Progress callback: обновляет done_items в БД при переходе между волнами
@@ -13237,11 +12659,6 @@ async def _exec_strike(
 
     summary_text = format_strike_summary(results)
     total_reported = sum(getattr(r, "peer_reported", 0) for r in results)
-    total_emails = sum(getattr(r, "emails_sent", 0) for r in results)
-    # Исход по ФАКТУ: не ушло НИ ОДНОЙ жалобы и НИ ОДНОГО письма = провал, а не
-    # «выполнено». (Крах staggered_strike уже отдаёт failed выше по except.)
-    # Письма учитываем отдельно: legal-only заход (без флота) шлёт только их.
-    _strike_did_anything = bool(total_reported or total_emails)
 
     # ── Настойчивая эскалация: переповтор, пока цель не снята ──────────────────
     # Реальные тейкдауны идут во времени: площадка/модерация реагирует не мгновенно.
@@ -13290,18 +12707,12 @@ async def _exec_strike(
             )
 
     return {
-        "status": "done" if _strike_did_anything else "failed",
+        "status": "done",
         "target": target,
         "waves_planned": num_waves,
         "accounts_used": len(viable),
         "total_reported": total_reported,
-        "emails_sent": total_emails,
-        "summary": (
-            (summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}")
-            if _strike_did_anything else
-            f"⚠️ Strike по {target}: не отправлено ни одной жалобы и ни одного письма (0). "
-            "Операция не выполнена."
-        ),
+        "summary": summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}",
     }
 
 
@@ -14266,7 +13677,6 @@ async def _exec_group_import_all(
     try:
 
         total_imported = 0
-        total_disabled = 0
         total_foreign = 0  # группы, где аккаунт лишь участник — чужие, не тянем
         errors: list[str] = []
         n = len(accounts)
@@ -14294,9 +13704,8 @@ async def _exec_group_import_all(
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
                     # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
                     # ВСЕ ранее сохранённые каналы/группы аккаунта перед вставкой этого среза.
-                    imported = await add_managed_channels(pool, owner_id, acc["id"], groups)
-                    total_imported += imported
-                    total_disabled += len(groups) - imported
+                    await add_managed_channels(pool, owner_id, acc["id"], groups)
+                    total_imported += len(groups)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -14311,51 +13720,15 @@ async def _exec_group_import_all(
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
         foreign_hint = f"\n🚫 Пропущено чужих (только участник): {total_foreign}" if total_foreign else ""
-        disabled_hint = f"\nОтключены в Infragram: {total_disabled}" if total_disabled else ""
         return {
             "status": "done",
             "imported": total_imported,
-            "disabled_skipped": total_disabled,
             "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{disabled_hint}{err_hint}",
+            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
-
-
-# Суточный потолок объявлений в группы с ОДНОГО аккаунта. Раньше его не было
-# вовсе: объявление уходило во ВСЕ группы аккаунта подряд с паузой в три
-# секунды — сотня одинаковых постов за пять минут, то есть ровно та
-# сигнатура, за которую Telegram ставит флуд и спам-флаг, а админы групп
-# банят. Темп и потолок — как у живого человека, который рекламирует себя.
-GROUP_ANNOUNCE_DAILY_CAP = 30
-GROUP_ANNOUNCE_DAILY_CAP_MAX = 80
-GROUP_ANNOUNCE_GAP_S = (25.0, 60.0)
-_GA_SENDING = "отправляется"
-
-
-def group_announce_cap(raw) -> int:
-    """Потолок владельца (params.per_day) с безопасным дефолтом и потолком."""
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        n = 0
-    if n <= 0:
-        return GROUP_ANNOUNCE_DAILY_CAP
-    return min(n, GROUP_ANNOUNCE_DAILY_CAP_MAX)
-
-
-async def _group_announces_today(pool, owner_id: int, acc_id: int) -> int:
-    """Сколько объявлений этот аккаунт уже отправил в группы за сутки (по часам
-    базы), всеми рассылками владельца. Бросает на сбое: без счёта потолок не
-    держится, и операция уходит на повтор, а не шлёт вслепую."""
-    return int(await pool.fetchval(
-        "SELECT count(*) FROM operation_log l JOIN operation_queue q ON q.id = l.op_id "
-        "WHERE q.owner_id=$1 AND q.op_type='group_announce' "
-        "AND q.params->>'acc_id' = $2::text AND l.status='ok' "
-        "AND l.created_at >= date_trunc('day', now())",
-        owner_id, str(int(acc_id))) or 0)
 
 
 async def _exec_group_announce(
@@ -14443,42 +13816,25 @@ async def _exec_group_announce(
         ok_count = 0
         err_count = 0
 
-        # Повтор операции (автоматический после сетевого сбоя/флуда, сброс
-        # зависшей, ручной) запускает исполнителя заново с done_items=0, и он
-        # идёт по ВСЕМУ списку сначала. Без журнала целей это вторая
-        # публикация туда, где пост уже стоит: дубль у подписчиков, сожжённый
-        # дневной лимит аккаунта и лишний повод для флуда.
+            # Повтор операции (автоматический после сетевого сбоя/флуда, сброс
+            # зависшей, ручной) запускает исполнителя заново с done_items=0, и он
+            # идёт по ВСЕМУ списку сначала. Без журнала целей это вторая
+            # публикация туда, где пост уже стоит: дубль у подписчиков, сожжённый
+            # дневной лимит аккаунта и лишний повод для флуда.
+        async def _log_grp(step: int, key: str, ok: bool, msg: str = "") -> None:
+            await _journal_write(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,$4,$5)",
+                op_id, step, key, "ok" if ok else "error", (msg or None),
+                log_ctx=f"[group_announce_log op={op_id}]",
+            )
+
         _already = await completed_targets(pool, op_id)
         if _already:
             log.info("group_announce op=%d: повтор — %d групп уже получили объявление",
                      op_id, len(_already))
 
-        from services import dm_engine as _dme
-        _cap = group_announce_cap(params.get("per_day"))
-        try:
-            _sent_today = await _group_announces_today(pool, owner_id, int(acc["id"]))
-        except Exception as e:
-            log.warning("group_announce op=%d: счёт за сутки не прочитался: %s", op_id, e)
-            _why = "Не удалось прочитать, сколько объявлений уже ушло сегодня — повторим позже"
-            return {"status": "requeue", "defer_s": 300, "defer_cause": "limit_unreadable",
-                    "reason": _why, "summary": _why}
-
-        async def _unmark(key: str) -> None:
-            # Telegram цель не рассматривал (флуд, мёртвая сессия, сеть):
-            # метка «отправляется» снимается, повтор отправит сюда снова.
-            await _safe_execute(
-                pool, "DELETE FROM operation_log WHERE op_id=$1 AND target=$2 "
-                      "AND status='ok' AND message=$3",
-                op_id, key, _GA_SENDING, log_ctx=f"[group_announce_unmark op={op_id}]")
-
-        async def _settle(key: str, ok: bool, msg: str = "") -> None:
-            await _safe_execute(
-                pool, "UPDATE operation_log SET status=$3, message=$4 "
-                      "WHERE op_id=$1 AND target=$2 AND status='ok' AND message=$5",
-                op_id, key, "ok" if ok else "error", (msg or None), _GA_SENDING,
-                log_ctx=f"[group_announce_settle op={op_id}]")
-
-        _posted_now = 0
         for idx, grp in enumerate(groups):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -14493,78 +13849,31 @@ async def _exec_group_announce(
                 await _safe_execute(
                         pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
-            if _sent_today >= _cap:
-                # Потолок суток: та же операция продолжит завтра с этого места
-                # (журнал целей не даст повторить уже отправленное).
-                _why = (f"Суточный потолок аккаунта ({_cap} объявлений в группы) "
-                        f"выбран — продолжим завтра. Отправлено в этот заход: {ok_count}")
-                return {"status": "requeue", "defer_s": await _dme.seconds_until_next_day(pool),
-                        "defer_cause": "daily_cap", "ok": ok_count, "fail": err_count,
-                        "reason": _why, "summary": _why}
-            if _posted_now:
-                # Пауза между группами — ДО следующего поста, а не после
-                # последнего; под губернатором флота и с отменой владельца.
-                await cancellable_pause(
-                    pool, op_id,
-                    await _governed_delay(pool, owner_id, random.uniform(*GROUP_ANNOUNCE_GAP_S)),
-                    "group_announce_gap")
-                if await _is_cancelled(pool, op_id):
-                    continue
-            # НЕОБРАТИМОЕ ОТМЕЧАЕТСЯ ДО НЕГО: метка в журнале — цена поста.
-            # Обрыв между постом и записью (деплой, SIGTERM) раньше давал
-            # второе такое же объявление в ту же группу на повторе.
-            if await _journal_write(
-                    pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,$4,$5)", op_id, idx, _key, "ok", _GA_SENDING,
-                    log_ctx=f"[group_announce_mark op={op_id}]",
-                    where="group_announce_mark") == "ERROR":
-                err_count += 1
-                await _safe_execute(
-                        pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-                continue
             access_hash = grp.get("access_hash", 0) or 0
             _ann = _expand_spintax(text)  # свой вариант объявления в эту группу
-            _posted_now += 1
-            _sent_today += 1
             try:
                 result = await account_manager.post_to_channel(
                     acc["session_str"], grp["id"], _ann, access_hash=access_hash, _acc=acc
                 )
+                if "error" in result or result.get("banned"):
+                    err_count += 1
+                    await _log_grp(idx, _key, False,
+                                   str(result.get("error") or "banned")[:200])
+                else:
+                    ok_count += 1
+                    await _log_grp(idx, _key, True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 log_exc_swallow(log, "group_announce: post_to_channel grp=%s: %s", grp.get("id"), exc)
-                result = {"error": str(exc)[:200]}
-            _kind = _dme.classify_send_result(
-                result if "error" in result or result.get("banned") else {"ok": True})
-            if _kind == "sent":
-                ok_count += 1
-                await _settle(_key, True)
-            elif _kind == "flood" or result.get("flood_wait"):
-                await _unmark(_key)
-                await _note_flood_penalty(pool, int(acc["id"]),
-                                          int(result.get("flood_wait") or 600), "post", op_id)
-                _wait = int(result.get("flood_wait") or 600) + random.randint(30, 180)
-                _why = (f"Telegram попросил паузу (флуд-лимит) — объявления "
-                        f"продолжатся позже. Отправлено в этот заход: {ok_count}")
-                return {"status": "requeue", "defer_s": _wait, "defer_cause": "flood",
-                        "ok": ok_count, "fail": err_count, "reason": _why, "summary": _why}
-            elif _kind == "auth":
-                await _unmark(_key)
-                return {"status": "failed", "ok": ok_count, "fail": err_count,
-                        "reason": "Сессия аккаунта недействительна — переподключите аккаунт",
-                        "summary": (f"❌ Сессия аккаунта недействительна. Отправлено: "
-                                    f"{ok_count} из {total}")}
-            elif result.get("proxy_error"):
-                await _unmark(_key)
                 err_count += 1
-            else:
-                err_count += 1
-                await _settle(_key, False, str(result.get("error") or "banned")[:200])
+                await _log_grp(idx, _key, False, str(exc)[:200])
 
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx < total - 1:
+                # межцелевой темп анонса в группы под губернатором
+                await asyncio.sleep(await _governed_delay(pool, owner_id, 3.0))
 
         return {
             "status": "done",
@@ -14617,11 +13926,10 @@ async def _exec_bulk_dm_adhoc(
     # Потолок сообщений с ОДНОГО аккаунта за эту рассылку. У кампаний дневной
     # лимит есть давно, у разовой рассылки не было ничего: 1000 получателей на
     # двух аккаунтах — это по 500 ЛС с каждого и почти верный бан.
-    # Теперь это СУТОЧНЫЙ потолок и он есть всегда (dm_engine.effective_daily_cap):
-    # не заданный — безопасный дефолт, а уже отправленное сегодня другими
-    # рассылками и кампаниями засчитывается ниже. Прежний «потолок на эту
-    # рассылку» давал полный лимит каждой новой рассылке того же дня.
-    _explicit_cap = params.get("per_account_cap")
+    try:
+        per_acc_cap = int(params.get("per_account_cap") or 0) or None
+    except (TypeError, ValueError):
+        per_acc_cap = None
 
     # Медиа (опц.): файл лежит на диске контейнера, читаем один раз. С медиа
     # текст становится ПОДПИСЬЮ и может быть пустым.
@@ -14717,19 +14025,7 @@ async def _exec_bulk_dm_adhoc(
         skip_count = 0     # получатель недостижим (приватность/блок/удалён) — не наша ошибка
         flood_wait_total = 0.0
         acc_idx = 0
-        from services import dm_engine as _dme
-        # Лимит у каждого аккаунта свой: явный владельца — общий, без него —
-        # по возрасту, профилю и неделе истории ЛС (dm_engine.dm_caps_for).
-        per_acc_cap = await _dme.dm_caps_for(
-            pool, owner_id, [a["id"] for a in active_accounts], _explicit_cap)
-        try:
-            sent_by_acc: dict[int, int] = await _dme.dm_sent_today(pool, owner_id)
-        except _dme.DailyCountUnreadable:
-            _why = ("Не прочитался счёт ЛС за сегодня — рассылка продолжится "
-                    "через 5 минут, чтобы не превысить суточный лимит")
-            return {"status": "requeue", "defer_s": 300,
-                    "defer_cause": _dme.CAMPAIGN_LIMIT_UNREADABLE,
-                    "reason": _why, "summary": _why}
+        sent_by_acc: dict[int, int] = {}
         _last_rebalance = time.monotonic()
 
         # Повтор операции (автоматический после сетевого сбоя, сброс зависшей,
@@ -14826,24 +14122,15 @@ async def _exec_bulk_dm_adhoc(
             # оставшиеся аккаунты и грузил одни сильнее других.
             acc, acc_idx = _pick_acc(active_accounts, acc_idx, sent_by_acc, per_acc_cap)
             if acc is None:
-                # Все аккаунты выбрали суточный лимит — это защита, а не ошибка,
-                # и не конец рассылки. Раньше остаток списывался в «пропущено»
-                # строкой журнала, то есть эти люди не получали сообщения уже
-                # никогда. Теперь операция откладывается до следующих суток и
-                # продолжит с этого места: отправленным журнал не даст написать
-                # второй раз, а строки на неотправленных здесь НЕ пишутся —
-                # иначе повтор счёл бы их закрытыми.
+                # Все аккаунты выбрали лимит на эту рассылку — это защита, а не
+                # ошибка: честно сообщаем и не дожимаем флот.
                 _left = total - i
-                log.info("bulk_dm_adhoc op=%d: суточный лимит %s исчерпан, "
-                         "осталось %d — продолжим завтра", op_id, per_acc_cap, _left)
-                _why = (f"Аккаунты отправили сегодня свой лимит ЛС "
-                        f"({sum(per_acc_cap.values())} на весь флот). "
-                        f"Отправлено в этот заход: {ok_count}, осталось "
-                        f"{_left} — рассылка продолжится завтра сама")
-                return {"status": "requeue",
-                        "defer_s": await _dme.seconds_until_next_day(pool),
-                        "defer_cause": _dme.CAMPAIGN_DAILY_CAP,
-                        "reason": _why, "summary": _why}
+                skip_count += _left
+                await _log_step(i + 1, username, "skip",
+                                f"лимит {per_acc_cap} на аккаунт исчерпан")
+                log.info("bulk_dm_adhoc op=%d: лимит на аккаунт исчерпан, не отправлено %d",
+                         op_id, _left)
+                break
             _msg = _expand_spintax(text)  # свой вариант текста этому получателю
 
             try:
@@ -14972,156 +14259,68 @@ async def _exec_bulk_dm_adhoc(
         await release_accounts(sorted(_held_ids))
 
 
-async def _channels_changed_after_queueing(
-    pool: asyncpg.Pool, owner_id: int, op_type: str | tuple[str, ...], family_ids: list[int],
-    targets: list[int], *, since: str | None = None,
-) -> set[int]:
-    """Ресурсы, для которых очистка или восстановление отменили прежний выбор."""
-    if not targets:
-        return set()
-    from datetime import datetime
-
-    cutoff = datetime.fromisoformat(since) if since is not None else None
-    if cutoff is not None and cutoff.tzinfo is None:
-        raise ValueError("Время подтверждения публикации без часового пояса")
-    rows = await pool.fetch(
-        """SELECT split_part(i.scope, ':', 2) AS channel_id
-             FROM resource_selection_invalidations i
-            WHERE i.owner_id=$1 AND i.scope=ANY($2::text[])
-              AND i.changed_at >= LEAST($5::timestamptz, (
-                  SELECT min(queued.created_at) FROM operation_queue queued
-                   WHERE queued.id=ANY($3::bigint[]) AND queued.owner_id=$1 AND queued.op_type=ANY($4::text[])))""",
-        owner_id, [f"channel:{ch_id}" for ch_id in targets],
-        family_ids, [op_type] if isinstance(op_type, str) else list(op_type), cutoff,
-    )
-    return {int(row["channel_id"]) for row in rows}
-
-
-_STALE_PUBLICATION_TARGET = "Ресурс отключали или восстанавливали после постановки. Подтвердите новую публикацию."
-
-
-async def _record_stale_publication_target(pool, op_id: int, step: int, channel_id: int) -> None:
-    await _journal_write(
-        pool,
-        """INSERT INTO operation_log(op_id, step_num, target, status, message)
-           SELECT $1::int,$2::int,$3::text,'skipped',$4::text WHERE NOT EXISTS (
-               SELECT 1 FROM operation_log WHERE op_id=$1 AND target=$3 AND status='skipped' AND message=$4)""",
-        op_id, step, str(channel_id), _STALE_PUBLICATION_TARGET,
-        log_ctx=f"[publish_cleanup op={op_id}]", where="publish_cleanup",
-    )
-    await _safe_execute(pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-
-
 async def _exec_pin_last_post(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Закрепить последний пост, сверив привязку и сохранив ID перед запросом."""
+    """Закрепить последний пост в канале от имени аккаунта-владельца/админа."""
+    import html as _html
     from services import account_manager
-    from services.security import tg_id, validate_integer
 
-    if any(type(params.get(key)) not in (int, str) for key in ("channel_ref", "account_id")):
-        return {"status": "failed", "reason": "Некорректный канал или аккаунт"}
-    channel_id = tg_id(params.get("channel_ref"))
-    account_id = validate_integer(params.get("account_id"), min_val=1)
-    row_id = params.get("managed_channel_row_id")
-    if row_id is not None:
-        row_id = validate_integer(row_id, min_val=1) if type(row_id) in (int, str) else None
-        if row_id is None:
-            return {"status": "failed", "reason": "Некорректная привязка канала"}
-    if channel_id is None or account_id is None:
-        return {"status": "failed", "reason": "Некорректный канал или аккаунт"}
+    channel_ref = params.get("channel_ref")
+    account_id = params.get("account_id")
+    access_hash = int(params.get("access_hash", 0) or 0)
+    if not channel_ref or not account_id:
+        return {"status": "failed", "reason": "Не указан channel_ref или account_id"}
 
-    target = str(channel_id)
-    family_ids = await journal_op_ids(pool, op_id)
-    previous = await _journal_fetch(
+    row = await _safe_fetchrow(
         pool,
-        """SELECT entry.status, entry.message FROM operation_log entry
-            JOIN operation_queue job ON job.id=entry.op_id AND job.owner_id=$3
-                                    AND job.op_type='pin_last_post'
-           WHERE entry.op_id=ANY($1::bigint[]) AND entry.target=$2
-             AND entry.status IN ('started', 'ok', 'error')
-           ORDER BY entry.id DESC LIMIT 1""",
-        family_ids, target, owner_id, where="pin_last_post",
+        "SELECT id, session_str, first_name, phone, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id "
+        "AND up.is_active=TRUE) AS proxy_url "
+        "FROM tg_accounts "
+        "WHERE owner_id=$1 AND id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, int(account_id),
     )
-    if previous:
-        last = previous[0]
-        if last["status"] == "ok":
-            await _safe_execute(pool, "UPDATE operation_queue SET done_items=1 WHERE id=$1", op_id)
-            return {"status": "done", "ok": 1, "summary": last["message"]}
-        if last["status"] == "started":
-            return {"status": "failed", "reason": f"Требуется сверка в Telegram. {last['message']}"}
-
-    row = await pool.fetchrow(
-        """SELECT a.id, a.session_str, a.first_name, a.phone, a.device_model, a.system_version,
-                  a.app_version, a.lang_code, a.system_lang_code, p.proxy_url,
-                  mc.access_hash, mc.username
-             FROM managed_channels mc
-             JOIN operation_queue queued ON queued.id=$5 AND queued.owner_id=mc.owner_id
-                                       AND queued.op_type='pin_last_post'
-             JOIN tg_accounts a ON a.owner_id=mc.owner_id AND a.id=mc.acc_id
-             LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-            WHERE mc.owner_id=$1 AND mc.channel_id=$2 AND mc.acc_id=$3
-              AND ($4::int IS NULL OR mc.id=$4)
-              AND a.is_active=TRUE AND NULLIF(a.session_str, '') IS NOT NULL""",
-        owner_id, channel_id, account_id, row_id, op_id,
-    )
-    if not row or channel_id in await _channels_changed_after_queueing(
-        pool, owner_id, "pin_last_post", family_ids, [channel_id],
-    ):
-        return {"status": "failed", "reason": "Канал отключён, восстановлен после постановки или привязка к доступному аккаунту изменилась"}
+    if not row:
+        return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
     acc = dict(row)
-    if not await try_claim_account(account_id):
-        return {"status": "requeue", "reason": "Аккаунт занят другой операцией — попробуйте позже"}
 
-    requested_post = None
-
-    async def before_pin(post_id):
-        nonlocal requested_post
-        if await _is_cancelled(pool, op_id):
-            raise asyncio.CancelledError
-        saved = await _journal_write(
-            pool,
-            """INSERT INTO operation_log(op_id, step_num, target, status, message)
-               SELECT $1::int, 1, $2::text, 'started', $3::text WHERE NOT EXISTS (
-                   SELECT 1 FROM operation_log WHERE op_id=$1 AND target=$2
-                      AND status='started' AND message=$3
-                      AND id > COALESCE((SELECT MAX(id) FROM operation_log WHERE op_id=$1
-                                        AND target=$2 AND status IN ('ok', 'error')), 0))""",
-            op_id, target, f"Запрос на закрепление поста #{post_id}", where="pin_last_post",
-        )
-        if saved == "ERROR":
-            raise JournalUnreadable("Не удалось сохранить ID поста перед закреплением")
-        requested_post = post_id
+    # Отказной захват: операция работает живой сессией этого аккаунта.
+    # Без захвата он мог параллельно вести другую операцию (две сессии на
+    # одном auth-key → AUTH_KEY_DUPLICATED).
+    if not await try_claim_account(int(acc["id"])):
+        return {"status": "requeue",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(acc["id"])
 
     try:
+
         await _safe_execute(pool, "UPDATE operation_queue SET total_items=1 WHERE id=$1", op_id)
+
         try:
             result = await account_manager.pin_last_channel_post(
-                acc["session_str"], channel_id, access_hash=acc["access_hash"] or 0,
-                username=acc["username"] or "", _acc=acc, before_pin=before_pin)
+                acc["session_str"], channel_ref, access_hash=access_hash, _acc=acc)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            log.warning("_exec_pin_last_post op=%s: %s", op_id, type(exc).__name__)
-            result = {"error": "Вызов закрепления завершился с ошибкой"}
+        except Exception as _pin_exc:
+            log.warning("_exec_pin_last_post acc=%s: %s", acc.get("id"), _pin_exc)
+            result = {"error": str(_pin_exc)[:120]}
 
         await _safe_execute(pool, "UPDATE operation_queue SET done_items=1 WHERE id=$1", op_id)
-        if requested_post is not None and result.get("pinned_msg_id") == requested_post:
-            summary = f"Закреплён пост #{requested_post}"
-            if await _journal_done(pool, op_id, 1, target, summary):
-                return {"status": "done", "ok": 1, "failed": 0, "summary": summary}
-        if requested_post is not None and not result.get("pin_rejected"):
-            reason = f"Требуется сверка в Telegram. Запрос на закрепление поста #{requested_post}"
-        else:
-            reason = redact_secrets(str(result.get("error") or "Не удалось закрепить пост"), limit=150)
-            await _journal_write(
-                pool, """INSERT INTO operation_log(op_id, step_num, target, status, message)
-                         VALUES($1, 1, $2, 'error', $3)""",
-                op_id, target, reason, where="pin_last_post",
-            )
-        return {"status": "failed", "ok": 0, "failed": 1, "reason": reason}
+
+        if "pinned_msg_id" in result:
+            return {
+                "status": "done", "ok": 1, "failed": 0,
+                "summary": f"\U0001F4CC Закреплён пост msg_id={result['pinned_msg_id']}",
+            }
+        return {
+            "status": "failed", "ok": 0, "failed": 1,
+            "reason": result.get("error", "ошибка"),
+            "summary": f"❌ {_html.escape(str(result.get('error', 'ошибка'))[:120])}",
+        }
     finally:
-        await release_accounts([account_id])
+        await release_accounts([_claimed_acc])
 
 
 async def _exec_bulk_post_to_channel(
@@ -15554,7 +14753,6 @@ _CHAN_EXEC_OPS = {
     "chan_uname": "🔤 Username",
     "chan_about": "📄 Описание",
     "chan_title": "📛 Название",
-    "chan_avatar": "🖼 Аватар",
     "chan_delete": "💥 Удаление каналов в Telegram",
     "chan_clear": "🧹 Очистка постов",
     "chan_leave": "🚪 Выход из каналов",
@@ -15682,96 +14880,68 @@ async def _exec_bulk_chan_exec(
                 "reason": "Состав массового переименования не был подтверждён",
             }
 
-    try:
-        if any(type(pair[key]) not in (int, str) for pair in channel_acc_pairs
-               for key in ("channel_id", "acc_id")):
-            raise ValueError
-        pairs = [(int(pair["channel_id"]), int(pair["acc_id"])) for pair in channel_acc_pairs]
-        if any(not channel_id or not -(2**63) <= channel_id < 2**63 or not 0 < acc_id < 2**31
-               for channel_id, acc_id in pairs):
-            raise ValueError
-    except (TypeError, KeyError, ValueError, OverflowError):
-        return {"status": "failed", "reason": "Некорректная привязка канала к аккаунту"}
-
-    family_ids = await journal_op_ids(pool, op_id)
-    already = await completed_targets(pool, op_id, family_ids=family_ids)
-    prior_ok = len({str(ch_id) for ch_id, _ in pairs} & already)
-    selected_ids = sorted({ch_id for ch_id, _ in pairs if str(ch_id) not in already})
-    catalog = await pool.fetch(
-        """SELECT channel_id, acc_id, title, username, access_hash, type
-             FROM managed_channels WHERE owner_id=$1 AND channel_id=ANY($2::bigint[])""",
-        owner_id, selected_ids,
-    )
-    current = {(row["channel_id"], row["acc_id"]): row for row in catalog}
-    stale_ids = await _channels_changed_after_queueing(
-        pool, owner_id, "bulk_chan_exec", family_ids,
-        sorted({ch_id for ch_id, acc_id in pairs if (ch_id, acc_id) in current}),
-    )
-    acc_ids = sorted({acc_id for ch_id, acc_id in pairs
-                      if (ch_id, acc_id) in current and ch_id not in stale_ids})
+    # Collect unique acc_ids and fetch sessions from DB (never pass session_str in params)
+    acc_ids = list({int(p["acc_id"]) for p in channel_acc_pairs})
     rows = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=acc_ids, min_trust_score=0.0) if acc_ids else []
+        pool, owner_id, include_ids=[int(_i) for _i in acc_ids], min_trust_score=0.0)
+    if not rows:
+        return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
     acc_map = {int(r["id"]): dict(r) for r in rows}
-    claimed_ids = await try_claim_accounts(list(acc_map)) if acc_map else []
-    if acc_map and not claimed_ids:
+
+    # Отказной захват вместо безусловной пометки. Пары «канал↔аккаунт» с
+    # незахваченным аккаунтом выбрасываем: работать ими нельзя, а молча оставить
+    # их в total — соврать в прогрессе и в итоге.
+    claimed_ids = await try_claim_accounts([int(a) for a in acc_map])
+    if not claimed_ids:
         return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
-    claimed = set(claimed_ids)
-    total = len(pairs)
-    busy = 0
+    _claimed_set = set(claimed_ids)
+    _pairs_before = len(channel_acc_pairs)
+    channel_acc_pairs = [p for p in channel_acc_pairs
+                         if int(p["acc_id"]) in _claimed_set]
+    _busy = _pairs_before - len(channel_acc_pairs)
+
+    total = len(channel_acc_pairs)
+    await _safe_execute(
+            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
     ok_list: list[str] = []
     err_list: list[str] = []
+    # Дверь идемпотентности: после сбоя/деплоя уже обработанные каналы не
+    # трогаем второй раз (повторная смена юзернейма, повторное удаление).
+    already = await completed_targets(pool, op_id)
+    _step = 0
 
     try:
-        await _safe_execute(
-            pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
-        for idx, (ch_id, acc_id) in enumerate(pairs):
+        for idx, pair in enumerate(channel_acc_pairs):
             if await _is_cancelled(pool, op_id):
                 return {
                     "status": "cancelled",
-                    "ok": prior_ok + len(ok_list),
+                    "ok": len(ok_list),
                     "fail": len(err_list),
-                    "summary": f"Отменено. Изменено: {prior_ok + len(ok_list)}",
+                    "summary": f"Отменено. Изменено: {len(ok_list)}",
                 }
 
+            ch_id = pair["channel_id"]
             if str(ch_id) in already:
                 await _safe_execute(
                     pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
-            row = current.get((ch_id, acc_id))
-            acc = acc_map.get(acc_id)
-            reason = ""
-            if row is None:
-                reason = "Ресурс отключён, удалён или сменил привязку к аккаунту"
-            elif ch_id in stale_ids:
-                reason = "Ресурс отключали или восстанавливали после постановки. Подтвердите новую команду"
-            elif acc is None:
-                reason = "Привязанный аккаунт недоступен"
-            elif acc_id not in claimed:
-                busy += 1
-                reason = "Привязанный аккаунт занят другой операцией"
-            if reason:
-                err_list.append(f"❌ {ch_id}: {reason}")
-                await _journal_write(
-                    pool,
-                    """INSERT INTO operation_log(op_id, step_num, target, status, message)
-                       SELECT $1::int,$2::int,$3::text,'skipped',$4::text WHERE NOT EXISTS (
-                           SELECT 1 FROM operation_log
-                            WHERE op_id=$1 AND step_num=$2 AND target=$3
-                              AND status='skipped' AND message=$4)""",
-                    op_id, idx + 1, str(ch_id), reason,
-                    log_ctx=f"[bulk_chan_exec op={op_id}]", where="bulk_chan_exec",
-                )
-                await _safe_execute(
-                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-                continue
-
+            acc_id = int(pair["acc_id"])
             _ok_before = len(ok_list)
-            chan_title = _html.escape(redact_secrets(str(row["title"] or ch_id)))
+            chan_title = _html.escape(str(pair.get("title") or ch_id))
             # access_hash/username нужны, чтобы свежий клиент нашёл канал по id
             # (иначе смена названия/описания давала 0 — get_entity(id) падал).
-            _pair_hash = int(row["access_hash"] or 0)
-            _pair_uname = str(row["username"] or "")
+            _pair_hash = int(pair.get("access_hash") or 0)
+            _pair_uname = str(pair.get("username") or "")
+            acc = acc_map.get(acc_id)
+            if not acc:
+                err_list.append(f"❌ {chan_title}: аккаунт не найден")
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
 
             try:
                 if op == "chan_uname":
@@ -15814,7 +14984,7 @@ async def _exec_bulk_chan_exec(
                         except Exception as e:
                             log_exc_swallow(log, f"bulk_chan_exec: persist username failed for ch={ch_id}: {e}")
                     else:
-                        err_list.append(f"❌ {chan_title}: {_html.escape(redact_secrets(last_err)[:60])}")
+                        err_list.append(f"❌ {chan_title}: {_html.escape(last_err[:60])}")
 
                 elif op == "chan_about":
                     ok = await account_manager.edit_channel_about(
@@ -15832,12 +15002,12 @@ async def _exec_bulk_chan_exec(
                         access_hash=_pair_hash, username=_pair_uname,
                     )
                     if ok:
-                        ok_list.append(f"✅ {chan_title} → {_html.escape(redact_secrets(value)[:40])}")
+                        ok_list.append(f"✅ {chan_title} → {_html.escape(value[:40])}")
                         try:
                             await pool.execute(
                                 "INSERT INTO channel_identity_history(owner_id,channel_id,old_title,new_title,"
                                 "source,operation_id) VALUES($1,$2,$3,$4,'manual',$5)",
-                                owner_id, ch_id, str(row["title"] or ""), value, op_id,
+                                owner_id, ch_id, str(pair.get("title") or ""), value, op_id,
                             )
                             await pool.execute(
                                 "UPDATE managed_channels SET title=$1 WHERE owner_id=$2 AND channel_id=$3",
@@ -15848,52 +15018,10 @@ async def _exec_bulk_chan_exec(
                     else:
                         err_list.append(f"❌ {chan_title}: ошибка смены названия")
 
-                elif op == "chan_avatar":
-                    # value — публичный URL картинки (как у аватара аккаунта:
-                    # pickMediaInto грузит файл и подставляет ссылку). Качаем
-                    # безопасно (SSRF-гард + потолок 10МБ), уникализируем (чтобы у
-                    # сети каналов не было байт-в-байт одинакового фото —
-                    # тривиальный признак фермы), ставим.
-                    _photo_bytes = None
-                    try:
-                        import aiohttp as _aiohttp
-                        from services.security import public_http_session, read_capped
-                        async with public_http_session() as _http:
-                            async with _http.get(
-                                value, timeout=_aiohttp.ClientTimeout(total=20)
-                            ) as _resp:
-                                if _resp.status != 200:
-                                    err_list.append(
-                                        f"❌ {chan_title}: не скачать фото "
-                                        f"(HTTP {_resp.status})")
-                                else:
-                                    _photo_bytes = await read_capped(
-                                        _resp, 10 * 1024 * 1024)
-                    except Exception as _fe:
-                        log_exc_swallow(
-                            log, f"bulk_chan_exec: avatar fetch ch={ch_id}: {_fe}")
-                        err_list.append(f"❌ {chan_title}: не скачать фото")
-                    if _photo_bytes:
-                        try:
-                            from services import media_uniquifier as _mu
-                            _photo_bytes = _mu.uniquify(
-                                _photo_bytes, filename="avatar.jpg")
-                        except Exception:
-                            log_exc_swallow(log, "bulk_chan_exec: avatar uniquify")
-                        _perr = await account_manager.set_channel_photo(
-                            acc["session_str"], ch_id, _photo_bytes,
-                            access_hash=int(_pair_hash or 0), _acc=acc)
-                        if not _perr:
-                            ok_list.append(f"✅ {chan_title}")
-                        else:
-                            err_list.append(
-                                f"❌ {chan_title}: "
-                                f"{_html.escape(redact_secrets(_perr)[:60])}")
-
                 elif op in ("chan_delete", "chan_clear", "chan_leave"):
                     ok, line = await _chan_destructive_step(
                         pool, owner_id, op, acc, int(ch_id), chan_title,
-                        _pair_hash, _pair_uname, str(row["type"] or ""),
+                        _pair_hash, _pair_uname, str(pair.get("type") or ""),
                         int(params.get("clear_limit") or 0), op_id=op_id)
                     (ok_list if ok else err_list).append(line)
 
@@ -15904,28 +15032,26 @@ async def _exec_bulk_chan_exec(
                 err_list.append(f"❌ {chan_title}: исключение")
 
             if len(ok_list) > _ok_before:
-                if await _journal_done(pool, op_id, idx + 1, str(ch_id)):
-                    already.add(str(ch_id))
+                _step += 1
+                await _journal_done(pool, op_id, _step, str(ch_id))
             await _safe_execute(
                     pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
             await asyncio.sleep(2)
     finally:
-        if claimed_ids:
-            await release_accounts(claimed_ids)
+        await release_accounts(claimed_ids)
 
-    successes = prior_ok + len(ok_list)
     op_label = _CHAN_EXEC_OPS.get(op, op)
     summary_lines = [
-        f"{op_label} — завершено: ✅ {successes} ❌ {len(err_list)} из {total}"
-        + (f" · аккаунт занят: {busy}" if busy else "")
+        f"{op_label} — завершено: ✅ {len(ok_list)} ❌ {len(err_list)} из {total}"
+        + (f" · пропущено (аккаунт занят): {_busy}" if _busy else "")
     ] + (ok_list + err_list)[:40]
     summary = "\n".join(summary_lines)
 
     return {
         "status": "done",
-        "ok": successes,
+        "ok": len(ok_list),
         "fail": len(err_list),
         "summary": summary[:500],
     }
@@ -15941,10 +15067,6 @@ async def _exec_bulk_post_chans(
     правила редактора, которых здесь нет). Исполнитель остаётся, чтобы честно
     доделать уже стоящие в очереди и рекуррентные круги — так же, как у
     `quick_post`. Стережёт `tests/test_channel_publish_one_op.py`."""
-    copy_review = await _review_queued_publication_copy(pool, owner_id, op_id, params)
-    if copy_review:
-        return {"status": "failed", "summary": copy_review}
-
     from services import account_manager, postbot
     from database import db as _db
     from bot.utils.op_helpers import backoff
@@ -16010,8 +15132,8 @@ async def _exec_bulk_post_chans(
         ch_rows = await _safe_fetch(
                 pool,
             "SELECT id, channel_id, access_hash, username FROM managed_channels "
-            "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND acc_id=$3",
-            owner_id, channel_ids, acc_id,
+            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            owner_id, channel_ids,
         )
         channels = [dict(r) for r in ch_rows]
         if not channels:
@@ -16040,10 +15162,6 @@ async def _exec_bulk_post_chans(
                 log_ctx=f"[bulk_post_chans_log op={op_id}]",
             )
 
-        stale_ids = await _channels_changed_after_queueing(
-            pool, owner_id, "bulk_post_chans", await journal_op_ids(pool, op_id),
-            [ch["channel_id"] for ch in channels], since=params.get("_publication_catalog_since"),
-        )
         _already = await completed_targets(pool, op_id)
         if _already:
             log.info("bulk_post_chans op=%d: повтор — %d каналов уже опубликованы",
@@ -16066,10 +15184,6 @@ async def _exec_bulk_post_chans(
                         pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
-                continue
-            if ch_id in stale_ids:
-                err_count += 1
-                await _record_stale_publication_target(pool, op_id, idx + 1, ch_id)
                 continue
             access_hash = ch.get("access_hash", 0) or 0
             ch_username = ch.get("username") or ""
@@ -16182,8 +15296,6 @@ async def _exec_bulk_post_chans(
                 pool, op_id, max(0.0, _pace - slept), "bulk_publish_pace")
 
         _summary = f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}"
-        if stale_ids:
-            _summary += f". {_STALE_PUBLICATION_TARGET}"
         if _has_channel_link and ok_count > 0:
             _summary += (
                 "\n\n🔗 Ссылка в посте — включён безопасный режим (форма разнесена, "
@@ -16191,7 +15303,7 @@ async def _exec_bulk_post_chans(
                 "публикуйте ссылку сразу во все каналы."
             )
         return {
-            "status": "failed" if stale_ids and not ok_count else "done",
+            "status": "done",
             "ok": ok_count,
             "fail": err_count,
             "summary": _summary,
@@ -16236,7 +15348,6 @@ async def _exec_channel_import_all(
                 pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
         total_imported = 0
-        total_disabled = 0
         total_foreign = 0  # чужие каналы (аккаунт — лишь подписчик), их не тянем
         errors: list[str] = []
 
@@ -16260,9 +15371,8 @@ async def _exec_channel_import_all(
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
                     # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
                     # ВСЕ ранее сохранённые каналы аккаунта перед вставкой этого среза.
-                    imported = await add_managed_channels(pool, owner_id, acc["id"], channels)
-                    total_imported += imported
-                    total_disabled += len(channels) - imported
+                    await add_managed_channels(pool, owner_id, acc["id"], channels)
+                    total_imported += len(channels)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -16277,14 +15387,12 @@ async def _exec_channel_import_all(
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
         foreign_hint = f"\n🚫 Пропущено чужих (только подписка): {total_foreign}" if total_foreign else ""
-        disabled_hint = f"\nОтключены в Infragram: {total_disabled}" if total_disabled else ""
         return {
             "status": "done",
             "imported": total_imported,
-            "disabled_skipped": total_disabled,
             "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{disabled_hint}{err_hint}",
+            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
@@ -16314,16 +15422,26 @@ async def _exec_channel_add(
         if "error" in res:
             return {"status": "failed", "summary": f"❌ {res['error']}"}
         title = res.get("title") or link
-        # Явное подключение снимает отметку отключения в той же транзакции.
-        from database.db import add_managed_channels
-
-        await add_managed_channels(
-            pool, owner_id, int(acc["id"]), [{
-                "id": res["channel_id"], "title": title,
-                "username": res.get("username") or "", "access_hash": res.get("access_hash") or 0,
-                "type": res.get("type") or "channel", "members": res.get("members") or 0,
-            }], reconnect=True,
+        # Точечный upsert одной строки — НЕ upsert_managed_channels(), т.к. та
+        # функция удаляет ВСЕ существующие каналы аккаунта перед вставкой
+        # (рассчитана на полный ре-импорт, а не на добавление одного канала).
+        await pool.execute(
+            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, members_count)
+               VALUES($1, $2, $3, $4, $5, $6, $7, $8)
+               ON CONFLICT (owner_id, channel_id) DO UPDATE
+               SET title=EXCLUDED.title, username=EXCLUDED.username,
+                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
+                   type=EXCLUDED.type,
+                   members_count=CASE WHEN EXCLUDED.members_count > 0
+                                       THEN EXCLUDED.members_count
+                                       ELSE managed_channels.members_count END""",
+            owner_id, int(acc["id"]), res["channel_id"], title,
+            res.get("username") or "", res.get("access_hash") or 0,
+            res.get("type") or "channel", int(res.get("members") or 0),
         )
+        # Владелец явно добавил канал — прежнее удаление больше не действует.
+        from database.db import forget_removed_channels
+        await forget_removed_channels(pool, owner_id, [res["channel_id"]])
         return {
             "status": "done",
             "channel_id": res["channel_id"],
@@ -16697,9 +15815,7 @@ async def _exec_check_accounts_health(
     try:
         from services import account_health as _ah
         await _ah.load_from_db(pool, owner_id)
-        # Только этого владельца: кеш общий на процесс, и без фильтра
-        # проверка одного клиента переписывала историю всего флота.
-        await _ah._persist_health_snapshots(pool, owner_id)
+        await _ah._persist_health_snapshots(pool)
     except Exception as _he:
         log.debug("_exec_check_accounts_health: health snapshot persist failed: %s", _he)
 
@@ -16716,52 +15832,25 @@ async def _exec_check_accounts_health(
     }
 
 
-def _restriction_access_candidates(ent, obs_by_id, observers, dead, *,
-                                   pool=None, rr_start=0):
-    """Аккаунты-кандидаты на резолв сущности: пары (аккаунт, access_hash), в
-    порядке перебора.
+def _restriction_access_candidates(ent, obs_by_id, observers, dead):
+    """Аккаунты-кандидаты на резолв сущности: пары (аккаунт, access_hash для НЕГО).
 
-    РАСПРЕДЕЛЕНИЕ НАГРУЗКИ (жалоба владельца: «проверку всех сущностей тянут 1–2
-    аккаунта, и они ловят спамблок / просадку траста»):
-      * ПУБЛИЧНУЮ сущность (@username) резолвит ЛЮБОЙ аккаунт, поэтому НЕ грузим
-        управляющего (иначе один аккаунт резолвил бы все свои сотни каналов
-        подряд — прямой путь в спамблок). Идём round-robin по пулу наблюдателей:
-        каждая следующая сущность — со следующего аккаунта, нагрузка размазана.
-      * ПРИВАТНУЮ (без @username) открывает только участник, поэтому управляющий
-        (preferred_acc) с его access_hash — первым, остальные живые — фолбэком
-        (резолв по участию, hash=0). Не-участник даёт «нечем проверить»
-        (probe_error), а не ложный негатив, так что перебор безопасен.
-
-    pool — ограниченный ротационный пул (бережёт и аккаунты от перегруза, и флот
-    от монополизации); на промахе добираем остальных наблюдателей. rr_start —
-    смещение round-robin (индекс сущности).
+    Вынесено на модульный уровень, чтобы проверять регрессом (баг «приватная не
+    проверяется, хотя управляющий аккаунт подключён»). Правила — в докстринге
+    замыкания `_access_candidates` внутри `_exec_check_owned_restrictions`.
+    Коротко: управляющий (preferred_acc) первым со своим записанным access_hash;
+    остальные живые — следом с access_hash=0 (резолв по участию). Приватную
+    не-участник не откроет и даст «нечем проверить», а не ложный негатив, поэтому
+    перебор безопасен и для приватной.
     """
     pref = ent.get("preferred_acc")
-    is_private = bool(ent.get("is_private"))
-    live = [a for a in observers if int(a["id"]) not in dead]
-    base = [a for a in (pool if pool is not None else observers)
-            if int(a["id"]) not in dead]
-    base_ids = {int(a["id"]) for a in base}
-    rest = [a for a in live if int(a["id"]) not in base_ids]
-
-    def _rot(seq):
-        if not seq:
-            return []
-        s = rr_start % len(seq)
-        return seq[s:] + seq[:s]
-
-    ordered = _rot(base) + rest
     out: list[tuple[dict, int]] = []
-    if is_private:
-        if pref and pref in obs_by_id and pref not in dead:
-            out.append((obs_by_id[pref], int(ent.get("access_hash") or 0)))
-        for a in ordered:
-            if pref and int(a["id"]) == pref:
-                continue
-            out.append((a, 0))
-        return out
-    # Публичная: round-robin по пулу, без приоритета управляющего.
-    for a in ordered:
+    if pref and pref in obs_by_id and pref not in dead:
+        out.append((obs_by_id[pref], int(ent.get("access_hash") or 0)))
+    for a in observers:
+        aid = int(a["id"])
+        if aid in dead or (pref and aid == pref):
+            continue
         out.append((a, 0))
     return out
 
@@ -16792,14 +15881,13 @@ async def _exec_check_owned_restrictions(
 
     only_channels = [int(x) for x in (params.get("channel_ids") or [])]
     only_bots = [int(x) for x in (params.get("bot_ids") or [])]
-    exact = params.get("selection_mode") == "exact"
 
     # ── 1. Сущности владельца ────────────────────────────────────────────────
     # Каналы/чаты: scope по owner_id. DISTINCT ON — один канал может вестись
     # несколькими аккаунтами (строка на acc_id), берём одну с её управляющим acc.
     _ch_where = "WHERE owner_id=$1"
     _ch_args: list = [owner_id]
-    if only_channels or exact:
+    if only_channels:
         _ch_where += " AND channel_id = ANY($2::bigint[])"
         _ch_args.append(only_channels)
     ch_rows = await _safe_fetch(
@@ -16809,21 +15897,21 @@ async def _exec_check_owned_restrictions(
         *_ch_args,
     )
     # Боты: scope по added_by (НЕ owner_id — такой колонки на managed_bots нет).
-    _bot_where = "WHERE added_by=$1 AND is_active AND deleted_at IS NULL"
+    _bot_where = "WHERE added_by=$1"
     _bot_args: list = [owner_id]
-    if only_bots or exact:
+    if only_bots:
         _bot_where += " AND bot_id = ANY($2::bigint[])"
         _bot_args.append(only_bots)
     bot_rows = await _safe_fetch(
         pool,
-        f"SELECT bot_id, username, first_name, token FROM managed_bots {_bot_where}",
+        f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
         *_bot_args,
     )
 
     entities: list[dict] = []
     for r in ch_rows or []:
         _type = (r.get("type") or "").lower()
-        kind = "group" if _type in _erc.CHANNEL_GROUP_TYPES else "channel"
+        kind = "group" if _type in ("megagroup", "supergroup", "group", "chat") else "channel"
         _uname = (r.get("username") or "").strip() or None
         entities.append({
             "kind": kind,
@@ -16847,7 +15935,6 @@ async def _exec_check_owned_restrictions(
             # Бот публичен по @username; без него проверить нечем.
             "is_private": not _uname,
             "bot_id": int(r["bot_id"]),
-            "token": r.get("token"),
         })
 
     if not entities:
@@ -16855,32 +15942,26 @@ async def _exec_check_owned_restrictions(
                 "summary": "⚠️ Нет каналов/чатов/ботов для проверки. Сначала подключите их."}
 
     # ── 2. Аккаунты-наблюдатели ──────────────────────────────────────────────
-    # Предохранитель (services/observer_guard): наблюдатель прошлого прогона
-    # получил ограничение после него — расписание снимаем, флот не жжём дальше.
-    from services import observer_guard as _og
-    _hit = await _og.tripped(pool, params)
-    if _hit:
-        await _og.stop_schedule(pool, op_id, params)
-        return {"status": "failed", "stop_reason": "observers_restricted",
-                "summary": _og.trip_summary(_hit, "Ограничения и теневой бан")}
-
-    # Наблюдатель — только живой аккаунт без ограничений: ограниченный и сам
-    # не всё видит, и проверка добавляла бы ему следа.
     acc_rows = await _safe_fetch(
         pool,
-        f"""SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
                   a.device_model, a.system_version, a.app_version,
                   a.lang_code, a.system_lang_code,
                   a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.owner_id=$1 AND a.is_active=TRUE AND {_og.observer_where("a")}""",
+           WHERE a.owner_id=$1 AND a.is_active=TRUE""",
         owner_id,
     )
     observers = [dict(r) for r in (acc_rows or []) if (r.get("session_str") or "").strip()]
     if not observers:
         return {"status": "failed",
-                "summary": "⚠️ Нет активного аккаунта без ограничений для проверки."}
+                "summary": "⚠️ Нет активного аккаунта для проверки. Подключите хотя бы один аккаунт."}
+
+    observers = await _claim_available_accounts(op_id, observers, owner_id)
+    if not observers:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     # Карантинные аккаунты не используем как наблюдателей (fail-open: пульс мог не
     # ответить — тогда аккаунт остаётся кандидатом, это осознанный fail-open).
@@ -16897,42 +15978,9 @@ async def _exec_check_owned_restrictions(
     observers = healthy
     _obs_by_id = {int(a["id"]): a for a in observers}
 
-    # ЛЕНИВЫЙ ЗАХВАТ ФЛОТА. Раньше здесь был upfront-захват ВСЕГО флота
-    # (_claim_available_accounts) на всю длительность проверки. Проверка
-    # read-only и реально подключает лишь несколько наблюдателей (управляющий
-    # сущностью + один внешний на видимость), но держала весь флот 20–30 минут —
-    # и параллельные ДЕЙСТВИЯ владельца голодали: strike брал один аккаунт из
-    # всего флота, «Проверка статуса аккаунтов» не стартовала 21 минуту и падала
-    # «флот занят». Теперь аккаунт захватывается лениво, в _client_for, только
-    # когда его реально подключают, и остальной флот свободен для действий.
-    # _claim_state["any"] — был ли захвачен хоть один: если весь флот занят
-    # (ни одного не дали), ведём себя как прежний upfront-путь — requeue.
-    _claim_state = {"any": False}
-
     n = len(entities)
     await _safe_execute(
         pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2", n, op_id)
-
-    # ── Пул наблюдателей для РАСПРЕДЕЛЕНИЯ нагрузки ───────────────────────────
-    # Проверку всех сущностей раньше тянули 1–2 аккаунта (управляющий резолвил все
-    # свои каналы, один аккаунт искал все) — и ловили спамблок/просадку траста.
-    # Размазываем: round-robin по ограниченному пулу. Размер пула держит нагрузку
-    # на аккаунт ниже безопасного порога (≈ _SAFE_TOUCHES_PER_ACCOUNT резолвов+
-    # поисков за прогон) и при этом НЕ забирает весь флот (оставляет резерв под
-    # действия владельца). Старт пула сдвигаем по op_id — разные прогоны берут
-    # разные аккаунты, риск не копится на одной и той же горстке.
-    _SAFE_TOUCHES_PER_ACCOUNT = 40
-    # Пул ПОСТОЯННЫЙ (observer_guard.stable_pick): раньше старт сдвигался по
-    # op_id, и за несколько прогонов по расписанию сущности сети «трогал» весь
-    # флот — после чего наблюдатели получали ограничение «жалоба на материалы».
-    # Аккаунты, которые сами ведут каналы владельца, — в последнюю очередь.
-    if observers:
-        _target_pool = max(2, -(-2 * max(1, n) // _SAFE_TOUCHES_PER_ACCOUNT))  # ceil(2n/safe)
-        _pool_size = min(len(observers), _target_pool)
-        _pool = _og.stable_pick(observers, _pool_size,
-                                avoid_ids=await _og.admin_account_ids(pool, owner_id))
-    else:
-        _pool = []
 
     # ── 3. Проход с переиспользованием коннекта наблюдателя ───────────────────
     _clients: dict[int, object] = {}       # acc_id -> подключённый client
@@ -16945,13 +15993,6 @@ async def _exec_check_owned_restrictions(
             return _clients[aid]
         if aid in _dead:
             return None
-        # Ленивый захват: держим только реально подключаемую сессию, остальной
-        # флот остаётся свободным для действий. Занятый другой операцией аккаунт
-        # пропускаем (тот же арбитр, что у действий, — двойной сессии не будет).
-        if not await claim_account_for_op(op_id, aid):
-            _dead.add(aid)
-            return None
-        _claim_state["any"] = True
         try:
             c = await account_manager.connect_client(
                 acc.get("session_str") or "", device=acc, action_type="op",
@@ -16960,7 +16001,7 @@ async def _exec_check_owned_restrictions(
             return c
         except Exception as e:
             log.warning("check_owned_restrictions op=%d: наблюдатель acc=%s не подключился: %s",
-                        op_id, aid, type(e).__name__)
+                        op_id, aid, e)
             _dead.add(aid)
             return None
 
@@ -16978,34 +16019,37 @@ async def _exec_check_owned_restrictions(
             raise
         except Exception as e:
             log.debug("check_owned_restrictions op=%d: get_dialogs acc=%s не удался: %s",
-                      op_id, aid, type(e).__name__)
+                      op_id, aid, e)
 
-    def _access_candidates(ent: dict, idx: int):
-        # Кандидаты на РЕЗОЛВ+флаги: пары (аккаунт, access_hash для НЕГО), в
-        # порядке перебора. Round-robin по пулу (idx — индекс сущности)
-        # размазывает нагрузку: публичную резолвит следующий аккаунт пула, а не
-        # всегда управляющий. Приватную по-прежнему открывает участник
-        # (управляющий первым, остальные фолбэком) — перебор безопасен, не-участник
-        # даёт probe_error, а не ложный негатив. Чистая логика и правила — в
-        # _restriction_access_candidates (под регрессом).
-        return _restriction_access_candidates(
-            ent, _obs_by_id, observers, _dead, pool=_pool, rr_start=idx)
+    def _access_candidates(ent: dict):
+        # Кандидаты на РЕЗОЛВ+флаги: пары (аккаунт, access_hash для НЕГО).
+        # Приватную сущность (нет @username) открывает только аккаунт-участник.
+        # Раньше пробовали лишь записанный управляющий (managed_channels.acc_id),
+        # и если он занят другой операцией, в карантине или устарел (владелец
+        # переподключил аккаунт под новым id, либо участник — ДРУГОЙ его аккаунт),
+        # приватная падала в «нет управляющего аккаунта», хотя доступ у владельца
+        # есть. Добрать остальных безопасно: не-участник приватную не резолвит и
+        # даёт «нечем проверить» (probe_error), а НЕ ложное «ограничена/недоступна»
+        # (entity_restriction_check.resolve_flags: приватная без @username на
+        # ошибке доступа → probe_error, не resolved=False) — поэтому перебор только
+        # помогает. access_hash у каждого аккаунта свой: записанный валиден лишь для
+        # управляющего, остальным даём 0 — они резолвят по участию (скан диалогов).
+        # Чистая логика вынесена в _restriction_access_candidates (под регрессом).
+        return _restriction_access_candidates(ent, _obs_by_id, observers, _dead)
 
-    def _pick_search(ent: dict, idx: int):
+    def _pick_search(ent: dict):
         # ВНЕШНИЙ аккаунт для проверки видимости: НЕ управляющий этой сущностью
         # (у управляющего она в диалогах и найдётся всегда — ложно-зелёный
-        # теневой бан). Round-robin по пулу → поиск тоже размазан по флоту, а не
-        # висит на первом аккаунте. На промахе пула добираем любого живого.
+        # теневой бан). Любой живой аккаунт с id != управляющего.
         pref = ent.get("preferred_acc")
-
-        def _ok(a):
+        for a in observers:
             aid = int(a["id"])
-            return aid not in _dead and not (pref and aid == pref)
-
-        live = [a for a in _pool if _ok(a)] or [a for a in observers if _ok(a)]
-        if not live:
-            return None
-        return live[idx % len(live)]
+            if aid in _dead:
+                continue
+            if pref and aid == pref:
+                continue
+            return a
+        return None
 
     counts: dict[str, int] = {}
     findings: list[dict] = []
@@ -17021,19 +16065,11 @@ async def _exec_check_owned_restrictions(
                                + _erc.build_summary(counts, n, checked=idx),
                 }
 
-            # Весь флот занят другими операциями: за первую сущность перебрали ВСЕХ
-            # наблюдателей и ни одного не захватили (все помечены _dead через
-            # занятость) — ведём себя как прежний upfront-путь: возвращаем в
-            # очередь, а не заваливаем журнал 300 строками «нет аккаунта».
-            if not _claim_state["any"] and _dead and len(_dead) >= len(observers):
-                return {"status": "requeue",
-                        "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
-
             # Внешний аккаунт для видимости — только публичным сущностям и один на
             # сущность (от того, каким аккаунтом резолвим доступ, не зависит).
             search_client = None
             if ent.get("username"):
-                _s = _pick_search(ent, idx)
+                _s = _pick_search(ent)
                 if _s is not None:
                     search_client = await _client_for(_s)
                 if search_client is None:
@@ -17044,7 +16080,7 @@ async def _exec_check_owned_restrictions(
             # следующего, прежде чем сдаться. Публичную резолвит первый же живой.
             _is_private = bool(ent.get("is_private"))
             verdict = None
-            for cand, chash in _access_candidates(ent, idx):
+            for cand, chash in _access_candidates(ent):
                 client = await _client_for(cand)
                 if client is None:
                     continue
@@ -17054,19 +16090,17 @@ async def _exec_check_owned_restrictions(
                 if _is_private and not chash:
                     await _ensure_dialogs(int(cand["id"]), client)
                 try:
-                    # /start боту с аккаунта флота больше не шлём: живость
-                    # бота — getMe по его же токену, без аккаунта (ниже).
                     v = await _erc.probe_entity(
                         client, kind=ent["kind"], entity_id=ent["id"],
                         username=ent.get("username"), access_hash=chash,
                         search_client=search_client,
-                        do_search=bool(search_client), do_bot_ping=False)
+                        do_search=bool(search_client))
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
                     log.warning("check_owned_restrictions op=%d ent=%s: проба упала: %s",
-                                op_id, ent["id"], type(e).__name__)
-                    v = _erc.classify(ent["kind"], {"probe_error": type(e).__name__})
+                                op_id, ent["id"], e)
+                    v = _erc.classify(ent["kind"], {"probe_error": str(e)[:160]})
                 verdict = v
                 if _is_private and v["status"] == _erc.STATUS_CHECK_FAILED:
                     continue   # не-участник — пробуем следующего
@@ -17077,24 +16111,14 @@ async def _exec_check_owned_restrictions(
                 verdict = _erc.classify(ent["kind"], {
                     "probe_error": "нет доступного аккаунта для проверки "
                                    "(все заняты другими операциями или не подключились)"})
-            elif ent["kind"] == "bot" and ent.get("token"):
-                _alive = await _og.bot_alive_by_token(ent["token"])
-                if _alive is not None:
-                    _meta = verdict.get("meta")
-                    verdict = _erc.classify("bot", {**(verdict.get("signals") or {}),
-                                                    "token_alive": _alive})
-                    verdict["meta"] = _meta
 
             status = verdict["status"]
             counts[status] = counts.get(status, 0) + 1
 
             _title = (ent.get("title") or (verdict.get("meta") or {}).get("title")
                       or (f"@{ent['username']}" if ent.get("username") else str(ent["id"])))
-            _title = redact_secrets(_title, limit=len(_title))[:500]
-            _reason = verdict["reason_ru"]
-            _reason = redact_secrets(_reason, limit=len(_reason))[:500]
             _label = f"{_KIND_RU.get(ent['kind'], ent['kind'])} «{_title}»"
-            _log_msg = f"{verdict['label']} — {_reason}"
+            _log_msg = f"{verdict['label']} — {verdict['reason_ru']}"
             await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -17103,13 +16127,11 @@ async def _exec_check_owned_restrictions(
                 "error" if _erc.is_problem(status) else "ok", _log_msg[:200],
             )
 
-            # Для карточки сохраняем и неудавшиеся проверки со стабильным ID.
-            if status != _erc.STATUS_CLEAN:
-                findings.append({"kind": ent["kind"], "title": _title,
-                                 "id": ent["id"], "bot_id": ent.get("bot_id"),
-                                 "status": status, "reason": _reason})
-            # В пульс ограничений попадают только выявленные проблемы.
+            # Реальное ограничение сущности — в общий пульс (restriction_events),
+            # чтобы shadowban_monitor/get_account_health его видели.
             if _erc.is_problem(status):
+                findings.append({"kind": ent["kind"], "title": _title,
+                                 "status": status, "reason": verdict["reason_ru"]})
                 try:
                     await _sbm._record_event(
                         pool, owner_id,
@@ -17117,7 +16139,7 @@ async def _exec_check_owned_restrictions(
                         _erc.severity_for(status),
                         {"entity_id": ent["id"], "kind": ent["kind"],
                          "username": ent.get("username"), "title": _title,
-                         "reason": _reason},
+                         "reason": verdict["reason_ru"]},
                         bot_id=ent.get("bot_id"),
                     )
                 except Exception as e:
@@ -17136,11 +16158,6 @@ async def _exec_check_owned_restrictions(
                 await c.disconnect()
             except Exception:
                 pass
-        # Кто смотрел — первыми к @SpamBot и в params следующего круга: так
-        # предохранитель видит ограничение наблюдателя уже на следующем прогоне.
-        _used = list(_clients.keys())
-        await _og.mark_for_recheck(pool, _used)
-        _og.remember_run(params, _used)
 
     summary = _erc.build_summary(counts, n)
     # Честность про непроверенную видимость: если у владельца всего один аккаунт
@@ -17154,8 +16171,7 @@ async def _exec_check_owned_restrictions(
         "status": "done",
         "checked": n,
         "counts": counts,
-        "findings": findings,
-        "findings_version": 2,
+        "findings": findings[:50],
         "visibility_unmeasured": vis_unmeasured,
         "summary": summary,
     }
@@ -17237,28 +16253,20 @@ async def _exec_check_bot_geoban(
                 "summary": "⚠️ Нет публичных каналов, чатов или ботов (с @username) "
                            "для проверки гео-доступности."}
 
-    # Предохранитель и выбор наблюдателей — общие с проверкой ограничений
-    # (services/observer_guard).
-    from services import observer_guard as _og
-    _hit = await _og.tripped(pool, params)
-    if _hit:
-        await _og.stop_schedule(pool, op_id, params)
-        return {"status": "failed", "stop_reason": "observers_restricted",
-                "summary": _og.trip_summary(_hit, "Гео-доступность")}
     acc_rows = await _safe_fetch(
         pool,
-        f"""SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
                   a.device_model, a.system_version, a.app_version,
                   a.lang_code, a.system_lang_code,
                   a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.owner_id=$1 AND a.is_active=TRUE AND {_og.observer_where("a")}""",
+           WHERE a.owner_id=$1 AND a.is_active=TRUE""",
         owner_id)
     observers = [dict(r) for r in (acc_rows or []) if (r.get("session_str") or "").strip()]
     if not observers:
         return {"status": "failed",
-                "summary": "⚠️ Нет активного аккаунта без ограничений для проверки."}
+                "summary": "⚠️ Нет активного аккаунта для проверки."}
 
     observers = await _claim_available_accounts(op_id, observers, owner_id)
     if not observers:
@@ -17275,10 +16283,6 @@ async def _exec_check_bot_geoban(
 
     # Одна страна = один наблюдатель (первый здоровый с известным geo). Без geo
     # прокси страну не знаем — такие аккаунты для гео-пробы бесполезны.
-    # Порядок постоянный (по id, ведущие каналы — в конце): одни и те же
-    # наблюдатели от прогона к прогону, а не случайный аккаунт страны.
-    healthy = _og.stable_pick(healthy, len(healthy),
-                              avoid_ids=await _og.admin_account_ids(pool, owner_id))
     geo_acc: dict = {}
     for a in healthy:
         geo = (str(a.get("geo_country") or "")).strip().upper()
@@ -17411,9 +16415,6 @@ async def _exec_check_bot_geoban(
                 await c.disconnect()
             except Exception:
                 pass
-        _used = list(_clients.keys())
-        await _og.mark_for_recheck(pool, _used)
-        _og.remember_run(params, _used)
 
     summary = _erc.build_geoban_summary(counts, n)
     summary += f"\n\nℹ️ Проверено стран: {distinct_geos} ({', '.join(sorted(geo_acc))})."
@@ -18265,7 +17266,6 @@ async def _exec_deploy_network(
     подключений не вводит.
     """
     from services import network_builder as _nb, account_manager
-    confirmed = "topology_digest" in params
     # Бренд-бот/промо — только free-tier (см. фабрику каналов и create_channel).
     try:
         from services import brand_injection as _bi_gate
@@ -18279,14 +17279,6 @@ async def _exec_deploy_network(
     d = await _nb.get_instance_detail(pool, owner_id, instance_id)
     if not d:
         return {"status": "failed", "summary": "⚠️ Связка не найдена"}
-    if confirmed:
-        account_id = params.get("account_id")
-        if not _nb.project_pilot_enabled(owner_id):
-            return {"status": "failed", "summary": "Доступ к пилоту отозван"}
-        if params["topology_digest"] != _nb.deployment_topology_digest(d):
-            return {"status": "failed", "summary": "Топология изменилась. Сверьте результат и откройте новый предпросмотр."}
-        if type(account_id) is not int or not await _nb.deployment_account(pool, owner_id, account_id):
-            return {"status": "failed", "summary": "Выбранный аккаунт недоступен"}
     nodes, edges = d["nodes"], d["edges"]
 
     # Аккаунт-создатель: явный или первый живой с сессией.
@@ -18314,17 +17306,6 @@ async def _exec_deploy_network(
     _claimed_acc = int(acc["id"])
 
     try:
-
-        if confirmed:
-            async with pool.acquire() as conn, conn.transaction():
-                await conn.fetchval("SELECT id FROM operation_queue WHERE id=$1 FOR UPDATE", op_id)
-                started = await conn.fetchval(
-                    """INSERT INTO operation_log(op_id,step_num,target,status,message)
-                       SELECT $1,0,'deploy_start','info','Начато развёртывание подтверждённого плана'
-                       WHERE NOT EXISTS (SELECT 1 FROM operation_log WHERE op_id=$1 AND target='deploy_start')
-                       RETURNING id""", op_id)
-            if not started:
-                return {"status": "failed", "summary": "Требуется сверка результата предыдущей попытки"}
 
         node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
         node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
@@ -18355,17 +17336,10 @@ async def _exec_deploy_network(
                     res = await account_manager.create_channel(
                         acc["session_str"], label,
                         megagroup=ntype in ("group", "chat"), _acc=acc,
-                        brand_promo=_brand_free and not confirmed)
-                except TimeoutError:
-                    if confirmed:
-                        return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
-                    manual.append(f"{label}: истекло время ожидания создания")
-                    continue
+                        brand_promo=_brand_free)
                 except Exception as e:
-                    manual.append(f"{label}: ошибка создания ({type(e).__name__})")
+                    manual.append(f"{label}: ошибка создания ({str(e)[:60]})")
                     continue
-                if confirmed and isinstance(res, dict) and res.get("requires_reconciliation"):
-                    return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
                 ch_id = res.get("channel_id") if isinstance(res, dict) else None
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
@@ -18390,12 +17364,10 @@ async def _exec_deploy_network(
                 # Нода-сообщество = форум-супергруппа + регистрация community_node.
                 try:
                     res = await account_manager.create_forum_supergroup(
-                        acc["session_str"], label, _acc=acc, brand_promo=not confirmed)
+                        acc["session_str"], label, _acc=acc)
                 except Exception as e:
                     manual.append(f"{label}: ошибка создания ноды ({str(e)[:60]})")
                     continue
-                if confirmed and isinstance(res, dict) and res.get("requires_reconciliation"):
-                    return {"status": "failed", "summary": f"Требуется сверка создания узла #{n['id']}"}
                 ch_id = res.get("channel_id") if isinstance(res, dict) else None
                 if not ch_id or res.get("error"):
                     manual.append(f"{label}: {str((res or {}).get('error') or 'нода не создана')[:60]}")
@@ -18491,13 +17463,9 @@ async def _exec_deploy_network(
         # «partial» с пустыми счётчиками он превращает в «done». Незапомненный
         # узел — именно непройденная работа: объект создан, а план о нём не
         # знает, и повтор создаст его заново.
-        failed = max(unmarked, _done_n - created - wired) if confirmed else unmarked
-        status = "done"
-        if failed:
-            status = "partial" if created + wired or not confirmed else "failed"
-        return {"status": status,
+        return {"status": "partial" if unmarked else "done",
                 "created": created, "wired": wired, "unmarked": unmarked,
-                "ok": created + wired, "failed": failed,
+                "ok": created + wired, "failed": unmarked,
                 "manual": manual, "summary": " · ".join(parts)}
     finally:
         await release_accounts([_claimed_acc])
@@ -19041,39 +18009,6 @@ async def _record_boost_flood(pool: asyncpg.Pool, acc_id: int, err: str, op_id: 
         log.debug("boost flood record failed acc=%s", acc_id)
 
 
-# Растянуть накрутку по времени (настройка экрана «Накрутка»): N аккаунтов,
-# отработавших пост за пару минут, — залп, по которому накрутку и видно;
-# живая аудитория приходит рассеянно. Допустимые окна — как на экране.
-BOOST_SPREAD_MINUTES = (0, 30, 60, 180, 360)
-
-
-def boost_spread_minutes(params: dict) -> int:
-    try:
-        m = int(params.get("spread_minutes") or 0)
-    except (TypeError, ValueError):
-        return 0
-    return m if m in BOOST_SPREAD_MINUTES else 0
-
-
-async def _boost_gap_pause(
-    pool, op_id: int, delay: float, spread_min: int, total: int, where: str,
-) -> None:
-    """Пауза между аккаунтами накрутки.
-
-    `delay` — обычная пауза, уже растянутая губернатором (считает вызывающий).
-    Без растяжки — она и есть пауза. С растяжкой — окно делится
-    на промежутки между аккаунтами с разбросом ±40%, но не короче обычной
-    паузы. Длинная пауза обязана слышать «Отменить», поэтому только через
-    cancellable_pause: следом идёт виток цикла, он начинается с проверки отмены.
-    """
-    if spread_min > 0 and total > 1:
-        gap = spread_min * 60.0 / (total - 1) * random.uniform(0.6, 1.4)
-        delay = max(delay, gap)
-        await cancellable_pause(pool, op_id, delay, where)
-        return
-    await asyncio.sleep(delay)
-
-
 async def _exec_boost_views(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -19184,8 +18119,7 @@ async def _exec_boost_views(
                 _vd *= _sim_v.time_of_day_factor()
             except Exception:
                 pass
-            await _boost_gap_pause(pool, op_id, await _governed_delay(pool, owner_id, _vd),
-                                   boost_spread_minutes(params), total, "boost_views")
+            await asyncio.sleep(await _governed_delay(pool, owner_id, _vd))
 
     summary = (
         f"👁 Просмотры: {channel} × {len(msg_ids)} сообщений\n"
@@ -19319,8 +18253,7 @@ async def _exec_boost_reactions(
                 _rd *= _sim_r.time_of_day_factor()
             except Exception:
                 pass
-            await _boost_gap_pause(pool, op_id, await _governed_delay(pool, owner_id, _rd),
-                                   boost_spread_minutes(params), total, "boost_reactions")
+            await asyncio.sleep(await _governed_delay(pool, owner_id, _rd))
 
     summary = (
         f"💫 Реакции: {channel} сообщение #{msg_id}\n"
@@ -20254,90 +19187,6 @@ async def _unmark_untried_invites(pool, owner_id: int, group_key: str, op_id: in
     return False
 
 
-async def _exec_contacts_import(
-    pool: asyncpg.Pool, op_id: int, owner_id: int, params: dict
-) -> dict:
-    """Импорт базы контактов из файла в хранилище — в ФОНЕ.
-
-    Раньше разбор и запись шли инлайн в HTTP-запросе: большая база (тысячи
-    строк) не укладывалась в таймаут шлюза, запрос обрывался, и в хранилище не
-    попадало ничего. Теперь веб только сохраняет файл во временный, а разбор и
-    запись (с дедупом по телефону) делает воркер без таймаута. По успеху —
-    авто-выгрузка в книги всего флота (тот же contacts_push), чтобы владельцу
-    хватило одного действия: «загрузить базу» → и хранилище, и книги флота.
-
-    Повтор безопасен: дедуп по телефону сливает, а не задваивает.
-    """
-    import os as _os
-    from services.contacts_hub import file_import as _fi
-
-    path = str(params.get("path") or "")
-    filename = str(params.get("filename") or "contacts")
-    if not path or not _os.path.exists(path):
-        return {"status": "failed",
-                "summary": "⚠️ Файл базы не найден (устарел или уже обработан)."}
-    try:
-        with open(path, "rb") as f:
-            data = f.read()
-    except Exception as exc:
-        return {"status": "failed",
-                "summary": f"⚠️ Не удалось прочитать файл базы: {str(exc)[:80]}"}
-    finally:
-        # Временный файл больше не нужен ни при успехе, ни при сбое чтения.
-        try:
-            _os.unlink(path)
-        except Exception:
-            pass
-    try:
-        rows = _fi.parse_contacts(filename, data)
-    except Exception:
-        log.exception("contacts_import op=%d parse owner=%s", op_id, owner_id)
-        return {"status": "failed",
-                "summary": "⚠️ Не удалось разобрать файл. Поддерживаются CSV, "
-                           "Excel (.xlsx), vCard (.vcf) и текст со списком номеров."}
-    if not rows:
-        return {"status": "done", "ok": 0, "failed": 0,
-                "summary": "📥 В файле не нашлось ни телефонов, ни имён — "
-                           "в хранилище ничего не добавлено."}
-    try:
-        summary = await _fi.import_contacts(pool, owner_id, rows, source="импорт")
-    except Exception:
-        log.exception("contacts_import op=%d import owner=%s", op_id, owner_id)
-        return {"status": "failed", "summary": "⚠️ Ошибка записи контактов в хранилище."}
-    added = int(summary.get("created", 0)) + int(summary.get("updated", 0))
-    tail = ""
-    # По успеху — авто-выгрузка в книги всего флота (одно действие владельца).
-    if added:
-        try:
-            _accs = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 "
-                "AND session_str IS NOT NULL AND session_str <> '' AND is_active "
-                "ORDER BY id", owner_id) or []
-            _acc_ids = [int(r["id"]) for r in _accs]
-            if _acc_ids:
-                from services import operation_bus
-                _pid = await operation_bus.submit(
-                    pool, owner_id, "contacts_push", {"account_ids": _acc_ids},
-                    total_items=len(_acc_ids),
-                    label=f"Контакты → книги флота: {len(_acc_ids)} акк.",
-                    bypass_plan_check=True)
-                tail = (f"\n📲 Запущена выгрузка в книги флота "
-                        f"({len(_acc_ids)} акк., операция #{_pid}).")
-        except Exception:
-            log.warning("contacts_import op=%d: авто-push не поставлен owner=%s",
-                        op_id, owner_id, exc_info=True)
-            tail = "\n⚠️ Контакты в хранилище, но выгрузку в книги флота запустите кнопкой «📲 В книги флота»."
-    return {
-        "status": "done",
-        "ok": added,
-        "failed": int(summary.get("skipped", 0)),
-        "summary": (f"📥 База загружена в хранилище: разобрано "
-                    f"{summary.get('total', 0)}, новых {summary.get('created', 0)}, "
-                    f"обновлено {summary.get('updated', 0)}"
-                    + (f", пропущено {summary['skipped']}" if summary.get('skipped') else "")
-                    + tail)}
-
-
 async def _exec_contacts_push(
     pool: asyncpg.Pool, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -21013,16 +19862,9 @@ async def _exec_mass_invite(
     # (banned/spamblock/session_expired, мёртвый прокси) остаются: забаненный
     # аккаунт всё равно не пригласит, форсить его — только жечь. По умолчанию OFF.
     _include_risky = bool(params.get("include_risky"))
-    # ВАЖНО: select_all_active фильтрует карантин риск-пульса ВНУТРИ себя по
-    # respect_quarantine (по умолчанию True). Без передачи флага рисковые
-    # (карантинные) аккаунты вырезались ещё здесь — и ветка include_risky ниже
-    # их уже не видела (она лишь СЧИТАЛА форсированных среди оставшихся, но не
-    # возвращала вырезанных). Поэтому «взять рисковые» не брал никого. Снимаем
-    # оба мягких гейта — и кулдаун, и карантин — одним осознанным выбором.
     accounts = await resource_selector.select_all_active(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids],
-        min_trust_score=0.0, respect_cooldown=not _include_risky,
-        respect_quarantine=not _include_risky)
+        min_trust_score=0.0, respect_cooldown=not _include_risky)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -21855,9 +20697,6 @@ async def _exec_mass_invite(
                 retired.discard(_nr)
             _no_rights_ids.clear()
             _no_rights_on_demand.clear()
-            # Новый канал — счёт «не смогли добавить» начинается заново: прошлый
-            # относился к покинутому каналу.
-            _chan_no_rights_accs.clear()
             if _invite_link:
                 try:
                     _invite_link = await asyncio.wait_for(
@@ -22016,16 +20855,6 @@ async def _exec_mass_invite(
     retired: set[int] = set()     # аккаунты, выбывшие из круга (флуд/лимит/сбой)
     _no_rights_ids: set[int] = set()  # выбыли только из-за прав — вернутся в новом канале
     _no_rights_retired = 0        # аккаунтов выведено из-за отсутствия прав админа
-    # Чат получил ОГРАНИЧЕНИЕ Telegram (в него больше нельзя добавлять никого):
-    # это видно не по одной цели, а по тому, что НЕСКОЛЬКО аккаунтов подряд не
-    # смогли добавить НИКОГО в ЭТОТ канал — ни сами, ни после выдачи прав
-    # промоутером. Копим ПО ТЕКУЩЕМУ каналу (сбрасывается в _switch_channel) и,
-    # когда порог взят при нуле успехов, переливаемся в резерв тем же пивотом,
-    # что и при заполнении. Отдельно от _no_rights_retired (тот — за весь прогон).
-    _chan_no_rights_accs: set[int] = set()
-    _chat_restricted_switched = False  # уже перелились из-за ограничения этого чата
-    # Порог распознавания ограничения чата — из движка (единый источник).
-    _CHAT_RESTRICTED_MIN_ACCS = inv.CHAT_RESTRICTED_MIN_ACCOUNTS
     budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
     group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
     _group_broken_reason = ""     # почему остановились по чату (safe-режим/недоступность)
@@ -22695,37 +21524,6 @@ async def _exec_mass_invite(
                 log.info("mass_invite op=%d acc=%s: нет прав админа, выдать не удалось (%s) — "
                          "выведен из круга, продолжаем аккаунтами с правами",
                          op_id, acc.get("id"), _reason)
-                # Ограничение САМОГО чата: несколько аккаунтов не смогли добавить
-                # НИКОГО в этот канал (ни сами, ни после выдачи прав), а успехов в
-                # нём нет вовсе. Это не вина отдельного аккаунта — в чат больше
-                # нельзя приглашать. Переливаемся в резерв тем же пивотом, что и при
-                # заполнении: резерв оформляется тем же сетапом (такой же пост),
-                # его админ становится промоутером, прогон продолжается.
-                _chan_no_rights_accs.add(acc_id)
-                if (not _chat_restricted_switched and inv.chat_looks_restricted(
-                        len(_chan_no_rights_accs), _CHAT_RESTRICTED_MIN_ACCS)):
-                    _why = (f"чат ограничен: {len(_chan_no_rights_accs)} аккаунтов подряд "
-                            f"не смогли добавить никого")
-                    if await _switch_channel(_why, _ovf.ST_BURNED):
-                        _chan_no_rights_accs.clear()
-                        log.warning("mass_invite op=%d: %s — перешли в резервный канал",
-                                    op_id, _why)
-                    else:
-                        # Резерва нет/переливание выключено — честно сообщаем, что
-                        # чат ограничен и нужен резервный канал, и останавливаемся,
-                        # чтобы не выжигать остаток флота о заблокированный чат.
-                        _chat_restricted_switched = True
-                        if not _use_overflow:
-                            group_broken = True
-                            # _group_reason — то, что видит владелец в итоге
-                            # («🚫 Не удалось добавлять в чат… Причина: …»).
-                            _group_reason = (
-                                "чат ограничен Telegram — в него больше нельзя "
-                                "добавлять участников; задайте резервные каналы "
-                                "(перелив), чтобы продолжить автоматически")
-                            _group_broken_reason = _group_reason
-                            log.warning("mass_invite op=%d: чат ограничен, резерва нет — "
-                                        "остановка (нужны резервные каналы)", op_id)
                 continue
 
             ok_n = int(res.get("ok") or 0)
@@ -22788,12 +21586,6 @@ async def _exec_mass_invite(
             total_fail += fail_n
             _chan_ok += ok_n
             _chan_trail[-1]["ok"] += ok_n
-            # Успех в канале обнуляет счётчик «подряд не смогли добавить»: значит
-            # чат принимает приглашения, и накопленные no_rights были про аккаунты,
-            # а не про чат. Так детекция ограничения чата ловит и случай, когда
-            # чат прикрыли ПОСЛЕ части приглашений (а не только с нуля).
-            if ok_n:
-                _chan_no_rights_accs.clear()
             if _invite_method == "link" and not by_phone and ok_n:
                 # Метод «ссылка в ЛС» — это личные сообщения: учитываем их
                 # построчно, как рассылка, иначе дневной лимит ЛС их не видит.
@@ -23696,8 +22488,7 @@ async def _exec_mass_invite(
 async def _exec_bulk_set_profile(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Массовое оформление аккаунтов: имя/описание, аватар (набор), юзернейм,
-    2FA, приватность, закрытие чужих сеансов, очистка."""
+    """Массовое оформление аккаунтов: имя/bio, аватар, 2FA."""
     from services import profile_setter_engine as pse
 
     op = params.get("op", "")
@@ -23707,10 +22498,6 @@ async def _exec_bulk_set_profile(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
-    # Порядок прогона — порядок выбора на экране: по нему раздаются аватары из
-    # набора и номера {n} в юзернейме, и повтор раздаёт их так же.
-    _order = {aid: i for i, aid in enumerate(account_ids)}
-    accounts = sorted(accounts, key=lambda a: _order.get(int(a["id"]), len(_order)))
 
     # Захват под живые сессии: без него операция подключала бы аккаунты,
     # которые в этот момент ведут другую операцию или прогрев — две сессии
@@ -23723,97 +22510,44 @@ async def _exec_bulk_set_profile(
 
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
-    accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
-    # Идемпотентность повтора. Аватар ДОБАВЛЯЕТ фото в историю профиля, а не
-    # заменяет его: повтор прогона (после сетевого сбоя, на деплое) давал
-    # аккаунту второе и третье фото. Смена 2FA на повторе падала с «неверный
-    # пароль» — текущий пароль уже новый — и честно отработанный аккаунт
-    # попадал в ошибки. Ключ журнала — acc#<id>.
-    _already = await completed_targets(pool, op_id)
-
-    ok_count, fail_count, skipped_done = 0, 0, 0
+    ok_count, fail_count = 0, 0
     total = len(accounts)
 
     for idx, acc in enumerate(accounts, 1):
         if await _is_cancelled(pool, op_id):
             break
-        _key = f"acc#{acc['id']}"
-        if _key in _already:
-            ok_count += 1
-            skipped_done += 1
-            await _safe_execute(
-                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            continue
         try:
-            _p = params
-            if op in ("2fa", "reset_2fa") and not (params.get("current_password") or ""):
-                # Пароль, который ставили мы сами, известен: без него смена и
-                # снятие 2FA на уже защищённом аккаунте невозможны, а владелец
-                # не обязан помнить пароль каждого из сотни аккаунтов.
-                _stored = await _stored_twofa(pool, owner_id, int(acc["id"]))
-                if _stored:
-                    _p = {**params, "current_password": _stored}
-            _restore_enc: list = []
-            if op == "2fa" and params.get("random_password"):
-                # Свой случайный пароль каждому аккаунту: один утёкший пароль
-                # больше не открывает весь флот. Пароль, который знает только
-                # система, записывается ДО того, как ставится, — обрыв между
-                # «поставили» и «записали» оставил бы аккаунт под паролем,
-                # которого не знает никто. Не записался — не ставим вовсе.
-                import secrets as _secrets
-                _gen = _secrets.token_urlsafe(12)
-                try:
-                    _restore_enc.append(await pool.fetchval(
-                        "SELECT twofa_enc FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-                        int(acc["id"]), owner_id))
-                except Exception:
-                    _restore_enc.clear()
-                if not _restore_enc or not await db.remember_account_twofa(
-                        pool, owner_id, int(acc["id"]), _gen):
-                    fail_count += 1
-                    await _journal_write(
-                        pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                        op_id, idx, _key, "Пароль не удалось сохранить — ставить его не стали",
-                        log_ctx=f" op={op_id}", where="bulk_set_profile",
-                    )
-                    await _safe_execute(
-                        pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-                    continue
-                _p = {**_p, "new_password": _gen}
             # Единый диспетчер op→движок (та же реализация, что инлайн-путь). Спинтакс
             # раскрывается внутри apply_op — для каждого аккаунта отдельно.
-            try:
-                res = await pse.apply_op(acc["session_str"], dict(acc), op, _p, slot=idx - 1)
-            except Exception:
-                if _restore_enc:
-                    await _restore_twofa_enc(pool, owner_id, int(acc["id"]), _restore_enc[0])
-                raise
-            if not res["ok"] and _restore_enc:
-                # Пароль не встал — у аккаунта остался прежний: его и вернуть.
-                await _restore_twofa_enc(pool, owner_id, int(acc["id"]), _restore_enc[0])
+            res = await pse.apply_op(acc["session_str"], dict(acc), op, params)
 
             if res["ok"]:
                 ok_count += 1
-                if op == "2fa":
-                    await _remember_twofa(pool, owner_id, int(acc["id"]),
-                                          _p.get("new_password") or "")
-                elif op == "reset_2fa":
-                    await _remember_twofa(pool, owner_id, int(acc["id"]), "")
-                elif op == "close_sessions":
-                    from services import session_watch as _sw
-                    await _sw.forget(pool, owner_id, int(acc["id"]))
                 # «Проверка» — фиксируем сам вердикт в лог, чтобы был виден результат
-                _msg = (pse.format_restriction_verdict(res)[:200]
-                        if op == "check_restriction" else None)
-                await _journal_done(pool, op_id, idx, _key, _msg)
+                if op == "check_restriction":
+                    verdict = pse.format_restriction_verdict(res)
+                    await _journal_write(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'ok',$4)",
+                        op_id, idx, f"acc#{acc['id']}", verdict[:200],
+                        log_ctx=f" op={op_id}", where="bulk_set_profile",
+                    )
+                else:
+                    await _journal_write(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                        op_id, idx, f"acc#{acc['id']}",
+                        log_ctx=f" op={op_id}", where="bulk_set_profile",
+                    )
             else:
                 fail_count += 1
                 await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                    op_id, idx, _key, (res.get("error") or "")[:200],
+                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
                     log_ctx=f" op={op_id}", where="bulk_set_profile",
                 )
         except Exception as exc:
@@ -23826,131 +22560,21 @@ async def _exec_bulk_set_profile(
             # межцелевой темп под губернатором (давление флота тормозит)
             await asyncio.sleep(await _governed_delay(pool, owner_id, 2.0))
 
-    op_labels = {**pse.SETTER_OPS, "bio": "Описание", "remove_username": "Снять юзернейм",
+    op_labels = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль",
+                 "username": "Username", "bio": "Bio", "close_sessions": "Закрыть сессии",
+                 "privacy": "Приватность",
+                 "clear_bio": "Очистить bio", "remove_username": "Снять username",
+                 "remove_avatar": "Удалить фото", "reset_2fa": "Снять 2FA",
                  "set_online": "В сети", "check_restriction": "Проверка ограничений"}
     summary = (
-        f"🎨 Оформление: {op_labels.get(op, op)}\n"
+        f"🎨 Сеттер: {op_labels.get(op, op)}\n"
         f"✅ Успешно: {ok_count}/{total}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
-        + (f"\n↩️ Уже сделано прошлым прогоном: {skipped_done}" if skipped_done else "")
-        + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
-        + ("\n🔐 Пароль сохранён у аккаунтов — смотрите «Пароли 2FA» на экране оформления"
-           if op == "2fa" and ok_count else "")
     )
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
-async def _restore_twofa_enc(pool, owner_id: int, account_id: int, enc) -> None:
-    """Вернуть прежнюю запись пароля 2FA как есть (зашифрованную или NULL)."""
-    for _attempt in (1, 2):
-        try:
-            await pool.execute(
-                "UPDATE tg_accounts SET twofa_enc=$1 WHERE id=$2 AND owner_id=$3",
-                enc, account_id, owner_id)
-            return
-        except Exception:
-            log_exc_swallow(log, f"_restore_twofa_enc acc={account_id} attempt={_attempt}")
-
-
-async def _stored_twofa(pool, owner_id: int, account_id: int) -> str:
-    """Сохранённый пароль 2FA аккаунта (расшифрованный) или ''. Сбой чтения —
-    '' : тогда Telegram честно ответит «нужен пароль», а не операция упадёт."""
-    try:
-        enc = await pool.fetchval(
-            "SELECT twofa_enc FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            account_id, owner_id)
-    except Exception:
-        log_exc_swallow(log, f"_stored_twofa acc={account_id}")
-        return ""
-    if not enc:
-        return ""
-    from services.token_vault import decrypt_token
-    return decrypt_token(enc) or ""
-
-
-async def _remember_twofa(pool, owner_id: int, account_id: int, password: str) -> None:
-    """Запомнить пароль 2FA аккаунта зашифрованным (пустой — забыть).
-
-    Пароль, поставленный массово и нигде не сохранённый, — это флот, который
-    владелец потеряет при первом же перелогине. Пишем повторно: потеря этой
-    записи стоит доступа к аккаунту.
-    """
-    await db.remember_account_twofa(pool, owner_id, account_id, password)
-
-
 # ── Репортер ──────────────────────────────────────────────────────────────────
-
-async def _diagnose_unused_accounts(
-    pool, owner_id: int, requested_ids: list[int] | None, used_ids: set[int],
-) -> tuple[str, dict]:
-    """Объяснить, ПОЧЕМУ выбранные аккаунты не пошли в работу.
-
-    Жалоба владельца: «массовые жалобы берут один аккаунт вместо заданного
-    количества». Причина — защитные гейты (кулдаун после FloodWait, спамблок/бан,
-    риск-пульс, занятость другой операцией) молча выкидывают аккаунты из явного
-    выбора, и владелец видит «1», не понимая почему. Здесь раскладываем остаток
-    по причинам одним запросом — чтобы сводка операции была честной и
-    действенной (ждать снятия кулдауна / прогреть / освободить флот).
-
-    requested_ids=None — взять ВЕСЬ флот владельца (для операций без явного
-    списка, напр. report_peer по числу аккаунтов). Чтение tg_accounts держим
-    ЗДЕСЬ, в помощнике, а не в теле исполнителя: выбор аккаунтов исполнителем —
-    только через resource_selector (сторож test_op_worker_single_door_scans).
-
-    Возвращает (готовая строка для сводки, счётчики по причинам).
-    """
-    if requested_ids is None:
-        _fleet = await _safe_fetch(
-            pool, "SELECT id FROM tg_accounts WHERE owner_id=$1", owner_id,
-            log_ctx=f"[diagnose_fleet owner={owner_id}]")
-        requested_ids = [int(r["id"]) for r in (_fleet or [])]
-    dropped = [int(a) for a in requested_ids if int(a) not in used_ids]
-    if not dropped:
-        return "", {}
-    rows = await _safe_fetch(
-        pool,
-        "SELECT id, is_active, (session_str IS NOT NULL) AS has_sess, "
-        "COALESCE(acc_status,'active') AS acc_status, "
-        "(cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS on_cooldown "
-        "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-        owner_id, dropped, log_ctx=f"[diagnose_unused op_owner={owner_id}]")
-    by_id = {int(r["id"]): r for r in (rows or [])}
-    try:
-        _quar = await _infra_mem.quarantined_accounts(pool, dropped)
-    except Exception:
-        _quar = set()
-    counts = {"cooldown": 0, "spamblock": 0, "quarantine": 0, "busy": 0,
-              "no_session": 0, "unknown": 0}
-    for aid in dropped:
-        r = by_id.get(aid)
-        if r is None:
-            counts["unknown"] += 1
-        elif not r["is_active"] or not r["has_sess"]:
-            counts["no_session"] += 1
-        elif _acc_status.is_dead(r["acc_status"]):
-            counts["spamblock"] += 1
-        elif r["on_cooldown"]:
-            counts["cooldown"] += 1
-        elif int(aid) in _quar:
-            counts["quarantine"] += 1
-        else:
-            # Прошёл все статусные гейты, но в работу не попал — значит был занят
-            # другой операцией/прогревом на момент захвата.
-            counts["busy"] += 1
-    labels = [
-        ("cooldown", "⏳ на кулдауне (FloodWait)"),
-        ("spamblock", "🚫 спамблок/бан/заморозка"),
-        ("quarantine", "🛡 риск-пульс (недавние ограничения)"),
-        ("busy", "🔄 заняты другой операцией"),
-        ("no_session", "⚪ без активной сессии"),
-        ("unknown", "❓ не ваши/не найдены"),
-    ]
-    parts = [f"{txt}: {counts[key]}" for key, txt in labels if counts[key]]
-    if not parts:
-        return "", counts
-    frag = "⚠️ Не пошли в работу " + str(len(dropped)) + ":\n   " + "\n   ".join(parts)
-    return frag, counts
-
 
 async def _exec_mass_report(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
@@ -23968,13 +22592,8 @@ async def _exec_mass_report(
     if not target or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры mass_report"}
 
-    # force: владелец осознанно шлёт СО ВСЕХ выбранных, игнорируя защиту (кулдаун
-    # после FloodWait и риск-пульс). Мёртвые (бан/деактивация/отозванная сессия)
-    # не включаем даже так — они физически не отправят. Дефолт — защита (force=off).
-    _force = bool(params.get("force"))
     accounts = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0,
-        respect_cooldown=not _force, respect_quarantine=not _force)
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -23982,24 +22601,14 @@ async def _exec_mass_report(
     # которые в этот момент ведут другую операцию или прогрев — две сессии
     # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
     # Освобождение — централизованно в finally _run_op_task по op_id.
-    # Сколько доступных было ДО захвата: если захват вернёт меньше, часть
-    # выбранных аккаунтов занята другой операцией/прогревом. Владелец видел
-    # «Аккаунтов: 1» без объяснения — теперь скажем это прямо в сводке, а не
-    # оставим его гадать, почему из выбранного среза пошёл один.
-    _available_cnt = len(accounts)
     accounts = await _claim_available_accounts(op_id, accounts, owner_id)
     if not accounts:
         return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
-    _busy_cnt = _available_cnt - len(accounts)
 
     # Риск-пульс: жалоба с аккаунта под недавним серьёзным ограничением = быстрый бан
     # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
-    # В force-режиме НЕ отсеиваем — владелец осознанно принял риск.
-    if _force:
-        _skipped_quar = 0
-    else:
-        accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+    accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
 
     # Идемпотентность повтора. Повтор — и автоматический (_maybe_requeue после
     # сетевой ошибки, сброс зависшей операции, воскрешение после перезапуска
@@ -24070,35 +22679,13 @@ async def _exec_mass_report(
 
     from services.reporter_engine import REPORT_REASONS
     reason_label = REPORT_REASONS.get(reason, ("?", ""))[0]
-    # Исход — по ФАКТУ (счётчикам), а не по намерению. Ни одной отправленной
-    # жалобы = провал; часть не прошла = partial. Иначе операция, не отправившая
-    # ничего, показывала бы «выполнено» (ложный успех).
-    if ok_count == 0 and total > 0:
-        status = "failed"
-    elif fail_count > 0:
-        status = "partial"
-    else:
-        status = "done"
-    # Явный выбор владельца = account_ids; реально отработавшие = used_ids. Из
-    # выбора часть молча выкидывали защитные гейты (кулдаун/спамблок/риск-пульс/
-    # занятость) — раскладываем ПОЧЕМУ, чтобы «1 из 10» перестало быть загадкой.
-    used_ids = {int(a["id"]) for a in accounts}
-    _why_frag, _why_counts = await _diagnose_unused_accounts(
-        pool, owner_id, account_ids, used_ids)
-    head = (f"✅ Отправлено: {ok_count}/{total}" if ok_count
-            else f"⚠️ Не отправлено ни одной жалобы: 0/{total}")
-    # Напоминаем исходный размер выбора, если из него дошли не все.
-    scope = (f" (выбрано {len(account_ids)})"
-             if len(account_ids) > total else "")
     summary = (
         f"🚨 Жалобы на {target} [{reason_label}]\n"
-        f"{head}{scope}"
+        f"✅ Отправлено: {ok_count}/{total}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
-        + (f"\n{_why_frag}" if _why_frag else "")
+        + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
     )
-    return {"status": status, "ok": ok_count, "failed": fail_count,
-            "busy": _busy_cnt, "skipped_quarantine": _skipped_quar,
-            "unused_reasons": _why_counts, "summary": summary}
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
 # ── Content Clone executor ──────────────────────────────────────────────────
@@ -24279,30 +22866,20 @@ async def _exec_ai_comment(
     """AI Commenting: под каждым целевым каналом (его группой обсуждений) постит
     контекстный AI-комментарий к недавнему посту. Round-robin по аккаунтам,
     задержки, обработка FloodWait, content_safety-гард на нишу.
-    params: {channels: [ref...], niche, tone, acc_count} + настройки
-    `growth_agent_settings.comment_settings` (posts_per_channel, post_pick,
-    max_post_age_hours, length, extra_instruction, join_discussion,
-    skip_commented). Отсутствующее = прежнее поведение.
-
-    Повтор под тем же ПОСТОМ закрыт таблицей `ai_comment_posts`: отметка
-    ставится до отправки и переживает операцию, то есть второй запуск по тем
-    же каналам не пишет второй комментарий под тот же пост.
+    params: {channels: [ref...], niche, tone, acc_count, per_channel_delay}
     """
-    from services import ai_comment_engine, account_manager, content_safety, persona_voice
-    from services.growth_agent_settings import comment_settings
+    from services import ai_comment_engine, account_manager, content_safety
 
     channels = [str(c).strip() for c in (params.get("channels") or []) if str(c).strip()]
     niche = (params.get("niche") or "").strip()
     tone = (params.get("tone") or "neutral").strip()
-    cfg = comment_settings(params)
-    acc_count = cfg["acc_count"]
+    acc_count = max(1, min(int(params.get("acc_count") or 3), 10))
     if not channels:
         return {"status": "failed", "summary": "⚠️ Не указаны каналы"}
 
     # Гард безопасности контента (ниша — единственный пользовательский текст;
     # сам коммент генерит LLM под постом, но нишу проверяем как контекст-инструкцию).
-    verdict = await content_safety.enforce(
-        pool, owner_id, niche or "comment", cfg["extra_instruction"], surface="ai_comment")
+    verdict = await content_safety.enforce(pool, owner_id, niche or "comment", "", surface="ai_comment")
     if verdict.blocked:
         return {"status": "failed", "summary": "⚠️ Контент заблокирован политикой платформы"}
 
@@ -24337,20 +22914,7 @@ async def _exec_ai_comment(
         log.info("ai_comment op=%d: повтор — под %d каналами комментарий уже есть, пропускаем",
                  op_id, len(_already_commented))
 
-    async def _mark_post(channel_id: int, post_id: int) -> bool:
-        """Отметка поста — цена комментария. Не легла — комментария нет."""
-        res = await _safe_execute(
-            pool,
-            "INSERT INTO ai_comment_posts(owner_id, channel_id, post_id, op_id) "
-            "VALUES($1,$2,$3,$4) ON CONFLICT (owner_id, channel_id, post_id) DO NOTHING",
-            owner_id, channel_id, post_id, op_id,
-            log_ctx=f"[ai_comment_mark op={op_id}]")
-        if res == "ERROR":
-            return False  # отметка не легла — комментария не будет
-        inserted = str(res or "").endswith(" 1")
-        return inserted or not cfg["skip_commented"]
-
-    ok_count, fail_count, comments_total = 0, 0, 0
+    ok_count, fail_count = 0, 0
     total = len(channels)
     for idx, ref in enumerate(channels, 1):
         if await _is_cancelled(pool, op_id):
@@ -24364,26 +22928,10 @@ async def _exec_ai_comment(
             continue
         acc = accounts[idx % len(accounts)]
         try:
-            # Персона аккаунта (экран «Профили → Персоны») задаёт голос
-            # комментария: без неё весь флот пишет одним голосом. Голос несёт
-            # и память персоны — что она уже говорила о себе — и после модели
-            # доводит её манеру, а повтор сказанного не отправляет.
-            _voice = await persona_voice.load(pool, int(acc["id"]))
-            _persona = _voice.prompt
             res = await ai_comment_engine.post_ai_comment(
-                acc["session_str"], dict(acc), ref, niche=niche, tone=tone,
-                posts=cfg["posts_per_channel"], pick=cfg["post_pick"],
-                max_age_hours=cfg["max_post_age_hours"], length=cfg["length"],
-                extra_instruction=cfg["extra_instruction"],
-                join_discussion=cfg["join_discussion"], mark=_mark_post,
-                persona=_persona,
-                polish=lambda t, _v=_voice: persona_voice.polish(t, _v))
-            for _c in res.get("comments") or []:
-                await persona_voice.remember(pool, _voice, "comment", _c.get("text") or "",
-                                             entity=str(ref), owner_id=owner_id)
+                acc["session_str"], dict(acc), ref, niche=niche, tone=tone)
             if res.get("ok"):
                 ok_count += 1
-                comments_total += len(res.get("comments") or []) or 1
                 # _safe_execute, а не pool.execute: комментарий уже опубликован,
                 # и ронять операцию из-за сбоя записи в журнал нельзя. Ценой
                 # служит возможный повтор по этому каналу при возобновлении —
@@ -24412,12 +22960,9 @@ async def _exec_ai_comment(
                 pool, op_id, random.uniform(20, 45),
                 "ai_comment_pace")  # органическая пауза между каналами
 
-    summary = (f"💬 ИИ-комментинг\n✅ Каналов с комментарием: {ok_count}/{total}"
-               f"\n💬 Комментариев: {comments_total}"
-               + (f"\n⚠️ Без комментария: {fail_count} (причины — в журнале)"
-                  if fail_count else ""))
-    return {"status": "done", "ok": ok_count, "failed": fail_count,
-            "comments": comments_total, "summary": summary}
+    summary = (f"💬 AI-комментинг\n✅ Успешно: {ok_count}/{total}"
+               + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
 async def _exec_niche_scan(
@@ -24444,14 +22989,10 @@ async def _exec_niche_scan(
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
     if not accounts:
         return {"status": "requeue", "summary": "⏳ Аккаунты на карантине — повторим позже"}
-    # Захват через _claim_available_accounts: он привязывает аккаунт к op_id,
-    # и освобождение идёт в finally _run_op_task. Прежний голый низкоуровневый захват
-    # держал аккаунт «занятым» до перезапуска процесса — и после удачного
-    # поиска тоже (освобождения не было ни на одном пути).
-    claimed = await _claim_available_accounts(op_id, accounts, owner_id)
+    claimed = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed:
         return {"status": "requeue", "summary": "⏳ Аккаунт занят другой операцией"}
-    acc = claimed[0]
+    acc = next(a for a in accounts if int(a["id"]) in set(claimed))
     if not acc.get("session_str"):
         return {"status": "failed", "summary": "⚠️ У аккаунта нет сессии"}
 
@@ -24630,21 +23171,11 @@ async def _exec_niche_presence(
                 if kind == "comment":
                     # Один вход и для канала (чат обсуждений), и для группы
                     # (ответ в ней самой): в нише групп больше, чем каналов.
-                    # Голос персоны аккаунта и здесь: без него радар ниши
-                    # писал безликим «живым участником», хотя тот же аккаунт
-                    # в прогреве и в комментинге говорит своим характером.
-                    from services import persona_voice
-                    _voice = await persona_voice.load(pool, int(acc_id))
                     res = await ai_comment_engine.post_ai_comment_anywhere(
                         acc["session_str"], dict(acc), ref,
-                        niche=campaign["niche"], tone=campaign["tone"],
-                        persona=_voice.prompt,
-                        polish=lambda t, _v=_voice: persona_voice.polish(t, _v))
+                        niche=campaign["niche"], tone=campaign["tone"])
                     if res.get("ok"):
                         comments += 1
-                        await persona_voice.remember(
-                            pool, _voice, "comment", res.get("comment") or "",
-                            entity=str(ref), owner_id=owner_id)
                         await niche_radar.log_action(
                             pool, owner_id, aid, op_id=op_id, acc_id=acc_id, kind="comment",
                             detail=(res.get("comment") or "")[:200])
@@ -24820,135 +23351,18 @@ async def _exec_compliance_scan(
             "failed": err_count, "summary": head}
 
 
-async def _growth_record_outcome(pool, owner_id: int, group_id, outcome: str,
-                                 *, msg_id=None, note: str = "") -> None:
-    """Исход публикации Агента роста — в журнал обучения. Fail-soft: строка
-    дедупа уже стоит (её поставили ДО поста), здесь только знание об исходе."""
-    if not group_id:
-        return
-    await _safe_execute(
-        pool,
-        "UPDATE niche_growth_targets SET outcome=$3, msg_id=$4, outcome_note=$5, "
-        "posted_at = CASE WHEN $3='posted' THEN now() ELSE posted_at END "
-        "WHERE owner_id=$1 AND group_id=$2",
-        owner_id, int(group_id), outcome,
-        int(msg_id) if msg_id else None, (note or "")[:300] or None,
-        log_ctx=f"[niche_growth_outcome owner={owner_id}]")
-
-
-async def _growth_check_posts_due(pool, owner_id: int, accounts: list) -> int:
-    """Узнать судьбу прошлых постов Агента роста: жив ли, просмотры.
-
-    Пост, удалённый админами через пару часов, — самый честный сигнал, что
-    здесь (и по этому запросу) промо считают спамом; раньше система о нём не
-    узнавала никогда. Спрашиваем тем аккаунтом, который публиковал, и только
-    если он сейчас в руках этого запуска (захвачен им): чужую сессию не
-    трогаем. «Не смогли спросить» — не «удалён»: строку оставляем на потом.
-    Возвращает, сколько постов проверено."""
-    from services import account_manager
-    from services.growth_learning import CHECK_AFTER_HOURS, CHECK_BATCH
-
-    by_id = {int(a["id"]): a for a in accounts or []}
-    if not by_id:
-        return 0
-    rows = await _safe_fetch(
-        pool,
-        "SELECT group_id, username, msg_id, acc_id FROM niche_growth_targets "
-        "WHERE owner_id=$1 AND outcome='posted' AND msg_id IS NOT NULL "
-        "AND checked_at IS NULL AND acc_id = ANY($2::bigint[]) "
-        "AND posted_at < now() - make_interval(hours => $3) "
-        "ORDER BY posted_at LIMIT $4",
-        owner_id, list(by_id), CHECK_AFTER_HOURS, CHECK_BATCH)
-    checked = 0
-    for r in rows or []:
-        acc = by_id.get(int(r["acc_id"]))
-        ref = f"@{r['username']}" if r["username"] else int(r["group_id"])
-        if not acc or not acc.get("session_str"):
-            continue
-        st = await account_manager.get_message_status(
-            acc["session_str"], ref, [int(r["msg_id"])], _acc=acc)
-        if st is None:
-            continue
-        info = st.get(int(r["msg_id"])) or {"alive": False, "views": 0}
-        await _safe_execute(
-            pool,
-            "UPDATE niche_growth_targets SET checked_at=now(), alive=$3, views=$4 "
-            "WHERE owner_id=$1 AND group_id=$2",
-            owner_id, int(r["group_id"]), bool(info["alive"]), int(info["views"] or 0),
-            log_ctx=f"[niche_growth_check owner={owner_id}]")
-        checked += 1
-        await asyncio.sleep(random.uniform(1.5, 3.0))
-    return checked
-
-
-async def _growth_proven_groups(pool, owner_id: int, niche: str, keywords: list,
-                                limit: int) -> list[dict]:
-    """Доказанные группы, куда пора повторить пост (growth_learning).
-
-    Пост прошёл, проверка нашла его живым и с просмотрами, прошло не меньше
-    REPOST_AFTER_DAYS. Та же ниша или тот же запрос — чужая тема не годится.
-    Только с публичным ником: пост идёт по нику, access_hash не хранится.
-    Fail-soft: сбой чтения = без повторов, то есть прежнее поведение (новых
-    групп это не касается — их дедуп читается строго выше)."""
-    from services.growth_learning import REPOST_AFTER_DAYS
-
-    if limit <= 0:
-        return []
-    rows = await _safe_fetch(
-        pool,
-        "SELECT group_id, title, username, members, keyword FROM niche_growth_targets "
-        "WHERE owner_id=$1 AND outcome='posted' AND alive AND COALESCE(views,0) > 0 "
-        "AND username IS NOT NULL AND username <> '' "
-        "AND posted_at < now() - make_interval(days => $2) "
-        "AND (lower(niche) = lower($3) OR lower(keyword) = ANY($4::text[])) "
-        "ORDER BY views DESC, posted_at LIMIT $5",
-        owner_id, REPOST_AFTER_DAYS, niche or "",
-        [str(k or "").lower() for k in keywords or []], int(limit),
-        log_ctx=f"[niche_growth_proven owner={owner_id}]")
-    return [{"id": int(r["group_id"]), "title": r["title"] or "",
-             "username": r["username"], "join_ref": f"@{r['username']}",
-             "members": int(r["members"] or 0), "keyword": r["keyword"],
-             "access_hash": 0, "proven": True} for r in rows or []]
-
-
-async def _growth_claim_proven(pool, owner_id: int, group_id: int, acc_id: int) -> bool:
-    """Занять доказанную группу под повтор — атомарно и ДО поста.
-
-    Условный UPDATE проходит ровно у одного запуска: строка уходит из
-    'posted' в 'marked', и второй (параллельный или повтор после обрыва) её
-    уже не видит доказанной. Сбой записи = поста нет, как и у новой группы."""
-    from services.growth_learning import REPOST_AFTER_DAYS
-
-    res = await _safe_execute(
-        pool,
-        "UPDATE niche_growth_targets SET outcome='marked', acc_id=$3, msg_id=NULL, "
-        "posted_at=NULL, checked_at=NULL, alive=NULL, views=NULL, outcome_note=NULL "
-        "WHERE owner_id=$1 AND group_id=$2 AND outcome='posted' AND alive "
-        "AND posted_at < now() - make_interval(days => $4)",
-        owner_id, int(group_id), int(acc_id), REPOST_AFTER_DAYS,
-        log_ctx=f"[niche_growth_claim_proven owner={owner_id}]")
-    return res == "UPDATE 1"
-
-
 async def _exec_niche_growth_post(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Growth Agent: ищет группы в нише → вступает → постит рекламный текст.
 
     Безопасный режим:
-    - Не более 10 групп за один запуск (по умолчанию 5)
-    - Темп «стандартный»: 3-8 минут между вступлением и постом, 10-20 минут
-      между группами; «бережный» — вдвое дольше. Быстрее стандартного нельзя.
+    - Не более 5 групп за один запуск (снижает риск бана)
+    - 3-8 минут между вступлением и постом (имитирует органическое поведение)
+    - 10-20 минут между группами (Telegram не замечает паттерн спама)
     - Round-robin по аккаунтам с обработкой FloodWait
-
-    Настройки (все необязательны, отсутствующее = прежнее поведение) —
-    `growth_agent_settings.growth_settings`: max_groups, min_members,
-    max_members, keywords (свои запросы вместо подбора), exclude_words
-    (стоп-слова в названии), pace, dry_run («только найти группы»: без
-    вступления и постов, найденное ложится в журнал операции).
     """
     from services import niche_searcher, account_manager
-    from services.growth_agent_settings import GROWTH_PACES, growth_settings
     # Anti-detection: свой вариант рекламного текста в каждую группу (spintax; no-op
     # без него) — иначе один и тот же promo_text в 5 групп = сигнатура координации.
     from services.dm_engine import expand_spintax as _expand_spintax
@@ -24956,21 +23370,17 @@ async def _exec_niche_growth_post(
     niche: str = params.get("niche", "")
     geo: str = (params.get("geo") or "").strip()
     promo_text: str = params.get("promo_text", "")
-    cfg = growth_settings(params)
-    # Безопасный лимит групп за запуск (по умолчанию 5, потолок 10)
-    max_groups: int = cfg["max_groups"]
+    # Безопасный лимит: не более 5 групп за запуск во избежание блокировки
+    max_groups: int = min(int(params.get("max_groups") or 5), 5)
     # Сколько аккаунтов задействовать (0/не задано → безопасный дефолт 3)
-    acc_count: int = cfg["acc_count"]
-    dry_run: bool = cfg["dry_run"]
-    pace = GROWTH_PACES[cfg["pace"]]
+    acc_count: int = max(1, min(int(params.get("acc_count") or 3), 10))
     # Гео дописывается к нише как доп. контекст для генерации ключевых слов —
     # search_niche_groups сам не умеет фильтровать по гео (Telegram SearchRequest
     # глобальный), но "фитнес Москва" вместо "фитнес" даёт более локальные ключи.
     search_description = f"{niche} {geo}".strip() if geo else niche
 
-    if not niche or (not promo_text and not dry_run):
-        return {"status": "failed", "reason": "Нет ниши или рекламного текста",
-                "summary": "⚠️ Не указана ниша или рекламный текст"}
+    if not niche or not promo_text:
+        return {"status": "failed", "reason": "Нет ниши или рекламного текста"}
 
     # Universal content-safety backstop — Growth Agent searches for and joins
     # groups matching `niche`, then posts `promo_text` into them, so both fields
@@ -25013,21 +23423,13 @@ async def _exec_niche_growth_post(
 
     try:
 
-        # Ключевые слова: свои запросы владельца — как есть; иначе подбор ИИ
-        # с учётом гео (раньше ИИ не включался никогда, а гео шло отдельным
-        # запросом и находило все чаты города подряд).
-        if cfg["keywords"]:
-            keywords = list(cfg["keywords"])
-        else:
-            try:
-                keywords = await niche_searcher.generate_keywords(
-                    niche, geo=geo, use_ai=True)
-            except Exception as exc:
-                log.warning("niche_growth_post: keyword gen failed: %s", exc)
-                keywords = []
-            if not keywords:
-                keywords = [search_description]
-        log.info("niche_growth_post op_id=%d: keywords=%s", op_id, keywords)
+        # Генерируем ключевые слова для ниши (+ гео, если задан)
+        try:
+            keywords = await niche_searcher.generate_keywords(search_description)
+            log.info("niche_growth_post op_id=%d: keywords=%s", op_id, keywords)
+        except Exception as exc:
+            log.warning("niche_growth_post: keyword gen failed: %s", exc)
+            keywords = [search_description]
 
         # Группы, в которые этот владелец уже заходил через Growth Agent раньше —
         # исключаем, чтобы повторные запуски не заходили и не постили повторно в
@@ -25060,41 +23462,13 @@ async def _exec_niche_growth_post(
                           "повторим позже, чтобы не отправить промо дважды",
             }
 
-        # ОБУЧЕНИЕ НА ИСХОДАХ (services/growth_learning). Сначала — судьба
-        # прошлых постов: жив ли, сколько просмотров (аккаунтом, который
-        # публиковал, если он в этом запуске). Потом — порядок запросов по их
-        # отдаче: запрос, по которому трижды не вышло ни одной живой
-        # публикации, больше не пробуется (кроме своих запросов владельца —
-        # их только переупорядочиваем). Всё fail-soft: обучение — надстройка,
-        # сбой не должен отменять запуск.
-        _dropped_kws: list[str] = []
-        _checked_posts = 0
-        try:
-            _checked_posts = await _growth_check_posts_due(pool, owner_id, accounts)
-            from services import growth_learning as _gl
-            _hist = await pool.fetch(
-                "SELECT keyword, outcome, alive FROM niche_growth_targets "
-                "WHERE owner_id=$1 AND keyword IS NOT NULL", owner_id)
-            _stats = _gl.keyword_stats([dict(r) for r in _hist])
-            if _stats:
-                _ordered, _dead = _gl.order_keywords(keywords, _stats)
-                if cfg["keywords"]:
-                    keywords = _ordered + _dead
-                else:
-                    keywords, _dropped_kws = _ordered, _dead
-                if _dropped_kws:
-                    log.info("niche_growth_post op=%d: по опыту отсеяны запросы %s",
-                             op_id, _dropped_kws)
-        except Exception:
-            log_exc_swallow(log, f"niche_growth_post op={op_id}: обучение недоступно")
-
         # Ищем группы
         try:
             groups = await niche_searcher.search_niche_groups(
                 session_str,
                 keywords,
-                min_members=cfg["min_members"],
-                max_per_keyword=5 if not dry_run else 10,
+                min_members=50,
+                max_per_keyword=5,
                 exclude_ids=exclude_ids,
                 _acc=search_acc,
             )
@@ -25105,29 +23479,6 @@ async def _exec_niche_growth_post(
                 "reason": f"Поиск групп не удался: {exc}",
                 "summary": "❌ Не удалось найти группы в нише",
             }
-
-        # Группы, где писать нельзя (закрытый чат, заявка, запрет ссылок при
-        # ссылке в промо), отсеиваются ДО вступления: см. posting_rights.
-        _has_links = niche_searcher.text_has_links(promo_text)
-        _found_n = len(groups or [])
-        _closed_n = sum(1 for g in (groups or [])
-                        if niche_searcher.postable(g, promo_has_links=_has_links))
-        groups = niche_searcher.filter_groups(
-            groups or [], max_members=cfg["max_members"],
-            exclude_words=cfg["exclude_words"], promo_has_links=_has_links)
-        # Сперва самые тематичные — и для превью, и для настоящего запуска.
-        groups = niche_searcher.rank_groups(groups, keywords, geo=geo)
-
-        # Повтор в ДОКАЗАННЫХ группах (пост жил и читался) — впереди новых, но
-        # не больше доли запуска: охват растёт там, где он уже подтверждён, а
-        # разведка новых групп не останавливается.
-        _proven: list[dict] = []
-        if not dry_run:
-            from services.growth_learning import repost_slots
-            _proven = await _growth_proven_groups(
-                pool, owner_id, niche, keywords, repost_slots(max_groups))
-            _pids = {g["id"] for g in _proven}
-            groups = _proven + [g for g in groups if int(g.get("id") or 0) not in _pids]
 
         if not groups:
             # Correct total_items down from the submitted placeholder (bot handler
@@ -25141,48 +23492,11 @@ async def _exec_niche_growth_post(
                 "status": "done",
                 "ok": 0,
                 "fail": 0,
-                "summary": (f"⚠️ Найдено {_found_n} групп, но писать участникам "
-                            "нельзя ни в одной (закрытый чат, вступление по заявке "
-                            "или запрет ссылок). Попробуйте другие запросы или "
-                            "текст без ссылки." if _closed_n and _closed_n == _found_n else
-                            "⚠️ Групп по нише не найдено. Попробуйте уточнить нишу, "
-                            "свои запросы или снизить порог участников."),
-                "keywords": keywords[:15],
+                "summary": "⚠️ Групп по нише не найдено. Попробуйте уточнить описание.",
             }
 
-        if dry_run:
-            # «Только найти группы»: ни вступления, ни поста. Список ложится
-            # в журнал операции, чтобы владелец увидел, куда пошёл бы текст,
-            # и поправил настройки ДО настоящего запуска.
-            groups = groups[:30]
-            await _safe_execute(
-                pool, "UPDATE operation_queue SET total_items=$1, done_items=$1 "
-                      "WHERE id=$2", len(groups), op_id)
-            for i, g in enumerate(groups, 1):
-                await _journal_write(
-                    pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'ok',$4)", op_id, i,
-                    g.get("join_ref") or str(g.get("id") or ""),
-                    (f"найдена: {g.get('title') or ''} · участников: {int(g.get('members') or 0)}")[:200],
-                    log_ctx=f" op={op_id}", where="niche_growth_preview")
-            lines = [f"• {g.get('title') or g.get('join_ref')} ({g.get('join_ref')}, "
-                     f"{int(g.get('members') or 0)} уч.)" for g in groups[:15]]
-            return {
-                "status": "done",
-                "ok": len(groups),
-                "fail": 0,
-                "groups_found": len(groups),
-                "keywords": keywords[:15],
-                "closed_skipped": _closed_n,
-                "summary": (f"🔍 Найдено групп: {len(groups)} (публикаций не было)\n"
-                            + (f"Отсеяно, где писать нельзя: {_closed_n}\n"
-                               if _closed_n else "")
-                            + f"Запросы: {', '.join(keywords[:8])}\n\n"
-                            + "\n".join(lines)),
-            }
-
-        # Самые тематичные в пределах безопасного лимита (порядок — rank_groups).
+        # Перемешиваем и берём только безопасный лимит
+        random.shuffle(groups)
         groups = groups[:max_groups]
         total = len(groups)
         await _safe_execute(
@@ -25191,8 +23505,6 @@ async def _exec_niche_growth_post(
         ok_count = 0
         err_count = 0
         acc_idx = 0
-        posted_titles: list[str] = []
-        _reposted = 0
 
         for idx, grp in enumerate(groups):
             if await _is_cancelled(pool, op_id):
@@ -25203,28 +23515,9 @@ async def _exec_niche_growth_post(
                     "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
                 }
 
-            # Round-robin по аккаунтам — среди тех, у кого сейчас НЕ местная
-            # ночь. Вступление и промо в 3 часа ночи по времени аккаунта —
-            # бот-сигнал, а пост в спящей группе к утру уйдёт под десятки
-            # новых сообщений: охвата нет, риск есть. Ночь у всех — операция
-            # откладывается до местного утра и продолжит с того же места
-            # (отработанные группы уже в niche_growth_targets).
-            from services import geo_tempo as _gt
-            acc = None
-            for _k in range(len(accounts)):
-                _cand = accounts[(acc_idx + _k) % len(accounts)]
-                if not _gt.is_local_night(_cand.get("geo_country")):
-                    acc = _cand
-                    acc_idx += _k + 1
-                    break
-            if acc is None:
-                _waits = [w for w in (_gt.seconds_until_local_morning(a.get("geo_country"))
-                                      for a in accounts) if w]
-                _wait = int(min(_waits) if _waits else 6 * 3600) + random.randint(300, 2400)
-                _why = (f"У всех аккаунтов сейчас местная ночь — Агент роста "
-                        f"продолжит утром. Опубликовано в этот заход: {ok_count}")
-                return {"status": "requeue", "defer_s": _wait,
-                        "defer_cause": "local_night", "reason": _why, "summary": _why}
+            # Round-robin по аккаунтам
+            acc = accounts[acc_idx % len(accounts)]
+            acc_idx += 1
 
             join_ref = grp.get("join_ref", "")
             grp_id = grp.get("id", 0)
@@ -25237,32 +23530,13 @@ async def _exec_niche_growth_post(
                 join_result = await account_manager.join_channel(
                     acc["session_str"], join_ref, _acc=acc
                 )
-                if join_result.get("flood_wait"):
-                    # Флуд — ответ Telegram АККАУНТУ, а не группе: следующая
-                    # попытка вступить сразу же продлевает его. Раньше это
-                    # считалось «не удалось вступить» и цикл шёл к следующей
-                    # группе без паузы. Группа ещё не отмечена — повтор её найдёт.
-                    await _note_flood_penalty(pool, int(acc["id"]),
-                                              int(join_result["flood_wait"]), "join", op_id)
-                    _why = (f"Telegram попросил паузу на вступления — Агент роста "
-                            f"продолжит позже. Опубликовано в этот заход: {ok_count}")
-                    return {"status": "requeue",
-                            "defer_s": int(join_result["flood_wait"]) + random.randint(60, 300),
-                            "defer_cause": "flood", "reason": _why, "summary": _why}
                 if "error" in join_result and not join_result.get("already_member"):
                     log.info(
                         "niche_growth_post: join failed grp=%s: %s",
                         join_ref, join_result.get("error"),
                     )
                     err_count += 1
-                    await _journal_write(
-                        pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                        "VALUES($1,$2,$3,'error',$4)", op_id, idx + 1, join_ref,
-                        (f"не удалось вступить: {join_result.get('error')}")[:200],
-                        log_ctx=f" op={op_id}", where="niche_growth_join")
-                    await _safe_execute(
-                        pool,
+                    await pool.execute(
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                     )
                     continue
@@ -25296,23 +23570,14 @@ async def _exec_niche_growth_post(
             # id неотметима в принципе, поэтому поста для неё тоже нет:
             # вступление обратимо и дёшево, второй промо-пост — нет.
             _marked = False
-            if grp_id and grp.get("proven"):
-                _marked = await _growth_claim_proven(pool, owner_id, grp_id, int(acc["id"]))
-            elif grp_id:
-                # «INSERT 0 0» — строку уже поставил другой запуск: группа
-                # занята им, второй пост отсюда был бы тем самым дублем.
+            if grp_id:
                 _marked = await _safe_execute(
                     pool,
-                    "INSERT INTO niche_growth_targets(owner_id, group_id, title, "
-                    "keyword, niche, username, members, acc_id, outcome) "
-                    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,'marked') "
-                    "ON CONFLICT (owner_id, group_id) DO NOTHING",
+                    "INSERT INTO niche_growth_targets(owner_id, group_id, title) "
+                    "VALUES($1,$2,$3) ON CONFLICT (owner_id, group_id) DO NOTHING",
                     owner_id, grp_id, grp_title,
-                    (grp.get("keyword") or None), (niche or None)[:200] if niche else None,
-                    (username or None), int(grp.get("members") or 0),
-                    int(acc["id"]),
                     log_ctx=f"[niche_growth_mark op={op_id}]",
-                ) == "INSERT 0 1"
+                ) != "ERROR"
             if not _marked:
                 log.error(
                     "niche_growth_post op=%d: группа %s (%r) не записалась в "
@@ -25330,7 +23595,7 @@ async def _exec_niche_growth_post(
                 continue
 
             # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
-            join_to_post_delay = random.uniform(*pace["join_to_post"])
+            join_to_post_delay = random.uniform(180, 480)
             log.debug("niche_growth_post: waiting %.0fs before posting to grp=%s", join_to_post_delay, join_ref)
             await _pause_watching_for_cancel(
                 pool, op_id, join_to_post_delay,
@@ -25355,54 +23620,18 @@ async def _exec_niche_growth_post(
                     username=username,
                     _acc=acc,
                 )
-                if post_result.get("flood_wait"):
-                    # Telegram пост не рассматривал: метка снимается (иначе
-                    # группа сгорела бы навсегда без поста, а флуд записался бы
-                    # в обучение как «здесь не публикуют» и отсеял бы запрос).
-                    await _safe_execute(
-                        pool, "DELETE FROM niche_growth_targets WHERE owner_id=$1 "
-                              "AND group_id=$2 AND outcome='marked'",
-                        owner_id, int(grp_id),
-                        log_ctx=f"[niche_growth_unmark op={op_id}]")
-                    await _note_flood_penalty(pool, int(acc["id"]),
-                                              int(post_result["flood_wait"]), "post", op_id)
-                    _why = (f"Telegram попросил паузу на публикации — Агент роста "
-                            f"продолжит позже. Опубликовано в этот заход: {ok_count}")
-                    return {"status": "requeue",
-                            "defer_s": int(post_result["flood_wait"]) + random.randint(60, 300),
-                            "defer_cause": "flood", "reason": _why, "summary": _why}
                 if "error" in post_result:
                     log.info(
                         "niche_growth_post: post failed grp=%s title=%r: %s",
                         join_ref, grp_title, post_result.get("error"),
                     )
-                    await _growth_record_outcome(
-                        pool, owner_id, grp_id, "post_failed",
-                        note=str(post_result.get("error") or ""))
                     err_count += 1
-                    await _journal_write(
-                        pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                        "VALUES($1,$2,$3,'error',$4)", op_id, idx + 1, join_ref,
-                        (f"{grp_title}: публикация не прошла — "
-                         f"{post_result.get('error')}")[:200],
-                        log_ctx=f" op={op_id}", where="niche_growth_post")
                 else:
                     ok_count += 1
-                    posted_titles.append(grp_title or join_ref)
-                    if grp.get("proven"):
-                        _reposted += 1
-                    await _growth_record_outcome(
-                        pool, owner_id, grp_id, "posted",
-                        msg_id=post_result.get("msg_id"))
                     log.info(
                         "niche_growth_post: posted to grp=%s title=%r msg_id=%s",
                         join_ref, grp_title, post_result.get("msg_id"),
                     )
-                    await _journal_done(
-                        pool, op_id, idx + 1, join_ref,
-                        (f"{grp_title}: опубликовано "
-                         f"(аккаунт {acc.get('phone') or acc.get('id')})")[:200])
             except Exception as exc:
                 exc_str = str(exc).lower()
                 if "floodwait" in exc_str or "flood" in exc_str:
@@ -25424,7 +23653,7 @@ async def _exec_niche_growth_post(
             # (множитель ≥1 — спокойный флот не ускоряем, рисковый — тормозим).
             if idx < total - 1:
                 between_groups_delay = await _governed_delay(
-                    pool, owner_id, random.uniform(*pace["between"]))
+                    pool, owner_id, random.uniform(600, 1200))
                 log.debug(
                     "niche_growth_post: waiting %.0fs before next group (%d/%d done)",
                     between_groups_delay, idx + 1, total,
@@ -25433,18 +23662,7 @@ async def _exec_niche_growth_post(
                     pool, op_id, between_groups_delay,
                     "niche_growth_between_groups")
 
-        summary = (f"🌿 Агент роста: опубликовано {ok_count} из {total}"
-                   + (f", ошибок {err_count}" if err_count else ""))
-        if _dropped_kws:
-            summary += (f"\nПо опыту прошлых запусков не пробовались запросы без "
-                        f"отдачи: {', '.join(_dropped_kws[:5])}")
-        if _checked_posts:
-            summary += f"\nПроверена судьба прошлых постов: {_checked_posts}"
-        if _reposted:
-            summary += (f"\nПовтор в группах, где прошлый пост жил и читался: "
-                        f"{_reposted}")
-        if posted_titles:
-            summary += "\n" + "\n".join(f"• {t}" for t in posted_titles[:10])
+        summary = f"🌱 Growth Agent: ✅ {ok_count} ❌ {err_count} из {total} групп"
         return {
             "status": "done",
             "ok": ok_count,
@@ -25764,20 +23982,11 @@ async def _exec_ad_intel_scan(
                     "summary": f"⚠️ {result.get('error') or 'Сканирование не удалось'}"}
 
         ad_posts = result.get("ad_posts_found", 0)
-        new_posts = result.get("new_ad_posts", 0)
-        advs = result.get("advertisers_found", 0)
-        flags = result.get("fraud_flags") or []
-        summary = (f"📡 Разведка рекламы @{channel}: рекламных постов {ad_posts}"
-                   f" (новых {new_posts}), рекламодателей {advs}, "
-                   f"качество {float(result.get('quality_score') or 0):.0f}/100")
-        if flags:
-            summary += f". ⚠️ {flags[0]}"
         return {
             "status": "done",
             "channel": channel,
             "ad_posts_found": ad_posts,
-            "new_ad_posts": new_posts,
-            "summary": summary,
+            "summary": f"🔍 Ad Intel @{channel}: найдено {ad_posts} рекламных постов",
         }
     except Exception as exc:
         log.exception("_exec_ad_intel_scan op=%d channel=%s", op_id, channel)
@@ -26315,18 +24524,6 @@ async def _exec_report_peer(
         if idx + 1 < len(accounts):
             await asyncio.sleep(2.5)
 
-    # Запрошено acc_count аккаунтов, в работу пошло len(accounts). Если меньше —
-    # раскладываем ПОЧЕМУ по всему флоту владельца (кулдаун/спамблок/риск-пульс/
-    # занятость), чтобы «1 вместо 10» перестало быть загадкой. Весь флот берёт
-    # сам помощник (requested_ids=None): чтение tg_accounts — не в исполнителе.
-    _why_frag = ""
-    if len(accounts) < acc_count:
-        try:
-            _used = {int(a["id"]) for a in accounts}
-            _why_frag, _ = await _diagnose_unused_accounts(
-                pool, owner_id, None, _used)
-        except Exception:
-            log_exc_swallow(log, f"report_peer diagnose op={op_id}")
     return {
         "status": "done" if ok_count else "failed",
         "ok": ok_count,
@@ -26335,10 +24532,8 @@ async def _exec_report_peer(
         # Пропущенные называем прямо: иначе повтор выглядит мгновенным успехом,
         # и непонятно, ушла жалоба заново или нет.
         "summary": (f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно"
-                    + (f" из {acc_count} запрошенных" if len(accounts) < acc_count else "")
                     + (f" (из них {skip_count} отправили в прошлый раз)" if skip_count else "")
-                    + (f" ❌ {fail_count}" if fail_count else "")
-                    + (f"\n{_why_frag}" if _why_frag else "")),
+                    + (f" ❌ {fail_count}" if fail_count else "")),
     }
 
 
@@ -26380,22 +24575,12 @@ async def _exec_auto_register(
 
     ok_n = len(res.get("ok", []))
     fail_n = len(res.get("failed", []))
-    stopped = str(res.get("stopped") or "")
     await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", ok_n + fail_n, op_id)
-    if stopped.startswith("⏹"):
-        status = "cancelled"
-    else:
-        status = "done" if ok_n else "failed"
-    # Первая причина пропуска — в итог: «0/10» без причины не говорит владельцу,
-    # что делать (пополнить сервис номеров, сменить страну, ждать).
-    first_fail = (res.get("failed") or [""])[0]
     return {
-        "status": status,
+        "status": "done" if ok_n else "failed",
         "ok": ok_n,
         "failed": fail_n,
-        "summary": (f"📱 Авторег {country}: ✅ {ok_n}/{cnt}" + (f" ⚠️ {fail_n}" if fail_n else "")
-                    + (f"\n{stopped}" if stopped
-                       else (f"\nПервая причина: {first_fail}" if fail_n and first_fail else ""))),
+        "summary": f"📱 Авторег {country}: ✅ {ok_n}/{cnt}" + (f" ⚠️ {fail_n}" if fail_n else ""),
         # Связка модулей: новые аккаунты сразу в прогрев/проверку (services/op_chain).
         "handoff": {"account_ids": list(res.get("account_ids") or [])},
     }
@@ -27042,208 +25227,87 @@ async def _exec_run_broadcast(
 async def _exec_clone_adapt(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """«Клон и адаптация»: профиль бота-источника → на один или много ботов.
-
-    params: source_bot_id, target_bot_ids (список; старый формат —
-    target_bot_id), fields (список или строка через запятую), settings
-    (шаблон имени, замены, подмена упоминаний, языки, «только разница») —
-    см. `services/clone_adapt_engine.py`.
-
-    Раньше исполнитель читал токены из базы КАК ЕСТЬ, а они зашифрованы
-    (token_vault): каждый вызов Telegram уходил с мусорным токеном, и клон из
-    мини-аппа не срабатывал никогда. Теперь токены — через `fetch_bots`.
-
-    По каждой цели: снимок «как было» (только тех полей, что изменятся) в
-    bulk_edit_snapshots ДО изменения — на нём работает откат; затем поле за
-    полем; итог — строка журнала операции (по ней повтор пропускает
-    сделанных) и строка истории с «было → стало» по каждому полю.
+    """Клонирование профиля бота: имя/описание/фото/команды.
+    params: {source_bot_id: int, target_bot_id: int, fields: str (comma-sep)}
     """
-    from services import bot_api, bot_health
-    from services import clone_adapt_engine as _ca
-    from database.db import fetch_bots as _fetch_bots_ca
+    import aiohttp as _aio
+    from services import bot_api as _bapi
 
-    try:
-        source_bot_id = int(params.get("source_bot_id") or 0)
-    except (TypeError, ValueError):
-        source_bot_id = 0
-    raw_targets = params.get("target_bot_ids")
-    if raw_targets is None and params.get("target_bot_id"):
-        raw_targets = [params.get("target_bot_id")]
-    target_ids: list[int] = []
-    for x in raw_targets or []:
-        try:
-            tid = int(x)
-        except (TypeError, ValueError):
-            continue
-        if tid and tid != source_bot_id and tid not in target_ids:
-            target_ids.append(tid)
-    fields = _ca.normalize_fields(params.get("fields", "name,desc"))
-    settings = _ca.normalize_settings(params.get("settings"))
-    # Бот ставил суффикс к имени отдельным параметром — это шаблон «{name}…».
-    if params.get("name_suffix") and settings["name_template"] == _ca.DEFAULT_NAME_TEMPLATE:
-        settings["name_template"] = "{name}" + str(params["name_suffix"])[:32]
+    source_bot_id = params.get("source_bot_id")
+    target_bot_id = params.get("target_bot_id")
+    fields_str = str(params.get("fields", "name,desc"))
+    fields = [f.strip() for f in fields_str.split(",") if f.strip()]
 
-    if not source_bot_id or not target_ids or not fields:
-        return {"status": "failed",
-                "summary": "⚠️ Клон: не выбран источник, цели или поля"}
+    if not source_bot_id or not target_bot_id or not fields:
+        return {"status": "failed", "summary": "⚠️ Неверные параметры clone_adapt"}
 
-    src_rows = await _fetch_bots_ca(
-        pool,
-        "SELECT bot_id, token, username, first_name FROM managed_bots "
-        "WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-        source_bot_id, owner_id,
+    src_row = await _safe_fetchrow(
+            pool,
+        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        int(source_bot_id), owner_id,
     )
-    if not src_rows:
-        return {"status": "failed", "summary": "⚠️ Клон: бот-источник не найден"}
-    src = src_rows[0]
-    tgt_rows = await _fetch_bots_ca(
-        pool,
-        "SELECT bot_id, token, username, first_name FROM managed_bots "
-        "WHERE added_by=$1 AND is_active=TRUE AND bot_id = ANY($2::bigint[])",
-        owner_id, target_ids,
+    tgt_row = await _safe_fetchrow(
+            pool,
+        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        int(target_bot_id), owner_id,
     )
-    by_id = {int(r["bot_id"]): r for r in tgt_rows}
-    targets = [by_id[t] for t in target_ids if t in by_id]
-    if not targets:
-        return {"status": "failed", "summary": "⚠️ Клон: боты-цели не найдены"}
+    if not src_row:
+        return {"status": "failed", "summary": "⚠️ Исходный бот не найден"}
+    if not tgt_row:
+        return {"status": "failed", "summary": "⚠️ Целевой бот не найден"}
+
+    src_token = src_row["token"]
+    tgt_token = tgt_row["token"]
+    src_name = src_row["username"] or src_row["first_name"] or f"id{source_bot_id}"
+    tgt_name = tgt_row["username"] or tgt_row["first_name"] or f"id{target_bot_id}"
+
+    errors = []
+    ok_count = 0
+
+    async with _aio.ClientSession() as http:
+        if "name" in fields:
+            me = await _bapi.get_my_name(http, src_token)
+            src_display_name = me.get("name", "") if me else ""
+            if src_display_name and await _bapi.set_name(http, tgt_token, src_display_name):
+                ok_count += 1
+            else:
+                errors.append("имя")
+
+        if "desc" in fields:
+            d = await _bapi.get_my_description(http, src_token)
+            src_desc = d.get("description", "") if d else ""
+            if await _bapi.set_description(http, tgt_token, src_desc):
+                ok_count += 1
+            else:
+                errors.append("описание")
+
+        if "short" in fields:
+            d = await _bapi.get_my_short_description(http, src_token)
+            src_short = d.get("short_description", "") if d else ""
+            if await _bapi.set_short_description(http, tgt_token, src_short):
+                ok_count += 1
+            else:
+                errors.append("краткое описание")
+
+        if "commands" in fields:
+            cmds = await _bapi.get_my_commands(http, src_token)
+            if cmds is not None and await _bapi.set_my_commands(http, tgt_token, cmds):
+                ok_count += 1
+            else:
+                errors.append("команды")
+
+    detail = f"Ошибки: {', '.join(errors)}" if errors else f"OK ({ok_count} полей)"
+    status = "failed" if errors and ok_count == 0 else "done"
 
     await _safe_execute(
-        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(targets), op_id)
-    already = await completed_targets(pool, op_id)
-    src_label = _bp_bot_label(src)
-    settings_json = json.dumps({"fields": fields, **settings}, ensure_ascii=False)
+            pool,
+        """INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, fields, status, details)
+           VALUES ($1, $2, $3, $4, $5, $6)""",
+        owner_id, int(source_bot_id), int(target_bot_id),
+        fields_str, "ok" if status == "done" else "error", detail,
+    )
 
-    ok_count = fail_count = same_count = prev_ok = 0
-    async with aiohttp.ClientSession() as sess:
-        source = await _ca.read_profile(sess, src["token"], fields, settings["langs"],
-                                        username=src.get("username") or "")
-        photo = None
-        if "photo" in fields:
-            photo = await _ca.read_photo(sess, src["token"])
-            source["has_photo"] = bool(photo)
-        # Языки цели читаем ровно те, что переносим.
-        langs = [lc for lc in _ca.effective_langs(settings, source) if lc]
-
-        for step_no, t in enumerate(targets, start=1):
-            if await _is_cancelled(pool, op_id):
-                return {"status": "cancelled", "ok": prev_ok + ok_count, "failed": fail_count,
-                        "summary": f"Отменено. Готово: {prev_ok + ok_count}, "
-                                   f"ошибок: {fail_count}"}
-            label = _bp_bot_label(t)
-            if label in already:
-                prev_ok += 1
-                await _mark_progress(pool, op_id, step_no)
-                continue
-
-            target = await _ca.read_profile(sess, t["token"], fields, langs,
-                                            username=t.get("username") or "")
-            plan = _ca.build_plan(source, target, fields, settings, index=step_no)
-
-            before = _ca.snapshot_before(plan)
-            if before:
-                try:
-                    await pool.execute(
-                        "INSERT INTO bulk_edit_snapshots(owner_id, op_id, entity_type, "
-                        "target_id, before) VALUES($1,$2,'bot',$3,$4::jsonb)",
-                        owner_id, op_id, int(t["bot_id"]),
-                        json.dumps(before, ensure_ascii=False))
-                except Exception as _se:  # noqa: BLE001 — снимок best-effort
-                    log.warning("clone_adapt: снимок для отката не снят bot=%s: %s",
-                                t.get("bot_id"), _se)
-
-            changes: list[dict] = []
-            errors = 0
-            applied = 0
-            for st in plan:
-                row = _ca.public_step(st)
-                if st["same"]:
-                    row["result"] = "same"
-                    changes.append(row)
-                    continue
-                try:
-                    data = await _ca.apply_step(sess, t["token"], st, photo)
-                    # setMy* лимитированы сильнее прочих методов: короткий флуд
-                    # отсыпаем и пробуем поле ещё раз.
-                    if not data.get("ok") and bot_health.classify_error(
-                            data.get("description", ""),
-                            data.get("error_code")) == bot_health.FLOOD:
-                        _ra = bot_api.retry_after_of(data) or 5
-                        if _ra <= 30:
-                            await cancellable_pause(pool, op_id, _ra + 1, where="clone_adapt")
-                            data = await _ca.apply_step(sess, t["token"], st, photo)
-                except Exception as e:  # noqa: BLE001 — провал поля, не всей операции
-                    data = None
-                    row["result"] = "error"
-                    row["reason"] = _bp_reason(st["label"], exc=e)
-                    errors += 1
-                if data is not None:
-                    if data.get("ok"):
-                        row["result"] = "ok"
-                        applied += 1
-                    else:
-                        row["result"] = "error"
-                        row["reason"] = _bp_reason(st["label"], data)
-                        errors += 1
-                changes.append(row)
-
-            if errors and not applied:
-                status = "error"
-            elif errors:
-                status = "partial"
-            elif applied:
-                status = "ok"
-            else:
-                status = "same"
-            summary_line = (
-                f"{src_label} → {label}: изменено {applied}, совпадало "
-                f"{sum(1 for c in changes if c['result'] == 'same')}"
-                + (f", ошибок {errors}" if errors else ""))
-
-            try:
-                await pool.execute(
-                    "INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, "
-                    "fields, status, details, op_id, changes, settings) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb)",
-                    owner_id, source_bot_id, int(t["bot_id"]), ",".join(fields), status,
-                    summary_line[:500], op_id, json.dumps(changes, ensure_ascii=False),
-                    settings_json)
-            except Exception as _he:  # noqa: BLE001 — история не стоит клона
-                log.warning("clone_adapt: история не записана bot=%s: %s",
-                            t.get("bot_id"), _he)
-
-            if status in ("ok", "same"):
-                if status == "ok":
-                    ok_count += 1
-                else:
-                    same_count += 1
-                await _journal_done(pool, op_id, step_no, label, summary_line[:900])
-            else:
-                fail_count += 1
-                reasons = "; ".join(c.get("reason", "") for c in changes if c.get("reason"))
-                # Ошибка прошлого прогона по этой же цели устарела.
-                await _safe_execute(
-                    pool, "DELETE FROM operation_log WHERE op_id=$1 AND target=$2 "
-                    "AND status='error'", op_id, label, log_ctx=f" clone_adapt op={op_id}")
-                await _journal_write(
-                    pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'error',$4)",
-                    op_id, step_no, label, f"{summary_line}. {reasons}"[:900],
-                    log_ctx=f" clone_adapt op={op_id}")
-            await _mark_progress(pool, op_id, step_no)
-            # Пауза между ботами бережёт лимиты Bot API на setMy*; отмену
-            # замечает и посреди паузы.
-            if step_no < len(targets):
-                await cancellable_pause(pool, op_id, 1, where="clone_adapt")
-
-    done = prev_ok + ok_count + same_count
-    _prev = f" (из них {prev_ok} — в прошлых прогонах)" if prev_ok else ""
-    _same = f", уже совпадало у {same_count}" if same_count else ""
-    if fail_count:
-        summary = (f"🔄 Клон {src_label}: готово {done} из {len(targets)}{_prev}{_same}, "
-                   f"с ошибками: {fail_count} — причины в истории модуля")
-    else:
-        summary = f"🔄 Клон {src_label}: готово {done} из {len(targets)}{_prev}{_same}"
-    return {"status": "done" if done else "failed",
-            "ok": prev_ok + ok_count + same_count, "failed": fail_count,
-            "summary": summary}
+    return {
+        "status": status,
+        "summary": f"🔄 Клон @{src_name} → @{tgt_name}: {detail}",
+    }

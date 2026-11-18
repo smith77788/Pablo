@@ -51,18 +51,3 @@ def test_signed_token_reaches_worker_instead_of_forgeable_digest():
     assert "channel_change_approval.verify(" in worker
     assert "approval_digest" not in api
     assert "approval_digest" not in worker
-
-
-def test_cleanup_token_preflight_rejects_wrong_owner_purpose_and_expiry(monkeypatch):
-    monkeypatch.setenv("BOT_TOKEN", "123456:" + "x" * 40)
-    monkeypatch.setattr(approval.time, "time", lambda: 100)
-    plan = {"op_id": 12, "items": []}
-    token = approval.issue_cleanup(9, plan)
-    with pytest.raises(approval.ApprovalError):
-        approval.read_cleanup(token, 10)
-    with pytest.raises(approval.ApprovalError):
-        approval.read_cleanup(approval.issue(9, "New", TARGETS), 9)
-    approval.verify_cleanup(token, 9, plan)
-    monkeypatch.setattr(approval.time, "time", lambda: 701)
-    with pytest.raises(approval.ApprovalError, match="устарело"):
-        approval.read_cleanup(token, 9)

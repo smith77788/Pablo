@@ -1,7 +1,5 @@
 """Bot profile editing: name, description, short description, photo (default language only)."""
 
-from html import escape
-
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
@@ -25,7 +23,7 @@ def _cancel_edit_kb(bot_id: int) -> InlineKeyboardMarkup:
 
 
 async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | None:
-    row = await db.get_bot(pool, bot_id, user_id, owner_only=True)
+    row = await db.get_bot(pool, bot_id, user_id)
     return row["token"] if row else None
 
 
@@ -40,7 +38,7 @@ async def cb_edit_menu(
     state: FSMContext,
 ) -> None:
     await state.clear()
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id, owner_only=True)
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -222,7 +220,7 @@ async def cb_del_photo(
     http: aiohttp.ClientSession,
 ) -> None:
 
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id, owner_only=True)
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -250,7 +248,7 @@ async def cb_update_token(
     await callback.message.edit_text(
         "🔑 <b>Обновление токена</b>\n\n"
         "Отправьте новый токен бота.\n"
-        "<i>Если бот на паузе после проверки, укажите токен того же бота.</i>\n\n"
+        "<i>Токен должен быть от того же или нового бота BotFather.</i>\n\n"
         "✏️ Напишите в поле сообщения ниже ↓",
         parse_mode="HTML",
         reply_markup=_cancel_edit_kb(callback_data.bot_id),
@@ -284,21 +282,14 @@ async def msg_update_token(
     username = info.get("username", "")
     first_name = info.get("first_name", "")
 
-    updated = await db.update_bot_token(
+    await state.clear()
+    await db.update_bot_token(
         pool, old_bot_id, message.from_user.id, token, new_bot_id, username, first_name
     )
-    if not updated:
-        await message.answer(
-            "Не удалось обновить токен. Проверьте доступ к боту. Для бота на паузе после проверки "
-            "укажите токен того же бота.",
-            reply_markup=_cancel_edit_kb(old_bot_id),
-        )
-        return
-    await state.clear()
 
     label = f"@{username}" if username else first_name
     await message.answer(
-        f"✅ Токен обновлён!\n\nБот: <b>{escape(label)}</b>",
+        f"✅ Токен обновлён!\n\nБот: <b>{label}</b>",
         parse_mode="HTML",
         reply_markup=back_to_bot(new_bot_id),
     )
@@ -315,7 +306,7 @@ async def cb_health(
     http: aiohttp.ClientSession,
 ) -> None:
 
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id, owner_only=True)
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return

@@ -67,8 +67,7 @@ def stand(monkeypatch):
     import services.mass_inviter_engine as inv
     from services import flood_engine as fe
 
-    state = {"quarantined": set(), "respect_cooldown_seen": [],
-             "respect_quarantine_seen": []}
+    state = {"quarantined": set(), "respect_cooldown_seen": []}
 
     async def _no_sleep(_):
         return None
@@ -96,17 +95,11 @@ def stand(monkeypatch):
 
     monkeypatch.setattr(fe, "recommended_daily_limit", _limit)
 
-    # select_all_active режет карантин ВНУТРИ себя по respect_quarantine (по
-    # умолчанию True) — как настоящий селектор. Если инвайт не передаёт
-    # respect_quarantine=False при include_risky, карантинные вырезаются ЗДЕСЬ и
-    # до форса не доходят (баг, который прежний mock не ловил, т.к. не фильтровал).
+    # select_all_active честно уважает respect_cooldown: карантинных оно НЕ режет
+    # (это делает is_account_quarantined отдельно), а вот кулдаун — по флагу.
     async def _sel_all(pool, owner_id, **k):
         state["respect_cooldown_seen"].append(k.get("respect_cooldown"))
-        state["respect_quarantine_seen"].append(k.get("respect_quarantine", True))
-        out = list(ACCOUNTS)
-        if k.get("respect_quarantine", True):
-            out = [a for a in out if int(a["id"]) not in state["quarantined"]]
-        return out
+        return list(ACCOUNTS)
     monkeypatch.setattr(op_worker.resource_selector, "select_all_active", _sel_all)
 
     async def _accounts(pool, q, *a):
@@ -170,22 +163,3 @@ def test_default_keeps_cooldown_gate(stand):
     _run(_Pool(), TARGETS)
     assert state["respect_cooldown_seen"] == [True], (
         f"кулдаун-гейт должен быть включён по умолчанию: {state['respect_cooldown_seen']}")
-
-
-def test_include_risky_drops_quarantine_gate_in_selector(stand):
-    """include_risky=True зовёт select_all_active с respect_quarantine=False.
-
-    Без этого карантинные («рисковые») аккаунты вырезались ВНУТРИ селектора и до
-    форса не доходили — «взять рисковые» не брал никого (жалоба владельца)."""
-    state, calls = stand
-    _run(_Pool(), TARGETS, include_risky=True)
-    assert state["respect_quarantine_seen"] == [False], (
-        f"карантин-гейт не снят при include_risky: {state['respect_quarantine_seen']}")
-
-
-def test_default_keeps_quarantine_gate_in_selector(stand):
-    """Без include_risky карантин-гейт селектора включён (respect_quarantine=True)."""
-    state, calls = stand
-    _run(_Pool(), TARGETS)
-    assert state["respect_quarantine_seen"] == [True], (
-        f"карантин-гейт должен быть включён по умолчанию: {state['respect_quarantine_seen']}")

@@ -806,7 +806,7 @@ async def _process_ai_turn(
             return
 
     if isinstance(reply, dict) and reply.get("__pending__"):
-        # AI wants to perform an action.
+        # AI wants to perform an action — show confirmation
         action_data = reply["action_data"]
         ai_message = reply["ai_message"]
         preview = action_data.get("preview", "")
@@ -817,43 +817,10 @@ async def _process_ai_turn(
             pending_action_data=action_data,
         )
 
-        # Автопилот: владелец разрешил ИИ исполнять действия сразу, не
-        # переспрашивая на каждое (просьба владельца — чтобы ИИ реально запускал
-        # действия, а не только давал черновики). Снимается ровно шаг
-        # подтверждения: действие идёт тем же execute_action → operation_bus, со
-        # всеми гейтами исполнителей. По умолчанию выключено.
-        try:
-            from services import ai_autopilot as _ap
-            _auto = await _ap.is_enabled(pool, message.from_user.id)
-        except Exception:
-            _auto = False
-        if _auto:
-            try:
-                result = await execute_action(
-                    action_data, pool, message.from_user.id, http)
-            except Exception as exc:
-                result = f"❌ Ошибка при выполнении: {escape(str(exc)[:200])}"
-            await state.update_data(pending_action_data=None)
-            kb = InlineKeyboardBuilder()
-            kb.button(text="🔵 Автопилот: ВКЛ — выключить",
-                      callback_data=AiCb(action="autopilot_off"))
-            kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
-            kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
-            kb.adjust(1)
-            await _edit_or_answer_long(
-                thinking, message,
-                f"{ai_message}\n\n━━━━━━━━━━━━━━━━━━\n🔵 <b>Автопилот — выполнено "
-                f"автоматически:</b>\n\n{result}",
-                reply_markup=kb.as_markup())
-            return
-
         kb = InlineKeyboardBuilder()
         kb.button(text="✅ Подтвердить", callback_data=AiCb(action="confirm_action"))
         kb.button(text="❌ Отмена", callback_data=AiCb(action="cancel_action"))
-        # Владелец может разрешить ИИ исполнять действия сразу, не переспрашивая.
-        kb.button(text="🔵 Включить автопилот (не спрашивать)",
-                  callback_data=AiCb(action="autopilot_on"))
-        kb.adjust(2, 1)
+        kb.adjust(2)
 
         # Build enhanced confirmation screen
         action_name = action_data.get("pending_action", "")
@@ -1151,66 +1118,6 @@ async def cb_ai_cancel_action(callback: CallbackQuery, state: FSMContext) -> Non
         "❌ Действие отменено. Можете задать новый вопрос или задачу.",
         reply_markup=kb.as_markup(),
     )
-
-
-@router.callback_query(AiCb.filter(F.action == "autopilot_on"))
-async def cb_ai_autopilot_on(
-    callback: CallbackQuery,
-    state: FSMContext,
-    pool: asyncpg.Pool,
-    http: aiohttp.ClientSession,
-) -> None:
-    """Включить автопилот ИИ и, если было отложенное действие, сразу выполнить его."""
-    await safe_answer(callback)
-    from services import ai_autopilot as _ap
-    await _ap.set_enabled(pool, callback.from_user.id, True)
-    data = await state.get_data()
-    action_data = data.get("pending_action_data")
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🔵 Автопилот: ВКЛ — выключить", callback_data=AiCb(action="autopilot_off"))
-    kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
-    kb.adjust(1)
-    if not action_data:
-        await callback.message.edit_text(
-            "🔵 <b>Автопилот включён.</b> Теперь ИИ будет выполнять действия сразу, "
-            "не переспрашивая. Выключить можно этой же кнопкой.\n\n"
-            "<i>Действия всё равно идут через обычную очередь операций со всеми "
-            "защитами (канарейка, лимиты, карантин).</i>",
-            parse_mode="HTML", reply_markup=kb.as_markup())
-        return
-    status_msg = await callback.message.edit_text("⏳ <i>Выполняю…</i>", parse_mode="HTML")
-
-    async def _do() -> None:
-        try:
-            result = await execute_action(action_data, pool, callback.from_user.id, http)
-        except Exception as exc:
-            result = f"❌ Ошибка при выполнении: {escape(str(exc)[:200])}"
-        await state.update_data(pending_action_data=None)
-        try:
-            await status_msg.edit_text(
-                f"🔵 <b>Автопилот включён — выполнено:</b>\n\n{result}",
-                parse_mode="HTML", reply_markup=kb.as_markup())
-        except Exception as e:
-            log.warning("ai autopilot_on execute: %s", e)
-
-    from services.bg_tasks import spawn
-    spawn(_do())
-
-
-@router.callback_query(AiCb.filter(F.action == "autopilot_off"))
-async def cb_ai_autopilot_off(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    """Выключить автопилот ИИ — вернуться к подтверждению каждого действия."""
-    await safe_answer(callback)
-    from services import ai_autopilot as _ap
-    await _ap.set_enabled(pool, callback.from_user.id, False)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
-    kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
-    kb.adjust(2)
-    await callback.message.edit_text(
-        "⚪️ <b>Автопилот выключен.</b> Теперь ИИ снова будет спрашивать "
-        "подтверждение перед каждым действием.",
-        parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 @router.callback_query(AiCb.filter(F.action == "memory"))

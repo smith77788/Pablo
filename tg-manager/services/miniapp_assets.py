@@ -82,5 +82,5 @@ def stamp_versions(html: str, versions: dict[str, str]) -> str:
 
 def page_etag(index_key: tuple, versions: dict[str, str]) -> str:
     """ETag страницы: сама страница + версии всех её файлов."""
-    h = hashlib.sha1(repr((index_key, sorted(versions.items()))).encode(), usedforsecurity=False).hexdigest()[:16]
+    h = hashlib.sha1(repr((index_key, sorted(versions.items()))).encode()).hexdigest()[:16]
     return f'W/"{h}"'

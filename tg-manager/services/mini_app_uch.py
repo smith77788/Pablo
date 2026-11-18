@@ -51,9 +51,6 @@ def setup_routes(app: web.Application, pool) -> None:
     # Фильтры и список контактов приходят полем формы как JSON: тысяча
     # идентификаторов это около сорока килобайт, мегабайта хватает с запасом.
     _UCH_JSON_MAX = 1024 * 1024
-    # Документ с базой контактов (CSV/Excel/vCard/текст). База клиентов на
-    # десятки тысяч строк — единицы мегабайт; 25 МБ хватает с запасом.
-    _UCH_IMPORT_MAX = 25 * 1024 * 1024
 
     _SEG_MAX = _segments.SEG_MAX
     _SEG_DM_CHUNK = _segments.SEG_DM_CHUNK
@@ -934,112 +931,6 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_sync submit uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_contacts_import(request: web.Request) -> web.Response:
-        """Загрузить документ с базой клиентов → разобрать → в хранилище (в ФОНЕ).
-
-        Владелец присылает файл (CSV / Excel / vCard / текст), где вперемешку
-        имена, телефоны, адреса, почты. Разбор и запись (дедуп ПО ТЕЛЕФОНУ) идут
-        ФОНОВОЙ операцией contacts_import, а не инлайн: большая база (тысячи
-        строк) не укладывалась в таймаут шлюза, запрос обрывался, и в хранилище
-        не попадало НИЧЕГО (жалоба владельца 18.11). Веб только сохраняет файл во
-        временный и ставит операцию; воркер разбирает без таймаута и по успеху
-        сам запускает выгрузку в книги флота (contacts_push) — одно действие
-        владельца наполняет и хранилище, и книги всего флота.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            reader = await request.multipart()
-        except Exception:
-            return _err("Ожидался файл (multipart/form-data)", 400)
-        filename = "contacts"
-        data = b""
-        try:
-            async for field in reader:
-                if field.name == "file":
-                    filename = field.filename or "contacts"
-                    data = await read_upload(field, _UCH_IMPORT_MAX)
-        except UploadTooLarge:
-            return _err("Файл слишком большой (лимит 25 МБ)", 413)
-        except Exception:
-            return _err("Не удалось прочитать загрузку", 400)
-        if not data:
-            return _err("Файл пуст", 400)
-        # Сохраняем во временный файл (та же схема, что у загрузки медиа): воркер
-        # и веб делят файловую систему, воркер прочитает его и удалит.
-        import os as _os
-        import tempfile as _tf
-        try:
-            ext = _os.path.splitext(filename)[1][:12]
-            fd, path = _tf.mkstemp(prefix="cimport_", suffix=ext or ".bin")
-            with _os.fdopen(fd, "wb") as f:
-                f.write(data)
-        except Exception:
-            log.exception("uch_contacts_import save-temp uid=%s", uid)
-            return _err("Не удалось сохранить файл", 500)
-        try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "contacts_import",
-                {"path": path, "filename": filename},
-                total_items=1, label=f"Импорт базы контактов: {filename[:40]}")
-            return _json_resp({"ok": True, "queued": True, "op_id": op_id})
-        except PermissionError as exc:
-            try: _os.unlink(path)
-            except Exception: pass
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            try: _os.unlink(path)
-            except Exception: pass
-            log.exception("uch_contacts_import submit uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def uch_push(request: web.Request) -> web.Response:
-        """Наполнить контактные книги ВСЕГО флота контактами из хранилища.
-
-        Обратное направление к uch_sync: там книги аккаунтов → хранилище (pull),
-        здесь хранилище → книги аккаунтов (push, op contacts_push). Раньше push
-        ставился ТОЛЬКО автоматически при подключении нового аккаунта
-        (device_sync.schedule_for_new_account) — ручной двери не было, и после
-        пополнения хранилища (импорт базы, новые контакты) книги флота оставались
-        старыми. Теперь владелец может разложить хранилище по всему флоту сам, и
-        этим же завершается импорт базы контактов.
-
-        Повтор безопасен: аккаунт читает свою книгу и шлёт только недостающих.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            rows = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 "
-                "AND session_str IS NOT NULL AND session_str <> '' AND is_active "
-                "ORDER BY id", uid) or []
-            acc_ids = [int(r["id"]) for r in rows]
-            if not acc_ids:
-                return _err("Нет активных аккаунтов с сессией. Подключите аккаунт "
-                            "в разделе «Аккаунты».", 400)
-            # Выгружать нечего, если в хранилище нет контактов с номером.
-            n_contacts = await _safe_count(pool,
-                "SELECT COUNT(*) FROM unified_contacts "
-                "WHERE owner_id=$1 AND phones IS NOT NULL AND phones <> '[]'::jsonb", uid)
-            if not n_contacts:
-                return _err("В хранилище нет контактов с номером телефона — "
-                            "выгружать в книги флота нечего.", 400)
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "contacts_push", {"account_ids": acc_ids},
-                total_items=len(acc_ids),
-                label=f"Контакты → книги флота: {len(acc_ids)} акк.")
-            return _json_resp({"ok": True, "queued": True, "op_id": op_id,
-                               "accounts": len(acc_ids), "contacts": int(n_contacts)})
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("uch_push submit uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
     async def uch_sync_center(request: web.Request) -> web.Response:
         """Центр синхронизации: что принёс каждый аккаунт и почему не принёс.
 
@@ -1573,9 +1464,7 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.merge_engine import merge_preview
             res = await merge_preview(pool, primary_id, secondary_id, uid)
             if 'error' in res:
-                from services.contacts_hub.merge_engine import MERGE_ERRORS
-                return _err(MERGE_ERRORS.get(res['error'], "Контакт не найден"),
-                            409 if res['error'] == 'different_telegram_accounts' else 404)
+                return _err("Контакт не найден", 404)
             return _json_resp(res)
         except Exception:
             log.exception("uch_merge_preview")
@@ -1592,12 +1481,6 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Нужны основной и дополнительный идентификаторы", 400)
             from services.contacts_hub.merge_engine import manual_merge
             result = await manual_merge(pool, primary_id, secondary_id, uid)
-            # Отказ — не 200. Экран на любой 200 писал «✅ Объединены», то есть
-            # пара, которая не слилась (уже слитая, чужая, два разных аккаунта
-            # Telegram), выглядела объединённой.
-            if result.get('status') == 'error':
-                return _err(result.get('message') or "Не удалось объединить",
-                            409 if result.get('error') == 'different_telegram_accounts' else 404)
             return _json_resp(result)
         except Exception as exc:
             _bad = bad_body_response(request, exc)
@@ -2181,8 +2064,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
     app.router.add_post("/api/miniapp/uch/sync", uch_sync)
-    app.router.add_post("/api/miniapp/uch/push", uch_push)
-    app.router.add_post("/api/miniapp/uch/import", uch_contacts_import)
     app.router.add_get("/api/miniapp/uch/sync_center", uch_sync_center)
     app.router.add_get("/api/miniapp/uch/groups", uch_groups)
     app.router.add_post("/api/miniapp/uch/groups", uch_group_create)

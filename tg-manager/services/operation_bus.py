@@ -547,8 +547,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "📤",
-        # Журнал пишет Telegram ID, collect_failed_targets находит выбранный PK.
-        # Постит один аккаунт (acc_id в params), цель отрабатывается один раз:
+        # target = str(ch_id) — элемент channel_ids как есть. Постит один
+        # аккаунт (acc_id в params), то есть цель отрабатывается один раз:
         # per_account здесь не нужен.
         "retry_targets": {"param": "channel_ids", "kind": "int"},
     },
@@ -661,14 +661,6 @@ OP_REGISTRY: dict[str, dict] = {
         "description": "Синхронизация контактов аккаунтов",
         "max_retries": 1,
         "icon": "🔄",
-    },
-    "contacts_import": {
-        # Импорт базы контактов из файла в хранилище. Фоновый по той же причине:
-        # большая база (тысячи строк) инлайн в HTTP-запросе не укладывается в
-        # таймаут, запрос обрывается, и в хранилище не попадает ничего.
-        "description": "Импорт базы контактов из файла",
-        "max_retries": 1,
-        "icon": "📥",
     },
     "mass_invite": {
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
@@ -849,15 +841,6 @@ OP_REGISTRY: dict[str, dict] = {
         # Повтор после таймаута клиента выполнил бы её второй раз: посты копируются в канал.
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
     },
-    # Откат клона — тот же исполнитель, что откат массовой правки профиля
-    # (снимки в одной таблице), но на тарифе самого клона: иначе владелец
-    # «starter» клонировать может, а вернуть как было — нет.
-    "clone_adapt_rollback": {
-        "description": "Откат клонирования профиля ботов",
-        "min_plan": "starter",
-        "max_retries": 2,
-        "icon": "↩️",
-    },
     "ad_intel_scan": {
         "description": "Разведка рекламы конкурентов",
         "min_plan": "pro",
@@ -979,167 +962,6 @@ def _coerce_scheduled_for(value):
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
 
-_PRESENCE_CREATION_TYPES = (
-    "global_presence_channel", "global_presence_group", "global_presence_bot",
-    "global_presence_package", "global_presence_full_package",
-)
-
-
-async def _active_presence_launch(conn, owner_id: int, plan_id: str) -> int | None:
-    from services.op_status import IN_FLIGHT
-
-    await conn.execute(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        f"global-presence|{owner_id}|{plan_id}",
-    )
-    return await conn.fetchval(
-        """SELECT id FROM operation_queue
-           WHERE owner_id=$1 AND params->>'plan_id'=$2
-             AND op_type=ANY($3::text[]) AND status=ANY($4::text[])
-           ORDER BY id LIMIT 1""",
-        owner_id, plan_id, list(_PRESENCE_CREATION_TYPES), sorted(IN_FLIGHT),
-    )
-
-
-PROJECT_PUBLISH_REVIEW_MESSAGE = "Заново откройте предпросмотр публикации проекта и подтвердите цели."
-
-
-CATALOG_PUBLICATION_TYPES = frozenset({"mass_publish", "quick_post", "bulk_post_chans"})
-CATALOG_PUBLISH_REVIEW_MESSAGE = "Заново откройте публикацию и подтвердите актуальный список каналов."
-
-
-class ProjectPublishReviewRequired(PermissionError):
-    def __init__(self, message: str = PROJECT_PUBLISH_REVIEW_MESSAGE) -> None:
-        super().__init__(message)
-
-
-async def _check_project_publish_derivation(
-    pool, owner_id: int, params: dict, source_id: int, *, catalog_since: str,
-) -> None:
-    from services.network_builder import (
-        project_pilot_enabled, project_publish_channels, project_publish_scope_was_detached,
-    )
-    from services.security import selection_ids, validate_integer
-
-    project_id = validate_integer(str(params["project_id"]), min_val=1, max_val=2**31 - 1)
-    if project_id is None or not project_pilot_enabled(owner_id):
-        raise ProjectPublishReviewRequired
-    source = await pool.fetchrow(
-        """SELECT params->>'project_id' AS project_id,
-                  params->'channel_ids' AS channel_ids,
-                  (result->>'project_publish_scope_refused' IS NOT NULL
-                   OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required
-             FROM operation_queue
-            WHERE id=$1 AND owner_id=$2 AND op_type IN ('mass_publish','quick_post')""",
-        source_id, owner_id,
-    )
-    if not source or source["project_id"] != str(params["project_id"]) or source["review_required"]:
-        raise ProjectPublishReviewRequired
-    original = source["channel_ids"]
-    if isinstance(original, str):
-        original = json.loads(original)
-    confirmed, _ = selection_ids({"channel_ids": original}, "channel_ids")
-    requested, _ = selection_ids(params, "channel_ids")
-    if not confirmed or not requested or not set(requested).issubset(confirmed):
-        raise ProjectPublishReviewRequired
-    available = await project_publish_channels(pool, owner_id, project_id)
-    if not set(requested).issubset(row["channel_id"] for row in available):
-        raise ProjectPublishReviewRequired
-    if await project_publish_scope_was_detached(
-        pool, owner_id, project_id, requested, source_id, since=catalog_since,
-    ):
-        raise ProjectPublishReviewRequired
-    params["_project_scope_since"] = catalog_since
-
-
-async def check_catalog_publish_derivation(
-    pool, owner_id: int, op_type: str, params: dict, source_id: int, *, copying: bool,
-) -> str:
-    """Дата исходного выбора для копии и повторов публикации."""
-    from services.op_status import is_terminal
-    from services.security import selection_ids, tg_id, validate_integer
-
-    rejected = ProjectPublishReviewRequired(CATALOG_PUBLISH_REVIEW_MESSAGE)
-    seen = set()
-    original = None
-    since = None
-    parent_id = source_id
-    for _ in range(RETRY_CHAIN_MAX):
-        if parent_id in seen:
-            raise rejected
-        seen.add(parent_id)
-        row = await pool.fetchrow(
-            """SELECT params, created_at, status FROM operation_queue
-               WHERE id=$1 AND owner_id=$2 AND op_type=$3""",
-            parent_id, owner_id, op_type,
-        )
-        if not row:
-            raise rejected
-        source = json.loads(row["params"]) if isinstance(row["params"], str) else row["params"]
-        if not isinstance(source, dict) or row["created_at"] is None:
-            raise rejected
-        if original is None:
-            if copying and not is_terminal(row["status"]):
-                raise rejected
-            original = source
-        since = min(since, row["created_at"]) if since is not None else row["created_at"]
-        dates = [source[key] for key in ("_publication_catalog_since", "_project_scope_since")
-                 if source.get(key) is not None]
-        if dates:
-            try:
-                inherited = [datetime.fromisoformat(value) for value in dates]
-            except (TypeError, ValueError):
-                raise rejected from None
-            if any(value.tzinfo is None for value in inherited):
-                raise rejected
-            since = min(since, *inherited)
-            break
-        parent = source.get("retry_of_op") or source.get("cloned_from_op")
-        if parent is None:
-            break
-        parent_id = validate_integer(str(parent), min_val=1, max_val=2**63 - 1)
-        if parent_id is None:
-            raise rejected
-    else:
-        raise rejected
-
-    if any(params.get(key) != original.get(key)
-           for key in ("project_id", "target", "account_ids", "acc_id")):
-        raise rejected
-    confirmed, confirmed_error = selection_ids(original, "channel_ids")
-    requested, requested_error = selection_ids(params, "channel_ids")
-    if confirmed_error or requested_error or not requested or any(tg_id(x) is None for x in requested):
-        raise rejected
-    if confirmed:
-        if not set(requested).issubset(confirmed) or (copying and set(requested) != set(confirmed)):
-            raise rejected
-    elif copying or not set(requested).issubset(
-        await collect_failed_targets(pool, source_id, op_type)
-    ):
-        raise rejected
-
-    if copying:
-        column = "id" if op_type == "bulk_post_chans" else "channel_id"
-        rows = await pool.fetch(
-            f"""SELECT DISTINCT channel_id, {column} AS selected_id FROM managed_channels
-                WHERE owner_id=$1 AND {column}=ANY($2::bigint[])
-                  AND ($3::bigint IS NULL OR acc_id=$3)""",
-            owner_id, requested, original.get("acc_id") if op_type == "bulk_post_chans" else None,
-        )
-        if {row["selected_id"] for row in rows} != set(requested) or await pool.fetchval(
-            """SELECT EXISTS(
-                   SELECT 1 FROM resource_selection_invalidations
-                   WHERE owner_id=$1 AND scope=ANY($2::text[]) AND changed_at >= $3
-               )""",
-            owner_id, [f"channel:{row['channel_id']}" for row in rows], since,
-        ):
-            raise rejected
-    cutoff = since.isoformat()
-    if params.get("project_id") is not None and op_type != "bulk_post_chans":
-        await _check_project_publish_derivation(pool, owner_id, params, source_id, catalog_since=cutoff)
-    return cutoff
-
-
 async def submit(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -1189,21 +1011,6 @@ async def submit(
         raise ValueError(
             f"operation_bus: unknown op_type={op_type!r}. Register in OP_REGISTRY first."
         )
-
-    publication_source = None
-    publication_copy = False
-    if op_type in CATALOG_PUBLICATION_TYPES:
-        source = params.get("retry_of_op") or params.get("cloned_from_op")
-        if source is not None:
-            from services.security import validate_integer
-
-            publication_source = validate_integer(str(source), min_val=1, max_val=2**63 - 1)
-            if publication_source is None:
-                raise ProjectPublishReviewRequired(CATALOG_PUBLISH_REVIEW_MESSAGE)
-            publication_copy = params.get("retry_of_op") is None
-            params["_publication_catalog_since"] = await check_catalog_publish_derivation(
-                pool, owner_id, op_type, params, publication_source, copying=publication_copy,
-            )
 
     meta = OP_REGISTRY[op_type]
     # Окно идемпотентности: своё у типа операции, если объявлено, иначе общее.
@@ -1266,61 +1073,7 @@ async def submit(
         reused = False
         async with pool.acquire() as conn:
             async with conn.transaction():
-                if publication_source is not None:
-                    from services.op_status import IN_FLIGHT
-
-                    await conn.execute(
-                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                        f"publication-derivation|{owner_id}|{publication_source}",
-                    )
-                    if await conn.fetchval(
-                        """SELECT id FROM operation_queue WHERE owner_id=$1 AND op_type=$2
-                             AND status=ANY($4::text[]) AND (
-                                params->>'cloned_from_op'=$3
-                                OR ($5 AND params->>'retry_of_op'=$3)) LIMIT 1""",
-                        owner_id, op_type, str(publication_source), sorted(IN_FLIGHT), publication_copy,
-                    ):
-                        raise ProjectPublishReviewRequired("Копия или повтор этой операции уже идёт. Дождитесь итога.")
-                # Один активный запуск на план, независимо от входа и возраста
-                # операции. Параметры бота и Mini App могут отличаться.
-                if op_type in _PRESENCE_CREATION_TYPES and params.get("plan_id"):
-                    active = await _active_presence_launch(conn, owner_id, str(params["plan_id"]))
-                    if active is not None:
-                        op_id = int(active)
-                        reused = True
-                if op_type == "deploy_network" and params.get("instance_id") is not None:
-                    await conn.execute(
-                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                        f"deploy-network|{owner_id}|{params['instance_id']}",
-                    )
-                    from services import op_status as _deploy_status
-                    if params.get("approval_digest"):
-                        confirmed = await conn.fetchval(
-                            """SELECT id FROM operation_queue WHERE owner_id=$1 AND op_type='deploy_network'
-                               AND params->>'instance_id'=$2 AND params->>'approval_digest'=$3
-                               ORDER BY id LIMIT 1""",
-                            owner_id, str(params["instance_id"]), params["approval_digest"],
-                        )
-                        if confirmed:
-                            op_id, reused = int(confirmed), True
-                    if not reused:
-                        active = await conn.fetchrow(
-                            """SELECT id, params->>'topology_digest' AS digest,
-                                      params->>'account_id' AS executor,
-                                      params->>'approval_digest' AS approval
-                               FROM operation_queue
-                               WHERE owner_id=$1 AND op_type='deploy_network'
-                                 AND params->>'instance_id'=$2
-                                 AND status=ANY($3::text[]) ORDER BY id LIMIT 1""",
-                            owner_id, str(params["instance_id"]), sorted(_deploy_status.IN_FLIGHT),
-                        )
-                        if active and ("topology_digest" in params or active["digest"] is not None):
-                            if (active["digest"] != params.get("topology_digest")
-                                    or active["executor"] != str(params.get("account_id"))
-                                    or active["approval"] != params.get("approval_digest")):
-                                raise PermissionError("Для этого проекта уже идёт другое развёртывание")
-                            op_id, reused = int(active["id"]), True
-                if not reused and dedup_window_sec and dedup_window_sec > 0:
+                if dedup_window_sec and dedup_window_sec > 0:
                     dedup_identity = sensitive_params_fp or dedup_params_json
                     _dedup_statuses = _dedup_status_sql()
                     await conn.execute(
@@ -1889,22 +1642,7 @@ async def collect_failed_targets(pool: asyncpg.Pool, op_id: int, op_type: str) -
         # что где-то упало. Дубль здесь безобиден — аккаунт, который уже вступил
         # или вышел, получает no-op, а тот, что упал, доделывает работу.
         return [val for _key, val in failed_ordered]
-    failed = [val for key, val in failed_ordered if key not in succeeded]
-    if op_type != "bulk_post_chans" or not failed:
-        return failed
-    # Журнал старого пакета пишет Telegram ID, исполнитель читает PK каталога.
-    # Переводим только цели исходной операции для того же владельца и аккаунта.
-    bindings = await pool.fetch(
-        """SELECT mc.id, mc.channel_id FROM operation_queue q
-           JOIN managed_channels mc ON mc.owner_id=q.owner_id AND mc.acc_id::text=q.params->>'acc_id'
-           WHERE q.id=$1 AND q.op_type='bulk_post_chans' AND mc.channel_id=ANY($2::bigint[])
-             AND mc.id::text IN (
-                 SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(q.params->'channel_ids')='array'
-                     THEN q.params->'channel_ids' ELSE '[]'::jsonb END))""",
-        op_id, failed,
-    )
-    row_ids = {row["channel_id"]: row["id"] for row in bindings}
-    return [row_ids[channel_id] for channel_id in failed if channel_id in row_ids]
+    return [val for key, val in failed_ordered if key not in succeeded]
 
 
 # Ключи params, которые делают операцию ПОВТОРЯЮЩЕЙСЯ: интервал круга, остаток
@@ -2014,8 +1752,6 @@ async def submit_retry_failed(
         op_id = await submit(pool, owner_id, op_type, new_params, total_items=len(failed))
     except PlanRequiredError:
         raise
-    except ProjectPublishReviewRequired as exc:
-        return {"ok": False, "op_id": None, "count": 0, "code": 409, "reason": str(exc)}
     except Exception as exc:
         log.error("operation_bus: повтор op=%s не поставлен: %s", src_op_id, exc)
         return {"ok": False, "op_id": None, "count": len(failed), "reason": "Не удалось поставить операцию"}
@@ -2152,7 +1888,7 @@ async def resubmit_unfinished(
             "recurrence_dropped": dropped, "plan_blocked": plan_blocked}
 
 
-async def retry_blocker(pool: asyncpg.Pool, op_id: int, operation) -> dict | None:
+async def retry_blocker(pool: asyncpg.Pool, op_id: int) -> dict | None:
     """Почему эту операцию сейчас НЕЛЬЗЯ повторять, или None.
 
     Общая проверка всех поверхностей повтора одной операции (бот — через
@@ -2160,15 +1896,6 @@ async def retry_blocker(pool: asyncpg.Pool, op_id: int, operation) -> dict | Non
     жила только в `resubmit_one`, мини-апп повторял операцию с убранным
     журналом целиком заново. Возвращает {"reason": str, ...}.
     """
-    if dict(operation).get("review_required"):
-        return {"reason": PROJECT_PUBLISH_REVIEW_MESSAGE}
-    if operation["op_type"] == "deploy_network":
-        params = operation["params"]
-        if isinstance(params, str):
-            params = json.loads(params)
-        if isinstance(params, dict) and "topology_digest" in params:
-            return {"reason": "Сверьте результат и заново откройте план развёртывания проекта"}
-
     # Журнал целей убран уборкой — повторять НЕЛЬЗЯ. Идемпотентность
     # исполнителя стоит на `operation_log`: пустой журнал означает «ничего не
     # сделано», и повтор прошёл бы ВСЕ цели заново — те же приглашения тем же
@@ -2257,8 +1984,6 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
 
     row = await pool.fetchrow(
         "SELECT owner_id, op_type, params, label, status, total_items, done_items, "
-        "       (result->>'project_publish_scope_refused' IS NOT NULL "
-        "        OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required, "
         "       (SELECT COUNT(*) FROM operation_log ol "
         "          WHERE ol.op_id = operation_queue.id AND ol.status='error'"
         + REAL_TARGET_SQL + ") AS err_cnt "
@@ -2278,7 +2003,7 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
         return {"ok": False, "op_id": None, "count": 0, "code": 409,
                 "reason": f"Повтор невозможен: {_why}"}
 
-    _blocked = await retry_blocker(pool, op_id, info)
+    _blocked = await retry_blocker(pool, op_id)
     if _blocked:
         return {"ok": False, "op_id": None, "count": 0, "code": 409, **_blocked}
 
@@ -2305,14 +2030,12 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
         try:
             return await submit(pool, owner_id, op_type, new_params,
                                 total_items=total_items, label=label), None
-        except ProjectPublishReviewRequired as exc:
-            return None, {"code": 409, "reason": str(exc)}
         except ValueError:
             # Тип переименован или убран из реестра. Копирование строки очереди
             # раньше воскрешало такую операцию, и она навсегда зависала
             # 'pending': воркер её не знает.
-            return None, {"code": 400, "reason": (
-                f"Тип операции «{op_type}» больше не поддерживается — повтор невозможен")}
+            return None, (f"Тип операции «{op_type}» больше не поддерживается — "
+                          "повтор невозможен")
 
     # Публикация: только упавшие каналы. Список собирает collect_failed_targets —
     # он исключает цели, закрывшиеся успехом позже (канал упал на первой попытке
@@ -2330,7 +2053,8 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
             _op_type, base, len(failed_ids),
             f"Повтор неудавшихся ({len(failed_ids)})")
         if err:
-            return {"ok": False, "op_id": None, "count": 0, **err}
+            return {"ok": False, "op_id": None, "count": 0, "code": 400,
+                    "reason": err}
         return {"ok": True, "op_id": new_id, "count": len(failed_ids),
                 "kind": "channels", "reason": "",
                 "dropped_recurrence": _dropped, "note": _note}
@@ -2347,8 +2071,6 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
             res.setdefault("note", _note)
             res.setdefault("kind", "targets")
             return res
-        if res.get("code") == 409:
-            return res
 
     # Размер повтора — остаток, а не потолок предка: иначе повтор, доделавший
     # всё, объявлялся бы «частично выполненным» по недобору прогресса.
@@ -2363,7 +2085,8 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
     new_id, err = await _submit(
         _op_type, params_for_retry(op_id, params), total, _label)
     if err:
-        return {"ok": False, "op_id": None, "count": 0, **err}
+        return {"ok": False, "op_id": None, "count": 0, "code": 400,
+                "reason": err}
     return {"ok": True, "op_id": new_id, "count": total, "kind": "whole",
             "reason": "", "dropped_recurrence": _dropped, "note": _note}
 

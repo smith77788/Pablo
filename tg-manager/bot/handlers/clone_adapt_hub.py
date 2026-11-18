@@ -1,9 +1,6 @@
-"""«Клон и адаптация» в боте: мастер (образец → поля → суффикс имени → цели).
+"""Clone & Adapt UI — clone bot profiles (name/desc/short/photo/commands) to multiple targets."""
 
-Запуск — операция `clone_adapt` в очереди (движок `services/clone_adapt_engine.py`),
-полные настройки и история — в мини-аппе.
-"""
-
+import asyncio
 import html
 import logging
 
@@ -122,7 +119,7 @@ async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.P
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
-            "🔀 <b>Клон и адаптация</b>\n\n"
+            "🔀 <b>Clone & Adapt</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
             "Администратору необходимо применить миграцию <code>schema_v107.sql</code>.",
             parse_mode="HTML",
@@ -136,7 +133,7 @@ async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.P
     kb.adjust(1)
 
     if rows:
-        icons = {"ok": "✅", "error": "❌", "partial": "⚠️", "same": "＝"}
+        icons = {"ok": "✅", "error": "❌", "partial": "⚠️"}
         lines = []
         for r in rows:
             ico = icons.get(r["status"], "?")
@@ -149,11 +146,10 @@ async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.P
         history = "История пуста."
 
     await callback.message.edit_text(
-        "🔀 <b>Клон и адаптация</b>\n\n"
-        "Копирует оформление одного бота (имя, описания, фото, команды) "
-        "на несколько ботов сразу; к имени можно добавить приписку. Перед "
-        "изменением сохраняется, как было, — клон можно откатить. Шаблоны "
-        "имени, замены текста, переводы и предпросмотр — в приложении.\n\n"
+        "🔀 <b>Clone & Adapt</b>\n\n"
+        "Копирует профиль одного бота (имя, описание, фото, команды) "
+        "на несколько ботов сразу. Опционально: добавляет суффикс к имени "
+        "для различия ботов в Telegram Search.\n\n"
         f"<b>Последние клонирования:</b>\n{history}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -173,7 +169,7 @@ async def cb_ca_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
     )
     if not bots:
         await callback.message.edit_text(
-            "🔀 <b>Клон и адаптация</b>\n\nУ вас нет ботов. Сначала добавьте бота.",
+            "🔀 <b>Clone & Adapt</b>\n\nУ вас нет ботов. Сначала добавьте бота.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardBuilder().button(
                 text="◀️ Назад", callback_data=CloneAdaptCb(action="menu")
@@ -492,22 +488,74 @@ async def cb_ca_preview(
 # ── run ───────────────────────────────────────────────────────────────────────
 
 
+async def _clone_to_bot(
+    http: aiohttp.ClientSession,
+    pool: asyncpg.Pool,
+    owner_id: int,
+    source: dict,
+    target: dict,
+    fields: list,
+    suffix: str,
+    src_name: str,
+    src_desc: str,
+    src_short: str,
+    src_photo_bytes: bytes | None,
+    src_commands: list,
+) -> tuple[bool, str]:
+    """Clone selected fields from source to one target bot. Returns (ok, detail)."""
+    errors = []
+    ok_count = 0
+
+    if "name" in fields:
+        new_name = (src_name + suffix)[:64]
+        ok = await bot_api.set_name(http, target["token"], new_name)
+        if ok:
+            ok_count += 1
+        else:
+            errors.append("имя")
+
+    if "desc" in fields:
+        ok = await bot_api.set_description(http, target["token"], src_desc[:512])
+        if ok:
+            ok_count += 1
+        else:
+            errors.append("описание")
+
+    if "short" in fields:
+        ok = await bot_api.set_short_description(http, target["token"], src_short[:120])
+        if ok:
+            ok_count += 1
+        else:
+            errors.append("краткое описание")
+
+    if "photo" in fields and src_photo_bytes:
+        ok = await bot_api.set_photo(http, target["token"], src_photo_bytes)
+        if ok:
+            ok_count += 1
+        else:
+            errors.append("фото")
+
+    if "commands" in fields and src_commands is not None:
+        ok = await bot_api.set_my_commands(http, target["token"], src_commands)
+        if ok:
+            ok_count += 1
+        else:
+            errors.append("команды")
+
+    status = "ok" if not errors else "error"
+    detail = f"Ошибки: {', '.join(errors)}" if errors else f"OK ({ok_count} полей)"
+    return status == "ok", detail
+
+
 @router.callback_query(CloneAdaptCb.filter(F.action == "run"))
 async def cb_ca_run(
     callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext,
-    pool: asyncpg.Pool,
+    pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    """Запуск — операцией в очереди, тем же движком, что в мини-аппе.
-
-    Раньше бот клонировал прямо в обработчике кнопки: мимо очереди, без
-    журнала операции, без снимка для отката, а сбой посреди списка целей
-    терял и то, что успело примениться."""
-    from services import operation_bus as _obus
-
     await safe_answer(callback)
     data = await _ensure_state(state)
-    targets = [int(t) for t in data.get("targets", []) if t]
-    fields = [f for f in data.get("fields", []) if f in _ALL_FIELDS]
+    targets = data.get("targets", [])
+    fields = data.get("fields", [])
     suffix = data.get("name_suffix", "")
     source_bot_id = callback_data.bot_id
 
@@ -515,49 +563,102 @@ async def cb_ca_run(
         await callback.answer("Нечего клонировать.", show_alert=True)
         return
 
+    await callback.message.edit_text("⏳ Клонирую профиль…", parse_mode="HTML")
+
     source = await db.get_bot(pool, source_bot_id, callback.from_user.id)
-    kb = InlineKeyboardBuilder()
     if not source:
-        kb.button(text="◀️ Назад", callback_data=CloneAdaptCb(action="menu"))
-        await callback.message.edit_text("❌ Бот-образец не найден.", reply_markup=kb.as_markup())
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
+        await callback.message.edit_text("❌ Источник не найден.", reply_markup=kb.as_markup())
         return
 
-    settings = {"name_template": "{name}" + suffix if suffix else "{name}"}
-    src_label = source["username"] or source["first_name"] or f"id{source_bot_id}"
+    # Fetch source profile
+    src_name, src_desc, src_short, src_commands = "", "", "", []
     try:
-        op_id = await _obus.submit(
-            pool, callback.from_user.id, "clone_adapt", {
-                "source_bot_id": source_bot_id,
-                "target_bot_ids": targets,
-                "fields": fields,
-                "settings": settings,
-            }, total_items=len(targets),
-            label=f"Клон @{src_label} → ботов: {len(targets)}")
-    except PermissionError as exc:
-        kb.button(text="◀️ К меню", callback_data=CloneAdaptCb(action="menu"))
-        await callback.message.edit_text(
-            f"🔒 {html.escape(str(exc) or 'Клон доступен на платном тарифе')}",
-            parse_mode="HTML", reply_markup=kb.as_markup())
-        return
-    except Exception:
-        log.exception("clone_adapt_hub: не поставлен клон uid=%s", callback.from_user.id)
-        kb.button(text="◀️ К меню", callback_data=CloneAdaptCb(action="menu"))
-        await callback.message.edit_text(
-            "❌ Не удалось поставить клон в очередь. Попробуйте ещё раз.",
-            reply_markup=kb.as_markup())
-        return
+        src_name, src_desc, src_short = await asyncio.gather(
+            bot_api.get_my_name(http, source["token"]),
+            bot_api.get_my_description(http, source["token"]),
+            bot_api.get_my_short_description(http, source["token"]),
+        )
+    except Exception as e:
+        log.debug("Clone & Adapt: failed to fetch source profile: %s", e)
+
+    if "commands" in fields:
+        try:
+            src_commands = await bot_api.get_my_commands(http, source["token"])
+        except Exception:
+            src_commands = []
+
+    # Fetch source photo
+    src_photo_bytes: bytes | None = None
+    if "photo" in fields:
+        try:
+            me = await bot_api.get_me(http, source["token"])
+            if me:
+                bot_uid = me.get("id")
+                # getUserProfilePhotos to get file_id
+                phdata = await bot_api._call(http, source["token"], "getUserProfilePhotos", user_id=bot_uid, limit=1)
+                if phdata.get("ok"):
+                    photos = phdata.get("result", {}).get("photos", [])
+                    if photos:
+                        # Largest version is last in the array
+                        file_id = photos[0][-1]["file_id"]
+                        fdata = await bot_api._call(http, source["token"], "getFile", file_id=file_id)
+                        if fdata.get("ok"):
+                            file_path = fdata["result"]["file_path"]
+                            token = source["token"]
+                            dl_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+                            async with http.get(dl_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                                if resp.status == 200:
+                                    src_photo_bytes = await resp.read()
+        except Exception as e:
+            log.debug("Clone & Adapt: failed to fetch source photo: %s", e)
+
+    # Get target bots
+    target_bots = await pool.fetch(
+        "SELECT * FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2 AND is_active=TRUE",
+        targets, callback.from_user.id,
+    )
+
+    results = []
+    for tb in target_bots:
+        try:
+            ok, detail = await _clone_to_bot(
+                http, pool, callback.from_user.id,
+                source, dict(tb), fields, suffix,
+                src_name, src_desc, src_short, src_photo_bytes, src_commands,
+            )
+            label = tb["username"] or tb["first_name"] or f"id{tb['bot_id']}"
+            results.append((label, ok, detail))
+            await pool.execute(
+                """
+                INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, fields, status, details)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                callback.from_user.id, source_bot_id, tb["bot_id"],
+                ",".join(fields), "ok" if ok else "error", detail,
+            )
+        except Exception as e:
+            label = tb["username"] or tb["first_name"] or f"id{tb['bot_id']}"
+            results.append((label, False, str(e)[:80]))
 
     await state.clear()
+
+    # Build result message
+    ok_cnt = sum(1 for _, ok, _ in results if ok)
+    lines = []
+    for label, ok, detail in results:
+        ico = "✅" if ok else "❌"
+        lines.append(f"{ico} @{html.escape(label)} — {html.escape(detail)}")
+
+    kb = InlineKeyboardBuilder()
     kb.button(text="🔀 Ещё клонирование", callback_data=CloneAdaptCb(action="start"))
     kb.button(text="◀️ К меню", callback_data=CloneAdaptCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
-        f"✅ <b>Клон поставлен в очередь</b> (операция #{op_id})\n\n"
-        f"Образец: @{html.escape(src_label)}\n"
-        f"Целей: <b>{len(targets)}</b>\n\n"
-        "У каждого бота перед изменением сохраняется, как было, — клон можно "
-        "откатить. Подробности по каждому полю, предпросмотр, замены текста и "
-        "переводы — в приложении: «Каналы и боты» → «Клон и адаптация».",
+        f"🔀 <b>Клонирование завершено</b>\n\n"
+        f"✅ Успешно: {ok_cnt}/{len(results)}\n\n"
+        + "\n".join(lines),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

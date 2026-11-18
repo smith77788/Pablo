@@ -214,7 +214,7 @@ def test_a_planned_node_does_not_print_id_null():
     # Границы — по соседнему выражению, а не окном фиксированной длины: от окна
     # отрицательная проверка ниже молча выключилась бы, стоит коду сдвинуться
     # (это ловит храповик test_no_silently_disabled_guards).
-    i = html.index("txt('netNodesList', nodes.map")
+    i = html.index("txt('netNodesList'")
     block = html[i:html.index("txt('netEdgesList'", i)]
     assert "n.object_id ?" in block, (
         "подпись узла снова печатает object_id без проверки")

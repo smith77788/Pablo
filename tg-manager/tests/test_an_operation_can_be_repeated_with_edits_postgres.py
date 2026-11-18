@@ -89,16 +89,11 @@ def _run(body):
         try:
             await pool.execute("DELETE FROM operation_queue WHERE owner_id = ANY($1::bigint[])",
                                [OWNER, STRANGER])
-            await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1", OWNER)
-            await pool.executemany(
-                "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title) VALUES($1,111,$2,'Тест')",
-                [(OWNER, channel_id) for channel_id in _PARAMS["channel_ids"]],
-            )
             ids = {}
             # Идущая операция — ПОСТОРОННЯЯ работа: без ссылки на предка,
             # иначе она числилась бы повтором той же работы, что и «done».
             _other = {k: v for k, v in _PARAMS.items() if k != "retry_of_op"}
-            for name, st, prm in (("done", "done", _other), ("running", "running", _other)):
+            for name, st, prm in (("done", "done", _PARAMS), ("running", "running", _other)):
                 ids[name] = await pool.fetchval(
                     "INSERT INTO operation_queue(owner_id, op_type, params, status, total_items, label)"
                     " VALUES($1,'mass_publish',$2::jsonb,$3,3,'Пост в каналы') RETURNING id",
@@ -116,7 +111,6 @@ def _run(body):
             try:
                 await pool.execute("DELETE FROM operation_queue WHERE owner_id = ANY($1::bigint[])",
                                    [OWNER, STRANGER])
-                await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1", OWNER)
             finally:
                 await pool.close()
 

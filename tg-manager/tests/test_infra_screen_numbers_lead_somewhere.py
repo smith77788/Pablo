@@ -74,9 +74,7 @@ def test_each_number_opens_its_list():
 
 def test_pool_row_opens_the_accounts_of_that_pool():
     body = _js_func("openInfra")
-    assert "infraPoolOpen(" in _js_func("_infraPoolRow"), "строка пула никуда не ведёт"
-    assert "_infraPoolRow" in body
-    assert "healthGoAccounts('all', '', p.pool)" in _js_func("infraPoolOpen")
+    assert "healthGoAccounts('all',''," in body, "строка пула никуда не ведёт"
 
 
 def test_the_server_actually_has_a_pool_slice():
@@ -120,18 +118,12 @@ def test_audit_actions_are_translated():
     assert m, "словаря действий аудита нет"
     known = set(re.findall(r"^\s{2}(\w+):", m.group(1), re.M))
     assert own <= known, f"без перевода остались: {sorted(own - known)}"
-    # Строку журнала рисует одна функция — и на вкладке, и в полном журнале.
-    assert "infraAuditRowHtml(" in _js_func("openInfra")
-    assert "auditRu(a.action)" in _js_func("infraAuditRowHtml")
+    assert "auditRu(a.action)" in _js_func("openInfra")
 
 
 def test_empty_states_say_what_would_be_here():
-    """Пустой экран пулов ведёт к созданию пула, а не на несуществующую
-    настройку: раньше он писал «назначается на карточке аккаунта», а такой
-    настройки в мини-аппе не было нигде (10.11.2026)."""
     body = _js_func("openInfra")
-    assert "Пулов пока нет" in body and "infraPoolCreate()" in body
-    assert "назначается на карточке аккаунта" not in body
+    assert "Пулы не заданы" in body and "назначается на карточке аккаунта" in body
     assert "Записей пока нет" in body
 
 

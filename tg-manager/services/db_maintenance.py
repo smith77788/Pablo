@@ -425,13 +425,12 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
     # delete) оставляет висячие строки. Consumers их не обрабатывают (join на
     # tg_accounts отфильтровывает), но без чистки они копятся бесконечно. У
     # operation_audit своё истечение (>30 дн), infra_memory чистится выше —
-    # поэтому здесь только они. managed_channels НЕ трогаем: канал — отдельная
+    # поэтому здесь только эти три. managed_channels НЕ трогаем: канал — отдельная
     # владеемая сущность, его судьба при удалении аккаунта — продуктовое решение.
     for _tbl, _col in (
         ("account_status_events", "acc_id"),
         ("account_daily_stats", "account_id"),
         ("account_rehab_state", "acc_id"),
-        ("account_rehab_events", "acc_id"),
     ):
         deleted, err = await _prune_batched(
             pool,

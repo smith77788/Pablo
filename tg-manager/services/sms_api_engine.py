@@ -22,28 +22,6 @@ _TIMEOUT = aiohttp.ClientTimeout(total=30)
 _5SIM_PRODUCT = "telegram"
 _SMSA_SERVICE = "tg"
 
-# Страна номера: мини-апп шлёт ISO-код («RU»), а сервисы кодируют страну
-# по-своему — 5sim словом («russia»), sms-activate числом («0»). Без перевода
-# заказ «RU» уходил как есть, и каждый пакет из мини-аппа падал на первой
-# покупке номера («нет такой страны»): из бота же код приходил уже в формате
-# сервиса (список стран берётся у самого сервиса) и проходит насквозь.
-_ISO_TO_5SIM = {
-    "RU": "russia", "UA": "ukraine", "KZ": "kazakhstan", "US": "usa",
-    "GB": "england", "DE": "germany", "PL": "poland", "IN": "india",
-    "ID": "indonesia", "BR": "brazil", "PH": "philippines",
-}
-_ISO_TO_SMSA = {
-    "RU": "0", "UA": "1", "KZ": "2", "US": "187", "GB": "16", "DE": "43",
-    "PL": "15", "IN": "22", "ID": "6", "BR": "73", "PH": "4",
-}
-
-
-def service_country(service: str, country: str | None) -> str:
-    """Страна в формате сервиса. Уже «родной» код (russia / 0) не трогаем."""
-    raw = str(country or "").strip()
-    table = _ISO_TO_5SIM if service == "5sim" else _ISO_TO_SMSA
-    return table.get(raw.upper(), raw) if len(raw) == 2 and raw.isalpha() else raw
-
 
 # ── 5sim.net ──────────────────────────────────────────────────────────────────
 
@@ -71,7 +49,6 @@ class FiveSimClient:
 
     async def buy_number(self, country: str) -> dict:
         """Заказать номер. Возвращает {"id": str, "phone": str}."""
-        country = service_country("5sim", country)
         url = f"{self.BASE}/user/buy/activation/{country}/any/{_5SIM_PRODUCT}"
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as s:
             async with s.get(url, headers=self._headers()) as r:
@@ -106,25 +83,13 @@ class FiveSimClient:
             await asyncio.sleep(6)
         return None
 
-    async def _order_action(self, action: str, order_id: str) -> None:
-        url = f"{self.BASE}/user/{action}/{order_id}"
+    async def cancel_order(self, order_id: str) -> None:
+        url = f"{self.BASE}/user/cancel/{order_id}"
         try:
             async with aiohttp.ClientSession(timeout=_TIMEOUT) as s:
                 await s.get(url, headers=self._headers())
         except Exception as exc:
-            log.warning("5sim %s %s: %s", action, order_id, exc)
-
-    async def cancel_order(self, order_id: str) -> None:
-        await self._order_action("cancel", order_id)
-
-    async def finish_order(self, order_id: str) -> None:
-        """Номер отработал — закрыть заказ, чтобы сервис не держал его открытым."""
-        await self._order_action("finish", order_id)
-
-    async def report_banned(self, order_id: str) -> None:
-        """Номер заблокирован в Telegram: «ban» у 5sim возвращает деньги за
-        него и убирает номер из выдачи, а «cancel» — нет."""
-        await self._order_action("ban", order_id)
+            log.warning("5sim cancel_order %s: %s", order_id, exc)
 
     async def get_balance(self) -> float:
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as s:
@@ -162,7 +127,6 @@ class SmsActivateClient:
                 ]
 
     async def buy_number(self, country: str) -> dict:
-        country = service_country("smsactivate", country)
         text = await self._get({"action": "getNumber", "service": _SMSA_SERVICE, "country": country})
         if not text.startswith("ACCESS_NUMBER"):
             raise RuntimeError(f"sms-activate buy_number: {text[:200]}")
@@ -184,23 +148,11 @@ class SmsActivateClient:
             await asyncio.sleep(6)
         return None
 
-    async def _set_status(self, order_id: str, status: str) -> None:
-        try:
-            await self._get({"action": "setStatus", "id": order_id, "status": status})
-        except Exception as exc:
-            log.warning("sms-activate setStatus=%s %s: %s", status, order_id, exc)
-
     async def cancel_order(self, order_id: str) -> None:
-        await self._set_status(order_id, "8")
-
-    async def finish_order(self, order_id: str) -> None:
-        """Активация завершена (статус 6)."""
-        await self._set_status(order_id, "6")
-
-    async def report_banned(self, order_id: str) -> None:
-        """У sms-activate отдельного «номер забанен» нет: отмена (8) и есть
-        возврат средств за номер, которым не воспользовались."""
-        await self._set_status(order_id, "8")
+        try:
+            await self._get({"action": "setStatus", "id": order_id, "status": "8"})
+        except Exception as exc:
+            log.warning("sms-activate cancel %s: %s", order_id, exc)
 
     async def get_balance(self) -> float:
         text = await self._get({"action": "getBalance"})

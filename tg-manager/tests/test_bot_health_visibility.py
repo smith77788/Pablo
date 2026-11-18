@@ -199,7 +199,7 @@ def test_ui_says_the_audience_survived_the_token_swap():
 
 def test_bot_card_no_longer_ships_the_token_to_the_client():
     src = _func_src(_API, "bot_detail")
-    assert 'if k not in ("token", "dead_notified_at")' in src
+    assert '"token"' in src and "SELECT * FROM managed_bots" in src
     # Отсев идёт до формирования ответа.
     assert src.index('"token"') < src.index("_json_resp")
 

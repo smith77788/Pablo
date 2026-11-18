@@ -14,7 +14,6 @@
 """
 from __future__ import annotations
 
-import hashlib
 import re
 
 from aiohttp import web
@@ -29,141 +28,10 @@ def setup_routes(app: web.Application, pool) -> None:
     )
     from services.security import validate_integer
 
-    async def restriction_cleanup(request: web.Request) -> web.Response:
-        from services import channel_change_approval as approval
-        from services import restriction_cleanup as cleanup
-        from services.network_builder import project_pilot_enabled
-
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        if not project_pilot_enabled(uid):
-            return _err("Недоступно", 403)
-        op_id = validate_integer(request.match_info["op_id"], min_val=1)
-        if op_id is None:
-            return _err("Неверный идентификатор операции", 400)
-        # Тело POST разбираем ДО общего `except … 500`: битое или пустое тело —
-        # вина клиента (400 с bad_body_response), а не поломка сервера. Под
-        # общим except его чтение маскировало бы 400 под 500 с неверным советом
-        # повторить (сторож test_a_broken_body_is_not_our_fault).
-        read_scope = {"receipt", "kind", "resource_id"}
-        if request.method not in ("GET", "HEAD") and any(key in request.query for key in read_scope):
-            return _err("Параметры фильтра доступны только для чтения", 400)
-        data: dict = {}
-        if request.method not in ("GET", "HEAD"):
-            try:
-                data = await request.json()
-            except Exception as exc:
-                bad = bad_body_response(request, exc)
-                return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
-            if not isinstance(data, dict):
-                return _err("Неверные параметры очистки", 400)
-        try:
-            if request.method in ("GET", "HEAD"):
-                receipts = request.query.getall("receipt", [])
-                kinds = request.query.getall("kind", [])
-                ids = request.query.getall("resource_id", [])
-                if kinds or ids:
-                    if receipts or len(kinds) != 1 or len(ids) != 1 or not re.fullmatch(r"-?[1-9][0-9]{0,18}", ids[0]):
-                        return _err("Укажите один тип и идентификатор ресурса", 400)
-                    report = await cleanup.findings(
-                        pool, uid, op_id, include_history=True, target={"kind": kinds[0], "id": ids[0]},
-                    )
-                    report["findings"] = cleanup.public_items(report["findings"])
-                    return _json_resp({"ok": True, **report})
-                if receipts:
-                    if len(receipts) != 1 or not re.fullmatch(r"[0-9a-f]{64}", receipts[0]):
-                        return _err("Неверный идентификатор результата очистки", 400)
-                    result = await cleanup.saved_result(pool, uid, op_id, receipts[0])
-                    return _json_resp(result)
-                report = await cleanup.findings(pool, uid, op_id, include_history=True)
-                report["findings"] = cleanup.public_items(report["findings"])
-                return _json_resp({"ok": True, **report})
-            project = data.get("project_id")
-            project_id = None
-            if project is not None:
-                project_id = validate_integer(str(project), min_val=1)
-                if project_id is None:
-                    return _err("Неверный проект", 400)
-            args = (pool, uid, op_id, data.get("targets"), data.get("action"))
-            token = data.get("token")
-            if "preview" in data and type(data["preview"]) is not bool:
-                return _err("Неверный режим очистки", 400)
-            if data.get("preview") is True:
-                if token is not None:
-                    return _err("Предпросмотр не принимает подтверждение", 400)
-                plan = await cleanup.plan(*args, project_id=project_id)
-                try:
-                    token = approval.issue_cleanup(uid, plan) if any(
-                        item["outcome"] == "ready" for item in plan["items"]
-                    ) else None
-                except approval.ApprovalError:
-                    log.error("Не настроено подтверждение очистки op_id=%s", op_id)
-                    return _err("Сервис подтверждения временно недоступен", 500)
-                return _json_resp({"ok": True, **plan, "items": cleanup.public_items(plan["items"]), "token": token})
-            if not isinstance(token, str) or not token or len(token) > 1024:
-                return _err("Сначала подтвердите предпросмотр очистки", 400)
-
-            def verify_access():
-                if not project_pilot_enabled(uid):
-                    raise cleanup.CleanupError("Недоступно", 403)
-                approval.read_cleanup(token, uid, allow_expired=True)
-
-            def verify(current):
-                if not project_pilot_enabled(uid):
-                    raise cleanup.CleanupError("Недоступно", 403)
-                approval.verify_cleanup(token, uid, current)
-
-            confirmation_id = hashlib.sha256(token.encode()).hexdigest()
-            try:
-                approval.read_cleanup(token, uid)
-            except approval.ApprovalExpired:
-                verify_access()
-                receipt = await cleanup.replay_confirmation(
-                    *args, project_id=project_id, confirmation_id=confirmation_id,
-                )
-                if receipt is None:
-                    raise
-                verify_access()
-                return _json_resp(receipt)
-            result = await cleanup.apply(
-                *args, project_id=project_id, verify=verify,
-                confirmation_id=confirmation_id, verify_access=verify_access)
-            return _json_resp(result)
-        except cleanup.CleanupError as exc:
-            return _err(str(exc), exc.status)
-        except approval.ApprovalError as exc:
-            return _err(str(exc), 409)
-        except Exception:
-            log.exception("Ошибка очистки по результату проверки op_id=%s uid=%s", op_id, uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def _project_scope(request, uid):
-        if "project_id" not in request.query:
-            return None, None
-        project_id = validate_integer(request.query["project_id"], min_val=1)
-        if project_id is None:
-            return None, _err("Неверный проект", 400)
-        exists = await pool.fetchval(
-            "SELECT 1 FROM network_instances WHERE id=$1 AND owner_id=$2", project_id, uid)
-        if not exists:
-            return None, _err("Проект не найден", 404)
-        return str(project_id), None
-
-    def project_predicate(prefix):
-        from services.network_builder import project_operation_keys
-
-        return f" AND $2 IN ({project_operation_keys(prefix)})"
-
     async def operations(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        project_id, scope_error = await _project_scope(request, uid)
-        if scope_error is not None:
-            return scope_error
-        project_args = [uid, project_id] if project_id else [uid]
-        project_sql = project_predicate("") if project_id else ""
         status_filter = request.query.get("status")
         # 'paused' обязан быть в списке: «Пауза» переводит pending → paused, и без
         # него фильтр по приостановленным молча отдавал ВСЮ очередь — человек
@@ -245,14 +113,13 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             for r in await pool.fetch(
                     "SELECT op_type, COUNT(*) AS n FROM operation_queue "
-                    f"WHERE owner_id=$1{project_sql} GROUP BY op_type ORDER BY 2 DESC, 1 LIMIT 60",
-                    *project_args):
+                    "WHERE owner_id=$1 GROUP BY op_type ORDER BY 2 DESC, 1 LIMIT 60", uid):
                 types.append({"op_type": r["op_type"], "n": int(r["n"] or 0)})
         except Exception:
             log.debug("operations: список типов недоступен uid=%s", uid)
         counts: dict = {}
-        _cwhere = "owner_id=$1" + project_sql
-        _cargs = project_args.copy()
+        _cwhere = "owner_id=$1"
+        _cargs: list = [uid]
         if days:
             _cargs.append(days)
             _cwhere += f" AND created_at >= now() - make_interval(days => ${len(_cargs)})"
@@ -274,12 +141,9 @@ def setup_routes(app: web.Application, pool) -> None:
         _cols = f"""oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
                           {op_status.sql_error_reason("oq.")} AS error_msg,
                           oq.created_at, oq.started_at, oq.finished_at,
-                          oq.scheduled_for,
-                          (oq.result->>'project_publish_scope_refused' IS NOT NULL
-                           OR oq.result->>'recurring_stop_reason' IS NOT NULL) AS project_review_required,
-                          {_err_sub}"""
-        _where = "oq.owner_id=$1" + (project_predicate("oq.") if project_id else "")
-        _wargs = project_args.copy()
+                          oq.scheduled_for, {_err_sub}"""
+        _where = "oq.owner_id=$1"
+        _wargs: list = [uid]
         if days:
             _wargs.append(days)
             _where += f" AND oq.created_at >= now() - make_interval(days => ${len(_wargs)})"
@@ -344,16 +208,11 @@ def setup_routes(app: web.Application, pool) -> None:
         if not row:
             return _err("Операция не найдена", 404)
         d = dict(row)
-        if d.get("op_type") == "check_owned_restrictions" and op_status.is_productive(d.get("status")):
-            from services.network_builder import project_pilot_enabled
-
-            d["cleanup_available"] = project_pilot_enabled(uid)
         # Быстрые действия по ИТОГУ: раньше сводка советовала словами
         # («назначьте прокси», «проверьте права», «повторите позже»), а кнопки
         # рядом не было — совет уходил в пустоту.
         _res_raw = d.pop("_result", None)
         _prm_raw = d.pop("_params", None)
-        _res = {}
         try:
             import json as _json_qa
             from services import op_quick_actions as _qa
@@ -364,20 +223,6 @@ def setup_routes(app: web.Application, pool) -> None:
                     else _json_qa.loads(_prm_raw or "{}"))
             d["quick_actions"] = _qa.suggest(
                 d.get("op_type"), d.get("status"), _res, op_id=op_id, params=_prm)
-            if _qa.project_review_required(_res):
-                d["project_review_required"] = True
-                from services.network_builder import project_pilot_enabled
-
-                project_id = validate_integer(str(_prm.get("project_id")), min_val=1)
-                if not project_pilot_enabled(uid):
-                    d["project_review_message"] = "Доступ к публикациям проекта сейчас закрыт."
-                elif project_id and await pool.fetchval(
-                    "SELECT 1 FROM network_instances WHERE id=$1 AND owner_id=$2", project_id, uid,
-                ):
-                    d["review_project_id"] = project_id
-                    d["project_review_message"] = _obus.PROJECT_PUBLISH_REVIEW_MESSAGE
-                else:
-                    d["project_review_message"] = "Исходный проект недоступен."
         except Exception:
             log.debug("operation_status: быстрые действия недоступны op=%s", op_id)
             d["quick_actions"] = []
@@ -388,45 +233,7 @@ def setup_routes(app: web.Application, pool) -> None:
             import json as _json_pv
             from services import op_params_view as _pv
             _p = _prm_raw if isinstance(_prm_raw, dict) else _json_pv.loads(_prm_raw or "{}")
-            # Резолвим id аккаунтов → имена: владелец видит «Иван (@ivan)», а не
-            # «#123». Карту строит хендлер (у describe нет БД). Скоуп по owner_id.
-            _acc_names: dict[int, str] = {}
-            try:
-                _ids: set[int] = set()
-                for _k in ("account_ids",):
-                    _v = _p.get(_k)
-                    if isinstance(_v, (list, tuple)):
-                        for _x in _v:
-                            try:
-                                _ids.add(int(_x))
-                            except (TypeError, ValueError):
-                                pass
-                for _k in ("acc_id", "account_id"):
-                    try:
-                        _ids.add(int(_p.get(_k)))
-                    except (TypeError, ValueError):
-                        pass
-                _ids.discard(0)
-                if _ids:
-                    _rows = await _safe_fetch(pool,
-                        "SELECT id, first_name, username, phone FROM tg_accounts "
-                        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-                        uid, list(_ids))
-                    for _r in (_rows or []):
-                        _nm = (_r["first_name"] or "").strip() or (
-                            ("@" + _r["username"]) if _r["username"] else "") or (
-                            _r["phone"] or "") or f"#{_r['id']}"
-                        _acc_names[int(_r["id"])] = _nm
-            except Exception:
-                _acc_names = {}
-            d["params_view"] = _pv.describe(d.get("op_type"), _p, _acc_names)
-            if d.get("op_type") == "strike":
-                _count = _res.get("accounts_used") if isinstance(_res, dict) else None
-                if type(_count) is int and _count >= 0:
-                    d["params_view"].append({
-                        "label": "Передано исполнителю",
-                        "value": str(_count),
-                    })
+            d["params_view"] = _pv.describe(d.get("op_type"), _p)
         except Exception:
             d["params_view"] = []
         # Длительность — от старта до конца (или до сейчас, пока идёт).
@@ -496,7 +303,7 @@ def setup_routes(app: web.Application, pool) -> None:
         except (ValueError, TypeError):
             offset = 0
         status = (request.query.get("status") or "").strip().lower()
-        if status not in ("ok", "fail", "failed", "error", "skip", "skipped", "started"):
+        if status not in ("ok", "fail", "failed", "error", "skip", "skipped"):
             status = ""
         # Поиск по цели. У операции на 2000 целей вопрос «а @ivan-то позвали?»
         # иначе решается прокруткой. Ищем и по сообщению: причина отказа
@@ -538,39 +345,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 f"ORDER BY step_num, id LIMIT ${_n + 2} OFFSET ${_n + 3}",
                 op_id, *_qa, limit, offset)
             shown_total = total
-        # Числовой target у операций по аккаунтам — это id аккаунта. Резолвим в
-        # имя (first_name/@username/телефон), чтобы владелец видел, КТО отработал,
-        # а не голый номер. Owner-scoped; нерезолвленные остаются как есть.
-        _num_t: set[int] = set()
-        for _r in rows:
-            _t = str(_r["target"] or "").strip()
-            if _t.isdigit():
-                try:
-                    _num_t.add(int(_t))
-                except ValueError:
-                    pass
-        _tmap: dict[int, str] = {}
-        if _num_t:
-            try:
-                _trows = await _safe_fetch(pool,
-                    "SELECT id, first_name, username, phone FROM tg_accounts "
-                    "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-                    uid, list(_num_t))
-                for _tr in (_trows or []):
-                    _tmap[int(_tr["id"])] = (_tr["first_name"] or "").strip() or (
-                        ("@" + _tr["username"]) if _tr["username"] else "") or (
-                        _tr["phone"] or "") or f"#{_tr['id']}"
-            except Exception:
-                _tmap = {}
-        _logs = []
-        for _r in rows:
-            _row = dict(_r)
-            _t = str(_row.get("target") or "").strip()
-            if _t.isdigit() and int(_t) in _tmap:
-                _row["target"] = _tmap[int(_t)]
-            _logs.append(_row)
         return _json_resp({
-            "logs": _logs,
+            "logs": rows,
             "total": total,
             "counts": counts,
             "status": status,
@@ -911,8 +687,6 @@ def setup_routes(app: web.Application, pool) -> None:
                         + _obus.REAL_TARGET_SQL + ") AS err_cnt")
             row = await pool.fetchrow(
                 f"SELECT op_type, params, label, status, total_items, done_items, "
-                f"(result->>'project_publish_scope_refused' IS NOT NULL "
-                f" OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required, "
                 f"{_err_cnt} "
                 f"FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
@@ -920,7 +694,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 return _err("Не найдено", 404)
             # Общие запреты повтора (журнал убран, повтор уже идёт) — те же,
             # что у бота: `operation_bus.retry_blocker`.
-            _blocked = await _obus.retry_blocker(pool, op_id, row)
+            _blocked = await _obus.retry_blocker(pool, op_id)
             if _blocked:
                 return _err(_blocked["reason"], 409)
 
@@ -1030,8 +804,6 @@ def setup_routes(app: web.Application, pool) -> None:
                 _resp["note"] = ("Повтор запущен один раз — расписание исходной "
                                  "операции не копируется.")
             return _json_resp(_resp)
-        except _obus.ProjectPublishReviewRequired as exc:
-            return _err(str(exc), 409)
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
@@ -1084,7 +856,6 @@ def setup_routes(app: web.Application, pool) -> None:
 
         retried, skipped = [], []
         dropped_schedules = 0
-        review_required = 0
         chosen = candidates[:25]    # потолок: не заваливаем очередь одним нажатием
         # Параметры всех выбранных операций — ОДНИМ запросом. Раньше здесь был
         # отдельный запрос на каждую: до 25 обращений к базе подряд, и владелец
@@ -1127,9 +898,6 @@ def setup_routes(app: web.Application, pool) -> None:
                 # обещала бы владельцу запуски, которых не было.
                 if _had_schedule:
                     dropped_schedules += 1
-            except _obus.ProjectPublishReviewRequired as exc:
-                review_required += 1
-                skipped.append({"id": int(c["id"]), "why": str(exc)})
             except PermissionError as exc:
                 skipped.append({"id": int(c["id"]), "why": str(exc)[:80]})
             except ValueError:
@@ -1138,8 +906,6 @@ def setup_routes(app: web.Application, pool) -> None:
         # Если по тарифу отказано ВО ВСЁМ — это отказ, а не «успех с пропусками»:
         # честный 403 с причиной, иначе платное ограничение выглядело бы как
         # молчаливое ничегонеделание. Частичный успех остаётся успехом.
-        if not retried and review_required:
-            return _err(_obus.PROJECT_PUBLISH_REVIEW_MESSAGE, 409)
         if not retried and skipped:
             return _err("Повтор отклонён тарифом: " + (skipped[0]["why"] or "требуется подписка"), 403)
         # Кнопка называется «перезапустить все», а за нажатие ставится не
@@ -1152,7 +918,6 @@ def setup_routes(app: web.Application, pool) -> None:
             "candidates": len(candidates), "left": left, "items": retried[:25],
             "note": (f"Перезапущено {len(retried)}"
                      + (f", пропущено {len(skipped)}" if skipped else "")
-                     + (f". Нужен новый предпросмотр публикаций: {review_required}" if review_required else "")
                      + (f". Разовым запуском, без копирования расписания: "
                         f"{dropped_schedules}" if dropped_schedules else "")
                      + (f". Осталось недоведённых: {left} — нажмите ещё раз"
@@ -1192,7 +957,7 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("operation_log_export op=%s", op_id)
             return _err(_INTERNAL_ERROR, 500)
         st_ru = {"ok": "Успешно", "error": "Ошибка", "failed": "Ошибка", "fail": "Ошибка",
-                 "skip": "Пропущено", "skipped": "Пропущено", "started": "Запрос подготовлен"}
+                 "skip": "Пропущено", "skipped": "Пропущено"}
         header = ["Шаг", "Цель", "Статус", "Причина / сообщение", "Время"]
         data = [[r["step_num"], r["target"] or "", st_ru.get((r["status"] or "").lower(),
                  r["status"] or ""), r["message"] or "", str(r["created_at"] or "")]
@@ -1206,11 +971,6 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        project_id, scope_error = await _project_scope(request, uid)
-        if scope_error is not None:
-            return scope_error
-        args = [uid, project_id] if project_id else [uid]
-        where = "owner_id=$1" + (project_predicate("") if project_id else "")
         fmt = request.query.get("format", "csv")
         try:
             # Потолок — предохранитель от выгрузки на миллион строк, а не
@@ -1223,15 +983,15 @@ def setup_routes(app: web.Application, pool) -> None:
             rows = await pool.fetch(
                 # Колонки err_cnt нет — экспорт падал всегда. Число неудачных
                 # попыток в этой схеме — retry_count.
-                f"""SELECT id, op_type, label, status, total_items, done_items,
+                """SELECT id, op_type, label, status, total_items, done_items,
                           COALESCE(retry_count, 0) AS err_cnt, created_at, finished_at
-                   FROM operation_queue WHERE {where}
-                   ORDER BY created_at DESC, id DESC LIMIT ${len(args) + 1}""",
-                *args, cap,
+                   FROM operation_queue WHERE owner_id=$1
+                   ORDER BY created_at DESC, id DESC LIMIT $2""",
+                uid, cap,
             )
             if fmt == "json":
                 total = await _safe_count(pool,
-                    f"SELECT COUNT(*) FROM operation_queue WHERE {where}", *args)
+                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", uid)
                 return _json_resp({"operations": [dict(r) for r in rows],
                                    "total": total,
                                    "truncated": len(rows) >= cap})
@@ -1267,16 +1027,10 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return None, _err("Неверный идентификатор операции", 400)
         row = await pool.fetchrow(
-            "SELECT op_type, params, label, status, total_items, "
-            "(result->>'project_publish_scope_refused' IS NOT NULL "
-            " OR result->>'recurring_stop_reason' IS NOT NULL) AS review_required "
+            "SELECT op_type, params, label, status, total_items "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return None, _err("Не найдено", 404)
-        if row["op_type"] == "deploy_network" and "topology_digest" in _row_params(row):
-            return None, _err("Сверьте результат и заново откройте план развёртывания проекта", 409)
-        if dict(row).get("review_required"):
-            return None, _err(_obus.PROJECT_PUBLISH_REVIEW_MESSAGE, 409)
         return (uid, op_id, row), None
 
     async def _live_copy(op_id: int, uid: int) -> int | None:
@@ -1319,13 +1073,6 @@ def setup_routes(app: web.Application, pool) -> None:
             uid, op_id, row = src
             from services import op_params_view as _opv
             params = _row_params(row)
-            if row["op_type"] in _obus.CATALOG_PUBLICATION_TYPES and op_status.is_terminal(row["status"]):
-                try:
-                    await _obus.check_catalog_publish_derivation(
-                        pool, uid, row["op_type"], params, op_id, copying=True,
-                    )
-                except _obus.ProjectPublishReviewRequired as exc:
-                    return _err(str(exc), 409)
             fields = _opv.editable(row["op_type"], params)
             editable_keys = {f["key"] for f in fields}
             context = [v for v in _opv.describe(row["op_type"], params)
@@ -1386,8 +1133,6 @@ def setup_routes(app: web.Application, pool) -> None:
                 new_id = await _obus.submit(pool, uid, row["op_type"], params,
                                             total_items=int(row["total_items"] or 0),
                                             label=label)
-            except _obus.ProjectPublishReviewRequired as exc:
-                return _err(str(exc), 409)
             except PermissionError as exc:
                 # Отказ по тарифу или предохранителю — не сбой: честный 403.
                 return _err(str(exc) or "Требуется подписка", 403)
@@ -1407,5 +1152,3 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/operations/resume", resume_operations)
     app.router.add_post("/api/miniapp/operations/retry_failed", operations_retry_failed)
     app.router.add_get("/api/miniapp/operations/export", operation_export)
-    app.router.add_get("/api/miniapp/operations/{op_id}/cleanup", restriction_cleanup)
-    app.router.add_post("/api/miniapp/operations/{op_id}/cleanup", restriction_cleanup)

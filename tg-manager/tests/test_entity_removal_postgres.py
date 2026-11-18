@@ -62,7 +62,6 @@ async def _clean(pool):
     await pool.execute("DELETE FROM managed_channels WHERE owner_id=$1", OWNER)
     await pool.execute("DELETE FROM removed_channels WHERE owner_id=$1", OWNER)
     await pool.execute("DELETE FROM va_channel_admin WHERE owner_id=$1", OWNER)
-    await pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER)
 
 
 @pytest.fixture(autouse=True)
@@ -164,11 +163,6 @@ def test_deleted_channel_stays_deleted_through_import(pool):
     assert [(r["channel_id"], r["reason"]) for r in removed] == [(12, "owner")]
 
     # вернуть — та же строка с тем же хешем
-    account = _run(pool.fetchval(
-        "INSERT INTO tg_accounts(owner_id, phone, session_str) "
-        "VALUES($1,'synthetic-restore','synthetic-session') RETURNING id", OWNER))
-    _run(pool.execute("UPDATE removed_channels SET acc_id=$2 WHERE owner_id=$1 AND channel_id=12",
-                      OWNER, account))
     assert _run(db.restore_removed_channel(pool, OWNER, 12)) is True
     assert _channel_ids(pool) == [11, 12]
     assert _run(pool.fetchval(

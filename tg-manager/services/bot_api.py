@@ -164,20 +164,19 @@ async def _call(
             return data
 
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
-            # Исключение клиента может содержать полный URL с токеном.
-            last_error = type(e).__name__
+            last_error = e
             if attempt < _MAX_RETRIES - 1:
                 backoff = _BASE_BACKOFF * (2**attempt)
                 log.debug(
                     "bot_api %s network error, retrying in %.1fs: %s",
                     method,
                     backoff,
-                    last_error,
+                    e,
                 )
                 await asyncio.sleep(backoff)
                 continue
             log.warning(
-                "bot_api %s failed after %d retries: %s", method, _MAX_RETRIES, last_error
+                "bot_api %s failed after %d retries: %s", method, _MAX_RETRIES, e
             )
 
     # All retries exhausted
@@ -433,20 +432,6 @@ async def set_webhook(session: aiohttp.ClientSession, token: str, url: str) -> d
 
 async def delete_webhook(session: aiohttp.ClientSession, token: str) -> dict:
     return await _call(session, token, "deleteWebhook")
-
-
-async def set_chat_menu_button(
-    session: aiohttp.ClientSession, token: str, *,
-    text: str | None = None, web_app_url: str | None = None,
-) -> dict:
-    """Кнопка меню бота. С web_app_url — открывает мини-апп (для бота-зеркала);
-    без него — сброс к стандартной кнопке (при отключении зеркала)."""
-    if web_app_url:
-        menu_button = {"type": "web_app", "text": (text or "Панель")[:64],
-                       "web_app": {"url": web_app_url}}
-    else:
-        menu_button = {"type": "default"}
-    return await _call(session, token, "setChatMenuButton", menu_button=menu_button)
 
 
 async def get_webhook_info(session: aiohttp.ClientSession, token: str) -> dict:
