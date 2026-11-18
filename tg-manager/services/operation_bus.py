@@ -662,6 +662,14 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🔄",
     },
+    "contacts_import": {
+        # Импорт базы контактов из файла в хранилище. Фоновый по той же причине:
+        # большая база (тысячи строк) инлайн в HTTP-запросе не укладывается в
+        # таймаут, запрос обрывается, и в хранилище не попадает ничего.
+        "description": "Импорт базы контактов из файла",
+        "max_retries": 1,
+        "icon": "📥",
+    },
     "mass_invite": {
         "dedup_window_sec": IRREVERSIBLE_DEDUP_WINDOW_SEC,
         "description": "Массовый инвайт участников в группы",

@@ -22157,18 +22157,22 @@ function importContactsFile() {
 async function _doImportContacts(inp) {
   const file = inp && inp.files && inp.files[0];
   if (!file) return;
-  toast('📥 Разбираю файл…');
+  toast('📥 Загружаю файл…');
   try {
     const fd = new FormData();
     fd.append('file', file);
     const d = await api('/api/miniapp/uch/import', {method:'POST', body: fd});
-    toast('✅ ' + (d.message || 'Готово'));
-    loadContacts(); loadContactStats();
-    if (d.suggest_sync) {
-      if (await askConfirm('Контакты добавлены в хранилище.\nРазложить их по контактным книгам всего флота сейчас?')) {
-        pushContactsToFleet();
-      }
+    if (d.queued) {
+      // Разбор и запись идут ФОНОВОЙ операцией (большая база не укладывается в
+      // таймаут запроса). По готовности воркер сам выгрузит контакты в книги
+      // флота. Подтягиваем список несколько раз, пока операция идёт.
+      toast('📥 База принята — разбираю и добавляю в хранилище в фоне. Контакты появятся по мере обработки, затем уйдут в книги флота.');
+      [8000, 20000, 45000, 90000].forEach(ms => setTimeout(() => {
+        loadContacts(); loadContactStats();
+      }, ms));
+      return;
     }
+    toast('⚠️ Не удалось принять файл — попробуйте ещё раз');
   } catch(e) {
     toast('⚠️ ' + errRu(e, 'Не удалось загрузить базу'));
   } finally {

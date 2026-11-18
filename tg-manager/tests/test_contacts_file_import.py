@@ -121,25 +121,42 @@ def test_route_registered():
     assert "POST /api/miniapp/uch/import" in snap
 
 
-def test_endpoint_parses_then_imports_and_suggests_sync():
+def test_endpoint_queues_background_import():
+    """Эндпоинт НЕ разбирает инлайн (большая база не укладывается в таймаут):
+    сохраняет файл во временный и ставит фоновую операцию contacts_import."""
     src = _src("services/mini_app_uch.py")
     body = src[src.index("async def uch_contacts_import("):]
     body = body[:body.index("async def uch_sync_center(")]
-    assert "file_import.parse_contacts(" in body
-    assert "file_import.import_contacts(" in body
-    assert '"suggest_sync"' in body
     assert "read_upload(field, _UCH_IMPORT_MAX)" in body
+    assert "mkstemp" in body, "файл сохраняется во временный для воркера"
+    assert '"contacts_import"' in body and "operation_bus.submit(" in body
+    assert '"queued": True' in body
+    # Разбор/запись НЕ в запросе — они в воркере.
+    assert "import_contacts(" not in body
 
 
-def test_frontend_has_import_button_and_offers_fleet_sync():
+def test_worker_executor_parses_imports_and_chains_push():
+    src = _src("services/op_worker.py")
+    body = src[src.index("async def _exec_contacts_import("):]
+    body = body[:body.index("async def _exec_contacts_push(")]
+    assert "parse_contacts(" in body and "import_contacts(" in body
+    # По успеху — авто-выгрузка в книги флота (contacts_push).
+    assert '"contacts_push"' in body
+    # Временный файл удаляется.
+    assert "unlink(path)" in body
+    # Зарегистрирован в диспетчере op.
+    assert '"contacts_import": _dispatch_contacts_import' in src
+
+
+def test_frontend_import_is_background():
     html = _src("mini_app/index.html")
     assert "importContactsFile()" in html
     assert "async function _doImportContacts(" in html
     assert "/api/miniapp/uch/import" in html
-    # После импорта — предложить разложить по книгам флота (push, не pull).
     fn = html[html.index("async function _doImportContacts("):]
     fn = fn[:fn.index("\nasync function ", 1)] if "\nasync function " in fn[10:] else fn[:2000]
-    assert "suggest_sync" in fn and "pushContactsToFleet()" in fn
+    # Фоновый ответ: queued, подтягиваем список по мере обработки.
+    assert "d.queued" in fn and "loadContacts()" in fn
 
 
 # ── Живая БД: дедуп по телефону (слияние, не дубль) ───────────────────────────

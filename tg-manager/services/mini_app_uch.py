@@ -935,14 +935,16 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contacts_import(request: web.Request) -> web.Response:
-        """Загрузить документ с базой клиентов → разобрать → в хранилище.
+        """Загрузить документ с базой клиентов → разобрать → в хранилище (в ФОНЕ).
 
         Владелец присылает файл (CSV / Excel / vCard / текст), где вперемешку
-        имена, телефоны, адреса, почты. Файл «грамотно расшифровывается»
-        (services.contacts_hub.file_import: колонки по заголовкам рус/англ, без
-        заголовков — по виду данных), записи ложатся в unified_contacts с
-        дедупом ПО ТЕЛЕФОНУ (повтор — слияние полей, а не дубль). В ответе —
-        сводка и флаг: предложить синк, чтобы разложить по книгам всего флота.
+        имена, телефоны, адреса, почты. Разбор и запись (дедуп ПО ТЕЛЕФОНУ) идут
+        ФОНОВОЙ операцией contacts_import, а не инлайн: большая база (тысячи
+        строк) не укладывалась в таймаут шлюза, запрос обрывался, и в хранилище
+        не попадало НИЧЕГО (жалоба владельца 18.11). Веб только сохраняет файл во
+        временный и ставит операцию; воркер разбирает без таймаута и по успеху
+        сам запускает выгрузку в книги флота (contacts_push) — одно действие
+        владельца наполняет и хранилище, и книги всего флота.
         """
         uid = _get_uid(request)
         if not uid:
@@ -964,29 +966,34 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось прочитать загрузку", 400)
         if not data:
             return _err("Файл пуст", 400)
+        # Сохраняем во временный файл (та же схема, что у загрузки медиа): воркер
+        # и веб делят файловую систему, воркер прочитает его и удалит.
+        import os as _os
+        import tempfile as _tf
         try:
-            from services.contacts_hub import file_import
-            rows = file_import.parse_contacts(filename, data)
+            ext = _os.path.splitext(filename)[1][:12]
+            fd, path = _tf.mkstemp(prefix="cimport_", suffix=ext or ".bin")
+            with _os.fdopen(fd, "wb") as f:
+                f.write(data)
         except Exception:
-            log.exception("uch_contacts_import parse uid=%s", uid)
-            return _err("Не удалось разобрать файл. Поддерживаются CSV, Excel "
-                        "(.xlsx), vCard (.vcf) и текст со списком номеров.", 400)
-        if not rows:
-            return _err("В файле не нашлось ни телефонов, ни имён. Проверьте, что "
-                        "в нём есть колонка с номерами.", 400)
+            log.exception("uch_contacts_import save-temp uid=%s", uid)
+            return _err("Не удалось сохранить файл", 500)
         try:
-            summary = await file_import.import_contacts(pool, uid, rows, source="импорт")
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "contacts_import",
+                {"path": path, "filename": filename},
+                total_items=1, label=f"Импорт базы контактов: {filename[:40]}")
+            return _json_resp({"ok": True, "queued": True, "op_id": op_id})
+        except PermissionError as exc:
+            try: _os.unlink(path)
+            except Exception: pass
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
-            log.exception("uch_contacts_import save uid=%s", uid)
+            try: _os.unlink(path)
+            except Exception: pass
+            log.exception("uch_contacts_import submit uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
-        added = summary.get("created", 0) + summary.get("updated", 0)
-        return _json_resp({"ok": True, **summary,
-                           "suggest_sync": added > 0,
-                           "message": (f"Разобрано {summary.get('total', 0)}: "
-                                       f"новых {summary.get('created', 0)}, "
-                                       f"обновлено {summary.get('updated', 0)}"
-                                       + (f", пропущено {summary['skipped']}"
-                                          if summary.get('skipped') else ""))})
 
     async def uch_push(request: web.Request) -> web.Response:
         """Наполнить контактные книги ВСЕГО флота контактами из хранилища.

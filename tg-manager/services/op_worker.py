@@ -5656,6 +5656,11 @@ async def _dispatch_contacts_push(pool, bot, op_id, owner_id, params) -> dict:
     return await _exec_contacts_push(pool, op_id, owner_id, params)
 
 
+async def _dispatch_contacts_import(pool, bot, op_id, owner_id, params) -> dict:
+    """Импорт базы контактов из файла в хранилище — bot ему не нужен."""
+    return await _exec_contacts_import(pool, op_id, owner_id, params)
+
+
 async def _dispatch_global_presence_group(pool, bot, op_id, owner_id, params) -> dict:
     """asset_type форсируем: кривые params не должны молча создать канал вместо группы."""
     return await _exec_global_presence_channel(
@@ -5787,6 +5792,7 @@ def _build_dispatch() -> dict:
         # ── Прочее ────────────────────────────────────────────────────────────
         "contacts_sync": _dispatch_contacts_sync,
         "contacts_push": _dispatch_contacts_push,
+        "contacts_import": _dispatch_contacts_import,
         "create_channel": _dispatch_create_channel,
         "create_group": _dispatch_create_group,
     }
@@ -20246,6 +20252,90 @@ async def _unmark_untried_invites(pool, owner_id: int, group_key: str, op_id: in
                 "infragram_invite_unmark_failures_total", op_type="mass_invite")
             return False
     return False
+
+
+async def _exec_contacts_import(
+    pool: asyncpg.Pool, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Импорт базы контактов из файла в хранилище — в ФОНЕ.
+
+    Раньше разбор и запись шли инлайн в HTTP-запросе: большая база (тысячи
+    строк) не укладывалась в таймаут шлюза, запрос обрывался, и в хранилище не
+    попадало ничего. Теперь веб только сохраняет файл во временный, а разбор и
+    запись (с дедупом по телефону) делает воркер без таймаута. По успеху —
+    авто-выгрузка в книги всего флота (тот же contacts_push), чтобы владельцу
+    хватило одного действия: «загрузить базу» → и хранилище, и книги флота.
+
+    Повтор безопасен: дедуп по телефону сливает, а не задваивает.
+    """
+    import os as _os
+    from services.contacts_hub import file_import as _fi
+
+    path = str(params.get("path") or "")
+    filename = str(params.get("filename") or "contacts")
+    if not path or not _os.path.exists(path):
+        return {"status": "failed",
+                "summary": "⚠️ Файл базы не найден (устарел или уже обработан)."}
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except Exception as exc:
+        return {"status": "failed",
+                "summary": f"⚠️ Не удалось прочитать файл базы: {str(exc)[:80]}"}
+    finally:
+        # Временный файл больше не нужен ни при успехе, ни при сбое чтения.
+        try:
+            _os.unlink(path)
+        except Exception:
+            pass
+    try:
+        rows = _fi.parse_contacts(filename, data)
+    except Exception:
+        log.exception("contacts_import op=%d parse owner=%s", op_id, owner_id)
+        return {"status": "failed",
+                "summary": "⚠️ Не удалось разобрать файл. Поддерживаются CSV, "
+                           "Excel (.xlsx), vCard (.vcf) и текст со списком номеров."}
+    if not rows:
+        return {"status": "done", "ok": 0, "failed": 0,
+                "summary": "📥 В файле не нашлось ни телефонов, ни имён — "
+                           "в хранилище ничего не добавлено."}
+    try:
+        summary = await _fi.import_contacts(pool, owner_id, rows, source="импорт")
+    except Exception:
+        log.exception("contacts_import op=%d import owner=%s", op_id, owner_id)
+        return {"status": "failed", "summary": "⚠️ Ошибка записи контактов в хранилище."}
+    added = int(summary.get("created", 0)) + int(summary.get("updated", 0))
+    tail = ""
+    # По успеху — авто-выгрузка в книги всего флота (одно действие владельца).
+    if added:
+        try:
+            _accs = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 "
+                "AND session_str IS NOT NULL AND session_str <> '' AND is_active "
+                "ORDER BY id", owner_id) or []
+            _acc_ids = [int(r["id"]) for r in _accs]
+            if _acc_ids:
+                from services import operation_bus
+                _pid = await operation_bus.submit(
+                    pool, owner_id, "contacts_push", {"account_ids": _acc_ids},
+                    total_items=len(_acc_ids),
+                    label=f"Контакты → книги флота: {len(_acc_ids)} акк.",
+                    bypass_plan_check=True)
+                tail = (f"\n📲 Запущена выгрузка в книги флота "
+                        f"({len(_acc_ids)} акк., операция #{_pid}).")
+        except Exception:
+            log.warning("contacts_import op=%d: авто-push не поставлен owner=%s",
+                        op_id, owner_id, exc_info=True)
+            tail = "\n⚠️ Контакты в хранилище, но выгрузку в книги флота запустите кнопкой «📲 В книги флота»."
+    return {
+        "status": "done",
+        "ok": added,
+        "failed": int(summary.get("skipped", 0)),
+        "summary": (f"📥 База загружена в хранилище: разобрано "
+                    f"{summary.get('total', 0)}, новых {summary.get('created', 0)}, "
+                    f"обновлено {summary.get('updated', 0)}"
+                    + (f", пропущено {summary['skipped']}" if summary.get('skipped') else "")
+                    + tail)}
 
 
 async def _exec_contacts_push(
