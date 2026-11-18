@@ -21715,6 +21715,9 @@ async def _exec_mass_invite(
                 retired.discard(_nr)
             _no_rights_ids.clear()
             _no_rights_on_demand.clear()
+            # Новый канал — счёт «не смогли добавить» начинается заново: прошлый
+            # относился к покинутому каналу.
+            _chan_no_rights_accs.clear()
             if _invite_link:
                 try:
                     _invite_link = await asyncio.wait_for(
@@ -21873,6 +21876,16 @@ async def _exec_mass_invite(
     retired: set[int] = set()     # аккаунты, выбывшие из круга (флуд/лимит/сбой)
     _no_rights_ids: set[int] = set()  # выбыли только из-за прав — вернутся в новом канале
     _no_rights_retired = 0        # аккаунтов выведено из-за отсутствия прав админа
+    # Чат получил ОГРАНИЧЕНИЕ Telegram (в него больше нельзя добавлять никого):
+    # это видно не по одной цели, а по тому, что НЕСКОЛЬКО аккаунтов подряд не
+    # смогли добавить НИКОГО в ЭТОТ канал — ни сами, ни после выдачи прав
+    # промоутером. Копим ПО ТЕКУЩЕМУ каналу (сбрасывается в _switch_channel) и,
+    # когда порог взят при нуле успехов, переливаемся в резерв тем же пивотом,
+    # что и при заполнении. Отдельно от _no_rights_retired (тот — за весь прогон).
+    _chan_no_rights_accs: set[int] = set()
+    _chat_restricted_switched = False  # уже перелились из-за ограничения этого чата
+    # Порог распознавания ограничения чата — из движка (единый источник).
+    _CHAT_RESTRICTED_MIN_ACCS = inv.CHAT_RESTRICTED_MIN_ACCOUNTS
     budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
     group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
     _group_broken_reason = ""     # почему остановились по чату (safe-режим/недоступность)
@@ -22542,6 +22555,37 @@ async def _exec_mass_invite(
                 log.info("mass_invite op=%d acc=%s: нет прав админа, выдать не удалось (%s) — "
                          "выведен из круга, продолжаем аккаунтами с правами",
                          op_id, acc.get("id"), _reason)
+                # Ограничение САМОГО чата: несколько аккаунтов не смогли добавить
+                # НИКОГО в этот канал (ни сами, ни после выдачи прав), а успехов в
+                # нём нет вовсе. Это не вина отдельного аккаунта — в чат больше
+                # нельзя приглашать. Переливаемся в резерв тем же пивотом, что и при
+                # заполнении: резерв оформляется тем же сетапом (такой же пост),
+                # его админ становится промоутером, прогон продолжается.
+                _chan_no_rights_accs.add(acc_id)
+                if (not _chat_restricted_switched and inv.chat_looks_restricted(
+                        _chan_ok, len(_chan_no_rights_accs), _CHAT_RESTRICTED_MIN_ACCS)):
+                    _why = (f"чат ограничен: {len(_chan_no_rights_accs)} аккаунтов не "
+                            f"смогли добавить никого, успехов нет")
+                    if await _switch_channel(_why, _ovf.ST_BURNED):
+                        _chan_no_rights_accs.clear()
+                        log.warning("mass_invite op=%d: %s — перешли в резервный канал",
+                                    op_id, _why)
+                    else:
+                        # Резерва нет/переливание выключено — честно сообщаем, что
+                        # чат ограничен и нужен резервный канал, и останавливаемся,
+                        # чтобы не выжигать остаток флота о заблокированный чат.
+                        _chat_restricted_switched = True
+                        if not _use_overflow:
+                            group_broken = True
+                            # _group_reason — то, что видит владелец в итоге
+                            # («🚫 Не удалось добавлять в чат… Причина: …»).
+                            _group_reason = (
+                                "чат ограничен Telegram — в него больше нельзя "
+                                "добавлять участников; задайте резервные каналы "
+                                "(перелив), чтобы продолжить автоматически")
+                            _group_broken_reason = _group_reason
+                            log.warning("mass_invite op=%d: чат ограничен, резерва нет — "
+                                        "остановка (нужны резервные каналы)", op_id)
                 continue
 
             ok_n = int(res.get("ok") or 0)
