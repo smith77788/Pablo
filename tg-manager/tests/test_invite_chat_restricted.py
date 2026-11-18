@@ -28,31 +28,34 @@ def _src(rel):
 
 # ── Чистое решение «чат ограничен» ───────────────────────────────────────────
 
-def test_two_blocked_accounts_zero_success_means_restricted():
-    # Два разных аккаунта не смогли добавить никого, успехов в чате нет → чат.
-    assert inv.chat_looks_restricted(chan_ok=0, distinct_blocked_accounts=2) is True
+def test_two_blocked_accounts_in_a_row_means_restricted():
+    # Два разных аккаунта ПОДРЯД не смогли добавить никого → чат ограничен.
+    assert inv.chat_looks_restricted(2) is True
 
 
 def test_one_blocked_account_is_not_enough():
     # Один аккаунт мог не получить прав по своей причине — это ещё не про чат.
-    assert inv.chat_looks_restricted(chan_ok=0, distinct_blocked_accounts=1) is False
+    assert inv.chat_looks_restricted(1) is False
 
 
-def test_any_success_means_chat_is_fine():
-    # Есть хоть один успех в чате — значит добавлять в него МОЖНО, дело в аккаунтах.
-    assert inv.chat_looks_restricted(chan_ok=5, distinct_blocked_accounts=9) is False
+def test_counter_resets_on_success_so_restriction_after_invites_is_caught():
+    # Счётчик обнуляется при успехе (в исполнителе), поэтому сюда приходит именно
+    # число ПОДРЯД-отказов без успеха: 2 подряд → ограничение, даже если раньше
+    # в этот чат кто-то добавился. Ноль/один подряд — ещё не ограничение.
+    assert inv.chat_looks_restricted(0) is False
+    assert inv.chat_looks_restricted(2) is True
 
 
 def test_threshold_cannot_be_lowered_below_two():
     # Защита от ложного срабатывания: порог нельзя опустить до одного аккаунта.
-    assert inv.chat_looks_restricted(0, 1, min_accounts=1) is False
-    assert inv.chat_looks_restricted(0, 1, min_accounts=0) is False
-    assert inv.chat_looks_restricted(0, 2, min_accounts=1) is True
+    assert inv.chat_looks_restricted(1, min_accounts=1) is False
+    assert inv.chat_looks_restricted(1, min_accounts=0) is False
+    assert inv.chat_looks_restricted(2, min_accounts=1) is True
 
 
 def test_higher_threshold_is_respected():
-    assert inv.chat_looks_restricted(0, 2, min_accounts=3) is False
-    assert inv.chat_looks_restricted(0, 3, min_accounts=3) is True
+    assert inv.chat_looks_restricted(2, min_accounts=3) is False
+    assert inv.chat_looks_restricted(3, min_accounts=3) is True
 
 
 # ── Проводка в исполнителе: ограничение чата ведёт к пивоту ───────────────────
@@ -71,6 +74,11 @@ def test_op_worker_switches_channel_on_chat_restriction():
     assert "_ovf.ST_BURNED" in body
     # Без резерва — честная остановка с причиной, видимой владельцу.
     assert "_group_reason =" in body and "чат ограничен" in body
+    # Счётчик обнуляется при успехе — иначе ограничение ПОСЛЕ части приглашений
+    # (чат прикрыли на ходу) не распозналось бы.
+    succ = src[src.index("_chan_ok += ok_n"):src.index("_chan_ok += ok_n") + 700]
+    assert "if ok_n:" in succ and "_chan_no_rights_accs.clear()" in succ, (
+        "успех должен сбрасывать счётчик no_rights")
 
 
 def test_threshold_is_single_source_from_engine():

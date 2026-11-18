@@ -22703,9 +22703,9 @@ async def _exec_mass_invite(
                 # его админ становится промоутером, прогон продолжается.
                 _chan_no_rights_accs.add(acc_id)
                 if (not _chat_restricted_switched and inv.chat_looks_restricted(
-                        _chan_ok, len(_chan_no_rights_accs), _CHAT_RESTRICTED_MIN_ACCS)):
-                    _why = (f"чат ограничен: {len(_chan_no_rights_accs)} аккаунтов не "
-                            f"смогли добавить никого, успехов нет")
+                        len(_chan_no_rights_accs), _CHAT_RESTRICTED_MIN_ACCS)):
+                    _why = (f"чат ограничен: {len(_chan_no_rights_accs)} аккаунтов подряд "
+                            f"не смогли добавить никого")
                     if await _switch_channel(_why, _ovf.ST_BURNED):
                         _chan_no_rights_accs.clear()
                         log.warning("mass_invite op=%d: %s — перешли в резервный канал",
@@ -22788,6 +22788,12 @@ async def _exec_mass_invite(
             total_fail += fail_n
             _chan_ok += ok_n
             _chan_trail[-1]["ok"] += ok_n
+            # Успех в канале обнуляет счётчик «подряд не смогли добавить»: значит
+            # чат принимает приглашения, и накопленные no_rights были про аккаунты,
+            # а не про чат. Так детекция ограничения чата ловит и случай, когда
+            # чат прикрыли ПОСЛЕ части приглашений (а не только с нуля).
+            if ok_n:
+                _chan_no_rights_accs.clear()
             if _invite_method == "link" and not by_phone and ok_n:
                 # Метод «ссылка в ЛС» — это личные сообщения: учитываем их
                 # построчно, как рассылка, иначе дневной лимит ЛС их не видит.
