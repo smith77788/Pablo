@@ -51,6 +51,9 @@ def setup_routes(app: web.Application, pool) -> None:
     # Фильтры и список контактов приходят полем формы как JSON: тысяча
     # идентификаторов это около сорока килобайт, мегабайта хватает с запасом.
     _UCH_JSON_MAX = 1024 * 1024
+    # Документ с базой контактов (CSV/Excel/vCard/текст). База клиентов на
+    # десятки тысяч строк — единицы мегабайт; 25 МБ хватает с запасом.
+    _UCH_IMPORT_MAX = 25 * 1024 * 1024
 
     _SEG_MAX = _segments.SEG_MAX
     _SEG_DM_CHUNK = _segments.SEG_DM_CHUNK
@@ -930,6 +933,60 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.exception("uch_sync submit uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
+
+    async def uch_contacts_import(request: web.Request) -> web.Response:
+        """Загрузить документ с базой клиентов → разобрать → в хранилище.
+
+        Владелец присылает файл (CSV / Excel / vCard / текст), где вперемешку
+        имена, телефоны, адреса, почты. Файл «грамотно расшифровывается»
+        (services.contacts_hub.file_import: колонки по заголовкам рус/англ, без
+        заголовков — по виду данных), записи ложатся в unified_contacts с
+        дедупом ПО ТЕЛЕФОНУ (повтор — слияние полей, а не дубль). В ответе —
+        сводка и флаг: предложить синк, чтобы разложить по книгам всего флота.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return _err("Ожидался файл (multipart/form-data)", 400)
+        filename = "contacts"
+        data = b""
+        try:
+            async for field in reader:
+                if field.name == "file":
+                    filename = field.filename or "contacts"
+                    data = await read_upload(field, _UCH_IMPORT_MAX)
+        except UploadTooLarge:
+            return _err("Файл слишком большой (лимит 25 МБ)", 413)
+        except Exception:
+            return _err("Не удалось прочитать загрузку", 400)
+        if not data:
+            return _err("Файл пуст", 400)
+        try:
+            from services.contacts_hub import file_import
+            rows = file_import.parse_contacts(filename, data)
+        except Exception:
+            log.exception("uch_contacts_import parse uid=%s", uid)
+            return _err("Не удалось разобрать файл. Поддерживаются CSV, Excel "
+                        "(.xlsx), vCard (.vcf) и текст со списком номеров.", 400)
+        if not rows:
+            return _err("В файле не нашлось ни телефонов, ни имён. Проверьте, что "
+                        "в нём есть колонка с номерами.", 400)
+        try:
+            summary = await file_import.import_contacts(pool, uid, rows, source="импорт")
+        except Exception:
+            log.exception("uch_contacts_import save uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        added = summary.get("created", 0) + summary.get("updated", 0)
+        return _json_resp({"ok": True, **summary,
+                           "suggest_sync": added > 0,
+                           "message": (f"Разобрано {summary.get('total', 0)}: "
+                                       f"новых {summary.get('created', 0)}, "
+                                       f"обновлено {summary.get('updated', 0)}"
+                                       + (f", пропущено {summary['skipped']}"
+                                          if summary.get('skipped') else ""))})
 
     async def uch_sync_center(request: web.Request) -> web.Response:
         """Центр синхронизации: что принёс каждый аккаунт и почему не принёс.
@@ -2072,6 +2129,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
     app.router.add_post("/api/miniapp/uch/sync", uch_sync)
+    app.router.add_post("/api/miniapp/uch/import", uch_contacts_import)
     app.router.add_get("/api/miniapp/uch/sync_center", uch_sync_center)
     app.router.add_get("/api/miniapp/uch/groups", uch_groups)
     app.router.add_post("/api/miniapp/uch/groups", uch_group_create)

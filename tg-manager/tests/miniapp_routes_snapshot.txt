@@ -1173,6 +1173,7 @@ POST /api/miniapp/uch/filter/exclude
 POST /api/miniapp/uch/filter/preview
 POST /api/miniapp/uch/graph/compute
 POST /api/miniapp/uch/groups
+POST /api/miniapp/uch/import
 POST /api/miniapp/uch/intent/rule
 POST /api/miniapp/uch/intent/rule/{rule_id}/toggle
 POST /api/miniapp/uch/intent/seed
