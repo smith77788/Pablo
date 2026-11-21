@@ -1271,6 +1271,7 @@ PUT /api/miniapp/self_promo/{tpl_id}/toggle
 PUT /api/miniapp/semantic_memory/{bot_id}/settings
 PUT /api/miniapp/semantic_memory/{bot_id}/user/{user_id}/fact
 PUT /api/miniapp/stars/experiment/{exp_id}/toggle
+PUT /api/miniapp/template/{tpl_id}
 PUT /api/miniapp/uch/groups/{group_id}
 PUT /api/miniapp/uch/smart-tags/rules/{rule_id}/toggle
 PUT /api/miniapp/va/channel/{cid}

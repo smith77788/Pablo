@@ -714,7 +714,7 @@ def setup_routes(app: web.Application, pool) -> None:
 
         cols = """b.id, b.bot_id, mb.username AS bot_username,
                   b.message_text, b.status, b.sent_count, b.failed_count,
-                  b.total_users, b.created_at, b.status_note"""
+                  b.total_users, b.created_at, b.status_note, b.buttons"""
         if status:
             rows = await _safe_fetch(pool,
                 f"""SELECT {cols} FROM broadcasts b
@@ -783,13 +783,28 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось создать отложенную рассылку", 500)
 
     async def templates(request: web.Request) -> web.Response:
+        """Шаблоны постов: страницами и с поиском по названию и тексту.
+        Раньше отдавались последние 30 без смещения — плитка писала «45
+        шаблонов», а 31-й не открывался ничем."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        q = (request.query.get("q") or "").strip()[:100]
+        try:
+            offset = max(0, int(request.query.get("offset") or 0))
+        except (TypeError, ValueError):
+            offset = 0
+        where = "owner_id=$1 AND asset_type='post'"
+        args: list = [uid]
+        if q:
+            args.append("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+            where += " AND (name ILIKE $2 OR template->>'text' ILIKE $2)"
+        n = len(args)
         rows = await _safe_fetch(pool,
-            """SELECT id, name, asset_type, template, created_at
-               FROM asset_templates WHERE owner_id=$1 AND asset_type='post'
-               ORDER BY created_at DESC LIMIT 30""", uid)
+            f"""SELECT id, name, asset_type, template, created_at
+               FROM asset_templates WHERE {where}
+               ORDER BY created_at DESC, id DESC LIMIT ${n + 1} OFFSET ${n + 2}""",
+            *args, _list_limit(request, 30, 200), offset)
         for r in rows:
             if isinstance(r.get("template"), str):
                 try:
@@ -797,8 +812,41 @@ def setup_routes(app: web.Application, pool) -> None:
                 except Exception:
                     r["template"] = {}
         total = await _safe_count(pool,
-            "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1 AND asset_type='post'", uid)
+            f"SELECT COUNT(*) FROM asset_templates WHERE {where}", *args)
         return _json_resp({"templates": rows, "total": int(total or 0)})
+
+    async def update_template(request: web.Request) -> web.Response:
+        """Правка шаблона: название и текст. Раньше только удалить и создать
+        заново."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            tpl_id = int(request.match_info["tpl_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        name = _text(body.get("name"))
+        text = _text(body.get("text"))
+        if not name:
+            return _err("Нужно название")
+        if not text:
+            return _err("Нужен текст")
+        if len(text) > 4096:
+            return _err("Текст длиннее 4096 символов")
+        try:
+            row = await pool.fetchrow(
+                """UPDATE asset_templates
+                      SET name=$3, template = COALESCE(template, '{}'::jsonb) || $4::jsonb
+                    WHERE id=$1 AND owner_id=$2 AND asset_type='post'
+                RETURNING id""",
+                tpl_id, uid, name, _json.dumps({"text": text}))
+        except Exception:
+            log.exception("update_template uid=%d tpl=%d", uid, tpl_id)
+            return _err(_INTERNAL_ERROR, 500)
+        if not row:
+            return _err("Шаблон не найден", 404)
+        return _json_resp({"ok": True, "id": row["id"]})
 
     async def create_template(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -873,6 +921,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/crm/contact", crm_contact_create)
     app.router.add_delete("/api/miniapp/crm/contact/{contact_id}", crm_contact_delete)
     app.router.add_delete("/api/miniapp/template/{tpl_id}", delete_template)
+    app.router.add_put("/api/miniapp/template/{tpl_id}", update_template)
     app.router.add_get("/api/miniapp/crm/deals", crm_deals)
     app.router.add_post("/api/miniapp/crm/deal", create_crm_deal)
     app.router.add_put("/api/miniapp/crm/deal/{deal_id}/stage", update_crm_deal_stage)
