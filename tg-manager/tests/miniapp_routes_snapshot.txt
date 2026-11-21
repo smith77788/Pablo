@@ -1274,4 +1274,5 @@ PUT /api/miniapp/uch/groups/{group_id}
 PUT /api/miniapp/uch/smart-tags/rules/{rule_id}/toggle
 PUT /api/miniapp/va/channel/{cid}
 PUT /api/miniapp/va/strategy
+PUT /api/miniapp/warmup/{plan_id}
 PUT /api/miniapp/workflows/{wf_id}/steps/{idx}

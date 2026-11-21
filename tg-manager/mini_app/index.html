@@ -7223,6 +7223,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="warmupStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div id="warmupWarn" style="display:none;margin-bottom:8px"></div>
     <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="bulkWarmup()">🔥 Прогреть все подходящие аккаунты</button>
+    <div id="warmupBulk" style="display:none;gap:8px;margin-bottom:8px">
+      <button class="btn btn-s" style="flex:1" onclick="warmupBulk('pause')">⏸ Пауза всем</button>
+      <button class="btn btn-s" style="flex:1" onclick="warmupBulk('resume')">▶ Возобновить всем</button>
+    </div>
     <div class="sec">Активные планы</div>
     <div class="lst" id="warmupList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -8598,9 +8602,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="warmupMbg" onclick="if(event.target===this)closeWarmupModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeWarmupModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🌱 Запустить прогрев</div>
-    <div class="field"><label>Аккаунт</label><select id="warmupAccSel"><option value="">Загрузка…</option></select></div>
-    <div class="field">
+    <div class="modal-title" id="warmupModalTitle">🌱 Запустить прогрев</div>
+    <div class="field" id="warmupAccField"><label>Аккаунты <span id="warmupAccCnt" style="opacity:.6"></span></label><select id="warmupAccSel" multiple size="6" onchange="_warmupAccCount()"><option value="">Загрузка…</option></select>
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><span class="chip" onclick="_warmupAccAll(true)">✅ Отметить всех найденных</span><span class="chip" onclick="_warmupAccAll(false)">⬜ Снять</span></div>
+      <div class="field-note">Можно отметить несколько — каждому заведётся свой план с этими настройками</div></div>
+    <div class="field" id="warmupPlanField">
       <label>Режим прогрева</label>
       <select id="warmupPlan">
         <option value="gentle">🌱 Мягкий (21 день, 5 действий в день)</option>
@@ -8650,6 +8656,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </details>
     <div class="field-err" id="warmupErr"></div>
     <button class="btn btn-p" data-main id="warmupBtn" onclick="submitWarmup()" style="width:100%">🚀 Запустить прогрев</button>
+    <div class="field-note" style="text-align:center;margin-top:6px">Настройки запоминаются до следующего запуска</div>
   </div>
 </div>
 
@@ -26362,12 +26369,55 @@ async function deleteDm(id, status, _el) {
 }
 
 // ── Account Warmup ─────────────────────────────────────
+// Правка идущего плана живёт в той же форме: id плана — режим правки.
+let WARMUP_EDIT_ID = null;
+let _WU_PLANS = [];
+const _WU_KEEP = '<option value="" data-keep="1">— не менять —</option>';
+function _warmupMode(edit) {
+  WARMUP_EDIT_ID = edit || null;
+  document.getElementById('warmupAccField').style.display = edit ? 'none' : '';
+  document.getElementById('warmupPlanField').style.display = edit ? 'none' : '';
+  txt('warmupModalTitle', edit ? '✏️ Изменить план прогрева' : '🌱 Запустить прогрев');
+  document.getElementById('warmupBtn').textContent = edit ? '💾 Сохранить' : '🚀 Запустить прогрев';
+  ['warmupProfile','warmupNiche'].forEach(id => {
+    const sel = document.getElementById(id);
+    const keep = sel.querySelector('option[data-keep]');
+    if (edit && !keep) sel.insertAdjacentHTML('afterbegin', _WU_KEEP);
+    if (!edit && keep) keep.remove();
+    if (edit) sel.value = '';
+  });
+  const det = document.querySelector('#warmupMbg details');
+  if (det) det.open = !!edit;
+}
+function _warmupAccCount() {
+  const n = document.getElementById('warmupAccSel').selectedOptions.length;
+  txt('warmupAccCnt', n ? '· выбрано '+n : '');
+  const b = document.getElementById('warmupBtn');
+  if (!WARMUP_EDIT_ID) b.textContent = n>1 ? `🚀 Запустить прогрев · ${n} акк.` : '🚀 Запустить прогрев';
+}
+function _warmupAccAll(on) {
+  [...document.getElementById('warmupAccSel').options].forEach(o => { if (o.value) o.selected = on; });
+  _warmupAccCount();
+}
+function openWarmupEdit(planId) {
+  const p = _WU_PLANS.find(x => x.id === planId); if (!p) return;
+  document.getElementById('warmupErr').textContent='';
+  document.getElementById('warmupBtn').disabled=false;
+  _warmupMode(planId);
+  document.getElementById('warmupChannels').value='';
+  document.getElementById('warmupDaily').value = p.daily_actions || '';
+  document.getElementById('warmupDays').value = p.target_days || '';
+  txt('warmupModalTitle', '✏️ ' + esc(p.first_name||p.phone||'План') + ' · день ' + (p.current_day||0));
+  document.getElementById('warmupMbg').classList.add('show');
+}
 async function openWarmupModal() {
   document.getElementById('warmupErr').textContent='';
   document.getElementById('warmupBtn').disabled=false;
+  _warmupMode(null);
   document.getElementById('warmupChannels').value='';
   document.getElementById('warmupDaily').value='';
   document.getElementById('warmupDays').value='';
+  applyFormPrefs('warmup', {plan:'warmupPlan', profile:'warmupProfile', niche:'warmupNiche', daily:'warmupDaily', days:'warmupDays'});
   document.getElementById('warmupMbg').classList.add('show');
   accPickerSearchBox('warmupAccSel', _warmupLoadAccs);
   _warmupLoadAccs('');
@@ -26386,6 +26436,7 @@ async function _warmupLoadAccs(q) {
     sel.innerHTML = r.accs.length
       ? r.accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone)} · ${esc(a.phone||'')}</option>`).join('')
       : `<option value="">${q ? 'По запросу активных не найдено' : 'Нет активных аккаунтов'}</option>`;
+    _warmupAccCount();
     accPickerSetNote('warmupAccSel', accPickerNote(r));
   } catch(e) {
     sel.innerHTML='<option value="">Ошибка загрузки</option>';
@@ -26412,7 +26463,6 @@ async function bulkWarmup() {
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 async function submitWarmup() {
-  const account_id = parseInt(document.getElementById('warmupAccSel').value);
   const plan_type = document.getElementById('warmupPlan').value;
   const profile_type = document.getElementById('warmupProfile').value;
   const niche = document.getElementById('warmupNiche').value;
@@ -26420,21 +26470,65 @@ async function submitWarmup() {
   const dailyRaw = document.getElementById('warmupDaily').value.trim();
   const daysRaw = document.getElementById('warmupDays').value.trim();
   const errEl = document.getElementById('warmupErr');
-  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
-  const payload = {account_id, plan_type, profile_type, niche};
+  errEl.textContent='';
+  const btn = document.getElementById('warmupBtn');
+  const btnText = btn.textContent;
+  if (WARMUP_EDIT_ID) {
+    const payload = {};
+    if (profile_type) payload.profile_type = profile_type;
+    if (niche) payload.niche = niche;
+    if (custom_channels) payload.custom_channels = custom_channels;
+    if (dailyRaw) payload.daily_actions = parseInt(dailyRaw);
+    if (daysRaw) payload.target_days = parseInt(daysRaw);
+    btn.disabled=true; btn.textContent='Сохраняю…';
+    try {
+      const r = await api('/api/miniapp/warmup/'+WARMUP_EDIT_ID, {method:'PUT', body:JSON.stringify(payload)});
+      toast(`💾 План обновлён: ${r.daily_actions} действ./день, ${r.target_days} дн.` + (r.status==='paused'?' · остаётся на паузе':''));
+      closeWarmupModal(); openWarmup();
+    } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
+    finally { btn.disabled=false; btn.textContent=btnText; }
+    return;
+  }
+  const ids = [...document.getElementById('warmupAccSel').selectedOptions].map(o=>parseInt(o.value)).filter(Boolean);
+  if (!ids.length) { errEl.textContent='Выберите аккаунт'; return; }
+  const payload = ids.length===1 ? {account_id: ids[0]} : {account_ids: ids};
+  Object.assign(payload, {plan_type, profile_type, niche});
   if (custom_channels) payload.custom_channels = custom_channels;
   if (dailyRaw) payload.daily_actions = parseInt(dailyRaw);
   if (daysRaw) payload.target_days = parseInt(daysRaw);
-  const btn = document.getElementById('warmupBtn');
+  saveFormPrefs('warmup', {plan:plan_type, profile:profile_type, niche, daily:dailyRaw, days:daysRaw});
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
     const r = await api('/api/miniapp/warmup',{method:'POST',body:JSON.stringify(payload)});
-    const chNote = r.custom_channels ? `, ${r.custom_channels} своих каналов` : '';
-    toast(`🌱 Прогрев запущен (#${r.op_id}): ${r.daily_actions} действ./день${chNote}`);
+    if (ids.length===1) {
+      const chNote = r.custom_channels ? `, ${r.custom_channels} своих каналов` : '';
+      toast(`🌱 Прогрев запущен (#${r.op_id}): ${r.daily_actions} действ./день${chNote}`);
+    } else {
+      const ref = r.refused||[];
+      let msg = `🌱 Прогрев запущен: ${r.started} из ${ids.length}`;
+      if (ref.length) msg += ` · не запущено ${ref.length}: ${ref[0].reason}`;
+      toast(msg);
+      if (!r.started) { errEl.textContent = ref.length ? ref[0].reason : 'Ни один аккаунт не подошёл'; return; }
+    }
     closeWarmupModal();
     openWarmup();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; btn.textContent='🚀 Запустить прогрев'; }
+  finally { btn.disabled=false; btn.textContent=btnText; }
+}
+// Пауза и возобновление всех планов разом — по одному запросу на план через
+// те же ручки, что и кнопки строки (проверки возобновления — те же).
+async function warmupBulk(action) {
+  const want = action==='pause' ? 'active' : 'paused';
+  const ids = _WU_PLANS.filter(p => p.status===want && (action==='pause' || !p.health || p.health.resumable!==false)).map(p=>p.id);
+  if (!ids.length) { toast(action==='pause' ? 'Нет активных планов' : 'Нет планов, которые можно возобновить'); return; }
+  if (!await askConfirm((action==='pause'?'Поставить на паузу':'Возобновить')+` планов прогрева: ${ids.length}?`)) return;
+  let ok = 0, fail = 0, firstErr = '';
+  for (const id of ids) {
+    try { await api(`/api/miniapp/warmup/${id}/${action}`, {method:'POST'}); ok++; }
+    catch(e) { fail++; if (!firstErr) firstErr = errRu(e,'Ошибка'); }
+  }
+  toast((action==='pause'?'⏸ На паузе: ':'▶ Возобновлено: ')+ok + (fail?` · не вышло ${fail}: ${firstErr}`.substring(0,160):''));
+  openWarmup();
 }
 // Режимы прогрева читал владелец, а назывались они по-английски.
 const WARMUP_PLAN = {gentle:'🌱 Мягкий',standard:'🌿 Обычный',aggressive:'🔥 Интенсивный'};
@@ -26466,6 +26560,9 @@ async function openWarmup() {
       warnBox.style.display = '';
     }
     const plans = d.plans||[];
+    _WU_PLANS = plans;
+    const bulkBox = document.getElementById('warmupBulk');
+    if (bulkBox) bulkBox.style.display = plans.some(p=>p.status==='active'||p.status==='paused') ? 'flex' : 'none';
     if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить', {label:'🌱 Запустить прогрев', fn:'openWarmupModal()'})); return; }
     txt('warmupList', plans.map(p=>{
       const h = p.health || {state:'running', label:(WARMUP_STATUS[p.status]||p.status), hint:'', resumable:p.status==='paused'};
@@ -26482,6 +26579,7 @@ async function openWarmup() {
           ${p.pause_reason==='restricted'?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openRehab()" title="Восстановление">🩹</button>`:''}
           ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})" aria-label="Приостановить прогрев">⏸</button>`:''}
           ${(p.status==='paused'&&h.resumable)?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})" aria-label="Возобновить прогрев">▶</button>`:''}
+          ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openWarmupEdit(${p.id})" aria-label="Изменить план" title="Изменить темп, дни, характер">✏️</button>`:''}
           ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})" aria-label="Остановить">⏹</button>`:''}
           <button class="icon-btn sm danger" onclick="deleteWarmupPlan(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>

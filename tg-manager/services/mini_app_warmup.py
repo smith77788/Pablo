@@ -208,12 +208,29 @@ def setup_routes(app: web.Application, pool) -> None:
         plan_type = body.get("plan_type", "standard")
         if plan_type not in ("gentle", "standard", "aggressive"):
             return _err("Режим прогрева: мягкий, обычный или интенсивный", 400)
-        if not body.get("account_id"):
+        # Один аккаунт (account_id) или несколько сразу (account_ids): раньше
+        # план заводился строго по одному, и десять аккаунтов — это десять
+        # раз открыть форму и выставить одно и то же.
+        raw_ids = body.get("account_ids")
+        if raw_ids is None:
+            if not body.get("account_id"):
+                return _err("Выберите аккаунт", 400)
+            raw_ids = [body.get("account_id")]
+        if not isinstance(raw_ids, list) or not raw_ids:
             return _err("Выберите аккаунт", 400)
-        # Нечисловой id уезжал параметром в запрос и давал DataError → 500.
-        account_id = validate_integer(body.get("account_id"), min_val=1)
-        if not account_id:
-            return _err("Неверный идентификатор аккаунта", 400)
+        if len(raw_ids) > 200:
+            return _err("За раз — не больше 200 аккаунтов", 400)
+        account_ids: list[int] = []
+        for x in raw_ids:
+            # Нечисловой id уезжал параметром в запрос и давал DataError → 500.
+            v = validate_integer(x, min_val=1)
+            if not v:
+                return _err("Неверный идентификатор аккаунта", 400)
+            if v not in account_ids:
+                account_ids.append(int(v))
+        if len(account_ids) > 1:
+            return await _warmup_create_many(uid, account_ids, plan_type, body)
+        account_id = account_ids[0]
 
         # ── Расширенные настройки поведения прогрева (движок читает их из
         # account_niche_profiles) — раньше не выводились в UI, аккаунт всегда
@@ -285,6 +302,113 @@ def setup_routes(app: web.Application, pool) -> None:
         except Exception:
             log.exception("warmup_create_plan uid=%d acc=%s", uid, account_id)
             return _err(_INTERNAL_ERROR, 500)
+
+    def _warmup_settings(body: dict):
+        """Настройки плана из тела запроса: (profile, niche, channels, daily, days)
+        или строка-ошибка для человека."""
+        from services.account_warmer import (
+            WARMUP_PROFILES, WARMUP_NICHES, normalize_warmup_channels,
+        )
+        profile_type = (body.get("profile_type") or "mixed").strip().lower()
+        if profile_type not in WARMUP_PROFILES:
+            return "Неизвестный характер поведения"
+        niche = (body.get("niche") or "general").strip().lower()
+        if niche not in WARMUP_NICHES:
+            return "Неизвестная ниша"
+        channels = normalize_warmup_channels(body.get("custom_channels"))
+        try:
+            daily = None if body.get("daily_actions") in (None, "") else int(body["daily_actions"])
+            days = None if body.get("target_days") in (None, "") else int(body["target_days"])
+        except (TypeError, ValueError):
+            return "Действий в день: 3–20, дней: 5–45"
+        return profile_type, niche, channels, daily, days
+
+    async def _warmup_create_many(uid: int, account_ids: list[int], plan_type: str,
+                                  body: dict) -> web.Response:
+        """Планы на несколько выбранных аккаунтов — через ту же
+        create_warmup_plan, что и одиночный: все проверки пригодности и тарифа
+        одни. Неподходящий аккаунт не валит пакет, а попадает в отчёт с причиной."""
+        from services import account_warmer as _aw
+
+        st = _warmup_settings(body)
+        if isinstance(st, str):
+            return _err(st, 400)
+        profile_type, niche, channels, daily, days = st
+        started: list[int] = []
+        refused: list[dict] = []
+        for aid in account_ids:
+            try:
+                await _aw.create_warmup_plan(
+                    pool, uid, aid, plan_type, profile_type=profile_type, niche=niche,
+                    custom_channels=channels, daily_actions=daily, target_days=days)
+                started.append(aid)
+            except _aw.WarmupNotAllowed as exc:
+                refused.append({"account_id": aid, "reason": str(exc)})
+            except PermissionError as exc:
+                # Тариф или Ban Weather — дальше по пакету будет то же самое.
+                if not started:
+                    return _err(str(exc) or "Требуется подписка", 403)
+                refused.append({"account_id": aid, "reason": str(exc)})
+                break
+            except Exception:
+                log.exception("warmup_create_many uid=%d acc=%d", uid, aid)
+                refused.append({"account_id": aid, "reason": "внутренняя ошибка"})
+        # След в «Операциях» — как у одиночного запуска, по операции на
+        # аккаунт: исполнитель account_warmup работает с одним аккаунтом.
+        # Планы уже записаны и пойдут фоновым циклом; сбой следа — не отказ.
+        op_ids: list[int] = []
+        for aid in started:
+            try:
+                op_ids.append(int(await _obus.submit(
+                    pool, uid, "account_warmup", {
+                        "account_id": aid, "plan_type": plan_type,
+                        "profile_type": profile_type, "niche": niche,
+                    }, total_items=1,
+                    label=f"Прогрев аккаунта ({plan_type}, {profile_type})")))
+            except Exception:
+                log.warning("warmup_create_many: op trace failed uid=%d acc=%d", uid, aid)
+        op_id = op_ids[0] if op_ids else None
+        return _json_resp({"ok": bool(started), "started": len(started),
+                           "account_ids": started, "refused": refused, "op_id": op_id})
+
+    async def warmup_update_plan(request: web.Request) -> web.Response:
+        """Правка идущего плана: темп, длительность, характер, ниша, свои каналы.
+        Пауза и текущий день сохраняются."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plan_id = int(request.match_info["plan_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        from services import account_warmer as _aw
+
+        def _opt_int(k):
+            v = body.get(k)
+            return None if v in (None, "") else int(v)
+
+        try:
+            daily, days = _opt_int("daily_actions"), _opt_int("target_days")
+        except (TypeError, ValueError):
+            return _err("Действий в день: 3–20, дней: 5–45", 400)
+        profile_type = (body.get("profile_type") or "").strip().lower() or None
+        niche = (body.get("niche") or "").strip().lower() or None
+        channels = None
+        if "custom_channels" in body and body.get("custom_channels") is not None:
+            channels = _aw.normalize_warmup_channels(body.get("custom_channels"))
+        try:
+            row = await _aw.update_warmup_plan(
+                pool, uid, plan_id, daily_actions=daily, target_days=days,
+                profile_type=profile_type, niche=niche, custom_channels=channels)
+        except _aw.WarmupNotAllowed as exc:
+            return _err(str(exc), exc.status)
+        except Exception:
+            log.exception("warmup_update_plan uid=%d plan=%d", uid, plan_id)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "daily_actions": row["daily_actions"],
+                           "target_days": row["target_days"], "status": row["status"],
+                           "current_day": row["current_day"]})
 
     async def warmup_bulk_start(request: web.Request) -> web.Response:
         """Массовый прогрев: создать планы для ВСЕХ подходящих аккаунтов сразу
@@ -729,6 +853,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
     app.router.add_get("/api/miniapp/warmup/{plan_id}/log", warmup_plan_log)
     app.router.add_delete("/api/miniapp/warmup/{plan_id}", warmup_delete_plan)
+    app.router.add_put("/api/miniapp/warmup/{plan_id}", warmup_update_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/pause", warmup_pause_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/resume", warmup_resume_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/cancel", warmup_cancel_plan)
