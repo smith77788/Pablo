@@ -714,6 +714,78 @@ _PLAN_UPSERT_TAIL = """
      WHERE account_warmup_plans.owner_id = EXCLUDED.owner_id"""
 
 
+async def _upsert_niche_profile(
+    conn, account_id: int, owner_id: int, niche: str | None,
+    profile_type: str | None, custom_channels: list[str] | None,
+) -> None:
+    """Профиль поведения аккаунта (его читает движок прогрева).
+
+    None в поле — «не менять»: у нового профиля оно берёт умолчание
+    (general / mixed / без своих каналов), у существующего остаётся как было.
+    Профиль чужого владельца не трогается.
+    """
+    await conn.execute(_NICHE_PROFILES_DDL)
+    await conn.execute(
+        """INSERT INTO account_niche_profiles(
+               account_id, owner_id, niche, profile_type,
+               custom_channels, updated_at)
+           VALUES($1,$2,COALESCE($3,'general'),COALESCE($4,'mixed'),
+                  COALESCE($5::text[], '{}'),now())
+           ON CONFLICT (account_id) DO UPDATE
+           SET niche=COALESCE($3, account_niche_profiles.niche),
+               profile_type=COALESCE($4, account_niche_profiles.profile_type),
+               custom_channels=COALESCE($5::text[],
+                                        account_niche_profiles.custom_channels),
+               updated_at=now()
+           WHERE account_niche_profiles.owner_id = EXCLUDED.owner_id""",
+        account_id, owner_id, niche, profile_type, custom_channels,
+    )
+
+
+async def update_warmup_plan(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    plan_id: int,
+    *,
+    daily_actions: int | None = None,
+    target_days: int | None = None,
+    profile_type: str | None = None,
+    niche: str | None = None,
+    custom_channels: list[str] | None = None,
+) -> dict:
+    """Поправить идущий или приостановленный план, не перезапуская его.
+
+    Перезапуск через create_warmup_plan снимал паузу (status='active') — для
+    правки темпа это неверно: приостановленный план должен остаться на паузе,
+    день прогрева — тем же. None — поле не менять. Пределы те же, что при
+    создании: 3–20 действий в день, 5–45 дней.
+    """
+    if profile_type is not None and profile_type not in WARMUP_PROFILES:
+        raise WarmupNotAllowed(
+            f"Профиль должен быть одним из: {', '.join(WARMUP_PROFILES)}", 400)
+    if niche is not None and niche not in WARMUP_NICHES:
+        raise WarmupNotAllowed(
+            f"Ниша должна быть одной из: {', '.join(WARMUP_NICHES)}", 400)
+    daily = None if daily_actions is None else max(3, min(20, int(daily_actions)))
+    days = None if target_days is None else max(5, min(45, int(target_days)))
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """UPDATE account_warmup_plans
+                      SET daily_actions = COALESCE($3, daily_actions),
+                          target_days   = COALESCE($4, target_days)
+                    WHERE id=$1 AND owner_id=$2 AND status IN ('active','paused')
+                RETURNING account_id, daily_actions, target_days, status, current_day""",
+                plan_id, owner_id, daily, days)
+            if not row:
+                raise WarmupNotAllowed("План не найден или уже завершён", 404)
+            if profile_type is not None or niche is not None or custom_channels is not None:
+                await _upsert_niche_profile(
+                    conn, int(row["account_id"]), owner_id, niche, profile_type,
+                    custom_channels)
+    return dict(row)
+
+
 async def create_warmup_plan(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -791,21 +863,9 @@ async def create_warmup_plan(
     async with pool.acquire() as conn:
         async with conn.transaction():
             if profile_type is not None or niche is not None:
-                await conn.execute(_NICHE_PROFILES_DDL)
-                await conn.execute(
-                    """INSERT INTO account_niche_profiles(
-                           account_id, owner_id, niche, profile_type,
-                           custom_channels, updated_at)
-                       VALUES($1,$2,$3,$4,COALESCE($5::text[], '{}'),now())
-                       ON CONFLICT (account_id) DO UPDATE
-                       SET niche=$3, profile_type=$4,
-                           custom_channels=COALESCE($5::text[],
-                                                    account_niche_profiles.custom_channels),
-                           updated_at=now()
-                       WHERE account_niche_profiles.owner_id = EXCLUDED.owner_id""",
-                    account_id, owner_id, niche or "general",
-                    profile_type or "mixed", custom_channels,
-                )
+                await _upsert_niche_profile(
+                    conn, account_id, owner_id, niche or "general",
+                    profile_type or "mixed", custom_channels)
             # Источник строки — живой аккаунт этого владельца: проверка выше и
             # запись не разъезжаются, даже если статус сменился между ними.
             row = await conn.fetchrow(

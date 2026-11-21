@@ -937,6 +937,7 @@ POST /api/miniapp/community/node/{node_id}/channels
 POST /api/miniapp/community/node/{node_id}/liven
 POST /api/miniapp/community/node/{node_id}/staff
 POST /api/miniapp/competitor
+POST /api/miniapp/competitors/refresh
 POST /api/miniapp/complaint/submit
 POST /api/miniapp/compliance_scan
 POST /api/miniapp/content_cloner/submit
@@ -1274,4 +1275,5 @@ PUT /api/miniapp/uch/groups/{group_id}
 PUT /api/miniapp/uch/smart-tags/rules/{rule_id}/toggle
 PUT /api/miniapp/va/channel/{cid}
 PUT /api/miniapp/va/strategy
+PUT /api/miniapp/warmup/{plan_id}
 PUT /api/miniapp/workflows/{wf_id}/steps/{idx}

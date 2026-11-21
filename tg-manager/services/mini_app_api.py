@@ -7779,7 +7779,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         rows = await _safe_fetch(pool,
-            """SELECT id, username, label, channel_id, last_members, last_checked, created_at
+            """SELECT id, username, label, channel_id, last_members, prev_members,
+                      last_checked, created_at
                FROM competitors WHERE owner_id=$1
                ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3""",
             uid, _list_limit(request, 50, 1000), _list_offset(request))
@@ -7811,6 +7812,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("add_competitor uid=%d", uid)
             return _err("Не удалось добавить конкурента", 500)
+
+    async def refresh_competitors(request: web.Request) -> web.Response:
+        """Обновить подписчиков у конкурентов (всех или по ids) — в фоне.
+        Раньше это умел только бот, и в мини-аппе всё стояло «не проверен»."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ids = []
+        for x in (body.get("ids") or [])[:500]:
+            v = validate_integer(x, min_val=1)
+            if v:
+                ids.append(int(v))
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM competitors WHERE owner_id=$1", uid)
+        if not total:
+            return _err("Список конкурентов пуст", 400)
+        from services import competitor_watch
+        from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+
+        spawn(competitor_watch.refresh(pool, uid, ids or None))
+        return _json_resp({"ok": True, "queued": len(ids) or total})
 
     async def delete_competitor(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9938,6 +9964,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/competitors", competitors_list)
     app.router.add_post("/api/miniapp/competitor", add_competitor)
     app.router.add_delete("/api/miniapp/competitor/{comp_id}", delete_competitor)
+    app.router.add_post("/api/miniapp/competitors/refresh", refresh_competitors)
     # Network broadcast
     app.router.add_post("/api/miniapp/network_broadcast", network_broadcast)
     # CRM

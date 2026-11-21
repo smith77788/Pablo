@@ -3114,7 +3114,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (ИИ понимает контекст). Темп человеческий, сессии защищены.
     </div>
     <div id="cwAiStatus" style="font-size:11px;line-height:1.5;margin-bottom:10px"></div>
-    <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(var(--fg-rgb),.12);background:rgba(var(--fg-rgb),.06);color:var(--text);font-size:13px">
+    <input id="cwChat" type="text" placeholder="Чат: @username, t.me/… или ID — можно несколько через пробел" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(var(--fg-rgb),.12);background:rgba(var(--fg-rgb),.06);color:var(--text);font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Режим работы</div>
     <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
       <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--btn-solid);color:var(--btn-text);cursor:pointer">🔀 Смешанный</button>
@@ -5014,6 +5014,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCompModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <button class="btn btn-s" style="flex:1" onclick="refreshComps()">🔄 Обновить подписчиков</button>
+      <select id="compSort" onchange="loadCompetitors()" style="flex:1;min-width:140px" aria-label="Сортировка">
+        <option value="new">Сначала новые</option>
+        <option value="big">Больше подписчиков</option>
+        <option value="grow">Быстрее растут</option>
+      </select>
+    </div>
     <div class="lst" id="compList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -7223,6 +7231,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="warmupStats" class="kpi-row" style="padding:8px 16px 10px"></div>
     <div id="warmupWarn" style="display:none;margin-bottom:8px"></div>
     <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="bulkWarmup()">🔥 Прогреть все подходящие аккаунты</button>
+    <div id="warmupBulk" style="display:none;gap:8px;margin-bottom:8px">
+      <button class="btn btn-s" style="flex:1" onclick="warmupBulk('pause')">⏸ Пауза всем</button>
+      <button class="btn btn-s" style="flex:1" onclick="warmupBulk('resume')">▶ Возобновить всем</button>
+    </div>
     <div class="sec">Активные планы</div>
     <div class="lst" id="warmupList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -8285,8 +8297,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeCompModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📈 Добавить конкурента</div>
     <div class="field">
-      <label>Username канала</label>
-      <input type="text" id="compUsername" placeholder="@channel или channel (без @)">
+      <label>Каналы</label>
+      <textarea id="compUsername" rows="2" placeholder="@channel — можно несколько: по одному в строке или через пробел"></textarea>
     </div>
     <div class="field">
       <label>Метка (необязательно)</label>
@@ -8598,9 +8610,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="warmupMbg" onclick="if(event.target===this)closeWarmupModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeWarmupModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🌱 Запустить прогрев</div>
-    <div class="field"><label>Аккаунт</label><select id="warmupAccSel"><option value="">Загрузка…</option></select></div>
-    <div class="field">
+    <div class="modal-title" id="warmupModalTitle">🌱 Запустить прогрев</div>
+    <div class="field" id="warmupAccField"><label>Аккаунты <span id="warmupAccCnt" style="opacity:.6"></span></label><select id="warmupAccSel" multiple size="6" onchange="_warmupAccCount()"><option value="">Загрузка…</option></select>
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><span class="chip" onclick="_warmupAccAll(true)">✅ Отметить всех найденных</span><span class="chip" onclick="_warmupAccAll(false)">⬜ Снять</span></div>
+      <div class="field-note">Можно отметить несколько — каждому заведётся свой план с этими настройками</div></div>
+    <div class="field" id="warmupPlanField">
       <label>Режим прогрева</label>
       <select id="warmupPlan">
         <option value="gentle">🌱 Мягкий (21 день, 5 действий в день)</option>
@@ -8650,6 +8664,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </details>
     <div class="field-err" id="warmupErr"></div>
     <button class="btn btn-p" data-main id="warmupBtn" onclick="submitWarmup()" style="width:100%">🚀 Запустить прогрев</button>
+    <div class="field-note" style="text-align:center;margin-top:6px">Настройки запоминаются до следующего запуска</div>
   </div>
 </div>
 
@@ -8671,7 +8686,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeParserModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔭 Запустить парсинг</div>
-    <div class="field"><label>Источник (@username или ссылка)</label><input type="text" id="parserSrc" placeholder="@channel или t.me/channel"></div>
+    <div class="field"><label>Источники (@username или ссылка)</label><textarea id="parserSrc" rows="2" placeholder="@channel или t.me/channel — можно несколько: по одному в строке или через пробел"></textarea>
+      <div class="field-note">До 20 источников за раз — на каждый свой прогон с этими настройками</div></div>
     <div class="field">
       <label>Тип парсинга</label>
       <select id="parserType" onchange="parserTypeToggle()" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px;color:var(--text);font-size:15px">
@@ -11630,7 +11646,12 @@ function cwPickInt(i){CW_INT=i;
   document.querySelectorAll('#cwInt .cw-int').forEach(b=>{const on=b.dataset.i===i;b.style.background=on?'var(--btn-solid)':'rgba(var(--fg-rgb),.06)';b.style.color=on?'var(--btn-text)':'var(--text)';});}
 let CW_ACCS=new Set(), CW_ACC_ALL=[];
 function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad(); cwAiStatus();
-  const box=document.getElementById('cwNewSettings'); if(box && !box.innerHTML) box.innerHTML=_cwSettingsHtml('cwN', {});}
+  // Последний запуск запоминается: режим, интенсивность, темы и доп. настройки.
+  const pr = loadFormPrefs('chatwarmup');
+  if (pr.mode) cwPickMode(pr.mode);
+  if (pr.intensity) cwPickInt(pr.intensity);
+  const tp=document.getElementById('cwTopics'); if (tp && pr.topics!=null && !tp.value) tp.value=pr.topics;
+  const box=document.getElementById('cwNewSettings'); if(box && !box.innerHTML) box.innerHTML=_cwSettingsHtml('cwN', pr.settings||{});}
 // ── Настройки разогрева (schema_v300) ─────────────────────────────────────
 // Одна разметка на запуск и на правку запущенной сессии: язык, часы работы,
 // длина реплик, доля реакций, лимиты на сутки и автостоп. Раньше у
@@ -11778,23 +11799,39 @@ async function cwLoad(){
     }).join('');
   }catch(e){el.innerHTML=errHtml(errRu(e),'cwLoad()');}
 }
+// Несколько чатов за раз: через пробел, запятую или с новой строки. Каждый
+// чат — своя сессия через ту же ручку, что и одиночный запуск.
+function _cwChats(raw){
+  return [...new Set(String(raw||'').split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean))].slice(0,20);
+}
 async function cwStart(){
-  const chat=document.getElementById('cwChat').value.trim();
-  if(!chat){toast('❗ Укажите чат');return;}
+  const chats=_cwChats(document.getElementById('cwChat').value);
+  if(!chats.length){toast('❗ Укажите чат');return;}
   const topics=document.getElementById('cwTopics').value.trim();
-  try{
-    const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
-      body:JSON.stringify(Object.assign({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT},
-        (document.getElementById('cwNewSettings')||{}).innerHTML ? _cwReadSettings('cwN') : {}))});
-    // Потолок флота на чат (30) раньше срабатывал молча, а потом называл
-    // только число. Теперь видно и причину: «не поместился в потолок» и
-    // «нет строки сессии» — это разные новости и разные действия.
-    const od=(r.omitted_detail||[]).map(d=>`${d.reason} — ${d.count}`).join('; ');
-    toast(`💬 Разогрев запущен: ${r.accounts||0} акк.`
-      + (r.omitted>0?` · не вошли ${r.omitted}${od?`: ${od}`:''}`:''));
-    document.getElementById('cwChat').value='';
-    cwLoad();
-  }catch(e){toast('⚠️ '+errRu(e,'Ошибка'));}
+  const extra=(document.getElementById('cwNewSettings')||{}).innerHTML ? _cwReadSettings('cwN') : {};
+  saveFormPrefs('chatwarmup', {mode:CW_MODE, intensity:CW_INT, topics:topics, settings:extra});
+  if (chats.length>1 && !await askConfirm(`Запустить разогрев в ${chats.length} чатах с одними настройками?`)) return;
+  let ok=0, accs=0; const fails=[], omitted=[];
+  for (const chat of chats) {
+    try{
+      const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
+        body:JSON.stringify(Object.assign({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT}, extra))});
+      ok++; accs+=r.accounts||0;
+      // Потолок флота на чат (30) раньше срабатывал молча, а потом называл
+      // только число. Теперь видно и причину: «не поместился в потолок» и
+      // «нет строки сессии» — это разные новости и разные действия.
+      const od=(r.omitted_detail||[]).map(d=>`${d.reason} — ${d.count}`).join('; ');
+      if (r.omitted>0) omitted.push(`не вошли ${r.omitted}${od?`: ${od}`:''}`);
+    }catch(e){ fails.push(`${chat}: ${errRu(e,'Ошибка')}`); }
+  }
+  if (chats.length===1) {
+    if (ok) toast(`💬 Разогрев запущен: ${accs} акк.` + (omitted.length?` · ${omitted[0]}`:''));
+    else toast('⚠️ '+fails[0].split(': ').slice(1).join(': '));
+  } else {
+    toast(`💬 Запущено в ${ok} из ${chats.length} чатов` + (fails.length?` · ошибка: ${fails[0]}`:'').substring(0,200));
+  }
+  if (ok) document.getElementById('cwChat').value = fails.map(f=>f.split(': ')[0]).join(' ');
+  cwLoad();
 }
 let CW_DETAIL_ID = 0;
 function cwOpenDetail(id){ CW_DETAIL_ID=id; push('s-cwdetail'); cwDetailLoad(); }
@@ -16239,22 +16276,29 @@ async function loadCompetitors(more) {
     const d = await api('/api/miniapp/competitors?limit=50&offset='+CMPT_OFFSET);
     const page = listOf(d,'competitors');
     CMPT_ROWS = CMPT_OFFSET ? CMPT_ROWS.concat(page) : page;
-    const items = CMPT_ROWS;
+    const sort = (document.getElementById('compSort')||{}).value || 'new';
+    const _grow = c => (c.last_members!=null && c.prev_members!=null) ? c.last_members - c.prev_members : -Infinity;
+    const items = sort==='new' ? CMPT_ROWS : CMPT_ROWS.slice().sort((a,b) =>
+      sort==='big' ? (b.last_members??-1) - (a.last_members??-1) : _grow(b) - _grow(a));
     const total = totalOf(d, items);
     // Плитка называет ВСЁ число, а не длину показанной страницы.
     txt('m-comp-cnt', total ? total+' конкурентов' : 'Нет');
     if (!items.length) { txt('compList', empty('📈','Нет конкурентов','Добавьте канал для мониторинга', {label:'➕ Добавить канал', fn:'openCompModal()'})); return; }
     txt('compList', items.map(c=>{
-      const members = c.last_members!=null?num(c.last_members)+' участников':'не проверен';
+      const members = c.last_members!=null?num(c.last_members)+' участников':'не проверен — нажмите «Обновить»';
+      const dlt = (c.last_members!=null && c.prev_members!=null) ? c.last_members - c.prev_members : 0;
+      const trend = dlt ? `<span style="color:${dlt>0?'var(--green)':'var(--red)'}">${dlt>0?'↗ +':'↘ '}${num(dlt)}</span>` : '';
       const checked = c.last_checked ? ago(c.last_checked) : 'никогда';
       return `<div class="li">
         <div class="ava ava-orange">📈</div>
         <div class="li-body">
           <div class="li-name">${c.label?esc(c.label):'@'+esc(c.username)}</div>
-          <div class="li-sub">@${esc(c.username)} · ${members} · ${checked}</div>
+          <div class="li-sub">@${esc(c.username)} · ${members} ${trend} · ${checked}</div>
         </div>
         <div class="li-right">
           ${c.last_members!=null?`<span class="badge b-bl">${num(c.last_members)}</span>`:''}
+          <span class="icon-btn sm" role="button" tabindex="0" aria-label="Собрать аудиторию" title="Собрать аудиторию в Парсере" onclick="compToParser(${c.id})">🔭</span>
+          <span class="icon-btn sm" role="button" tabindex="0" aria-label="Изменить метку" title="Изменить метку" onclick="openCompEdit(${c.id})">✏️</span>
           <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить конкурента" onclick="deleteComp(${c.id}, this)">🗑</span>
         </div>
       </div>`;
@@ -16264,8 +16308,32 @@ async function loadCompetitors(more) {
   }
 }
 
+// Правка метки — та же ручка добавления: она обновляет метку по @нику.
+function openCompEdit(id) {
+  const c = (CMPT_ROWS||[]).find(x => x.id===id); if (!c) return;
+  openCompModal();
+  const u = document.getElementById('compUsername');
+  u.value = '@'+c.username; u.readOnly = true;
+  document.getElementById('compLabel').value = c.label || '';
+  document.getElementById('compBtn').textContent='💾 Сохранить';
+}
+async function refreshComps() {
+  try {
+    const r = await api('/api/miniapp/competitors/refresh', {method:'POST', body:'{}'});
+    toast(`🔄 Обновляю подписчиков: ${r.queued}. Через минуту обновите список.`);
+    setTimeout(() => loadCompetitors(), Math.min(90000, 3000 + r.queued*1700));
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+// Собрать аудиторию конкурента: форма парсера с этим источником.
+function compToParser(id) {
+  const c = (CMPT_ROWS||[]).find(x => x.id===id); if (!c) return;
+  openParser();
+  openParserModal();
+  document.getElementById('parserSrc').value = c.username;
+}
 function openCompModal() {
   document.getElementById('compUsername').value='';
+  document.getElementById('compUsername').readOnly=false;
   document.getElementById('compLabel').value='';
   document.getElementById('compErr').style.display='none';
   document.getElementById('compBtn').disabled=false;
@@ -16276,23 +16344,27 @@ function openCompModal() {
 function closeCompModal() { document.getElementById('compMbg').classList.remove('show'); }
 
 async function saveComp() {
-  const username = document.getElementById('compUsername').value.trim().replace('@','');
+  const names = [...new Set(document.getElementById('compUsername').value.split(/[\s,;]+/)
+    .map(x => x.trim().replace(/^@/,'').replace(/.*t\.me\//,'').replace(/\/+$/,'')).filter(Boolean))].slice(0,50);
   const label = document.getElementById('compLabel').value.trim();
   const errEl = document.getElementById('compErr');
   errEl.style.display='none';
-  if (!username) { errEl.textContent='Введите username'; errEl.style.display='block'; return; }
+  if (!names.length) { errEl.textContent='Введите username'; errEl.style.display='block'; return; }
   const btn = document.getElementById('compBtn');
-  btn.disabled=true; btn.textContent='⏳ Добавление...';
+  const btnText = btn.textContent;
+  btn.disabled=true; btn.textContent='⏳ Сохраняю...';
+  let ok = 0; const fails = [];
   try {
-    await api('/api/miniapp/competitor', {method:'POST', body:JSON.stringify({username, label:label||null})});
+    for (const username of names) {
+      try { await api('/api/miniapp/competitor', {method:'POST', body:JSON.stringify({username, label:label||null})}); ok++; }
+      catch(e) { fails.push('@'+username+': '+errRu(e)); }
+    }
+    if (!ok) { errEl.textContent='Ошибка: '+fails[0]; errEl.style.display='block'; tg.HapticFeedback?.notificationOccurred('error'); return; }
     closeCompModal();
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Конкурент добавлен');
+    toast(names.length===1 ? '✅ Сохранено' : `✅ Добавлено ${ok} из ${names.length}` + (fails.length?` · ${fails[0]}`:''));
     loadCompetitors();
-  } catch(e) {
-    errEl.textContent='Ошибка: '+errRu(e); errEl.style.display='block';
-    tg.HapticFeedback?.notificationOccurred('error');
-  } finally { btn.disabled=false; btn.textContent='➕ Добавить'; }
+  } finally { btn.disabled=false; btn.textContent=btnText; }
 }
 
 async function deleteComp(id, _el) {
@@ -26362,12 +26434,55 @@ async function deleteDm(id, status, _el) {
 }
 
 // ── Account Warmup ─────────────────────────────────────
+// Правка идущего плана живёт в той же форме: id плана — режим правки.
+let WARMUP_EDIT_ID = null;
+let _WU_PLANS = [];
+const _WU_KEEP = '<option value="" data-keep="1">— не менять —</option>';
+function _warmupMode(edit) {
+  WARMUP_EDIT_ID = edit || null;
+  document.getElementById('warmupAccField').style.display = edit ? 'none' : '';
+  document.getElementById('warmupPlanField').style.display = edit ? 'none' : '';
+  txt('warmupModalTitle', edit ? '✏️ Изменить план прогрева' : '🌱 Запустить прогрев');
+  document.getElementById('warmupBtn').textContent = edit ? '💾 Сохранить' : '🚀 Запустить прогрев';
+  ['warmupProfile','warmupNiche'].forEach(id => {
+    const sel = document.getElementById(id);
+    const keep = sel.querySelector('option[data-keep]');
+    if (edit && !keep) sel.insertAdjacentHTML('afterbegin', _WU_KEEP);
+    if (!edit && keep) keep.remove();
+    if (edit) sel.value = '';
+  });
+  const det = document.querySelector('#warmupMbg details');
+  if (det) det.open = !!edit;
+}
+function _warmupAccCount() {
+  const n = document.getElementById('warmupAccSel').selectedOptions.length;
+  txt('warmupAccCnt', n ? '· выбрано '+n : '');
+  const b = document.getElementById('warmupBtn');
+  if (!WARMUP_EDIT_ID) b.textContent = n>1 ? `🚀 Запустить прогрев · ${n} акк.` : '🚀 Запустить прогрев';
+}
+function _warmupAccAll(on) {
+  [...document.getElementById('warmupAccSel').options].forEach(o => { if (o.value) o.selected = on; });
+  _warmupAccCount();
+}
+function openWarmupEdit(planId) {
+  const p = _WU_PLANS.find(x => x.id === planId); if (!p) return;
+  document.getElementById('warmupErr').textContent='';
+  document.getElementById('warmupBtn').disabled=false;
+  _warmupMode(planId);
+  document.getElementById('warmupChannels').value='';
+  document.getElementById('warmupDaily').value = p.daily_actions || '';
+  document.getElementById('warmupDays').value = p.target_days || '';
+  txt('warmupModalTitle', '✏️ ' + esc(p.first_name||p.phone||'План') + ' · день ' + (p.current_day||0));
+  document.getElementById('warmupMbg').classList.add('show');
+}
 async function openWarmupModal() {
   document.getElementById('warmupErr').textContent='';
   document.getElementById('warmupBtn').disabled=false;
+  _warmupMode(null);
   document.getElementById('warmupChannels').value='';
   document.getElementById('warmupDaily').value='';
   document.getElementById('warmupDays').value='';
+  applyFormPrefs('warmup', {plan:'warmupPlan', profile:'warmupProfile', niche:'warmupNiche', daily:'warmupDaily', days:'warmupDays'});
   document.getElementById('warmupMbg').classList.add('show');
   accPickerSearchBox('warmupAccSel', _warmupLoadAccs);
   _warmupLoadAccs('');
@@ -26386,6 +26501,7 @@ async function _warmupLoadAccs(q) {
     sel.innerHTML = r.accs.length
       ? r.accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone)} · ${esc(a.phone||'')}</option>`).join('')
       : `<option value="">${q ? 'По запросу активных не найдено' : 'Нет активных аккаунтов'}</option>`;
+    _warmupAccCount();
     accPickerSetNote('warmupAccSel', accPickerNote(r));
   } catch(e) {
     sel.innerHTML='<option value="">Ошибка загрузки</option>';
@@ -26412,7 +26528,6 @@ async function bulkWarmup() {
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 async function submitWarmup() {
-  const account_id = parseInt(document.getElementById('warmupAccSel').value);
   const plan_type = document.getElementById('warmupPlan').value;
   const profile_type = document.getElementById('warmupProfile').value;
   const niche = document.getElementById('warmupNiche').value;
@@ -26420,21 +26535,65 @@ async function submitWarmup() {
   const dailyRaw = document.getElementById('warmupDaily').value.trim();
   const daysRaw = document.getElementById('warmupDays').value.trim();
   const errEl = document.getElementById('warmupErr');
-  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
-  const payload = {account_id, plan_type, profile_type, niche};
+  errEl.textContent='';
+  const btn = document.getElementById('warmupBtn');
+  const btnText = btn.textContent;
+  if (WARMUP_EDIT_ID) {
+    const payload = {};
+    if (profile_type) payload.profile_type = profile_type;
+    if (niche) payload.niche = niche;
+    if (custom_channels) payload.custom_channels = custom_channels;
+    if (dailyRaw) payload.daily_actions = parseInt(dailyRaw);
+    if (daysRaw) payload.target_days = parseInt(daysRaw);
+    btn.disabled=true; btn.textContent='Сохраняю…';
+    try {
+      const r = await api('/api/miniapp/warmup/'+WARMUP_EDIT_ID, {method:'PUT', body:JSON.stringify(payload)});
+      toast(`💾 План обновлён: ${r.daily_actions} действ./день, ${r.target_days} дн.` + (r.status==='paused'?' · остаётся на паузе':''));
+      closeWarmupModal(); openWarmup();
+    } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
+    finally { btn.disabled=false; btn.textContent=btnText; }
+    return;
+  }
+  const ids = [...document.getElementById('warmupAccSel').selectedOptions].map(o=>parseInt(o.value)).filter(Boolean);
+  if (!ids.length) { errEl.textContent='Выберите аккаунт'; return; }
+  const payload = ids.length===1 ? {account_id: ids[0]} : {account_ids: ids};
+  Object.assign(payload, {plan_type, profile_type, niche});
   if (custom_channels) payload.custom_channels = custom_channels;
   if (dailyRaw) payload.daily_actions = parseInt(dailyRaw);
   if (daysRaw) payload.target_days = parseInt(daysRaw);
-  const btn = document.getElementById('warmupBtn');
+  saveFormPrefs('warmup', {plan:plan_type, profile:profile_type, niche, daily:dailyRaw, days:daysRaw});
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
     const r = await api('/api/miniapp/warmup',{method:'POST',body:JSON.stringify(payload)});
-    const chNote = r.custom_channels ? `, ${r.custom_channels} своих каналов` : '';
-    toast(`🌱 Прогрев запущен (#${r.op_id}): ${r.daily_actions} действ./день${chNote}`);
+    if (ids.length===1) {
+      const chNote = r.custom_channels ? `, ${r.custom_channels} своих каналов` : '';
+      toast(`🌱 Прогрев запущен (#${r.op_id}): ${r.daily_actions} действ./день${chNote}`);
+    } else {
+      const ref = r.refused||[];
+      let msg = `🌱 Прогрев запущен: ${r.started} из ${ids.length}`;
+      if (ref.length) msg += ` · не запущено ${ref.length}: ${ref[0].reason}`;
+      toast(msg);
+      if (!r.started) { errEl.textContent = ref.length ? ref[0].reason : 'Ни один аккаунт не подошёл'; return; }
+    }
     closeWarmupModal();
     openWarmup();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; btn.textContent='🚀 Запустить прогрев'; }
+  finally { btn.disabled=false; btn.textContent=btnText; }
+}
+// Пауза и возобновление всех планов разом — по одному запросу на план через
+// те же ручки, что и кнопки строки (проверки возобновления — те же).
+async function warmupBulk(action) {
+  const want = action==='pause' ? 'active' : 'paused';
+  const ids = _WU_PLANS.filter(p => p.status===want && (action==='pause' || !p.health || p.health.resumable!==false)).map(p=>p.id);
+  if (!ids.length) { toast(action==='pause' ? 'Нет активных планов' : 'Нет планов, которые можно возобновить'); return; }
+  if (!await askConfirm((action==='pause'?'Поставить на паузу':'Возобновить')+` планов прогрева: ${ids.length}?`)) return;
+  let ok = 0, fail = 0, firstErr = '';
+  for (const id of ids) {
+    try { await api(action==='pause' ? `/api/miniapp/warmup/${id}/pause` : `/api/miniapp/warmup/${id}/resume`, {method:'POST'}); ok++; }
+    catch(e) { fail++; if (!firstErr) firstErr = errRu(e,'Ошибка'); }
+  }
+  toast((action==='pause'?'⏸ На паузе: ':'▶ Возобновлено: ')+ok + (fail?` · не вышло ${fail}: ${firstErr}`.substring(0,160):''));
+  openWarmup();
 }
 // Режимы прогрева читал владелец, а назывались они по-английски.
 const WARMUP_PLAN = {gentle:'🌱 Мягкий',standard:'🌿 Обычный',aggressive:'🔥 Интенсивный'};
@@ -26466,6 +26625,9 @@ async function openWarmup() {
       warnBox.style.display = '';
     }
     const plans = d.plans||[];
+    _WU_PLANS = plans;
+    const bulkBox = document.getElementById('warmupBulk');
+    if (bulkBox) bulkBox.style.display = plans.some(p=>p.status==='active'||p.status==='paused') ? 'flex' : 'none';
     if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить', {label:'🌱 Запустить прогрев', fn:'openWarmupModal()'})); return; }
     txt('warmupList', plans.map(p=>{
       const h = p.health || {state:'running', label:(WARMUP_STATUS[p.status]||p.status), hint:'', resumable:p.status==='paused'};
@@ -26482,6 +26644,7 @@ async function openWarmup() {
           ${p.pause_reason==='restricted'?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openRehab()" title="Восстановление">🩹</button>`:''}
           ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})" aria-label="Приостановить прогрев">⏸</button>`:''}
           ${(p.status==='paused'&&h.resumable)?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})" aria-label="Возобновить прогрев">▶</button>`:''}
+          ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openWarmupEdit(${p.id})" aria-label="Изменить план" title="Изменить темп, дни, характер">✏️</button>`:''}
           ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})" aria-label="Остановить">⏹</button>`:''}
           <button class="icon-btn sm danger" onclick="deleteWarmupPlan(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
@@ -29023,10 +29186,13 @@ async function loadParserRuns(keep) {
           <div class="row-val" style="color:var(--hint)">${ago(r.started_at)}</div>
           ${r.error?`<div class="row-val" style="color:${r.status==='failed'?'var(--red)':'var(--hint)'};white-space:normal">⚠️ ${esc(r.error)}</div>`:''}
         </div>
-        ${r.status==='done'&&r.total_found>0?`<div class="row-right" style="display:flex;flex-direction:column;gap:4px">
+        <div class="row-right" style="display:flex;flex-direction:column;gap:4px">
+        ${r.status==='done'&&r.total_found>0?`
           <button class="btn btn-p" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="startCampaignFromParse(${r.id})">📨 В рассылку</button>
           <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="startInviteFromParse(${r.id})">➕ В инвайт</button>
-        </div>`:''}
+          <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="showParserRunAudience(${r.id})">👥 Люди</button>`:''}
+          ${r.status!=='running'&&r.status!=='pending'?`<button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="repeatParserRun(${r.id})" title="Запустить ещё раз с тем же источником">🔁 Повторить</button>`:''}
+        </div>
       </div>
     `).join('') + moreBtn(runs.length, prTotal, 'loadParserRunsMore()'));
     // Сумма по ВСЕЙ истории приходит с сервера: посчитать её по показанной
@@ -29156,31 +29322,65 @@ function parserTypeToggle() {
   document.getElementById('parserDaysField').style.display = windowed?'block':'none';
 }
 function closeParserModal() { document.getElementById('parserMbg').classList.remove('show'); }
+// Несколько источников за раз: каждый — свой прогон через ту же ручку.
+function _parserSources(raw) {
+  const out = [];
+  String(raw||'').split(/[\s,;]+/).forEach(x => {
+    const v = x.trim().replace(/^@/,'').replace(/.*t\.me\//,'').replace(/\/+$/,'');
+    if (v && !out.includes(v)) out.push(v);
+  });
+  return out.slice(0, 20);
+}
 async function submitParser() {
-  const src = document.getElementById('parserSrc').value.trim().replace(/^@/,'').replace(/.*t\.me\//,'');
+  const srcs = _parserSources(document.getElementById('parserSrc').value);
   const errEl = document.getElementById('parserErr');
   errEl.textContent='';
-  if (!src) { errEl.textContent='Введите источник'; return; }
+  if (!srcs.length) { errEl.textContent='Введите источник'; return; }
   const btn = document.getElementById('parserBtn');
   btn.disabled=true; btn.textContent='Ставлю в очередь…';
+  const opts = {
+    parse_type: document.getElementById('parserType').value,
+    limit: parseInt(document.getElementById('parserLimit').value)||500,
+    days_back: parseInt(document.getElementById('parserDays').value)||30,
+  };
+  // Запоминаем использованные настройки для следующего запуска.
+  saveFormPrefs('parser', {
+    type: document.getElementById('parserType').value,
+    limit: document.getElementById('parserLimit').value,
+    days: document.getElementById('parserDays').value,
+  });
+  const ok = [], fails = [];
   try {
-    const r = await api('/api/miniapp/parser/submit', {method:'POST', body:JSON.stringify({
-      source_ref: src,
-      parse_type: document.getElementById('parserType').value,
-      limit: parseInt(document.getElementById('parserLimit').value)||500,
-      days_back: parseInt(document.getElementById('parserDays').value)||30,
-    })});
-    // Запоминаем использованные настройки для следующего запуска.
-    saveFormPrefs('parser', {
-      type: document.getElementById('parserType').value,
-      limit: document.getElementById('parserLimit').value,
-      days: document.getElementById('parserDays').value,
-    });
+    for (const src of srcs) {
+      try {
+        const r = await api('/api/miniapp/parser/submit', {method:'POST', body:JSON.stringify(Object.assign({source_ref: src}, opts))});
+        ok.push(r.op_id);
+      } catch(e) {
+        fails.push(src+': '+errRu(e,'Ошибка'));
+        // Отказ по тарифу одинаков для всех — дальше не идём.
+        if (e && (e.status===403 || e.paywall)) break;
+      }
+    }
+    if (!ok.length) { errEl.textContent = fails[0] || 'Ошибка'; return; }
     closeParserModal();
-    toast(`✅ Парсинг поставлен в очередь (#${r.op_id})`);
+    toast(srcs.length===1 ? `✅ Парсинг поставлен в очередь (#${ok[0]})`
+      : `✅ В очереди прогонов: ${ok.length} из ${srcs.length}` + (fails.length?` · ошибка: ${fails[0]}`.substring(0,160):''));
     loadParserRuns();
-  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+  } finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+// Повтор прогона: та же форма с источником и типом прошлого запуска.
+function repeatParserRun(id) {
+  const r = (PARSER_RUNS||[]).find(x => x.id===id); if (!r) return;
+  openParserModal();
+  document.getElementById('parserSrc').value = r.source || '';
+  if (r.parse_type) { document.getElementById('parserType').value = r.parse_type; parserTypeToggle(); }
+}
+// Собранные люди одного прогона: вкладка «Аудитория» с фильтром по источнику.
+function showParserRunAudience(id) {
+  const r = (PARSER_RUNS||[]).find(x => x.id===id); if (!r) return;
+  showParserTab('audience');
+  const inp = document.getElementById('parserSearch'); if (inp) inp.value = r.source || '';
+  loadParsedAudience(r.source || '');
 }
 
 // ── Новая сделка (простая сделка, crm_deals) ────────────────────────────
