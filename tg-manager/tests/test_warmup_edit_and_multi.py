@@ -148,3 +148,25 @@ def test_edit_route(monkeypatch):
     assert seen["uid"] == 42 and seen["plan_id"] == 11 and seen["daily_actions"] == 8
     assert seen["niche"] is None and seen["profile_type"] is None
     assert seen["custom_channels"] == ["@chan_a", "@chan_b"]
+
+
+def test_chat_warmup_takes_several_chats_at_once():
+    """Разогрев чата: несколько чатов одной строкой — по сессии на чат."""
+    import os
+    import re
+    import shutil
+    import subprocess
+
+    import pytest
+
+    html = open(os.path.join(os.path.dirname(__file__), "..", "mini_app", "index.html"),
+                encoding="utf-8").read()
+    m = re.search(r"function _cwChats\(raw\)\{.*?\n\}", html, re.S)
+    assert m, "нет разбора нескольких чатов"
+    body = html[html.index("async function cwStart(){"):html.index("let CW_DETAIL_ID = 0;")]
+    assert "for (const chat of chats)" in body and "/api/miniapp/chatwarmup/session" in body
+    if not shutil.which("node"):
+        pytest.skip("нет node")
+    js = m.group(0) + "\nconsole.log(JSON.stringify(_cwChats('@a, t.me/b\\n-100123 @a')))"
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout
+    assert json.loads(out) == ["@a", "t.me/b", "-100123"]

@@ -3114,7 +3114,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (ИИ понимает контекст). Темп человеческий, сессии защищены.
     </div>
     <div id="cwAiStatus" style="font-size:11px;line-height:1.5;margin-bottom:10px"></div>
-    <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(var(--fg-rgb),.12);background:rgba(var(--fg-rgb),.06);color:var(--text);font-size:13px">
+    <input id="cwChat" type="text" placeholder="Чат: @username, t.me/… или ID — можно несколько через пробел" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(var(--fg-rgb),.12);background:rgba(var(--fg-rgb),.06);color:var(--text);font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Режим работы</div>
     <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
       <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--btn-solid);color:var(--btn-text);cursor:pointer">🔀 Смешанный</button>
@@ -11637,7 +11637,12 @@ function cwPickInt(i){CW_INT=i;
   document.querySelectorAll('#cwInt .cw-int').forEach(b=>{const on=b.dataset.i===i;b.style.background=on?'var(--btn-solid)':'rgba(var(--fg-rgb),.06)';b.style.color=on?'var(--btn-text)':'var(--text)';});}
 let CW_ACCS=new Set(), CW_ACC_ALL=[];
 function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad(); cwAiStatus();
-  const box=document.getElementById('cwNewSettings'); if(box && !box.innerHTML) box.innerHTML=_cwSettingsHtml('cwN', {});}
+  // Последний запуск запоминается: режим, интенсивность, темы и доп. настройки.
+  const pr = loadFormPrefs('chatwarmup');
+  if (pr.mode) cwPickMode(pr.mode);
+  if (pr.intensity) cwPickInt(pr.intensity);
+  const tp=document.getElementById('cwTopics'); if (tp && pr.topics!=null && !tp.value) tp.value=pr.topics;
+  const box=document.getElementById('cwNewSettings'); if(box && !box.innerHTML) box.innerHTML=_cwSettingsHtml('cwN', pr.settings||{});}
 // ── Настройки разогрева (schema_v300) ─────────────────────────────────────
 // Одна разметка на запуск и на правку запущенной сессии: язык, часы работы,
 // длина реплик, доля реакций, лимиты на сутки и автостоп. Раньше у
@@ -11785,23 +11790,39 @@ async function cwLoad(){
     }).join('');
   }catch(e){el.innerHTML=errHtml(errRu(e),'cwLoad()');}
 }
+// Несколько чатов за раз: через пробел, запятую или с новой строки. Каждый
+// чат — своя сессия через ту же ручку, что и одиночный запуск.
+function _cwChats(raw){
+  return [...new Set(String(raw||'').split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean))].slice(0,20);
+}
 async function cwStart(){
-  const chat=document.getElementById('cwChat').value.trim();
-  if(!chat){toast('❗ Укажите чат');return;}
+  const chats=_cwChats(document.getElementById('cwChat').value);
+  if(!chats.length){toast('❗ Укажите чат');return;}
   const topics=document.getElementById('cwTopics').value.trim();
-  try{
-    const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
-      body:JSON.stringify(Object.assign({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT},
-        (document.getElementById('cwNewSettings')||{}).innerHTML ? _cwReadSettings('cwN') : {}))});
-    // Потолок флота на чат (30) раньше срабатывал молча, а потом называл
-    // только число. Теперь видно и причину: «не поместился в потолок» и
-    // «нет строки сессии» — это разные новости и разные действия.
-    const od=(r.omitted_detail||[]).map(d=>`${d.reason} — ${d.count}`).join('; ');
-    toast(`💬 Разогрев запущен: ${r.accounts||0} акк.`
-      + (r.omitted>0?` · не вошли ${r.omitted}${od?`: ${od}`:''}`:''));
-    document.getElementById('cwChat').value='';
-    cwLoad();
-  }catch(e){toast('⚠️ '+errRu(e,'Ошибка'));}
+  const extra=(document.getElementById('cwNewSettings')||{}).innerHTML ? _cwReadSettings('cwN') : {};
+  saveFormPrefs('chatwarmup', {mode:CW_MODE, intensity:CW_INT, topics:topics, settings:extra});
+  if (chats.length>1 && !await askConfirm(`Запустить разогрев в ${chats.length} чатах с одними настройками?`)) return;
+  let ok=0, accs=0; const fails=[], omitted=[];
+  for (const chat of chats) {
+    try{
+      const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
+        body:JSON.stringify(Object.assign({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT}, extra))});
+      ok++; accs+=r.accounts||0;
+      // Потолок флота на чат (30) раньше срабатывал молча, а потом называл
+      // только число. Теперь видно и причину: «не поместился в потолок» и
+      // «нет строки сессии» — это разные новости и разные действия.
+      const od=(r.omitted_detail||[]).map(d=>`${d.reason} — ${d.count}`).join('; ');
+      if (r.omitted>0) omitted.push(`не вошли ${r.omitted}${od?`: ${od}`:''}`);
+    }catch(e){ fails.push(`${chat}: ${errRu(e,'Ошибка')}`); }
+  }
+  if (chats.length===1) {
+    if (ok) toast(`💬 Разогрев запущен: ${accs} акк.` + (omitted.length?` · ${omitted[0]}`:''));
+    else toast('⚠️ '+fails[0].split(': ').slice(1).join(': '));
+  } else {
+    toast(`💬 Запущено в ${ok} из ${chats.length} чатов` + (fails.length?` · ошибка: ${fails[0]}`:'').substring(0,200));
+  }
+  if (ok) document.getElementById('cwChat').value = fails.map(f=>f.split(': ')[0]).join(' ');
+  cwLoad();
 }
 let CW_DETAIL_ID = 0;
 function cwOpenDetail(id){ CW_DETAIL_ID=id; push('s-cwdetail'); cwDetailLoad(); }
