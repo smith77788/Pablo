@@ -1713,7 +1713,8 @@ def generate_device_fingerprint(
 
 
 def _shared_handle(session_string: str, device: dict | None, *, low_risk: bool,
-                   action_type: str, retry_auth_dup: bool, _no_pool: bool = False):
+                   action_type: str, retry_auth_dup: bool, _no_pool: bool = False,
+                   eager: bool = True):
     """Держатель ОБЩЕГО подключения аккаунта (FLEET_SHARED_SESSIONS=1).
 
     None — делить нечего (нет сессии), вызывающий идёт старым путём. Первое
@@ -1743,6 +1744,13 @@ def _shared_handle(session_string: str, device: dict | None, *, low_risk: bool,
     # прокси-изоляция, битая сессия) обязаны подниматься там же, где и раньше,
     # — у вызывающего на `_make_client`, а не позже на connect(). Он же служит
     # «отдельным» клиентом, если к держателю обратятся до connect().
+    # connect_client держатель подключает сразу же (eager=False): ошибки сборки
+    # поднимутся из того же connect, а лишний клиент не строится.
+    if not eager:
+        def _detached():
+            return _make_client(session_string, device, low_risk=low_risk,
+                                _no_pool=_no_pool, _no_share=True)
+        return _shared.SharedClient(key, acc_id, _connect, _detached)
     _built = _make_client(session_string, device, low_risk=low_risk,
                           _no_pool=_no_pool, _no_share=True)
 
@@ -2074,7 +2082,8 @@ async def connect_client(session_string: str = "", device: dict | None = None,
     # на мьютексе сессии. Первое подключение строит этот же путь (_no_share).
     if not _no_share:
         _h = _shared_handle(session_string, device, low_risk=low_risk,
-                            action_type=action_type, retry_auth_dup=retry_auth_dup)
+                            action_type=action_type, retry_auth_dup=retry_auth_dup,
+                            eager=False)
         if _h is not None:
             await _h.connect()
             if retry_auth_dup:

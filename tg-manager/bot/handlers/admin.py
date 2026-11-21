@@ -279,8 +279,9 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="🔐 Аудит TG-операций", callback_data="adm:audit_log")
         kb.button(text="📊 Системная статистика", callback_data="adm:stats")
         kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
+        kb.button(text="🔀 Параллельные операции", callback_data="adm:fleet_par")
         kb.button(text="🏠 Админка", callback_data="adm:main")
-        kb.adjust(1, 2, 2, 1)
+        kb.adjust(1, 2, 2, 1, 1)
     elif section == "ai":
         kb.button(text="🧠 Статус AI", callback_data="adm:ai_status")
         kb.button(text="🔑 Переменные AI", callback_data="adm:env_list")
@@ -428,24 +429,64 @@ async def cmd_admin_log(message: Message, pool: asyncpg.Pool) -> None:
     await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=terminal_kb())
 
 
+async def _fleet_parallel_apply(pool: asyncpg.Pool, uid: int, raw: "str | None") -> str:
+    """Применить режим (raw: off | all | owners:…; None — только показать) и
+    вернуть текст экрана. Одна дверь для команды и кнопок админ-панели."""
+    from services import shared_sessions as _ss
+    note = ""
+    if raw is not None:
+        try:
+            mode, owners = await _ss.save_mode(pool, raw)
+            try:
+                await db.log_admin_action(
+                    pool, uid, f"fleet_parallel {_ss.format_mode(mode, owners)}",
+                    source="bot")
+            except Exception:
+                log_exc_swallow(log, "fleet_parallel: журнал не записан", user_id=uid)
+            note = "\n\n✔️ Сохранено. Исполнитель подхватит изменение за полминуты."
+        except Exception:
+            log_exc_swallow(log, "fleet_parallel: режим не записан", user_id=uid)
+            note = "\n\n❌ Не удалось сохранить — база недоступна. Режим не изменился."
+    else:
+        await _ss.refresh_from_db(pool, force_read=True)
+    mode, owners = _ss.current_mode()
+    st = _ss.stats()
+    if mode == "all":
+        head = "✅ <b>Включено для всех.</b> На одном аккаунте одновременно идут до трёх операций."
+    elif mode == "owners":
+        head = ("🧪 <b>Включено только для:</b> "
+                + ", ".join(f"<code>{o}</code>" for o in sorted(owners))
+                + ". У остальных операции на аккаунте идут по очереди.")
+    else:
+        head = "⏸ <b>Выключено.</b> Операции на одном аккаунте идут по очереди, как раньше."
+    return (
+        "🔀 <b>Параллельные операции на одном аккаунте</b>\n\n"
+        f"{head}\n\n"
+        "Как работает: у аккаунта одно общее подключение к Telegram, и через него "
+        "одновременно идут несколько операций (например, инвайт и рассылка), как у "
+        "живого человека. Пока аккаунт делят, между его действиями держится пауза, "
+        "чтобы не ловить ограничения.\n\n"
+        f"Сейчас в этом процессе: подключений {st['connections']}, "
+        f"делят аккаунт {st['shared']}."
+        f"{note}"
+    )
+
+
 @router.message(Command("fleet_parallel"))
 async def cmd_fleet_parallel(message: Message, pool: asyncpg.Pool) -> None:
-    """Несколько операций одновременно на одном аккаунте флота (админ).
+    """То же, что кнопка «🔀 Параллельные операции» в разделе «Операции» админки.
 
-    /fleet_parallel            — показать режим и живые общие подключения
-    /fleet_parallel me         — включить только для себя (канарейка)
+    /fleet_parallel            — показать режим
+    /fleet_parallel me         — включить только для себя
     /fleet_parallel 111 222    — включить для этих владельцев
-    /fleet_parallel all        — включить для всех
-    /fleet_parallel off        — выключить (мгновенный откат)
-
-    Режим живёт в базе (services/shared_sessions), процессы подхватывают его
-    за полминуты без деплоя.
+    /fleet_parallel all        — включить для всех (по умолчанию)
+    /fleet_parallel off        — выключить
     """
     uid = message.from_user.id
     if not _is_admin(uid):
         return  # молчим — не раскрываем команду
-    from services import shared_sessions as _ss
     parts = (message.text or "").split()[1:]
+    raw = None
     if parts:
         arg = parts[0].lower()
         if arg == "me":
@@ -456,50 +497,12 @@ async def cmd_fleet_parallel(message: Message, pool: asyncpg.Pool) -> None:
             raw = "owners:" + ",".join(parts)
         else:
             await message.answer(
-                "Не понял. Варианты: <code>/fleet_parallel me</code>, "
-                "<code>/fleet_parallel all</code>, <code>/fleet_parallel off</code> "
-                "или id владельцев через пробел.",
-                parse_mode="HTML", reply_markup=terminal_kb())
+                "Не понял. Проще всего — кнопкой: /admin → «⚙️ Операции» → "
+                "«🔀 Параллельные операции».",
+                reply_markup=terminal_kb())
             return
-        try:
-            mode, owners = await _ss.save_mode(pool, raw)
-        except Exception:
-            log_exc_swallow(log, "fleet_parallel: режим не записан", user_id=uid)
-            await message.answer("❌ Не удалось сохранить режим — база недоступна.",
-                                 reply_markup=terminal_kb())
-            return
-        try:
-            await db.log_admin_action(pool, uid, f"fleet_parallel {_ss.format_mode(mode, owners)}",
-                                      source="bot")
-        except Exception:
-            log_exc_swallow(log, "fleet_parallel: журнал не записан", user_id=uid)
-    else:
-        await _ss.refresh_from_db(pool, force_read=True)
-    mode, owners = _ss.current_mode()
-    st = _ss.stats()
-    if mode == "all":
-        head = "✅ Включено для всех владельцев."
-    elif mode == "owners":
-        head = ("✅ Включено для владельцев: "
-                + ", ".join(f"<code>{o}</code>" for o in sorted(owners)) + ".")
-    else:
-        head = ("⏸ Выключено: операции на одном аккаунте идут по очереди, как раньше. "
-                "Включить снова: <code>/fleet_parallel all</code>.")
-    lines = [
-        "🔀 <b>Параллельные операции на одном аккаунте</b>",
-        "",
-        head,
-        "",
-        "Как работает: у аккаунта одно общее подключение, через него одновременно "
-        "идут до трёх операций; пока аккаунт делят, между его запросами держится пауза.",
-        "Изменение доходит до исполнителя за полминуты.",
-        "",
-        f"Сейчас в этом процессе: подключений {st['connections']}, "
-        f"держателей {st['holders']}, делят аккаунт {st['shared']}.",
-        "",
-        "<code>/fleet_parallel me</code> · <code>all</code> · <code>off</code>",
-    ]
-    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=terminal_kb())
+    text = await _fleet_parallel_apply(pool, uid, raw)
+    await message.answer(text, parse_mode="HTML", reply_markup=terminal_kb())
 
 
 @router.message(Command("backup"))
@@ -797,6 +800,25 @@ async def cb_admin(
 
     elif action == "section_users":
         await _adm_section_users(callback, pool)
+
+    elif action in ("fleet_par", "fleet_par_all", "fleet_par_me", "fleet_par_off"):
+        raw = {"fleet_par_all": "all", "fleet_par_off": "off",
+               "fleet_par_me": f"owners:{callback.from_user.id}"}.get(action)
+        text = await _fleet_parallel_apply(pool, callback.from_user.id, raw)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="✅ Включить для всех", callback_data="adm:fleet_par_all")
+        kb.button(text="🧪 Только для меня", callback_data="adm:fleet_par_me")
+        kb.button(text="⏸ Выключить", callback_data="adm:fleet_par_off")
+        kb.button(text="🔄 Обновить", callback_data="adm:fleet_par")
+        kb.button(text="⬅️ Операции", callback_data="adm:section_ops")
+        kb.adjust(1, 2, 2)
+        try:
+            await callback.message.edit_text(text, parse_mode="HTML",
+                                             reply_markup=kb.as_markup())
+        except Exception as e:
+            if "message is not modified" not in str(e):
+                await callback.message.answer(text, parse_mode="HTML",
+                                              reply_markup=kb.as_markup())
 
     elif action == "section_billing":
         await _adm_section_billing(callback, pool)

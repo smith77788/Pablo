@@ -400,3 +400,33 @@ def test_env_still_enables_for_all(monkeypatch):
     ss.set_mode("off")
     monkeypatch.setenv("FLEET_SHARED_SESSIONS", "1")
     assert ss.enabled(999) is True
+
+
+# ── кнопка в админ-панели ───────────────────────────────────────────────────
+
+def test_ops_section_has_parallel_button():
+    from bot.handlers import admin
+    kb = admin._admin_section_kb("ops")
+    datas = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert "adm:fleet_par" in datas, "владелец управляет режимом кнопкой, а не командой"
+
+
+@pytest.mark.asyncio
+async def test_parallel_buttons_switch_mode(monkeypatch):
+    from bot.handlers import admin
+    ss.force(None)
+    monkeypatch.delenv("FLEET_SHARED_SESSIONS", raising=False)
+
+    async def _log(*a, **k):
+        return 1
+    monkeypatch.setattr(admin.db, "log_admin_action", _log)
+    pool = _SettingsPool()
+    try:
+        t = await admin._fleet_parallel_apply(pool, 77, "off")
+        assert pool.value == "off" and "Выключено" in t
+        t = await admin._fleet_parallel_apply(pool, 77, "owners:77")
+        assert pool.value == "owners:77" and ss.enabled(77) and not ss.enabled(78)
+        t = await admin._fleet_parallel_apply(pool, 77, "all")
+        assert pool.value == "all" and "Включено для всех" in t
+    finally:
+        ss.set_mode("off")
