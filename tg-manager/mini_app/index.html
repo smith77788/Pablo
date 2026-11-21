@@ -6633,7 +6633,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div id="giftsStats" class="kpi-row" style="padding:8px 16px 10px"></div>
+    <div id="giftsFilter" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:0 16px 8px"></div>
     <div class="lst" id="giftsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="giftsMore" style="padding:0 16px"></div>
     <div id="giftsBar" style="padding:10px 16px 16px"></div>
   </div>
 </div>
@@ -24979,23 +24981,69 @@ function ntRender() {
 // операции gift_transfer в шине) существовала целиком, но жила только в боте.
 let GIFT_ROWS = [];
 let GIFT_SEL = new Set();
+// Срез списка подарков: только передаваемые и/или один аккаунт. Считает сервер.
+let GIFT_ONLY = '', GIFT_ACC = 0, GIFT_SHOWN = 0, GIFT_ACCS = [];
+function _giftsQuery(offset) {
+  return '/api/miniapp/gifts?limit=100&offset=' + offset
+    + (GIFT_ONLY ? '&only=' + GIFT_ONLY : '') + (GIFT_ACC ? '&account_id=' + GIFT_ACC : '');
+}
+function giftsFilterRender() {
+  const box = document.getElementById('giftsFilter'); if (!box) return;
+  if (!GIFT_ACCS.length) { box.innerHTML = ''; return; }
+  const chip = (on, lbl, fn) => `<span class="lf-chip${on?' on':''}" role="button" tabindex="0" aria-pressed="${on}" onclick="${fn}">${lbl}</span>`;
+  box.innerHTML = chip(!GIFT_ONLY, 'Все', "giftsSetFilter('',null)")
+    + chip(GIFT_ONLY==='transferable', '📤 Можно передать', "giftsSetFilter('transferable',null)")
+    + (GIFT_ACCS.length > 1
+      ? `<select class="sel" style="width:auto;max-width:60%" aria-label="Аккаунт" onchange="giftsSetFilter(null, Number(this.value))">`
+        + `<option value="0">Все аккаунты</option>`
+        + GIFT_ACCS.map(a => `<option value="${Number(a.account_id)}"${Number(a.account_id)===GIFT_ACC?' selected':''}>${esc(a.name||('#'+a.account_id))} · ${num(a.n)}</option>`).join('')
+        + `</select>` : '');
+}
+async function giftsSetFilter(only, acc) {
+  if (only !== null) GIFT_ONLY = only;
+  if (acc !== null) GIFT_ACC = acc || 0;
+  GIFT_SEL = new Set();
+  txt('giftsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(_giftsQuery(0));
+    GIFT_ROWS = listOf(d,'items');
+    GIFT_SHOWN = d.shown_total != null ? d.shown_total : GIFT_ROWS.length;
+    giftsFilterRender();
+    if (!GIFT_ROWS.length) { txt('giftsList', empty('🔍','По этому срезу пусто','Смените срез', {label:'Показать все', fn:"giftsSetFilter('',0)"})); txt('giftsBar',''); txt('giftsMore',''); return; }
+    giftsRender();
+  } catch(e) { txt('giftsList', errHtml(errRu(e), 'openGifts()')); }
+}
+async function giftsLoadMore() {
+  try {
+    const d = await api(_giftsQuery(GIFT_ROWS.length));
+    const known = new Set(GIFT_ROWS.map(g => g.id));
+    listOf(d,'items').forEach(g => { if (!known.has(g.id)) GIFT_ROWS.push(g); });
+    if (d.shown_total != null) GIFT_SHOWN = d.shown_total;
+    giftsRender();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось догрузить')); }
+}
 let GIFT_PAY = 'auto';
 let GIFT_RECIPS = [];
 
 async function openGifts() {
   push('s-gifts');
   GIFT_SEL = new Set();
+  GIFT_ONLY = ''; GIFT_ACC = 0;
   txt('giftsStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('giftsList','');
   txt('giftsBar','');
+  txt('giftsMore','');
   try {
-    const d = await api('/api/miniapp/gifts');
+    const d = await api(_giftsQuery(0));
     txt('giftsStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего подарков</div></div>
       <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.transferable,'green')}">${d.transferable||0}</div><div class="kpi-lbl">Передаваемых</div></div>
     `);
     txt('m-gifts-val',`${d.total||0} подарков · ${d.transferable||0} передаваемых`);
     GIFT_ROWS = listOf(d,'items');
+    GIFT_SHOWN = d.shown_total != null ? d.shown_total : GIFT_ROWS.length;
+    GIFT_ACCS = Array.isArray(d.accounts) ? d.accounts : [];
+    giftsFilterRender();
     if (!GIFT_ROWS.length) {
       txt('giftsList', empty('🎁','Нет подарков',
         d.note || 'Нажмите «📡 Скан», чтобы собрать подарки со всех аккаунтов',
@@ -25023,6 +25071,7 @@ function giftsRender() {
         <div class="row-val" style="white-space:normal">${who} · ${cost} · ${can?'можно передать':'передать нельзя'}</div>
       </div></div>`;
   }).join(''));
+  txt('giftsMore', moreBtn(GIFT_ROWS.length, GIFT_SHOWN, 'giftsLoadMore()'));
   giftsBar();
 }
 
