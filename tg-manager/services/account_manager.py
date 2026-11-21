@@ -4826,7 +4826,7 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
                         "a.trusted_session_hashes, a.username, "
                         "(a.twofa_enc IS NOT NULL) AS twofa_saved, a.reserve_auth_hash, "
                         "(a.reserve_session_enc IS NOT NULL) AS has_reserve, "
-                        # Сигналы атаки (services/account_alarm, v378).
+                        # Сигналы атаки (services/account_alarm, v379).
                         "a.twofa_on, a.twofa_enc, a.service_seen_msg_id, "
                         "a.login_code_read_at, a.twofa_mismatch_at, a.recovery_email_fp"),
         )

@@ -341,7 +341,7 @@ def test_guard_switches_reach_the_screen_and_the_bot():
     assert _cfg().guard_sessions is False, (
         "закрытие сеансов может закрыть телефон владельца — включает его владелец, а не мы")
     # Пароль 2FA и отмена чужого сброса пароля — по умолчанию у всех: решение
-    # владельца продукта 21.11.2026 (schema_v378, services/account_alarm).
+    # владельца продукта 21.11.2026 (schema_v379, services/account_alarm).
     assert _cfg().guard_twofa is True and _cfg().guard_reset is True
 
 

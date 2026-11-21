@@ -1,4 +1,4 @@
-"""Сигналы атаки на аккаунт флота (services/account_alarm, schema_v378).
+"""Сигналы атаки на аккаунт флота (services/account_alarm, schema_v379).
 
 Просьба владельца 21.11.2026: защитить флот от взлома, фишинга и сторонних
 сессий. Дозор сеансов видел угон, когда вход уже случился; до этого флот не
@@ -300,6 +300,6 @@ def test_owner_read_code_is_noted_and_buttons_reach_the_screen():
 
 
 def test_migration_turns_password_guard_on_for_everyone():
-    sql = _src("schema_v378_account_alarm.sql")
+    sql = _src("schema_v379_account_alarm.sql")
     assert "guard_reset BOOLEAN NOT NULL DEFAULT TRUE" in sql
     assert "UPDATE shield_configs SET guard_twofa = TRUE" in sql
