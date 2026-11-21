@@ -5556,18 +5556,60 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">🧹 Очистка аккаунтов</div>
   </div>
   <div class="sub-sb">
-    <div class="card" style="font-size:13px;color:var(--red);margin-bottom:8px">
-      ⚠️ Действия необратимы! Аккаунт покинет все чаты или потеряет контакты.
+    <div class="sec">1. Что сделать</div>
+    <div class="chip-row" id="cleanerOps" style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px">
+      <span class="chip on" data-op="leave_all_chats" onclick="selectCleanerOp('leave_all_chats')">🚪 Выйти из чатов</span>
+      <span class="chip" data-op="delete_private_dialogs" onclick="selectCleanerOp('delete_private_dialogs')">💬 Удалить личные диалоги</span>
+      <span class="chip" data-op="delete_contacts" onclick="selectCleanerOp('delete_contacts')">👥 Удалить контакты</span>
+      <span class="chip" data-op="read_all_dialogs" onclick="selectCleanerOp('read_all_dialogs')">📖 Прочитать всё</span>
     </div>
-    <div class="sec">Выберите аккаунт и операцию</div>
+    <div class="card" id="cleanerOpHint" style="font-size:12px;color:var(--hint);margin-bottom:8px"></div>
+
+    <div class="sec">2. Настройки</div>
+    <div class="card" style="margin-bottom:8px">
+      <div id="cleanerOptLeave">
+        <div class="field"><label>Откуда выходить</label>
+          <div class="chip-row" id="cleanerKinds" style="display:flex;gap:6px;flex-wrap:wrap">
+            <span class="chip on" data-k="all" onclick="cleanerSetKinds('all')">Все чаты</span>
+            <span class="chip" data-k="channels" onclick="cleanerSetKinds('channels')">📢 Только каналы</span>
+            <span class="chip" data-k="groups" onclick="cleanerSetKinds('groups')">👥 Только группы</span>
+          </div>
+        </div>
+        <label class="chk-row" style="display:block;font-size:13px;margin:8px 0;cursor:pointer"><input type="checkbox" id="cleanerKeepOwn" checked onchange="cleanerSavePrefs()" style="vertical-align:middle"> 🛡 Не трогать свои: каналы из каталога и чаты, где аккаунт создатель или админ</label>
+        <div class="field"><label>Белый список — не выходить (через запятую или с новой строки)</label>
+          <textarea id="cleanerWhite" rows="2" placeholder="@my_channel, t.me/partner_chat, -1001234567890" oninput="cleanerSavePrefs()"></textarea>
+        </div>
+      </div>
+      <div id="cleanerOptAge" class="field"><label>Только где не было сообщений дольше, дней (0 — все)</label>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input id="cleanerDays" type="number" min="0" max="3650" value="0" style="width:90px" oninput="cleanerSavePrefs()">
+          <span class="chip" onclick="cleanerSetDays(0)">все</span>
+          <span class="chip" onclick="cleanerSetDays(30)">30</span>
+          <span class="chip" onclick="cleanerSetDays(90)">90</span>
+          <span class="chip" onclick="cleanerSetDays(180)">180</span>
+        </div>
+      </div>
+      <label id="cleanerOptBots" class="chk-row" style="display:block;font-size:13px;margin:8px 0;cursor:pointer"><input type="checkbox" id="cleanerKeepBots" onchange="cleanerSavePrefs()" style="vertical-align:middle"> 🤖 Не трогать диалоги с ботами</label>
+      <div id="cleanerOptContacts" class="field"><label>Какие контакты</label>
+        <div class="chip-row" id="cleanerCMode" style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="chip on" data-m="all" onclick="cleanerSetCMode('all')">Все</span>
+          <span class="chip" data-m="non_mutual" onclick="cleanerSetCMode('non_mutual')">Только невзаимные</span>
+        </div>
+      </div>
+      <label id="cleanerOptDry" class="chk-row" style="display:block;font-size:13px;margin:8px 0 0;cursor:pointer"><input type="checkbox" id="cleanerDry" onchange="cleanerSavePrefs();cleanerUpdateBtn()" style="vertical-align:middle"> 🧪 Пробный прогон: только посчитать и показать, ничего не удалять</label>
+    </div>
+
+    <div class="sec" style="display:flex;justify-content:space-between;align-items:center">
+      <span>3. Аккаунты <span id="cleanerSelCnt" style="opacity:.6"></span></span>
+      <span style="display:flex;gap:6px">
+        <span class="chip" onclick="cleanerSelectAll(true)">✅ Все</span>
+        <span class="chip" onclick="cleanerSelectAll(false)">⬜ Снять</span>
+      </span>
+    </div>
+    <input id="cleanerSearch" placeholder="🔍 Имя, @ник или телефон" oninput="renderCleanerAccounts()" style="margin-bottom:6px">
     <div class="lst" id="cleanerAccList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:12px">Операция</div>
-    <div style="display:flex;gap:8px;padding:4px 0 10px">
-      <button class="btn btn-p" onclick="selectCleanerOp('leave_all_chats')" id="cleanerOpLeave">🚪 Выйти из чатов</button>
-      <button class="btn btn-s" onclick="selectCleanerOp('delete_contacts')" id="cleanerOpContacts">👥 Удалить контакты</button>
-    </div>
-    <div id="cleanerErr" style="color:var(--red);font-size:13px;margin:4px 0"></div>
-    <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
+    <div id="cleanerErr" style="color:var(--red);font-size:13px;margin:6px 0"></div>
+    <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%;margin-top:6px" disabled>Выберите аккаунты</button>
   </div>
 </div>
 
@@ -29481,58 +29523,148 @@ async function savePromoBot() {
 }
 
 // ── Account Cleaner ────────────────────────────────────
-let CLEANER_ACC_ID = null;
+// Несколько аккаунтов за раз, отбор чатов (свои, белый список, давность),
+// пробный прогон и запоминание настроек. Отбор делает сервер
+// (account_cleaner.pick_*), экран только собирает настройки.
+let CLEANER_ACCS = [];
+let CLEANER_SEL = new Set();
 let CLEANER_OP = 'leave_all_chats';
-async function openCleaner() {
-  CLEANER_ACC_ID = null;
-  CLEANER_OP = 'leave_all_chats';
+let CLEANER_KINDS = 'all';
+let CLEANER_CMODE = 'all';
+const CLEANER_OP_INFO = {
+  leave_all_chats: {title:'выйти из чатов', irreversible:true,
+    hint:'Аккаунт покинет группы и каналы по вашему отбору. Свои каналы и чаты, где он админ, по умолчанию остаются.'},
+  delete_private_dialogs: {title:'удалить личные диалоги', irreversible:true,
+    hint:'Удаляет переписку в личке у себя. «Избранное» и служебный чат Telegram с кодами входа не удаляются никогда.'},
+  delete_contacts: {title:'удалить контакты', irreversible:true,
+    hint:'Удаляет контакты из телефонной книги аккаунта. «Только невзаимные» оставит тех, у кого аккаунт тоже записан.'},
+  read_all_dialogs: {title:'прочитать все диалоги', irreversible:false,
+    hint:'Помечает непрочитанное прочитанным — естественное поведение живого аккаунта. Ничего не удаляет.'},
+};
+async function openCleaner(preselectIds) {
+  CLEANER_SEL = new Set((preselectIds||[]).map(Number));
   push('s-cleaner');
-  selectCleanerOp('leave_all_chats');
+  cleanerLoadPrefs();
+  selectCleanerOp(CLEANER_OP);
   loadCleanerAccounts();
+}
+function cleanerLoadPrefs() {
+  const p = loadFormPrefs('cleaner');
+  if (p.op && CLEANER_OP_INFO[p.op]) CLEANER_OP = p.op;
+  CLEANER_KINDS = p.kinds || 'all';
+  CLEANER_CMODE = p.cmode || 'all';
+  applyFormPrefs('cleaner', {keep_own:'cleanerKeepOwn', white:'cleanerWhite', days:'cleanerDays', keep_bots:'cleanerKeepBots', dry:'cleanerDry'});
+  cleanerSetKinds(CLEANER_KINDS, true);
+  cleanerSetCMode(CLEANER_CMODE, true);
+}
+function cleanerSavePrefs() {
+  const v = id => document.getElementById(id);
+  saveFormPrefs('cleaner', {op:CLEANER_OP, kinds:CLEANER_KINDS, cmode:CLEANER_CMODE,
+    keep_own:v('cleanerKeepOwn').checked, white:v('cleanerWhite').value,
+    days:v('cleanerDays').value, keep_bots:v('cleanerKeepBots').checked, dry:v('cleanerDry').checked});
+}
+function _cleanerChips(rowId, attr, val) {
+  document.querySelectorAll('#'+rowId+' .chip').forEach(c=>c.classList.toggle('on', c.dataset[attr]===val));
+}
+function cleanerSetKinds(k, silent) { CLEANER_KINDS = k; _cleanerChips('cleanerKinds','k',k); if(!silent) cleanerSavePrefs(); }
+function cleanerSetCMode(m, silent) { CLEANER_CMODE = m; _cleanerChips('cleanerCMode','m',m); if(!silent) cleanerSavePrefs(); }
+function cleanerSetDays(n) { document.getElementById('cleanerDays').value = n; cleanerSavePrefs(); }
+function selectCleanerOp(op) {
+  if (!CLEANER_OP_INFO[op]) op = 'leave_all_chats';
+  CLEANER_OP = op;
+  _cleanerChips('cleanerOps','op',op);
+  const show = (id, on) => { const el=document.getElementById(id); if (el) el.style.display = on?'':'none'; };
+  show('cleanerOptLeave', op==='leave_all_chats');
+  show('cleanerOptAge', op==='leave_all_chats' || op==='delete_private_dialogs');
+  show('cleanerOptBots', op==='delete_private_dialogs');
+  show('cleanerOptContacts', op==='delete_contacts');
+  show('cleanerOptDry', op!=='read_all_dialogs');
+  txt('cleanerOpHint', esc(CLEANER_OP_INFO[op].hint));
+  cleanerSavePrefs();
+  cleanerUpdateBtn();
 }
 async function loadCleanerAccounts() {
   txt('cleanerAccList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/cleaner/accounts');
-    const accs = d.accounts||[];
-    if (!accs.length) { txt('cleanerAccList', empty('📵','Нет аккаунтов с сессией','')); return; }
-    txt('cleanerAccList', accs.map(a=>{
-      const warn = a.asset_count>0 ? `<div class="row-val" style="color:var(--red)">⚠️ ${a.asset_count} управл. каналов</div>` : '';
-      return `<div class="row tap" onclick="selectCleanerAcc(${a.id},'${escJs(a.name)}')" id="cleanerAcc-${a.id}">
-        <div class="row-ico" style="background:var(--bg-blue-16)">📱</div>
-        <div class="row-body"><div class="row-name">${esc(a.name)}</div>${a.phone?`<div class="row-val">${esc(a.phone)}</div>`:''}${warn}</div>
-        <div class="row-right chev">›</div>
-      </div>`;
-    }).join(''));
+    CLEANER_ACCS = d.accounts||[];
+    const ids = new Set(CLEANER_ACCS.map(a=>a.id));
+    CLEANER_SEL = new Set([...CLEANER_SEL].filter(i=>ids.has(i)));
+    renderCleanerAccounts();
   } catch(e) { txt('cleanerAccList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadCleanerAccounts')})); }
 }
-function selectCleanerAcc(accId, name) {
-  CLEANER_ACC_ID = accId;
-  document.querySelectorAll('[id^="cleanerAcc-"]').forEach(el=>el.classList.remove('on'));
-  const el = document.getElementById('cleanerAcc-'+accId);
-  if (el) el.classList.add('on');
-  const btn = document.getElementById('cleanerBtn');
-  btn.disabled = false;
-  btn.textContent = '🚀 Запустить очистку';
-  document.getElementById('cleanerErr').textContent='';
+function _cleanerVisible() {
+  const q = (document.getElementById('cleanerSearch').value||'').trim().toLowerCase().replace(/^@/,'');
+  if (!q) return CLEANER_ACCS;
+  return CLEANER_ACCS.filter(a => [a.name,a.username,a.phone].some(x => String(x||'').toLowerCase().includes(q)));
 }
-function selectCleanerOp(op) {
-  CLEANER_OP = op;
-  document.getElementById('cleanerOpLeave').className = op==='leave_all_chats'?'btn btn-p':'btn btn-s';
-  document.getElementById('cleanerOpContacts').className = op==='delete_contacts'?'btn btn-p':'btn btn-s';
+function renderCleanerAccounts() {
+  if (!CLEANER_ACCS.length) { txt('cleanerAccList', empty('📵','Нет аккаунтов с сессией','Добавьте аккаунт в разделе «Аккаунты»')); cleanerUpdateBtn(); return; }
+  const list = _cleanerVisible();
+  if (!list.length) { txt('cleanerAccList', empty('🔍','Никого не нашлось','Измените запрос')); cleanerUpdateBtn(); return; }
+  txt('cleanerAccList', list.map(a=>{
+    const on = CLEANER_SEL.has(a.id);
+    const sub = [a.username?'@'+a.username:'', a.phone].filter(Boolean).join(' · ');
+    const own = a.asset_count>0 ? `<div class="row-val" style="color:var(--orange)">🛡 ведёт каналов: ${a.asset_count}</div>` : '';
+    return `<div class="row tap${on?' on':''}" onclick="toggleCleanerAcc(${a.id})" id="cleanerAcc-${a.id}">
+      <div class="row-ico" style="background:var(--bg-blue-16)">${on?'✅':'📱'}</div>
+      <div class="row-body"><div class="row-name">${esc(a.name)}</div>${sub?`<div class="row-val">${esc(sub)}</div>`:''}${own}</div>
+    </div>`;
+  }).join(''));
+  cleanerUpdateBtn();
+}
+function toggleCleanerAcc(id) {
+  if (CLEANER_SEL.has(id)) CLEANER_SEL.delete(id); else CLEANER_SEL.add(id);
+  renderCleanerAccounts();
+}
+function cleanerSelectAll(on) {
+  const vis = _cleanerVisible();
+  vis.forEach(a => { if (on) CLEANER_SEL.add(a.id); else CLEANER_SEL.delete(a.id); });
+  renderCleanerAccounts();
+}
+function cleanerUpdateBtn() {
+  const btn = document.getElementById('cleanerBtn'); if (!btn) return;
+  const n = CLEANER_SEL.size;
+  txt('cleanerSelCnt', n ? '· выбрано '+n : '');
+  const dry = CLEANER_OP!=='read_all_dialogs' && document.getElementById('cleanerDry').checked;
+  btn.disabled = !n;
+  btn.className = 'btn ' + (dry || CLEANER_OP==='read_all_dialogs' ? 'btn-p' : 'btn-d');
+  btn.textContent = !n ? 'Выберите аккаунты' : (dry ? '🧪 Посчитать' : '🚀 Запустить') + ' · ' + n + ' акк.';
+}
+function cleanerBody() {
+  const v = id => document.getElementById(id);
+  return {op: CLEANER_OP, account_ids: [...CLEANER_SEL],
+    kinds: CLEANER_KINDS, keep_own: v('cleanerKeepOwn').checked, whitelist: v('cleanerWhite').value,
+    inactive_days: parseInt(v('cleanerDays').value||'0',10)||0, keep_bots: v('cleanerKeepBots').checked,
+    contacts_mode: CLEANER_CMODE, dry_run: CLEANER_OP!=='read_all_dialogs' && v('cleanerDry').checked};
 }
 async function submitCleaner() {
-  if (!CLEANER_ACC_ID) { document.getElementById('cleanerErr').textContent='Выберите аккаунт'; return; }
-  const opLabels = {leave_all_chats:'выйти из всех чатов', delete_contacts:'удалить все контакты'};
-  if (!await askConfirm(`${opLabels[CLEANER_OP]} — аккаунт #${CLEANER_ACC_ID}.\n\nДействие необратимо: вернуть удалённое нельзя.`)) return;
+  const errEl = document.getElementById('cleanerErr');
+  if (!CLEANER_SEL.size) { errEl.textContent='Выберите аккаунты'; return; }
+  const body = cleanerBody();
+  const info = CLEANER_OP_INFO[CLEANER_OP];
+  const n = CLEANER_SEL.size;
+  if (!body.dry_run && info.irreversible) {
+    const parts = [`${info.title[0].toUpperCase()+info.title.slice(1)} — аккаунтов: ${n}.`];
+    if (CLEANER_OP==='leave_all_chats') {
+      parts.push(body.kinds==='channels'?'Только каналы.':body.kinds==='groups'?'Только группы.':'Все группы и каналы.');
+      parts.push(body.keep_own?'Свои каналы и чаты, где аккаунт админ, останутся.':'⚠️ Свои каналы тоже будут покинуты.');
+    }
+    if (body.inactive_days && CLEANER_OP!=='delete_contacts') parts.push(`Только где тихо дольше ${body.inactive_days} дн.`);
+    if (CLEANER_OP==='delete_contacts') parts.push(body.contacts_mode==='non_mutual'?'Только невзаимные контакты.':'Все контакты.');
+    parts.push('', 'Действие необратимо. Не уверены — сначала включите «Пробный прогон».');
+    if (!await askConfirm(parts.join('\n'))) return;
+  }
   const btn = document.getElementById('cleanerBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
-  document.getElementById('cleanerErr').textContent='';
+  errEl.textContent='';
   try {
-    const r = await api('/api/miniapp/cleaner/submit', {method:'POST', body:JSON.stringify({op:CLEANER_OP, account_id:CLEANER_ACC_ID})});
-    toast(`✅ ${r.label} — поставлено в очередь (#${r.op_id})`);
+    const r = await api('/api/miniapp/cleaner/submit', {method:'POST', body:JSON.stringify(body)});
+    const extra = r.skipped ? ` (пропущено: ${r.skipped})` : '';
+    toast(`✅ ${r.label} — в очереди: ${r.count}${extra}. Итог — в «Операциях».`);
+    if (body.dry_run) { cleanerUpdateBtn(); return; }
     back();
-  } catch(e) { document.getElementById('cleanerErr').textContent=errRu(e,'Ошибка'); btn.disabled=false; btn.textContent='🚀 Запустить очистку'; }
+  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); cleanerUpdateBtn(); }
 }
 
 // ── Error Report ───────────────────────────────────────

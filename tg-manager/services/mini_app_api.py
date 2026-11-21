@@ -3317,8 +3317,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
-                """SELECT id, phone, first_name,
-                          (SELECT COUNT(*) FROM managed_channels WHERE acc_id=tg_accounts.id) AS asset_count
+                """SELECT id, phone, first_name, username,
+                          (SELECT COUNT(*) FROM managed_channels
+                            WHERE acc_id=tg_accounts.id AND owner_id=$1) AS asset_count
                    FROM tg_accounts
                    WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL AND session_str <> ''
                    ORDER BY added_at""",
@@ -3331,50 +3332,122 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             {
                 "id": r["id"],
                 "phone": r["phone"] or "",
+                "username": r["username"] or "",
                 "name": r["first_name"] or r["phone"] or str(r["id"]),
                 "asset_count": int(r["asset_count"] or 0),
             }
             for r in rows
         ]})
 
+    # Очистка: что умеет экран. Ключ — тип операции, значение — подпись.
+    _CLEANER_OPS = {
+        "leave_all_chats": "Выход из чатов",
+        "delete_private_dialogs": "Удаление личных диалогов",
+        "delete_contacts": "Удаление контактов",
+        "read_all_dialogs": "Прочитать все диалоги",
+    }
+    _CLEANER_MAX_ACCOUNTS = 200
+
+    def _cleaner_params(op: str, body: dict) -> dict:
+        """Настройки очистки из тела запроса — только известные поля и в
+        своих границах. Исполнитель проверяет их ещё раз (_cleaner_opts)."""
+        from services import account_cleaner as _ac
+
+        params: dict = {}
+        if op in ("leave_all_chats", "delete_private_dialogs", "delete_contacts"):
+            params["dry_run"] = bool(body.get("dry_run"))
+        if op in ("leave_all_chats", "delete_private_dialogs"):
+            try:
+                params["inactive_days"] = max(0, min(3650, int(body.get("inactive_days") or 0)))
+            except (TypeError, ValueError):
+                params["inactive_days"] = 0
+        if op == "leave_all_chats":
+            kinds = str(body.get("kinds") or "all")
+            params["kinds"] = kinds if kinds in _ac.CLEANER_KINDS else "all"
+            params["keep_own"] = body.get("keep_own", True) is not False
+            params["whitelist"] = _ac.parse_whitelist(str(body.get("whitelist") or "")[:8000])
+        if op == "delete_private_dialogs":
+            params["keep_bots"] = bool(body.get("keep_bots"))
+        if op == "delete_contacts":
+            mode = str(body.get("contacts_mode") or "all")
+            params["contacts_mode"] = mode if mode in _ac.CONTACT_MODES else "all"
+        return params
+
     async def cleaner_submit(request: web.Request) -> web.Response:
+        """Очистка одного или нескольких аккаунтов: по операции на аккаунт.
+
+        Тело: {op, account_ids: [..] | account_id, + настройки отбора}.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
             op = validate_string(body.get("op"), max_len=30)
-            account_id = validate_integer(body.get("account_id"), min_val=1)
+            raw_ids = body.get("account_ids")
+            if raw_ids is None and body.get("account_id") is not None:
+                raw_ids = [body.get("account_id")]
+            if not isinstance(raw_ids, list):
+                raise ValueError("account_ids")
+            ids: list[int] = []
+            for x in raw_ids:
+                v = validate_integer(x, min_val=1)
+                if v and v not in ids:
+                    ids.append(int(v))
         except Exception:
             return _err("Неверное тело запроса", 400)
-        if not op or not account_id:
-            return _err("Неверное тело запроса", 400)
-        if op not in ("leave_all_chats", "delete_contacts"):
-            return _err("Операция: выйти из всех чатов или удалить контакты", 400)
+        if not op or op not in _CLEANER_OPS:
+            return _err("Неизвестная операция очистки", 400)
+        if not ids:
+            return _err("Выберите хотя бы один аккаунт", 400)
+        if len(ids) > _CLEANER_MAX_ACCOUNTS:
+            return _err(f"За раз — не больше {_CLEANER_MAX_ACCOUNTS} аккаунтов", 400)
         try:
-            row = await pool.fetchrow(
-                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
-                account_id, uid,
+            rows = await pool.fetch(
+                "SELECT id, first_name, username, phone FROM tg_accounts "
+                "WHERE id = ANY($1::int[]) AND owner_id=$2 AND session_str IS NOT NULL",
+                ids, uid,
             )
         except Exception:
-            log.exception("cleaner_submit fetchrow uid=%d", uid)
+            log.exception("cleaner_submit fetch uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
-        if not row:
+        found = {int(r["id"]): r for r in rows}
+        if not found:
             return _err("Аккаунт не найден или нет сессии", 404)
-        label_map = {"leave_all_chats": "Выход из чатов", "delete_contacts": "Удаление контактов"}
-        label = f"Cleaner: {label_map[op]} акк #{account_id}"
-        try:
-            op_id = await _obus.submit(
-                pool, uid, op, {"account_id": account_id},
-                total_items=1, label=label)
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("cleaner_submit insert uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        params_base = _cleaner_params(op, body)
+        title = _CLEANER_OPS[op] + (" (пробный прогон)" if params_base.get("dry_run") else "")
+        op_ids: list[int] = []
+        for aid in ids:
+            r = found.get(aid)
+            if r is None:
+                continue
+            who = r["first_name"] or (("@" + r["username"]) if r["username"] else "") \
+                or r["phone"] or f"#{aid}"
+            label = f"Очистка: {title} — {who}"
+            try:
+                op_id = await _obus.submit(
+                    pool, uid, op, dict(params_base, account_id=aid),
+                    total_items=1, label=label)
+            except PermissionError as exc:
+                # Отказ по тарифу — не сбой: честный 403 с причиной.
+                if not op_ids:
+                    return _err(str(exc) or "Требуется подписка", 403)
+                break
+            except Exception:
+                log.exception("cleaner_submit submit uid=%d acc=%d", uid, aid)
+                if not op_ids:
+                    return _err(_INTERNAL_ERROR, 500)
+                break
+            op_ids.append(int(op_id))
+        skipped = len(ids) - len(op_ids)
+        return _json_resp({
+            "ok": True,
+            "op_id": op_ids[0] if op_ids else None,
+            "op_ids": op_ids,
+            "count": len(op_ids),
+            "skipped": skipped,
+            "label": f"Очистка: {title}" + (f" — {len(op_ids)} акк." if len(op_ids) > 1 else ""),
+        })
 
     # ── Topology Map ──────────────────────────────────────────────────────────
 
