@@ -57,3 +57,10 @@ def test_recent_returns_channel_id():
         loop.run_until_complete(go())
     finally:
         loop.close()
+
+
+def test_bot_factory_recent_row_opens_the_bot():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "mini_app" / "screens" / "bot_factory.js").read_text(
+        encoding="utf-8")
+    assert 'onclick="openBot(${Number(b.bot_id)})"' in js
