@@ -26520,6 +26520,7 @@ async function openDmCampaigns() {
           ${c.status==='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Пауза — можно будет возобновить с места остановки" onclick="pauseDm(${c.id})">⏸</button>`:''}
           ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↺ Повторить</button>`:''}
           ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick="editDm(${c.id})">✏️</button>`:''}
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Новая кампания с этим текстом и настройками" onclick="copyDm(${c.id})">📋</button>
           <button class="icon-btn sm danger" onclick="deleteDm(${c.id},'${c.status}', this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>`;
@@ -26785,6 +26786,28 @@ function editDm(id) {
     e.textContent = `Уже отправлено ${sent} — им ушёл прежний текст. Новый получат только оставшиеся.`;
     e.style.display = 'block';
   }
+}
+
+// Копия кампании: тот же текст, вложение и темп — для другой аудитории.
+// Раньше удачный текст переносили руками через буфер, а настройки (темп,
+// лимит на аккаунт, тихие часы, запасное имя) набирали заново. Аудиторию
+// НЕ копируем: та же аудитория второй раз — это повторная ЛС тем же людям.
+function copyDm(id) {
+  const c = (CUR_DM_CAMPAIGNS||[]).find(x=>String(x.id)===String(id));
+  if (!c) { toast('⚠️ Кампания не найдена — обновите список'); return; }
+  openCmpModal();
+  document.getElementById('cmpName').value = (c.name || 'Кампания') + ' · копия';
+  document.getElementById('cmpText').value = c.text_template || '';
+  document.getElementById('cmpLen').textContent = (c.text_template||'').length;
+  const p = c.params || {};
+  const pc = document.getElementById('cmpPace'); if (pc) pc.value = p.pace || 'normal';
+  const pa = document.getElementById('cmpPerAcc'); if (pa) pa.value = p.per_account_daily || '';
+  const md = document.getElementById('cmpMedia'); if (md) md.value = p.media_url || '';
+  const q = document.getElementById('cmpQuiet'); if (q) q.checked = p.quiet_hours !== false;
+  const nf = document.getElementById('cmpNameFb'); if (nf) nf.value = p.name_fallback || '';
+  const e = document.getElementById('cmpErr');
+  e.textContent = 'Текст и настройки скопированы. Выберите аудиторию: тем, кому уже писала исходная кампания, эта напишет ещё раз.';
+  e.style.display = 'block';
 }
 
 async function pauseDm(id) {
