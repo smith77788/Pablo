@@ -22,7 +22,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import OwnSessCb, ShieldCb, BmCb, PhysicsCb
+from bot.callbacks import AccSecCb, OwnSessCb, ShieldCb, BmCb, PhysicsCb
 from services import account_shield
 from services import physics_engine
 from bot.utils.op_helpers import safe_answer
@@ -181,6 +181,7 @@ async def _show_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "🛡 <b>Автозащита</b> (обход флота раз в 6 часов):",
         f"🚪 Закрывать новые чужие сеансы: {'<b>вкл</b>' if cfg.guard_sessions else '<b>выкл</b>'}",
         f"🔐 Ставить свой пароль 2FA, где его нет: {'<b>вкл</b>' if cfg.guard_twofa else '<b>выкл</b>'}",
+        f"🛡 Отменять чужой сброс пароля 2FA: {'<b>вкл</b>' if cfg.guard_reset else '<b>выкл</b>'}",
         f"🗝 Заводить запасной ключ (второй свой сеанс): {'<b>вкл</b>' if cfg.guard_reserve else '<b>выкл</b>'}",
         "<i>Telegram разрешает и то и другое из сеанса старше суток.</i>",
     ]
@@ -195,6 +196,8 @@ async def _show_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
               callback_data=ShieldCb(action="toggle_gs"))
     kb.button(text=("🔐 Пароль 2FA: ВЫКЛ" if cfg.guard_twofa else "🔐 Пароль 2FA: ВКЛ"),
               callback_data=ShieldCb(action="toggle_g2"))
+    kb.button(text=("🛡 Отмена сброса пароля: ВЫКЛ" if cfg.guard_reset else "🛡 Отмена сброса пароля: ВКЛ"),
+              callback_data=ShieldCb(action="toggle_rs"))
     kb.button(text=("🗝 Запасной ключ: ВЫКЛ" if cfg.guard_reserve else "🗝 Запасной ключ: ВКЛ"),
               callback_data=ShieldCb(action="toggle_gr"))
     kb.button(text="◀️ Назад", callback_data=ShieldCb(action="menu"))
@@ -224,7 +227,7 @@ async def cb_shield_toggle_ap(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     await _show_settings(callback, pool)
 
 
-@router.callback_query(ShieldCb.filter(F.action.in_({"toggle_gs", "toggle_g2", "toggle_gr"})))
+@router.callback_query(ShieldCb.filter(F.action.in_({"toggle_gs", "toggle_g2", "toggle_gr", "toggle_rs"})))
 async def cb_shield_toggle_guard(callback: CallbackQuery, callback_data: ShieldCb,
                                  pool: asyncpg.Pool) -> None:
     """Автозащита: закрывать чужие сеансы / ставить 2FA (session_watch.guard)."""
@@ -232,7 +235,7 @@ async def cb_shield_toggle_guard(callback: CallbackQuery, callback_data: ShieldC
     owner_id = callback.from_user.id
     cfg = await account_shield.get_shield_config(pool, owner_id)
     field = {"toggle_gs": "guard_sessions", "toggle_g2": "guard_twofa",
-             "toggle_gr": "guard_reserve"}[callback_data.action]
+             "toggle_gr": "guard_reserve", "toggle_rs": "guard_reset"}[callback_data.action]
     try:
         await account_shield.save_shield_config(
             pool, owner_id, **{field: not getattr(cfg, field)})
@@ -466,3 +469,46 @@ async def cb_owner_session_kill(callback: CallbackQuery, callback_data: OwnSessC
         await callback.message.answer(text, parse_mode="HTML")
     except Exception as exc:
         log.debug("shield_hub.owner_kill answer: %s", exc)
+
+
+# ─── Кнопки под тревогой безопасности аккаунта ────────────────────────────────
+
+_ACCSEC_DONE = {
+    "decline": "🛡 Сброс пароля 2FA отменён",
+    "twofa": "🔐 Пароль 2FA поставлен и сохранён в «Профили → Пароли 2FA»",
+    "close": "🚪 Чужие сеансы закрыты",
+}
+
+
+@router.callback_query(AccSecCb.filter(F.action.in_({"decline", "twofa", "close"})))
+async def cb_account_security_action(callback: CallbackQuery, callback_data: AccSecCb,
+                                     pool: asyncpg.Pool) -> None:
+    """Одно нажатие — одно защитное действие на аккаунте владельца.
+
+    Владелец берётся из нажавшего, аккаунт ищется по паре (id, владелец):
+    чужая кнопка, пересланная в другой чат, ничего не откроет.
+    """
+    from services import account_alarm
+    await safe_answer(callback, "⏳ Выполняю…")
+    owner_id = callback.from_user.id
+    acc_id = int(callback_data.account_id or 0)
+    fn = {"decline": account_alarm.decline_reset_now,
+          "twofa": account_alarm.set_twofa_now,
+          "close": account_alarm.close_foreign_now}[callback_data.action]
+    try:
+        res = await fn(pool, owner_id, acc_id)
+    except Exception as exc:
+        log.warning("shield_hub.accsec %s acc=%s: %s", callback_data.action, acc_id, exc)
+        res = {"ok": False, "error": "Не получилось — попробуйте ещё раз"}
+    if res.get("ok"):
+        text = _ACCSEC_DONE[callback_data.action]
+        if callback_data.action == "twofa" and res.get("already"):
+            text = "🔐 Пароль 2FA на аккаунте уже стоит"
+        if callback_data.action == "close" and res.get("total") == 0:
+            text = "✅ Чужих сеансов нет"
+    else:
+        text = "⚠️ " + html.escape(str(res.get("error") or "Не получилось"))
+    try:
+        await callback.message.answer(text)
+    except Exception as exc:
+        log.debug("shield_hub.accsec answer: %s", exc)

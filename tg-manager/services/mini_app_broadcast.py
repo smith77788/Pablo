@@ -442,6 +442,54 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("update_crm_deal_stage uid=%d deal=%d", uid, deal_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    # Правка сделки. Опечатка в сумме или названии лечилась только удалением
+    # и созданием заново: сделка теряла дату и историю стадий. Стадия здесь не
+    # меняется — у неё своя дверь (move_crm_deal_stage) с событием сценариям.
+    async def update_crm_deal(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            deal_id = int(request.match_info["deal_id"])
+            body = await request.json()
+            title = str(body.get("title", "")).strip()
+            # Поля, которых нет в запросе, не трогаются: доска отдаёт контакт
+            # и заметки обрезанными, и экран их не присылает, если их не правили.
+            keep_contact = "contact" not in body
+            keep_notes = "notes" not in body
+            contact = str(body.get("contact") or "").strip()
+            value = float(body.get("value", 0) or 0)
+            notes = str(body.get("notes") or "").strip()
+            currency = str(body.get("currency") or "").strip().upper()
+        except Exception:
+            return _err("Неверное тело запроса", 400)
+        if not title:
+            return _err("Укажите название сделки", 400)
+        if len(title) > 200 or len(contact) > 200:
+            return _err("Слишком длинное название или контакт", 400)
+        if value < 0:
+            return _err("Сумма сделки не может быть отрицательной", 400)
+        from services.owner_currency import MAIN_CURRENCIES
+        if currency and currency not in MAIN_CURRENCIES:
+            return _err("Такой валюты нет в списке", 400)
+        try:
+            res = await pool.execute(
+                """UPDATE crm_deals
+                      SET title=$3, value=$5,
+                          contact=CASE WHEN $8 THEN contact ELSE $4 END,
+                          notes=CASE WHEN $9 THEN notes ELSE $6 END,
+                          currency=COALESCE(NULLIF($7, ''), currency), updated_at=now()
+                    WHERE id=$1 AND owner_id=$2""",
+                deal_id, uid, title, contact or None, value, notes or None, currency,
+                keep_contact, keep_notes,
+            )
+        except Exception:
+            log.exception("update_crm_deal uid=%d deal=%d", uid, deal_id)
+            return _err(_INTERNAL_ERROR, 500)
+        if res == "UPDATE 0":
+            return _err("Не найдено", 404)
+        return _json_resp({"ok": True})
+
     async def delete_crm_deal(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -925,6 +973,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/crm/deals", crm_deals)
     app.router.add_post("/api/miniapp/crm/deal", create_crm_deal)
     app.router.add_put("/api/miniapp/crm/deal/{deal_id}/stage", update_crm_deal_stage)
+    app.router.add_put("/api/miniapp/crm/deal/{deal_id}", update_crm_deal)
     app.router.add_delete("/api/miniapp/crm/deal/{deal_id}", delete_crm_deal)
     # До /campaign/{campaign_id}: иначе «chats» уйдёт туда как номер кампании.
     app.router.add_get("/api/miniapp/campaign/chats", campaign_chats)

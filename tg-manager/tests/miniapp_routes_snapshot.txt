@@ -830,6 +830,7 @@ POST /api/miniapp/account/{acc_id}/post_story
 POST /api/miniapp/account/{acc_id}/profile
 POST /api/miniapp/account/{acc_id}/proxy
 POST /api/miniapp/account/{acc_id}/public_channel_capacity
+POST /api/miniapp/account/{acc_id}/security/{action}
 POST /api/miniapp/account/{acc_id}/session/close
 POST /api/miniapp/account/{acc_id}/session/trust
 POST /api/miniapp/account/{acc_id}/spamblock_appeal
@@ -971,6 +972,7 @@ POST /api/miniapp/fleet/sweep
 POST /api/miniapp/flood/{bot_id}/flag-recent
 POST /api/miniapp/flood/{bot_id}/purge
 POST /api/miniapp/flood/{bot_id}/unflag
+POST /api/miniapp/funnel/{funnel_id}/copy
 POST /api/miniapp/funnel/{funnel_id}/step
 POST /api/miniapp/ghost
 POST /api/miniapp/ghost/bulk
@@ -1262,6 +1264,7 @@ PUT /api/miniapp/bot/{bot_id}/toggle
 PUT /api/miniapp/content_mesh/target/{target_id}/toggle
 PUT /api/miniapp/content_mesh/{mesh_id}
 PUT /api/miniapp/content_mesh/{mesh_id}/toggle
+PUT /api/miniapp/crm/deal/{deal_id}
 PUT /api/miniapp/crm/deal/{deal_id}/stage
 PUT /api/miniapp/ecosystem/{eco_id}
 PUT /api/miniapp/editorial/policy

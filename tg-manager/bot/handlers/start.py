@@ -41,6 +41,7 @@ from bot.callbacks import (
     QuickPostCb,
     SpinCb,
     OnbCb,
+    VaultCb,
 )
 from bot.handlers.admin import notify_new_platform_user
 from services.logger import log_exc_swallow
@@ -164,7 +165,8 @@ async def _onboarding_message(pool: asyncpg.Pool, uid: int):
     lines = []
     for st in d["steps"]:
         mark = "👉" if st["id"] == d.get("next_step") else _ONBOARD_MARK[bool(st["done"])]
-        opt = " <i>(необязательно)</i>" if st.get("optional") else ""
+        opt = (" <i>(рекомендуем)</i>" if st.get("recommended")
+               else " <i>(необязательно)</i>" if st.get("optional") else "")
         lines.append(f"{mark} {escape(st['title'])}{opt}")
     nxt = next((st for st in d["steps"] if st["id"] == d.get("next_step")), None)
     hint = f"\n\n<i>{escape(nxt['hint'])}</i>" if nxt and nxt.get("hint") else ""
@@ -185,6 +187,10 @@ async def _onboarding_message(pool: asyncpg.Pool, uid: int):
     bot_step = next((st for st in d["steps"] if st["id"] == "bot"), None)
     if bot_step and not bot_step["done"]:
         kb.button(text="🤖 Подключить бота здесь", callback_data=BotCb(action="add"))
+    vault_step = next((st for st in d["steps"] if st["id"] == "vault"), None)
+    if vault_step and not vault_step["done"]:
+        kb.button(text="🗄 Подключить Хранилище диалогов",
+                  callback_data=VaultCb(a="how"))
     plan_step = next((st for st in d["steps"] if st["id"] == "plan"), None)
     if plan_step and not plan_step["done"] and plan_step.get("action"):
         kb.button(text="💳 Подписка", callback_data=SubCb(action="menu"))

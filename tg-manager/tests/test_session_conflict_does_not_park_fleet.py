@@ -99,9 +99,12 @@ def pool():
         # доверенные сеансы (v371) — обход читает их колонки. Монитор выбирает
         # a.trusted_session_hashes (v371); без этой миграции тестовая схема
         # отстаёт от запроса, и выборка падает «column … does not exist».
+        # Сигналы атаки (v379) читают на том же обходе twofa_on (v346) и свои
+        # отметки разбора.
         for mig in ("schema_v185.sql", "schema_v331_account_twofa.sql",
-                    "schema_v340_fleet_watch.sql", "schema_v347_reserve_key.sql",
-                    "schema_v371_trusted_sessions.sql"):
+                    "schema_v340_fleet_watch.sql", "schema_v346_fleet_guard.sql",
+                    "schema_v347_reserve_key.sql",
+                    "schema_v371_trusted_sessions.sql", "schema_v379_account_alarm.sql"):
             with open(os.path.join(ROOT, mig), encoding="utf-8") as f:
                 for chunk in f.read().split(";"):
                     body = "\n".join(ln for ln in chunk.split("\n")
