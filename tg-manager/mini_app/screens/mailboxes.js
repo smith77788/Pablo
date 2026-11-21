@@ -43,7 +43,10 @@ async function openMailboxes() {
       row.className = 'li';
       const label = document.createElement('div');
       label.className = 'li-body';
-      label.textContent = mailbox.email + (mailbox.is_active ? ' · Подключён' : ' · Отключён');
+      const fails = Number(mailbox.fail_count) || 0;
+      label.textContent = mailbox.email + (mailbox.is_active
+        ? ' · Подключён' + (fails ? ' · ошибок отправки подряд: ' + fails + ' из 3' : '')
+        : ' · Выключен после ошибок отправки');
       const button = document.createElement('button');
       button.className = 'btn btn-s';
       button.textContent = 'Отключить';
@@ -55,7 +58,9 @@ async function openMailboxes() {
           await openMailboxes();
         } catch(e) { toast(errRu(e, 'Не удалось отключить')); button.disabled = false; }
       };
-      row.append(label, button);
+      row.append(label);
+      if (!mailbox.is_active) row.append(mailboxEnableButton(mailbox));
+      row.append(button);
       list.appendChild(row);
     }
   } catch(e) { list.innerHTML = errHtml(errRu(e), 'openMailboxes()'); }
@@ -134,4 +139,27 @@ async function connectMailbox(event) {
     await openMailboxes();
   } catch(e) { result.textContent = errRu(e, 'Не удалось подключить почту'); }
   finally { password.value = ''; button.disabled = false; }
+}
+
+// Кнопка «Включить» у выключенного ящика: сервер заново проверяет вход
+// сохранённым паролем и включает ящик только при удачной проверке.
+function mailboxEnableButton(mailbox) {
+  const b = document.createElement('button');
+  b.className = 'btn btn-p';
+  b.style.marginRight = '6px';
+  b.textContent = 'Включить';
+  b.onclick = async () => {
+    b.disabled = true;
+    b.textContent = 'Проверяю…';
+    try {
+      await api('/api/miniapp/mailboxes/' + Number(mailbox.id) + '/enable', {method: 'POST'});
+      toast('✅ ' + mailbox.email + ' снова в работе');
+      await openMailboxes();
+    } catch (e) {
+      toast('⚠️ ' + errRu(e, 'Не удалось включить'));
+      b.disabled = false;
+      b.textContent = 'Включить';
+    }
+  };
+  return b;
 }

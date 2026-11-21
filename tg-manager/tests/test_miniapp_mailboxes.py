@@ -13,8 +13,10 @@ def handlers(monkeypatch, pool, uid=42):
     monkeypatch.setattr(mini_app_api, '_get_uid', lambda request: uid)
     app = web.Application()
     mini_app_mailboxes.setup_routes(app, pool)
+    # По одной ручке на метод: быстрый вход и «Включить» проверяются отдельно.
     return {route.method: route.handler for route in app.router.routes()
-            if '/oauth/' not in (route.resource.get_info().get('formatter') or '')}
+            if not any(part in (route.resource.get_info().get('formatter') or '')
+                       for part in ('/oauth/', '/enable'))}
 
 
 @pytest.mark.asyncio

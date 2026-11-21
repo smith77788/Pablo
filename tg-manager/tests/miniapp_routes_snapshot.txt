@@ -1018,6 +1018,7 @@ POST /api/miniapp/links/toggle
 POST /api/miniapp/links/update
 POST /api/miniapp/mailboxes
 POST /api/miniapp/mailboxes/oauth/{provider}
+POST /api/miniapp/mailboxes/{mailbox_id}/enable
 POST /api/miniapp/mass_invite
 POST /api/miniapp/mass_publish
 POST /api/miniapp/mass_report
