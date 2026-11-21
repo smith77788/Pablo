@@ -20,7 +20,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import HostCb, BmCb
 from bot.states import HostOfferingFSM, HostPriceFSM
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 from bot.utils.subscription import is_platform_admin
 from services import host_server as hs
 from services import usdt_invoice
@@ -125,11 +125,17 @@ async def cb_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     wallet = res["wallet"]
     price = res["price_usd"]
     if wallet == "NOT_CONFIGURED":
+        # Не тупик: заявка админу, как «📩 Запросить подписку».
+        nkb = InlineKeyboardBuilder()
+        nkb.button(text="📩 Запросить доступ", callback_data=HostCb(action="request"))
+        nkb.button(text="◀️ Назад", callback_data=HostCb(action="menu"))
+        nkb.adjust(1)
         await callback.message.edit_text(
             f"🖥️ <b>Host-Server — ${price} USDT</b>\n\n"
-            "⚠️ Автоматическая оплата не настроена.\n"
-            "Свяжитесь с администратором для активации.",
-            parse_mode="HTML", reply_markup=kb.as_markup())
+            "⚠️ Автоматическая оплата не настроена.\n\n"
+            "Нажмите <b>«📩 Запросить доступ»</b> — администратор активирует "
+            "модуль вручную после оплаты.",
+            parse_mode="HTML", reply_markup=nkb.as_markup())
         return
     await callback.message.edit_text(
         f"🖥️ <b>Host-Server — оплата</b>\n\n"
@@ -142,6 +148,79 @@ async def cb_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"⏱ Подтверждение: 5–30 минут\n"
         f"<i>ID платежа: {res['reference']}</i>",
         parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(HostCb.filter(F.action == "request"))
+async def cb_request(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Заявка на модуль, когда автоматическая оплата не настроена."""
+    from bot.utils.access_request import (
+        NOT_DELIVERED_TEXT, send_access_request, user_label,
+    )
+
+    uid = callback.from_user.id
+    if await hs.has_access(pool, uid):
+        await callback.answer("✅ Модуль уже активен.", show_alert=True)
+        return
+    await safe_answer(callback)
+    try:
+        price = await hs.get_price(pool)
+    except Exception:
+        log_exc_swallow(log, "host cb_request: get_price")
+        price = None
+    price_line = f"Сумма: <b>${price}</b>\n\n" if price is not None else "\n"
+    notify = (
+        "🖥️ <b>Запрос доступа: Host-Server</b>\n\n"
+        f"Пользователь: {user_label(callback)} (<code>{uid}</code>)\n"
+        f"{price_line}"
+        "После получения оплаты нажмите кнопку ниже."
+    )
+    akb = InlineKeyboardBuilder()
+    akb.button(text="✅ Выдать доступ", callback_data=HostCb(action="grant", val=str(uid)))
+    delivered = await send_access_request(callback, pool, notify, akb.as_markup())
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=HostCb(action="menu"))
+    if not delivered:
+        await callback.message.edit_text(
+            NOT_DELIVERED_TEXT, parse_mode="HTML", reply_markup=kb.as_markup())
+        return
+    await callback.message.edit_text(
+        "✅ <b>Запрос отправлен!</b>\n\n"
+        "Администратор получил заявку на модуль «Host-Server».\n"
+        "Модуль будет активирован после подтверждения оплаты.",
+        parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(HostCb.filter(F.action == "grant"))
+async def cb_grant(callback: CallbackQuery, callback_data: HostCb, pool: asyncpg.Pool) -> None:
+    """Кнопка из заявки: админ выдаёт доступ вручную (другого пути выдачи нет)."""
+    if not is_platform_admin(callback.from_user.id):
+        await callback.answer("⛔ Только для администратора.", show_alert=True)
+        return
+    if not callback_data.val.isdigit():
+        await callback.answer("❌ Неверный ID пользователя.", show_alert=True)
+        return
+    target = int(callback_data.val)
+    try:
+        await hs.grant_access(pool, target, granted_by=callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "host cb_grant", user_id=target)
+        await callback.answer("❌ Ошибка БД. Попробуйте позже.", show_alert=True)
+        return
+    await safe_answer(callback)
+    try:
+        await callback.message.edit_text(
+            f"✅ <b>Доступ к Host-Server выдан</b> пользователю <code>{target}</code>.",
+            parse_mode="HTML", reply_markup=terminal_kb())
+    except Exception:
+        log_exc_swallow(log, "host cb_grant: edit")
+    try:
+        await callback.bot.send_message(
+            target,
+            "🖥️ <b>Модуль «Host-Server» активирован!</b>\n\n"
+            "Администратор предоставил вам доступ. Откройте меню для использования.",
+            parse_mode="HTML")
+    except Exception:
+        log_exc_swallow(log, "host cb_grant: notify user", user_id=target)
 
 
 @router.callback_query(HostCb.filter(F.action == "check_pay"))

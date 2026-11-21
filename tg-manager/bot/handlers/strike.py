@@ -339,6 +339,47 @@ async def cb_strike_set_mode_maximum(
 # ── payment flow ──────────────────────────────────────────────────────────────
 
 
+@router.callback_query(StrikeCb.filter(F.action == "request"))
+async def cb_strike_request(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Заявка на доступ к жалобам, когда автоматическая оплата не настроена."""
+    from bot.utils.access_request import (
+        NOT_DELIVERED_TEXT, send_access_request, user_label,
+    )
+
+    uid = callback.from_user.id
+    try:
+        _already = await _has_access(pool, uid)
+    except Exception:
+        log_exc_swallow(log, "cb_strike_request: _has_access failed")
+        _already = False
+    if _already:
+        await callback.answer("⚔️ Массовые жалобы уже активны!", show_alert=True)
+        return
+    await safe_answer(callback)
+    notify = (
+        "⚔️ <b>Запрос доступа: Массовые жалобы</b>\n\n"
+        f"Пользователь: {user_label(callback)} (<code>{uid}</code>)\n"
+        f"Сумма: <b>${_PRICE_USD}</b>\n\n"
+        "Чтобы активировать после получения оплаты:\n"
+        "<b>/admin</b> → ⚔️ Выдать доступ к жалобам →\n"
+        f"<code>{uid}</code>"
+    )
+    delivered = await send_access_request(callback, pool, notify)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
+    if not delivered:
+        await callback.message.edit_text(
+            NOT_DELIVERED_TEXT, parse_mode="HTML", reply_markup=kb.as_markup())
+        return
+    await callback.message.edit_text(
+        "✅ <b>Запрос отправлен!</b>\n\n"
+        f"Администратор получил заявку на «Массовые жалобы» — <b>${_PRICE_USD}</b>.\n"
+        "Модуль будет активирован после подтверждения оплаты.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 @router.callback_query(StrikeCb.filter(F.action == "buy"))
 async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     # Уже есть доступ?
@@ -352,22 +393,28 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
     await safe_answer(callback)
 
+    wallet = _tron_wallet()
+    if not wallet:
+        # Счёт без кошелька оплатить нельзя — не заводим его вовсе. Но и не
+        # оставляем тупик: заявка админу, как «📩 Запросить подписку».
+        nkb = InlineKeyboardBuilder()
+        nkb.button(text="📩 Запросить доступ", callback_data=StrikeCb(action="request"))
+        nkb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
+        nkb.adjust(1)
+        await callback.message.edit_text(
+            f"⚔️ <b>Массовые жалобы — ${_PRICE_USD} USDT</b>\n\n"
+            "⚠️ Автоматическая оплата не настроена.\n\n"
+            "Нажмите <b>«📩 Запросить доступ»</b> — администратор активирует "
+            "модуль вручную после оплаты.",
+            parse_mode="HTML",
+            reply_markup=nkb.as_markup(),
+        )
+        return
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Проверить оплату", callback_data=StrikeCb(action="check_pay"))
     kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
     kb.adjust(1)
-
-    wallet = _tron_wallet()
-    if not wallet:
-        # Счёт без кошелька оплатить нельзя — не заводим его вовсе.
-        await callback.message.edit_text(
-            f"⚔️ <b>Массовые жалобы — ${_PRICE_USD} USDT</b>\n\n"
-            "⚠️ Автоматическая оплата не настроена.\n\n"
-            "Свяжитесь с администратором для активации.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
-        return
 
     from services import usdt_invoice
 

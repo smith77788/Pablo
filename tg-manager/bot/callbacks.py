@@ -438,12 +438,12 @@ class StrikeCb(CallbackData, prefix="strk"):
 
 
 class HostCb(CallbackData, prefix="host"):
-    # action: menu|buy|check_pay|market|my|new|rent|toggle|approve|reject|end|cancel|setprice|kind
+    # action: menu|buy|request|grant|check_pay|market|my|new|rent|toggle|approve|reject|end|cancel|setprice|kind
     action: str
     oid: int = 0    # offering_id
     rid: int = 0    # rental_id
     page: int = 0
-    val: str = ""   # вспомогательное (kind при выборе типа предложения)
+    val: str = ""   # вспомогательное (kind при выборе типа предложения; uid в grant)
 
 
 class ScenCb(CallbackData, prefix="scen"):
