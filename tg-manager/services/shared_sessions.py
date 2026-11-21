@@ -29,12 +29,18 @@
 (вступить, пригласить, отправить...). Нижний порог флуд-паузы
 (`_wrap_client_flood_floor`) работает как раньше — он стоит на самом клиенте.
 
-ОТКАТ. Снять флаг → `_make_client` и `connect_client` ведут себя ровно как до
+ВКЛЮЧЕНИЕ. Либо окружение `FLEET_SHARED_SESSIONS=1` (для всех), либо режим в
+базе (`platform_settings.fleet_shared_sessions`: off | all | owners:1,2) —
+его ставит админ командой /fleet_parallel без деплоя, в том числе на одного
+владельца для канарейки.
+
+ОТКАТ. `/fleet_parallel off` (и снять переменную окружения, если ставили) → `_make_client` и `connect_client` ведут себя ровно как до
 этого модуля (каждый вызов — своё подключение).
 """
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import logging
 import os
@@ -58,18 +64,114 @@ def _env_float(name: str, default: float, lo: float, hi: float) -> float:
 
 _forced: "bool | None" = None
 
+# Режим из базы (platform_settings, ключ SETTING_KEY) — включение без деплоя и
+# ПО ВЛАДЕЛЬЦАМ (канарейка): "off" | "all" | "owners:1,2,3". Переключает
+# админ командой /fleet_parallel; каждый процесс перечитывает значение раз в
+# REFRESH_S (refresh_from_db зовёт цикл исполнителя), так что web и worker
+# сходятся за полминуты.
+SETTING_KEY = "fleet_shared_sessions"
+REFRESH_S = 30.0
+_db_mode: str = "off"
+_db_owners: frozenset = frozenset()
+_db_read_at: float = 0.0
 
-def enabled() -> bool:
-    """Включено ли общее подключение. Читается на каждом вызове: дёшево, и
-    тест/админка может переключить его без перезапуска (`force`)."""
+# Владелец операции, в задаче которой идёт код (ставит op_worker). По нему режим
+# «owners:…» решает, делить ли подключение: словарь аккаунта владельца знает не
+# на каждом пути.
+_current_owner: "contextvars.ContextVar[int | None]" = contextvars.ContextVar(
+    "shared_sessions_owner", default=None)
+
+
+def parse_mode(raw: "str | None") -> "tuple[str, frozenset]":
+    """Разбор значения настройки. Непонятное значение — выключено."""
+    v = str(raw or "").strip().lower()
+    if v in ("all", "on", "1", "true"):
+        return "all", frozenset()
+    if v.startswith("owners:"):
+        ids = set()
+        for part in v[len("owners:"):].split(","):
+            part = part.strip()
+            if part.lstrip("-").isdigit():
+                ids.add(int(part))
+        return ("owners", frozenset(ids)) if ids else ("off", frozenset())
+    return "off", frozenset()
+
+
+def format_mode(mode: str, owners) -> str:
+    if mode == "owners":
+        return "owners:" + ",".join(str(i) for i in sorted(owners))
+    return mode
+
+
+def set_mode(raw: "str | None") -> None:
+    """Применить значение настройки в этом процессе (после записи в базу)."""
+    global _db_mode, _db_owners, _db_read_at
+    _db_mode, _db_owners = parse_mode(raw)
+    _db_read_at = time.monotonic()
+
+
+def current_mode() -> "tuple[str, frozenset]":
     if _forced is not None:
-        return _forced
+        return ("all" if _forced else "off"), frozenset()
+    if _env_on():
+        return "all", frozenset()
+    return _db_mode, _db_owners
+
+
+async def refresh_from_db(pool, *, force_read: bool = False) -> None:
+    """Перечитать режим из базы не чаще REFRESH_S. Сбой чтения — оставляем
+    прежнее значение: блип базы не должен ни включать, ни выключать режим."""
+    if pool is None:
+        return
+    if not force_read and (time.monotonic() - _db_read_at) < REFRESH_S:
+        return
+    try:
+        raw = await pool.fetchval(
+            "SELECT value FROM platform_settings WHERE key = $1", SETTING_KEY)
+    except Exception as e:
+        log.debug("shared_sessions: режим не прочитан: %s", e)
+        return
+    set_mode(raw)
+
+
+async def save_mode(pool, raw: str) -> "tuple[str, frozenset]":
+    """Записать режим в базу и применить в этом процессе."""
+    mode, owners = parse_mode(raw)
+    value = format_mode(mode, owners)
+    await pool.execute(
+        """INSERT INTO platform_settings (key, value, updated_at)
+                VALUES ($1, $2, now())
+           ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()""",
+        SETTING_KEY, value)
+    set_mode(value)
+    return mode, owners
+
+
+def _env_on() -> bool:
     return str(os.getenv("FLEET_SHARED_SESSIONS", "")).strip().lower() in (
         "1", "true", "yes", "on")
 
 
+def enabled(owner_id: "int | None" = None) -> bool:
+    """Включено ли общее подключение для этого владельца.
+
+    Владелец — явный аргумент, иначе владелец операции из контекста задачи.
+    Без владельца в режиме «owners:…» — выключено (старый путь безопасен
+    всегда: он просто не делит подключение)."""
+    mode, owners = current_mode()
+    if mode == "all":
+        return True
+    if mode != "owners":
+        return False
+    oid = owner_id if owner_id is not None else _current_owner.get()
+    try:
+        return oid is not None and int(oid) in owners
+    except (TypeError, ValueError):
+        return False
+
+
 def force(value: "bool | None") -> None:
-    """Принудительно включить/выключить (None — снова читать окружение)."""
+    """Принудительно включить/выключить (None — снова читать окружение и базу)."""
     global _forced
     _forced = value
 

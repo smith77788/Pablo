@@ -27,4 +27,4 @@ def test_unknown_op_returns_none():
 def test_all_worker_ops_distinct():
     vals = list(_CHANNEL_EDIT_OPS.values())
     assert len(vals) == len(set(vals))
-    assert set(vals) == {"chan_title", "chan_about", "chan_uname"}
+    assert set(vals) == {"chan_title", "chan_about", "chan_uname", "chan_avatar"}

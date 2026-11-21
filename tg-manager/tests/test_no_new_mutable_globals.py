@@ -255,6 +255,10 @@ PROCESS_LOCAL: dict[str, str] = {
         "ContextVar: какая операция идёт в задаче — живёт в пределах задачи"),
     "services/shared_sessions.py:_entries": (
         "живые подключения Telethon этого процесса — сокеты не делятся между процессами"),
+    "services/shared_sessions.py:_db_mode": (
+        "кэш режима из platform_settings; каждый процесс перечитывает раз в 30 с"),
+    "services/shared_sessions.py:_db_owners": "то же — владельцы режима канарейки",
+    "services/shared_sessions.py:_db_read_at": "момент последнего чтения режима",
     "services/shared_sessions.py:_forced": (
         "переключатель флага для тестов; в проде флаг читается из окружения"),
     "services/op_worker.py:_db_pool": "пул asyncpg привязан к циклу событий",

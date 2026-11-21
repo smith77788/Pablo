@@ -48,9 +48,15 @@ def test_ui_sends_select_all_filtered():
                  "pool: ACC_POOL_FILTER", "geo: ACC_GEO_FILTER"):
         assert part in body, f"UI не передаёт {part} в масс-действие"
     # все масс-пути идут через _massSel (не жёстко account_ids)
-    assert "op, ..._massSel()" in ui        # runAccMass
-    assert "op:'set_stage', target_stage:stage, ..._massSel()" in ui
-    assert "Object.assign(payload, _massSel())" in ui    # submitAccProfile
+    # Выбор СНИМАЕТСЯ один раз (тем же _massSel) до вопроса/модалки, и в
+    # запрос уходит именно снимок: число в подтверждении и цели операции — одно
+    # и то же, а не пересчёт после того, как фильтр успели сменить.
+    assert "const selection = _massSel();" in ui         # runAccMass
+    assert "op, ...selection" in ui
+    assert "massStageScope = _massSel();" in ui           # set_stage
+    assert "op:'set_stage', target_stage:stage, ...massStageScope" in ui
+    assert "AP_MASS_SCOPE = {selection: _massSel(), count};" in ui  # submitAccProfile
+    assert "Object.assign(payload, selection)" in ui
 
 
 @pytest.fixture

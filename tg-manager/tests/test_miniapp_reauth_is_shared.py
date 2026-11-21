@@ -114,7 +114,12 @@ __APIRAW__
 
 def _run() -> dict:
     src = (HARNESS
-           .replace("__REAUTH__", _fn_source("_reAuth"))
+           # `_reAuth` передаёт серверу id зеркала (`_mirrorId`, из адреса
+           # страницы). Без него в вырезанном куске ReferenceError глотался
+           # try/catch, обновление не случалось НИ РАЗУ, и проверка мерила
+           # поломку стенда, а не код. В node `location` нет — настоящая
+           # функция честно отвечает «не зеркало».
+           .replace("__REAUTH__", _fn_source("_mirrorId") + "\n" + _fn_source("_reAuth"))
            # Проверка «сервер перезапускается» вызывается из _apiRaw; у
            # подставных ответов нет заголовков — она обязана сказать «нет».
            .replace("__BOOTING__", "const BOOT_RETRY_MAX = 6, BOOT_RETRY_MS = 1;\n"

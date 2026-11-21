@@ -93,12 +93,20 @@ def _run(coro):
 # ── Неполный список ничего не удаляет ───────────────────────────────────────
 
 
+def _channel_deletes(pool) -> list[str]:
+    return [q for q in pool.log
+            if q.strip().upper().startswith("DELETE FROM MANAGED_CHANNELS")]
+
+
 def test_incomplete_list_deletes_nothing():
     pool = _FakePool()
     _run(db.upsert_managed_channels(
         pool, owner_id=1, acc_id=10, channels=_channels(1, 2), complete=False))
 
-    assert not [q for q in pool.log if q.strip().upper().startswith("DELETE")], (
+    # Считаем удаления КАНАЛОВ. DELETE FROM removed_channels … reason='gone' —
+    # это снятие отметки «пропал в Telegram» с каналов, которые снова видны
+    # (skip_removed_channels(restore_found=True)), каналы оно не трогает.
+    assert not _channel_deletes(pool), (
         "по обрезанному скану удалили строки — каналы, до которых не дочитали, "
         "пропадут из продукта"
     )
@@ -124,7 +132,7 @@ def test_complete_list_spares_the_channels_it_carries():
     _run(db.upsert_managed_channels(
         pool, owner_id=1, acc_id=10, channels=_channels(1, 2), complete=True))
 
-    deletes = [q for q in pool.log if q.strip().upper().startswith("DELETE")]
+    deletes = _channel_deletes(pool)
     assert len(deletes) == 1
     assert "NOT (channel_id = ANY" in deletes[0], (
         "снос всех строк с последующей вставкой теряет накопленные поля строки"

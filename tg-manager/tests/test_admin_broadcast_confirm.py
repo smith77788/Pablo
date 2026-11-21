@@ -196,9 +196,19 @@ def test_confirm_button_actually_sends(pool):
         async def clear(self):
             pass
 
+    # Сегмент «all» — ВСЕ незабаненные пользователи платформы, а база в CI
+    # общая для части набора: другие файлы оставляют своих владельцев
+    # (889934, 889935 …). Сверяемся с настоящей аудиторией на момент нажатия,
+    # а не с «в таблице только наши трое».
+    audience = {int(r["user_id"]) for r in _run(pool.fetch(
+        "SELECT user_id FROM platform_users WHERE COALESCE(is_banned, false) = false"))}
+    assert {900000, 900001, 900002} <= audience
+
     _run(admin.cb_admin(cb, pool, http=None, state=_FakeState()))
 
-    assert len(msg.bot.sent) == 3, "подтверждённая рассылка обязана дойти до всех"
+    sent_to = [uid for uid, _ in msg.bot.sent]
+    assert set(sent_to) == audience and len(sent_to) == len(audience), (
+        "подтверждённая рассылка обязана дойти до всех и ровно по разу")
     assert all(text == "Новость дня" for _, text in msg.bot.sent)
 
     row = _run(pool.fetchrow(

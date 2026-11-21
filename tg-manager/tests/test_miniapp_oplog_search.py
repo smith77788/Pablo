@@ -86,7 +86,9 @@ def test_placeholders_shift_with_the_search_parameter():
     assert "_n = len(_qa)" in h
     # Ни в одной из двух выборок строк не должно остаться жёсткого номера:
     # с параметром поиска он указывал бы на строку поиска вместо статуса.
-    rows = h[h.index("if status:"):h.index("return _json_resp(")]
+    # Окно — только две выборки строк (до `shown_total = total`): ниже идёт
+    # отдельный запрос имён аккаунтов со своими $1/$2, поиск в нём не участвует.
+    rows = h[h.index("if status:"):h.index("shown_total = total")]
     hard = re.findall(r"(?<!_n \+ )\$([234])\b", rows.replace("${_n + 2}", "").replace("${_n + 3}", "").replace("${_n + 4}", ""))
     assert not hard, f"жёсткие номера плейсхолдеров в выборке строк: {hard}"
     assert rows.count("${_n + 2}") == 2, "сдвиг применён не в обеих выборках"

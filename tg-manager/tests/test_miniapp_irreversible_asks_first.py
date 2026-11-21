@@ -39,7 +39,10 @@ SRC = miniapp_source()
 
 # функция → (эндпойнт, по чему считается масштаб)
 GUARDED = {
-    "submitAccProfile": ("/api/miniapp/accounts/mass", "_massSelCount()"),
+    # Выбор снимается в openMassProfile (AP_MASS_SCOPE = {selection, count},
+    # count = _massSelCount()) и в вопросе стоит именно он: число и цели
+    # операции — один и тот же снимок, а не пересчёт на момент отправки.
+    "submitAccProfile": ("/api/miniapp/accounts/mass", "_apN"),
     "submitAccContMsg": ("/api/miniapp/dm/adhoc_send", "usernames.length"),
     # Откат версии контакта перезаписывает карточку целиком, а спрашивал
     # «Откатить к версии 3?» — число версии вместо числа того, что исчезнет.
